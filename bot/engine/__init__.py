@@ -5,6 +5,7 @@ Canonical import path for all analysis primitives:
 
     from engine.fair_probability import compute_fair_market, FairProbabilityMethod
     from engine.ev import compute_ev, compute_ev_batch, EVRating, ConfidenceFlag
+    from engine.steam import compute_steam, compute_steam_simple, SteamResult, SteamTier
 """
 
 from .fair_probability import (
@@ -34,6 +35,20 @@ from .ev import (
     compute_ev_batch,
 )
 
+from .steam import (
+    MovementDirection,
+    SteamTier,
+    ConfidenceLevel,
+    LineMovementEvent,
+    SteamMovement,
+    SteamContext,
+    SteamResult,
+    SPORTSBOOK_WEIGHTS,
+    SHARP_BOOK_THRESHOLD,
+    compute_steam,
+    compute_steam_simple,
+)
+
 __all__ = [
     # fair_probability
     "american_to_implied",
@@ -58,4 +73,16 @@ __all__ = [
     "compute_ev",
     "compute_ev_from_market",
     "compute_ev_batch",
+    # steam
+    "MovementDirection",
+    "SteamTier",
+    "ConfidenceLevel",
+    "LineMovementEvent",
+    "SteamMovement",
+    "SteamContext",
+    "SteamResult",
+    "SPORTSBOOK_WEIGHTS",
+    "SHARP_BOOK_THRESHOLD",
+    "compute_steam",
+    "compute_steam_simple",
 ]
