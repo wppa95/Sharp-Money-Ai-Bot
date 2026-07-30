@@ -317,6 +317,72 @@ async def cmd_ev(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 
+async def cmd_clv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/clv — Show post-close Closing Line Value performance history.
+
+    CLV records are written after events close (when real closing odds are
+    available). While no events have closed yet, the response explains this
+    and shows how many CLV opportunity alerts have been sent so far.
+    """
+    if not _check_allowed(update):
+        await update.message.reply_text("⛔ Unauthorized.")
+        return
+
+    if _db is None:
+        await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
+        return
+
+    try:
+        from alerts_multiplatform import format_clv_history
+        records = await _db.get_recent_clv_records(limit=20)
+        msg = format_clv_history(records)
+        await update.message.reply_text(msg, parse_mode="HTML")
+    except Exception as exc:
+        logger.exception("cmd_clv error: %s", exc)
+        await update.message.reply_text(
+            f"{EMOJI['warn']} Could not load CLV data: {exc}",
+            parse_mode="HTML",
+        )
+
+
+async def cmd_market(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/market — Show cross-book consensus and market inefficiencies."""
+    if not _check_allowed(update):
+        await update.message.reply_text("⛔ Unauthorized.")
+        return
+
+    try:
+        from market_engine import _snapshot_cache
+        from engine.consensus import compute_consensus
+        from alerts_multiplatform import format_consensus_summary
+        from config import config
+
+        all_snaps = [s for snaps in _snapshot_cache.values() for s in snaps]
+
+        if not all_snaps:
+            await update.message.reply_text(
+                f"📊 <b>Market Consensus</b>\n\n"
+                f"No cross-book market data available yet.\n"
+                f"<i>Data accumulates as the multi-platform connectors poll live odds.</i>",
+                parse_mode="HTML",
+            )
+            return
+
+        results = compute_consensus(
+            all_snaps,
+            min_books=config.CONSENSUS_MIN_BOOKS,
+            outlier_threshold=config.INEFFICIENCY_THRESHOLD,
+        )
+        msg = format_consensus_summary(results)
+        await update.message.reply_text(msg, parse_mode="HTML")
+    except Exception as exc:
+        logger.exception("cmd_market error: %s", exc)
+        await update.message.reply_text(
+            f"{EMOJI['warn']} Could not load market data: {exc}",
+            parse_mode="HTML",
+        )
+
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Log errors raised by handlers."""
     logger.error("Update %s caused error: %s", update, context.error, exc_info=context.error)

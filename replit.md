@@ -140,8 +140,40 @@ Commands:
 | `/steam` | Latest sharp moves from DB |
 | `/ev` | Latest +EV opportunities from DB |
 
-### 10. Test suite (`bot/tests/test_pipeline.py`)
-**76 / 76 tests passing** — full pipeline coverage, zero mocks in the engine layer.
+### 10. Multi-Platform Market Engine (`bot/connectors/`, `bot/engine/consensus.py`, `bot/engine/clv.py`, `bot/market_engine.py`)
+
+Modular connector framework + cross-book analysis engines:
+
+**Connectors** (`bot/connectors/`):
+- `BaseConnector` — abstract interface: `fetch()`, `health_check()`, `enabled`, `is_pickem`
+- `DraftKingsConnector` — DraftKings odds via The Odds API, tracks opening vs. current per session
+- `FanDuelConnector` — FanDuel odds via The Odds API, same normalization layer as DraftKings
+- `UnderdogConnector` — Underdog Fantasy pick'em projections; detects line movement, value changes, removals
+- `ConnectorRegistry` — manages all connectors, fetches in parallel, routes sportsbook vs. pick'em
+- All output normalized to `MarketSnapshot` (sport, event, market_type, selection, odds, sportsbook, timestamp, game_time, opening_odds, is_pickem)
+
+**Consensus Engine** (`bot/engine/consensus.py`):
+- `compute_consensus(snapshots)` → `list[ConsensusResult]` — groups by market key, computes median odds/line across books
+- `find_inefficiencies(snapshots)` → books deviating beyond threshold flagged as `MarketInefficiency`
+- `build_multi_book_steam_inputs(snapshots)` → prepares per-market movement data for steam detection
+
+**CLV Engine** (`bot/engine/clv.py`):
+- `compute_clv(bet_odds, closing_odds, ...)` → `CLVResult` — with de-vigged fair probability comparison when counterpart odds available
+- `build_clv_opportunity(snapshot, consensus_snaps)` → `CLVOpportunity` — flags when current price leads projected close
+- CLV grades: Excellent (≥5%) / Strong (≥2%) / Neutral / Weak / Bad
+
+**Market Engine Jobs** (`bot/market_engine.py`):
+- `connector_poll_job` — fetches all sportsbook connectors, stores `MarketSnapshotRecord`, updates in-memory cache
+- `consensus_check_job` — runs consensus engine, sends `MarketInefficiency` alerts and multi-book steam alerts through `AlertDelivery`
+- `clv_check_job` — detects CLV leads, alerts when current price > projected close by `MIN_CLV_LEAD` cents
+- `underdog_job` — fetches Underdog projections, alerts on line changes and removed props
+
+**New alert types**: `MULTI_BOOK_STEAM`, `MARKET_INEFFICIENCY`, `CLV_OPPORTUNITY`, `UNDERDOG_LINE_CHANGE`, `UNDERDOG_REMOVED`  
+**New commands**: `/market` (cross-book consensus), `/clv` (CLV performance history)  
+**Pick'em isolation**: Underdog/PrizePicks output stays in pick'em domain — never mixed into sportsbook moneyline analysis
+
+### 11. Test suite (`bot/tests/`)
+**Full pipeline coverage across all modules.**
 
 | Class | Tests | Covers |
 |---|---|---|

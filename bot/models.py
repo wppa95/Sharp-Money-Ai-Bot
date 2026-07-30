@@ -40,6 +40,12 @@ class AlertType(str, enum.Enum):
     EV_POSITIVE = "+EV Opportunity"
     REVERSE_LINE = "Reverse Line Move"
     PRIZEPICKS = "PrizePicks +EV"
+    # Multi-platform market engine alert types
+    MULTI_BOOK_STEAM   = "Multi-Book Steam"
+    MARKET_INEFFICIENCY = "Market Inefficiency"
+    CLV_OPPORTUNITY    = "CLV Opportunity"
+    UNDERDOG_LINE_CHANGE = "Underdog Line Change"
+    UNDERDOG_REMOVED   = "Underdog Prop Removed"
 
 
 class Recommendation(str, enum.Enum):

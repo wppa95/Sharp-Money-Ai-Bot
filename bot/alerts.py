@@ -431,6 +431,8 @@ def format_help_message() -> str:
         f"             <i>Example: /analyze NBA Lakers+3.5 -110 -110</i>",
         f"  /steam    — Show the {EMOJI['fire']} latest steam / sharp moves",
         f"  /ev       — Show the {EMOJI['ev']} latest +EV opportunities",
+        f"  /market   — Cross-book consensus and market inefficiencies",
+        f"  /clv      — Closing Line Value performance history",
         "",
         "<b>🔍 Analyze Format:</b>",
         "  <code>/analyze [sport] [selection] [your_odds] [opp_odds]</code>",

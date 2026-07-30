@@ -73,6 +73,40 @@ class Config:
     EV_DEDUP_WINDOW: int    = int(os.environ.get("EV_DEDUP_WINDOW",    "1800"))  # 30 min
     STEAM_DEDUP_WINDOW: int = int(os.environ.get("STEAM_DEDUP_WINDOW", "3600"))  # 60 min
 
+    # ── Multi-platform connector settings ────────────────────────────────────
+    # Enable/disable individual connectors via env vars
+    DRAFTKINGS_ENABLED: bool = os.environ.get("DRAFTKINGS_ENABLED", "true").lower() == "true"
+    FANDUEL_ENABLED:    bool = os.environ.get("FANDUEL_ENABLED",    "true").lower() == "true"
+    UNDERDOG_ENABLED:   bool = os.environ.get("UNDERDOG_ENABLED",   "true").lower() == "true"
+
+    # Polling intervals for multi-platform connectors (seconds)
+    CONNECTOR_POLL_INTERVAL:  int = int(os.environ.get("CONNECTOR_POLL_INTERVAL",  "90"))
+    CONSENSUS_CHECK_INTERVAL: int = int(os.environ.get("CONSENSUS_CHECK_INTERVAL", "120"))
+    CLV_CHECK_INTERVAL:       int = int(os.environ.get("CLV_CHECK_INTERVAL",       "300"))
+    UNDERDOG_POLL_INTERVAL:   int = int(os.environ.get("UNDERDOG_POLL_INTERVAL",   "300"))
+
+    # Consensus engine thresholds
+    # Minimum books for cross-book consensus computation
+    CONSENSUS_MIN_BOOKS: int = int(os.environ.get("CONSENSUS_MIN_BOOKS", "2"))
+    # American-odds deviation from consensus to flag as market inefficiency
+    INEFFICIENCY_THRESHOLD: int = int(os.environ.get("INEFFICIENCY_THRESHOLD", "10"))
+    # Minimum inefficiency deviation to trigger an alert
+    MIN_INEFFICIENCY_DEVIATION: int = int(os.environ.get("MIN_INEFFICIENCY_DEVIATION", "10"))
+
+    # CLV thresholds
+    # Minimum current-vs-projected-close lead (American odds cents) to fire alert
+    MIN_CLV_LEAD: int = int(os.environ.get("MIN_CLV_LEAD", "8"))
+    # Minimum CLV% for a historical CLV result to be surfaced
+    MIN_CLV_PCT: float = float(os.environ.get("MIN_CLV_PCT", "1.0"))
+
+    # Underdog thresholds
+    # Minimum absolute line change (units) to trigger an alert
+    MIN_UNDERDOG_LINE_CHANGE: float = float(os.environ.get("MIN_UNDERDOG_LINE_CHANGE", "0.5"))
+
+    # Dedup windows for new alert types (seconds)
+    INEFFICIENCY_DEDUP_WINDOW: int = int(os.environ.get("INEFFICIENCY_DEDUP_WINDOW", "1800"))
+    CLV_DEDUP_WINDOW:          int = int(os.environ.get("CLV_DEDUP_WINDOW",           "3600"))
+
     # ── Logging ───────────────────────────────────────────────────────────────
     LOG_LEVEL: str = os.environ.get("LOG_LEVEL", "INFO")
 

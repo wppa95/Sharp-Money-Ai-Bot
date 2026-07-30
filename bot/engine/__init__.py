@@ -59,10 +59,34 @@ from .steam import (
 )
 
 from .analysis import AnalysisEngine
+from .consensus import (
+    compute_consensus,
+    find_inefficiencies,
+    build_multi_book_steam_inputs,
+    ConsensusResult,
+    MarketInefficiency,
+)
+from .clv import (
+    compute_clv,
+    build_clv_opportunity,
+    CLVResult,
+    CLVOpportunity,
+)
 
 __all__ = [
     # analysis
     "AnalysisEngine",
+    # consensus
+    "compute_consensus",
+    "find_inefficiencies",
+    "build_multi_book_steam_inputs",
+    "ConsensusResult",
+    "MarketInefficiency",
+    # clv
+    "compute_clv",
+    "build_clv_opportunity",
+    "CLVResult",
+    "CLVOpportunity",
     # fair_probability
     "american_to_implied",
     "implied_to_american",

@@ -48,8 +48,23 @@ from commands import (
     cmd_analyze,
     cmd_steam,
     cmd_ev,
+    cmd_clv,
+    cmd_market,
     error_handler,
     init_handlers,
+)
+from connectors import (
+    ConnectorRegistry,
+    DraftKingsConnector,
+    FanDuelConnector,
+    UnderdogConnector,
+)
+from market_engine import (
+    init_market_engine,
+    connector_poll_job,
+    consensus_check_job,
+    clv_check_job,
+    underdog_job,
 )
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -86,17 +101,51 @@ async def post_init(application: Application) -> None:
     allowed_ids = list(config.allowed_user_ids)
     init_handlers(_db, _engine, allowed_ids)
 
+    # ── Multi-platform connector registry ─────────────────────────────────────
+    registry = ConnectorRegistry()
+    active_sports = config.active_sports
+
+    registry.register(DraftKingsConnector(
+        odds_api_key  = config.ODDS_API_KEY,
+        active_sports = active_sports,
+        enabled       = config.DRAFTKINGS_ENABLED,
+    ))
+    registry.register(FanDuelConnector(
+        odds_api_key  = config.ODDS_API_KEY,
+        active_sports = active_sports,
+        enabled       = config.FANDUEL_ENABLED,
+    ))
+    registry.register(UnderdogConnector(
+        active_sports = active_sports,
+        enabled       = config.UNDERDOG_ENABLED,
+    ))
+
+    init_market_engine(registry)
+
+    # Store db reference in bot_data for market engine jobs
+    application.bot_data["db"] = _db
+
     # Register background jobs
     jq = application.job_queue
     if jq:
         jq.run_repeating(_poll_odds_job,       interval=config.ODDS_POLL_INTERVAL,          first=10,  name="odds_poller")
         jq.run_repeating(_steam_check_job,     interval=config.STEAM_CHECK_INTERVAL,        first=15,  name="steam_checker")
         jq.run_repeating(_prizepicks_job,      interval=config.PRIZEPICKS_POLL_INTERVAL,    first=30,  name="prizepicks_monitor")
+        # Multi-platform market engine jobs
+        jq.run_repeating(connector_poll_job,   interval=config.CONNECTOR_POLL_INTERVAL,     first=20,  name="connector_poller")
+        jq.run_repeating(consensus_check_job,  interval=config.CONSENSUS_CHECK_INTERVAL,    first=25,  name="consensus_checker")
+        jq.run_repeating(clv_check_job,        interval=config.CLV_CHECK_INTERVAL,          first=35,  name="clv_checker")
+        jq.run_repeating(underdog_job,         interval=config.UNDERDOG_POLL_INTERVAL,      first=45,  name="underdog_monitor")
         logger.info(
-            "Jobs scheduled — odds: every %ds, steam: every %ds, prizepicks: every %ds",
+            "Jobs scheduled — odds: every %ds, steam: every %ds, prizepicks: every %ds, "
+            "connectors: every %ds, consensus: every %ds, clv: every %ds, underdog: every %ds",
             config.ODDS_POLL_INTERVAL,
             config.STEAM_CHECK_INTERVAL,
             config.PRIZEPICKS_POLL_INTERVAL,
+            config.CONNECTOR_POLL_INTERVAL,
+            config.CONSENSUS_CHECK_INTERVAL,
+            config.CLV_CHECK_INTERVAL,
+            config.UNDERDOG_POLL_INTERVAL,
         )
     else:
         logger.warning("JobQueue not available — background jobs disabled.")
@@ -500,6 +549,8 @@ def main() -> None:
     app.add_handler(CommandHandler("analyze", cmd_analyze))
     app.add_handler(CommandHandler("steam",   cmd_steam))
     app.add_handler(CommandHandler("ev",      cmd_ev))
+    app.add_handler(CommandHandler("clv",     cmd_clv))
+    app.add_handler(CommandHandler("market",  cmd_market))
     app.add_error_handler(error_handler)
 
     logger.info("Starting polling — press Ctrl+C to stop.")

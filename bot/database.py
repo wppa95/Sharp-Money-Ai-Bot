@@ -129,6 +129,70 @@ class PPEdgeRecord(Base):
     detected_at     = Column(DateTime,    default=datetime.utcnow, nullable=False)
 
 
+# ── Multi-platform market snapshot records ────────────────────────────────────
+
+class MarketSnapshotRecord(Base):
+    """Normalized cross-platform market snapshot — one record per odds fetch."""
+    __tablename__ = "market_snapshots"
+
+    id           = Column(Integer,  primary_key=True, autoincrement=True)
+    sportsbook   = Column(String(64),  nullable=False, index=True)
+    sport        = Column(String(32),  nullable=False, index=True)
+    league       = Column(String(32),  nullable=False, default="")
+    event        = Column(String(256), nullable=False)
+    market_type  = Column(String(32),  nullable=False)
+    selection    = Column(String(256), nullable=False)
+    player       = Column(String(128), nullable=True)
+    team         = Column(String(64),  nullable=True)
+    line         = Column(Float,       nullable=True)
+    odds         = Column(Integer,     nullable=False, default=0)
+    opening_odds = Column(Integer,     nullable=True)
+    is_pickem    = Column(Boolean,     default=False, nullable=False)
+    game_time    = Column(DateTime,    nullable=True)
+    recorded_at  = Column(DateTime,    default=datetime.utcnow, nullable=False)
+    alert_sent   = Column(Boolean,     default=False, nullable=False)
+
+
+class CLVRecord(Base):
+    """Closing Line Value result for an alerted opportunity."""
+    __tablename__ = "clv_records"
+
+    id                     = Column(Integer,  primary_key=True, autoincrement=True)
+    selection              = Column(String(256), nullable=False, index=True)
+    event                  = Column(String(256), nullable=False)
+    sport                  = Column(String(32),  nullable=False)
+    bet_odds               = Column(Integer,     nullable=False)
+    closing_odds           = Column(Integer,     nullable=False)
+    clv_pct                = Column(Float,       nullable=False)
+    clv_proxy              = Column(Integer,     nullable=False)
+    fair_prob_bet          = Column(Float,       nullable=True)
+    fair_prob_close        = Column(Float,       nullable=True)
+    counterpart_bet_odds   = Column(Integer,     nullable=True)
+    counterpart_close_odds = Column(Integer,     nullable=True)
+    notes                  = Column(Text,        nullable=False, default="")
+    computed_at            = Column(DateTime,    default=datetime.utcnow, nullable=False)
+
+
+class UnderdogSnapshotRecord(Base):
+    """Raw Underdog Fantasy pick'em projection snapshot."""
+    __tablename__ = "underdog_snapshots"
+
+    id          = Column(Integer,  primary_key=True, autoincrement=True)
+    external_id = Column(String(64),  nullable=False, index=True)
+    player_name = Column(String(128), nullable=False, index=True)
+    team        = Column(String(64),  nullable=False, default="")
+    sport       = Column(String(32),  nullable=False, index=True)
+    stat_type   = Column(String(64),  nullable=False)
+    line_value  = Column(Float,       nullable=False)
+    game_id     = Column(String(64),  nullable=False, default="")
+    game_time   = Column(DateTime,    nullable=True)
+    line_moved  = Column(Boolean,     default=False, nullable=False)
+    prev_line   = Column(Float,       nullable=True)
+    removed     = Column(Boolean,     default=False, nullable=False)
+    alert_sent  = Column(Boolean,     default=False, nullable=False)
+    fetched_at  = Column(DateTime,    default=datetime.utcnow, nullable=False)
+
+
 # ── Database manager ──────────────────────────────────────────────────────────
 
 class Database:
@@ -395,6 +459,106 @@ class Database:
                 .order_by(desc(OddsRecord.recorded_at))
             )
             return list(result.scalars().all())
+
+    # ── Multi-platform market snapshots ──────────────────────────────────────
+
+    async def save_market_snapshot(self, record: "MarketSnapshotRecord") -> "MarketSnapshotRecord":
+        async with self.session() as s:
+            s.add(record)
+            await s.commit()
+            await s.refresh(record)
+        return record
+
+    async def get_snapshots_since(
+        self,
+        sport: str,
+        since: datetime,
+        sportsbook: Optional[str] = None,
+    ) -> list["MarketSnapshotRecord"]:
+        async with self.session() as s:
+            q = select(MarketSnapshotRecord).where(
+                MarketSnapshotRecord.sport == sport,
+                MarketSnapshotRecord.recorded_at >= since,
+            )
+            if sportsbook:
+                q = q.where(MarketSnapshotRecord.sportsbook == sportsbook)
+            result = await s.execute(q.order_by(MarketSnapshotRecord.recorded_at))
+            return list(result.scalars().all())
+
+    async def count_snapshot_records(self) -> int:
+        async with self.session() as s:
+            result = await s.execute(select(func.count()).select_from(MarketSnapshotRecord))
+            return result.scalar() or 0
+
+    # ── CLV records ──────────────────────────────────────────────────────────
+
+    async def save_clv_record(self, record: "CLVRecord") -> "CLVRecord":
+        async with self.session() as s:
+            s.add(record)
+            await s.commit()
+            await s.refresh(record)
+        return record
+
+    async def get_recent_clv_records(self, limit: int = 20) -> list["CLVRecord"]:
+        async with self.session() as s:
+            result = await s.execute(
+                select(CLVRecord)
+                .order_by(desc(CLVRecord.computed_at))
+                .limit(limit)
+            )
+            return list(result.scalars().all())
+
+    async def count_clv_records(self) -> int:
+        async with self.session() as s:
+            result = await s.execute(select(func.count()).select_from(CLVRecord))
+            return result.scalar() or 0
+
+    # ── Underdog snapshots ───────────────────────────────────────────────────
+
+    async def save_underdog_snapshot(self, record: "UnderdogSnapshotRecord") -> "UnderdogSnapshotRecord":
+        async with self.session() as s:
+            s.add(record)
+            await s.commit()
+            await s.refresh(record)
+        return record
+
+    async def get_recent_underdog_snapshots(self, limit: int = 50) -> list["UnderdogSnapshotRecord"]:
+        async with self.session() as s:
+            result = await s.execute(
+                select(UnderdogSnapshotRecord)
+                .order_by(desc(UnderdogSnapshotRecord.fetched_at))
+                .limit(limit)
+            )
+            return list(result.scalars().all())
+
+    async def count_underdog_records(self) -> int:
+        async with self.session() as s:
+            result = await s.execute(select(func.count()).select_from(UnderdogSnapshotRecord))
+            return result.scalar() or 0
+
+    async def has_recent_inefficiency_alert(
+        self,
+        event: str,
+        selection: str,
+        sportsbook: str,
+        within_seconds: int = 1800,
+    ) -> bool:
+        """True if a market inefficiency alert for this market/book was sent recently."""
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(seconds=within_seconds)
+        async with self.session() as s:
+            result = await s.execute(
+                select(func.count())
+                .select_from(MarketSnapshotRecord)
+                .where(
+                    MarketSnapshotRecord.event == event,
+                    MarketSnapshotRecord.selection == selection,
+                    MarketSnapshotRecord.sportsbook == sportsbook,
+                    MarketSnapshotRecord.alert_sent == True,  # noqa: E712
+                    MarketSnapshotRecord.recorded_at >= cutoff,
+                )
+            )
+            return (result.scalar() or 0) > 0
 
     async def close(self) -> None:
         if self._engine:
