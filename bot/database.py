@@ -560,6 +560,68 @@ class Database:
             )
             return (result.scalar() or 0) > 0
 
+    # ── AI Ranking / Performance tracking ────────────────────────────────────
+
+    async def get_ev_records_with_results(
+        self,
+        *,
+        sport: Optional[str] = None,
+        market_type: Optional[str] = None,
+        limit: int = 500,
+        include_pending: bool = False,
+    ) -> list["EVRecord"]:
+        """
+        Return EVRecord rows that have a resolved result.
+
+        By default, only WIN / LOSS / PUSH rows are returned.
+        Set include_pending=True to also include PENDING rows.
+
+        Parameters
+        ----------
+        sport           Filter to a specific sport (exact match).
+        market_type     Filter to a specific market type (exact match).
+        limit           Maximum number of rows to return (most recent first).
+        include_pending Also include PENDING result rows.
+        """
+        async with self.session() as s:
+            q = select(EVRecord).order_by(desc(EVRecord.detected_at))
+            if sport:
+                q = q.where(EVRecord.sport == sport)
+            if market_type:
+                q = q.where(EVRecord.market_type == market_type)
+            if not include_pending:
+                q = q.where(EVRecord.result.in_(["WIN", "LOSS", "PUSH"]))
+            result = await s.execute(q.limit(limit))
+            return list(result.scalars().all())
+
+    async def update_ev_record_result(
+        self,
+        record_id: int,
+        result: str,
+        clv: Optional[float] = None,
+    ) -> None:
+        """
+        Update the result and optionally the CLV for a specific EVRecord.
+
+        Parameters
+        ----------
+        record_id   Primary key of the EVRecord to update.
+        result      One of WIN / LOSS / PUSH / PENDING.
+        clv         Closing Line Value percentage (optional).
+        """
+        from sqlalchemy import update as sa_update
+        values: dict = {"result": result.upper()}
+        if clv is not None:
+            values["clv"] = clv
+        async with self.session() as s:
+            await s.execute(
+                sa_update(EVRecord)
+                .where(EVRecord.id == record_id)
+                .values(**values)
+            )
+            await s.commit()
+        logger.debug("Updated EVRecord %d → result=%s clv=%s", record_id, result, clv)
+
     async def close(self) -> None:
         if self._engine:
             await self._engine.dispose()

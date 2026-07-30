@@ -216,6 +216,7 @@ def format_ev_alert(
     opp: EVOpportunity,
     *,
     risk_factors: Optional[list[RiskFactor]] = None,
+    ranking_result: Optional[object] = None,
 ) -> str:
     """
     Format a +EV opportunity as a rich Telegram HTML message.
@@ -313,6 +314,17 @@ def format_ev_alert(
         "",
         f"{EMOJI['clock']} <i>{opp.timestamp.strftime('%Y-%m-%d %H:%M UTC')}</i>",
     ]
+
+    # ── Optional AI Ranking block ─────────────────────────────────────────────
+    if ranking_result is not None:
+        try:
+            # ranking_result is a RankingResult — use duck-typing to avoid
+            # a hard import here (engine imports alerts, not vice versa)
+            ranking_block = ranking_result.to_telegram_block()
+            if ranking_block:
+                parts += ["", ranking_block]
+        except Exception:
+            pass  # never let ranking formatting break the main alert
 
     return "\n".join(parts)
 
@@ -431,8 +443,10 @@ def format_help_message() -> str:
         f"             <i>Example: /analyze NBA Lakers+3.5 -110 -110</i>",
         f"  /steam    — Show the {EMOJI['fire']} latest steam / sharp moves",
         f"  /ev       — Show the {EMOJI['ev']} latest +EV opportunities",
-        f"  /market   — Cross-book consensus and market inefficiencies",
-        f"  /clv      — Closing Line Value performance history",
+        f"  /market       — Cross-book consensus and market inefficiencies",
+        f"  /clv          — Closing Line Value performance history",
+        f"  /performance  — Historical win rate, CLV and ROI by tier & sport",
+        f"  /backtest     — Replay last N alerts through the AI ranking model",
         "",
         "<b>🔍 Analyze Format:</b>",
         "  <code>/analyze [sport] [selection] [your_odds] [opp_odds]</code>",

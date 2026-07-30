@@ -383,6 +383,86 @@ async def cmd_market(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         )
 
 
+async def cmd_performance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/performance — Historical win rate, CLV and ROI broken down by sport, market and tier."""
+    if not _check_allowed(update):
+        await update.message.reply_text("⛔ Unauthorized.")
+        return
+
+    try:
+        from engine.backtesting import BacktestEngine
+        from engine.ranking import RankingTier, RankingDecision
+
+        records = await _db.get_ev_records_with_results(limit=500, include_pending=False)
+
+        if not records:
+            await update.message.reply_text(
+                "📊 <b>Performance History</b>\n\n"
+                "<i>No resolved bets yet.  Win/loss results are recorded automatically"
+                " once an event's final score is available.</i>",
+                parse_mode="HTML",
+            )
+            return
+
+        engine = BacktestEngine()
+        report = engine.run(records)
+        msg = report.to_telegram()
+        await update.message.reply_text(msg, parse_mode="HTML")
+
+    except Exception as exc:
+        logger.exception("cmd_performance error: %s", exc)
+        await update.message.reply_text(
+            f"{EMOJI['warn']} Could not load performance data: {exc}",
+            parse_mode="HTML",
+        )
+
+
+async def cmd_backtest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/backtest [limit] — Run a full backtest on the last N resolved alerts."""
+    if not _check_allowed(update):
+        await update.message.reply_text("⛔ Unauthorized.")
+        return
+
+    # Optional limit argument
+    limit = 200
+    args = context.args or []
+    if args:
+        try:
+            limit = max(10, min(int(args[0]), 1000))
+        except ValueError:
+            pass
+
+    try:
+        from engine.backtesting import run_backtest
+
+        await update.message.reply_text(
+            f"⏳ Running backtest on last <b>{limit}</b> resolved records…",
+            parse_mode="HTML",
+        )
+
+        records = await _db.get_ev_records_with_results(limit=limit, include_pending=False)
+
+        if not records:
+            await update.message.reply_text(
+                "📊 <b>Backtest</b>\n\n"
+                "<i>No resolved records found.  Results are tracked automatically"
+                " once events finish.  Use /performance once results accumulate.</i>",
+                parse_mode="HTML",
+            )
+            return
+
+        report = run_backtest(records)
+        msg = report.to_telegram()
+        await update.message.reply_text(msg, parse_mode="HTML")
+
+    except Exception as exc:
+        logger.exception("cmd_backtest error: %s", exc)
+        await update.message.reply_text(
+            f"{EMOJI['warn']} Backtest failed: {exc}",
+            parse_mode="HTML",
+        )
+
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Log errors raised by handlers."""
     logger.error("Update %s caused error: %s", update, context.error, exc_info=context.error)

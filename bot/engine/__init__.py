@@ -6,6 +6,7 @@ Canonical import path for all analysis primitives:
     from engine.fair_probability import compute_fair_market, FairProbabilityMethod
     from engine.ev import compute_ev, compute_ev_batch, EVRating, ConfidenceFlag
     from engine.steam import compute_steam, compute_steam_simple, SteamResult, SteamTier
+    from engine.ranking import compute_ranking, RankingResult, RankingTier, RankingDecision
 """
 
 from .fair_probability import (
@@ -59,6 +60,7 @@ from .steam import (
 )
 
 from .analysis import AnalysisEngine
+
 from .consensus import (
     compute_consensus,
     find_inefficiencies,
@@ -66,6 +68,7 @@ from .consensus import (
     ConsensusResult,
     MarketInefficiency,
 )
+
 from .clv import (
     compute_clv,
     build_clv_opportunity,
@@ -73,9 +76,41 @@ from .clv import (
     CLVOpportunity,
 )
 
+from .ranking import (
+    RankingTier,
+    RankingDecision,
+    HistoricalStats,
+    HistoricalBreakdown,
+    RankingResult,
+    compute_ranking,
+    MIN_SAMPLE_SIZE,
+)
+
+from .backtesting import (
+    BacktestEngine,
+    BacktestRecord,
+    BacktestReport,
+    DimensionStats,
+    run_backtest,
+)
+
 __all__ = [
     # analysis
     "AnalysisEngine",
+    # ranking / decision
+    "RankingTier",
+    "RankingDecision",
+    "HistoricalStats",
+    "HistoricalBreakdown",
+    "RankingResult",
+    "compute_ranking",
+    "MIN_SAMPLE_SIZE",
+    # backtesting
+    "BacktestEngine",
+    "BacktestRecord",
+    "BacktestReport",
+    "DimensionStats",
+    "run_backtest",
     # consensus
     "compute_consensus",
     "find_inefficiencies",
@@ -87,6 +122,13 @@ __all__ = [
     "build_clv_opportunity",
     "CLVResult",
     "CLVOpportunity",
+    # confidence
+    "ConfidenceTier",
+    "SupportingFactor",
+    "RiskWarning",
+    "ScoreBreakdown",
+    "ConfidenceResult",
+    "compute_confidence",
     # fair_probability
     "american_to_implied",
     "implied_to_american",

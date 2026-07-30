@@ -50,6 +50,8 @@ from commands import (
     cmd_ev,
     cmd_clv,
     cmd_market,
+    cmd_performance,
+    cmd_backtest,
     error_handler,
     init_handlers,
 )
@@ -549,8 +551,10 @@ def main() -> None:
     app.add_handler(CommandHandler("analyze", cmd_analyze))
     app.add_handler(CommandHandler("steam",   cmd_steam))
     app.add_handler(CommandHandler("ev",      cmd_ev))
-    app.add_handler(CommandHandler("clv",     cmd_clv))
-    app.add_handler(CommandHandler("market",  cmd_market))
+    app.add_handler(CommandHandler("clv",         cmd_clv))
+    app.add_handler(CommandHandler("market",      cmd_market))
+    app.add_handler(CommandHandler("performance", cmd_performance))
+    app.add_handler(CommandHandler("backtest",    cmd_backtest))
     app.add_error_handler(error_handler)
 
     logger.info("Starting polling — press Ctrl+C to stop.")
