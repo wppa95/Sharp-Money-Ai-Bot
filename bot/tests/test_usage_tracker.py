@@ -105,8 +105,10 @@ class TestInferCallPriority:
         # Even for a low-priority sport, player_props → HIGH
         assert infer_call_priority("soccer_epl", "player_props,h2h") == CallPriority.HIGH
 
-    def test_mlb_medium(self):
-        assert infer_call_priority("baseball_mlb", "h2h") == CallPriority.MEDIUM
+    def test_mlb_high(self):
+        # MLB is the only in-scope bookmaker sport; its game-line requests must
+        # be HIGH so the budget guard never silences the only deliverable alerts.
+        assert infer_call_priority("baseball_mlb", "h2h") == CallPriority.HIGH
 
     def test_nba_medium(self):
         assert infer_call_priority("basketball_nba", "h2h,spreads") == CallPriority.MEDIUM

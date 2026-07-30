@@ -65,13 +65,19 @@ def infer_call_priority(sport_key: str, markets: str) -> CallPriority:
 
     Rules (in order):
       1. ``"player_props"`` or any ``"player_"`` market key in *markets* → HIGH
-      2. ``baseball_mlb`` or ``basketball_nba`` in *sport_key* → MEDIUM
-      3. Everything else                               → LOW
+      2. ``baseball_mlb`` in *sport_key*                                 → HIGH
+         MLB is the only sport whose game-line alerts are currently in
+         scope, so its odds requests must never be blocked by the budget
+         guard (which stops MEDIUM calls at ≥ 90 % quota).
+      3. ``basketball_nba`` in *sport_key*                               → MEDIUM
+      4. Everything else                                                 → LOW
     """
     if "player_props" in markets or "player_" in markets:
         return CallPriority.HIGH
     s = sport_key.lower()
-    if "baseball_mlb" in s or "basketball_nba" in s:
+    if "baseball_mlb" in s:
+        return CallPriority.HIGH
+    if "basketball_nba" in s:
         return CallPriority.MEDIUM
     return CallPriority.LOW
 

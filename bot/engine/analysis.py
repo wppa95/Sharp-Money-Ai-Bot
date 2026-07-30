@@ -55,9 +55,11 @@ _SPORT_TO_ODDS_API_KEY: dict[Sport, str] = {
 }
 
 _MARKET_KEY_TO_TYPE: dict[str, MarketType] = {
-    "h2h":     MarketType.MONEYLINE,
-    "spreads": MarketType.SPREAD,
-    "totals":  MarketType.TOTAL,
+    "h2h":    MarketType.MONEYLINE,
+    "totals": MarketType.TOTAL,
+    # "spreads" removed — spreads are not requested (markets="h2h,totals") and
+    # are blocked by alert_scope_filter.py.  Re-add here only when both the
+    # fetch and the scope filter are updated together.
 }
 
 # Player-prop markets to request per sport, keyed by the raw Odds API market
