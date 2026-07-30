@@ -71,14 +71,26 @@ def _check_allowed(update: Update) -> bool:
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/start — welcome message."""
-    logger.info("cmd_start: chat_id=%s user_id=%s", update.effective_chat.id, getattr(update.effective_user, 'id', None))
+    chat_id = update.effective_chat.id
+    user_id = getattr(update.effective_user, 'id', None)
+    logger.info("cmd_start: chat_id=%s user_id=%s", chat_id, user_id)
     if not _check_allowed(update):
-        await update.message.reply_text("⛔ Unauthorized.")
+        await update.message.reply_text(
+            f"⛔ Unauthorized.\n\n"
+            f"<i>Your chat ID is <code>{chat_id}</code>. "
+            f"Add it to ALLOWED_USER_IDS to enable alerts.</i>",
+            parse_mode=ParseMode.HTML,
+        )
         return
     await update.message.reply_text(
         format_start_message(),
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
+    )
+    # Remind authorised users of their chat ID for easy reference.
+    await update.message.reply_text(
+        f"ℹ️ Your chat ID: <code>{chat_id}</code>",
+        parse_mode=ParseMode.HTML,
     )
 
 
@@ -462,6 +474,145 @@ async def cmd_backtest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             f"{EMOJI['warn']} Backtest failed: {exc}",
             parse_mode="HTML",
         )
+
+
+async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/testalert [steam|ev] — Send a mock alert to verify delivery end-to-end."""
+    if not _check_allowed(update):
+        await update.message.reply_text("⛔ Unauthorized.")
+        return
+
+    args = [a.lower() for a in (context.args or [])]
+    send_steam = not args or "steam" in args
+    send_ev    = not args or "ev" in args
+
+    if not send_steam and not send_ev:
+        await update.message.reply_text(
+            "Usage: /testalert  |  /testalert steam  |  /testalert ev"
+        )
+        return
+
+    await update.message.reply_text("⏳ Generating mock alerts…")
+
+    try:
+        from connectors.mock import (
+            MockOddsConnector, MockScenario,
+            _GAME_A, _BOS_SEL, _LAL_SEL, _DK, _FD, _SP,
+        )
+        from engine.steam import compute_steam_simple
+        from engine.fair_probability import (
+            compute_fair_market, FairProbabilityMethod, implied_to_american,
+        )
+        from engine.ev import compute_ev_from_market, kelly_fraction as kf_fn
+        from engine.ranking import compute_ranking, HistoricalStats
+        from models import (
+            SteamAlert, AlertType, Sport, MarketType,
+            EVOpportunity, EVResult, FairOdds, Recommendation,
+        )
+
+        # ── Build mock state ──────────────────────────────────────────────
+        c = MockOddsConnector()
+        await c.fetch()                          # OPENING baseline
+        c.tick(MockScenario.STEAM)
+        snaps1 = await c.fetch()
+
+        bos_dk1 = next(s for s in snaps1 if s.sportsbook == _DK
+                       and s.event == _GAME_A and s.selection == _BOS_SEL
+                       and s.market_type == _SP)
+
+        steam_result = compute_steam_simple(
+            market=_GAME_A, sport="NBA", market_type=_SP,
+            selection=f"{_BOS_SEL} -3.5",
+            book_snapshots=[
+                {"sportsbook": "Pinnacle",   "open_odds": bos_dk1.opening_odds, "current_odds": bos_dk1.odds},
+                {"sportsbook": "DraftKings", "open_odds": bos_dk1.opening_odds, "current_odds": bos_dk1.odds},
+            ],
+            elapsed_minutes=12.0,
+        )
+
+        steam_alert_obj = SteamAlert(
+            alert_type=AlertType.STEAM, sport=Sport.NBA, market_type=MarketType.SPREAD,
+            event=_GAME_A, selection=f"{_BOS_SEL} -3.5",
+            opening_odds=steam_result.opening_odds, current_odds=steam_result.current_odds,
+            steam_score=steam_result.steam_score,
+            steam_direction=steam_result.movement_direction.value,
+            books_moved=steam_result.books_triggered,
+        )
+
+        # ── Send steam alert ──────────────────────────────────────────────
+        if send_steam:
+            steam_msg = format_steam_alert(steam_alert_obj, sharp_books=["Pinnacle"], risk_factors=[])
+            await update.message.reply_text(steam_msg, parse_mode=ParseMode.HTML,
+                                            disable_web_page_preview=True)
+
+        # ── Build EV window state ─────────────────────────────────────────
+        if send_ev:
+            c.tick(MockScenario.EV_WINDOW)
+            snaps2 = await c.fetch()
+
+            dk_bos2 = next(s for s in snaps2 if s.sportsbook == _DK
+                           and s.event == _GAME_A and s.selection == _BOS_SEL
+                           and s.market_type == _SP)
+            dk_lal2 = next(s for s in snaps2 if s.sportsbook == _DK
+                           and s.event == _GAME_A and s.selection == _LAL_SEL
+                           and s.market_type == _SP)
+            fd_bos2 = next(s for s in snaps2 if s.sportsbook == _FD
+                           and s.event == _GAME_A and s.selection == _BOS_SEL
+                           and s.market_type == _SP)
+
+            fair      = compute_fair_market(
+                [dk_bos2.odds, dk_lal2.odds], labels=[_BOS_SEL, _LAL_SEL],
+                method=FairProbabilityMethod.MULTIPLICATIVE,
+            )
+            engine_ev = compute_ev_from_market(fair, _BOS_SEL, fd_bos2.odds)
+            kf        = kf_fn(engine_ev.fair_probability, fd_bos2.odds)
+
+            history = HistoricalStats(sample_size=30, win_rate=0.57, avg_clv=2.1)
+            ranking = compute_ranking(
+                steam_score=steam_result.steam_score,
+                ev_edge_pct=engine_ev.edge * 100,
+                fair_probability=engine_ev.fair_probability,
+                n_books_moving=2, sharp_book_count=1, market_agreement=1.0,
+                movement_speed=steam_result.movement_speed,
+                liquidity_score=70, minutes_to_game=180.0,
+                overall_history=history,
+            )
+
+            opp = EVOpportunity(
+                ev_result=EVResult(
+                    selection=f"{_BOS_SEL} -3.5",
+                    fair_odds=FairOdds(
+                        selection=f"{_BOS_SEL} -3.5",
+                        fair_probability=engine_ev.fair_probability,
+                        fair_american_odds=implied_to_american(engine_ev.fair_probability),
+                        vig_percentage=engine_ev.vig_pct,
+                        market_width=fair.market_width,
+                    ),
+                    offered_american_odds=fd_bos2.odds,
+                    ev_percentage=engine_ev.ev_percentage,
+                    edge=engine_ev.edge,
+                    kelly_fraction=max(kf, 0.0),
+                    half_kelly=max(kf / 2, 0.0),
+                ),
+                steam_alert=steam_alert_obj,
+                sport=Sport.NBA, market_type=MarketType.SPREAD,
+                event=_GAME_A, player=None, line=-3.5,
+                best_odds=fd_bos2.odds, best_book=_FD,
+                fair_probability=engine_ev.fair_probability,
+                expected_value=engine_ev.ev_percentage,
+                steam_score=steam_result.steam_score,
+                ai_confidence=82, recommendation=Recommendation.STRONG_BET, stars=4,
+            )
+            ev_msg = format_ev_alert(opp, ranking_result=ranking, risk_factors=[])
+            await update.message.reply_text(ev_msg, parse_mode=ParseMode.HTML,
+                                            disable_web_page_preview=True)
+
+        kinds = " + ".join(filter(None, ["steam" if send_steam else "", "ev" if send_ev else ""]))
+        await update.message.reply_text(f"✅ Test alert(s) sent: {kinds}")
+
+    except Exception as exc:
+        logger.exception("cmd_testalert error: %s", exc)
+        await update.message.reply_text(f"{EMOJI['warn']} Test alert failed: {exc}")
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:

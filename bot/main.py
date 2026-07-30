@@ -54,6 +54,7 @@ from commands import (
     cmd_market,
     cmd_performance,
     cmd_backtest,
+    cmd_testalert,
     error_handler,
     init_handlers,
 )
@@ -113,6 +114,14 @@ async def post_init(application: Application) -> None:
         await _season_checker.refresh()
 
     allowed_ids = list(config.allowed_user_ids)
+    if not allowed_ids:
+        logger.warning(
+            "⚠️  ALLOWED_USER_IDS is not configured — proactive alerts will NOT "
+            "be delivered to anyone. Set ALLOWED_USER_IDS=<your_telegram_chat_id> "
+            "in the environment, then restart the bot."
+        )
+    else:
+        logger.info("Alert recipients: %s", allowed_ids)
     init_handlers(_db, _engine, allowed_ids)
 
     # ── Multi-platform connector registry ─────────────────────────────────────
@@ -604,6 +613,7 @@ def main() -> None:
     )
 
     # Register command handlers
+    app.add_handler(CommandHandler("testalert", cmd_testalert))
     app.add_handler(CommandHandler("start",   cmd_start))
     app.add_handler(CommandHandler("help",    cmd_help))
     app.add_handler(CommandHandler("status",  cmd_status))
