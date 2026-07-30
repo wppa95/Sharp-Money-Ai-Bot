@@ -138,7 +138,7 @@ class TestTtlExpiry:
         count = _patch_fetch(cache)
         await cache.get_or_fetch("basketball_nba", "key")
         # Manually backdate the entry so it appears expired
-        key = ("basketball_nba", "h2h,spreads,totals", "us")
+        key = ("basketball_nba", "h2h,totals", "us")
         cache._entries[key].fetched_at = datetime.utcnow() - timedelta(seconds=2)
         await cache.get_or_fetch("basketball_nba", "key")
         assert count[0] == 2   # second fetch triggered

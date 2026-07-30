@@ -28,8 +28,9 @@ from config import Config, config
 
 
 EXPECTED_DEFAULT_SPORTS = [
-    "NBA", "MLB", "WNBA", "NHL", "NCAAF", "NCAAB", "UFC",
-    "EPL", "LaLiga", "SerieA", "Bundesliga", "Ligue1", "MLS", "UCL",
+    # Only sports whose alerts can currently be delivered (see alert_scope_filter.py).
+    # Expand this list when delivery scope is widened for additional sports.
+    "MLB",
 ]
 
 # Verified Odds API sport keys (documented at the-odds-api.com)

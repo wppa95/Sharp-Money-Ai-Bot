@@ -136,7 +136,7 @@ class FanDuelConnector(BaseConnector):
             data = await cache.get_or_fetch(
                 sport_key = sport_key,
                 api_key   = self._api_key,
-                markets   = "h2h,spreads,totals",
+                markets   = "h2h,totals",
                 regions   = "us",
             )
         except OddsApiError as exc:
@@ -159,7 +159,7 @@ class FanDuelConnector(BaseConnector):
         params = {
             "apiKey":     self._api_key,
             "regions":    "us",
-            "markets":    "h2h,spreads,totals",
+            "markets":    "h2h,totals",
             "oddsFormat": "american",
             "bookmakers": _BOOK_KEY,
         }

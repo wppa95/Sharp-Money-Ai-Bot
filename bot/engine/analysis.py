@@ -66,19 +66,18 @@ _MARKET_KEY_TO_TYPE: dict[str, MarketType] = {
 # Priority 2 (enable via PLAYER_PROP_SPORTS env var): soccer leagues.
 # NFL excluded — add Sport.NFL here only if re-enabled.
 _SPORT_PLAYER_PROP_MARKETS: dict[Sport, str] = {
+    # Priority 1: sports actively cross-matched against PrizePicks / Underdog.
+    # NBA is included so props are ready when the season opens; if NBA is
+    # not in PLAYER_PROP_SPORTS the entry is never reached.
     Sport.NBA: (
         "player_points,player_rebounds,player_assists,"
         "player_threes,player_steals,player_blocks"
     ),
     Sport.MLB: "player_hits,player_pitcher_strikeouts,player_total_bases",
-    # Soccer — Priority 2; only requested when sport is in PLAYER_PROP_SPORTS
-    Sport.EPL:        "player_shots_on_target,player_goal_scorer_anytime",
-    Sport.MLS:        "player_shots_on_target,player_goal_scorer_anytime",
-    Sport.LA_LIGA:    "player_shots_on_target,player_goal_scorer_anytime",
-    Sport.SERIE_A:    "player_shots_on_target,player_goal_scorer_anytime",
-    Sport.BUNDESLIGA: "player_shots_on_target,player_goal_scorer_anytime",
-    Sport.LIGUE_1:    "player_shots_on_target,player_goal_scorer_anytime",
-    Sport.UCL:        "player_shots_on_target,player_goal_scorer_anytime",
+    # Soccer leagues removed: soccer player-prop alerts are out of scope and
+    # fetching them consumes quota that blocks MLB/NBA HIGH-priority calls.
+    # Re-add here only when soccer prop delivery is enabled in
+    # alert_scope_filter.py.
 }
 
 _ODDS_API_BASE = "https://api.the-odds-api.com/v4"
@@ -557,7 +556,7 @@ class AnalysisEngine:
             data: list[dict] = await cache.get_or_fetch(
                 sport_key,
                 api_key=config.ODDS_API_KEY,
-                markets="h2h,spreads,totals",
+                markets="h2h,totals",
                 regions="us",
                 odds_format="american",
             )

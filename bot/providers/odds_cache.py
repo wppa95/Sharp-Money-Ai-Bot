@@ -115,7 +115,7 @@ class OddsApiCache:
         self,
         sport_key:   str,
         api_key:     str,
-        markets:     str = "h2h,spreads,totals",
+        markets:     str = "h2h,totals",
         regions:     str = "us",
         odds_format: str = "american",
     ) -> list[dict]:
@@ -206,7 +206,7 @@ class OddsApiCache:
     def invalidate(
         self,
         sport_key: str,
-        markets:   str = "h2h,spreads,totals",
+        markets:   str = "h2h,totals",
         regions:   str = "us",
     ) -> None:
         """Remove a specific entry from the cache (forces the next call to re-fetch)."""

@@ -68,15 +68,17 @@ class Config:
     PLAYER_PROP_POLL_INTERVAL: int = int(os.environ.get("PLAYER_PROP_POLL_INTERVAL", "600"))
 
     # ── Sports to monitor (comma-separated Sport enum values) ─────────────────
-    # Default: every sport with a verified Odds API key, except NFL
-    # (not monitored by default — re-enable via the env var below).
-    # Override via the ACTIVE_SPORTS env var (e.g. "NFL,NBA,MLB").
+    # Default: MLB only — the only sport whose alerts can be delivered given
+    # the current scope rules (MLB Moneyline + MLB Totals on DK/FD).
+    # Fetching other sports wastes Odds API quota without producing any alerts.
+    # Add sports here only when their alert delivery is also enabled in
+    # alert_scope_filter.py — e.g. set ACTIVE_SPORTS=NBA,MLB when NBA is
+    # in-season and NBA alerts are approved.
     # Note: "Soccer" is a legacy alias for EPL — don't activate it alongside
     # "EPL" or the EPL feed will be fetched twice.
     ACTIVE_SPORTS_RAW: str = os.environ.get(
         "ACTIVE_SPORTS",
-        "NBA,MLB,WNBA,NHL,NCAAF,NCAAB,UFC,"
-        "EPL,LaLiga,SerieA,Bundesliga,Ligue1,MLS,UCL",
+        "MLB",
     )
 
     # ── Alert thresholds ──────────────────────────────────────────────────────

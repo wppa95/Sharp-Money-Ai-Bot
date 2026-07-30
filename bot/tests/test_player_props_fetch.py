@@ -86,13 +86,17 @@ def test_mlb_markets_in_map():
         assert m in markets, f"Expected {m} in MLB player-prop markets"
 
 
-def test_soccer_leagues_in_map():
+def test_soccer_leagues_not_in_map():
+    """Soccer leagues were removed from the prop-market map to conserve quota.
+    They must be re-added only when soccer prop delivery is enabled in
+    alert_scope_filter.py.
+    """
     soccer_sports = [Sport.EPL, Sport.MLS, Sport.LA_LIGA,
                      Sport.SERIE_A, Sport.BUNDESLIGA, Sport.LIGUE_1, Sport.UCL]
     for sp in soccer_sports:
-        assert sp in _SPORT_PLAYER_PROP_MARKETS, f"{sp} missing from player-prop market map"
-        markets = _SPORT_PLAYER_PROP_MARKETS[sp]
-        assert "player_shots_on_target" in markets or "player_goal_scorer" in markets
+        assert sp not in _SPORT_PLAYER_PROP_MARKETS, (
+            f"{sp} should not be in player-prop market map until soccer delivery is enabled"
+        )
 
 
 def test_nfl_not_in_default_map():
@@ -125,11 +129,11 @@ def test_player_prop_markets_are_high_priority(markets):
 
 
 def test_game_line_markets_not_high():
-    assert infer_call_priority("basketball_nba", "h2h,spreads,totals") == CallPriority.MEDIUM
+    assert infer_call_priority("basketball_nba", "h2h,totals") == CallPriority.MEDIUM
 
 
 def test_low_sport_game_lines_are_low():
-    assert infer_call_priority("soccer_epl", "h2h,spreads,totals") == CallPriority.LOW
+    assert infer_call_priority("soccer_epl", "h2h,totals") == CallPriority.LOW
 
 
 # ── Config ────────────────────────────────────────────────────────────────────
