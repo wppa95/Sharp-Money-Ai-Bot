@@ -1,49 +1,50 @@
-# See https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files for more about ignoring files.
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+.eggs/
+wheels/
+*.so
 
-# compiled output
-dist
-tmp
-out-tsc
-*.tsbuildinfo
-.expo
-.expo-shared
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
 
-# dependencies
-node_modules
+# Environment files (NEVER commit these)
+.env
+.env.local
+.env.*.local
+bot/.env
 
-# IDEs and editors
-/.idea
-.project
-.classpath
-.c9/
-*.launch
-.settings/
-*.sublime-workspace
+# Database files
+bot/data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
 
-# IDE - VSCode
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
+# Logs
+*.log
+logs/
 
-# misc
-/.sass-cache
-/connect.lock
-/coverage
-/libpeerconnection.log
-npm-debug.log
-yarn-error.log
-testem.log
-/typings
-
-# System Files
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
 .DS_Store
-Thumbs.db
 
-.cursor/rules/nx-rules.mdc
-.github/instructions/nx.instructions.md
-
-# Replit
-.cache/
-.local/
+# Node / pnpm (for the monorepo)
+node_modules/
+.pnpm-store/
