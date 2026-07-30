@@ -27,7 +27,7 @@ from .base import BaseConnector, ConnectorStatus, MarketSnapshot
 
 logger = logging.getLogger(__name__)
 
-_UNDERDOG_BASE = "https://api.underdogfantasy.com/v3"
+_UNDERDOG_BASE = "https://api.underdogfantasy.com/v1"
 _BOOK_TITLE    = "Underdog"
 _TIMEOUT       = aiohttp.ClientTimeout(total=20)
 
@@ -186,29 +186,80 @@ class UnderdogConnector(BaseConnector):
                 async with s.get(url) as resp:
                     if resp.status != 200:
                         logger.warning("Underdog API HTTP %d", resp.status)
+                        try:
+                            from providers.health_monitor import get_health_monitor as _ghm
+                            from providers.base import FailureType as _FT
+                            _mon = _ghm()
+                            if _mon:
+                                _ftype = _FT.BLOCKED if resp.status == 403 else _FT.HTTP_ERROR
+                                _mon.record_failure("Underdog", f"HTTP {resp.status}", _ftype)
+                        except ImportError:
+                            pass
                         return None
+                    try:
+                        from providers.health_monitor import get_health_monitor as _ghm
+                        _mon = _ghm()
+                        if _mon:
+                            _mon.record_success("Underdog")
+                    except ImportError:
+                        pass
                     raw = await resp.json(content_type=None)
         except aiohttp.ClientError as exc:
             logger.warning("Underdog request error: %s", exc)
+            try:
+                from providers.health_monitor import get_health_monitor as _ghm
+                from providers.base import FailureType as _FT
+                _mon = _ghm()
+                if _mon:
+                    _mon.record_failure("Underdog", str(exc)[:120], _FT.HTTP_ERROR)
+            except ImportError:
+                pass
             return None
         except Exception as exc:  # noqa: BLE001
             logger.warning("Underdog unexpected error: %s", exc)
+            try:
+                from providers.health_monitor import get_health_monitor as _ghm
+                from providers.base import FailureType as _FT
+                _mon = _ghm()
+                if _mon:
+                    _mon.record_failure("Underdog", str(exc)[:120], _FT.UNKNOWN)
+            except ImportError:
+                pass
             return None
 
         return self._parse(raw)
 
     def _parse(self, data: dict) -> list[UnderdogProjection]:
-        """Parse Underdog API JSON into UnderdogProjection objects."""
+        """Parse Underdog API v1 JSON into UnderdogProjection objects.
+
+        v1 shape differences from the old v3 endpoint:
+          - ``appearance_stat`` is nested inside ``line["over_under"]``, not on
+            the line directly.
+          - Player-to-appearance linking goes through a top-level ``appearances``
+            array; ``appearance_stat.appearance_id`` → ``appearances[].id``.
+          - Players carry ``team_id`` (UUID string) instead of ``team: {alias}``.
+          - ``appearances[].match_id`` is an integer; ``games[].id`` is a UUID, so
+            the two do not cross-reference.  ``game_time`` resolves only when the
+            fixture supplies matching string ids (tests); it will be ``None`` in
+            production, which is acceptable — it is display-only.
+        """
         projections: list[UnderdogProjection] = []
 
-        # Build player lookup from 'players' included section
+        # Build player lookup: id → player dict
         players: dict[str, dict] = {}
         for player in data.get("players", []):
             pid = player.get("id", "")
             if pid:
                 players[pid] = player
 
-        # Build game lookup from 'games' included section
+        # Build appearances lookup: id → appearance dict (v1 top-level array)
+        appearances: dict[str, dict] = {}
+        for app in data.get("appearances", []):
+            aid = app.get("id", "")
+            if aid:
+                appearances[aid] = app
+
+        # Build game lookup: id → game dict
         games: dict[str, dict] = {}
         for game in data.get("games", []):
             gid = game.get("id", "")
@@ -221,20 +272,33 @@ class UnderdogConnector(BaseConnector):
                 if stat_value is None:
                     continue
 
-                appearance = line.get("appearance_stat", {}) or {}
-                player_id  = appearance.get("player_id", "")
-                game_id    = appearance.get("match_id", "")
+                # v1: appearance_stat is nested inside the embedded over_under object
+                over_under      = line.get("over_under") or {}
+                appearance_stat = over_under.get("appearance_stat") or {}
 
-                p_data = players.get(player_id, {})
+                appearance_id = appearance_stat.get("appearance_id", "")
+                display_stat  = appearance_stat.get("display_stat", "Unknown")
+
+                # Resolve player and game through the top-level appearances table
+                app       = appearances.get(appearance_id, {})
+                player_id = app.get("player_id", "")
+                # match_id is an integer in production; str() normalises for lookup
+                match_id  = str(app.get("match_id", ""))
+
+                p_data      = players.get(player_id, {})
                 player_name = (
                     f"{p_data.get('first_name', '')} {p_data.get('last_name', '')}".strip()
                     or "Unknown Player"
                 )
-                team   = p_data.get("team", {}).get("alias", "") if isinstance(p_data.get("team"), dict) else ""
-                sport  = p_data.get("sport_id", "Unknown").upper()
+                # v1 players carry team_id (UUID string) — no nested team dict
+                team  = p_data.get("team_id", "")
+                sport = p_data.get("sport_id", "Unknown").upper()
 
+                # game_time: attempt lookup by match_id string.  In production
+                # match_id is an integer and game ids are UUIDs, so this will
+                # usually be None — that is acceptable; game_time is display-only.
                 game_time: Optional[datetime] = None
-                g_data = games.get(game_id, {})
+                g_data    = games.get(match_id, {})
                 scheduled = g_data.get("scheduled_at", "")
                 if scheduled:
                     try:
@@ -249,9 +313,9 @@ class UnderdogConnector(BaseConnector):
                     player_name = player_name,
                     team        = team,
                     sport       = sport,
-                    stat_type   = appearance.get("display_stat", "Unknown"),
+                    stat_type   = display_stat,
                     line_value  = float(stat_value),
-                    game_id     = game_id,
+                    game_id     = match_id,
                     game_time   = game_time,
                     fetched_at  = datetime.utcnow(),
                 ))

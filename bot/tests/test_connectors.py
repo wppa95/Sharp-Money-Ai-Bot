@@ -76,39 +76,57 @@ ODDS_API_RESPONSE = [
     }
 ]
 
+# v1 API shape:
+#   - appearance_stat lives inside line["over_under"], not on the line directly
+#   - appearances is a top-level array; appearance_stat.appearance_id → appearances[].id
+#   - players carry team_id (UUID string) instead of team: {alias}
+#   - match_id in test uses the same string as the game id so game_time resolves;
+#     in production match_id is an integer and game ids are UUIDs, so game_time=None
 UNDERDOG_API_RESPONSE = {
     "over_under_lines": [
         {
             "id": "ud-001",
             "stat_value": 27.5,
-            "appearance_stat": {
-                "player_id": "p-001",
-                "match_id":  "game-001",
-                "display_stat": "Fantasy Points",
+            "over_under": {
+                "appearance_stat": {
+                    "appearance_id": "app-001",
+                    "display_stat":  "Fantasy Points",
+                },
             },
+            "over_under_id": "ou-001",
         },
         {
             "id": "ud-002",
-            "stat_value": None,           # should be skipped
-            "appearance_stat": {
-                "player_id": "p-001",
-                "match_id":  "game-001",
-                "display_stat": "Rushing Yards",
+            "stat_value": None,            # should be skipped
+            "over_under": {
+                "appearance_stat": {
+                    "appearance_id": "app-001",
+                    "display_stat":  "Rushing Yards",
+                },
             },
+            "over_under_id": "ou-002",
+        },
+    ],
+    "appearances": [
+        {
+            "id":        "app-001",
+            "player_id": "p-001",
+            "match_id":  "game-001",   # string here so games lookup succeeds in tests
+            "team_id":   "team-kc",
         },
     ],
     "players": [
         {
-            "id": "p-001",
+            "id":         "p-001",
             "first_name": "Patrick",
             "last_name":  "Mahomes",
             "sport_id":   "nfl",
-            "team": {"alias": "KC"},
+            "team_id":    "team-kc",   # v1: UUID string, no nested alias dict
         }
     ],
     "games": [
         {
-            "id": "game-001",
+            "id":           "game-001",
             "scheduled_at": "2025-01-15T20:00:00Z",
         }
     ],
