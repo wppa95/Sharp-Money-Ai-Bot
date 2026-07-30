@@ -71,6 +71,7 @@ def _check_allowed(update: Update) -> bool:
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/start — welcome message."""
+    logger.info("cmd_start: chat_id=%s user_id=%s", update.effective_chat.id, getattr(update.effective_user, 'id', None))
     if not _check_allowed(update):
         await update.message.reply_text("⛔ Unauthorized.")
         return
