@@ -1,0 +1,99 @@
+Build the next SharpMoneyBot production batch. Combine all 5 items into one batch to save credits. Do not split into separate tasks.
+
+Goal: finish the production readiness layer before adding external APIs.
+
+1. Credit Protection ✅ (Audit + Improve)
+
+Review the existing API usage tracker and budget protection.
+
+Requirements:
+
+* Confirm all expensive API calls respect the budget guard.
+* Ensure blocked requests fail silently without breaking the bot.
+* Add priority handling:
+    * PrizePicks = PRIMARY
+    * Underdog = SECONDARY
+    * DraftKings/FanDuel odds = SUPPORTING DATA
+* Preserve monthly credit limits.
+* Add tests for budget exhaustion behavior.
+
+2. Provider Priority 🔧
+
+Implement provider priority rules throughout the alert pipeline.
+
+Priority order:
+
+1. PrizePicks player props (main workflow)
+2. Underdog player props (backup workflow)
+3. DraftKings/FanDuel odds (supporting comparison only)
+
+Requirements:
+
+* Alerts and commands should reflect this priority.
+* Do not let sportsbook alerts overpower PrizePicks workflow.
+* Keep MLB Moneyline and MLB Totals scope rules for DK/FD.
+* Add provider status visibility in dashboard.
+
+3. Slip Builder ✅ (Audit + Improve)
+
+Review the current slip optimizer.
+
+Requirements:
+
+* Keep Ai.v3.1Revamped scoring unchanged.
+* Build:
+    * Best 2-man
+    * Best 3-man
+    * Best 4-man
+    * Best 5-man
+    * Best 6-man
+* Default recommendation should prioritize the safest 2-man.
+* Remove same player correlation.
+* Reduce same team/game correlation.
+* Show:
+    * Tier
+    * Stars
+    * Edge
+    * Confidence
+    * Decision (BET/WATCH/PASS)
+    * Correlation warnings
+
+4. Alert Limits 🔧
+
+Add daily alert controls.
+
+Requirements:
+
+* Limit unnecessary Telegram spam.
+* Add configurable daily maximum alerts.
+* Prioritize:
+    1. S-tier PrizePicks
+    2. A-tier PrizePicks
+    3. B-tier opportunities
+    4. Underdog opportunities
+* Avoid sending duplicate alerts.
+* Track alerts sent in dashboard.
+
+5. Game Timing Filter 🔧
+
+Add pre-game timing validation before any PrizePicks or Underdog alert delivery.
+
+Rules:
+
+* Never send alerts after games start.
+* Add configurable alert window:
+    * Default: 30–120 minutes before game.
+* Show time until game in /picks and slip commands.
+* Prioritize picks with earliest start times.
+* Allow urgent alerts only for major line movement or major edge changes.
+
+Important:
+
+* PrizePicks remains PRIMARY.
+* Underdog remains SECONDARY.
+* Do not add external APIs yet.
+* Do not modify Ai.v3.1 scoring logic.
+* Do not modify decision engine or slip optimizer logic unless required for integration.
+* Preserve existing architecture.
+* Add tests for all new behavior.
+* Run the complete test suite and report results.
