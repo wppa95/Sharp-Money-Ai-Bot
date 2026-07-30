@@ -739,6 +739,41 @@ class Database:
             )
             return list(result.scalars().all())
 
+    async def get_latest_underdog_snapshot_per_prop(
+        self,
+    ) -> "dict[tuple[str, str], UnderdogSnapshotRecord]":
+        """
+        Return the single most-recent non-removed snapshot for every active
+        (player_name, stat_type) pair, keyed for O(1) lookup.
+
+        Uses MAX(id) per group — one SQL round-trip, no LIMIT, covers the full
+        feed regardless of how many props are active.  The autoincrement ``id``
+        is a reliable tiebreaker when multiple rows share the same
+        ``fetched_at`` (which happens because every job cycle writes an entire
+        batch at once).
+
+        Replaces ``get_recent_underdog_snapshots(limit=N)`` in
+        ``underdog_job`` where a fixed N was too small to cover all props.
+        """
+        async with self.session() as s:
+            # Subquery: the MAX(id) for each (player, stat) among non-removed rows
+            subq = (
+                select(func.max(UnderdogSnapshotRecord.id))
+                .where(UnderdogSnapshotRecord.removed == False)  # noqa: E712
+                .group_by(
+                    UnderdogSnapshotRecord.player_name,
+                    UnderdogSnapshotRecord.stat_type,
+                )
+                .scalar_subquery()
+            )
+            result = await s.execute(
+                select(UnderdogSnapshotRecord).where(
+                    UnderdogSnapshotRecord.id.in_(subq)
+                )
+            )
+            rows = result.scalars().all()
+        return {(r.player_name, r.stat_type): r for r in rows}
+
     async def count_underdog_records(self) -> int:
         async with self.session() as s:
             result = await s.execute(select(func.count()).select_from(UnderdogSnapshotRecord))

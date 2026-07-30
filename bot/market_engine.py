@@ -436,15 +436,11 @@ async def underdog_job(context) -> None:
     _n_qualified: int  = 0   # line-change props that passed the scoring gate
     _n_removed:   int  = 0   # props with [REMOVED] marker
 
-    # Load recent Underdog records once for the batch (avoids N+1 queries)
-    recent_records = await db.get_recent_underdog_snapshots(limit=200)
-
-    # Build lookup: (player_name, stat_type) -> most recent record
-    recent_by_key: dict[tuple[str, str], UnderdogSnapshotRecord] = {}
-    for r in recent_records:
-        key = (r.player_name, r.stat_type)
-        if key not in recent_by_key:
-            recent_by_key[key] = r  # already ordered most-recent-first
+    # Load the single most-recent snapshot per (player, stat) — covers all
+    # active props in one DB round-trip regardless of feed size.
+    recent_by_key: dict[tuple[str, str], UnderdogSnapshotRecord] = (
+        await db.get_latest_underdog_snapshot_per_prop()
+    )
 
     for snap in ud_snaps:
         is_removed = "[REMOVED]" in snap.selection

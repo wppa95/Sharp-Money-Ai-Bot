@@ -71,11 +71,18 @@ def _make_db(
     today_alerts: int = 0,
     prop_history: list | None = None,
 ) -> MagicMock:
+    # Build the dict that get_latest_underdog_snapshot_per_prop() returns.
+    # Mirrors the real method: one entry per (player_name, stat_type), last wins.
+    recent_dict: dict = {}
+    for r in (recent_records or []):
+        key = (r.player_name, r.stat_type)
+        recent_dict[key] = r
+
     db = MagicMock()
-    db.get_recent_underdog_snapshots = AsyncMock(return_value=recent_records or [])
-    db.count_today_underdog_alerts   = AsyncMock(return_value=today_alerts)
-    db.save_underdog_snapshot        = AsyncMock()
-    db.get_ud_prop_history           = AsyncMock(return_value=prop_history or [])
+    db.get_latest_underdog_snapshot_per_prop = AsyncMock(return_value=recent_dict)
+    db.count_today_underdog_alerts           = AsyncMock(return_value=today_alerts)
+    db.save_underdog_snapshot                = AsyncMock()
+    db.get_ud_prop_history                   = AsyncMock(return_value=prop_history or [])
     return db
 
 
