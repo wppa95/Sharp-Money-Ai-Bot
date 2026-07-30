@@ -26,6 +26,8 @@ sys.path.insert(0, os.path.dirname(__file__))
 from config import config
 from database import Database, OddsRecord
 from engine import AnalysisEngine
+from engine.season_check import SeasonChecker
+from engine.analysis import _SPORT_TO_ODDS_API_KEY
 from models import (
     MarketType,
     OddsLine,
@@ -83,13 +85,14 @@ logger = logging.getLogger(__name__)
 # Initialised inside post_init so they live in the bot's event loop.
 _db: Database | None = None
 _engine: AnalysisEngine | None = None
+_season_checker: SeasonChecker | None = None
 
 
 # ── PTB lifecycle hooks ────────────────────────────────────────────────────────
 
 async def post_init(application: Application) -> None:
     """Runs once after the bot is initialised but before polling starts."""
-    global _db, _engine
+    global _db, _engine, _season_checker
 
     logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     logger.info("  Sharp Money +EV Detection Bot — Starting Up")
@@ -100,6 +103,15 @@ async def post_init(application: Application) -> None:
 
     _engine = AnalysisEngine()
 
+    # ── Season / market-status checker ────────────────────────────────────────
+    _season_checker = SeasonChecker(
+        api_key=config.ODDS_API_KEY,
+        ttl_seconds=config.SEASON_CHECK_INTERVAL,
+    )
+    # Eager first load — non-fatal; checker stays fail-open on error.
+    if config.SEASON_CHECK_INTERVAL > 0:
+        await _season_checker.refresh()
+
     allowed_ids = list(config.allowed_user_ids)
     init_handlers(_db, _engine, allowed_ids)
 
@@ -108,14 +120,16 @@ async def post_init(application: Application) -> None:
     active_sports = config.active_sports
 
     registry.register(DraftKingsConnector(
-        odds_api_key  = config.ODDS_API_KEY,
-        active_sports = active_sports,
-        enabled       = config.DRAFTKINGS_ENABLED,
+        odds_api_key   = config.ODDS_API_KEY,
+        active_sports  = active_sports,
+        enabled        = config.DRAFTKINGS_ENABLED,
+        season_checker = _season_checker,
     ))
     registry.register(FanDuelConnector(
-        odds_api_key  = config.ODDS_API_KEY,
-        active_sports = active_sports,
-        enabled       = config.FANDUEL_ENABLED,
+        odds_api_key   = config.ODDS_API_KEY,
+        active_sports  = active_sports,
+        enabled        = config.FANDUEL_ENABLED,
+        season_checker = _season_checker,
     ))
     registry.register(UnderdogConnector(
         active_sports = active_sports,
@@ -138,9 +152,18 @@ async def post_init(application: Application) -> None:
         jq.run_repeating(consensus_check_job,  interval=config.CONSENSUS_CHECK_INTERVAL,    first=25,  name="consensus_checker")
         jq.run_repeating(clv_check_job,        interval=config.CLV_CHECK_INTERVAL,          first=35,  name="clv_checker")
         jq.run_repeating(underdog_job,         interval=config.UNDERDOG_POLL_INTERVAL,      first=45,  name="underdog_monitor")
+        # Season / market-status refresh (skip when interval is 0 = disabled)
+        if config.SEASON_CHECK_INTERVAL > 0:
+            jq.run_repeating(
+                _season_check_job,
+                interval=config.SEASON_CHECK_INTERVAL,
+                first=config.SEASON_CHECK_INTERVAL,  # first eager load already done above
+                name="season_checker",
+            )
         logger.info(
             "Jobs scheduled — odds: every %ds, steam: every %ds, prizepicks: every %ds, "
-            "connectors: every %ds, consensus: every %ds, clv: every %ds, underdog: every %ds",
+            "connectors: every %ds, consensus: every %ds, clv: every %ds, underdog: every %ds, "
+            "season_check: every %ds",
             config.ODDS_POLL_INTERVAL,
             config.STEAM_CHECK_INTERVAL,
             config.PRIZEPICKS_POLL_INTERVAL,
@@ -148,6 +171,7 @@ async def post_init(application: Application) -> None:
             config.CONSENSUS_CHECK_INTERVAL,
             config.CLV_CHECK_INTERVAL,
             config.UNDERDOG_POLL_INTERVAL,
+            config.SEASON_CHECK_INTERVAL,
         )
     else:
         logger.warning("JobQueue not available — background jobs disabled.")
@@ -194,6 +218,16 @@ async def _poll_odds_job(context) -> None:
         except ValueError:
             logger.warning("Unknown sport in ACTIVE_SPORTS: %s", sport_str)
             continue
+        # Skip sports that are out of season / have no active markets.
+        # The checker is fail-open: returns True if cache not yet populated.
+        if _season_checker is not None:
+            odds_key = _SPORT_TO_ODDS_API_KEY.get(sport)
+            if odds_key and not _season_checker.is_sport_active(odds_key):
+                logger.info(
+                    "_poll_odds_job: skipping %s (%s) — out of season / no active markets",
+                    sport_str, odds_key,
+                )
+                continue
         lines = await _engine.fetch_live_odds(sport)
         all_lines.extend(lines)
 
@@ -299,6 +333,16 @@ async def _steam_check_job(context) -> None:
         except ValueError:
             continue
 
+        # Skip sports that are out of season / have no active markets.
+        if _season_checker is not None:
+            odds_key = _SPORT_TO_ODDS_API_KEY.get(sport)
+            if odds_key and not _season_checker.is_sport_active(odds_key):
+                logger.debug(
+                    "_steam_check_job: skipping %s (%s) — out of season / no active markets",
+                    sport_str, odds_key,
+                )
+                continue
+
         records = await _db.get_odds_window(sport.value, since)
         if not records:
             continue
@@ -383,6 +427,21 @@ async def _steam_check_job(context) -> None:
 
             # AlertDelivery handles: filter → dedup → format → send → log
             await delivery.deliver_steam(steam_alert)
+
+
+# ── Season / market-status refresh job ────────────────────────────────────────
+
+async def _season_check_job(context) -> None:
+    """
+    Periodically refresh the season / market-status cache.
+
+    Calls SeasonChecker.refresh() unconditionally (the job scheduler
+    already manages the interval).  Failures are logged inside the
+    checker and leave the previous cache value intact (fail-open).
+    """
+    if _season_checker is None:
+        return
+    await _season_checker.refresh()
 
 
 # ── PrizePicks monitoring job ─────────────────────────────────────────────────

@@ -114,6 +114,11 @@ class Config:
     INEFFICIENCY_DEDUP_WINDOW: int = int(os.environ.get("INEFFICIENCY_DEDUP_WINDOW", "1800"))
     CLV_DEDUP_WINDOW:          int = int(os.environ.get("CLV_DEDUP_WINDOW",           "3600"))
 
+    # ── Season / market-status check ─────────────────────────────────────────
+    # How often to refresh the /v4/sports active-market cache (seconds).
+    # Default: 3600 (1 hour).  Set to 0 to disable automatic skipping.
+    SEASON_CHECK_INTERVAL: int = int(os.environ.get("SEASON_CHECK_INTERVAL", "3600"))
+
     # ── Logging ───────────────────────────────────────────────────────────────
     LOG_LEVEL: str = os.environ.get("LOG_LEVEL", "INFO")
 

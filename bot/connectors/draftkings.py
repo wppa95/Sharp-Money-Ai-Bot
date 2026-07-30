@@ -20,6 +20,7 @@ from typing import Optional
 import aiohttp
 
 from .base import BaseConnector, ConnectorStatus, MarketSnapshot
+from engine.season_check import SeasonChecker
 
 logger = logging.getLogger(__name__)
 
@@ -74,10 +75,12 @@ class DraftKingsConnector(BaseConnector):
         odds_api_key: str,
         active_sports: list[str],
         enabled: bool = True,
+        season_checker: SeasonChecker | None = None,
     ) -> None:
-        self._api_key       = odds_api_key
-        self._active_sports = active_sports
-        self.enabled        = enabled
+        self._api_key        = odds_api_key
+        self._active_sports  = active_sports
+        self.enabled         = enabled
+        self._season_checker = season_checker
         # (event, selection) -> opening American odds
         self._opening: dict[tuple[str, str], int] = {}
 
@@ -94,6 +97,12 @@ class DraftKingsConnector(BaseConnector):
         for sport in self._active_sports:
             sport_key = _SPORT_KEYS.get(sport)
             if not sport_key:
+                continue
+            if self._season_checker and not self._season_checker.is_sport_active(sport_key):
+                logger.info(
+                    "DraftKings: skipping %s (%s) — out of season / no active markets",
+                    sport, sport_key,
+                )
                 continue
             snaps = await self._fetch_sport(sport, sport_key)
             snapshots.extend(snaps)

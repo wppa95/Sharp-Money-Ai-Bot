@@ -94,9 +94,13 @@ from .backtesting import (
     run_backtest,
 )
 
+from .season_check import SeasonChecker
+
 __all__ = [
     # analysis
     "AnalysisEngine",
+    # season check
+    "SeasonChecker",
     # ranking / decision
     "RankingTier",
     "RankingDecision",
