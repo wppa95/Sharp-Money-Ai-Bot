@@ -707,14 +707,11 @@ async def _prizepicks_job(context) -> None:
                     now=now,
                 )
 
-                # ── 8. Normalise → AlertObject (scope check) ─────────────────
-                from alert_normalizer import normalize_pp
-                from alert_scope_filter import check
-                norm_obj = normalize_pp(opp, score=pp_score)
-                scope    = check(norm_obj)
+                # ── 8. Deliver via AlertDelivery (scope + timing + cap + broadcast) ─
+                delivery   = AlertDelivery(_db, bot, chat_ids)
+                result     = await delivery.deliver_pp(opp, score=pp_score)
 
-                # ── 9. Store edge record ─────────────────────────────────────
-                alert_sent = bool(chat_ids) and scope.allowed
+                # ── 9. Store edge record (alert_sent reflects actual outcome) ─
                 await _db.save_pp_edge(PPEdgeRecord(
                     player_name     = pp_line.player_name,
                     team            = pp_line.team,
@@ -731,28 +728,21 @@ async def _prizepicks_job(context) -> None:
                     edge_under      = opp.edge_under,
                     best_side       = opp.best_side,
                     best_edge       = opp.best_edge,
-                    alert_sent      = alert_sent,
+                    alert_sent      = result.sent,
                     tier            = pp_score.tier,
                     confidence      = float(pp_score.total),
                     result          = "PENDING",
                     opening_line    = opening_line,
                     prev_line       = prev_line,
                     detected_at     = now,
+                    game_time       = getattr(pp_line, "start_time", None),
                 ))
 
-                # ── 10. Alert ────────────────────────────────────────────────
-                if chat_ids and scope.allowed:
-                    message = format_pp_alert(opp)
-                    await broadcast_alert(bot, chat_ids, message)
-                    logger.info(
-                        "PP edge alert: %s | %s | %s | edge=+%.1f%% | "
-                        "score=%d tier=%s stars=%d★",
-                        pp_line.player_name, pp_line.stat_type,
-                        opp.best_side, opp.best_edge,
-                        pp_score.total, pp_score.tier, pp_score.stars,
+                if result.filtered:
+                    logger.debug(
+                        "PP alert filtered: %s | %s | %s",
+                        pp_line.player_name, pp_line.stat_type, result.filtered_reason,
                     )
-                elif not scope.allowed:
-                    logger.warning("PP alert skipped — %s", scope.reason)
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────

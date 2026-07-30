@@ -832,8 +832,8 @@ class AlertDelivery:
         """
         Full PrizePicks alert pipeline:
           0. Scope filter.
-          1. normalize_pp (with optional PPAnalysisScore) → AlertObject.
-          2. Scope check.
+          1. Game timing filter — block games already started or outside window.
+          2. Daily alert cap check — S-tier always bypasses; A/B count against cap.
           3. format_pp_alert.
           4. Broadcast to all registered chat IDs.
 
@@ -842,12 +842,49 @@ class AlertDelivery:
         """
         from alert_normalizer import normalize_pp
         from alert_scope_filter import check
+        from engine.timing import is_game_alertable
 
+        # 0. Scope filter
         norm_obj = normalize_pp(opp, score=score)
         scope    = check(norm_obj)
         if not scope.allowed:
             return DeliveryResult(sent=False, filtered=True, filtered_reason=scope.reason)
 
+        # 1. Game timing filter
+        game_time = getattr(opp.pp_line, "start_time", None)
+        tier_str  = score.tier if score else None
+        allowed, timing_reason = is_game_alertable(
+            game_time,
+            min_minutes=config.ALERT_WINDOW_MIN_MINUTES,
+            max_minutes=config.ALERT_WINDOW_MAX_MINUTES,
+            urgent_edge=config.URGENT_EDGE_THRESHOLD,
+            edge=opp.best_edge,
+        )
+        if not allowed:
+            logger.debug(
+                "PP alert timing-blocked: %s | %s | %s",
+                opp.pp_line.player_name, opp.pp_line.stat_type, timing_reason,
+            )
+            return DeliveryResult(sent=False, filtered=True, filtered_reason=timing_reason)
+
+        # 2. Daily alert cap
+        # S-tier always passes.  A/B tiers count against DAILY_ALERT_LIMIT.
+        # Only A/B-tier records count toward the budget — S-tier volume never
+        # reduces the A/B quota.
+        if config.DAILY_ALERT_LIMIT > 0 and tier_str in ("A", "B"):
+            today_sent = await self._db.count_today_pp_alerts(in_tiers=["A", "B"])
+            if today_sent >= config.DAILY_ALERT_LIMIT:
+                reason = (
+                    f"Daily PP alert cap reached ({today_sent}/{config.DAILY_ALERT_LIMIT}) "
+                    f"— tier {tier_str} suppressed (S-tier bypasses cap)"
+                )
+                logger.info(
+                    "PP alert capped: %s | %s | %s",
+                    opp.pp_line.player_name, opp.pp_line.stat_type, reason,
+                )
+                return DeliveryResult(sent=False, filtered=True, filtered_reason=reason)
+
+        # 3. Format and send
         message = format_pp_alert(opp)
         counts  = await broadcast_alert(self._bot, self._chat_ids, message)
         alert_sent = counts["sent"] > 0
@@ -857,9 +894,8 @@ class AlertDelivery:
             recipients_sent  = counts["sent"],
             recipients_failed= counts["failed"],
         )
-        pp       = opp.pp_line
-        tier_str = score.tier if score else "?"
-        log_fn   = logger.info if alert_sent else logger.warning
+        pp     = opp.pp_line
+        log_fn = logger.info if alert_sent else logger.warning
         log_fn(
             "PP alert: %s | %s | %s | edge=+%.1f%% | tier=%s → %s",
             pp.player_name, pp.stat_type, opp.best_side, opp.best_edge, tier_str, result,
@@ -884,18 +920,51 @@ class AlertDelivery:
         Full Underdog prop alert pipeline:
           0. normalize_underdog → AlertObject.
           1. Scope check.
-          2. format_underdog_change_alert.
-          3. Broadcast to all registered chat IDs.
+          2. Game timing filter — block games already started or outside window.
+          3. Daily Underdog cap check.
+          4. format_underdog_change_alert.
+          5. Broadcast to all registered chat IDs.
         """
         from alert_normalizer import normalize_underdog
         from alert_scope_filter import check
         from alerts_multiplatform import format_underdog_change_alert
+        from engine.timing import is_game_alertable
 
+        # 0 & 1. Normalize + scope check
         norm_obj = normalize_underdog(player_name, stat_type, sport, is_removed=removed)
         scope    = check(norm_obj)
         if not scope.allowed:
             return DeliveryResult(sent=False, filtered=True, filtered_reason=scope.reason)
 
+        # 2. Game timing filter (skip for removal notices — game may have ended)
+        if not removed:
+            line_change = abs(new_line - old_line)
+            allowed, timing_reason = is_game_alertable(
+                game_time,
+                min_minutes=config.ALERT_WINDOW_MIN_MINUTES,
+                max_minutes=config.ALERT_WINDOW_MAX_MINUTES,
+                urgent_edge=config.URGENT_EDGE_THRESHOLD,
+                edge=line_change * 2.0,  # treat line-change magnitude as proxy for urgency
+            )
+            if not allowed:
+                logger.debug(
+                    "Underdog alert timing-blocked: %s | %s | %s",
+                    player_name, stat_type, timing_reason,
+                )
+                return DeliveryResult(sent=False, filtered=True, filtered_reason=timing_reason)
+
+        # 3. Daily Underdog cap
+        if config.DAILY_UNDERDOG_LIMIT > 0:
+            today_ud = await self._db.count_today_underdog_alerts()
+            if today_ud >= config.DAILY_UNDERDOG_LIMIT:
+                reason = (
+                    f"Daily Underdog alert cap reached "
+                    f"({today_ud}/{config.DAILY_UNDERDOG_LIMIT})"
+                )
+                logger.info("Underdog alert capped: %s | %s | %s", player_name, stat_type, reason)
+                return DeliveryResult(sent=False, filtered=True, filtered_reason=reason)
+
+        # 4. Format and send
         message = format_underdog_change_alert(
             player_name, team, sport, stat_type,
             old_line, new_line,

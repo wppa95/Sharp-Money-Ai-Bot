@@ -247,16 +247,16 @@ class TestDraftKingsConnector:
         snaps = c._normalize(ODDS_API_RESPONSE, "NFL")
         assert all(not s.is_pickem for s in snaps)
 
-    def test_disabled_connector_returns_empty(self):
+    @pytest.mark.asyncio
+    async def test_disabled_connector_returns_empty(self):
         c = DraftKingsConnector(odds_api_key="key", active_sports=["NFL"], enabled=False)
-        import asyncio
-        result = asyncio.get_event_loop().run_until_complete(c.fetch())
+        result = await c.fetch()
         assert result == []
 
-    def test_no_api_key_returns_empty(self):
+    @pytest.mark.asyncio
+    async def test_no_api_key_returns_empty(self):
         c = DraftKingsConnector(odds_api_key="", active_sports=["NFL"])
-        import asyncio
-        result = asyncio.get_event_loop().run_until_complete(c.fetch())
+        result = await c.fetch()
         assert result == []
 
 
@@ -329,38 +329,35 @@ class TestUnderdogConnector:
         projs = c._parse(UNDERDOG_API_RESPONSE)
         assert projs[0].game_time is not None
 
-    def test_fetch_returns_pickem_snapshots(self):
+    @pytest.mark.asyncio
+    async def test_fetch_returns_pickem_snapshots(self):
         c = self._make_connector()
         # Inject pre-parsed projections (bypass HTTP)
         projs = c._parse(UNDERDOG_API_RESPONSE)
-        import asyncio
 
-        async def _run():
-            # Directly call the normalization portion of fetch
-            current_ids = {p.external_id for p in projs}
-            c._last_seen = set()
-            snapshots = []
-            from datetime import datetime as _dt
-            now = _dt.utcnow()
-            for proj in projs:
-                prev = c._previous.get(proj.external_id)
-                opening_line = prev.line_value if prev else proj.line_value
-                sel = f"{proj.player_name} {proj.stat_type} {proj.line_value}"
-                snaps = MarketSnapshot(
-                    sportsbook="Underdog", sport=proj.sport, league=proj.sport,
-                    event=proj.game_id or "game", market_type="Pick'em",
-                    selection=sel, odds=0, timestamp=now, player=proj.player_name,
-                    team=proj.team, line=proj.line_value, is_pickem=True,
-                )
-                snapshots.append(snaps)
-                c._previous[proj.external_id] = proj
-            c._last_seen = current_ids
-            return snapshots
+        # Directly call the normalization portion of fetch
+        current_ids = {p.external_id for p in projs}
+        c._last_seen = set()
+        snapshots = []
+        from datetime import datetime as _dt
+        now = _dt.utcnow()
+        for proj in projs:
+            prev = c._previous.get(proj.external_id)
+            opening_line = prev.line_value if prev else proj.line_value
+            sel = f"{proj.player_name} {proj.stat_type} {proj.line_value}"
+            snaps = MarketSnapshot(
+                sportsbook="Underdog", sport=proj.sport, league=proj.sport,
+                event=proj.game_id or "game", market_type="Pick'em",
+                selection=sel, odds=0, timestamp=now, player=proj.player_name,
+                team=proj.team, line=proj.line_value, is_pickem=True,
+            )
+            snapshots.append(snaps)
+            c._previous[proj.external_id] = proj
+        c._last_seen = current_ids
 
-        snaps = asyncio.get_event_loop().run_until_complete(_run())
-        assert all(s.is_pickem for s in snaps)
-        assert all(s.sportsbook == "Underdog" for s in snaps)
-        assert all(s.odds == 0 for s in snaps)
+        assert all(s.is_pickem for s in snapshots)
+        assert all(s.sportsbook == "Underdog" for s in snapshots)
+        assert all(s.odds == 0 for s in snapshots)
 
     def test_line_movement_detected(self):
         c = self._make_connector()
@@ -376,10 +373,10 @@ class TestUnderdogConnector:
         assert prev is not None
         assert abs(new_proj.line_value - prev.line_value) > 0.01
 
-    def test_disabled_connector_returns_empty(self):
+    @pytest.mark.asyncio
+    async def test_disabled_connector_returns_empty(self):
         c = UnderdogConnector(enabled=False)
-        import asyncio
-        result = asyncio.get_event_loop().run_until_complete(c.fetch())
+        result = await c.fetch()
         assert result == []
 
 

@@ -645,8 +645,20 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         return
 
-    # Sort: tier rank first, then best_edge descending
-    records.sort(key=lambda r: (_TIER_ORDER.get(r.tier or "Low", 3), -(r.best_edge or 0)))
+    # Sort: tier rank → game_time ASC (None last) → best_edge DESC
+    from engine.timing import format_game_time_label as _fmt_gt
+    import datetime as _dt_mod
+
+    def _sort_key(r):
+        tier_rank = _TIER_ORDER.get(r.tier or "Low", 3)
+        gt = getattr(r, "game_time", None)
+        if gt is None:
+            gt_sort = _dt_mod.datetime.max
+        else:
+            gt_sort = gt.replace(tzinfo=None) if gt.tzinfo else gt
+        return (tier_rank, gt_sort, -(r.best_edge or 0))
+
+    records.sort(key=_sort_key)
 
     today = datetime.utcnow().strftime("%b %d, %Y")
     lines: list[str] = [f"🎯 <b>PrizePicks Picks — {today}</b>"]
@@ -679,6 +691,14 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             direction = "▲" if delta > 0 else "▼"
             move_str  = f"  {direction}{abs(delta):.1f} from open"
 
+        # Game timing label
+        gt_label = ""
+        gt = getattr(r, "game_time", None)
+        if gt is not None:
+            _lbl = _fmt_gt(gt)
+            if _lbl:
+                gt_label = f"  ⏰ {_lbl}"
+
         # ── Bankroll discipline ─────────────────────────────────────────────
         _dec_str = ""
         try:
@@ -703,6 +723,7 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"  #{rank} <b>{r.player_name}</b> · {r.stat_type}\n"
             f"       PP <code>{r.pp_line_value:g}</code> · <b>{r.best_side}</b> · "
             f"<code>+{r.best_edge:.1f}%</code>{conf_str}{stars_str}{move_str}{result_str}"
+            f"{gt_label}"
             f"{_dec_str}\n"
             f"       <i>{r.sport} · vs {r.sportsbook} · "
             f"{r.detected_at.strftime('%H:%M UTC')}</i>"
@@ -927,63 +948,28 @@ async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.message.reply_text(f"{EMOJI['warn']} Test alert failed: {exc}")
 
 
-async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/slip [N] — Build a prop slip from the top N picks (2–6, default 3).
+def _render_slip_section(
+    size: int,
+    slip_result: "OptimizedSlip",
+    label: str = "",
+) -> list[str]:
+    """Render a single slip size into HTML lines (shared by cmd_slip)."""
+    from engine.timing import format_game_time_label as _fmt_gt
 
-    Usage:
-      /slip      — 3-leg slip from today's top picks
-      /slip 4    — 4-leg slip
-      /slip 6    — maximum 6-leg slip
-    """
-    if not _check_allowed(update):
-        await update.message.reply_text("⛔ Unauthorized.")
-        return
-    if _db is None:
-        await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
-        return
-
-    # Parse leg count: 2–6, default 3
-    args = context.args or []
-    legs = 3
-    if args:
-        try:
-            legs = int(args[0])
-        except ValueError:
-            pass
-    legs = max(2, min(legs, 6))
-
-    from engine.slip_optimizer import optimize_slip
-    _candidates = await _db.get_top_pp_edges(limit=legs * 4, hours=6)
-    slip_result = optimize_slip(_candidates, n_legs=legs)
     records = slip_result.legs
-
-    if len(records) < 2:
-        _c = len(_candidates)
-        hint = f"{_c} candidate{'s' if _c != 1 else ''}" if _candidates else "no picks"
-        await update.message.reply_text(
-            f"🎰 <b>SharpMoney Slip</b>\n\n"
-            f"Not enough independent picks for a {legs}-leg slip "
-            f"({hint} in last 6 h after correlation filtering).\n\n"
-            f"<i>Run /picks to see current edges.</i>",
-            parse_mode=ParseMode.HTML,
-        )
-        return
-
-    actual_legs = len(records)
-
-    today = datetime.now(timezone.utc).strftime("%b %d, %Y")
-    lines: list[str] = [
-        f"🎰 <b>SharpMoney Slip — {actual_legs} legs · {today}</b>",
-        "",
-    ]
-
+    actual  = len(records)
     total_conf = 0.0
     conf_count = 0
     total_edge = 0.0
 
+    heading = f"🎰 <b>{size}-Man Slip</b>"
+    if label:
+        heading += f"  <i>{label}</i>"
+    section: list[str] = [heading, ""]
+
     for i, r in enumerate(records, 1):
-        tier_icon = _TIER_EMOJI.get(r.tier or "Low", "⚪")
-        stars_str = _stars_from_conf(r.confidence)
+        tier_icon  = _TIER_EMOJI.get(r.tier or "Low", "⚪")
+        stars_str  = _stars_from_conf(r.confidence)
         conf_label = f"{r.confidence:.0f}/100" if r.confidence is not None else "—"
         if r.confidence is not None:
             total_conf += r.confidence
@@ -997,62 +983,138 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             delta = r.pp_line_value - r.opening_line
             move_note = f"  {'▲' if delta > 0 else '▼'}{abs(delta):.1f}"
 
+        gt = getattr(r, "game_time", None)
+        gt_label = f"  ⏰ {_fmt_gt(gt)}" if gt is not None and _fmt_gt(gt) else ""
+
         _dec_leg = ""
         try:
             from engine.decision_engine import make_pp_decision
             _d = make_pp_decision(r)
             if _d.suggested_units > 0:
                 _dec_leg = (
-                    f"\n  {_d.action_label}  ·  "
+                    f"\n    {_d.action_label}  ·  "
                     f"Kelly {_d.kelly_full * 100:.1f}%  ·  "
-                    f"{_d.suggested_units:.2f}u"
+                    f"<b>{_d.suggested_units:.2f}u</b>"
                 )
             else:
-                _dec_leg = f"\n  {_d.action_label}"
+                _dec_leg = f"\n    {_d.action_label}"
         except Exception:
             pass
 
-        lines.append(
-            f"<b>Leg {i}</b>  {tier_icon} {r.tier or '—'}  {stars_str}\n"
-            f"  <b>{r.player_name}</b> · {r.stat_type}\n"
-            f"  {r.best_side} {r.pp_line_value:g}  ·  "
-            f"<code>+{r.best_edge:.1f}%</code>  ·  conf {conf_label}{move_note}"
-            f"{_dec_leg}\n"
-            f"  <i>{r.sport} · {r.sportsbook} · {r.detected_at.strftime('%H:%M UTC')}</i>"
+        section.append(
+            f"  <b>Leg {i}</b>  {tier_icon} {r.tier or '—'}  {stars_str}\n"
+            f"    <b>{r.player_name}</b> · {r.stat_type}\n"
+            f"    {r.best_side} <code>{r.pp_line_value:g}</code>  ·  "
+            f"<code>+{r.best_edge:.1f}%</code>  ·  conf {conf_label}"
+            f"{move_note}{gt_label}"
+            f"{_dec_leg}"
         )
 
     avg_conf = total_conf / conf_count if conf_count else 0.0
-    avg_edge = total_edge / actual_legs if actual_legs else 0.0
+    avg_edge = total_edge / actual     if actual     else 0.0
 
-    lines += [
-        "",
-        "─" * 28,
-        f"Legs: <b>{actual_legs}</b>  ·  "
-        f"Avg edge: <code>+{avg_edge:.1f}%</code>  ·  "
-        f"Avg conf: <code>{avg_conf:.0f}/100</code>",
-    ]
+    section.append(
+        f"\n  Avg edge <code>+{avg_edge:.1f}%</code>  ·  "
+        f"Avg conf <code>{avg_conf:.0f}/100</code>  ·  "
+        f"{actual} legs"
+    )
 
-    # Correlation warnings from the optimizer
     if slip_result.correlation_warnings:
-        lines.append("")
-        lines.append("<i>Correlation notices:</i>")
         for _w in slip_result.correlation_warnings:
-            lines.append(f"  {_w}")
+            section.append(f"  <i>⚠️ {_w}</i>")
 
     if slip_result.excluded:
         _excl = ", ".join(
             f"{_r.player_name} · {_r.stat_type}"
-            for _r, _ in slip_result.excluded[:3]
+            for _r, _ in slip_result.excluded[:2]
         )
-        lines.append(
-            f"<i>{len(slip_result.excluded)} filtered by correlation: {_excl}</i>"
+        section.append(
+            f"  <i>{len(slip_result.excluded)} filtered by correlation: {_excl}…</i>"
         )
 
-    lines += [
-        "",
-        "<i>⚠️ Research tool — not betting advice.  Verify lines before placing.</i>",
-    ]
+    return section
 
+
+async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/slip — Build all prop slip sizes (2–6 legs) from today's top picks.
+
+    Usage:
+      /slip      — show best 2-man through 6-man slips simultaneously
+      /slip 3    — show only the 3-man slip
+    """
+    if not _check_allowed(update):
+        await update.message.reply_text("⛔ Unauthorized.")
+        return
+    if _db is None:
+        await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
+        return
+
+    # Optional single-size argument
+    args = context.args or []
+    single_size: Optional[int] = None
+    if args:
+        try:
+            single_size = max(2, min(int(args[0]), 6))
+        except ValueError:
+            pass
+
+    from engine.slip_builder import build_all_slips
+
+    _candidates = await _db.get_top_pp_edges(limit=30, hours=6)
+    if not _candidates:
+        await update.message.reply_text(
+            "🎰 <b>SharpMoney Slip</b>\n\n"
+            "No picks detected in the last 6 hours.\n\n"
+            "<i>Run /picks to see current edges.</i>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    slips = build_all_slips(_candidates, max_size=6)
+
+    if not slips:
+        await update.message.reply_text(
+            "🎰 <b>SharpMoney Slip</b>\n\n"
+            f"Not enough independent picks to build a slip "
+            f"({len(_candidates)} candidate{'s' if len(_candidates) != 1 else ''} "
+            f"after correlation filtering).\n\n"
+            f"<i>Check back after the next poll cycle.</i>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    today = datetime.now(timezone.utc).strftime("%b %d, %Y")
+
+    if single_size is not None:
+        # User requested a specific size
+        slip = slips.get(single_size)
+        if slip is None:
+            await update.message.reply_text(
+                f"🎰 <b>SharpMoney Slip</b>\n\n"
+                f"Could not build a {single_size}-man slip from today's picks.\n"
+                f"<i>Available sizes: {', '.join(str(s) for s in sorted(slips))}.</i>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+        label = "✅ Recommended (Safest)" if single_size == 2 else ""
+        lines: list[str] = [
+            f"🎰 <b>SharpMoney Slips — {today}</b>",
+            "",
+        ] + _render_slip_section(single_size, slip, label)
+    else:
+        # Show all sizes
+        lines = [
+            f"🎰 <b>SharpMoney Slips — {today}</b>",
+            f"<i>{len(slips)} slip size{'s' if len(slips) != 1 else ''} built "
+            f"from {len(_candidates)} candidates</i>",
+            "",
+        ]
+        for size in sorted(slips):
+            label = "✅ Recommended (Safest)" if size == 2 else ""
+            lines.extend(_render_slip_section(size, slips[size], label))
+            lines.append("")
+
+    lines.append("<i>⚠️ Research tool — not betting advice.  Verify lines before placing.</i>")
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
 
@@ -1123,8 +1185,28 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         f"  Uptime:    {_uptime_str()}",
         _fmt_provider_status_line("PrizePicks", "PP API"),
         _fmt_provider_status_line("OddsAPI",    "Odds API"),
-        "",
     ]
+
+    # Today's alert counts
+    try:
+        _pp_today = await _db.count_today_pp_alerts()
+        _cap_str  = (
+            f"/{config.DAILY_ALERT_LIMIT}"
+            if config.DAILY_ALERT_LIMIT > 0 else ""
+        )
+        _ud_today = await _db.count_today_underdog_alerts()
+        _ud_cap   = (
+            f"/{config.DAILY_UNDERDOG_LIMIT}"
+            if config.DAILY_UNDERDOG_LIMIT > 0 else ""
+        )
+        lines.append(
+            f"  PP alerts today:  <b>{_pp_today}</b>{_cap_str}  "
+            f"·  Underdog: <b>{_ud_today}</b>{_ud_cap}"
+        )
+    except Exception:
+        pass
+
+    lines.append("")
 
     if top:
         tier_icon  = _TIER_EMOJI.get(top.tier or "Low", "⚪")

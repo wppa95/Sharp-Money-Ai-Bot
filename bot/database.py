@@ -134,6 +134,8 @@ class PPEdgeRecord(Base):
     # ── line movement tracking ────────────────────────────────────────────────
     opening_line    = Column(Float,       nullable=True)    # first ever line seen
     prev_line       = Column(Float,       nullable=True)    # line from prior record
+    # ── timing ───────────────────────────────────────────────────────────────
+    game_time       = Column(DateTime,    nullable=True)    # UTC game start time
 
 
 # ── Multi-platform market snapshot records ────────────────────────────────────
@@ -383,6 +385,7 @@ class Database:
             "ALTER TABLE pp_edge_records ADD COLUMN result TEXT DEFAULT 'PENDING'",
             "ALTER TABLE pp_edge_records ADD COLUMN opening_line REAL",
             "ALTER TABLE pp_edge_records ADD COLUMN prev_line REAL",
+            "ALTER TABLE pp_edge_records ADD COLUMN game_time DATETIME",
         ]
         async with self._engine.begin() as conn:
             for sql in new_cols:
@@ -588,6 +591,57 @@ class Database:
                 )
             )
             return (result.scalar() or 0) > 0
+
+    async def count_today_pp_alerts(
+        self,
+        tier: Optional[str] = None,
+        in_tiers: Optional[list] = None,
+    ) -> int:
+        """
+        Count PP edge records that were alerted today (UTC midnight to now).
+
+        Parameters
+        ----------
+        tier:      When provided, only count records with that exact tier.
+        in_tiers:  When provided, only count records whose tier is in the list
+                   (e.g. ``["A", "B"]`` to count only non-S alerts).
+                   Takes precedence over ``tier`` when both are supplied.
+        None/None → count all tiers.
+        """
+        today_start = datetime.utcnow().replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        async with self.session() as s:
+            q = (
+                select(func.count())
+                .select_from(PPEdgeRecord)
+                .where(
+                    PPEdgeRecord.alert_sent == True,   # noqa: E712
+                    PPEdgeRecord.detected_at >= today_start,
+                )
+            )
+            if in_tiers is not None:
+                q = q.where(PPEdgeRecord.tier.in_(in_tiers))
+            elif tier is not None:
+                q = q.where(PPEdgeRecord.tier == tier)
+            result = await s.execute(q)
+            return result.scalar() or 0
+
+    async def count_today_underdog_alerts(self) -> int:
+        """Count Underdog snapshot records that were alerted today (UTC)."""
+        today_start = datetime.utcnow().replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        async with self.session() as s:
+            result = await s.execute(
+                select(func.count())
+                .select_from(UnderdogSnapshotRecord)
+                .where(
+                    UnderdogSnapshotRecord.alert_sent == True,   # noqa: E712
+                    UnderdogSnapshotRecord.fetched_at >= today_start,
+                )
+            )
+            return result.scalar() or 0
 
     async def find_player_prop_odds(
         self,

@@ -23,6 +23,20 @@ from models import AlertObject, AlertSource, AlertType, MarketType, Sport
 
 logger = logging.getLogger(__name__)
 
+# ── Canonical scope rules ─────────────────────────────────────────────────────
+# This constant is the single source of truth for the provider priority policy.
+# Never widen the DK/FD scope without also updating the tests.
+#
+# Priority order: PrizePicks (PRIMARY) → Underdog (SECONDARY) → DK/FD (SUPPORTING ONLY)
+#
+SCOPE_RULES: dict[str, str] = {
+    "PrizePicks": "ALWAYS PASS — player props, all sports (primary source)",
+    "Underdog":   "ALWAYS PASS — player props, all sports (secondary source)",
+    "DraftKings": "MLB Moneyline (h2h) + MLB Totals only — all other sports/markets BLOCKED",
+    "FanDuel":    "MLB Moneyline (h2h) + MLB Totals only — all other sports/markets BLOCKED",
+    "System":     "ALWAYS BLOCKED — multi-book steam, CLV, inefficiency alerts excluded",
+}
+
 # ── Allowed DK / FD scope ─────────────────────────────────────────────────────
 _APPROVED_SPORT   = Sport.MLB.value
 _APPROVED_MARKETS = frozenset({MarketType.MONEYLINE.value, MarketType.TOTAL.value})

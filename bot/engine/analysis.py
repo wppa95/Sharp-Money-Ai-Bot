@@ -502,78 +502,28 @@ class AnalysisEngine:
             logger.debug("No Odds API key mapping for sport %s", sport)
             return []
 
-        url = f"{_ODDS_API_BASE}/sports/{sport_key}/odds"
-        params = {
-            "apiKey":     config.ODDS_API_KEY,
-            "regions":    "us",
-            "markets":    "h2h,spreads,totals",
-            "oddsFormat": "american",
-        }
-
+        # Route through the shared OddsApiCache so every call is:
+        #   1. Budget-guarded (usage tracker blocks over-quota calls)
+        #   2. Deduplicated (TTL cache — DK & FD share one fetch per sport)
+        #   3. Health-monitored (quota headers recorded automatically)
+        # This eliminates the direct aiohttp path that previously bypassed all
+        # three controls and caused repeated 401-spam in the logs.
         try:
-            timeout = aiohttp.ClientTimeout(total=30)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(url, params=params) as resp:
-                    if resp.status == 401:
-                        try:
-                            body = await resp.json(content_type=None)
-                        except Exception:
-                            body = {}
-                        error_code = (body or {}).get("error_code", "")
-                        message = (body or {}).get("message", "")
-                        if error_code == "OUT_OF_USAGE_CREDITS":
-                            logger.error(
-                                "Odds API: usage quota exhausted (401) — %s", message
-                            )
-                            try:
-                                from providers.health_monitor import get_health_monitor as _ghm
-                                from providers.base import FailureType as _FT
-                                _mon = _ghm()
-                                if _mon:
-                                    _mon.record_failure("OddsAPI", message or "quota exhausted", _FT.QUOTA)
-                            except ImportError:
-                                pass
-                        else:
-                            logger.error(
-                                "Odds API: unauthorized (401) — %s%s",
-                                error_code or "invalid API key",
-                                f": {message}" if message else "",
-                            )
-                            try:
-                                from providers.health_monitor import get_health_monitor as _ghm
-                                from providers.base import FailureType as _FT
-                                _mon = _ghm()
-                                if _mon:
-                                    _mon.record_failure("OddsAPI", error_code or message or "401", _FT.HTTP_ERROR)
-                            except ImportError:
-                                pass
-                        return []
-                    if resp.status == 422:
-                        logger.error("Odds API: sport key not found — %s", sport_key)
-                        return []
-                    if resp.status == 429:
-                        logger.warning("Odds API: rate limit exceeded (429)")
-                        return []
-                    resp.raise_for_status()
-                    data: list[dict] = await resp.json()
-                    remaining = resp.headers.get("x-requests-remaining", "?")
-                    logger.debug(
-                        "Odds API: %d events for %s (%s requests remaining)",
-                        len(data), sport, remaining,
-                    )
-                    try:
-                        from providers.health_monitor import get_health_monitor as _ghm
-                        _mon = _ghm()
-                        if _mon:
-                            _rem: Optional[int] = None
-                            try:
-                                _rem = int(remaining) if remaining != "?" else None
-                            except (ValueError, TypeError):
-                                pass
-                            _mon.record_success("OddsAPI", quota_remaining=_rem)
-                    except ImportError:
-                        pass
-        except aiohttp.ClientError as exc:
+            from providers.odds_cache import get_odds_cache, OddsApiError
+            cache = get_odds_cache()
+            if cache is None:
+                logger.warning(
+                    "OddsApiCache not yet initialised; skipping live odds for %s", sport
+                )
+                return []
+            data: list[dict] = await cache.get_or_fetch(
+                sport_key,
+                api_key=config.ODDS_API_KEY,
+                markets="h2h,spreads,totals",
+                regions="us",
+                odds_format="american",
+            )
+        except OddsApiError as exc:
             logger.error("Odds API request failed for %s: %s", sport, exc)
             return []
         except Exception as exc:

@@ -1,0 +1,101 @@
+We need to be extremely conservative with credits. Combine all remaining production tasks into ONE batch. Do not split work into multiple tasks.
+
+The AI model is already built:
+
+* Ai.v3.1Revamped scoring ✅
+* Decision engine ✅
+* Slip optimizer ✅
+* PrizePicks pipeline ✅
+* Underdog pipeline ✅
+* Alert delivery ✅
+* Usage tracker ✅
+
+Only finish production readiness.
+
+Build these together:
+
+1. Credit Protection Final Audit
+
+* Verify every API-consuming path uses the shared usage tracker/cache.
+* Remove any remaining quota leaks.
+* Preserve monthly budget controls.
+* Add tests only where missing.
+
+2. Provider Priority Enforcement
+
+Priority order must be:
+
+1. PrizePicks player props (PRIMARY)
+2. Underdog player props (SECONDARY)
+3. DraftKings/FanDuel odds (SUPPORTING DATA ONLY)
+
+Requirements:
+
+* Never let sportsbook alerts overpower PrizePicks workflow.
+* Keep MLB Moneyline + MLB Totals scope rules.
+* Show provider status in dashboard.
+
+3. Slip Builder Final Interface
+
+Do not change optimizer logic.
+
+Expose:
+
+* Best 2-man (default recommendation)
+* Best 3-man
+* Best 4-man
+* Best 5-man
+* Best 6-man
+
+Each slip should show:
+
+* Player
+* Prop
+* Side
+* Tier
+* Stars
+* Edge
+* Confidence
+* BET/WATCH/PASS
+* Correlation warnings
+
+4. Alert Limits
+
+Add production alert controls:
+
+Priority:
+
+1. PrizePicks S Tier
+2. PrizePicks A Tier
+3. PrizePicks B Tier
+4. Underdog
+
+Requirements:
+
+* Daily alert cap.
+* Duplicate prevention.
+* S-tier PrizePicks can bypass lower priority limits.
+* Track sent alerts in dashboard.
+
+5. Game Timing Filter
+
+Before sending PrizePicks or Underdog alerts:
+
+Rules:
+
+* Never alert after game starts.
+* Default alert window: 30–120 minutes before start.
+* Show “starts in X minutes” in picks/slips.
+* Prioritize upcoming games.
+* Allow urgent alerts only for major line movement.
+
+Final Requirements:
+
+* Do not add new AI scoring features.
+* Do not change Ai.v3.1 thresholds.
+* Do not add external APIs.
+* Preserve architecture.
+* Run full tests.
+* Report only final results.
+
+Goal: finish the bot build so the next step is only buying API access and running live data.

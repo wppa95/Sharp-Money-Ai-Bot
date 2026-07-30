@@ -46,7 +46,7 @@ from connectors import ConnectorRegistry, MarketSnapshot
 from engine.consensus import compute_consensus, find_inefficiencies, build_multi_book_steam_inputs
 from engine.clv import build_clv_opportunity
 from engine.steam import compute_steam_simple
-from alerts import broadcast_alert, identify_sharp_books
+from alerts import AlertDelivery, broadcast_alert, identify_sharp_books
 from alerts_multiplatform import (
     format_steam_multibook_alert,
     format_inefficiency_alert,
@@ -462,7 +462,28 @@ async def underdog_job(context) -> None:
             and abs(snap.line - prev_line) >= config.MIN_UNDERDOG_LINE_CHANGE
         )
 
-        # Persist current snapshot (with correct stat_type)
+        # Deliver via AlertDelivery (scope + timing + cap + broadcast)
+        from alerts import DeliveryResult
+        ud_result: DeliveryResult = DeliveryResult(sent=False)
+        if should_alert and chat_ids:
+            delivery  = AlertDelivery(db, bot, chat_ids)
+            ud_result = await delivery.deliver_underdog(
+                player_name = player,
+                team        = snap.team or "",
+                sport       = snap.sport,
+                stat_type   = stat_type,
+                old_line    = prev_line or (snap.line or 0.0),
+                new_line    = snap.line or 0.0,
+                game_time   = snap.game_time,
+                removed     = is_removed,
+            )
+            if ud_result.filtered:
+                logger.debug(
+                    "Underdog alert filtered: %s | %s | %s",
+                    player, stat_type, ud_result.filtered_reason,
+                )
+
+        # Persist snapshot (alert_sent reflects actual delivery outcome)
         record = UnderdogSnapshotRecord(
             external_id = f"{player}_{stat_type}"[:64],  # stable identity key
             player_name = player,
@@ -475,32 +496,9 @@ async def underdog_job(context) -> None:
             line_moved  = line_changed,
             prev_line   = prev_line,
             removed     = is_removed,
-            alert_sent  = should_alert and bool(chat_ids),
+            alert_sent  = ud_result.sent,
             fetched_at  = now,
         )
         await db.save_underdog_snapshot(record)
-
-        if should_alert and chat_ids:
-            from alert_normalizer import normalize_underdog
-            from alert_scope_filter import check
-            scope = check(normalize_underdog(player, stat_type, snap.sport, is_removed, now))
-            if scope.allowed:
-                message = format_underdog_change_alert(
-                    player_name = player,
-                    team        = snap.team or "",
-                    sport       = snap.sport,
-                    stat_type   = stat_type,
-                    old_line    = prev_line or (snap.line or 0.0),
-                    new_line    = snap.line or 0.0,
-                    game_time   = snap.game_time,
-                    removed     = is_removed,
-                )
-                await broadcast_alert(bot, chat_ids, message)
-                logger.info(
-                    "Underdog alert: %s | %s | removed=%s | line_change=%s → %s",
-                    player, stat_type, is_removed, prev_line, snap.line,
-                )
-            else:
-                logger.warning("Underdog alert skipped — %s", scope.reason)
 
     logger.info("underdog_job: processed %d Underdog pick'em snapshots", len(ud_snaps))

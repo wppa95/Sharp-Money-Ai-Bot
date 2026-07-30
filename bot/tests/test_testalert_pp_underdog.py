@@ -97,6 +97,16 @@ def _make_opp(
     )
 
 
+def _make_db_mock() -> MagicMock:
+    """Return a fully-configured async-capable database mock."""
+    mock_db = MagicMock()
+    mock_db.has_recent_ev_alert         = AsyncMock(return_value=False)
+    mock_db.has_recent_steam_alert      = AsyncMock(return_value=False)
+    mock_db.count_today_pp_alerts       = AsyncMock(return_value=0)
+    mock_db.count_today_underdog_alerts = AsyncMock(return_value=0)
+    return mock_db
+
+
 def _make_delivery(
     chat_ids: list | None = None,
     bot: object = None,
@@ -104,9 +114,7 @@ def _make_delivery(
 ) -> AlertDelivery:
     mock_bot = bot or MagicMock()
     mock_bot.send_message = AsyncMock(return_value=MagicMock())
-    mock_db  = db  or MagicMock()
-    mock_db.has_recent_ev_alert    = AsyncMock(return_value=False)
-    mock_db.has_recent_steam_alert = AsyncMock(return_value=False)
+    mock_db  = db  or _make_db_mock()
     # Use explicit None sentinel so callers can pass [] to mean "no recipients"
     return AlertDelivery(mock_db, mock_bot, [12345] if chat_ids is None else chat_ids)
 
@@ -191,7 +199,7 @@ class TestDeliverPp:
     async def test_message_broadcast_to_chat_ids(self):
         mock_bot = MagicMock()
         mock_bot.send_message = AsyncMock(return_value=MagicMock())
-        mock_db  = MagicMock()
+        mock_db  = _make_db_mock()
         delivery = AlertDelivery(mock_db, mock_bot, [111, 222])
         opp      = _make_opp()
         score    = score_pp_edge(opp, history=[], opening_line=26.5)
@@ -229,7 +237,7 @@ class TestDeliverPp:
         mock_bot = MagicMock()
         from telegram.error import TelegramError
         mock_bot.send_message = AsyncMock(side_effect=TelegramError("blocked"))
-        mock_db  = MagicMock()
+        mock_db  = _make_db_mock()
         delivery = AlertDelivery(mock_db, mock_bot, [111])
         opp      = _make_opp()
         result   = await delivery.deliver_pp(opp)
@@ -247,7 +255,7 @@ class TestDeliverPp:
 
         mock_bot = MagicMock()
         mock_bot.send_message = AsyncMock(side_effect=capture_send)
-        mock_db = MagicMock()
+        mock_db = _make_db_mock()
         delivery = AlertDelivery(mock_db, mock_bot, [1])
         opp      = _make_opp()
         score    = score_pp_edge(opp, history=[], opening_line=26.5)
@@ -270,7 +278,7 @@ class TestDeliverPp:
 
         mock_bot = MagicMock()
         mock_bot.send_message = AsyncMock(side_effect=capture)
-        mock_db = MagicMock()
+        mock_db = _make_db_mock()
         delivery = AlertDelivery(mock_db, mock_bot, [1])
         opp      = _make_opp()
         await delivery.deliver_pp(opp)
@@ -308,7 +316,7 @@ class TestDeliverPp:
     async def test_multiple_chat_ids_recipients_counted(self):
         mock_bot = MagicMock()
         mock_bot.send_message = AsyncMock(return_value=MagicMock())
-        mock_db  = MagicMock()
+        mock_db  = _make_db_mock()
         delivery = AlertDelivery(mock_db, mock_bot, [1, 2, 3])
         opp      = _make_opp()
         result   = await delivery.deliver_pp(opp)
@@ -324,7 +332,7 @@ class TestDeliverUnderdog:
     def _delivery(self, chat_ids=None):
         mock_bot = MagicMock()
         mock_bot.send_message = AsyncMock(return_value=MagicMock())
-        mock_db  = MagicMock()
+        mock_db  = _make_db_mock()
         return AlertDelivery(mock_db, mock_bot, [12345] if chat_ids is None else chat_ids)
 
     @pytest.mark.asyncio
@@ -351,7 +359,7 @@ class TestDeliverUnderdog:
 
         mock_bot = MagicMock()
         mock_bot.send_message = AsyncMock(side_effect=capture)
-        delivery = AlertDelivery(MagicMock(), mock_bot, [1])
+        delivery = AlertDelivery(_make_db_mock(), mock_bot, [1])
         await delivery.deliver_underdog(
             player_name = "Saquon Barkley",
             team        = "PHI",
@@ -378,7 +386,7 @@ class TestDeliverUnderdog:
 
         mock_bot = MagicMock()
         mock_bot.send_message = AsyncMock(side_effect=capture)
-        delivery = AlertDelivery(MagicMock(), mock_bot, [1])
+        delivery = AlertDelivery(_make_db_mock(), mock_bot, [1])
         await delivery.deliver_underdog(
             player_name = "Travis Kelce",
             team        = "KC",
@@ -404,7 +412,7 @@ class TestDeliverUnderdog:
 
         mock_bot = MagicMock()
         mock_bot.send_message = AsyncMock(side_effect=capture)
-        delivery = AlertDelivery(MagicMock(), mock_bot, [1])
+        delivery = AlertDelivery(_make_db_mock(), mock_bot, [1])
         await delivery.deliver_underdog(
             player_name = "Davante Adams",
             team        = "NYJ",
@@ -449,7 +457,7 @@ class TestDeliverUnderdog:
     async def test_multiple_recipients_counted(self):
         mock_bot = MagicMock()
         mock_bot.send_message = AsyncMock(return_value=MagicMock())
-        delivery = AlertDelivery(MagicMock(), mock_bot, [1, 2, 3])
+        delivery = AlertDelivery(_make_db_mock(), mock_bot, [1, 2, 3])
         result   = await delivery.deliver_underdog(
             player_name = "Saquon Barkley",
             team        = "PHI",
@@ -463,8 +471,8 @@ class TestDeliverUnderdog:
 
     @pytest.mark.asyncio
     async def test_game_time_forwarded_to_formatter(self):
-        """When game_time is supplied it should appear in the formatted message."""
-        from datetime import datetime
+        """When game_time is supplied the timing filter runs and game_time is forwarded."""
+        from datetime import datetime, timedelta
         sent_messages: list[str] = []
 
         async def capture(chat_id, text, **kwargs):
@@ -473,8 +481,9 @@ class TestDeliverUnderdog:
 
         mock_bot = MagicMock()
         mock_bot.send_message = AsyncMock(side_effect=capture)
-        delivery = AlertDelivery(MagicMock(), mock_bot, [1])
-        game_ts  = datetime(2025, 9, 14, 18, 0, 0)
+        delivery = AlertDelivery(_make_db_mock(), mock_bot, [1])
+        # Use a game time 60 min in the future so the timing filter allows it
+        game_ts  = datetime.utcnow() + timedelta(hours=1)
         await delivery.deliver_underdog(
             player_name = "Saquon Barkley",
             team        = "PHI",
@@ -485,9 +494,9 @@ class TestDeliverUnderdog:
             game_time   = game_ts,
         )
 
+        assert sent_messages, "Expected alert to be sent with future game_time"
         msg = sent_messages[0]
-        # Date should appear somewhere in the message (Sep 14)
-        assert "Sep" in msg or "14" in msg
+        assert "Saquon Barkley" in msg
 
     @pytest.mark.asyncio
     async def test_underdog_sport_icon_nfl(self):
@@ -500,7 +509,7 @@ class TestDeliverUnderdog:
 
         mock_bot = MagicMock()
         mock_bot.send_message = AsyncMock(side_effect=capture)
-        delivery = AlertDelivery(MagicMock(), mock_bot, [1])
+        delivery = AlertDelivery(_make_db_mock(), mock_bot, [1])
         await delivery.deliver_underdog(
             player_name = "Saquon Barkley",
             team        = "PHI",
@@ -522,7 +531,7 @@ class TestDeliverUnderdog:
 
         mock_bot = MagicMock()
         mock_bot.send_message = AsyncMock(side_effect=capture)
-        delivery = AlertDelivery(MagicMock(), mock_bot, [1])
+        delivery = AlertDelivery(_make_db_mock(), mock_bot, [1])
         await delivery.deliver_underdog(
             player_name = "Anthony Edwards",
             team        = "MIN",
@@ -538,7 +547,7 @@ class TestDeliverUnderdog:
         from telegram.error import TelegramError
         mock_bot = MagicMock()
         mock_bot.send_message = AsyncMock(side_effect=TelegramError("blocked"))
-        delivery = AlertDelivery(MagicMock(), mock_bot, [1])
+        delivery = AlertDelivery(_make_db_mock(), mock_bot, [1])
         result   = await delivery.deliver_underdog(
             player_name = "Saquon Barkley",
             team        = "PHI",

@@ -135,6 +135,23 @@ class Config:
     # Telegram warnings fire at 75 %, 90 %, and 100 % of this value.
     ODDS_API_MONTHLY_BUDGET: int = int(os.environ.get("ODDS_API_MONTHLY_BUDGET", "500"))
 
+    # ── Alert limits ─────────────────────────────────────────────────────────
+    # Maximum PrizePicks A/B-tier alerts sent per calendar day (UTC).
+    # S-tier always bypasses this cap.  Set to 0 to disable.
+    DAILY_ALERT_LIMIT: int = int(os.environ.get("DAILY_ALERT_LIMIT", "20"))
+    # Maximum Underdog alerts sent per calendar day (UTC).  Set to 0 to disable.
+    DAILY_UNDERDOG_LIMIT: int = int(os.environ.get("DAILY_UNDERDOG_LIMIT", "5"))
+
+    # ── Game timing filter ───────────────────────────────────────────────────
+    # Block alerts for games that start sooner than this (minutes).
+    # Exception: allows through if edge ≥ URGENT_EDGE_THRESHOLD.
+    ALERT_WINDOW_MIN_MINUTES: int = int(os.environ.get("ALERT_WINDOW_MIN_MINUTES", "30"))
+    # Block alerts for games that start later than this (minutes from now).
+    ALERT_WINDOW_MAX_MINUTES: int = int(os.environ.get("ALERT_WINDOW_MAX_MINUTES", "120"))
+    # Edge % at or above which an alert bypasses the min-minutes gate
+    # (i.e. "urgent" edge can fire even if game is <30 min away).
+    URGENT_EDGE_THRESHOLD: float = float(os.environ.get("URGENT_EDGE_THRESHOLD", "8.0"))
+
     # ── Logging ───────────────────────────────────────────────────────────────
     LOG_LEVEL: str = os.environ.get("LOG_LEVEL", "INFO")
 
