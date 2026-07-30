@@ -128,6 +128,12 @@ class Config:
     # Minimum star rating (1–5) required to send an Underdog alert.
     # 3★ corresponds to a score of 55+ (B-tier or better).  Set to 1 to disable.
     UD_MIN_STARS_TO_ALERT:    int   = int(os.environ.get("UD_MIN_STARS_TO_ALERT", "3"))
+    # New-prop alert: auto-qualify when the starting line is at or below this
+    # value, regardless of score (0.5 and 1.0 lines are high-value new props).
+    # Set to 0.0 to rely on score alone for new-prop qualification.
+    UD_NEW_PROP_LOW_LINE_THRESHOLD: float = float(
+        os.environ.get("UD_NEW_PROP_LOW_LINE_THRESHOLD", "1.0")
+    )
 
     # Dedup windows for new alert types (seconds)
     INEFFICIENCY_DEDUP_WINDOW: int = int(os.environ.get("INEFFICIENCY_DEDUP_WINDOW", "1800"))

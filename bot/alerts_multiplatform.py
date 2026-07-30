@@ -7,6 +7,7 @@ New alert types:
   format_clv_opportunity_alert  — current price better than projected close
   format_clv_result_alert       — CLV result after event closes
   format_underdog_change_alert  — Underdog line change or removed prop
+  format_underdog_new_prop_alert — first-appearance Underdog prop
 """
 
 from __future__ import annotations
@@ -307,6 +308,77 @@ def format_underdog_change_alert(
         "",
         _div(),
         change_line + game_str + grade_str,
+        "",
+        f"{EMOJI['clock']} <i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>",
+    ]
+    return "\n".join(parts)
+
+
+# ── Underdog new-prop alert ────────────────────────────────────────────────────
+
+def format_underdog_new_prop_alert(
+    player_name: str,
+    team: str,
+    sport: str,
+    stat_type: str,
+    line_value: float,
+    game_time: Optional[datetime] = None,
+    score: Optional[object] = None,    # UDPropScore
+    *,
+    low_line_threshold: float = 1.0,
+) -> str:
+    """Format a 🚨 UNDERDOG PROP LIVE alert for a first-appearance prop.
+
+    Fires when a (player_name, stat_type) pair is seen for the very first
+    time in the Underdog feed.  Score may be present even with no history
+    (n_history=0) if the scoring model ran with defaults.
+    """
+    sport_icon = {
+        "NFL": "🏈", "NBA": "🏀", "MLB": "⚾",
+        "NHL": "🏒", "UFC": "🥊",
+    }.get(sport, "🎯")
+
+    game_str = (
+        f"\n  <b>Game:</b>        {game_time.strftime('%b %d %H:%M')} UTC"
+        if game_time else ""
+    )
+
+    # Grade block — shown even when n_history=0 so tier/stars are visible
+    grade_str = ""
+    if score is not None:
+        tier   = getattr(score, "tier",         "?")
+        stars  = getattr(score, "stars",         0)
+        total  = getattr(score, "total",         0)
+        s_disp = getattr(score, "stars_display", "?" * 5)
+        n_hist = getattr(score, "n_history",     0)
+        grade_str = (
+            f"\n\n📊 <b>Grade:</b>  <code>{tier}</code>  {s_disp}  "
+            f"<code>{total}/100</code>"
+            f"  <i>(n={n_hist})</i>"
+        )
+
+    # Reason bullets
+    reasons = ["• New prop detected"]
+    if line_value <= low_line_threshold:
+        reasons.append(f"• Low starting line ({line_value} ≤ {low_line_threshold})")
+    if score is not None and getattr(score, "stars", 0) >= 3:
+        tier = getattr(score, "tier", "?")
+        reasons.append(f"• Score qualifies ({tier}-tier)")
+
+    parts = [
+        "🚨 <b>UNDERDOG PROP LIVE</b>",
+        "",
+        f"{sport_icon} <b>{sport} — {stat_type}</b>",
+        f"👤 <b>{player_name}</b>",
+        "",
+        _div(),
+        f"  <b>Starting Line:</b>  {line_value}",
+        f"  <b>First Seen:</b>    {datetime.utcnow().strftime('%H:%M UTC')}"
+        + game_str
+        + grade_str,
+        "",
+        "<b>Reason:</b>",
+        "\n".join(reasons),
         "",
         f"{EMOJI['clock']} <i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>",
     ]

@@ -767,6 +767,24 @@ class Database:
             )
             return list(result.scalars().all())
 
+    async def get_known_underdog_prop_keys(self) -> "set[tuple[str, str]]":
+        """
+        Return every (player_name, stat_type) pair ever stored in
+        underdog_snapshots, including removed rows.
+
+        Used at the start of each underdog_job cycle to detect genuinely
+        new props on their very first appearance.  Including removed rows
+        ensures a re-listed prop is NOT re-flagged as new.
+        """
+        async with self.session() as s:
+            result = await s.execute(
+                select(
+                    UnderdogSnapshotRecord.player_name,
+                    UnderdogSnapshotRecord.stat_type,
+                ).distinct()
+            )
+            return {(row[0], row[1]) for row in result.all()}
+
     async def get_latest_underdog_snapshot_per_prop(
         self,
     ) -> "dict[tuple[str, str], UnderdogSnapshotRecord]":

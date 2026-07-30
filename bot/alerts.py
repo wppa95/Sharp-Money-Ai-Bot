@@ -916,19 +916,26 @@ class AlertDelivery:
         score: "Optional[object]" = None,   # UDPropScore — typed as object to avoid import
         *,
         removed: bool = False,
+        new_prop: bool = False,
     ) -> "DeliveryResult":
         """
         Full Underdog prop alert pipeline:
           0. normalize_underdog → AlertObject.
           1. Scope check.
-          2. Game timing filter — block games already started or outside window.
-          3. Daily Underdog cap check.
-          4. format_underdog_change_alert (includes grade when score is supplied).
+          2. Game timing filter — skipped for removals and new-prop alerts.
+          3. Daily Underdog cap check (disabled by default; set DAILY_UNDERDOG_LIMIT > 0).
+          4. Format and broadcast.
+             - new_prop=True  → format_underdog_new_prop_alert  (🚨 PROP LIVE)
+             - removed=True   → format_underdog_change_alert    (🚫 REMOVED)
+             - default        → format_underdog_change_alert    (🔄 LINE CHANGE)
           5. Broadcast to all registered chat IDs.
         """
         from alert_normalizer import normalize_underdog
         from alert_scope_filter import check
-        from alerts_multiplatform import format_underdog_change_alert
+        from alerts_multiplatform import (
+            format_underdog_change_alert,
+            format_underdog_new_prop_alert,
+        )
         from engine.timing import is_game_alertable
 
         # 0 & 1. Normalize + scope check
@@ -937,15 +944,17 @@ class AlertDelivery:
         if not scope.allowed:
             return DeliveryResult(sent=False, filtered=True, filtered_reason=scope.reason)
 
-        # 2. Game timing filter (skip for removal notices — game may have ended)
-        if not removed:
+        # 2. Game timing filter
+        # Skipped for removals (game may have ended) and new-prop alerts
+        # (opportunity is now — timing gate must not suppress first-appearance alerts).
+        if not removed and not new_prop:
             line_change = abs(new_line - old_line)
             allowed, timing_reason = is_game_alertable(
                 game_time,
                 min_minutes=config.ALERT_WINDOW_MIN_MINUTES,
                 max_minutes=config.ALERT_WINDOW_MAX_MINUTES,
                 urgent_edge=config.URGENT_EDGE_THRESHOLD,
-                edge=line_change * 2.0,  # treat line-change magnitude as proxy for urgency
+                edge=line_change * 2.0,
             )
             if not allowed:
                 logger.debug(
@@ -954,7 +963,7 @@ class AlertDelivery:
                 )
                 return DeliveryResult(sent=False, filtered=True, filtered_reason=timing_reason)
 
-        # 3. Daily Underdog cap
+        # 3. Daily Underdog cap (disabled by default — DAILY_UNDERDOG_LIMIT=0)
         if config.DAILY_UNDERDOG_LIMIT > 0:
             today_ud = await self._db.count_today_underdog_alerts()
             if today_ud >= config.DAILY_UNDERDOG_LIMIT:
@@ -965,31 +974,47 @@ class AlertDelivery:
                 logger.info("Underdog alert capped: %s | %s | %s", player_name, stat_type, reason)
                 return DeliveryResult(sent=False, filtered=True, filtered_reason=reason)
 
-        # 4. Format and send
-        message = format_underdog_change_alert(
-            player_name, team, sport, stat_type,
-            old_line, new_line,
-            game_time,
-            score=score,
-            removed=removed,
-        )
+        # 4. Format
+        if new_prop:
+            message = format_underdog_new_prop_alert(
+                player_name, team, sport, stat_type,
+                new_line,
+                game_time,
+                score=score,
+                low_line_threshold=config.UD_NEW_PROP_LOW_LINE_THRESHOLD,
+            )
+        else:
+            message = format_underdog_change_alert(
+                player_name, team, sport, stat_type,
+                old_line, new_line,
+                game_time,
+                score=score,
+                removed=removed,
+            )
+
+        # 5. Broadcast
         counts     = await broadcast_alert(self._bot, self._chat_ids, message)
         alert_sent = counts["sent"] > 0
 
-        result   = DeliveryResult(
+        result = DeliveryResult(
             sent             = alert_sent,
             recipients_sent  = counts["sent"],
             recipients_failed= counts["failed"],
         )
-        change_str = "REMOVED" if removed else ("HIGHER" if new_line > old_line else "LOWER")
-        score_tag  = (
+        if new_prop:
+            event_str = f"NEW_PROP line={new_line}"
+        elif removed:
+            event_str = "REMOVED"
+        else:
+            event_str = "HIGHER" if new_line > old_line else "LOWER"
+        score_tag = (
             f" [tier={score.tier} stars={score.stars} score={score.total}]"
             if score is not None else ""
         )
         log_fn = logger.info if alert_sent else logger.warning
         log_fn(
             "Underdog alert: %s | %s | %s | %s%s → %s",
-            player_name, stat_type, sport, change_str, score_tag, result,
+            player_name, stat_type, sport, event_str, score_tag, result,
         )
         return result
 

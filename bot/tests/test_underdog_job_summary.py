@@ -70,6 +70,7 @@ def _make_db(
     recent_records: list | None = None,
     today_alerts: int = 0,
     prop_history: list | None = None,
+    known_keys: set | None = None,
 ) -> MagicMock:
     # Build the dict that get_latest_underdog_snapshot_per_prop() returns.
     # Mirrors the real method: one entry per (player_name, stat_type), last wins.
@@ -78,8 +79,14 @@ def _make_db(
         key = (r.player_name, r.stat_type)
         recent_dict[key] = r
 
+    # By default, treat all props that have previous records as "known"
+    # so they follow the line-change path rather than the new-prop path.
+    if known_keys is None:
+        known_keys = {(r.player_name, r.stat_type) for r in (recent_records or [])}
+
     db = MagicMock()
     db.get_latest_underdog_snapshot_per_prop = AsyncMock(return_value=recent_dict)
+    db.get_known_underdog_prop_keys          = AsyncMock(return_value=known_keys)
     db.count_today_underdog_alerts           = AsyncMock(return_value=today_alerts)
     db.save_underdog_snapshot                = AsyncMock()
     db.get_ud_prop_history                   = AsyncMock(return_value=prop_history or [])
