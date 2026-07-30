@@ -35,6 +35,15 @@ from .ev import (
     compute_ev_batch,
 )
 
+from .confidence import (
+    ConfidenceTier,
+    SupportingFactor,
+    RiskWarning,
+    ScoreBreakdown,
+    ConfidenceResult,
+    compute_confidence,
+)
+
 from .steam import (
     MovementDirection,
     SteamTier,

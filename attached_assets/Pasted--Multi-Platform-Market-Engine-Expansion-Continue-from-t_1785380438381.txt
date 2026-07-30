@@ -1,0 +1,244 @@
+# Multi-Platform Market Engine Expansion
+
+Continue from the existing completed PrizePicks integration.
+
+Do NOT rewrite existing code.
+
+Current status:
+- PrizePicks client completed
+- PrizePicks edge detection completed
+- Database models completed
+- Alert formatting completed
+- Background polling job completed
+- 128/128 tests passing
+
+Build the next phase: Multi-Platform Market Engine.
+
+## Objective
+
+Create a modular market intelligence system that supports:
+
+- DraftKings Sportsbook
+- FanDuel Sportsbook
+- Underdog Fantasy
+- Existing sportsbook data sources
+
+The purpose is to detect:
+- Sharp money movement
+- Steam alerts
+- CLV opportunities
+- Market inefficiencies
+- PrizePicks/Underdog line discrepancies
+
+---
+
+## Architecture
+
+Create a modular adapter system:
+
+bot/market_data/
+
+- draftkings.py
+- fanduel.py
+- underdog.py
+- consensus.py
+- steam_engine.py
+
+
+All platforms should return standardized market objects.
+
+Create models:
+
+MarketRecord:
+
+- sport
+- league
+- event
+- player/team
+- market_type
+- selection
+- line
+- odds
+- sportsbook
+- timestamp
+- game_time
+
+---
+
+## DraftKings Integration
+
+Track:
+
+- Moneylines
+- Player props
+- Opening odds
+- Current odds
+- Line movement
+- Timestamp
+
+
+Detect:
+
+Example:
+
+Opening:
+Team A -140
+
+Current:
+Team A -185
+
+
+Calculate:
+
+- movement
+- implied probability change
+- steam score
+
+---
+
+## FanDuel Integration
+
+Track the same data.
+
+Compare:
+
+DraftKings
+FanDuel
+Other sharp books
+
+Create consensus pricing.
+
+---
+
+## Underdog Integration
+
+Track:
+
+- Pick'em projections
+- Higher/lower lines
+- Projection changes
+- Removed props
+
+Example:
+
+Before:
+Player Over 5.5 rebounds
+
+After:
+Player Over 6.5 rebounds
+
+Flag:
+
+LINE MOVEMENT ALERT
+
+---
+
+## Steam Engine
+
+Create:
+
+bot/market_data/steam_engine.py
+
+Calculate:
+
+- movement speed
+- number of books moving
+- direction
+- magnitude
+- sharp book weighting
+- time before game
+
+Output:
+
+SteamAlert:
+
+- market
+- selection
+- direction
+- steam_score
+- fair_probability
+- expected_clv
+- confidence
+
+---
+
+## Database
+
+Add:
+
+moneyline_records
+
+player_market_records
+
+steam_alerts
+
+
+Store:
+
+- opening price
+- current price
+- closing price
+- CLV
+- result tracking
+
+---
+
+## Alert System
+
+Add Discord alerts:
+
+#sharp-money-alerts
+
+Example:
+
+🚨 SHARP MONEY ALERT
+
+Sport:
+MLB
+
+Market:
+Moneyline
+
+Team:
+Dodgers
+
+Opening:
+-125
+
+Current:
+-175
+
+Steam Score:
+94
+
+Fair Probability:
+63%
+
+Expected CLV:
++7%
+
+Confidence:
+★★★★★
+
+
+---
+
+## Testing
+
+Requirements:
+
+- Do not break existing tests
+- Keep PrizePicks functionality intact
+- Add unit tests for:
+  - market models
+  - odds conversion
+  - steam scoring
+  - CLV calculations
+  - alert formatting
+
+Before completion run full test suite.
+
+Report:
+- Files created
+- Files modified
+- Tests passed
