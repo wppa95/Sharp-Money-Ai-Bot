@@ -54,6 +54,8 @@ class Config:
     MIN_PP_FAIR_PROB: float = float(os.environ.get("MIN_PP_FAIR_PROB", "0.55"))
     # Dedup window: suppress repeat PP alerts for the same player/stat.
     PP_DEDUP_WINDOW: int = int(os.environ.get("PP_DEDUP_WINDOW", "3600"))  # 60 min
+    # Minimum PP line change (in units) to log as a movement signal.
+    MIN_PP_LINE_CHANGE: float = float(os.environ.get("MIN_PP_LINE_CHANGE", "0.5"))
 
     # ── Sports to monitor (comma-separated Sport enum values) ─────────────────
     # Default: every sport with a verified Odds API key, except NFL

@@ -476,6 +476,99 @@ async def cmd_backtest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
 
 
+# ── /picks tier constants ─────────────────────────────────────────────────────
+_TIER_ORDER: dict[str, int] = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
+_TIER_EMOJI: dict[str, str] = {"Critical": "🔴", "High": "🟠", "Medium": "🟡", "Low": "⚪"}
+
+
+async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/picks [sport|N] — Ranked PrizePicks edges by confidence tier (S→A→B).
+
+    Usage:
+      /picks           — top 10 picks from the last 6 hours
+      /picks 5         — top 5 picks
+      /picks NBA       — filter to NBA only
+      /picks NFL 5     — NFL, top 5
+    """
+    if not _check_allowed(update):
+        await update.message.reply_text("⛔ Unauthorized.")
+        return
+    if _db is None:
+        await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
+        return
+
+    args = context.args or []
+    limit = 10
+    sport_filter: Optional[str] = None
+    for arg in args:
+        if arg.isdigit():
+            limit = min(int(arg), 20)
+        else:
+            sport_filter = arg.upper()
+
+    records = await _db.get_top_pp_edges(limit=limit, hours=6)
+
+    if sport_filter:
+        records = [r for r in records if r.sport.upper() == sport_filter]
+
+    if not records:
+        hint = f" for {sport_filter}" if sport_filter else ""
+        await update.message.reply_text(
+            f"🎯 <b>PrizePicks Picks</b>\n\n"
+            f"No edges detected{hint} in the last 6 hours.\n\n"
+            f"<i>Edges are found when a PP line diverges from sportsbook fair odds.\n"
+            f"Check back after the next poll cycle (every 5 min).</i>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    # Sort: tier rank first, then best_edge descending
+    records.sort(key=lambda r: (_TIER_ORDER.get(r.tier or "Low", 3), -(r.best_edge or 0)))
+
+    today = datetime.utcnow().strftime("%b %d, %Y")
+    lines: list[str] = [f"🎯 <b>PrizePicks Picks — {today}</b>"]
+    if sport_filter:
+        lines.append(f"<i>Filtered: {sport_filter}</i>")
+    lines.append("")
+
+    current_tier: Optional[str] = None
+    rank = 0
+    for r in records:
+        tier = r.tier or "Low"
+        if tier != current_tier:
+            current_tier = tier
+            tier_icon = _TIER_EMOJI.get(tier, "⚪")
+            lines.append(f"{tier_icon} <b>{tier}</b>")
+        rank += 1
+
+        conf_str  = f"  conf {r.confidence:.0f}/100" if r.confidence else ""
+        result_str = (
+            f"  [{r.result}]"
+            if r.result and r.result != "PENDING" else ""
+        )
+
+        move_str = ""
+        if (r.prev_line is not None
+                and r.opening_line is not None
+                and r.opening_line != r.pp_line_value):
+            delta     = r.pp_line_value - r.opening_line
+            direction = "▲" if delta > 0 else "▼"
+            move_str  = f"  {direction}{abs(delta):.1f} from open"
+
+        lines.append(
+            f"  #{rank} <b>{r.player_name}</b> · {r.stat_type}\n"
+            f"       PP <code>{r.pp_line_value:g}</code> · <b>{r.best_side}</b> · "
+            f"<code>+{r.best_edge:.1f}%</code>{conf_str}{move_str}{result_str}\n"
+            f"       <i>{r.sport} · vs {r.sportsbook} · "
+            f"{r.detected_at.strftime('%H:%M UTC')}</i>"
+        )
+
+    if not sport_filter and len(records) >= limit:
+        lines.append(f"\n<i>Showing top {limit}. Use /picks [sport] to filter.</i>")
+
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+
 async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/testalert [steam|ev] — Send a mock alert to verify delivery end-to-end."""
     if not _check_allowed(update):

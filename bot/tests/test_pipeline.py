@@ -109,11 +109,11 @@ OPP_BEST_ODDS  = +115   # best available Raiders line
 OPENING_ODDS   = -130   # Chiefs line before steam
 CURRENT_ODDS   = -155   # Chiefs line after steam
 
-SPORT     = Sport.NFL
+SPORT     = Sport.MLB
 MKT_TYPE  = MarketType.MONEYLINE
-EVENT     = "Kansas City Chiefs @ Las Vegas Raiders"
-SELECTION = "Kansas City Chiefs"
-BOOK      = "FanDuel"
+EVENT     = "New York Yankees @ Boston Red Sox"
+SELECTION = "New York Yankees"
+BOOK      = "DraftKings"
 
 STEAM_BOOKS = ["Pinnacle", "Circa Sports", "DraftKings", "FanDuel", "BetMGM"]
 
@@ -505,11 +505,11 @@ class TestAlertFormatting:
 
     def test_ev_alert_contains_sport(self, engine):
         msg = format_ev_alert(self._full_opp(engine))
-        assert "NFL" in msg
+        assert "MLB" in msg
 
     def test_ev_alert_contains_event(self, engine):
         msg = format_ev_alert(self._full_opp(engine))
-        assert "Raiders" in msg
+        assert "Red Sox" in msg
 
     def test_ev_alert_contains_player(self, engine):
         msg = format_ev_alert(self._full_opp(engine))
@@ -583,8 +583,8 @@ class TestAlertFormatting:
         msg = format_steam_alert(alert)
 
         assert "SHARP MONEY ALERT" in msg             # alert type
-        assert "NFL" in msg                           # sport / league
-        assert "Raiders" in msg                       # event
+        assert "MLB" in msg                           # sport / league
+        assert "Red Sox" in msg                       # event
         assert "Moneyline" in msg                     # market
         assert SELECTION in msg                       # selection
         assert str(OPENING_ODDS) in msg               # opening odds
@@ -629,13 +629,17 @@ class TestSharpBooks:
 
 class TestAlertDeliveryFiltering:
     def _low_ev_opp(self) -> EVOpportunity:
-        """An opportunity well below the default MIN_EV_THRESHOLD (3.0%)."""
+        """An opportunity well below the default MIN_EV_THRESHOLD (3.0%).
+
+        Uses MLB Moneyline / DraftKings so the scope filter passes it through
+        and the EV threshold is the active gate being tested.
+        """
         fair = VigRemover.build_fair_odds("Home", -110, -110, is_side_a=True)
         ev_result = EVCalculator.build_ev_result("Home", fair, -110)
         return EVOpportunity(
             ev_result=ev_result, steam_alert=None,
-            sport=Sport.NBA, market_type=MarketType.SPREAD,
-            event="Lakers vs Celtics", player=None, line=-4.5,
+            sport=Sport.MLB, market_type=MarketType.MONEYLINE,
+            event="Chicago Cubs @ St. Louis Cardinals", player=None, line=None,
             best_odds=-110, best_book="DraftKings",
             fair_probability=0.5, expected_value=-2.3,
             steam_score=0, ai_confidence=30,
@@ -680,8 +684,9 @@ class TestAlertDeliveryFiltering:
         )
         delivery = AlertDelivery(db, mock_bot, [12345], min_steam=70)
         result = await delivery.deliver_steam(alert)
+        # Steam alerts are always blocked by the scope filter (sportsbook
+        # sharp-money alerts are outside the approved alert scope).
         assert result.filtered
-        assert "20" in result.filtered_reason
         mock_bot.send_message.assert_not_called()
 
 
@@ -759,7 +764,7 @@ class TestAlertDeliveryEndToEnd:
         await delivery.deliver_ev(opp)
 
         rec = (await db.get_recent_ev(limit=1))[0]
-        assert rec.sport == "NFL"
+        assert rec.sport == "MLB"
         assert rec.market_type == "Moneyline"
         assert rec.fair_probability > 0
         assert rec.steam_score > 0
@@ -768,7 +773,10 @@ class TestAlertDeliveryEndToEnd:
         assert rec.stars >= 1
         assert rec.reason_codes != ""
 
-    async def test_steam_alert_sends_and_stores(self, db, mock_bot):
+    async def test_steam_alert_scope_filtered(self, db, mock_bot):
+        """Steam (sportsbook sharp-money) alerts are always blocked by the scope
+        filter — they are outside the approved alert set.  Delivery must return
+        filtered=True and never reach Telegram or the DB."""
         alert = SteamAlert(
             alert_type=AlertType.STEAM, sport=SPORT, market_type=MKT_TYPE,
             event=EVENT, selection=SELECTION,
@@ -780,19 +788,17 @@ class TestAlertDeliveryEndToEnd:
         delivery = AlertDelivery(db, mock_bot, [11111], min_steam=60)
         result = await delivery.deliver_steam(alert)
 
-        assert not result.filtered
-        assert result.sent
-        mock_bot.send_message.assert_called_once()
+        assert result.filtered          # scope filter always blocks steam
+        assert not result.sent
+        mock_bot.send_message.assert_not_called()
+        # DB should be empty — scope filter fires before the store step
+        assert await db.count_steam_records() == 0
 
-        steam_records = await db.get_recent_steam(limit=5)
-        assert len(steam_records) == 1
-        rec = steam_records[0]
-        assert rec.event == EVENT
-        assert rec.steam_score == 70
-        assert rec.alert_sent is True
-        assert "Pinnacle" in rec.books_moved
-
-    async def test_steam_alert_message_contains_required_fields(self, db, mock_bot):
+    async def test_steam_alert_format_contains_required_fields(self, db, mock_bot):
+        """format_steam_alert() produces correctly structured HTML regardless of
+        scope.  This test exercises the formatter directly without going through
+        the delivery pipeline."""
+        from alerts import format_steam_alert
         alert = SteamAlert(
             alert_type=AlertType.STEAM, sport=SPORT, market_type=MKT_TYPE,
             event=EVENT, selection=SELECTION,
@@ -800,12 +806,9 @@ class TestAlertDeliveryEndToEnd:
             steam_score=70, steam_direction="DOWN",
             books_moved=STEAM_BOOKS,
         )
-        delivery = AlertDelivery(db, mock_bot, [11111], min_steam=60)
-        await delivery.deliver_steam(alert)
-
-        text = mock_bot.send_message.call_args.kwargs["text"]
-        assert "NFL" in text
-        assert "Raiders" in text       # event
+        text = format_steam_alert(alert)
+        assert "MLB" in text
+        assert "Red Sox" in text       # event
         assert "Moneyline" in text     # market
         assert SELECTION in text       # selection
         assert "70" in text            # steam score
@@ -847,7 +850,9 @@ class TestAlertDeliveryDeduplication:
         assert not r2.sent
         assert mock_bot.send_message.call_count == 1  # still only one real send
 
-    async def test_second_steam_alert_is_deduped(self, db, mock_bot):
+    async def test_second_steam_alert_is_scope_filtered(self, db, mock_bot):
+        """Steam alerts never reach the dedup stage — the scope filter blocks
+        them first.  Both calls should return filtered=True with zero sends."""
         alert = SteamAlert(
             alert_type=AlertType.STEAM, sport=SPORT, market_type=MKT_TYPE,
             event=EVENT, selection=SELECTION,
@@ -860,11 +865,13 @@ class TestAlertDeliveryDeduplication:
             min_steam=60, steam_dedup_window=3600,
         )
         r1 = await delivery.deliver_steam(alert)
-        assert r1.sent
+        assert r1.filtered
+        assert not r1.sent
 
         r2 = await delivery.deliver_steam(alert)
-        assert r2.deduped
-        assert mock_bot.send_message.call_count == 1
+        assert r2.filtered
+        assert not r2.sent
+        mock_bot.send_message.assert_not_called()
 
     async def test_different_events_both_send(self, db, mock_bot):
         """Two alerts for different events should each send independently."""

@@ -12,7 +12,7 @@ from typing import Optional
 
 from sqlalchemy import (
     Boolean, Column, DateTime, Float, Integer, String, Text,
-    select, func, desc
+    select, func, desc, text
 )
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
@@ -127,6 +127,13 @@ class PPEdgeRecord(Base):
     best_edge       = Column(Float,       nullable=False)
     alert_sent      = Column(Boolean,     default=False, nullable=False)
     detected_at     = Column(DateTime,    default=datetime.utcnow, nullable=False)
+    # ── outcome tracking ──────────────────────────────────────────────────────
+    tier            = Column(String(16),  nullable=True)    # AlertTier value
+    confidence      = Column(Float,       nullable=True)    # 0–100
+    result          = Column(String(16),  nullable=True, default="PENDING")
+    # ── line movement tracking ────────────────────────────────────────────────
+    opening_line    = Column(Float,       nullable=True)    # first ever line seen
+    prev_line       = Column(Float,       nullable=True)    # line from prior record
 
 
 # ── Multi-platform market snapshot records ────────────────────────────────────
@@ -220,6 +227,7 @@ class Database:
         )
         async with self._engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+        await self._migrate_pp_edge_records()
         logger.info("Database initialised at %s", self._url)
 
     def session(self) -> AsyncSession:
@@ -367,6 +375,22 @@ class Database:
 
     # ── PrizePicks ───────────────────────────────────────────────────────────
 
+    async def _migrate_pp_edge_records(self) -> None:
+        """Add new columns to pp_edge_records if they don't exist yet (idempotent)."""
+        new_cols = [
+            "ALTER TABLE pp_edge_records ADD COLUMN tier TEXT",
+            "ALTER TABLE pp_edge_records ADD COLUMN confidence REAL",
+            "ALTER TABLE pp_edge_records ADD COLUMN result TEXT DEFAULT 'PENDING'",
+            "ALTER TABLE pp_edge_records ADD COLUMN opening_line REAL",
+            "ALTER TABLE pp_edge_records ADD COLUMN prev_line REAL",
+        ]
+        async with self._engine.begin() as conn:
+            for sql in new_cols:
+                try:
+                    await conn.execute(text(sql))
+                except Exception:
+                    pass   # column already exists — safe to ignore
+
     async def save_pp_line(self, record: "PrizePicksRecord") -> "PrizePicksRecord":
         async with self.session() as s:
             s.add(record)
@@ -412,6 +436,76 @@ class Database:
                 select(func.count()).select_from(PPEdgeRecord)
             )
             return result.scalar() or 0
+
+    async def get_top_pp_edges(
+        self, limit: int = 10, hours: int = 6
+    ) -> list["PPEdgeRecord"]:
+        """Top PP edges from the last ``hours`` hours, deduped by (player, stat).
+
+        Returns at most ``limit`` records sorted by tier rank then edge% descending.
+        Deduplication keeps the record with the highest edge for each player/stat pair.
+        """
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(hours=hours)
+        async with self.session() as s:
+            result = await s.execute(
+                select(PPEdgeRecord)
+                .where(PPEdgeRecord.detected_at >= cutoff)
+                .order_by(desc(PPEdgeRecord.best_edge))
+                .limit(limit * 4)   # overfetch to allow in-Python dedup
+            )
+            rows = list(result.scalars().all())
+        seen: set[tuple[str, str]] = set()
+        deduped: list[PPEdgeRecord] = []
+        for r in rows:
+            key = (r.player_name, r.stat_type)
+            if key not in seen:
+                seen.add(key)
+                deduped.append(r)
+            if len(deduped) >= limit:
+                break
+        return deduped
+
+    async def get_pp_edge_line_history(
+        self, player_name: str, stat_type: str
+    ) -> tuple[float | None, float | None]:
+        """Return (opening_line, prev_line) for the given player/stat.
+
+        ``opening_line`` is the pp_line_value from the oldest stored record.
+        ``prev_line``    is the pp_line_value from the most recent stored record.
+        Both are None when no prior records exist (first detection ever).
+        """
+        async with self.session() as s:
+            first_res = await s.execute(
+                select(PPEdgeRecord.pp_line_value)
+                .where(
+                    PPEdgeRecord.player_name == player_name,
+                    PPEdgeRecord.stat_type   == stat_type,
+                )
+                .order_by(PPEdgeRecord.detected_at.asc())
+                .limit(1)
+            )
+            latest_res = await s.execute(
+                select(PPEdgeRecord.pp_line_value)
+                .where(
+                    PPEdgeRecord.player_name == player_name,
+                    PPEdgeRecord.stat_type   == stat_type,
+                )
+                .order_by(PPEdgeRecord.detected_at.desc())
+                .limit(1)
+            )
+        return first_res.scalar(), latest_res.scalar()
+
+    async def update_pp_result(self, record_id: int, result: str) -> None:
+        """Set the outcome (WIN/LOSS/PUSH/PENDING) on a PPEdgeRecord by id."""
+        from sqlalchemy import update as sa_update
+        async with self.session() as s:
+            await s.execute(
+                sa_update(PPEdgeRecord)
+                .where(PPEdgeRecord.id == record_id)
+                .values(result=result)
+            )
+            await s.commit()
 
     async def has_recent_pp_alert(
         self,

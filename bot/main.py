@@ -50,6 +50,7 @@ from commands import (
     cmd_analyze,
     cmd_steam,
     cmd_ev,
+    cmd_picks,
     cmd_clv,
     cmd_market,
     cmd_performance,
@@ -561,43 +562,66 @@ async def _prizepicks_job(context) -> None:
                     )
                     continue
 
-                # ── 6. Store edge record ─────────────────────────────────────
-                alert_sent = bool(chat_ids)
+                # ── 6. Normalise → AlertObject (tier, confidence, scope) ─────
+                from alert_normalizer import normalize_pp
+                from alert_scope_filter import check
+                norm_obj = normalize_pp(opp)
+                scope    = check(norm_obj)
+
+                # ── 7. Line movement tracking ────────────────────────────────
+                opening_line, prev_line = await _db.get_pp_edge_line_history(
+                    pp_line.player_name, pp_line.stat_type
+                )
+                if opening_line is None:
+                    opening_line = pp_line.line_value  # first record — current is baseline
+                if (prev_line is not None
+                        and abs(pp_line.line_value - prev_line) >= config.MIN_PP_LINE_CHANGE):
+                    direction = "up" if pp_line.line_value > prev_line else "down"
+                    logger.info(
+                        "PP line move signal: %s %s %.1f→%.1f (%s, Δ%.1f) — signal, not auto-pick",
+                        pp_line.player_name, pp_line.stat_type,
+                        prev_line, pp_line.line_value, direction,
+                        abs(pp_line.line_value - prev_line),
+                    )
+
+                # ── 8. Store edge record ─────────────────────────────────────
+                alert_sent = bool(chat_ids) and scope.allowed
                 await _db.save_pp_edge(PPEdgeRecord(
-                    player_name=pp_line.player_name,
-                    team=pp_line.team,
-                    sport=pp_line.sport,
-                    stat_type=pp_line.stat_type,
-                    pp_line_value=pp_line.line_value,
-                    sportsbook=opp.sportsbook,
-                    sb_line_value=opp.sportsbook_line,
-                    sb_over_odds=opp.sportsbook_over_odds,
-                    sb_under_odds=opp.sportsbook_under_odds,
-                    fair_prob_over=opp.adjusted_fair_prob_over,
-                    fair_prob_under=opp.adjusted_fair_prob_under,
-                    edge_over=opp.edge_over,
-                    edge_under=opp.edge_under,
-                    best_side=opp.best_side,
-                    best_edge=opp.best_edge,
-                    alert_sent=alert_sent,
-                    detected_at=now,
+                    player_name     = pp_line.player_name,
+                    team            = pp_line.team,
+                    sport           = pp_line.sport,
+                    stat_type       = pp_line.stat_type,
+                    pp_line_value   = pp_line.line_value,
+                    sportsbook      = opp.sportsbook,
+                    sb_line_value   = opp.sportsbook_line,
+                    sb_over_odds    = opp.sportsbook_over_odds,
+                    sb_under_odds   = opp.sportsbook_under_odds,
+                    fair_prob_over  = opp.adjusted_fair_prob_over,
+                    fair_prob_under = opp.adjusted_fair_prob_under,
+                    edge_over       = opp.edge_over,
+                    edge_under      = opp.edge_under,
+                    best_side       = opp.best_side,
+                    best_edge       = opp.best_edge,
+                    alert_sent      = alert_sent,
+                    tier            = norm_obj.tier.value,
+                    confidence      = norm_obj.confidence,
+                    result          = "PENDING",
+                    opening_line    = opening_line,
+                    prev_line       = prev_line,
+                    detected_at     = now,
                 ))
 
-                # ── 7. Scope filter + Alert ──────────────────────────────────
-                if chat_ids:
-                    from alert_normalizer import normalize_pp
-                    from alert_scope_filter import check
-                    scope = check(normalize_pp(opp))
-                    if scope.allowed:
-                        message = format_pp_alert(opp)
-                        await broadcast_alert(bot, chat_ids, message)
-                        logger.info(
-                            "PP edge alert: %s | %s | %s | edge=+%.1f%%",
-                            pp_line.player_name, pp_line.stat_type,
-                            opp.best_side, opp.best_edge,
-                        )
-                    else:
-                        logger.warning("PP alert skipped — %s", scope.reason)
+                # ── 9. Alert ─────────────────────────────────────────────────
+                if chat_ids and scope.allowed:
+                    message = format_pp_alert(opp)
+                    await broadcast_alert(bot, chat_ids, message)
+                    logger.info(
+                        "PP edge alert: %s | %s | %s | edge=+%.1f%% | tier=%s",
+                        pp_line.player_name, pp_line.stat_type,
+                        opp.best_side, opp.best_edge, norm_obj.tier.value,
+                    )
+                elif not scope.allowed:
+                    logger.warning("PP alert skipped — %s", scope.reason)
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
@@ -620,6 +644,7 @@ def main() -> None:
 
     # Register command handlers
     app.add_handler(CommandHandler("testalert", cmd_testalert))
+    app.add_handler(CommandHandler("picks",   cmd_picks))
     app.add_handler(CommandHandler("start",   cmd_start))
     app.add_handler(CommandHandler("help",    cmd_help))
     app.add_handler(CommandHandler("status",  cmd_status))
