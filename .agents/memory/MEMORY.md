@@ -1,3 +1,4 @@
 - [CLV formula direction](clv-formula.md) — CLV% uses (fp_close/fp_bet - 1), NOT (fp_bet/fp_close - 1); higher fp_close = market tightened after your bet = positive CLV.
 - [Multi-platform connector architecture](connector-architecture.md) — DK/FD connectors use Odds API filtered by bookmaker key; Underdog uses unofficial /v3/over_under_lines; pick'em isolation enforced by is_pickem flag.
 - [AI Ranking & Backtesting Engine](ranking-engine.md) — ranking.py wraps compute_confidence + ±10 historical adj; backtesting.py replays EVRecord via stored ai_confidence; new DB methods and /performance + /backtest commands added.
+- [Alert source priority](source-priority.md) — PrizePicks (primary/daily) → Underdog (secondary) → DK/FD MLB ML/Totals (tertiary); never optimise sportsbook alerts ahead of PP work.

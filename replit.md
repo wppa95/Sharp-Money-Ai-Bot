@@ -233,3 +233,6 @@ All settings in `bot/config.py` — override via environment variables:
 - Documentation changes do not require calling `markTaskInProgress`
 - Test suite is the source of truth for pipeline correctness — run before merging any engine changes
 - Sharp book list is configurable via `SHARP_BOOKS` env var; defaults cover the primary sharp/respected books
+- **Alert source priority: PrizePicks (primary, daily use) → Underdog (secondary) → DraftKings/FanDuel MLB ML/Totals (tertiary)**
+- Do not spend development effort optimising sportsbook alerts before PrizePicks analysis is complete
+- PrizePicks features ship first; Underdog enhancements second; sportsbook scope changes last
