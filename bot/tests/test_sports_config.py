@@ -28,7 +28,7 @@ from config import Config, config
 
 
 EXPECTED_DEFAULT_SPORTS = [
-    "NFL", "NBA", "MLB", "WNBA", "NHL", "NCAAF", "NCAAB", "UFC",
+    "NBA", "MLB", "WNBA", "NHL", "NCAAF", "NCAAB", "UFC",
     "EPL", "LaLiga", "SerieA", "Bundesliga", "Ligue1", "MLS", "UCL",
 ]
 
