@@ -28,6 +28,7 @@ from database import Database, OddsRecord
 from engine import AnalysisEngine
 from engine.season_check import SeasonChecker
 from engine.analysis import _SPORT_TO_ODDS_API_KEY, PlayerPropLine
+from alert_scope_filter import is_ev_line_in_scope
 from models import (
     MarketType,
     OddsLine,
@@ -287,9 +288,26 @@ async def _poll_odds_job(context) -> None:
         logger.debug("_poll_odds_job: no lines returned from API")
         return
 
-    logger.info("_poll_odds_job: storing %d odds lines", len(all_lines))
+    # ── 1b. Early scope filter — drop lines that can never be delivered ────────
+    # Only MLB Moneyline / MLB Totals can pass the AlertScopeFilter for DK/FD EV
+    # alerts.  Filtering here avoids writing out-of-scope rows to odds_records
+    # and running EV analysis on data that will always be blocked at delivery.
+    before_filter = len(all_lines)
+    all_lines = [l for l in all_lines if is_ev_line_in_scope(l.sport, l.market_type)]
+    dropped = before_filter - len(all_lines)
+    if dropped:
+        logger.debug(
+            "_poll_odds_job: dropped %d out-of-scope lines before analysis (%d remain)",
+            dropped, len(all_lines),
+        )
 
-    # ── 2. Store every line to the database ───────────────────────────────────
+    if not all_lines:
+        logger.debug("_poll_odds_job: no in-scope lines after scope filter")
+        return
+
+    logger.info("_poll_odds_job: storing %d in-scope odds lines", len(all_lines))
+
+    # ── 2. Store every in-scope line to the database ──────────────────────────
     for line in all_lines:
         record = OddsRecord(
             sportsbook=line.sportsbook,
@@ -394,6 +412,17 @@ async def _steam_check_job(context) -> None:
                     sport_str, odds_key,
                 )
                 continue
+
+        # Skip sports whose steam alerts are always blocked by scope.
+        # Steam is blocked for all non-MLB sports (and for all steam alert
+        # types regardless of sport), so reading their odds records is wasted
+        # I/O.  Only MLB records could theoretically produce a deliverable alert
+        # if the scope is ever widened; keep MLB here for forward-compatibility.
+        if sport != Sport.MLB:
+            logger.debug(
+                "_steam_check_job: skipping %s — steam outside approved scope", sport_str
+            )
+            continue
 
         records = await _db.get_odds_window(sport.value, since)
         if not records:

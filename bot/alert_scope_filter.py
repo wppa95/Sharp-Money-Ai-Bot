@@ -106,6 +106,22 @@ def check(obj: AlertObject) -> FilterResult:
     return FilterResult(allowed=True)
 
 
+# ── Cheap line-level pre-filter (call before constructing AlertObject) ────────
+
+def is_ev_line_in_scope(sport: Sport, market_type: MarketType) -> bool:
+    """
+    Fast pre-filter for raw OddsLine objects — call this before any DB write
+    or analysis-engine call to drop data that can never pass ``check()``.
+
+    Rules mirror the DK/FD block in ``check()``:
+      • Only ``Sport.MLB`` + (``MarketType.MONEYLINE`` or ``MarketType.TOTAL``) → True
+      • Everything else → False
+      • PrizePicks / Underdog lines are handled by their own pipelines;
+        do not pass them here.
+    """
+    return sport.value == _APPROVED_SPORT and market_type.value in _APPROVED_MARKETS
+
+
 # ── Internal ──────────────────────────────────────────────────────────────────
 
 def _block(obj: AlertObject, reason: str) -> FilterResult:
