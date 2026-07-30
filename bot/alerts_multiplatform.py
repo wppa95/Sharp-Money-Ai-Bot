@@ -253,7 +253,8 @@ def format_underdog_change_alert(
     old_line: float,
     new_line: float,
     game_time: Optional[datetime] = None,
-    score: Optional[object] = None,   # UDPropScore — typed as object to avoid circular import
+    score: Optional[object] = None,       # UDPropScore — typed as object to avoid circular import
+    validation: Optional[object] = None,  # PlayerPropValidation — typed as object
     *,
     removed: bool = False,
 ) -> str:
@@ -261,6 +262,7 @@ def format_underdog_change_alert(
 
     When *score* (a UDPropScore) is supplied, a grade line is appended that
     shows the tier (S/A/B), star rating (★★★☆☆), and raw score total.
+    When *validation* is supplied, a compact history signal line is appended.
     """
     sport_icon = {
         "NFL": "🏈", "NBA": "🏀", "MLB": "⚾",
@@ -299,6 +301,14 @@ def format_underdog_change_alert(
             f"  <i>(n={n_hist})</i>"
         )
 
+    # Validation block — shown when supporting history is available
+    validation_str = ""
+    if validation is not None and getattr(validation, "has_supporting_data", False):
+        validation_str = (
+            f"\n💡 <b>History:</b>  "
+            f"<code>{getattr(validation, 'rate_summary', lambda: '')()}</code>"
+        )
+
     parts = [
         header,
         "",
@@ -306,7 +316,7 @@ def format_underdog_change_alert(
         f"👤 <b>{player_name}</b>",
         "",
         _div(),
-        change_line + game_str + grade_str,
+        change_line + game_str + grade_str + validation_str,
         "",
         f"{EMOJI['clock']} <i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>",
     ]
@@ -322,15 +332,16 @@ def format_underdog_new_prop_alert(
     stat_type: str,
     line_value: float,
     game_time: Optional[datetime] = None,
-    score: Optional[object] = None,    # UDPropScore
+    score: Optional[object] = None,       # UDPropScore
+    validation: Optional[object] = None,  # PlayerPropValidation
     *,
     low_line_threshold: float = 1.0,
 ) -> str:
     """Format a 🚨 UNDERDOG PROP LIVE alert for a first-appearance prop.
 
     Fires when a (player_name, stat_type) pair is seen for the very first
-    time in the Underdog feed.  Score may be present even with no history
-    (n_history=0) if the scoring model ran with defaults.
+    time AND has sufficient history to justify an immediate alert.
+    The validation gate ensures props with no history go to digest only.
     """
     sport_icon = {
         "NFL": "🏈", "NBA": "🏀", "MLB": "⚾",
@@ -342,7 +353,7 @@ def format_underdog_new_prop_alert(
         if game_time else ""
     )
 
-    # Grade block — shown even when n_history=0 so tier/stars are visible
+    # Grade block
     grade_str = ""
     if score is not None:
         tier   = getattr(score, "tier",         "?")
@@ -356,6 +367,14 @@ def format_underdog_new_prop_alert(
             f"  <i>(n={n_hist})</i>"
         )
 
+    # Validation block — only show when supporting history is available
+    validation_str = ""
+    if validation is not None and getattr(validation, "has_supporting_data", False):
+        validation_str = (
+            f"\n💡 <b>History:</b>  "
+            f"<code>{getattr(validation, 'rate_summary', lambda: '')()}</code>"
+        )
+
     # Reason bullets
     reasons = ["• New prop detected"]
     if line_value <= low_line_threshold:
@@ -363,6 +382,8 @@ def format_underdog_new_prop_alert(
     if score is not None and getattr(score, "stars", 0) >= 3:
         tier = getattr(score, "tier", "?")
         reasons.append(f"• Score qualifies ({tier}-tier)")
+    if validation is not None and getattr(validation, "has_supporting_data", False):
+        reasons.append(f"• Supporting history available ({getattr(validation, 'n_history', 0)} snapshots)")
 
     parts = [
         "🚨 <b>UNDERDOG PROP LIVE</b>",
@@ -374,7 +395,8 @@ def format_underdog_new_prop_alert(
         f"  <b>Starting Line:</b>  {line_value}",
         f"  <b>First Seen:</b>    {datetime.utcnow().strftime('%H:%M UTC')}"
         + game_str
-        + grade_str,
+        + grade_str
+        + validation_str,
         "",
         "<b>Reason:</b>",
         "\n".join(reasons),

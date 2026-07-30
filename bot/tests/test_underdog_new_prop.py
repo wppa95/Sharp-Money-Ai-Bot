@@ -42,16 +42,38 @@ def _snap(player: str, stat: str, line: float = 2.5, *, removed: bool = False) -
     return s
 
 
+def _fake_history(n: int = 6, line: float = 0.5) -> list:
+    """Build n fake UnderdogSnapshotRecord-like mocks for validation/scoring tests.
+
+    Sets all attributes accessed by both validate_player_prop and score_ud_prop:
+      line_value, line_moved, prev_line (None so consistency skips them), removed.
+    """
+    records = []
+    for i in range(n):
+        r = MagicMock()
+        r.line_value = line
+        r.line_moved = (i % 2 == 0)
+        r.prev_line  = None    # prevents _score_consistency from comparing MagicMocks
+        r.removed    = False   # prevents _score_stability from filtering rows
+        records.append(r)
+    return records
+
+
 def _make_db(
     known_keys: set | None = None,
     recent_dict: dict | None = None,
+    prop_history: list | None = None,
 ) -> MagicMock:
     db = MagicMock()
     db.get_known_underdog_prop_keys          = AsyncMock(return_value=known_keys or set())
     db.get_latest_underdog_snapshot_per_prop = AsyncMock(return_value=recent_dict or {})
     db.count_today_underdog_alerts           = AsyncMock(return_value=0)
     db.save_underdog_snapshot                = AsyncMock()
-    db.get_ud_prop_history                   = AsyncMock(return_value=[])
+    # Default to empty history — validation gate blocks immediate alerts without data.
+    # Pass prop_history=_fake_history() in tests that expect immediate alerts to fire.
+    db.get_ud_prop_history                   = AsyncMock(
+        return_value=prop_history if prop_history is not None else []
+    )
     return db
 
 
@@ -89,9 +111,10 @@ async def _run_job(snapshots, db, *, deliver_result=None):
 
 @pytest.mark.asyncio
 async def test_low_line_new_prop_triggers_alert(caplog):
-    """A new prop with a 0.5 line must call deliver_underdog(new_prop=True)."""
+    """A new prop with 0.5 line AND supporting history triggers an immediate alert."""
     snaps = [_snap("Aaron Judge", "Home Runs", 0.5)]
-    db = _make_db(known_keys=set())          # empty DB — all props are new
+    # Provide 6 history records so validation gate passes (need >= 5 by default)
+    db = _make_db(known_keys=set(), prop_history=_fake_history(6))
 
     with caplog.at_level(logging.INFO, logger="market_engine"):
         delivery = await _run_job(snaps, db)
@@ -100,6 +123,26 @@ async def test_low_line_new_prop_triggers_alert(caplog):
     _, kwargs = delivery.deliver_underdog.call_args
     assert kwargs.get("new_prop") is True
     assert kwargs.get("removed") is not True
+
+
+@pytest.mark.asyncio
+async def test_low_line_new_prop_without_history_goes_to_digest():
+    """A new prop with 0.5 line but NO history is blocked from immediate alert by validation gate.
+
+    It still appears in the digest — validation does NOT suppress storage.
+    """
+    snaps = [_snap("Aaron Judge", "Home Runs", 0.5)]
+    # Empty history — validation gate blocks immediate alert
+    db = _make_db(known_keys=set(), prop_history=[])
+
+    delivery = await _run_job(snaps, db)
+
+    # No immediate alert — not enough history
+    delivery.deliver_underdog.assert_not_called()
+    # But the record IS saved and the prop goes to digest
+    db.save_underdog_snapshot.assert_called_once()
+    record = db.save_underdog_snapshot.call_args[0][0]
+    assert record.alert_outcome == "new_prop_summary"
 
 
 @pytest.mark.asyncio
@@ -161,7 +204,8 @@ async def test_new_prop_outcome_stored_as_new_prop_sent(caplog):
     """When a new-prop alert is sent, alert_outcome='new_prop_sent' in the DB record."""
     from alerts import DeliveryResult
     snaps = [_snap("Aaron Judge", "Home Runs", 0.5)]
-    db = _make_db(known_keys=set())
+    # Provide history so validation gate passes and immediate alert fires
+    db = _make_db(known_keys=set(), prop_history=_fake_history(6))
 
     sent_result = DeliveryResult(sent=True, recipients_sent=1)
     await _run_job(snaps, db, deliver_result=sent_result)
@@ -194,7 +238,8 @@ async def test_non_immediate_new_prop_outcome_is_summary():
 async def test_summary_line_includes_new_counts(caplog):
     """The INFO summary line must include new=N new_sent=N fields."""
     snaps = [_snap("Aaron Judge", "Home Runs", 0.5)]
-    db = _make_db(known_keys=set())
+    # Provide history so the immediate alert fires and new_sent=1
+    db = _make_db(known_keys=set(), prop_history=_fake_history(6))
 
     from alerts import DeliveryResult
     sent = DeliveryResult(sent=True, recipients_sent=1)
@@ -214,14 +259,16 @@ async def test_summary_line_includes_new_counts(caplog):
 async def test_new_prop_sent_increments_new_sent_counter(caplog):
     """new_sent counter equals number of immediate new-prop alerts delivered.
 
-    Both props are priority stats at 0.5 → both trigger immediate alerts.
+    Both props are priority stats at 0.5 AND have sufficient history → both
+    trigger immediate alerts.
     """
     # "Home Runs" and "Strikeouts" are both in UD_PRIORITY_STAT_CATEGORIES
     snaps = [
         _snap("Player A", "Strikeouts", 0.5),
         _snap("Player B", "Home Runs",  0.5),
     ]
-    db = _make_db(known_keys=set())
+    # Provide history so validation gate passes for both props
+    db = _make_db(known_keys=set(), prop_history=_fake_history(6))
 
     from alerts import DeliveryResult
     sent = DeliveryResult(sent=True, recipients_sent=1)
@@ -333,9 +380,10 @@ async def test_priority_stat_high_line_goes_to_digest_not_immediate():
 
 @pytest.mark.asyncio
 async def test_priority_stat_at_half_line_triggers_immediate_alert():
-    """A priority stat AT 0.5 line DOES trigger an immediate individual alert."""
+    """A priority stat AT 0.5 line WITH supporting history triggers an immediate alert."""
     snaps = [_snap("Aaron Judge", "Home Runs", 0.5)]
-    db = _make_db(known_keys=set())
+    # History is required — validation gate blocks immediate alerts without data
+    db = _make_db(known_keys=set(), prop_history=_fake_history(6))
 
     from alerts import DeliveryResult
     sent = DeliveryResult(sent=True, recipients_sent=1)
@@ -345,6 +393,38 @@ async def test_priority_stat_at_half_line_triggers_immediate_alert():
     delivery.deliver_underdog.assert_called_once()
     _, kwargs = delivery.deliver_underdog.call_args
     assert kwargs.get("new_prop") is True
+
+
+@pytest.mark.asyncio
+async def test_validation_json_stored_on_record():
+    """validation_json is stored on the DB record for all new props."""
+    snaps = [_snap("Aaron Judge", "Home Runs", 0.5)]
+    db = _make_db(known_keys=set(), prop_history=[])
+
+    await _run_job(snaps, db)
+
+    db.save_underdog_snapshot.assert_called_once()
+    record = db.save_underdog_snapshot.call_args[0][0]
+    assert record.validation_json is not None
+    import json
+    parsed = json.loads(record.validation_json)
+    assert "n" in parsed
+    assert "has_data" in parsed
+
+
+@pytest.mark.asyncio
+async def test_validation_json_stored_with_history():
+    """validation_json reflects history metrics when history is available."""
+    snaps = [_snap("Aaron Judge", "Home Runs", 0.5)]
+    db = _make_db(known_keys=set(), prop_history=_fake_history(8))
+
+    await _run_job(snaps, db)
+
+    record = db.save_underdog_snapshot.call_args[0][0]
+    import json
+    parsed = json.loads(record.validation_json)
+    assert parsed["n"] == 8
+    assert parsed["has_data"] is True
 
 
 @pytest.mark.asyncio

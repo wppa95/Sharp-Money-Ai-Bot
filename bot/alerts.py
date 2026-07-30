@@ -913,7 +913,8 @@ class AlertDelivery:
         old_line: float,
         new_line: float,
         game_time: "Optional[datetime]" = None,
-        score: "Optional[object]" = None,   # UDPropScore — typed as object to avoid import
+        score: "Optional[object]" = None,       # UDPropScore — typed as object to avoid import
+        validation: "Optional[object]" = None,  # PlayerPropValidation — typed as object
         *,
         removed: bool = False,
         new_prop: bool = False,
@@ -981,6 +982,7 @@ class AlertDelivery:
                 new_line,
                 game_time,
                 score=score,
+                validation=validation,
                 low_line_threshold=config.UD_NEW_PROP_LOW_LINE_THRESHOLD,
             )
         else:
@@ -989,6 +991,7 @@ class AlertDelivery:
                 old_line, new_line,
                 game_time,
                 score=score,
+                validation=validation,
                 removed=removed,
             )
 

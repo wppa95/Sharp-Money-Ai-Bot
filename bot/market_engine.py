@@ -479,44 +479,63 @@ async def underdog_job(context) -> None:
 
         # ── Scoring gate ─────────────────────────────────────────────────────
         from engine.ud_scoring import score_ud_prop, UDPropScore
+        from engine.player_validator import validate_player_prop
         from alerts import DeliveryResult
         score:        Optional[UDPropScore] = None
         ud_result:    DeliveryResult        = DeliveryResult(sent=False)
         np_immediate: bool                  = False   # set inside is_new_prop branch
+        validation:   Optional[object]      = None    # PlayerPropValidation or None
 
         if is_new_prop:
             # ── New-prop path ────────────────────────────────────────────────
-            # Score with no history (n_history=0 — all dimensions return neutral).
             _n_new_prop += 1
             line_val = snap.line or 0.0
+            # Load history even for new props — needed for validation gate.
+            # Truly first-ever props return empty list → validation blocks alert.
+            np_history = await db.get_ud_prop_history(player, stat_type, limit=30)
             score = score_ud_prop(
                 player_name  = player,
                 stat_type    = stat_type,
                 sport        = snap.sport or "UNKNOWN",
                 current_line = line_val,
                 prev_line    = None,
-                history      = [],
+                history      = np_history,
             )
-            # Immediate individual alert criteria (strict):
-            #   - 0.5 line AND it is a supported betting category
-            #   - OR score reaches the quality threshold
-            # Priority stat category alone (without a 0.5 line) does NOT trigger
-            # an individual alert — it goes into the digest instead.
+            # Validation: require min supporting history before any immediate alert.
+            # Props with zero history (first appearance) always go to digest.
+            validation = validate_player_prop(
+                player_name  = player,
+                stat_type    = stat_type,
+                current_line = line_val,
+                history      = np_history,
+                min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
+            )
+            # Immediate criteria (strict):
+            #   - 0.5 line AND supported betting category
+            #   - OR score reaches quality threshold
             np_immediate = (
                 (line_val <= config.UD_NEW_PROP_IMMEDIATE_LINE_THRESHOLD
                  and stat_type in config.UD_PRIORITY_STAT_CATEGORIES)
                 or score.stars >= config.UD_MIN_STARS_TO_ALERT
             )
-            # Always add to the cycle batch — even non-immediate props appear in summary
+            # Validation gate: block if insufficient player history
+            if np_immediate and not validation.has_supporting_data:
+                np_immediate = False
+                logger.debug(
+                    "UD new-prop validation blocked: %s | %s | %s",
+                    player, stat_type, validation.reason,
+                )
+            # Always add to the cycle batch — even blocked props appear in digest
             _new_props_batch.append({
-                "player":    player,
-                "stat_type": stat_type,
-                "sport":     snap.sport or "UNKNOWN",
-                "team":      snap.team or "",
-                "line":      line_val,
-                "score":     score,
-                "immediate": np_immediate,
-                "game_time": snap.game_time,
+                "player":     player,
+                "stat_type":  stat_type,
+                "sport":      snap.sport or "UNKNOWN",
+                "team":       snap.team or "",
+                "line":       line_val,
+                "score":      score,
+                "immediate":  np_immediate,
+                "game_time":  snap.game_time,
+                "validation": validation,
             })
             if np_immediate and chat_ids:
                 delivery  = AlertDelivery(db, bot, chat_ids)
@@ -530,6 +549,7 @@ async def underdog_job(context) -> None:
                     game_time   = snap.game_time,
                     score       = score,
                     new_prop    = True,
+                    validation  = validation,
                 )
                 if ud_result.sent:
                     _n_new_prop_sent += 1
@@ -544,7 +564,8 @@ async def underdog_job(context) -> None:
             # Score line-change props that pass the raw magnitude pre-filter.
             # Removal notices bypass scoring and always qualify.
             if not is_removed and line_changed and prev_line is not None:
-                ud_history = await db.get_ud_prop_history(player, stat_type, limit=20)
+                # Load limit=30 to cover L30 validation window as well as scoring
+                ud_history = await db.get_ud_prop_history(player, stat_type, limit=30)
                 score = score_ud_prop(
                     player_name  = player,
                     stat_type    = stat_type,
@@ -553,11 +574,19 @@ async def underdog_job(context) -> None:
                     prev_line    = prev_line,
                     history      = ud_history,
                 )
+                validation = validate_player_prop(
+                    player_name  = player,
+                    stat_type    = stat_type,
+                    current_line = snap.line or 0.0,
+                    history      = ud_history,
+                    min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
+                )
                 _n_scored += 1
                 _tier_counts[score.tier] = _tier_counts.get(score.tier, 0) + 1
                 logger.debug(
-                    "UD score: %s | %s | %s (tier=%s stars=%d n=%d)",
-                    player, stat_type, score.total, score.tier, score.stars, score.n_history,
+                    "UD score: %s | %s | %s (tier=%s stars=%d n=%d has_data=%s)",
+                    player, stat_type, score.total, score.tier, score.stars,
+                    score.n_history, validation.has_supporting_data,
                 )
 
             # Qualify for alert delivery.
@@ -600,6 +629,7 @@ async def underdog_job(context) -> None:
                     game_time   = snap.game_time,
                     score       = score,
                     removed     = is_removed,
+                    validation  = validation,
                 )
                 if ud_result.filtered:
                     logger.debug(
@@ -648,8 +678,9 @@ async def underdog_job(context) -> None:
             score_total   = score.total  if score is not None else None,
             score_tier    = score.tier   if score is not None else None,
             score_stars   = score.stars  if score is not None else None,
-            alert_outcome = _alert_outcome,
-            fetched_at    = now,
+            alert_outcome   = _alert_outcome,
+            validation_json = validation.to_json() if validation is not None else None,
+            fetched_at      = now,
         )
         await db.save_underdog_snapshot(record)
 

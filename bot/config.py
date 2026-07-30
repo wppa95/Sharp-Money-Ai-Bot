@@ -140,6 +140,13 @@ class Config:
     UD_NEW_PROP_IMMEDIATE_LINE_THRESHOLD: float = float(
         os.environ.get("UD_NEW_PROP_IMMEDIATE_LINE_THRESHOLD", "0.5")
     )
+    # Minimum DB snapshots required before a prop is allowed an immediate
+    # individual alert.  Props with fewer than this many snapshots are sent
+    # to the digest only, regardless of line or score.  Prevents "first
+    # appearance = alert" for props with no performance evidence.
+    UD_VALIDATION_MIN_SAMPLES: int = int(
+        os.environ.get("UD_VALIDATION_MIN_SAMPLES", "5")
+    )
     # Stat categories that always trigger an immediate individual alert when a
     # new prop is first seen, regardless of line value.  Comma-separated via env
     # var UD_PRIORITY_STAT_CATEGORIES to override.
