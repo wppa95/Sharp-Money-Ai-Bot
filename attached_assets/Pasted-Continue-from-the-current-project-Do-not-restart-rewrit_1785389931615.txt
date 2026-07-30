@@ -1,0 +1,87 @@
+Continue from the current project. Do not restart, rewrite, or replace any existing modules.
+
+Current project status:
+- Core architecture complete
+- PrizePicks integration complete
+- Multi-Platform Market Engine complete and applied
+- Existing tests must continue to pass
+
+Next Task: AI Ranking & Backtesting Engine
+
+Objective:
+Build an AI ranking system that learns from historical alerts and ranks new opportunities by quality and confidence.
+
+Requirements:
+
+1. Historical Tracking
+Record every alert with:
+- Sport
+- League
+- Event
+- Player/Team
+- Market
+- Sportsbook(s)
+- Opening odds
+- Alert odds
+- Closing odds
+- Fair probability
+- Expected value (+EV)
+- Steam score
+- AI confidence
+- Timestamp
+- Result (Win/Loss/Push)
+- Closing Line Value (CLV)
+
+2. Backtesting Engine
+Create a module that can analyze historical alerts and report:
+- Win rate
+- Average CLV
+- Average edge
+- Performance by sport
+- Performance by league
+- Performance by market type
+- Performance by sportsbook
+- Performance by confidence tier
+
+3. AI Ranking
+Create a confidence score from 0–100 using existing engine outputs such as:
+- Steam score
+- Fair probability
+- Expected value
+- Consensus agreement
+- Historical performance
+- CLV history
+
+Assign:
+- S Tier (95–100)
+- A Tier (85–94)
+- B Tier (75–84)
+- Pass (<75)
+
+The scoring system should be modular and configurable.
+
+4. Recommendation Engine
+Each alert should include:
+- Confidence score
+- Tier
+- Take/Pass recommendation
+- Short explanation of the strongest factors
+
+5. Database
+Add any required tables for historical performance and rankings without breaking existing database models.
+
+6. Discord Integration
+Update alerts to include:
+- AI Confidence
+- Tier
+- Historical win rate (when available)
+- Average CLV (when available)
+
+7. Testing
+- Add comprehensive unit tests.
+- Keep all existing functionality intact.
+- Run the full test suite before completion.
+- Report all files created, modified, and final test results.
+
+Important:
+Do not duplicate existing functionality. Reuse the current engine, database, alert pipeline, and market models wherever possible. Inspect the existing implementation before making changes and extend the current architecture rather than creating parallel systems.
