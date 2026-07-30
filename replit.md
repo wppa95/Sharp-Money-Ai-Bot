@@ -1,45 +1,68 @@
-# [Project name]
+# Sharp Money +EV Detection Bot
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+A professional sports betting intelligence Telegram bot — foundation for a Sharp Money +EV Detection Platform.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- **Start the bot:** Run the `Sharp Money Bot` workflow (or `python bot/main.py`)
+- The bot polls Telegram continuously; it must stay running to receive commands
 
 ## Stack
 
-- pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
-- DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- Python 3.11
+- python-telegram-bot 22 (async, APScheduler job queue)
+- SQLAlchemy 2 + aiosqlite (async SQLite)
+- python-dotenv for local dev
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+```
+bot/
+├── main.py       # Entry point — builds Application, registers lifecycle hooks
+├── config.py     # All settings (reads TELEGRAM_TOKEN + optional env vars)
+├── commands.py   # Telegram command handlers (/start /help /status /analyze /steam /ev)
+├── alerts.py     # HTML alert formatters and broadcast helpers
+├── engine.py     # Vig removal, EV calculation, steam detection, AI confidence scoring
+├── database.py   # Async SQLAlchemy ORM + data access layer
+├── models.py     # Plain dataclasses: OddsLine, EVOpportunity, SteamAlert, etc.
+└── data/         # Auto-created — sharp_money.db lives here
+```
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- `run_polling()` owns the event loop in PTB v20+; never wrap it in `asyncio.run()`
+- Async DB setup uses PTB's `post_init` hook (not top-level `asyncio.run`)
+- Database env var is `BOT_DATABASE_URL` (not `DATABASE_URL`) to avoid collision with Replit's managed Postgres
+- All analysis logic is in `engine.py`; Telegram I/O stays in `commands.py` and `alerts.py`
+- Background job stubs (`_poll_odds_job`, `_steam_check_job`) are pre-wired in `main.py` — fill in when live APIs are integrated
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+- `/start` — welcome and overview
+- `/help` — command reference
+- `/status` — uptime, DB record counts, market stats
+- `/analyze [sport] [selection] [odds] [opp_odds]` — on-demand line analysis (vig removal + EV + Kelly)
+- `/steam` — latest detected steam / sharp moves from DB
+- `/ev` — latest +EV opportunities from DB
+- Automatic alert broadcasting (ready to wire to live odds feed)
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+_Populate as you build._
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Install packages with `installLanguagePackages` (skill), not `pip install` directly
+- PTB v20+ event loop: `Application.run_polling()` blocks and manages its own loop
+- `DATABASE_URL` is Replit-managed (Postgres); use `BOT_DATABASE_URL` for the bot's SQLite
 
-## Pointers
+## Roadmap stubs (ready to implement)
 
-- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+| Feature | Location |
+|---------|----------|
+| Live sportsbook odds | `engine.py → fetch_live_odds()` |
+| PrizePicks monitoring | `engine.py → fetch_prizepicks_lines()` |
+| ML confidence model | `engine.py → run_ml_model()` |
+| CLV tracking | `engine.py → compute_clv()` |
+| Periodic polling | `main.py → _poll_odds_job()` / `_steam_check_job()` |
+| Discord integration | `alerts.py → broadcast_alert()` |

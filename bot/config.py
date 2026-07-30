@@ -14,7 +14,7 @@ load_dotenv()
 class Config:
     # ── Telegram ──────────────────────────────────────────────────────────────
     TELEGRAM_BOT_TOKEN: str = field(
-        default_factory=lambda: os.environ.get("TELEGRAM_BOT_TOKEN", "")
+        default_factory=lambda: os.environ.get("TELEGRAM_TOKEN", "")
     )
     # Comma-separated list of Telegram user IDs allowed to use the bot.
     # Leave empty to allow all users (not recommended for production).
@@ -22,7 +22,7 @@ class Config:
 
     # ── Database ──────────────────────────────────────────────────────────────
     DATABASE_URL: str = field(
-        default_factory=lambda: os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///bot/data/sharp_money.db")
+        default_factory=lambda: os.environ.get("BOT_DATABASE_URL", "sqlite+aiosqlite:///bot/data/sharp_money.db")
     )
 
     # ── Analysis Engine ───────────────────────────────────────────────────────
