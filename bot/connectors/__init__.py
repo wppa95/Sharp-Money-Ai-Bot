@@ -18,6 +18,7 @@ from .draftkings import DraftKingsConnector
 from .fanduel import FanDuelConnector
 from .underdog import UnderdogConnector
 from .registry import ConnectorRegistry
+from .mock import MockOddsConnector, MockScenario, make_mock_dk, make_mock_fd
 
 __all__ = [
     "BaseConnector",
@@ -27,4 +28,9 @@ __all__ = [
     "FanDuelConnector",
     "UnderdogConnector",
     "ConnectorRegistry",
+    # ── Testing only — never registered in production ──────────────────────
+    "MockOddsConnector",
+    "MockScenario",
+    "make_mock_dk",
+    "make_mock_fd",
 ]
