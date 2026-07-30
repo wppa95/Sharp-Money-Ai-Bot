@@ -585,8 +585,9 @@ async def _prizepicks_job(context) -> None:
 
                 # ── 7. Scope filter + Alert ──────────────────────────────────
                 if chat_ids:
-                    from alert_scope_filter import check_pp_opportunity
-                    scope = check_pp_opportunity(opp)
+                    from alert_normalizer import normalize_pp
+                    from alert_scope_filter import check
+                    scope = check(normalize_pp(opp))
                     if scope.allowed:
                         message = format_pp_alert(opp)
                         await broadcast_alert(bot, chat_ids, message)

@@ -213,11 +213,9 @@ async def consensus_check_job(context) -> None:
 
         message = format_inefficiency_alert(ineff, cr)
         if chat_ids:
-            from alert_scope_filter import check_inefficiency_alert
-            scope = check_inefficiency_alert(
-                str(ineff.sport), str(ineff.market_type),
-                ineff.event, ineff.selection,
-            )
+            from alert_normalizer import normalize_inefficiency
+            from alert_scope_filter import check
+            scope = check(normalize_inefficiency(ineff))
             if scope.allowed:
                 await broadcast_alert(bot, chat_ids, message)
                 logger.info(
@@ -284,8 +282,9 @@ async def consensus_check_job(context) -> None:
             sharp_books     = sharp_books,
         )
         if chat_ids:
-            from alert_scope_filter import check_multibook_steam
-            scope = check_multibook_steam(str(sport), str(market_type), event, selection)
+            from alert_normalizer import normalize_multibook_steam
+            from alert_scope_filter import check
+            scope = check(normalize_multibook_steam(str(sport), str(market_type), event, selection))
             if scope.allowed:
                 await broadcast_alert(bot, chat_ids, message)
                 logger.info(
@@ -369,8 +368,9 @@ async def clv_check_job(context) -> None:
 
             message = format_clv_opportunity_alert(opp)
             if chat_ids:
-                from alert_scope_filter import check_clv_alert
-                scope = check_clv_alert(opp.event, opp.selection, opp.sportsbook)
+                from alert_normalizer import normalize_clv
+                from alert_scope_filter import check
+                scope = check(normalize_clv(opp))
                 if scope.allowed:
                     await broadcast_alert(bot, chat_ids, message)
                     logger.info(
@@ -481,8 +481,9 @@ async def underdog_job(context) -> None:
         await db.save_underdog_snapshot(record)
 
         if should_alert and chat_ids:
-            from alert_scope_filter import check_underdog_alert
-            scope = check_underdog_alert(player, stat_type, snap.sport)
+            from alert_normalizer import normalize_underdog
+            from alert_scope_filter import check
+            scope = check(normalize_underdog(player, stat_type, snap.sport, is_removed, now))
             if scope.allowed:
                 message = format_underdog_change_alert(
                     player_name = player,

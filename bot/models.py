@@ -66,6 +66,24 @@ class Recommendation(str, enum.Enum):
     FADE = "Fade"
 
 
+class AlertSource(str, enum.Enum):
+    """Which platform or book originated an alert."""
+    PRIZEPICKS = "PrizePicks"
+    UNDERDOG   = "Underdog"
+    DRAFTKINGS = "DraftKings"
+    FANDUEL    = "FanDuel"
+    SYSTEM     = "System"   # multi-book / engine-generated (no single book)
+    UNKNOWN    = "Unknown"
+
+
+class AlertTier(str, enum.Enum):
+    """Normalized confidence tier across all alert types."""
+    CRITICAL = "Critical"   # STRONG_BET / CRITICAL_STEAM / edge ≥ 10 %
+    HIGH     = "High"       # BET        / STRONG_STEAM   / edge ≥ 7 %
+    MEDIUM   = "Medium"     # LEAN       / MODERATE_STEAM / edge ≥ 5 %
+    LOW      = "Low"        # PASS/FADE  / below threshold / informational
+
+
 # ── Core data models ───────────────────────────────────────────────────────────
 
 @dataclass
@@ -176,6 +194,30 @@ class EVOpportunity:
     @property
     def star_display(self) -> str:
         return "★" * self.stars + "☆" * (5 - self.stars)
+
+
+@dataclass
+class AlertObject:
+    """
+    Normalised envelope for every alert type.
+
+    Built by alert_normalizer.py from SteamAlert, EVOpportunity,
+    PPEdgeOpportunity, or Underdog data.  The AlertScopeFilter stamps
+    ``reason`` when it blocks delivery; callers read ``reason`` to log
+    the outcome without needing to re-inspect the raw alert.
+    """
+    source:     AlertSource
+    sport:      str           # Sport.value or raw string from connectors
+    market:     str           # MarketType.value
+    confidence: float         # 0–100 (ai_confidence, steam_score, or edge %)
+    tier:       AlertTier
+    reason:     str           # populated by filter on block; empty = allowed
+    timestamp:  datetime
+
+    # ── supplementary (for logging / correlation) ────────────────────────────
+    alert_type: AlertType = AlertType.SHARP
+    event:      str = ""
+    selection:  str = ""
 
 
 @dataclass

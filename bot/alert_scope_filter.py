@@ -1,140 +1,103 @@
 """
 AlertScopeFilter — final gate before every Telegram delivery.
 
+Single entry point:  check(obj: AlertObject) -> FilterResult
+
 Rules
 ─────
-PrizePicks   : player props only  → always allowed (PP is inherently player-prop)
-Underdog     : player props only  → always allowed (all Underdog pick'em are player-level)
-DraftKings / FanDuel (EVOpportunity)
-             : MLB Moneyline  ✓
-             : MLB Totals     ✓
-             : everything else ✗
-SteamAlert   : ALL blocked        ("sportsbook sharp money alerts")
-Multi-book steam, inefficiency, CLV alerts
-             : ALL blocked        ("generic betting alerts")
+PrizePicks / Underdog  : always allowed  (player props by definition)
+DraftKings / FanDuel   : MLB Moneyline ✓ | MLB Totals ✓ | everything else ✗
+SteamAlert (any book)  : always blocked  ("sportsbook sharp money alerts")
+System alerts          : always blocked  (multi-book steam, inefficiency, CLV)
 
-Any blocked call is logged at WARNING with a human-readable reason.
+When blocked, ``obj.reason`` is stamped with the human-readable explanation
+so callers get a complete record without needing a second inspection.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
-from models import MarketType, Sport
-
-if TYPE_CHECKING:
-    from models import EVOpportunity, SteamAlert
-    from prizepicks import PPEdgeOpportunity
+from models import AlertObject, AlertSource, AlertType, MarketType, Sport
 
 logger = logging.getLogger(__name__)
 
-# ── Approved DK / FD scope ────────────────────────────────────────────────────
-_APPROVED_SPORT       = Sport.MLB
-_APPROVED_MARKETS     = frozenset({MarketType.MONEYLINE, MarketType.TOTAL})
+# ── Allowed DK / FD scope ─────────────────────────────────────────────────────
+_APPROVED_SPORT   = Sport.MLB.value
+_APPROVED_MARKETS = frozenset({MarketType.MONEYLINE.value, MarketType.TOTAL.value})
+
+# AlertType values that are always blocked regardless of source
+_STEAM_ALERT_TYPES = frozenset({
+    AlertType.STEAM.value,
+    AlertType.SHARP.value,
+    AlertType.MULTI_BOOK_STEAM.value,
+})
 
 
 @dataclass(frozen=True)
 class FilterResult:
     allowed: bool
-    reason:  str = ""          # non-empty only when blocked
+    reason:  str = ""   # non-empty only when blocked
 
 
-# ── Public helpers ────────────────────────────────────────────────────────────
+# ── Public entry point ────────────────────────────────────────────────────────
 
-def check_ev_opportunity(opp: "EVOpportunity") -> FilterResult:
+def check(obj: AlertObject) -> FilterResult:
     """
-    DraftKings / FanDuel EVOpportunity: allow only MLB Moneyline or MLB Total.
-    """
-    sport  = opp.sport
-    mtype  = opp.market_type
+    Evaluate scope rules against a normalised AlertObject.
 
-    if sport != _APPROVED_SPORT:
+    Side-effect: stamps ``obj.reason`` with the block explanation when blocked.
+    """
+    src = obj.source
+
+    # ── PrizePicks / Underdog: player props — always pass ────────────────────
+    if src in (AlertSource.PRIZEPICKS, AlertSource.UNDERDOG):
+        return FilterResult(allowed=True)
+
+    # ── System alerts (multi-book steam, inefficiency, CLV): always block ────
+    if src == AlertSource.SYSTEM:
         reason = (
-            f"Blocked: {sport.value} {mtype.value} outside approved scope "
+            f"Blocked: {obj.alert_type.value} outside allowed scope "
+            f"({obj.sport} {obj.market} — {obj.event} / {obj.selection})"
+        )
+        return _block(obj, reason)
+
+    # ── DraftKings / FanDuel ─────────────────────────────────────────────────
+
+    # All steam / sharp-money moves are blocked regardless of sport
+    if obj.alert_type in _STEAM_ALERT_TYPES:
+        reason = (
+            f"Blocked: sportsbook sharp money alert outside allowed scope "
+            f"({obj.sport} {obj.market} — {obj.selection})"
+        )
+        return _block(obj, reason)
+
+    # Non-MLB sport
+    if obj.sport != _APPROVED_SPORT:
+        reason = (
+            f"Blocked: {obj.sport} {obj.market} outside approved scope "
             f"(DK/FD only: MLB Moneyline / MLB Totals)"
         )
-        _log_blocked("EV", opp.event, opp.ev_result.selection, reason)
-        return FilterResult(allowed=False, reason=reason)
+        return _block(obj, reason)
 
-    if mtype not in _APPROVED_MARKETS:
+    # MLB but wrong market type
+    if obj.market not in _APPROVED_MARKETS:
         reason = (
-            f"Blocked: MLB {mtype.value} outside approved scope "
+            f"Blocked: MLB {obj.market} outside approved scope "
             f"(DK/FD only: MLB Moneyline / MLB Totals)"
         )
-        _log_blocked("EV", opp.event, opp.ev_result.selection, reason)
-        return FilterResult(allowed=False, reason=reason)
+        return _block(obj, reason)
 
     return FilterResult(allowed=True)
-
-
-def check_steam_alert(alert: "SteamAlert") -> FilterResult:
-    """
-    All SteamAlerts are blocked — sportsbook sharp money alerts are outside scope.
-    """
-    reason = (
-        f"Blocked: sportsbook sharp money alert outside allowed scope "
-        f"({alert.sport.value} {alert.market_type.value} — {alert.selection})"
-    )
-    _log_blocked("Steam", alert.event, alert.selection, reason)
-    return FilterResult(allowed=False, reason=reason)
-
-
-def check_pp_opportunity(opp: "PPEdgeOpportunity") -> FilterResult:
-    """
-    PrizePicks player-prop opportunities are always allowed.
-    """
-    return FilterResult(allowed=True)
-
-
-def check_underdog_alert(player: str, stat_type: str, sport: str) -> FilterResult:
-    """
-    Underdog pick'em prop changes are always allowed (inherently player-level).
-    """
-    return FilterResult(allowed=True)
-
-
-def check_multibook_steam(sport: str, market_type: str, event: str, selection: str) -> FilterResult:
-    """
-    Multi-book steam / sportsbook consensus alerts are outside scope.
-    """
-    reason = (
-        f"Blocked: sportsbook sharp money alert outside allowed scope "
-        f"({sport} {market_type} — {event} / {selection})"
-    )
-    _log_blocked("MultiBookSteam", event, selection, reason)
-    return FilterResult(allowed=False, reason=reason)
-
-
-def check_inefficiency_alert(sport: str, market_type: str, event: str, selection: str) -> FilterResult:
-    """
-    Market inefficiency alerts are outside scope.
-    """
-    reason = (
-        f"Blocked: market inefficiency alert outside allowed scope "
-        f"({sport} {market_type} — {event} / {selection})"
-    )
-    _log_blocked("Inefficiency", event, selection, reason)
-    return FilterResult(allowed=False, reason=reason)
-
-
-def check_clv_alert(event: str, selection: str, sportsbook: str) -> FilterResult:
-    """
-    CLV opportunity alerts are outside scope.
-    """
-    reason = (
-        f"Blocked: CLV opportunity alert outside allowed scope "
-        f"({sportsbook} — {event} / {selection})"
-    )
-    _log_blocked("CLV", event, selection, reason)
-    return FilterResult(allowed=False, reason=reason)
 
 
 # ── Internal ──────────────────────────────────────────────────────────────────
 
-def _log_blocked(alert_kind: str, event: str, selection: str, reason: str) -> None:
+def _block(obj: AlertObject, reason: str) -> FilterResult:
+    obj.reason = reason
     logger.warning(
-        "AlertScopeFilter [%s] BLOCKED | %s / %s | %s",
-        alert_kind, event, selection, reason,
+        "AlertScopeFilter [%s | %s] BLOCKED | %s / %s | %s",
+        obj.source, obj.alert_type, obj.event, obj.selection, reason,
     )
+    return FilterResult(allowed=False, reason=reason)

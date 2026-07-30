@@ -712,8 +712,9 @@ class AlertDelivery:
           5. Log the alert (with alert_sent flag) to the database.
         """
         # 0. Scope filter
-        from alert_scope_filter import check_ev_opportunity
-        scope = check_ev_opportunity(opp)
+        from alert_normalizer import normalize_ev
+        from alert_scope_filter import check
+        scope = check(normalize_ev(opp))
         if not scope.allowed:
             return DeliveryResult(sent=False, filtered=True, filtered_reason=scope.reason)
 
@@ -775,8 +776,9 @@ class AlertDelivery:
           5. Log the alert (with alert_sent flag) to the database.
         """
         # 0. Scope filter
-        from alert_scope_filter import check_steam_alert
-        scope = check_steam_alert(alert)
+        from alert_normalizer import normalize_steam
+        from alert_scope_filter import check
+        scope = check(normalize_steam(alert))
         if not scope.allowed:
             return DeliveryResult(sent=False, filtered=True, filtered_reason=scope.reason)
 
