@@ -57,7 +57,7 @@ def format_steam_multibook_alert(
 
     sport_icon = {
         "NFL": "🏈", "NBA": "🏀", "MLB": "⚾",
-        "NHL": "🏒", "UFC": "🥊",
+        "NHL": "🏒", "UFC": "🥊", "WNBA": "🏀",
     }.get(sport, "🎯")
 
     consensus_line = (
@@ -118,7 +118,7 @@ def format_inefficiency_alert(
     """
     sport_icon = {
         "NFL": "🏈", "NBA": "🏀", "MLB": "⚾",
-        "NHL": "🏒", "UFC": "🥊",
+        "NHL": "🏒", "UFC": "🥊", "WNBA": "🏀",
     }.get(ineff.sport, "🎯")
 
     sign = "+" if ineff.deviation > 0 else ""
@@ -174,7 +174,7 @@ def format_clv_opportunity_alert(
     """
     sport_icon = {
         "NFL": "🏈", "NBA": "🏀", "MLB": "⚾",
-        "NHL": "🏒", "UFC": "🥊",
+        "NHL": "🏒", "UFC": "🥊", "WNBA": "🏀",
     }.get(opp.sport, "🎯")
 
     curr_str  = format_odds(opp.current_odds)
@@ -264,22 +264,21 @@ def format_underdog_change_alert(
     """
     sport_icon = {
         "NFL": "🏈", "NBA": "🏀", "MLB": "⚾",
-        "NHL": "🏒", "UFC": "🥊",
+        "NHL": "🏒", "UFC": "🥊", "WNBA": "🏀",
     }.get(sport, "🎯")
 
     if removed:
-        header = "🚫 <b>UNDERDOG PROP REMOVED</b>"
+        header      = "🚫 <b>UNDERDOG PROP REMOVED</b>"
         change_line = f"  <b>Last Line:</b>  {old_line}"
-        direction   = ""
     else:
-        change      = new_line - old_line
-        direction   = "📈 HIGHER" if change > 0 else "📉 LOWER"
-        header      = f"🔄 <b>UNDERDOG LINE CHANGE</b>  {direction}"
-        change_sign = "+" if change >= 0 else ""
+        change          = new_line - old_line
+        direction_icon  = "📈" if change > 0 else "📉"
+        header          = f"{direction_icon} <b>UNDERDOG LINE MOVE</b>"
+        change_sign     = "+" if change >= 0 else ""
         change_line = (
-            f"  <b>Old Line:</b>  {old_line}\n"
-            f"  <b>New Line:</b>  {new_line}\n"
-            f"  <b>Change:</b>    <code>{change_sign}{change:.1f}</code>"
+            f"  <b>Previous Line:</b>  {old_line}\n"
+            f"  <b>Current Line:</b>   {new_line}\n"
+            f"  <b>Movement:</b>       <code>{change_sign}{change:.1f}</code>"
         )
 
     game_str = f"\n  <b>Game:</b>    {game_time.strftime('%b %d %H:%M')} UTC" if game_time else ""
@@ -335,7 +334,7 @@ def format_underdog_new_prop_alert(
     """
     sport_icon = {
         "NFL": "🏈", "NBA": "🏀", "MLB": "⚾",
-        "NHL": "🏒", "UFC": "🥊",
+        "NHL": "🏒", "UFC": "🥊", "WNBA": "🏀",
     }.get(sport, "🎯")
 
     game_str = (
@@ -420,7 +419,7 @@ def format_underdog_new_prop_cycle_summary(
 
     sport_icon = {
         "NFL": "🏈", "NBA": "🏀", "MLB": "⚾",
-        "NHL": "🏒", "UFC": "🥊",
+        "NHL": "🏒", "UFC": "🥊", "WNBA": "🏀",
     }
 
     parts = [

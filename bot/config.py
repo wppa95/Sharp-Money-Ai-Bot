@@ -148,7 +148,8 @@ class Config:
         for s in os.environ.get(
             "UD_PRIORITY_STAT_CATEGORIES",
             "Home Runs,Strikeouts,Passing Yards,Rushing Yards,Receiving Yards,"
-            "Touchdowns,Points,Rebounds,Assists,3-Pointers,Goals,Shots on Goal",
+            "Touchdowns,Points,Rebounds,Assists,3-Pointers,Goals,Shots on Goal,"
+            "Rebounds + Assists,Points + Rebounds + Assists",
         ).split(",")
         if s.strip()
     ))

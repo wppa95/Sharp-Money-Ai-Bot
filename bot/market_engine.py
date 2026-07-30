@@ -557,13 +557,31 @@ async def underdog_job(context) -> None:
                     player, stat_type, score.total, score.tier, score.stars, score.n_history,
                 )
 
-            # Qualify: B-tier or better (stars >= UD_MIN_STARS_TO_ALERT).
-            # Removal notices always qualify.
-            is_qualified = is_removed or (
-                score is not None and score.stars >= config.UD_MIN_STARS_TO_ALERT
-            )
-            if is_qualified and not is_removed:
-                _n_qualified += 1
+            # Qualify for alert delivery.
+            # Removal notices: only Telegram-alert when the prop was worth watching.
+            # Criteria: previously alerted, strong score tier, 0.5 starting line,
+            # priority stat category, or had an earlier line movement.
+            # All removals are still saved to the DB regardless.
+            if is_removed:
+                is_qualified = (
+                    prev_record is not None and (
+                        prev_record.alert_sent
+                        or prev_record.score_tier in ("S", "A", "B")
+                        or (
+                            prev_record.line_value is not None
+                            and prev_record.line_value <= 0.5
+                        )
+                        or stat_type in config.UD_PRIORITY_STAT_CATEGORIES
+                        or prev_record.line_moved
+                    )
+                )
+            else:
+                # Line-change props: require B-tier or better.
+                is_qualified = (
+                    score is not None and score.stars >= config.UD_MIN_STARS_TO_ALERT
+                )
+                if is_qualified:
+                    _n_qualified += 1
 
             should_alert = is_qualified and (is_removed or (
                 line_changed
@@ -601,7 +619,7 @@ async def underdog_job(context) -> None:
             else:
                 _alert_outcome = "new_prop_summary"     # in cycle digest, no individual alert
         elif not should_alert:
-            _alert_outcome = "skipped"
+            _alert_outcome = "removal_skipped" if is_removed else "skipped"
         elif ud_result.sent:
             _alert_outcome = "removal_sent" if is_removed else "sent"
         elif ud_result.filtered:

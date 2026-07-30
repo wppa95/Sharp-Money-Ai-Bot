@@ -1,0 +1,298 @@
+FINAL UNDERDOG REFINEMENT PASS — DO NOT REDESIGN
+
+We are moving from development into live betting/testing.
+
+The recent changes already improved the system:
+- New prop individual alerts are filtered
+- End-of-cycle digest is working
+- 0.5 lines are prioritized
+- Line movement detection is working
+- All props continue being stored
+
+Keep those changes.
+
+Do not touch:
+- PrizePicks pipeline
+- OddsAPI architecture
+- Existing scoring model
+- Existing thresholds unless specifically required
+- Sports scope outside adding WNBA support
+- Database structure unless required
+
+Goal:
+Make Underdog useful for betting decisions while continuing to collect historical data.
+
+==================================================
+
+1. ALERT TIMING REFINEMENT
+
+Current issue:
+Alerts are arriving too close to publication/live windows.
+
+Goal:
+Find opportunities before games start.
+
+Continue storing every prop immediately.
+
+Telegram alerts should:
+- Prefer upcoming games only
+- Require game start time when available
+- Avoid alerts after game start
+- Prioritize several hours before the event
+
+If game time is unavailable:
+- Store the prop
+- Do not send immediate alerts unless it meets a high-priority condition
+
+Keep:
+- New prop detection
+- Digest system
+- Line movement tracking
+- Removal tracking
+
+==================================================
+
+2. KEEP FULL HISTORICAL DATA COLLECTION
+
+Continue storing every Underdog snapshot.
+
+Store:
+
+- Player
+- Sport
+- Stat type
+- Line value
+- Previous line
+- Line movement direction
+- Line movement amount
+- Timestamp
+- Game information when available
+- Score/tier/stars if graded
+- Alert outcome/reason
+
+Do not delete historical data.
+
+Purpose:
+Build future analysis for:
+
+- Which grades win
+- ROI
+- Hit rate
+- Best sports
+- Best stat types
+- S/A/B tier accuracy
+
+==================================================
+
+3. IMPROVE TELEGRAM NOTIFICATION FILTERING
+
+Current issue:
+Too many alerts hide the good opportunities.
+
+Keep collecting everything, but make Telegram the filter.
+
+Telegram should prioritize:
+
+- 0.5 starting lines
+- Strong grades
+- Meaningful line movement
+- Priority stat categories
+- Upcoming games
+
+Everything else:
+Store silently or include only in digest.
+
+Do not stop database collection.
+
+==================================================
+
+4. IMPROVE REMOVAL ALERTS
+
+Keep removal alerts.
+
+However, do not flood Telegram with every random removal.
+
+Removal alerts should prioritize:
+
+- Props that were previously alerted
+- Props with strong grades
+- Props with meaningful movement/history
+- Priority props
+
+Continue storing all removals in the database.
+
+Goal:
+Notify when an opportunity disappears, not every feed removal.
+
+==================================================
+
+5. ADD USEFUL LINE MOVEMENT ALERTS
+
+Keep detecting line movement.
+
+Add priority line movement alerts.
+
+Example:
+
+📈 UNDERDOG LINE MOVE
+
+Player:
+Sport:
+Stat:
+
+Previous Line:
+Current Line:
+
+Movement:
+Score/Tier/Stars:
+
+Only alert meaningful movements.
+Ignore tiny/noise changes.
+
+==================================================
+
+6. KEEP DATA COLLECTION MODE ACTIVE
+
+Do not reduce collection.
+
+The purpose of this phase is learning:
+
+- Which sports produce the best opportunities
+- Which stat types perform best
+- Which starting lines are strongest
+- Which grades convert into wins
+
+Do not optimize scoring yet.
+
+Collect data first.
+
+==================================================
+
+7. WNBA UNDERDOG SUPPORT
+
+Ensure WNBA props are included in Underdog collection and alerts.
+
+Include:
+
+- WNBA player props
+- Points
+- Rebounds
+- Assists
+- Rebounds + Assists
+- Points + Rebounds + Assists
+- 3-Pointers if available
+
+Treat WNBA the same as MLB:
+
+- Store every snapshot
+- Track new props
+- Track line movement
+- Grade when possible
+- Include in digest/priority alerts
+
+Do not create separate logic.
+Use the existing Underdog pipeline.
+
+Goal:
+Have MLB + WNBA available for live testing and slip building.
+
+==================================================
+
+8. FUTURE PRIZEPICKS COMPATIBILITY
+
+Prepare Underdog historical data so it can eventually be used as an information source for PrizePicks analysis.
+
+Do not merge pipelines.
+
+Keep:
+
+Underdog:
+- Market movement tracking
+- Opening lines
+- Line changes
+- Historical prop database
+- Alert history
+
+PrizePicks:
+- Separate grading system
+- Separate thresholds
+- Separate workflow
+
+Future goal:
+
+Use Underdog historical data to improve PrizePicks analysis through:
+
+- Opening line trends
+- Closing line movement
+- Which starting lines perform best
+- Which sports/stat types produce the most value
+- Historical hit rates by prop category
+- Cross-platform comparison when available
+
+Examples:
+
+"MLB Hits props opened at 0.5 on Underdog and moved — how often did they hit?"
+
+"Which players receive early market movement before games?"
+
+"Does Underdog movement improve PrizePicks confidence?"
+
+Do not build this integration now.
+
+Only make sure current Underdog data storage is clean and accessible for future analysis.
+
+==================================================
+
+9. REMOVAL ALERT PRIORITY REFINEMENT
+
+Current issue:
+Removal alerts are flooding Telegram and hiding actionable alerts.
+
+Keep storing every removal in the database.
+
+Change Telegram removal notifications:
+
+Only send removal alerts when at least one condition is true:
+
+- Prop previously triggered a quality alert
+- Prop had a strong score/tier
+- Prop had meaningful line movement
+- Prop was a priority stat category
+- Prop was a low starting line opportunity (0.5)
+
+All other removals:
+
+- Store silently
+- Mark alert outcome in database
+- Do not send Telegram notification
+
+Goal:
+Telegram should prioritize actionable opportunities, not feed cleanup.
+
+==================================================
+
+10. FINAL TESTING
+
+After changes:
+
+Run full tests.
+
+Confirm:
+
+- Underdog pipeline passes
+- Telegram delivery works
+- Database continues storing snapshots
+- WNBA props are collected
+- No new errors introduced
+
+After this pass:
+
+STOP ADDING FEATURES.
+
+Move into live testing and betting mode.
+
+The goal is now:
+
+Collect → Analyze → Build slips → Track results → Improve with data.
+
+Do not redesign architecture.
