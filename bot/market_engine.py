@@ -213,11 +213,19 @@ async def consensus_check_job(context) -> None:
 
         message = format_inefficiency_alert(ineff, cr)
         if chat_ids:
-            await broadcast_alert(bot, chat_ids, message)
-            logger.info(
-                "Inefficiency alert: %s | %s | %s | dev=%+d",
-                ineff.event, ineff.selection, ineff.sportsbook, ineff.deviation,
+            from alert_scope_filter import check_inefficiency_alert
+            scope = check_inefficiency_alert(
+                str(ineff.sport), str(ineff.market_type),
+                ineff.event, ineff.selection,
             )
+            if scope.allowed:
+                await broadcast_alert(bot, chat_ids, message)
+                logger.info(
+                    "Inefficiency alert: %s | %s | %s | dev=%+d",
+                    ineff.event, ineff.selection, ineff.sportsbook, ineff.deviation,
+                )
+            else:
+                logger.warning("Inefficiency alert skipped — %s", scope.reason)
         # Persist dedup marker (alert_sent=True so has_recent_inefficiency_alert finds it)
         await db.save_market_snapshot(MarketSnapshotRecord(
             sportsbook  = ineff.sportsbook,
@@ -276,11 +284,16 @@ async def consensus_check_job(context) -> None:
             sharp_books     = sharp_books,
         )
         if chat_ids:
-            await broadcast_alert(bot, chat_ids, message)
-            logger.info(
-                "Multi-book steam alert: %s | %s | score=%d",
-                event, selection, result.steam_score,
-            )
+            from alert_scope_filter import check_multibook_steam
+            scope = check_multibook_steam(str(sport), str(market_type), event, selection)
+            if scope.allowed:
+                await broadcast_alert(bot, chat_ids, message)
+                logger.info(
+                    "Multi-book steam alert: %s | %s | score=%d",
+                    event, selection, result.steam_score,
+                )
+            else:
+                logger.warning("Multi-book steam alert skipped — %s", scope.reason)
 
         # Persist SteamRecord so has_recent_steam_alert() deduplicates next cycle
         await db.save_steam(SteamRecord(
@@ -356,11 +369,16 @@ async def clv_check_job(context) -> None:
 
             message = format_clv_opportunity_alert(opp)
             if chat_ids:
-                await broadcast_alert(bot, chat_ids, message)
-                logger.info(
-                    "CLV opportunity: %s | %s | %s | lead=%+d",
-                    opp.event, opp.selection, opp.sportsbook, opp.clv_lead,
-                )
+                from alert_scope_filter import check_clv_alert
+                scope = check_clv_alert(opp.event, opp.selection, opp.sportsbook)
+                if scope.allowed:
+                    await broadcast_alert(bot, chat_ids, message)
+                    logger.info(
+                        "CLV opportunity: %s | %s | %s | lead=%+d",
+                        opp.event, opp.selection, opp.sportsbook, opp.clv_lead,
+                    )
+                else:
+                    logger.warning("CLV alert skipped — %s", scope.reason)
 
             # Persist dedup marker — NOT a CLVRecord (no real closing odds yet)
             await db.save_market_snapshot(MarketSnapshotRecord(
@@ -463,20 +481,25 @@ async def underdog_job(context) -> None:
         await db.save_underdog_snapshot(record)
 
         if should_alert and chat_ids:
-            message = format_underdog_change_alert(
-                player_name = player,
-                team        = snap.team or "",
-                sport       = snap.sport,
-                stat_type   = stat_type,
-                old_line    = prev_line or (snap.line or 0.0),
-                new_line    = snap.line or 0.0,
-                game_time   = snap.game_time,
-                removed     = is_removed,
-            )
-            await broadcast_alert(bot, chat_ids, message)
-            logger.info(
-                "Underdog alert: %s | %s | removed=%s | line_change=%s → %s",
-                player, stat_type, is_removed, prev_line, snap.line,
-            )
+            from alert_scope_filter import check_underdog_alert
+            scope = check_underdog_alert(player, stat_type, snap.sport)
+            if scope.allowed:
+                message = format_underdog_change_alert(
+                    player_name = player,
+                    team        = snap.team or "",
+                    sport       = snap.sport,
+                    stat_type   = stat_type,
+                    old_line    = prev_line or (snap.line or 0.0),
+                    new_line    = snap.line or 0.0,
+                    game_time   = snap.game_time,
+                    removed     = is_removed,
+                )
+                await broadcast_alert(bot, chat_ids, message)
+                logger.info(
+                    "Underdog alert: %s | %s | removed=%s | line_change=%s → %s",
+                    player, stat_type, is_removed, prev_line, snap.line,
+                )
+            else:
+                logger.warning("Underdog alert skipped — %s", scope.reason)
 
     logger.info("underdog_job: processed %d Underdog pick'em snapshots", len(ud_snaps))

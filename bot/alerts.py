@@ -704,12 +704,19 @@ class AlertDelivery:
     async def deliver_ev(self, opp: EVOpportunity) -> DeliveryResult:
         """
         Full EV alert pipeline:
+          0. Scope filter (sport/market allowlist).
           1. Filter by min EV% and min AI confidence.
           2. Deduplicate against recently sent alerts in the DB.
           3. Compute risk factors, format message.
           4. Broadcast to all registered chat IDs.
           5. Log the alert (with alert_sent flag) to the database.
         """
+        # 0. Scope filter
+        from alert_scope_filter import check_ev_opportunity
+        scope = check_ev_opportunity(opp)
+        if not scope.allowed:
+            return DeliveryResult(sent=False, filtered=True, filtered_reason=scope.reason)
+
         # 1. Filter
         if opp.expected_value < self._min_ev:
             return DeliveryResult(
@@ -760,12 +767,19 @@ class AlertDelivery:
     async def deliver_steam(self, alert: SteamAlert) -> DeliveryResult:
         """
         Full steam alert pipeline:
+          0. Scope filter (sportsbook sharp money alerts are outside allowed scope).
           1. Filter by min steam score.
           2. Deduplicate against recently sent alerts in the DB.
           3. Identify sharp books, compute risk factors, format message.
           4. Broadcast to all registered chat IDs.
           5. Log the alert (with alert_sent flag) to the database.
         """
+        # 0. Scope filter
+        from alert_scope_filter import check_steam_alert
+        scope = check_steam_alert(alert)
+        if not scope.allowed:
+            return DeliveryResult(sent=False, filtered=True, filtered_reason=scope.reason)
+
         # 1. Filter
         if alert.steam_score < self._min_steam:
             return DeliveryResult(

@@ -583,15 +583,20 @@ async def _prizepicks_job(context) -> None:
                     detected_at=now,
                 ))
 
-                # ── 7. Alert ─────────────────────────────────────────────────
+                # ── 7. Scope filter + Alert ──────────────────────────────────
                 if chat_ids:
-                    message = format_pp_alert(opp)
-                    await broadcast_alert(bot, chat_ids, message)
-                    logger.info(
-                        "PP edge alert: %s | %s | %s | edge=+%.1f%%",
-                        pp_line.player_name, pp_line.stat_type,
-                        opp.best_side, opp.best_edge,
-                    )
+                    from alert_scope_filter import check_pp_opportunity
+                    scope = check_pp_opportunity(opp)
+                    if scope.allowed:
+                        message = format_pp_alert(opp)
+                        await broadcast_alert(bot, chat_ids, message)
+                        logger.info(
+                            "PP edge alert: %s | %s | %s | edge=+%.1f%%",
+                            pp_line.player_name, pp_line.stat_type,
+                            opp.best_side, opp.best_edge,
+                        )
+                    else:
+                        logger.warning("PP alert skipped — %s", scope.reason)
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
