@@ -51,6 +51,10 @@ from commands import (
     cmd_steam,
     cmd_ev,
     cmd_picks,
+    cmd_slip,
+    cmd_dashboard,
+    cmd_alerts,
+    cmd_grade,
     cmd_clv,
     cmd_market,
     cmd_performance,
@@ -658,13 +662,17 @@ def main() -> None:
 
     # Register command handlers
     app.add_handler(CommandHandler("testalert", cmd_testalert))
-    app.add_handler(CommandHandler("picks",   cmd_picks))
-    app.add_handler(CommandHandler("start",   cmd_start))
-    app.add_handler(CommandHandler("help",    cmd_help))
-    app.add_handler(CommandHandler("status",  cmd_status))
-    app.add_handler(CommandHandler("analyze", cmd_analyze))
-    app.add_handler(CommandHandler("steam",   cmd_steam))
-    app.add_handler(CommandHandler("ev",      cmd_ev))
+    app.add_handler(CommandHandler("picks",     cmd_picks))
+    app.add_handler(CommandHandler("slip",      cmd_slip))
+    app.add_handler(CommandHandler("dashboard", cmd_dashboard))
+    app.add_handler(CommandHandler("alerts",    cmd_alerts))
+    app.add_handler(CommandHandler("grade",     cmd_grade))
+    app.add_handler(CommandHandler("start",     cmd_start))
+    app.add_handler(CommandHandler("help",      cmd_help))
+    app.add_handler(CommandHandler("status",    cmd_status))
+    app.add_handler(CommandHandler("analyze",   cmd_analyze))
+    app.add_handler(CommandHandler("steam",     cmd_steam))
+    app.add_handler(CommandHandler("ev",        cmd_ev))
     app.add_handler(CommandHandler("clv",         cmd_clv))
     app.add_handler(CommandHandler("market",      cmd_market))
     app.add_handler(CommandHandler("performance", cmd_performance))

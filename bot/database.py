@@ -533,6 +533,40 @@ class Database:
             )
             await s.commit()
 
+    async def get_all_resolved_pp_edges(
+        self, limit: int = 200
+    ) -> list["PPEdgeRecord"]:
+        """Return resolved (non-PENDING, non-NULL) PPEdgeRecords, newest first.
+
+        Used by /grade to compute win/loss breakdown by tier.
+        """
+        from sqlalchemy import not_
+        async with self.session() as s:
+            result = await s.execute(
+                select(PPEdgeRecord)
+                .where(
+                    PPEdgeRecord.result.isnot(None),
+                    not_(PPEdgeRecord.result.in_(["PENDING", ""])),
+                )
+                .order_by(desc(PPEdgeRecord.detected_at))
+                .limit(limit)
+            )
+            return list(result.scalars().all())
+
+    async def get_recent_pp_alerts(self, limit: int = 15) -> list["PPEdgeRecord"]:
+        """Return recently alerted PP edges (alert_sent=True), newest first.
+
+        Used by /alerts to show the alert history feed.
+        """
+        async with self.session() as s:
+            result = await s.execute(
+                select(PPEdgeRecord)
+                .where(PPEdgeRecord.alert_sent == True)   # noqa: E712
+                .order_by(desc(PPEdgeRecord.detected_at))
+                .limit(limit)
+            )
+            return list(result.scalars().all())
+
     async def has_recent_pp_alert(
         self,
         player_name: str,

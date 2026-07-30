@@ -488,6 +488,19 @@ _TIER_EMOJI: dict[str, str] = {
     "Critical": "🔴", "High": "🟠", "Medium": "🟡", "Low": "⚪",
 }
 
+# Thresholds mirror PPAnalysisScore._STAR_BANDS — display-only, no scoring logic.
+_STAR_BANDS: tuple[tuple[int, int], ...] = ((85, 5), (70, 4), (55, 3), (40, 2))
+
+
+def _stars_from_conf(conf: Optional[float]) -> str:
+    """Return a 5-char star bar (e.g. '★★★★☆') from a 0–100 confidence score."""
+    if conf is None:
+        return ""
+    for threshold, n in _STAR_BANDS:
+        if conf >= threshold:
+            return "★" * n + "☆" * (5 - n)
+    return "★☆☆☆☆"
+
 
 async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/picks [sport|N] — Ranked PrizePicks edges by confidence tier (S→A→B).
@@ -550,6 +563,7 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         rank += 1
 
         conf_str  = f"  conf {r.confidence:.0f}/100" if r.confidence else ""
+        stars_str = f"  {_stars_from_conf(r.confidence)}" if r.confidence else ""
         result_str = (
             f"  [{r.result}]"
             if r.result and r.result != "PENDING" else ""
@@ -566,7 +580,7 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         lines.append(
             f"  #{rank} <b>{r.player_name}</b> · {r.stat_type}\n"
             f"       PP <code>{r.pp_line_value:g}</code> · <b>{r.best_side}</b> · "
-            f"<code>+{r.best_edge:.1f}%</code>{conf_str}{move_str}{result_str}\n"
+            f"<code>+{r.best_edge:.1f}%</code>{conf_str}{stars_str}{move_str}{result_str}\n"
             f"       <i>{r.sport} · vs {r.sportsbook} · "
             f"{r.detected_at.strftime('%H:%M UTC')}</i>"
         )
@@ -707,6 +721,346 @@ async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     except Exception as exc:
         logger.exception("cmd_testalert error: %s", exc)
         await update.message.reply_text(f"{EMOJI['warn']} Test alert failed: {exc}")
+
+
+async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/slip [N] — Build a prop slip from the top N picks (2–6, default 3).
+
+    Usage:
+      /slip      — 3-leg slip from today's top picks
+      /slip 4    — 4-leg slip
+      /slip 6    — maximum 6-leg slip
+    """
+    if not _check_allowed(update):
+        await update.message.reply_text("⛔ Unauthorized.")
+        return
+    if _db is None:
+        await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
+        return
+
+    # Parse leg count: 2–6, default 3
+    args = context.args or []
+    legs = 3
+    if args:
+        try:
+            legs = int(args[0])
+        except ValueError:
+            pass
+    legs = max(2, min(legs, 6))
+
+    records = await _db.get_top_pp_edges(limit=legs, hours=6)
+    records.sort(key=lambda r: (_TIER_ORDER.get(r.tier or "Low", 3), -(r.best_edge or 0)))
+
+    if len(records) < 2:
+        hint = f"{len(records)} pick" if records else "no picks"
+        await update.message.reply_text(
+            f"🎰 <b>SharpMoney Slip</b>\n\n"
+            f"Not enough picks to build a slip ({hint} available in last 6 h).\n\n"
+            f"<i>A slip needs at least 2 legs.  Run /picks to see what's available.</i>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    # Trim to requested count if fewer picks came back
+    records = records[:legs]
+    actual_legs = len(records)
+
+    today = datetime.now(timezone.utc).strftime("%b %d, %Y")
+    lines: list[str] = [
+        f"🎰 <b>SharpMoney Slip — {actual_legs} legs · {today}</b>",
+        "",
+    ]
+
+    total_conf = 0.0
+    conf_count = 0
+    total_edge = 0.0
+
+    for i, r in enumerate(records, 1):
+        tier_icon = _TIER_EMOJI.get(r.tier or "Low", "⚪")
+        stars_str = _stars_from_conf(r.confidence)
+        conf_label = f"{r.confidence:.0f}/100" if r.confidence is not None else "—"
+        if r.confidence is not None:
+            total_conf += r.confidence
+            conf_count += 1
+        total_edge += r.best_edge or 0.0
+
+        move_note = ""
+        if (r.opening_line is not None
+                and r.pp_line_value is not None
+                and r.opening_line != r.pp_line_value):
+            delta = r.pp_line_value - r.opening_line
+            move_note = f"  {'▲' if delta > 0 else '▼'}{abs(delta):.1f}"
+
+        lines.append(
+            f"<b>Leg {i}</b>  {tier_icon} {r.tier or '—'}  {stars_str}\n"
+            f"  <b>{r.player_name}</b> · {r.stat_type}\n"
+            f"  {r.best_side} {r.pp_line_value:g}  ·  "
+            f"<code>+{r.best_edge:.1f}%</code>  ·  conf {conf_label}{move_note}\n"
+            f"  <i>{r.sport} · {r.sportsbook} · {r.detected_at.strftime('%H:%M UTC')}</i>"
+        )
+
+    avg_conf = total_conf / conf_count if conf_count else 0.0
+    avg_edge = total_edge / actual_legs if actual_legs else 0.0
+
+    lines += [
+        "",
+        "─" * 28,
+        f"Legs: <b>{actual_legs}</b>  ·  "
+        f"Avg edge: <code>+{avg_edge:.1f}%</code>  ·  "
+        f"Avg conf: <code>{avg_conf:.0f}/100</code>",
+        "",
+        "<i>⚠️ Research tool — not betting advice.  Verify lines before placing.</i>",
+    ]
+
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+
+async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/dashboard — Overview: picks health, tier breakdown, top pick, bot uptime."""
+    if not _check_allowed(update):
+        await update.message.reply_text("⛔ Unauthorized.")
+        return
+    if _db is None:
+        await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
+        return
+
+    today = datetime.now(timezone.utc).strftime("%b %d, %Y  %H:%M UTC")
+
+    # ── Data gathering (all queries independent) ─────────────────────────────
+    edges_6h   = await _db.get_top_pp_edges(limit=50, hours=6)
+    edges_24h  = await _db.get_top_pp_edges(limit=50, hours=24)
+    total_all  = await _db.count_pp_edge_records()
+
+    # Tier breakdown from 6h window
+    tier_counts: dict[str, int] = {}
+    for r in edges_6h:
+        t = r.tier or "—"
+        tier_counts[t] = tier_counts.get(t, 0) + 1
+
+    # Top pick (highest conf in 6h, fall back to highest edge)
+    top = None
+    if edges_6h:
+        edges_6h.sort(key=lambda r: (
+            _TIER_ORDER.get(r.tier or "Low", 3),
+            -(r.confidence or 0),
+        ))
+        top = edges_6h[0]
+
+    # Freshness: latest detected_at across 24h window
+    freshness_str = "No picks yet"
+    if edges_24h:
+        latest = max(edges_24h, key=lambda r: r.detected_at)
+        age_s  = int((datetime.utcnow() - latest.detected_at).total_seconds())
+        if age_s < 60:
+            freshness_str = f"{age_s}s ago"
+        elif age_s < 3600:
+            freshness_str = f"{age_s // 60}m ago"
+        else:
+            freshness_str = f"{age_s // 3600}h {(age_s % 3600) // 60}m ago"
+
+    # ── Build tier breakdown string ───────────────────────────────────────────
+    tier_parts = []
+    for tier in ("S", "A", "B", "PASS"):
+        n = tier_counts.get(tier, 0)
+        if n:
+            tier_parts.append(f"{_TIER_EMOJI[tier]}{tier}:{n}")
+    tier_str = "  " + "  ".join(tier_parts) if tier_parts else "  none"
+
+    # ── Message assembly ──────────────────────────────────────────────────────
+    lines: list[str] = [
+        f"📊 <b>SharpMoneyBot Dashboard</b>",
+        f"<i>{today}</i>",
+        "",
+        "🃏 <b>PrizePicks Picks</b>",
+        f"  Last  6 h:  <b>{len(edges_6h)}</b> detected{tier_str}",
+        f"  Last 24 h:  <b>{len(edges_24h)}</b> detected",
+        f"  All-time:   <b>{total_all}</b> stored",
+        f"  Freshness:  {freshness_str}",
+        "",
+        "🤖 <b>Bot Health</b>",
+        f"  Uptime:    {_uptime_str()}",
+        f"  PP API:    ⚠️ Temporarily unavailable (HTTP 403 — bot-detection wall)",
+        f"  Odds API:  ⚠️ Monthly quota nearly exhausted",
+        "",
+    ]
+
+    if top:
+        tier_icon  = _TIER_EMOJI.get(top.tier or "Low", "⚪")
+        stars_str  = _stars_from_conf(top.confidence)
+        conf_label = f"{top.confidence:.0f}/100" if top.confidence is not None else "—"
+        lines += [
+            "🔝 <b>Top Pick (last 6 h)</b>",
+            f"  {tier_icon} {top.tier or '—'}  <b>{top.player_name}</b> · {top.stat_type}",
+            f"  {top.best_side} {top.pp_line_value:g}  ·  "
+            f"<code>+{top.best_edge:.1f}%</code>  ·  {conf_label}  {stars_str}",
+            f"  <i>{top.sport} · {top.sportsbook}</i>",
+        ]
+    else:
+        lines.append("🔝 <b>Top Pick</b>  —  no picks in last 6 h")
+
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+
+async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/alerts — Recent alert history: PP picks sent, EV and steam alerts."""
+    if not _check_allowed(update):
+        await update.message.reply_text("⛔ Unauthorized.")
+        return
+    if _db is None:
+        await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
+        return
+
+    # Gather all alert types
+    pp_sent    = await _db.get_recent_pp_alerts(limit=10)
+    ev_recent  = await _db.get_recent_ev(limit=5)
+    stm_recent = await _db.get_recent_steam(limit=5)
+
+    lines: list[str] = [
+        "🔔 <b>Alert History</b>",
+        "",
+    ]
+
+    # ── PP Pick alerts ────────────────────────────────────────────────────────
+    lines.append(f"🎯 <b>PP Pick Alerts</b>")
+    if not pp_sent:
+        lines.append(
+            "  No PP picks have been alerted yet.\n"
+            "  <i>Alerts fire automatically when PrizePicks API data resumes.</i>"
+        )
+    else:
+        lines.append(f"  <i>{len(pp_sent)} most recent (alert_sent=True)</i>")
+        lines.append("")
+        for r in pp_sent:
+            tier_icon = _TIER_EMOJI.get(r.tier or "Low", "⚪")
+            result_tag = (
+                f"  [{r.result}]" if r.result and r.result != "PENDING" else ""
+            )
+            lines.append(
+                f"  {tier_icon} <b>{r.player_name}</b> · {r.stat_type}  "
+                f"<code>+{r.best_edge:.1f}%</code>{result_tag}\n"
+                f"      <i>{r.sport} · {r.detected_at.strftime('%b %d %H:%M UTC')}</i>"
+            )
+
+    lines.append("")
+
+    # ── EV alerts ─────────────────────────────────────────────────────────────
+    ev_sent = [r for r in ev_recent if r.alert_sent]
+    lines.append(f"{EMOJI['ev']} <b>EV Alerts</b>  ({len(ev_sent)} of last {len(ev_recent)} sent)")
+    if not ev_sent:
+        lines.append("  <i>No EV alerts sent recently.</i>")
+    else:
+        for r in ev_sent[:3]:
+            lines.append(
+                f"  <b>{r.selection}</b> · {r.sport}  "
+                f"EV <code>{r.expected_value:+.1f}%</code>\n"
+                f"      <i>{r.detected_at.strftime('%b %d %H:%M UTC')}</i>"
+            )
+
+    lines.append("")
+
+    # ── Steam alerts ──────────────────────────────────────────────────────────
+    stm_sent = [r for r in stm_recent if r.alert_sent]
+    lines.append(f"{EMOJI['fire']} <b>Steam Alerts</b>  ({len(stm_sent)} of last {len(stm_recent)} sent)")
+    if not stm_sent:
+        lines.append("  <i>No steam alerts sent recently.</i>")
+    else:
+        for r in stm_sent[:3]:
+            lines.append(
+                f"  <b>{r.selection}</b> · {r.sport}  "
+                f"score <code>{r.steam_score}/100</code>\n"
+                f"      <i>{r.detected_at.strftime('%b %d %H:%M UTC')}</i>"
+            )
+
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+
+async def cmd_grade(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/grade — Grade resolved PP picks by tier (WIN/LOSS/PUSH breakdown)."""
+    if not _check_allowed(update):
+        await update.message.reply_text("⛔ Unauthorized.")
+        return
+    if _db is None:
+        await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
+        return
+
+    resolved  = await _db.get_all_resolved_pp_edges(limit=200)
+    total_all = await _db.count_pp_edge_records()
+
+    lines: list[str] = ["📈 <b>PP Pick Grades</b>", ""]
+
+    if not resolved:
+        pending_count = total_all  # all stored picks must be PENDING
+        lines += [
+            "No resolved picks yet.",
+            "<i>Results update automatically when games finish.</i>",
+            "",
+            "─ <b>Current snapshot</b> ─",
+            f"  Stored picks:  <b>{total_all}</b>",
+            f"  Pending:       <b>{pending_count}</b>",
+            f"  Resolved:      <b>0</b>",
+            "",
+            "<i>Use /picks to see active edges.</i>",
+        ]
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+        return
+
+    # ── Aggregate by tier ─────────────────────────────────────────────────────
+    # tier → {W, L, P, edges}
+    from collections import defaultdict
+    stats: dict[str, dict] = defaultdict(lambda: {"W": 0, "L": 0, "P": 0, "edges": []})
+
+    for r in resolved:
+        tier = r.tier or "—"
+        res  = (r.result or "").upper()
+        if res == "WIN":
+            stats[tier]["W"] += 1
+        elif res == "LOSS":
+            stats[tier]["L"] += 1
+        elif res in ("PUSH", "REFUND"):
+            stats[tier]["P"] += 1
+        if r.best_edge is not None:
+            stats[tier]["edges"].append(r.best_edge)
+
+    overall_w = overall_l = overall_p = 0
+    all_edges: list[float] = []
+
+    lines.append("─ <b>By Tier</b> " + "─" * 20)
+    for tier in ("S", "A", "B", "PASS", "—"):
+        if tier not in stats:
+            continue
+        s   = stats[tier]
+        w, l, p = s["W"], s["L"], s["P"]
+        total_res = w + l + p
+        hit_rate  = w / total_res * 100 if total_res > 0 else 0.0
+        avg_edge  = sum(s["edges"]) / len(s["edges"]) if s["edges"] else 0.0
+        icon      = _TIER_EMOJI.get(tier, "⚪")
+        lines.append(
+            f"  {icon} <b>{tier:<4}</b>  "
+            f"{total_res} picks  W:{w}  L:{l}  P:{p}  "
+            f"→ <code>{hit_rate:.0f}%</code> hit  "
+            f"avg edge <code>+{avg_edge:.1f}%</code>"
+        )
+        overall_w += w
+        overall_l += l
+        overall_p += p
+        all_edges.extend(s["edges"])
+
+    overall_res  = overall_w + overall_l + overall_p
+    overall_hit  = overall_w / overall_res * 100 if overall_res > 0 else 0.0
+    overall_edge = sum(all_edges) / len(all_edges) if all_edges else 0.0
+    pending_n    = total_all - len(resolved)
+
+    lines += [
+        "─ <b>Overall</b> " + "─" * 21,
+        f"  <b>{overall_res}</b> resolved  "
+        f"W:{overall_w}  L:{overall_l}  P:{overall_p}  "
+        f"→ <code>{overall_hit:.0f}%</code> hit  "
+        f"avg edge <code>+{overall_edge:.1f}%</code>",
+        "",
+        f"<i>{pending_n} picks still PENDING · results set when games finish.</i>",
+    ]
+
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
