@@ -27,7 +27,7 @@ from config import config
 from database import Database, OddsRecord
 from engine import AnalysisEngine
 from engine.season_check import SeasonChecker
-from engine.analysis import _SPORT_TO_ODDS_API_KEY
+from engine.analysis import _SPORT_TO_ODDS_API_KEY, PlayerPropLine
 from models import (
     MarketType,
     OddsLine,
@@ -193,7 +193,8 @@ async def post_init(application: Application) -> None:
     if jq:
         jq.run_repeating(_poll_odds_job,       interval=config.ODDS_POLL_INTERVAL,          first=10,  name="odds_poller")
         jq.run_repeating(_steam_check_job,     interval=config.STEAM_CHECK_INTERVAL,        first=15,  name="steam_checker")
-        jq.run_repeating(_prizepicks_job,      interval=config.PRIZEPICKS_POLL_INTERVAL,    first=30,  name="prizepicks_monitor")
+        jq.run_repeating(_player_props_job,    interval=config.PLAYER_PROP_POLL_INTERVAL,   first=60,  name="player_props_fetcher")
+        jq.run_repeating(_prizepicks_job,      interval=config.PRIZEPICKS_POLL_INTERVAL,    first=90,  name="prizepicks_monitor")
         # Multi-platform market engine jobs
         jq.run_repeating(connector_poll_job,   interval=config.CONNECTOR_POLL_INTERVAL,     first=20,  name="connector_poller")
         jq.run_repeating(consensus_check_job,  interval=config.CONSENSUS_CHECK_INTERVAL,    first=25,  name="consensus_checker")
@@ -210,11 +211,13 @@ async def post_init(application: Application) -> None:
                 name="season_checker",
             )
         logger.info(
-            "Jobs scheduled — odds: every %ds, steam: every %ds, prizepicks: every %ds, "
-            "connectors: every %ds, consensus: every %ds, clv: every %ds, underdog: every %ds, "
-            "season_check: every %ds",
+            "Jobs scheduled — odds: every %ds, steam: every %ds, "
+            "player_props: every %ds, prizepicks: every %ds, "
+            "connectors: every %ds, consensus: every %ds, clv: every %ds, "
+            "underdog: every %ds, season_check: every %ds",
             config.ODDS_POLL_INTERVAL,
             config.STEAM_CHECK_INTERVAL,
+            config.PLAYER_PROP_POLL_INTERVAL,
             config.PRIZEPICKS_POLL_INTERVAL,
             config.CONNECTOR_POLL_INTERVAL,
             config.CONSENSUS_CHECK_INTERVAL,
@@ -569,6 +572,70 @@ async def _season_check_job(context) -> None:
     if _season_checker is None:
         return
     await _season_checker.refresh()
+
+
+# ── Player-prop odds fetching job ─────────────────────────────────────────────
+
+async def _player_props_job(context) -> None:
+    """
+    Fetch player-prop odds for every configured sport and store them as
+    OddsRecord rows so the PrizePicks crossmatch pipeline can find sportsbook
+    equivalents when _prizepicks_job runs.
+
+    Runs every PLAYER_PROP_POLL_INTERVAL seconds (default 10 min).  Only
+    fetches sports that are active according to the season checker, so credits
+    are not wasted on off-season leagues.
+    """
+    if _db is None or _engine is None:
+        logger.debug("_player_props_job: DB or engine not ready, skipping")
+        return
+
+    now = datetime.utcnow()
+    total_saved = 0
+
+    for sport_str in config.player_prop_sports:
+        try:
+            sport = Sport(sport_str)
+        except ValueError:
+            logger.warning("_player_props_job: unknown sport %r in PLAYER_PROP_SPORTS", sport_str)
+            continue
+
+        # Skip out-of-season sports to protect API credits
+        if _season_checker is not None:
+            odds_key = _SPORT_TO_ODDS_API_KEY.get(sport)
+            if odds_key and not _season_checker.is_sport_active(odds_key):
+                logger.info(
+                    "_player_props_job: skipping %s (%s) — out of season",
+                    sport_str, odds_key,
+                )
+                continue
+
+        lines: list[PlayerPropLine] = await _engine.fetch_player_prop_odds(sport)
+        if not lines:
+            logger.debug("_player_props_job: no player prop lines for %s", sport_str)
+            continue
+
+        for pl in lines:
+            # selection = "Player Name Over" / "Player Name Under"
+            selection = f"{pl.player_name} {pl.description}".strip()
+            record = OddsRecord(
+                sportsbook=pl.sportsbook,
+                sport=pl.sport.value,
+                market_type=pl.market_key,   # e.g. "player_points" — matches PP_STAT_TO_ODDS_API
+                event=pl.event,
+                selection=selection,
+                american_odds=pl.american_odds,
+                line=pl.line,
+                event_start=pl.event_start,
+                recorded_at=now,
+            )
+            await _db.save_odds(record)
+            total_saved += 1
+
+    if total_saved:
+        logger.info("_player_props_job: saved %d player prop records", total_saved)
+    else:
+        logger.debug("_player_props_job: no player prop records saved this cycle")
 
 
 # ── PrizePicks monitoring job ─────────────────────────────────────────────────

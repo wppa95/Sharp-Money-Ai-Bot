@@ -45,7 +45,7 @@ class Config:
 
     # ── PrizePicks monitoring ─────────────────────────────────────────────────
     # Leagues to monitor (comma-separated PrizePicks league names).
-    PRIZEPICKS_LEAGUES_RAW: str = os.environ.get("PRIZEPICKS_LEAGUES", "NBA,NFL")
+    PRIZEPICKS_LEAGUES_RAW: str = os.environ.get("PRIZEPICKS_LEAGUES", "NBA,MLB")
     # Seconds between PrizePicks projection polls (default 5 min).
     PRIZEPICKS_POLL_INTERVAL: int = int(os.environ.get("PRIZEPICKS_POLL_INTERVAL", "300"))
     # Minimum edge % vs sportsbook fair probability to trigger a PP alert.
@@ -56,6 +56,16 @@ class Config:
     PP_DEDUP_WINDOW: int = int(os.environ.get("PP_DEDUP_WINDOW", "3600"))  # 60 min
     # Minimum PP line change (in units) to log as a movement signal.
     MIN_PP_LINE_CHANGE: float = float(os.environ.get("MIN_PP_LINE_CHANGE", "0.5"))
+
+    # ── Player prop market fetching ───────────────────────────────────────────
+    # Sports for which player-prop odds are fetched from The Odds API and stored
+    # in odds_records so the PP crossmatch pipeline can find sportsbook matches.
+    # Priority 1: NBA, MLB.  Add soccer leagues (e.g. "NBA,MLB,EPL,MLS") for
+    # Priority 2.  NFL excluded by default.
+    PLAYER_PROP_SPORTS_RAW: str = os.environ.get("PLAYER_PROP_SPORTS", "NBA,MLB")
+    # Seconds between player-prop poll cycles.  Props move slower than game
+    # lines so a 10-minute interval is sufficient and keeps credit usage low.
+    PLAYER_PROP_POLL_INTERVAL: int = int(os.environ.get("PLAYER_PROP_POLL_INTERVAL", "600"))
 
     # ── Sports to monitor (comma-separated Sport enum values) ─────────────────
     # Default: every sport with a verified Odds API key, except NFL
@@ -174,6 +184,11 @@ class Config:
     def prizepicks_leagues(self) -> list[str]:
         """PrizePicks league names to monitor (e.g. ["NBA", "NFL"])."""
         return [lg.strip() for lg in self.PRIZEPICKS_LEAGUES_RAW.split(",") if lg.strip()]
+
+    @property
+    def player_prop_sports(self) -> list[str]:
+        """Sport enum values for which player-prop odds are fetched."""
+        return [s.strip() for s in self.PLAYER_PROP_SPORTS_RAW.split(",") if s.strip()]
 
     @property
     def active_sports(self) -> list[str]:

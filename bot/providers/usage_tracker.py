@@ -64,11 +64,11 @@ def infer_call_priority(sport_key: str, markets: str) -> CallPriority:
     Derive a CallPriority from the sport key and markets query string.
 
     Rules (in order):
-      1. ``"player_props"`` anywhere in *markets*     → HIGH
+      1. ``"player_props"`` or any ``"player_"`` market key in *markets* → HIGH
       2. ``baseball_mlb`` or ``basketball_nba`` in *sport_key* → MEDIUM
       3. Everything else                               → LOW
     """
-    if "player_props" in markets:
+    if "player_props" in markets or "player_" in markets:
         return CallPriority.HIGH
     s = sport_key.lower()
     if "baseball_mlb" in s or "basketball_nba" in s:

@@ -10,6 +10,7 @@ Also owns fetch_live_odds() — the live data feed via The Odds API.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
@@ -59,7 +60,44 @@ _MARKET_KEY_TO_TYPE: dict[str, MarketType] = {
     "totals":  MarketType.TOTAL,
 }
 
+# Player-prop markets to request per sport, keyed by the raw Odds API market
+# name that also appears in prizepicks.PP_STAT_TO_ODDS_API.
+# Priority 1 (default active): NBA, MLB.
+# Priority 2 (enable via PLAYER_PROP_SPORTS env var): soccer leagues.
+# NFL excluded — add Sport.NFL here only if re-enabled.
+_SPORT_PLAYER_PROP_MARKETS: dict[Sport, str] = {
+    Sport.NBA: (
+        "player_points,player_rebounds,player_assists,"
+        "player_threes,player_steals,player_blocks"
+    ),
+    Sport.MLB: "player_hits,player_pitcher_strikeouts,player_total_bases",
+    # Soccer — Priority 2; only requested when sport is in PLAYER_PROP_SPORTS
+    Sport.EPL:        "player_shots_on_target,player_goal_scorer_anytime",
+    Sport.MLS:        "player_shots_on_target,player_goal_scorer_anytime",
+    Sport.LA_LIGA:    "player_shots_on_target,player_goal_scorer_anytime",
+    Sport.SERIE_A:    "player_shots_on_target,player_goal_scorer_anytime",
+    Sport.BUNDESLIGA: "player_shots_on_target,player_goal_scorer_anytime",
+    Sport.LIGUE_1:    "player_shots_on_target,player_goal_scorer_anytime",
+    Sport.UCL:        "player_shots_on_target,player_goal_scorer_anytime",
+}
+
 _ODDS_API_BASE = "https://api.the-odds-api.com/v4"
+
+
+# ── Player-prop result dataclass ──────────────────────────────────────────────
+
+@dataclass
+class PlayerPropLine:
+    """A single sportsbook player-prop outcome from The Odds API."""
+    sportsbook:   str
+    sport:        Sport
+    market_key:   str            # raw Odds API key, e.g. "player_points"
+    event:        str
+    player_name:  str
+    description:  str            # "Over" or "Under" (from outcome description)
+    american_odds: int
+    line:         Optional[float]
+    event_start:  Optional[datetime]
 
 
 # ── Vig removal ───────────────────────────────────────────────────────────────
@@ -570,6 +608,100 @@ class AnalysisEngine:
                             logger.debug("Skipping malformed outcome: %s", exc)
 
         logger.info("Fetched %d odds lines for %s", len(lines), sport)
+        return lines
+
+    async def fetch_player_prop_odds(self, sport: Sport) -> list[PlayerPropLine]:
+        """
+        Fetch player-prop odds from The Odds API for *sport*.
+
+        Only runs for sports listed in _SPORT_PLAYER_PROP_MARKETS.  Returns a
+        flat list of PlayerPropLine objects — one per outcome per book per
+        market.  Results are budget-guarded and TTL-cached via OddsApiCache
+        (same path as fetch_live_odds).
+
+        These rows are stored in odds_records with market_type = the raw Odds
+        API key (e.g. "player_points") so find_player_prop_odds() can match
+        them against PrizePicks lines via PP_STAT_TO_ODDS_API.
+        """
+        if not config.ODDS_API_KEY:
+            logger.warning(
+                "ODDS_API_KEY not configured; skipping player prop fetch for %s", sport
+            )
+            return []
+
+        markets = _SPORT_PLAYER_PROP_MARKETS.get(sport)
+        if not markets:
+            logger.debug("No player-prop market mapping for sport %s", sport)
+            return []
+
+        sport_key = _SPORT_TO_ODDS_API_KEY.get(sport)
+        if not sport_key:
+            logger.debug("No Odds API key mapping for sport %s", sport)
+            return []
+
+        try:
+            from providers.odds_cache import get_odds_cache, OddsApiError
+            cache = get_odds_cache()
+            if cache is None:
+                logger.warning(
+                    "OddsApiCache not initialised; skipping player props for %s", sport
+                )
+                return []
+            data: list[dict] = await cache.get_or_fetch(
+                sport_key,
+                api_key=config.ODDS_API_KEY,
+                markets=markets,
+                regions="us",
+                odds_format="american",
+            )
+        except OddsApiError as exc:
+            logger.error("Odds API player-prop request failed for %s: %s", sport, exc)
+            return []
+        except Exception as exc:
+            logger.exception("Unexpected error fetching player props for %s: %s", sport, exc)
+            return []
+
+        lines: list[PlayerPropLine] = []
+        for event in data:
+            away = event.get("away_team", "Away")
+            home = event.get("home_team", "Home")
+            event_name = f"{away} @ {home}"
+
+            commence_str = event.get("commence_time")
+            try:
+                event_start: Optional[datetime] = (
+                    datetime.fromisoformat(commence_str.replace("Z", "+00:00"))
+                    if commence_str
+                    else None
+                )
+            except ValueError:
+                event_start = None
+
+            for bookmaker in event.get("bookmakers", []):
+                book_title = bookmaker.get("title") or bookmaker.get("key", "Unknown")
+                for market in bookmaker.get("markets", []):
+                    market_key = market.get("key", "")
+                    if not market_key.startswith("player_"):
+                        continue
+                    for outcome in market.get("outcomes", []):
+                        try:
+                            lines.append(
+                                PlayerPropLine(
+                                    sportsbook=book_title,
+                                    sport=sport,
+                                    market_key=market_key,
+                                    event=event_name,
+                                    player_name=outcome["name"],
+                                    description=outcome.get("description", ""),
+                                    american_odds=int(outcome["price"]),
+                                    line=outcome.get("point"),
+                                    event_start=event_start,
+                                )
+                            )
+                        except (KeyError, TypeError, ValueError) as exc:
+                            logger.debug("Skipping malformed player prop outcome: %s", exc)
+
+        logger.info("Fetched %d player prop lines for %s", len(lines), sport)
         return lines
 
     # ── Future integration stubs ───────────────────────────────────────────────
