@@ -577,10 +577,31 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             direction = "▲" if delta > 0 else "▼"
             move_str  = f"  {direction}{abs(delta):.1f} from open"
 
+        # ── Bankroll discipline ─────────────────────────────────────────────
+        _dec_str = ""
+        try:
+            from engine.decision_engine import make_pp_decision
+            _dec = make_pp_decision(r)
+            _flag = (
+                f"  <i>⚠️ {', '.join(_dec.risk_flags)}</i>"
+                if _dec.risk_flags else ""
+            )
+            if _dec.action == "PASS":
+                _dec_str = f"\n       {_dec.action_label}{_flag}"
+            else:
+                _dec_str = (
+                    f"\n       {_dec.action_label}  ·  "
+                    f"Kelly <code>{_dec.kelly_full * 100:.1f}%</code>  ·  "
+                    f"<b>{_dec.suggested_units:.2f}u</b>{_flag}"
+                )
+        except Exception:
+            pass
+
         lines.append(
             f"  #{rank} <b>{r.player_name}</b> · {r.stat_type}\n"
             f"       PP <code>{r.pp_line_value:g}</code> · <b>{r.best_side}</b> · "
-            f"<code>+{r.best_edge:.1f}%</code>{conf_str}{stars_str}{move_str}{result_str}\n"
+            f"<code>+{r.best_edge:.1f}%</code>{conf_str}{stars_str}{move_str}{result_str}"
+            f"{_dec_str}\n"
             f"       <i>{r.sport} · vs {r.sportsbook} · "
             f"{r.detected_at.strftime('%H:%M UTC')}</i>"
         )
@@ -748,21 +769,23 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             pass
     legs = max(2, min(legs, 6))
 
-    records = await _db.get_top_pp_edges(limit=legs, hours=6)
-    records.sort(key=lambda r: (_TIER_ORDER.get(r.tier or "Low", 3), -(r.best_edge or 0)))
+    from engine.slip_optimizer import optimize_slip
+    _candidates = await _db.get_top_pp_edges(limit=legs * 4, hours=6)
+    slip_result = optimize_slip(_candidates, n_legs=legs)
+    records = slip_result.legs
 
     if len(records) < 2:
-        hint = f"{len(records)} pick" if records else "no picks"
+        _c = len(_candidates)
+        hint = f"{_c} candidate{'s' if _c != 1 else ''}" if _candidates else "no picks"
         await update.message.reply_text(
             f"🎰 <b>SharpMoney Slip</b>\n\n"
-            f"Not enough picks to build a slip ({hint} available in last 6 h).\n\n"
-            f"<i>A slip needs at least 2 legs.  Run /picks to see what's available.</i>",
+            f"Not enough independent picks for a {legs}-leg slip "
+            f"({hint} in last 6 h after correlation filtering).\n\n"
+            f"<i>Run /picks to see current edges.</i>",
             parse_mode=ParseMode.HTML,
         )
         return
 
-    # Trim to requested count if fewer picks came back
-    records = records[:legs]
     actual_legs = len(records)
 
     today = datetime.now(timezone.utc).strftime("%b %d, %Y")
@@ -791,11 +814,27 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             delta = r.pp_line_value - r.opening_line
             move_note = f"  {'▲' if delta > 0 else '▼'}{abs(delta):.1f}"
 
+        _dec_leg = ""
+        try:
+            from engine.decision_engine import make_pp_decision
+            _d = make_pp_decision(r)
+            if _d.suggested_units > 0:
+                _dec_leg = (
+                    f"\n  {_d.action_label}  ·  "
+                    f"Kelly {_d.kelly_full * 100:.1f}%  ·  "
+                    f"{_d.suggested_units:.2f}u"
+                )
+            else:
+                _dec_leg = f"\n  {_d.action_label}"
+        except Exception:
+            pass
+
         lines.append(
             f"<b>Leg {i}</b>  {tier_icon} {r.tier or '—'}  {stars_str}\n"
             f"  <b>{r.player_name}</b> · {r.stat_type}\n"
             f"  {r.best_side} {r.pp_line_value:g}  ·  "
-            f"<code>+{r.best_edge:.1f}%</code>  ·  conf {conf_label}{move_note}\n"
+            f"<code>+{r.best_edge:.1f}%</code>  ·  conf {conf_label}{move_note}"
+            f"{_dec_leg}\n"
             f"  <i>{r.sport} · {r.sportsbook} · {r.detected_at.strftime('%H:%M UTC')}</i>"
         )
 
@@ -808,6 +847,25 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"Legs: <b>{actual_legs}</b>  ·  "
         f"Avg edge: <code>+{avg_edge:.1f}%</code>  ·  "
         f"Avg conf: <code>{avg_conf:.0f}/100</code>",
+    ]
+
+    # Correlation warnings from the optimizer
+    if slip_result.correlation_warnings:
+        lines.append("")
+        lines.append("<i>Correlation notices:</i>")
+        for _w in slip_result.correlation_warnings:
+            lines.append(f"  {_w}")
+
+    if slip_result.excluded:
+        _excl = ", ".join(
+            f"{_r.player_name} · {_r.stat_type}"
+            for _r, _ in slip_result.excluded[:3]
+        )
+        lines.append(
+            f"<i>{len(slip_result.excluded)} filtered by correlation: {_excl}</i>"
+        )
+
+    lines += [
         "",
         "<i>⚠️ Research tool — not betting advice.  Verify lines before placing.</i>",
     ]
@@ -827,9 +885,10 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     today = datetime.now(timezone.utc).strftime("%b %d, %Y  %H:%M UTC")
 
     # ── Data gathering (all queries independent) ─────────────────────────────
-    edges_6h   = await _db.get_top_pp_edges(limit=50, hours=6)
-    edges_24h  = await _db.get_top_pp_edges(limit=50, hours=24)
-    total_all  = await _db.count_pp_edge_records()
+    edges_6h     = await _db.get_top_pp_edges(limit=50, hours=6)
+    edges_24h    = await _db.get_top_pp_edges(limit=50, hours=24)
+    total_all    = await _db.count_pp_edge_records()
+    resolved_all = await _db.get_all_resolved_pp_edges(limit=200)
 
     # Tier breakdown from 6h window
     tier_counts: dict[str, int] = {}
@@ -897,6 +956,26 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         ]
     else:
         lines.append("🔝 <b>Top Pick</b>  —  no picks in last 6 h")
+
+    # ── Performance tracking ───────────────────────────────────────────────────
+    lines.append("")
+    if resolved_all:
+        from engine.decision_engine import compute_tier_performance
+        _perf = compute_tier_performance(resolved_all)
+        lines.append("📈 <b>Performance (resolved picks)</b>")
+        for _tier in ("S", "A", "B", "PASS"):
+            if _tier not in _perf:
+                continue
+            _ts   = _perf[_tier]
+            _note = f"  <i>{_ts.sample_size_note}</i>" if _ts.sample_size_note else ""
+            lines.append(
+                f"  {_TIER_EMOJI[_tier]} {_tier}  "
+                f"{_ts.picks} resolved  "
+                f"<code>{_ts.hit_rate_pct:.0f}%</code> hit  "
+                f"avg edge <code>+{_ts.avg_edge:.1f}%</code>{_note}"
+            )
+    else:
+        lines.append("📈 <b>Performance</b>  <i>No resolved picks yet</i>")
 
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
@@ -1059,6 +1138,39 @@ async def cmd_grade(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "",
         f"<i>{pending_n} picks still PENDING · results set when games finish.</i>",
     ]
+
+    # ── Trend analysis ────────────────────────────────────────────────────────
+    from engine.decision_engine import compute_tier_performance
+    _perf_g = compute_tier_performance(resolved)
+    _qual   = [(t, s) for t, s in _perf_g.items() if s.picks >= 3 and t in ("S", "A", "B")]
+    if _qual:
+        best_t  = max(_qual, key=lambda x: x[1].hit_rate)
+        worst_t = min(_qual, key=lambda x: x[1].hit_rate)
+        lines.append("")
+        lines.append("─ <b>Trends</b> " + "─" * 22)
+        if best_t[0] != worst_t[0]:
+            lines.append(
+                f"  Best tier:  {_TIER_EMOJI.get(best_t[0], '⚪')} {best_t[0]}  "
+                f"{best_t[1].hit_rate_pct:.0f}% hit  "
+                f"({best_t[1].wins}W / {best_t[1].losses}L)"
+            )
+            lines.append(
+                f"  Worst tier: {_TIER_EMOJI.get(worst_t[0], '⚪')} {worst_t[0]}  "
+                f"{worst_t[1].hit_rate_pct:.0f}% hit  "
+                f"({worst_t[1].wins}W / {worst_t[1].losses}L)"
+            )
+        if overall_edge > 0 and overall_res >= 5:
+            _roi = (overall_edge / 100) * 0.909
+            lines.append(
+                f"  Implied ROI: <code>{_roi * 100:+.1f}%</code>"
+                f" <i>(rough, -110 base)</i>"
+            )
+    elif overall_res > 0:
+        lines.append("")
+        lines.append(
+            f"<i>Trends visible after ≥ 3 resolved picks per tier "
+            f"({overall_res} resolved total so far).</i>"
+        )
 
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
