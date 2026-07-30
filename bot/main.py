@@ -562,13 +562,7 @@ async def _prizepicks_job(context) -> None:
                     )
                     continue
 
-                # ── 6. Normalise → AlertObject (tier, confidence, scope) ─────
-                from alert_normalizer import normalize_pp
-                from alert_scope_filter import check
-                norm_obj = normalize_pp(opp)
-                scope    = check(norm_obj)
-
-                # ── 7. Line movement tracking ────────────────────────────────
+                # ── 6. Line movement tracking ────────────────────────────────
                 opening_line, prev_line = await _db.get_pp_edge_line_history(
                     pp_line.player_name, pp_line.stat_type
                 )
@@ -584,7 +578,25 @@ async def _prizepicks_job(context) -> None:
                         abs(pp_line.line_value - prev_line),
                     )
 
-                # ── 8. Store edge record ─────────────────────────────────────
+                # ── 7. Score (PPAnalysisScore) ───────────────────────────────
+                from engine.pp_scoring import score_pp_edge
+                resolved_history = await _db.get_resolved_pp_history(
+                    pp_line.player_name, pp_line.stat_type
+                )
+                pp_score = score_pp_edge(
+                    opp,
+                    history=resolved_history,
+                    opening_line=opening_line,
+                    now=now,
+                )
+
+                # ── 8. Normalise → AlertObject (scope check) ─────────────────
+                from alert_normalizer import normalize_pp
+                from alert_scope_filter import check
+                norm_obj = normalize_pp(opp, score=pp_score)
+                scope    = check(norm_obj)
+
+                # ── 9. Store edge record ─────────────────────────────────────
                 alert_sent = bool(chat_ids) and scope.allowed
                 await _db.save_pp_edge(PPEdgeRecord(
                     player_name     = pp_line.player_name,
@@ -603,22 +615,24 @@ async def _prizepicks_job(context) -> None:
                     best_side       = opp.best_side,
                     best_edge       = opp.best_edge,
                     alert_sent      = alert_sent,
-                    tier            = norm_obj.tier.value,
-                    confidence      = norm_obj.confidence,
+                    tier            = pp_score.tier,
+                    confidence      = float(pp_score.total),
                     result          = "PENDING",
                     opening_line    = opening_line,
                     prev_line       = prev_line,
                     detected_at     = now,
                 ))
 
-                # ── 9. Alert ─────────────────────────────────────────────────
+                # ── 10. Alert ────────────────────────────────────────────────
                 if chat_ids and scope.allowed:
                     message = format_pp_alert(opp)
                     await broadcast_alert(bot, chat_ids, message)
                     logger.info(
-                        "PP edge alert: %s | %s | %s | edge=+%.1f%% | tier=%s",
+                        "PP edge alert: %s | %s | %s | edge=+%.1f%% | "
+                        "score=%d tier=%s stars=%d★",
                         pp_line.player_name, pp_line.stat_type,
-                        opp.best_side, opp.best_edge, norm_obj.tier.value,
+                        opp.best_side, opp.best_edge,
+                        pp_score.total, pp_score.tier, pp_score.stars,
                     )
                 elif not scope.allowed:
                     logger.warning("PP alert skipped — %s", scope.reason)

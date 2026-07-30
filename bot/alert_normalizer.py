@@ -106,16 +106,46 @@ def normalize_steam(alert: "SteamAlert") -> AlertObject:
     )
 
 
-def normalize_pp(opp) -> AlertObject:
-    """Normalise a PPEdgeOpportunity into an AlertObject."""
+_PP_SCORE_TIER_TO_ALERT_TIER: dict[str, "AlertTier"] = {}
+
+def _alert_tier_from_pp_score_tier(tier_str: str) -> "AlertTier":
+    """Map PPScoreTier value ("S"/"A"/"B"/"PASS") → AlertTier."""
+    # Lazily populated to avoid import-time circular issues.
+    if not _PP_SCORE_TIER_TO_ALERT_TIER:
+        _PP_SCORE_TIER_TO_ALERT_TIER.update({
+            "S":    AlertTier.CRITICAL,
+            "A":    AlertTier.HIGH,
+            "B":    AlertTier.MEDIUM,
+            "PASS": AlertTier.LOW,
+        })
+    return _PP_SCORE_TIER_TO_ALERT_TIER.get(tier_str, AlertTier.LOW)
+
+
+def normalize_pp(opp, *, score=None) -> AlertObject:
+    """Normalise a PPEdgeOpportunity into an AlertObject.
+
+    Args:
+        opp:   PPEdgeOpportunity to normalise.
+        score: Optional PPAnalysisScore.  When provided its tier and total are
+               used for the AlertObject; otherwise falls back to the legacy
+               _tier_from_pp_edge / best_edge behaviour.
+    """
     pp = opp.pp_line
     selection = f"{pp.player_name} {pp.stat_type} {pp.line_value}"
+
+    if score is not None:
+        tier       = _alert_tier_from_pp_score_tier(score.tier)
+        confidence = float(score.total)
+    else:
+        tier       = _tier_from_pp_edge(opp.best_edge)
+        confidence = round(float(opp.best_edge), 2)
+
     return AlertObject(
         source     = AlertSource.PRIZEPICKS,
         sport      = pp.sport,
         market     = MarketType.PLAYER_PROP.value,
-        confidence = round(float(opp.best_edge), 2),
-        tier       = _tier_from_pp_edge(opp.best_edge),
+        confidence = confidence,
+        tier       = tier,
         reason     = "",
         timestamp  = datetime.utcnow(),
         alert_type = AlertType.PRIZEPICKS,

@@ -496,6 +496,32 @@ class Database:
             )
         return first_res.scalar(), latest_res.scalar()
 
+    async def get_resolved_pp_history(
+        self,
+        player_name: str,
+        stat_type: str,
+        limit: int = 20,
+    ) -> list["PPEdgeRecord"]:
+        """Return resolved (non-PENDING) PPEdgeRecords for a player/stat, newest first.
+
+        Used by PPAnalysisScore to compute the Hit Rate dimension.
+        Records with result=PENDING or result=NULL are excluded.
+        """
+        from sqlalchemy import not_
+        async with self.session() as s:
+            result = await s.execute(
+                select(PPEdgeRecord)
+                .where(
+                    PPEdgeRecord.player_name == player_name,
+                    PPEdgeRecord.stat_type   == stat_type,
+                    PPEdgeRecord.result.isnot(None),
+                    not_(PPEdgeRecord.result.in_(["PENDING", ""])),
+                )
+                .order_by(desc(PPEdgeRecord.detected_at))
+                .limit(limit)
+            )
+            return list(result.scalars().all())
+
     async def update_pp_result(self, record_id: int, result: str) -> None:
         """Set the outcome (WIN/LOSS/PUSH/PENDING) on a PPEdgeRecord by id."""
         from sqlalchemy import update as sa_update

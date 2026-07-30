@@ -477,8 +477,16 @@ async def cmd_backtest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 # ── /picks tier constants ─────────────────────────────────────────────────────
-_TIER_ORDER: dict[str, int] = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
-_TIER_EMOJI: dict[str, str] = {"Critical": "🔴", "High": "🟠", "Medium": "🟡", "Low": "⚪"}
+# New PPAnalysisScore vocabulary (S/A/B/PASS) plus legacy AlertTier values for
+# any records written before the scoring engine was introduced.
+_TIER_ORDER: dict[str, int] = {
+    "S": 0, "A": 1, "B": 2, "PASS": 3,
+    "Critical": 0, "High": 1, "Medium": 2, "Low": 3,
+}
+_TIER_EMOJI: dict[str, str] = {
+    "S": "🔥", "A": "🟢", "B": "🟡", "PASS": "⚪",
+    "Critical": "🔴", "High": "🟠", "Medium": "🟡", "Low": "⚪",
+}
 
 
 async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
