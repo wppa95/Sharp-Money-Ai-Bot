@@ -497,12 +497,15 @@ async def underdog_job(context) -> None:
                 prev_line    = None,
                 history      = [],
             )
-            # Immediate individual alert: very low line, score gate, or priority stat.
-            # Everything else is batched into the end-of-cycle digest instead.
+            # Immediate individual alert criteria (strict):
+            #   - 0.5 line AND it is a supported betting category
+            #   - OR score reaches the quality threshold
+            # Priority stat category alone (without a 0.5 line) does NOT trigger
+            # an individual alert — it goes into the digest instead.
             np_immediate = (
-                line_val <= config.UD_NEW_PROP_IMMEDIATE_LINE_THRESHOLD
+                (line_val <= config.UD_NEW_PROP_IMMEDIATE_LINE_THRESHOLD
+                 and stat_type in config.UD_PRIORITY_STAT_CATEGORIES)
                 or score.stars >= config.UD_MIN_STARS_TO_ALERT
-                or stat_type in config.UD_PRIORITY_STAT_CATEGORIES
             )
             # Always add to the cycle batch — even non-immediate props appear in summary
             _new_props_batch.append({
@@ -558,21 +561,17 @@ async def underdog_job(context) -> None:
                 )
 
             # Qualify for alert delivery.
-            # Removal notices: only Telegram-alert when the prop was worth watching.
-            # Criteria: previously alerted, strong score tier, 0.5 starting line,
-            # priority stat category, or had an earlier line movement.
+            # Removal notices: only Telegram-alert for three conditions.
             # All removals are still saved to the DB regardless.
             if is_removed:
                 is_qualified = (
                     prev_record is not None and (
-                        prev_record.alert_sent
-                        or prev_record.score_tier in ("S", "A", "B")
-                        or (
+                        prev_record.alert_sent                        # previously sent a quality alert
+                        or prev_record.score_tier in ("S", "A", "B") # strong grade
+                        or (                                          # was a 0.5 opportunity
                             prev_record.line_value is not None
                             and prev_record.line_value <= 0.5
                         )
-                        or stat_type in config.UD_PRIORITY_STAT_CATEGORIES
-                        or prev_record.line_moved
                     )
                 )
             else:

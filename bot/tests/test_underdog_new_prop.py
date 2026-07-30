@@ -212,10 +212,14 @@ async def test_summary_line_includes_new_counts(caplog):
 
 @pytest.mark.asyncio
 async def test_new_prop_sent_increments_new_sent_counter(caplog):
-    """new_sent counter in summary equals number of successfully delivered new-prop alerts."""
+    """new_sent counter equals number of immediate new-prop alerts delivered.
+
+    Both props are priority stats at 0.5 → both trigger immediate alerts.
+    """
+    # "Home Runs" and "Strikeouts" are both in UD_PRIORITY_STAT_CATEGORIES
     snaps = [
-        _snap("Player A", "Hits",      0.5),
-        _snap("Player B", "Home Runs", 0.5),
+        _snap("Player A", "Strikeouts", 0.5),
+        _snap("Player B", "Home Runs",  0.5),
     ]
     db = _make_db(known_keys=set())
 
@@ -309,8 +313,8 @@ async def test_no_digest_when_no_new_props():
 
 
 @pytest.mark.asyncio
-async def test_priority_stat_triggers_immediate_alert():
-    """A new prop with a priority stat category gets an immediate individual alert even with a high line."""
+async def test_priority_stat_high_line_goes_to_digest_not_immediate():
+    """A priority stat at a high line (> 0.5) does NOT trigger an immediate alert — digest only."""
     from config import config
     # "Home Runs" is in the default UD_PRIORITY_STAT_CATEGORIES
     snaps = [_snap("Aaron Judge", "Home Runs", 5.0)]
@@ -321,10 +325,40 @@ async def test_priority_stat_triggers_immediate_alert():
 
     delivery = await _run_job(snaps, db, deliver_result=sent)
 
-    # Should be called because "Home Runs" is a priority stat
+    # High line + no history → stars=0 < gate AND line > 0.5 → not immediate
+    delivery.deliver_underdog.assert_not_called()
+    # Must still be batched into the digest
+    db.save_underdog_snapshot.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_priority_stat_at_half_line_triggers_immediate_alert():
+    """A priority stat AT 0.5 line DOES trigger an immediate individual alert."""
+    snaps = [_snap("Aaron Judge", "Home Runs", 0.5)]
+    db = _make_db(known_keys=set())
+
+    from alerts import DeliveryResult
+    sent = DeliveryResult(sent=True, recipients_sent=1)
+
+    delivery = await _run_job(snaps, db, deliver_result=sent)
+
     delivery.deliver_underdog.assert_called_once()
     _, kwargs = delivery.deliver_underdog.call_args
     assert kwargs.get("new_prop") is True
+
+
+@pytest.mark.asyncio
+async def test_half_line_non_priority_stat_goes_to_digest():
+    """0.5 line with a non-priority stat (e.g. Walks) goes to digest, not immediate alert."""
+    # "Walks" is not in UD_PRIORITY_STAT_CATEGORIES
+    snaps = [_snap("Aaron Judge", "Walks", 0.5)]
+    db = _make_db(known_keys=set())
+
+    delivery = await _run_job(snaps, db)
+
+    # 0.5 line but "Walks" not in priority cats → not immediate
+    delivery.deliver_underdog.assert_not_called()
+    db.save_underdog_snapshot.assert_called_once()
 
 
 # ── Format function ────────────────────────────────────────────────────────────
