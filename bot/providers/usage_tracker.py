@@ -227,14 +227,14 @@ class ApiUsageTracker:
             if priority.value > CallPriority.HIGH.value:
                 return (
                     False,
-                    f"{provider} budget exhausted ({budget_pct:.0f}%) — "
+                    f"{provider} pacing budget exceeded ({budget_pct:.0f}%) — "
                     f"{priority.name} priority blocked",
                 )
         elif budget_pct >= 90.0:
             if priority == CallPriority.LOW:
                 return (
                     False,
-                    f"{provider} budget at {budget_pct:.0f}% — LOW priority blocked",
+                    f"{provider} pacing budget at {budget_pct:.0f}% — LOW priority blocked",
                 )
 
         return True, ""

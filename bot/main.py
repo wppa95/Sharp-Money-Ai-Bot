@@ -514,14 +514,17 @@ async def _steam_check_job(context) -> None:
 
 async def _budget_check_job(context) -> None:
     """
-    Run every 15 minutes.  Checks API usage against the monthly budget and
+    Run every 15 minutes.  Checks API usage against the pacing budget and
     sends a Telegram alert the *first* time each threshold (75 / 90 / 100 %)
     is crossed in a calendar month.
+
+    "Pacing budget" (ODDS_API_MONTHLY_BUDGET) is a self-imposed call cap and
+    is separate from the actual OddsAPI plan quota reported by API headers.
 
     Alert escalation:
       ≥ 75 % → ⚠️  warning
       ≥ 90 % → ⚠️  serious warning; LOW-priority calls now blocked
-      ≥ 100% → 🚨  quota exhausted; only CRITICAL + HIGH calls pass
+      ≥ 100% → 🚨  pacing budget exceeded; LOW + MEDIUM blocked; HIGH + CRITICAL pass
     """
     _tracker = get_usage_tracker()
     if _tracker is None:
@@ -544,47 +547,54 @@ async def _budget_check_job(context) -> None:
 
                 if threshold >= 100:
                     icon    = "🚨"
-                    heading = "API QUOTA EXHAUSTED"
+                    heading = "PACING BUDGET EXCEEDED"
                     note    = (
-                        "All LOW + MEDIUM priority Odds API calls are now blocked.\n"
-                        "PrizePicks and player-prop pipelines continue normally."
+                        "LOW + MEDIUM priority calls are now blocked.\n"
+                        "HIGH + CRITICAL calls (MLB odds, player props) continue normally.\n"
+                        "This is your self-imposed pacing cap — the actual OddsAPI plan quota is not exhausted.\n"
+                        "Raise <code>ODDS_API_MONTHLY_BUDGET</code> to allow more calls."
                     )
                 elif threshold >= 90:
                     icon    = "⚠️"
-                    heading = f"API USAGE WARNING — {threshold}%"
+                    heading = f"PACING BUDGET WARNING — {threshold}%"
                     note    = "LOW-priority Odds API calls are now blocked."
                 else:
                     icon    = "⚠️"
-                    heading = f"API USAGE WARNING — {threshold}%"
-                    note    = "Usage is elevated. Monitor before the end of the month."
+                    heading = f"PACING BUDGET WARNING — {threshold}%"
+                    note    = "Approaching pacing cap. Monitor before the end of the month."
 
-                used_str = (
+                # Pacing budget: how many calls made vs the self-imposed cap
+                pacing_used_str = (
                     f"{stats.quota_used:,}"
                     if stats.quota_used is not None
-                    else f"~{stats.month_count:,} (tracked)"
+                    else f"~{stats.month_count:,}"
                 )
-                rem_str = (
-                    f"{stats.quota_remaining:,}"
-                    if stats.quota_remaining is not None
-                    else f"~{max(0, stats.month_budget - stats.month_count):,}"
-                )
+
+                # Actual OddsAPI plan quota from response headers (separate concept)
+                if stats.quota_remaining is not None or stats.quota_used is not None:
+                    r = f"{stats.quota_remaining:,}" if stats.quota_remaining is not None else "?"
+                    u = f"{stats.quota_used:,}"      if stats.quota_used      is not None else "?"
+                    api_quota_line = f"<b>API quota:</b>     {r} remaining  ·  {u} used\n"
+                else:
+                    api_quota_line = ""
 
                 msg = (
                     f"{icon} <b>{heading}</b>\n"
                     f"\n"
-                    f"<b>Provider:</b>   {provider}\n"
-                    f"<b>Used:</b>       {used_str} / {stats.month_budget:,}  ({stats.budget_pct:.1f}%)\n"
-                    f"<b>Remaining:</b>  {rem_str}\n"
-                    f"<b>Budget:</b>     <code>{stats.budget_bar}</code>\n"
+                    f"<b>Provider:</b>      {provider}\n"
+                    f"<b>Pacing budget:</b> {pacing_used_str} / {stats.month_budget:,}  ({stats.budget_pct:.1f}%)\n"
+                    f"<b>Pacing bar:</b>    <code>{stats.budget_bar}</code>\n"
+                    f"{api_quota_line}"
                     f"\n"
                     f"<i>{note}</i>"
                 )
 
                 await broadcast_alert(bot, chat_ids, msg)
                 logger.warning(
-                    "_budget_check_job: %s crossed %d%% threshold "
-                    "(used=%s / budget=%d)",
-                    provider, threshold, used_str, stats.month_budget,
+                    "_budget_check_job: %s crossed %d%% pacing threshold "
+                    "(used=%s / pacing_budget=%d, api_quota_remaining=%s)",
+                    provider, threshold, pacing_used_str, stats.month_budget,
+                    stats.quota_remaining if stats.quota_remaining is not None else "unknown",
                 )
 
 

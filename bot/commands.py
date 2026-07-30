@@ -174,12 +174,28 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 f"  {h.status_emoji} <b>{name}</b>  {h.status.value}"
                 f"  ·  last ✓: {last_ok}{fail_note}"
             )
-        # Quota detail for Odds API
+        # API quota (from response headers) + pacing budget (self-imposed cap)
         odds_h = _mon.get_health("OddsAPI")
         if odds_h.quota_remaining is not None or odds_h.quota_used is not None:
             r = f"{odds_h.quota_remaining:,}" if odds_h.quota_remaining is not None else "?"
             u = f"{odds_h.quota_used:,}"      if odds_h.quota_used      is not None else "?"
-            lines.append(f"  ↳ Quota: {r} remaining  ·  {u} used")
+            lines.append(f"  ↳ API quota:  {r} remaining  ·  {u} used")
+        try:
+            from providers.usage_tracker import get_usage_tracker as _get_tracker
+            _ut = _get_tracker()
+            if _ut is not None:
+                _us = _ut.get_stats("OddsAPI")
+                if _us.month_budget > 0:
+                    _pacing_used = (
+                        f"{_us.quota_used:,}" if _us.quota_used is not None
+                        else f"~{_us.month_count:,}"
+                    )
+                    lines.append(
+                        f"  ↳ Pacing:     {_pacing_used} / {_us.month_budget:,}"
+                        f"  ({_us.budget_pct:.1f}%)  <code>{_us.budget_bar}</code>"
+                    )
+        except Exception:
+            pass
     else:
         lines += [
             "  ⚪ PrizePicks   not yet tracked",
