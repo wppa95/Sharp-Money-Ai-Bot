@@ -58,7 +58,11 @@ from .steam import (
     compute_steam_simple,
 )
 
+from .analysis import AnalysisEngine
+
 __all__ = [
+    # analysis
+    "AnalysisEngine",
     # fair_probability
     "american_to_implied",
     "implied_to_american",

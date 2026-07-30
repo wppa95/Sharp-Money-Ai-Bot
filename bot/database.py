@@ -87,6 +87,48 @@ class EVRecord(Base):
     alert_sent = Column(Boolean, default=False, nullable=False)
 
 
+# ── PrizePicks models ─────────────────────────────────────────────────────────
+
+class PrizePicksRecord(Base):
+    """Raw PrizePicks projection — stores line history over time."""
+    __tablename__ = "prizepicks_records"
+
+    id               = Column(Integer, primary_key=True, autoincrement=True)
+    external_id      = Column(String(64),  nullable=False, index=True)
+    player_name      = Column(String(128), nullable=False, index=True)
+    team             = Column(String(64),  nullable=False, default="")
+    sport            = Column(String(32),  nullable=False, index=True)
+    stat_type        = Column(String(64),  nullable=False)
+    line_value       = Column(Float,       nullable=False)
+    start_time       = Column(DateTime,    nullable=True)
+    game_description = Column(String(256), nullable=False, default="")
+    fetched_at       = Column(DateTime,    default=datetime.utcnow, nullable=False)
+
+
+class PPEdgeRecord(Base):
+    """Detected PrizePicks edge opportunity vs sportsbook fair odds."""
+    __tablename__ = "pp_edge_records"
+
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    player_name     = Column(String(128), nullable=False, index=True)
+    team            = Column(String(64),  nullable=False, default="")
+    sport           = Column(String(32),  nullable=False, index=True)
+    stat_type       = Column(String(64),  nullable=False)
+    pp_line_value   = Column(Float,       nullable=False)
+    sportsbook      = Column(String(64),  nullable=False)
+    sb_line_value   = Column(Float,       nullable=False)
+    sb_over_odds    = Column(Integer,     nullable=False)
+    sb_under_odds   = Column(Integer,     nullable=False)
+    fair_prob_over  = Column(Float,       nullable=False)
+    fair_prob_under = Column(Float,       nullable=False)
+    edge_over       = Column(Float,       nullable=False)
+    edge_under      = Column(Float,       nullable=False)
+    best_side       = Column(String(8),   nullable=False)   # "OVER" | "UNDER"
+    best_edge       = Column(Float,       nullable=False)
+    alert_sent      = Column(Boolean,     default=False, nullable=False)
+    detected_at     = Column(DateTime,    default=datetime.utcnow, nullable=False)
+
+
 # ── Database manager ──────────────────────────────────────────────────────────
 
 class Database:
@@ -99,10 +141,14 @@ class Database:
 
     async def init(self) -> None:
         """Create engine, run migrations, and ensure tables exist."""
-        # Ensure the data directory exists for SQLite
+        # Ensure the data directory exists for file-backed SQLite.
+        # Skip for in-memory databases (":memory:" has no parent directory).
         if self._url.startswith("sqlite"):
             db_path = self._url.replace("sqlite+aiosqlite:///", "")
-            os.makedirs(os.path.dirname(db_path), exist_ok=True)
+            if db_path and db_path != ":memory:":
+                parent = os.path.dirname(db_path)
+                if parent:
+                    os.makedirs(parent, exist_ok=True)
 
         self._engine = create_async_engine(self._url, echo=False)
         self._session_factory = async_sessionmaker(
@@ -178,6 +224,177 @@ class Database:
         async with self.session() as s:
             result = await s.execute(select(func.count()).select_from(OddsRecord))
             return result.scalar() or 0
+
+    async def get_prior_odds(
+        self,
+        event: str,
+        selection: str,
+        sportsbook: str,
+        before: datetime,
+    ) -> Optional[OddsRecord]:
+        """
+        Return the most recent OddsRecord for a specific event/selection/book
+        recorded strictly before *before*.  Used for steam movement comparison.
+        """
+        async with self.session() as s:
+            result = await s.execute(
+                select(OddsRecord)
+                .where(
+                    OddsRecord.event == event,
+                    OddsRecord.selection == selection,
+                    OddsRecord.sportsbook == sportsbook,
+                    OddsRecord.recorded_at < before,
+                )
+                .order_by(desc(OddsRecord.recorded_at))
+                .limit(1)
+            )
+            return result.scalar_one_or_none()
+
+    async def get_odds_window(self, sport: str, since: datetime) -> list[OddsRecord]:
+        """Return all OddsRecords for a sport recorded at or after *since*."""
+        async with self.session() as s:
+            result = await s.execute(
+                select(OddsRecord)
+                .where(
+                    OddsRecord.sport == sport,
+                    OddsRecord.recorded_at >= since,
+                )
+                .order_by(OddsRecord.recorded_at)
+            )
+            return list(result.scalars().all())
+
+    async def has_recent_steam_alert(
+        self, event: str, selection: str, within_seconds: int = 3600
+    ) -> bool:
+        """True if a SteamRecord for this event/selection was sent recently."""
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(seconds=within_seconds)
+        async with self.session() as s:
+            result = await s.execute(
+                select(func.count())
+                .select_from(SteamRecord)
+                .where(
+                    SteamRecord.event == event,
+                    SteamRecord.selection == selection,
+                    SteamRecord.alert_sent == True,  # noqa: E712
+                    SteamRecord.detected_at >= cutoff,
+                )
+            )
+            return (result.scalar() or 0) > 0
+
+    async def has_recent_ev_alert(
+        self, event: str, selection: str, within_seconds: int = 1800
+    ) -> bool:
+        """True if an EVRecord for this event/selection was alerted recently."""
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(seconds=within_seconds)
+        async with self.session() as s:
+            result = await s.execute(
+                select(func.count())
+                .select_from(EVRecord)
+                .where(
+                    EVRecord.event == event,
+                    EVRecord.selection == selection,
+                    EVRecord.alert_sent == True,  # noqa: E712
+                    EVRecord.detected_at >= cutoff,
+                )
+            )
+            return (result.scalar() or 0) > 0
+
+    # ── PrizePicks ───────────────────────────────────────────────────────────
+
+    async def save_pp_line(self, record: "PrizePicksRecord") -> "PrizePicksRecord":
+        async with self.session() as s:
+            s.add(record)
+            await s.commit()
+            await s.refresh(record)
+        return record
+
+    async def get_recent_pp_lines(self, limit: int = 20) -> list["PrizePicksRecord"]:
+        async with self.session() as s:
+            result = await s.execute(
+                select(PrizePicksRecord)
+                .order_by(desc(PrizePicksRecord.fetched_at))
+                .limit(limit)
+            )
+            return list(result.scalars().all())
+
+    async def save_pp_edge(self, record: "PPEdgeRecord") -> "PPEdgeRecord":
+        async with self.session() as s:
+            s.add(record)
+            await s.commit()
+            await s.refresh(record)
+        return record
+
+    async def get_recent_pp_edges(self, limit: int = 10) -> list["PPEdgeRecord"]:
+        async with self.session() as s:
+            result = await s.execute(
+                select(PPEdgeRecord)
+                .order_by(desc(PPEdgeRecord.detected_at))
+                .limit(limit)
+            )
+            return list(result.scalars().all())
+
+    async def count_pp_records(self) -> int:
+        async with self.session() as s:
+            result = await s.execute(
+                select(func.count()).select_from(PrizePicksRecord)
+            )
+            return result.scalar() or 0
+
+    async def count_pp_edge_records(self) -> int:
+        async with self.session() as s:
+            result = await s.execute(
+                select(func.count()).select_from(PPEdgeRecord)
+            )
+            return result.scalar() or 0
+
+    async def has_recent_pp_alert(
+        self,
+        player_name: str,
+        stat_type: str,
+        within_seconds: int = 3600,
+    ) -> bool:
+        """True if a PPEdgeRecord for this player/stat was alerted recently."""
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(seconds=within_seconds)
+        async with self.session() as s:
+            result = await s.execute(
+                select(func.count())
+                .select_from(PPEdgeRecord)
+                .where(
+                    PPEdgeRecord.player_name == player_name,
+                    PPEdgeRecord.stat_type   == stat_type,
+                    PPEdgeRecord.alert_sent  == True,   # noqa: E712
+                    PPEdgeRecord.detected_at >= cutoff,
+                )
+            )
+            return (result.scalar() or 0) > 0
+
+    async def find_player_prop_odds(
+        self,
+        player_name: str,
+        market_type: str,
+        since: datetime,
+    ) -> list["OddsRecord"]:
+        """
+        Find sportsbook player-prop OddsRecords for a player + stat combination.
+
+        Matches records whose ``selection`` column contains the player name
+        (case-insensitive) and whose ``market_type`` equals the Odds API stat
+        string (e.g. "player_points").
+        """
+        async with self.session() as s:
+            result = await s.execute(
+                select(OddsRecord)
+                .where(
+                    OddsRecord.market_type == market_type,
+                    OddsRecord.selection.ilike(f"%{player_name}%"),
+                    OddsRecord.recorded_at >= since,
+                )
+                .order_by(desc(OddsRecord.recorded_at))
+            )
+            return list(result.scalars().all())
 
     async def close(self) -> None:
         if self._engine:

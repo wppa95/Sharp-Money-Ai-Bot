@@ -1,68 +1,203 @@
-# Sharp Money +EV Detection Bot
+# Sharp Money +EV Detection Bot — v1.0
 
-A professional sports betting intelligence Telegram bot — foundation for a Sharp Money +EV Detection Platform.
+A professional sports-betting intelligence Telegram bot that monitors live sportsbook odds, detects steam moves and positive-expected-value opportunities, and delivers richly formatted alerts automatically.
 
-## Run & Operate
+---
 
-- **Start the bot:** Run the `Sharp Money Bot` workflow (or `python bot/main.py`)
-- The bot polls Telegram continuously; it must stay running to receive commands
+## Quick start
+
+- **Run:** `Sharp Money Bot` workflow (or `python bot/main.py`)
+- **Required secret:** `TELEGRAM_TOKEN` (set in Replit Secrets)
+- **Optional secret:** `ODDS_API_KEY` — The Odds API key for live data (without it the polling jobs no-op gracefully)
+- The bot polls Telegram continuously; keep the workflow running
+
+---
 
 ## Stack
 
-- Python 3.11
-- python-telegram-bot 22 (async, APScheduler job queue)
-- SQLAlchemy 2 + aiosqlite (async SQLite)
-- python-dotenv for local dev
+| Layer | Library |
+|---|---|
+| Bot framework | python-telegram-bot 22 (async, APScheduler job queue) |
+| Database | SQLAlchemy 2 + aiosqlite (async SQLite) |
+| HTTP client | aiohttp (live odds fetch) |
+| Runtime | Python 3.11 |
+| Config | python-dotenv (local dev) |
+| Tests | pytest + pytest-asyncio |
 
-## Where things live
+---
+
+## File structure
 
 ```
 bot/
-├── main.py       # Entry point — builds Application, registers lifecycle hooks
-├── config.py     # All settings (reads TELEGRAM_TOKEN + optional env vars)
-├── commands.py   # Telegram command handlers (/start /help /status /analyze /steam /ev)
-├── alerts.py     # HTML alert formatters and broadcast helpers
-├── engine.py     # Vig removal, EV calculation, steam detection, AI confidence scoring
-├── database.py   # Async SQLAlchemy ORM + data access layer
-├── models.py     # Plain dataclasses: OddsLine, EVOpportunity, SteamAlert, etc.
-└── data/         # Auto-created — sharp_money.db lives here
+├── main.py              # Entry point — Application lifecycle, background jobs
+├── config.py            # All settings (env vars + typed properties)
+├── models.py            # Shared dataclasses: OddsLine, EVOpportunity, SteamAlert, …
+├── database.py          # Async SQLAlchemy ORM: OddsRecord, EVRecord, SteamRecord
+├── alerts.py            # Alert formatting, risk factors, AlertDelivery pipeline
+├── commands.py          # Telegram command handlers (/start /help /status /analyze /steam /ev)
+├── engine/              # Analysis engine package (see below)
+│   ├── __init__.py      # Re-exports AnalysisEngine
+│   ├── analysis.py      # Orchestrator: VigRemover, EVCalculator, SteamDetector, AIConfidenceScorer
+│   ├── fair_probability.py  # Devig methods: multiplicative, additive, power, odds-ratio
+│   ├── ev.py            # EVResult, kelly_fraction, compute_ev, compute_ev_batch
+│   ├── steam.py         # SteamMovement, SteamResult, compute_steam, compute_steam_simple
+│   └── confidence.py    # ConfidenceResult, _ConfidenceScorer, compute_confidence
+├── tests/
+│   ├── __init__.py
+│   └── test_pipeline.py # Full pipeline test suite (76 tests, all passing)
+└── data/                # Auto-created at runtime — sharp_money.db lives here
 ```
+
+---
+
+## Completed modules — v1.0 baseline
+
+### 1. Odds pipeline (`engine/analysis.py`, `main.py`)
+- `fetch_live_odds(sport)` — async call to The Odds API (h2h, spreads, totals)
+- `_poll_odds_job` — APScheduler job, runs every `ODDS_POLL_INTERVAL` seconds (default 60s)
+- Stores each fetched line as an `OddsRecord` in SQLite with timestamp
+
+### 2. Fair probability engine (`engine/fair_probability.py`, `engine/analysis.py → VigRemover`)
+- Four devig methods: **multiplicative** (default), additive, power-iteration, odds-ratio
+- `american_to_implied`, `implied_to_american`, `overround`, `vig_percentage`, `hold_percentage`
+- `compute_fair_probability(odds_list, method)` — works for two-way and multi-way markets
+- `compute_fair_market(lines)` — batch fair-prob across a full market snapshot
+- `no_vig_line` — returns the fair American odds for both sides of a two-way market
+
+### 3. EV engine (`engine/ev.py`, `engine/analysis.py → EVCalculator`)
+- `expected_value_pct(fair_probability, market_odds)` — core EV formula
+- `kelly_fraction` / half-Kelly sizing
+- `edge_pct`, `break_even_probability`, `fair_vs_market_diff`
+- `EVResult` — full result object with rating, confidence flags, sizing
+- `compute_ev_batch` — vectorised over a list of lines
+- `EVRating` enum: STRONG / MODERATE / MARGINAL / NEGATIVE / AVOID
+
+### 4. Steam engine (`engine/steam.py`, `engine/analysis.py → SteamDetector`)
+- `compute_steam(movements)` — detects cross-book consensus line movement
+- `compute_steam_simple(movement, books_moved)` — lightweight scorer used in background jobs
+- Steam score 0–100 from: odds change magnitude (+40 max), books moved (+30 max), line movement (+20 max, placeholder +10)
+- `SteamTier`: ELITE / STRONG / MODERATE / WEAK
+- `MovementDirection`: UP / DOWN / FLAT / MIXED
+
+### 5. Confidence engine (`engine/confidence.py`, `engine/analysis.py → AIConfidenceScorer`)
+Five live signals, 100-pt ceiling:
+
+| Signal | Max pts | Source |
+|---|---|---|
+| EV Edge | 25 | `ev_percentage` tier (≥3/5/7/10%) |
+| Steam Score | 25 | `steam_score × 0.25` |
+| Sharp Book Presence | 20 | `books_moved ∩ config.sharp_books` (≥1/2/3) |
+| Line Shopping Efficiency | 20 | `\|side_a_odds − side_b_odds\|` (≥5/10/20) |
+| Market Tightness | 10 | `vig_pct` (≤0 / ≤3 / ≤6) |
+
+Star bands (from confidence score):
+- 90–100 → ★★★★★ Elite
+- 75–89  → ★★★★☆ Strong
+- 60–74  → ★★★☆☆ Good
+- 40–59  → ★★☆☆☆ Marginal
+- 0–39   → ★☆☆☆☆ Weak
+
+### 6. Analysis engine (`engine/analysis.py → AnalysisEngine`)
+Single entry-point that orchestrates all sub-engines:
+```
+analyze_line(sport, market_type, event, selection, side_a_odds, side_b_odds, …)
+  → EVOpportunity(ev_result, steam_alert, ai_confidence, recommendation, stars, reason_codes)
+```
+- `Recommendation`: STRONG_BET / BET / LEAN / PASS / FADE
+- Requires both EV ≥ threshold AND confidence ≥ threshold to recommend betting
+- Also owns `fetch_live_odds()` and `fetch_prizepicks_lines()` (stub)
+
+### 7. Risk system (`alerts.py → compute_ev_risk_factors / compute_steam_risk_factors`)
+- `RiskFactor(level, description, icon)` — HIGH 🔴 / MEDIUM 🟡 / LOW 🔵
+- EV risk checks: vig quality, steam confirmation, odds extremity, AI confidence, edge thinness, Kelly sizing
+- Steam risk checks: book count, movement size, sharp book presence
+- `identify_sharp_books(books)` — filters against `config.sharp_books` (Pinnacle, Circa, Bookmaker.eu, Heritage, BetOnline, CRIS, 5Dimes, …)
+
+### 8. Alert delivery (`alerts.py → AlertDelivery`)
+Full pipeline in a single call — no inline logic needed in background jobs:
+```
+AlertDelivery(db, bot, chat_ids, min_ev, min_confidence, min_steam, ev_dedup_window, steam_dedup_window)
+  .deliver_ev(opp)     → DeliveryResult(filtered, filtered_reason, sent, deduped, recipients_sent, …)
+  .deliver_steam(alert) → DeliveryResult(…)
+```
+Steps: **filter** → **dedup** (DB-backed, configurable window) → **format** (rich HTML, risk factors, sharp books) → **send** → **log** (`EVRecord` / `SteamRecord`)
+
+`format_ev_alert` HTML fields: alert type, sport/league, event, player/market, sportsbook, offered odds, fair odds, fair probability, EV%, Kelly, steam score, books moving, sharp books, AI confidence, star rating, recommendation, risk factors.
+
+### 9. Telegram integration (`main.py`, `commands.py`)
+Background jobs:
+- `_poll_odds_job` (every 60s) — fetch → store → detect +EV → `AlertDelivery.deliver_ev()`
+- `_steam_check_job` (every 30s) — window query → group by book → detect steam → `AlertDelivery.deliver_steam()`
+
+Commands:
+| Command | What it does |
+|---|---|
+| `/start` | Welcome message with feature overview |
+| `/help` | Full command reference |
+| `/status` | Uptime, DB record counts, config summary |
+| `/analyze [sport] [selection] [odds] [opp_odds]` | On-demand vig removal + EV + Kelly |
+| `/steam` | Latest sharp moves from DB |
+| `/ev` | Latest +EV opportunities from DB |
+
+### 10. Test suite (`bot/tests/test_pipeline.py`)
+**76 / 76 tests passing** — full pipeline coverage, zero mocks in the engine layer.
+
+| Class | Tests | Covers |
+|---|---|---|
+| `TestVigRemover` | 6 | Implied prob math, vig %, fair prob, roundtrip |
+| `TestEVCalculator` | 5 | +EV scenario, Kelly, sign consistency |
+| `TestSteamDetector` | 5 | Score tiers, line change, cap, direction |
+| `TestAIConfidenceScorer` | 8 | All 5 signal tiers, sharp pts, vig tiers, cap |
+| `TestAnalysisEngine` | 6 | Full pipeline, steam attachment, FADE on negative EV |
+| `TestRiskFactors` | 6 | HIGH/MEDIUM/LOW assignment, icons |
+| `TestAlertFormatting` | 19 | All HTML fields, balanced tags, score bar |
+| `TestSharpBooks` | 3 | Known sharp, all-soft, empty input |
+| `TestAlertDeliveryFiltering` | 3 | EV / confidence / steam threshold blocks |
+| `TestAlertDeliveryEndToEnd` | 6 | Real SQLite, mock Telegram, DB fields |
+| `TestAlertDeliveryDeduplication` | 3 | Same event suppressed, different events both send |
+| `TestConfidenceRecalibration` | 7 | 100 reachable, 5★ end-to-end, sharp vs soft, delivery |
+
+Run: `python -m pytest bot/tests/test_pipeline.py -v`
+
+---
+
+## Configuration
+
+All settings in `bot/config.py` — override via environment variables:
+
+| Variable | Default | Description |
+|---|---|---|
+| `TELEGRAM_TOKEN` | — | **Required.** Bot token from @BotFather |
+| `ODDS_API_KEY` | — | The Odds API key (live data) |
+| `ALLOWED_USER_IDS` | (empty) | Comma-separated Telegram user IDs for alerts |
+| `ODDS_POLL_INTERVAL` | `60` | Seconds between odds fetches |
+| `STEAM_CHECK_INTERVAL` | `30` | Seconds between steam scans |
+| `MIN_EV_THRESHOLD` | `3.0` | Minimum EV% to alert |
+| `MIN_STEAM_SCORE` | `70` | Minimum steam score (0–100) to alert |
+| `MIN_AI_CONFIDENCE` | `60` | Minimum confidence score (0–100) to alert |
+| `EV_DEDUP_WINDOW` | `1800` | Seconds before re-alerting same EV opportunity |
+| `STEAM_DEDUP_WINDOW` | `3600` | Seconds before re-alerting same steam move |
+| `SHARP_BOOKS` | Pinnacle, Circa, Bookmaker.eu, … | Comma-separated sharp book names |
+| `ACTIVE_SPORTS` | americanfootball_nfl, … | Sports to monitor |
+| `BOT_DATABASE_URL` | `sqlite+aiosqlite:///bot/data/sharp_money.db` | Database URL |
+
+> `DATABASE_URL` is reserved by Replit for managed Postgres — always use `BOT_DATABASE_URL` for the bot's SQLite.
+
+---
 
 ## Architecture decisions
 
-- `run_polling()` owns the event loop in PTB v20+; never wrap it in `asyncio.run()`
-- Async DB setup uses PTB's `post_init` hook (not top-level `asyncio.run`)
-- Database env var is `BOT_DATABASE_URL` (not `DATABASE_URL`) to avoid collision with Replit's managed Postgres
-- All analysis logic is in `engine.py`; Telegram I/O stays in `commands.py` and `alerts.py`
-- Background job stubs (`_poll_odds_job`, `_steam_check_job`) are pre-wired in `main.py` — fill in when live APIs are integrated
+- **`engine/` package shadows `engine.py`** — Python resolves packages before modules. `AnalysisEngine` lives in `engine/analysis.py`, exported via `engine/__init__.py`. The original `engine.py` is dead code (tracked as task #5).
+- **`AlertDelivery` centralises all delivery logic** — background jobs call a single method; no inline dedup/format/send logic in `main.py`.
+- **Dedup via DB** — `has_recent_ev_alert` / `has_recent_steam_alert` query the ORM with a configurable time window instead of in-memory state (survives restarts).
+- **`run_polling()` owns the event loop** — PTB v20+; never wrap in `asyncio.run()`. Async DB setup uses the `post_init` lifecycle hook.
+- **Stars map directly from confidence score** — not a composite formula. The old `ev × 0.5 + confidence × 0.3 + steam × 0.2` composite made 5★ mathematically unreachable (ceiling was 51/70 threshold).
 
-## Product
-
-- `/start` — welcome and overview
-- `/help` — command reference
-- `/status` — uptime, DB record counts, market stats
-- `/analyze [sport] [selection] [odds] [opp_odds]` — on-demand line analysis (vig removal + EV + Kelly)
-- `/steam` — latest detected steam / sharp moves from DB
-- `/ev` — latest +EV opportunities from DB
-- Automatic alert broadcasting (ready to wire to live odds feed)
+---
 
 ## User preferences
 
-_Populate as you build._
-
-## Gotchas
-
-- Install packages with `installLanguagePackages` (skill), not `pip install` directly
-- PTB v20+ event loop: `Application.run_polling()` blocks and manages its own loop
-- `DATABASE_URL` is Replit-managed (Postgres); use `BOT_DATABASE_URL` for the bot's SQLite
-
-## Roadmap stubs (ready to implement)
-
-| Feature | Location |
-|---------|----------|
-| Live sportsbook odds | `engine.py → fetch_live_odds()` |
-| PrizePicks monitoring | `engine.py → fetch_prizepicks_lines()` |
-| ML confidence model | `engine.py → run_ml_model()` |
-| CLV tracking | `engine.py → compute_clv()` |
-| Periodic polling | `main.py → _poll_odds_job()` / `_steam_check_job()` |
-| Discord integration | `alerts.py → broadcast_alert()` |
+- Documentation changes do not require calling `markTaskInProgress`
+- Test suite is the source of truth for pipeline correctness — run before merging any engine changes
+- Sharp book list is configurable via `SHARP_BOOKS` env var; defaults cover the primary sharp/respected books

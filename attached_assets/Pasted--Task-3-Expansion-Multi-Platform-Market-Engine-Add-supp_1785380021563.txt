@@ -1,0 +1,429 @@
+# Task #3 Expansion — Multi-Platform Market Engine
+
+Add support for:
+
+1. Underdog Fantasy
+2. DraftKings Sportsbook Moneylines
+3. FanDuel Sportsbook Moneylines
+
+Goal:
+
+Track market movement, compare prices, detect sharp action, and calculate value.
+
+---
+
+# New Module Structure
+
+Create:
+
+bot/
+ ├── market_data/
+ │    ├── draftkings.py
+ │    ├── fanduel.py
+ │    ├── underdog.py
+ │    ├── consensus.py
+ │    └── steam_engine.py
+ │
+ ├── models/
+ │    ├── odds.py
+ │    ├── moneyline.py
+ │    └── steam.py
+
+---
+
+# DraftKings Moneyline Collector
+
+Track:
+
+- Team
+- Opponent
+- Opening odds
+- Current odds
+- Movement
+- Timestamp
+- Game start
+- Market liquidity
+
+Example:
+
+Opening:
+
+Yankees ML
+-145
+
+Current:
+
+Yankees ML
+-185
+
+
+Output:
+
+Moneyline Movement:
+
++40 cents
+
+Steam Score:
+
+87/100
+
+---
+
+# FanDuel Moneyline Collector
+
+Track the same:
+
+Example:
+
+FanDuel
+
+Dodgers ML
+
+Open:
+-120
+
+Current:
+-155
+
+
+Compare:
+
+DraftKings:
+-150
+
+FanDuel:
+-155
+
+Pinnacle:
+-160
+
+
+Consensus:
+
+Dodgers ML
+
+Fair Probability:
+
+61.8%
+
+---
+
+# Underdog Collector
+
+Track:
+
+- Pick'em lines
+- Player projections
+- Higher/lower movement
+- Line changes
+- Removed props
+
+Example:
+
+Before:
+
+Player
+Over 5.5 rebounds
+
+
+After:
+
+Over 6.5 rebounds
+
+
+Detection:
+
+🚨 UNDERDOG LINE MOVE
+
+Player:
+Anthony Edwards
+
+Market:
+Rebounds
+
+Movement:
++1.0
+
+Confidence:
+HIGH
+
+---
+
+# Consensus Engine
+
+Combine:
+
+DraftKings
+
+FanDuel
+
+Pinnacle
+
+Circa
+
+Bet365
+
+Underdog
+
+PrizePicks
+
+
+Create:
+
+Consensus Price
+
+Fair Probability
+
+Market Direction
+
+---
+
+# Sharp Money Detector
+
+Calculate:
+
+## Movement Speed
+
+Example:
+
+3 sportsbooks move within 60 seconds:
+
++20 points
+
+
+## Sharp Book Agreement
+
+Pinnacle/Circa move first:
+
++30 points
+
+
+## Magnitude
+
+Example:
+
+-120 → -170
+
++25 points
+
+
+## Time Before Game
+
+Early move:
+
+Higher weight
+
+
+Final:
+
+Steam Score
+
+0-100
+
+---
+
+# Moneyline Alert Example
+
+🚨 SHARP MONEY ALERT
+
+Sport:
+MLB
+
+Market:
+Moneyline
+
+Team:
+Los Angeles Dodgers
+
+Opening:
+-125
+
+Current:
+-175
+
+Fair Probability:
+63.6%
+
+Steam Score:
+94
+
+Books Moving:
+6/8
+
+Sharp Books:
+Pinnacle
+Circa
+
+Expected CLV:
++7%
+
+AI Confidence:
+★★★★★
+
+
+---
+
+# Database Additions
+
+Create:
+
+moneyline_records
+
+Fields:
+
+id
+
+sport
+
+league
+
+team
+
+opponent
+
+book
+
+opening_odds
+
+current_odds
+
+movement
+
+timestamp
+
+game_time
+
+
+steam_alerts
+
+Fields:
+
+id
+
+market_type
+
+player/team
+
+steam_score
+
+fair_probability
+
+expected_clv
+
+books_triggered
+
+result
+
+
+---
+
+# AI Ranking System
+
+Rank alerts:
+
+S Tier
+95-100 confidence
+
+A Tier
+85-94 confidence
+
+B Tier
+75-84 confidence
+
+
+Anything below:
+
+IGNORE
+
+---
+
+# Integration Rules
+
+PrizePicks:
+
+Player props only
+
+Focus:
+- consistency
+- matchup
+- role
+- hit rate
+
+
+DraftKings/FanDuel:
+
+Moneylines only
+
+Focus:
+- market movement
+- sharp action
+- injuries
+- lineup
+- rest
+
+
+Underdog:
+
+Fantasy projections only
+
+Focus:
+- line movement
+- projection gaps
+- closing movement
+
+---
+
+# Discord Channels
+
+Create:
+
+#sharp-money-alerts
+
+For:
+
+Steam alerts
+
+#prizepicks-edges
+
+For:
+
++EV props
+
+#moneyline-value
+
+For:
+
+DraftKings/FanDuel ML edges
+
+#underdog-moves
+
+For:
+
+Projection changes
+
+---
+
+# Final Bot Flow
+
+Sportsbooks
+      |
+      ↓
+DraftKings/FanDuel/Pinnacle/Circa
+      |
+      ↓
+Steam Engine
+      |
+      ↓
+Fair Probability
+      |
+      ↓
+CLV Prediction
+      |
+      ↓
+PrizePicks + Underdog Comparison
+      |
+      ↓
+AI Confidence Score
+      |
+      ↓
+Discord Alert

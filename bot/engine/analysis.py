@@ -1,24 +1,19 @@
 """
-Analysis Engine — Sharp Money +EV Detection Platform.
+analysis.py — AnalysisEngine orchestrator.
 
-Responsibilities:
-  • Remove sportsbook vig to calculate fair probabilities
-  • Calculate expected value (+EV) for any line
-  • Detect steam / sharp money moves from odds movement
-  • Score AI confidence based on multiple signals
-  • Compare sportsbook lines with PrizePicks props (placeholder)
-  • CLV tracking (placeholder — populated post-event)
+Wraps VigRemover, EVCalculator, SteamDetector, and AIConfidenceScorer into a
+single entry-point used by main.py and commands.py.
 
-All public methods are async-ready. Placeholder stubs are clearly marked
-so future integrations (live odds APIs, ML models) can drop in cleanly.
+Also owns fetch_live_odds() — the live data feed via The Odds API.
 """
 
 from __future__ import annotations
 
 import logging
-import math
 from datetime import datetime
 from typing import Optional
+
+import aiohttp
 
 from models import (
     AlertType,
@@ -36,11 +31,32 @@ from config import config
 
 logger = logging.getLogger(__name__)
 
+# ── The Odds API — sport / market key mappings ────────────────────────────────
+
+_SPORT_TO_ODDS_API_KEY: dict[Sport, str] = {
+    Sport.NFL:    "americanfootball_nfl",
+    Sport.NBA:    "basketball_nba",
+    Sport.MLB:    "baseball_mlb",
+    Sport.NHL:    "icehockey_nhl",
+    Sport.NCAAF:  "americanfootball_ncaaf",
+    Sport.NCAAB:  "basketball_ncaab",
+    Sport.UFC:    "mma_mixed_martial_arts",
+    Sport.SOCCER: "soccer_epl",
+}
+
+_MARKET_KEY_TO_TYPE: dict[str, MarketType] = {
+    "h2h":     MarketType.MONEYLINE,
+    "spreads": MarketType.SPREAD,
+    "totals":  MarketType.TOTAL,
+}
+
+_ODDS_API_BASE = "https://api.the-odds-api.com/v4"
+
 
 # ── Vig removal ───────────────────────────────────────────────────────────────
 
 class VigRemover:
-    """Remove sportsbook vig using the multiplicative / Shin method."""
+    """Remove sportsbook vig using the multiplicative method."""
 
     @staticmethod
     def american_to_implied(odds: int) -> float:
@@ -49,11 +65,9 @@ class VigRemover:
         return 100 / (odds + 100)
 
     @staticmethod
-    def fair_probability_multiplicative(side_a_odds: int, side_b_odds: int) -> tuple[float, float]:
-        """
-        Remove vig multiplicatively (standard approach).
-        Returns (fair_prob_a, fair_prob_b) that sum to exactly 1.0.
-        """
+    def fair_probability_multiplicative(
+        side_a_odds: int, side_b_odds: int
+    ) -> tuple[float, float]:
         p_a = VigRemover.american_to_implied(side_a_odds)
         p_b = VigRemover.american_to_implied(side_b_odds)
         total = p_a + p_b
@@ -61,7 +75,6 @@ class VigRemover:
 
     @staticmethod
     def vig_percentage(side_a_odds: int, side_b_odds: int) -> float:
-        """Return the vig as a percentage of the total market width."""
         p_a = VigRemover.american_to_implied(side_a_odds)
         p_b = VigRemover.american_to_implied(side_b_odds)
         total = p_a + p_b
@@ -69,18 +82,18 @@ class VigRemover:
 
     @staticmethod
     def fair_american_odds(fair_probability: float) -> int:
-        """Convert a fair probability to American odds (rounded to nearest 5)."""
         if fair_probability <= 0 or fair_probability >= 1:
             raise ValueError("Probability must be between 0 and 1 (exclusive).")
         if fair_probability >= 0.5:
             raw = -(fair_probability / (1 - fair_probability)) * 100
         else:
             raw = ((1 - fair_probability) / fair_probability) * 100
-        # Round to nearest 5 for cleanliness
         return int(round(raw / 5) * 5)
 
     @staticmethod
-    def build_fair_odds(selection: str, side_a_odds: int, side_b_odds: int, is_side_a: bool) -> FairOdds:
+    def build_fair_odds(
+        selection: str, side_a_odds: int, side_b_odds: int, is_side_a: bool
+    ) -> FairOdds:
         fp_a, fp_b = VigRemover.fair_probability_multiplicative(side_a_odds, side_b_odds)
         fair_prob = fp_a if is_side_a else fp_b
         vig = VigRemover.vig_percentage(side_a_odds, side_b_odds)
@@ -102,10 +115,6 @@ class EVCalculator:
 
     @staticmethod
     def expected_value(fair_probability: float, offered_american_odds: int) -> float:
-        """
-        EV% = (fair_prob * decimal_odds - 1) * 100
-        Positive value = +EV opportunity.
-        """
         if offered_american_odds < 0:
             decimal = 1 + (100 / abs(offered_american_odds))
         else:
@@ -115,18 +124,19 @@ class EVCalculator:
 
     @staticmethod
     def kelly_fraction(fair_probability: float, offered_american_odds: int) -> float:
-        """Full Kelly Criterion — fraction of bankroll to stake."""
         if offered_american_odds < 0:
             decimal = 1 + (100 / abs(offered_american_odds))
         else:
             decimal = 1 + (offered_american_odds / 100)
-        b = decimal - 1  # net profit per unit staked
+        b = decimal - 1
         q = 1 - fair_probability
         kelly = (b * fair_probability - q) / b
         return max(0.0, round(kelly, 4))
 
     @staticmethod
-    def build_ev_result(selection: str, fair_odds: FairOdds, offered_american_odds: int) -> EVResult:
+    def build_ev_result(
+        selection: str, fair_odds: FairOdds, offered_american_odds: int
+    ) -> EVResult:
         ev = EVCalculator.expected_value(fair_odds.fair_probability, offered_american_odds)
         kelly = EVCalculator.kelly_fraction(fair_odds.fair_probability, offered_american_odds)
         return EVResult(
@@ -134,7 +144,11 @@ class EVCalculator:
             fair_odds=fair_odds,
             offered_american_odds=offered_american_odds,
             ev_percentage=ev,
-            edge=round(fair_odds.fair_probability - VigRemover.american_to_implied(offered_american_odds), 4),
+            edge=round(
+                fair_odds.fair_probability
+                - VigRemover.american_to_implied(offered_american_odds),
+                4,
+            ),
             kelly_fraction=kelly,
             half_kelly=round(kelly / 2, 4),
         )
@@ -157,7 +171,6 @@ class SteamDetector:
     def score_movement(movement: OddsMovement, books_moved: list[str]) -> int:
         score = 0
 
-        # 1. Magnitude of odds change
         change = abs(movement.odds_change)
         if change >= 20:
             score += 40
@@ -168,7 +181,6 @@ class SteamDetector:
         elif change >= 5:
             score += 10
 
-        # 2. Number of sportsbooks that moved
         num_books = len(books_moved)
         if num_books >= 5:
             score += 30
@@ -177,7 +189,6 @@ class SteamDetector:
         elif num_books >= 2:
             score += 10
 
-        # 3. Line movement (spread/total)
         if movement.line_change is not None:
             lc = abs(movement.line_change)
             if lc >= 2.0:
@@ -186,9 +197,6 @@ class SteamDetector:
                 score += 10
             elif lc >= 0.5:
                 score += 5
-
-        # 4. Placeholder: public % vs movement contra (future ML signal)
-        # score += _public_contra_signal(movement)
 
         return min(score, 100)
 
@@ -224,19 +232,43 @@ class AIConfidenceScorer:
     """
     Multi-signal confidence scorer (0–100).
 
-    Signals:
-      • EV magnitude                     (25 pts max)
-      • Steam score                      (25 pts max)
-      • Line shopping efficiency         (20 pts max)
-      • Historical accuracy (placeholder)(20 pts max)
-      • Market liquidity (placeholder)   (10 pts max)
+    Five live signals (all computable from current data):
+
+      Signal                  Max pts  Notes
+      ─────────────────────────────────────────────────────────────────
+      EV Edge                  25      magnitude of EV advantage
+      Steam Score              25      cross-book movement intensity
+      Sharp Book Presence      20      how many known-sharp books moved
+      Line Shopping Efficiency 20      gap between offered and best opp. odds
+      Market Tightness          10      vig quality — cross-book arb gives 10 pts
+
+      Total live ceiling:     100
+
+    Bands map to star ratings per spec:
+      90–100 → 5★   (elite: all signals firing)
+      75–89  → 4★   (strong)
+      60–74  → 3★   (good)
+      40–59  → 2★   (marginal)
+      0–39   → 1★   (weak / noise)
+
+    Future signals (add when data available):
+      • Liquidity / volume (Odds API doesn't expose volume yet)
+      • Timing proximity to game start
+      • PrizePicks lag confirmation
     """
 
     @staticmethod
-    def score(ev_percentage: float, steam_score: int, line_shopping_gap: int = 0) -> int:
+    def score(
+        ev_percentage: float,
+        steam_score: int,
+        *,
+        sharp_book_count: int = 0,
+        line_shopping_gap: int = 0,
+        vig_pct: float = 10.0,  # default >6 → 0 pts, forces explicit opt-in
+    ) -> int:
         score = 0
 
-        # EV signal
+        # ── 1. EV Edge (0–25 pts) ────────────────────────────────────────────
         if ev_percentage >= 10:
             score += 25
         elif ev_percentage >= 7:
@@ -248,10 +280,21 @@ class AIConfidenceScorer:
         elif ev_percentage > 0:
             score += 5
 
-        # Steam signal
+        # ── 2. Steam Score (0–25 pts) ────────────────────────────────────────
         score += int(steam_score * 0.25)
 
-        # Line shopping gap (difference between best and worst available odds)
+        # ── 3. Sharp Book Presence (0–20 pts) ────────────────────────────────
+        # More sharp books validating the move = higher confidence in the signal.
+        if sharp_book_count >= 3:
+            score += 20
+        elif sharp_book_count >= 2:
+            score += 14
+        elif sharp_book_count >= 1:
+            score += 8
+
+        # ── 4. Line Shopping Efficiency (0–20 pts) ───────────────────────────
+        # How wide the spread is between our offered price and the opposing
+        # best line.  Wide spread = strong cross-book mispricing.
         if line_shopping_gap >= 20:
             score += 20
         elif line_shopping_gap >= 10:
@@ -259,11 +302,17 @@ class AIConfidenceScorer:
         elif line_shopping_gap >= 5:
             score += 6
 
-        # Historical accuracy placeholder (future ML model hook)
-        # score += _historical_model_signal(...)
-
-        # Market liquidity placeholder
-        # score += _liquidity_signal(...)
+        # ── 5. Market Tightness / Vig Quality (0–10 pts) ────────────────────
+        # Negative vig means we're computing fair probability from a synthetic
+        # best-of-market (cross-book arb scenario) — the most reliable pricing.
+        # Low positive vig = sharp single-book reference.
+        # High vig = soft book pricing, less reliable fair prob.
+        if vig_pct <= 0:
+            score += 10
+        elif vig_pct <= 3:
+            score += 7
+        elif vig_pct <= 6:
+            score += 3
 
         return min(score, 100)
 
@@ -271,21 +320,40 @@ class AIConfidenceScorer:
 # ── Recommendation Engine ─────────────────────────────────────────────────────
 
 def _to_recommendation(ev: float, confidence: int, steam: int) -> tuple[Recommendation, int]:
-    """Return (Recommendation, stars 1-5)."""
-    composite = ev * 0.5 + confidence * 0.3 + steam * 0.2
+    """
+    Map EV + confidence → (Recommendation, stars).
 
-    if composite >= 70 and ev >= 8:
-        return Recommendation.STRONG_BET, 5
-    elif composite >= 55 and ev >= 5:
-        return Recommendation.STRONG_BET, 4
-    elif composite >= 40 and ev >= 3:
-        return Recommendation.BET, 3
-    elif composite >= 25 and ev > 0:
-        return Recommendation.LEAN, 2
-    elif ev < 0:
-        return Recommendation.FADE, 1
+    Stars come directly from the 0-100 confidence score per spec:
+      90–100 → 5★   75–89 → 4★   60–74 → 3★   40–59 → 2★   <40 → 1★
+
+    Recommendation requires both a minimum EV threshold AND a minimum
+    confidence level — EV alone is not enough to bet aggressively.
+    """
+    # Stars: direct confidence-score bands (spec: 90-100=5★, 75-89=4★, 60-74=3★)
+    if confidence >= 90:
+        stars = 5
+    elif confidence >= 75:
+        stars = 4
+    elif confidence >= 60:
+        stars = 3
+    elif confidence >= 40:
+        stars = 2
     else:
-        return Recommendation.PASS, 1
+        stars = 1
+
+    # Recommendation: EV quality + confidence threshold
+    if ev >= 8 and confidence >= 75:
+        rec = Recommendation.STRONG_BET
+    elif ev >= 5 and confidence >= 60:
+        rec = Recommendation.BET
+    elif ev >= 3 and confidence >= 40:
+        rec = Recommendation.LEAN
+    elif ev < 0:
+        rec = Recommendation.FADE
+    else:
+        rec = Recommendation.PASS
+
+    return rec, stars
 
 
 def _reason_codes(
@@ -321,6 +389,9 @@ class AnalysisEngine:
     """
     Orchestrates vig removal, EV calculation, steam detection, and confidence
     scoring into a single EVOpportunity output.
+
+    Also provides fetch_live_odds() which calls The Odds API to retrieve live
+    sportsbook odds as a flat list of OddsLine objects.
     """
 
     def __init__(self) -> None:
@@ -366,15 +437,18 @@ class AnalysisEngine:
             steam_score = steam_alert.steam_score
             line_change = movement.line_change
 
+        sharp_book_count = sum(
+            1 for b in books_moved if b in config.sharp_books
+        )
         ai_conf = self._ai.score(
             ev_result.ev_percentage,
             steam_score,
+            sharp_book_count=sharp_book_count,
             line_shopping_gap=abs(side_a_odds - side_b_odds),
+            vig_pct=fair.vig_percentage,
         )
 
-        recommendation, stars = _to_recommendation(
-            ev_result.ev_percentage, ai_conf, steam_score
-        )
+        recommendation, stars = _to_recommendation(ev_result.ev_percentage, ai_conf, steam_score)
         reason_codes = _reason_codes(
             ev_result.ev_percentage, steam_score, ai_conf, line_change, books_moved
         )
@@ -398,40 +472,117 @@ class AnalysisEngine:
             reason_codes=reason_codes,
         )
 
-    # ── Placeholder stubs for future integrations ──────────────────────────
+    # ── Live data feed ─────────────────────────────────────────────────────────
 
     async def fetch_live_odds(self, sport: Sport) -> list[OddsLine]:
         """
-        PLACEHOLDER: Fetch live odds from sportsbook APIs.
-        TODO: Integrate with The Odds API, Pinnacle API, etc.
+        Fetch live odds from The Odds API (https://the-odds-api.com).
+
+        Returns a flat list of OddsLine objects — one per outcome per book per
+        market. Markets fetched: h2h (moneyline), spreads, totals.
+        Returns an empty list when the API key is missing or the request fails.
         """
-        logger.debug("fetch_live_odds called for %s (not yet implemented)", sport)
-        return []
+        if not config.ODDS_API_KEY:
+            logger.warning(
+                "ODDS_API_KEY not configured; skipping live odds fetch for %s", sport
+            )
+            return []
+
+        sport_key = _SPORT_TO_ODDS_API_KEY.get(sport)
+        if not sport_key:
+            logger.debug("No Odds API key mapping for sport %s", sport)
+            return []
+
+        url = f"{_ODDS_API_BASE}/sports/{sport_key}/odds"
+        params = {
+            "apiKey":     config.ODDS_API_KEY,
+            "regions":    "us",
+            "markets":    "h2h,spreads,totals",
+            "oddsFormat": "american",
+        }
+
+        try:
+            timeout = aiohttp.ClientTimeout(total=30)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(url, params=params) as resp:
+                    if resp.status == 401:
+                        logger.error("Odds API: invalid API key (401)")
+                        return []
+                    if resp.status == 422:
+                        logger.error("Odds API: sport key not found — %s", sport_key)
+                        return []
+                    if resp.status == 429:
+                        logger.warning("Odds API: rate limit exceeded (429)")
+                        return []
+                    resp.raise_for_status()
+                    data: list[dict] = await resp.json()
+                    remaining = resp.headers.get("x-requests-remaining", "?")
+                    logger.debug(
+                        "Odds API: %d events for %s (%s requests remaining)",
+                        len(data), sport, remaining,
+                    )
+        except aiohttp.ClientError as exc:
+            logger.error("Odds API request failed for %s: %s", sport, exc)
+            return []
+        except Exception as exc:
+            logger.exception("Unexpected error fetching odds for %s: %s", sport, exc)
+            return []
+
+        lines: list[OddsLine] = []
+        for event in data:
+            away = event.get("away_team", "Away")
+            home = event.get("home_team", "Home")
+            event_name = f"{away} @ {home}"
+
+            commence_str = event.get("commence_time")
+            try:
+                event_start: Optional[datetime] = (
+                    datetime.fromisoformat(commence_str.replace("Z", "+00:00"))
+                    if commence_str
+                    else None
+                )
+            except ValueError:
+                event_start = None
+
+            for bookmaker in event.get("bookmakers", []):
+                book_title = bookmaker.get("title") or bookmaker.get("key", "Unknown")
+                for market in bookmaker.get("markets", []):
+                    mtype = _MARKET_KEY_TO_TYPE.get(market.get("key", ""))
+                    if mtype is None:
+                        continue
+                    for outcome in market.get("outcomes", []):
+                        try:
+                            lines.append(
+                                OddsLine(
+                                    sportsbook=book_title,
+                                    sport=sport,
+                                    market_type=mtype,
+                                    event=event_name,
+                                    selection=outcome["name"],
+                                    american_odds=int(outcome["price"]),
+                                    line=outcome.get("point"),
+                                    event_start=event_start,
+                                )
+                            )
+                        except (KeyError, TypeError, ValueError) as exc:
+                            logger.debug("Skipping malformed outcome: %s", exc)
+
+        logger.info("Fetched %d odds lines for %s", len(lines), sport)
+        return lines
+
+    # ── Future integration stubs ───────────────────────────────────────────────
 
     async def fetch_prizepicks_lines(self, sport: Sport) -> list[OddsLine]:
-        """
-        PLACEHOLDER: Fetch PrizePicks player prop lines.
-        TODO: Integrate with PrizePicks unofficial API / scraper.
-        """
+        """PLACEHOLDER: Fetch PrizePicks player prop lines."""
         logger.debug("fetch_prizepicks_lines called for %s (not yet implemented)", sport)
         return []
 
     async def run_ml_model(self, opportunity: EVOpportunity) -> int:
-        """
-        PLACEHOLDER: Run ML model to refine AI confidence score.
-        TODO: Load trained model (sklearn / pytorch) and return confidence 0–100.
-        """
+        """PLACEHOLDER: Run ML model to refine AI confidence score."""
         logger.debug("run_ml_model called (not yet implemented)")
         return opportunity.ai_confidence
 
     async def compute_clv(self, ev_record_id: int, closing_odds: int) -> float:
-        """
-        PLACEHOLDER: Compute Closing Line Value post-event.
-        TODO: Fetch closing odds from DB / API and compare to bet odds.
-        """
+        """PLACEHOLDER: Compute Closing Line Value post-event."""
         logger.debug("compute_clv called (not yet implemented)")
         return 0.0
-
-
-# Singleton engine instance
-engine = AnalysisEngine()
