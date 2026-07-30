@@ -16,7 +16,7 @@ from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
 from alerts import (
-    format_ev_alert,
+    AlertDelivery,
     format_help_message,
     format_start_message,
     format_steam_alert,
@@ -597,7 +597,6 @@ async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             compute_fair_market, FairProbabilityMethod, implied_to_american,
         )
         from engine.ev import compute_ev_from_market, kelly_fraction as kf_fn
-        from engine.ranking import compute_ranking, HistoricalStats
         from models import (
             SteamAlert, AlertType, Sport, MarketType,
             EVOpportunity, EVResult, FairOdds, Recommendation,
@@ -660,17 +659,6 @@ async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             engine_ev = compute_ev_from_market(fair, _BOS_SEL, fd_bos2.odds)
             kf        = kf_fn(engine_ev.fair_probability, fd_bos2.odds)
 
-            history = HistoricalStats(sample_size=30, win_rate=0.57, avg_clv=2.1)
-            ranking = compute_ranking(
-                steam_score=steam_result.steam_score,
-                ev_edge_pct=engine_ev.edge * 100,
-                fair_probability=engine_ev.fair_probability,
-                n_books_moving=2, sharp_book_count=1, market_agreement=1.0,
-                movement_speed=steam_result.movement_speed,
-                liquidity_score=70, minutes_to_game=180.0,
-                overall_history=history,
-            )
-
             opp = EVOpportunity(
                 ev_result=EVResult(
                     selection=f"{_BOS_SEL} -3.5",
@@ -696,9 +684,14 @@ async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 steam_score=steam_result.steam_score,
                 ai_confidence=82, recommendation=Recommendation.STRONG_BET, stars=4,
             )
-            ev_msg = format_ev_alert(opp, ranking_result=ranking, risk_factors=[])
-            await update.message.reply_text(ev_msg, parse_mode=ParseMode.HTML,
-                                            disable_web_page_preview=True)
+
+            # Route through the real delivery pipeline (scope filter → dedup → format → send).
+            delivery = AlertDelivery(_db, context.bot, _alert_chat_ids)
+            ev_result = await delivery.deliver_ev(opp)
+            await update.message.reply_text(
+                f"📋 EV pipeline result: {ev_result}",
+                parse_mode=ParseMode.HTML,
+            )
 
         kinds = " + ".join(filter(None, ["steam" if send_steam else "", "ev" if send_ev else ""]))
         await update.message.reply_text(f"✅ Test alert(s) sent: {kinds}")
