@@ -451,6 +451,77 @@ class TestSteamDetection:
             )
 
     @pytest.mark.asyncio
+    async def test_high_confidence_steam_alert_fires(self):
+        """
+        A Pinnacle-led move (weight 1.0) alongside DraftKings (weight 0.40)
+        crosses the 60-point MODERATE_STEAM threshold and produces a real
+        steam alert tier.
+
+        Score breakdown for these inputs (expected ≥ 60):
+          books_moving  2 books                            → 12 pts
+          sharp_books   (1.00+0.40)/2.0 × 25 = 17.5      → 18 pts
+          speed         25 pts / 12 min = 2.08 ≥ 2.0     → 14 pts
+          magnitude     abs(25) ≥ 20                       → 15 pts
+          consensus     2/2 = 100 % agreement              → 10 pts
+          reverse_line  no public-bet data                 →  0 pts
+          ────────────────────────────────────────────────────────
+          total                                            → 69 pts  (MODERATE_STEAM)
+
+        All inputs are inline synthetic mock data; no detection logic is
+        modified.  Pinnacle's inclusion is the only delta that pushes the
+        score above the NO_ALERT cutoff (compare: DK+FD alone scores ~56).
+        """
+        from models import SteamAlert, AlertType, Sport, MarketType
+
+        sharp_book_snapshots = [
+            # Pinnacle: canonical market-setter, -25 pt move in 12 minutes
+            {"sportsbook": "Pinnacle",   "open_odds": -110, "current_odds": -135},
+            # DraftKings followed in the same direction
+            {"sportsbook": "DraftKings", "open_odds": -110, "current_odds": -133},
+        ]
+        result = compute_steam_simple(
+            market          = _GAME_A,
+            sport           = "NBA",
+            market_type     = _SP,
+            selection       = f"{_BOS_SEL} -3.5",
+            book_snapshots  = sharp_book_snapshots,
+            elapsed_minutes = 12.0,
+        )
+
+        assert result.steam_score >= 60, (
+            f"Expected steam_score ≥ 60 (MODERATE_STEAM threshold), "
+            f"got {result.steam_score}. Breakdown: {result.score_breakdown}"
+        )
+        assert result.steam_tier != SteamTier.NO_ALERT, (
+            f"Expected a steam alert tier (≥ MODERATE_STEAM), "
+            f"got {result.steam_tier} at score {result.steam_score}"
+        )
+        assert result.n_books_moving == 2, (
+            f"Expected 2 books moving, got {result.n_books_moving}"
+        )
+        assert "Pinnacle" in result.sharp_books_triggered, (
+            f"Pinnacle should be in sharp_books_triggered: "
+            f"{result.sharp_books_triggered}"
+        )
+
+        # Verify the result can be used to construct a models.SteamAlert —
+        # the downstream formatter needs this object to generate Telegram HTML.
+        alert = SteamAlert(
+            alert_type      = AlertType.STEAM,
+            sport           = Sport.NBA,
+            market_type     = MarketType.SPREAD,
+            event           = _GAME_A,
+            selection       = f"{_BOS_SEL} -3.5",
+            opening_odds    = result.opening_odds,
+            current_odds    = result.current_odds,
+            steam_score     = result.steam_score,
+            steam_direction = result.movement_direction.value,
+            books_moved     = result.books_triggered,
+        )
+        assert alert.steam_score >= 60
+        assert set(alert.books_moved) == {"Pinnacle", "DraftKings"}
+
+    @pytest.mark.asyncio
     async def test_consensus_scenario_produces_multi_market_steam(self):
         """CONSENSUS scenario: multiple markets across both books all moved."""
         c = MockOddsConnector()
