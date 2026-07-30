@@ -59,6 +59,64 @@ logger = logging.getLogger(__name__)
 # Module-level registry — set by init_market_engine()
 _registry: Optional[ConnectorRegistry] = None
 
+# ── Player results integration ────────────────────────────────────────────────
+# Singleton provider and per-day fetch dedup cache.
+# Cache key: (player_name, sport, stat_type_lower, date_iso)
+# The date component means stale entries are automatically bypassed next day.
+_player_stats_provider = None
+_player_result_fetch_cache: set = set()
+
+
+def _get_player_stats_provider():
+    global _player_stats_provider
+    if _player_stats_provider is None:
+        from providers.player_stats import PlayerStatsProvider
+        _player_stats_provider = PlayerStatsProvider()
+    return _player_stats_provider
+
+
+async def _fetch_and_compute_hit_rates(
+    db: Database,
+    player_name: str,
+    sport: str,
+    stat_type: str,
+    current_line: float,
+) -> "Optional[object]":
+    """
+    Fetch fresh game results (at most once per calendar day per player/stat),
+    upsert to DB, then compute and return PlayerHitRates.
+
+    Returns None on any failure so callers can always fall back to PASS.
+    """
+    from engine.player_results import compute_hit_rates
+
+    provider  = _get_player_stats_provider()
+    today     = datetime.utcnow().date().isoformat()
+    cache_key = (player_name, sport, stat_type.lower().strip(), today)
+
+    try:
+        if cache_key not in _player_result_fetch_cache:
+            raw_results = await provider.fetch_results(player_name, sport, stat_type)
+            for r in raw_results:
+                await db.upsert_player_result(r)
+            _player_result_fetch_cache.add(cache_key)
+            if raw_results:
+                logger.debug(
+                    "player_results: fetched %d results for %s / %s",
+                    len(raw_results), player_name, stat_type,
+                )
+
+        db_results = await db.get_player_results(player_name, sport, stat_type, limit=30)
+        if not db_results:
+            return None
+        return compute_hit_rates(db_results, current_line)
+
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "_fetch_and_compute_hit_rates: %s / %s: %s", player_name, stat_type, exc
+        )
+        return None
+
 # In-memory snapshot cache: market_key -> list[MarketSnapshot]
 _snapshot_cache: dict[tuple, list[MarketSnapshot]] = {}
 
@@ -487,6 +545,7 @@ async def underdog_job(context) -> None:
         np_immediate: bool                  = False   # set inside is_new_prop branch
         validation:   Optional[object]      = None    # PlayerPropValidation or None
         decision:     Optional[object]      = None    # UDBetDecision or None
+        hit_rates:    Optional[object]      = None    # PlayerHitRates or None
 
         if is_new_prop:
             # ── New-prop path ────────────────────────────────────────────────
@@ -527,13 +586,18 @@ async def underdog_job(context) -> None:
                     "UD new-prop validation blocked: %s | %s | %s",
                     player, stat_type, validation.reason,
                 )
-            # Betting decision — only when supporting history + meaningful score
+            # Fetch real game results — required before any directional pick
+            hit_rates = None
             if validation.has_supporting_data and score.tier != "PASS":
+                hit_rates = await _fetch_and_compute_hit_rates(
+                    db, player, snap.sport or "UNKNOWN", stat_type, line_val
+                )
                 decision = make_ud_bet_decision(
                     score        = score,
                     validation   = validation,
                     current_line = line_val,
-                    prev_line    = None,   # new prop — no prior line
+                    prev_line    = None,
+                    hit_rates    = hit_rates,
                 )
             # Always add to the cycle batch — even blocked props appear in digest
             _new_props_batch.append({
@@ -593,13 +657,18 @@ async def underdog_job(context) -> None:
                     history      = ud_history,
                     min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
                 )
-                # Betting decision — only for qualified props with market evidence
+                # Fetch real game results — required before any directional pick
+                hit_rates = None
                 if validation.has_supporting_data and score.tier != "PASS":
+                    hit_rates = await _fetch_and_compute_hit_rates(
+                        db, player, snap.sport or "UNKNOWN", stat_type, snap.line or 0.0
+                    )
                     decision = make_ud_bet_decision(
                         score        = score,
                         validation   = validation,
                         current_line = snap.line or 0.0,
                         prev_line    = prev_line,
+                        hit_rates    = hit_rates,
                     )
                 _n_scored += 1
                 _tier_counts[score.tier] = _tier_counts.get(score.tier, 0) + 1

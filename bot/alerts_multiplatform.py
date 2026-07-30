@@ -246,46 +246,62 @@ def format_clv_result_alert(result: CLVResult) -> str:
 # ── Underdog line change alert ─────────────────────────────────────────────────
 
 def _format_decision_block(decision: Optional[object]) -> str:
-    """Format the OVER/UNDER/PASS recommendation block for Underdog alerts.
+    """
+    Format the full OVER / UNDER / PASS evaluation block for Underdog alerts.
 
-    Returns an empty string when *decision* is None (not evaluated / removed prop).
-    Always shown when a decision is available, including PASS.
+    Shows tier, confidence, all per-window hit-rate statistics, and a reason.
+    Returns an empty string when *decision* is None.
     """
     if decision is None:
         return ""
 
-    rec  = getattr(decision, "recommendation",   "PASS")
-    emoji = getattr(decision, "recommendation_emoji", lambda: "⚪")()
-    conf = getattr(decision, "confidence_display", lambda: "—")()
-    reason = getattr(decision, "reason", "")
+    rec       = getattr(decision, "recommendation", "PASS")
+    emoji     = getattr(decision, "recommendation_emoji", lambda: "⚪")()
+    tier_disp = getattr(decision, "tier_display",         lambda: "—")()
+    conf      = getattr(decision, "confidence_display",   lambda: "—")()
+    reason    = getattr(decision, "reason", "")
+    avg_disp  = getattr(decision, "avg_vs_line_display",  lambda: "N/A")()
 
-    def _rate(v: Optional[float]) -> str:
-        return f"{v:.0%}" if v is not None else "N/A"
+    win_fn = getattr(decision, "window_display", None)
 
-    l5  = _rate(getattr(decision, "l5_rate",  None))
-    l10 = _rate(getattr(decision, "l10_rate", None))
-    l20 = _rate(getattr(decision, "l20_rate", None))
-    l30 = _rate(getattr(decision, "l30_rate", None))
-    avg_display = getattr(decision, "avg_vs_line_display", lambda: "N/A")()
+    def _w(g, o, u, r, a) -> str:
+        """Render one evidence row."""
+        if win_fn and callable(win_fn):
+            return win_fn(g, o, u, r, a)
+        if g is None or r is None:
+            return "N/A"
+        rate_str = f"{r:.0%}"
+        avg_str  = f"  avg {a:.1f}" if a is not None else ""
+        return f"{o}/{g} ({rate_str}){avg_str}"
 
-    conf_line = f"   <b>Confidence:</b>    {conf}" if rec != "PASS" else ""
+    def _a(name):
+        return getattr(decision, name, None)
 
-    evidence_block = (
-        f"\n\n📊 <b>Evidence:</b>"
-        f"\n   L5:           {l5}"
-        f"\n   L10:          {l10}"
-        f"\n   L20:          {l20}"
-        f"\n   L30:          {l30}"
-        f"\n   Season avg:   N/A"
-        f"\n   H2H:          N/A"
-        f"\n   Avg vs line:  {avg_display}"
-    ) if rec != "PASS" else ""
+    is_pick = rec != "PASS"
+
+    tier_line = f"\n   {tier_disp}" if is_pick else ""
+    conf_line = f"\n   <b>Confidence:</b>    {conf}" if is_pick else ""
+
+    if is_pick:
+        evidence_block = (
+            f"\n\n📊 <b>Evidence:</b>"
+            f"\n   <b>L5:</b>          {_w(_a('l5_games'),     _a('l5_over'),     _a('l5_under'),     _a('l5_hit_rate'),     _a('l5_avg'))}"
+            f"\n   <b>L10:</b>         {_w(_a('l10_games'),    _a('l10_over'),    _a('l10_under'),    _a('l10_hit_rate'),    _a('l10_avg'))}"
+            f"\n   <b>L20:</b>         {_w(_a('l20_games'),    _a('l20_over'),    _a('l20_under'),    _a('l20_hit_rate'),    _a('l20_avg'))}"
+            f"\n   <b>L30:</b>         {_w(_a('l30_games'),    _a('l30_over'),    _a('l30_under'),    _a('l30_hit_rate'),    _a('l30_avg'))}"
+            f"\n   <b>Season:</b>      {_w(_a('season_games'), _a('season_over'), _a('season_under'), _a('season_hit_rate'), _a('season_avg'))}"
+            f"\n   <b>H2H:</b>         {_w(_a('h2h_games'),    _a('h2h_over'),    _a('h2h_under'),    _a('h2h_hit_rate'),    _a('h2h_avg'))}"
+            f"\n   <b>Avg vs line:</b> {avg_disp}"
+        )
+    else:
+        evidence_block = ""
 
     reason_block = f"\n\n💬 <b>Reason:</b>\n   <i>{reason}</i>" if reason else ""
 
     return (
         f"\n\n{_div()}"
         f"\n🎯 <b>Recommendation:</b>  {emoji} {rec}"
+        f"{tier_line}"
         f"{conf_line}"
         f"{evidence_block}"
         f"{reason_block}"

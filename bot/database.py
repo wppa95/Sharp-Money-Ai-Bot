@@ -12,6 +12,7 @@ from typing import Optional
 
 from sqlalchemy import (
     Boolean, Column, DateTime, Float, Integer, String, Text,
+    UniqueConstraint,
     select, func, desc, text
 )
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
@@ -216,6 +217,38 @@ class UnderdogSnapshotRecord(Base):
     bet_reason         = Column(Text,      nullable=True)    # human-readable explanation
     bet_evidence_json  = Column(Text,      nullable=True)    # compact JSON evidence blob
     fetched_at  = Column(DateTime,    default=datetime.utcnow, nullable=False)
+
+
+class PlayerGameResult(Base):
+    """
+    Per-game stat result for one player × sport × stat_type combination.
+
+    Populated by ``providers.player_stats.PlayerStatsProvider`` from free public
+    APIs (MLB Stats API, ESPN unofficial gamelog endpoint).  Used by
+    ``engine.player_results.compute_hit_rates()`` to build L5/L10/L20/L30/Season
+    and H2H windows for the betting decision engine.
+
+    Unique on (player_name, sport, stat_type, game_date) — re-upserted when the
+    API reports a corrected boxscore.
+    """
+    __tablename__ = "player_game_results"
+
+    id           = Column(Integer,     primary_key=True, autoincrement=True)
+    player_name  = Column(String(128), nullable=False, index=True)
+    sport        = Column(String(32),  nullable=False, index=True)
+    stat_type    = Column(String(64),  nullable=False)
+    game_date    = Column(String(16),  nullable=False)   # "YYYY-MM-DD"
+    opponent     = Column(String(128), nullable=True)
+    actual_value = Column(Float,       nullable=False)
+    source       = Column(String(32),  nullable=False, default="api")
+    fetched_at   = Column(DateTime,    default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "player_name", "sport", "stat_type", "game_date",
+            name="uq_player_game_result",
+        ),
+    )
 
 
 # ── Database manager ──────────────────────────────────────────────────────────
@@ -947,6 +980,92 @@ class Database:
             )
             await s.commit()
         logger.debug("Updated EVRecord %d → result=%s clv=%s", record_id, result, clv)
+
+    # ── Player game results ──────────────────────────────────────────────────
+
+    async def upsert_player_result(self, raw: object) -> None:
+        """
+        Insert or update a PlayerGameResult row.
+
+        *raw* must have attributes matching ``providers.player_stats.RawGameResult``:
+        player_name, sport, stat_type, game_date, actual_value, opponent, source.
+
+        If a row already exists for (player_name, sport, stat_type, game_date)
+        the actual_value and opponent are refreshed; no duplicate is created.
+        """
+        player_name  = raw.player_name
+        sport        = raw.sport
+        stat_type    = raw.stat_type.lower().strip()
+        game_date    = raw.game_date
+        actual_value = raw.actual_value
+        opponent     = raw.opponent
+        source       = raw.source
+
+        async with self.session() as s:
+            result = await s.execute(
+                select(PlayerGameResult).where(
+                    PlayerGameResult.player_name == player_name,
+                    PlayerGameResult.sport       == sport,
+                    PlayerGameResult.stat_type   == stat_type,
+                    PlayerGameResult.game_date   == game_date,
+                )
+            )
+            record = result.scalar_one_or_none()
+            if record is None:
+                s.add(PlayerGameResult(
+                    player_name  = player_name,
+                    sport        = sport,
+                    stat_type    = stat_type,
+                    game_date    = game_date,
+                    opponent     = opponent,
+                    actual_value = actual_value,
+                    source       = source,
+                ))
+            else:
+                record.actual_value = actual_value
+                if opponent:
+                    record.opponent = opponent
+                record.fetched_at = datetime.utcnow()
+            await s.commit()
+
+    async def get_player_results(
+        self,
+        player_name: str,
+        sport: str,
+        stat_type: str,
+        limit: int = 30,
+    ) -> "list[PlayerGameResult]":
+        """
+        Return up to *limit* most-recent game results for the given player + sport
+        + stat combination, ordered newest-first by game_date.
+        """
+        async with self.session() as s:
+            result = await s.execute(
+                select(PlayerGameResult)
+                .where(
+                    PlayerGameResult.player_name == player_name,
+                    PlayerGameResult.sport       == sport,
+                    PlayerGameResult.stat_type   == stat_type.lower().strip(),
+                )
+                .order_by(desc(PlayerGameResult.game_date))
+                .limit(limit)
+            )
+            return list(result.scalars().all())
+
+    async def count_player_results(
+        self,
+        player_name: Optional[str] = None,
+        sport: Optional[str] = None,
+    ) -> int:
+        """Count PlayerGameResult rows, optionally filtered by player or sport."""
+        async with self.session() as s:
+            q = select(func.count()).select_from(PlayerGameResult)
+            if player_name:
+                q = q.where(PlayerGameResult.player_name == player_name)
+            if sport:
+                q = q.where(PlayerGameResult.sport == sport)
+            result = await s.execute(q)
+            return result.scalar() or 0
 
     async def close(self) -> None:
         if self._engine:
