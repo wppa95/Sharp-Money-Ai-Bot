@@ -194,22 +194,26 @@ async def test_pp_timing_filter_blocks_in_progress_game():
 # ── deliver_underdog: daily cap ───────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_underdog_blocked_when_daily_cap_reached():
-    """Underdog alert suppressed when daily Underdog cap is hit."""
+async def test_underdog_blocked_when_daily_cap_configured_and_reached():
+    """
+    When DAILY_UNDERDOG_LIMIT is set to a positive value and the count equals
+    that limit, the alert is suppressed.  The cap is disabled by default (0).
+    """
     from config import config
-    db = _make_db(ud_today=config.DAILY_UNDERDOG_LIMIT)
-    delivery = _make_delivery(db)
+    with patch.object(config, "DAILY_UNDERDOG_LIMIT", 10):
+        db = _make_db(ud_today=10)
+        delivery = _make_delivery(db)
 
-    from alert_scope_filter import FilterResult
-    with (
-        patch("alert_scope_filter.check", return_value=FilterResult(allowed=True)),
-        patch("engine.timing.is_game_alertable", return_value=(True, "")),
-    ):
-        result = await delivery.deliver_underdog(
-            "Test Player", "TeamA", "NBA", "Points",
-            25.5, 26.0,
-            game_time=None,
-        )
+        from alert_scope_filter import FilterResult
+        with (
+            patch("alert_scope_filter.check", return_value=FilterResult(allowed=True)),
+            patch("engine.timing.is_game_alertable", return_value=(True, "")),
+        ):
+            result = await delivery.deliver_underdog(
+                "Test Player", "TeamA", "NBA", "Points",
+                25.5, 26.0,
+                game_time=None,
+            )
 
     assert result.sent is False
     assert result.filtered is True
@@ -217,8 +221,35 @@ async def test_underdog_blocked_when_daily_cap_reached():
 
 
 @pytest.mark.asyncio
+async def test_underdog_cap_disabled_when_limit_is_zero():
+    """When DAILY_UNDERDOG_LIMIT=0 (default), the cap is fully disabled and
+    alerts are never blocked by it regardless of how many have been sent."""
+    from config import config
+    with patch.object(config, "DAILY_UNDERDOG_LIMIT", 0):
+        db = _make_db(ud_today=9999)  # enormous count — must not block
+        delivery = _make_delivery(db)
+
+        from alert_scope_filter import FilterResult
+        with (
+            patch("alert_scope_filter.check", return_value=FilterResult(allowed=True)),
+            patch("alerts_multiplatform.format_underdog_change_alert", return_value="<msg>"),
+            patch("alerts.broadcast_alert", new_callable=AsyncMock,
+                  return_value={"sent": 1, "failed": 0}),
+            patch("engine.timing.is_game_alertable", return_value=(True, "")),
+        ):
+            result = await delivery.deliver_underdog(
+                "Test Player", "TeamA", "NBA", "Points",
+                25.5, 26.0,
+                game_time=None,
+            )
+
+    assert result.sent is True
+    assert result.filtered is False
+
+
+@pytest.mark.asyncio
 async def test_underdog_allowed_when_under_cap():
-    """Underdog alert fires when count is below daily cap."""
+    """Underdog alert fires when count is below a configured daily cap."""
     db = _make_db(ud_today=0)
     delivery = _make_delivery(db)
 

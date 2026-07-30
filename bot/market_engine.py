@@ -527,21 +527,40 @@ async def underdog_job(context) -> None:
                     player, stat_type, ud_result.filtered_reason,
                 )
 
-        # Persist snapshot (alert_sent reflects actual delivery outcome)
+        # Resolve alert_outcome for historical analysis
+        if not should_alert:
+            _alert_outcome: Optional[str] = "skipped"
+        elif ud_result.sent:
+            _alert_outcome = "removal_sent" if is_removed else "sent"
+        elif ud_result.filtered:
+            _alert_outcome = f"filtered:{ud_result.filtered_reason}"[:64]
+        else:
+            _alert_outcome = "failed"
+
+        # Persist snapshot — includes scoring and delivery outcome for analysis
         record = UnderdogSnapshotRecord(
-            external_id = f"{player}_{stat_type}"[:64],  # stable identity key
-            player_name = player,
-            team        = snap.team or "",
-            sport       = snap.sport,
-            stat_type   = stat_type,              # actual stat, not "Pick'em"
-            line_value  = snap.line or 0.0,
-            game_id     = snap.event,
-            game_time   = snap.game_time,
-            line_moved  = line_changed,
-            prev_line   = prev_line,
-            removed     = is_removed,
-            alert_sent  = ud_result.sent,
-            fetched_at  = now,
+            external_id   = f"{player}_{stat_type}"[:64],  # stable identity key
+            player_name   = player,
+            team          = snap.team or "",
+            sport         = snap.sport,
+            stat_type     = stat_type,              # actual stat, not "Pick'em"
+            line_value    = snap.line or 0.0,
+            game_id       = snap.event,
+            game_time     = snap.game_time,
+            line_moved    = line_changed,
+            prev_line     = prev_line,
+            line_delta    = (
+                (snap.line - prev_line)
+                if prev_line is not None and snap.line is not None
+                else None
+            ),
+            removed       = is_removed,
+            alert_sent    = ud_result.sent,
+            score_total   = score.total  if score is not None else None,
+            score_tier    = score.tier   if score is not None else None,
+            score_stars   = score.stars  if score is not None else None,
+            alert_outcome = _alert_outcome,
+            fetched_at    = now,
         )
         await db.save_underdog_snapshot(record)
 

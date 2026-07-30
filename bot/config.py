@@ -156,8 +156,9 @@ class Config:
     # S-tier always bypasses this cap.  Set to 0 to disable.
     DAILY_ALERT_LIMIT: int = int(os.environ.get("DAILY_ALERT_LIMIT", "20"))
     # Maximum Underdog alerts sent per calendar day (UTC).  Set to 0 to disable.
-    # Raised to 15 now that the scoring layer acts as the primary quality gate.
-    DAILY_UNDERDOG_LIMIT: int = int(os.environ.get("DAILY_UNDERDOG_LIMIT", "15"))
+    # Default is 0 (unlimited) — the scoring layer is the primary quality gate.
+    # Set DAILY_UNDERDOG_LIMIT env var to a positive integer to re-enable.
+    DAILY_UNDERDOG_LIMIT: int = int(os.environ.get("DAILY_UNDERDOG_LIMIT", "0"))
 
     # ── Game timing filter ───────────────────────────────────────────────────
     # Block alerts for games that start sooner than this (minutes).

@@ -197,8 +197,16 @@ class UnderdogSnapshotRecord(Base):
     game_time   = Column(DateTime,    nullable=True)
     line_moved  = Column(Boolean,     default=False, nullable=False)
     prev_line   = Column(Float,       nullable=True)
+    # line_delta: new_line - prev_line; positive = line went up, negative = down
+    line_delta  = Column(Float,       nullable=True)
     removed     = Column(Boolean,     default=False, nullable=False)
     alert_sent  = Column(Boolean,     default=False, nullable=False)
+    # Scoring fields — populated for line-change props that reach the scoring gate
+    score_total = Column(Float,       nullable=True)   # composite score (0-100)
+    score_tier  = Column(String(8),   nullable=True)   # S / A / B / PASS
+    score_stars = Column(Integer,     nullable=True)   # 0-5
+    # Delivery outcome: "sent" | "filtered:<reason>" | "skipped" | "failed"
+    alert_outcome = Column(String(64), nullable=True)
     fetched_at  = Column(DateTime,    default=datetime.utcnow, nullable=False)
 
 
@@ -230,6 +238,7 @@ class Database:
         async with self._engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         await self._migrate_pp_edge_records()
+        await self._migrate_underdog_snapshots()
         logger.info("Database initialised at %s", self._url)
 
     def session(self) -> AsyncSession:
@@ -722,6 +731,25 @@ class Database:
             return result.scalar() or 0
 
     # ── Underdog snapshots ───────────────────────────────────────────────────
+
+    async def _migrate_underdog_snapshots(self) -> None:
+        """
+        Add analysis columns to underdog_snapshots if they don't exist yet.
+        Idempotent — safe to call on every startup.
+        """
+        new_cols = [
+            "ALTER TABLE underdog_snapshots ADD COLUMN line_delta REAL",
+            "ALTER TABLE underdog_snapshots ADD COLUMN score_total REAL",
+            "ALTER TABLE underdog_snapshots ADD COLUMN score_tier TEXT",
+            "ALTER TABLE underdog_snapshots ADD COLUMN score_stars INTEGER",
+            "ALTER TABLE underdog_snapshots ADD COLUMN alert_outcome TEXT",
+        ]
+        async with self._engine.begin() as conn:
+            for sql in new_cols:
+                try:
+                    await conn.execute(text(sql))
+                except Exception:
+                    pass  # column already exists — safe to ignore
 
     async def save_underdog_snapshot(self, record: "UnderdogSnapshotRecord") -> "UnderdogSnapshotRecord":
         async with self.session() as s:
