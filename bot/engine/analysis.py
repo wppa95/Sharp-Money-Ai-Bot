@@ -515,7 +515,22 @@ class AnalysisEngine:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(url, params=params) as resp:
                     if resp.status == 401:
-                        logger.error("Odds API: invalid API key (401)")
+                        try:
+                            body = await resp.json(content_type=None)
+                        except Exception:
+                            body = {}
+                        error_code = (body or {}).get("error_code", "")
+                        message = (body or {}).get("message", "")
+                        if error_code == "OUT_OF_USAGE_CREDITS":
+                            logger.error(
+                                "Odds API: usage quota exhausted (401) — %s", message
+                            )
+                        else:
+                            logger.error(
+                                "Odds API: unauthorized (401) — %s%s",
+                                error_code or "invalid API key",
+                                f": {message}" if message else "",
+                            )
                         return []
                     if resp.status == 422:
                         logger.error("Odds API: sport key not found — %s", sport_key)

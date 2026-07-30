@@ -119,9 +119,23 @@ class FanDuelConnector(BaseConnector):
             async with aiohttp.ClientSession(timeout=timeout) as s:
                 async with s.get(url, params=params) as resp:
                     if resp.status in (401, 422, 429):
-                        logger.warning(
-                            "FanDuel/OddsAPI HTTP %d for %s", resp.status, sport
-                        )
+                        try:
+                            body = await resp.json(content_type=None)
+                        except Exception:
+                            body = {}
+                        error_code = (body or {}).get("error_code", "")
+                        message = (body or {}).get("message", "")
+                        if resp.status == 401 and error_code == "OUT_OF_USAGE_CREDITS":
+                            logger.warning(
+                                "FanDuel/OddsAPI: usage quota exhausted (401) for %s — %s",
+                                sport, message,
+                            )
+                        else:
+                            logger.warning(
+                                "FanDuel/OddsAPI HTTP %d for %s%s",
+                                resp.status, sport,
+                                f" — {error_code or message}" if (error_code or message) else "",
+                            )
                         return []
                     resp.raise_for_status()
                     data: list[dict] = await resp.json()
