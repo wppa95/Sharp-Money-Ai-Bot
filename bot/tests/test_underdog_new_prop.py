@@ -76,7 +76,12 @@ async def _run_job(snapshots, db, *, deliver_result=None):
             mock_delivery = MagicMock()
             mock_delivery.deliver_underdog = AsyncMock(return_value=deliver_result)
             mock_cls.return_value = mock_delivery
-            await me.underdog_job(ctx)
+            # The cycle digest is dispatched via broadcast_alert directly (not through
+            # AlertDelivery), so we patch it here to prevent real Telegram calls.
+            with patch("alerts.broadcast_alert",
+                       new_callable=AsyncMock,
+                       return_value={"sent": 1, "failed": 0}):
+                await me.underdog_job(ctx)
             return mock_delivery
 
 
@@ -98,21 +103,26 @@ async def test_low_line_new_prop_triggers_alert(caplog):
 
 
 @pytest.mark.asyncio
-async def test_high_line_new_prop_skipped():
-    """A new prop with a high line (above threshold) and zero score is NOT alerted."""
+async def test_high_line_new_prop_not_immediately_alerted():
+    """A new prop above the immediate threshold and not a priority stat is NOT individually alerted.
+
+    It must still be included in the cycle batch (and saved to DB).
+    """
     from config import config
-    snaps = [_snap("Aaron Judge", "Hits", 99.0)]
+    # "Walks" is deliberately not in UD_PRIORITY_STAT_CATEGORIES defaults
+    snaps = [_snap("Aaron Judge", "Walks", 99.0)]
     db = _make_db(known_keys=set())
 
     from alerts import DeliveryResult
     not_sent = DeliveryResult(sent=False)
 
-    with patch.object(config, "UD_NEW_PROP_LOW_LINE_THRESHOLD", 1.0):
-        delivery = await _run_job(snaps, db, deliver_result=not_sent)
+    # Verify: line 99.0 > 0.5 immediate threshold, stars=0 < gate, "Walks" not in priority
+    delivery = await _run_job(snaps, db, deliver_result=not_sent)
 
-    # High line + no history → stars=0 < UD_MIN_STARS_TO_ALERT → not qualified
-    # deliver_underdog should NOT be called at all for unqualified new props
+    # deliver_underdog should NOT be called — prop goes to cycle summary instead
     delivery.deliver_underdog.assert_not_called()
+    # But it must still be saved to DB
+    db.save_underdog_snapshot.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -163,18 +173,20 @@ async def test_new_prop_outcome_stored_as_new_prop_sent(caplog):
 
 
 @pytest.mark.asyncio
-async def test_new_prop_outcome_stored_as_skipped_when_unqualified():
-    """When a new prop doesn't qualify (high line, no score), outcome='new_prop_skipped'."""
-    from config import config
-    snaps = [_snap("Aaron Judge", "Hits", 99.0)]
+async def test_non_immediate_new_prop_outcome_is_summary():
+    """A non-immediate new prop (high line, no score, non-priority stat) gets outcome='new_prop_summary'.
+
+    It must NOT get outcome='new_prop_skipped' — it IS included in the cycle digest.
+    """
+    # "Walks" is not in the priority stat list
+    snaps = [_snap("Aaron Judge", "Walks", 99.0)]
     db = _make_db(known_keys=set())
 
-    with patch.object(config, "UD_NEW_PROP_LOW_LINE_THRESHOLD", 1.0):
-        await _run_job(snaps, db)
+    await _run_job(snaps, db)
 
     db.save_underdog_snapshot.assert_called_once()
     record = db.save_underdog_snapshot.call_args[0][0]
-    assert record.alert_outcome == "new_prop_skipped"
+    assert record.alert_outcome == "new_prop_summary"
     assert record.alert_sent is False
 
 
@@ -232,6 +244,87 @@ async def test_new_prop_score_stored_on_record():
     # score_tier and score_total should be set (not None) since scoring ran
     assert record.score_tier is not None
     assert record.score_total is not None
+
+
+@pytest.mark.asyncio
+async def test_cycle_digest_sent_when_new_props_detected():
+    """broadcast_alert must be called with the cycle digest after the loop when new props exist."""
+    snaps = [_snap("Aaron Judge", "Walks", 5.0)]    # non-immediate: goes to digest only
+    db = _make_db(known_keys=set())
+
+    with patch("alerts.broadcast_alert", new_callable=AsyncMock,
+               return_value={"sent": 1, "failed": 0}) as mock_broadcast:
+        with patch("market_engine.AlertDelivery") as mock_cls:
+            mock_delivery = MagicMock()
+            mock_delivery.deliver_underdog = AsyncMock()
+            mock_cls.return_value = mock_delivery
+
+            registry = MagicMock()
+            registry.fetch_pickem = AsyncMock(return_value=snaps)
+            ctx = MagicMock()
+            ctx.bot_data = {"db": db}
+            ctx.bot = MagicMock()
+
+            with patch.object(me, "_registry", registry):
+                await me.underdog_job(ctx)
+
+    # broadcast_alert should have been called for the digest (no individual alert)
+    mock_delivery.deliver_underdog.assert_not_called()   # non-immediate → no individual
+    assert mock_broadcast.call_count >= 1
+    # The digest message must mention "UNDERDOG NEW PROPS"
+    digest_call = next(
+        (c for c in mock_broadcast.call_args_list
+         if "UNDERDOG NEW PROPS" in str(c)),
+        None,
+    )
+    assert digest_call is not None, "Cycle digest not sent"
+
+
+@pytest.mark.asyncio
+async def test_no_digest_when_no_new_props():
+    """No cycle digest is sent when all props are already known."""
+    snaps = [_snap("Aaron Judge", "Walks", 5.0)]
+    # All props in known_keys → nothing is new
+    db = _make_db(known_keys={("Aaron Judge", "Walks")})
+
+    with patch("alerts.broadcast_alert", new_callable=AsyncMock,
+               return_value={"sent": 1, "failed": 0}) as mock_broadcast:
+        with patch("market_engine.AlertDelivery") as mock_cls:
+            mock_delivery = MagicMock()
+            mock_delivery.deliver_underdog = AsyncMock()
+            mock_cls.return_value = mock_delivery
+
+            registry = MagicMock()
+            registry.fetch_pickem = AsyncMock(return_value=snaps)
+            ctx = MagicMock()
+            ctx.bot_data = {"db": db}
+            ctx.bot = MagicMock()
+
+            with patch.object(me, "_registry", registry):
+                await me.underdog_job(ctx)
+
+    # No digest — prop is known, no new props detected
+    for c in mock_broadcast.call_args_list:
+        assert "UNDERDOG NEW PROPS" not in str(c)
+
+
+@pytest.mark.asyncio
+async def test_priority_stat_triggers_immediate_alert():
+    """A new prop with a priority stat category gets an immediate individual alert even with a high line."""
+    from config import config
+    # "Home Runs" is in the default UD_PRIORITY_STAT_CATEGORIES
+    snaps = [_snap("Aaron Judge", "Home Runs", 5.0)]
+    db = _make_db(known_keys=set())
+
+    from alerts import DeliveryResult
+    sent = DeliveryResult(sent=True, recipients_sent=1)
+
+    delivery = await _run_job(snaps, db, deliver_result=sent)
+
+    # Should be called because "Home Runs" is a priority stat
+    delivery.deliver_underdog.assert_called_once()
+    _, kwargs = delivery.deliver_underdog.call_args
+    assert kwargs.get("new_prop") is True
 
 
 # ── Format function ────────────────────────────────────────────────────────────

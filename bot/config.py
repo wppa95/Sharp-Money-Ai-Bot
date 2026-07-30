@@ -128,12 +128,30 @@ class Config:
     # Minimum star rating (1–5) required to send an Underdog alert.
     # 3★ corresponds to a score of 55+ (B-tier or better).  Set to 1 to disable.
     UD_MIN_STARS_TO_ALERT:    int   = int(os.environ.get("UD_MIN_STARS_TO_ALERT", "3"))
-    # New-prop alert: auto-qualify when the starting line is at or below this
-    # value, regardless of score (0.5 and 1.0 lines are high-value new props).
-    # Set to 0.0 to rely on score alone for new-prop qualification.
+    # New-prop alert: used for DB qualification tracking (summary inclusion gate).
+    # Props at or below this line appear in the end-of-cycle summary regardless
+    # of score.  Set to 0.0 to use score-only qualification.
     UD_NEW_PROP_LOW_LINE_THRESHOLD: float = float(
         os.environ.get("UD_NEW_PROP_LOW_LINE_THRESHOLD", "1.0")
     )
+    # Strict threshold for IMMEDIATE individual Telegram alerts on new props.
+    # Only props at or below this line get a 🚨 PROP LIVE message right away.
+    # All other new props are collected into the end-of-cycle digest instead.
+    UD_NEW_PROP_IMMEDIATE_LINE_THRESHOLD: float = float(
+        os.environ.get("UD_NEW_PROP_IMMEDIATE_LINE_THRESHOLD", "0.5")
+    )
+    # Stat categories that always trigger an immediate individual alert when a
+    # new prop is first seen, regardless of line value.  Comma-separated via env
+    # var UD_PRIORITY_STAT_CATEGORIES to override.
+    UD_PRIORITY_STAT_CATEGORIES: frozenset = field(default_factory=lambda: frozenset(
+        s.strip()
+        for s in os.environ.get(
+            "UD_PRIORITY_STAT_CATEGORIES",
+            "Home Runs,Strikeouts,Passing Yards,Rushing Yards,Receiving Yards,"
+            "Touchdowns,Points,Rebounds,Assists,3-Pointers,Goals,Shots on Goal",
+        ).split(",")
+        if s.strip()
+    ))
 
     # Dedup windows for new alert types (seconds)
     INEFFICIENCY_DEDUP_WINDOW: int = int(os.environ.get("INEFFICIENCY_DEDUP_WINDOW", "1800"))

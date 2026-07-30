@@ -385,6 +385,77 @@ def format_underdog_new_prop_alert(
     return "\n".join(parts)
 
 
+# ── Underdog end-of-cycle new-prop digest ─────────────────────────────────────
+
+def format_underdog_new_prop_cycle_summary(
+    new_props: "list[dict]",
+    *,
+    max_shown: int = 8,
+) -> str:
+    """Format a 📋 end-of-cycle digest for all new Underdog props detected this cycle.
+
+    Each entry in ``new_props`` is a dict with keys:
+      player, stat_type, sport, team, line, score (UDPropScore|None),
+      immediate (bool), game_time (datetime|None).
+
+    Sorted display order: 0.5 lines first → line asc → stars desc.
+    Immediately-alerted props are marked with ⚡; others with a tier badge.
+    """
+    if not new_props:
+        return ""
+
+    total       = len(new_props)
+    n_immediate = sum(1 for p in new_props if p.get("immediate"))
+    n_half_line = sum(1 for p in new_props if (p.get("line") or 99.0) <= 0.5)
+
+    def _sort_key(p: dict) -> tuple:
+        stars = getattr(p.get("score"), "stars", 0)
+        line  = p.get("line") or 99.0
+        # 0.5 lines first, then ascending line, then descending stars
+        return (0 if line <= 0.5 else 1, line, -stars)
+
+    sorted_props = sorted(new_props, key=_sort_key)
+    shown        = sorted_props[:max_shown]
+    overflow     = total - len(shown)
+
+    sport_icon = {
+        "NFL": "🏈", "NBA": "🏀", "MLB": "⚾",
+        "NHL": "🏒", "UFC": "🥊",
+    }
+
+    parts = [
+        f"📋 <b>UNDERDOG NEW PROPS</b>  —  <b>{total}</b> detected",
+        "",
+        _div(),
+        f"  ⚡ Immediate alerts:  <b>{n_immediate}</b>",
+        f"  🎯 0.5 lines found:   <b>{n_half_line}</b>",
+        "",
+        "<b>Top Opportunities</b>",
+    ]
+
+    for p in shown:
+        score  = p.get("score")
+        stars  = getattr(score, "stars_display", "·····") if score else "·····"
+        tier   = getattr(score, "tier",          "?")     if score else "?"
+        sport  = p.get("sport", "")
+        icon   = sport_icon.get(sport, "🎯")
+        line   = p.get("line") or 0.0
+        marker = "⚡" if p.get("immediate") else f"<code>{tier}</code>"
+        parts.append(
+            f"  {marker}  {icon} {p['player']} — {p['stat_type']}"
+            f"  @{line}  {stars}"
+        )
+
+    if overflow > 0:
+        parts.append(f"  <i>...and {overflow} more</i>")
+
+    parts += [
+        "",
+        f"{EMOJI['clock']} <i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>",
+    ]
+    return "\n".join(parts)
+
+
 # ── /market command response formatter ────────────────────────────────────────
 
 def format_consensus_summary(results: list[ConsensusResult]) -> str:

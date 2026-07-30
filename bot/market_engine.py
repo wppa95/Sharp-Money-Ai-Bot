@@ -431,12 +431,15 @@ async def underdog_job(context) -> None:
     ud_snaps = [s for s in snapshots if s.sportsbook == "Underdog"]
 
     # Summary counters — emitted as a single INFO line after the loop
-    _n_scored:        int  = 0
-    _tier_counts:     dict = {"S": 0, "A": 0, "B": 0, "PASS": 0}
-    _n_qualified:     int  = 0   # line-change props that passed the scoring gate
-    _n_removed:       int  = 0   # props with [REMOVED] marker
-    _n_new_prop:      int  = 0   # first-appearance props detected this cycle
-    _n_new_prop_sent: int  = 0   # new-prop alerts successfully delivered
+    _n_scored:        int       = 0
+    _tier_counts:     dict      = {"S": 0, "A": 0, "B": 0, "PASS": 0}
+    _n_qualified:     int       = 0   # line-change props that passed the scoring gate
+    _n_removed:       int       = 0   # props with [REMOVED] marker
+    _n_new_prop:      int       = 0   # first-appearance props detected this cycle
+    _n_new_prop_sent: int       = 0   # immediate new-prop alerts delivered
+    # Batch for the end-of-cycle new-prop digest sent after the loop.
+    # Each entry: {player, stat_type, sport, team, line, score, immediate, game_time}
+    _new_props_batch: list[dict] = []
 
     # Two DB round-trips before the loop — both O(unique props), no LIMIT.
     # 1. Most-recent non-removed snapshot per (player, stat) for line-change detection.
@@ -477,35 +480,50 @@ async def underdog_job(context) -> None:
         # ── Scoring gate ─────────────────────────────────────────────────────
         from engine.ud_scoring import score_ud_prop, UDPropScore
         from alerts import DeliveryResult
-        score:     Optional[UDPropScore] = None
-        ud_result: DeliveryResult        = DeliveryResult(sent=False)
+        score:        Optional[UDPropScore] = None
+        ud_result:    DeliveryResult        = DeliveryResult(sent=False)
+        np_immediate: bool                  = False   # set inside is_new_prop branch
 
         if is_new_prop:
             # ── New-prop path ────────────────────────────────────────────────
             # Score with no history (n_history=0 — all dimensions return neutral).
-            # Qualify if line ≤ threshold OR score meets the star gate.
             _n_new_prop += 1
+            line_val = snap.line or 0.0
             score = score_ud_prop(
                 player_name  = player,
                 stat_type    = stat_type,
                 sport        = snap.sport or "UNKNOWN",
-                current_line = snap.line or 0.0,
+                current_line = line_val,
                 prev_line    = None,
                 history      = [],
             )
-            np_qualified = (
-                (snap.line or 0.0) <= config.UD_NEW_PROP_LOW_LINE_THRESHOLD
+            # Immediate individual alert: very low line, score gate, or priority stat.
+            # Everything else is batched into the end-of-cycle digest instead.
+            np_immediate = (
+                line_val <= config.UD_NEW_PROP_IMMEDIATE_LINE_THRESHOLD
                 or score.stars >= config.UD_MIN_STARS_TO_ALERT
+                or stat_type in config.UD_PRIORITY_STAT_CATEGORIES
             )
-            if np_qualified and chat_ids:
+            # Always add to the cycle batch — even non-immediate props appear in summary
+            _new_props_batch.append({
+                "player":    player,
+                "stat_type": stat_type,
+                "sport":     snap.sport or "UNKNOWN",
+                "team":      snap.team or "",
+                "line":      line_val,
+                "score":     score,
+                "immediate": np_immediate,
+                "game_time": snap.game_time,
+            })
+            if np_immediate and chat_ids:
                 delivery  = AlertDelivery(db, bot, chat_ids)
                 ud_result = await delivery.deliver_underdog(
                     player_name = player,
                     team        = snap.team or "",
                     sport       = snap.sport,
                     stat_type   = stat_type,
-                    old_line    = snap.line or 0.0,
-                    new_line    = snap.line or 0.0,
+                    old_line    = line_val,
+                    new_line    = line_val,
                     game_time   = snap.game_time,
                     score       = score,
                     new_prop    = True,
@@ -578,8 +596,10 @@ async def underdog_job(context) -> None:
                 _alert_outcome: Optional[str] = "new_prop_sent"
             elif ud_result.filtered:
                 _alert_outcome = f"new_prop_filtered:{ud_result.filtered_reason}"[:64]
+            elif np_immediate:
+                _alert_outcome = "new_prop_failed"      # tried but delivery failed
             else:
-                _alert_outcome = "new_prop_skipped"
+                _alert_outcome = "new_prop_summary"     # in cycle digest, no individual alert
         elif not should_alert:
             _alert_outcome = "skipped"
         elif ud_result.sent:
@@ -615,6 +635,22 @@ async def underdog_job(context) -> None:
             fetched_at    = now,
         )
         await db.save_underdog_snapshot(record)
+
+    # ── End-of-cycle new-prop digest ──────────────────────────────────────────
+    # One batched summary per cycle — only when new props were detected and there
+    # are registered chat IDs to send to.  Individual alerts were already sent
+    # above for high-priority props (line ≤ 0.5, score gate, priority stat).
+    if _new_props_batch and chat_ids:
+        from alerts_multiplatform import format_underdog_new_prop_cycle_summary
+        from alerts import broadcast_alert
+        digest = format_underdog_new_prop_cycle_summary(_new_props_batch)
+        await broadcast_alert(bot, chat_ids, digest)
+        logger.info(
+            "underdog_job: new-prop digest sent — total=%d immediate=%d summary_only=%d",
+            len(_new_props_batch),
+            _n_new_prop_sent,
+            len(_new_props_batch) - _n_new_prop_sent,
+        )
 
     logger.info(
         "underdog_job: fetched=%d scored=%d S=%d A=%d B=%d PASS=%d "
