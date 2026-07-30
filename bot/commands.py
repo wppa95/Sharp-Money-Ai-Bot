@@ -720,13 +720,16 @@ async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.message.reply_text("⛔ Unauthorized.")
         return
 
-    args = [a.lower() for a in (context.args or [])]
-    send_steam = not args or "steam" in args
-    send_ev    = not args or "ev" in args
+    args          = [a.lower() for a in (context.args or [])]
+    send_steam    = not args or "steam"    in args
+    send_ev       = not args or "ev"       in args
+    send_pp       = not args or "pp"       in args
+    send_underdog = not args or "underdog" in args
 
-    if not send_steam and not send_ev:
+    if not send_steam and not send_ev and not send_pp and not send_underdog:
         await update.message.reply_text(
             "Usage: /testalert  |  /testalert steam  |  /testalert ev"
+            "  |  /testalert pp  |  /testalert underdog"
         )
         return
 
@@ -838,7 +841,85 @@ async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 parse_mode=ParseMode.HTML,
             )
 
-        kinds = " + ".join(filter(None, ["steam" if send_steam else "", "ev" if send_ev else ""]))
+        # ── PP edge opportunity ───────────────────────────────────────────────
+        if send_pp:
+            from datetime import datetime as _dt
+            from prizepicks import PrizePicksLine, PPEdgeOpportunity
+            from engine.pp_scoring import score_pp_edge
+
+            _now_ts = _dt.utcnow()
+            _pp_line = PrizePicksLine(
+                external_id      = "test-pp-001",
+                player_name      = "Anthony Edwards",
+                team             = "MIN",
+                sport            = "NBA",
+                league           = "NBA",
+                stat_type        = "Points",
+                line_value       = 26.5,
+                start_time       = None,
+                game_description = "MIN vs DEN",
+                fetched_at       = _now_ts,
+            )
+            # Realistic edge: PP line 26.5, DK has 27.0 (-110 / -110).
+            # Fair prob ~62.1% OVER at the PP line → +16.8% edge.
+            _opp = PPEdgeOpportunity(
+                pp_line                   = _pp_line,
+                sportsbook                = "DraftKings",
+                sportsbook_line           = 27.0,
+                sportsbook_over_odds      = -110,
+                sportsbook_under_odds     = -110,
+                fair_prob_over_at_sb_line = 0.502,
+                fair_prob_under_at_sb_line= 0.498,
+                line_diff                 = 0.5,   # sb_line − pp_line
+                adjusted_fair_prob_over   = 0.621,
+                adjusted_fair_prob_under  = 0.379,
+                edge_over                 = 16.8,
+                edge_under                = 0.0,
+                best_side                 = "OVER",
+                best_edge                 = 16.8,
+                prob_per_unit             = 3.0,
+            )
+            _pp_score = score_pp_edge(
+                _opp, history=[], opening_line=_pp_line.line_value, now=_now_ts,
+            )
+
+            # Route through real production pipeline: score → normalize_pp
+            # → AlertScopeFilter → AlertDelivery.deliver_pp → broadcast_alert → Telegram.
+            delivery = AlertDelivery(_db, context.bot, _alert_chat_ids)
+            pp_result = await delivery.deliver_pp(_opp, score=_pp_score)
+
+            await update.message.reply_text(
+                f"📋 PP pipeline result: {pp_result}\n"
+                f"🏅 Score: {_pp_score.total}/100 — "
+                f"tier=<b>{_pp_score.tier}</b> stars={_pp_score.stars}★",
+                parse_mode=ParseMode.HTML,
+            )
+
+        # ── Underdog line change ──────────────────────────────────────────────
+        if send_underdog:
+            # Realistic NFL rushing-yards line movement (Barkley +4 yds).
+            delivery = AlertDelivery(_db, context.bot, _alert_chat_ids)
+            ud_result = await delivery.deliver_underdog(
+                player_name = "Saquon Barkley",
+                team        = "PHI",
+                sport       = "NFL",
+                stat_type   = "Rushing Yards",
+                old_line    = 85.5,
+                new_line    = 89.5,
+                game_time   = None,
+                removed     = False,
+            )
+            await update.message.reply_text(
+                f"📋 Underdog pipeline result: {ud_result}",
+                parse_mode=ParseMode.HTML,
+            )
+
+        kinds = " + ".join(filter(None, [
+            "steam"    if send_steam    else "",
+            "ev"       if send_ev       else "",
+            "pp"       if send_pp       else "",
+            "underdog" if send_underdog else "",
+        ]))
         await update.message.reply_text(f"✅ Test alert(s) sent: {kinds}")
 
     except Exception as exc:

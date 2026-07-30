@@ -822,6 +822,102 @@ class AlertDelivery:
         )
         return result
 
+    # ── PP delivery ───────────────────────────────────────────────────────────
+
+    async def deliver_pp(
+        self,
+        opp: "PPEdgeOpportunity",
+        score: "Optional[PPAnalysisScore]" = None,
+    ) -> "DeliveryResult":
+        """
+        Full PrizePicks alert pipeline:
+          0. Scope filter.
+          1. normalize_pp (with optional PPAnalysisScore) → AlertObject.
+          2. Scope check.
+          3. format_pp_alert.
+          4. Broadcast to all registered chat IDs.
+
+        No DB-level dedup is applied here — dedup is handled upstream in
+        _prizepicks_job by checking for recent PPEdgeRecords in the DB.
+        """
+        from alert_normalizer import normalize_pp
+        from alert_scope_filter import check
+
+        norm_obj = normalize_pp(opp, score=score)
+        scope    = check(norm_obj)
+        if not scope.allowed:
+            return DeliveryResult(sent=False, filtered=True, filtered_reason=scope.reason)
+
+        message = format_pp_alert(opp)
+        counts  = await broadcast_alert(self._bot, self._chat_ids, message)
+        alert_sent = counts["sent"] > 0
+
+        result  = DeliveryResult(
+            sent             = alert_sent,
+            recipients_sent  = counts["sent"],
+            recipients_failed= counts["failed"],
+        )
+        pp       = opp.pp_line
+        tier_str = score.tier if score else "?"
+        log_fn   = logger.info if alert_sent else logger.warning
+        log_fn(
+            "PP alert: %s | %s | %s | edge=+%.1f%% | tier=%s → %s",
+            pp.player_name, pp.stat_type, opp.best_side, opp.best_edge, tier_str, result,
+        )
+        return result
+
+    # ── Underdog delivery ─────────────────────────────────────────────────────
+
+    async def deliver_underdog(
+        self,
+        player_name: str,
+        team: str,
+        sport: str,
+        stat_type: str,
+        old_line: float,
+        new_line: float,
+        game_time: "Optional[datetime]" = None,
+        *,
+        removed: bool = False,
+    ) -> "DeliveryResult":
+        """
+        Full Underdog prop alert pipeline:
+          0. normalize_underdog → AlertObject.
+          1. Scope check.
+          2. format_underdog_change_alert.
+          3. Broadcast to all registered chat IDs.
+        """
+        from alert_normalizer import normalize_underdog
+        from alert_scope_filter import check
+        from alerts_multiplatform import format_underdog_change_alert
+
+        norm_obj = normalize_underdog(player_name, stat_type, sport, is_removed=removed)
+        scope    = check(norm_obj)
+        if not scope.allowed:
+            return DeliveryResult(sent=False, filtered=True, filtered_reason=scope.reason)
+
+        message = format_underdog_change_alert(
+            player_name, team, sport, stat_type,
+            old_line, new_line,
+            game_time,
+            removed=removed,
+        )
+        counts     = await broadcast_alert(self._bot, self._chat_ids, message)
+        alert_sent = counts["sent"] > 0
+
+        result   = DeliveryResult(
+            sent             = alert_sent,
+            recipients_sent  = counts["sent"],
+            recipients_failed= counts["failed"],
+        )
+        change_str = "REMOVED" if removed else ("HIGHER" if new_line > old_line else "LOWER")
+        log_fn     = logger.info if alert_sent else logger.warning
+        log_fn(
+            "Underdog alert: %s | %s | %s | %s → %s",
+            player_name, stat_type, sport, change_str, result,
+        )
+        return result
+
     # ── DB logging ────────────────────────────────────────────────────────────
 
     async def _log_ev(self, opp: EVOpportunity, *, alert_sent: bool) -> None:
