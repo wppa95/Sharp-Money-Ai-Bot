@@ -913,6 +913,7 @@ class AlertDelivery:
         old_line: float,
         new_line: float,
         game_time: "Optional[datetime]" = None,
+        score: "Optional[object]" = None,   # UDPropScore — typed as object to avoid import
         *,
         removed: bool = False,
     ) -> "DeliveryResult":
@@ -922,7 +923,7 @@ class AlertDelivery:
           1. Scope check.
           2. Game timing filter — block games already started or outside window.
           3. Daily Underdog cap check.
-          4. format_underdog_change_alert.
+          4. format_underdog_change_alert (includes grade when score is supplied).
           5. Broadcast to all registered chat IDs.
         """
         from alert_normalizer import normalize_underdog
@@ -969,6 +970,7 @@ class AlertDelivery:
             player_name, team, sport, stat_type,
             old_line, new_line,
             game_time,
+            score=score,
             removed=removed,
         )
         counts     = await broadcast_alert(self._bot, self._chat_ids, message)
@@ -980,10 +982,14 @@ class AlertDelivery:
             recipients_failed= counts["failed"],
         )
         change_str = "REMOVED" if removed else ("HIGHER" if new_line > old_line else "LOWER")
-        log_fn     = logger.info if alert_sent else logger.warning
+        score_tag  = (
+            f" [tier={score.tier} stars={score.stars} score={score.total}]"
+            if score is not None else ""
+        )
+        log_fn = logger.info if alert_sent else logger.warning
         log_fn(
-            "Underdog alert: %s | %s | %s | %s → %s",
-            player_name, stat_type, sport, change_str, result,
+            "Underdog alert: %s | %s | %s | %s%s → %s",
+            player_name, stat_type, sport, change_str, score_tag, result,
         )
         return result
 

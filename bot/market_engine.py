@@ -463,6 +463,40 @@ async def underdog_job(context) -> None:
             and abs(snap.line - prev_line) >= config.MIN_UNDERDOG_LINE_CHANGE
         )
 
+        # ── Scoring gate ─────────────────────────────────────────────────────
+        # Load per-player+stat history and compute a UDPropScore for any prop
+        # that passes the raw line-change pre-filter.  Removal notices bypass
+        # the scoring gate — they always alert regardless of score.
+        from engine.ud_scoring import score_ud_prop, UDPropScore
+        score: Optional[UDPropScore] = None
+
+        if not is_removed and line_changed and prev_line is not None:
+            ud_history = await db.get_ud_prop_history(player, stat_type, limit=20)
+            score = score_ud_prop(
+                player_name  = player,
+                stat_type    = stat_type,
+                sport        = snap.sport or "UNKNOWN",
+                current_line = snap.line or 0.0,
+                prev_line    = prev_line,
+                history      = ud_history,
+            )
+            logger.debug(
+                "UD score: %s | %s | %s (tier=%s stars=%d n=%d)",
+                player, stat_type, score.total, score.tier, score.stars, score.n_history,
+            )
+
+        # Qualify: B-tier or better required (stars >= UD_MIN_STARS_TO_ALERT).
+        # Removal notices always qualify.
+        is_qualified = is_removed or (
+            score is not None and score.stars >= config.UD_MIN_STARS_TO_ALERT
+        )
+
+        should_alert = is_qualified and (is_removed or (
+            line_changed
+            and prev_line is not None
+            and abs(snap.line - prev_line) >= config.MIN_UNDERDOG_LINE_CHANGE
+        ))
+
         # Deliver via AlertDelivery (scope + timing + cap + broadcast)
         from alerts import DeliveryResult
         ud_result: DeliveryResult = DeliveryResult(sent=False)
@@ -476,6 +510,7 @@ async def underdog_job(context) -> None:
                 old_line    = prev_line or (snap.line or 0.0),
                 new_line    = snap.line or 0.0,
                 game_time   = snap.game_time,
+                score       = score,
                 removed     = is_removed,
             )
             if ud_result.filtered:

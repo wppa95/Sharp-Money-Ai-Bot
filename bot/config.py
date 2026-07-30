@@ -122,8 +122,12 @@ class Config:
     MIN_CLV_PCT: float = float(os.environ.get("MIN_CLV_PCT", "1.0"))
 
     # Underdog thresholds
-    # Minimum absolute line change (units) to trigger an alert
+    # Minimum absolute line change (units) to pass through to the scoring layer.
+    # The grading model then applies a separate quality gate (UD_MIN_STARS_TO_ALERT).
     MIN_UNDERDOG_LINE_CHANGE: float = float(os.environ.get("MIN_UNDERDOG_LINE_CHANGE", "0.5"))
+    # Minimum star rating (1–5) required to send an Underdog alert.
+    # 3★ corresponds to a score of 55+ (B-tier or better).  Set to 1 to disable.
+    UD_MIN_STARS_TO_ALERT:    int   = int(os.environ.get("UD_MIN_STARS_TO_ALERT", "3"))
 
     # Dedup windows for new alert types (seconds)
     INEFFICIENCY_DEDUP_WINDOW: int = int(os.environ.get("INEFFICIENCY_DEDUP_WINDOW", "1800"))
@@ -152,7 +156,8 @@ class Config:
     # S-tier always bypasses this cap.  Set to 0 to disable.
     DAILY_ALERT_LIMIT: int = int(os.environ.get("DAILY_ALERT_LIMIT", "20"))
     # Maximum Underdog alerts sent per calendar day (UTC).  Set to 0 to disable.
-    DAILY_UNDERDOG_LIMIT: int = int(os.environ.get("DAILY_UNDERDOG_LIMIT", "5"))
+    # Raised to 15 now that the scoring layer acts as the primary quality gate.
+    DAILY_UNDERDOG_LIMIT: int = int(os.environ.get("DAILY_UNDERDOG_LIMIT", "15"))
 
     # ── Game timing filter ───────────────────────────────────────────────────
     # Block alerts for games that start sooner than this (minutes).

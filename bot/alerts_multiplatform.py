@@ -252,10 +252,15 @@ def format_underdog_change_alert(
     old_line: float,
     new_line: float,
     game_time: Optional[datetime] = None,
+    score: Optional[object] = None,   # UDPropScore — typed as object to avoid circular import
     *,
     removed: bool = False,
 ) -> str:
-    """Format an alert for an Underdog prop line change or removed prop."""
+    """Format an alert for an Underdog prop line change or removed prop.
+
+    When *score* (a UDPropScore) is supplied, a grade line is appended that
+    shows the tier (S/A/B), star rating (★★★☆☆), and raw score total.
+    """
     sport_icon = {
         "NFL": "🏈", "NBA": "🏀", "MLB": "⚾",
         "NHL": "🏒", "UFC": "🥊",
@@ -278,14 +283,30 @@ def format_underdog_change_alert(
 
     game_str = f"\n  <b>Game:</b>    {game_time.strftime('%b %d %H:%M')} UTC" if game_time else ""
 
+    # Grade block — only shown when a UDPropScore was computed
+    grade_str = ""
+    if score is not None:
+        # Access tier/stars/total/stars_display via attribute lookup so this
+        # module does not need to import engine.ud_scoring directly.
+        tier   = getattr(score, "tier",          "?")
+        stars  = getattr(score, "stars",          0)
+        total  = getattr(score, "total",          0)
+        s_disp = getattr(score, "stars_display",  "?" * 5)
+        n_hist = getattr(score, "n_history",      0)
+        grade_str = (
+            f"\n\n📊 <b>Grade:</b>  <code>{tier}</code>  {s_disp}  "
+            f"<code>{total}/100</code>"
+            f"  <i>(n={n_hist})</i>"
+        )
+
     parts = [
         header,
         "",
         f"{sport_icon} <b>{sport} — {stat_type}</b>",
-        f"👤 <b>{player_name}</b> ({team})",
+        f"👤 <b>{player_name}</b>",
         "",
         _div(),
-        change_line + game_str,
+        change_line + game_str + grade_str,
         "",
         f"{EMOJI['clock']} <i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>",
     ]

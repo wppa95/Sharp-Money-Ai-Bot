@@ -744,6 +744,30 @@ class Database:
             result = await s.execute(select(func.count()).select_from(UnderdogSnapshotRecord))
             return result.scalar() or 0
 
+    async def get_ud_prop_history(
+        self,
+        player_name: str,
+        stat_type: str,
+        limit: int = 20,
+    ) -> "list[UnderdogSnapshotRecord]":
+        """
+        Return up to *limit* most-recent records for a specific player + stat
+        combination, ordered most-recent-first.  Removal records are excluded
+        so they do not distort line-value statistics.
+        """
+        async with self.session() as s:
+            result = await s.execute(
+                select(UnderdogSnapshotRecord)
+                .where(
+                    UnderdogSnapshotRecord.player_name == player_name,
+                    UnderdogSnapshotRecord.stat_type   == stat_type,
+                    UnderdogSnapshotRecord.removed     == False,  # noqa: E712
+                )
+                .order_by(desc(UnderdogSnapshotRecord.fetched_at))
+                .limit(limit)
+            )
+            return list(result.scalars().all())
+
     async def has_recent_inefficiency_alert(
         self,
         event: str,
