@@ -430,6 +430,12 @@ async def underdog_job(context) -> None:
 
     ud_snaps = [s for s in snapshots if s.sportsbook == "Underdog"]
 
+    # Summary counters — emitted as a single INFO line after the loop
+    _n_scored:    int  = 0
+    _tier_counts: dict = {"S": 0, "A": 0, "B": 0, "PASS": 0}
+    _n_qualified: int  = 0   # line-change props that passed the scoring gate
+    _n_removed:   int  = 0   # props with [REMOVED] marker
+
     # Load recent Underdog records once for the batch (avoids N+1 queries)
     recent_records = await db.get_recent_underdog_snapshots(limit=200)
 
@@ -442,6 +448,8 @@ async def underdog_job(context) -> None:
 
     for snap in ud_snaps:
         is_removed = "[REMOVED]" in snap.selection
+        if is_removed:
+            _n_removed += 1
         player     = snap.player or "Unknown"
 
         # Extract the stable stat-type category from the selection string
@@ -480,6 +488,8 @@ async def underdog_job(context) -> None:
                 prev_line    = prev_line,
                 history      = ud_history,
             )
+            _n_scored += 1
+            _tier_counts[score.tier] = _tier_counts.get(score.tier, 0) + 1
             logger.debug(
                 "UD score: %s | %s | %s (tier=%s stars=%d n=%d)",
                 player, stat_type, score.total, score.tier, score.stars, score.n_history,
@@ -490,6 +500,8 @@ async def underdog_job(context) -> None:
         is_qualified = is_removed or (
             score is not None and score.stars >= config.UD_MIN_STARS_TO_ALERT
         )
+        if is_qualified and not is_removed:
+            _n_qualified += 1
 
         should_alert = is_qualified and (is_removed or (
             line_changed
@@ -537,4 +549,14 @@ async def underdog_job(context) -> None:
         )
         await db.save_underdog_snapshot(record)
 
-    logger.info("underdog_job: processed %d Underdog pick'em snapshots", len(ud_snaps))
+    logger.info(
+        "underdog_job: fetched=%d scored=%d S=%d A=%d B=%d PASS=%d qualified=%d removed=%d",
+        len(ud_snaps),
+        _n_scored,
+        _tier_counts.get("S",    0),
+        _tier_counts.get("A",    0),
+        _tier_counts.get("B",    0),
+        _tier_counts.get("PASS", 0),
+        _n_qualified,
+        _n_removed,
+    )
