@@ -31,5 +31,6 @@ Before any immediate individual Telegram alert fires for an Underdog prop, the p
 ## Files
 
 - `bot/engine/player_validator.py` — `PlayerPropValidation` dataclass + `validate_player_prop()` function
-- `bot/market_engine.py` — validation called in both `is_new_prop` and line-change branches; result stored in record
-- `bot/alerts.py` / `bot/alerts_multiplatform.py` — `validation=` kwarg added; history block shown in alerts when `has_supporting_data=True`
+- `bot/engine/ud_bet_decision.py` — `UDBetDecision` dataclass + `make_ud_bet_decision()` function; OVER/UNDER/PASS engine
+- `bot/market_engine.py` — validation + decision called in both branches; results stored in record
+- `bot/alerts.py` / `bot/alerts_multiplatform.py` — `validation=` and `decision=` kwargs; `_format_decision_block()` helper

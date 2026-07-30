@@ -915,6 +915,7 @@ class AlertDelivery:
         game_time: "Optional[datetime]" = None,
         score: "Optional[object]" = None,       # UDPropScore — typed as object to avoid import
         validation: "Optional[object]" = None,  # PlayerPropValidation — typed as object
+        decision: "Optional[object]" = None,    # UDBetDecision — typed as object
         *,
         removed: bool = False,
         new_prop: bool = False,
@@ -983,6 +984,7 @@ class AlertDelivery:
                 game_time,
                 score=score,
                 validation=validation,
+                decision=decision,
                 low_line_threshold=config.UD_NEW_PROP_LOW_LINE_THRESHOLD,
             )
         else:
@@ -992,6 +994,7 @@ class AlertDelivery:
                 game_time,
                 score=score,
                 validation=validation,
+                decision=decision,
                 removed=removed,
             )
 

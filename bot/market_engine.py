@@ -480,11 +480,13 @@ async def underdog_job(context) -> None:
         # ── Scoring gate ─────────────────────────────────────────────────────
         from engine.ud_scoring import score_ud_prop, UDPropScore
         from engine.player_validator import validate_player_prop
+        from engine.ud_bet_decision import make_ud_bet_decision
         from alerts import DeliveryResult
         score:        Optional[UDPropScore] = None
         ud_result:    DeliveryResult        = DeliveryResult(sent=False)
         np_immediate: bool                  = False   # set inside is_new_prop branch
         validation:   Optional[object]      = None    # PlayerPropValidation or None
+        decision:     Optional[object]      = None    # UDBetDecision or None
 
         if is_new_prop:
             # ── New-prop path ────────────────────────────────────────────────
@@ -525,6 +527,14 @@ async def underdog_job(context) -> None:
                     "UD new-prop validation blocked: %s | %s | %s",
                     player, stat_type, validation.reason,
                 )
+            # Betting decision — only when supporting history + meaningful score
+            if validation.has_supporting_data and score.tier != "PASS":
+                decision = make_ud_bet_decision(
+                    score        = score,
+                    validation   = validation,
+                    current_line = line_val,
+                    prev_line    = None,   # new prop — no prior line
+                )
             # Always add to the cycle batch — even blocked props appear in digest
             _new_props_batch.append({
                 "player":     player,
@@ -536,6 +546,7 @@ async def underdog_job(context) -> None:
                 "immediate":  np_immediate,
                 "game_time":  snap.game_time,
                 "validation": validation,
+                "decision":   decision,
             })
             if np_immediate and chat_ids:
                 delivery  = AlertDelivery(db, bot, chat_ids)
@@ -550,6 +561,7 @@ async def underdog_job(context) -> None:
                     score       = score,
                     new_prop    = True,
                     validation  = validation,
+                    decision    = decision,
                 )
                 if ud_result.sent:
                     _n_new_prop_sent += 1
@@ -581,6 +593,14 @@ async def underdog_job(context) -> None:
                     history      = ud_history,
                     min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
                 )
+                # Betting decision — only for qualified props with market evidence
+                if validation.has_supporting_data and score.tier != "PASS":
+                    decision = make_ud_bet_decision(
+                        score        = score,
+                        validation   = validation,
+                        current_line = snap.line or 0.0,
+                        prev_line    = prev_line,
+                    )
                 _n_scored += 1
                 _tier_counts[score.tier] = _tier_counts.get(score.tier, 0) + 1
                 logger.debug(
@@ -630,6 +650,7 @@ async def underdog_job(context) -> None:
                     score       = score,
                     removed     = is_removed,
                     validation  = validation,
+                    decision    = decision,
                 )
                 if ud_result.filtered:
                     logger.debug(
@@ -678,9 +699,13 @@ async def underdog_job(context) -> None:
             score_total   = score.total  if score is not None else None,
             score_tier    = score.tier   if score is not None else None,
             score_stars   = score.stars  if score is not None else None,
-            alert_outcome   = _alert_outcome,
-            validation_json = validation.to_json() if validation is not None else None,
-            fetched_at      = now,
+            alert_outcome      = _alert_outcome,
+            validation_json    = validation.to_json() if validation is not None else None,
+            bet_recommendation = decision.recommendation if decision is not None else None,
+            bet_confidence     = decision.confidence     if decision is not None else None,
+            bet_reason         = decision.reason         if decision is not None else None,
+            bet_evidence_json  = decision.to_json()      if decision is not None else None,
+            fetched_at         = now,
         )
         await db.save_underdog_snapshot(record)
 

@@ -2,4 +2,4 @@
 - [Multi-platform connector architecture](connector-architecture.md) — DK/FD connectors use Odds API filtered by bookmaker key; Underdog uses unofficial /v3/over_under_lines; pick'em isolation enforced by is_pickem flag.
 - [AI Ranking & Backtesting Engine](ranking-engine.md) — ranking.py wraps compute_confidence + ±10 historical adj; backtesting.py replays EVRecord via stored ai_confidence; new DB methods and /performance + /backtest commands added.
 - [Alert source priority](source-priority.md) — PrizePicks (primary/daily) → Underdog (secondary) → DK/FD MLB ML/Totals (tertiary); never optimise sportsbook alerts ahead of PP work.
-- [Player Prop Validation Layer](player-validation-layer.md) — immediate alerts gate on n_history ≥ MIN_SAMPLES; new props always go to digest; validation_json stored per snapshot; season/h2h rates always null until result tracking added.
+- [Player Prop Validation + Bet Decision Layer](player-validation-layer.md) — validation gates immediate alerts (n≥5); bet decision (OVER/UNDER/PASS) uses market-proxy signals only; season/h2h always null; stored in 4 new DB columns; shown in every alert.

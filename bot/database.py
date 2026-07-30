@@ -210,6 +210,11 @@ class UnderdogSnapshotRecord(Base):
     # Validation metrics snapshot — compact JSON produced by player_validator.
     # Keys: n, l5, l10, l20, l30, avg, min, rate_below, season, h2h, has_data
     validation_json = Column(Text,       nullable=True)
+    # Betting decision — produced by ud_bet_decision for qualified props
+    bet_recommendation = Column(String(8), nullable=True)    # OVER | UNDER | PASS
+    bet_confidence     = Column(Integer,   nullable=True)    # 0–95
+    bet_reason         = Column(Text,      nullable=True)    # human-readable explanation
+    bet_evidence_json  = Column(Text,      nullable=True)    # compact JSON evidence blob
     fetched_at  = Column(DateTime,    default=datetime.utcnow, nullable=False)
 
 
@@ -747,6 +752,10 @@ class Database:
             "ALTER TABLE underdog_snapshots ADD COLUMN score_stars INTEGER",
             "ALTER TABLE underdog_snapshots ADD COLUMN alert_outcome TEXT",
             "ALTER TABLE underdog_snapshots ADD COLUMN validation_json TEXT",
+            "ALTER TABLE underdog_snapshots ADD COLUMN bet_recommendation TEXT",
+            "ALTER TABLE underdog_snapshots ADD COLUMN bet_confidence INTEGER",
+            "ALTER TABLE underdog_snapshots ADD COLUMN bet_reason TEXT",
+            "ALTER TABLE underdog_snapshots ADD COLUMN bet_evidence_json TEXT",
         ]
         async with self._engine.begin() as conn:
             for sql in new_cols:

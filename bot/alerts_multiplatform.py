@@ -245,6 +245,53 @@ def format_clv_result_alert(result: CLVResult) -> str:
 
 # ── Underdog line change alert ─────────────────────────────────────────────────
 
+def _format_decision_block(decision: Optional[object]) -> str:
+    """Format the OVER/UNDER/PASS recommendation block for Underdog alerts.
+
+    Returns an empty string when *decision* is None (not evaluated / removed prop).
+    Always shown when a decision is available, including PASS.
+    """
+    if decision is None:
+        return ""
+
+    rec  = getattr(decision, "recommendation",   "PASS")
+    emoji = getattr(decision, "recommendation_emoji", lambda: "⚪")()
+    conf = getattr(decision, "confidence_display", lambda: "—")()
+    reason = getattr(decision, "reason", "")
+
+    def _rate(v: Optional[float]) -> str:
+        return f"{v:.0%}" if v is not None else "N/A"
+
+    l5  = _rate(getattr(decision, "l5_rate",  None))
+    l10 = _rate(getattr(decision, "l10_rate", None))
+    l20 = _rate(getattr(decision, "l20_rate", None))
+    l30 = _rate(getattr(decision, "l30_rate", None))
+    avg_display = getattr(decision, "avg_vs_line_display", lambda: "N/A")()
+
+    conf_line = f"   <b>Confidence:</b>    {conf}" if rec != "PASS" else ""
+
+    evidence_block = (
+        f"\n\n📊 <b>Evidence:</b>"
+        f"\n   L5:           {l5}"
+        f"\n   L10:          {l10}"
+        f"\n   L20:          {l20}"
+        f"\n   L30:          {l30}"
+        f"\n   Season avg:   N/A"
+        f"\n   H2H:          N/A"
+        f"\n   Avg vs line:  {avg_display}"
+    ) if rec != "PASS" else ""
+
+    reason_block = f"\n\n💬 <b>Reason:</b>\n   <i>{reason}</i>" if reason else ""
+
+    return (
+        f"\n\n{_div()}"
+        f"\n🎯 <b>Recommendation:</b>  {emoji} {rec}"
+        f"{conf_line}"
+        f"{evidence_block}"
+        f"{reason_block}"
+    )
+
+
 def format_underdog_change_alert(
     player_name: str,
     team: str,
@@ -255,6 +302,7 @@ def format_underdog_change_alert(
     game_time: Optional[datetime] = None,
     score: Optional[object] = None,       # UDPropScore — typed as object to avoid circular import
     validation: Optional[object] = None,  # PlayerPropValidation — typed as object
+    decision: Optional[object] = None,    # UDBetDecision — typed as object
     *,
     removed: bool = False,
 ) -> str:
@@ -316,7 +364,8 @@ def format_underdog_change_alert(
         f"👤 <b>{player_name}</b>",
         "",
         _div(),
-        change_line + game_str + grade_str + validation_str,
+        change_line + game_str + grade_str + validation_str
+        + _format_decision_block(decision),
         "",
         f"{EMOJI['clock']} <i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>",
     ]
@@ -334,6 +383,7 @@ def format_underdog_new_prop_alert(
     game_time: Optional[datetime] = None,
     score: Optional[object] = None,       # UDPropScore
     validation: Optional[object] = None,  # PlayerPropValidation
+    decision: Optional[object] = None,    # UDBetDecision
     *,
     low_line_threshold: float = 1.0,
 ) -> str:
@@ -396,7 +446,8 @@ def format_underdog_new_prop_alert(
         f"  <b>First Seen:</b>    {datetime.utcnow().strftime('%H:%M UTC')}"
         + game_str
         + grade_str
-        + validation_str,
+        + validation_str
+        + _format_decision_block(decision),
         "",
         "<b>Reason:</b>",
         "\n".join(reasons),
