@@ -27,6 +27,16 @@ _SPORT_KEYS: dict[str, str] = {
     "NCAAF": "americanfootball_ncaaf",
     "NCAAB": "basketball_ncaab",
     "UFC":   "mma_mixed_martial_arts",
+    "WNBA":  "basketball_wnba",
+    # Soccer — one Odds API key per league ("Soccer" is a legacy EPL alias)
+    "EPL":        "soccer_epl",
+    "LaLiga":     "soccer_spain_la_liga",
+    "SerieA":     "soccer_italy_serie_a",
+    "Bundesliga": "soccer_germany_bundesliga",
+    "Ligue1":     "soccer_france_ligue_one",
+    "MLS":        "soccer_usa_mls",
+    "UCL":        "soccer_uefa_champs_league",
+    "Soccer":     "soccer_epl",
 }
 
 _MARKET_MAP: dict[str, str] = {

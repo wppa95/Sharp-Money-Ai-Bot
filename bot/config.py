@@ -56,8 +56,15 @@ class Config:
     PP_DEDUP_WINDOW: int = int(os.environ.get("PP_DEDUP_WINDOW", "3600"))  # 60 min
 
     # ── Sports to monitor (comma-separated Sport enum values) ─────────────────
-    # Default: NFL, NBA, MLB — edit via ACTIVE_SPORTS env var
-    ACTIVE_SPORTS_RAW: str = os.environ.get("ACTIVE_SPORTS", "NFL,NBA,MLB")
+    # Default: every sport with a verified Odds API key.
+    # Override via the ACTIVE_SPORTS env var (e.g. "NFL,NBA,MLB").
+    # Note: "Soccer" is a legacy alias for EPL — don't activate it alongside
+    # "EPL" or the EPL feed will be fetched twice.
+    ACTIVE_SPORTS_RAW: str = os.environ.get(
+        "ACTIVE_SPORTS",
+        "NFL,NBA,MLB,WNBA,NHL,NCAAF,NCAAB,UFC,"
+        "EPL,LaLiga,SerieA,Bundesliga,Ligue1,MLS,UCL",
+    )
 
     # ── Alert thresholds ──────────────────────────────────────────────────────
     # Known sharp / respected sportsbooks (comma-separated).

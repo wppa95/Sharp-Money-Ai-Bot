@@ -64,7 +64,15 @@ _SPORT_EMOJI: dict[str, str] = {
     "NCAAF":  "🏈",
     "NCAAB":  "🏀",
     "UFC":    "🥊",
+    "WNBA":   "🏀",
     "Soccer": "⚽",
+    "EPL":        "⚽",
+    "LaLiga":     "⚽",
+    "SerieA":     "⚽",
+    "Bundesliga": "⚽",
+    "Ligue1":     "⚽",
+    "MLS":        "⚽",
+    "UCL":        "⚽",
     "Other":  "🎯",
 }
 
