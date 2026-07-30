@@ -76,6 +76,9 @@ from market_engine import (
     clv_check_job,
     underdog_job,
 )
+from providers import init_health_monitor
+from providers.odds_cache import init_odds_cache
+from providers.game_results import OddsApiResultsProvider
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -118,6 +121,20 @@ async def post_init(application: Application) -> None:
     if config.SEASON_CHECK_INTERVAL > 0:
         await _season_checker.refresh()
 
+    # ── Provider health monitor + shared Odds API cache ──────────────────────
+    _health_monitor = init_health_monitor()
+    _health_monitor.register("PrizePicks")
+    _health_monitor.register("OddsAPI")
+    _health_monitor.register("Underdog")
+    logger.info("Provider health monitor initialised (PrizePicks, OddsAPI, Underdog)")
+
+    init_odds_cache(ttl_seconds=config.ODDS_API_CACHE_TTL)
+    logger.info("Odds API shared cache initialised (TTL=%ds)", config.ODDS_API_CACHE_TTL)
+
+    # Game results provider — not wired to any job yet; framework only
+    _results_provider = OddsApiResultsProvider(api_key=config.ODDS_API_KEY)
+    application.bot_data["results_provider"] = _results_provider
+
     allowed_ids = list(config.allowed_user_ids)
     if not allowed_ids:
         logger.warning(
@@ -127,7 +144,7 @@ async def post_init(application: Application) -> None:
         )
     else:
         logger.info("Alert recipients: %s", allowed_ids)
-    init_handlers(_db, _engine, allowed_ids)
+    init_handlers(_db, _engine, allowed_ids, season_checker=_season_checker)
 
     # ── Multi-platform connector registry ─────────────────────────────────────
     registry = ConnectorRegistry()

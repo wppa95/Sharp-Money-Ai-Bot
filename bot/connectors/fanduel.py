@@ -115,6 +115,46 @@ class FanDuelConnector(BaseConnector):
             return ConnectorStatus.ERROR
 
     async def _fetch_sport(self, sport: str, sport_key: str) -> list[MarketSnapshot]:
+        """
+        Fetch odds for one sport via the shared OddsApiCache when available.
+
+        Falls back to _fetch_sport_direct() when the cache singleton has not
+        been initialised (e.g. in unit-test environments).  The cached path
+        fetches ALL bookmakers in one shared call (same entry as DraftKings);
+        _normalize() filters for FanDuel data client-side, halving API usage.
+        """
+        try:
+            from providers.odds_cache import get_odds_cache, OddsApiError
+        except ImportError:
+            return await self._fetch_sport_direct(sport, sport_key)
+
+        cache = get_odds_cache()
+        if cache is None:
+            return await self._fetch_sport_direct(sport, sport_key)
+
+        try:
+            data = await cache.get_or_fetch(
+                sport_key = sport_key,
+                api_key   = self._api_key,
+                markets   = "h2h,spreads,totals",
+                regions   = "us",
+            )
+        except OddsApiError as exc:
+            logger.warning("FanDuel/OddsAPI error for %s: %s", sport, exc)
+            return []
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("FanDuel unexpected error (%s): %s", sport, exc)
+            return []
+
+        return self._normalize(data, sport)
+
+    async def _fetch_sport_direct(self, sport: str, sport_key: str) -> list[MarketSnapshot]:
+        """
+        Direct Odds API call with per-bookmaker filtering.
+
+        Used as the fallback when the shared OddsApiCache is not available
+        (test environments, early startup before init_odds_cache() is called).
+        """
         url = f"{_ODDS_API_BASE}/sports/{sport_key}/odds"
         params = {
             "apiKey":     self._api_key,
@@ -133,7 +173,7 @@ class FanDuelConnector(BaseConnector):
                         except Exception:
                             body = {}
                         error_code = (body or {}).get("error_code", "")
-                        message = (body or {}).get("message", "")
+                        message    = (body or {}).get("message", "")
                         if resp.status == 401 and error_code == "OUT_OF_USAGE_CREDITS":
                             logger.warning(
                                 "FanDuel/OddsAPI: usage quota exhausted (401) for %s — %s",

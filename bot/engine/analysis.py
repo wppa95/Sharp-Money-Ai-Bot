@@ -525,12 +525,28 @@ class AnalysisEngine:
                             logger.error(
                                 "Odds API: usage quota exhausted (401) — %s", message
                             )
+                            try:
+                                from providers.health_monitor import get_health_monitor as _ghm
+                                from providers.base import FailureType as _FT
+                                _mon = _ghm()
+                                if _mon:
+                                    _mon.record_failure("OddsAPI", message or "quota exhausted", _FT.QUOTA)
+                            except ImportError:
+                                pass
                         else:
                             logger.error(
                                 "Odds API: unauthorized (401) — %s%s",
                                 error_code or "invalid API key",
                                 f": {message}" if message else "",
                             )
+                            try:
+                                from providers.health_monitor import get_health_monitor as _ghm
+                                from providers.base import FailureType as _FT
+                                _mon = _ghm()
+                                if _mon:
+                                    _mon.record_failure("OddsAPI", error_code or message or "401", _FT.HTTP_ERROR)
+                            except ImportError:
+                                pass
                         return []
                     if resp.status == 422:
                         logger.error("Odds API: sport key not found — %s", sport_key)
@@ -545,6 +561,18 @@ class AnalysisEngine:
                         "Odds API: %d events for %s (%s requests remaining)",
                         len(data), sport, remaining,
                     )
+                    try:
+                        from providers.health_monitor import get_health_monitor as _ghm
+                        _mon = _ghm()
+                        if _mon:
+                            _rem: Optional[int] = None
+                            try:
+                                _rem = int(remaining) if remaining != "?" else None
+                            except (ValueError, TypeError):
+                                pass
+                            _mon.record_success("OddsAPI", quota_remaining=_rem)
+                    except ImportError:
+                        pass
         except aiohttp.ClientError as exc:
             logger.error("Odds API request failed for %s: %s", sport, exc)
             return []

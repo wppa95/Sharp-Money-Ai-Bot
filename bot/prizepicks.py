@@ -292,7 +292,23 @@ class PrizePicksClient:
                         "PrizePicks API HTTP %d for league_id=%d",
                         resp.status, league_id,
                     )
+                    try:
+                        from providers.health_monitor import get_health_monitor as _ghm
+                        from providers.base import FailureType as _FT
+                        _mon = _ghm()
+                        if _mon:
+                            _ftype = _FT.BLOCKED if resp.status == 403 else _FT.HTTP_ERROR
+                            _mon.record_failure("PrizePicks", f"HTTP {resp.status}", _ftype)
+                    except ImportError:
+                        pass
                     return []
+                try:
+                    from providers.health_monitor import get_health_monitor as _ghm
+                    _mon = _ghm()
+                    if _mon:
+                        _mon.record_success("PrizePicks")
+                except ImportError:
+                    pass
                 raw = await resp.json(content_type=None)
         except aiohttp.ClientError as exc:
             logger.warning("PrizePicks request error (league_id=%d): %s", league_id, exc)

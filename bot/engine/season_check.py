@@ -63,6 +63,9 @@ class SeasonChecker:
         # None  → never fetched (fail-open)
         # set() → successfully fetched; may be empty if no sports active
         self._active_keys: Optional[frozenset[str]] = None
+        # Full set of ALL sport keys returned by /v4/sports (active + inactive).
+        # Used by get_sport_summary() to show which sports are off-season.
+        self._all_known_keys: Optional[frozenset[str]] = None
         self._last_refresh: Optional[datetime] = None
 
     # ── Public interface ──────────────────────────────────────────────────────
@@ -133,14 +136,14 @@ class SeasonChecker:
             )
             return False
 
-        active_keys = frozenset(
-            entry["key"] for entry in data if entry.get("active", False)
-        )
+        active_keys   = frozenset(entry["key"] for entry in data if entry.get("active", False))
+        all_known_keys = frozenset(entry["key"] for entry in data)
         total = len(data)
         prev_count = len(self._active_keys) if self._active_keys is not None else "?"
 
-        self._active_keys = active_keys
-        self._last_refresh = datetime.utcnow()
+        self._active_keys    = active_keys
+        self._all_known_keys = all_known_keys
+        self._last_refresh   = datetime.utcnow()
 
         logger.info(
             "SeasonChecker: refreshed — %d/%d sport keys have active markets (was %s)",
@@ -149,6 +152,31 @@ class SeasonChecker:
             prev_count,
         )
         return True
+
+    # ── New public helpers ────────────────────────────────────────────────────
+
+    def get_active_sport_keys(self) -> frozenset[str]:
+        """
+        Return the set of sport keys that currently have active markets.
+
+        Returns an empty frozenset when the cache has never been populated
+        (unlike is_sport_active which is fail-open).  Callers that need the
+        fail-open behaviour should use is_sport_active() instead.
+        """
+        return self._active_keys if self._active_keys is not None else frozenset()
+
+    def get_sport_summary(self) -> dict[str, bool]:
+        """
+        Return a mapping of ``{odds_api_sport_key: is_active}`` for every
+        sport key seen in the last successful /v4/sports response.
+
+        Returns an empty dict when the cache has never been populated.
+        Useful for the /status display of which sports are in-season.
+        """
+        if self._all_known_keys is None:
+            return {}
+        active = self._active_keys or frozenset()
+        return {key: (key in active) for key in sorted(self._all_known_keys)}
 
     # ── Diagnostic helpers ────────────────────────────────────────────────────
 

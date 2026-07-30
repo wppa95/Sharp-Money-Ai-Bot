@@ -41,14 +41,23 @@ _db: Optional[Database] = None
 _engine: Optional[AnalysisEngine] = None
 _alert_chat_ids: list[int] = []
 _total_alerts_sent: int = 0
+# SeasonChecker instance passed from main.py — typed as object to avoid a
+# circular import; duck-typed at call sites via hasattr checks.
+_season_checker: Optional[object] = None
 
 
-def init_handlers(db: Database, analysis_engine: AnalysisEngine, alert_chat_ids: list[int]) -> None:
+def init_handlers(
+    db: Database,
+    analysis_engine: AnalysisEngine,
+    alert_chat_ids: list[int],
+    season_checker: Optional[object] = None,
+) -> None:
     """Call this once from main.py after the database and engine are ready."""
-    global _db, _engine, _alert_chat_ids
-    _db = db
-    _engine = analysis_engine
+    global _db, _engine, _alert_chat_ids, _season_checker
+    _db             = db
+    _engine         = analysis_engine
     _alert_chat_ids = alert_chat_ids
+    _season_checker = season_checker
 
 
 def _uptime_str() -> str:
@@ -106,27 +115,120 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+def _fmt_provider_status_line(provider_name: str, display_name: str) -> str:
+    """Single-line provider status for the dashboard health section."""
+    try:
+        from providers import get_health_monitor
+        mon = get_health_monitor()
+        if mon:
+            h = mon.get_health(provider_name)
+            detail = ""
+            if h.quota_remaining is not None:
+                detail = f" ({h.quota_remaining:,} req remaining)"
+            elif h.error_msg:
+                detail = f" — {h.error_msg[:50]}"
+            return f"  {display_name}:  {h.status_emoji} {h.status.value}{detail}"
+    except ImportError:
+        pass
+    return f"  {display_name}:  ⚪ not tracked"
+
+
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/status — show bot and market status."""
     if not _check_allowed(update):
         await update.message.reply_text("⛔ Unauthorized.")
         return
 
+    # DB counts
     total_steam = await _db.count_steam_records() if _db else 0
     total_ev    = await _db.count_ev_records() if _db else 0
     db_records  = await _db.count_odds_records() if _db else 0
+    pp_total    = await _db.count_pp_edge_records() if _db else 0
 
-    msg = format_status_message(
-        uptime_str=_uptime_str(),
-        total_alerts=_total_alerts_sent,
-        total_steam=total_steam,
-        total_ev=total_ev,
-        books_monitored=0,     # TODO: pull from live odds poller
-        active_markets=0,      # TODO: pull from live odds poller
-        db_records=db_records,
-        last_update=None,      # TODO: pull from live odds poller
-    )
-    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+    # Load provider health monitor and odds cache singletons
+    try:
+        from providers import get_health_monitor
+        from providers.odds_cache import get_odds_cache
+        _mon   = get_health_monitor()
+        _cache = get_odds_cache()
+    except ImportError:
+        _mon   = None
+        _cache = None
+
+    lines: list[str] = [
+        f"🤖 <b>Sharp Money Bot</b>  ·  Uptime: {_uptime_str()}",
+        f"📬 Alerts sent: {_total_alerts_sent:,}",
+        "",
+    ]
+
+    # ── Data provider health ──────────────────────────────────────────────────
+    lines.append("📡 <b>Data Providers</b>")
+    if _mon:
+        for name, h in _mon.get_all_health().items():
+            last_ok   = h.format_last_success()
+            fail_note = (
+                f"  ({h.consecutive_failures} fail{'s' if h.consecutive_failures != 1 else ''})"
+                if h.consecutive_failures else ""
+            )
+            lines.append(
+                f"  {h.status_emoji} <b>{name}</b>  {h.status.value}"
+                f"  ·  last ✓: {last_ok}{fail_note}"
+            )
+        # Quota detail for Odds API
+        odds_h = _mon.get_health("OddsAPI")
+        if odds_h.quota_remaining is not None or odds_h.quota_used is not None:
+            r = f"{odds_h.quota_remaining:,}" if odds_h.quota_remaining is not None else "?"
+            u = f"{odds_h.quota_used:,}"      if odds_h.quota_used      is not None else "?"
+            lines.append(f"  ↳ Quota: {r} remaining  ·  {u} used")
+    else:
+        lines += [
+            "  ⚪ PrizePicks   not yet tracked",
+            "  ⚪ Odds API     not yet tracked",
+            "  ⚪ Underdog     not yet tracked",
+        ]
+    lines.append("")
+
+    # ── Odds API cache stats ──────────────────────────────────────────────────
+    if _cache:
+        st  = _cache.stats()
+        tot = st["hits"] + st["misses"]
+        hr  = f"{st['hit_rate'] * 100:.0f}%" if tot > 0 else "—"
+        lines.append(
+            f"⛽ <b>Odds API Cache</b>  TTL {st['ttl_seconds']}s"
+            f"  ·  {st['hits']} hits / {st['misses']} misses  ({hr})"
+        )
+        lines.append("")
+
+    # ── Active sports from season checker ─────────────────────────────────────
+    if _season_checker and hasattr(_season_checker, "get_sport_summary"):
+        summary = _season_checker.get_sport_summary()  # type: ignore[union-attr]
+        if summary:
+            active   = [k for k, v in summary.items() if v]
+            inactive = [k for k, v in summary.items() if not v]
+            lines.append(f"🏈 <b>Active Sports</b>  ({len(active)}/{len(summary)} in season)")
+            if active:
+                short_active = [k.split("_")[-1].upper()[:6] for k in active[:14]]
+                lines.append(
+                    f"  In season:  {' · '.join(short_active)}"
+                    f"{'…' if len(active) > 14 else ''}"
+                )
+            if inactive:
+                short_inactive = [k.split("_")[-1].upper()[:6] for k in inactive[:8]]
+                lines.append(
+                    f"  Off season: {' · '.join(short_inactive)}"
+                    f"{'…' if len(inactive) > 8 else ''}"
+                )
+            lines.append("")
+        else:
+            lines.append("🏈 <b>Active Sports</b>  <i>(cache not yet populated)</i>")
+            lines.append("")
+
+    # ── Database ──────────────────────────────────────────────────────────────
+    lines.append("📊 <b>Database Records</b>")
+    lines.append(f"  Odds: {db_records:,}  ·  Steam: {total_steam:,}  ·  EV: {total_ev:,}")
+    lines.append(f"  PP edges: {pp_total:,}")
+
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
 
 async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -938,8 +1040,8 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "",
         "🤖 <b>Bot Health</b>",
         f"  Uptime:    {_uptime_str()}",
-        f"  PP API:    ⚠️ Temporarily unavailable (HTTP 403 — bot-detection wall)",
-        f"  Odds API:  ⚠️ Monthly quota nearly exhausted",
+        _fmt_provider_status_line("PrizePicks", "PP API"),
+        _fmt_provider_status_line("OddsAPI",    "Odds API"),
         "",
     ]
 

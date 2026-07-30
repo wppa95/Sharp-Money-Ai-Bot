@@ -122,6 +122,13 @@ class Config:
     # Default: 3600 (1 hour).  Set to 0 to disable automatic skipping.
     SEASON_CHECK_INTERVAL: int = int(os.environ.get("SEASON_CHECK_INTERVAL", "3600"))
 
+    # ── Odds API shared cache ─────────────────────────────────────────────────
+    # TTL for the shared Odds API response cache (seconds).  Default 55 s
+    # keeps the cache warm inside the 90 s connector poll cycle.
+    # DraftKings and FanDuel share one API call per sport per TTL window,
+    # cutting Odds API quota usage by ~50%.
+    ODDS_API_CACHE_TTL: int = int(os.environ.get("ODDS_API_CACHE_TTL", "55"))
+
     # ── Logging ───────────────────────────────────────────────────────────────
     LOG_LEVEL: str = os.environ.get("LOG_LEVEL", "INFO")
 
