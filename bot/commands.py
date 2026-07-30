@@ -1160,6 +1160,51 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     else:
         lines.append("📈 <b>Performance</b>  <i>No resolved picks yet</i>")
 
+    # ── API Health ─────────────────────────────────────────────────────────────
+    lines.append("")
+    try:
+        from providers.usage_tracker import get_usage_tracker
+        _tracker = get_usage_tracker()
+        if _tracker is not None:
+            _ust = _tracker.get_stats("OddsAPI")
+            lines.append("🔌 <b>API Health</b>")
+
+            # Used / budget display — prefer real quota headers from API
+            _used_n  = _ust.quota_used   if _ust.quota_used   is not None else _ust.month_count
+            _used_lbl = f"{_used_n:,}" + ("" if _ust.quota_used is not None else " (tracked)")
+            _budget_lbl = f"{_ust.month_budget:,}" if _ust.month_budget > 0 else "unlimited"
+            _pct_lbl    = f"  ({_ust.budget_pct:.1f}%)" if _ust.month_budget > 0 else ""
+            _bar_lbl    = f"  <code>{_ust.budget_bar}</code>" if _ust.month_budget > 0 else ""
+            lines.append(f"  Requests used:  {_used_lbl} / {_budget_lbl}{_pct_lbl}{_bar_lbl}")
+
+            # Remaining estimate
+            _rem = _ust.remaining_estimate
+            lines.append(f"  Remaining est.: {_rem:,}" if _rem is not None else "  Remaining est.: —")
+
+            # Today's own call count
+            if _ust.today_count > 0:
+                lines.append(f"  Today's calls:  {_ust.today_count}")
+
+            # Last successful API fetch + live status from health monitor
+            try:
+                from providers import get_health_monitor as _ghm
+                _mon = _ghm()
+                if _mon:
+                    _h = _mon.get_health("OddsAPI")
+                    lines.append(f"  Last fetch:     {_h.format_last_success()}")
+                    lines.append(f"  Provider:       {_h.status_emoji} {_h.status.value}")
+            except Exception:
+                pass
+
+            # Budget warning if any threshold already crossed this month
+            if _ust.warning_level is not None:
+                _wlbl = "⚠️" if _ust.warning_level < 100 else "🚨"
+                lines.append(f"  {_wlbl} Budget warning: {_ust.warning_level}% threshold reached this month")
+        else:
+            lines.append("🔌 <b>API Health</b>  <i>(usage tracker not initialised)</i>")
+    except Exception:
+        pass
+
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
 

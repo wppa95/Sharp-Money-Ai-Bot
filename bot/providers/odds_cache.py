@@ -146,6 +146,31 @@ class OddsApiCache:
                 return entry.data
 
             self._misses += 1
+
+            # ── Budget guard ──────────────────────────────────────────────────
+            # Check usage budget + active-sport filter before making the HTTP
+            # call.  Runs inside the lock so the check and the record are atomic
+            # for this (sport_key, markets, regions) slot.
+            try:
+                from .usage_tracker import get_usage_tracker, infer_call_priority
+                _tracker = get_usage_tracker()
+                if _tracker is not None:
+                    _priority = infer_call_priority(sport_key, markets)
+                    _allowed, _reason = _tracker.should_allow(
+                        _PROVIDER_NAME, _priority, sport_key=sport_key,
+                    )
+                    if not _allowed:
+                        logger.info(
+                            "OddsApiCache: request for %s blocked by usage tracker — %s",
+                            sport_key, _reason,
+                        )
+                        return []
+                    # Record the outgoing request (may return a newly-crossed threshold)
+                    _tracker.record_request(_PROVIDER_NAME, _priority, sport_key=sport_key)
+            except ImportError:
+                pass
+            # ─────────────────────────────────────────────────────────────────
+
             data = await self._fetch(sport_key, api_key, markets, regions, odds_format)
             self._entries[cache_key] = _CacheEntry(sport_key=sport_key, data=data)
             logger.debug("OddsApiCache MISS %s — stored %d events", sport_key, len(data))

@@ -129,6 +129,12 @@ class Config:
     # cutting Odds API quota usage by ~50%.
     ODDS_API_CACHE_TTL: int = int(os.environ.get("ODDS_API_CACHE_TTL", "55"))
 
+    # ── API budget management ─────────────────────────────────────────────────
+    # Monthly Odds API request cap.  The Odds API free tier allows 500
+    # requests/month.  Set to 0 to disable budget enforcement entirely.
+    # Telegram warnings fire at 75 %, 90 %, and 100 % of this value.
+    ODDS_API_MONTHLY_BUDGET: int = int(os.environ.get("ODDS_API_MONTHLY_BUDGET", "500"))
+
     # ── Logging ───────────────────────────────────────────────────────────────
     LOG_LEVEL: str = os.environ.get("LOG_LEVEL", "INFO")
 

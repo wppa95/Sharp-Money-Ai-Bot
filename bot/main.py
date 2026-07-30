@@ -79,6 +79,7 @@ from market_engine import (
 from providers import init_health_monitor
 from providers.odds_cache import init_odds_cache
 from providers.game_results import OddsApiResultsProvider
+from providers.usage_tracker import init_usage_tracker, get_usage_tracker
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -95,6 +96,11 @@ logger = logging.getLogger(__name__)
 _db: Database | None = None
 _engine: AnalysisEngine | None = None
 _season_checker: SeasonChecker | None = None
+
+# Tracks which budget-warning thresholds have already been alerted this month
+# per provider.  Reset implicitly when get_usage_tracker()._roll_month_if_needed()
+# fires, or on bot restart (acceptable — at worst one duplicate alert per month).
+_last_budget_alerted: dict[str, set[int]] = {}
 
 
 # ── PTB lifecycle hooks ────────────────────────────────────────────────────────
@@ -130,6 +136,16 @@ async def post_init(application: Application) -> None:
 
     init_odds_cache(ttl_seconds=config.ODDS_API_CACHE_TTL)
     logger.info("Odds API shared cache initialised (TTL=%ds)", config.ODDS_API_CACHE_TTL)
+
+    # ── API usage tracker + budget enforcement ────────────────────────────────
+    _usage_tracker = init_usage_tracker(
+        monthly_budgets={"OddsAPI": config.ODDS_API_MONTHLY_BUDGET},
+    )
+    _usage_tracker.set_season_checker(_season_checker)
+    logger.info(
+        "API usage tracker initialised (OddsAPI budget: %d requests/month)",
+        config.ODDS_API_MONTHLY_BUDGET,
+    )
 
     # Game results provider — not wired to any job yet; framework only
     _results_provider = OddsApiResultsProvider(api_key=config.ODDS_API_KEY)
@@ -183,6 +199,8 @@ async def post_init(application: Application) -> None:
         jq.run_repeating(consensus_check_job,  interval=config.CONSENSUS_CHECK_INTERVAL,    first=25,  name="consensus_checker")
         jq.run_repeating(clv_check_job,        interval=config.CLV_CHECK_INTERVAL,          first=35,  name="clv_checker")
         jq.run_repeating(underdog_job,         interval=config.UNDERDOG_POLL_INTERVAL,      first=45,  name="underdog_monitor")
+        # API budget check — every 15 minutes
+        jq.run_repeating(_budget_check_job,    interval=900,                                first=900, name="budget_checker")
         # Season / market-status refresh (skip when interval is 0 = disabled)
         if config.SEASON_CHECK_INTERVAL > 0:
             jq.run_repeating(
@@ -458,6 +476,84 @@ async def _steam_check_job(context) -> None:
 
             # AlertDelivery handles: filter → dedup → format → send → log
             await delivery.deliver_steam(steam_alert)
+
+
+# ── API budget check job ───────────────────────────────────────────────────────
+
+async def _budget_check_job(context) -> None:
+    """
+    Run every 15 minutes.  Checks API usage against the monthly budget and
+    sends a Telegram alert the *first* time each threshold (75 / 90 / 100 %)
+    is crossed in a calendar month.
+
+    Alert escalation:
+      ≥ 75 % → ⚠️  warning
+      ≥ 90 % → ⚠️  serious warning; LOW-priority calls now blocked
+      ≥ 100% → 🚨  quota exhausted; only CRITICAL + HIGH calls pass
+    """
+    _tracker = get_usage_tracker()
+    if _tracker is None:
+        return
+
+    bot      = context.bot
+    chat_ids = list(config.allowed_user_ids)
+    if not chat_ids:
+        return
+
+    for provider, stats in _tracker.get_all_stats().items():
+        if stats.month_budget <= 0:
+            continue
+
+        alerted = _last_budget_alerted.setdefault(provider, set())
+
+        for threshold in (75, 90, 100):
+            if stats.budget_pct >= threshold and threshold not in alerted:
+                alerted.add(threshold)
+
+                if threshold >= 100:
+                    icon    = "🚨"
+                    heading = "API QUOTA EXHAUSTED"
+                    note    = (
+                        "All LOW + MEDIUM priority Odds API calls are now blocked.\n"
+                        "PrizePicks and player-prop pipelines continue normally."
+                    )
+                elif threshold >= 90:
+                    icon    = "⚠️"
+                    heading = f"API USAGE WARNING — {threshold}%"
+                    note    = "LOW-priority Odds API calls are now blocked."
+                else:
+                    icon    = "⚠️"
+                    heading = f"API USAGE WARNING — {threshold}%"
+                    note    = "Usage is elevated. Monitor before the end of the month."
+
+                used_str = (
+                    f"{stats.quota_used:,}"
+                    if stats.quota_used is not None
+                    else f"~{stats.month_count:,} (tracked)"
+                )
+                rem_str = (
+                    f"{stats.quota_remaining:,}"
+                    if stats.quota_remaining is not None
+                    else f"~{max(0, stats.month_budget - stats.month_count):,}"
+                )
+
+                msg = (
+                    f"{icon} <b>{heading}</b>\n"
+                    f"\n"
+                    f"<b>Provider:</b>   {provider}\n"
+                    f"<b>Used:</b>       {used_str} / {stats.month_budget:,}  ({stats.budget_pct:.1f}%)\n"
+                    f"<b>Remaining:</b>  {rem_str}\n"
+                    f"<b>Budget:</b>     <code>{stats.budget_bar}</code>\n"
+                    f"\n"
+                    f"<i>{note}</i>"
+                )
+
+                await broadcast_alert(bot, chat_ids, msg)
+                logger.warning(
+                    "_budget_check_job: %s crossed %d%% threshold "
+                    "(used=%s / budget=%d)",
+                    provider, threshold, used_str, stats.month_budget,
+                )
 
 
 # ── Season / market-status refresh job ────────────────────────────────────────
