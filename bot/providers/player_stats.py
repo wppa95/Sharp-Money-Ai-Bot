@@ -274,8 +274,7 @@ class PlayerStatsProvider:
             if raw_val is None:
                 continue
 
-            game_obj  = split.get("game") or {}
-            game_date = _parse_date(game_obj.get("gameDate", ""))
+            game_date = _parse_date(split.get("date", ""))
             if not game_date:
                 continue
 
