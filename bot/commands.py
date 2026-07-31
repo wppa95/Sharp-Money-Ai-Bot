@@ -105,14 +105,20 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/help — show available commands."""
+    uid = getattr(update.effective_user, "id", "?")
+    logger.info("cmd_help: user_id=%s", uid)
     if not _check_allowed(update):
         await update.message.reply_text("⛔ Unauthorized.")
         return
-    await update.message.reply_text(
-        format_help_message(),
-        parse_mode=ParseMode.HTML,
-        disable_web_page_preview=True,
-    )
+    try:
+        await update.message.reply_text(
+            format_help_message(),
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+        )
+    except Exception as exc:
+        logger.exception("cmd_help: reply_text failed: %s", exc)
+        await update.message.reply_text("⚠️ Help message failed to send. Check bot logs.")
 
 
 def _fmt_provider_status_line(provider_name: str, display_name: str) -> str:
@@ -750,6 +756,8 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/testalert [steam|ev] — Send a mock alert to verify delivery end-to-end."""
+    uid = getattr(update.effective_user, "id", "?")
+    logger.info("cmd_testalert: user_id=%s args=%s", uid, context.args)
     if not _check_allowed(update):
         await update.message.reply_text("⛔ Unauthorized.")
         return
