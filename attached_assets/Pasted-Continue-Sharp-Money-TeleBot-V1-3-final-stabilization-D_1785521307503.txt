@@ -1,0 +1,227 @@
+Continue Sharp Money TeleBot V1.3 final stabilization.
+
+Do not restart completed work.
+Do not rebuild completed systems.
+This is the final V1.3 validation pass.
+
+---
+
+# Current confirmed working
+
+✅ Bot starts cleanly  
+✅ Telegram connection works  
+✅ Telegram getUpdates works  
+✅ Scheduler starts normally  
+✅ Underdog monitoring works  
+✅ Automated Telegram alerts work  
+✅ PrizePicks Reference Alerts work  
+✅ Underdog removal alerts work  
+✅ Normal lifecycle tracking appears correct
+
+---
+
+# 🚨 Priority Fix #1 — Telegram Command Reliability
+
+During live testing:
+
+Automated alerts continued working, but manual Telegram commands stopped responding.
+
+Affected commands:
+- /health
+- /restarts
+- /dashboard
+- /status
+- /performance
+- /backtest
+- /testalert
+- /analyze
+- /slip
+- /help
+
+Console showed:
+- Bot initialized successfully
+- deleteWebhook returned 200 OK
+- getUpdates returned 200 OK
+- Application started normally
+
+Focus:
+- Command handler registration
+- Telegram update routing
+- Callback execution failures
+- Exceptions being swallowed
+- Blocking tasks preventing command responses
+- Silent command failures
+
+Requirements:
+- Every command must return a response or visible error.
+- No silent failures.
+- Preserve all V1.3 health, lifecycle, and PP reference changes.
+
+---
+
+# ⚠️ V1.3 Improvements / Cautions
+
+## 1. PrizePicks Proxy Alert Confidence Wording
+
+Current:
+Confidence: 100/100
+
+Change to:
+
+Proxy Match Confidence: 100/100
+
+Reason:
+This measures Underdog → PrizePicks proxy matching confidence, not betting confidence.
+
+---
+
+## 2. PrizePicks Proxy Alert Naming
+
+Review:
+
+Current:
+PRIZEPICKS REFERENCE ALERT
+
+Possible:
+PRIZEPICKS PROXY ALERT
+
+Reason:
+The system uses Underdog proxy data and does not have confirmed PrizePicks API data.
+
+Keep disclaimer:
+Reference only — not confirmed PrizePicks data.
+
+---
+
+## 3. Add Observed Timestamp
+
+Add:
+
+Observed: HH:MM UTC
+
+Purpose:
+Track exactly when:
+- line appeared
+- movement occurred
+- removal happened
+
+---
+
+## 4. Reappearing Prop Lifecycle Review
+
+Example tested:
+
+Jordin Canada:
+- Alerted at 1.5
+- Removed at 1.5
+- Returned later at 0.5
+
+Verify:
+- New lifecycle created after removal
+- Old removed record is not reused
+- Dedup does not block valid re-entry
+
+---
+
+## 5. Command Failure Visibility
+
+Current problem:
+Commands can fail with no response.
+
+Requirement:
+
+Every command should return:
+
+⚠️ Command failed
+Reason: ______
+
+instead of silently failing.
+
+---
+
+## 6. Dashboard Scope Cleanup
+
+Review dashboard sections that no longer match current bot focus.
+
+Current focus:
+- Underdog player props
+- PrizePicks proxy reference system
+
+Review/remove/rename:
+- EV sections if not applicable
+- Old PrizePicks wording
+- Irrelevant sportsbook sections
+
+---
+
+## 7. EV Line Relevance
+
+Review whether EV lines should appear.
+
+Current concern:
+If EV cannot be calculated/usefully applied to player props, remove or hide those sections.
+
+If still useful, keep.
+
+---
+
+## 8. Sports Scope Cleanup
+
+Current display shows many sports.
+
+Review active scope display.
+
+Primary focus:
+- Underdog player props
+- PrizePicks proxy alerts
+
+Future:
+- DraftKings/FanDuel MLB Moneyline + Totals only
+
+Do not prioritize unused markets.
+
+---
+
+## 9. Performance Dashboard Refinement
+
+Review dashboard metrics.
+
+Separate:
+- Raw alerts
+- Qualified plays
+- Tracked picks
+- Resolved results
+
+Avoid confusing raw alert volume with betting performance.
+
+---
+
+# Final Validation Requirements
+
+Before completion:
+
+Run:
+- Command tests
+- Full test suite
+
+Verify:
+
+✅ Bot starts cleanly  
+✅ Telegram commands respond consistently  
+✅ Underdog monitoring works  
+✅ PrizePicks proxy alerts work  
+✅ Removal alerts work  
+✅ Lifecycle handling works  
+✅ No silent failures  
+✅ No regressions from previous V1.3 work
+
+Provide final report:
+
+- Root cause
+- Files changed
+- Fixes completed
+- Tests passed/failed
+- Remaining issues
+- Final V1.3 stability status
+
+After completing this V1.3 stabilization checklist, do not move to new tasks or phases. Stop and wait for further instructions.

@@ -72,11 +72,11 @@ _player_result_fetch_cache: set = set()
 # scoring (new props and line-change events only).
 _cold_start_done: bool = False
 
-# ── PrizePicks reference alert dedup ─────────────────────────────────────────
+# ── Player Prop Market alert dedup ────────────────────────────────────────────
 # Keyed on (player_name, sport, stat_type, line_str) so a new alert fires when
 # the line changes but not on every cycle for the same prop/line.
 # Intentionally module-level: persists across cycles, resets on bot restart.
-_pp_ref_alerted: set = set()
+_prop_market_alerted: set = set()
 
 
 def _get_player_stats_provider():
@@ -757,6 +757,7 @@ async def underdog_job(context) -> None:
                         "sta":       score.stability,
                         "n":         score.n_history,
                         "line":      score.current_line,
+                        "prev_line": None,  # new props have no previous line
                     })
     
             else:
@@ -843,6 +844,48 @@ async def underdog_job(context) -> None:
                     _n_cold_start_scored += 1
                     _tier_counts[score.tier] = _tier_counts.get(score.tier, 0) + 1
     
+                # ── Re-entry detection ────────────────────────────────────────────
+                # A prop returns after removal: known_keys has it (via
+                # get_known_underdog_prop_keys which includes removed rows) but
+                # prev_record is None (get_latest_underdog_snapshot_per_prop
+                # returns only non-removed rows, so a removed prop yields None).
+                # Treat the re-appearing prop like a new-prop alert so it:
+                #   - bypasses the timing filter (new_prop=True)
+                #   - fires regardless of prev_line comparison
+                #   - gets a fresh lifecycle DISCOVERED → ACTIVE_ALERTED
+                is_reentry = not is_removed and not is_cold_start and prev_record is None
+                is_reentry_qualified = False
+                if is_reentry:
+                    logger.info(
+                        "underdog_job: prop re-entry — %s / %s / %s  line=%.1f",
+                        player, stat_type, snap.sport or "UNKNOWN", snap.line or 0.0,
+                    )
+                    ud_history = await db.get_ud_prop_history(player, stat_type, limit=30)
+                    score = score_ud_prop(
+                        player_name  = player,
+                        stat_type    = stat_type,
+                        sport        = snap.sport or "UNKNOWN",
+                        current_line = snap.line or 0.0,
+                        prev_line    = None,
+                        history      = ud_history,
+                    )
+                    market_quality  = compute_market_quality(stat_type, snap.line or 0.0, score)
+                    market_pressure = detect_market_pressure(None, ud_history)
+                    _processed_keys.add((player, stat_type))
+                    validation = validate_player_prop(
+                        player_name  = player,
+                        stat_type    = stat_type,
+                        current_line = snap.line or 0.0,
+                        history      = ud_history,
+                        min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
+                    )
+                    is_reentry_qualified = (
+                        score is not None
+                        and (snap.sport or "UNKNOWN") in config.ud_alert_sports
+                    )
+                    if is_reentry_qualified:
+                        _n_qualified += 1
+
                 # Qualify for alert delivery.
                 # Removal notices: only Telegram-alert for three conditions.
                 # All removals are still saved to the DB regardless.
@@ -859,7 +902,9 @@ async def underdog_job(context) -> None:
                     # Line-change props: require A-tier or better, a real directional
                     # pick from the decision engine, and sport in betting whitelist.
                     # Cold-start props always fail this gate — alerts suppressed.
-                    is_qualified = (
+                    # Re-entries qualify via is_reentry_qualified (set above) regardless
+                    # of decision engine result — there is no previous line to compare.
+                    is_qualified = is_reentry_qualified or (
                         not is_cold_start
                         and score is not None
                         and score.stars >= config.UD_MIN_STARS_TO_ALERT
@@ -867,7 +912,7 @@ async def underdog_job(context) -> None:
                         and decision.recommendation != "PASS"
                         and (snap.sport or "UNKNOWN") in config.ud_alert_sports
                     )
-                    if is_qualified:
+                    if is_qualified and not is_reentry_qualified:
                         _n_qualified += 1
                     # ── Debug tracking (line-change / cold-start) ─────────────────
                     if score is not None:
@@ -922,9 +967,10 @@ async def underdog_job(context) -> None:
                             "sta":       score.stability,
                             "n":         score.n_history,
                             "line":      score.current_line,
+                            "prev_line": prev_line,  # previous line for movement tracking
                         })
     
-                should_alert = is_qualified and (is_removed or (
+                should_alert = is_qualified and (is_reentry or is_removed or (
                     line_changed
                     and prev_line is not None
                     and abs(snap.line - prev_line) >= config.MIN_UNDERDOG_LINE_CHANGE
@@ -942,6 +988,7 @@ async def underdog_job(context) -> None:
                         game_time       = snap.game_time,
                         score           = score,
                         removed         = is_removed,
+                        new_prop        = is_reentry_qualified and not is_removed,
                         validation      = validation,
                         decision        = decision,
                         market_quality  = market_quality,
@@ -1294,23 +1341,25 @@ async def underdog_job(context) -> None:
     if _lc_fail_count > 0:
         _persistence_ok = False
 
-    # ── PrizePicks reference engine (post-bridge, post-lifecycle) ─────────────
+    # ── Player Prop Market engine (post-bridge, post-lifecycle) ──────────────
+    # Active framework for multi-provider market alerts. Replaces the old
+    # PrizePicks-only reference alert path.
     # Run AFTER bridge so PropLineHistory rows reflect the current cycle.
     # Failures are non-fatal: logged at debug level so they never mask the
     # main persistence outcome.
     if chat_ids and _scored_props:
         try:
-            from engine.pp_reference import run_pp_reference_cycle
-            await run_pp_reference_cycle(
+            from engine.player_prop_market import run_player_prop_market_cycle
+            await run_player_prop_market_cycle(
                 db           = db,
                 bot          = bot,
                 chat_ids     = chat_ids,
                 scored_props = _scored_props,
-                alerted_set  = _pp_ref_alerted,
+                alerted_set  = _prop_market_alerted,
                 now          = now,
             )
         except Exception as _ref_exc:
-            logger.debug("underdog_job: pp_reference cycle error: %s", _ref_exc)
+            logger.debug("underdog_job: player_prop_market cycle error: %s", _ref_exc)
 
     # Record job outcome — failure if any persistence stage raised.
     if _health:

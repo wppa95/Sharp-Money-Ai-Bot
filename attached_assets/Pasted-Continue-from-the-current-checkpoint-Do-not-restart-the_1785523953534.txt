@@ -1,0 +1,196 @@
+Continue from the current checkpoint. Do not restart the implementation.
+
+We are at the final stage. The goal now is to finish V1.3, verify stability, and move into real system testing with player prop alerts.
+
+Current checkpoint:
+
+- New Player Prop Market Alert framework was being implemented
+- Telegram command reliability fixes were being implemented
+- Lifecycle re-entry fix was being implemented
+- Player Prop Market Comparison foundation was being implemented
+- Tests were written
+- Full test suite was running
+- One test failure was identified
+
+Failure identified:
+
+"The broadcast_alert import is inside the function body, so the patch path is wrong. Fix the tests to patch the source module, then rerun everything."
+
+Continue from here.
+
+---
+
+# Finish remaining fixes
+
+1. Fix the failing test.
+2. Rerun the full test suite.
+3. Resolve any remaining failures.
+4. Confirm the bot is stable.
+
+---
+
+# Verify Telegram commands
+
+Test:
+
+/help
+/health
+/status
+/dashboard
+/performance
+/restarts
+/testalert
+/analyze
+/slip
+
+Requirements:
+
+✅ Every command responds  
+✅ No silent failures  
+✅ Errors are logged clearly
+
+---
+
+# Verify framework migration
+
+The active system should now be:
+
+PLAYER PROP MARKET ALERT
+
+The old:
+
+PRIZEPICKS REFERENCE ALERT
+
+should no longer be the active alert path.
+
+Confirm:
+
+✅ Old formatter disabled  
+✅ New formatter active  
+✅ No duplicate alert paths  
+✅ Restarts continue using new framework
+
+---
+
+# Verify player prop workflow
+
+The bot should now support:
+
+🟣 PrizePicks
+🐶 Underdog
+🎰 DraftKings
+🦊 FanDuel
+
+When unavailable:
+
+- Show unavailable
+- Use available sources
+- Clearly label proxy usage
+
+Verify:
+
+- Line storage
+- Provider tracking
+- Movement tracking
+- Lifecycle tracking
+- Alert formatting
+
+---
+
+# Start controlled live testing
+
+After all fixes pass:
+
+Enable controlled player prop testing.
+
+Goal:
+
+Use the bot to begin generating real player prop analysis alerts.
+
+Test:
+
+- Prop detection
+- Market comparison
+- Movement detection
+- Confidence scoring
+- Alert quality
+- Database tracking
+
+Do not activate anything that creates false confidence.
+
+We want to validate the system before placing real bets.
+
+---
+
+# Prepare for first real test picks
+
+Once stable:
+
+Generate test player prop opportunities from the live system.
+
+For each:
+
+Show:
+
+Player:
+Sport:
+Market:
+Available lines:
+Source:
+Movement:
+Reason flagged:
+Confidence:
+Risk level:
+
+The purpose is to compare bot output with manual PrizePicks/Underdog checks.
+
+---
+
+# Future market watch foundation (do not delay completion)
+
+After the current system is stable, prepare the foundation for:
+
+Pregame Market Watch
+
+Goal:
+
+The bot should monitor upcoming games before alerts happen.
+
+Workflow:
+
+Earlier in day:
+- Identify upcoming games
+- Track available player props
+- Monitor opening lines
+
+Around 3 hours before game:
+- Run deeper scan
+- Compare providers
+- Detect meaningful movement
+- Create watch alerts
+
+Do not overbuild this now.
+
+Only create the foundation.
+
+---
+
+# Final completion report
+
+Provide:
+
+- Files changed
+- Root causes fixed
+- Tests passed/failed
+- Framework migration status
+- Telegram command status
+- Player prop testing status
+- Remaining issues
+
+After this is complete:
+
+STOP.
+
+Do not move into additional features.
+
+Wait for instructions.

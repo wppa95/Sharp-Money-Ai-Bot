@@ -1,0 +1,394 @@
+Continue Sharp Money TeleBot V1.3 final completion pass.
+
+This is the final stabilization + usability + framework migration + Player Prop Market Comparison Foundation pass before freeze.
+
+Do not restart completed work.
+Do not rebuild completed systems.
+Preserve all existing V1.3 health monitoring, lifecycle fixes, Underdog monitoring, and PrizePicks proxy work.
+
+Goal:
+Finish the bot so it is reliable for daily use and migrate it toward the new Player Prop Market Alert framework.
+
+---
+
+# Current confirmed working
+
+✅ Bot starts cleanly  
+✅ Telegram connection works  
+✅ Telegram getUpdates works  
+✅ Scheduler starts normally  
+✅ Underdog monitoring works  
+✅ Automated Telegram alerts work  
+✅ PrizePicks proxy alerts work  
+✅ Underdog removal alerts work  
+✅ Normal lifecycle tracking appears correct
+
+---
+
+# 1. 🚨 PRIORITY — Telegram Command Reliability
+
+Live testing showed:
+
+Automated alerts continue working, but manual Telegram commands can stop responding.
+
+Affected:
+- /help
+- /health
+- /restarts
+- /status
+- /dashboard
+- /performance
+- /backtest
+- /testalert
+- /analyze
+- /slip
+
+Console evidence:
+- Bot initialized successfully
+- Telegram deleteWebhook returned 200 OK
+- Telegram getUpdates returned 200 OK
+- Scheduler started normally
+
+Investigate:
+
+- Command handler registration
+- Telegram update routing
+- Callback execution failures
+- Exceptions being swallowed
+- Blocking tasks preventing command responses
+- Silent command failures
+
+Requirements:
+
+✅ Every command must always respond  
+✅ Failed commands must return visible errors  
+✅ Add logging around command failures  
+✅ No silent failures
+
+Preserve all existing V1.3 functionality.
+
+---
+
+# 2. 🟣 Upgrade Alert Framework
+
+The bot should no longer be built around:
+
+"PrizePicks Reference Alert"
+
+The new active framework should be:
+
+PLAYER PROP MARKET ALERT
+
+Sharp Money TeleBot is evolving into a Player Prop Market Comparison Engine.
+
+Data sources:
+
+🟣 PrizePicks  
+🐶 Underdog  
+🎰 DraftKings  
+🦊 FanDuel  
+
+The system should support multiple providers instead of depending on one source.
+
+---
+
+# 3. 🟣 New Player Prop Market Alert Format
+
+Move toward:
+
+🟣 PLAYER PROP MARKET ALERT
+
+Example:
+
+⚾ MLB · Strikeouts
+👤 Freddy Peralta
+
+────────────────
+
+📊 Available Lines
+
+🟣 PrizePicks:
+Unavailable
+
+🐶 Underdog:
+5.5
+
+🎰 DraftKings:
+Unavailable
+
+🦊 FanDuel:
+Unavailable
+
+────────────────
+
+📈 Market View
+
+Best Available Line:
+Underdog
+
+Market Consensus:
+5.5
+
+Observed:
+HH:MM UTC
+
+Previous Line:
+5.0
+
+Movement:
++0.5 ↑
+
+────────────────
+
+📡 Sources:
+Available providers
+
+---
+
+# 4. ⚠️ Proxy Data Improvements
+
+When PrizePicks data is unavailable:
+
+Do NOT remove proxy functionality.
+
+Instead show:
+
+- Available provider
+- Missing providers
+- Observed timestamp
+- Line history
+- Movement
+- Proxy match confidence
+
+Change:
+
+Confidence: 100/100
+
+To:
+
+Proxy Match Confidence: 100/100
+
+Reason:
+
+This measures provider agreement/proxy reliability, not betting confidence.
+
+---
+
+# 5. ⚠️ Lifecycle / Database Validation
+
+Review live example:
+
+Jordin Canada:
+
+17:51 UTC:
+- Alert created
+- Line 1.5
+
+17:58 UTC:
+- Removed
+- Last Line 1.5
+
+Later:
+- Returned with line 0.5
+
+Verify:
+
+✅ New lifecycle created after removal  
+✅ Old removed record is not reused  
+✅ Deduplication does not block valid re-entry  
+✅ Line history remains accurate
+
+---
+
+# 6. 🧹 Dashboard + Scope Cleanup
+
+Review Telegram displays.
+
+Current focus:
+
+- Underdog player props
+- PrizePicks proxy workflow
+- Future multi-source prop comparison
+
+Clean up outdated/confusing sections:
+
+Review:
+
+- EV sections if not applicable to player props
+- Old PrizePicks wording
+- Irrelevant sportsbook displays
+- Sports list showing unused markets
+
+Performance dashboard should eventually separate:
+
+- Raw alerts
+- Qualified plays
+- Tracked picks
+- Resolved results
+
+Do not confuse alert volume with betting performance.
+
+---
+
+# 7. ⚠️ EV Line Relevance
+
+Review EV display.
+
+If EV cannot be calculated or used effectively for player props:
+
+Remove/hide those sections.
+
+If useful:
+
+Keep.
+
+Do not show irrelevant metrics.
+
+---
+
+# 8. ⚠️ Sports Scope Cleanup
+
+Review active sports display.
+
+Primary focus:
+
+- Player props only
+- Underdog player props
+- PrizePicks workflow
+- Future multi-source player prop comparison
+
+Do not prioritize:
+
+- Moneylines
+- Totals
+- Spreads
+- Traditional sportsbook markets
+
+The current bot direction is player prop analysis and market comparison.
+
+Keep the framework focused on player props.
+
+---
+
+# 9. 🟣 Player Prop Market Comparison Engine Foundation
+
+Begin implementing the foundation of the future Player Prop Market Comparison Engine.
+
+This should become the core architecture of Sharp Money TeleBot.
+
+Build:
+
+- Unified player prop data model
+- Provider/source tracking
+- Multi-provider line storage
+- Side-by-side comparison structure
+- Best available line detection
+- Market consensus calculation
+- Line movement tracking
+
+Supported providers:
+
+🟣 PrizePicks  
+🐶 Underdog  
+🎰 DraftKings  
+🦊 FanDuel  
+
+Do not require every provider to be active yet.
+
+If a provider is unavailable:
+
+- Mark unavailable
+- Continue using available sources
+
+The goal:
+
+The bot should eventually answer:
+
+"Which app has the best line for this player prop?"
+
+Do not build advanced sportsbook features yet.
+
+Focus on creating the correct foundation so future providers can plug in without rebuilding the system.
+
+---
+
+# 10. 🔄 Final Framework Migration Check
+
+Before completion:
+
+Verify the bot is fully migrated to the new Player Prop Market Alert framework.
+
+Requirements:
+
+✅ New framework is the active/default system  
+✅ Old PrizePicks Reference Alert framework is no longer used  
+✅ No old alert formatter is still active  
+✅ No duplicate old/new alert paths exist  
+✅ Future updates/restarts continue using the new framework  
+✅ Documentation/config references use the new framework
+
+The bot should no longer think in terms of:
+
+"PrizePicks proxy alerts"
+
+It should think in terms of:
+
+PLAYER PROP MARKET ALERT
+
+with provider-based data:
+
+🟣 PrizePicks  
+🐶 Underdog  
+🎰 DraftKings  
+🦊 FanDuel  
+
+If a provider is unavailable:
+
+- Show unavailable
+- Use available sources
+- Clearly label proxy usage
+
+If old code must remain temporarily for compatibility, ensure it cannot trigger alerts.
+
+---
+
+# Final Validation Before Completion
+
+Run:
+
+- Command tests
+- Lifecycle tests
+- Alert tests
+- Framework tests
+- Full test suite
+
+Verify:
+
+✅ Bot starts cleanly  
+✅ Telegram commands respond consistently  
+✅ Underdog monitoring works  
+✅ Player Prop Market Alerts work  
+✅ Removal alerts work  
+✅ Lifecycle handling works  
+✅ Comparison foundation works  
+✅ No silent failures  
+✅ No regressions
+
+Provide final report:
+
+- Root cause
+- Files changed
+- Fixes completed
+- Framework migration completed
+- Comparison engine foundation completed
+- Tests passed/failed
+- Remaining issues
+- Final V1.3 stability status
+
+After this is complete:
+
+STOP.
+
+Do not move to new tasks, phases, or features.
+
+Wait for further instructions.

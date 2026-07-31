@@ -34,3 +34,23 @@ In `underdog_job`, the PropLineHistory bridge and lifecycle-state updates are *p
 `_lifecycle_alerted` / `_lifecycle_removed` are populated during the `underdog_job` loop, then applied via `update_prop_lifecycle_state` only *after* `sync_underdog_snapshots_to_prop_history` completes.
 
 **Why:** The bridge creates/updates `PropLineHistory` rows; applying lifecycle state before the bridge would target rows that don't exist yet.
+
+## Rule: re-entry detection requires both known_keys AND prev_record checks
+
+A prop in `known_keys` (which includes removed rows) with `prev_record = None` (from `get_latest_underdog_snapshot_per_prop` which is non-removed only) is a **re-entry** — the prop returned after removal. Treat with `new_prop=True` to bypass the timing filter and fire an alert.
+
+**Why:** Without this, re-entering props silently skip alerting because `line_changed=False` (no prev_record to compare against). Users miss the re-appearance.
+
+**How to apply:** `is_reentry = not is_removed and not is_cold_start and prev_record is None`
+
+## Rule: Player Prop Market Engine is the active alert framework (replacing pp_reference)
+
+`bot/engine/player_prop_market.py` — `run_player_prop_market_cycle` — is the live path. `_prop_market_alerted` is the module-level dedup set. Old `run_pp_reference_cycle` is dead code and must not be re-enabled.
+
+**Why:** The new framework shows all 4 providers (PP/UD/DK/FD), labels confidence as "Proxy Match Confidence" (not just "Confidence"), and supports multi-provider market view per spec.
+
+## Rule: command handlers must have try/except + error_handler must reply
+
+Every `cmd_*` handler needs a top-level `try/except` block that catches all exceptions and sends a visible error reply. The global `error_handler` also replies to the user.
+
+**Why:** Without this, failed commands appear to silently succeed — the user gets no response and has no way to know something went wrong.

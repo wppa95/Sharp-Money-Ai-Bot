@@ -1,0 +1,494 @@
+"""
+player_prop_market.py — Player Prop Market Comparison Engine.
+
+This is the active alert framework for Sharp Money TeleBot. It replaces the
+earlier "PrizePicks Reference Alert" model with a multi-provider market view
+that surfaces the best available line across all data sources.
+
+Supported providers (in priority order):
+    🟣 PrizePicks  — primary (manual import via /pp_import; API is DataDome-blocked)
+    🐶 Underdog    — secondary (live via UnderdogConnector)
+    🎰 DraftKings  — tertiary (live via DraftKingsConnector when active)
+    🦊 FanDuel     — tertiary (live via FanDuelConnector when active)
+
+When a provider has no data for a given player/market, its line is shown as
+"Unavailable" in the alert. The system continues using available sources.
+
+Design principles:
+  - "Best available line" = the highest-confidence live line regardless of source
+  - Proxy Match Confidence measures provider agreement / proxy reliability —
+    NOT betting confidence. Labelled explicitly as "Proxy Match Confidence".
+  - Alerts fire for high-quality props (tier S/A from the Underdog scoring engine)
+  - Per-session dedup key: (player_name, sport, stat_type, line_str)
+  - Old format_pp_reference_alert remains as dead code; this module owns the
+    active alert path. No duplicate alert paths exist.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
+
+# ── Provider registry ─────────────────────────────────────────────────────────
+
+@dataclass
+class ProviderLine:
+    """A single provider's line for one player/market combination."""
+    provider:    str              # "PrizePicks" | "Underdog" | "DraftKings" | "FanDuel"
+    emoji:       str              # visual identifier
+    line_value:  Optional[float]  # None = unavailable
+    available:   bool             # True if a line exists
+
+    def display(self) -> str:
+        if self.available and self.line_value is not None:
+            return f"{self.line_value:.1f}"
+        return "Unavailable"
+
+
+# All providers the system is aware of, in display order.
+PROVIDER_ORDER = ["PrizePicks", "Underdog", "DraftKings", "FanDuel"]
+PROVIDER_EMOJI = {
+    "PrizePicks": "🟣",
+    "Underdog":   "🐶",
+    "DraftKings": "🎰",
+    "FanDuel":    "🦊",
+}
+
+# Sports that PrizePicks actively offers lines for
+PP_SUPPORTED_SPORTS: frozenset[str] = frozenset({
+    "MLB", "NBA", "NFL", "NHL", "WNBA",
+    "SOCCER", "TENNIS", "CS", "DOTA", "LOL",
+})
+
+# Stat-type normalisation (UD abbrevs → canonical names)
+_STAT_NORM: dict[str, str] = {
+    "pts": "points", "points": "points",
+    "reb": "rebounds", "rebounds": "rebounds",
+    "ast": "assists", "assists": "assists",
+    "3pm": "3-pointers made", "3-pointers made": "3-pointers made",
+    "blk": "blocks", "blocks": "blocks",
+    "stl": "steals", "steals": "steals",
+    "pts+reb+ast": "pts+reb+ast",
+    "fantasy points": "fantasy points",
+    "hits": "hits", "hr": "home runs", "home runs": "home runs",
+    "rbis": "rbis", "strikeouts": "strikeouts", "walks": "walks",
+    "total bases": "total bases",
+    "rushing yards": "rushing yards", "receiving yards": "receiving yards",
+    "receptions": "receptions", "passing yards": "passing yards",
+    "passing tds": "passing tds", "rush+rec yards": "rush+rec yards",
+    "shots": "shots on goal", "shots on goal": "shots on goal",
+    "goals+assists": "points",
+    "kills": "kills", "deaths": "deaths", "maps won": "maps won",
+    "games won": "games won", "sets won": "sets won",
+}
+_PP_CANONICAL_STATS: frozenset[str] = frozenset(_STAT_NORM.values())
+
+PROXY_CONFIDENCE_THRESHOLD = 80
+
+
+def normalize_stat(raw: str) -> str:
+    """Return the canonical stat name, falling back to lowercased raw."""
+    return _STAT_NORM.get(raw.lower().strip(), raw.lower().strip())
+
+
+# ── Core dataclass ────────────────────────────────────────────────────────────
+
+@dataclass
+class PlayerPropMarketComparison:
+    """
+    A multi-provider market view for one player × stat combination.
+
+    Built from Underdog's current-cycle data, optionally cross-referenced
+    against PropLineHistory PP rows and any sportsbook lines.
+
+    ``proxy_match_confidence`` (0–100) measures provider agreement and proxy
+    reliability — NOT betting confidence. Clearly labelled in every alert.
+    """
+    player_name:             str
+    sport:                   str
+    stat_type:               str              # canonical PP stat name
+    lines:                   dict[str, ProviderLine]  # keyed by provider name
+    best_provider:           Optional[str]    # provider with the best available line
+    best_line:               Optional[float]
+    market_consensus:        Optional[float]  # average of all available lines
+    previous_line:           Optional[float]  # previous Underdog line
+    movement:                Optional[float]  # best_line - previous_line
+    observed_at:             datetime
+    proxy_match_confidence:  int              # 0–100, labelled in alert
+    match_reason:            str              # human-readable scoring explanation
+
+
+# ── Confidence scoring (mirrors pp_reference logic, renamed Proxy Match) ──────
+
+def _compute_proxy_confidence(
+    player_name:       str,
+    sport:             str,
+    stat_type:         str,
+    fetched_at:        Optional[datetime],
+    pp_rows:           list,
+    now:               datetime,
+) -> tuple[int, str, str]:
+    """
+    Score the Underdog prop as a PP market proxy.
+
+    Returns (confidence, reason_string, pp_source).
+      pp_source = "prop_history_match" | "underdog_proxy"
+    """
+    _bad = frozenset({"unknown", "", "n/a", "tbd", "tba"})
+    player_clean  = (player_name or "").strip()
+    norm_stat     = normalize_stat(stat_type)
+    score         = 0
+    reasons: list[str] = []
+    pp_source     = "underdog_proxy"
+
+    # Dimension 1: player name (40 pts)
+    if player_clean.lower() not in _bad:
+        matching_pp = [
+            r for r in pp_rows
+            if getattr(r, "provider", "") == "PrizePicks"
+            and getattr(r, "player_name", "").lower() == player_clean.lower()
+            and getattr(r, "sport", "").upper() == sport.upper()
+            and normalize_stat(getattr(r, "stat_type", "")) == norm_stat
+        ]
+        if matching_pp:
+            score     += 40
+            pp_source  = "prop_history_match"
+            reasons.append(f"PP match: {player_clean}")
+        else:
+            score     += 40
+            reasons.append(f"player: {player_clean}")
+    else:
+        reasons.append("skip: unknown player")
+
+    # Dimension 2: normalised stat (30 pts)
+    if norm_stat in _PP_CANONICAL_STATS:
+        score += 30
+        reasons.append(f"stat: {norm_stat}")
+
+    # Dimension 3: PP-supported sport (20 pts)
+    if sport.upper() in PP_SUPPORTED_SPORTS:
+        score += 20
+        reasons.append(f"sport: {sport}")
+
+    # Dimension 4: data freshness (10 pts)
+    if fetched_at is not None:
+        if (now - fetched_at) <= timedelta(hours=6):
+            score += 10
+            reasons.append("fresh data")
+    else:
+        score += 10   # unknown age — benefit of the doubt
+        reasons.append("recency: unknown")
+
+    return min(score, 100), "; ".join(reasons), pp_source
+
+
+# ── Builder ───────────────────────────────────────────────────────────────────
+
+def build_player_prop_market_comparison(
+    player_name:    str,
+    sport:          str,
+    stat_type:      str,
+    ud_line:        float,
+    previous_line:  Optional[float] = None,
+    fetched_at:     Optional[datetime] = None,
+    pp_rows:        Optional[list] = None,      # PropLineHistory rows (provider=PrizePicks)
+    dk_line:        Optional[float] = None,     # DraftKings prop line if available
+    fd_line:        Optional[float] = None,     # FanDuel prop line if available
+    now:            Optional[datetime] = None,
+) -> Optional[PlayerPropMarketComparison]:
+    """
+    Build a PlayerPropMarketComparison from available provider data.
+
+    Returns None if proxy_match_confidence < PROXY_CONFIDENCE_THRESHOLD.
+    The caller's dedup set prevents re-alerting the same prop/line in one session.
+    """
+    if now is None:
+        now = datetime.utcnow()
+
+    norm_stat = normalize_stat(stat_type)
+
+    # ── Compute proxy confidence ───────────────────────────────────────────────
+    confidence, reason, pp_source = _compute_proxy_confidence(
+        player_name  = player_name,
+        sport        = sport,
+        stat_type    = norm_stat,
+        fetched_at   = fetched_at,
+        pp_rows      = pp_rows or [],
+        now          = now,
+    )
+
+    if confidence < PROXY_CONFIDENCE_THRESHOLD:
+        logger.debug(
+            "player_prop_market: below threshold — %s / %s / %s  conf=%d < %d",
+            player_name, stat_type, sport, confidence, PROXY_CONFIDENCE_THRESHOLD,
+        )
+        return None
+
+    # ── Provider lines ────────────────────────────────────────────────────────
+    # PrizePicks: look for matching PP row in PropLineHistory
+    pp_line_value: Optional[float] = None
+    if pp_source == "prop_history_match" and pp_rows:
+        matching = [
+            r for r in pp_rows
+            if getattr(r, "provider", "") == "PrizePicks"
+            and getattr(r, "player_name", "").lower() == player_name.strip().lower()
+            and getattr(r, "sport", "").upper() == sport.upper()
+            and normalize_stat(getattr(r, "stat_type", "")) == norm_stat
+        ]
+        if matching:
+            best = max(matching, key=lambda r: getattr(r, "fetched_at", None) or datetime.min)
+            pp_line_value = float(best.line_value)
+
+    lines: dict[str, ProviderLine] = {
+        "PrizePicks": ProviderLine(
+            provider   = "PrizePicks",
+            emoji      = PROVIDER_EMOJI["PrizePicks"],
+            line_value = pp_line_value,
+            available  = pp_line_value is not None,
+        ),
+        "Underdog": ProviderLine(
+            provider   = "Underdog",
+            emoji      = PROVIDER_EMOJI["Underdog"],
+            line_value = ud_line,
+            available  = True,
+        ),
+        "DraftKings": ProviderLine(
+            provider   = "DraftKings",
+            emoji      = PROVIDER_EMOJI["DraftKings"],
+            line_value = dk_line,
+            available  = dk_line is not None,
+        ),
+        "FanDuel": ProviderLine(
+            provider   = "FanDuel",
+            emoji      = PROVIDER_EMOJI["FanDuel"],
+            line_value = fd_line,
+            available  = fd_line is not None,
+        ),
+    }
+
+    # ── Compute market view ───────────────────────────────────────────────────
+    available_lines = [
+        (pname, pl.line_value)
+        for pname, pl in lines.items()
+        if pl.available and pl.line_value is not None
+    ]
+    best_provider: Optional[str] = None
+    best_line:     Optional[float] = None
+    if available_lines:
+        # Prefer PrizePicks > Underdog > DraftKings > FanDuel
+        for p in PROVIDER_ORDER:
+            match = [(n, v) for n, v in available_lines if n == p]
+            if match:
+                best_provider, best_line = match[0]
+                break
+
+    consensus: Optional[float] = None
+    if available_lines:
+        vals = [v for _, v in available_lines]
+        consensus = round(sum(vals) / len(vals) * 2) / 2   # round to nearest 0.5
+
+    movement: Optional[float] = None
+    if best_line is not None and previous_line is not None:
+        movement = round(best_line - previous_line, 1)
+
+    return PlayerPropMarketComparison(
+        player_name            = player_name.strip(),
+        sport                  = sport,
+        stat_type              = norm_stat or stat_type,
+        lines                  = lines,
+        best_provider          = best_provider,
+        best_line              = best_line,
+        market_consensus       = consensus,
+        previous_line          = previous_line,
+        movement               = movement,
+        observed_at            = now,
+        proxy_match_confidence = confidence,
+        match_reason           = reason,
+    )
+
+
+# ── Alert formatter ───────────────────────────────────────────────────────────
+
+def format_player_prop_market_alert(comp: PlayerPropMarketComparison) -> str:
+    """
+    Format a Player Prop Market Alert for Telegram (HTML).
+
+    Clearly shows all available providers, the best line, market consensus,
+    line movement, and proxy match confidence (labelled explicitly — not betting confidence).
+    """
+    sport_icons = {
+        "NFL": "🏈", "NBA": "🏀", "MLB": "⚾", "NHL": "🏒",
+        "UFC": "🥊", "WNBA": "🏀", "SOCCER": "⚽", "TENNIS": "🎾",
+    }
+    s_icon = sport_icons.get(comp.sport.upper(), "🎯")
+
+    div = "─" * 16
+
+    # ── Header ────────────────────────────────────────────────────────────────
+    parts: list[str] = [
+        "🟣 <b>PLAYER PROP MARKET ALERT</b>",
+        "",
+        f"{s_icon} <b>{comp.sport}</b>  ·  {comp.stat_type}",
+        f"👤 <b>{comp.player_name}</b>",
+        "",
+        div,
+        "",
+        "📊 <b>Available Lines</b>",
+        "",
+    ]
+
+    # ── Provider lines ────────────────────────────────────────────────────────
+    for pname in PROVIDER_ORDER:
+        pl = comp.lines.get(pname)
+        if pl is None:
+            parts.append(f"{PROVIDER_EMOJI.get(pname, '?')} {pname}:  Unavailable")
+        else:
+            parts.append(f"{pl.emoji} {pname}:  {pl.display()}")
+
+    # ── Market view ───────────────────────────────────────────────────────────
+    parts += [
+        "",
+        div,
+        "",
+        "📈 <b>Market View</b>",
+        "",
+    ]
+
+    if comp.best_provider and comp.best_line is not None:
+        parts.append(f"Best Available Line:  {comp.best_provider} ({comp.best_line:.1f})")
+    else:
+        parts.append("Best Available Line:  —")
+
+    if comp.market_consensus is not None:
+        parts.append(f"Market Consensus:     {comp.market_consensus:.1f}")
+    else:
+        parts.append("Market Consensus:     —")
+
+    parts.append(f"Observed:             {comp.observed_at.strftime('%H:%M UTC')}")
+
+    if comp.previous_line is not None:
+        parts.append(f"Previous Line:        {comp.previous_line:.1f}")
+    if comp.movement is not None:
+        sign = "+" if comp.movement > 0 else ""
+        arrow = "↑" if comp.movement > 0 else ("↓" if comp.movement < 0 else "→")
+        parts.append(f"Movement:             <code>{sign}{comp.movement:.1f} {arrow}</code>")
+
+    # ── Sources / confidence ──────────────────────────────────────────────────
+    active_sources = [
+        PROVIDER_EMOJI.get(p, p)
+        for p in PROVIDER_ORDER
+        if comp.lines.get(p) and comp.lines[p].available
+    ]
+    conf_bar = _conf_bar(comp.proxy_match_confidence)
+
+    parts += [
+        "",
+        div,
+        "",
+        f"📡 <b>Sources:</b>  {' '.join(active_sources)}",
+        f"🔬 <b>Proxy Match Confidence:</b>  {comp.proxy_match_confidence}/100  {conf_bar}",
+        f"<i>Confidence measures provider agreement/proxy reliability, not betting edge.</i>",
+    ]
+
+    return "\n".join(parts)
+
+
+def _conf_bar(confidence: int) -> str:
+    filled = max(0, min(10, round(confidence / 10)))
+    return f"<code>[{'█' * filled}{'░' * (10 - filled)}]</code>"
+
+
+# ── Batch cycle helper ────────────────────────────────────────────────────────
+
+async def run_player_prop_market_cycle(
+    *,
+    db:            Any,
+    bot:           Any,
+    chat_ids:      list,
+    scored_props:  list[dict],
+    alerted_set:   set,
+    now:           Optional[datetime] = None,
+    confidence_threshold: int = PROXY_CONFIDENCE_THRESHOLD,
+) -> int:
+    """
+    Run the Player Prop Market Engine over the current cycle's high-scoring props.
+
+    Only props with tier in ("S", "A") are considered. For each candidate:
+    1. Fetch PP PropLineHistory rows (one DB query for the batch).
+    2. Build a PlayerPropMarketComparison.
+    3. Broadcast a 🟣 PLAYER PROP MARKET ALERT if confidence >= threshold
+       and the prop has not already been alerted in this session.
+
+    Returns the number of alerts sent.
+    """
+    from alerts import broadcast_alert  # local to avoid circular
+
+    if now is None:
+        now = datetime.utcnow()
+
+    candidates = [p for p in scored_props if p.get("tier") in ("S", "A")]
+    if not candidates:
+        logger.debug("player_prop_market: no S/A tier props — skipping")
+        return 0
+
+    # One DB query for all PP history rows
+    try:
+        pp_rows = await db.get_latest_props_for_provider("PrizePicks", since_hours=24)
+    except Exception as exc:
+        logger.debug("player_prop_market: failed to fetch PP rows: %s", exc)
+        pp_rows = []
+
+    alerts_sent = 0
+    for p in candidates:
+        player    = p.get("player", "")
+        stat_type = p.get("stat_type", "")
+        sport     = p.get("sport", "")
+        line      = float(p.get("line") or 0.0)
+        prev_line = p.get("prev_line")   # may be None
+
+        dedup_key = (player, sport, stat_type, f"{line:.1f}")
+        if dedup_key in alerted_set:
+            logger.debug(
+                "player_prop_market: deduped — %s / %s / %s @ %.1f",
+                player, stat_type, sport, line,
+            )
+            continue
+
+        comp = build_player_prop_market_comparison(
+            player_name   = player,
+            sport         = sport,
+            stat_type     = stat_type,
+            ud_line       = line,
+            previous_line = prev_line,
+            fetched_at    = now,
+            pp_rows       = pp_rows,
+            now           = now,
+        )
+        if comp is None:
+            continue
+
+        try:
+            message = format_player_prop_market_alert(comp)
+            counts  = await broadcast_alert(bot, chat_ids, message)
+            if counts.get("sent", 0) > 0:
+                alerted_set.add(dedup_key)
+                alerts_sent += 1
+                logger.info(
+                    "player_prop_market alert sent: %s / %s / %s  "
+                    "conf=%d  best=%s(%.1f)",
+                    player, stat_type, sport,
+                    comp.proxy_match_confidence,
+                    comp.best_provider or "?",
+                    comp.best_line or 0.0,
+                )
+        except Exception as exc:
+            logger.warning(
+                "player_prop_market: failed to send alert for %s / %s: %s",
+                player, stat_type, exc,
+            )
+
+    return alerts_sent

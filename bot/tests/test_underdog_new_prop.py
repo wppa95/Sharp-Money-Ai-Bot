@@ -199,18 +199,53 @@ async def test_high_line_new_prop_not_immediately_alerted():
 
 @pytest.mark.asyncio
 async def test_known_prop_not_treated_as_new():
-    """A prop already in known_keys follows the normal line-change path, not new-prop."""
+    """A prop in known_keys WITH an active prev_record follows the line-change path, not new-prop."""
     snaps = [_snap("Aaron Judge", "Home Runs", 0.5)]
     known = {("Aaron Judge", "Home Runs")}
-    db = _make_db(known_keys=known, recent_dict={})
+
+    # Build a fake prev_record so prev_record is NOT None → not a re-entry
+    prev = MagicMock()
+    prev.line_value  = 0.5   # same line → no line change event
+    prev.alert_sent  = True
+    prev.score_tier  = "A"
+
+    db = _make_db(
+        known_keys  = known,
+        recent_dict = {("Aaron Judge", "Home Runs"): prev},
+    )
 
     delivery = await _run_job(snaps, db)
 
     # deliver_underdog may or may not be called (no line change) but if called,
-    # new_prop kwarg must NOT be True
+    # new_prop kwarg must NOT be True — this prop has an active record
     for c in delivery.deliver_underdog.call_args_list:
         _, kwargs = c
-        assert kwargs.get("new_prop") is not True
+        assert kwargs.get("new_prop") is not True, \
+            "Prop with active prev_record should not fire as new_prop"
+
+
+@pytest.mark.asyncio
+async def test_known_prop_reentry_treated_as_new_prop():
+    """A prop in known_keys but with NO recent non-removed record is a re-entry.
+
+    Re-entries fire as new_prop=True (bypasses timing filter) so the user
+    is notified the prop returned to the feed.
+    """
+    snaps = [_snap("Aaron Judge", "Home Runs", 0.5)]
+    known = {("Aaron Judge", "Home Runs")}
+
+    # recent_dict={} means get_latest_underdog_snapshot_per_prop() returned
+    # nothing for this prop — last snapshot was a removal.
+    db = _make_db(known_keys=known, recent_dict={}, prop_history=_fake_history(6))
+
+    delivery = await _run_job(snaps, db, hit_rates=_make_hit_rates())
+
+    # Re-entry should fire as new_prop (same treatment as a first appearance).
+    # deliver_underdog is called with new_prop=True.
+    if delivery.deliver_underdog.call_args_list:
+        _, kwargs = delivery.deliver_underdog.call_args
+        assert kwargs.get("new_prop") is True, \
+            "Re-entry (known key, no active prev_record) must fire as new_prop=True"
 
 
 @pytest.mark.asyncio

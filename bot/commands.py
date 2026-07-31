@@ -83,24 +83,31 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
     user_id = getattr(update.effective_user, 'id', None)
     logger.info("cmd_start: chat_id=%s user_id=%s", chat_id, user_id)
-    if not _check_allowed(update):
+    try:
+        if not _check_allowed(update):
+            await update.message.reply_text(
+                f"⛔ Unauthorized.\n\n"
+                f"<i>Your chat ID is <code>{chat_id}</code>. "
+                f"Add it to ALLOWED_USER_IDS to enable alerts.</i>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
         await update.message.reply_text(
-            f"⛔ Unauthorized.\n\n"
-            f"<i>Your chat ID is <code>{chat_id}</code>. "
-            f"Add it to ALLOWED_USER_IDS to enable alerts.</i>",
+            format_start_message(),
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+        )
+        # Remind authorised users of their chat ID for easy reference.
+        await update.message.reply_text(
+            f"ℹ️ Your chat ID: <code>{chat_id}</code>",
             parse_mode=ParseMode.HTML,
         )
-        return
-    await update.message.reply_text(
-        format_start_message(),
-        parse_mode=ParseMode.HTML,
-        disable_web_page_preview=True,
-    )
-    # Remind authorised users of their chat ID for easy reference.
-    await update.message.reply_text(
-        f"ℹ️ Your chat ID: <code>{chat_id}</code>",
-        parse_mode=ParseMode.HTML,
-    )
+    except Exception as exc:
+        logger.exception("cmd_start: error: %s", exc)
+        try:
+            await update.message.reply_text("⚠️ /start failed. Check bot logs.")
+        except Exception:
+            pass
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1834,9 +1841,27 @@ async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         "<i>Secrets are never shown. Restart the bot after changing env vars.</i>",
     ]
 
-    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+    try:
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+    except Exception as exc:
+        logger.exception("cmd_config: reply_text failed: %s", exc)
+        await update.message.reply_text("⚠️ /config failed to send. Check bot logs.")
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Log errors raised by handlers."""
-    logger.error("Update %s caused error: %s", update, context.error, exc_info=context.error)
+    """Log errors raised by handlers and notify the user if possible."""
+    logger.error(
+        "Update %s caused error: %s",
+        update, context.error,
+        exc_info=context.error,
+    )
+    # Try to reply so the user sees a visible failure instead of silence.
+    from telegram import Update as _Update
+    if isinstance(update, _Update) and update.message:
+        try:
+            await update.message.reply_text(
+                "⚠️ Command failed — please try again. "
+                "If the issue persists, the bot may need to restart.",
+            )
+        except Exception:
+            pass
