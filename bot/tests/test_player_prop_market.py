@@ -400,18 +400,21 @@ class TestFormatAlert:
         bare_conf_lines = [l for l in lines if "Confidence:" in l and "Proxy Match" not in l]
         assert bare_conf_lines == [], f"Found bare 'Confidence:' line: {bare_conf_lines}"
 
-    def test_shows_all_four_providers(self):
+    def test_shows_available_providers_only(self):
+        """Alert shows only providers with real data; unavailable ones are omitted."""
         comp = _make_comp()
         msg = format_player_prop_market_alert(comp)
-        assert "PrizePicks" in msg
-        assert "Underdog"   in msg
-        assert "DraftKings" in msg
-        assert "FanDuel"    in msg
+        # Underdog is always populated by _make_comp
+        assert "Underdog" in msg
+        # DK/FD are unavailable in _make_comp → must NOT appear
+        assert "DraftKings" not in msg
+        assert "FanDuel"    not in msg
 
-    def test_unavailable_providers_shown(self):
+    def test_unavailable_providers_not_shown(self):
+        """Providers with no data must not emit an 'Unavailable' row."""
         comp = _make_comp()
         msg = format_player_prop_market_alert(comp)
-        assert "Unavailable" in msg
+        assert "Unavailable" not in msg
 
     def test_best_available_line_shown(self):
         comp = _make_comp(best_provider="Underdog", best_line=5.5)
@@ -714,9 +717,12 @@ class TestFrameworkMigration:
         msg  = format_player_prop_market_alert(comp)
         assert "PrizePicks Reference Alert" not in msg
 
-    def test_new_alert_mentions_multi_provider_sources(self):
-        """New alert surfaces all four provider slots."""
+    def test_new_alert_shows_available_providers_only(self):
+        """Alert surfaces only providers that have real data; unavailable ones are omitted."""
         comp = _make_comp()
         msg  = format_player_prop_market_alert(comp)
-        for pname in PROVIDER_ORDER:
-            assert pname in msg
+        # Underdog is always in _make_comp fixtures
+        assert "Underdog" in msg
+        # DK/FD default to unavailable in fixtures → must not appear
+        assert "DraftKings" not in msg
+        assert "FanDuel"    not in msg

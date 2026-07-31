@@ -380,13 +380,17 @@ def format_player_prop_market_alert(comp: PlayerPropMarketComparison) -> str:
         "",
     ]
 
-    # ── Provider lines ────────────────────────────────────────────────────────
-    for pname in PROVIDER_ORDER:
-        pl = comp.lines.get(pname)
-        if pl is None:
-            parts.append(f"{PROVIDER_EMOJI.get(pname, '?')} {pname}:  Unavailable")
-        else:
+    # ── Provider lines — only show providers with real data ───────────────────
+    avail_lines = [
+        (pname, comp.lines[pname])
+        for pname in PROVIDER_ORDER
+        if pname in comp.lines and comp.lines[pname].available
+    ]
+    if avail_lines:
+        for pname, pl in avail_lines:
             parts.append(f"{pl.emoji} {pname}:  {pl.display()}")
+    else:
+        parts.append("No provider data available.")
 
     # ── Market view ───────────────────────────────────────────────────────────
     parts += [

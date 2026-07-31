@@ -352,19 +352,23 @@ def _format_available_lines_block(
     fd_line: Optional[float] = None,
 ) -> str:
     """
-    Render a 📊 Available Lines block showing all 4 providers.
-    Shows "Unavailable" for providers with no current data.
+    Render a 📊 Available Lines block showing only providers with real data.
+    Providers with no current data are omitted entirely.
     """
-    def _fmt(val: Optional[float]) -> str:
-        return f"<code>{val:.1f}</code>" if val is not None else "Unavailable"
+    lines = ["\n\n📊 <b>Available Line</b>" if (
+        sum(v is not None for v in [pp_line, ud_line, dk_line, fd_line]) == 1
+    ) else "\n\n📊 <b>Available Lines</b>"]
 
-    return (
-        f"\n\n📊 <b>Available Lines</b>"
-        f"\n🟣 PrizePicks:  {_fmt(pp_line)}"
-        f"\n🐶 Underdog:    {_fmt(ud_line)}"
-        f"\n🎰 DraftKings:  {_fmt(dk_line)}"
-        f"\n🦊 FanDuel:     {_fmt(fd_line)}"
-    )
+    if pp_line is not None:
+        lines.append(f"\n🟣 PrizePicks:  <code>{pp_line:.1f}</code>")
+    if ud_line is not None:
+        lines.append(f"\n🐶 Underdog:    <code>{ud_line:.1f}</code>")
+    if dk_line is not None:
+        lines.append(f"\n🎰 DraftKings:  <code>{dk_line:.1f}</code>")
+    if fd_line is not None:
+        lines.append(f"\n🦊 FanDuel:     <code>{fd_line:.1f}</code>")
+
+    return "".join(lines)
 
 
 def format_underdog_change_alert(

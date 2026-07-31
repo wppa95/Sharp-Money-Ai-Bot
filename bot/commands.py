@@ -866,32 +866,20 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"🟣 <b>Player Prop Picks</b>\n\n"
             f"No qualifying player prop opportunities detected{hint}.\n\n"
             f"<i>Underdog props auto-score every 5 min.\n"
-            f"Use /pp_import to add PrizePicks lines.\n"
-            f"DraftKings/FanDuel lines load automatically each cycle.</i>",
+            f"Use /pp_import to add PrizePicks lines.</i>",
             parse_mode=ParseMode.HTML,
         )
         return
 
-    # ── 2. Cross-provider data (bulk fetch) ───────────────────────────────────
+    # ── 2. Cross-provider data (PrizePicks only — DK/FD removed from workflow) ─
     try:
         pp_rows = await _db.get_latest_props_for_provider("PrizePicks", since_hours=24)
     except Exception:
         pp_rows = []
 
-    try:
-        dk_fd_raw   = await _db.get_recent_player_prop_lines(
-            ["DraftKings", "FanDuel"], since_hours=4
-        )
-        dk_fd_index = _build_dk_fd_index(dk_fd_raw)
-    except Exception:
-        dk_fd_index = {}
-
     # ── 3. Build PlayerPropMarketComparison for each prop ────────────────────
     picks: list[tuple] = []   # [(PropLineHistory, PlayerPropMarketComparison|None)]
     for plh in ud_props:
-        pkey    = plh.player_name.lower()
-        dk_line = dk_fd_index.get((pkey, "DraftKings"))
-        fd_line = dk_fd_index.get((pkey, "FanDuel"))
         comp = build_player_prop_market_comparison(
             player_name    = plh.player_name,
             sport          = plh.sport,
@@ -900,8 +888,6 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             previous_line  = plh.prev_line,
             fetched_at     = plh.fetched_at,
             pp_rows        = pp_rows,
-            dk_line        = dk_line,
-            fd_line        = fd_line,
             now            = now,
             min_confidence = 0,   # show all props; confidence is display info, not a gate
         )
@@ -952,36 +938,29 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         tier_icon = _TIER_EMOJI.get(tier, "⚪")
         stars     = _stars_from_conf(float(conf))
 
-        # Provider lines from comparison object
+        # Provider lines — only show providers with real data
         pp_pl = comp.lines.get("PrizePicks") if comp else None
         ud_pl = comp.lines.get("Underdog")   if comp else None
-        dk_pl = comp.lines.get("DraftKings") if comp else None
-        fd_pl = comp.lines.get("FanDuel")    if comp else None
 
         pp_v = pp_pl.line_value if (pp_pl and pp_pl.available) else None
         ud_v = ud_pl.line_value if (ud_pl and ud_pl.available) else plh.line_value
-        dk_v = dk_pl.line_value if (dk_pl and dk_pl.available) else None
-        fd_v = fd_pl.line_value if (fd_pl and fd_pl.available) else None
 
-        lines_row = (
-            f"🐶 {_lv(ud_v)}"
-            f"  🟣 {_lv(pp_v)}"
-            f"  🎰 {_lv(dk_v)}"
-            f"  🦊 {_lv(fd_v)}"
-        )
+        line_parts = [f"🐶 {_lv(ud_v)}"]
+        if pp_v is not None:
+            line_parts.append(f"🟣 {_lv(pp_v)}")
+        lines_row = "  ".join(line_parts)
 
-        # Best available
+        # Best available — only when multiple providers agree/disagree
         best_row = ""
-        if comp and comp.best_over_app and comp.best_under_app:
-            oe = _PROV_EMOJI.get(comp.best_over_app,  "?")
-            ue = _PROV_EMOJI.get(comp.best_under_app, "?")
-            best_row = (
-                f"  ⬆ OVER → {oe} {_lv(comp.best_over_line)}"
-                f"  ·  ⬇ UNDER → {ue} {_lv(comp.best_under_line)}"
-            )
-        elif comp and comp.best_line is not None:
-            be = _PROV_EMOJI.get(comp.best_provider or "", "?")
-            best_row = f"  Best: {be} {_lv(comp.best_line)}"
+        if comp and pp_v is not None and ud_v is not None:
+            # Two providers: show OVER/UNDER-friendly split
+            if comp.best_over_app and comp.best_under_app:
+                oe = _PROV_EMOJI.get(comp.best_over_app,  "?")
+                ue = _PROV_EMOJI.get(comp.best_under_app, "?")
+                best_row = (
+                    f"  ⬆ OVER → {oe} {_lv(comp.best_over_line)}"
+                    f"  ·  ⬇ UNDER → {ue} {_lv(comp.best_under_line)}"
+                )
 
         # Movement + confidence + timing
         detail: list[str] = []
@@ -1137,7 +1116,7 @@ def _render_slip_section(
             except Exception:
                 pass
 
-        # Provider lines summary for PropPickAdapter legs
+        # Provider lines summary for PropPickAdapter legs — available only
         provider_row = ""
         if has_adapters:
             comp = getattr(r, "comp", None)
@@ -1145,17 +1124,11 @@ def _render_slip_section(
                 def _lv2(v: Optional[float]) -> str:
                     return f"<code>{v:.1f}</code>" if v is not None else "—"
                 pp_pl = comp.lines.get("PrizePicks")
-                dk_pl = comp.lines.get("DraftKings")
-                fd_pl = comp.lines.get("FanDuel")
                 pp_v  = pp_pl.line_value if (pp_pl and pp_pl.available) else None
-                dk_v  = dk_pl.line_value if (dk_pl and dk_pl.available) else None
-                fd_v  = fd_pl.line_value if (fd_pl and fd_pl.available) else None
-                provider_row = (
-                    f"\n    🐶 {_lv2(best_line)}"
-                    f"  🟣 {_lv2(pp_v)}"
-                    f"  🎰 {_lv2(dk_v)}"
-                    f"  🦊 {_lv2(fd_v)}"
-                )
+                row_parts = [f"🐶 {_lv2(best_line)}"]
+                if pp_v is not None:
+                    row_parts.append(f"🟣 {_lv2(pp_v)}")
+                provider_row = "\n    " + "  ".join(row_parts)
 
         section.append(
             f"  <b>Leg {i}</b>  {tier_icon} {r.tier or '—'}  {stars_str}\n"
@@ -1247,20 +1220,9 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception:
         pp_rows = []
 
-    try:
-        dk_fd_raw   = await _db.get_recent_player_prop_lines(
-            ["DraftKings", "FanDuel"], since_hours=4
-        )
-        dk_fd_index = _build_dk_fd_index(dk_fd_raw)
-    except Exception:
-        dk_fd_index = {}
-
-    # ── 3. Build PropPickAdapter candidates ───────────────────────────────────
+    # ── 3. Build PropPickAdapter candidates (Underdog + PrizePicks only) ─────
     _candidates: list[PropPickAdapter] = []
     for plh in ud_props:
-        pkey    = plh.player_name.lower()
-        dk_line = dk_fd_index.get((pkey, "DraftKings"))
-        fd_line = dk_fd_index.get((pkey, "FanDuel"))
         comp = build_player_prop_market_comparison(
             player_name    = plh.player_name,
             sport          = plh.sport,
@@ -1269,8 +1231,6 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             previous_line  = plh.prev_line,
             fetched_at     = plh.fetched_at,
             pp_rows        = pp_rows,
-            dk_line        = dk_line,
-            fd_line        = fd_line,
             now            = now,
             min_confidence = 0,
         )

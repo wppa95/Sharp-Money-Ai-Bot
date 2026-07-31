@@ -1,0 +1,560 @@
+IMPORTANT IMPLEMENTATION RULE
+
+Do NOT modify, remove, rewrite, or refactor anything outside of the requested changes.
+
+The current bot has working systems that must remain intact.
+
+Only make the exact changes listed in this specification.
+
+Do NOT:
+
+- remove working features
+- change unrelated modules
+- rewrite stable logic
+- change existing provider integrations unless specifically requested
+- alter scoring systems unless specifically requested
+- remove existing data collection
+- change scheduler behavior unless specifically requested
+
+If a required change creates a conflict with existing code:
+
+1. Explain the conflict
+2. Make only the minimum necessary adjustment
+3. Preserve all existing working functionality
+
+After completing the requested changes:
+
+Review the system for any additional fixes needed because of the updates.
+
+If a small supporting change is required for the new framework to work correctly, make that change.
+
+Do not make unrelated improvements.
+
+Priority:
+
+1. Preserve working bot functionality
+2. Apply only requested framework changes
+3. Verify everything still works
+4. Run tests
+5. Restart cleanly
+
+
+==================================================
+
+FINAL SHARP MONEY BOT — PLAYER PROP MARKET FRAMEWORK
+
+Goal:
+
+Turn Sharp Money Bot into a universal all-day player prop opportunity scanner.
+
+The bot should find the best available player props automatically across all active sports and markets.
+
+==================================================
+
+1. UNIVERSAL PLAYER PROP SCANNING
+
+Do NOT limit the bot to specific leagues.
+
+The bot should scan every active sport available from supported providers.
+
+Examples:
+
+- MLB
+- WNBA
+- Soccer
+- Tennis
+- Esports
+- Any other supported markets
+
+Do not prioritize sports based on popularity.
+
+Do not force specific leagues into picks.
+
+The best opportunity should rank highest regardless of sport.
+
+Ranking factors:
+
+- confidence
+- statistical edge
+- consistency
+- market quality
+- available data
+- movement
+- timing
+- matchup information
+
+==================================================
+
+2. SCAN ALL ACTIVE PLAYER PROPS
+
+Do NOT hardcode prop categories.
+
+The bot should scan every available player market.
+
+Examples:
+
+- Hits
+- Hits + Runs + RBIs
+- Strikeouts
+- Walks
+- Total Bases
+- Home Runs
+- RBIs
+- Points
+- Rebounds
+- Assists
+- Fantasy Points
+- Shots
+- Shots on Target
+- Passes
+- Goals
+- Aces
+- Games
+- Sets
+- Kills
+- Damage
+- Any other available player prop
+
+The model decides what has value.
+
+Do not remove a market because it was not listed.
+
+==================================================
+
+3. CURRENT PROVIDER SYSTEM
+
+ACTIVE PROVIDER:
+
+🐶 Underdog = PRIMARY SOURCE
+
+Underdog is currently the main market engine.
+
+Use Underdog for:
+
+✅ prop discovery  
+✅ available lines  
+✅ line movement  
+✅ market tracking  
+✅ alerts  
+✅ /picks  
+✅ /slip  
+
+==================================================
+
+4. PRIZEPICKS HANDLING
+
+🟣 PrizePicks remains the user's main betting platform.
+
+Current issue:
+
+PrizePicks API is unavailable.
+
+Until PP API works:
+
+- do not require PP data
+- do not block picks
+- do not wait for PP lines
+- use available market data to find opportunities
+
+When PP API becomes available:
+
+Add PP as an additional provider.
+
+==================================================
+
+5. REMOVE DRAFTKINGS AND FANDUEL FOR NOW
+
+Do NOT use DraftKings or FanDuel in the active workflow.
+
+Current issue:
+
+- DK data is not reliably loading
+- FD data is not reliably loading
+
+Remove them from:
+
+❌ alerts  
+❌ /picks  
+❌ /slip  
+❌ provider comparisons  
+❌ best line calculations  
+
+Do NOT display unavailable providers.
+
+Only display providers with real data.
+
+Example:
+
+📊 Available Line
+
+🐶 Underdog: 1.5
+
+==================================================
+
+6. CONTINUOUS ALL-DAY SCANNING
+
+The scanner should run all day.
+
+Do NOT make it morning-only.
+
+Do NOT wait until 3 hours before games.
+
+Markets open at different times.
+
+Example:
+
+Game:
+Tomorrow 7 PM
+
+Market opens:
+Today 10 PM
+
+Immediately:
+
+- detect prop
+- save opening line
+- save timestamp
+- track movement
+- monitor changes
+
+Continue monitoring until:
+
+- game starts
+- market closes
+- prop removed
+
+==================================================
+
+7. MARKET TRACKING VS PICKS
+
+Separate tracking from betting decisions.
+
+Track:
+
+- opening line
+- previous line
+- current line
+- movement
+- timestamps
+- line history
+
+Historical lines are used for:
+
+✅ movement analysis  
+✅ market pressure  
+✅ trend detection  
+✅ understanding market behavior  
+
+Historical lines are NOT used for:
+
+❌ fake edges  
+❌ current betting lines  
+❌ automatic picks  
+
+Picks use current available lines only.
+
+==================================================
+
+8. PLAYER DATA ANALYSIS
+
+Use available player performance data sources.
+
+Priority:
+
+1. SofaScore (when available)
+2. Existing stat APIs
+3. Other reliable player data sources
+
+Use SofaScore for:
+
+- Last 5
+- Last 10
+- Last 20
+- Last 30
+- Season stats
+- H2H history
+- Recent form
+- Matchup context
+
+If SofaScore data is unavailable:
+
+- continue using other sources
+- do not block picks
+
+Analysis priority:
+
+1. Current available line
+2. Recent performance
+3. Larger sample size
+4. Consistency
+5. Matchup data
+6. H2H
+
+H2H is supporting information only.
+
+==================================================
+
+9. ALERT SYSTEM
+
+Separate:
+
+MARKET ALERTS
+
+and
+
+BETTING OPPORTUNITY ALERTS
+
+Market alerts:
+
+Used for:
+
+- new prop detected
+- line movement
+- provider changes
+- removals
+
+Betting opportunity alerts:
+
+Only send when:
+
+- confidence threshold passes
+- historical support exists
+- market quality is good
+- opportunity is still available
+
+Movement alone is NOT a bet.
+
+==================================================
+
+10. /PICKS FRAMEWORK
+
+/picks must use the new player prop market framework.
+
+Remove old PrizePicks-only logic.
+
+ /picks should:
+
+- scan all active sports
+- scan all active props
+- rank best opportunities
+- show Underdog line
+- show PrizePicks when available
+- show confidence
+- show supporting data
+
+Rank by:
+
+- opportunity quality
+- confidence
+- edge
+- consistency
+- market quality
+
+NOT:
+
+- popularity
+- league preference
+- preset prop restrictions
+
+==================================================
+
+11. /SLIP FRAMEWORK
+
+/slip must use the same player prop pool as /picks.
+
+Use:
+
+- confidence
+- tier
+- market quality
+- consistency
+- correlation removal
+
+Do not use old PPEdge-only logic.
+
+==================================================
+
+12. REMOVE OLD PRIZEPICKS-ONLY LOGIC
+
+Completely remove old PrizePicks-only framework paths.
+
+The previous logic should no longer be used for:
+
+❌ /picks  
+❌ /slip  
+❌ alerts  
+❌ ranking  
+❌ scoring  
+❌ recommendations  
+❌ edge calculations  
+
+The old system depended on PrizePicks API edge detection.
+
+That is no longer the active framework.
+
+Replace with the new player prop market system.
+
+New logic uses:
+
+- Underdog as primary market source
+- PrizePicks when available
+- current available lines
+- line movement
+- historical performance
+- confidence scoring
+- market quality
+- consistency
+- matchup data
+- SofaScore/stat data when available
+
+Remove old references such as:
+
+- PPEdgeRecord as required source
+- PrizePicks-only pick generation
+- PrizePicks-only slip building
+- old "No edges detected" logic
+- old PP edge commands
+
+The new framework is the only active decision engine.
+
+==================================================
+
+13. PICK SPEED
+
+Speed matters.
+
+Lines move and props disappear.
+
+Workflow:
+
+Market detected
+
+↓
+
+Data collected
+
+↓
+
+Historical analysis
+
+↓
+
+Confidence scoring
+
+↓
+
+Opportunity ranking
+
+↓
+
+Alert
+
+↓
+
+User decision
+
+Do not delay alerts waiting for unavailable providers.
+
+==================================================
+
+14. PICK PERFORMANCE MEMORY & MODEL IMPROVEMENT
+
+The bot should track historical pick results and learn from performance.
+
+Every generated player prop opportunity should be stored.
+
+Track:
+
+- player
+- sport
+- market type
+- line
+- provider
+- recommendation (Over/Under)
+- confidence score
+- tier
+- market quality
+- supporting stats used
+- timestamp
+- game result
+- hit/miss result
+
+Use this data for:
+
+✅ future ranking improvements  
+✅ confidence calibration  
+✅ tier accuracy  
+✅ identifying strong markets  
+✅ identifying weak markets  
+✅ improving pick selection  
+
+The bot should remember:
+
+- which prop types perform best
+- which sports perform best
+- which confidence ranges are accurate
+- which markets create false positives
+- which player profiles are reliable
+
+Do NOT use memory to force picks.
+
+Use memory to improve:
+
+- ranking
+- confidence scoring
+- filtering
+- opportunity quality
+
+Example:
+
+If 80 confidence picks historically hit 55%:
+
+Adjust confidence calibration.
+
+If a market performs poorly:
+
+Reduce priority/confidence.
+
+If a market performs well:
+
+Increase ranking weight.
+
+The goal is continuous improvement from actual results.
+
+==================================================
+
+15. FINAL VERIFICATION
+
+Before completion confirm:
+
+✅ Universal sport scanning  
+✅ All active prop markets scanned  
+✅ No hardcoded prop restrictions  
+✅ Underdog primary system  
+✅ PrizePicks supported when available  
+✅ DK/FD removed from active workflow  
+✅ Missing providers removed from output  
+✅ Continuous all-day scanning  
+✅ Markets tracked from opening  
+✅ Historical lines stored correctly  
+✅ SofaScore integration when available  
+✅ L5/L10/L20/L30/Season/H2H analysis  
+✅ /picks migrated  
+✅ /slip migrated  
+✅ Old PrizePicks-only logic removed  
+✅ Old framework paths disabled  
+✅ Pick results tracked  
+✅ Hit/miss memory improves future ranking and confidence  
+✅ Tests passing  
+✅ Clean restart  
+
+After this:
+
+Stop building framework pieces.
+
+Move into:
+
+- live testing
+- making picks
+- grading results
+- improving accuracy

@@ -163,14 +163,17 @@ def format_pregame_watch_alert(
     _pe = {"PrizePicks": "🟣", "Underdog": "🐶", "DraftKings": "🎰", "FanDuel": "🦊"}
 
     if comp is not None:
-        # ── Full 4-provider view ─────────────────────────────────────────────
-        parts += ["", "<b>📊 Available Lines</b>", ""]
-        for p in ["PrizePicks", "Underdog", "DraftKings", "FanDuel"]:
-            pl = comp.lines.get(p)
-            if pl and pl.available and pl.line_value is not None:
-                parts.append(f"  {_pe[p]} {p}:  <code>{pl.line_value:.1f}</code>")
-            else:
-                parts.append(f"  {_pe[p]} {p}:  Unavailable")
+        # ── Available providers only — skip those with no real data ──────────
+        avail = [
+            (p, comp.lines[p])
+            for p in ["PrizePicks", "Underdog", "DraftKings", "FanDuel"]
+            if p in comp.lines and comp.lines[p].available and comp.lines[p].line_value is not None
+        ]
+        n_avail = len(avail)
+        header = "<b>📊 Available Line</b>" if n_avail == 1 else "<b>📊 Available Lines</b>"
+        parts += ["", header, ""]
+        for p, pl in avail:
+            parts.append(f"  {_pe[p]} {p}:  <code>{pl.line_value:.1f}</code>")
 
         # Movement
         if comp.movement is not None and abs(comp.movement) >= 0.01:
@@ -218,29 +221,22 @@ def format_pregame_watch_alert(
             parts.append(f"<b>Reason:</b>           {comp.best_reason}")
 
     else:
-        # ── Fallback: opening vs current lines ───────────────────────────────
-        parts += ["", "<b>📊 Opening Lines</b>", ""]
-        for p in ["PrizePicks", "Underdog", "DraftKings", "FanDuel"]:
-            if p in entry.opening_lines:
-                wl = entry.opening_lines[p]
+        # ── Fallback: opening vs current lines (only show providers with data) ─
+        if entry.opening_lines:
+            parts += ["", "<b>📊 Opening Lines</b>", ""]
+            for p, wl in entry.opening_lines.items():
                 parts.append(f"  {_pe.get(p, '?')} {p}:  {wl.line_value:.1f}")
-            else:
-                parts.append(f"  {_pe.get(p, '?')} {p}:  Unavailable")
 
         if entry.current_lines:
             parts += ["", "<b>📈 Current Lines</b>", ""]
-            for p in ["PrizePicks", "Underdog", "DraftKings", "FanDuel"]:
-                if p in entry.current_lines:
-                    wl  = entry.current_lines[p]
-                    mv  = entry.movement.get(p)
-                    mv_str = ""
-                    if mv is not None and abs(mv) >= 0.01:
-                        sign  = "+" if mv > 0 else ""
-                        arrow = "↑" if mv > 0 else "↓"
-                        mv_str = f"  <code>{sign}{mv:.1f} {arrow}</code>"
-                    parts.append(f"  {_pe.get(p, '?')} {p}:  {wl.line_value:.1f}{mv_str}")
-                elif p in entry.opening_lines:
-                    parts.append(f"  {_pe.get(p, '?')} {p}:  Unavailable now")
+            for p, wl in entry.current_lines.items():
+                mv     = entry.movement.get(p)
+                mv_str = ""
+                if mv is not None and abs(mv) >= 0.01:
+                    sign  = "+" if mv > 0 else ""
+                    arrow = "↑" if mv > 0 else "↓"
+                    mv_str = f"  <code>{sign}{mv:.1f} {arrow}</code>"
+                parts.append(f"  {_pe.get(p, '?')} {p}:  {wl.line_value:.1f}{mv_str}")
 
         if entry.has_movement:
             parts += [
@@ -372,15 +368,13 @@ class PregameWatchEngine:
             return 0
 
         # Bulk fetch cross-provider data once for all targets
+        # DK/FD removed from active workflow — Underdog + PrizePicks only
         try:
             from engine.player_prop_market import build_player_prop_market_comparison
             pp_rows = await db.get_latest_props_for_provider("PrizePicks", since_hours=24)
-            dk_fd_raw = await db.get_recent_player_prop_lines(["DraftKings", "FanDuel"], since_hours=4)
-            dk_fd_index = _build_dk_fd_index(dk_fd_raw)
         except Exception as exc:
             logger.warning("pregame_watch.pregame_scan: cross-provider fetch failed: %s", exc)
             pp_rows = []
-            dk_fd_index = {}
 
         # Refresh current Underdog lines
         try:
@@ -429,25 +423,20 @@ class PregameWatchEngine:
             if ud_line_val is None:
                 continue
 
-            # Build 4-provider market comparison
-            pkey    = player.lower()
-            dk_line = dk_fd_index.get((pkey, "DraftKings"))
-            fd_line = dk_fd_index.get((pkey, "FanDuel"))
+            # Build market comparison — Underdog + PrizePicks only
             prev_line = (
                 entry.opening_lines["Underdog"].line_value
                 if "Underdog" in entry.opening_lines else None
             )
 
             comp = build_player_prop_market_comparison(
-                player_name   = player,
-                sport         = entry.sport,
-                stat_type     = stat,
-                ud_line       = ud_line_val,
-                previous_line = prev_line,
-                pp_rows       = pp_rows,
-                dk_line       = dk_line,
-                fd_line       = fd_line,
-                now           = now,
+                player_name    = player,
+                sport          = entry.sport,
+                stat_type      = stat,
+                ud_line        = ud_line_val,
+                previous_line  = prev_line,
+                pp_rows        = pp_rows,
+                now            = now,
                 min_confidence = 60,   # quality gate for pregame alerts
             )
 

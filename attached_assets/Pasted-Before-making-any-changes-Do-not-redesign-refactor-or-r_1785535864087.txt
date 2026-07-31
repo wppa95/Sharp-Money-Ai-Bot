@@ -1,0 +1,194 @@
+Before making any changes:
+
+Do not redesign, refactor, or rewrite the bot.
+Do not change any working logic unless it is absolutely necessary to complete the items below.
+
+This is NOT a new feature request.
+This is a framework verification, filtering, and cleanup pass only.
+
+If a working component already matches the intended behavior, leave it alone.
+
+⸻
+
+Final Framework Verification & Cleanup
+
+1. Verify the completed framework
+
+Verify that every item from the previous implementation is actually working as intended.
+
+If something is incomplete, finish only that specific part.
+
+Do not redesign anything.
+
+⸻
+
+2. Remove remaining alert noise
+
+Keep alerts focused on meaningful events.
+
+PLAYER PROP MARKET ALERTS should only trigger when there is a meaningful reason, such as:
+
+* first appearance of a qualifying prop
+* meaningful line movement
+* significant confidence change
+* strong market-quality threshold
+* another actionable event
+
+Avoid sending multiple alerts that contain no useful change.
+
+⸻
+
+3. Removal Alerts
+
+Keep the current removal alert format.
+
+Only improve it by adding:
+
+* Game / matchup
+* Optional note explaining the prop was removed from the market
+
+Do not add unnecessary statistics or betting recommendations.
+
+⸻
+
+4. Player Prop Market Alerts
+
+Keep the current layout.
+
+Only add:
+
+* Game / matchup
+* Scheduled game start time
+* Better emphasis on actual line movement when movement exists.
+
+Example:
+
+Previous: 1.5
+Current: 0.5
+Movement: -1.0 ↓
+
+Do not otherwise redesign the alert.
+
+⸻
+
+5. Historical line tracking
+
+Continue tracking opening line, previous line, current line, and movement history from the time a market first appears.
+
+This history is for learning and analysis.
+
+Do not use previous-day lines to generate betting recommendations for today’s props.
+
+⸻
+
+6. Providers
+
+Keep Underdog as the primary provider until the PrizePicks API is available again.
+
+Continue supporting PrizePicks whenever its API returns.
+
+Do not display DraftKings or FanDuel in user-facing output until reliable live data exists.
+
+Background support for future use is fine.
+
+⸻
+
+7. Sports
+
+Scan every active sport that the bot supports.
+
+Do not prioritize NFL or NBA while they are out of season.
+
+Do not artificially limit sports.
+
+If a sport is active and supported, scan it.
+
+⸻
+
+8. Markets
+
+Scan every available player prop market.
+
+Do not restrict scanning to specific stat categories.
+
+⸻
+
+9. Data
+
+Continue using the existing statistics pipeline.
+
+If technically feasible without violating site restrictions or destabilizing the bot, use SofaScore as an additional statistics source for:
+
+* H2H
+* L5
+* L10
+* L20
+* L30
+* Season
+
+Only supplement existing data.
+
+Do not replace working providers.
+
+⸻
+
+10. Learning
+
+Confirm that the bot stores:
+
+* picks
+* results
+* hits
+* misses
+* confidence at time of pick
+* final outcome
+
+Use this history to improve future confidence and ranking.
+
+Do not reset historical learning.
+
+⸻
+
+11. Final Verification
+
+Run the full test suite.
+
+Restart the bot.
+
+Provide a verification report confirming:
+
+✅ Framework active
+
+✅ Old PrizePicks-only logic removed
+
+✅ Underdog primary
+
+✅ PrizePicks supported when available
+
+✅ DK/FD hidden from user-facing output
+
+✅ Continuous all-day scanning
+
+✅ Tracks opening, previous, and current lines
+
+✅ Historical line memory working
+
+✅ /picks uses new framework
+
+✅ /slip uses same framework
+
+✅ All active sports scanned
+
+✅ All player prop markets scanned
+
+✅ Learning system tracking hits/misses
+
+✅ Scheduler healthy
+
+✅ Tests passing
+
+✅ Clean restart
+
+If anything is still incomplete, list it explicitly before making any additional code changes.
+
+The goal of this session is to finish and stabilize the current framework—not to redesign or expand it.
