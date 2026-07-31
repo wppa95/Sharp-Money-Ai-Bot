@@ -683,6 +683,14 @@ async def underdog_job(context) -> None:
                     "stars_d":   getattr(score, "stars_display", "?????"),
                     "rejection": _np_rej,
                     "path":      "new",
+                    # ── component breakdown ──────────────────────────────
+                    "vel":       score.move_velocity,
+                    "act":       score.historical_activity,
+                    "avg":       score.avg_vs_line,
+                    "con":       score.consistency,
+                    "sta":       score.stability,
+                    "n":         score.n_history,
+                    "line":      score.current_line,
                 })
 
         else:
@@ -809,6 +817,14 @@ async def underdog_job(context) -> None:
                         "stars_d":   getattr(score, "stars_display", "?????"),
                         "rejection": _lc_rej,
                         "path":      "cs" if is_cold_start else "lc",
+                        # ── component breakdown ──────────────────────────────
+                        "vel":       score.move_velocity,
+                        "act":       score.historical_activity,
+                        "avg":       score.avg_vs_line,
+                        "con":       score.consistency,
+                        "sta":       score.stability,
+                        "n":         score.n_history,
+                        "line":      score.current_line,
                     })
 
             should_alert = is_qualified and (is_removed or (
@@ -963,11 +979,24 @@ async def underdog_job(context) -> None:
         _top = sorted(_scored_props, key=lambda x: x["total"], reverse=True)[:10]
         _dbg_lines.append("  top 10 by score:")
         for _i, _p in enumerate(_top, 1):
+            # Header line: rank, player, stat, sport, total, tier, stars, path, rejection
             _dbg_lines.append(
-                f"    {_i:2d}. {_p['player'][:24]:<24} | {_p['stat_type']:<20}"
-                f" | {_p['sport']:<5} | {_p['total']:5.1f}/100 {_p['tier']}"
+                f"    {_i:2d}. {_p['player'][:24]:<24} | {_p['stat_type']:<22}"
+                f" | {_p['sport']:<5} | {_p['total']:3d}/100 {_p['tier']}"
                 f" {_p['stars_d']} [{_p['path']}] → {_p['rejection']}"
             )
+            # Component line: each dimension with its cap, plus n and current line
+            _has_comp = "vel" in _p
+            if _has_comp:
+                _dbg_lines.append(
+                    f"        vel={_p['vel']:2d}/25"
+                    f"  act={_p['act']:2d}/25"
+                    f"  avg={_p['avg']:2d}/20"
+                    f"  con={_p['con']:2d}/15"
+                    f"  sta={_p['sta']:2d}/15"
+                    f"  n={_p['n']}"
+                    f"  line={_p['line']}"
+                )
         _rej_counts = Counter(_p["rejection"] for _p in _scored_props)
         _rej_str = "  ".join(
             f"{_k}={_v}"
