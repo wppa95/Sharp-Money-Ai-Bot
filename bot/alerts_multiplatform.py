@@ -345,6 +345,28 @@ def _format_market_pressure_block(market_pressure: Optional[object]) -> str:
     return text
 
 
+def _format_available_lines_block(
+    ud_line: Optional[float],
+    pp_line: Optional[float] = None,
+    dk_line: Optional[float] = None,
+    fd_line: Optional[float] = None,
+) -> str:
+    """
+    Render a 📊 Available Lines block showing all 4 providers.
+    Shows "Unavailable" for providers with no current data.
+    """
+    def _fmt(val: Optional[float]) -> str:
+        return f"<code>{val:.1f}</code>" if val is not None else "Unavailable"
+
+    return (
+        f"\n\n📊 <b>Available Lines</b>"
+        f"\n🟣 PrizePicks:  {_fmt(pp_line)}"
+        f"\n🐶 Underdog:    {_fmt(ud_line)}"
+        f"\n🎰 DraftKings:  {_fmt(dk_line)}"
+        f"\n🦊 FanDuel:     {_fmt(fd_line)}"
+    )
+
+
 def format_underdog_change_alert(
     player_name: str,
     team: str,
@@ -358,14 +380,19 @@ def format_underdog_change_alert(
     decision: Optional[object] = None,        # UDBetDecision — typed as object
     market_quality: Optional[object] = None,  # MarketQuality — display context
     market_pressure: Optional[object] = None, # MarketPressureFlag — warning only
+    pp_line: Optional[float] = None,          # PrizePicks line if available
+    dk_line: Optional[float] = None,          # DraftKings line if available
+    fd_line: Optional[float] = None,          # FanDuel line if available
     *,
     removed: bool = False,
     standing: bool = False,                   # True for evidence-driven alerts without line movement
 ) -> str:
     """Format an alert for an Underdog prop line change or removed prop.
 
-    When *score* (a UDPropScore) is supplied, a grade line is appended that
-    shows the tier (S/A/B), star rating (★★★☆☆), and raw score total.
+    Now includes an "Available Lines" block showing all 4 providers, and
+    separates Market Movement Score from Bet Confidence.
+
+    When *score* (a UDPropScore) is supplied, the grade is shown.
     When *validation* is supplied, a compact history signal line is appended.
     """
     sport_icon = {
@@ -375,46 +402,60 @@ def format_underdog_change_alert(
 
     if removed:
         header      = "🚫 <b>UNDERDOG PROP REMOVED</b>"
-        change_line = f"  <b>Last Line:</b>  {old_line}"
+        movement_block = f"  <b>Last Line:</b>  {old_line}"
     elif standing:
         header      = "🎯 <b>UNDERDOG STANDING PLAY</b>"
-        change_line = f"  <b>Current Line:</b>  {new_line}"
+        movement_block = f"  <b>Current Line:</b>  {new_line}"
     else:
-        change          = new_line - old_line
-        direction_icon  = "📈" if change > 0 else "📉"
-        header          = f"{direction_icon} <b>UNDERDOG LINE MOVE</b>"
-        change_sign     = "+" if change >= 0 else ""
-        change_line = (
-            f"  <b>Previous Line:</b>  {old_line}\n"
-            f"  <b>Current Line:</b>   {new_line}\n"
-            f"  <b>Movement:</b>       <code>{change_sign}{change:.1f}</code>"
+        change         = new_line - old_line
+        direction_icon = "📈" if change > 0 else "📉"
+        header         = f"{direction_icon} <b>UNDERDOG LINE MOVE</b>"
+        change_sign    = "+" if change >= 0 else ""
+        movement_block = (
+            f"📈 <b>Movement</b>\n"
+            f"  Provider:         Underdog 🐶\n"
+            f"  Previous Line:    <code>{old_line:.1f}</code>\n"
+            f"  Current Line:     <code>{new_line:.1f}</code>\n"
+            f"  Movement:         <code>{change_sign}{change:.1f}</code>"
         )
 
     game_str = f"\n  <b>Game:</b>    {game_time.strftime('%b %d %H:%M')} UTC" if game_time else ""
 
-    # Grade block — only shown when a UDPropScore was computed
+    # Grade + movement score vs bet confidence separation
     grade_str = ""
     if score is not None:
-        # Access tier/stars/total/stars_display via attribute lookup so this
-        # module does not need to import engine.ud_scoring directly.
-        tier   = getattr(score, "tier",          "?")
-        stars  = getattr(score, "stars",          0)
-        total  = getattr(score, "total",          0)
-        s_disp = getattr(score, "stars_display",  "?" * 5)
-        n_hist = getattr(score, "n_history",      0)
-        grade_str = (
-            f"\n\n📊 <b>Grade:</b>  <code>{tier}</code>  {s_disp}  "
-            f"<code>{total}/100</code>"
-            f"  <i>(n={n_hist})</i>"
-        )
+        tier      = getattr(score, "tier",          "?")
+        s_disp    = getattr(score, "stars_display",  "?" * 5)
+        total     = getattr(score, "total",          0)
+        n_hist    = getattr(score, "n_history",      0)
+        move_vel  = getattr(score, "move_velocity",  None)  # market movement component
 
-    # Validation block — shown when supporting history is available
+        grade_str = f"\n\n📊 <b>Grade:</b>  <code>{tier}</code>  {s_disp}  <code>{total}/100</code>  <i>(n={n_hist})</i>"
+
+        if not removed and move_vel is not None:
+            grade_str += (
+                f"\n\n📉 <b>Market Movement Score:</b>  <code>{move_vel}/100</code>"
+                f"  <i>(how significant is the line move)</i>"
+                f"\n🎯 <b>Bet Confidence:</b>         <code>{total}/100</code>"
+                f"  <i>(composite: history + movement)</i>"
+                f"\n<i>Market activity ≠ betting edge.</i>"
+            )
+
+    # Validation block
     validation_str = ""
     if validation is not None and getattr(validation, "has_supporting_data", False):
         validation_str = (
             f"\n💡 <b>History:</b>  "
             f"<code>{getattr(validation, 'rate_summary', lambda: '')()}</code>"
         )
+
+    # Available lines block (all 4 providers)
+    avail_block = _format_available_lines_block(
+        ud_line = new_line if not removed else old_line,
+        pp_line = pp_line,
+        dk_line = dk_line,
+        fd_line = fd_line,
+    )
 
     parts = [
         header,
@@ -423,7 +464,10 @@ def format_underdog_change_alert(
         f"👤 <b>{player_name}</b>",
         "",
         _div(),
-        change_line + game_str + grade_str + validation_str
+        avail_block.lstrip("\n"),
+        "",
+        _div(),
+        movement_block + game_str + grade_str + validation_str
         + _format_decision_block(decision)
         + _format_market_quality_block(market_quality)
         + _format_market_pressure_block(market_pressure),
@@ -447,6 +491,9 @@ def format_underdog_new_prop_alert(
     decision: Optional[object] = None,        # UDBetDecision
     market_quality: Optional[object] = None,  # MarketQuality — display context
     market_pressure: Optional[object] = None, # MarketPressureFlag — warning only
+    pp_line: Optional[float] = None,          # PrizePicks line if available
+    dk_line: Optional[float] = None,          # DraftKings line if available
+    fd_line: Optional[float] = None,          # FanDuel line if available
     *,
     low_line_threshold: float = 1.0,
 ) -> str:
@@ -498,11 +545,22 @@ def format_underdog_new_prop_alert(
     if validation is not None and getattr(validation, "has_supporting_data", False):
         reasons.append(f"• Supporting history available ({getattr(validation, 'n_history', 0)} snapshots)")
 
+    # Available lines block (all 4 providers)
+    avail_block = _format_available_lines_block(
+        ud_line = line_value,
+        pp_line = pp_line,
+        dk_line = dk_line,
+        fd_line = fd_line,
+    )
+
     parts = [
         "🚨 <b>UNDERDOG PROP LIVE</b>",
         "",
         f"{sport_icon} <b>{sport} — {stat_type}</b>",
         f"👤 <b>{player_name}</b>",
+        "",
+        _div(),
+        avail_block.lstrip("\n"),
         "",
         _div(),
         f"  <b>Starting Line:</b>  {line_value}",

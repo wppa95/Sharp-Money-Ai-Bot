@@ -1,0 +1,349 @@
+Continue from the completed V1.3 Player Prop Market Engine checkpoint.
+
+This is the FINAL completion pass before live testing.
+
+Do not rebuild the engine.
+Do not create a second system.
+Do not change the working lifecycle/re-entry logic.
+
+Current stable state:
+
+✅ 1716 tests passing
+✅ Player Prop Market Engine active
+✅ Underdog player props working
+✅ PLAYER PROP MARKET ALERT active
+✅ Dashboard/commands migrated
+✅ Old PrizePicks Reference Alert path removed
+✅ Alert framework migrated
+
+Complete the remaining provider expansion and full framework audit.
+
+⸻
+
+1. Enable DraftKings Player Prop Connector
+
+Current issue:
+
+DraftKings is connected only for:
+
+* MLB moneylines
+* MLB totals
+
+It is not providing player props.
+
+Add/activate DraftKings player prop data.
+
+Pull:
+
+* player
+* sport
+* market type
+* line
+* odds
+* timestamp
+
+Normalize into the existing Player Prop Market Engine.
+
+Do not create a separate alert system.
+
+⸻
+
+2. Enable FanDuel Player Prop Connector
+
+Current issue:
+
+FanDuel is connected but not providing player props.
+
+Add/activate FanDuel player prop data.
+
+Pull:
+
+* player
+* sport
+* market type
+* line
+* odds
+* timestamp
+
+Normalize into the existing Player Prop Market Engine.
+
+⸻
+
+3. Unified Player Prop Market Object
+
+All providers must flow into one market object:
+
+🟣 PrizePicks
+🐶 Underdog
+🎰 DraftKings
+🦊 FanDuel
+
+Example:
+
+Player:
+Market:
+
+PrizePicks:
+line/status
+
+Underdog:
+line/status
+
+DraftKings:
+line/status
+
+FanDuel:
+line/status
+
+No false unavailable values if data exists.
+
+⸻
+
+4. Best Available App / Line Logic
+
+Add:
+
+🏆 Best Available App:
+🏆 Best Available Line:
+
+Reasons:
+
+* Lowest line available
+* Highest line available
+* Only available provider
+* Market disagreement detected
+
+Do not claim betting edge from line differences alone.
+
+⸻
+
+5. Keep Provider-Specific Movement Alerts
+
+Do NOT remove provider-specific movement alerts.
+
+They are valuable.
+
+Example:
+
+📈 UNDERDOG LINE MOVE
+
+is useful because it tells us exactly which provider moved.
+
+However, upgrade the format.
+
+Every movement alert should include:
+
+📊 Available Lines
+
+🟣 PrizePicks:
+🐶 Underdog:
+🎰 DraftKings:
+🦊 FanDuel:
+
+Then show:
+
+📈 Movement
+
+Provider that moved:
+Previous line:
+Current line:
+Movement amount:
+
+Market Consensus:
+
+Best Available Line/App:
+
+Keep market movement separate from betting recommendation.
+
+A line move is market information, not automatically a bet.
+
+⸻
+
+6. Full Framework Migration Verification
+
+The NEW Player Prop Market Framework must be the only active framework.
+
+The old PrizePicks-only framework must not remain active.
+
+Audit all commands:
+
+/picks
+/slip
+/dashboard
+/alerts
+/performance
+/grade
+/stats
+/providers
+/help
+/testalert
+
+Everything must use:
+
+Providers
+
+↓
+
+Player Prop Market Engine
+
+↓
+
+Ranking/Tier System
+
+↓
+
+Alerts
+
+↓
+
+/picks and /slip
+
+No duplicate systems.
+
+⸻
+
+7. Update /picks
+
+Current concern:
+
+/picks may still use old PP-only logic.
+
+Update /picks to use the new Player Prop Market Engine.
+
+It should show:
+
+* Player
+* Market
+* Available provider lines
+* Best available app
+* Market consensus
+* Ranking score
+* Tier
+* Confidence
+
+Include:
+
+🟣 PrizePicks
+🐶 Underdog
+🎰 DraftKings
+🦊 FanDuel
+
+If PrizePicks is unavailable, use available providers.
+
+Do not show false zeros.
+
+⸻
+
+8. Update /slip
+
+/slip must use the same framework as /picks.
+
+Build slips from:
+
+* ranked player props
+* provider availability
+* tier ranking
+* confidence
+* correlation rules
+
+No separate slip logic.
+
+⸻
+
+9. Legacy Alert Cleanup
+
+Audit remaining alert paths.
+
+Remove or migrate any remaining:
+
+❌ Old PrizePicks Reference Alerts
+❌ Old PP-only recommendation paths
+❌ Old separate Underdog recommendation engine
+❌ Old sportsbook-only workflows
+
+Specifically check:
+
+📈 UNDERDOG LINE MOVE
+
+If kept, migrate it into the new Player Prop Market framework instead of running separately.
+
+Separate:
+
+Market Movement Score
+
+from:
+
+Betting Recommendation Confidence
+
+Example:
+
+Movement:
+70/100
+
+Bet Confidence:
+30/100
+
+Do not confuse market activity with a betting edge.
+
+⸻
+
+10. Pregame Market Watch
+
+Add the foundation for future game monitoring.
+
+Goal:
+
+* Morning scan
+* Monitor upcoming games
+* Watch player props
+* Scan approximately 3 hours before game start
+* Alert when meaningful movement occurs
+
+Do not overbuild.
+Create foundation only.
+
+⸻
+
+11. Validation
+
+Run:
+
+* Full test suite
+* Provider tests
+* Alert tests
+* Telegram command tests
+* Restart test
+
+Verify:
+
+✅ Underdog still works
+✅ DraftKings player props populate when available
+✅ FanDuel player props populate when available
+✅ PrizePicks slot works when data exists
+✅ Player Prop Market Alert works
+✅ Movement alerts include all providers
+✅ /picks uses new framework
+✅ /slip uses new framework
+✅ Dashboard matches active system
+✅ No duplicate alert paths
+
+Final report:
+
+* Files changed
+* Tests passed/failed
+* Provider status
+* Framework migration status
+* Example live alerts
+
+After this is complete:
+
+STOP.
+
+Do not add more features.
+
+We are moving directly into:
+
+* reviewing live alerts
+* ranking props
+* building slips
+* testing real picks.

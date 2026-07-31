@@ -1,5 +1,6 @@
 - [CLV formula direction](clv-formula.md) — CLV% uses (fp_close/fp_bet - 1), NOT (fp_bet/fp_close - 1); higher fp_close = market tightened after your bet = positive CLV.
-- [Provider abstraction & CLV pipeline](provider-abstraction-dashboard.md) — frozen stable baseline: prop_provider.py ABC, prizepicks/underdog providers, AlertCLVSeed, DashboardEngine, 1568 tests passing July 31 2026.
+- [Provider abstraction & CLV pipeline](provider-abstraction-dashboard.md) — frozen stable baseline: prop_provider.py ABC, prizepicks/underdog providers, AlertCLVSeed, DashboardEngine, 1716 tests passing July 31 2026.
+- [DK/FD player prop normalization](dk-fd-player-prop-normalize.md) — player_props market key uses outcome["description"]=player, outcome["name"]=Over/Under, outcome["point"]=line; not the standard outcome["name"] h2h/totals path.
 - [Async test event loop pattern](async-test-loop.md) — Python 3.11 aiosqlite tests must use module-level asyncio.new_event_loop(); never asyncio.get_event_loop() across test files.
 - [Multi-platform connector architecture](connector-architecture.md) — DK/FD connectors use Odds API filtered by bookmaker key; Underdog uses unofficial /v3/over_under_lines; pick'em isolation enforced by is_pickem flag.
 - [AI Ranking & Backtesting Engine](ranking-engine.md) — ranking.py wraps compute_confidence + ±10 historical adj; backtesting.py replays EVRecord via stored ai_confidence; new DB methods and /performance + /backtest commands added.

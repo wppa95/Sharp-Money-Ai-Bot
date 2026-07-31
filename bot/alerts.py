@@ -1038,6 +1038,9 @@ class AlertDelivery:
         decision: "Optional[object]" = None,        # UDBetDecision — typed as object
         market_quality: "Optional[object]" = None,  # MarketQuality — display context
         market_pressure: "Optional[object]" = None, # MarketPressureFlag — warning only
+        pp_line: "Optional[float]" = None,          # PrizePicks line if available
+        dk_line: "Optional[float]" = None,          # DraftKings line if available
+        fd_line: "Optional[float]" = None,          # FanDuel line if available
         *,
         removed: bool = False,
         new_prop: bool = False,
@@ -1110,6 +1113,9 @@ class AlertDelivery:
                 decision=decision,
                 market_quality=market_quality,
                 market_pressure=market_pressure,
+                pp_line=pp_line,
+                dk_line=dk_line,
+                fd_line=fd_line,
                 low_line_threshold=config.UD_NEW_PROP_LOW_LINE_THRESHOLD,
             )
         else:
@@ -1122,6 +1128,9 @@ class AlertDelivery:
                 decision=decision,
                 market_quality=market_quality,
                 market_pressure=market_pressure,
+                pp_line=pp_line,
+                dk_line=dk_line,
+                fd_line=fd_line,
                 removed=removed,
                 standing=standing,
             )

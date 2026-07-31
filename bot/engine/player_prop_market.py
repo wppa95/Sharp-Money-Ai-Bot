@@ -112,7 +112,7 @@ class PlayerPropMarketComparison:
     sport:                   str
     stat_type:               str              # canonical PP stat name
     lines:                   dict[str, ProviderLine]  # keyed by provider name
-    best_provider:           Optional[str]    # provider with the best available line
+    best_provider:           Optional[str]    # provider with the priority-ordered best line
     best_line:               Optional[float]
     market_consensus:        Optional[float]  # average of all available lines
     previous_line:           Optional[float]  # previous Underdog line
@@ -120,6 +120,12 @@ class PlayerPropMarketComparison:
     observed_at:             datetime
     proxy_match_confidence:  int              # 0–100, labelled in alert
     match_reason:            str              # human-readable scoring explanation
+    # Best-available-app analysis (independent of provider priority)
+    best_over_app:           Optional[str]    = None  # provider with lowest line (OVER-friendly)
+    best_over_line:          Optional[float]  = None
+    best_under_app:          Optional[str]    = None  # provider with highest line (UNDER-friendly)
+    best_under_line:         Optional[float]  = None
+    best_reason:             str              = ""    # e.g. "Market disagreement detected"
 
 
 # ── Confidence scoring (mirrors pp_reference logic, renamed Proxy Match) ──────
@@ -295,6 +301,32 @@ def build_player_prop_market_comparison(
     if best_line is not None and previous_line is not None:
         movement = round(best_line - previous_line, 1)
 
+    # ── Best Available App analysis ───────────────────────────────────────────
+    # Independent of provider priority — computed from actual line values.
+    # Lower line = OVER-friendly (easier to beat); higher = UNDER-friendly.
+    best_over_app:   Optional[str]   = None
+    best_over_line:  Optional[float] = None
+    best_under_app:  Optional[str]   = None
+    best_under_line: Optional[float] = None
+    best_reason: str = ""
+
+    if available_lines:
+        over_sorted  = sorted(available_lines, key=lambda x: x[1])           # ascending
+        under_sorted = sorted(available_lines, key=lambda x: -x[1])          # descending
+        best_over_app,  best_over_line  = over_sorted[0]
+        best_under_app, best_under_line = under_sorted[0]
+
+        if len(available_lines) == 1:
+            best_reason = "Only available provider"
+        else:
+            line_spread = best_under_line - best_over_line
+            if line_spread >= 0.5:
+                best_reason = "Market disagreement detected"
+            elif line_spread == 0.0:
+                best_reason = "All providers aligned"
+            else:
+                best_reason = "Lines closely aligned"
+
     return PlayerPropMarketComparison(
         player_name            = player_name.strip(),
         sport                  = sport,
@@ -308,6 +340,11 @@ def build_player_prop_market_comparison(
         observed_at            = now,
         proxy_match_confidence = confidence,
         match_reason           = reason,
+        best_over_app          = best_over_app,
+        best_over_line         = best_over_line,
+        best_under_app         = best_under_app,
+        best_under_line        = best_under_line,
+        best_reason            = best_reason,
     )
 
 
@@ -358,11 +395,6 @@ def format_player_prop_market_alert(comp: PlayerPropMarketComparison) -> str:
         "",
     ]
 
-    if comp.best_provider and comp.best_line is not None:
-        parts.append(f"Best Available Line:  {comp.best_provider} ({comp.best_line:.1f})")
-    else:
-        parts.append("Best Available Line:  —")
-
     if comp.market_consensus is not None:
         parts.append(f"Market Consensus:     {comp.market_consensus:.1f}")
     else:
@@ -376,6 +408,50 @@ def format_player_prop_market_alert(comp: PlayerPropMarketComparison) -> str:
         sign = "+" if comp.movement > 0 else ""
         arrow = "↑" if comp.movement > 0 else ("↓" if comp.movement < 0 else "→")
         parts.append(f"Movement:             <code>{sign}{comp.movement:.1f} {arrow}</code>")
+
+    # ── Best Available App ────────────────────────────────────────────────────
+    parts += [
+        "",
+        div,
+        "",
+        "🏆 <b>Best Available Line</b>",
+        "",
+    ]
+
+    _avail_count = sum(
+        1 for pl in comp.lines.values() if pl.available and pl.line_value is not None
+    )
+    if _avail_count == 0:
+        parts.append("  No provider data available.")
+    elif _avail_count == 1:
+        # Only one provider — just show it
+        pname = comp.best_provider or "—"
+        pline = comp.best_line
+        pemoji = PROVIDER_EMOJI.get(pname, "?")
+        line_str = f"{pline:.1f}" if pline is not None else "—"
+        parts.append(f"  {pemoji} <b>{pname}</b>  ·  {line_str}")
+        parts.append(f"  <i>Reason: {comp.best_reason}</i>")
+    else:
+        # Multiple providers — show OVER-friendly and UNDER-friendly separately
+        if comp.best_over_app and comp.best_over_line is not None:
+            oe = PROVIDER_EMOJI.get(comp.best_over_app, "?")
+            parts.append(
+                f"  OVER-friendly:   {oe} <b>{comp.best_over_app}</b>"
+                f"  <code>{comp.best_over_line:.1f}</code>  <i>(lowest line)</i>"
+            )
+        if comp.best_under_app and comp.best_under_line is not None:
+            ue = PROVIDER_EMOJI.get(comp.best_under_app, "?")
+            parts.append(
+                f"  UNDER-friendly:  {ue} <b>{comp.best_under_app}</b>"
+                f"  <code>{comp.best_under_line:.1f}</code>  <i>(highest line)</i>"
+            )
+        if comp.best_reason:
+            parts.append(f"  <i>Reason: {comp.best_reason}</i>")
+        parts.append("")
+        parts.append(
+            "  <i>Line differences = market information."
+            " Not a betting recommendation.</i>"
+        )
 
     # ── Sources / confidence ──────────────────────────────────────────────────
     active_sources = [

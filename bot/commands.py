@@ -774,10 +774,11 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not records:
         hint = f" for {sport_filter}" if sport_filter else ""
         await update.message.reply_text(
-            f"🎯 <b>PrizePicks Picks</b>\n\n"
-            f"No edges detected{hint} in the last 6 hours.\n\n"
-            f"<i>Edges are found when a PP line diverges from sportsbook fair odds.\n"
-            f"Check back after the next poll cycle (every 5 min).</i>",
+            f"🎯 <b>Player Prop Picks</b>\n\n"
+            f"No scored picks detected{hint} in the last 6 hours.\n\n"
+            f"<i>Picks are scored from live Underdog props (every 5 min).\n"
+            f"Use /pp_import to add PrizePicks lines manually.\n"
+            f"Check back after the next poll cycle.</i>",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -798,9 +799,10 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     records.sort(key=_sort_key)
 
     today = datetime.utcnow().strftime("%b %d, %Y")
-    lines: list[str] = [f"🎯 <b>PrizePicks Picks — {today}</b>"]
+    lines: list[str] = [f"🎯 <b>Player Prop Picks — {today}</b>"]
     if sport_filter:
         lines.append(f"<i>Filtered: {sport_filter}</i>")
+    lines.append(f"<i>Source: 🐶 Underdog  ·  🟣 PrizePicks (when imported)</i>")
     lines.append("")
 
     current_tier: Optional[str] = None
@@ -858,11 +860,11 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         lines.append(
             f"  #{rank} <b>{r.player_name}</b> · {r.stat_type}\n"
-            f"       PP <code>{r.pp_line_value:g}</code> · <b>{r.best_side}</b> · "
+            f"       🐶 <code>{r.pp_line_value:g}</code> · <b>{r.best_side}</b> · "
             f"<code>+{r.best_edge:.1f}%</code>{conf_str}{stars_str}{move_str}{result_str}"
             f"{gt_label}"
             f"{_dec_str}\n"
-            f"       <i>{r.sport} · vs {r.sportsbook} · "
+            f"       <i>{r.sport} · ref: {r.sportsbook} · "
             f"{r.detected_at.strftime('%H:%M UTC')}</i>"
         )
 
@@ -1037,9 +1039,9 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     _candidates = await _db.get_top_pp_edges(limit=30, hours=6)
     if not _candidates:
         await update.message.reply_text(
-            "🎰 <b>SharpMoney Slip</b>\n\n"
-            "No picks detected in the last 6 hours.\n\n"
-            "<i>Run /picks to see current edges.</i>",
+            "🎰 <b>Player Prop Slip</b>\n\n"
+            "No scored picks detected in the last 6 hours.\n\n"
+            "<i>Run /picks to see current picks. Underdog props auto-score every 5 min.</i>",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -1064,7 +1066,7 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         slip = slips.get(single_size)
         if slip is None:
             await update.message.reply_text(
-                f"🎰 <b>SharpMoney Slip</b>\n\n"
+                f"🎰 <b>Player Prop Slip</b>\n\n"
                 f"Could not build a {single_size}-man slip from today's picks.\n"
                 f"<i>Available sizes: {', '.join(str(s) for s in sorted(slips))}.</i>",
                 parse_mode=ParseMode.HTML,
@@ -1072,13 +1074,13 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             return
         label = "✅ Recommended (Safest)" if single_size == 2 else ""
         lines: list[str] = [
-            f"🎰 <b>SharpMoney Slips — {today}</b>",
+            f"🎰 <b>Player Prop Slips — {today}</b>",
             "",
         ] + _render_slip_section(single_size, slip, label)
     else:
         # Show all sizes
         lines = [
-            f"🎰 <b>SharpMoney Slips — {today}</b>",
+            f"🎰 <b>Player Prop Slips — {today}</b>",
             f"<i>{len(slips)} slip size{'s' if len(slips) != 1 else ''} built "
             f"from {len(_candidates)} candidates</i>",
             "",

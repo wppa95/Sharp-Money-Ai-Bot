@@ -149,7 +149,7 @@ class DraftKingsConnector(BaseConnector):
             data = await cache.get_or_fetch(
                 sport_key   = sport_key,
                 api_key     = self._api_key,
-                markets     = "h2h,totals",
+                markets     = "h2h,totals,player_props",
                 regions     = "us",
             )
         except OddsApiError as exc:
@@ -174,7 +174,7 @@ class DraftKingsConnector(BaseConnector):
         params = {
             "apiKey":     self._api_key,
             "regions":    "us",
-            "markets":    "h2h,totals",
+            "markets":    "h2h,totals,player_props",
             "oddsFormat": "american",
             "bookmakers": _BOOK_KEY,
         }
@@ -230,14 +230,27 @@ class DraftKingsConnector(BaseConnector):
                 if bm.get("key", "").lower() != _BOOK_KEY:
                     continue
                 for market in bm.get("markets", []):
-                    mtype = _MARKET_MAP.get(market.get("key", ""))
+                    market_key = market.get("key", "")
+                    mtype = _MARKET_MAP.get(market_key)
                     if mtype is None:
                         continue
+                    is_player_prop = market_key == "player_props"
+
                     for outcome in market.get("outcomes", []):
                         try:
-                            sel   = str(outcome["name"])
-                            odds  = int(outcome["price"])
-                            line  = outcome.get("point")
+                            odds = int(outcome["price"])
+                            line = outcome.get("point")
+                            if is_player_prop:
+                                # Odds API player prop outcomes:
+                                # "description" = player name, "name" = "Over"/"Under"
+                                player = str(outcome.get("description") or "").strip()
+                                direction = str(outcome.get("name") or "").strip()
+                                if not player or not direction:
+                                    continue
+                                sel = f"{player} {direction}"
+                            else:
+                                sel    = str(outcome["name"])
+                                player = None
                         except (KeyError, TypeError, ValueError):
                             continue
 
@@ -251,6 +264,7 @@ class DraftKingsConnector(BaseConnector):
                             event        = event_name,
                             market_type  = mtype,
                             selection    = sel,
+                            player       = player if is_player_prop else None,
                             odds         = odds,
                             timestamp    = now,
                             line         = float(line) if line is not None else None,
