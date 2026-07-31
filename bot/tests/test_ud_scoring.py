@@ -57,6 +57,11 @@ from datetime import datetime
 from unittest.mock import MagicMock
 
 from engine.ud_scoring import (
+    MarketQualityLabel,
+    MarketQuality,
+    MarketPressureFlag,
+    compute_market_quality,
+    detect_market_pressure,
     UDScoreTier,
     UDPropScore,
     PropDifficultyClass,
@@ -806,3 +811,167 @@ class TestUDPropScoreWithVariancePenalty:
         )
         assert s.variance_penalty == 0
         assert s.difficulty == PropDifficultyClass.STANDARD
+
+
+# ── compute_market_quality ─────────────────────────────────────────────────────
+
+class TestComputeMarketQuality:
+    def _score(
+        self,
+        difficulty:  PropDifficultyClass = PropDifficultyClass.HIGH_FLOOR,
+        activity:    int = 20,
+        stability:   int = 12,
+        n:           int = 30,
+        stat_type:   str = "Hits",
+        variance_penalty: int = 0,
+    ) -> UDPropScore:
+        return UDPropScore(
+            player_name="Test", stat_type=stat_type, sport="MLB", current_line=1.5,
+            move_velocity=0, historical_activity=activity, avg_vs_line=0,
+            consistency=8, stability=stability, n_history=n,
+            difficulty=difficulty, variance_penalty=variance_penalty,
+        )
+
+    def test_high_floor_deep_stable_is_elite(self):
+        """HIGH_FLOOR + high activity + 30 records + stable → ELITE (≥75)."""
+        mq = compute_market_quality("Hits", 1.5, self._score())
+        assert mq.label == MarketQualityLabel.ELITE
+        assert mq.score >= 75
+
+    def test_high_variance_thin_volatile_is_low(self):
+        """HIGH_VARIANCE + no activity + 3 records + volatile → LOW (<35)."""
+        s = UDPropScore(
+            player_name="T", stat_type="Home Runs", sport="MLB", current_line=0.5,
+            move_velocity=0, historical_activity=2, avg_vs_line=0,
+            consistency=8, stability=0, n_history=3,
+            difficulty=PropDifficultyClass.HIGH_VARIANCE, variance_penalty=10,
+        )
+        mq = compute_market_quality("Home Runs", 0.5, s)
+        assert mq.label == MarketQualityLabel.LOW
+        assert mq.score < 35
+
+    def test_standard_moderate_is_medium_or_high(self):
+        """STANDARD + moderate activity + 12 records → MEDIUM or HIGH."""
+        s = UDPropScore(
+            player_name="T", stat_type="Strikeouts", sport="MLB", current_line=5.5,
+            move_velocity=0, historical_activity=5, avg_vs_line=0,
+            consistency=8, stability=9, n_history=12,
+            difficulty=PropDifficultyClass.STANDARD,
+        )
+        mq = compute_market_quality("Strikeouts", 5.5, s)
+        assert mq.label in (MarketQualityLabel.MEDIUM, MarketQualityLabel.HIGH)
+
+    def test_score_capped_at_100(self):
+        """score never exceeds 100 even with all-max inputs."""
+        s = UDPropScore(
+            player_name="T", stat_type="Hits", sport="MLB", current_line=1.5,
+            move_velocity=0, historical_activity=25, avg_vs_line=0,
+            consistency=15, stability=15, n_history=50,
+            difficulty=PropDifficultyClass.HIGH_FLOOR,
+        )
+        mq = compute_market_quality("Hits", 1.5, s)
+        assert mq.score <= 100
+
+    def test_high_floor_reasons_mention_stat(self):
+        """HIGH_FLOOR quality note references the stat name."""
+        mq = compute_market_quality("Hits", 1.5, self._score())
+        assert any("Hits" in r or "High-floor" in r for r in mq.reasons)
+
+    def test_high_variance_reasons_mention_stat(self):
+        """HIGH_VARIANCE quality note references the stat name."""
+        s = self._score(difficulty=PropDifficultyClass.HIGH_VARIANCE, stat_type="Home Runs")
+        mq = compute_market_quality("Home Runs", 0.5, s)
+        assert any("Home Runs" in r or "variance" in r.lower() for r in mq.reasons)
+
+    def test_returns_market_quality_instance(self):
+        mq = compute_market_quality("Hits", 1.5, self._score())
+        assert isinstance(mq, MarketQuality)
+        assert mq.label in MarketQualityLabel
+        assert isinstance(mq.reasons, tuple)
+
+    def test_low_activity_reduces_score(self):
+        """Zero activity lowers score compared to high activity."""
+        high = compute_market_quality("Hits", 1.5, self._score(activity=20))
+        low  = compute_market_quality("Hits", 1.5, self._score(activity=2))
+        assert high.score > low.score
+
+    def test_thin_sample_reduces_score(self):
+        """Thin sample (n<5) lowers score compared to deep sample."""
+        deep  = compute_market_quality("Hits", 1.5, self._score(n=30))
+        thin  = compute_market_quality("Hits", 1.5, self._score(n=2))
+        assert deep.score > thin.score
+
+
+# ── detect_market_pressure ─────────────────────────────────────────────────────
+
+class TestDetectMarketPressure:
+    def _hist(self, moved: int = 0, total: int = 10) -> list:
+        recs = []
+        for i in range(total):
+            r = MagicMock()
+            r.line_moved = i < moved
+            recs.append(r)
+        return recs
+
+    def test_no_signals_none(self):
+        flag = detect_market_pressure(None, [], False)
+        assert not flag.has_pressure
+        assert flag.pressure_level == "NONE"
+
+    def test_large_move_high(self):
+        flag = detect_market_pressure(1.5, [], False)
+        assert flag.has_pressure
+        assert flag.pressure_level == "HIGH"
+
+    def test_significant_move_medium(self):
+        flag = detect_market_pressure(1.0, [], False)
+        assert flag.has_pressure
+        assert flag.pressure_level == "MEDIUM"
+
+    def test_small_move_low(self):
+        flag = detect_market_pressure(0.5, [], False)
+        assert flag.has_pressure
+        assert flag.pressure_level == "LOW"
+
+    def test_removal_risk_high(self):
+        flag = detect_market_pressure(None, [], True)
+        assert flag.has_pressure
+        assert flag.pressure_level == "HIGH"
+
+    def test_four_recent_moves_high(self):
+        flag = detect_market_pressure(None, self._hist(4), False)
+        assert flag.has_pressure
+        assert flag.pressure_level == "HIGH"
+
+    def test_three_recent_moves_medium(self):
+        flag = detect_market_pressure(None, self._hist(3), False)
+        assert flag.has_pressure
+        assert flag.pressure_level == "MEDIUM"
+
+    def test_two_recent_moves_low(self):
+        flag = detect_market_pressure(None, self._hist(2), False)
+        assert flag.has_pressure
+        assert flag.pressure_level == "LOW"
+
+    def test_one_move_no_pressure(self):
+        flag = detect_market_pressure(None, self._hist(1), False)
+        assert not flag.has_pressure
+
+    def test_returns_market_pressure_flag(self):
+        flag = detect_market_pressure(None, [], False)
+        assert isinstance(flag, MarketPressureFlag)
+        assert isinstance(flag.reasons, tuple)
+
+    def test_reasons_populated_for_large_move(self):
+        flag = detect_market_pressure(2.0, [], False)
+        assert len(flag.reasons) > 0
+        assert any("Large" in r or "move" in r.lower() for r in flag.reasons)
+
+    def test_reasons_populated_for_removal(self):
+        flag = detect_market_pressure(None, [], True)
+        assert any("removed" in r.lower() or "Prop" in r for r in flag.reasons)
+
+    def test_large_move_dominates_small_history(self):
+        """Large magnitude → HIGH even with only 1 recent move."""
+        flag = detect_market_pressure(1.5, self._hist(1), False)
+        assert flag.pressure_level == "HIGH"

@@ -521,6 +521,191 @@ def _score_drift_velocity(opening_line: float, current_line: float) -> int:
     else:              return  0
 
 
+# ── Market Quality ─────────────────────────────────────────────────────────────
+
+class MarketQualityLabel(str, enum.Enum):
+    """Four-tier label for how efficient / soft a pick'em market is."""
+    ELITE  = "ELITE"   # Deep, reliable, high-floor market
+    HIGH   = "HIGH"    # Strong market characteristics
+    MEDIUM = "MEDIUM"  # Standard pick'em market
+    LOW    = "LOW"     # High-variance, illiquid, or thin-history market
+
+
+@dataclass(frozen=True)
+class MarketQuality:
+    """
+    Market quality / softness evaluation for an Underdog prop.
+
+    Combines prop-type class, market activity, sample depth, and line
+    stability into a 0–100 score with a human-readable label.
+
+    This is a *display / context* layer — it does NOT adjust the main
+    score, tier, stars, or alert qualification gate.  The existing
+    variance_penalty already accounts for risk; market quality adds
+    forward-looking context shown in the alert.
+    """
+    label:   MarketQualityLabel
+    score:   int    # 0–100
+    reasons: tuple  # tuple[str, ...] — contributing factors
+
+
+@dataclass(frozen=True)
+class MarketPressureFlag:
+    """
+    Market pressure warning for an Underdog prop.
+
+    WARNING ONLY — does NOT affect confidence, score, tier, or alert
+    qualification.  Shown in the alert as informational context; never
+    used to trigger or block an alert.
+    """
+    has_pressure:   bool
+    pressure_level: str   # "HIGH" | "MEDIUM" | "LOW" | "NONE"
+    reasons:        tuple # tuple[str, ...] — detected pressure signals
+
+
+def compute_market_quality(
+    stat_type: str,
+    line_value: float,
+    score: "UDPropScore",
+) -> "MarketQuality":
+    """
+    Evaluate market quality / softness for an Underdog pick'em prop.
+
+    Four factors (max 100 total):
+      Prop type       0–30   HIGH_FLOOR=30, STANDARD=15, HIGH_VARIANCE=0
+      Activity        0–25   historical_activity component, used directly
+      Sample depth    0–20   n≥30→20, n≥20→16, n≥10→10, n≥5→5, else 0
+      Stability       0–25   stability component (0–15), scaled to 0–25
+
+    Label mapping:  ELITE ≥75  |  HIGH ≥55  |  MEDIUM ≥35  |  LOW <35
+
+    Parameters
+    ----------
+    stat_type:  Stat category (e.g. "Hits", "Home Runs").
+    line_value: Current prop line value.
+    score:      Already-computed UDPropScore — components are reused
+                so that no duplicate work is performed.
+    """
+    difficulty   = score.difficulty
+    activity_sc  = score.historical_activity   # 0–25
+    stability_sc = score.stability             # 0–15
+    n            = score.n_history
+
+    reasons: list = []
+
+    # Factor 1: Prop type (0–30)
+    if difficulty == PropDifficultyClass.HIGH_FLOOR:
+        type_pts = 30
+        reasons.append(f"High-floor stat ({stat_type})")
+    elif difficulty == PropDifficultyClass.STANDARD:
+        type_pts = 15
+    else:  # HIGH_VARIANCE
+        type_pts = 0
+        reasons.append(f"High-variance market ({stat_type})")
+
+    # Factor 2: Market activity (0–25) — already 0–25, used directly
+    activity_pts = activity_sc
+    if activity_sc >= 15:
+        reasons.append("Highly active market")
+    elif activity_sc >= 10:
+        reasons.append("Active market")
+    elif activity_sc >= 5:
+        reasons.append("Some market activity")
+
+    # Factor 3: Sample depth (0–20)
+    if n >= 30:
+        sample_pts = 20
+        reasons.append(f"Deep sample ({n} records)")
+    elif n >= 20:
+        sample_pts = 16
+        reasons.append(f"Good sample ({n} records)")
+    elif n >= 10:
+        sample_pts = 10
+    elif n >= 5:
+        sample_pts = 5
+    else:
+        sample_pts = 0
+        reasons.append("Thin sample — limited history")
+
+    # Factor 4: Stability (scale 0–15 → 0–25)
+    stability_pts = round(stability_sc * 25 / 15)
+    if stability_sc >= 12:
+        reasons.append("Stable line")
+    elif stability_sc <= 2:
+        reasons.append("Volatile line")
+
+    total = min(100, type_pts + activity_pts + sample_pts + stability_pts)
+
+    if   total >= 75: label = MarketQualityLabel.ELITE
+    elif total >= 55: label = MarketQualityLabel.HIGH
+    elif total >= 35: label = MarketQualityLabel.MEDIUM
+    else:             label = MarketQualityLabel.LOW
+
+    if not reasons:
+        reasons.append("Standard market")
+
+    return MarketQuality(label=label, score=total, reasons=tuple(reasons))
+
+
+def detect_market_pressure(
+    magnitude:       Optional[float],
+    history:         "list[UnderdogSnapshotRecord]",
+    is_removal_risk: bool = False,
+) -> "MarketPressureFlag":
+    """
+    Detect market pressure signals for an Underdog pick'em prop.
+
+    WARNING ONLY — this result is never used for scoring, confidence
+    adjustment, or alert gating.  It is purely informational context
+    rendered alongside the alert.
+
+    Parameters
+    ----------
+    magnitude:       Absolute line change for this event (|new - old|),
+                     or None when there is no line-change event.
+    history:         Most-recent-first snapshot list from the DB.
+    is_removal_risk: True when the prop carries a [REMOVED] marker.
+    """
+    reasons: list = []
+    level_rank = 0   # 0=NONE, 1=LOW, 2=MEDIUM, 3=HIGH
+
+    if is_removal_risk:
+        reasons.append("Prop removed from board")
+        level_rank = 3
+
+    if magnitude is not None:
+        if   magnitude >= 1.5:
+            reasons.append(f"Large line move ({magnitude:+.1f})")
+            level_rank = max(level_rank, 3)
+        elif magnitude >= 1.0:
+            reasons.append(f"Significant line move ({magnitude:+.1f})")
+            level_rank = max(level_rank, 2)
+        elif magnitude >= 0.5:
+            reasons.append(f"Line moved ({magnitude:+.1f})")
+            level_rank = max(level_rank, 1)
+
+    # Count recent moves in the last 10 snapshots
+    n_recent = sum(1 for r in history[:10] if getattr(r, "line_moved", False))
+    if n_recent >= 4:
+        reasons.append(f"Frequent movement: {n_recent} moves in last 10 cycles")
+        level_rank = max(level_rank, 3)
+    elif n_recent >= 3:
+        reasons.append(f"Multiple moves: {n_recent} in last 10 cycles")
+        level_rank = max(level_rank, 2)
+    elif n_recent >= 2:
+        reasons.append(f"{n_recent} recent moves in last 10")
+        level_rank = max(level_rank, 1)
+
+    _levels = {0: "NONE", 1: "LOW", 2: "MEDIUM", 3: "HIGH"}
+    level = _levels[level_rank]
+
+    return MarketPressureFlag(
+        has_pressure   = level_rank > 0,
+        pressure_level = level,
+        reasons        = tuple(reasons),
+    )
+
+
 # ── Public entry point ────────────────────────────────────────────────────────
 
 def score_ud_prop(

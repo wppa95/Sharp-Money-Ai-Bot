@@ -308,6 +308,43 @@ def _format_decision_block(decision: Optional[object]) -> str:
     )
 
 
+def _format_market_quality_block(market_quality: Optional[object]) -> str:
+    """Render the Market Quality section for Underdog alerts (informational)."""
+    if market_quality is None:
+        return ""
+    label   = getattr(market_quality, "label",   None)
+    score   = getattr(market_quality, "score",   0)
+    reasons = getattr(market_quality, "reasons", ())
+    if label is None:
+        return ""
+    label_str  = label.value if hasattr(label, "value") else str(label)
+    filled     = round(score / 10)
+    bar        = "█" * filled + "░" * (10 - filled)
+    icon       = {"ELITE": "🥇", "HIGH": "🥈", "MEDIUM": "🥉", "LOW": "⚠️"}.get(label_str, "📊")
+    reason_str = "  •  ".join(reasons) if reasons else "Standard market"
+    return (
+        f"\n\n{icon} <b>Market Quality:</b>  {label_str}  "
+        f"<code>[{bar}]</code>  {score}/100"
+        f"\n   <i>{reason_str}</i>"
+    )
+
+
+def _format_market_pressure_block(market_pressure: Optional[object]) -> str:
+    """Render the Market Pressure warning section (display-only, never gates alerts)."""
+    if market_pressure is None:
+        return ""
+    if not getattr(market_pressure, "has_pressure", False):
+        return ""
+    level   = getattr(market_pressure, "pressure_level", "NONE")
+    reasons = getattr(market_pressure, "reasons",         ())
+    icon       = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🔵"}.get(level, "⚪")
+    reason_str = "  •  ".join(reasons) if reasons else ""
+    text = f"\n\n{icon} <b>Market Pressure:</b>  {level}"
+    if reason_str:
+        text += f"\n   <i>{reason_str}</i>"
+    return text
+
+
 def format_underdog_change_alert(
     player_name: str,
     team: str,
@@ -316,11 +353,14 @@ def format_underdog_change_alert(
     old_line: float,
     new_line: float,
     game_time: Optional[datetime] = None,
-    score: Optional[object] = None,       # UDPropScore — typed as object to avoid circular import
-    validation: Optional[object] = None,  # PlayerPropValidation — typed as object
-    decision: Optional[object] = None,    # UDBetDecision — typed as object
+    score: Optional[object] = None,           # UDPropScore — typed as object to avoid circular import
+    validation: Optional[object] = None,      # PlayerPropValidation — typed as object
+    decision: Optional[object] = None,        # UDBetDecision — typed as object
+    market_quality: Optional[object] = None,  # MarketQuality — display context
+    market_pressure: Optional[object] = None, # MarketPressureFlag — warning only
     *,
     removed: bool = False,
+    standing: bool = False,                   # True for evidence-driven alerts without line movement
 ) -> str:
     """Format an alert for an Underdog prop line change or removed prop.
 
@@ -336,6 +376,9 @@ def format_underdog_change_alert(
     if removed:
         header      = "🚫 <b>UNDERDOG PROP REMOVED</b>"
         change_line = f"  <b>Last Line:</b>  {old_line}"
+    elif standing:
+        header      = "🎯 <b>UNDERDOG STANDING PLAY</b>"
+        change_line = f"  <b>Current Line:</b>  {new_line}"
     else:
         change          = new_line - old_line
         direction_icon  = "📈" if change > 0 else "📉"
@@ -381,7 +424,9 @@ def format_underdog_change_alert(
         "",
         _div(),
         change_line + game_str + grade_str + validation_str
-        + _format_decision_block(decision),
+        + _format_decision_block(decision)
+        + _format_market_quality_block(market_quality)
+        + _format_market_pressure_block(market_pressure),
         "",
         f"{EMOJI['clock']} <i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>",
     ]
@@ -397,9 +442,11 @@ def format_underdog_new_prop_alert(
     stat_type: str,
     line_value: float,
     game_time: Optional[datetime] = None,
-    score: Optional[object] = None,       # UDPropScore
-    validation: Optional[object] = None,  # PlayerPropValidation
-    decision: Optional[object] = None,    # UDBetDecision
+    score: Optional[object] = None,           # UDPropScore
+    validation: Optional[object] = None,      # PlayerPropValidation
+    decision: Optional[object] = None,        # UDBetDecision
+    market_quality: Optional[object] = None,  # MarketQuality — display context
+    market_pressure: Optional[object] = None, # MarketPressureFlag — warning only
     *,
     low_line_threshold: float = 1.0,
 ) -> str:
@@ -463,7 +510,9 @@ def format_underdog_new_prop_alert(
         + game_str
         + grade_str
         + validation_str
-        + _format_decision_block(decision),
+        + _format_decision_block(decision)
+        + _format_market_quality_block(market_quality)
+        + _format_market_pressure_block(market_pressure),
         "",
         "<b>Reason:</b>",
         "\n".join(reasons),

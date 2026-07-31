@@ -1,0 +1,166 @@
+Now that the Underdog-only engine is stable, add the final intelligence layer for prop selection.
+
+Do not expand sportsbook functionality. Keep DraftKings/FanDuel/ML/totals disabled but preserve code.
+
+Goal:
+Turn the Underdog engine from a line-movement detector into a true prop selection system that prioritizes high-probability “green goblin” style plays.
+
+Implement only the following:
+
+1. Add Market Quality / Softness Score
+
+Create a market quality layer that evaluates how efficient or inefficient a prop market is.
+
+Consider:
+- Market liquidity
+- Historical movement frequency
+- Prop type difficulty
+- Sample size
+- Stability of outcomes
+
+Boost priority for:
+- MLB Hits
+- MLB Hits + Runs + RBIs
+- MLB Fantasy Score
+- WNBA Points/Rebounds/Assists/PRA
+- Tennis stable volume markets
+- Soccer volume markets
+- Other proven high-floor markets
+
+Penalize unless elite evidence supports:
+- HR 0.5
+- RBI 0.5
+- Stolen Bases 0.5
+- Low-frequency outcome props
+
+Do not remove markets. Adjust confidence/priority only.
+
+2. Add Market Pressure Flag
+
+Create a warning layer based on market behavior.
+
+Detect:
+- Fast line movement
+- Multiple line updates
+- Large movement
+- Market disappearing/removal risk
+
+Display as a warning only.
+
+Do NOT increase confidence because of market pressure.
+Do NOT create alerts based only on movement.
+
+3. Add Smart Movement Re-Evaluation
+
+When a meaningful Underdog line change occurs:
+
+Recalculate the full prop evaluation.
+
+Triggers:
+- New prop
+- Significant line movement
+- Player/status change if available
+- Matchup change if available
+
+Ignore:
+- Duplicate snapshots
+- Tiny meaningless changes
+
+The flow should be:
+
+Line change detected →
+Refresh evidence →
+Recalculate score →
+Apply market quality →
+Apply variance →
+Apply qualification rules →
+Alert only if qualified.
+
+4. Preserve current Underdog improvements
+
+Do not modify:
+- Historical Activity calibration
+- Drift velocity adjustment
+- Current evidence breakdown
+- S/A/B/PASS thresholds
+- Alert qualification thresholds
+
+Unless tests prove a change is required.
+
+4A. Prevent over-filtering / allow elite no-movement opportunities
+
+The engine should not require line movement as the primary reason for an alert.
+
+Allow qualified alerts from:
+- New Underdog props
+- Existing props with no meaningful movement
+- Line movement events
+
+ONLY when the full evidence profile supports it.
+
+For high-floor markets, allow the model to prioritize:
+- Strong hit rate
+- Strong consistency
+- Median outcome edge
+- Stable role/usage
+- Low variance
+
+Preferred markets:
+- MLB Hits
+- MLB Hits + Runs + RBIs
+- MLB Fantasy Score
+- WNBA Points/Rebounds/Assists/PRA
+- Tennis volume markets
+- Soccer volume markets
+
+Do NOT loosen standards for:
+- HR 0.5
+- RBI 0.5
+- Stolen Bases 0.5
+- Low-frequency outcome props
+
+Do not lower S/A/B/PASS thresholds globally.
+
+Goal:
+Avoid a situation where stacking multiple filters creates zero alerts. The engine should produce selective but realistic opportunities.
+
+5. Preserve Telegram behavior
+
+Keep:
+- Detailed qualified alerts only
+
+Alert format should include:
+- Player
+- Sport
+- Prop
+- Line movement
+- Grade
+- Confidence
+- Evidence table
+- Reason
+- Market Quality
+- Market Pressure warning if applicable
+
+Do NOT restore:
+- UNDERDOG NEW PROPS digest messages
+
+6. Testing and verification
+
+Do not break:
+- Telegram
+- /status
+- Underdog monitoring
+- Existing scoring logic
+- Disabled sportsbook architecture
+
+Run full test suite.
+
+Provide:
+- Tests passed
+- Active Underdog sports
+- Active prop markets
+- Example qualified/scored props
+- Confirmation only Underdog jobs are active
+- Confirmation Telegram only sends qualified signals
+
+Do not make unrelated changes.

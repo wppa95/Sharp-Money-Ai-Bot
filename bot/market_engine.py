@@ -503,10 +503,12 @@ async def underdog_job(context) -> None:
     _n_new_prop:      int       = 0   # first-appearance props detected this cycle
     _n_new_prop_sent:      int       = 0   # immediate new-prop alerts delivered
     _n_cold_start_scored: int       = 0   # props scored during the one-time cold-start pass
+    _n_standing_sent:      int       = 0   # standing opportunity alerts delivered (4A)
     _cold_start_records:  list       = []  # records buffered for bulk save at end of cold-start
     _cs_before_tiers:     dict       = {}  # tier counts under old calibration (before)
     _cs_after_tiers:      dict       = {}  # tier counts under new calibration (after)
     _scored_props:        list[dict] = []  # all scored props this cycle — for end-of-cycle debug log
+    _processed_keys:      set        = set()   # (player, stat_type) pairs handled in main loop
     # Batch for the end-of-cycle new-prop digest sent after the loop.
     # Each entry: {player, stat_type, sport, team, line, score, immediate, game_time}
     _new_props_batch: list[dict] = []
@@ -551,16 +553,20 @@ async def underdog_job(context) -> None:
         from engine.ud_scoring import (
             score_ud_prop, UDPropScore,
             _score_historical_activity_legacy,  # for cold-start before/after comparison
+            compute_market_quality, detect_market_pressure,
+            _HIGH_FLOOR_STATS,
         )
         from engine.player_validator import validate_player_prop
         from engine.ud_bet_decision import make_ud_bet_decision
         from alerts import DeliveryResult
-        score:        Optional[UDPropScore] = None
-        ud_result:    DeliveryResult        = DeliveryResult(sent=False)
-        np_immediate: bool                  = False   # set inside is_new_prop branch
-        validation:   Optional[object]      = None    # PlayerPropValidation or None
-        decision:     Optional[object]      = None    # UDBetDecision or None
-        hit_rates:    Optional[object]      = None    # PlayerHitRates or None
+        score:           Optional[UDPropScore] = None
+        ud_result:       DeliveryResult        = DeliveryResult(sent=False)
+        np_immediate:    bool                  = False   # set inside is_new_prop branch
+        validation:      Optional[object]      = None    # PlayerPropValidation or None
+        decision:        Optional[object]      = None    # UDBetDecision or None
+        hit_rates:       Optional[object]      = None    # PlayerHitRates or None
+        market_quality:  Optional[object]      = None    # MarketQuality — display context
+        market_pressure: Optional[object]      = None    # MarketPressureFlag — warning only
 
         if is_new_prop:
             # ── New-prop path ────────────────────────────────────────────────
@@ -577,6 +583,9 @@ async def underdog_job(context) -> None:
                 prev_line    = None,
                 history      = np_history,
             )
+            market_quality  = compute_market_quality(stat_type, line_val, score)
+            market_pressure = detect_market_pressure(None, np_history)
+            _processed_keys.add((player, stat_type))
             # Validation: require min supporting history before any immediate alert.
             # Props with zero history (first appearance) always go to digest.
             validation = validate_player_prop(
@@ -640,17 +649,19 @@ async def underdog_job(context) -> None:
             if _np_bet_ready and chat_ids:
                 delivery  = AlertDelivery(db, bot, chat_ids)
                 ud_result = await delivery.deliver_underdog(
-                    player_name = player,
-                    team        = snap.team or "",
-                    sport       = snap.sport,
-                    stat_type   = stat_type,
-                    old_line    = line_val,
-                    new_line    = line_val,
-                    game_time   = snap.game_time,
-                    score       = score,
-                    new_prop    = True,
-                    validation  = validation,
-                    decision    = decision,
+                    player_name     = player,
+                    team            = snap.team or "",
+                    sport           = snap.sport,
+                    stat_type       = stat_type,
+                    old_line        = line_val,
+                    new_line        = line_val,
+                    game_time       = snap.game_time,
+                    score           = score,
+                    new_prop        = True,
+                    validation      = validation,
+                    decision        = decision,
+                    market_quality  = market_quality,
+                    market_pressure = market_pressure,
                 )
                 if ud_result.sent:
                     _n_new_prop_sent += 1
@@ -713,6 +724,10 @@ async def underdog_job(context) -> None:
                     prev_line    = prev_line,
                     history      = ud_history,
                 )
+                _lc_magnitude   = abs(snap.line - prev_line) if (snap.line is not None and prev_line is not None) else None
+                market_quality  = compute_market_quality(stat_type, snap.line or 0.0, score)
+                market_pressure = detect_market_pressure(_lc_magnitude, ud_history)
+                _processed_keys.add((player, stat_type))
                 validation = validate_player_prop(
                     player_name  = player,
                     stat_type    = stat_type,
@@ -852,17 +867,19 @@ async def underdog_job(context) -> None:
             if should_alert and chat_ids:
                 delivery  = AlertDelivery(db, bot, chat_ids)
                 ud_result = await delivery.deliver_underdog(
-                    player_name = player,
-                    team        = snap.team or "",
-                    sport       = snap.sport,
-                    stat_type   = stat_type,
-                    old_line    = prev_line or (snap.line or 0.0),
-                    new_line    = snap.line or 0.0,
-                    game_time   = snap.game_time,
-                    score       = score,
-                    removed     = is_removed,
-                    validation  = validation,
-                    decision    = decision,
+                    player_name     = player,
+                    team            = snap.team or "",
+                    sport           = snap.sport,
+                    stat_type       = stat_type,
+                    old_line        = prev_line or (snap.line or 0.0),
+                    new_line        = snap.line or 0.0,
+                    game_time       = snap.game_time,
+                    score           = score,
+                    removed         = is_removed,
+                    validation      = validation,
+                    decision        = decision,
+                    market_quality  = market_quality,
+                    market_pressure = market_pressure,
                 )
                 if ud_result.filtered:
                     logger.debug(
@@ -930,6 +947,116 @@ async def underdog_job(context) -> None:
             _cold_start_records.append(record)
         else:
             await db.save_underdog_snapshot(record)
+
+    # ── 4A: Standing opportunity scan ─────────────────────────────────────────
+    # After cold-start, re-evaluate stable HIGH_FLOOR props that had no line
+    # change and are not new this cycle.  Allows evidence-driven (hit-rate-
+    # based) alerts without requiring a line-change event.
+    #
+    # Constraints to prevent alert spam:
+    #   • Only HIGH_FLOOR stat types in the betting-alert whitelist
+    #   • Must have previously scored A or S tier (from cold-start or prior cycles)
+    #   • No Underdog alert sent for this player/stat in the last 24 h
+    #   • Top 5 candidates per cycle (avoids hammering the stats API)
+    #   • Full scoring + validation + decision gate — same standard as live alerts
+    if not is_cold_start and chat_ids:
+        from engine.ud_scoring import (  # already imported above but local scope
+            compute_market_quality as _cmq,
+            detect_market_pressure as _dmp,
+            _HIGH_FLOOR_STATS as _HFS,
+        )
+        _standing_candidates: list = []
+        for _snap in ud_snaps:
+            if "[REMOVED]" in _snap.selection:
+                continue
+            _sp      = _snap.player or "Unknown"
+            _st      = _extract_ud_stat_type(_snap.selection, _snap.player, _snap.line)
+            _sport   = _snap.sport or "UNKNOWN"
+
+            if _st not in _HFS:
+                continue
+            if _sport not in config.ud_alert_sports:
+                continue
+            if (_sp, _st) in _processed_keys:
+                continue  # already handled in the main loop this cycle
+
+            _prev = recent_by_key.get((_sp, _st))
+            if _prev is None or _prev.score_tier not in ("A", "S"):
+                continue
+
+            _standing_candidates.append((_snap, _sp, _st, _sport, _prev))
+
+        # Sort by previous score descending, limit to top 5
+        _standing_candidates.sort(key=lambda x: x[4].score_total or 0, reverse=True)
+
+        for (_ssnap, _sp, _st, _ssport, _prev) in _standing_candidates[:5]:
+            _line_val = _ssnap.line or 0.0
+
+            # 24 h dedup — skip if already alerted today
+            if await db.has_recent_ud_alert(_sp, _st, within_seconds=86400):
+                continue
+
+            _shist = await db.get_ud_prop_history(_sp, _st, limit=30)
+            _sscore = score_ud_prop(
+                player_name  = _sp,
+                stat_type    = _st,
+                sport        = _ssport,
+                current_line = _line_val,
+                prev_line    = None,
+                history      = _shist,
+            )
+            _sval = validate_player_prop(
+                player_name  = _sp,
+                stat_type    = _st,
+                current_line = _line_val,
+                history      = _shist,
+                min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
+            )
+            if not _sval.has_supporting_data:
+                continue
+            if _sscore.stars < config.UD_MIN_STARS_TO_ALERT:
+                continue
+
+            _shits = await _fetch_and_compute_hit_rates(
+                db, _sp, _ssport, _st, _line_val
+            )
+            _sdec = make_ud_bet_decision(
+                score        = _sscore,
+                validation   = _sval,
+                current_line = _line_val,
+                prev_line    = None,
+                hit_rates    = _shits,
+            )
+            if _sdec is None or _sdec.recommendation == "PASS":
+                continue
+
+            _smq = _cmq(_st, _line_val, _sscore)
+            _smp = _dmp(None, _shist)
+            delivery   = AlertDelivery(db, bot, chat_ids)
+            _sresult   = await delivery.deliver_underdog(
+                player_name     = _sp,
+                team            = _ssnap.team or "",
+                sport           = _ssnap.sport,
+                stat_type       = _st,
+                old_line        = _line_val,
+                new_line        = _line_val,
+                game_time       = _ssnap.game_time,
+                score           = _sscore,
+                validation      = _sval,
+                decision        = _sdec,
+                market_quality  = _smq,
+                market_pressure = _smp,
+                standing        = True,
+            )
+            if _sresult.sent:
+                _n_standing_sent += 1
+                logger.info(
+                    "Underdog standing alert sent: %s | %s | %s | score=%d",
+                    _sp, _st, _ssport, _sscore.total,
+                )
+
+        if _n_standing_sent:
+            logger.info("underdog_job: standing opportunities fired — sent=%d", _n_standing_sent)
 
     # ── End-of-cycle new-prop digest — SUPPRESSED ─────────────────────────────
     # New props are silently stored and scored.  Telegram only receives a

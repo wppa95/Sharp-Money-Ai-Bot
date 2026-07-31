@@ -913,12 +913,15 @@ class AlertDelivery:
         old_line: float,
         new_line: float,
         game_time: "Optional[datetime]" = None,
-        score: "Optional[object]" = None,       # UDPropScore — typed as object to avoid import
-        validation: "Optional[object]" = None,  # PlayerPropValidation — typed as object
-        decision: "Optional[object]" = None,    # UDBetDecision — typed as object
+        score: "Optional[object]" = None,           # UDPropScore — typed as object to avoid import
+        validation: "Optional[object]" = None,      # PlayerPropValidation — typed as object
+        decision: "Optional[object]" = None,        # UDBetDecision — typed as object
+        market_quality: "Optional[object]" = None,  # MarketQuality — display context
+        market_pressure: "Optional[object]" = None, # MarketPressureFlag — warning only
         *,
         removed: bool = False,
         new_prop: bool = False,
+        standing: bool = False,  # True for evidence-driven alerts without line movement
     ) -> "DeliveryResult":
         """
         Full Underdog prop alert pipeline:
@@ -985,6 +988,8 @@ class AlertDelivery:
                 score=score,
                 validation=validation,
                 decision=decision,
+                market_quality=market_quality,
+                market_pressure=market_pressure,
                 low_line_threshold=config.UD_NEW_PROP_LOW_LINE_THRESHOLD,
             )
         else:
@@ -995,7 +1000,10 @@ class AlertDelivery:
                 score=score,
                 validation=validation,
                 decision=decision,
+                market_quality=market_quality,
+                market_pressure=market_pressure,
                 removed=removed,
+                standing=standing,
             )
 
         # 5. Broadcast

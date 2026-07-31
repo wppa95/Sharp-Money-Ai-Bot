@@ -911,6 +911,32 @@ class Database:
             )
             return list(result.scalars().all())
 
+    async def has_recent_ud_alert(
+        self,
+        player_name: str,
+        stat_type: str,
+        within_seconds: int = 86400,
+    ) -> bool:
+        """True if an Underdog alert was sent for this player+stat within *within_seconds*.
+
+        Used by the standing-opportunity scan (4A) to prevent re-alerting
+        the same prop more than once per day.
+        """
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(seconds=within_seconds)
+        async with self.session() as s:
+            result = await s.execute(
+                select(func.count())
+                .select_from(UnderdogSnapshotRecord)
+                .where(
+                    UnderdogSnapshotRecord.player_name == player_name,
+                    UnderdogSnapshotRecord.stat_type   == stat_type,
+                    UnderdogSnapshotRecord.alert_sent  == True,   # noqa: E712
+                    UnderdogSnapshotRecord.fetched_at  >= cutoff,
+                )
+            )
+            return (result.scalar() or 0) > 0
+
     async def has_recent_inefficiency_alert(
         self,
         event: str,
