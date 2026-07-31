@@ -256,11 +256,14 @@ class PropLineHistory(Base):
     game_id     = Column(String(64),  nullable=False, default="")
     fetched_at  = Column(DateTime,    default=datetime.utcnow, nullable=False)
     # Lifecycle columns (added via migration for existing databases)
-    first_seen   = Column(DateTime,   nullable=True)
-    last_seen    = Column(DateTime,   nullable=True)
-    change_count = Column(Integer,    default=0,     nullable=True)
-    prev_line    = Column(Float,      nullable=True)
-    removed      = Column(Boolean,    default=False, nullable=True)
+    first_seen         = Column(DateTime,   nullable=True)
+    last_seen          = Column(DateTime,   nullable=True)
+    change_count       = Column(Integer,    default=0,            nullable=True)
+    prev_line          = Column(Float,      nullable=True)
+    removed            = Column(Boolean,    default=False,        nullable=True)
+    # Alert lifecycle state — "DISCOVERED" | "ACTIVE_ALERTED" | "REMOVED"
+    lifecycle_state    = Column(String(16), default="DISCOVERED", nullable=True)
+    first_alert_sent_at = Column(DateTime, nullable=True)
 
 
 class AlertCLVSeed(Base):
@@ -952,6 +955,9 @@ class Database:
             "ALTER TABLE prop_line_history ADD COLUMN change_count INTEGER DEFAULT 0",
             "ALTER TABLE prop_line_history ADD COLUMN prev_line  REAL",
             "ALTER TABLE prop_line_history ADD COLUMN removed    INTEGER DEFAULT 0",
+            # Alert lifecycle state columns (v1.3)
+            "ALTER TABLE prop_line_history ADD COLUMN lifecycle_state TEXT DEFAULT 'DISCOVERED'",
+            "ALTER TABLE prop_line_history ADD COLUMN first_alert_sent_at DATETIME",
         ]
         async with self._engine.begin() as conn:
             for sql in new_cols:
@@ -959,6 +965,57 @@ class Database:
                     await conn.execute(text(sql))
                 except Exception:
                     pass  # column already exists — safe to ignore
+
+    async def update_prop_lifecycle_state(
+        self,
+        provider:    str,
+        player_name: str,
+        sport:       str,
+        stat_type:   str,
+        new_state:   str,
+        first_alert_sent_at: "Optional[datetime]" = None,
+    ) -> bool:
+        """
+        Update the lifecycle_state (and optionally first_alert_sent_at) on the
+        most-recent PropLineHistory row for this prop.
+
+        Lifecycle states:
+          DISCOVERED     — seen but not yet alerted
+          ACTIVE_ALERTED — at least one alert sent to user
+          REMOVED        — prop is no longer offered
+
+        Returns True if a row was found and updated, False otherwise.
+        """
+        from sqlalchemy import update as sa_update
+
+        async with self.session() as s:
+            # Find the most-recent row for this prop identity
+            result = await s.execute(
+                select(PropLineHistory)
+                .where(
+                    PropLineHistory.provider    == provider,
+                    PropLineHistory.player_name == player_name,
+                    PropLineHistory.sport       == sport,
+                    PropLineHistory.stat_type   == stat_type,
+                )
+                .order_by(desc(PropLineHistory.fetched_at))
+                .limit(1)
+            )
+            row = result.scalar_one_or_none()
+            if row is None:
+                return False
+
+            vals: dict = {"lifecycle_state": new_state}
+            if first_alert_sent_at is not None and row.first_alert_sent_at is None:
+                vals["first_alert_sent_at"] = first_alert_sent_at
+
+            await s.execute(
+                sa_update(PropLineHistory)
+                .where(PropLineHistory.id == row.id)
+                .values(**vals)
+            )
+            await s.commit()
+        return True
 
     async def count_prop_line_history(self, provider: Optional[str] = None) -> int:
         """Count PropLineHistory rows, optionally filtered by provider."""

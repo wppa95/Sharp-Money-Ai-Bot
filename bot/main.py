@@ -66,6 +66,8 @@ from commands import (
     cmd_config,
     cmd_calibration,
     cmd_pp_import,
+    cmd_health,
+    cmd_restarts,
     error_handler,
     init_handlers,
 )
@@ -86,6 +88,7 @@ from providers import init_health_monitor
 from providers.odds_cache import init_odds_cache
 from providers.game_results import OddsApiResultsProvider
 from providers.usage_tracker import init_usage_tracker, get_usage_tracker
+from engine.health import init_health_tracker, get_health_tracker
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -118,6 +121,13 @@ async def post_init(application: Application) -> None:
     logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     logger.info("  Sharp Money +EV Detection Bot — Starting Up")
     logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+    # ── Health tracker (must be first — jobs reference it) ────────────────────
+    _ht = init_health_tracker()
+    _ht.record_startup()
+    logger.info(
+        "HealthTracker initialised — startup #%d", _ht.restart_count()
+    )
 
     _db = Database(config.DATABASE_URL)
     await _db.init()
@@ -220,6 +230,8 @@ async def post_init(application: Application) -> None:
         jq.run_repeating(_clv_harvest_job,     interval=3600,                               first=300, name="clv_harvester")
         # API budget check — every 15 minutes
         jq.run_repeating(_budget_check_job,    interval=900,                                first=900, name="budget_checker")
+        # Heartbeat — every 60 s (keeps HealthTracker alive timestamp current)
+        jq.run_repeating(_heartbeat_job,       interval=60,                                 first=30,  name="heartbeat")
         # Season / market-status refresh (skip when interval is 0 = disabled)
         if config.SEASON_CHECK_INTERVAL > 0:
             jq.run_repeating(
@@ -229,7 +241,7 @@ async def post_init(application: Application) -> None:
                 name="season_checker",
             )
         logger.info(
-            "Jobs scheduled — underdog: every %ds, season_check: every %ds"
+            "Jobs scheduled — underdog: every %ds, season_check: every %ds, heartbeat: every 60s"
             " [sportsbook jobs disabled]",
             config.UNDERDOG_POLL_INTERVAL,
             config.SEASON_CHECK_INTERVAL,
@@ -245,6 +257,21 @@ async def post_shutdown(application: Application) -> None:
     if _db:
         await _db.close()
     logger.info("Shutdown complete. Goodbye.")
+
+
+# ── Heartbeat job ─────────────────────────────────────────────────────────────
+
+async def _heartbeat_job(context) -> None:
+    """Run every 60 s to keep the HealthTracker heartbeat timestamp current."""
+    ht = get_health_tracker()
+    if ht is None:
+        return
+    try:
+        ht.update_heartbeat()
+        ht.record_job_run("heartbeat_job")
+    except Exception as _exc:
+        logger.exception("_heartbeat_job: error: %s", _exc)
+        ht.record_job_fail("heartbeat_job", str(_exc))
 
 
 # ── Background jobs ────────────────────────────────────────────────────────────
@@ -534,17 +561,29 @@ async def _clv_harvest_job(context) -> None:
     data; until then it gracefully expires seeds it cannot resolve.
     """
     if _db is None:
+        # DB not ready — record as successful no-op so /health never shows "never ran"
+        _ht = get_health_tracker()
+        if _ht:
+            _ht.record_job_run("_clv_harvest_job")
         return
 
     try:
-        from engine.clv import compute_clv, CLVRecord as _CLVResult  # noqa: F401
+        from engine.clv import compute_clv
         from database import CLVRecord
-    except ImportError:
+    except ImportError as _imp_exc:
+        logger.warning("_clv_harvest_job: import failed — %s", _imp_exc)
+        _ht = get_health_tracker()
+        if _ht:
+            _ht.record_job_fail("_clv_harvest_job", f"ImportError: {_imp_exc}")
         return
 
     try:
         seeds = await _db.get_pending_clv_seeds(limit=50)
         if not seeds:
+            # Idle cycle — nothing to harvest; still counts as a successful run
+            _ht = get_health_tracker()
+            if _ht:
+                _ht.record_job_run("_clv_harvest_job")
             return
 
         harvested = 0
@@ -624,6 +663,14 @@ async def _clv_harvest_job(context) -> None:
 
     except Exception as exc:
         logger.exception("_clv_harvest_job: error: %s", exc)
+        _ht = get_health_tracker()
+        if _ht:
+            _ht.record_job_fail("_clv_harvest_job", str(exc))
+        return
+
+    _ht = get_health_tracker()
+    if _ht:
+        _ht.record_job_run("_clv_harvest_job")
 
 
 async def _clv_seed_job(context) -> None:
@@ -639,6 +686,10 @@ async def _clv_seed_job(context) -> None:
     these seeds, fetch closing odds, compute CLV%, and write clv_records.
     """
     if _db is None:
+        # DB not ready — record as successful no-op so /health never shows "never ran"
+        _ht = get_health_tracker()
+        if _ht:
+            _ht.record_job_run("_clv_seed_job")
         return
     try:
         ev_seeded = await _db.seed_clv_from_ev_records(limit=100)
@@ -648,8 +699,14 @@ async def _clv_seed_job(context) -> None:
                 "_clv_seed_job: seeded %d EV + %d Underdog alerts for CLV tracking",
                 ev_seeded, ud_seeded,
             )
+        _ht = get_health_tracker()
+        if _ht:
+            _ht.record_job_run("_clv_seed_job")
     except Exception as exc:
         logger.exception("_clv_seed_job: error during CLV seeding: %s", exc)
+        _ht = get_health_tracker()
+        if _ht:
+            _ht.record_job_fail("_clv_seed_job", str(exc))
 
 
 # ── API budget check job ───────────────────────────────────────────────────────
@@ -670,107 +727,127 @@ async def _budget_check_job(context) -> None:
     """
     _tracker = get_usage_tracker()
     if _tracker is None:
+        # Tracker not ready — record as successful no-op so /health never shows "never ran"
+        _ht = get_health_tracker()
+        if _ht:
+            _ht.record_job_run("_budget_check_job")
         return
 
     bot      = context.bot
     chat_ids = list(config.allowed_user_ids)
     if not chat_ids:
+        # No recipients configured — still a successful (no-op) run
+        _ht = get_health_tracker()
+        if _ht:
+            _ht.record_job_run("_budget_check_job")
         return
 
-    for provider, stats in _tracker.get_all_stats().items():
-        if stats.month_budget <= 0:
-            continue
+    try:
+        for provider, stats in _tracker.get_all_stats().items():
+            if stats.month_budget <= 0:
+                continue
 
-        alerted = _last_budget_alerted.setdefault(provider, set())
+            alerted = _last_budget_alerted.setdefault(provider, set())
 
-        for threshold in (75, 90, 100):
-            if stats.budget_pct >= threshold and threshold not in alerted:
-                alerted.add(threshold)
+            for threshold in (75, 90, 100):
+                if stats.budget_pct >= threshold and threshold not in alerted:
+                    alerted.add(threshold)
 
-                if threshold >= 100:
-                    icon    = "🚨"
-                    heading = "PACING BUDGET EXCEEDED"
-                elif threshold >= 90:
-                    icon    = "⚠️"
-                    heading = f"PACING BUDGET WARNING — {threshold}%"
-                else:
-                    icon    = "⚠️"
-                    heading = f"PACING BUDGET WARNING — {threshold}%"
+                    if threshold >= 100:
+                        icon    = "🚨"
+                        heading = "PACING BUDGET EXCEEDED"
+                    elif threshold >= 90:
+                        icon    = "⚠️"
+                        heading = f"PACING BUDGET WARNING — {threshold}%"
+                    else:
+                        icon    = "⚠️"
+                        heading = f"PACING BUDGET WARNING — {threshold}%"
 
-                # Pacing budget: how many calls made vs the self-imposed cap
-                pacing_used_str = (
-                    f"{stats.quota_used:,}"
-                    if stats.quota_used is not None
-                    else f"~{stats.month_count:,}"
-                )
-
-                # Actual OddsAPI plan quota from response headers (separate concept)
-                if stats.quota_remaining is not None or stats.quota_used is not None:
-                    r = f"{stats.quota_remaining:,}" if stats.quota_remaining is not None else "?"
-                    u = f"{stats.quota_used:,}"      if stats.quota_used      is not None else "?"
-                    api_quota_line = f"<b>API quota:</b>     {r} remaining  ·  {u} used\n"
-                else:
-                    api_quota_line = ""
-
-                # Sport breakdown — which UD alert sports are active
-                _sport_icons = {
-                    "MLB": "⚾", "WNBA": "🏀", "NBA": "🏀", "NFL": "🏈",
-                    "DOTA": "🎮", "CS": "🖥️", "TENNIS": "🎾",
-                }
-                ud_sports     = sorted(config.ud_alert_sports)
-                active_sp     = sorted(config.active_sports)
-                sport_lines   = "  ".join(
-                    f"{_sport_icons.get(s, '🔸')}{s}" for s in ud_sports
-                )
-                odds_api_sp   = "  ".join(
-                    f"{_sport_icons.get(s, '🔸')}{s}" for s in active_sp
-                ) or "none"
-
-                if threshold >= 100:
-                    blocking_section = (
-                        "<b>Blocked:</b>     LOW + MEDIUM priority calls\n"
-                        "<b>Protected:</b>   HIGH + CRITICAL — approved active sports\n"
+                    # Pacing budget: how many calls made vs the self-imposed cap
+                    pacing_used_str = (
+                        f"{stats.quota_used:,}"
+                        if stats.quota_used is not None
+                        else f"~{stats.month_count:,}"
                     )
-                    footer = (
-                        "This is your self-imposed pacing cap — the actual OddsAPI plan quota "
-                        "is not exhausted.\n"
-                        "Raise <code>ODDS_API_MONTHLY_BUDGET</code> to allow more calls."
-                    )
-                elif threshold >= 90:
-                    blocking_section = (
-                        "<b>Blocked:</b>     LOW priority calls\n"
-                        "<b>Protected:</b>   HIGH + CRITICAL — approved active sports\n"
-                    )
-                    footer = "Monitor closely before the end of the month."
-                else:
-                    blocking_section = ""
-                    footer = "Approaching pacing cap. Monitor before the end of the month."
 
-                msg = (
-                    f"{icon} <b>{heading}</b>\n"
-                    f"\n"
-                    f"<b>Provider:</b>      {provider}\n"
-                    f"<b>Pacing budget:</b> {pacing_used_str} / {stats.month_budget:,}"
-                    f"  ({stats.budget_pct:.1f}%)\n"
-                    f"<b>Pacing bar:</b>    <code>{stats.budget_bar}</code>\n"
-                    f"{api_quota_line}"
-                    f"\n"
-                    f"{blocking_section}"
-                    f"\n"
-                    f"<b>Alert sports:</b>  {sport_lines}\n"
-                    f"<b>Odds API scope:</b> {odds_api_sp}\n"
-                    f"<i>(DOTA / TENNIS / CS use external APIs — not affected by this cap)</i>\n"
-                    f"\n"
-                    f"<i>{footer}</i>"
-                )
+                    # Actual OddsAPI plan quota from response headers (separate concept)
+                    if stats.quota_remaining is not None or stats.quota_used is not None:
+                        r = f"{stats.quota_remaining:,}" if stats.quota_remaining is not None else "?"
+                        u = f"{stats.quota_used:,}"      if stats.quota_used      is not None else "?"
+                        api_quota_line = f"<b>API quota:</b>     {r} remaining  ·  {u} used\n"
+                    else:
+                        api_quota_line = ""
 
-                await broadcast_alert(bot, chat_ids, msg)
-                logger.warning(
-                    "_budget_check_job: %s crossed %d%% pacing threshold "
-                    "(used=%s / pacing_budget=%d, api_quota_remaining=%s)",
-                    provider, threshold, pacing_used_str, stats.month_budget,
-                    stats.quota_remaining if stats.quota_remaining is not None else "unknown",
-                )
+                    # Sport breakdown — which UD alert sports are active
+                    _sport_icons = {
+                        "MLB": "⚾", "WNBA": "🏀", "NBA": "🏀", "NFL": "🏈",
+                        "DOTA": "🎮", "CS": "🖥️", "TENNIS": "🎾",
+                    }
+                    ud_sports     = sorted(config.ud_alert_sports)
+                    active_sp     = sorted(config.active_sports)
+                    sport_lines   = "  ".join(
+                        f"{_sport_icons.get(s, '🔸')}{s}" for s in ud_sports
+                    )
+                    odds_api_sp   = "  ".join(
+                        f"{_sport_icons.get(s, '🔸')}{s}" for s in active_sp
+                    ) or "none"
+
+                    if threshold >= 100:
+                        blocking_section = (
+                            "<b>Blocked:</b>     LOW + MEDIUM priority calls\n"
+                            "<b>Protected:</b>   HIGH + CRITICAL — approved active sports\n"
+                        )
+                        footer = (
+                            "This is your self-imposed pacing cap — the actual OddsAPI plan quota "
+                            "is not exhausted.\n"
+                            "Raise <code>ODDS_API_MONTHLY_BUDGET</code> to allow more calls."
+                        )
+                    elif threshold >= 90:
+                        blocking_section = (
+                            "<b>Blocked:</b>     LOW priority calls\n"
+                            "<b>Protected:</b>   HIGH + CRITICAL — approved active sports\n"
+                        )
+                        footer = "Monitor closely before the end of the month."
+                    else:
+                        blocking_section = ""
+                        footer = "Approaching pacing cap. Monitor before the end of the month."
+
+                    msg = (
+                        f"{icon} <b>{heading}</b>\n"
+                        f"\n"
+                        f"<b>Provider:</b>      {provider}\n"
+                        f"<b>Pacing budget:</b> {pacing_used_str} / {stats.month_budget:,}"
+                        f"  ({stats.budget_pct:.1f}%)\n"
+                        f"<b>Pacing bar:</b>    <code>{stats.budget_bar}</code>\n"
+                        f"{api_quota_line}"
+                        f"\n"
+                        f"{blocking_section}"
+                        f"\n"
+                        f"<b>Alert sports:</b>  {sport_lines}\n"
+                        f"<b>Odds API scope:</b> {odds_api_sp}\n"
+                        f"<i>(DOTA / TENNIS / CS use external APIs — not affected by this cap)</i>\n"
+                        f"\n"
+                        f"<i>{footer}</i>"
+                    )
+
+                    await broadcast_alert(bot, chat_ids, msg)
+                    logger.warning(
+                        "_budget_check_job: %s crossed %d%% pacing threshold "
+                        "(used=%s / pacing_budget=%d, api_quota_remaining=%s)",
+                        provider, threshold, pacing_used_str, stats.month_budget,
+                        stats.quota_remaining if stats.quota_remaining is not None else "unknown",
+                    )
+
+    except Exception as _exc:
+        logger.exception("_budget_check_job: error: %s", _exc)
+        _ht = get_health_tracker()
+        if _ht:
+            _ht.record_job_fail("_budget_check_job", str(_exc))
+        return
+
+    _ht = get_health_tracker()
+    if _ht:
+        _ht.record_job_run("_budget_check_job")
 
 
 # ── Season / market-status refresh job ────────────────────────────────────────
@@ -784,8 +861,21 @@ async def _season_check_job(context) -> None:
     checker and leave the previous cache value intact (fail-open).
     """
     if _season_checker is None:
+        # Checker not ready — record as successful no-op so /health never shows "never ran"
+        _ht = get_health_tracker()
+        if _ht:
+            _ht.record_job_run("_season_check_job")
         return
-    await _season_checker.refresh()
+    try:
+        await _season_checker.refresh()
+        _ht = get_health_tracker()
+        if _ht:
+            _ht.record_job_run("_season_check_job")
+    except Exception as exc:
+        logger.exception("_season_check_job: error: %s", exc)
+        _ht = get_health_tracker()
+        if _ht:
+            _ht.record_job_fail("_season_check_job", str(exc))
 
 
 # ── Player-prop odds fetching job ─────────────────────────────────────────────
@@ -1066,6 +1156,8 @@ def main() -> None:
     app.add_handler(CommandHandler("config",       cmd_config))
     app.add_handler(CommandHandler("calibration",  cmd_calibration))
     app.add_handler(CommandHandler("pp_import",    cmd_pp_import))
+    app.add_handler(CommandHandler("health",       cmd_health))
+    app.add_handler(CommandHandler("restarts",     cmd_restarts))
     app.add_error_handler(error_handler)
 
     logger.info("Starting polling — press Ctrl+C to stop.")

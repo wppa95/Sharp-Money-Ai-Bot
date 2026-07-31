@@ -301,6 +301,38 @@ All settings in `bot/config.py` — override via environment variables:
 
 ---
 
+## v1.3 Stability Architecture
+
+Implemented as part of the v1.3 freeze (Task #70). No new features — hardening only.
+
+### HealthTracker (`bot/engine/health.py`)
+- JSON-backed singleton (`bot/data/health.json`); survives restarts without DB dependency
+- Tracks: restart count + history (last 20), per-job last_run/last_fail/last_error, heartbeat timestamp, provider fetch/error streaks, last Telegram send time
+- `init_health_tracker()` called once in `post_init`; `get_health_tracker()` used by jobs and commands
+- Heartbeat job runs every 60 s; `/health` and `/restarts` commands expose full detail
+
+### PropLineHistory lifecycle states
+- New columns: `lifecycle_state` (DISCOVERED / ACTIVE_ALERTED / REMOVED), `first_alert_sent_at`
+- Added via `_migrate_prop_line_history()` — idempotent, safe for existing DBs
+- `update_prop_lifecycle_state()` DB method updates the most-recent row per prop identity
+- `underdog_job` calls it after any successful alert delivery (state → ACTIVE_ALERTED)
+
+### Score validation (`bot/engine/score_validation.py`)
+- `clamp_score(value, label, min_=0, max_=100)` — clamps and logs WARNING if clamping occurred
+- Used wherever `score.total`, `score.stars`, or `ai_confidence` are stored
+
+### Command hardening
+- `cmd_status` wrapped in top-level try/except returning safe error message
+- `cmd_health` and `cmd_restarts` both hardened; `/health` shows job health with fail streaks
+- All new commands registered and exported; `/status` extended with Scheduler section
+- `/help` updated to include `/health` and `/restarts`
+
+### Job health tracking
+- `underdog_job` — records provider fetch success/error + job run/fail
+- `_clv_seed_job`, `_clv_harvest_job`, `_season_check_job` — all wrapped with health recording
+
+---
+
 ## Architecture decisions
 
 - **`engine/` package shadows `engine.py`** — Python resolves packages before modules. `AnalysisEngine` lives in `engine/analysis.py`, exported via `engine/__init__.py`. The original `engine.py` is dead code (tracked as task #5).

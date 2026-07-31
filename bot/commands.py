@@ -139,123 +139,226 @@ def _fmt_provider_status_line(provider_name: str, display_name: str) -> str:
     return f"  {display_name}:  ⚪ not tracked"
 
 
+async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/health — show background job health: last run, last error per job."""
+    if not _check_allowed(update):
+        await update.message.reply_text("⛔ Unauthorized.")
+        return
+    try:
+        from engine.health import get_health_tracker
+        ht = get_health_tracker()
+        if ht is None:
+            await update.message.reply_text("⚠️ Health tracker not initialised.")
+            return
+
+        lines: list[str] = [
+            "❤️ <b>Bot Health</b>",
+            "",
+            f"Uptime:      {_uptime_str()}",
+            f"Heartbeat:   {ht.heartbeat_age_str()}",
+            f"Last startup: {ht.last_startup() or '—'}",
+            "",
+            "<b>📋 Background Jobs</b>",
+        ]
+
+        _JOB_LABELS = {
+            "underdog_job":        "Underdog monitor",
+            "_clv_seed_job":       "CLV seeder",
+            "_clv_harvest_job":    "CLV harvester",
+            "_budget_check_job":   "Budget checker",
+            "_season_check_job":   "Season checker",
+        }
+
+        jobs = ht.get_all_jobs()
+        for jid, label in _JOB_LABELS.items():
+            info = jobs.get(jid, {})
+            last_run   = ht.job_last_run_str(jid)
+            fail_streak = info.get("fail_streak", 0)
+            icon = "✅" if fail_streak == 0 else "⚠️" if fail_streak < 3 else "🚨"
+            line = f"  {icon} <b>{label}</b>  ·  last run: {last_run}"
+            if fail_streak:
+                line += f"  ·  fails: {fail_streak}"
+            lines.append(line)
+            last_err = info.get("last_error")
+            if last_err:
+                lines.append(f"      ↳ {last_err[:80]}")
+
+        # Provider health
+        lines.append("")
+        lines.append("<b>📡 Providers</b>")
+        for provider in ("Underdog",):
+            info = ht.get_provider_info(provider)
+            if info:
+                last_fetch = ht.provider_last_fetch_str(provider)
+                streak = info.get("error_streak", 0)
+                icon = "✅" if streak == 0 else "⚠️" if streak < 3 else "🚨"
+                lines.append(
+                    f"  {icon} <b>{provider}</b>  ·  last fetch: {last_fetch}"
+                    + (f"  ·  err streak: {streak}" if streak else "")
+                )
+            else:
+                lines.append(f"  ⚪ <b>{provider}</b>  ·  not yet fetched")
+
+        last_err_global = ht.last_error()
+        if last_err_global:
+            lines.append("")
+            lines.append(f"⚠️ <b>Last error:</b> {last_err_global[:120]}")
+            ts = ht.last_error_ts()
+            if ts:
+                lines.append(f"   at {ts}")
+
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+    except Exception as exc:
+        logger.exception("cmd_health: unexpected error: %s", exc)
+        await update.message.reply_text("⚠️ /health failed. Check bot logs.")
+
+
+async def cmd_restarts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/restarts — show bot restart count and recent restart history."""
+    if not _check_allowed(update):
+        await update.message.reply_text("⛔ Unauthorized.")
+        return
+    try:
+        from engine.health import get_health_tracker
+        ht = get_health_tracker()
+        if ht is None:
+            await update.message.reply_text("⚠️ Health tracker not initialised.")
+            return
+
+        count   = ht.restart_count()
+        history = ht.restart_history()
+
+        lines: list[str] = [
+            f"🔄 <b>Bot Restarts</b>",
+            "",
+            f"Total restarts: <b>{count}</b>",
+            f"Last startup:   {ht.last_startup() or '—'}",
+        ]
+
+        if history:
+            lines.append("")
+            lines.append(f"<b>Recent history</b> (last {len(history)}):")
+            for entry in reversed(history[-10:]):
+                ts     = entry.get("ts", "?")
+                reason = entry.get("reason", "normal")
+                lines.append(f"  · {ts}  <i>{reason}</i>")
+        else:
+            lines.append("")
+            lines.append("<i>No restart history recorded yet.</i>")
+
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+    except Exception as exc:
+        logger.exception("cmd_restarts: unexpected error: %s", exc)
+        await update.message.reply_text("⚠️ /restarts failed. Check bot logs.")
+
+
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/status — show bot and market status."""
     if not _check_allowed(update):
         await update.message.reply_text("⛔ Unauthorized.")
         return
-
-    # DB counts
-    total_steam = await _db.count_steam_records() if _db else 0
-    total_ev    = await _db.count_ev_records() if _db else 0
-    db_records  = await _db.count_odds_records() if _db else 0
-    # Load provider health monitor and odds cache singletons
     try:
-        from providers import get_health_monitor
-        from providers.odds_cache import get_odds_cache
-        _mon   = get_health_monitor()
-        _cache = get_odds_cache()
-    except ImportError:
-        _mon   = None
-        _cache = None
+        # DB counts
+        total_steam = await _db.count_steam_records() if _db else 0
+        total_ev    = await _db.count_ev_records() if _db else 0
+        db_records  = await _db.count_odds_records() if _db else 0
+        # Load provider health monitor and odds cache singletons
+        try:
+            from providers import get_health_monitor
+            from providers.odds_cache import get_odds_cache
+            _mon   = get_health_monitor()
+            _cache = get_odds_cache()
+        except ImportError:
+            _mon   = None
+            _cache = None
 
-    lines: list[str] = [
-        f"🤖 <b>Sharp Money Bot</b>  ·  Uptime: {_uptime_str()}",
-        f"📬 Alerts sent: {_total_alerts_sent:,}",
-        "",
-    ]
+        lines: list[str] = [
+            f"🤖 <b>Sharp Money Bot</b>  ·  Uptime: {_uptime_str()}",
+            f"📬 Alerts sent: {_total_alerts_sent:,}",
+            "",
+        ]
 
-    # ── Data provider health ──────────────────────────────────────────────────
-    lines.append("📡 <b>Data Providers</b>")
-    if _mon:
-        for name, h in _mon.get_all_health().items():
-            if name == "PrizePicks":
-                continue  # PP provider temporarily disabled
-            last_ok   = h.format_last_success()
-            fail_note = (
-                f"  ({h.consecutive_failures} fail{'s' if h.consecutive_failures != 1 else ''})"
-                if h.consecutive_failures else ""
-            )
-            lines.append(
-                f"  {h.status_emoji} <b>{name}</b>  {h.status.value}"
-                f"  ·  last ✓: {last_ok}{fail_note}"
-            )
-        # OddsAPI quota/pacing stats hidden — sportsbook polling disabled.
-        # To restore: uncomment the block below when re-enabling sportsbook jobs.
-        # odds_h = _mon.get_health("OddsAPI")
-        # if odds_h.quota_remaining is not None or odds_h.quota_used is not None:
-        #     r = f"{odds_h.quota_remaining:,}" if odds_h.quota_remaining is not None else "?"
-        #     u = f"{odds_h.quota_used:,}"      if odds_h.quota_used      is not None else "?"
-        #     lines.append(f"  ↳ API quota:  {r} remaining  ·  {u} used")
-        # try:
-        #     from providers.usage_tracker import get_usage_tracker as _get_tracker
-        #     _ut = _get_tracker()
-        #     if _ut is not None:
-        #         _us = _ut.get_stats("OddsAPI")
-        #         if _us.month_budget > 0:
-        #             _pacing_used = (
-        #                 f"{_us.quota_used:,}" if _us.quota_used is not None
-        #                 else f"~{_us.month_count:,}"
-        #             )
-        #             lines.append(
-        #                 f"  ↳ Pacing:     {_pacing_used} / {_us.month_budget:,}"
-        #                 f"  ({_us.budget_pct:.1f}%)  <code>{_us.budget_bar}</code>"
-        #             )
-        # except Exception:
-        #     pass
-    else:
-        lines.append("  ⚪ Underdog     not yet tracked")
-    lines.append("")
-
-    # ── Odds API cache stats — hidden while sportsbook polling is disabled ────
-    # To restore: uncomment when re-enabling sportsbook jobs.
-    # if _cache:
-    #     st  = _cache.stats()
-    #     tot = st["hits"] + st["misses"]
-    #     hr  = f"{st['hit_rate'] * 100:.0f}%" if tot > 0 else "—"
-    #     lines.append(
-    #         f"⛽ <b>Odds API Cache</b>  TTL {st['ttl_seconds']}s"
-    #         f"  ·  {st['hits']} hits / {st['misses']} misses  ({hr})"
-    #     )
-    #     lines.append("")
-
-    # ── Active sports from season checker ─────────────────────────────────────
-    if _season_checker and hasattr(_season_checker, "get_sport_summary"):
-        summary = _season_checker.get_sport_summary()  # type: ignore[union-attr]
-        if summary:
-            active   = [k for k, v in summary.items() if v]
-            inactive = [k for k, v in summary.items() if not v]
-            lines.append(f"🏈 <b>Active Sports</b>  ({len(active)}/{len(summary)} in season)")
-            if active:
-                short_active = [k.split("_")[-1].upper()[:6] for k in active[:14]]
-                lines.append(
-                    f"  In season:  {' · '.join(short_active)}"
-                    f"{'…' if len(active) > 14 else ''}"
+        # ── Data provider health ──────────────────────────────────────────────────
+        lines.append("📡 <b>Data Providers</b>")
+        if _mon:
+            for name, h in _mon.get_all_health().items():
+                if name == "PrizePicks":
+                    continue  # PP provider temporarily disabled
+                last_ok   = h.format_last_success()
+                fail_note = (
+                    f"  ({h.consecutive_failures} fail{'s' if h.consecutive_failures != 1 else ''})"
+                    if h.consecutive_failures else ""
                 )
-            if inactive:
-                short_inactive = [k.split("_")[-1].upper()[:6] for k in inactive[:8]]
                 lines.append(
-                    f"  Off season: {' · '.join(short_inactive)}"
-                    f"{'…' if len(inactive) > 8 else ''}"
+                    f"  {h.status_emoji} <b>{name}</b>  {h.status.value}"
+                    f"  ·  last ✓: {last_ok}{fail_note}"
                 )
-            lines.append("")
         else:
-            lines.append("🏈 <b>Active Sports</b>  <i>(cache not yet populated)</i>")
-            lines.append("")
+            lines.append("  ⚪ Underdog     not yet tracked")
+        lines.append("")
 
-    # ── Database ──────────────────────────────────────────────────────────────
-    total_prop_history = await _db.count_prop_line_history() if _db else 0
-    lines.append("📊 <b>Database Records</b>")
-    lines.append(f"  Odds: {db_records:,}  ·  Steam: {total_steam:,}  ·  EV: {total_ev:,}")
-    if total_prop_history:
-        ud_history  = await _db.count_prop_line_history(provider="Underdog") if _db else 0
-        pp_history  = await _db.count_prop_line_history(provider="PrizePicks") if _db else 0
-        lines.append(
-            f"  PropLineHistory: {total_prop_history:,}"
-            + (f"  (UD:{ud_history:,}  PP:{pp_history:,})" if ud_history or pp_history else "")
-        )
+        # ── Scheduler / job health ─────────────────────────────────────────────
+        try:
+            from engine.health import get_health_tracker as _get_ht
+            _ht = _get_ht()
+            if _ht:
+                hb_age = _ht.heartbeat_age_str()
+                lines.append(f"⚙️ <b>Scheduler</b>  ·  heartbeat: {hb_age}")
+                _JOB_LABELS_SHORT = {
+                    "underdog_job":     "UD monitor",
+                    "_clv_seed_job":    "CLV seed",
+                    "_clv_harvest_job": "CLV harvest",
+                }
+                for jid, label in _JOB_LABELS_SHORT.items():
+                    info = _ht.get_job_info(jid)
+                    last_run = _ht.job_last_run_str(jid)
+                    streak   = info.get("fail_streak", 0)
+                    icon     = "✅" if streak == 0 else "⚠️" if streak < 3 else "🚨"
+                    lines.append(f"  {icon} {label}  last: {last_run}")
+                lines.append("")
+        except Exception:
+            pass
 
-    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+        # ── Active sports from season checker ─────────────────────────────────────
+        if _season_checker and hasattr(_season_checker, "get_sport_summary"):
+            summary = _season_checker.get_sport_summary()  # type: ignore[union-attr]
+            if summary:
+                active   = [k for k, v in summary.items() if v]
+                inactive = [k for k, v in summary.items() if not v]
+                lines.append(f"🏈 <b>Active Sports</b>  ({len(active)}/{len(summary)} in season)")
+                if active:
+                    short_active = [k.split("_")[-1].upper()[:6] for k in active[:14]]
+                    lines.append(
+                        f"  In season:  {' · '.join(short_active)}"
+                        f"{'…' if len(active) > 14 else ''}"
+                    )
+                if inactive:
+                    short_inactive = [k.split("_")[-1].upper()[:6] for k in inactive[:8]]
+                    lines.append(
+                        f"  Off season: {' · '.join(short_inactive)}"
+                        f"{'…' if len(inactive) > 8 else ''}"
+                    )
+                lines.append("")
+            else:
+                lines.append("🏈 <b>Active Sports</b>  <i>(cache not yet populated)</i>")
+                lines.append("")
+
+        # ── Database ──────────────────────────────────────────────────────────────
+        total_prop_history = await _db.count_prop_line_history() if _db else 0
+        lines.append("📊 <b>Database Records</b>")
+        lines.append(f"  Odds: {db_records:,}  ·  Steam: {total_steam:,}  ·  EV: {total_ev:,}")
+        if total_prop_history:
+            ud_history  = await _db.count_prop_line_history(provider="Underdog") if _db else 0
+            pp_history  = await _db.count_prop_line_history(provider="PrizePicks") if _db else 0
+            lines.append(
+                f"  PropLineHistory: {total_prop_history:,}"
+                + (f"  (UD:{ud_history:,}  PP:{pp_history:,})" if ud_history or pp_history else "")
+            )
+
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+    except Exception as exc:
+        logger.exception("cmd_status: unexpected error: %s", exc)
+        await update.message.reply_text("⚠️ /status failed. Check bot logs.")
 
 
 async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

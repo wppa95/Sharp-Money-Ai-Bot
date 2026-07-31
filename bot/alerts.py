@@ -27,6 +27,7 @@ from telegram.constants import ParseMode
 from telegram.error import TelegramError
 
 from config import config
+from engine.score_validation import clamp_score
 from models import EVOpportunity, Recommendation, SteamAlert
 
 if TYPE_CHECKING:
@@ -437,6 +438,42 @@ def format_status_message(
     ])
 
 
+def format_ud_removal_alert(
+    player_name: str,
+    sport: str,
+    stat_type: str,
+    last_line: float,
+    first_seen: "Optional[datetime]" = None,
+    last_seen: "Optional[datetime]" = None,
+    first_alert_sent_at: "Optional[datetime]" = None,
+    reason: str = "pulled from board",
+) -> str:
+    """Format a removal alert for an Underdog prop that was previously alerted."""
+    _fmt_dt = lambda dt: dt.strftime("%b %-d %H:%M UTC") if dt else "—"
+
+    duration_str = "—"
+    if first_seen and last_seen:
+        secs = int((last_seen - first_seen).total_seconds())
+        if secs < 3600:
+            duration_str = f"{secs // 60}m"
+        else:
+            duration_str = f"{secs // 3600}h {(secs % 3600) // 60}m"
+
+    return "\n".join([
+        f"🚫 <b>UNDERDOG PROP REMOVED</b>",
+        f"",
+        f"<b>{player_name}</b>  ·  {sport}  ·  {stat_type}",
+        f"Last line:       <b>{last_line:.1f}</b>",
+        f"",
+        f"First seen:      {_fmt_dt(first_seen)}",
+        f"Last seen:       {_fmt_dt(last_seen)}",
+        f"Duration:        {duration_str}",
+        f"Originally alerted: {_fmt_dt(first_alert_sent_at)}",
+        f"",
+        f"Reason: <i>{reason}</i>",
+    ])
+
+
 def format_help_message() -> str:
     return "\n".join([
         f"{EMOJI['robot']} <b>Sharp Money +EV Bot — Commands</b>",
@@ -471,6 +508,8 @@ def format_help_message() -> str:
         "<b>⚙️ System</b>",
         f"  /start      — Welcome message",
         f"  /status     — Bot uptime, provider health, database counts",
+        f"  /health     — Job health: last run / last error per background job",
+        f"  /restarts   — Bot restart count and recent restart history",
         f"  /providers  — Per-sport data provider status (MLB/WNBA/DOTA/Tennis/CS2)",
         f"  /config     — Active configuration and alert scope (no secrets shown)",
         f"  /testalert  — Send a mock alert to verify Telegram delivery",
@@ -1058,7 +1097,7 @@ class AlertDelivery:
             fair_probability=opp.fair_probability,
             expected_value=opp.expected_value,
             steam_score=opp.steam_score,
-            ai_confidence=opp.ai_confidence,
+            ai_confidence=clamp_score(opp.ai_confidence, "ev.ai_confidence", 0, 100),
             recommendation=opp.recommendation.value,
             stars=opp.stars,
             reason_codes=",".join(opp.reason_codes),

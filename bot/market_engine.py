@@ -35,6 +35,8 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from config import config
+from engine.health import get_health_tracker
+from engine.score_validation import clamp_score
 from database import (
     Database,
     MarketSnapshotRecord,
@@ -488,12 +490,34 @@ async def underdog_job(context) -> None:
     chat_ids = list(config.allowed_user_ids)
     now      = datetime.utcnow()
 
-    snapshots = await _registry.fetch_pickem()
-    if not snapshots:
-        logger.debug("underdog_job: no pick'em snapshots")
+    _health = get_health_tracker()
+
+    try:
+        snapshots = await _registry.fetch_pickem()
+    except Exception as _fetch_exc:
+        if _health:
+            _health.record_provider_error("Underdog", str(_fetch_exc))
+            _health.record_job_fail("underdog_job", str(_fetch_exc))
+        logger.exception("underdog_job: fetch_pickem failed: %s", _fetch_exc)
         return
 
+    if not snapshots:
+        logger.debug("underdog_job: no pick'em snapshots")
+        if _health:
+            _health.record_provider_fetch("Underdog")
+            _health.record_job_run("underdog_job")   # empty response = successful run
+        return
+
+    if _health:
+        _health.record_provider_fetch("Underdog")
+
     ud_snaps = [s for s in snapshots if s.sportsbook == "Underdog"]
+
+    if not ud_snaps:
+        logger.debug("underdog_job: no Underdog pick'em snapshots in response")
+        if _health:
+            _health.record_job_run("underdog_job")
+        return
 
     # Summary counters — emitted as a single INFO line after the loop
     _n_scored:        int       = 0
@@ -512,349 +536,189 @@ async def underdog_job(context) -> None:
     # Batch for the end-of-cycle new-prop digest sent after the loop.
     # Each entry: {player, stat_type, sport, team, line, score, immediate, game_time}
     _new_props_batch: list[dict] = []
+    # Lifecycle state queues — populated during loop, applied AFTER bridge so
+    # PropLineHistory rows exist before we try to update them.
+    _lifecycle_alerted:  list[tuple[str, str, str]] = []   # (player, sport, stat_type) → ACTIVE_ALERTED
+    _lifecycle_removed:  list[tuple[str, str, str]] = []   # (player, sport, stat_type) → REMOVED
 
-    # Two DB round-trips before the loop — both O(unique props), no LIMIT.
-    # 1. Most-recent non-removed snapshot per (player, stat) for line-change detection.
-    # 2. All ever-seen (player, stat) keys (incl. removed) to detect first appearances.
-    recent_by_key: dict[tuple[str, str], UnderdogSnapshotRecord] = (
-        await db.get_latest_underdog_snapshot_per_prop()
-    )
-    known_keys: set[tuple[str, str]] = await db.get_known_underdog_prop_keys()
-
-    for snap in ud_snaps:
-        is_removed = "[REMOVED]" in snap.selection
-        if is_removed:
-            _n_removed += 1
-        player     = snap.player or "Unknown"
-
-        # Extract the stable stat-type category from the selection string
-        stat_type = _extract_ud_stat_type(snap.selection, snap.player, snap.line)
-
-        # Detect first-ever appearance: (player, stat) not in DB at all yet
-        is_new_prop = not is_removed and (player, stat_type) not in known_keys
-
-        # Look up the previous record for this player + stat combo
-        prev_record  = recent_by_key.get((player, stat_type))
-        line_changed = False
-        prev_line: Optional[float] = None
-
-        if prev_record is not None and snap.line is not None:
-            if prev_record.line_value != snap.line:
-                line_changed = True
-                prev_line    = prev_record.line_value
-
-        should_alert = is_removed or (
-            line_changed
-            and prev_line is not None
-            and abs(snap.line - prev_line) >= config.MIN_UNDERDOG_LINE_CHANGE
+    try:
+        # Two DB round-trips before the loop — both O(unique props), no LIMIT.
+        # 1. Most-recent non-removed snapshot per (player, stat) for line-change detection.
+        # 2. All ever-seen (player, stat) keys (incl. removed) to detect first appearances.
+        recent_by_key: dict[tuple[str, str], UnderdogSnapshotRecord] = (
+            await db.get_latest_underdog_snapshot_per_prop()
         )
-
-        # ── Scoring gate ─────────────────────────────────────────────────────
-        from engine.ud_scoring import (
-            score_ud_prop, UDPropScore,
-            _score_historical_activity_legacy,  # for cold-start before/after comparison
-            compute_market_quality, detect_market_pressure,
-            _HIGH_FLOOR_STATS,
-        )
-        from engine.player_validator import validate_player_prop
-        from engine.ud_bet_decision import make_ud_bet_decision
-        from alerts import DeliveryResult
-        score:           Optional[UDPropScore] = None
-        ud_result:       DeliveryResult        = DeliveryResult(sent=False)
-        np_immediate:    bool                  = False   # set inside is_new_prop branch
-        validation:      Optional[object]      = None    # PlayerPropValidation or None
-        decision:        Optional[object]      = None    # UDBetDecision or None
-        hit_rates:       Optional[object]      = None    # PlayerHitRates or None
-        market_quality:  Optional[object]      = None    # MarketQuality — display context
-        market_pressure: Optional[object]      = None    # MarketPressureFlag — warning only
-
-        if is_new_prop:
-            # ── New-prop path ────────────────────────────────────────────────
-            _n_new_prop += 1
-            line_val = snap.line or 0.0
-            # Load history even for new props — needed for validation gate.
-            # Truly first-ever props return empty list → validation blocks alert.
-            np_history = await db.get_ud_prop_history(player, stat_type, limit=30)
-            score = score_ud_prop(
-                player_name  = player,
-                stat_type    = stat_type,
-                sport        = snap.sport or "UNKNOWN",
-                current_line = line_val,
-                prev_line    = None,
-                history      = np_history,
+        known_keys: set[tuple[str, str]] = await db.get_known_underdog_prop_keys()
+    
+        for snap in ud_snaps:
+            is_removed = "[REMOVED]" in snap.selection
+            if is_removed:
+                _n_removed += 1
+            player     = snap.player or "Unknown"
+    
+            # Extract the stable stat-type category from the selection string
+            stat_type = _extract_ud_stat_type(snap.selection, snap.player, snap.line)
+    
+            # Detect first-ever appearance: (player, stat) not in DB at all yet
+            is_new_prop = not is_removed and (player, stat_type) not in known_keys
+    
+            # Look up the previous record for this player + stat combo
+            prev_record  = recent_by_key.get((player, stat_type))
+            line_changed = False
+            prev_line: Optional[float] = None
+    
+            if prev_record is not None and snap.line is not None:
+                if prev_record.line_value != snap.line:
+                    line_changed = True
+                    prev_line    = prev_record.line_value
+    
+            should_alert = is_removed or (
+                line_changed
+                and prev_line is not None
+                and abs(snap.line - prev_line) >= config.MIN_UNDERDOG_LINE_CHANGE
             )
-            market_quality  = compute_market_quality(stat_type, line_val, score)
-            market_pressure = detect_market_pressure(None, np_history)
-            _processed_keys.add((player, stat_type))
-            # Validation: require min supporting history before any immediate alert.
-            # Props with zero history (first appearance) always go to digest.
-            validation = validate_player_prop(
-                player_name  = player,
-                stat_type    = stat_type,
-                current_line = line_val,
-                history      = np_history,
-                min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
+    
+            # ── Scoring gate ─────────────────────────────────────────────────────
+            from engine.ud_scoring import (
+                score_ud_prop, UDPropScore,
+                _score_historical_activity_legacy,  # for cold-start before/after comparison
+                compute_market_quality, detect_market_pressure,
+                _HIGH_FLOOR_STATS,
             )
-            # Immediate criteria (strict):
-            #   - 0.5 line AND supported betting category
-            #   - OR score reaches quality threshold
-            np_immediate = (
-                (line_val <= config.UD_NEW_PROP_IMMEDIATE_LINE_THRESHOLD
-                 and stat_type in config.UD_PRIORITY_STAT_CATEGORIES)
-                or score.stars >= config.UD_MIN_STARS_TO_ALERT
-            )
-            # Validation gate: block if insufficient player history
-            if np_immediate and not validation.has_supporting_data:
-                np_immediate = False
-                logger.debug(
-                    "UD new-prop validation blocked: %s | %s | %s",
-                    player, stat_type, validation.reason,
-                )
-            # Fetch real game results — required before any directional pick.
-            # Also fetch for np_immediate props (e.g. 0.5-line priority stats)
-            # even when they score PASS tier (no prev_line → low movement score).
-            hit_rates = None
-            if validation.has_supporting_data and (score.tier != "PASS" or np_immediate):
-                hit_rates = await _fetch_and_compute_hit_rates(
-                    db, player, snap.sport or "UNKNOWN", stat_type, line_val
-                )
-                decision = make_ud_bet_decision(
-                    score        = score,
-                    validation   = validation,
-                    current_line = line_val,
-                    prev_line    = None,
-                    hit_rates    = hit_rates,
-                )
-            # Always add to the cycle batch — even blocked props appear in digest
-            _new_props_batch.append({
-                "player":     player,
-                "stat_type":  stat_type,
-                "sport":      snap.sport or "UNKNOWN",
-                "team":       snap.team or "",
-                "line":       line_val,
-                "score":      score,
-                "immediate":  np_immediate,
-                "game_time":  snap.game_time,
-                "validation": validation,
-                "decision":   decision,
-            })
-            # Send only when: S/A score, real directional pick, and sport is
-            # in the betting-alert whitelist (NBA/NFL are tracking-only).
-            _np_bet_ready = (
-                np_immediate
-                and decision is not None
-                and decision.recommendation != "PASS"
-                and (snap.sport or "UNKNOWN") in config.ud_alert_sports
-            )
-            if _np_bet_ready and chat_ids:
-                delivery  = AlertDelivery(db, bot, chat_ids)
-                ud_result = await delivery.deliver_underdog(
-                    player_name     = player,
-                    team            = snap.team or "",
-                    sport           = snap.sport,
-                    stat_type       = stat_type,
-                    old_line        = line_val,
-                    new_line        = line_val,
-                    game_time       = snap.game_time,
-                    score           = score,
-                    new_prop        = True,
-                    validation      = validation,
-                    decision        = decision,
-                    market_quality  = market_quality,
-                    market_pressure = market_pressure,
-                )
-                if ud_result.sent:
-                    _n_new_prop_sent += 1
-                elif ud_result.filtered:
-                    logger.debug(
-                        "Underdog new-prop filtered: %s | %s | %s",
-                        player, stat_type, ud_result.filtered_reason,
-                    )
-            # ── Debug tracking (new-prop) ─────────────────────────────────────
-            if score is not None:
-                if _np_bet_ready:
-                    _np_rej = "sent" if ud_result.sent else (
-                        "filtered" if ud_result.filtered else "new_prop_failed"
-                    )
-                elif not np_immediate:
-                    _np_rej = (
-                        "validation_blocked" if not validation.has_supporting_data
-                        else "not_immediate"
-                    )
-                elif decision is None:
-                    _np_rej = "no_decision"
-                elif decision.recommendation == "PASS":
-                    _np_rej = "decision_pass"
-                    logger.info(
-                        "UD decision_pass [new]: %s | %s | %s | line=%.1f"
-                        " | %d★ %d/100 | reason=%s"
-                        " | l5=%s l10=%s games=%s val_data=%s",
-                        player, stat_type, snap.sport or "UNKNOWN", line_val,
-                        score.stars, score.total,
-                        decision.reason,
-                        (f"{decision.l5_hit_rate:.0%}({decision.l5_games}g)"
-                         if decision.l5_hit_rate is not None else "N/A"),
-                        (f"{decision.l10_hit_rate:.0%}({decision.l10_games}g)"
-                         if decision.l10_hit_rate is not None else "N/A"),
-                        (hit_rates.total_games if hit_rates is not None else "no_data"),
-                        getattr(validation, "has_supporting_data", "?"),
-                    )
-                elif (snap.sport or "UNKNOWN") not in config.ud_alert_sports:
-                    _np_rej = f"sport_blocked ({snap.sport})"
-                else:
-                    _np_rej = "unknown"
-                _scored_props.append({
-                    "player":          player,
-                    "stat_type":       stat_type,
-                    "sport":           snap.sport or "UNKNOWN",
-                    "total":           score.total,
-                    "tier":            score.tier,
-                    "stars":           score.stars,
-                    "stars_d":         getattr(score, "stars_display", "?????"),
-                    "rejection":       _np_rej,
-                    "path":            "new",
-                    "decision_reason": (decision.reason if decision is not None else None),
-                    # ── component breakdown ──────────────────────────────
-                    "vel":       score.move_velocity,
-                    "act":       score.historical_activity,
-                    "avg":       score.avg_vs_line,
-                    "con":       score.consistency,
-                    "sta":       score.stability,
-                    "n":         score.n_history,
-                    "line":      score.current_line,
-                })
-
-        else:
-            # ── Line-change / removal path (existing logic) ──────────────────
-            # Score line-change props that pass the raw magnitude pre-filter.
-            # Removal notices bypass scoring and always qualify.
-            if not is_removed and line_changed and prev_line is not None:
-                # Load limit=30 to cover L30 validation window as well as scoring
-                ud_history = await db.get_ud_prop_history(player, stat_type, limit=30)
+            from engine.player_validator import validate_player_prop
+            from engine.ud_bet_decision import make_ud_bet_decision
+            from alerts import DeliveryResult
+            score:           Optional[UDPropScore] = None
+            ud_result:       DeliveryResult        = DeliveryResult(sent=False)
+            np_immediate:    bool                  = False   # set inside is_new_prop branch
+            validation:      Optional[object]      = None    # PlayerPropValidation or None
+            decision:        Optional[object]      = None    # UDBetDecision or None
+            hit_rates:       Optional[object]      = None    # PlayerHitRates or None
+            market_quality:  Optional[object]      = None    # MarketQuality — display context
+            market_pressure: Optional[object]      = None    # MarketPressureFlag — warning only
+    
+            if is_new_prop:
+                # ── New-prop path ────────────────────────────────────────────────
+                _n_new_prop += 1
+                line_val = snap.line or 0.0
+                # Load history even for new props — needed for validation gate.
+                # Truly first-ever props return empty list → validation blocks alert.
+                np_history = await db.get_ud_prop_history(player, stat_type, limit=30)
                 score = score_ud_prop(
                     player_name  = player,
                     stat_type    = stat_type,
                     sport        = snap.sport or "UNKNOWN",
-                    current_line = snap.line or 0.0,
-                    prev_line    = prev_line,
-                    history      = ud_history,
+                    current_line = line_val,
+                    prev_line    = None,
+                    history      = np_history,
                 )
-                _lc_magnitude   = abs(snap.line - prev_line) if (snap.line is not None and prev_line is not None) else None
-                market_quality  = compute_market_quality(stat_type, snap.line or 0.0, score)
-                market_pressure = detect_market_pressure(_lc_magnitude, ud_history)
+                market_quality  = compute_market_quality(stat_type, line_val, score)
+                market_pressure = detect_market_pressure(None, np_history)
                 _processed_keys.add((player, stat_type))
+                # Validation: require min supporting history before any immediate alert.
+                # Props with zero history (first appearance) always go to digest.
                 validation = validate_player_prop(
                     player_name  = player,
                     stat_type    = stat_type,
-                    current_line = snap.line or 0.0,
-                    history      = ud_history,
+                    current_line = line_val,
+                    history      = np_history,
                     min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
                 )
-                # Fetch real game results — required before any directional pick
+                # Immediate criteria (strict):
+                #   - 0.5 line AND supported betting category
+                #   - OR score reaches quality threshold
+                np_immediate = (
+                    (line_val <= config.UD_NEW_PROP_IMMEDIATE_LINE_THRESHOLD
+                     and stat_type in config.UD_PRIORITY_STAT_CATEGORIES)
+                    or score.stars >= config.UD_MIN_STARS_TO_ALERT
+                )
+                # Validation gate: block if insufficient player history
+                if np_immediate and not validation.has_supporting_data:
+                    np_immediate = False
+                    logger.debug(
+                        "UD new-prop validation blocked: %s | %s | %s",
+                        player, stat_type, validation.reason,
+                    )
+                # Fetch real game results — required before any directional pick.
+                # Also fetch for np_immediate props (e.g. 0.5-line priority stats)
+                # even when they score PASS tier (no prev_line → low movement score).
                 hit_rates = None
-                if validation.has_supporting_data and score.tier != "PASS":
+                if validation.has_supporting_data and (score.tier != "PASS" or np_immediate):
                     hit_rates = await _fetch_and_compute_hit_rates(
-                        db, player, snap.sport or "UNKNOWN", stat_type, snap.line or 0.0
+                        db, player, snap.sport or "UNKNOWN", stat_type, line_val
                     )
                     decision = make_ud_bet_decision(
                         score        = score,
                         validation   = validation,
-                        current_line = snap.line or 0.0,
-                        prev_line    = prev_line,
+                        current_line = line_val,
+                        prev_line    = None,
                         hit_rates    = hit_rates,
                     )
-                _n_scored += 1
-                _tier_counts[score.tier] = _tier_counts.get(score.tier, 0) + 1
-                logger.debug(
-                    "UD score: %s | %s | %s (tier=%s stars=%d n=%d has_data=%s)",
-                    player, stat_type, score.total, score.tier, score.stars,
-                    score.n_history, validation.has_supporting_data,
-                )
-
-            elif not is_removed and is_cold_start:
-                # ── Cold-start path ───────────────────────────────────────────
-                # First cycle only: score every active prop so the DB has fresh
-                # tier / stars / validation data from startup.  hit_rates are
-                # intentionally skipped — fetching them for ~1000 props on boot
-                # would hammer the stats API; they are populated lazily on the
-                # first qualifying incremental event.  No alerts are sent.
-                ud_history = await db.get_ud_prop_history(player, stat_type, limit=30)
-                score = score_ud_prop(
-                    player_name        = player,
-                    stat_type          = stat_type,
-                    sport              = snap.sport or "UNKNOWN",
-                    current_line       = snap.line or 0.0,
-                    prev_line          = None,   # no change event — baseline score
-                    history            = ud_history,
-                    use_drift_velocity = True,   # cumulative drift from earliest known line
-                )
-                validation = validate_player_prop(
-                    player_name  = player,
-                    stat_type    = stat_type,
-                    current_line = snap.line or 0.0,
-                    history      = ud_history,
-                    min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
-                )
-                # ── Before/after tier comparison for the completion log ───────
-                _legacy_act   = _score_historical_activity_legacy(ud_history)
-                _legacy_total = 0 + _legacy_act + score.avg_vs_line + score.consistency + score.stability
-                if   _legacy_total >= 80: _legacy_tier = "S"
-                elif _legacy_total >= 65: _legacy_tier = "A"
-                elif _legacy_total >= 50: _legacy_tier = "B"
-                else:                     _legacy_tier = "PASS"
-                _cs_before_tiers[_legacy_tier] = _cs_before_tiers.get(_legacy_tier, 0) + 1
-                _cs_after_tiers[score.tier]    = _cs_after_tiers.get(score.tier, 0) + 1
-
-                _n_cold_start_scored += 1
-                _tier_counts[score.tier] = _tier_counts.get(score.tier, 0) + 1
-
-            # Qualify for alert delivery.
-            # Removal notices: only Telegram-alert for three conditions.
-            # All removals are still saved to the DB regardless.
-            if is_removed:
-                # Removal alerts: only for props that previously triggered a
-                # quality alert or reached S/A grade (B-tier removals suppressed).
-                is_qualified = (
-                    prev_record is not None and (
-                        prev_record.alert_sent                   # previously sent a quality alert
-                        or prev_record.score_tier in ("S", "A") # S/A grade only — B suppressed
-                    )
-                )
-            else:
-                # Line-change props: require A-tier or better, a real directional
-                # pick from the decision engine, and sport in betting whitelist.
-                # Cold-start props always fail this gate — alerts suppressed.
-                is_qualified = (
-                    not is_cold_start
-                    and score is not None
-                    and score.stars >= config.UD_MIN_STARS_TO_ALERT
+                # Always add to the cycle batch — even blocked props appear in digest
+                _new_props_batch.append({
+                    "player":     player,
+                    "stat_type":  stat_type,
+                    "sport":      snap.sport or "UNKNOWN",
+                    "team":       snap.team or "",
+                    "line":       line_val,
+                    "score":      score,
+                    "immediate":  np_immediate,
+                    "game_time":  snap.game_time,
+                    "validation": validation,
+                    "decision":   decision,
+                })
+                # Send only when: S/A score, real directional pick, and sport is
+                # in the betting-alert whitelist (NBA/NFL are tracking-only).
+                _np_bet_ready = (
+                    np_immediate
                     and decision is not None
                     and decision.recommendation != "PASS"
                     and (snap.sport or "UNKNOWN") in config.ud_alert_sports
                 )
-                if is_qualified:
-                    _n_qualified += 1
-                # ── Debug tracking (line-change / cold-start) ─────────────────
+                if _np_bet_ready and chat_ids:
+                    delivery  = AlertDelivery(db, bot, chat_ids)
+                    ud_result = await delivery.deliver_underdog(
+                        player_name     = player,
+                        team            = snap.team or "",
+                        sport           = snap.sport,
+                        stat_type       = stat_type,
+                        old_line        = line_val,
+                        new_line        = line_val,
+                        game_time       = snap.game_time,
+                        score           = score,
+                        new_prop        = True,
+                        validation      = validation,
+                        decision        = decision,
+                        market_quality  = market_quality,
+                        market_pressure = market_pressure,
+                    )
+                    if ud_result.sent:
+                        _n_new_prop_sent += 1
+                    elif ud_result.filtered:
+                        logger.debug(
+                            "Underdog new-prop filtered: %s | %s | %s",
+                            player, stat_type, ud_result.filtered_reason,
+                        )
+                # ── Debug tracking (new-prop) ─────────────────────────────────────
                 if score is not None:
-                    if is_cold_start:
-                        _lc_rej = "cold_start"
-                    elif is_qualified:
-                        _lc_rej = "qualified"
-                    elif score.stars < config.UD_MIN_STARS_TO_ALERT:
-                        _lc_rej = (
-                            f"below_threshold"
-                            f" ({score.stars}★ < {config.UD_MIN_STARS_TO_ALERT}★)"
+                    if _np_bet_ready:
+                        _np_rej = "sent" if ud_result.sent else (
+                            "filtered" if ud_result.filtered else "new_prop_failed"
+                        )
+                    elif not np_immediate:
+                        _np_rej = (
+                            "validation_blocked" if not validation.has_supporting_data
+                            else "not_immediate"
                         )
                     elif decision is None:
-                        _lc_rej = "no_decision (PASS tier)"
+                        _np_rej = "no_decision"
                     elif decision.recommendation == "PASS":
-                        _lc_rej = "decision_pass"
+                        _np_rej = "decision_pass"
                         logger.info(
-                            "UD decision_pass [lc]: %s | %s | %s | line=%.1f"
+                            "UD decision_pass [new]: %s | %s | %s | line=%.1f"
                             " | %d★ %d/100 | reason=%s"
                             " | l5=%s l10=%s games=%s val_data=%s",
-                            player, stat_type, snap.sport or "UNKNOWN",
-                            snap.line or 0.0,
+                            player, stat_type, snap.sport or "UNKNOWN", line_val,
                             score.stars, score.total,
                             decision.reason,
                             (f"{decision.l5_hit_rate:.0%}({decision.l5_games}g)"
@@ -865,9 +729,9 @@ async def underdog_job(context) -> None:
                             getattr(validation, "has_supporting_data", "?"),
                         )
                     elif (snap.sport or "UNKNOWN") not in config.ud_alert_sports:
-                        _lc_rej = f"sport_blocked ({snap.sport})"
+                        _np_rej = f"sport_blocked ({snap.sport})"
                     else:
-                        _lc_rej = "unknown"
+                        _np_rej = "unknown"
                     _scored_props.append({
                         "player":          player,
                         "stat_type":       stat_type,
@@ -876,8 +740,8 @@ async def underdog_job(context) -> None:
                         "tier":            score.tier,
                         "stars":           score.stars,
                         "stars_d":         getattr(score, "stars_display", "?????"),
-                        "rejection":       _lc_rej,
-                        "path":            "cs" if is_cold_start else "lc",
+                        "rejection":       _np_rej,
+                        "path":            "new",
                         "decision_reason": (decision.reason if decision is not None else None),
                         # ── component breakdown ──────────────────────────────
                         "vel":       score.move_velocity,
@@ -888,318 +752,497 @@ async def underdog_job(context) -> None:
                         "n":         score.n_history,
                         "line":      score.current_line,
                     })
-
-            should_alert = is_qualified and (is_removed or (
-                line_changed
-                and prev_line is not None
-                and abs(snap.line - prev_line) >= config.MIN_UNDERDOG_LINE_CHANGE
-            ))
-
-            if should_alert and chat_ids:
-                delivery  = AlertDelivery(db, bot, chat_ids)
-                ud_result = await delivery.deliver_underdog(
-                    player_name     = player,
-                    team            = snap.team or "",
-                    sport           = snap.sport,
-                    stat_type       = stat_type,
-                    old_line        = prev_line or (snap.line or 0.0),
-                    new_line        = snap.line or 0.0,
-                    game_time       = snap.game_time,
-                    score           = score,
-                    removed         = is_removed,
-                    validation      = validation,
-                    decision        = decision,
-                    market_quality  = market_quality,
-                    market_pressure = market_pressure,
-                )
-                if ud_result.filtered:
-                    logger.debug(
-                        "Underdog alert filtered: %s | %s | %s",
-                        player, stat_type, ud_result.filtered_reason,
+    
+            else:
+                # ── Line-change / removal path (existing logic) ──────────────────
+                # Score line-change props that pass the raw magnitude pre-filter.
+                # Removal notices bypass scoring and always qualify.
+                if not is_removed and line_changed and prev_line is not None:
+                    # Load limit=30 to cover L30 validation window as well as scoring
+                    ud_history = await db.get_ud_prop_history(player, stat_type, limit=30)
+                    score = score_ud_prop(
+                        player_name  = player,
+                        stat_type    = stat_type,
+                        sport        = snap.sport or "UNKNOWN",
+                        current_line = snap.line or 0.0,
+                        prev_line    = prev_line,
+                        history      = ud_history,
                     )
-
-        # Resolve alert_outcome for historical analysis
-        if is_new_prop:
+                    _lc_magnitude   = abs(snap.line - prev_line) if (snap.line is not None and prev_line is not None) else None
+                    market_quality  = compute_market_quality(stat_type, snap.line or 0.0, score)
+                    market_pressure = detect_market_pressure(_lc_magnitude, ud_history)
+                    _processed_keys.add((player, stat_type))
+                    validation = validate_player_prop(
+                        player_name  = player,
+                        stat_type    = stat_type,
+                        current_line = snap.line or 0.0,
+                        history      = ud_history,
+                        min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
+                    )
+                    # Fetch real game results — required before any directional pick
+                    hit_rates = None
+                    if validation.has_supporting_data and score.tier != "PASS":
+                        hit_rates = await _fetch_and_compute_hit_rates(
+                            db, player, snap.sport or "UNKNOWN", stat_type, snap.line or 0.0
+                        )
+                        decision = make_ud_bet_decision(
+                            score        = score,
+                            validation   = validation,
+                            current_line = snap.line or 0.0,
+                            prev_line    = prev_line,
+                            hit_rates    = hit_rates,
+                        )
+                    _n_scored += 1
+                    _tier_counts[score.tier] = _tier_counts.get(score.tier, 0) + 1
+                    logger.debug(
+                        "UD score: %s | %s | %s (tier=%s stars=%d n=%d has_data=%s)",
+                        player, stat_type, score.total, score.tier, score.stars,
+                        score.n_history, validation.has_supporting_data,
+                    )
+    
+                elif not is_removed and is_cold_start:
+                    # ── Cold-start path ───────────────────────────────────────────
+                    # First cycle only: score every active prop so the DB has fresh
+                    # tier / stars / validation data from startup.  hit_rates are
+                    # intentionally skipped — fetching them for ~1000 props on boot
+                    # would hammer the stats API; they are populated lazily on the
+                    # first qualifying incremental event.  No alerts are sent.
+                    ud_history = await db.get_ud_prop_history(player, stat_type, limit=30)
+                    score = score_ud_prop(
+                        player_name        = player,
+                        stat_type          = stat_type,
+                        sport              = snap.sport or "UNKNOWN",
+                        current_line       = snap.line or 0.0,
+                        prev_line          = None,   # no change event — baseline score
+                        history            = ud_history,
+                        use_drift_velocity = True,   # cumulative drift from earliest known line
+                    )
+                    validation = validate_player_prop(
+                        player_name  = player,
+                        stat_type    = stat_type,
+                        current_line = snap.line or 0.0,
+                        history      = ud_history,
+                        min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
+                    )
+                    # ── Before/after tier comparison for the completion log ───────
+                    _legacy_act   = _score_historical_activity_legacy(ud_history)
+                    _legacy_total = 0 + _legacy_act + score.avg_vs_line + score.consistency + score.stability
+                    if   _legacy_total >= 80: _legacy_tier = "S"
+                    elif _legacy_total >= 65: _legacy_tier = "A"
+                    elif _legacy_total >= 50: _legacy_tier = "B"
+                    else:                     _legacy_tier = "PASS"
+                    _cs_before_tiers[_legacy_tier] = _cs_before_tiers.get(_legacy_tier, 0) + 1
+                    _cs_after_tiers[score.tier]    = _cs_after_tiers.get(score.tier, 0) + 1
+    
+                    _n_cold_start_scored += 1
+                    _tier_counts[score.tier] = _tier_counts.get(score.tier, 0) + 1
+    
+                # Qualify for alert delivery.
+                # Removal notices: only Telegram-alert for three conditions.
+                # All removals are still saved to the DB regardless.
+                if is_removed:
+                    # Removal alerts: only for props that previously triggered a
+                    # quality alert or reached S/A grade (B-tier removals suppressed).
+                    is_qualified = (
+                        prev_record is not None and (
+                            prev_record.alert_sent                   # previously sent a quality alert
+                            or prev_record.score_tier in ("S", "A") # S/A grade only — B suppressed
+                        )
+                    )
+                else:
+                    # Line-change props: require A-tier or better, a real directional
+                    # pick from the decision engine, and sport in betting whitelist.
+                    # Cold-start props always fail this gate — alerts suppressed.
+                    is_qualified = (
+                        not is_cold_start
+                        and score is not None
+                        and score.stars >= config.UD_MIN_STARS_TO_ALERT
+                        and decision is not None
+                        and decision.recommendation != "PASS"
+                        and (snap.sport or "UNKNOWN") in config.ud_alert_sports
+                    )
+                    if is_qualified:
+                        _n_qualified += 1
+                    # ── Debug tracking (line-change / cold-start) ─────────────────
+                    if score is not None:
+                        if is_cold_start:
+                            _lc_rej = "cold_start"
+                        elif is_qualified:
+                            _lc_rej = "qualified"
+                        elif score.stars < config.UD_MIN_STARS_TO_ALERT:
+                            _lc_rej = (
+                                f"below_threshold"
+                                f" ({score.stars}★ < {config.UD_MIN_STARS_TO_ALERT}★)"
+                            )
+                        elif decision is None:
+                            _lc_rej = "no_decision (PASS tier)"
+                        elif decision.recommendation == "PASS":
+                            _lc_rej = "decision_pass"
+                            logger.info(
+                                "UD decision_pass [lc]: %s | %s | %s | line=%.1f"
+                                " | %d★ %d/100 | reason=%s"
+                                " | l5=%s l10=%s games=%s val_data=%s",
+                                player, stat_type, snap.sport or "UNKNOWN",
+                                snap.line or 0.0,
+                                score.stars, score.total,
+                                decision.reason,
+                                (f"{decision.l5_hit_rate:.0%}({decision.l5_games}g)"
+                                 if decision.l5_hit_rate is not None else "N/A"),
+                                (f"{decision.l10_hit_rate:.0%}({decision.l10_games}g)"
+                                 if decision.l10_hit_rate is not None else "N/A"),
+                                (hit_rates.total_games if hit_rates is not None else "no_data"),
+                                getattr(validation, "has_supporting_data", "?"),
+                            )
+                        elif (snap.sport or "UNKNOWN") not in config.ud_alert_sports:
+                            _lc_rej = f"sport_blocked ({snap.sport})"
+                        else:
+                            _lc_rej = "unknown"
+                        _scored_props.append({
+                            "player":          player,
+                            "stat_type":       stat_type,
+                            "sport":           snap.sport or "UNKNOWN",
+                            "total":           score.total,
+                            "tier":            score.tier,
+                            "stars":           score.stars,
+                            "stars_d":         getattr(score, "stars_display", "?????"),
+                            "rejection":       _lc_rej,
+                            "path":            "cs" if is_cold_start else "lc",
+                            "decision_reason": (decision.reason if decision is not None else None),
+                            # ── component breakdown ──────────────────────────────
+                            "vel":       score.move_velocity,
+                            "act":       score.historical_activity,
+                            "avg":       score.avg_vs_line,
+                            "con":       score.consistency,
+                            "sta":       score.stability,
+                            "n":         score.n_history,
+                            "line":      score.current_line,
+                        })
+    
+                should_alert = is_qualified and (is_removed or (
+                    line_changed
+                    and prev_line is not None
+                    and abs(snap.line - prev_line) >= config.MIN_UNDERDOG_LINE_CHANGE
+                ))
+    
+                if should_alert and chat_ids:
+                    delivery  = AlertDelivery(db, bot, chat_ids)
+                    ud_result = await delivery.deliver_underdog(
+                        player_name     = player,
+                        team            = snap.team or "",
+                        sport           = snap.sport,
+                        stat_type       = stat_type,
+                        old_line        = prev_line or (snap.line or 0.0),
+                        new_line        = snap.line or 0.0,
+                        game_time       = snap.game_time,
+                        score           = score,
+                        removed         = is_removed,
+                        validation      = validation,
+                        decision        = decision,
+                        market_quality  = market_quality,
+                        market_pressure = market_pressure,
+                    )
+                    if ud_result.filtered:
+                        logger.debug(
+                            "Underdog alert filtered: %s | %s | %s",
+                            player, stat_type, ud_result.filtered_reason,
+                        )
+    
+            # Queue lifecycle transitions — applied after bridge so PropLineHistory rows exist
             if ud_result.sent:
-                _alert_outcome: Optional[str] = "new_prop_sent"
+                _sport_key = snap.sport or "UNKNOWN"
+                if is_removed:
+                    _lifecycle_removed.append((player, _sport_key, stat_type))
+                else:
+                    _lifecycle_alerted.append((player, _sport_key, stat_type))
+    
+            # Resolve alert_outcome for historical analysis
+            if is_new_prop:
+                if ud_result.sent:
+                    _alert_outcome: Optional[str] = "new_prop_sent"
+                elif ud_result.filtered:
+                    _alert_outcome = f"new_prop_filtered:{ud_result.filtered_reason}"[:64]
+                elif np_immediate:
+                    _alert_outcome = "new_prop_failed"      # tried but delivery failed
+                else:
+                    _alert_outcome = "new_prop_summary"     # in cycle digest, no individual alert
+            elif not should_alert:
+                if is_removed:
+                    _alert_outcome = "removal_skipped"
+                elif is_cold_start and score is not None:
+                    _alert_outcome = "cold_start_scored"
+                else:
+                    _alert_outcome = "skipped"
+            elif ud_result.sent:
+                _alert_outcome = "removal_sent" if is_removed else "sent"
             elif ud_result.filtered:
-                _alert_outcome = f"new_prop_filtered:{ud_result.filtered_reason}"[:64]
-            elif np_immediate:
-                _alert_outcome = "new_prop_failed"      # tried but delivery failed
+                _alert_outcome = f"filtered:{ud_result.filtered_reason}"[:64]
             else:
-                _alert_outcome = "new_prop_summary"     # in cycle digest, no individual alert
-        elif not should_alert:
-            if is_removed:
-                _alert_outcome = "removal_skipped"
-            elif is_cold_start and score is not None:
-                _alert_outcome = "cold_start_scored"
+                _alert_outcome = "failed"
+    
+            # Persist snapshot — includes scoring and delivery outcome for analysis
+            record = UnderdogSnapshotRecord(
+                external_id   = f"{player}_{stat_type}"[:64],  # stable identity key
+                player_name   = player,
+                team          = snap.team or "",
+                sport         = snap.sport,
+                stat_type     = stat_type,              # actual stat, not "Pick'em"
+                line_value    = snap.line or 0.0,
+                game_id       = snap.event,
+                game_time     = snap.game_time,
+                line_moved    = line_changed,
+                prev_line     = prev_line,
+                line_delta    = (
+                    (snap.line - prev_line)
+                    if prev_line is not None and snap.line is not None
+                    else None
+                ),
+                removed       = is_removed,
+                alert_sent    = ud_result.sent,
+                score_total   = clamp_score(score.total,  "ud_score.total",  0, 100) if score is not None else None,
+                score_tier    = score.tier   if score is not None else None,
+                score_stars   = clamp_score(score.stars,  "ud_score.stars",  0, 5)   if score is not None else None,
+                alert_outcome      = _alert_outcome,
+                validation_json    = validation.to_json() if validation is not None else None,
+                bet_recommendation = decision.recommendation if decision is not None else None,
+                bet_confidence     = clamp_score(decision.confidence, "ud_bet_confidence", 0, 100) if decision is not None else None,
+                bet_reason         = decision.reason         if decision is not None else None,
+                bet_evidence_json  = decision.to_json()      if decision is not None else None,
+                fetched_at         = now,
+            )
+            # Cold-start: buffer for a single bulk transaction after the loop.
+            # Incremental: commit immediately (rare, no lock-contention risk).
+            if is_cold_start:
+                _cold_start_records.append(record)
             else:
-                _alert_outcome = "skipped"
-        elif ud_result.sent:
-            _alert_outcome = "removal_sent" if is_removed else "sent"
-        elif ud_result.filtered:
-            _alert_outcome = f"filtered:{ud_result.filtered_reason}"[:64]
-        else:
-            _alert_outcome = "failed"
-
-        # Persist snapshot — includes scoring and delivery outcome for analysis
-        record = UnderdogSnapshotRecord(
-            external_id   = f"{player}_{stat_type}"[:64],  # stable identity key
-            player_name   = player,
-            team          = snap.team or "",
-            sport         = snap.sport,
-            stat_type     = stat_type,              # actual stat, not "Pick'em"
-            line_value    = snap.line or 0.0,
-            game_id       = snap.event,
-            game_time     = snap.game_time,
-            line_moved    = line_changed,
-            prev_line     = prev_line,
-            line_delta    = (
-                (snap.line - prev_line)
-                if prev_line is not None and snap.line is not None
-                else None
-            ),
-            removed       = is_removed,
-            alert_sent    = ud_result.sent,
-            score_total   = score.total  if score is not None else None,
-            score_tier    = score.tier   if score is not None else None,
-            score_stars   = score.stars  if score is not None else None,
-            alert_outcome      = _alert_outcome,
-            validation_json    = validation.to_json() if validation is not None else None,
-            bet_recommendation = decision.recommendation if decision is not None else None,
-            bet_confidence     = decision.confidence     if decision is not None else None,
-            bet_reason         = decision.reason         if decision is not None else None,
-            bet_evidence_json  = decision.to_json()      if decision is not None else None,
-            fetched_at         = now,
-        )
-        # Cold-start: buffer for a single bulk transaction after the loop.
-        # Incremental: commit immediately (rare, no lock-contention risk).
-        if is_cold_start:
-            _cold_start_records.append(record)
-        else:
-            await db.save_underdog_snapshot(record)
-
-    # ── 4A: Standing opportunity scan ─────────────────────────────────────────
-    # After cold-start, re-evaluate stable HIGH_FLOOR props that had no line
-    # change and are not new this cycle.  Allows evidence-driven (hit-rate-
-    # based) alerts without requiring a line-change event.
-    #
-    # Constraints to prevent alert spam:
-    #   • Only HIGH_FLOOR stat types in the betting-alert whitelist
-    #   • Must have previously scored A or S tier (from cold-start or prior cycles)
-    #   • No Underdog alert sent for this player/stat in the last 24 h
-    #   • Top 5 candidates per cycle (avoids hammering the stats API)
-    #   • Full scoring + validation + decision gate — same standard as live alerts
-    if not is_cold_start and chat_ids:
-        from engine.ud_scoring import (  # already imported above but local scope
-            compute_market_quality as _cmq,
-            detect_market_pressure as _dmp,
-            _HIGH_FLOOR_STATS as _HFS,
-        )
-        _standing_candidates: list = []
-        for _snap in ud_snaps:
-            if "[REMOVED]" in _snap.selection:
-                continue
-            _sp      = _snap.player or "Unknown"
-            _st      = _extract_ud_stat_type(_snap.selection, _snap.player, _snap.line)
-            _sport   = _snap.sport or "UNKNOWN"
-
-            if _st not in _HFS:
-                continue
-            if _sport not in config.ud_alert_sports:
-                continue
-            if (_sp, _st) in _processed_keys:
-                continue  # already handled in the main loop this cycle
-
-            _prev = recent_by_key.get((_sp, _st))
-            if _prev is None or _prev.score_tier not in ("A", "S"):
-                continue
-
-            _standing_candidates.append((_snap, _sp, _st, _sport, _prev))
-
-        # Sort by previous score descending, limit to top 5
-        _standing_candidates.sort(key=lambda x: x[4].score_total or 0, reverse=True)
-
-        for (_ssnap, _sp, _st, _ssport, _prev) in _standing_candidates[:5]:
-            _line_val = _ssnap.line or 0.0
-
-            # 24 h dedup — skip if already alerted today
-            if await db.has_recent_ud_alert(_sp, _st, within_seconds=86400):
-                continue
-
-            _shist = await db.get_ud_prop_history(_sp, _st, limit=30)
-            _sscore = score_ud_prop(
-                player_name  = _sp,
-                stat_type    = _st,
-                sport        = _ssport,
-                current_line = _line_val,
-                prev_line    = None,
-                history      = _shist,
+                await db.save_underdog_snapshot(record)
+    
+        # ── 4A: Standing opportunity scan ─────────────────────────────────────────
+        # After cold-start, re-evaluate stable HIGH_FLOOR props that had no line
+        # change and are not new this cycle.  Allows evidence-driven (hit-rate-
+        # based) alerts without requiring a line-change event.
+        #
+        # Constraints to prevent alert spam:
+        #   • Only HIGH_FLOOR stat types in the betting-alert whitelist
+        #   • Must have previously scored A or S tier (from cold-start or prior cycles)
+        #   • No Underdog alert sent for this player/stat in the last 24 h
+        #   • Top 5 candidates per cycle (avoids hammering the stats API)
+        #   • Full scoring + validation + decision gate — same standard as live alerts
+        if not is_cold_start and chat_ids:
+            from engine.ud_scoring import (  # already imported above but local scope
+                compute_market_quality as _cmq,
+                detect_market_pressure as _dmp,
+                _HIGH_FLOOR_STATS as _HFS,
             )
-            _sval = validate_player_prop(
-                player_name  = _sp,
-                stat_type    = _st,
-                current_line = _line_val,
-                history      = _shist,
-                min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
-            )
-            if not _sval.has_supporting_data:
-                continue
-            if _sscore.stars < config.UD_MIN_STARS_TO_ALERT:
-                continue
-
-            _shits = await _fetch_and_compute_hit_rates(
-                db, _sp, _ssport, _st, _line_val
-            )
-            _sdec = make_ud_bet_decision(
-                score        = _sscore,
-                validation   = _sval,
-                current_line = _line_val,
-                prev_line    = None,
-                hit_rates    = _shits,
-            )
-            if _sdec is None or _sdec.recommendation == "PASS":
-                continue
-
-            _smq = _cmq(_st, _line_val, _sscore)
-            _smp = _dmp(None, _shist)
-            delivery   = AlertDelivery(db, bot, chat_ids)
-            _sresult   = await delivery.deliver_underdog(
-                player_name     = _sp,
-                team            = _ssnap.team or "",
-                sport           = _ssnap.sport,
-                stat_type       = _st,
-                old_line        = _line_val,
-                new_line        = _line_val,
-                game_time       = _ssnap.game_time,
-                score           = _sscore,
-                validation      = _sval,
-                decision        = _sdec,
-                market_quality  = _smq,
-                market_pressure = _smp,
-                standing        = True,
-            )
-            if _sresult.sent:
-                _n_standing_sent += 1
-                logger.info(
-                    "Underdog standing alert sent: %s | %s | %s | score=%d",
-                    _sp, _st, _ssport, _sscore.total,
+            _standing_candidates: list = []
+            for _snap in ud_snaps:
+                if "[REMOVED]" in _snap.selection:
+                    continue
+                _sp      = _snap.player or "Unknown"
+                _st      = _extract_ud_stat_type(_snap.selection, _snap.player, _snap.line)
+                _sport   = _snap.sport or "UNKNOWN"
+    
+                if _st not in _HFS:
+                    continue
+                if _sport not in config.ud_alert_sports:
+                    continue
+                if (_sp, _st) in _processed_keys:
+                    continue  # already handled in the main loop this cycle
+    
+                _prev = recent_by_key.get((_sp, _st))
+                if _prev is None or _prev.score_tier not in ("A", "S"):
+                    continue
+    
+                _standing_candidates.append((_snap, _sp, _st, _sport, _prev))
+    
+            # Sort by previous score descending, limit to top 5
+            _standing_candidates.sort(key=lambda x: x[4].score_total or 0, reverse=True)
+    
+            for (_ssnap, _sp, _st, _ssport, _prev) in _standing_candidates[:5]:
+                _line_val = _ssnap.line or 0.0
+    
+                # 24 h dedup — skip if already alerted today
+                if await db.has_recent_ud_alert(_sp, _st, within_seconds=86400):
+                    continue
+    
+                _shist = await db.get_ud_prop_history(_sp, _st, limit=30)
+                _sscore = score_ud_prop(
+                    player_name  = _sp,
+                    stat_type    = _st,
+                    sport        = _ssport,
+                    current_line = _line_val,
+                    prev_line    = None,
+                    history      = _shist,
                 )
-
-        if _n_standing_sent:
-            logger.info("underdog_job: standing opportunities fired — sent=%d", _n_standing_sent)
-
-    # ── End-of-cycle new-prop digest — SUPPRESSED ─────────────────────────────
-    # New props are silently stored and scored.  Telegram only receives a
-    # notification when a prop passes the full qualification gate:
-    #   score + validation + decision engine + sport whitelist.
-    # To restore the discovery dump: uncomment the block below and restart.
-    # if _new_props_batch and chat_ids:
-    #     from alerts_multiplatform import format_underdog_new_prop_cycle_summary
-    #     from alerts import broadcast_alert
-    #     digest = format_underdog_new_prop_cycle_summary(_new_props_batch)
-    #     await broadcast_alert(bot, chat_ids, digest)
-    #     logger.info(
-    #         "underdog_job: new-prop digest sent — total=%d immediate=%d summary_only=%d",
-    #         len(_new_props_batch),
-    #         _n_new_prop_sent,
-    #         len(_new_props_batch) - _n_new_prop_sent,
-    #     )
-    if _new_props_batch:
-        logger.info(
-            "underdog_job: %d new props stored silently (digest suppressed — "
-            "Telegram only fires on qualified alerts)",
-            len(_new_props_batch),
-        )
-
-    # ── Cold-start bulk save + latch — runs once after the prop loop ──────────
-    if is_cold_start:
-        if _cold_start_records:
-            await db.save_underdog_snapshots_bulk(_cold_start_records)
+                _sval = validate_player_prop(
+                    player_name  = _sp,
+                    stat_type    = _st,
+                    current_line = _line_val,
+                    history      = _shist,
+                    min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
+                )
+                if not _sval.has_supporting_data:
+                    continue
+                if _sscore.stars < config.UD_MIN_STARS_TO_ALERT:
+                    continue
+    
+                _shits = await _fetch_and_compute_hit_rates(
+                    db, _sp, _ssport, _st, _line_val
+                )
+                _sdec = make_ud_bet_decision(
+                    score        = _sscore,
+                    validation   = _sval,
+                    current_line = _line_val,
+                    prev_line    = None,
+                    hit_rates    = _shits,
+                )
+                if _sdec is None or _sdec.recommendation == "PASS":
+                    continue
+    
+                _smq = _cmq(_st, _line_val, _sscore)
+                _smp = _dmp(None, _shist)
+                delivery   = AlertDelivery(db, bot, chat_ids)
+                _sresult   = await delivery.deliver_underdog(
+                    player_name     = _sp,
+                    team            = _ssnap.team or "",
+                    sport           = _ssnap.sport,
+                    stat_type       = _st,
+                    old_line        = _line_val,
+                    new_line        = _line_val,
+                    game_time       = _ssnap.game_time,
+                    score           = _sscore,
+                    validation      = _sval,
+                    decision        = _sdec,
+                    market_quality  = _smq,
+                    market_pressure = _smp,
+                    standing        = True,
+                )
+                if _sresult.sent:
+                    _n_standing_sent += 1
+                    logger.info(
+                        "Underdog standing alert sent: %s | %s | %s | score=%d",
+                        _sp, _st, _ssport, _sscore.total,
+                    )
+    
+            if _n_standing_sent:
+                logger.info("underdog_job: standing opportunities fired — sent=%d", _n_standing_sent)
+    
+        # ── End-of-cycle new-prop digest — SUPPRESSED ─────────────────────────────
+        # New props are silently stored and scored.  Telegram only receives a
+        # notification when a prop passes the full qualification gate:
+        #   score + validation + decision engine + sport whitelist.
+        # To restore the discovery dump: uncomment the block below and restart.
+        # if _new_props_batch and chat_ids:
+        #     from alerts_multiplatform import format_underdog_new_prop_cycle_summary
+        #     from alerts import broadcast_alert
+        #     digest = format_underdog_new_prop_cycle_summary(_new_props_batch)
+        #     await broadcast_alert(bot, chat_ids, digest)
+        #     logger.info(
+        #         "underdog_job: new-prop digest sent — total=%d immediate=%d summary_only=%d",
+        #         len(_new_props_batch),
+        #         _n_new_prop_sent,
+        #         len(_new_props_batch) - _n_new_prop_sent,
+        #     )
+        if _new_props_batch:
             logger.info(
-                "underdog_job: cold-start bulk save — %d records written",
-                len(_cold_start_records),
+                "underdog_job: %d new props stored silently (digest suppressed — "
+                "Telegram only fires on qualified alerts)",
+                len(_new_props_batch),
             )
-        _cold_start_done = True
+    
+        # ── Cold-start bulk save + latch — runs once after the prop loop ──────────
+        if is_cold_start:
+            if _cold_start_records:
+                await db.save_underdog_snapshots_bulk(_cold_start_records)
+                logger.info(
+                    "underdog_job: cold-start bulk save — %d records written",
+                    len(_cold_start_records),
+                )
+            _cold_start_done = True
+            logger.info(
+                "underdog_job: cold-start complete — scored %d props\n"
+                "  before (old cal):  S=%d  A=%d  B=%d  PASS=%d\n"
+                "   after (new cal):  S=%d  A=%d  B=%d  PASS=%d",
+                _n_cold_start_scored,
+                _cs_before_tiers.get("S",    0),
+                _cs_before_tiers.get("A",    0),
+                _cs_before_tiers.get("B",    0),
+                _cs_before_tiers.get("PASS", 0),
+                _cs_after_tiers.get("S",    0),
+                _cs_after_tiers.get("A",    0),
+                _cs_after_tiers.get("B",    0),
+                _cs_after_tiers.get("PASS", 0),
+            )
+    
         logger.info(
-            "underdog_job: cold-start complete — scored %d props\n"
-            "  before (old cal):  S=%d  A=%d  B=%d  PASS=%d\n"
-            "   after (new cal):  S=%d  A=%d  B=%d  PASS=%d",
+            "underdog_job: fetched=%d scored=%d cold_start=%d S=%d A=%d B=%d PASS=%d "
+            "qualified=%d removed=%d new=%d new_sent=%d",
+            len(ud_snaps),
+            _n_scored,
             _n_cold_start_scored,
-            _cs_before_tiers.get("S",    0),
-            _cs_before_tiers.get("A",    0),
-            _cs_before_tiers.get("B",    0),
-            _cs_before_tiers.get("PASS", 0),
-            _cs_after_tiers.get("S",    0),
-            _cs_after_tiers.get("A",    0),
-            _cs_after_tiers.get("B",    0),
-            _cs_after_tiers.get("PASS", 0),
+            _tier_counts.get("S",    0),
+            _tier_counts.get("A",    0),
+            _tier_counts.get("B",    0),
+            _tier_counts.get("PASS", 0),
+            _n_qualified,
+            _n_removed,
+            _n_new_prop,
+            _n_new_prop_sent,
         )
-
-    logger.info(
-        "underdog_job: fetched=%d scored=%d cold_start=%d S=%d A=%d B=%d PASS=%d "
-        "qualified=%d removed=%d new=%d new_sent=%d",
-        len(ud_snaps),
-        _n_scored,
-        _n_cold_start_scored,
-        _tier_counts.get("S",    0),
-        _tier_counts.get("A",    0),
-        _tier_counts.get("B",    0),
-        _tier_counts.get("PASS", 0),
-        _n_qualified,
-        _n_removed,
-        _n_new_prop,
-        _n_new_prop_sent,
-    )
-    # ── Debug: scored prop detail — logged every cycle ────────────────────────
-    _dbg_lines: list[str] = [
-        (
-            f"  received={len(ud_snaps)}  analyzed={len(_scored_props)}"
-            f"  (new={_n_new_prop}  line_change={_n_scored}"
-            + (f"  cold_start={_n_cold_start_scored}" if _n_cold_start_scored else "")
-            + f"  removed={_n_removed})"
-        ),
-    ]
-    if _scored_props:
-        from collections import Counter
-        _top = sorted(_scored_props, key=lambda x: x["total"], reverse=True)[:10]
-        _dbg_lines.append("  top 10 by score:")
-        for _i, _p in enumerate(_top, 1):
-            # Header line: rank, player, stat, sport, total, tier, stars, path, rejection
-            _dbg_lines.append(
-                f"    {_i:2d}. {_p['player'][:24]:<24} | {_p['stat_type']:<22}"
-                f" | {_p['sport']:<5} | {_p['total']:3d}/100 {_p['tier']}"
-                f" {_p['stars_d']} [{_p['path']}] → {_p['rejection']}"
+        # ── Debug: scored prop detail — logged every cycle ────────────────────────
+        _dbg_lines: list[str] = [
+            (
+                f"  received={len(ud_snaps)}  analyzed={len(_scored_props)}"
+                f"  (new={_n_new_prop}  line_change={_n_scored}"
+                + (f"  cold_start={_n_cold_start_scored}" if _n_cold_start_scored else "")
+                + f"  removed={_n_removed})"
+            ),
+        ]
+        if _scored_props:
+            from collections import Counter
+            _top = sorted(_scored_props, key=lambda x: x["total"], reverse=True)[:10]
+            _dbg_lines.append("  top 10 by score:")
+            for _i, _p in enumerate(_top, 1):
+                # Header line: rank, player, stat, sport, total, tier, stars, path, rejection
+                _dbg_lines.append(
+                    f"    {_i:2d}. {_p['player'][:24]:<24} | {_p['stat_type']:<22}"
+                    f" | {_p['sport']:<5} | {_p['total']:3d}/100 {_p['tier']}"
+                    f" {_p['stars_d']} [{_p['path']}] → {_p['rejection']}"
+                )
+                # Extra line for decision_pass: show the engine's own reason string
+                if _p["rejection"] == "decision_pass" and _p.get("decision_reason"):
+                    _dbg_lines.append(
+                        f"        ↳ engine: {_p['decision_reason']}"
+                    )
+                # Component line: each dimension with its cap, plus n and current line
+                _has_comp = "vel" in _p
+                if _has_comp:
+                    _dbg_lines.append(
+                        f"        vel={_p['vel']:2d}/25"
+                        f"  act={_p['act']:2d}/25"
+                        f"  avg={_p['avg']:2d}/20"
+                        f"  con={_p['con']:2d}/15"
+                        f"  sta={_p['sta']:2d}/15"
+                        f"  n={_p['n']}"
+                        f"  line={_p['line']}"
+                    )
+            _rej_counts = Counter(_p["rejection"] for _p in _scored_props)
+            _rej_str = "  ".join(
+                f"{_k}={_v}"
+                for _k, _v in sorted(_rej_counts.items(), key=lambda x: -x[1])
             )
-            # Extra line for decision_pass: show the engine's own reason string
-            if _p["rejection"] == "decision_pass" and _p.get("decision_reason"):
-                _dbg_lines.append(
-                    f"        ↳ engine: {_p['decision_reason']}"
-                )
-            # Component line: each dimension with its cap, plus n and current line
-            _has_comp = "vel" in _p
-            if _has_comp:
-                _dbg_lines.append(
-                    f"        vel={_p['vel']:2d}/25"
-                    f"  act={_p['act']:2d}/25"
-                    f"  avg={_p['avg']:2d}/20"
-                    f"  con={_p['con']:2d}/15"
-                    f"  sta={_p['sta']:2d}/15"
-                    f"  n={_p['n']}"
-                    f"  line={_p['line']}"
-                )
-        _rej_counts = Counter(_p["rejection"] for _p in _scored_props)
-        _rej_str = "  ".join(
-            f"{_k}={_v}"
-            for _k, _v in sorted(_rej_counts.items(), key=lambda x: -x[1])
-        )
-        _dbg_lines.append(f"  rejection breakdown:  {_rej_str}")
-    logger.info("underdog_job [debug summary]\n%s", "\n".join(_dbg_lines))
+            _dbg_lines.append(f"  rejection breakdown:  {_rej_str}")
+        logger.info("underdog_job [debug summary]\n%s", "\n".join(_dbg_lines))
+
+    except Exception as _job_exc:
+        logger.exception("underdog_job: processing error: %s", _job_exc)
+        if _health:
+            _health.record_job_fail("underdog_job", str(_job_exc))
+        return
 
     # ── Bridge to PropLineHistory (lifecycle tracking) ─────────────────────────
-    # Syncs this cycle's Underdog snapshots into the provider-agnostic
-    # PropLineHistory table, tracking first_seen / last_seen / change_count.
-    # Wrapped in try/except so a bridge failure never crashes the main job.
+    # Must run AFTER the main try block so snapshots exist in UnderdogSnapshotRecord.
+    # A bridge failure is surfaced as a job failure so /health can alert on it.
+    _persistence_ok = True
     try:
         bridged = await db.sync_underdog_snapshots_to_prop_history(
             limit=200, since_hours=4
@@ -1208,3 +1251,49 @@ async def underdog_job(context) -> None:
             logger.debug("underdog_job: bridged %d rows to PropLineHistory", bridged)
     except Exception as _bridge_exc:
         logger.warning("underdog_job: PropLineHistory sync failed: %s", _bridge_exc)
+        _persistence_ok = False
+
+    # ── Apply lifecycle state transitions (AFTER bridge creates/updates the rows) ──
+    # Queued in _lifecycle_alerted / _lifecycle_removed during the main loop.
+    # Applying here guarantees PropLineHistory rows exist before we try to update them.
+    _lc_fail_count = 0
+    for _lc_player, _lc_sport, _lc_stat in _lifecycle_alerted:
+        try:
+            await db.update_prop_lifecycle_state(
+                "Underdog", _lc_player, _lc_sport, _lc_stat,
+                "ACTIVE_ALERTED", first_alert_sent_at=now,
+            )
+        except Exception as _lc_exc:
+            logger.debug(
+                "underdog_job: ACTIVE_ALERTED update failed %s/%s: %s",
+                _lc_player, _lc_stat, _lc_exc,
+            )
+            _lc_fail_count += 1
+    for _lc_player, _lc_sport, _lc_stat in _lifecycle_removed:
+        try:
+            await db.update_prop_lifecycle_state(
+                "Underdog", _lc_player, _lc_sport, _lc_stat, "REMOVED",
+            )
+        except Exception as _lc_exc:
+            logger.debug(
+                "underdog_job: REMOVED update failed %s/%s: %s",
+                _lc_player, _lc_stat, _lc_exc,
+            )
+            _lc_fail_count += 1
+    if _lifecycle_alerted or _lifecycle_removed:
+        logger.debug(
+            "underdog_job: lifecycle updated — ACTIVE_ALERTED=%d  REMOVED=%d  lc_fails=%d",
+            len(_lifecycle_alerted), len(_lifecycle_removed), _lc_fail_count,
+        )
+    if _lc_fail_count > 0:
+        _persistence_ok = False
+
+    # Record job outcome — failure if any persistence stage raised.
+    if _health:
+        if _persistence_ok:
+            _health.record_job_run("underdog_job")
+        else:
+            _health.record_job_fail(
+                "underdog_job",
+                "persistence stage failed (bridge or lifecycle update)",
+            )
