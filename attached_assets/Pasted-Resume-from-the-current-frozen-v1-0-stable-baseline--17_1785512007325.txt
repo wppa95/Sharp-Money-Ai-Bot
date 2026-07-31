@@ -1,0 +1,760 @@
+Resume from the current frozen v1.0+ stable baseline.
+
+==================================================
+PRIMARY OBJECTIVE
+==================================================
+
+The goal of this phase is to make the bot stable enough for real daily use.
+
+This is a stabilization, reliability, monitoring, and quality-control phase.
+
+Do not add experimental features.
+
+Do not expand into new sports, providers, or prediction systems.
+
+Priorities:
+
+- Continuous uptime
+- Reliable Telegram monitoring
+- Correct alerts
+- Correct grading
+- No false notifications
+- Remote diagnosis without opening Replit
+- Automatic recovery when possible
+- Stable production checkpoint
+
+Final requirement:
+
+After completing all tasks, freeze the codebase again as the next stable version checkpoint.
+
+==================================================
+BEFORE MAKING CHANGES
+==================================================
+
+First:
+
+1. Read replit.md.
+2. Inspect the current architecture.
+3. Review existing modules before editing.
+4. Do not rebuild completed systems.
+
+Preserve unless absolutely required:
+
+- Odds Pipeline
+- Fair Probability Engine
+- EV Engine
+- Steam Engine
+- AI Confidence Engine
+- Analysis Engine
+- Risk System
+- AlertDelivery
+- Telegram Integration
+- Underdog Provider
+- PrizePicks Provider Layer
+- CLV System
+- Performance Dashboard
+
+All existing tests must continue passing.
+
+==================================================
+1. BOT PROCESS STABILITY / REMOTE DIAGNOSIS
+==================================================
+
+Current issue:
+
+The bot appears to stop working until Replit is opened.
+
+Observed:
+
+- No obvious traceback.
+- Database survives.
+- Telegram reconnects.
+- Bot works after restart.
+- Opening Replit appears to wake or restart the process.
+
+Investigate the actual cause.
+
+Check:
+
+- duplicate bot instances
+- hidden exceptions
+- process exits
+- Replit sleep/background limitations
+- memory/resource issues
+- scheduler failures
+- Telegram polling interruptions
+- unhandled async errors
+
+Add lightweight health monitoring.
+
+Track:
+
+- uptime
+- heartbeat
+- restart detection
+- last scheduler execution
+- last provider fetch
+- last Telegram send
+- last error
+- process health state
+
+==================================================
+REMOTE DIAGNOSIS + RECOVERY GOAL
+==================================================
+
+The goal is not only to identify the problem.
+
+The goal is to diagnose and solve problems without needing to open Replit.
+
+The bot should provide enough information through Telegram to determine:
+
+- Is the bot running?
+- Did it restart?
+- Did a scheduler fail?
+- Did a provider fail?
+- Did Telegram disconnect?
+- Did the environment stop the process?
+
+Add safe recovery:
+
+- automatic reconnects
+- scheduler recovery
+- provider retry handling
+- error recovery
+- health restoration
+
+The user should only need Replit for code changes, not normal monitoring.
+
+==================================================
+NO SILENT FAILURES RULE
+==================================================
+
+Any background job, scheduler, provider, database process, or Telegram process failure must never fail silently.
+
+Any failure must:
+
+- create a log entry
+- update system health status
+- expose the issue through Telegram monitoring
+- attempt recovery if safe
+
+The bot should never appear healthy while a critical component is failing.
+
+Health status must reflect:
+
+- provider failures
+- scheduler failures
+- Telegram failures
+- database failures
+- crashed jobs
+- stopped workers
+
+==================================================
+2. TELEGRAM COMMAND SYSTEM / REMOTE CONTROL CENTER
+==================================================
+
+Telegram is the main control center.
+
+Verify every existing command.
+
+Check:
+
+- registration
+- responses
+- formatting
+- database access
+- permissions
+- error handling
+- no silent failures
+
+Every command must:
+
+- respond successfully
+- handle missing data safely
+- never crash the bot
+
+
+Verify:
+
+/status
+
+Must show:
+
+System:
+- uptime
+- heartbeat
+- restart information
+- database health
+
+Schedulers:
+- active jobs
+- last execution
+- next execution
+- failed jobs
+
+Providers:
+- Underdog status
+- PrizePicks status
+- OddsAPI status
+- last successful fetch
+- last provider error
+
+Alerts:
+- last alert
+- Telegram delivery status
+- alert counts
+
+
+/dashboard
+
+Must show:
+
+- total alerts
+- alert breakdown
+- EV performance
+- CLV performance
+- confidence tier performance
+- market performance
+- sport performance
+- historical trends
+
+
+/calibration
+
+Must show:
+
+- model accuracy
+- tier accuracy
+- confidence performance
+- recommendation accuracy
+- CLV information
+
+
+/picks
+
+Must show:
+
+- active qualified picks
+- grade
+- tier
+- confidence
+- evidence
+- recommendation
+
+
+/alerts
+
+Must show:
+
+- recent alerts
+- alert type
+- timestamp
+- status
+
+
+/slip
+
+Must show:
+
+- saved selections
+- current status
+
+
+/grade
+
+Must show:
+
+- resolved alerts
+- hit/miss tracking
+- performance data
+
+
+/backtest
+
+Must show:
+
+- historical results
+- model performance
+
+
+/testalert
+
+Must continue working for Telegram testing.
+
+
+Add if needed:
+
+/health
+
+Shows:
+
+- bot alive
+- providers
+- scheduler health
+- heartbeat
+
+
+/restarts
+
+Shows:
+
+- restart count
+- last restart
+- reason if known
+
+
+/providers
+
+Shows:
+
+- provider status
+- last fetch
+- errors
+
+
+COMMAND ERROR HANDLING
+
+Protect against:
+
+- database errors
+- provider failures
+- timeout issues
+- missing data
+- empty responses
+
+If a command fails:
+
+Return a Telegram error message instead of silently failing.
+
+Goal:
+
+Telegram becomes the remote dashboard and control center.
+
+The user should diagnose issues without opening Replit.
+
+==================================================
+3. UNDERDOG PROP REMOVAL ALERT FIX
+==================================================
+
+Current issue:
+
+Removal alerts are being sent for props the user never knew existed.
+
+Fix lifecycle rules.
+
+Only send removal alerts if:
+
+1. The prop was previously tracked.
+2. The prop reached ACTIVE ALERTED status.
+3. The user previously received a notification.
+
+Do not alert removals for:
+
+- cold-start props
+- silent database discoveries
+- backfills
+- internal-only records
+
+Track:
+
+- first_seen
+- first_alert_sent_time
+- last_seen
+- last_alert_time
+- activation_status
+- removal_status
+
+Removal alert format:
+
+🚫 UNDERDOG PROP REMOVED
+
+Sport:
+Market:
+Player:
+
+Last Known Line:
+
+First Seen:
+
+Last Seen:
+
+Duration Available:
+
+Original Alert Sent:
+
+Reason:
+
+Determine when possible:
+
+- Game Started
+- Line Adjustment
+- Temporary Removal
+- Unknown
+
+Never claim certainty when unknown.
+
+==================================================
+4. PROP LIFECYCLE STATES
+==================================================
+
+Implement clear states:
+
+DISCOVERED
+
+- provider found prop
+- stored internally
+- no user notification
+
+
+ACTIVE ALERTED
+
+- user received notification
+- eligible for removal tracking
+
+
+REMOVED
+
+- only after ACTIVE ALERTED
+
+Prevent:
+
+- cold-start spam
+- false removal alerts
+- database-only alerts
+
+==================================================
+5. PROP RETURN / LINE CHANGE DETECTION
+==================================================
+
+If removed props return:
+
+Do not immediately classify as permanent removal.
+
+Detect:
+
+Removed → returned same line
+
+Removed → returned different line
+
+Permanent removal
+
+
+For line changes show:
+
+Player:
+
+Market:
+
+Previous Line:
+
+New Line:
+
+Movement:
+
+Time Between Changes:
+
+==================================================
+6. UNDERDOG DATABASE LIFECYCLE VALIDATION
+==================================================
+
+Validate:
+
+PropLineHistory
+
+sync_underdog_snapshots_to_prop_history()
+
+Confirm:
+
+Added:
+
+- first_seen correct
+
+Changed:
+
+- previous line stored
+- change_count updated
+
+Removed:
+
+- removed state correct
+
+Returned:
+
+- lifecycle restored
+
+Prevent:
+
+- duplicate records
+- corrupted history
+- restart issues
+
+==================================================
+7. PRIZEPICKS MONITORING USING AVAILABLE DATA
+==================================================
+
+Goal:
+
+Bring PrizePicks monitoring to life without depending on the protected API.
+
+Do not make the system dependent on DataDome/API access.
+
+Keep:
+
+providers/prizepicks.py
+
+as a replaceable provider layer.
+
+Support:
+
+- public sources
+- cached feeds
+- manual imports
+- alternative providers
+- Underdog reference data
+
+
+Architecture:
+
+Data Source
+
+↓
+
+PrizePicks Provider Layer
+
+↓
+
+Normalized Prop Model
+
+↓
+
+Line History Database
+
+↓
+
+Fair Probability / EV Comparison
+
+↓
+
+Alert System
+
+
+Track:
+
+- player
+- market
+- stat type
+- prop ID
+- line
+- timestamp
+- source
+
+
+UNDERDOG REFERENCE SYSTEM
+
+Use existing Underdog information as reference data.
+
+Reason:
+
+Underdog lines are usually identical or close to PrizePicks.
+
+Typical difference:
+
+0.5 to 1.0 line.
+
+Match:
+
+- player
+- market
+- sport
+- stat type
+- date
+
+Store:
+
+- source
+- matched player
+- matched market
+- line difference
+- confidence
+
+Do not treat Underdog as confirmed PrizePicks data.
+
+Separate:
+
+🟣 PrizePicks Reference Alert
+
+from:
+
+🚨 Confirmed PrizePicks Alert
+
+==================================================
+8. ALERT QUALITY / SCORE / GRADE VALIDATION
+==================================================
+
+Fix invalid outputs.
+
+Example:
+
+121/100
+
+Rules:
+
+- Score maximum 100
+- Confidence maximum 100
+- No negative confidence
+- Component ranges enforced
+- Final score normalized
+
+
+Validate:
+
+Grades:
+
+- S
+- A
+- B
+- PASS
+
+
+Validate:
+
+Tiers:
+
+- S-Tier
+- A-Tier
+- B-Tier
+- PASS
+
+
+Ensure:
+
+- Grade matches score
+- Tier matches confidence
+- Stars match confidence
+- Recommendation matches evidence
+
+
+Prevent:
+
+- inflated confidence
+- missing data alerts
+- low sample alerts
+- conflicting evidence
+
+
+Use:
+
+- L5
+- L10
+- L20
+- L30
+- Season
+- Average vs line
+- Stability
+- Consistency
+- Market quality
+- Line movement
+
+
+Goal:
+
+Fewer but higher-quality alerts.
+
+==================================================
+9. TESTING REQUIREMENTS
+==================================================
+
+Add automated tests for:
+
+- restart detection
+- health monitoring
+- Telegram commands
+- command failures
+- provider failures
+- lifecycle states
+- removals
+- returns
+- line changes
+- PrizePicks matching
+- Underdog matching
+- score validation
+- grade validation
+- alert formatting
+
+Run the complete test suite.
+
+Fix all regressions.
+
+==================================================
+10. DOCUMENTATION UPDATE
+==================================================
+
+Update replit.md with:
+
+- stability architecture
+- health monitoring
+- Telegram command system
+- lifecycle system
+- PrizePicks architecture
+- Underdog reference integration
+- grading validation
+- known limitations
+
+==================================================
+11. PRODUCTION STABILITY MODE + FINAL FREEZE
+==================================================
+
+After successful verification and testing:
+
+Mark this build as the new stable production checkpoint.
+
+Rules:
+
+- Avoid unnecessary refactors
+- Do not rebuild completed systems
+- Protect stable modules
+- Validate changes before modifying core architecture
+- Keep regression testing required
+
+Any future modification to:
+
+- Odds Engine
+- EV Engine
+- Steam Engine
+- Confidence Engine
+- Analysis Engine
+- Risk System
+- AlertDelivery
+- Telegram Integration
+
+must preserve existing functionality and pass the full test suite.
+
+
+Before freezing:
+
+Verify:
+
+- Bot starts cleanly
+- Telegram works
+- Commands work
+- Database healthy
+- Scheduler stable
+- Underdog monitoring works
+- PrizePicks reference system works
+- Removal alerts are correct
+- No duplicate alerts
+- No notification loops
+- Scores are valid
+- Grades are valid
+
+Run full test suite.
+
+Perform stability verification.
+
+Then:
+
+FREEZE THE CODEBASE.
+
+Create the next stable version checkpoint.
+
+Do not begin new experimental features until this version has been validated in real usage.
