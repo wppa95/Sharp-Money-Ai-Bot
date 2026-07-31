@@ -170,11 +170,17 @@ class Config:
     # Tracking only (data collected + scored, no Telegram bet alerts):
     #   NBA, NFL — ESPN gamelog available but user-configured as tracking only.
     #
-    # Intended but no real result data yet (self-suppress via PASS decision):
-    #   CS2, Tennis, Soccer, NPB, KBO — no public per-game stat API supported;
-    #   the decision engine returns PASS for these, so they never alert even if
-    #   listed here.  Add when real result APIs are integrated.
-    UD_ALERT_SPORTS_RAW: str = os.environ.get("UD_ALERT_SPORTS", "MLB,WNBA")
+    # Supported with real historical data:
+    #   MLB    → MLB Stats API (statsapi.mlb.com)
+    #   WNBA   → ESPN gamelog
+    #   DOTA   → OpenDota API (api.opendota.com) — free, no key required
+    #   TENNIS → JeffSackmann ATP/WTA CSV (github.com/JeffSackmann) — free, no key
+    #   CS     → PandaScore API — requires PANDASCORE_API_KEY env var;
+    #            returns [] gracefully without it (alerts suppressed by decision engine)
+    #
+    # Still unsupported (self-suppress via PASS decision):
+    #   Soccer, NPB, KBO — no public per-game stat API integrated.
+    UD_ALERT_SPORTS_RAW: str = os.environ.get("UD_ALERT_SPORTS", "MLB,WNBA,DOTA,TENNIS,CS")
 
     # Dedup windows for new alert types (seconds)
     INEFFICIENCY_DEDUP_WINDOW: int = int(os.environ.get("INEFFICIENCY_DEDUP_WINDOW", "1800"))

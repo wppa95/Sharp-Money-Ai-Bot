@@ -3,3 +3,4 @@
 - [AI Ranking & Backtesting Engine](ranking-engine.md) — ranking.py wraps compute_confidence + ±10 historical adj; backtesting.py replays EVRecord via stored ai_confidence; new DB methods and /performance + /backtest commands added.
 - [Alert source priority](source-priority.md) — PrizePicks (primary/daily) → Underdog (secondary) → DK/FD MLB ML/Totals (tertiary); never optimise sportsbook alerts ahead of PP work.
 - [Player Prop Validation + Bet Decision Layer](player-validation-layer.md) — validation gates immediate alerts (n≥5); bet decision (OVER/UNDER/PASS) uses market-proxy signals only; season/h2h always null; stored in 4 new DB columns; shown in every alert.
+- [Esports & Tennis stat providers](esports-tennis-providers.md) — DOTA=OpenDota (free), CS=PandaScore (needs PANDASCORE_API_KEY), Tennis=JeffSackmann CSV (free); multi-map stats scaled by map count; UD_ALERT_SPORTS now includes DOTA/TENNIS/CS.

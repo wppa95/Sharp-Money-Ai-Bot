@@ -1,0 +1,106 @@
+Add Tennis and Esports (CS/DOTA) support to the Underdog prop engine.
+
+Goal:
+Allow qualified Underdog alerts for Tennis and Esports without bypassing the current decision standards.
+
+Do not modify:
+- Underdog scoring calibration
+- Drift velocity
+- Market quality score
+- Market pressure logic
+- S/A/B/PASS thresholds
+- Telegram alert qualification rules
+
+1. Add Tennis historical data support
+
+Create a Tennis stats provider/adapter that can supply player history for available Underdog markets.
+
+Support:
+- Total Games
+- Sets
+- Aces
+- Double Faults
+- First Serves if available
+- Other tennis volume markets returned by Underdog
+
+Use evidence:
+- Recent matches
+- Last 5/10/20
+- Average outcome
+- Median outcome
+- Surface when available
+- Opponent context when available
+
+Prioritize:
+- Stable volume markets
+
+Avoid overvaluing:
+- One-off match results
+- Small samples
+
+2. Add CS and DOTA historical data support
+
+Create esports stats provider/adapter for available Underdog markets.
+
+Support:
+CS:
+- Kills
+- Assists
+- Headshots if available
+- Maps 1-2 markets
+
+DOTA:
+- Kills
+- Assists
+- Other player map stats returned by Underdog
+
+Use evidence:
+- Recent maps
+- Last 10/20/30 maps when available
+- Average
+- Median
+- Consistency
+- Player role
+- Match/map context when available
+
+3. Update decision engine
+
+Current issue:
+decision_pass occurs because:
+"No player game history available"
+
+After adding support:
+The decision engine should evaluate Tennis and Esports using real history.
+
+Do not create alerts from:
+- Line movement alone
+- Underdog snapshots alone
+
+Require:
+- Historical evidence
+- Consistency
+- Valid sample size
+- Existing qualification rules
+
+4. Preserve existing behavior
+
+Keep:
+- MLB/WNBA pipeline unchanged
+- Sportsbook disabled
+- Telegram signal-only alerts
+- No new prop digest messages
+- /status working
+
+5. Testing
+
+Run full test suite.
+
+Provide:
+- Tests passed
+- Tennis markets detected
+- CS/DOTA markets detected
+- Example scored props
+- Confirmation decision_pass can now reach qualification when real history exists
+- Confirmation only Underdog jobs remain active
+
+Do not make unrelated changes.

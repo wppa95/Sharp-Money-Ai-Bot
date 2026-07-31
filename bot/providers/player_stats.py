@@ -4,8 +4,11 @@ providers/player_stats.py — Universal player game-result fetcher.
 Fetches per-game stat results for every sport supported by Underdog / PrizePicks
 from free public APIs (no API key required):
 
-  MLB  → MLB Stats API  (https://statsapi.mlb.com/api/v1/)
+  MLB    → MLB Stats API  (https://statsapi.mlb.com/api/v1/)
   NBA, WNBA, NFL, NHL → ESPN unofficial athlete gamelog endpoint
+  DOTA   → OpenDota API   (https://api.opendota.com/api/) — free, no key
+  CS     → PandaScore API (https://api.pandascore.co/) — set PANDASCORE_API_KEY
+  TENNIS → JeffSackmann ATP/WTA CSV  (github.com/JeffSackmann/) — free, no key
 
 Results are returned as a list of dicts suitable for upsert into the
 ``player_game_results`` table via ``Database.upsert_player_result()``.
@@ -174,6 +177,29 @@ _MLB_PITCHING_STATS: frozenset[str] = frozenset({
     "innings pitched", "outs recorded",
 })
 
+# Lazy singletons for esports / tennis providers (avoids re-creating per call)
+_esports_provider_instance: Optional["object"] = None
+_tennis_provider_instance:  Optional["object"] = None
+
+
+def _get_esports_provider():  # type: ignore[return]
+    """Return the shared EsportsStatsProvider singleton (created on first call)."""
+    global _esports_provider_instance
+    if _esports_provider_instance is None:
+        from providers.esports_stats import EsportsStatsProvider
+        _esports_provider_instance = EsportsStatsProvider()
+    return _esports_provider_instance
+
+
+def _get_tennis_provider():  # type: ignore[return]
+    """Return the shared TennisStatsProvider singleton (created on first call)."""
+    global _tennis_provider_instance
+    if _tennis_provider_instance is None:
+        from providers.tennis_stats import TennisStatsProvider
+        _tennis_provider_instance = TennisStatsProvider()
+    return _tennis_provider_instance
+
+
 # ESPN sport routing:  Underdog sport key → (sport_slug, league_slug)
 _ESPN_ROUTE: dict[str, tuple[str, str]] = {
     "NBA":    ("basketball",     "nba"),
@@ -223,6 +249,14 @@ class PlayerStatsProvider:
                 sport_slug, league_slug = _ESPN_ROUTE[sport_upper]
                 return await self._fetch_espn(
                     player_name, sport_upper, stat_lower, sport_slug, league_slug
+                )
+            elif sport_upper in ("CS", "DOTA"):
+                return await _get_esports_provider().fetch_results(
+                    player_name, sport_upper, stat_type
+                )
+            elif sport_upper == "TENNIS":
+                return await _get_tennis_provider().fetch_results(
+                    player_name, sport_upper, stat_type
                 )
             else:
                 logger.debug("PlayerStatsProvider: unsupported sport %r", sport)
