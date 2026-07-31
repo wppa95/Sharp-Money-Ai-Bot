@@ -66,10 +66,13 @@ class Config:
     # in odds_records so the PP crossmatch pipeline can find sportsbook matches.
     # Priority 1: NBA, MLB.  Add soccer leagues (e.g. "NBA,MLB,EPL,MLS") for
     # Priority 2.  NFL excluded by default.
-    PLAYER_PROP_SPORTS_RAW: str = os.environ.get("PLAYER_PROP_SPORTS", "NBA,MLB")
+    PLAYER_PROP_SPORTS_RAW: str = os.environ.get("PLAYER_PROP_SPORTS", "MLB,NBA,WNBA,NFL")
     # Seconds between player-prop poll cycles.  Props move slower than game
     # lines so a 10-minute interval is sufficient and keeps credit usage low.
     PLAYER_PROP_POLL_INTERVAL: int = int(os.environ.get("PLAYER_PROP_POLL_INTERVAL", "600"))
+    # Seconds between pregame market watch cycles (continuous, all-day).
+    # Each cycle runs morning_scan + pregame_scan for all watched entries.
+    PREGAME_SCAN_INTERVAL: int = int(os.environ.get("PREGAME_SCAN_INTERVAL", "300"))
 
     # ── Sports to monitor (comma-separated Sport enum values) ─────────────────
     # Default: MLB only — the only sport whose alerts can be delivered given

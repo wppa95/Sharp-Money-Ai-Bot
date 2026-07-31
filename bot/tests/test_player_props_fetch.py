@@ -143,9 +143,11 @@ def test_low_sport_game_lines_are_low():
 def test_default_player_prop_sports():
     cfg = Config()
     sports = cfg.player_prop_sports
+    # Spec: all supported sports considered — default now includes MLB, NBA, WNBA, NFL
     assert "NBA" in sports
     assert "MLB" in sports
-    assert "NFL" not in sports
+    assert "WNBA" in sports
+    assert "NFL" in sports
 
 
 def test_player_prop_poll_interval_default():

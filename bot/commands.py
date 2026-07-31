@@ -855,7 +855,7 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     today = now.strftime("%b %d, %Y")
 
     # ── 1. Underdog props ─────────────────────────────────────────────────────
-    ud_props = await _db.get_top_ud_props_for_picks(limit=limit * 3, since_hours=6)
+    ud_props = await _db.get_top_ud_props_for_picks(limit=limit * 3, since_hours=24)
     if sport_filter:
         ud_props = [p for p in ud_props if p.sport.upper() == sport_filter]
     ud_props = ud_props[:limit]
@@ -864,7 +864,7 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         hint = f" for {sport_filter}" if sport_filter else ""
         await update.message.reply_text(
             f"🟣 <b>Player Prop Picks</b>\n\n"
-            f"No live props detected{hint} in the last 6 hours.\n\n"
+            f"No qualifying player prop opportunities detected{hint}.\n\n"
             f"<i>Underdog props auto-score every 5 min.\n"
             f"Use /pp_import to add PrizePicks lines.\n"
             f"DraftKings/FanDuel lines load automatically each cycle.</i>",
@@ -907,18 +907,27 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         picks.append((plh, comp))
 
-    # Sort: confidence DESC → game_time ASC (None last)
+    # Sort: confidence DESC → provider count DESC → |movement| DESC →
+    #        provider disagreement DESC → game_time ASC (None last)
+    # No sport preference — value + market quality + confidence ranks first.
     import datetime as _dt_mod
 
     def _pick_sort(item: tuple) -> tuple:
         plh, comp = item
-        conf  = comp.proxy_match_confidence if comp else 0
-        gt    = plh.game_time
+        conf       = comp.proxy_match_confidence if comp else 0
+        n_prov     = sum(1 for pl in comp.lines.values() if pl.available) if comp else 0
+        movement   = abs(comp.movement or 0.0) if comp else 0.0
+        disagreement = (
+            (comp.best_under_line or 0.0) - (comp.best_over_line or 0.0)
+            if (comp and comp.best_under_line is not None and comp.best_over_line is not None)
+            else 0.0
+        )
+        gt = plh.game_time
         if gt is None:
             gt_sort = _dt_mod.datetime.max
         else:
             gt_sort = gt.replace(tzinfo=None) if gt.tzinfo else gt
-        return (-conf, gt_sort)
+        return (-conf, -n_prov, -movement, -disagreement, gt_sort)
 
     picks.sort(key=_pick_sort)
 
@@ -1026,12 +1035,13 @@ async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         # MLB strikeouts — Freddy Peralta, line moved 5.0 → 5.5 (Underdog only;
         # PrizePicks / DK / FD show as Unavailable to demonstrate the multi-provider layout).
         comp = build_player_prop_market_comparison(
-            player_name   = "Freddy Peralta",
-            sport         = "MLB",
-            stat_type     = "strikeouts",
-            ud_line       = 5.5,
-            previous_line = 5.0,
-            now           = _now,
+            player_name    = "Freddy Peralta",
+            sport          = "MLB",
+            stat_type      = "strikeouts",
+            ud_line        = 5.5,
+            previous_line  = 5.0,
+            now            = _now,
+            min_confidence = 0,  # always render; confidence is shown as info not a gate
         )
 
         if comp is None:

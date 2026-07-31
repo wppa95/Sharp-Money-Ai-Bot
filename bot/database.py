@@ -609,7 +609,7 @@ class Database:
         return deduped
 
     async def get_top_ud_props_for_picks(
-        self, limit: int = 10, since_hours: int = 6
+        self, limit: int = 10, since_hours: int = 24
     ) -> "list[PropLineHistory]":
         """Return the most-recent Underdog prop snapshot for each (player, stat) within the window.
 

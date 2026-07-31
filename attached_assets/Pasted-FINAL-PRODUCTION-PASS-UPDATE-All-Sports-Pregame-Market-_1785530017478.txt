@@ -1,0 +1,260 @@
+FINAL PRODUCTION PASS UPDATE — All Sports Pregame Market Detection
+
+Keep the current Player Prop Market framework. Do not rebuild.
+
+The goal is now:
+
+Find valuable player props as soon as the market shows them, across all supported sports, before lines move, get worse, or disappear.
+
+1. /picks must support ALL valuable sports
+
+Do not prioritize only MLB/WNBA/NBA/NFL.
+
+The system should evaluate every supported sport that has valid player prop markets:
+
+Examples:
+
+⚾ MLB
+🏀 NBA
+🏀 WNBA
+🏈 NFL
+⚽ Soccer
+🎾 Tennis
+🎮 CS2
+🎮 Dota
+🎮 LoL
+🏓 Table Tennis
+🏸 Badminton
+🏎️ Any other supported prop market
+
+The priority should be:
+
+Value + market quality + confidence
+
+NOT sport popularity.
+
+A tennis prop with a strong edge should appear before a weak MLB prop.
+
+⸻
+
+2. Change /picks from “live props” to “available opportunities”
+
+The bot should not wait until games start.
+
+Current:
+
+“No live props detected in the last 6 hours”
+
+is incorrect.
+
+Replace with:
+
+“No qualifying player prop opportunities detected.”
+
+The system should show picks as soon as:
+
+* a market opens
+* a line appears
+* a line moves
+* providers disagree
+* a strong historical edge appears
+
+The longer we wait, the more likely:
+
+* the line moves
+* the edge disappears
+* the prop gets removed
+
+The bot should be early.
+
+⸻
+
+3. Pregame scanning should run ALL DAY
+
+Do not only run a morning scan.
+
+Different sports start at different times.
+
+Create continuous market watch:
+
+All-day monitoring
+
+Continuously:
+
+* scan upcoming games
+* scan new prop markets
+* track line movement
+* update provider comparisons
+* rank opportunities
+
+Then:
+
+Before game start
+
+Increase monitoring frequency:
+
+Example:
+
+3+ hours before:
+
+* normal watch
+
+1 hour before:
+
+* increased checks
+
+30 minutes before:
+
+* final market comparison
+
+⸻
+
+4. Pregame Watch Alerts
+
+Activate the pregame watch system.
+
+Alerts should include:
+
+🟣 PREGAME PLAYER PROP OPPORTUNITY
+
+Sport:
+Player:
+Market:
+
+Available Lines:
+
+🟣 PrizePicks:
+🐶 Underdog:
+🎰 DraftKings:
+🦊 FanDuel:
+
+Movement:
+Previous → Current
+
+Best Available Line:
+Provider + Line
+
+Market Quality:
+Confidence:
+Reason:
+
+⸻
+
+5. Provider data verification
+
+Continue fixing DK/FD.
+
+Verify:
+
+* player props are requested
+* player props are returned
+* records are saved
+* names normalize correctly
+* providers match the same player/market
+
+Keep the provider comparison object:
+
+PlayerPropMarketComparison
+
+as the single source of truth.
+
+⸻
+
+6. /picks ranking logic
+
+Rank by:
+
+1. Model confidence
+2. Market quality
+3. Line movement
+4. Provider disagreement/value
+5. Historical consistency
+6. Available sample size
+
+Do NOT rank by sport.
+
+⸻
+
+7. Keep risk filters
+
+Avoid:
+
+❌ Futures
+❌ Season-long projections
+❌ Awards
+❌ Non-actionable markets
+
+Prioritize:
+
+✅ Daily player props
+✅ Match/game props
+✅ Props with available history
+✅ Props that can actually be entered
+
+⸻
+
+8. /slip
+
+Build slips from the same all-sports opportunity pool.
+
+Rules:
+
+* 2-man first
+* 3-man only when justified
+* avoid correlation
+* avoid same player
+* avoid same game unless intentional
+
+⸻
+
+9. Framework enforcement
+
+Verify all commands use the new system:
+
+/picks
+/slip
+/dashboard
+/alerts
+/testalert
+
+No old:
+
+* PrizePicks-only logic
+* PPEdgeRecord
+* EV-only picks
+* steam-only recommendations
+
+⸻
+
+10. Final verification
+
+Run tests.
+
+Confirm:
+
+✅ All tests passing
+✅ Bot restarts clean
+✅ Player prop fetch jobs running
+✅ Pregame monitoring active all day
+✅ All supported sports considered
+✅ /picks returns actionable opportunities
+✅ DK/FD provider status verified
+
+After this:
+
+STOP DEVELOPMENT.
+
+We move to:
+
+1. Pull real opportunities
+2. Analyze picks
+3. Build slips
+4. Place small test bets
+5. Track results
+6. Calibrate model from actual performance
+
+The objective is now a working sharp market assistant, not more features.
+
+⸻
+
+This version matches the actual vision of the bot: find the best opportunities first, regardless of sport, before the market moves.

@@ -1,26 +1,21 @@
 """
-pregame_watch.py — Pregame Market Watch Foundation.
+pregame_watch.py — Pregame Market Watch (Continuous, All-Day).
 
-Monitors upcoming games before alerts fire, tracking opening lines and
-identifying meaningful movement across providers in the hours before tip-off.
+Continuously monitors upcoming games across all supported sports, tracking
+opening lines and surfacing valuable player prop opportunities before the
+market moves, lines get worse, or props disappear.
 
-This is a FOUNDATION module — data structures and scan logic only.
-The scheduler integration is intentionally omitted until live testing
-confirms the pattern. No active job is registered here.
+Activated: continuous scheduler job runs every PREGAME_SCAN_INTERVAL seconds.
 
-Workflow (when activated):
-  Morning scan (e.g. 9 AM):
-    - Identify upcoming games for the day
-    - Record available player prop opening lines per provider
-    - Store in PregameWatchEntry for comparison
+Workflow:
+  Each cycle:
+    - Scan for new props and record opening lines (morning_scan)
+    - Re-fetch current lines, compute movement (pregame_scan)
+    - Alert on first-detection of qualifying props (conf ≥ 60)
+    - Re-alert when significant movement occurs on tracked props
+    - Clear stale entries for games that have started
 
-  Pre-game scan (~3 h before tip-off):
-    - Re-fetch all lines for watched games
-    - Compute movement vs opening lines
-    - Flag meaningful moves (threshold: ≥0.5 line units or provider divergence)
-    - Emit a PREGAME WATCH alert if criteria met
-
-  Alert format:  📋 PREGAME MARKET WATCH
+  Alert format:  🟣 PREGAME PLAYER PROP OPPORTUNITY
 """
 
 from __future__ import annotations
@@ -121,80 +116,140 @@ class PregameWatchEntry:
 
 # ── Alert formatter ───────────────────────────────────────────────────────────
 
-def format_pregame_watch_alert(entry: PregameWatchEntry) -> str:
+def format_pregame_watch_alert(
+    entry: PregameWatchEntry,
+    comp: Optional[Any] = None,
+) -> str:
     """
-    Format a 📋 PREGAME MARKET WATCH alert for Telegram (HTML).
+    Format a 🟣 PREGAME PLAYER PROP OPPORTUNITY alert for Telegram (HTML).
 
-    Only called when entry.has_movement is True or provider divergence exists.
+    When a PlayerPropMarketComparison is provided, shows the full 4-provider
+    market view (Available Lines, Movement, Best Available Line, Market Quality,
+    Confidence, Reason).  Falls back to opening/current line comparison when
+    comp is None.
     """
     sport_icons = {
         "NFL": "🏈", "NBA": "🏀", "MLB": "⚾", "NHL": "🏒",
         "UFC": "🥊", "WNBA": "🏀", "SOCCER": "⚽", "TENNIS": "🎾",
+        "CS": "🖥️", "DOTA": "🎮", "LOL": "🎮",
+        "TABLE TENNIS": "🏓", "BADMINTON": "🏸",
     }
     s_icon = sport_icons.get(entry.sport.upper(), "🎯")
-
     div = "─" * 16
 
     mins = entry.minutes_to_game()
-    time_str = (
-        f"{int(mins)} min" if mins is not None and mins >= 0
-        else (entry.game_start.strftime("%H:%M UTC") if entry.game_start else "—")
-    )
+    if mins is not None and mins >= 0:
+        if mins < 60:
+            time_str = f"{int(mins)} min"
+        else:
+            h, m = int(mins // 60), int(mins % 60)
+            time_str = f"{h}h {m}m" if m else f"{h}h"
+    elif entry.game_start:
+        time_str = entry.game_start.strftime("%H:%M UTC")
+    else:
+        time_str = None
 
     parts: list[str] = [
-        "📋 <b>PREGAME MARKET WATCH</b>",
+        "🟣 <b>PREGAME PLAYER PROP OPPORTUNITY</b>",
         "",
-        f"{s_icon} <b>{entry.sport}</b>  ·  {entry.stat_type}",
-        f"👤 <b>{entry.player_name}</b>",
-        f"⏰ Game in:  {time_str}",
-        "",
-        div,
-        "",
-        "📊 <b>Opening Lines</b>",
-        "",
+        f"<b>Sport:</b>   {s_icon} {entry.sport}",
+        f"<b>Player:</b>  {entry.player_name}",
+        f"<b>Market:</b>  {entry.stat_type}",
     ]
+    if time_str:
+        parts.append(f"<b>Game in:</b> {time_str}")
+    parts += ["", div]
 
-    _provider_emojis = {
-        "PrizePicks": "🟣", "Underdog": "🐶",
-        "DraftKings": "🎰", "FanDuel": "🦊",
-    }
-    for p in ["PrizePicks", "Underdog", "DraftKings", "FanDuel"]:
-        if p in entry.opening_lines:
-            wl = entry.opening_lines[p]
-            parts.append(f"{_provider_emojis.get(p, '?')} {p}:  {wl.line_value:.1f}")
-        else:
-            parts.append(f"{_provider_emojis.get(p, '?')} {p}:  Unavailable")
+    _pe = {"PrizePicks": "🟣", "Underdog": "🐶", "DraftKings": "🎰", "FanDuel": "🦊"}
 
-    if entry.current_lines:
-        parts += ["", "<b>📈 Current Lines</b>", ""]
+    if comp is not None:
+        # ── Full 4-provider view ─────────────────────────────────────────────
+        parts += ["", "<b>📊 Available Lines</b>", ""]
         for p in ["PrizePicks", "Underdog", "DraftKings", "FanDuel"]:
-            if p in entry.current_lines:
-                wl  = entry.current_lines[p]
-                mv  = entry.movement.get(p)
-                mv_str = ""
-                if mv is not None and abs(mv) >= 0.01:
-                    sign  = "+" if mv > 0 else ""
-                    arrow = "↑" if mv > 0 else "↓"
-                    mv_str = f"  <code>{sign}{mv:.1f} {arrow}</code>"
-                parts.append(f"{_provider_emojis.get(p, '?')} {p}:  {wl.line_value:.1f}{mv_str}")
-            elif p in entry.opening_lines:
-                parts.append(f"{_provider_emojis.get(p, '?')} {p}:  Unavailable now")
+            pl = comp.lines.get(p)
+            if pl and pl.available and pl.line_value is not None:
+                parts.append(f"  {_pe[p]} {p}:  <code>{pl.line_value:.1f}</code>")
+            else:
+                parts.append(f"  {_pe[p]} {p}:  Unavailable")
 
-    if entry.has_movement:
+        # Movement
+        if comp.movement is not None and abs(comp.movement) >= 0.01:
+            prev = comp.previous_line
+            curr = comp.best_line
+            sign  = "+" if comp.movement > 0 else ""
+            arrow = "↑"  if comp.movement > 0 else "↓"
+            ps    = f"{prev:.1f}" if prev is not None else "?"
+            cs    = f"{curr:.1f}" if curr is not None else "?"
+            parts += [
+                "",
+                f"<b>📈 Movement:</b>  {ps} → {cs}  <code>{sign}{comp.movement:.1f} {arrow}</code>",
+            ]
+
+        # Best available line
+        if comp.best_over_app and comp.best_under_app:
+            parts += ["", "<b>🏆 Best Available Line</b>", ""]
+            oe = _pe.get(comp.best_over_app,  "?")
+            ue = _pe.get(comp.best_under_app, "?")
+            parts.append(
+                f"  ⬆ OVER  → {oe} {comp.best_over_app}  "
+                f"<code>{comp.best_over_line:.1f}</code>"
+            )
+            parts.append(
+                f"  ⬇ UNDER → {ue} {comp.best_under_app}  "
+                f"<code>{comp.best_under_line:.1f}</code>"
+            )
+        elif comp.best_line is not None:
+            be = _pe.get(comp.best_provider or "", "?")
+            parts += [
+                "",
+                f"<b>🏆 Best Available Line:</b>  {be} {comp.best_provider}  "
+                f"<code>{comp.best_line:.1f}</code>",
+            ]
+
+        n_prov = sum(1 for pl in comp.lines.values() if pl.available)
         parts += [
             "",
             div,
             "",
-            f"⚠️ <b>Movement Detected</b>",
-            f"   {entry.movement_summary()}",
+            f"<b>Market Quality:</b>  {n_prov}/4 providers",
+            f"<b>Confidence:</b>       {comp.proxy_match_confidence}/100",
         ]
+        if comp.best_reason:
+            parts.append(f"<b>Reason:</b>           {comp.best_reason}")
 
-    parts += [
-        "",
-        div,
-        "",
-        f"<i>Pregame watch — verify lines before placing.</i>",
-    ]
+    else:
+        # ── Fallback: opening vs current lines ───────────────────────────────
+        parts += ["", "<b>📊 Opening Lines</b>", ""]
+        for p in ["PrizePicks", "Underdog", "DraftKings", "FanDuel"]:
+            if p in entry.opening_lines:
+                wl = entry.opening_lines[p]
+                parts.append(f"  {_pe.get(p, '?')} {p}:  {wl.line_value:.1f}")
+            else:
+                parts.append(f"  {_pe.get(p, '?')} {p}:  Unavailable")
+
+        if entry.current_lines:
+            parts += ["", "<b>📈 Current Lines</b>", ""]
+            for p in ["PrizePicks", "Underdog", "DraftKings", "FanDuel"]:
+                if p in entry.current_lines:
+                    wl  = entry.current_lines[p]
+                    mv  = entry.movement.get(p)
+                    mv_str = ""
+                    if mv is not None and abs(mv) >= 0.01:
+                        sign  = "+" if mv > 0 else ""
+                        arrow = "↑" if mv > 0 else "↓"
+                        mv_str = f"  <code>{sign}{mv:.1f} {arrow}</code>"
+                    parts.append(f"  {_pe.get(p, '?')} {p}:  {wl.line_value:.1f}{mv_str}")
+                elif p in entry.opening_lines:
+                    parts.append(f"  {_pe.get(p, '?')} {p}:  Unavailable now")
+
+        if entry.has_movement:
+            parts += [
+                "", div, "",
+                "⚠️ <b>Movement Detected</b>",
+                f"   {entry.movement_summary()}",
+            ]
+
+    parts += ["", div, "", "<i>Verify lines before placing. Markets move fast.</i>"]
     return "\n".join(parts)
 
 
@@ -213,6 +268,10 @@ class PregameWatchEngine:
     def __init__(self) -> None:
         # In-memory store: keyed on (player_name, stat_type, game_id)
         self._watch_entries: dict[tuple, PregameWatchEntry] = {}
+        # Dedup: first-time alert per (player, stat, game_id) key
+        self._alerted_set: set[str] = set()
+        # Movement dedup: track the last-alerted line per key so we re-alert only on change
+        self._movement_alerted: dict[str, float] = {}
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
@@ -286,10 +345,13 @@ class PregameWatchEngine:
         now:      Optional[datetime] = None,
     ) -> int:
         """
-        For each watched game starting within PREGAME_SCAN_HOURS:
-          1. Re-fetch current lines.
-          2. Compute movement vs opening lines.
-          3. Broadcast a PREGAME MARKET WATCH alert if movement threshold met.
+        Continuous scan — fires for qualifying props not yet alerted, and
+        re-fires when significant line movement is detected.
+
+        Alert conditions:
+          • First detection of the prop with proxy_match_confidence ≥ 60
+          • Subsequent detection where the current line differs from the
+            last-alerted line (movement re-alert)
 
         Returns the number of alerts sent.
         """
@@ -299,18 +361,26 @@ class PregameWatchEngine:
         alerts_sent = 0
         pregame_cutoff = now + timedelta(hours=PREGAME_SCAN_HOURS)
 
-        # Identify entries with games starting soon
+        # All entries in the pregame window (none = too far out; game_start None = always included)
         targets = [
             (key, entry)
             for key, entry in self._watch_entries.items()
-            if (
-                entry.game_start is None
-                or entry.game_start <= pregame_cutoff
-            )
+            if entry.game_start is None or entry.game_start <= pregame_cutoff
         ]
         if not targets:
-            logger.debug("pregame_watch.pregame_scan: no upcoming games in window")
+            logger.debug("pregame_watch.pregame_scan: no entries in window (total=%d)", len(self._watch_entries))
             return 0
+
+        # Bulk fetch cross-provider data once for all targets
+        try:
+            from engine.player_prop_market import build_player_prop_market_comparison
+            pp_rows = await db.get_latest_props_for_provider("PrizePicks", since_hours=24)
+            dk_fd_raw = await db.get_recent_player_prop_lines(["DraftKings", "FanDuel"], since_hours=4)
+            dk_fd_index = _build_dk_fd_index(dk_fd_raw)
+        except Exception as exc:
+            logger.warning("pregame_watch.pregame_scan: cross-provider fetch failed: %s", exc)
+            pp_rows = []
+            dk_fd_index = {}
 
         # Refresh current Underdog lines
         try:
@@ -319,13 +389,14 @@ class PregameWatchEngine:
                 (r.player_name, r.stat_type): r for r in ud_current
             }
         except Exception as exc:
-            logger.warning("pregame_watch.pregame_scan: DB error: %s", exc)
+            logger.warning("pregame_watch.pregame_scan: UD DB error: %s", exc)
             return 0
 
         from alerts import broadcast_alert
 
         for key, entry in targets:
             player, stat, _ = key
+            alert_key = f"{player}|{stat}|{entry.game_id or ''}"
 
             # Update current Underdog line
             ud_row = ud_index.get((player, stat))
@@ -337,36 +408,76 @@ class PregameWatchEngine:
                     fetched_at = now,
                 )
 
-            # Compute movement
+            # Compute movement vs opening lines
             entry.movement = {}
             for p, current in entry.current_lines.items():
                 if p in entry.opening_lines:
                     entry.movement[p] = round(
                         current.line_value - entry.opening_lines[p].line_value, 2
                     )
-
             entry.updated_at = now
 
-            # Alert if movement exceeds threshold
-            if not entry.has_movement:
+            # Resolve best available Underdog line for comparison
+            ud_line_val: Optional[float] = None
+            if ud_row:
+                ud_line_val = float(ud_row.line_value or 0)
+            elif "Underdog" in entry.current_lines:
+                ud_line_val = entry.current_lines["Underdog"].line_value
+            elif "Underdog" in entry.opening_lines:
+                ud_line_val = entry.opening_lines["Underdog"].line_value
+
+            if ud_line_val is None:
                 continue
-            if not chat_ids:
+
+            # Build 4-provider market comparison
+            pkey    = player.lower()
+            dk_line = dk_fd_index.get((pkey, "DraftKings"))
+            fd_line = dk_fd_index.get((pkey, "FanDuel"))
+            prev_line = (
+                entry.opening_lines["Underdog"].line_value
+                if "Underdog" in entry.opening_lines else None
+            )
+
+            comp = build_player_prop_market_comparison(
+                player_name   = player,
+                sport         = entry.sport,
+                stat_type     = stat,
+                ud_line       = ud_line_val,
+                previous_line = prev_line,
+                pp_rows       = pp_rows,
+                dk_line       = dk_line,
+                fd_line       = fd_line,
+                now           = now,
+                min_confidence = 60,   # quality gate for pregame alerts
+            )
+
+            if comp is None:
+                continue   # below confidence threshold
+
+            # Alert conditions
+            is_first_alert   = alert_key not in self._alerted_set
+            prev_alerted_val = self._movement_alerted.get(alert_key)
+            has_new_movement = (
+                entry.has_movement
+                and prev_alerted_val != ud_line_val
+            )
+
+            if not chat_ids or not (is_first_alert or has_new_movement):
                 continue
 
             try:
-                msg    = format_pregame_watch_alert(entry)
+                msg    = format_pregame_watch_alert(entry, comp)
                 counts = await broadcast_alert(bot, chat_ids, msg)
                 if counts.get("sent", 0) > 0:
                     alerts_sent += 1
+                    self._alerted_set.add(alert_key)
+                    self._movement_alerted[alert_key] = ud_line_val
                     logger.info(
-                        "pregame_watch: alert sent — %s / %s  movement=%s",
-                        player, stat, entry.movement_summary(),
+                        "pregame_watch: alert sent — %s / %s  conf=%d  movement=%s",
+                        player, stat, comp.proxy_match_confidence, entry.movement_summary(),
                     )
             except Exception as exc:
-                logger.warning(
-                    "pregame_watch: alert failed for %s / %s: %s",
-                    player, stat, exc,
-                )
+                logger.warning("pregame_watch: alert failed for %s / %s: %s", player, stat, exc)
 
         return alerts_sent
 
@@ -400,3 +511,30 @@ def get_pregame_watch_engine() -> PregameWatchEngine:
     if _pregame_engine is None:
         _pregame_engine = PregameWatchEngine()
     return _pregame_engine
+
+
+# ── DK/FD index helper ────────────────────────────────────────────────────────
+
+def _build_dk_fd_index(records: list) -> dict:
+    """Parse OddsRecord rows into {(player_lower, sportsbook): line}.
+
+    Selection format stored by _player_props_job:
+      "Player Name Over"  →  OVER line
+      "Player Name Under" →  UNDER line  (stored only when no OVER entry yet)
+    """
+    index: dict = {}
+    for rec in records:
+        sel  = getattr(rec, "selection", "") or ""
+        book = getattr(rec, "sportsbook", "") or ""
+        line = getattr(rec, "line", None)
+        if not sel or line is None:
+            continue
+        sel_lower = sel.lower()
+        if sel_lower.endswith(" over"):
+            player_key = sel_lower[:-5].strip()
+            index[(player_key, book)] = float(line)
+        elif sel_lower.endswith(" under"):
+            player_key = sel_lower[:-6].strip()
+            if (player_key, book) not in index:   # OVER takes precedence
+                index[(player_key, book)] = float(line)
+    return index

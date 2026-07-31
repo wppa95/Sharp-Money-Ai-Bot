@@ -89,6 +89,7 @@ from providers.odds_cache import init_odds_cache
 from providers.game_results import OddsApiResultsProvider
 from providers.usage_tracker import init_usage_tracker, get_usage_tracker
 from engine.health import init_health_tracker, get_health_tracker
+from engine.pregame_watch import get_pregame_watch_engine
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -218,6 +219,7 @@ async def post_init(application: Application) -> None:
         # jq.run_repeating(_poll_odds_job,      interval=config.ODDS_POLL_INTERVAL,        first=10,  name="odds_poller")
         # jq.run_repeating(_steam_check_job,    interval=config.STEAM_CHECK_INTERVAL,      first=15,  name="steam_checker")
         jq.run_repeating(_player_props_job,    interval=config.PLAYER_PROP_POLL_INTERVAL, first=60,  name="player_props_fetcher")
+        jq.run_repeating(_pregame_watch_job,   interval=config.PREGAME_SCAN_INTERVAL,    first=30,  name="pregame_watcher")
         # _prizepicks_job disabled — PrizePicks provider temporarily off
         # jq.run_repeating(connector_poll_job,  interval=config.CONNECTOR_POLL_INTERVAL,   first=20,  name="connector_poller")
         # jq.run_repeating(consensus_check_job, interval=config.CONSENSUS_CHECK_INTERVAL,  first=25,  name="consensus_checker")
@@ -241,9 +243,11 @@ async def post_init(application: Application) -> None:
                 name="season_checker",
             )
         logger.info(
-            "Jobs scheduled — underdog: every %ds, season_check: every %ds, heartbeat: every 60s"
-            " [sportsbook jobs disabled]",
+            "Jobs scheduled — underdog: every %ds, pregame: every %ds, "
+            "player_props: every %ds, season_check: every %ds, heartbeat: every 60s",
             config.UNDERDOG_POLL_INTERVAL,
+            config.PREGAME_SCAN_INTERVAL,
+            config.PLAYER_PROP_POLL_INTERVAL,
             config.SEASON_CHECK_INTERVAL,
         )
     else:
@@ -876,6 +880,52 @@ async def _season_check_job(context) -> None:
         _ht = get_health_tracker()
         if _ht:
             _ht.record_job_fail("_season_check_job", str(exc))
+
+
+# ── Pregame market watch job (continuous, all-day) ────────────────────────────
+
+async def _pregame_watch_job(context) -> None:
+    """
+    Continuous pregame market watch — runs every PREGAME_SCAN_INTERVAL seconds.
+
+    Each cycle:
+      1. morning_scan: discover new props and record opening lines.
+      2. pregame_scan: re-fetch current lines, compute movement, fire alerts
+         for qualifying props (conf ≥ 60) not yet alerted this session and
+         for any prop whose line moved since the last alert.
+      3. clear_stale: remove entries for games that have already started.
+
+    No sport filtering here — the engine accepts every sport Underdog carries.
+    """
+    if _db is None:
+        logger.debug("_pregame_watch_job: DB not ready, skipping")
+        return
+
+    _ht = get_health_tracker()
+    try:
+        bot      = context.application.bot
+        chat_ids = list(config.allowed_user_ids)
+        engine   = get_pregame_watch_engine()
+
+        n_created = await engine.morning_scan(_db)
+        n_alerts  = await engine.pregame_scan(_db, bot, chat_ids)
+        n_cleared = engine.clear_stale()
+
+        if n_created or n_alerts or n_cleared:
+            logger.info(
+                "_pregame_watch_job: watching=%d  new=%d  alerts=%d  cleared=%d",
+                engine.watch_count, n_created, n_alerts, n_cleared,
+            )
+        else:
+            logger.debug("_pregame_watch_job: watching=%d  no changes", engine.watch_count)
+
+        if _ht:
+            _ht.record_job_run("_pregame_watch_job")
+
+    except Exception as exc:
+        logger.exception("_pregame_watch_job: error: %s", exc)
+        if _ht:
+            _ht.record_job_fail("_pregame_watch_job", str(exc))
 
 
 # ── Player-prop odds fetching job ─────────────────────────────────────────────
