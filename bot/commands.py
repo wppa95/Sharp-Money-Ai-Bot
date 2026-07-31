@@ -873,214 +873,49 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/testalert [steam|ev] — Send a mock alert to verify delivery end-to-end."""
+    """/testalert — Send a mock Player Prop Market Alert to verify Telegram delivery."""
     uid = getattr(update.effective_user, "id", "?")
-    logger.info("cmd_testalert: user_id=%s args=%s", uid, context.args)
+    logger.info("cmd_testalert: user_id=%s", uid)
     if not _check_allowed(update):
         await update.message.reply_text("⛔ Unauthorized.")
         return
 
-    args          = [a.lower() for a in (context.args or [])]
-    send_steam    = not args or "steam"    in args
-    send_ev       = not args or "ev"       in args
-    send_pp       = not args or "pp"       in args
-    send_underdog = not args or "underdog" in args
-
-    if not send_steam and not send_ev and not send_pp and not send_underdog:
-        await update.message.reply_text(
-            "Usage: /testalert  |  /testalert steam  |  /testalert ev"
-            "  |  /testalert pp  |  /testalert underdog"
-        )
-        return
-
-    await update.message.reply_text("⏳ Generating mock alerts…")
+    await update.message.reply_text("⏳ Generating mock Player Prop Market Alert…")
 
     try:
-        from connectors.mock import (
-            MockOddsConnector, MockScenario,
-            _GAME_A, _BOS_SEL, _LAL_SEL, _DK, _FD, _SP,
-        )
-        from engine.steam import compute_steam_simple
-        from engine.fair_probability import (
-            compute_fair_market, FairProbabilityMethod, implied_to_american,
-        )
-        from engine.ev import compute_ev_from_market, kelly_fraction as kf_fn
-        from models import (
-            SteamAlert, AlertType, Sport, MarketType,
-            EVOpportunity, EVResult, FairOdds, Recommendation,
+        from datetime import datetime as _dt
+        from engine.player_prop_market import (
+            build_player_prop_market_comparison,
+            format_player_prop_market_alert,
         )
 
-        # ── Build mock state ──────────────────────────────────────────────
-        c = MockOddsConnector()
-        await c.fetch()                          # OPENING baseline
-        c.tick(MockScenario.STEAM)
-        snaps1 = await c.fetch()
+        _now = _dt.utcnow()
 
-        bos_dk1 = next(s for s in snaps1 if s.sportsbook == _DK
-                       and s.event == _GAME_A and s.selection == _BOS_SEL
-                       and s.market_type == _SP)
-
-        steam_result = compute_steam_simple(
-            market=_GAME_A, sport="NBA", market_type=_SP,
-            selection=f"{_BOS_SEL} -3.5",
-            book_snapshots=[
-                {"sportsbook": "Pinnacle",   "open_odds": bos_dk1.opening_odds, "current_odds": bos_dk1.odds},
-                {"sportsbook": "DraftKings", "open_odds": bos_dk1.opening_odds, "current_odds": bos_dk1.odds},
-            ],
-            elapsed_minutes=12.0,
+        # MLB strikeouts — Freddy Peralta, line moved 5.0 → 5.5 (Underdog only;
+        # PrizePicks / DK / FD show as Unavailable to demonstrate the multi-provider layout).
+        comp = build_player_prop_market_comparison(
+            player_name   = "Freddy Peralta",
+            sport         = "MLB",
+            stat_type     = "strikeouts",
+            ud_line       = 5.5,
+            previous_line = 5.0,
+            now           = _now,
         )
 
-        steam_alert_obj = SteamAlert(
-            alert_type=AlertType.STEAM, sport=Sport.NBA, market_type=MarketType.SPREAD,
-            event=_GAME_A, selection=f"{_BOS_SEL} -3.5",
-            opening_odds=steam_result.opening_odds, current_odds=steam_result.current_odds,
-            steam_score=steam_result.steam_score,
-            steam_direction=steam_result.movement_direction.value,
-            books_moved=steam_result.books_triggered,
-        )
-
-        # ── Send steam alert ──────────────────────────────────────────────
-        if send_steam:
-            steam_msg = format_steam_alert(steam_alert_obj, sharp_books=["Pinnacle"], risk_factors=[])
-            await update.message.reply_text(steam_msg, parse_mode=ParseMode.HTML,
-                                            disable_web_page_preview=True)
-
-        # ── Build EV window state ─────────────────────────────────────────
-        if send_ev:
-            c.tick(MockScenario.EV_WINDOW)
-            snaps2 = await c.fetch()
-
-            dk_bos2 = next(s for s in snaps2 if s.sportsbook == _DK
-                           and s.event == _GAME_A and s.selection == _BOS_SEL
-                           and s.market_type == _SP)
-            dk_lal2 = next(s for s in snaps2 if s.sportsbook == _DK
-                           and s.event == _GAME_A and s.selection == _LAL_SEL
-                           and s.market_type == _SP)
-            fd_bos2 = next(s for s in snaps2 if s.sportsbook == _FD
-                           and s.event == _GAME_A and s.selection == _BOS_SEL
-                           and s.market_type == _SP)
-
-            fair      = compute_fair_market(
-                [dk_bos2.odds, dk_lal2.odds], labels=[_BOS_SEL, _LAL_SEL],
-                method=FairProbabilityMethod.MULTIPLICATIVE,
-            )
-            engine_ev = compute_ev_from_market(fair, _BOS_SEL, fd_bos2.odds)
-            kf        = kf_fn(engine_ev.fair_probability, fd_bos2.odds)
-
-            opp = EVOpportunity(
-                ev_result=EVResult(
-                    selection=f"{_BOS_SEL} -3.5",
-                    fair_odds=FairOdds(
-                        selection=f"{_BOS_SEL} -3.5",
-                        fair_probability=engine_ev.fair_probability,
-                        fair_american_odds=implied_to_american(engine_ev.fair_probability),
-                        vig_percentage=engine_ev.vig_pct,
-                        market_width=fair.market_width,
-                    ),
-                    offered_american_odds=fd_bos2.odds,
-                    ev_percentage=engine_ev.ev_percentage,
-                    edge=engine_ev.edge,
-                    kelly_fraction=max(kf, 0.0),
-                    half_kelly=max(kf / 2, 0.0),
-                ),
-                steam_alert=steam_alert_obj,
-                sport=Sport.NBA, market_type=MarketType.SPREAD,
-                event=_GAME_A, player=None, line=-3.5,
-                best_odds=fd_bos2.odds, best_book=_FD,
-                fair_probability=engine_ev.fair_probability,
-                expected_value=engine_ev.ev_percentage,
-                steam_score=steam_result.steam_score,
-                ai_confidence=82, recommendation=Recommendation.STRONG_BET, stars=4,
-            )
-
-            # Route through the real delivery pipeline (scope filter → dedup → format → send).
-            delivery = AlertDelivery(_db, context.bot, _alert_chat_ids)
-            ev_result = await delivery.deliver_ev(opp)
+        if comp is None:
             await update.message.reply_text(
-                f"📋 EV pipeline result: {ev_result}",
-                parse_mode=ParseMode.HTML,
+                f"{EMOJI['warn']} Test comparison could not be built "
+                f"(proxy confidence below threshold). Check bot logs."
             )
+            return
 
-        # ── PP edge opportunity ───────────────────────────────────────────────
-        if send_pp:
-            from datetime import datetime as _dt
-            from prizepicks import PrizePicksLine, PPEdgeOpportunity
-            from engine.pp_scoring import score_pp_edge
-
-            _now_ts = _dt.utcnow()
-            _pp_line = PrizePicksLine(
-                external_id      = "test-pp-001",
-                player_name      = "Anthony Edwards",
-                team             = "MIN",
-                sport            = "NBA",
-                league           = "NBA",
-                stat_type        = "Points",
-                line_value       = 26.5,
-                start_time       = None,
-                game_description = "MIN vs DEN",
-                fetched_at       = _now_ts,
-            )
-            # Realistic edge: PP line 26.5, DK has 27.0 (-110 / -110).
-            # Fair prob ~62.1% OVER at the PP line → +16.8% edge.
-            _opp = PPEdgeOpportunity(
-                pp_line                   = _pp_line,
-                sportsbook                = "DraftKings",
-                sportsbook_line           = 27.0,
-                sportsbook_over_odds      = -110,
-                sportsbook_under_odds     = -110,
-                fair_prob_over_at_sb_line = 0.502,
-                fair_prob_under_at_sb_line= 0.498,
-                line_diff                 = 0.5,   # sb_line − pp_line
-                adjusted_fair_prob_over   = 0.621,
-                adjusted_fair_prob_under  = 0.379,
-                edge_over                 = 16.8,
-                edge_under                = 0.0,
-                best_side                 = "OVER",
-                best_edge                 = 16.8,
-                prob_per_unit             = 3.0,
-            )
-            _pp_score = score_pp_edge(
-                _opp, history=[], opening_line=_pp_line.line_value, now=_now_ts,
-            )
-
-            # Route through real production pipeline: score → normalize_pp
-            # → AlertScopeFilter → AlertDelivery.deliver_pp → broadcast_alert → Telegram.
-            delivery = AlertDelivery(_db, context.bot, _alert_chat_ids)
-            pp_result = await delivery.deliver_pp(_opp, score=_pp_score)
-
-            await update.message.reply_text(
-                f"📋 PP pipeline result: {pp_result}\n"
-                f"🏅 Score: {_pp_score.total}/100 — "
-                f"tier=<b>{_pp_score.tier}</b> stars={_pp_score.stars}★",
-                parse_mode=ParseMode.HTML,
-            )
-
-        # ── Underdog line change ──────────────────────────────────────────────
-        if send_underdog:
-            # Realistic NFL rushing-yards line movement (Barkley +4 yds).
-            delivery = AlertDelivery(_db, context.bot, _alert_chat_ids)
-            ud_result = await delivery.deliver_underdog(
-                player_name = "Saquon Barkley",
-                team        = "PHI",
-                sport       = "NFL",
-                stat_type   = "Rushing Yards",
-                old_line    = 85.5,
-                new_line    = 89.5,
-                game_time   = None,
-                removed     = False,
-            )
-            await update.message.reply_text(
-                f"📋 Underdog pipeline result: {ud_result}",
-                parse_mode=ParseMode.HTML,
-            )
-
-        kinds = " + ".join(filter(None, [
-            "steam"    if send_steam    else "",
-            "ev"       if send_ev       else "",
-            "pp"       if send_pp       else "",
-            "underdog" if send_underdog else "",
-        ]))
-        await update.message.reply_text(f"✅ Test alert(s) sent: {kinds}")
+        msg = format_player_prop_market_alert(comp)
+        await update.message.reply_text(
+            msg,
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+        )
+        await update.message.reply_text("✅ Player Prop Market Alert test sent.")
 
     except Exception as exc:
         logger.exception("cmd_testalert error: %s", exc)
@@ -1280,70 +1115,97 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         )
         return
 
-    # ── Append PP-specific live section ──────────────────────────────────────
+    # ── Player Prop Market section ────────────────────────────────────────────
     try:
-        edges_6h     = await _db.get_top_pp_edges(limit=50, hours=6)
-        resolved_all = await _db.get_all_resolved_pp_edges(limit=200)
+        pm_lines: list[str] = ["🟣 <b>Player Prop Market — Live Activity</b>", ""]
 
-        # Top pick
-        top = None
-        if edges_6h:
-            edges_6h.sort(key=lambda r: (
-                _TIER_ORDER.get(r.tier or "Low", 3),
-                -(r.confidence or 0),
-            ))
-            top = edges_6h[0]
-
-        pp_lines: list[str] = ["🃏 <b>PrizePicks — Live Picks</b>"]
-        if top:
-            tier_icon  = _TIER_EMOJI.get(top.tier or "Low", "⚪")
-            stars_str  = _stars_from_conf(top.confidence)
-            conf_label = f"{top.confidence:.0f}/100" if top.confidence is not None else "—"
-            pp_lines += [
-                f"  🔝 {tier_icon} {top.tier or '—'}  <b>{top.player_name}</b> · {top.stat_type}",
-                f"  {top.best_side} {top.pp_line_value:g}  ·  "
-                f"<code>+{top.best_edge:.1f}%</code>  ·  {conf_label}  {stars_str}",
-                f"  <i>{top.sport} · {top.sportsbook}</i>",
-            ]
-        else:
-            pp_lines.append("  No PP picks in the last 6 h — use /picks to see older ones")
-
-        # Resolved performance
-        pp_lines.append("")
-        if resolved_all:
-            from engine.decision_engine import compute_tier_performance
-            _perf = compute_tier_performance(resolved_all)
-            pp_lines.append("  <b>Resolved results by tier</b>")
-            for _tier in ("S", "A", "B", "PASS"):
-                if _tier not in _perf:
+        # ── Provider status ───────────────────────────────────────────────────
+        pm_lines.append("<b>📡 Providers</b>")
+        from providers import get_health_monitor
+        _hmon = get_health_monitor()
+        providers_display = [
+            ("PrizePicks", "🟣", "manual import via /pp_import"),
+            ("Underdog",   "🐶", None),
+            ("DraftKings", "🎰", None),
+            ("FanDuel",    "🦊", None),
+        ]
+        for pname, pemoji, override_note in providers_display:
+            if override_note:
+                pm_lines.append(f"  {pemoji} <b>{pname}</b>  ·  <i>{override_note}</i>")
+                continue
+            if _hmon:
+                h = _hmon.get_health(pname) if hasattr(_hmon, "get_health") else None
+                if h is not None:
+                    last_ok   = h.format_last_success() if hasattr(h, "format_last_success") else "—"
+                    fail_note = (
+                        f"  ({h.consecutive_failures} fails)"
+                        if getattr(h, "consecutive_failures", 0) else ""
+                    )
+                    pm_lines.append(
+                        f"  {pemoji} {h.status_emoji} <b>{pname}</b>  {h.status.value}"
+                        f"  ·  last ✓: {last_ok}{fail_note}"
+                    )
                     continue
-                _ts   = _perf[_tier]
-                _note = f"  <i>{_ts.sample_size_note}</i>" if _ts.sample_size_note else ""
-                pp_lines.append(
-                    f"  {_TIER_EMOJI[_tier]} {_tier}  "
-                    f"{_ts.picks} resolved  "
-                    f"<code>{_ts.hit_rate_pct:.0f}%</code> hit  "
-                    f"avg edge <code>+{_ts.avg_edge:.1f}%</code>{_note}"
-                )
-        else:
-            pp_lines.append("  <i>No resolved picks yet</i>")
+            # Provider not in health monitor (DK/FD when disabled)
+            from config import config as _cfg
+            enabled = {
+                "DraftKings": getattr(_cfg, "DRAFTKINGS_ENABLED", False),
+                "FanDuel":    getattr(_cfg, "FANDUEL_ENABLED", False),
+            }.get(pname)
+            if enabled is False:
+                pm_lines.append(f"  {pemoji} <b>{pname}</b>  ·  <i>disabled</i>")
+            else:
+                pm_lines.append(f"  {pemoji} <b>{pname}</b>  ·  <i>not yet tracked</i>")
 
-        # Bot health & uptime
-        pp_lines += [
+        # ── Underdog prop counts from DB ──────────────────────────────────────
+        pm_lines.append("")
+        pm_lines.append("<b>📊 Player Prop Activity</b>")
+        try:
+            total_ud = await _db.count_underdog_records()
+            # Recent snapshots (last 6 h) = rough active prop count
+            ud_recent = await _db.count_prop_line_history()
+            pm_lines.append(
+                f"  Underdog snapshots:  <code>{total_ud:,}</code> total"
+                f"  ·  PropHistory rows: <code>{ud_recent:,}</code>"
+            )
+        except Exception:
+            pm_lines.append("  <i>Prop counts unavailable</i>")
+
+        # ── Recent Underdog props tracked ─────────────────────────────────────
+        pm_lines.append("")
+        pm_lines.append("<b>🔔 Recently Tracked Props</b>  <i>(last 6 h)</i>")
+        try:
+            recent_props = await _db.get_latest_props_for_provider("Underdog", since_hours=6)
+            if recent_props:
+                for _r in recent_props[:5]:
+                    _lc = getattr(_r, "lifecycle_state", None) or "—"
+                    _lc_icon = {"ACTIVE_ALERTED": "✅", "DISCOVERED": "🔍", "REMOVED": "🚫"}.get(_lc, "⚪")
+                    pm_lines.append(
+                        f"  {_lc_icon} <b>{_r.player_name}</b>  {_r.stat_type}  "
+                        f"<code>{float(_r.line_value):.1f}</code>  ·  <i>{_r.sport}</i>"
+                    )
+                if len(recent_props) > 5:
+                    pm_lines.append(f"  <i>…and {len(recent_props) - 5} more. Use /alerts for history.</i>")
+            else:
+                pm_lines.append("  <i>No props tracked yet in this window.</i>")
+        except Exception:
+            pm_lines.append("  <i>Use /alerts for detailed alert history.</i>")
+
+        # ── Bot health ────────────────────────────────────────────────────────
+        pm_lines += [
             "",
             "🤖 <b>Bot</b>",
             f"  Uptime: {_uptime_str()}",
-            _fmt_provider_status_line("Underdog", "Underdog"),
         ]
 
-        await update.message.reply_text("\n".join(pp_lines), parse_mode=ParseMode.HTML)
+        await update.message.reply_text("\n".join(pm_lines), parse_mode=ParseMode.HTML)
     except Exception as exc:
-        logger.exception("cmd_dashboard: PP section failed: %s", exc)
+        logger.exception("cmd_dashboard: player prop market section failed: %s", exc)
         # Non-fatal — main dashboard already sent
 
 
 async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/alerts — Recent alert history: PP picks sent, EV and steam alerts."""
+    """/alerts — Recent player prop alert history."""
     if not _check_allowed(update):
         await update.message.reply_text("⛔ Unauthorized.")
         return
@@ -1351,66 +1213,41 @@ async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
         return
 
-    # Gather all alert types
-    pp_sent    = await _db.get_recent_pp_alerts(limit=10)
-    ev_recent  = await _db.get_recent_ev(limit=5)
-    stm_recent = await _db.get_recent_steam(limit=5)
-
     lines: list[str] = [
         "🔔 <b>Alert History</b>",
         "",
     ]
 
-    # ── PP Pick alerts ────────────────────────────────────────────────────────
-    lines.append(f"🎯 <b>PP Pick Alerts</b>")
-    if not pp_sent:
-        lines.append(
-            "  No PP picks have been alerted yet.\n"
-            "  <i>Alerts fire automatically when PrizePicks API data resumes.</i>"
-        )
-    else:
-        lines.append(f"  <i>{len(pp_sent)} most recent (alert_sent=True)</i>")
-        lines.append("")
-        for r in pp_sent:
-            tier_icon = _TIER_EMOJI.get(r.tier or "Low", "⚪")
-            result_tag = (
-                f"  [{r.result}]" if r.result and r.result != "PENDING" else ""
-            )
-            lines.append(
-                f"  {tier_icon} <b>{r.player_name}</b> · {r.stat_type}  "
-                f"<code>+{r.best_edge:.1f}%</code>{result_tag}\n"
-                f"      <i>{r.sport} · {r.detected_at.strftime('%b %d %H:%M UTC')}</i>"
-            )
-
-    lines.append("")
-
-    # ── EV alerts ─────────────────────────────────────────────────────────────
-    ev_sent = [r for r in ev_recent if r.alert_sent]
-    lines.append(f"{EMOJI['ev']} <b>EV Alerts</b>  ({len(ev_sent)} of last {len(ev_recent)} sent)")
-    if not ev_sent:
-        lines.append("  <i>No EV alerts sent recently.</i>")
-    else:
-        for r in ev_sent[:3]:
-            lines.append(
-                f"  <b>{r.selection}</b> · {r.sport}  "
-                f"EV <code>{r.expected_value:+.1f}%</code>\n"
-                f"      <i>{r.detected_at.strftime('%b %d %H:%M UTC')}</i>"
-            )
-
-    lines.append("")
-
-    # ── Steam alerts ──────────────────────────────────────────────────────────
-    stm_sent = [r for r in stm_recent if r.alert_sent]
-    lines.append(f"{EMOJI['fire']} <b>Steam Alerts</b>  ({len(stm_sent)} of last {len(stm_recent)} sent)")
-    if not stm_sent:
-        lines.append("  <i>No steam alerts sent recently.</i>")
-    else:
-        for r in stm_sent[:3]:
-            lines.append(
-                f"  <b>{r.selection}</b> · {r.sport}  "
-                f"score <code>{r.steam_score}/100</code>\n"
-                f"      <i>{r.detected_at.strftime('%b %d %H:%M UTC')}</i>"
-            )
+    # ── Player Prop Market alerts (Underdog PropLineHistory) ──────────────────
+    lines.append("🟣 <b>Player Prop Alerts</b>")
+    try:
+        recent_props = await _db.get_latest_props_for_provider("Underdog", since_hours=24)
+        alerted_props = [
+            r for r in recent_props
+            if getattr(r, "lifecycle_state", None) == "ACTIVE_ALERTED"
+        ]
+        if alerted_props:
+            lines.append(f"  <i>{len(alerted_props)} props alerted in last 24 h</i>")
+            lines.append("")
+            for r in alerted_props[:8]:
+                _lv = float(getattr(r, "line_value", 0) or 0)
+                _ts = (
+                    getattr(r, "first_alert_sent_at", None) or
+                    getattr(r, "fetched_at", None)
+                )
+                _ts_str = _ts.strftime("%b %d %H:%M UTC") if _ts else "—"
+                lines.append(
+                    f"  🐶 <b>{r.player_name}</b>  {r.stat_type}  "
+                    f"<code>{_lv:.1f}</code>  ·  <i>{r.sport}</i>  ·  {_ts_str}"
+                )
+            if len(alerted_props) > 8:
+                lines.append(f"  <i>…{len(alerted_props) - 8} more</i>")
+        else:
+            lines.append("  <i>No player prop alerts sent in the last 24 h.</i>")
+            lines.append("  <i>Alerts fire automatically when qualifying props are detected.</i>")
+    except Exception as exc:
+        logger.debug("cmd_alerts: prop history lookup failed: %s", exc)
+        lines.append("  <i>Alert history unavailable — check /health for job status.</i>")
 
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
@@ -1576,7 +1413,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     lines.append(
         f"  {'✅' if config.DRAFTKINGS_ENABLED else '❌'} DraftKings  ·  "
         f"{'✅' if config.FANDUEL_ENABLED else '❌'} FanDuel\n"
-        f"  <i>Odds API — MLB moneylines + totals only</i>"
+        f"  <i>Odds API — player prop lines (when enabled)</i>"
     )
 
     if not pandascore_key:

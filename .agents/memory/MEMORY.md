@@ -6,4 +6,5 @@
 - [Alert source priority](source-priority.md) — PrizePicks (primary/daily) → Underdog (secondary) → DK/FD MLB ML/Totals (tertiary); never optimise sportsbook alerts ahead of PP work.
 - [Player Prop Validation + Bet Decision Layer](player-validation-layer.md) — validation gates immediate alerts (n≥5); bet decision (OVER/UNDER/PASS) uses market-proxy signals only; season/h2h always null; stored in 4 new DB columns; shown in every alert.
 - [Esports & Tennis stat providers](esports-tennis-providers.md) — DOTA=OpenDota (free), CS=PandaScore (needs PANDASCORE_API_KEY), Tennis=JeffSackmann CSV (free); multi-map stats scaled by map count; UD_ALERT_SPORTS now includes DOTA/TENNIS/CS.
-- [v1.3 Stability architecture](v13-stability.md) — HealthTracker JSON sidecar, PropLineHistory lifecycle_state, score_validation clamp_score, /health + /restarts commands, job health wrapping.
+- [v1.3 Stability architecture](v13-stability.md) — HealthTracker JSON sidecar, PropLineHistory lifecycle_state, clamp_score, /health + /restarts; re-entry detection; PLAYER PROP MARKET ALERT is the active framework; pregame watch foundation added.
+- [Pregame watch foundation](pregame-watch.md) — PregameWatchEngine in engine/pregame_watch.py; no active scheduler job yet; call morning_scan() then pregame_scan() when activating.

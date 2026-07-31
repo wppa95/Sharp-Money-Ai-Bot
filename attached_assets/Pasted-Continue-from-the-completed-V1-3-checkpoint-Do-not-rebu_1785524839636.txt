@@ -1,0 +1,233 @@
+Continue from the completed V1.3 checkpoint.
+
+Do not rebuild the engine.
+Do not restart previous work.
+
+The core system is already working:
+
+✅ 1716 tests passing
+✅ Telegram commands responding
+✅ Underdog provider working
+✅ Player Prop Market Engine implemented
+✅ Lifecycle re-entry fixed
+
+This is the final completion pass before we begin using the bot for real player prop testing and picks.
+
+Complete ALL remaining issues found during live testing.
+
+⸻
+
+1. Dashboard Migration
+
+The dashboard is still using old PrizePicks-focused reporting.
+
+Fix:
+
+* PP alerts showing 0 when Underdog player prop data is active
+* PP Live Picks section not matching current framework
+* EV sections creating confusion
+* Dashboard not reflecting Player Prop Market Engine activity
+
+Update dashboard to show:
+
+PLAYER PROP MARKET DATA
+
+Provider structure:
+
+🟣 PrizePicks
+🐶 Underdog
+🎰 DraftKings
+🦊 FanDuel
+
+If a provider has no data:
+
+* show unavailable
+* do not show misleading zeros
+
+Make the dashboard represent the actual active system.
+
+⸻
+
+2. Sports Scope Cleanup
+
+Update:
+
+* /status
+* /dashboard
+* /providers
+* /help
+* command descriptions
+
+Current priority:
+
+PLAYER PROPS ONLY
+
+Remove old emphasis on:
+
+❌ Moneylines
+❌ Totals
+❌ Spreads
+
+The bot can keep future expansion ability, but the user-facing system should match the current mission.
+
+⸻
+
+3. Remove Legacy Alert Paths
+
+/testalert revealed old systems are still connected.
+
+Currently firing:
+
+❌ SHARP MONEY ALERT
+
+* NBA spreads
+* sportsbook steam alerts
+
+❌ PRIZEPICKS EDGE DETECTED
+
+* old EV comparison workflow
+
+❌ Old Underdog Line Move formatter
+
+These are not the active workflow anymore.
+
+Update:
+
+/testalert
+
+to only test:
+
+🟣 PLAYER PROP MARKET ALERT
+
+The test alert must match the same framework used for real alerts.
+
+⸻
+
+4. Player Prop Market Alert Final Verification
+
+The only active player prop alert format should be:
+
+🟣 PLAYER PROP MARKET ALERT
+
+Structure:
+
+📊 Available Lines
+
+🟣 PrizePicks:
+🐶 Underdog:
+🎰 DraftKings:
+🦊 FanDuel:
+
+Include:
+
+* best available line
+* market consensus
+* previous line
+* movement
+* source
+* observed time
+
+Verify:
+
+✅ No PRIZEPICKS REFERENCE ALERT wording
+✅ Proxy Match Confidence wording only
+✅ Proxy confidence is not shown as betting edge
+✅ No duplicate alerts
+✅ Lifecycle/re-entry works
+
+⸻
+
+5. Command Menu Cleanup
+
+Update /help and command descriptions.
+
+Remove outdated wording:
+
+* PrizePicks-only interface
+* NFL spread examples
+* EV-focused descriptions
+
+Make commands match the current system:
+
+Player prop monitoring
+Player prop alerts
+Market comparison
+Performance tracking
+
+⸻
+
+6. EV / Sportsbook Cleanup
+
+Review old EV sections.
+
+If EV cannot be properly applied to player props:
+
+* remove from active displays
+* hide from user-facing workflow
+
+Do not show irrelevant data.
+
+⸻
+
+7. Pregame Market Watch Foundation
+
+Add the foundation for future game monitoring.
+
+Do not overbuild.
+
+Create the structure for:
+
+Earlier in the day:
+
+* identify upcoming games
+* monitor available player props
+* track opening lines
+
+Around 3 hours before game start:
+
+* run deeper market scan
+* compare available providers
+* identify meaningful movement
+* create watch alerts
+
+This should prepare the bot to find opportunities before games start.
+
+⸻
+
+Final Testing
+
+Run:
+
+* Full test suite
+* Telegram command tests
+* Alert tests
+* Restart test
+
+Verify:
+
+✅ Bot starts clean
+✅ No silent command failures
+✅ No legacy alerts
+✅ New player prop framework only
+✅ Dashboard matches active system
+✅ Player prop monitoring ready
+
+Final report:
+
+* Files changed
+* Tests passed/failed
+* Remaining issues
+* Confirmation bot is ready for live player prop testing
+
+After this is complete:
+
+STOP.
+
+Do not add more features.
+
+We are moving directly into:
+
+* reviewing live alerts
+* analyzing player props
+* building test slips
+* making picks for current and future games.
