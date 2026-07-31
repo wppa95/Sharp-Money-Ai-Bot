@@ -28,6 +28,16 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+
+
+def _line_label(line: float) -> str:
+    """General line-level reference label — context only, not a difficulty rating."""
+    if line <= 0.5:
+        return "🟢 Low Line / Goblin Discount"
+    elif line <= 1.5:
+        return "⚪ Standard Line"
+    else:
+        return "🔴 Higher Difficulty Line"
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
@@ -418,12 +428,12 @@ def format_player_prop_market_alert(comp: PlayerPropMarketComparison) -> str:
         arrow = "↑" if comp.movement > 0 else ("↓" if comp.movement < 0 else "→")
         parts.append(f"Movement:             <code>{sign}{comp.movement:.1f} {arrow}</code>")
 
-    # ── Best Available App ────────────────────────────────────────────────────
+    # ── Underdog Line ─────────────────────────────────────────────────────────
     parts += [
         "",
         div,
         "",
-        "🏆 <b>Best Available Line</b>",
+        "📊 <b>Underdog Line</b>",
         "",
     ]
 
@@ -433,12 +443,12 @@ def format_player_prop_market_alert(comp: PlayerPropMarketComparison) -> str:
     if _avail_count == 0:
         parts.append("  No provider data available.")
     elif _avail_count == 1:
-        # Only one provider — just show it
-        pname = comp.best_provider or "—"
-        pline = comp.best_line
+        # Only Underdog active — show line + context label
+        pname  = comp.best_provider or "—"
+        pline  = comp.best_line
         pemoji = PROVIDER_EMOJI.get(pname, "?")
         line_str = f"{pline:.1f}" if pline is not None else "—"
-        parts.append(f"  {pemoji} <b>{pname}</b>  ·  {line_str}")
+        parts.append(f"  {pemoji} <code>{line_str}</code>  {_line_label(pline) if pline is not None else ''}")
         parts.append(f"  <i>Reason: {comp.best_reason}</i>")
     else:
         # Multiple providers — show OVER-friendly and UNDER-friendly separately

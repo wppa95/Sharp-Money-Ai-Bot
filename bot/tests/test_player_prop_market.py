@@ -419,7 +419,7 @@ class TestFormatAlert:
     def test_best_available_line_shown(self):
         comp = _make_comp(best_provider="Underdog", best_line=5.5)
         msg = format_player_prop_market_alert(comp)
-        assert "Best Available Line" in msg
+        assert "Underdog Line" in msg
         assert "Underdog" in msg
         assert "5.5" in msg
 

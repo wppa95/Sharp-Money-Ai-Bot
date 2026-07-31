@@ -15,6 +15,16 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
+
+def _line_label(line: float) -> str:
+    """General line-level reference label — context only, not a difficulty rating."""
+    if line <= 0.5:
+        return "🟢 Low Line / Goblin Discount"
+    elif line <= 1.5:
+        return "⚪ Standard Line"
+    else:
+        return "🔴 Higher Difficulty Line"
+
 from alerts import EMOJI, _div, _risk_section, format_odds, format_probability, RiskFactor
 from engine.consensus import ConsensusResult, MarketInefficiency
 from engine.clv import CLVOpportunity, CLVResult
@@ -406,21 +416,23 @@ def format_underdog_change_alert(
     }.get(sport, "🎯")
 
     if removed:
-        header      = "🚫 <b>UNDERDOG PROP REMOVED</b>"
-        movement_block = f"  <b>Last Line:</b>  {old_line}"
+        header         = "🚫 <b>UNDERDOG PROP REMOVED</b>"
+        movement_block = f"  🐶 <b>Last Line:</b>  <code>{old_line:.1f}</code>"
     elif standing:
-        header      = "🎯 <b>UNDERDOG STANDING PLAY</b>"
-        movement_block = f"  <b>Current Line:</b>  {new_line}"
+        header         = "🎯 <b>UNDERDOG STANDING PLAY</b>"
+        movement_block = (
+            f"📊 <b>Underdog Line</b>\n"
+            f"  🐶 <code>{new_line:.1f}</code>  {_line_label(new_line)}"
+        )
     else:
         change         = new_line - old_line
         direction_icon = "📈" if change > 0 else "📉"
         header         = f"{direction_icon} <b>UNDERDOG LINE MOVE</b>"
         change_sign    = "+" if change >= 0 else ""
         movement_block = (
-            f"📈 <b>Movement</b>\n"
-            f"  Provider:         Underdog 🐶\n"
-            f"  Previous Line:    <code>{old_line:.1f}</code>\n"
-            f"  Current Line:     <code>{new_line:.1f}</code>\n"
+            f"📊 <b>Underdog Line</b>\n"
+            f"  🐶 <code>{new_line:.1f}</code>  {_line_label(new_line)}\n"
+            f"  Previous:         <code>{old_line:.1f}</code>\n"
             f"  Movement:         <code>{change_sign}{change:.1f}</code>"
         )
 
@@ -581,7 +593,7 @@ def format_underdog_new_prop_alert(
         avail_block.lstrip("\n"),
         "",
         _div(),
-        f"  <b>Starting Line:</b>  {line_value}",
+        f"  🐶 <b>Underdog Line:</b>  <code>{line_value:.1f}</code>  {_line_label(line_value)}",
         f"  <b>First Seen:</b>    {datetime.utcnow().strftime('%H:%M UTC')}"
         + game_str
         + grade_str

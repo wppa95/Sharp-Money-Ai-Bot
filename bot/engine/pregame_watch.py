@@ -25,6 +25,17 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
+
+def _line_label(line: float) -> str:
+    """General line-level reference label — context only, not a difficulty rating."""
+    if line <= 0.5:
+        return "🟢 Low Line / Goblin Discount"
+    elif line <= 1.5:
+        return "⚪ Standard Line"
+    else:
+        return "🔴 Higher Difficulty Line"
+
+
 logger = logging.getLogger(__name__)
 
 # ── Thresholds ────────────────────────────────────────────────────────────────
@@ -191,9 +202,9 @@ def format_pregame_watch_alert(
                 f"<b>📈 Movement:</b>  {ps} → {cs}  <code>{sign}{comp.movement:.1f} {arrow}</code>",
             ]
 
-        # Best available line
+        # Underdog line display
         if comp.best_over_app and comp.best_under_app:
-            parts += ["", "<b>🏆 Best Available Line</b>", ""]
+            parts += ["", "<b>📊 Underdog Line</b>", ""]
             oe = _pe.get(comp.best_over_app,  "?")
             ue = _pe.get(comp.best_under_app, "?")
             parts.append(
@@ -205,11 +216,11 @@ def format_pregame_watch_alert(
                 f"<code>{comp.best_under_line:.1f}</code>"
             )
         elif comp.best_line is not None:
-            be = _pe.get(comp.best_provider or "", "?")
+            _lbl = _line_label(comp.best_line)
             parts += [
                 "",
-                f"<b>🏆 Best Available Line:</b>  {be} {comp.best_provider}  "
-                f"<code>{comp.best_line:.1f}</code>",
+                f"<b>📊 Underdog Line:</b>  🐶  "
+                f"<code>{comp.best_line:.1f}</code>  {_lbl}",
             ]
 
         n_prov = sum(1 for pl in comp.lines.values() if pl.available)
