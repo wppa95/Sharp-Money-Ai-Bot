@@ -15,9 +15,12 @@ the health monitor.  This module adds:
 Call-priority levels
 ---------------------
   CRITICAL (1) — PrizePicks pipeline: never blocked, uses no Odds API quota
-  HIGH     (2) — Player prop markets (markets string contains "player_props")
-  MEDIUM   (3) — MLB / NBA moneylines  (sport_key contains baseball_mlb / basketball_nba)
-  LOW      (4) — Everything else (other sports, spreads, totals)
+  HIGH     (2) — Player prop markets + game lines for any configured active sport
+  MEDIUM   (3) — Reserved (currently unused in infer_call_priority)
+  LOW      (4) — Everything else (inactive sports, unconfigured markets)
+
+Priority is sport-agnostic: any sport present in ACTIVE_SPORTS config
+automatically receives HIGH priority for its Odds API calls without code changes.
 
 Budget-enforcement rules (against budget_pct = quota_used / monthly_budget × 100)
 --------------------------
@@ -54,31 +57,46 @@ class CallPriority(IntEnum):
     """Priority of a single Odds API call — lower value = higher priority."""
 
     CRITICAL = 1   # PrizePicks (no Odds API cost, guard kept for uniformity)
-    HIGH     = 2   # Player prop markets
-    MEDIUM   = 3   # MLB / NBA moneylines
-    LOW      = 4   # Everything else
+    HIGH     = 2   # Player props + game lines for any configured active sport
+    MEDIUM   = 3   # Reserved — kept for backward compatibility; not used by infer_call_priority
+    LOW      = 4   # Everything else (inactive sports, unconfigured markets)
 
 
 def infer_call_priority(sport_key: str, markets: str) -> CallPriority:
     """
     Derive a CallPriority from the sport key and markets query string.
 
+    Priority is **sport-agnostic**: adding a sport to ``ACTIVE_SPORTS`` config
+    automatically elevates its Odds API calls to HIGH without code changes.
+
     Rules (in order):
-      1. ``"player_props"`` or any ``"player_"`` market key in *markets* → HIGH
-      2. ``baseball_mlb`` in *sport_key*                                 → HIGH
-         MLB is the only sport whose game-line alerts are currently in
-         scope, so its odds requests must never be blocked by the budget
-         guard (which stops MEDIUM calls at ≥ 90 % quota).
-      3. ``basketball_nba`` in *sport_key*                               → MEDIUM
-      4. Everything else                                                 → LOW
+      1. Any ``"player_props"`` or ``"player_"`` market → HIGH (all sports)
+      2. Game-line call for a sport whose Odds API key is in the active
+         configured sports (``config.active_sports``) → HIGH
+      3. Everything else → LOW
     """
+    # ── 1. Player props are always HIGH regardless of sport ───────────────────
     if "player_props" in markets or "player_" in markets:
         return CallPriority.HIGH
-    s = sport_key.lower()
-    if "baseball_mlb" in s:
-        return CallPriority.HIGH
-    if "basketball_nba" in s:
-        return CallPriority.MEDIUM
+
+    # ── 2. Game lines for any configured active sport → HIGH ──────────────────
+    # Build the set of Odds API sport keys for the currently active sports so
+    # priority is driven by config rather than hard-coded sport names.
+    try:
+        from config import config as _cfg
+        from models import Sport
+        from engine.analysis import _SPORT_TO_ODDS_API_KEY
+        active_odds_keys: frozenset[str] = frozenset(
+            odds_key.lower()
+            for sp, odds_key in _SPORT_TO_ODDS_API_KEY.items()
+            if isinstance(sp, Sport) and sp.value in _cfg.active_sports
+        )
+        if sport_key.lower() in active_odds_keys:
+            return CallPriority.HIGH
+    except Exception:
+        # Fail open: if the config/model import fails, fall through to LOW
+        pass
+
     return CallPriority.LOW
 
 

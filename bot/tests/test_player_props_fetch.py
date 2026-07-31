@@ -129,7 +129,9 @@ def test_player_prop_markets_are_high_priority(markets):
 
 
 def test_game_line_markets_not_high():
-    assert infer_call_priority("basketball_nba", "h2h,totals") == CallPriority.MEDIUM
+    # NBA is not in the default active_sports config → game lines are LOW (not MEDIUM).
+    # Priority is sport-agnostic: any sport NOT in active_sports falls to LOW.
+    assert infer_call_priority("basketball_nba", "h2h,totals") == CallPriority.LOW
 
 
 def test_low_sport_game_lines_are_low():

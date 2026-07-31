@@ -550,20 +550,12 @@ async def _budget_check_job(context) -> None:
                 if threshold >= 100:
                     icon    = "🚨"
                     heading = "PACING BUDGET EXCEEDED"
-                    note    = (
-                        "LOW + MEDIUM priority calls are now blocked.\n"
-                        "HIGH + CRITICAL calls (MLB odds, player props) continue normally.\n"
-                        "This is your self-imposed pacing cap — the actual OddsAPI plan quota is not exhausted.\n"
-                        "Raise <code>ODDS_API_MONTHLY_BUDGET</code> to allow more calls."
-                    )
                 elif threshold >= 90:
                     icon    = "⚠️"
                     heading = f"PACING BUDGET WARNING — {threshold}%"
-                    note    = "LOW-priority Odds API calls are now blocked."
                 else:
                     icon    = "⚠️"
                     heading = f"PACING BUDGET WARNING — {threshold}%"
-                    note    = "Approaching pacing cap. Monitor before the end of the month."
 
                 # Pacing budget: how many calls made vs the self-imposed cap
                 pacing_used_str = (
@@ -580,15 +572,56 @@ async def _budget_check_job(context) -> None:
                 else:
                     api_quota_line = ""
 
+                # Sport breakdown — which UD alert sports are active
+                _sport_icons = {
+                    "MLB": "⚾", "WNBA": "🏀", "NBA": "🏀", "NFL": "🏈",
+                    "DOTA": "🎮", "CS": "🖥️", "TENNIS": "🎾",
+                }
+                ud_sports     = sorted(config.ud_alert_sports)
+                active_sp     = sorted(config.active_sports)
+                sport_lines   = "  ".join(
+                    f"{_sport_icons.get(s, '🔸')}{s}" for s in ud_sports
+                )
+                odds_api_sp   = "  ".join(
+                    f"{_sport_icons.get(s, '🔸')}{s}" for s in active_sp
+                ) or "none"
+
+                if threshold >= 100:
+                    blocking_section = (
+                        "<b>Blocked:</b>     LOW + MEDIUM priority calls\n"
+                        "<b>Protected:</b>   HIGH + CRITICAL — approved active sports\n"
+                    )
+                    footer = (
+                        "This is your self-imposed pacing cap — the actual OddsAPI plan quota "
+                        "is not exhausted.\n"
+                        "Raise <code>ODDS_API_MONTHLY_BUDGET</code> to allow more calls."
+                    )
+                elif threshold >= 90:
+                    blocking_section = (
+                        "<b>Blocked:</b>     LOW priority calls\n"
+                        "<b>Protected:</b>   HIGH + CRITICAL — approved active sports\n"
+                    )
+                    footer = "Monitor closely before the end of the month."
+                else:
+                    blocking_section = ""
+                    footer = "Approaching pacing cap. Monitor before the end of the month."
+
                 msg = (
                     f"{icon} <b>{heading}</b>\n"
                     f"\n"
                     f"<b>Provider:</b>      {provider}\n"
-                    f"<b>Pacing budget:</b> {pacing_used_str} / {stats.month_budget:,}  ({stats.budget_pct:.1f}%)\n"
+                    f"<b>Pacing budget:</b> {pacing_used_str} / {stats.month_budget:,}"
+                    f"  ({stats.budget_pct:.1f}%)\n"
                     f"<b>Pacing bar:</b>    <code>{stats.budget_bar}</code>\n"
                     f"{api_quota_line}"
                     f"\n"
-                    f"<i>{note}</i>"
+                    f"{blocking_section}"
+                    f"\n"
+                    f"<b>Alert sports:</b>  {sport_lines}\n"
+                    f"<b>Odds API scope:</b> {odds_api_sp}\n"
+                    f"<i>(DOTA / TENNIS / CS use external APIs — not affected by this cap)</i>\n"
+                    f"\n"
+                    f"<i>{footer}</i>"
                 )
 
                 await broadcast_alert(bot, chat_ids, msg)

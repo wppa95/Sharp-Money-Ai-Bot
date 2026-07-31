@@ -106,12 +106,13 @@ class TestInferCallPriority:
         assert infer_call_priority("soccer_epl", "player_props,h2h") == CallPriority.HIGH
 
     def test_mlb_high(self):
-        # MLB is the only in-scope bookmaker sport; its game-line requests must
-        # be HIGH so the budget guard never silences the only deliverable alerts.
+        # MLB is in active_sports by default; priority is config-driven, not hardcoded.
         assert infer_call_priority("baseball_mlb", "h2h") == CallPriority.HIGH
 
-    def test_nba_medium(self):
-        assert infer_call_priority("basketball_nba", "h2h,spreads") == CallPriority.MEDIUM
+    def test_nba_low_when_not_in_active_sports(self):
+        # NBA is not in the default active_sports config → LOW (not MEDIUM).
+        # Priority is sport-agnostic: NBA would be HIGH only if added to active_sports.
+        assert infer_call_priority("basketball_nba", "h2h,spreads") == CallPriority.LOW
 
     def test_nfl_low(self):
         assert infer_call_priority("americanfootball_nfl", "h2h") == CallPriority.LOW

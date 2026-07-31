@@ -1,0 +1,90 @@
+Before any live testing, fix the OddsAPI pacing priority system.
+
+Current problem:
+The pacing limiter is still MLB-focused.
+
+Current message:
+"LOW + MEDIUM priority calls are now blocked.
+HIGH + CRITICAL calls (MLB odds, player props) continue normally."
+
+This is incorrect for the expanded multi-sport system.
+
+Required changes:
+
+1. Update priority classification logic:
+- Remove MLB-only assumptions.
+- HIGH and CRITICAL priority should apply to all approved active sports, not just MLB.
+
+Protected priority markets should include:
+- MLB odds/player props
+- WNBA odds/player props
+- Tennis markets
+- DOTA markets
+- CS2 markets when enabled
+- Any future approved sports added through config
+
+2. Make priority sport-agnostic:
+Do not hardcode:
+"MLB = important"
+"everything else = lower priority"
+
+Priority should be based on:
+- enabled sport
+- active provider
+- configured market importance
+- alert requirements
+
+3. Update pacing warning messages:
+
+Replace:
+"HIGH + CRITICAL calls (MLB odds, player props) continue normally."
+
+With something like:
+"HIGH + CRITICAL calls for approved active sports continue normally."
+
+4. Improve pacing diagnostics:
+
+When budget is exceeded, show usage breakdown if available:
+
+Example:
+
+🚨 PACING BUDGET EXCEEDED
+
+Provider: OddsAPI
+Usage: 880 / 500 (176%)
+
+Blocked:
+LOW + MEDIUM priority calls
+
+Protected:
+HIGH + CRITICAL priority calls for active sports
+
+Usage breakdown:
+- MLB:
+- WNBA:
+- Tennis:
+- DOTA:
+- CS2:
+
+5. Add tests:
+- Confirm WNBA/Tennis/DOTA/CS2 can receive HIGH priority.
+- Confirm MLB is not treated as uniquely protected.
+- Confirm LOW/MEDIUM blocking still works.
+- Confirm warning text is updated.
+
+Do not change:
+- self-imposed pacing cap
+- quota safety behavior
+- alert grading logic
+- provider architecture
+- existing working MLB/WNBA pipelines
+
+After fixing:
+- Run the test suite.
+- Confirm the pacing system is now sport-neutral.
+- Confirm the bot starts cleanly.
+- Confirm no regressions.
+
+After this is complete, freeze the build for now.
+
+Do not add additional features after this point. The next phase should only be live monitoring, collecting alerts/results, and tuning based on performance data.
