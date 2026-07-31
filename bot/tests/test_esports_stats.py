@@ -251,17 +251,63 @@ class TestFetchDotaSingleMap:
 
 
 class TestFetchDotaMultiMap:
-    """DOTA maps-1+2 stat should scale values by 2."""
+    """DOTA maps-1+2 stat uses true series pairing (not per-game scaling)."""
+
+    # Two matches 45 min apart (same series) + one match 24 h later (separate series)
+    _SERIES_MATCHES = [
+        {
+            "match_id": 9001,
+            "start_time": 1753574400,          # series 1, game 1
+            "kills": 10, "deaths": 2, "assists": 5,
+            "last_hits": 200, "gold_per_min": 500,
+        },
+        {
+            "match_id": 9002,
+            "start_time": 1753574400 + 2700,   # series 1, game 2 (45 min later)
+            "kills": 6, "deaths": 3, "assists": 8,
+            "last_hits": 150, "gold_per_min": 450,
+        },
+        {
+            "match_id": 9003,
+            "start_time": 1753574400 + 86400,  # series 2 (24 h later)
+            "kills": 12, "deaths": 1, "assists": 9,
+            "last_hits": 300, "gold_per_min": 620,
+        },
+    ]
 
     @pytest.fixture
     def provider(self):
         return EsportsStatsProvider()
 
     @pytest.mark.asyncio
-    async def test_values_scaled_by_map_count(self, provider):
+    async def test_series_pair_sums_true_values(self, provider):
+        """Maps 1+2 returns the real sum (10+6=16), not a scaled average."""
         def _get_response(url, **kwargs):
             if "search" in url:
                 return _mock_json_response(_FAKE_SEARCH_RESPONSE)
+            return _mock_json_response(self._SERIES_MATCHES)
+
+        session = MagicMock()
+        session.get = MagicMock(side_effect=_get_response)
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("providers.esports_stats.aiohttp.ClientSession", return_value=session):
+            results = await provider.fetch_results("s4", "DOTA", "kills on maps 1+2")
+
+        # Series 1 has 2 games → 1 result (10+6=16)
+        # Series 2 has only 1 game → skipped (not enough maps)
+        assert len(results) == 1
+        assert results[0].actual_value == 16.0
+        assert results[0].source == "opendota_series"
+
+    @pytest.mark.asyncio
+    async def test_incomplete_series_yields_no_result(self, provider):
+        """A series with only 1 game is skipped for Maps 1+2 props."""
+        def _get_response(url, **kwargs):
+            if "search" in url:
+                return _mock_json_response(_FAKE_SEARCH_RESPONSE)
+            # Each match is 24 h apart → 3 single-game series → all skipped
             return _mock_json_response(_FAKE_RECENT_MATCHES)
 
         session = MagicMock()
@@ -272,12 +318,31 @@ class TestFetchDotaMultiMap:
         with patch("providers.esports_stats.aiohttp.ClientSession", return_value=session):
             results = await provider.fetch_results("s4", "DOTA", "kills on maps 1+2")
 
+        assert results == []
+
+    @pytest.mark.asyncio
+    async def test_single_map_still_uses_individual_games(self, provider):
+        """Single-map props still produce one result per game (not series-grouped)."""
+        def _get_response(url, **kwargs):
+            if "search" in url:
+                return _mock_json_response(_FAKE_SEARCH_RESPONSE)
+            return _mock_json_response(self._SERIES_MATCHES)
+
+        session = MagicMock()
+        session.get = MagicMock(side_effect=_get_response)
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("providers.esports_stats.aiohttp.ClientSession", return_value=session):
+            results = await provider.fetch_results("s4", "DOTA", "kills on map 1")
+
+        # All 3 individual games returned
         assert len(results) == 3
-        # Each value should be raw kills × 2
+        assert all(r.source == "opendota" for r in results)
         actual_values = {r.actual_value for r in results}
-        assert 16.0 in actual_values   # 8 × 2
-        assert 24.0 in actual_values   # 12 × 2
-        assert 10.0 in actual_values   # 5 × 2
+        assert 10.0 in actual_values
+        assert 6.0 in actual_values
+        assert 12.0 in actual_values
 
 
 class TestFetchDotaFantasy:

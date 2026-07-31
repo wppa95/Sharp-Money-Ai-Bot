@@ -42,6 +42,10 @@ class Config:
     # PrizePicks uses a public API — no key required. Field reserved for future
     # authenticated endpoints.
     PRIZEPICKS_API_KEY: str = os.environ.get("PRIZEPICKS_API_KEY", "")
+    # PandaScore API key for CS2 player stats.  Free tier available at
+    # pandascore.co — set PANDASCORE_API_KEY env var to activate CS2 alerts.
+    # CS2 props gracefully return [] without this key (decision engine PASS).
+    PANDASCORE_API_KEY: str = os.environ.get("PANDASCORE_API_KEY", "")
 
     # ── PrizePicks monitoring ─────────────────────────────────────────────────
     # Leagues to monitor (comma-separated PrizePicks league names).

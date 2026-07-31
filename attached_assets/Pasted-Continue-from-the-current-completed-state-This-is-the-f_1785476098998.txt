@@ -1,0 +1,180 @@
+Continue from the current completed state.
+
+This is the final implementation cycle for tonight. The goal is to finish the system cleanly, activate all supported sports/providers, add Telegram controls, validate everything, and leave the bot running for live alerts.
+
+Do not split this work into future tasks. Complete this in one cycle.
+
+==================================================
+STEP 1 — ORIENT AND PROTECT EXISTING SYSTEMS
+==================================================
+
+Before editing:
+- Re-read the current provider architecture, config, alert routing, Telegram command structure, database/storage flow, and test patterns.
+- Make changes cleanly and modularly.
+- Do not break existing working systems.
+
+Preserve:
+- MLB/WNBA pipeline
+- Existing decision engine gates
+- Existing alert quality filters
+- Underdog-only alert jobs
+- No alerts based only on line movement/snapshots
+
+==================================================
+STEP 2 — RESTART AND VERIFY CURRENT BUILD
+==================================================
+
+Restart the bot so all new modules load.
+
+Verify:
+- /status works
+- Bot is healthy
+- Scheduled jobs are running
+- Underdog feed is active
+- Telegram delivery works
+- No startup/import/runtime errors
+
+==================================================
+STEP 3 — FINISH ALL PROVIDER SUPPORT
+==================================================
+
+#64 — CS2 activation
+
+Complete CS2 support:
+- Wire PANDASCORE_API_KEY into configuration.
+- Enable CS2 historical stats retrieval when available.
+- Keep graceful fallback when unavailable.
+- Preserve provider interface.
+- Confirm CS2 routes through the same decision engine.
+
+Test:
+- key exists
+- key missing
+- retrieval success
+- fallback behavior
+
+#65 — Esports identity resolution
+
+Improve player matching:
+- Underdog names → provider names
+- aliases
+- shortened names
+- professional handles
+- stylized names
+
+Prevent silent failures where history exists but matching fails.
+
+Add tests for:
+- alias matches
+- failed matches
+- edge cases
+
+#66 — DOTA series pairing
+
+Improve DOTA cumulative accuracy:
+- Support Maps 1+2 and series-based props.
+- Group same-series games correctly.
+- Make historical samples comparable to Underdog cumulative lines.
+
+Add tests for:
+- series grouping
+- cumulative stats
+- historical comparisons
+
+==================================================
+STEP 4 — ACTIVATE TELEGRAM CONTROL PANEL
+==================================================
+
+Add/verify these commands:
+
+/status
+Shows:
+- bot health
+- active providers
+- active alert sources
+- last scan time
+- provider/API status
+
+/providers
+Shows:
+- MLB
+- WNBA
+- DOTA
+- TENNIS
+- CS2
+- active/missing credential/fallback state
+
+/testalert
+- Sends a safe test alert through the real Telegram pipeline
+
+/stats
+Shows:
+- alerts generated
+- tracked outcomes
+- performance tracking if available
+
+/config
+Shows:
+- active configuration
+- alert scope
+- enabled sports
+- never expose secrets
+
+/help
+Shows all commands and usage
+
+Follow existing command architecture.
+Do not create duplicate handlers.
+Keep security/admin checks consistent.
+
+==================================================
+STEP 5 — ALERT COVERAGE VERIFICATION
+==================================================
+
+Confirm the system can generate notifications for:
+
+Underdog:
+- MLB player props
+- WNBA player props
+- DOTA props
+- TENNIS props
+- CS2 props when API is available
+
+Keep alert grading active:
+- S/A tier focus
+- confidence scoring
+- historical validation
+- no low-quality spam alerts
+
+Confirm DraftKings/FanDuel scope remains separate:
+- MLB moneylines
+- MLB totals only
+
+==================================================
+STEP 6 — FINAL TEST AND FREEZE
+==================================================
+
+Run the complete test suite.
+
+Report:
+- final passing test count
+- files changed
+- provider status
+- Telegram command status
+
+Confirm:
+- MLB/WNBA unchanged
+- all new providers connected
+- Telegram notifications working
+- no regressions
+
+After completion:
+STOP feature development.
+
+The next phase is only:
+- live monitoring
+- collecting results
+- tracking hit rates
+- tuning thresholds
+
+Do not add more sports/features until live data is collected.

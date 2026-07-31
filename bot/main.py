@@ -61,6 +61,9 @@ from commands import (
     cmd_performance,
     cmd_backtest,
     cmd_testalert,
+    cmd_providers,
+    cmd_stats,
+    cmd_config,
     error_handler,
     init_handlers,
 )
@@ -885,6 +888,9 @@ def main() -> None:
     app.add_handler(CommandHandler("market",      cmd_market))
     app.add_handler(CommandHandler("performance", cmd_performance))
     app.add_handler(CommandHandler("backtest",    cmd_backtest))
+    app.add_handler(CommandHandler("providers",   cmd_providers))
+    app.add_handler(CommandHandler("stats",       cmd_stats))
+    app.add_handler(CommandHandler("config",      cmd_config))
     app.add_error_handler(error_handler)
 
     logger.info("Starting polling — press Ctrl+C to stop.")

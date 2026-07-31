@@ -1498,6 +1498,175 @@ async def cmd_grade(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
 
+async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/providers — Show status of every sport data provider."""
+    if not _check_allowed(update):
+        await update.message.reply_text("⛔ Unauthorized.")
+        return
+
+    import os
+    pandascore_key = bool(os.environ.get("PANDASCORE_API_KEY", "").strip())
+
+    lines: list[str] = [
+        "🔌 <b>Provider Status</b>",
+        "",
+        "<b>Underdog Alert Sports</b>",
+    ]
+
+    # Per-sport provider details
+    providers_info = [
+        ("MLB",    "⚾", "MLB Stats API",      "statsapi.mlb.com", True,            "free — no key"),
+        ("WNBA",   "🏀", "ESPN gamelog",        "espn.com/api",     True,            "free — no key"),
+        ("DOTA",   "🎮", "OpenDota API",        "api.opendota.com", True,            "free — no key"),
+        ("TENNIS", "🎾", "JeffSackmann CSV",   "github.com/JeffSackmann", True,     "free — no key"),
+        ("CS2",    "🖥️", "PandaScore API",     "api.pandascore.co", pandascore_key, "key active" if pandascore_key else "⚠️ PANDASCORE_API_KEY not set"),
+    ]
+
+    ud_sports = config.ud_alert_sports
+
+    for sport, icon, provider_name, host, active, note in providers_info:
+        in_scope = sport in ud_sports or (sport == "CS2" and "CS" in ud_sports)
+        scope_tag = "✅" if (in_scope and active) else ("⚠️" if in_scope else "⏸️")
+        lines.append(
+            f"  {scope_tag} {icon} <b>{sport:<6}</b>  {provider_name}\n"
+            f"         <i>{note}  ·  {host}</i>"
+        )
+
+    lines.append("")
+    lines.append("<b>DraftKings / FanDuel</b>")
+    lines.append(
+        f"  {'✅' if config.DRAFTKINGS_ENABLED else '❌'} DraftKings  ·  "
+        f"{'✅' if config.FANDUEL_ENABLED else '❌'} FanDuel\n"
+        f"  <i>Odds API — MLB moneylines + totals only</i>"
+    )
+
+    if not pandascore_key:
+        lines.append("")
+        lines.append(
+            "<i>💡 To enable CS2 alerts: add PANDASCORE_API_KEY to environment secrets, "
+            "then restart the bot.</i>"
+        )
+
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+
+async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/stats — Alert generation stats, outcomes tracked, performance summary."""
+    if not _check_allowed(update):
+        await update.message.reply_text("⛔ Unauthorized.")
+        return
+    if _db is None:
+        await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
+        return
+
+    # Gather data
+    ud_today   = await _db.count_today_underdog_alerts()
+    pp_today   = await _db.count_today_pp_alerts()
+    total_pp   = await _db.count_pp_edge_records()
+    resolved   = await _db.get_all_resolved_pp_edges(limit=500)
+    edges_24h  = await _db.get_top_pp_edges(limit=100, hours=24)
+
+    lines: list[str] = [
+        f"📈 <b>Alert Stats</b>  ·  Uptime: {_uptime_str()}",
+        "",
+        "<b>Today's Alerts</b>",
+        f"  Underdog:    <b>{ud_today}</b>",
+        f"  PrizePicks:  <b>{pp_today}</b>",
+        "",
+        "<b>Pipeline (last 24 h)</b>",
+    ]
+
+    # Tier breakdown from 24h edges
+    tier_counts: dict[str, int] = {}
+    for r in edges_24h:
+        t = r.tier or "PASS"
+        tier_counts[t] = tier_counts.get(t, 0) + 1
+
+    if tier_counts:
+        for tier in ("S", "A", "B", "PASS"):
+            n = tier_counts.get(tier, 0)
+            if n:
+                icon = {"S": "🔥", "A": "🟢", "B": "🟡", "PASS": "⚪"}.get(tier, "⚪")
+                lines.append(f"  {icon} {tier}: <b>{n}</b>")
+    else:
+        lines.append("  <i>No edges detected in last 24 h</i>")
+
+    lines.append("")
+    lines.append(f"<b>All-time</b>  ({total_pp:,} edges stored)")
+
+    if resolved:
+        wins   = sum(1 for r in resolved if (r.result or "").upper() == "WIN")
+        losses = sum(1 for r in resolved if (r.result or "").upper() == "LOSS")
+        pushes = sum(1 for r in resolved if (r.result or "").upper() in ("PUSH", "REFUND"))
+        total_res = wins + losses + pushes
+        hit_rate  = wins / total_res * 100 if total_res > 0 else 0.0
+        edges     = [r.best_edge for r in resolved if r.best_edge is not None]
+        avg_edge  = sum(edges) / len(edges) if edges else 0.0
+        lines += [
+            f"  Resolved:    <b>{total_res}</b>  W:{wins}  L:{losses}  P:{pushes}",
+            f"  Hit rate:    <code>{hit_rate:.0f}%</code>",
+            f"  Avg edge:    <code>+{avg_edge:.1f}%</code>",
+        ]
+        if total_res >= 5:
+            implied_roi = (avg_edge / 100) * 0.909
+            lines.append(f"  Implied ROI: <code>{implied_roi * 100:+.1f}%</code> <i>(rough, -110 base)</i>")
+    else:
+        lines.append("  <i>No resolved picks yet — results recorded after games finish.</i>")
+
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+
+async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/config — Show active bot configuration (no secrets exposed)."""
+    if not _check_allowed(update):
+        await update.message.reply_text("⛔ Unauthorized.")
+        return
+
+    import os
+    pandascore_set = bool(os.environ.get("PANDASCORE_API_KEY", "").strip())
+    odds_api_set   = bool(config.ODDS_API_KEY)
+
+    ud_sports = ", ".join(sorted(config.ud_alert_sports)) or "none"
+    active_sp = ", ".join(config.active_sports) or "none"
+
+    lines: list[str] = [
+        "⚙️ <b>Bot Configuration</b>",
+        "",
+        "<b>Alert Scope</b>",
+        f"  Underdog sports:   <code>{ud_sports}</code>",
+        f"  DK/FD sports:      <code>{active_sp}</code>",
+        f"  Min stars (alert): <code>{config.UD_MIN_STARS_TO_ALERT}★</code>",
+        f"  Min validation:    <code>{config.UD_VALIDATION_MIN_SAMPLES} snapshots</code>",
+        "",
+        "<b>Thresholds</b>",
+        f"  Min EV:            <code>{config.MIN_EV_THRESHOLD:.1f}%</code>",
+        f"  Min steam score:   <code>{config.MIN_STEAM_SCORE}/100</code>",
+        f"  Min AI confidence: <code>{config.MIN_AI_CONFIDENCE}/100</code>",
+        f"  Min PP edge:       <code>{config.MIN_PP_EDGE:.1f}%</code>",
+        "",
+        "<b>Alert Limits</b>",
+        f"  Daily PP cap:      <code>{'unlimited' if config.DAILY_ALERT_LIMIT == 0 else config.DAILY_ALERT_LIMIT}</code>",
+        f"  Daily UD cap:      <code>{'unlimited' if config.DAILY_UNDERDOG_LIMIT == 0 else config.DAILY_UNDERDOG_LIMIT}</code>",
+        "",
+        "<b>Connectors</b>",
+        f"  DraftKings:        {'✅ enabled' if config.DRAFTKINGS_ENABLED else '❌ disabled'}",
+        f"  FanDuel:           {'✅ enabled' if config.FANDUEL_ENABLED else '❌ disabled'}",
+        f"  Underdog:          {'✅ enabled' if config.UNDERDOG_ENABLED else '❌ disabled'}",
+        "",
+        "<b>API Keys</b>",
+        f"  Odds API:          {'✅ set' if odds_api_set else '❌ not set'}",
+        f"  PandaScore (CS2):  {'✅ set' if pandascore_set else '⚠️ not set — CS2 alerts suppressed'}",
+        "",
+        "<b>Poll Intervals</b>",
+        f"  Underdog:          <code>{config.UNDERDOG_POLL_INTERVAL}s ({config.UNDERDOG_POLL_INTERVAL // 60} min)</code>",
+        f"  Season check:      <code>{config.SEASON_CHECK_INTERVAL}s</code>",
+        "",
+        "<i>Secrets are never shown. Restart the bot after changing env vars.</i>",
+    ]
+
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Log errors raised by handlers."""
     logger.error("Update %s caused error: %s", update, context.error, exc_info=context.error)
