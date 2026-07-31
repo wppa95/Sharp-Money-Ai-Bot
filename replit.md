@@ -343,6 +343,42 @@ Implemented as part of the v1.3 freeze (Task #70). No new features — hardening
 
 ---
 
+## PrizePicks Reference System
+
+Since the PrizePicks API is DataDome-protected, `engine/pp_reference.py` surfaces
+Underdog pick'em projections as PrizePicks *reference* data. Underdog lines are
+typically identical or within ±0.5 of PrizePicks for the same player/market.
+
+**Architecture:**
+- `PPReferenceMatch` dataclass — holds player, sport, stat, UD line, inferred PP line, confidence (0–100), match reason, and source label
+- `match_underdog_to_pp(player, sport, stat, line, fetched_at, *, prop_history_rows, now)` — scores one prop as a PP proxy
+- `run_pp_reference_cycle(db, bot, chat_ids, scored_props, alerted_set, now)` — batch helper called from `underdog_job` post-bridge
+- `format_pp_reference_alert(match)` in `alerts.py` — formats the 🟣 reference alert with mandatory disclaimer
+
+**Confidence scoring (max 100):**
+| Dimension | Points | Criteria |
+|---|---|---|
+| Player name quality | 40 | Non-empty, non-generic; exact match in PP PropLineHistory if available |
+| Stat normalization | 30 | Stat type maps to a canonical PP stat |
+| Sport support | 20 | Sport is in PrizePicks' active sport list |
+| Data recency | 10 | Fetched within the last 6 hours |
+
+**Threshold:** ≥ 80 confidence required to fire a reference alert.
+
+**Dedup:** Module-level `_pp_ref_alerted` set in `market_engine.py`, keyed on
+`(player_name, sport, stat_type, line_str)`. A new alert fires when the line moves.
+
+**Source labels:**
+- `🔍 Underdog Proxy` — no PP data in PropLineHistory; UD line used as proxy (±0.5 note shown)
+- `📋 PP History Match` — a live PP row was found in PropLineHistory (from manual `/pp_import`)
+
+**Invariant:** `PPReferenceMatch` output is NEVER treated as confirmed PP data. The
+disclaimer ("Reference only — not confirmed PrizePicks data") is mandatory in every alert.
+The existing `PrizePicksManualProvider` and `/pp_import` flow remain the only authoritative
+source for confirmed PP data.
+
+---
+
 ## User preferences
 
 - Documentation changes do not require calling `markTaskInProgress`

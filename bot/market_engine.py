@@ -72,6 +72,12 @@ _player_result_fetch_cache: set = set()
 # scoring (new props and line-change events only).
 _cold_start_done: bool = False
 
+# ── PrizePicks reference alert dedup ─────────────────────────────────────────
+# Keyed on (player_name, sport, stat_type, line_str) so a new alert fires when
+# the line changes but not on every cycle for the same prop/line.
+# Intentionally module-level: persists across cycles, resets on bot restart.
+_pp_ref_alerted: set = set()
+
 
 def _get_player_stats_provider():
     global _player_stats_provider
@@ -1287,6 +1293,24 @@ async def underdog_job(context) -> None:
         )
     if _lc_fail_count > 0:
         _persistence_ok = False
+
+    # ── PrizePicks reference engine (post-bridge, post-lifecycle) ─────────────
+    # Run AFTER bridge so PropLineHistory rows reflect the current cycle.
+    # Failures are non-fatal: logged at debug level so they never mask the
+    # main persistence outcome.
+    if chat_ids and _scored_props:
+        try:
+            from engine.pp_reference import run_pp_reference_cycle
+            await run_pp_reference_cycle(
+                db           = db,
+                bot          = bot,
+                chat_ids     = chat_ids,
+                scored_props = _scored_props,
+                alerted_set  = _pp_ref_alerted,
+                now          = now,
+            )
+        except Exception as _ref_exc:
+            logger.debug("underdog_job: pp_reference cycle error: %s", _ref_exc)
 
     # Record job outcome — failure if any persistence stage raised.
     if _health:

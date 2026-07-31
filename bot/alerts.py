@@ -691,6 +691,75 @@ def format_pp_alert(
     return "\n".join(parts)
 
 
+# ── PrizePicks reference alert formatter ──────────────────────────────────────
+
+def format_pp_reference_alert(match: "PPReferenceMatch") -> str:  # noqa: F821
+    """
+    Format a PrizePicks reference alert derived from an Underdog prop.
+
+    The 🟣 prefix and mandatory disclaimer clearly distinguish this from a
+    🚨 Confirmed PrizePicks Alert.  The alert surfaces the Underdog line as
+    a PP proxy, includes the ±0.5 uncertainty note, and the confidence score.
+
+    Parameters
+    ----------
+    match:
+        A PPReferenceMatch produced by engine.pp_reference.match_underdog_to_pp().
+    """
+    # Import here to avoid a circular dependency (pp_reference → alerts → pp_reference)
+    from engine.pp_reference import PPReferenceMatch  # noqa: PLC0415
+
+    sport      = match.sport
+    s_icon     = _SPORT_EMOJI.get(sport.upper(), "🎯")
+    conf_bar   = _pp_conf_bar(match.confidence)
+
+    # Inferred PP line may equal UD line (proxy) or differ slightly (DB match)
+    pp_line_str = f"{match.inferred_pp_line:.1f}"
+    ud_line_str = f"{match.ud_line:.1f}"
+
+    if match.pp_source == "prop_history_match" and match.pp_line_from_db is not None:
+        pp_note = f"confirmed from PP history (UD: {ud_line_str})"
+    else:
+        pp_note = f"inferred from Underdog proxy (±0.5 uncertainty)"
+
+    source_label = (
+        "📋 PP History Match"
+        if match.pp_source == "prop_history_match"
+        else "🔍 Underdog Proxy"
+    )
+
+    lines = [
+        f"🟣 <b>PRIZEPICKS REFERENCE ALERT</b>",
+        "",
+        f"{s_icon} <b>{sport}</b>  ·  {match.stat_type}",
+        f"👤 <b>{match.player_name}</b>",
+        "",
+        f"─────────────────────────────",
+        f"📊 <b>Underdog Line:</b>    {ud_line_str}",
+        f"🎯 <b>Inferred PP Line:</b> {pp_line_str}",
+        f"    <i>{pp_note}</i>",
+        "",
+        f"🔬 <b>Confidence:</b>  {match.confidence}/100  {conf_bar}",
+        f"📡 <b>Source:</b>      {source_label}",
+        f"",
+        f"─────────────────────────────",
+        f"⚠️  <b>Reference only — not confirmed PrizePicks data.</b>",
+        f"    Underdog and PrizePicks lines typically match within ±0.5",
+        f"    but can diverge. Always verify at prizepicks.com before",
+        f"    placing a pick.",
+        f"",
+        f"{EMOJI['clock']} <i>{match.matched_at.strftime('%Y-%m-%d %H:%M UTC')}</i>",
+    ]
+
+    return "\n".join(lines)
+
+
+def _pp_conf_bar(confidence: int) -> str:
+    """Return a visual 0–10 scale bar for a PP reference confidence score."""
+    filled = max(0, min(10, round(confidence / 10)))
+    return f"<code>[{'█' * filled}{'░' * (10 - filled)}]</code>"
+
+
 # ── AlertDelivery ─────────────────────────────────────────────────────────────
 
 @dataclass
