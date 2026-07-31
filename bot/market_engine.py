@@ -1195,3 +1195,16 @@ async def underdog_job(context) -> None:
         )
         _dbg_lines.append(f"  rejection breakdown:  {_rej_str}")
     logger.info("underdog_job [debug summary]\n%s", "\n".join(_dbg_lines))
+
+    # ── Bridge to PropLineHistory (lifecycle tracking) ─────────────────────────
+    # Syncs this cycle's Underdog snapshots into the provider-agnostic
+    # PropLineHistory table, tracking first_seen / last_seen / change_count.
+    # Wrapped in try/except so a bridge failure never crashes the main job.
+    try:
+        bridged = await db.sync_underdog_snapshots_to_prop_history(
+            limit=200, since_hours=4
+        )
+        if bridged:
+            logger.debug("underdog_job: bridged %d rows to PropLineHistory", bridged)
+    except Exception as _bridge_exc:
+        logger.warning("underdog_job: PropLineHistory sync failed: %s", _bridge_exc)

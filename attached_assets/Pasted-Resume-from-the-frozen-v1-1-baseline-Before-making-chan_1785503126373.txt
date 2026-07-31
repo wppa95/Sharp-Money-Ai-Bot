@@ -1,0 +1,142 @@
+Resume from the frozen v1.1 baseline.
+
+Before making changes:
+
+1. Read replit.md.
+2. Inspect the current codebase.
+3. Preserve all completed architecture.
+4. Do not rebuild completed modules.
+
+Current stable systems:
+
+* Odds Pipeline
+* Fair Probability Engine
+* EV Engine
+* Steam Engine
+* AI Confidence Engine
+* Analysis Engine
+* Risk System
+* AlertDelivery
+* Telegram Integration
+* CLV Tracking
+* Performance Dashboard
+* PrizePicks Provider Layer
+* Underdog Provider Layer
+* PropLineHistory
+
+Current status:
+
+* 1427/1427 tests passing.
+
+All existing tests must continue passing.
+
+Complete the following in this order:
+
+Phase 1 — CLV Harvest Automation
+
+Complete the CLV system.
+
+Requirements:
+
+* Automatically capture closing lines before game start.
+* Match alerts to closing prices.
+* Calculate CLV automatically.
+* Store:
+    * opening/alert line
+    * closing line
+    * CLV percentage
+    * alert type
+    * confidence tier
+    * sport
+    * market
+
+Add historical CLV reporting by:
+
+* Sport
+* Market
+* Alert type
+* Confidence tier
+
+Add automated tests.
+
+⸻
+
+Phase 2 — Underdog Bridge Automation
+
+Complete the Underdog data flow.
+
+Requirements:
+
+* Automatically sync Underdog snapshots into PropLineHistory.
+* Preserve source metadata.
+* Avoid duplicate records.
+* Track:
+    * first seen
+    * last seen
+    * line changes
+    * removals
+    * returns
+
+Do not create a duplicate prop system.
+
+⸻
+
+Phase 3 — Model Calibration System
+
+Use the new historical data to evaluate the bot.
+
+Create performance tracking for:
+
+* Confidence score accuracy
+* S-tier performance
+* A-tier performance
+* B-tier performance
+* Grade accuracy
+* Line movement alerts vs actual results
+
+Track separately:
+
+1. Line movement detection accuracy
+2. Betting recommendation accuracy
+
+Do not assume a sharp movement automatically equals a profitable bet.
+
+Example:
+
+A line move alert should be evaluated separately from the recommendation generated from that move.
+
+⸻
+
+Phase 4 — PrizePicks Manual Data Command
+
+Add a manual/test import command for PrizePicks.
+
+Requirements:
+
+* Import test prop data.
+* Feed into the same normalized PropLineHistory system.
+* Support:
+    * prop added
+    * line changed
+    * prop removed
+    * prop returned
+
+Do not modify EV, Steam, Confidence, or AlertDelivery engines.
+
+⸻
+
+Phase 5 — Reliability and Freeze
+
+Before completion:
+
+* Run full test suite.
+* Fix all regressions.
+* Update replit.md.
+* Confirm architecture.
+* Create the next stable checkpoint.
+
+Do not start new experimental features after this.
+
+The goal of this phase is not adding more features.
+
+The goal is making the bot measurable, calibrated, and reliable.

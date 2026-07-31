@@ -64,6 +64,8 @@ from commands import (
     cmd_providers,
     cmd_stats,
     cmd_config,
+    cmd_calibration,
+    cmd_pp_import,
     error_handler,
     init_handlers,
 )
@@ -214,6 +216,8 @@ async def post_init(application: Application) -> None:
         jq.run_repeating(underdog_job,         interval=config.UNDERDOG_POLL_INTERVAL,      first=45,  name="underdog_monitor")
         # CLV seed job — every 15 minutes (creates AlertCLVSeed entries for alerts)
         jq.run_repeating(_clv_seed_job,        interval=900,                                first=120, name="clv_seeder")
+        # CLV harvest job — every hour (processes seeds after game_time passes)
+        jq.run_repeating(_clv_harvest_job,     interval=3600,                               first=300, name="clv_harvester")
         # API budget check — every 15 minutes
         jq.run_repeating(_budget_check_job,    interval=900,                                first=900, name="budget_checker")
         # Season / market-status refresh (skip when interval is 0 = disabled)
@@ -515,6 +519,112 @@ async def _steam_check_job(context) -> None:
 
 
 # ── CLV seed job ──────────────────────────────────────────────────────────────
+
+async def _clv_harvest_job(context) -> None:
+    """
+    Run every hour.  Processes pending AlertCLVSeeds whose game_time has passed:
+
+    - For seeds with bet_odds:  tries to find a closing-odds proxy in OddsRecord;
+      if found, computes CLV% and writes a CLVRecord; otherwise marks expired
+      after a grace period (4 hours post game_time).
+    - For seeds without bet_odds (Underdog pick'em, no sportsbook odds): marks
+      expired immediately — CLV% is not applicable to pick'em props.
+
+    When sportsbook polling is re-enabled this job will have real closing-odds
+    data; until then it gracefully expires seeds it cannot resolve.
+    """
+    if _db is None:
+        return
+
+    try:
+        from engine.clv import compute_clv, CLVRecord as _CLVResult  # noqa: F401
+        from database import CLVRecord
+    except ImportError:
+        return
+
+    try:
+        seeds = await _db.get_pending_clv_seeds(limit=50)
+        if not seeds:
+            return
+
+        harvested = 0
+        expired   = 0
+        now       = datetime.utcnow()
+        grace     = timedelta(hours=4)   # wait this long for closing odds before expiring
+
+        for seed in seeds:
+            game_time = seed.game_time
+            if game_time is None:
+                # No timing info — expire immediately
+                await _db.mark_clv_seed_expired(seed.id)
+                expired += 1
+                continue
+
+            # Underdog pick'em seeds have no sportsbook bet_odds → expire immediately
+            if not seed.bet_odds or seed.alert_type == "UNDERDOG":
+                await _db.mark_clv_seed_expired(seed.id)
+                expired += 1
+                continue
+
+            # Try to find closing odds from the last OddsRecord for this event
+            closing_record = await _db.get_last_odds_for_event(
+                seed.event or "", seed.selection or ""
+            )
+
+            if closing_record is not None and closing_record.american_odds:
+                # We have closing odds — compute CLV
+                try:
+                    clv_result = compute_clv(
+                        bet_odds              = seed.bet_odds,
+                        closing_odds          = closing_record.american_odds,
+                        counterpart_bet_odds  = seed.counterpart_odds,
+                        counterpart_close_odds= None,
+                        selection             = seed.selection or "",
+                        notes                 = f"source={seed.source_table}:{seed.source_id}",
+                    )
+                    rec = CLVRecord(
+                        selection              = seed.selection or "",
+                        event                  = seed.event     or "",
+                        sport                  = seed.sport     or "",
+                        bet_odds               = seed.bet_odds,
+                        closing_odds           = closing_record.american_odds,
+                        clv_pct                = clv_result.clv_pct,
+                        clv_proxy              = clv_result.clv_lead,
+                        fair_prob_bet          = clv_result.fair_prob_bet,
+                        fair_prob_close        = clv_result.fair_prob_close,
+                        counterpart_bet_odds   = seed.counterpart_odds,
+                        counterpart_close_odds = None,
+                        notes                  = clv_result.notes,
+                        computed_at            = now,
+                    )
+                    # Set migration-added columns if present
+                    try:
+                        rec.alert_type   = seed.alert_type   or ""
+                        rec.market_type  = seed.market_type  or ""
+                        rec.tier         = seed.tier         or ""
+                    except AttributeError:
+                        pass
+                    await _db.save_clv_record(rec)
+                    await _db.mark_clv_seed_computed(seed.id, clv_result.clv_pct)
+                    harvested += 1
+                except Exception as exc:
+                    logger.warning(
+                        "_clv_harvest_job: CLV compute failed for seed %d: %s", seed.id, exc
+                    )
+            elif now - game_time > grace:
+                # Grace period elapsed, no odds found → expire
+                await _db.mark_clv_seed_expired(seed.id)
+                expired += 1
+
+        if harvested or expired:
+            logger.info(
+                "_clv_harvest_job: harvested=%d expired=%d (pending remaining=%d)",
+                harvested, expired, len(seeds) - harvested - expired,
+            )
+
+    except Exception as exc:
+        logger.exception("_clv_harvest_job: error: %s", exc)
+
 
 async def _clv_seed_job(context) -> None:
     """
@@ -953,7 +1063,9 @@ def main() -> None:
     app.add_handler(CommandHandler("backtest",    cmd_backtest))
     app.add_handler(CommandHandler("providers",   cmd_providers))
     app.add_handler(CommandHandler("stats",       cmd_stats))
-    app.add_handler(CommandHandler("config",      cmd_config))
+    app.add_handler(CommandHandler("config",       cmd_config))
+    app.add_handler(CommandHandler("calibration",  cmd_calibration))
+    app.add_handler(CommandHandler("pp_import",    cmd_pp_import))
     app.add_error_handler(error_handler)
 
     logger.info("Starting polling — press Ctrl+C to stop.")

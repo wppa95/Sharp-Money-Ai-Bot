@@ -255,6 +255,12 @@ class PropLineHistory(Base):
     external_id = Column(String(64),  nullable=False, default="")
     game_id     = Column(String(64),  nullable=False, default="")
     fetched_at  = Column(DateTime,    default=datetime.utcnow, nullable=False)
+    # Lifecycle columns (added via migration for existing databases)
+    first_seen   = Column(DateTime,   nullable=True)
+    last_seen    = Column(DateTime,   nullable=True)
+    change_count = Column(Integer,    default=0,     nullable=True)
+    prev_line    = Column(Float,      nullable=True)
+    removed      = Column(Boolean,    default=False, nullable=True)
 
 
 class AlertCLVSeed(Base):
@@ -359,6 +365,7 @@ class Database:
         await self._migrate_pp_edge_records()
         await self._migrate_underdog_snapshots()
         await self._migrate_clv_records()
+        await self._migrate_prop_line_history()
         logger.info("Database initialised at %s", self._url)
 
     def session(self) -> AsyncSession:
@@ -935,6 +942,24 @@ class Database:
             )
             return list(result.scalars().all())
 
+    # ── PropLineHistory migration ────────────────────────────────────────────
+
+    async def _migrate_prop_line_history(self) -> None:
+        """Add lifecycle columns to prop_line_history if they don't exist (idempotent)."""
+        new_cols = [
+            "ALTER TABLE prop_line_history ADD COLUMN first_seen DATETIME",
+            "ALTER TABLE prop_line_history ADD COLUMN last_seen  DATETIME",
+            "ALTER TABLE prop_line_history ADD COLUMN change_count INTEGER DEFAULT 0",
+            "ALTER TABLE prop_line_history ADD COLUMN prev_line  REAL",
+            "ALTER TABLE prop_line_history ADD COLUMN removed    INTEGER DEFAULT 0",
+        ]
+        async with self._engine.begin() as conn:
+            for sql in new_cols:
+                try:
+                    await conn.execute(text(sql))
+                except Exception:
+                    pass  # column already exists — safe to ignore
+
     async def count_prop_line_history(self, provider: Optional[str] = None) -> int:
         """Count PropLineHistory rows, optionally filtered by provider."""
         async with self.session() as s:
@@ -950,29 +975,28 @@ class Database:
         since_hours: int = 48,
     ) -> int:
         """
-        Bridge Underdog snapshot records into the shared PropLineHistory table.
+        Bridge Underdog snapshot records into the shared PropLineHistory table
+        with full lifecycle tracking (first_seen, last_seen, change_count, removed).
 
-        Reads recent, non-removed UnderdogSnapshotRecord rows whose
-        (player_name, sport, stat_type, fetched_at) combination does not yet
-        exist in PropLineHistory, then bulk-inserts them.
+        Algorithm per prop (player_name, sport, stat_type):
+          • First appearance  → insert with first_seen=last_seen=fetched_at, change_count=0
+          • Same line         → update last_seen only
+          • Line changed      → increment change_count, set prev_line, update last_seen
+          • Removed snapshot  → set removed=True, update last_seen
 
-        This ensures Underdog data flows into the same normalized model as
-        PrizePicks data, enabling cross-provider comparison and line history.
-
-        Returns the number of new PropLineHistory rows written.
+        Returns the number of UPSERTED (new or updated) rows.
         """
         from datetime import timedelta
+        from sqlalchemy import update as sa_update
+
         cutoff = datetime.utcnow() - timedelta(hours=since_hours)
 
-        # Load recent Underdog snapshots (non-removed only)
+        # Load recent Underdog snapshots (all, including removed — we track removals)
         async with self.session() as s:
             result = await s.execute(
                 select(UnderdogSnapshotRecord)
-                .where(
-                    UnderdogSnapshotRecord.fetched_at >= cutoff,
-                    UnderdogSnapshotRecord.removed    == False,   # noqa: E712
-                )
-                .order_by(desc(UnderdogSnapshotRecord.fetched_at))
+                .where(UnderdogSnapshotRecord.fetched_at >= cutoff)
+                .order_by(UnderdogSnapshotRecord.fetched_at.asc())  # oldest first
                 .limit(limit)
             )
             snaps = list(result.scalars().all())
@@ -980,56 +1004,221 @@ class Database:
         if not snaps:
             return 0
 
-        # Find already-bridged combinations so we don't duplicate
-        # Key: (player_name, sport, stat_type, fetched_at rounded to minute)
-        cutoff_dt = datetime.utcnow() - timedelta(hours=since_hours)
+        # Load latest PropLineHistory row per (player_name, sport, stat_type) for Underdog
         async with self.session() as s:
-            existing_result = await s.execute(
-                select(
+            # Subquery: max id per prop identity
+            subq = (
+                select(func.max(PropLineHistory.id))
+                .where(PropLineHistory.provider == "Underdog")
+                .group_by(
                     PropLineHistory.player_name,
                     PropLineHistory.sport,
                     PropLineHistory.stat_type,
-                    PropLineHistory.external_id,
                 )
-                .where(
-                    PropLineHistory.provider   == "Underdog",
-                    PropLineHistory.fetched_at >= cutoff_dt,
-                )
+                .scalar_subquery()
             )
-            existing_keys = {
-                (row.player_name, row.sport, row.stat_type, row.external_id)
-                for row in existing_result.all()
+            result = await s.execute(
+                select(PropLineHistory).where(PropLineHistory.id.in_(subq))
+            )
+            latest_rows = {
+                (r.player_name, r.sport, r.stat_type): r
+                for r in result.scalars().all()
             }
 
-        # Build new records for snapshots not yet bridged
-        new_records: list[PropLineHistory] = []
+        # Track changes to accumulate within this batch
+        upserted = 0
+        snap_by_key: dict[tuple, list] = {}
         for snap in snaps:
-            key = (
-                snap.player_name or "",
-                snap.sport       or "",
-                snap.stat_type   or "",
-                snap.external_id or "",
+            key = (snap.player_name or "", snap.sport or "", snap.stat_type or "")
+            snap_by_key.setdefault(key, []).append(snap)
+
+        for key, key_snaps in snap_by_key.items():
+            player_name, sport, stat_type = key
+            # Use the LATEST snapshot for this batch as the authoritative state
+            latest_snap = key_snaps[-1]
+            existing    = latest_rows.get(key)
+            now_ts      = latest_snap.fetched_at or datetime.utcnow()
+            is_removed  = bool(latest_snap.removed)
+            new_line    = float(latest_snap.line_value) if latest_snap.line_value is not None else 0.0
+
+            if existing is None:
+                # First appearance — insert
+                async with self.session() as s:
+                    row = PropLineHistory(
+                        provider     = "Underdog",
+                        sport        = sport,
+                        player_name  = player_name,
+                        team         = latest_snap.team        or "",
+                        stat_type    = stat_type,
+                        line_value   = new_line,
+                        game_time    = latest_snap.game_time,
+                        external_id  = latest_snap.external_id or "",
+                        game_id      = latest_snap.game_id     or "",
+                        fetched_at   = now_ts,
+                    )
+                    # Lifecycle columns (may be None on old schema — migration adds them)
+                    try:
+                        row.first_seen   = now_ts
+                        row.last_seen    = now_ts
+                        row.change_count = 0
+                        row.prev_line    = None
+                        row.removed      = is_removed
+                    except AttributeError:
+                        pass
+                    s.add(row)
+                    await s.commit()
+                upserted += 1
+            else:
+                # Existing row — determine what changed
+                old_line      = existing.line_value or 0.0
+                line_changed  = abs(new_line - old_line) >= 0.01
+                change_delta  = (getattr(existing, "change_count", 0) or 0)
+                if line_changed:
+                    change_delta += 1
+
+                async with self.session() as s:
+                    update_vals: dict = {
+                        "line_value": new_line,
+                        "fetched_at": now_ts,
+                    }
+                    try:
+                        update_vals["last_seen"]    = now_ts
+                        update_vals["change_count"] = change_delta
+                        update_vals["removed"]      = is_removed
+                        if line_changed:
+                            update_vals["prev_line"] = old_line
+                    except Exception:
+                        pass
+                    await s.execute(
+                        sa_update(PropLineHistory)
+                        .where(PropLineHistory.id == existing.id)
+                        .values(**update_vals)
+                    )
+                    await s.commit()
+                upserted += 1
+
+        return upserted
+
+    async def upsert_prop_line_lifecycle(
+        self,
+        provider:    str,
+        player_name: str,
+        sport:       str,
+        stat_type:   str,
+        line_value:  float,
+        *,
+        team:        str            = "",
+        external_id: str            = "",
+        game_id:     str            = "",
+        game_time:   "Optional[datetime]" = None,
+        removed:     bool           = False,
+        fetched_at:  "Optional[datetime]" = None,
+    ) -> tuple["PropLineHistory", str]:
+        """
+        Insert or update a PropLineHistory row with full lifecycle tracking.
+
+        Returns (row, event) where event is one of:
+            "ADDED"    — first time this prop is seen for this provider
+            "CHANGED"  — same prop, line changed
+            "REMOVED"  — prop marked removed
+            "RETURNED" — prop was removed then reappeared
+            "UNCHANGED"— same prop, same line, not removed
+        """
+        from sqlalchemy import update as sa_update
+
+        now_ts = fetched_at or datetime.utcnow()
+
+        # Find most-recent existing row for this prop+provider
+        async with self.session() as s:
+            result = await s.execute(
+                select(PropLineHistory)
+                .where(
+                    PropLineHistory.provider    == provider,
+                    PropLineHistory.player_name == player_name,
+                    PropLineHistory.sport       == sport,
+                    PropLineHistory.stat_type   == stat_type,
+                )
+                .order_by(desc(PropLineHistory.fetched_at))
+                .limit(1)
             )
-            if key in existing_keys:
-                continue
-            new_records.append(PropLineHistory(
-                provider    = "Underdog",
-                sport       = snap.sport       or "",
-                player_name = snap.player_name or "",
-                team        = snap.team        or "",
-                stat_type   = snap.stat_type   or "",
-                line_value  = float(snap.line_value) if snap.line_value is not None else 0.0,
-                game_time   = snap.game_time,
-                external_id = snap.external_id or "",
-                game_id     = snap.game_id     or "",
-                fetched_at  = snap.fetched_at  or datetime.utcnow(),
-            ))
-            existing_keys.add(key)   # prevent duplicates within this batch
+            existing = result.scalar_one_or_none()
 
-        if new_records:
-            await self.save_prop_line_history_bulk(new_records)
+        if existing is None:
+            # First appearance
+            row = PropLineHistory(
+                provider    = provider,
+                sport       = sport,
+                player_name = player_name,
+                team        = team,
+                stat_type   = stat_type,
+                line_value  = line_value,
+                game_time   = game_time,
+                external_id = external_id,
+                game_id     = game_id,
+                fetched_at  = now_ts,
+            )
+            try:
+                row.first_seen   = now_ts
+                row.last_seen    = now_ts
+                row.change_count = 0
+                row.prev_line    = None
+                row.removed      = removed
+            except AttributeError:
+                pass
+            async with self.session() as s:
+                s.add(row)
+                await s.commit()
+                await s.refresh(row)
+            return row, "ADDED"
 
-        return len(new_records)
+        # Existing — determine event type
+        was_removed  = bool(getattr(existing, "removed", False))
+        old_line     = existing.line_value or 0.0
+        line_changed = abs(line_value - old_line) >= 0.01
+
+        if was_removed and not removed:
+            event = "RETURNED"
+        elif removed:
+            event = "REMOVED"
+        elif line_changed:
+            event = "CHANGED"
+        else:
+            event = "UNCHANGED"
+
+        change_count = (getattr(existing, "change_count", 0) or 0)
+        if line_changed:
+            change_count += 1
+
+        update_vals: dict = {
+            "line_value": line_value,
+            "fetched_at": now_ts,
+            "team":       team or existing.team,
+        }
+        try:
+            update_vals["last_seen"]    = now_ts
+            update_vals["change_count"] = change_count
+            update_vals["removed"]      = removed
+            if line_changed:
+                update_vals["prev_line"] = old_line
+        except Exception:
+            pass
+
+        async with self.session() as s:
+            await s.execute(
+                sa_update(PropLineHistory)
+                .where(PropLineHistory.id == existing.id)
+                .values(**update_vals)
+            )
+            await s.commit()
+
+        # Re-fetch the updated row
+        async with self.session() as s:
+            result = await s.execute(
+                select(PropLineHistory).where(PropLineHistory.id == existing.id)
+            )
+            row = result.scalar_one()
+
+        return row, event
 
     # ── Alert CLV seeds ──────────────────────────────────────────────────────
 
@@ -1064,37 +1253,70 @@ class Database:
             await s.commit()
         return record
 
-    async def get_pending_clv_seeds(self, limit: int = 100) -> "list[AlertCLVSeed]":
+    async def get_pending_clv_seeds(
+        self,
+        limit: int = 100,
+        stale_hours: int = 24,
+    ) -> "list[AlertCLVSeed]":
         """
-        Return seeds where game_time has passed but CLV has not been computed.
+        Return seeds that are ready for harvest — either:
+          (a) game_time is set and has passed (normal path), OR
+          (b) game_time is None but alerted_at is older than stale_hours
+              (seeds from EV records which don't store game_time; expire after cutoff)
 
-        These are ready for the harvest job to fetch closing odds and compute CLV.
+        In both cases clv_computed must be False.
         """
-        now = datetime.utcnow()
+        from datetime import timedelta as _td
+        from sqlalchemy import or_, and_
+
+        now          = datetime.utcnow()
+        stale_cutoff = now - _td(hours=stale_hours)
+
         async with self.session() as s:
             result = await s.execute(
                 select(AlertCLVSeed)
                 .where(
                     AlertCLVSeed.clv_computed == False,       # noqa: E712
-                    AlertCLVSeed.game_time.isnot(None),
-                    AlertCLVSeed.game_time <= now,
+                    or_(
+                        and_(
+                            AlertCLVSeed.game_time.isnot(None),
+                            AlertCLVSeed.game_time <= now,
+                        ),
+                        and_(
+                            AlertCLVSeed.game_time.is_(None),
+                            AlertCLVSeed.alerted_at <= stale_cutoff,
+                        ),
+                    ),
                 )
-                .order_by(AlertCLVSeed.game_time.asc())
+                .order_by(AlertCLVSeed.alerted_at.asc())
                 .limit(limit)
             )
             return list(result.scalars().all())
 
-    async def count_pending_clv_seeds(self) -> int:
-        """Count seeds where game_time has passed but CLV not yet computed."""
-        now = datetime.utcnow()
+    async def count_pending_clv_seeds(self, stale_hours: int = 24) -> int:
+        """Count seeds that are ready for harvest (game_time passed or stale)."""
+        from datetime import timedelta as _td
+        from sqlalchemy import or_, and_
+
+        now          = datetime.utcnow()
+        stale_cutoff = now - _td(hours=stale_hours)
+
         async with self.session() as s:
             result = await s.execute(
                 select(func.count())
                 .select_from(AlertCLVSeed)
                 .where(
                     AlertCLVSeed.clv_computed == False,       # noqa: E712
-                    AlertCLVSeed.game_time.isnot(None),
-                    AlertCLVSeed.game_time <= now,
+                    or_(
+                        and_(
+                            AlertCLVSeed.game_time.isnot(None),
+                            AlertCLVSeed.game_time <= now,
+                        ),
+                        and_(
+                            AlertCLVSeed.game_time.is_(None),
+                            AlertCLVSeed.alerted_at <= stale_cutoff,
+                        ),
+                    ),
                 )
             )
             return result.scalar() or 0
@@ -1109,6 +1331,128 @@ class Database:
                 .values(clv_pct=clv_pct, clv_computed=True)
             )
             await s.commit()
+
+    async def mark_clv_seed_expired(self, seed_id: int) -> None:
+        """
+        Mark a seed as processed with no CLV data (closing odds unavailable).
+
+        Sets clv_computed=True and clv_pct=None so the harvest job stops
+        retrying this seed. Called after the grace period has passed without
+        finding closing odds.
+        """
+        from sqlalchemy import update as sa_update
+        async with self.session() as s:
+            await s.execute(
+                sa_update(AlertCLVSeed)
+                .where(AlertCLVSeed.id == seed_id)
+                .values(clv_pct=None, clv_computed=True)
+            )
+            await s.commit()
+
+    async def get_last_odds_for_event(
+        self, event: str, selection: str
+    ) -> "Optional[OddsRecord]":
+        """
+        Return the most-recent OddsRecord for a given event+selection.
+
+        Used by the CLV harvest job to find a proxy for closing odds when
+        sportsbook polling is active.  Returns None if no odds are found.
+        """
+        async with self.session() as s:
+            result = await s.execute(
+                select(OddsRecord)
+                .where(
+                    OddsRecord.event     == event,
+                    OddsRecord.selection == selection,
+                )
+                .order_by(desc(OddsRecord.recorded_at))  # OddsRecord uses recorded_at
+                .limit(1)
+            )
+            return result.scalar_one_or_none()
+
+    async def get_clv_seeds_by_tier_stats(self) -> "dict[str, dict]":
+        """
+        Return avg CLV% grouped by tier from computed seeds.
+
+        Returns: { "S": {"avg_clv": float, "count": int}, ... }
+        Used by CalibrationEngine to populate tier CLV averages.
+        """
+        async with self.session() as s:
+            result = await s.execute(
+                select(
+                    AlertCLVSeed.tier,
+                    func.avg(AlertCLVSeed.clv_pct).label("avg_clv"),
+                    func.count(AlertCLVSeed.id).label("count"),
+                )
+                .where(
+                    AlertCLVSeed.clv_computed == True,   # noqa: E712
+                    AlertCLVSeed.clv_pct.isnot(None),
+                    AlertCLVSeed.tier.isnot(None),
+                )
+                .group_by(AlertCLVSeed.tier)
+            )
+            rows = result.all()
+        return {
+            row.tier: {"avg_clv": row.avg_clv, "count": row.count}
+            for row in rows
+            if row.tier
+        }
+
+    async def get_clv_stats_by_dimension(self) -> "dict[str, dict]":
+        """
+        Return CLV statistics grouped by sport, alert_type, market_type, and tier.
+
+        Returns a dict keyed by dimension name, each containing a list of
+        (value, avg_clv, count) tuples.
+
+        Example:
+            {
+                "by_sport":   [("NFL", 2.1, 10), ...],
+                "by_type":    [("EV", 1.8, 5), ...],
+                "by_market":  [("h2h", 2.0, 4), ...],
+                "by_tier":    [("S", 3.5, 3), ...],
+            }
+        """
+        dims = [
+            ("by_sport",  AlertCLVSeed.sport),
+            ("by_type",   AlertCLVSeed.alert_type),
+            ("by_market", AlertCLVSeed.market_type),
+            ("by_tier",   AlertCLVSeed.tier),
+        ]
+        base_filter = (
+            AlertCLVSeed.clv_computed == True,   # noqa: E712
+            AlertCLVSeed.clv_pct.isnot(None),
+        )
+        result: dict[str, list] = {}
+        for key, col in dims:
+            async with self.session() as s:
+                rows = (await s.execute(
+                    select(
+                        col.label("dim_val"),
+                        func.avg(AlertCLVSeed.clv_pct).label("avg_clv"),
+                        func.count(AlertCLVSeed.id).label("count"),
+                    )
+                    .where(*base_filter, col.isnot(None), col != "")
+                    .group_by(col)
+                    .order_by(func.avg(AlertCLVSeed.clv_pct).desc())
+                )).all()
+            result[key] = [
+                (row.dim_val, round(row.avg_clv or 0, 3), row.count)
+                for row in rows
+            ]
+        return result
+
+    async def get_recent_underdog_snapshots(
+        self, limit: int = 500
+    ) -> "list[UnderdogSnapshotRecord]":
+        """Return the most-recent Underdog snapshot records, newest first."""
+        async with self.session() as s:
+            result = await s.execute(
+                select(UnderdogSnapshotRecord)
+                .order_by(desc(UnderdogSnapshotRecord.fetched_at))
+                .limit(limit)
+            )
+            return list(result.scalars().all())
 
     async def get_clv_seed_for_source(
         self, source_table: str, source_id: int

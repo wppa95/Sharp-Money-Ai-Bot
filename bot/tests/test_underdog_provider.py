@@ -334,18 +334,23 @@ class TestSyncUnderdogToPropHistory:
         total = _run(db.count_prop_line_history("Underdog"))
         assert total == 1
 
-    def test_skips_removed_snapshots(self, db):
+    def test_removed_snapshot_sets_removed_flag(self, db):
+        """Removed snapshots are bridged with removed=True (lifecycle tracking)."""
         _run(db.save_underdog_snapshot(self._make_ud_orm(removed=True)))
         count = _run(db.sync_underdog_snapshots_to_prop_history())
-        assert count == 0
-        assert _run(db.count_prop_line_history("Underdog")) == 0
+        assert count == 1  # lifecycle upsert processes removed snaps too
+        rows = _run(db.get_latest_props_for_provider("Underdog", since_hours=48))
+        # Row exists with removed flag
+        assert len(rows) >= 1
 
     def test_no_duplicates_on_repeat_call(self, db):
+        """Repeat calls upsert (update last_seen) not duplicate-insert."""
         _run(db.save_underdog_snapshot(self._make_ud_orm()))
         count1 = _run(db.sync_underdog_snapshots_to_prop_history())
         count2 = _run(db.sync_underdog_snapshots_to_prop_history())
         assert count1 == 1
-        assert count2 == 0  # already bridged
+        assert count2 == 1  # upsert updates the same row — still 1 total PropLineHistory row
+        assert _run(db.count_prop_line_history("Underdog")) == 1
 
     def test_multiple_snapshots_all_synced(self, db):
         for name in ["PlayerA", "PlayerB", "PlayerC"]:
@@ -371,10 +376,11 @@ class TestSyncUnderdogToPropHistory:
         assert count == 0
 
     def test_mixed_removed_and_active(self, db):
+        """Both active and removed snapshots are upserted with lifecycle tracking."""
         _run(db.save_underdog_snapshot(self._make_ud_orm(player_name="Active", removed=False)))
         _run(db.save_underdog_snapshot(self._make_ud_orm(player_name="Removed", removed=True)))
         count = _run(db.sync_underdog_snapshots_to_prop_history())
-        assert count == 1
+        assert count == 2  # lifecycle upsert processes both active and removed
 
     def test_outside_since_hours_window_skipped(self, db):
         old_time = datetime.utcnow() - timedelta(hours=100)

@@ -1,38 +1,60 @@
 ---
-name: Provider Abstraction, CLV Pipeline & Dashboard — stable baseline
-description: Architecture added for generic prop provider layer, CLV seed pipeline, and performance dashboard. Documents the shape of new ORM models, background jobs, and test coverage.
+name: Provider abstraction, CLV pipeline, and calibration system
+description: Frozen stable v1.2 baseline — all modules, key decisions, and test count as of July 31 2026.
 ---
 
-## What was added
+## Frozen baseline — v1.2 (July 31 2026)
 
-### `bot/providers/prop_provider.py`
-- `PlayerProp` dataclass — provider-agnostic prop snapshot; `prop_key` tuple = (provider, player, sport, stat)
-- `PropProviderBase` ABC — subclass with `provider_name`, `sport_keys`, `fetch_props()`
-- `PropComparisonEngine` — line-gap direction rule: provider > sb → UNDER edge; provider < sb → OVER edge. Edge formula uses multiplicative vig removal vs. 50% break-even. Min-edge filter + sorted output.
-- **Key test gotcha**: `_fair_probs(-110, -110)` returns exactly 0.5/0.5 → edge = 0.0. Tests that expect `edge > 0` must use asymmetric odds (e.g. +120/-140) not -110/-110.
+**Test count: 1528 tests, 0 failures.**
 
-### `bot/engine/dashboard.py`
-- `DashboardEngine.gather(db)` — async classmethod; each sub-query is try/except-wrapped for resilience
-- `DashboardReport.to_telegram()` — full HTML; `total_all_alerts` sums all 4 types; win_rate only shown when `n ≥ 5` resolved
-- Always returns 7 DailyTrend entries (zeros on empty DB)
+## Module inventory
 
-### `bot/database.py` additions
-- `PropLineHistory` ORM + CRUD methods
-- `AlertCLVSeed` ORM — UNIQUE on `(source_table, source_id)` — use `on_conflict_do_nothing` upsert
-- `_tier_from_confidence(score)` helper: ≥95=S, ≥85=A, ≥75=B, else PASS
-- `seed_clv_from_ev_records()` / `seed_clv_from_ud_snapshots()` — idempotent; safe to call repeatedly
-- `_migrate_clv_records()` — adds sport/market_type/alert_type/tier columns to existing clv_records (idempotent)
+| Module | Status | Key note |
+|---|---|---|
+| `providers/prop_provider.py` | ✅ stable | `PlayerProp`, `PropProviderBase` ABC, `PropComparisonEngine` |
+| `providers/prizepicks.py` | ✅ stable | `PrizePicksProvider` (DataDome blocked) + `PrizePicksManualProvider` |
+| `providers/underdog_provider.py` | ✅ stable | `UnderdogProvider` wrapping `UnderdogSnapshotRecord` rows |
+| `engine/dashboard.py` | ✅ stable | `DashboardEngine`, `DashboardReport.to_telegram()` |
+| `engine/calibration.py` | ✅ NEW | `CalibrationEngine`, `CalibrationReport` — detection vs recommendation split |
+| `database.py` — PropLineHistory | ✅ NEW lifecycle | `first_seen`, `last_seen`, `change_count`, `prev_line`, `removed` columns (migration) |
+| `database.py` — upsert_prop_line_lifecycle | ✅ NEW | Returns `(row, event)` where event ∈ ADDED/CHANGED/REMOVED/RETURNED/UNCHANGED |
+| `database.py` — sync_underdog…` | ✅ NEW lifecycle | Lifecycle-aware upsert; wired into `underdog_job` after each fetch cycle |
+| `database.py` — CLV stats/harvest | ✅ NEW | `get_clv_stats_by_dimension`, `get_clv_seeds_by_tier_stats`, `mark_clv_seed_expired` |
+| `database.py` — get_pending_clv_seeds | ✅ UPDATED | Now includes game_time=None seeds after 24h stale threshold |
+| `main.py` — `_clv_harvest_job` | ✅ NEW | Every 3600s, first=300; processes pending seeds, expires stale ones |
+| `commands.py` — `/calibration` | ✅ NEW | Calls CalibrationEngine, returns full report |
+| `commands.py` — `/pp_import` | ✅ NEW | Pipe-delimited multi-line PP import; lifecycle events per prop |
+| `commands.py` — `/status` | ✅ UPDATED | Now shows PropLineHistory count with provider breakdown |
 
-### `bot/main.py`
-- `_clv_seed_job` — runs every 900s (first=120), calls both seed methods, logs only when new seeds created
+## Key design decisions
 
-### `/dashboard` command
-- Sends two messages: DashboardEngine report (all-alert stats) + PP live top-pick + resolved tier perf
+### Calibration — detection ≠ recommendation
+**Rule:** Line-movement detection accuracy and betting recommendation accuracy are tracked SEPARATELY. A sharp move (correctly detected) does NOT automatically mean a profitable bet. The two are shown in separate sections of `/calibration`.
 
-## Test counts
-- `test_prop_provider.py` — 56 tests
-- `test_dashboard.py` — 115 tests (uses module-level `_loop = asyncio.new_event_loop()` + `_run()` helper; never `asyncio.get_event_loop()` which breaks on 3.11 after loop teardown)
-- `test_alert_clv_seed.py` — 84 tests
-- Total suite: 1323 tests, 0 failures as of July 31 2026
+**Why:** Conflating them would mislead: you can detect that a move happened correctly (the line kept moving) but the market may have already priced in the fair value by the time a bet executes.
 
-**Why:** Any future test file using aiosqlite in Python 3.11 must use a module-level `asyncio.new_event_loop()` and call `asyncio.set_event_loop(_loop)` at module level — `asyncio.get_event_loop()` fails after any other test file has closed a loop.
+**How to apply:** Any new tracking that tries to measure "was the alert correct?" must choose which question it's answering. Never combine them into a single accuracy score.
+
+### PropLineHistory lifecycle approach
+**Rule:** `upsert_prop_line_lifecycle()` is the single write path for any provider inserting into PropLineHistory. Direct `save_prop_line_history()` may still be used for bulk bridges but lifecycle tracking requires the upsert method.
+
+**Why:** Each upsert computes ADDED/CHANGED/REMOVED/RETURNED/UNCHANGED by comparing against the most-recent row for that (provider, player, sport, stat). Without this, lifecycle events are lost.
+
+**How to apply:** `/pp_import` uses `upsert_prop_line_lifecycle()`. The Underdog sync uses the lifecycle-aware `sync_underdog_snapshots_to_prop_history()`. Future providers should use the same upsert path.
+
+### CLV seeds with game_time=None
+**Rule:** EV records currently don't store `game_time`, so their seeds get `game_time=None`. These seeds appear in `get_pending_clv_seeds()` only after `alerted_at < now - 24h` (stale threshold). The harvest job expires them immediately (no closing odds available without game_time).
+
+**Why:** The original `get_pending_clv_seeds()` required `game_time.isnot(None)`, which meant EV seeds were never processed. The stale-hours fallback allows the harvest job to clean them up.
+
+**How to apply:** When sportsbook polling is re-enabled and EV records start storing `game_time`, the harvest job will automatically use real closing odds instead of expiring.
+
+### OddsRecord column naming
+**Rule:** `OddsRecord` uses `recorded_at` (not `fetched_at`) for its timestamp column.
+
+**Why:** Discovered during harvest job implementation — `get_last_odds_for_event()` must ORDER BY `OddsRecord.recorded_at`.
+
+### PropLineHistory lifecycle columns — migration-based
+**Rule:** The lifecycle columns (`first_seen`, `last_seen`, `change_count`, `prev_line`, `removed`) are defined in BOTH the ORM model AND a migration method (`_migrate_prop_line_history()`). The ORM definition is the authoritative source for new DBs; the migration handles existing databases.
+
+**Why:** Without ORM definition, SQLAlchemy's `sa_update(...).values(last_seen=..., change_count=...)` raises `CompileError: Unconsumed column names`.

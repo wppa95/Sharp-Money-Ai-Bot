@@ -244,8 +244,16 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             lines.append("")
 
     # ── Database ──────────────────────────────────────────────────────────────
+    total_prop_history = await _db.count_prop_line_history() if _db else 0
     lines.append("📊 <b>Database Records</b>")
     lines.append(f"  Odds: {db_records:,}  ·  Steam: {total_steam:,}  ·  EV: {total_ev:,}")
+    if total_prop_history:
+        ud_history  = await _db.count_prop_line_history(provider="Underdog") if _db else 0
+        pp_history  = await _db.count_prop_line_history(provider="PrizePicks") if _db else 0
+        lines.append(
+            f"  PropLineHistory: {total_prop_history:,}"
+            + (f"  (UD:{ud_history:,}  PP:{pp_history:,})" if ud_history or pp_history else "")
+        )
 
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
@@ -1535,6 +1543,144 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         lines.append("  <i>No resolved picks yet — results recorded after games finish.</i>")
 
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+
+async def cmd_calibration(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/calibration — Model calibration: tier accuracy, CLV, detection vs recommendation."""
+    if not _check_allowed(update):
+        await update.message.reply_text("⛔ Unauthorized.")
+        return
+    if _db is None:
+        await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
+        return
+
+    await update.message.reply_text(
+        "⏳ Computing calibration metrics…", parse_mode=ParseMode.HTML
+    )
+
+    try:
+        from engine.calibration import CalibrationEngine
+        engine = CalibrationEngine()
+        report = await engine.compute(_db)
+        await update.message.reply_text(report.to_telegram(), parse_mode=ParseMode.HTML)
+    except Exception as exc:
+        logger.exception("cmd_calibration error: %s", exc)
+        await update.message.reply_text(
+            f"{EMOJI['warn']} Calibration failed: {exc}", parse_mode=ParseMode.HTML
+        )
+
+
+async def cmd_pp_import(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/pp_import — Manually import PrizePicks prop data and feed PropLineHistory.
+
+    Format (one prop per line after the command):
+        PLAYER | STAT | LINE | SPORT
+        PLAYER | STAT | LINE | SPORT | removed
+
+    Example:
+        /pp_import
+        LeBron James | Points | 25.5 | NBA
+        Mike Trout | Hits | 1.5 | MLB
+        Patrick Mahomes | Pass Yards | 275.5 | NFL | removed
+    """
+    if not _check_allowed(update):
+        await update.message.reply_text("⛔ Unauthorized.")
+        return
+    if _db is None:
+        await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
+        return
+
+    # Extract text after the command line
+    raw_text = update.message.text or ""
+    lines_raw = [ln.strip() for ln in raw_text.split("\n")]
+    # Drop the command line itself (first line)
+    prop_lines = [ln for ln in lines_raw[1:] if ln and not ln.startswith("/")]
+
+    if not prop_lines:
+        await update.message.reply_text(
+            "ℹ️ <b>Usage:</b>\n"
+            "<code>/pp_import\n"
+            "LeBron James | Points | 25.5 | NBA\n"
+            "Mike Trout | Hits | 1.5 | MLB\n"
+            "Patrick Mahomes | Pass Yards | 275.5 | NFL | removed</code>\n\n"
+            "<i>Supported lifecycle markers: <code>removed</code></i>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    from datetime import timezone
+    from database import PropLineHistory  # noqa: F401 — type check
+
+    results: list[tuple[str, str, str]] = []  # (player, stat, event)
+    errors:  list[str]                  = []
+
+    for raw in prop_lines:
+        parts = [p.strip() for p in raw.split("|")]
+        if len(parts) < 4:
+            errors.append(f"⚠️ Skipped (need at least 4 fields): <code>{raw[:60]}</code>")
+            continue
+
+        player_name = parts[0]
+        stat_type   = parts[1]
+        sport       = parts[3].upper()
+
+        try:
+            line_value = float(parts[2].replace(",", ""))
+        except (ValueError, IndexError):
+            errors.append(f"⚠️ Invalid line value: <code>{raw[:60]}</code>")
+            continue
+
+        is_removed = len(parts) >= 5 and "removed" in parts[4].lower()
+
+        try:
+            _, event = await _db.upsert_prop_line_lifecycle(
+                provider    = "PrizePicks",
+                player_name = player_name,
+                sport       = sport,
+                stat_type   = stat_type,
+                line_value  = line_value,
+                removed     = is_removed,
+                fetched_at  = datetime.now(timezone.utc).replace(tzinfo=None),
+            )
+            results.append((player_name, stat_type, event))
+        except Exception as exc:
+            errors.append(f"⚠️ Error for <code>{player_name}</code>: {exc}")
+
+    if not results and not errors:
+        await update.message.reply_text("⚠️ No valid props found in input.")
+        return
+
+    # Build summary grouped by lifecycle event
+    event_emoji = {
+        "ADDED":     "🆕",
+        "CHANGED":   "📊",
+        "REMOVED":   "❌",
+        "RETURNED":  "↩️",
+        "UNCHANGED": "✅",
+    }
+    event_groups: dict[str, list[str]] = {}
+    for player, stat, ev in results:
+        event_groups.setdefault(ev, []).append(f"  {player} — {stat}")
+
+    reply_lines = [
+        f"📥 <b>PrizePicks Import</b>  ({len(results)} props processed)",
+        "",
+    ]
+    for ev in ("ADDED", "CHANGED", "RETURNED", "REMOVED", "UNCHANGED"):
+        if ev in event_groups:
+            emoji = event_emoji.get(ev, "•")
+            reply_lines.append(f"{emoji} <b>{ev}</b> ({len(event_groups[ev])})")
+            reply_lines.extend(event_groups[ev][:10])
+            if len(event_groups[ev]) > 10:
+                reply_lines.append(f"  … +{len(event_groups[ev]) - 10} more")
+
+    if errors:
+        reply_lines.append("")
+        reply_lines.extend(errors[:5])
+
+    await update.message.reply_text(
+        "\n".join(reply_lines), parse_mode=ParseMode.HTML
+    )
 
 
 async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -214,12 +214,50 @@ Implements the roadmap-specified `providers/prizepicks.py` file — a concrete `
 
 Maps Underdog data into the same normalized model as PrizePicks so both feed a shared `PropLineHistory`:
 
-- **`UnderdogProvider`** — concrete `PropProviderBase` wrapping `UnderdogSnapshotRecord` rows. Skips `removed=True` props. Applies optional sport filter. Used by the bot's Underdog job to feed PropLineHistory.
+- **`UnderdogProvider`** — concrete `PropProviderBase` wrapping `UnderdogSnapshotRecord` rows. Skips `removed=True` props. Applies optional sport filter.
 - **`ud_snapshot_to_player_prop(snap)`** — adapter: UnderdogSnapshotRecord → PlayerProp. Handles None fields, stat normalisation.
-- **`Database.sync_underdog_snapshots_to_prop_history()`** — bridge method. Reads recent non-removed Underdog snapshot records and bulk-inserts them into `PropLineHistory` (provider="Underdog"), deduped by (player_name, sport, stat_type, external_id). Idempotent — safe to call repeatedly.
+- **`Database.sync_underdog_snapshots_to_prop_history()`** — lifecycle-aware upsert bridge. Called automatically at the end of each `underdog_job` cycle. Tracks `first_seen`, `last_seen`, `change_count`, `prev_line`, `removed` per prop. Idempotent — safe to call repeatedly.
 
-### 17. Test suite (`bot/tests/`)
-**Full pipeline coverage across all modules — 1427 tests, all passing.**
+### 18. CLV Harvest Automation (`bot/_clv_harvest_job`)
+
+Completes the CLV tracking loop. Runs every hour, processes pending `AlertCLVSeed` records:
+
+- Seeds with `game_time` passed → tries to find closing odds in `OddsRecord`; computes CLV% and writes `CLVRecord`; falls back to expiring the seed after 4h grace period
+- Seeds with `game_time=None` but `alerted_at` older than 24h → marked expired (EV records currently don't store game_time)
+- Underdog/no-bet-odds seeds → expired immediately (pick'em props have no sportsbook CLV)
+- `Database.get_clv_stats_by_dimension()` — returns CLV stats grouped by sport/market/alert_type/tier
+- `Database.get_clv_seeds_by_tier_stats()` — tier-level avg CLV%, used by CalibrationEngine
+
+### 19. PropLineHistory Lifecycle Tracking
+
+`PropLineHistory` ORM extended with lifecycle columns (`first_seen`, `last_seen`, `change_count`, `prev_line`, `removed`):
+
+- **`Database.upsert_prop_line_lifecycle()`** — provider-agnostic upsert that returns `(row, event)` where `event` ∈ `ADDED | CHANGED | REMOVED | RETURNED | UNCHANGED`
+- Underdog sync wired into `underdog_job` via `sync_underdog_snapshots_to_prop_history()` after each fetch cycle
+- `/status` command now shows PropLineHistory row count with provider breakdown (UD/PP)
+
+### 20. Model Calibration Engine (`bot/engine/calibration.py`)
+
+Evaluates two questions that must NOT be conflated:
+
+1. **Line-movement detection accuracy** — was the detected direction correct? (independent of profitability)
+2. **Betting recommendation accuracy** — was the recommended side correct against the result?
+
+- `CalibrationEngine.compute(db)` — async; queries ev_records, clv_records, underdog_snapshots; each sub-query individually try/except wrapped
+- `CalibrationReport.to_telegram()` — full formatted report with tier accuracy, avg CLV per tier, detection confirmation rate, recommendation accuracy
+- `/calibration` Telegram command — triggers the engine and sends the report
+
+### 21. PrizePicks Manual Import (`/pp_import` command)
+
+Lets users import PrizePicks prop data into the shared `PropLineHistory` while the DataDome API block is in place:
+
+- Format: `PLAYER | STAT | LINE | SPORT` (one prop per line), optional `| removed` marker
+- Detects lifecycle events: `ADDED / CHANGED / REMOVED / RETURNED / UNCHANGED`
+- Returns grouped summary with per-event emojis
+- Feeds `PropLineHistory` via `upsert_prop_line_lifecycle()` (provider="PrizePicks")
+
+### 22. Test suite (`bot/tests/`)
+**Full pipeline coverage across all modules — 1528 tests, all passing.**
 
 | File | Tests | Covers |
 |---|---|---|
@@ -227,9 +265,13 @@ Maps Underdog data into the same normalized model as PrizePicks so both feed a s
 | `test_prop_provider.py` | 56 | `PlayerProp`, `PropProviderBase` ABC, `PropComparisonEngine`, vig removal |
 | `test_dashboard.py` | 115 | `DashboardReport.to_telegram()`, `DashboardEngine.gather()` (empty + seeded DB) |
 | `test_alert_clv_seed.py` | 84 | `PropLineHistory` CRUD, `AlertCLVSeed` upsert + dedup, seed methods |
-| `test_prizepicks_provider.py` | 61 | `_normalize_stat`, `_parse_dt`, `pp_line_to_player_prop`, `PrizePicksProvider`, `PrizePicksManualProvider` |
-| `test_underdog_provider.py` | 43 | `_normalize_stat`, `ud_snapshot_to_player_prop`, `UnderdogProvider`, `sync_underdog_snapshots_to_prop_history` |
-| (+ other test files) | ~1000 | Connectors, consensus, CLV engine, AI ranking, backtesting, PP/UD providers |
+| `test_prizepicks_provider.py` | 61 | `pp_line_to_player_prop`, `PrizePicksProvider`, `PrizePicksManualProvider` |
+| `test_underdog_provider.py` | 43 | `UnderdogProvider`, `sync_underdog_snapshots_to_prop_history` lifecycle |
+| `test_calibration.py` | 45 | `CalibrationEngine`, `CalibrationReport`, tier accuracy, detection vs recommendation |
+| `test_prop_lifecycle.py` | 42 | `upsert_prop_line_lifecycle` ADDED/CHANGED/REMOVED/RETURNED, CLV seed expiry |
+| `test_clv_harvest.py` | 43 | Harvest logic: grace period, expiry, stale seeds, game_time filtering |
+| `test_pp_import.py` | 32 | PP import parsing, lifecycle via upsert, provider isolation |
+| (+ other test files) | ~939 | Connectors, consensus, CLV engine, AI ranking, backtesting |
 
 Run: `python -m pytest bot/tests/ -q`
 
