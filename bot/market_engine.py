@@ -495,6 +495,7 @@ async def underdog_job(context) -> None:
     _n_removed:       int       = 0   # props with [REMOVED] marker
     _n_new_prop:      int       = 0   # first-appearance props detected this cycle
     _n_new_prop_sent: int       = 0   # immediate new-prop alerts delivered
+    _scored_props:    list[dict] = []  # all scored props this cycle — for end-of-cycle debug log
     # Batch for the end-of-cycle new-prop digest sent after the loop.
     # Each entry: {player, stat_type, sport, team, line, score, immediate, game_time}
     _new_props_batch: list[dict] = []
@@ -644,6 +645,36 @@ async def underdog_job(context) -> None:
                         "Underdog new-prop filtered: %s | %s | %s",
                         player, stat_type, ud_result.filtered_reason,
                     )
+            # ── Debug tracking (new-prop) ─────────────────────────────────────
+            if score is not None:
+                if _np_bet_ready:
+                    _np_rej = "sent" if ud_result.sent else (
+                        "filtered" if ud_result.filtered else "new_prop_failed"
+                    )
+                elif not np_immediate:
+                    _np_rej = (
+                        "validation_blocked" if not validation.has_supporting_data
+                        else "not_immediate"
+                    )
+                elif decision is None:
+                    _np_rej = "no_decision"
+                elif decision.recommendation == "PASS":
+                    _np_rej = "decision_pass"
+                elif (snap.sport or "UNKNOWN") not in config.ud_alert_sports:
+                    _np_rej = f"sport_blocked ({snap.sport})"
+                else:
+                    _np_rej = "unknown"
+                _scored_props.append({
+                    "player":    player,
+                    "stat_type": stat_type,
+                    "sport":     snap.sport or "UNKNOWN",
+                    "total":     score.total,
+                    "tier":      score.tier,
+                    "stars":     score.stars,
+                    "stars_d":   getattr(score, "stars_display", "?????"),
+                    "rejection": _np_rej,
+                    "path":      "new",
+                })
 
         else:
             # ── Line-change / removal path (existing logic) ──────────────────
@@ -712,6 +743,34 @@ async def underdog_job(context) -> None:
                 )
                 if is_qualified:
                     _n_qualified += 1
+                # ── Debug tracking (line-change) ──────────────────────────────
+                if score is not None:
+                    if is_qualified:
+                        _lc_rej = "qualified"
+                    elif score.stars < config.UD_MIN_STARS_TO_ALERT:
+                        _lc_rej = (
+                            f"below_threshold"
+                            f" ({score.stars}★ < {config.UD_MIN_STARS_TO_ALERT}★)"
+                        )
+                    elif decision is None:
+                        _lc_rej = "no_decision (PASS tier)"
+                    elif decision.recommendation == "PASS":
+                        _lc_rej = "decision_pass"
+                    elif (snap.sport or "UNKNOWN") not in config.ud_alert_sports:
+                        _lc_rej = f"sport_blocked ({snap.sport})"
+                    else:
+                        _lc_rej = "unknown"
+                    _scored_props.append({
+                        "player":    player,
+                        "stat_type": stat_type,
+                        "sport":     snap.sport or "UNKNOWN",
+                        "total":     score.total,
+                        "tier":      score.tier,
+                        "stars":     score.stars,
+                        "stars_d":   getattr(score, "stars_display", "?????"),
+                        "rejection": _lc_rej,
+                        "path":      "lc",
+                    })
 
             should_alert = is_qualified and (is_removed or (
                 line_changed
@@ -821,3 +880,27 @@ async def underdog_job(context) -> None:
         _n_new_prop,
         _n_new_prop_sent,
     )
+    # ── Debug: scored prop detail — logged every cycle ────────────────────────
+    _dbg_lines: list[str] = [
+        (
+            f"  received={len(ud_snaps)}  analyzed={len(_scored_props)}"
+            f"  (new={_n_new_prop}  line_change={_n_scored}  removed={_n_removed})"
+        ),
+    ]
+    if _scored_props:
+        from collections import Counter
+        _top = sorted(_scored_props, key=lambda x: x["total"], reverse=True)[:10]
+        _dbg_lines.append("  top 10 by score:")
+        for _i, _p in enumerate(_top, 1):
+            _dbg_lines.append(
+                f"    {_i:2d}. {_p['player'][:24]:<24} | {_p['stat_type']:<20}"
+                f" | {_p['sport']:<5} | {_p['total']:5.1f}/100 {_p['tier']}"
+                f" {_p['stars_d']} [{_p['path']}] → {_p['rejection']}"
+            )
+        _rej_counts = Counter(_p["rejection"] for _p in _scored_props)
+        _rej_str = "  ".join(
+            f"{_k}={_v}"
+            for _k, _v in sorted(_rej_counts.items(), key=lambda x: -x[1])
+        )
+        _dbg_lines.append(f"  rejection breakdown:  {_rej_str}")
+    logger.info("underdog_job [debug summary]\n%s", "\n".join(_dbg_lines))
