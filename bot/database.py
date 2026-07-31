@@ -608,6 +608,63 @@ class Database:
                 break
         return deduped
 
+    async def get_top_ud_props_for_picks(
+        self, limit: int = 10, since_hours: int = 6
+    ) -> "list[PropLineHistory]":
+        """Return the most-recent Underdog prop snapshot for each (player, stat) within the window.
+
+        Non-removed props only, ordered by fetched_at DESC so freshest data appears first.
+        Used as the primary data source for /picks and /slip.
+        """
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(hours=since_hours)
+        async with self.session() as s:
+            subq = (
+                select(func.max(PropLineHistory.id))
+                .where(
+                    PropLineHistory.provider   == "Underdog",
+                    PropLineHistory.fetched_at >= cutoff,
+                    PropLineHistory.removed.isnot(True),
+                )
+                .group_by(
+                    PropLineHistory.player_name,
+                    PropLineHistory.sport,
+                    PropLineHistory.stat_type,
+                )
+                .scalar_subquery()
+            )
+            result = await s.execute(
+                select(PropLineHistory)
+                .where(PropLineHistory.id.in_(subq))
+                .order_by(desc(PropLineHistory.fetched_at))
+                .limit(limit * 3)  # overfetch to allow sport filtering
+            )
+            rows = list(result.scalars().all())
+        return rows[:limit]
+
+    async def get_recent_player_prop_lines(
+        self, sportsbooks: "list[str]", since_hours: int = 4
+    ) -> "list[OddsRecord]":
+        """Return all recent OddsRecords with a line value for the given sportsbooks.
+
+        Designed for bulk DK/FD player-prop lookup in the market comparison engine.
+        The caller builds a {(player_lower, sportsbook): line} index after parsing
+        selection="PlayerName Over" / "PlayerName Under".
+        """
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(hours=since_hours)
+        async with self.session() as s:
+            result = await s.execute(
+                select(OddsRecord)
+                .where(
+                    OddsRecord.sportsbook.in_(sportsbooks),
+                    OddsRecord.recorded_at >= cutoff,
+                    OddsRecord.line.isnot(None),
+                )
+                .order_by(desc(OddsRecord.recorded_at))
+            )
+            return list(result.scalars().all())
+
     async def get_pp_edge_line_history(
         self, player_name: str, stat_type: str
     ) -> tuple[float | None, float | None]:

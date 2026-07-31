@@ -741,14 +741,93 @@ def _stars_from_conf(conf: Optional[float]) -> str:
     return "★☆☆☆☆"
 
 
+class PropPickAdapter:
+    """
+    Wraps (PropLineHistory + PlayerPropMarketComparison) into the interface
+    expected by the slip optimizer (check_correlation) and _render_slip_section.
+
+    Replaces the old PPEdgeRecord in the /picks and /slip flows so both commands
+    can operate without any PrizePicks edge data.
+    """
+    __slots__ = (
+        "player_name", "stat_type", "sport", "team", "game_time",
+        "game_description", "confidence", "tier", "best_edge",
+        "best_side", "pp_line_value", "prev_line", "opening_line",
+        "sportsbook", "result", "detected_at", "comp",
+    )
+
+    def __init__(
+        self,
+        plh: Any,                   # PropLineHistory — typed as Any to avoid circular import
+        comp: Optional[Any] = None, # PlayerPropMarketComparison | None
+    ) -> None:
+        self.player_name = plh.player_name
+        self.stat_type   = plh.stat_type
+        self.sport       = plh.sport
+        self.team        = plh.team or ""
+        self.game_time   = plh.game_time
+        self.game_description = f"vs {plh.team}" if plh.team else ""
+        self.detected_at = plh.fetched_at
+        self.result      = None
+        self.sportsbook  = "Underdog"
+        self.comp        = comp
+
+        # Confidence → tier
+        conf = comp.proxy_match_confidence if comp else 40
+        self.confidence  = float(conf)
+        if conf >= 90:
+            self.tier = "S"
+        elif conf >= 70:
+            self.tier = "A"
+        elif conf >= 50:
+            self.tier = "B"
+        else:
+            self.tier = "Low"
+
+        # Best line from comparison or fallback to UD line
+        best_line = (comp.best_line if comp else None) or plh.line_value
+        self.pp_line_value = float(best_line)
+        self.prev_line     = plh.prev_line
+        self.opening_line  = None  # not tracked in PropLineHistory; no move note in slip
+
+        # Edge proxy: use absolute line movement scaled to a % signal
+        movement = (comp.movement if comp else None) or 0.0
+        self.best_edge = abs(movement) * 2.0 if movement else 0.0
+
+        # Direction: market-information label, not a betting call
+        self.best_side = "OVER"
+
+
+def _build_dk_fd_index(records: list) -> "dict[tuple[str,str], float]":
+    """Build {(player_lower, sportsbook): line} from a list of OddsRecord objects.
+
+    OddsRecord.selection is "PlayerName Over" / "PlayerName Under"; the
+    line value is the same for both sides so we keep the first occurrence.
+    """
+    index: dict = {}
+    for rec in records:
+        sel      = (getattr(rec, "selection", None) or "").strip()
+        line_val = getattr(rec, "line", None)
+        if line_val is None:
+            continue
+        for suffix in (" Over", " Under"):
+            if sel.endswith(suffix):
+                pkey = sel[: -len(suffix)].strip().lower()
+                key  = (pkey, rec.sportsbook)
+                if key not in index:
+                    index[key] = float(line_val)
+                break
+    return index
+
+
 async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/picks [sport|N] — Ranked PrizePicks edges by confidence tier (S→A→B).
+    """/picks [sport|N] — Live player prop picks from the multi-provider market engine.
 
     Usage:
-      /picks           — top 10 picks from the last 6 hours
-      /picks 5         — top 5 picks
+      /picks           — top 10 props from the last 6 hours
+      /picks 5         — top 5
       /picks NBA       — filter to NBA only
-      /picks NFL 5     — NFL, top 5
+      /picks MLB 5     — MLB, top 5
     """
     if not _check_allowed(update):
         await update.message.reply_text("⛔ Unauthorized.")
@@ -766,112 +845,163 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         else:
             sport_filter = arg.upper()
 
-    records = await _db.get_top_pp_edges(limit=limit, hours=6)
+    from engine.timing import format_game_time_label as _fmt_gt
+    from engine.player_prop_market import (
+        build_player_prop_market_comparison,
+        PROVIDER_EMOJI as _PROV_EMOJI,
+    )
 
+    now   = datetime.utcnow()
+    today = now.strftime("%b %d, %Y")
+
+    # ── 1. Underdog props ─────────────────────────────────────────────────────
+    ud_props = await _db.get_top_ud_props_for_picks(limit=limit * 3, since_hours=6)
     if sport_filter:
-        records = [r for r in records if r.sport.upper() == sport_filter]
+        ud_props = [p for p in ud_props if p.sport.upper() == sport_filter]
+    ud_props = ud_props[:limit]
 
-    if not records:
+    if not ud_props:
         hint = f" for {sport_filter}" if sport_filter else ""
         await update.message.reply_text(
-            f"🎯 <b>Player Prop Picks</b>\n\n"
-            f"No scored picks detected{hint} in the last 6 hours.\n\n"
-            f"<i>Picks are scored from live Underdog props (every 5 min).\n"
-            f"Use /pp_import to add PrizePicks lines manually.\n"
-            f"Check back after the next poll cycle.</i>",
+            f"🟣 <b>Player Prop Picks</b>\n\n"
+            f"No live props detected{hint} in the last 6 hours.\n\n"
+            f"<i>Underdog props auto-score every 5 min.\n"
+            f"Use /pp_import to add PrizePicks lines.\n"
+            f"DraftKings/FanDuel lines load automatically each cycle.</i>",
             parse_mode=ParseMode.HTML,
         )
         return
 
-    # Sort: tier rank → game_time ASC (None last) → best_edge DESC
-    from engine.timing import format_game_time_label as _fmt_gt
+    # ── 2. Cross-provider data (bulk fetch) ───────────────────────────────────
+    try:
+        pp_rows = await _db.get_latest_props_for_provider("PrizePicks", since_hours=24)
+    except Exception:
+        pp_rows = []
+
+    try:
+        dk_fd_raw   = await _db.get_recent_player_prop_lines(
+            ["DraftKings", "FanDuel"], since_hours=4
+        )
+        dk_fd_index = _build_dk_fd_index(dk_fd_raw)
+    except Exception:
+        dk_fd_index = {}
+
+    # ── 3. Build PlayerPropMarketComparison for each prop ────────────────────
+    picks: list[tuple] = []   # [(PropLineHistory, PlayerPropMarketComparison|None)]
+    for plh in ud_props:
+        pkey    = plh.player_name.lower()
+        dk_line = dk_fd_index.get((pkey, "DraftKings"))
+        fd_line = dk_fd_index.get((pkey, "FanDuel"))
+        comp = build_player_prop_market_comparison(
+            player_name    = plh.player_name,
+            sport          = plh.sport,
+            stat_type      = plh.stat_type,
+            ud_line        = plh.line_value,
+            previous_line  = plh.prev_line,
+            fetched_at     = plh.fetched_at,
+            pp_rows        = pp_rows,
+            dk_line        = dk_line,
+            fd_line        = fd_line,
+            now            = now,
+            min_confidence = 0,   # show all props; confidence is display info, not a gate
+        )
+        picks.append((plh, comp))
+
+    # Sort: confidence DESC → game_time ASC (None last)
     import datetime as _dt_mod
 
-    def _sort_key(r):
-        tier_rank = _TIER_ORDER.get(r.tier or "Low", 3)
-        gt = getattr(r, "game_time", None)
+    def _pick_sort(item: tuple) -> tuple:
+        plh, comp = item
+        conf  = comp.proxy_match_confidence if comp else 0
+        gt    = plh.game_time
         if gt is None:
             gt_sort = _dt_mod.datetime.max
         else:
             gt_sort = gt.replace(tzinfo=None) if gt.tzinfo else gt
-        return (tier_rank, gt_sort, -(r.best_edge or 0))
+        return (-conf, gt_sort)
 
-    records.sort(key=_sort_key)
+    picks.sort(key=_pick_sort)
 
-    today = datetime.utcnow().strftime("%b %d, %Y")
-    lines: list[str] = [f"🎯 <b>Player Prop Picks — {today}</b>"]
+    # ── 4. Format ─────────────────────────────────────────────────────────────
+    def _tier_from_conf(c: int) -> str:
+        if c >= 90: return "S"
+        if c >= 70: return "A"
+        if c >= 50: return "B"
+        return "—"
+
+    def _lv(v: Optional[float]) -> str:
+        return f"<code>{v:.1f}</code>" if v is not None else "—"
+
+    header = f"🟣 <b>Player Prop Picks — {today}</b>"
     if sport_filter:
-        lines.append(f"<i>Filtered: {sport_filter}</i>")
-    lines.append(f"<i>Source: 🐶 Underdog  ·  🟣 PrizePicks (when imported)</i>")
-    lines.append("")
+        header += f"  <i>({sport_filter})</i>"
+    out: list[str] = [header, ""]
 
-    current_tier: Optional[str] = None
-    rank = 0
-    for r in records:
-        tier = r.tier or "Low"
-        if tier != current_tier:
-            current_tier = tier
-            tier_icon = _TIER_EMOJI.get(tier, "⚪")
-            lines.append(f"{tier_icon} <b>{tier}</b>")
-        rank += 1
+    for rank, (plh, comp) in enumerate(picks, 1):
+        conf      = comp.proxy_match_confidence if comp else 0
+        tier      = _tier_from_conf(conf)
+        tier_icon = _TIER_EMOJI.get(tier, "⚪")
+        stars     = _stars_from_conf(float(conf))
 
-        conf_str  = f"  conf {r.confidence:.0f}/100" if r.confidence else ""
-        stars_str = f"  {_stars_from_conf(r.confidence)}" if r.confidence else ""
-        result_str = (
-            f"  [{r.result}]"
-            if r.result and r.result != "PENDING" else ""
+        # Provider lines from comparison object
+        pp_pl = comp.lines.get("PrizePicks") if comp else None
+        ud_pl = comp.lines.get("Underdog")   if comp else None
+        dk_pl = comp.lines.get("DraftKings") if comp else None
+        fd_pl = comp.lines.get("FanDuel")    if comp else None
+
+        pp_v = pp_pl.line_value if (pp_pl and pp_pl.available) else None
+        ud_v = ud_pl.line_value if (ud_pl and ud_pl.available) else plh.line_value
+        dk_v = dk_pl.line_value if (dk_pl and dk_pl.available) else None
+        fd_v = fd_pl.line_value if (fd_pl and fd_pl.available) else None
+
+        lines_row = (
+            f"🐶 {_lv(ud_v)}"
+            f"  🟣 {_lv(pp_v)}"
+            f"  🎰 {_lv(dk_v)}"
+            f"  🦊 {_lv(fd_v)}"
         )
 
-        move_str = ""
-        if (r.prev_line is not None
-                and r.opening_line is not None
-                and r.opening_line != r.pp_line_value):
-            delta     = r.pp_line_value - r.opening_line
-            direction = "▲" if delta > 0 else "▼"
-            move_str  = f"  {direction}{abs(delta):.1f} from open"
-
-        # Game timing label
-        gt_label = ""
-        gt = getattr(r, "game_time", None)
-        if gt is not None:
-            _lbl = _fmt_gt(gt)
-            if _lbl:
-                gt_label = f"  ⏰ {_lbl}"
-
-        # ── Bankroll discipline ─────────────────────────────────────────────
-        _dec_str = ""
-        try:
-            from engine.decision_engine import make_pp_decision
-            _dec = make_pp_decision(r)
-            _flag = (
-                f"  <i>⚠️ {', '.join(_dec.risk_flags)}</i>"
-                if _dec.risk_flags else ""
+        # Best available
+        best_row = ""
+        if comp and comp.best_over_app and comp.best_under_app:
+            oe = _PROV_EMOJI.get(comp.best_over_app,  "?")
+            ue = _PROV_EMOJI.get(comp.best_under_app, "?")
+            best_row = (
+                f"  ⬆ OVER → {oe} {_lv(comp.best_over_line)}"
+                f"  ·  ⬇ UNDER → {ue} {_lv(comp.best_under_line)}"
             )
-            if _dec.action == "PASS":
-                _dec_str = f"\n       {_dec.action_label}{_flag}"
-            else:
-                _dec_str = (
-                    f"\n       {_dec.action_label}  ·  "
-                    f"Kelly <code>{_dec.kelly_full * 100:.1f}%</code>  ·  "
-                    f"<b>{_dec.suggested_units:.2f}u</b>{_flag}"
-                )
-        except Exception:
-            pass
+        elif comp and comp.best_line is not None:
+            be = _PROV_EMOJI.get(comp.best_provider or "", "?")
+            best_row = f"  Best: {be} {_lv(comp.best_line)}"
 
-        lines.append(
-            f"  #{rank} <b>{r.player_name}</b> · {r.stat_type}\n"
-            f"       🐶 <code>{r.pp_line_value:g}</code> · <b>{r.best_side}</b> · "
-            f"<code>+{r.best_edge:.1f}%</code>{conf_str}{stars_str}{move_str}{result_str}"
-            f"{gt_label}"
-            f"{_dec_str}\n"
-            f"       <i>{r.sport} · ref: {r.sportsbook} · "
-            f"{r.detected_at.strftime('%H:%M UTC')}</i>"
+        # Movement + confidence + timing
+        detail: list[str] = []
+        if comp and comp.movement is not None and comp.movement != 0:
+            sign  = "+" if comp.movement > 0 else ""
+            arrow = "↑" if comp.movement > 0 else "↓"
+            detail.append(f"<code>{sign}{comp.movement:.1f} {arrow}</code>")
+        detail.append(f"Conf: {conf}/100 {tier_icon}")
+        gt = plh.game_time
+        if gt:
+            lbl = _fmt_gt(gt)
+            if lbl:
+                detail.append(f"⏰ {lbl}")
+
+        entry = (
+            f"<b>#{rank} {plh.player_name}</b>  ·  {plh.stat_type}  {stars}\n"
+            f"  {plh.sport}  |  {lines_row}"
         )
+        if best_row:
+            entry += f"\n{best_row}"
+        if detail:
+            entry += f"\n  {' · '.join(detail)}"
 
-    if not sport_filter and len(records) >= limit:
-        lines.append(f"\n<i>Showing top {limit}. Use /picks [sport] to filter.</i>")
+        out.append(entry)
 
-    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+    if len(picks) >= limit and not sport_filter:
+        out.append(f"\n<i>Showing top {limit}. Use /picks [sport] to filter.</i>")
+
+    await update.message.reply_text("\n".join(out), parse_mode=ParseMode.HTML)
 
 
 async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -929,14 +1059,19 @@ def _render_slip_section(
     slip_result: "OptimizedSlip",
     label: str = "",
 ) -> list[str]:
-    """Render a single slip size into HTML lines (shared by cmd_slip)."""
+    """Render a single slip size into HTML lines (shared by cmd_slip).
+
+    Works with both PPEdgeRecord legs (old pipeline) and PropPickAdapter legs
+    (new player prop market framework).
+    """
     from engine.timing import format_game_time_label as _fmt_gt
 
-    records = slip_result.legs
-    actual  = len(records)
+    records    = slip_result.legs
+    actual     = len(records)
     total_conf = 0.0
     conf_count = 0
-    total_edge = 0.0
+    total_move = 0.0   # replaces avg_edge for PropPickAdapter legs
+    has_adapters = any(hasattr(r, "comp") for r in records)
 
     heading = f"🎰 <b>{size}-Man Slip</b>"
     if label:
@@ -950,50 +1085,96 @@ def _render_slip_section(
         if r.confidence is not None:
             total_conf += r.confidence
             conf_count += 1
-        total_edge += r.best_edge or 0.0
 
+        best_line = getattr(r, "pp_line_value", None)
+        line_str  = f"<code>{best_line:g}</code>" if best_line is not None else "—"
+
+        # Movement note — only for PropPickAdapter (prev_line available)
         move_note = ""
-        if (r.opening_line is not None
-                and r.pp_line_value is not None
-                and r.opening_line != r.pp_line_value):
-            delta = r.pp_line_value - r.opening_line
-            move_note = f"  {'▲' if delta > 0 else '▼'}{abs(delta):.1f}"
+        prev = getattr(r, "prev_line", None)
+        if has_adapters:
+            comp = getattr(r, "comp", None)
+            mv   = comp.movement if comp else None
+            if mv is not None and mv != 0:
+                sign  = "+" if mv > 0 else ""
+                arrow = "↑" if mv > 0 else "↓"
+                move_note = f"  <code>{sign}{mv:.1f}{arrow}</code>"
+                total_move += abs(mv)
+        else:
+            opening = getattr(r, "opening_line", None)
+            if (opening is not None and best_line is not None
+                    and opening != best_line):
+                delta = best_line - opening
+                move_note = f"  {'▲' if delta > 0 else '▼'}{abs(delta):.1f}"
 
         gt = getattr(r, "game_time", None)
         gt_label = f"  ⏰ {_fmt_gt(gt)}" if gt is not None and _fmt_gt(gt) else ""
 
+        # Decision engine — only meaningful for PPEdgeRecord legs
         _dec_leg = ""
-        try:
-            from engine.decision_engine import make_pp_decision
-            _d = make_pp_decision(r)
-            if _d.suggested_units > 0:
-                _dec_leg = (
-                    f"\n    {_d.action_label}  ·  "
-                    f"Kelly {_d.kelly_full * 100:.1f}%  ·  "
-                    f"<b>{_d.suggested_units:.2f}u</b>"
+        if not has_adapters:
+            try:
+                from engine.decision_engine import make_pp_decision
+                _d = make_pp_decision(r)
+                if _d.suggested_units > 0:
+                    _dec_leg = (
+                        f"\n    {_d.action_label}  ·  "
+                        f"Kelly {_d.kelly_full * 100:.1f}%  ·  "
+                        f"<b>{_d.suggested_units:.2f}u</b>"
+                    )
+                else:
+                    _dec_leg = f"\n    {_d.action_label}"
+            except Exception:
+                pass
+
+        # Provider lines summary for PropPickAdapter legs
+        provider_row = ""
+        if has_adapters:
+            comp = getattr(r, "comp", None)
+            if comp and comp.lines:
+                def _lv2(v: Optional[float]) -> str:
+                    return f"<code>{v:.1f}</code>" if v is not None else "—"
+                pp_pl = comp.lines.get("PrizePicks")
+                dk_pl = comp.lines.get("DraftKings")
+                fd_pl = comp.lines.get("FanDuel")
+                pp_v  = pp_pl.line_value if (pp_pl and pp_pl.available) else None
+                dk_v  = dk_pl.line_value if (dk_pl and dk_pl.available) else None
+                fd_v  = fd_pl.line_value if (fd_pl and fd_pl.available) else None
+                provider_row = (
+                    f"\n    🐶 {_lv2(best_line)}"
+                    f"  🟣 {_lv2(pp_v)}"
+                    f"  🎰 {_lv2(dk_v)}"
+                    f"  🦊 {_lv2(fd_v)}"
                 )
-            else:
-                _dec_leg = f"\n    {_d.action_label}"
-        except Exception:
-            pass
 
         section.append(
             f"  <b>Leg {i}</b>  {tier_icon} {r.tier or '—'}  {stars_str}\n"
             f"    <b>{r.player_name}</b> · {r.stat_type}\n"
-            f"    {r.best_side} <code>{r.pp_line_value:g}</code>  ·  "
-            f"<code>+{r.best_edge:.1f}%</code>  ·  conf {conf_label}"
+            f"    {r.best_side} {line_str}  ·  conf {conf_label}"
             f"{move_note}{gt_label}"
+            f"{provider_row}"
             f"{_dec_leg}"
         )
 
     avg_conf = total_conf / conf_count if conf_count else 0.0
-    avg_edge = total_edge / actual     if actual     else 0.0
 
-    section.append(
-        f"\n  Avg edge <code>+{avg_edge:.1f}%</code>  ·  "
-        f"Avg conf <code>{avg_conf:.0f}/100</code>  ·  "
-        f"{actual} legs"
-    )
+    if has_adapters:
+        avg_mv = total_move / actual if actual else 0.0
+        summary = (
+            f"\n  Avg move <code>{avg_mv:.1f}</code>  ·  "
+            f"Avg conf <code>{avg_conf:.0f}/100</code>  ·  "
+            f"{actual} legs"
+        )
+    else:
+        edges     = [r.best_edge for r in records if getattr(r, "best_edge", None) is not None]
+        avg_edge  = sum(edges) / len(edges) if edges else 0.0
+        summary   = (
+            f"\n  Avg edge <code>+{avg_edge:.1f}%</code>  ·  "
+            f"Avg conf <code>{avg_conf:.0f}/100</code>  ·  "
+            f"{actual} legs"
+        )
+
+    section.append(summary)
 
     if slip_result.correlation_warnings:
         for _w in slip_result.correlation_warnings:
@@ -1012,7 +1193,7 @@ def _render_slip_section(
 
 
 async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/slip — Build all prop slip sizes (2–6 legs) from today's top picks.
+    """/slip — Build correlation-aware prop slips (2–6 legs) from live market props.
 
     Usage:
       /slip      — show best 2-man through 6-man slips simultaneously
@@ -1025,7 +1206,6 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
         return
 
-    # Optional single-size argument
     args = context.args or []
     single_size: Optional[int] = None
     if args:
@@ -1035,22 +1215,62 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             pass
 
     from engine.slip_builder import build_all_slips
+    from engine.player_prop_market import build_player_prop_market_comparison
 
-    _candidates = await _db.get_top_pp_edges(limit=30, hours=6)
-    if not _candidates:
+    now   = datetime.utcnow()
+    today = now.strftime("%b %d, %Y")
+
+    # ── 1. Fetch Underdog props (same pool as /picks) ─────────────────────────
+    ud_props = await _db.get_top_ud_props_for_picks(limit=30, since_hours=6)
+    if not ud_props:
         await update.message.reply_text(
             "🎰 <b>Player Prop Slip</b>\n\n"
-            "No scored picks detected in the last 6 hours.\n\n"
-            "<i>Run /picks to see current picks. Underdog props auto-score every 5 min.</i>",
+            "No live props detected in the last 6 hours.\n\n"
+            "<i>Underdog props auto-score every 5 min. Run /picks to check status.</i>",
             parse_mode=ParseMode.HTML,
         )
         return
+
+    # ── 2. Cross-provider enrichment (same as /picks) ─────────────────────────
+    try:
+        pp_rows = await _db.get_latest_props_for_provider("PrizePicks", since_hours=24)
+    except Exception:
+        pp_rows = []
+
+    try:
+        dk_fd_raw   = await _db.get_recent_player_prop_lines(
+            ["DraftKings", "FanDuel"], since_hours=4
+        )
+        dk_fd_index = _build_dk_fd_index(dk_fd_raw)
+    except Exception:
+        dk_fd_index = {}
+
+    # ── 3. Build PropPickAdapter candidates ───────────────────────────────────
+    _candidates: list[PropPickAdapter] = []
+    for plh in ud_props:
+        pkey    = plh.player_name.lower()
+        dk_line = dk_fd_index.get((pkey, "DraftKings"))
+        fd_line = dk_fd_index.get((pkey, "FanDuel"))
+        comp = build_player_prop_market_comparison(
+            player_name    = plh.player_name,
+            sport          = plh.sport,
+            stat_type      = plh.stat_type,
+            ud_line        = plh.line_value,
+            previous_line  = plh.prev_line,
+            fetched_at     = plh.fetched_at,
+            pp_rows        = pp_rows,
+            dk_line        = dk_line,
+            fd_line        = fd_line,
+            now            = now,
+            min_confidence = 0,
+        )
+        _candidates.append(PropPickAdapter(plh, comp))
 
     slips = build_all_slips(_candidates, max_size=6)
 
     if not slips:
         await update.message.reply_text(
-            "🎰 <b>SharpMoney Slip</b>\n\n"
+            "🎰 <b>Player Prop Slip</b>\n\n"
             f"Not enough independent picks to build a slip "
             f"({len(_candidates)} candidate{'s' if len(_candidates) != 1 else ''} "
             f"after correlation filtering).\n\n"
@@ -1059,10 +1279,7 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         return
 
-    today = datetime.now(timezone.utc).strftime("%b %d, %Y")
-
     if single_size is not None:
-        # User requested a specific size
         slip = slips.get(single_size)
         if slip is None:
             await update.message.reply_text(
@@ -1078,11 +1295,10 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             "",
         ] + _render_slip_section(single_size, slip, label)
     else:
-        # Show all sizes
         lines = [
             f"🎰 <b>Player Prop Slips — {today}</b>",
             f"<i>{len(slips)} slip size{'s' if len(slips) != 1 else ''} built "
-            f"from {len(_candidates)} candidates</i>",
+            f"from {len(_candidates)} Underdog props</i>",
             "",
         ]
         for size in sorted(slips):

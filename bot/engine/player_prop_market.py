@@ -205,12 +205,14 @@ def build_player_prop_market_comparison(
     dk_line:        Optional[float] = None,     # DraftKings prop line if available
     fd_line:        Optional[float] = None,     # FanDuel prop line if available
     now:            Optional[datetime] = None,
+    min_confidence: int = PROXY_CONFIDENCE_THRESHOLD,  # override for /picks (use 0 to show all)
 ) -> Optional[PlayerPropMarketComparison]:
     """
     Build a PlayerPropMarketComparison from available provider data.
 
-    Returns None if proxy_match_confidence < PROXY_CONFIDENCE_THRESHOLD.
-    The caller's dedup set prevents re-alerting the same prop/line in one session.
+    Returns None if proxy_match_confidence < min_confidence (default: PROXY_CONFIDENCE_THRESHOLD).
+    Pass min_confidence=0 to build a comparison for all props regardless of score
+    (useful for /picks display where confidence is shown as info, not a gate).
     """
     if now is None:
         now = datetime.utcnow()
@@ -227,10 +229,10 @@ def build_player_prop_market_comparison(
         now          = now,
     )
 
-    if confidence < PROXY_CONFIDENCE_THRESHOLD:
+    if confidence < min_confidence:
         logger.debug(
             "player_prop_market: below threshold — %s / %s / %s  conf=%d < %d",
-            player_name, stat_type, sport, confidence, PROXY_CONFIDENCE_THRESHOLD,
+            player_name, stat_type, sport, confidence, min_confidence,
         )
         return None
 
@@ -518,6 +520,27 @@ async def run_player_prop_market_cycle(
         logger.debug("player_prop_market: failed to fetch PP rows: %s", exc)
         pp_rows = []
 
+    # Pre-fetch DK/FD player-prop OddsRecords for the whole cycle (1 query each)
+    dk_fd_index: dict[tuple[str, str], float] = {}
+    try:
+        dk_fd_rows = await db.get_recent_player_prop_lines(
+            ["DraftKings", "FanDuel"], since_hours=4
+        )
+        for rec in dk_fd_rows:
+            sel      = (getattr(rec, "selection", None) or "").strip()
+            line_val = getattr(rec, "line", None)
+            if line_val is None:
+                continue
+            for suffix in (" Over", " Under"):
+                if sel.endswith(suffix):
+                    pkey = sel[: -len(suffix)].strip().lower()
+                    key  = (pkey, rec.sportsbook)
+                    if key not in dk_fd_index:
+                        dk_fd_index[key] = float(line_val)
+                    break
+    except Exception as exc:
+        logger.debug("player_prop_market: failed to fetch DK/FD rows: %s", exc)
+
     alerts_sent = 0
     for p in candidates:
         player    = p.get("player", "")
@@ -534,6 +557,10 @@ async def run_player_prop_market_cycle(
             )
             continue
 
+        pkey    = player.lower()
+        dk_line = dk_fd_index.get((pkey, "DraftKings"))
+        fd_line = dk_fd_index.get((pkey, "FanDuel"))
+
         comp = build_player_prop_market_comparison(
             player_name   = player,
             sport         = sport,
@@ -542,6 +569,8 @@ async def run_player_prop_market_cycle(
             previous_line = prev_line,
             fetched_at    = now,
             pp_rows       = pp_rows,
+            dk_line       = dk_line,
+            fd_line       = fd_line,
             now           = now,
         )
         if comp is None:

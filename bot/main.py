@@ -217,7 +217,7 @@ async def post_init(application: Application) -> None:
         # restart the bot.  All logic is preserved; nothing has been deleted.
         # jq.run_repeating(_poll_odds_job,      interval=config.ODDS_POLL_INTERVAL,        first=10,  name="odds_poller")
         # jq.run_repeating(_steam_check_job,    interval=config.STEAM_CHECK_INTERVAL,      first=15,  name="steam_checker")
-        # jq.run_repeating(_player_props_job,   interval=config.PLAYER_PROP_POLL_INTERVAL, first=60,  name="player_props_fetcher")
+        jq.run_repeating(_player_props_job,    interval=config.PLAYER_PROP_POLL_INTERVAL, first=60,  name="player_props_fetcher")
         # _prizepicks_job disabled — PrizePicks provider temporarily off
         # jq.run_repeating(connector_poll_job,  interval=config.CONNECTOR_POLL_INTERVAL,   first=20,  name="connector_poller")
         # jq.run_repeating(consensus_check_job, interval=config.CONSENSUS_CHECK_INTERVAL,  first=25,  name="consensus_checker")

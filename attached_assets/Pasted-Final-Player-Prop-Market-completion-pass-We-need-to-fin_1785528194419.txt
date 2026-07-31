@@ -1,0 +1,210 @@
+Final Player Prop Market completion pass.
+
+We need to finish the migration to the new framework and make the bot usable for real player prop testing.
+
+Current status:
+✅ New PLAYER PROP MARKET ALERT framework is active
+✅ Underdog data is flowing
+✅ 1716 tests passing
+❌ /picks is still using old PrizePicks-only logic
+❌ DraftKings/FanDuel connectors exist but are not providing live player prop lines into the market engine
+❌ Provider comparison is incomplete
+
+Complete all remaining work below.
+
+1. Fully migrate /picks to Player Prop Market framework
+
+Remove old PrizePicks edge-only logic.
+
+Replace:
+"🎯 PrizePicks Picks"
+"No edges detected"
+"PP line diverges from sportsbook fair odds"
+
+with:
+
+🟣 Player Prop Picks
+
+/picks must use the unified PlayerPropMarket engine.
+
+Rank available props using:
+- Underdog
+- PrizePicks when available
+- DraftKings player props
+- FanDuel player props
+
+Do not require PrizePicks data or a PP edge to generate picks.
+
+If PP is unavailable, use available provider data.
+
+Show:
+
+Player
+Sport
+Market
+Available Lines:
+🟣 PrizePicks:
+🐶 Underdog:
+🎰 DraftKings:
+🦊 FanDuel:
+
+Best available app/line
+
+Market movement
+
+Model score/tier
+
+Risk factors
+
+2. Fully migrate /slip
+
+/slip must use the same PlayerPropMarket framework.
+
+Do not use old PP-only pick generation.
+
+Build slips from ranked player props using all available providers.
+
+3. Finish DraftKings player prop integration
+
+DK must provide actual player prop data, not only connector status.
+
+Ingest:
+
+- Player name
+- Sport
+- Market type
+- Over/Under side
+- Current line
+- Odds when available
+
+Normalize into the existing PlayerPropMarket object.
+
+Example:
+
+🎰 DraftKings:
+Freddy Peralta
+Strikeouts
+Over 5.5 (-115)
+
+4. Finish FanDuel player prop integration
+
+Same requirements:
+
+🦊 FanDuel:
+- Player name
+- Sport
+- Market
+- Over/Under
+- Current line
+- Odds when available
+
+Normalize into the same market object.
+
+5. Provider comparison engine
+
+The PlayerPropMarket object should compare:
+
+🟣 PrizePicks
+🐶 Underdog
+🎰 DraftKings
+🦊 FanDuel
+
+Display unavailable providers clearly.
+
+Example:
+
+Available Lines:
+
+🟣 PP: 5.5
+🐶 UD: 5.5
+🎰 DK: 6.0 (-115)
+🦊 FD: 5.5 (-110)
+
+Best Available Line:
+Over → 5.5 providers
+Under → DraftKings 6.0
+
+Line differences are market information only, not automatic betting recommendations.
+
+6. Upgrade alerts
+
+Keep the current PLAYER PROP MARKET ALERT format.
+
+Make sure alerts show:
+
+Available Lines
+
+Market View
+
+Best Available Line
+
+Movement
+
+Provider sources
+
+Proxy Match Confidence
+
+Separate:
+📉 Market Movement Score
+from
+🎯 Betting Confidence
+
+Do not label provider agreement as betting confidence.
+
+7. Dashboard/status cleanup
+
+Remove misleading old PrizePicks-only references.
+
+Dashboard should show:
+
+Player Prop Market activity
+
+Provider availability:
+PP / UD / DK / FD
+
+Tracked props
+
+Line history
+
+8. Pregame watch integration foundation
+
+Keep the new pregame watch system.
+
+Prepare for:
+- Morning market scan
+- 3 hours before game start scan
+- Alert on important line movement before games
+
+Do not activate until scheduler integration is confirmed.
+
+9. Framework enforcement
+
+IMPORTANT:
+
+The old framework must no longer be active anywhere.
+
+Search for and disable old paths:
+- PrizePicks Reference Alert
+- PP-only picks
+- old PP edge pipeline
+- old recommendation paths
+
+The only active player prop path should be:
+
+Providers → Normalize → PlayerPropMarket → Ranking → Alerts / Picks / Slip
+
+10. Verify everything
+
+After implementation:
+
+Run full test suite.
+
+Confirm:
+- tests passing
+- no duplicate alert paths
+- /picks uses new framework
+- /slip uses new framework
+- DK/FD lines flow into alerts
+- bot runtime stable
+
+Do not move on after this. Finish this migration completely before adding new features.
