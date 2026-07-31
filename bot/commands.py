@@ -174,45 +174,44 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 f"  {h.status_emoji} <b>{name}</b>  {h.status.value}"
                 f"  ·  last ✓: {last_ok}{fail_note}"
             )
-        # API quota (from response headers) + pacing budget (self-imposed cap)
-        odds_h = _mon.get_health("OddsAPI")
-        if odds_h.quota_remaining is not None or odds_h.quota_used is not None:
-            r = f"{odds_h.quota_remaining:,}" if odds_h.quota_remaining is not None else "?"
-            u = f"{odds_h.quota_used:,}"      if odds_h.quota_used      is not None else "?"
-            lines.append(f"  ↳ API quota:  {r} remaining  ·  {u} used")
-        try:
-            from providers.usage_tracker import get_usage_tracker as _get_tracker
-            _ut = _get_tracker()
-            if _ut is not None:
-                _us = _ut.get_stats("OddsAPI")
-                if _us.month_budget > 0:
-                    _pacing_used = (
-                        f"{_us.quota_used:,}" if _us.quota_used is not None
-                        else f"~{_us.month_count:,}"
-                    )
-                    lines.append(
-                        f"  ↳ Pacing:     {_pacing_used} / {_us.month_budget:,}"
-                        f"  ({_us.budget_pct:.1f}%)  <code>{_us.budget_bar}</code>"
-                    )
-        except Exception:
-            pass
+        # OddsAPI quota/pacing stats hidden — sportsbook polling disabled.
+        # To restore: uncomment the block below when re-enabling sportsbook jobs.
+        # odds_h = _mon.get_health("OddsAPI")
+        # if odds_h.quota_remaining is not None or odds_h.quota_used is not None:
+        #     r = f"{odds_h.quota_remaining:,}" if odds_h.quota_remaining is not None else "?"
+        #     u = f"{odds_h.quota_used:,}"      if odds_h.quota_used      is not None else "?"
+        #     lines.append(f"  ↳ API quota:  {r} remaining  ·  {u} used")
+        # try:
+        #     from providers.usage_tracker import get_usage_tracker as _get_tracker
+        #     _ut = _get_tracker()
+        #     if _ut is not None:
+        #         _us = _ut.get_stats("OddsAPI")
+        #         if _us.month_budget > 0:
+        #             _pacing_used = (
+        #                 f"{_us.quota_used:,}" if _us.quota_used is not None
+        #                 else f"~{_us.month_count:,}"
+        #             )
+        #             lines.append(
+        #                 f"  ↳ Pacing:     {_pacing_used} / {_us.month_budget:,}"
+        #                 f"  ({_us.budget_pct:.1f}%)  <code>{_us.budget_bar}</code>"
+        #             )
+        # except Exception:
+        #     pass
     else:
-        lines += [
-            "  ⚪ Odds API     not yet tracked",
-            "  ⚪ Underdog     not yet tracked",
-        ]
+        lines.append("  ⚪ Underdog     not yet tracked")
     lines.append("")
 
-    # ── Odds API cache stats ──────────────────────────────────────────────────
-    if _cache:
-        st  = _cache.stats()
-        tot = st["hits"] + st["misses"]
-        hr  = f"{st['hit_rate'] * 100:.0f}%" if tot > 0 else "—"
-        lines.append(
-            f"⛽ <b>Odds API Cache</b>  TTL {st['ttl_seconds']}s"
-            f"  ·  {st['hits']} hits / {st['misses']} misses  ({hr})"
-        )
-        lines.append("")
+    # ── Odds API cache stats — hidden while sportsbook polling is disabled ────
+    # To restore: uncomment when re-enabling sportsbook jobs.
+    # if _cache:
+    #     st  = _cache.stats()
+    #     tot = st["hits"] + st["misses"]
+    #     hr  = f"{st['hit_rate'] * 100:.0f}%" if tot > 0 else "—"
+    #     lines.append(
+    #         f"⛽ <b>Odds API Cache</b>  TTL {st['ttl_seconds']}s"
+    #         f"  ·  {st['hits']} hits / {st['misses']} misses  ({hr})"
+    #     )
+    #     lines.append("")
 
     # ── Active sports from season checker ─────────────────────────────────────
     if _season_checker and hasattr(_season_checker, "get_sport_summary"):

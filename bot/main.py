@@ -132,9 +132,9 @@ async def post_init(application: Application) -> None:
     _health_monitor = init_health_monitor()
     # PrizePicks provider is temporarily disabled — not registered so it never
     # shows as a failed provider in /status or logs.
-    _health_monitor.register("OddsAPI")
+    # _health_monitor.register("OddsAPI")  # sportsbook polling disabled — Underdog-only mode
     _health_monitor.register("Underdog")
-    logger.info("Provider health monitor initialised (OddsAPI, Underdog)")
+    logger.info("Provider health monitor initialised (Underdog) [sportsbook polling disabled]")
 
     init_odds_cache(ttl_seconds=config.ODDS_API_CACHE_TTL)
     logger.info("Odds API shared cache initialised (TTL=%ds)", config.ODDS_API_CACHE_TTL)
@@ -193,14 +193,17 @@ async def post_init(application: Application) -> None:
     # Register background jobs
     jq = application.job_queue
     if jq:
-        jq.run_repeating(_poll_odds_job,       interval=config.ODDS_POLL_INTERVAL,          first=10,  name="odds_poller")
-        jq.run_repeating(_steam_check_job,     interval=config.STEAM_CHECK_INTERVAL,        first=15,  name="steam_checker")
-        jq.run_repeating(_player_props_job,    interval=config.PLAYER_PROP_POLL_INTERVAL,   first=60,  name="player_props_fetcher")
+        # ── Sportsbook polling disabled — Underdog-only mode ─────────────────
+        # To re-enable sportsbook monitoring: uncomment the blocks below and
+        # restart the bot.  All logic is preserved; nothing has been deleted.
+        # jq.run_repeating(_poll_odds_job,      interval=config.ODDS_POLL_INTERVAL,        first=10,  name="odds_poller")
+        # jq.run_repeating(_steam_check_job,    interval=config.STEAM_CHECK_INTERVAL,      first=15,  name="steam_checker")
+        # jq.run_repeating(_player_props_job,   interval=config.PLAYER_PROP_POLL_INTERVAL, first=60,  name="player_props_fetcher")
         # _prizepicks_job disabled — PrizePicks provider temporarily off
-        # Multi-platform market engine jobs
-        jq.run_repeating(connector_poll_job,   interval=config.CONNECTOR_POLL_INTERVAL,     first=20,  name="connector_poller")
-        jq.run_repeating(consensus_check_job,  interval=config.CONSENSUS_CHECK_INTERVAL,    first=25,  name="consensus_checker")
-        jq.run_repeating(clv_check_job,        interval=config.CLV_CHECK_INTERVAL,          first=35,  name="clv_checker")
+        # jq.run_repeating(connector_poll_job,  interval=config.CONNECTOR_POLL_INTERVAL,   first=20,  name="connector_poller")
+        # jq.run_repeating(consensus_check_job, interval=config.CONSENSUS_CHECK_INTERVAL,  first=25,  name="consensus_checker")
+        # jq.run_repeating(clv_check_job,       interval=config.CLV_CHECK_INTERVAL,        first=35,  name="clv_checker")
+        # ─────────────────────────────────────────────────────────────────────
         jq.run_repeating(underdog_job,         interval=config.UNDERDOG_POLL_INTERVAL,      first=45,  name="underdog_monitor")
         # API budget check — every 15 minutes
         jq.run_repeating(_budget_check_job,    interval=900,                                first=900, name="budget_checker")
@@ -213,16 +216,8 @@ async def post_init(application: Application) -> None:
                 name="season_checker",
             )
         logger.info(
-            "Jobs scheduled — odds: every %ds, steam: every %ds, "
-            "player_props: every %ds, "
-            "connectors: every %ds, consensus: every %ds, clv: every %ds, "
-            "underdog: every %ds, season_check: every %ds",
-            config.ODDS_POLL_INTERVAL,
-            config.STEAM_CHECK_INTERVAL,
-            config.PLAYER_PROP_POLL_INTERVAL,
-            config.CONNECTOR_POLL_INTERVAL,
-            config.CONSENSUS_CHECK_INTERVAL,
-            config.CLV_CHECK_INTERVAL,
+            "Jobs scheduled — underdog: every %ds, season_check: every %ds"
+            " [sportsbook jobs disabled]",
             config.UNDERDOG_POLL_INTERVAL,
             config.SEASON_CHECK_INTERVAL,
         )
