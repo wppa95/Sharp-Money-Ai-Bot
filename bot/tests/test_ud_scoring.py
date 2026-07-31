@@ -59,6 +59,7 @@ from unittest.mock import MagicMock
 from engine.ud_scoring import (
     UDScoreTier,
     UDPropScore,
+    PropDifficultyClass,
     score_ud_prop,
     _score_move_velocity,
     _score_historical_activity,
@@ -67,6 +68,8 @@ from engine.ud_scoring import (
     _score_avg_vs_line,
     _score_consistency,
     _score_stability,
+    _classify_prop_difficulty,
+    _score_variance_penalty,
     _ACTIVITY_NEUTRAL,
     _ACTIVITY_NEUTRAL_LEGACY,
     _CONSISTENCY_NEUTRAL,
@@ -644,3 +647,162 @@ class TestHistoricalActivityLegacy:
         old2 = _score_historical_activity_legacy(h2)
         # blended≈0.04: new→raw=10 (≥0.02), old→raw=2 (<0.10)
         assert new2 > old2
+
+
+# ── PropDifficultyClass classification ────────────────────────────────────────
+
+class TestClassifyPropDifficulty:
+    """_classify_prop_difficulty(stat_type, line_value) → PropDifficultyClass."""
+
+    # HIGH_FLOOR cases
+    def test_hits_is_high_floor(self):
+        assert _classify_prop_difficulty("Hits", 1.5) == PropDifficultyClass.HIGH_FLOOR
+
+    def test_hits_plus_rbi_is_high_floor(self):
+        assert _classify_prop_difficulty("Hits + Runs + RBIs", 2.5) == PropDifficultyClass.HIGH_FLOOR
+
+    def test_fantasy_score_is_high_floor(self):
+        assert _classify_prop_difficulty("Fantasy Score", 30.5) == PropDifficultyClass.HIGH_FLOOR
+
+    def test_points_is_high_floor(self):
+        assert _classify_prop_difficulty("Points", 18.5) == PropDifficultyClass.HIGH_FLOOR
+
+    def test_pra_is_high_floor(self):
+        assert _classify_prop_difficulty("PRA", 25.5) == PropDifficultyClass.HIGH_FLOOR
+
+    def test_high_floor_at_half_line_stays_high_floor(self):
+        # High-floor stats at 0.5 remain HIGH_FLOOR — they are still reliable.
+        assert _classify_prop_difficulty("Hits", 0.5) == PropDifficultyClass.HIGH_FLOOR
+
+    # HIGH_VARIANCE cases
+    def test_home_runs_is_high_variance(self):
+        assert _classify_prop_difficulty("Home Runs", 0.5) == PropDifficultyClass.HIGH_VARIANCE
+
+    def test_home_runs_non_half_still_high_variance(self):
+        assert _classify_prop_difficulty("Home Runs", 1.5) == PropDifficultyClass.HIGH_VARIANCE
+
+    def test_stolen_bases_is_high_variance(self):
+        assert _classify_prop_difficulty("Stolen Bases", 0.5) == PropDifficultyClass.HIGH_VARIANCE
+
+    def test_rbi_is_high_variance(self):
+        assert _classify_prop_difficulty("RBIs", 0.5) == PropDifficultyClass.HIGH_VARIANCE
+
+    def test_standard_stat_at_half_line_is_high_variance(self):
+        # Non-high-floor, non-high-variance stat at 0.5 line → HIGH_VARIANCE
+        assert _classify_prop_difficulty("Shots", 0.5) == PropDifficultyClass.HIGH_VARIANCE
+
+    def test_strikeouts_at_half_line_is_high_variance(self):
+        assert _classify_prop_difficulty("Strikeouts", 0.5) == PropDifficultyClass.HIGH_VARIANCE
+
+    # STANDARD cases
+    def test_total_bases_is_standard(self):
+        assert _classify_prop_difficulty("Total Bases", 1.5) == PropDifficultyClass.STANDARD
+
+    def test_shots_on_target_is_standard(self):
+        assert _classify_prop_difficulty("Shots on Target", 1.5) == PropDifficultyClass.STANDARD
+
+    def test_strikeouts_non_half_is_standard(self):
+        assert _classify_prop_difficulty("Strikeouts", 4.5) == PropDifficultyClass.STANDARD
+
+    def test_aces_is_standard(self):
+        assert _classify_prop_difficulty("Aces", 5.5) == PropDifficultyClass.STANDARD
+
+    def test_unknown_stat_is_standard(self):
+        assert _classify_prop_difficulty("Some New Stat", 2.5) == PropDifficultyClass.STANDARD
+
+
+# ── _score_variance_penalty ───────────────────────────────────────────────────
+
+class TestScoreVariancePenalty:
+    """_score_variance_penalty(stat_type, line_value) → 0 | 5 | 10."""
+
+    def test_high_floor_stat_no_penalty(self):
+        assert _score_variance_penalty("Hits", 1.5) == 0
+
+    def test_high_floor_at_half_line_no_penalty(self):
+        assert _score_variance_penalty("Hits", 0.5) == 0
+
+    def test_standard_stat_non_half_no_penalty(self):
+        assert _score_variance_penalty("Total Bases", 1.5) == 0
+
+    def test_standard_at_half_line_penalty_5(self):
+        # Non-high-floor stat at 0.5 → HIGH_VARIANCE → penalty 5
+        assert _score_variance_penalty("Shots", 0.5) == 5
+
+    def test_explicit_hv_stat_non_half_line_penalty_5(self):
+        # HR at non-0.5 line: HIGH_VARIANCE category, not 0.5 → penalty 5
+        assert _score_variance_penalty("Home Runs", 1.5) == 5
+
+    def test_explicit_hv_stat_half_line_penalty_10(self):
+        # HR at 0.5: HIGH_VARIANCE + 0.5 line → harshest penalty
+        assert _score_variance_penalty("Home Runs", 0.5) == 10
+
+    def test_stolen_bases_half_line_penalty_10(self):
+        assert _score_variance_penalty("Stolen Bases", 0.5) == 10
+
+    def test_rbi_half_line_penalty_10(self):
+        assert _score_variance_penalty("RBIs", 0.5) == 10
+
+
+# ── UDPropScore.total with variance_penalty ───────────────────────────────────
+
+class TestUDPropScoreWithVariancePenalty:
+    """Verify variance_penalty is subtracted from total and affects tier."""
+
+    def test_penalty_subtracted_from_total(self):
+        s = UDPropScore(
+            player_name="P", stat_type="Home Runs", sport="MLB",
+            current_line=0.5,
+            move_velocity=25, historical_activity=25, avg_vs_line=20,
+            consistency=15, stability=15, n_history=20,
+            variance_penalty=10,
+        )
+        assert s.total == 25 + 25 + 20 + 15 + 15 - 10  # 90
+
+    def test_zero_penalty_unchanged(self):
+        s = UDPropScore(
+            player_name="P", stat_type="Hits", sport="MLB",
+            current_line=1.5,
+            move_velocity=20, historical_activity=18, avg_vs_line=12,
+            consistency=10, stability=8, n_history=10,
+            variance_penalty=0,
+        )
+        assert s.total == 20 + 18 + 12 + 10 + 8  # 68
+
+    def test_penalty_floors_at_zero(self):
+        s = UDPropScore(
+            player_name="P", stat_type="Home Runs", sport="MLB",
+            current_line=0.5,
+            move_velocity=0, historical_activity=2, avg_vs_line=0,
+            consistency=0, stability=0, n_history=3,
+            variance_penalty=10,
+        )
+        assert s.total == 0  # max(0, 2-10) = 0
+
+    def test_score_ud_prop_high_variance_has_penalty(self):
+        """score_ud_prop() auto-computes variance_penalty for HR 0.5."""
+        s = score_ud_prop("Player", "Home Runs", "MLB", 0.5, None, [])
+        assert s.variance_penalty == 10
+        assert s.difficulty == PropDifficultyClass.HIGH_VARIANCE
+
+    def test_score_ud_prop_high_floor_no_penalty(self):
+        """score_ud_prop() returns penalty=0 for a Hits prop."""
+        s = score_ud_prop("Player", "Hits", "MLB", 1.5, None, [])
+        assert s.variance_penalty == 0
+        assert s.difficulty == PropDifficultyClass.HIGH_FLOOR
+
+    def test_score_ud_prop_standard_no_penalty(self):
+        """score_ud_prop() returns penalty=0 for a standard prop at non-0.5 line."""
+        s = score_ud_prop("Player", "Total Bases", "MLB", 1.5, None, [])
+        assert s.variance_penalty == 0
+        assert s.difficulty == PropDifficultyClass.STANDARD
+
+    def test_score_ud_prop_default_difficulty_field(self):
+        """UDPropScore with no explicit difficulty defaults to STANDARD."""
+        s = UDPropScore(
+            player_name="P", stat_type="X", sport="MLB", current_line=1.5,
+            move_velocity=10, historical_activity=10, avg_vs_line=5,
+            consistency=8, stability=8, n_history=5,
+        )
+        assert s.variance_penalty == 0
+        assert s.difficulty == PropDifficultyClass.STANDARD

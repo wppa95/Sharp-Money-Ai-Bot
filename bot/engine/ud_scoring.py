@@ -63,6 +63,58 @@ class UDScoreTier(str, enum.Enum):
     PASS = "PASS"
 
 
+# ── Prop difficulty classification ───────────────────────────────────────────
+
+class PropDifficultyClass(str, enum.Enum):
+    """
+    Three-tier classification of prop difficulty / variance.
+
+    HIGH_FLOOR    — reliable daily-production markets; preferred "green goblin"
+                    opportunities.  No score adjustment.
+    STANDARD      — typical prop categories; no adjustment.
+    HIGH_VARIANCE — low-frequency or volatile outcomes (e.g. HR 0.5, SB 0.5).
+                    A variance_penalty is subtracted from the raw total so that
+                    a higher evidence bar must be cleared before these alerts fire.
+    """
+    HIGH_FLOOR    = "HIGH_FLOOR"
+    STANDARD      = "STANDARD"
+    HIGH_VARIANCE = "HIGH_VARIANCE"
+
+
+# Stat categories that produce high-floor, daily-production outcomes.
+# These are the "green goblin" targets — reliable hits for active players.
+_HIGH_FLOOR_STATS: frozenset[str] = frozenset({
+    "Hits",
+    "Hits + Runs + RBIs",
+    "Fantasy Score",
+    "Fantasy Points",
+    "Points",
+    "Rebounds",
+    "Points + Rebounds + Assists",
+    "Pts+Rebs+Asts",
+    "PRA",
+    "Assists",
+    "Pass Completions",
+    "Receiving Yards",
+    "Rushing Yards",
+    "Passing Yards",
+})
+
+# Stat categories that are inherently volatile — low-frequency outcomes where
+# small samples mislead and single-game variance is very high.
+_HIGH_VARIANCE_STATS: frozenset[str] = frozenset({
+    "Home Runs",
+    "Stolen Bases",
+    "RBIs",
+    "Wins",
+    "Saves",
+})
+
+# At these exact line values even otherwise-standard stats become high-variance.
+# e.g. "Hits 0.5" is qualitatively different from "Hits 1.5".
+_HIGH_VARIANCE_LINES: frozenset[float] = frozenset({0.5})
+
+
 # ── Thresholds ────────────────────────────────────────────────────────────────
 
 _S_THRESHOLD = 80
@@ -108,17 +160,24 @@ class UDPropScore:
 
     n_history:           int   # number of DB records used for scoring
 
+    # ── Difficulty / variance adjustment (default = no adjustment) ────────────
+    # Fields have defaults so existing call sites that omit them still work.
+    variance_penalty:    int                = 0                             # 0, 5, or 10 — subtracted from raw total
+    difficulty:          PropDifficultyClass = PropDifficultyClass.STANDARD # prop difficulty class
+
     # ── Derived properties ────────────────────────────────────────────────────
 
     @property
     def total(self) -> int:
-        return (
+        """Raw component sum minus variance penalty (floor 0)."""
+        return max(0, (
             self.move_velocity
             + self.historical_activity
             + self.avg_vs_line
             + self.consistency
             + self.stability
-        )
+            - self.variance_penalty
+        ))
 
     @property
     def tier(self) -> str:
@@ -389,6 +448,53 @@ def _score_stability(
     else:             return  0
 
 
+def _classify_prop_difficulty(stat_type: str, line_value: float) -> PropDifficultyClass:
+    """
+    Classify a prop's difficulty tier based on stat type and line value.
+
+    HIGH_FLOOR  — safe, reliable daily-production markets; no score adjustment.
+    HIGH_VARIANCE — low-frequency outcomes or 0.5-line bets on volatile stats;
+                    a variance_penalty will be subtracted from their raw total,
+                    requiring stronger evidence before they reach a qualifying tier.
+    STANDARD    — everything else; no adjustment.
+
+    Note: ``_HIGH_FLOOR_STATS`` at a 0.5 line are still classified HIGH_FLOOR
+    because high-floor stats are consistently achievable even at low thresholds
+    (e.g. "at least one hit" for a contact hitter is genuinely reliable).
+    """
+    # Explicitly volatile categories are HIGH_VARIANCE regardless of line
+    if stat_type in _HIGH_VARIANCE_STATS:
+        return PropDifficultyClass.HIGH_VARIANCE
+
+    # Standard stats at a 0.5 line become HIGH_VARIANCE (not high-floor stats)
+    if line_value in _HIGH_VARIANCE_LINES and stat_type not in _HIGH_FLOOR_STATS:
+        return PropDifficultyClass.HIGH_VARIANCE
+
+    if stat_type in _HIGH_FLOOR_STATS:
+        return PropDifficultyClass.HIGH_FLOOR
+
+    return PropDifficultyClass.STANDARD
+
+
+def _score_variance_penalty(stat_type: str, line_value: float) -> int:
+    """
+    Variance penalty (0, 5, or 10) — subtracted from the raw five-dimension
+    total before tier and star assignment.
+
+    HIGH_VARIANCE props require stronger evidence to reach the same tier:
+      Explicit high-variance stat + 0.5 line (HR 0.5, RBI 0.5, SB 0.5) → –10
+      General high-variance (category or 0.5 non-high-floor line)       → –5
+      HIGH_FLOOR or STANDARD                                              →  0
+    """
+    dc = _classify_prop_difficulty(stat_type, line_value)
+    if dc != PropDifficultyClass.HIGH_VARIANCE:
+        return 0
+    # Harshest penalty: explicitly volatile stat AND a 0.5 line
+    if line_value in _HIGH_VARIANCE_LINES and stat_type in _HIGH_VARIANCE_STATS:
+        return 10
+    return 5
+
+
 def _score_drift_velocity(opening_line: float, current_line: float) -> int:
     """
     Drift Velocity (0–15) — cold-start baseline for accumulated line migration.
@@ -463,6 +569,9 @@ def score_ud_prop(
     else:
         velocity = 0
 
+    penalty    = _score_variance_penalty(stat_type, current_line)
+    difficulty = _classify_prop_difficulty(stat_type, current_line)
+
     return UDPropScore(
         player_name         = player_name,
         stat_type           = stat_type,
@@ -474,4 +583,6 @@ def score_ud_prop(
         consistency         = _score_consistency(history),
         stability           = _score_stability(history),
         n_history           = len(history),
+        variance_penalty    = penalty,
+        difficulty          = difficulty,
     )

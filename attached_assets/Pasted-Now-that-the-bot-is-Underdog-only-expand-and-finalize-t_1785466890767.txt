@@ -1,0 +1,226 @@
+Now that the bot is Underdog-only, expand and finalize the Underdog Fantasy player prop engine.
+
+Goal
+
+Build a complete Underdog Fantasy player prop analysis engine.
+
+Do not monitor sportsbook ML, totals, DraftKings, or FanDuel right now.
+
+Keep sportsbook code preserved but disabled for future reactivation.
+
+Do not make unrelated changes outside this scope.
+
+⸻
+
+1. Full Underdog prop market coverage
+
+Fetch and analyze all available Underdog Fantasy player prop lines from the interface.
+
+Do not hardcode only MLB.
+
+Dynamically support any active sport and prop market returned by Underdog.
+
+Current active priority sports:
+
+* MLB
+* WNBA
+* Soccer
+* Tennis
+* Other active Underdog sports/prop markets
+
+Do NOT include:
+
+* NFL (out of season)
+* NBA (out of season)
+
+Keep architecture flexible so inactive sports can be re-enabled later.
+
+Support available prop categories including:
+
+MLB
+
+* Hits
+* Runs
+* RBIs
+* Hits + Runs + RBIs
+* Fantasy Score
+* Total Bases
+* Home Runs
+* Strikeouts
+* Earned Runs
+* Pitcher outs recorded
+* Pitcher strikeouts
+* Other available MLB props
+
+WNBA
+
+* Points
+* Rebounds
+* Assists
+* PRA
+* 3-pointers
+* Steals
+* Blocks
+* Turnovers
+* Fantasy Score
+* Other available player props
+
+Soccer
+
+Support all soccer player prop markets that are actually available through the Underdog interface.
+
+Priority markets:
+
+* Shots
+* Shots on target
+* Goals
+* Assists
+* Pass attempts
+
+If Underdog provides additional soccer player action markets, dynamically support them as well.
+
+Examples:
+
+* Dribbles
+* Tackles
+* Clearances
+* Other player involvement stats
+
+Do not hardcode unsupported soccer markets. Only analyze props returned by the Underdog feed.
+
+Tennis
+
+* Total games
+* Sets
+* Aces
+* Double faults
+* Match/player props
+* Other available tennis props
+
+Support any additional active Underdog markets exposed through the interface.
+
+⸻
+
+2. Preserve current Underdog scoring improvements
+
+Keep the current Underdog recalibration unchanged.
+
+Keep:
+
+* Drift velocity adjustment
+* Historical Activity calibration based on actual Underdog movement data
+* Current evidence breakdown
+* Current scoring logic improvements
+
+Do not modify:
+
+* S/A/B/PASS thresholds
+* Alert qualification logic
+
+unless changes are tested and justified with before/after results.
+
+⸻
+
+3. Build toward the correct betting philosophy
+
+The engine should prioritize high-probability player props, not just movement/value.
+
+Add the foundation for:
+
+* Hit-rate weighting
+* Consistency weighting
+* Median outcome analysis
+* Variance penalty
+* Prop difficulty classification
+
+Future goal:
+
+Prefer safer “green goblin” style opportunities over high-variance “demon” lines.
+
+Boost:
+
+* Hits
+* Hits + Runs + RBIs
+* Fantasy Score
+* High-floor production markets
+
+Penalize unless elite evidence supports:
+
+* HR 0.5
+* RBI 0.5
+* Stolen Bases 0.5
+* Other low-frequency outcomes
+
+Do not remove these markets. Properly account for variance.
+
+⸻
+
+4. Data and evidence requirements
+
+Before qualifying an alert, prioritize:
+
+* Recent form
+* Season sample
+* Hit rate
+* Average outcome
+* Median outcome
+* Matchup context
+* Role/usage
+* Sport-specific factors
+
+Do not send alerts based only on line movement.
+
+⸻
+
+5. Telegram notification cleanup
+
+Change Telegram behavior:
+
+Do not send “UNDERDOG NEW PROPS” discovery dumps to Telegram.
+
+New props should:
+
+* Be fetched
+* Stored
+* Scored internally
+
+Only send Telegram notifications when a prop passes the alert qualification criteria.
+
+Qualified alerts should keep the detailed format:
+
+* Player
+* Prop
+* Line movement
+* Grade
+* Confidence
+* Evidence table
+* Reason
+
+Goal:
+
+Signal only, not the entire prop feed.
+
+⸻
+
+6. Testing and safety
+
+Do not break existing functionality.
+
+Keep:
+
+* Telegram alerts working
+* /status working
+* Current Underdog engine intact
+* Sportsbook code preserved but disabled
+* Existing tests passing
+
+Run the full test suite after changes.
+
+Provide:
+
+* Tests passed
+* Active sports detected
+* Active prop markets detected
+* Example scored props from each available sport
+* Confirmation Underdog monitoring is the only active engine
+* Confirmation Telegram only sends qualified alerts

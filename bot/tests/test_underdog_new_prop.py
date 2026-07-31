@@ -326,9 +326,15 @@ async def test_new_prop_score_stored_on_record():
 
 
 @pytest.mark.asyncio
-async def test_cycle_digest_sent_when_new_props_detected():
-    """broadcast_alert must be called with the cycle digest after the loop when new props exist."""
-    snaps = [_snap("Aaron Judge", "Walks", 5.0)]    # non-immediate: goes to digest only
+async def test_new_props_stored_silently_no_digest():
+    """New props are stored and scored silently — no digest is broadcast to Telegram.
+
+    The "UNDERDOG NEW PROPS" discovery dump has been suppressed.  New props only
+    trigger a Telegram message when they pass the full qualification gate
+    (score + validation + decision + sport whitelist).  Non-immediate props
+    (low score, no history, non-priority line) must be stored without any alert.
+    """
+    snaps = [_snap("Aaron Judge", "Walks", 5.0)]    # non-immediate: stored silently
     db = _make_db(known_keys=set())
 
     with patch("alerts.broadcast_alert", new_callable=AsyncMock,
@@ -348,16 +354,15 @@ async def test_cycle_digest_sent_when_new_props_detected():
                 with patch.object(me, "_cold_start_done", True):
                     await me.underdog_job(ctx)
 
-    # broadcast_alert should have been called for the digest (no individual alert)
-    mock_delivery.deliver_underdog.assert_not_called()   # non-immediate → no individual
-    assert mock_broadcast.call_count >= 1
-    # The digest message must mention "UNDERDOG NEW PROPS"
-    digest_call = next(
-        (c for c in mock_broadcast.call_args_list
-         if "UNDERDOG NEW PROPS" in str(c)),
-        None,
-    )
-    assert digest_call is not None, "Cycle digest not sent"
+    # No individual alert (non-immediate prop)
+    mock_delivery.deliver_underdog.assert_not_called()
+    # No digest broadcast — digest is suppressed in Underdog-only mode
+    for c in mock_broadcast.call_args_list:
+        assert "UNDERDOG NEW PROPS" not in str(c), (
+            "Cycle digest must not be broadcast — new props are stored silently"
+        )
+    # Prop is still persisted in the DB
+    db.save_underdog_snapshot.assert_called_once()
 
 
 @pytest.mark.asyncio

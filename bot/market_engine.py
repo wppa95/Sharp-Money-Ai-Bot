@@ -931,20 +931,27 @@ async def underdog_job(context) -> None:
         else:
             await db.save_underdog_snapshot(record)
 
-    # ── End-of-cycle new-prop digest ──────────────────────────────────────────
-    # One batched summary per cycle — only when new props were detected and there
-    # are registered chat IDs to send to.  Individual alerts were already sent
-    # above for high-priority props (line ≤ 0.5, score gate, priority stat).
-    if _new_props_batch and chat_ids:
-        from alerts_multiplatform import format_underdog_new_prop_cycle_summary
-        from alerts import broadcast_alert
-        digest = format_underdog_new_prop_cycle_summary(_new_props_batch)
-        await broadcast_alert(bot, chat_ids, digest)
+    # ── End-of-cycle new-prop digest — SUPPRESSED ─────────────────────────────
+    # New props are silently stored and scored.  Telegram only receives a
+    # notification when a prop passes the full qualification gate:
+    #   score + validation + decision engine + sport whitelist.
+    # To restore the discovery dump: uncomment the block below and restart.
+    # if _new_props_batch and chat_ids:
+    #     from alerts_multiplatform import format_underdog_new_prop_cycle_summary
+    #     from alerts import broadcast_alert
+    #     digest = format_underdog_new_prop_cycle_summary(_new_props_batch)
+    #     await broadcast_alert(bot, chat_ids, digest)
+    #     logger.info(
+    #         "underdog_job: new-prop digest sent — total=%d immediate=%d summary_only=%d",
+    #         len(_new_props_batch),
+    #         _n_new_prop_sent,
+    #         len(_new_props_batch) - _n_new_prop_sent,
+    #     )
+    if _new_props_batch:
         logger.info(
-            "underdog_job: new-prop digest sent — total=%d immediate=%d summary_only=%d",
+            "underdog_job: %d new props stored silently (digest suppressed — "
+            "Telegram only fires on qualified alerts)",
             len(_new_props_batch),
-            _n_new_prop_sent,
-            len(_new_props_batch) - _n_new_prop_sent,
         )
 
     # ── Cold-start bulk save + latch — runs once after the prop loop ──────────

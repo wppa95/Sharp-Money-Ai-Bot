@@ -181,8 +181,12 @@ async def post_init(application: Application) -> None:
         season_checker = _season_checker,
     ))
     registry.register(UnderdogConnector(
-        active_sports = active_sports,
-        enabled       = config.UNDERDOG_ENABLED,
+        # active_sports=None: accept every sport the Underdog API returns.
+        # Underdog only lists currently-active props, so out-of-season sports
+        # (NFL, NBA) simply don't appear — no explicit blocklist is needed.
+        # This gives us MLB, WNBA, Soccer, Tennis, and any other live markets
+        # without hardcoding sport IDs that may change or be added.
+        enabled = config.UNDERDOG_ENABLED,
     ))
 
     init_market_engine(registry)
