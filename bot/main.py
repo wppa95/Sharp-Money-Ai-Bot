@@ -212,6 +212,8 @@ async def post_init(application: Application) -> None:
         # jq.run_repeating(clv_check_job,       interval=config.CLV_CHECK_INTERVAL,        first=35,  name="clv_checker")
         # ─────────────────────────────────────────────────────────────────────
         jq.run_repeating(underdog_job,         interval=config.UNDERDOG_POLL_INTERVAL,      first=45,  name="underdog_monitor")
+        # CLV seed job — every 15 minutes (creates AlertCLVSeed entries for alerts)
+        jq.run_repeating(_clv_seed_job,        interval=900,                                first=120, name="clv_seeder")
         # API budget check — every 15 minutes
         jq.run_repeating(_budget_check_job,    interval=900,                                first=900, name="budget_checker")
         # Season / market-status refresh (skip when interval is 0 = disabled)
@@ -510,6 +512,34 @@ async def _steam_check_job(context) -> None:
 
             # AlertDelivery handles: filter → dedup → format → send → log
             await delivery.deliver_steam(steam_alert)
+
+
+# ── CLV seed job ──────────────────────────────────────────────────────────────
+
+async def _clv_seed_job(context) -> None:
+    """
+    Run every 15 minutes.  Scans alerted EV and Underdog records that have
+    not yet been seeded for CLV tracking, and creates AlertCLVSeed entries
+    for each.
+
+    This is a lightweight read-then-write operation that never modifies
+    existing alert data or fires any Telegram messages.
+
+    When sportsbook polling is re-enabled, a separate harvest job will read
+    these seeds, fetch closing odds, compute CLV%, and write clv_records.
+    """
+    if _db is None:
+        return
+    try:
+        ev_seeded = await _db.seed_clv_from_ev_records(limit=100)
+        ud_seeded = await _db.seed_clv_from_ud_snapshots(limit=100)
+        if ev_seeded or ud_seeded:
+            logger.info(
+                "_clv_seed_job: seeded %d EV + %d Underdog alerts for CLV tracking",
+                ev_seeded, ud_seeded,
+            )
+    except Exception as exc:
+        logger.exception("_clv_seed_job: error during CLV seeding: %s", exc)
 
 
 # ── API budget check job ───────────────────────────────────────────────────────

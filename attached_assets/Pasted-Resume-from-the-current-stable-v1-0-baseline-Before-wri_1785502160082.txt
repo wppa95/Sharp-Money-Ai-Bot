@@ -1,0 +1,112 @@
+Resume from the current stable v1.0 baseline.
+
+Before writing any code:
+
+1. Read replit.md.
+2. Inspect the existing codebase to regain full context.
+3. Do not rebuild or replace completed modules.
+4. Preserve the current architecture unless a change is absolutely required.
+
+The following modules are stable and should not be modified unless necessary:
+
+* Odds Pipeline
+* Fair Probability Engine
+* EV Engine
+* Steam Engine
+* AI Confidence Engine
+* Analysis Engine
+* Risk System
+* AlertDelivery
+* Telegram Integration
+
+All existing tests must continue to pass.
+
+Complete the following:
+
+Phase 1 — Closing Line Value (CLV)
+
+Build the complete CLV tracking system.
+
+Requirements:
+
+* Record alert timestamp and alert odds.
+* Capture closing odds before game start.
+* Calculate CLV for every alert.
+* Store historical CLV data.
+* Produce CLV statistics by:
+    * Sport
+    * League
+    * Market
+    * Confidence tier
+    * Alert type
+
+Add automated tests.
+
+⸻
+
+Phase 2 — Performance Dashboard
+
+Build analytics using existing historical database data.
+
+Include:
+
+* Total alerts
+* Average EV
+* Average CLV
+* Alert success statistics
+* Confidence tier performance
+* Steam score performance
+* Best/worst sports
+* Best/worst markets
+* Historical trends
+
+Keep the dashboard modular and separate from the core engines.
+
+⸻
+
+Phase 3 — Historical Tracking Foundation
+
+Store important events:
+
+* Alert created
+* Alert type
+* Entry odds/line
+* Closing odds/line
+* CLV
+* EV
+* Confidence score
+* Steam score
+* Result when available
+
+This data should support future:
+
+* Backtesting
+* Model improvements
+* Machine learning improvements
+
+⸻
+
+Reliability Improvements
+
+Add:
+
+* Health monitoring
+* Startup validation
+* Error logging
+* Graceful provider/API failure handling
+* Background job protection so failures do not crash the bot
+* Clean restart behavior
+
+⸻
+
+Completion Requirements
+
+Before finishing:
+
+1. Add comprehensive automated tests.
+2. Run the complete test suite.
+3. Fix all regressions.
+4. Confirm all existing tests still pass.
+5. Update replit.md.
+
+Do not start PrizePicks/Underdog expansion yet. Complete this phase first.

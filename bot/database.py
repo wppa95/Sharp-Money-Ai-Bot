@@ -21,6 +21,17 @@ from sqlalchemy.orm import DeclarativeBase
 logger = logging.getLogger(__name__)
 
 
+def _tier_from_confidence(ai_confidence: int) -> str:
+    """Map an ai_confidence score (0-100) to a tier label for CLV seeding."""
+    if ai_confidence >= 95:
+        return "S"
+    if ai_confidence >= 85:
+        return "A"
+    if ai_confidence >= 75:
+        return "B"
+    return "PASS"
+
+
 # ── ORM base ──────────────────────────────────────────────────────────────────
 
 class Base(DeclarativeBase):
@@ -219,6 +230,73 @@ class UnderdogSnapshotRecord(Base):
     fetched_at  = Column(DateTime,    default=datetime.utcnow, nullable=False)
 
 
+class PropLineHistory(Base):
+    """
+    Provider-agnostic player prop line history.
+
+    Stores normalized PlayerProp snapshots from any pick'em provider
+    (PrizePicks, Underdog, or future sources) for line-movement tracking
+    and comparison-engine input.
+
+    Designed to complement (not replace) the provider-specific tables
+    (prizepicks_records, underdog_snapshots) — this is the shared layer
+    that future providers will write to directly.
+    """
+    __tablename__ = "prop_line_history"
+
+    id          = Column(Integer,  primary_key=True, autoincrement=True)
+    provider    = Column(String(64),  nullable=False, index=True)   # "PrizePicks" | "Underdog" | …
+    sport       = Column(String(32),  nullable=False, index=True)
+    player_name = Column(String(128), nullable=False, index=True)
+    team        = Column(String(64),  nullable=False, default="")
+    stat_type   = Column(String(64),  nullable=False)
+    line_value  = Column(Float,       nullable=False)
+    game_time   = Column(DateTime,    nullable=True)
+    external_id = Column(String(64),  nullable=False, default="")
+    game_id     = Column(String(64),  nullable=False, default="")
+    fetched_at  = Column(DateTime,    default=datetime.utcnow, nullable=False)
+
+
+class AlertCLVSeed(Base):
+    """
+    CLV seed record — captures alert odds at fire time for later CLV computation.
+
+    When an alert is sent, a seed is created with the odds at that moment.
+    After the event closes, a harvester job reads these seeds, fetches
+    closing odds (via OddsAPI or manual entry), computes CLV, and stores
+    the result in clv_records.
+
+    ``clv_computed`` is False until the harvest job processes the seed.
+    Seeds for events whose game_time has not yet passed are skipped.
+    """
+    __tablename__ = "alert_clv_seeds"
+
+    id               = Column(Integer,     primary_key=True, autoincrement=True)
+    # Source linkage
+    source_table     = Column(String(32),  nullable=False)     # "ev_records" | "underdog_snapshots" | "steam_records"
+    source_id        = Column(Integer,     nullable=False, index=True)
+    # Alert metadata
+    alert_type       = Column(String(32),  nullable=False)     # "EV" | "STEAM" | "UNDERDOG" | "PP"
+    sport            = Column(String(32),  nullable=False, index=True)
+    market_type      = Column(String(64),  nullable=False, default="")
+    event            = Column(String(256), nullable=False, default="")
+    selection        = Column(String(256), nullable=False, default="")
+    # Odds at alert time
+    bet_odds         = Column(Integer,     nullable=True)      # American odds (best_odds for EV)
+    counterpart_odds = Column(Integer,     nullable=True)      # opposing side odds
+    tier             = Column(String(16),  nullable=True)      # "S" | "A" | "B" | "PASS" | "High" | …
+    # Timing
+    game_time        = Column(DateTime,    nullable=True)      # UTC game start — when to harvest
+    alerted_at       = Column(DateTime,    default=datetime.utcnow, nullable=False)
+    # CLV result (populated by harvest job)
+    clv_pct          = Column(Float,       nullable=True)      # computed CLV%; None until harvested
+    clv_computed     = Column(Boolean,     default=False, nullable=False, index=True)
+
+    __table_args__ = (
+        UniqueConstraint("source_table", "source_id", name="uq_alert_clv_seed_source"),
+    )
+
+
 class PlayerGameResult(Base):
     """
     Per-game stat result for one player × sport × stat_type combination.
@@ -280,6 +358,7 @@ class Database:
             await conn.run_sync(Base.metadata.create_all)
         await self._migrate_pp_edge_records()
         await self._migrate_underdog_snapshots()
+        await self._migrate_clv_records()
         logger.info("Database initialised at %s", self._url)
 
     def session(self) -> AsyncSession:
@@ -770,6 +849,377 @@ class Database:
         async with self.session() as s:
             result = await s.execute(select(func.count()).select_from(CLVRecord))
             return result.scalar() or 0
+
+    # ── CLV record migration ─────────────────────────────────────────────────
+
+    async def _migrate_clv_records(self) -> None:
+        """Add new columns to clv_records if they don't exist yet (idempotent)."""
+        new_cols = [
+            "ALTER TABLE clv_records ADD COLUMN sport TEXT DEFAULT ''",
+            "ALTER TABLE clv_records ADD COLUMN market_type TEXT DEFAULT ''",
+            "ALTER TABLE clv_records ADD COLUMN alert_type TEXT DEFAULT ''",
+            "ALTER TABLE clv_records ADD COLUMN tier TEXT DEFAULT ''",
+        ]
+        async with self._engine.begin() as conn:
+            for sql in new_cols:
+                try:
+                    await conn.execute(text(sql))
+                except Exception:
+                    pass  # column already exists — safe to ignore
+
+    # ── Provider-agnostic prop line history ──────────────────────────────────
+
+    async def save_prop_line_history(self, record: "PropLineHistory") -> "PropLineHistory":
+        """Store one normalized PlayerProp snapshot from any provider."""
+        async with self.session() as s:
+            s.add(record)
+            await s.commit()
+            await s.refresh(record)
+        return record
+
+    async def save_prop_line_history_bulk(
+        self, records: "list[PropLineHistory]"
+    ) -> None:
+        """Bulk-insert a batch of PropLineHistory records in a single transaction."""
+        if not records:
+            return
+        async with self.session() as s:
+            s.add_all(records)
+            await s.commit()
+
+    async def get_prop_line_history(
+        self,
+        provider:    str,
+        player_name: str,
+        sport:       str,
+        stat_type:   str,
+        limit:       int = 30,
+    ) -> "list[PropLineHistory]":
+        """Return recent snapshots for one player+stat, newest first."""
+        async with self.session() as s:
+            result = await s.execute(
+                select(PropLineHistory)
+                .where(
+                    PropLineHistory.provider    == provider,
+                    PropLineHistory.player_name == player_name,
+                    PropLineHistory.sport       == sport,
+                    PropLineHistory.stat_type   == stat_type,
+                )
+                .order_by(desc(PropLineHistory.fetched_at))
+                .limit(limit)
+            )
+            return list(result.scalars().all())
+
+    async def get_latest_props_for_provider(
+        self, provider: str, since_hours: int = 6
+    ) -> "list[PropLineHistory]":
+        """Return the most-recent snapshot for each (player, stat) from a provider."""
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(hours=since_hours)
+        async with self.session() as s:
+            subq = (
+                select(func.max(PropLineHistory.id))
+                .where(
+                    PropLineHistory.provider   == provider,
+                    PropLineHistory.fetched_at >= cutoff,
+                )
+                .group_by(
+                    PropLineHistory.player_name,
+                    PropLineHistory.sport,
+                    PropLineHistory.stat_type,
+                )
+                .scalar_subquery()
+            )
+            result = await s.execute(
+                select(PropLineHistory).where(PropLineHistory.id.in_(subq))
+            )
+            return list(result.scalars().all())
+
+    async def count_prop_line_history(self, provider: Optional[str] = None) -> int:
+        """Count PropLineHistory rows, optionally filtered by provider."""
+        async with self.session() as s:
+            q = select(func.count()).select_from(PropLineHistory)
+            if provider:
+                q = q.where(PropLineHistory.provider == provider)
+            result = await s.execute(q)
+            return result.scalar() or 0
+
+    async def sync_underdog_snapshots_to_prop_history(
+        self,
+        limit: int = 200,
+        since_hours: int = 48,
+    ) -> int:
+        """
+        Bridge Underdog snapshot records into the shared PropLineHistory table.
+
+        Reads recent, non-removed UnderdogSnapshotRecord rows whose
+        (player_name, sport, stat_type, fetched_at) combination does not yet
+        exist in PropLineHistory, then bulk-inserts them.
+
+        This ensures Underdog data flows into the same normalized model as
+        PrizePicks data, enabling cross-provider comparison and line history.
+
+        Returns the number of new PropLineHistory rows written.
+        """
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(hours=since_hours)
+
+        # Load recent Underdog snapshots (non-removed only)
+        async with self.session() as s:
+            result = await s.execute(
+                select(UnderdogSnapshotRecord)
+                .where(
+                    UnderdogSnapshotRecord.fetched_at >= cutoff,
+                    UnderdogSnapshotRecord.removed    == False,   # noqa: E712
+                )
+                .order_by(desc(UnderdogSnapshotRecord.fetched_at))
+                .limit(limit)
+            )
+            snaps = list(result.scalars().all())
+
+        if not snaps:
+            return 0
+
+        # Find already-bridged combinations so we don't duplicate
+        # Key: (player_name, sport, stat_type, fetched_at rounded to minute)
+        cutoff_dt = datetime.utcnow() - timedelta(hours=since_hours)
+        async with self.session() as s:
+            existing_result = await s.execute(
+                select(
+                    PropLineHistory.player_name,
+                    PropLineHistory.sport,
+                    PropLineHistory.stat_type,
+                    PropLineHistory.external_id,
+                )
+                .where(
+                    PropLineHistory.provider   == "Underdog",
+                    PropLineHistory.fetched_at >= cutoff_dt,
+                )
+            )
+            existing_keys = {
+                (row.player_name, row.sport, row.stat_type, row.external_id)
+                for row in existing_result.all()
+            }
+
+        # Build new records for snapshots not yet bridged
+        new_records: list[PropLineHistory] = []
+        for snap in snaps:
+            key = (
+                snap.player_name or "",
+                snap.sport       or "",
+                snap.stat_type   or "",
+                snap.external_id or "",
+            )
+            if key in existing_keys:
+                continue
+            new_records.append(PropLineHistory(
+                provider    = "Underdog",
+                sport       = snap.sport       or "",
+                player_name = snap.player_name or "",
+                team        = snap.team        or "",
+                stat_type   = snap.stat_type   or "",
+                line_value  = float(snap.line_value) if snap.line_value is not None else 0.0,
+                game_time   = snap.game_time,
+                external_id = snap.external_id or "",
+                game_id     = snap.game_id     or "",
+                fetched_at  = snap.fetched_at  or datetime.utcnow(),
+            ))
+            existing_keys.add(key)   # prevent duplicates within this batch
+
+        if new_records:
+            await self.save_prop_line_history_bulk(new_records)
+
+        return len(new_records)
+
+    # ── Alert CLV seeds ──────────────────────────────────────────────────────
+
+    async def save_alert_clv_seed(self, record: "AlertCLVSeed") -> "AlertCLVSeed":
+        """
+        Insert a CLV seed record, ignoring duplicates (upsert-on-conflict).
+
+        The unique constraint on (source_table, source_id) prevents double-seeding
+        the same alert.  On conflict the existing seed is left unchanged.
+        """
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+        async with self.session() as s:
+            stmt = sqlite_insert(AlertCLVSeed).values(
+                source_table     = record.source_table,
+                source_id        = record.source_id,
+                alert_type       = record.alert_type,
+                sport            = record.sport,
+                market_type      = record.market_type,
+                event            = record.event,
+                selection        = record.selection,
+                bet_odds         = record.bet_odds,
+                counterpart_odds = record.counterpart_odds,
+                tier             = record.tier,
+                game_time        = record.game_time,
+                alerted_at       = record.alerted_at,
+                clv_pct          = record.clv_pct,
+                clv_computed     = record.clv_computed,
+            ).on_conflict_do_nothing(
+                index_elements=["source_table", "source_id"]
+            )
+            await s.execute(stmt)
+            await s.commit()
+        return record
+
+    async def get_pending_clv_seeds(self, limit: int = 100) -> "list[AlertCLVSeed]":
+        """
+        Return seeds where game_time has passed but CLV has not been computed.
+
+        These are ready for the harvest job to fetch closing odds and compute CLV.
+        """
+        now = datetime.utcnow()
+        async with self.session() as s:
+            result = await s.execute(
+                select(AlertCLVSeed)
+                .where(
+                    AlertCLVSeed.clv_computed == False,       # noqa: E712
+                    AlertCLVSeed.game_time.isnot(None),
+                    AlertCLVSeed.game_time <= now,
+                )
+                .order_by(AlertCLVSeed.game_time.asc())
+                .limit(limit)
+            )
+            return list(result.scalars().all())
+
+    async def count_pending_clv_seeds(self) -> int:
+        """Count seeds where game_time has passed but CLV not yet computed."""
+        now = datetime.utcnow()
+        async with self.session() as s:
+            result = await s.execute(
+                select(func.count())
+                .select_from(AlertCLVSeed)
+                .where(
+                    AlertCLVSeed.clv_computed == False,       # noqa: E712
+                    AlertCLVSeed.game_time.isnot(None),
+                    AlertCLVSeed.game_time <= now,
+                )
+            )
+            return result.scalar() or 0
+
+    async def mark_clv_seed_computed(self, seed_id: int, clv_pct: float) -> None:
+        """Mark a seed as computed and store the resulting CLV%."""
+        from sqlalchemy import update as sa_update
+        async with self.session() as s:
+            await s.execute(
+                sa_update(AlertCLVSeed)
+                .where(AlertCLVSeed.id == seed_id)
+                .values(clv_pct=clv_pct, clv_computed=True)
+            )
+            await s.commit()
+
+    async def get_clv_seed_for_source(
+        self, source_table: str, source_id: int
+    ) -> "Optional[AlertCLVSeed]":
+        """Return the seed for a given source record, or None if not seeded yet."""
+        async with self.session() as s:
+            result = await s.execute(
+                select(AlertCLVSeed).where(
+                    AlertCLVSeed.source_table == source_table,
+                    AlertCLVSeed.source_id    == source_id,
+                )
+            )
+            return result.scalar_one_or_none()
+
+    async def seed_clv_from_ev_records(self, limit: int = 200) -> int:
+        """
+        Create AlertCLVSeed entries for EV alerts that haven't been seeded yet.
+
+        Queries ev_records where alert_sent=True and no matching seed exists,
+        then creates seeds.  Returns the number of new seeds created.
+
+        Safe to call repeatedly — the UNIQUE constraint prevents duplicates.
+        """
+        from sqlalchemy import not_
+
+        async with self.session() as s:
+            # Find ev_records that are alerted but not yet seeded
+            seeded_ids_subq = (
+                select(AlertCLVSeed.source_id)
+                .where(AlertCLVSeed.source_table == "ev_records")
+                .scalar_subquery()
+            )
+            result = await s.execute(
+                select(EVRecord)
+                .where(
+                    EVRecord.alert_sent == True,              # noqa: E712
+                    not_(EVRecord.id.in_(seeded_ids_subq)),
+                )
+                .order_by(desc(EVRecord.detected_at))
+                .limit(limit)
+            )
+            ev_rows = list(result.scalars().all())
+
+        created = 0
+        for ev in ev_rows:
+            seed = AlertCLVSeed(
+                source_table     = "ev_records",
+                source_id        = ev.id,
+                alert_type       = "EV",
+                sport            = ev.sport or "",
+                market_type      = ev.market_type or "",
+                event            = ev.event or "",
+                selection        = ev.selection or "",
+                bet_odds         = ev.best_odds,
+                counterpart_odds = None,
+                tier             = _tier_from_confidence(ev.ai_confidence),
+                game_time        = None,    # ev_records don't store game_time currently
+                alerted_at       = ev.detected_at,
+                clv_computed     = False,
+            )
+            await self.save_alert_clv_seed(seed)
+            created += 1
+
+        return created
+
+    async def seed_clv_from_ud_snapshots(self, limit: int = 200) -> int:
+        """
+        Create AlertCLVSeed entries for Underdog alerts that haven't been seeded.
+
+        Returns the number of new seeds created.
+        """
+        from sqlalchemy import not_
+
+        async with self.session() as s:
+            seeded_ids_subq = (
+                select(AlertCLVSeed.source_id)
+                .where(AlertCLVSeed.source_table == "underdog_snapshots")
+                .scalar_subquery()
+            )
+            result = await s.execute(
+                select(UnderdogSnapshotRecord)
+                .where(
+                    UnderdogSnapshotRecord.alert_sent == True,    # noqa: E712
+                    not_(UnderdogSnapshotRecord.id.in_(seeded_ids_subq)),
+                )
+                .order_by(desc(UnderdogSnapshotRecord.fetched_at))
+                .limit(limit)
+            )
+            ud_rows = list(result.scalars().all())
+
+        created = 0
+        for ud in ud_rows:
+            seed = AlertCLVSeed(
+                source_table     = "underdog_snapshots",
+                source_id        = ud.id,
+                alert_type       = "UNDERDOG",
+                sport            = ud.sport or "",
+                market_type      = ud.stat_type or "",
+                event            = ud.game_id or "",
+                selection        = f"{ud.player_name} {ud.stat_type} {ud.line_value:g}",
+                bet_odds         = None,   # Underdog is pick'em — no American odds
+                counterpart_odds = None,
+                tier             = ud.score_tier or "",
+                game_time        = ud.game_time,
+                alerted_at       = ud.fetched_at,
+                clv_computed     = False,
+            )
+            await self.save_alert_clv_seed(seed)
+            created += 1
+
+        return created
 
     # ── Underdog snapshots ───────────────────────────────────────────────────
 

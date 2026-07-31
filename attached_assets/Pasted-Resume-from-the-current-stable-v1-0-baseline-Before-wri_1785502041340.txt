@@ -1,0 +1,410 @@
+Resume from the current stable v1.0 baseline.
+
+Before writing any code:
+
+1. Read replit.md.
+2. Inspect the existing codebase to regain full context.
+3. Do not rebuild or replace completed modules.
+4. Preserve the current architecture unless a change is absolutely required.
+
+The following modules are considered stable:
+
+* Odds Pipeline
+* Fair Probability Engine
+* EV Engine
+* Steam Engine
+* AI Confidence Engine
+* Analysis Engine
+* Risk System
+* AlertDelivery
+* Telegram Integration
+
+All existing tests must continue to pass.
+
+⸻
+
+Remaining Roadmap
+
+Complete the following in order.
+
+⸻
+
+Phase 1 — Closing Line Value (CLV)
+
+Build the complete CLV tracking system.
+
+Requirements:
+
+* Record alert timestamp and alert odds.
+* Capture closing odds before game start.
+* Calculate CLV for every alert.
+* Store historical CLV data.
+* Produce CLV statistics by:
+    * Sport
+    * League
+    * Market
+    * Confidence tier
+    * Alert type
+
+Add automated tests before completion.
+
+⸻
+
+Phase 2 — Performance Dashboard
+
+Build analytics using existing historical database data.
+
+Include:
+
+* Total alerts
+* Average EV
+* Average CLV
+* Alert success statistics
+* Confidence tier performance
+* Steam score performance
+* Best/worst sports
+* Best/worst markets
+* Historical trends
+
+Keep the dashboard modular and separate from the core engines.
+
+⸻
+
+Phase 3 — PrizePicks Monitoring Infrastructure
+
+PrizePicks Data Access Strategy
+
+The PrizePicks API is currently protected by DataDome.
+
+Do not make the system dependent on the official API.
+
+Create a flexible PrizePicks data ingestion layer that supports alternative data sources.
+
+Create:
+
+providers/prizepicks.py
+
+Requirements:
+
+* PrizePicks data ingestion layer
+* Normalized player prop formatting
+* Prop ID tracking
+* Player tracking
+* Market tracking
+* Line tracking
+* Timestamp tracking
+
+The rest of the system should not know where data originates.
+
+Architecture:
+
+Data Source
+
+↓
+
+PrizePicks Provider Layer
+
+↓
+
+Normalized Prop Model
+
+↓
+
+Line History Database
+
+↓
+
+EV / Fair Probability Comparison
+
+↓
+
+Alert System
+
+Support future input methods:
+
+* Public endpoints if available
+* Cached feeds
+* Manual import/testing feeds
+* Alternative providers
+
+The provider layer must be replaceable.
+
+Do not modify:
+
+* EV engine
+* Steam engine
+* Confidence engine
+* AlertDelivery
+
+unless absolutely required.
+
+⸻
+
+Phase 4 — Underdog Reference Data Integration
+
+Use the existing Underdog provider/data pipeline as a reference source when building and validating the PrizePicks database.
+
+Do not create duplicate prop systems.
+
+Map Underdog data into the same normalized prop model used by PrizePicks.
+
+Use Underdog data to assist with:
+
+* Player identification
+* Prop market matching
+* Line comparison
+* Timestamp validation
+* Historical line tracking
+* Missing data validation
+
+Architecture:
+
+PrizePicks Data Source
+
+↓
+
+Underdog Reference Data (optional)
+
+↓
+
+Normalized Prop Model
+
+↓
+
+Line History Database
+
+↓
+
+EV / Fair Probability Comparison
+
+↓
+
+Alert System
+
+Rules:
+
+* PrizePicks remains the primary source when available.
+* Underdog is only a reference/fallback source.
+* Do not assume PrizePicks and Underdog lines are identical.
+* Store the source of every prop record.
+* Keep provider-specific fields separate.
+
+Store metadata:
+
+Source:
+
+* PrizePicks
+* Underdog
+* Manual/Test Feed
+
+Provider Prop ID:
+
+* Unique identifier
+
+Timestamp:
+
+* First seen
+* Last updated
+
+Line:
+
+* Current line
+* Historical changes
+
+Use this reference data to improve prop matching, lifecycle tracking, and database completeness.
+
+⸻
+
+Phase 5 — PrizePicks Prop Lifecycle Tracking
+
+Track the complete lifecycle of every prop.
+
+Do not only detect removals.
+
+🟢 Prop Added
+
+Track:
+
+* Player
+* Market
+* Line
+* Sport
+* League
+* Time first seen
+
+Optional notification:
+
+🟢 PrizePicks Prop Added
+
+Player:
+Prop:
+Line:
+
+First Seen:
+Timestamp
+
+⸻
+
+🔄 Line Changed
+
+Detect:
+
+* Previous line
+* New line
+* Movement direction
+* Timestamp
+
+Alert:
+
+🔄 PrizePicks Line Changed
+
+Player:
+Prop:
+
+Previous:
+New:
+
+Changed:
+Timestamp
+
+⸻
+
+❌ Prop Removed
+
+Only alert when the prop was previously tracked.
+
+Do not send removal notifications for props the bot never saw.
+
+Include:
+
+* Player
+* Prop
+* Last known line
+* First seen time
+* Last seen time
+* Duration available
+* Removal reason if determinable
+
+Possible reasons:
+
+* Game started
+* Line adjustment
+* Temporary removal
+* Permanent removal
+* Unknown
+
+Notification format:
+
+🚨 PrizePicks Prop Removed
+
+Player:
+Prop:
+Last Available Line:
+First Seen:
+Last Seen:
+Time Available:
+Status:
+Removed from PrizePicks
+
+Reason:
+<Game Started / Line Adjustment / Temporary Removal / Unknown>
+
+Do not guess reasons if they cannot be determined.
+
+⸻
+
+Phase 6 — Prop Return Detection
+
+If a removed prop returns within a configurable time window:
+
+* Treat it as the same prop.
+* Do not create duplicates.
+* Classify it as:
+    * Line Changed
+    * Prop Reinstated
+
+Show:
+
+* Previous line
+* New line
+* Time between removal and return
+
+⸻
+
+Phase 7 — Historical Tracking / Backtesting Foundation
+
+Store important events:
+
+* Alert created
+* Alert type
+* Entry odds/line
+* Closing odds/line
+* CLV
+* EV
+* Confidence score
+* Steam score
+* Result when available
+
+This data should support future:
+
+* Backtesting
+* Model improvements
+* Machine learning improvements
+
+⸻
+
+Reliability Improvements
+
+Add:
+
+* Health monitoring
+* Startup validation
+* Error logging
+* Graceful API/provider failure handling
+* Background job protection so failures do not crash the bot
+* Clean restart behavior
+
+⸻
+
+Scope Rules
+
+Maintain the current project focus.
+
+Priority:
+
+1. Sharp money detection
+2. +EV detection
+3. PrizePicks/Underdog prop intelligence
+4. CLV measurement
+5. Historical performance tracking
+
+Do not expand into unnecessary markets or features before the core system is proven.
+
+Maintain provider compatibility:
+
+* PrizePicks provider
+* Underdog provider
+* Sportsbook odds providers
+
+All providers should feed the same normalized models.
+
+⸻
+
+Final Completion Requirements
+
+Before considering this complete:
+
+1. Add comprehensive automated tests for every new module.
+2. Run the complete test suite.
+3. Fix all regressions.
+4. Confirm all existing tests still pass.
+5. Update replit.md with the completed architecture.
+6. Create a stable version checkpoint.
+7. Freeze the codebase again.
+
+After the freeze:
+
+* No additional architecture changes.
+* Only fix confirmed bugs or critical issues.
+
+Do not begin new experimental features until this version is stable.

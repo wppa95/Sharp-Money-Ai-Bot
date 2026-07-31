@@ -1140,7 +1140,7 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/dashboard — Overview: picks health, tier breakdown, top pick, bot uptime."""
+    """/dashboard — Full performance dashboard: alerts, EV, CLV, sport/market breakdown."""
     if not _check_allowed(update):
         await update.message.reply_text("⛔ Unauthorized.")
         return
@@ -1148,167 +1148,80 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
         return
 
-    today = datetime.now(timezone.utc).strftime("%b %d, %Y  %H:%M UTC")
+    await update.message.reply_text("⏳ Gathering stats…")
 
-    # ── Data gathering (all queries independent) ─────────────────────────────
-    edges_6h     = await _db.get_top_pp_edges(limit=50, hours=6)
-    edges_24h    = await _db.get_top_pp_edges(limit=50, hours=24)
-    total_all    = await _db.count_pp_edge_records()
-    resolved_all = await _db.get_all_resolved_pp_edges(limit=200)
-
-    # Tier breakdown from 6h window
-    tier_counts: dict[str, int] = {}
-    for r in edges_6h:
-        t = r.tier or "—"
-        tier_counts[t] = tier_counts.get(t, 0) + 1
-
-    # Top pick (highest conf in 6h, fall back to highest edge)
-    top = None
-    if edges_6h:
-        edges_6h.sort(key=lambda r: (
-            _TIER_ORDER.get(r.tier or "Low", 3),
-            -(r.confidence or 0),
-        ))
-        top = edges_6h[0]
-
-    # Freshness: latest detected_at across 24h window
-    freshness_str = "No picks yet"
-    if edges_24h:
-        latest = max(edges_24h, key=lambda r: r.detected_at)
-        age_s  = int((datetime.utcnow() - latest.detected_at).total_seconds())
-        if age_s < 60:
-            freshness_str = f"{age_s}s ago"
-        elif age_s < 3600:
-            freshness_str = f"{age_s // 60}m ago"
-        else:
-            freshness_str = f"{age_s // 3600}h {(age_s % 3600) // 60}m ago"
-
-    # ── Build tier breakdown string ───────────────────────────────────────────
-    tier_parts = []
-    for tier in ("S", "A", "B", "PASS"):
-        n = tier_counts.get(tier, 0)
-        if n:
-            tier_parts.append(f"{_TIER_EMOJI[tier]}{tier}:{n}")
-    tier_str = "  " + "  ".join(tier_parts) if tier_parts else "  none"
-
-    # ── Message assembly ──────────────────────────────────────────────────────
-    lines: list[str] = [
-        f"📊 <b>SharpMoneyBot Dashboard</b>",
-        f"<i>{today}</i>",
-        "",
-        "🃏 <b>PrizePicks Picks</b>",
-        f"  Last  6 h:  <b>{len(edges_6h)}</b> detected{tier_str}",
-        f"  Last 24 h:  <b>{len(edges_24h)}</b> detected",
-        f"  All-time:   <b>{total_all}</b> stored",
-        f"  Freshness:  {freshness_str}",
-        "",
-        "🤖 <b>Bot Health</b>",
-        f"  Uptime:    {_uptime_str()}",
-        _fmt_provider_status_line("PrizePicks", "PP API"),
-        _fmt_provider_status_line("OddsAPI",    "Odds API"),
-    ]
-
-    # Today's alert counts
     try:
-        _pp_today = await _db.count_today_pp_alerts()
-        _cap_str  = (
-            f"/{config.DAILY_ALERT_LIMIT}"
-            if config.DAILY_ALERT_LIMIT > 0 else ""
+        from engine.dashboard import DashboardEngine
+        report = await DashboardEngine.gather(_db)
+        msg    = report.to_telegram()
+        await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+    except Exception as exc:
+        logger.exception("cmd_dashboard: DashboardEngine failed: %s", exc)
+        await update.message.reply_text(
+            f"{EMOJI['warn']} Dashboard unavailable: {exc}", parse_mode=ParseMode.HTML
         )
-        _ud_today = await _db.count_today_underdog_alerts()
-        _ud_cap   = (
-            f"/{config.DAILY_UNDERDOG_LIMIT}"
-            if config.DAILY_UNDERDOG_LIMIT > 0 else ""
-        )
-        lines.append(
-            f"  PP alerts today:  <b>{_pp_today}</b>{_cap_str}  "
-            f"·  Underdog: <b>{_ud_today}</b>{_ud_cap}"
-        )
-    except Exception:
-        pass
+        return
 
-    lines.append("")
+    # ── Append PP-specific live section ──────────────────────────────────────
+    try:
+        edges_6h     = await _db.get_top_pp_edges(limit=50, hours=6)
+        resolved_all = await _db.get_all_resolved_pp_edges(limit=200)
 
-    if top:
-        tier_icon  = _TIER_EMOJI.get(top.tier or "Low", "⚪")
-        stars_str  = _stars_from_conf(top.confidence)
-        conf_label = f"{top.confidence:.0f}/100" if top.confidence is not None else "—"
-        lines += [
-            "🔝 <b>Top Pick (last 6 h)</b>",
-            f"  {tier_icon} {top.tier or '—'}  <b>{top.player_name}</b> · {top.stat_type}",
-            f"  {top.best_side} {top.pp_line_value:g}  ·  "
-            f"<code>+{top.best_edge:.1f}%</code>  ·  {conf_label}  {stars_str}",
-            f"  <i>{top.sport} · {top.sportsbook}</i>",
+        # Top pick
+        top = None
+        if edges_6h:
+            edges_6h.sort(key=lambda r: (
+                _TIER_ORDER.get(r.tier or "Low", 3),
+                -(r.confidence or 0),
+            ))
+            top = edges_6h[0]
+
+        pp_lines: list[str] = ["🃏 <b>PrizePicks — Live Picks</b>"]
+        if top:
+            tier_icon  = _TIER_EMOJI.get(top.tier or "Low", "⚪")
+            stars_str  = _stars_from_conf(top.confidence)
+            conf_label = f"{top.confidence:.0f}/100" if top.confidence is not None else "—"
+            pp_lines += [
+                f"  🔝 {tier_icon} {top.tier or '—'}  <b>{top.player_name}</b> · {top.stat_type}",
+                f"  {top.best_side} {top.pp_line_value:g}  ·  "
+                f"<code>+{top.best_edge:.1f}%</code>  ·  {conf_label}  {stars_str}",
+                f"  <i>{top.sport} · {top.sportsbook}</i>",
+            ]
+        else:
+            pp_lines.append("  No PP picks in the last 6 h — use /picks to see older ones")
+
+        # Resolved performance
+        pp_lines.append("")
+        if resolved_all:
+            from engine.decision_engine import compute_tier_performance
+            _perf = compute_tier_performance(resolved_all)
+            pp_lines.append("  <b>Resolved results by tier</b>")
+            for _tier in ("S", "A", "B", "PASS"):
+                if _tier not in _perf:
+                    continue
+                _ts   = _perf[_tier]
+                _note = f"  <i>{_ts.sample_size_note}</i>" if _ts.sample_size_note else ""
+                pp_lines.append(
+                    f"  {_TIER_EMOJI[_tier]} {_tier}  "
+                    f"{_ts.picks} resolved  "
+                    f"<code>{_ts.hit_rate_pct:.0f}%</code> hit  "
+                    f"avg edge <code>+{_ts.avg_edge:.1f}%</code>{_note}"
+                )
+        else:
+            pp_lines.append("  <i>No resolved picks yet</i>")
+
+        # Bot health & uptime
+        pp_lines += [
+            "",
+            "🤖 <b>Bot</b>",
+            f"  Uptime: {_uptime_str()}",
+            _fmt_provider_status_line("Underdog", "Underdog"),
         ]
-    else:
-        lines.append("🔝 <b>Top Pick</b>  —  no picks in last 6 h")
 
-    # ── Performance tracking ───────────────────────────────────────────────────
-    lines.append("")
-    if resolved_all:
-        from engine.decision_engine import compute_tier_performance
-        _perf = compute_tier_performance(resolved_all)
-        lines.append("📈 <b>Performance (resolved picks)</b>")
-        for _tier in ("S", "A", "B", "PASS"):
-            if _tier not in _perf:
-                continue
-            _ts   = _perf[_tier]
-            _note = f"  <i>{_ts.sample_size_note}</i>" if _ts.sample_size_note else ""
-            lines.append(
-                f"  {_TIER_EMOJI[_tier]} {_tier}  "
-                f"{_ts.picks} resolved  "
-                f"<code>{_ts.hit_rate_pct:.0f}%</code> hit  "
-                f"avg edge <code>+{_ts.avg_edge:.1f}%</code>{_note}"
-            )
-    else:
-        lines.append("📈 <b>Performance</b>  <i>No resolved picks yet</i>")
-
-    # ── API Health ─────────────────────────────────────────────────────────────
-    lines.append("")
-    try:
-        from providers.usage_tracker import get_usage_tracker
-        _tracker = get_usage_tracker()
-        if _tracker is not None:
-            _ust = _tracker.get_stats("OddsAPI")
-            lines.append("🔌 <b>API Health</b>")
-
-            # Used / budget display — prefer real quota headers from API
-            _used_n  = _ust.quota_used   if _ust.quota_used   is not None else _ust.month_count
-            _used_lbl = f"{_used_n:,}" + ("" if _ust.quota_used is not None else " (tracked)")
-            _budget_lbl = f"{_ust.month_budget:,}" if _ust.month_budget > 0 else "unlimited"
-            _pct_lbl    = f"  ({_ust.budget_pct:.1f}%)" if _ust.month_budget > 0 else ""
-            _bar_lbl    = f"  <code>{_ust.budget_bar}</code>" if _ust.month_budget > 0 else ""
-            lines.append(f"  Requests used:  {_used_lbl} / {_budget_lbl}{_pct_lbl}{_bar_lbl}")
-
-            # Remaining estimate
-            _rem = _ust.remaining_estimate
-            lines.append(f"  Remaining est.: {_rem:,}" if _rem is not None else "  Remaining est.: —")
-
-            # Today's own call count
-            if _ust.today_count > 0:
-                lines.append(f"  Today's calls:  {_ust.today_count}")
-
-            # Last successful API fetch + live status from health monitor
-            try:
-                from providers import get_health_monitor as _ghm
-                _mon = _ghm()
-                if _mon:
-                    _h = _mon.get_health("OddsAPI")
-                    lines.append(f"  Last fetch:     {_h.format_last_success()}")
-                    lines.append(f"  Provider:       {_h.status_emoji} {_h.status.value}")
-            except Exception:
-                pass
-
-            # Budget warning if any threshold already crossed this month
-            if _ust.warning_level is not None:
-                _wlbl = "⚠️" if _ust.warning_level < 100 else "🚨"
-                lines.append(f"  {_wlbl} Budget warning: {_ust.warning_level}% threshold reached this month")
-        else:
-            lines.append("🔌 <b>API Health</b>  <i>(usage tracker not initialised)</i>")
-    except Exception:
-        pass
-
-    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+        await update.message.reply_text("\n".join(pp_lines), parse_mode=ParseMode.HTML)
+    except Exception as exc:
+        logger.exception("cmd_dashboard: PP section failed: %s", exc)
+        # Non-fatal — main dashboard already sent
 
 
 async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -446,7 +446,7 @@ def format_help_message() -> str:
         f"                    <i>/picks 5 · /picks NBA · /picks NFL 5</i>",
         f"  /slip [N]       — Build a prop slip from top N picks (2–6)",
         f"                    <i>/slip 3 · /slip 5</i>",
-        f"  /dashboard      — Overview: pick counts, tier breakdown, top pick",
+        f"  /dashboard      — Full performance dashboard: alerts, EV, CLV, sport/market",
         f"  /alerts         — Recent alert history (PP · EV · Steam)",
         f"  /grade          — Win/loss breakdown by tier for resolved picks",
         "",

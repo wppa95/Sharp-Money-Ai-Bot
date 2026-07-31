@@ -172,25 +172,66 @@ Modular connector framework + cross-book analysis engines:
 **New commands**: `/market` (cross-book consensus), `/clv` (CLV performance history)  
 **Pick'em isolation**: Underdog/PrizePicks output stays in pick'em domain — never mixed into sportsbook moneyline analysis
 
-### 11. Test suite (`bot/tests/`)
-**Full pipeline coverage across all modules.**
+### 11. Provider Abstraction Layer (`bot/providers/prop_provider.py`)
 
-| Class | Tests | Covers |
+Normalised, provider-agnostic player-prop model so PrizePicks (DataDome-protected) can be plugged in later without touching any alert or DB code:
+
+- **`PlayerProp`** — normalised dataclass (`provider`, `sport`, `player_name`, `team`, `stat_type`, `line_value`, `game_time`, `external_id`, `game_id`, `fetched_at`). `prop_key` tuple uniquely identifies a (provider, player, sport, stat) combination.
+- **`PropProviderBase`** — abstract base class. Subclasses must implement `provider_name`, `sport_keys`, `fetch_props()`. Default `normalize_stat()` lower-strips; `is_available()` returns `True`.
+- **`PropComparison`** — result of comparing a pick'em prop to a sportsbook line. Fields: `sb_line`, `sb_over_odds`, `sb_under_odds`, `fair_prob_over/under` (multiplicative vig removal), `edge_over/under` (vs. 50% break-even), `best_side`, `best_edge`, `sportsbook`, `detected_at`. Properties: `has_edge`, `line_diff`, passthrough player info.
+- **`PropComparisonEngine`** — `compare()` / `compare_many()` / `filter_edges()`. Direction rule: provider_line > sb_line → UNDER edge; provider_line < sb_line → OVER edge. `filter_edges()` returns sorted-best-first list above `min_edge_pct` threshold.
+
+### 12. Performance Dashboard Engine (`bot/engine/dashboard.py`)
+
+Full cross-alert-type aggregation engine powering the `/dashboard` command:
+
+- **`DashboardReport`** — dataclass with `total_all_alerts`, `avg_ev_pct`, `avg_clv_pct`, `clv_beat_close_rate`, `ud_tier_breakdown`, `by_sport` (`list[SportPerf]`), `by_market` (`list[MarketPerf]`), `daily_trend` (`list[DailyTrend]`, always 7 days), `best_sport`, `worst_sport`, `best_market`. `to_telegram()` renders full HTML.
+- **`DashboardEngine.gather(db)`** — async class method. Independently queries ev_records, steam_records, underdog_snapshots, pp_edge_records, clv_records. Each sub-query is try/except-wrapped so partial DB failures never break the dashboard.
+- **`TierPerf`** — tier breakdown with `tier_emoji` property (🔥/🟢/🟡/⚪).
+- Win-rate only shown when `n ≥ 5` resolved records to avoid misleading small-sample stats.
+
+### 13. CLV Seed Pipeline (`bot/database.py`)
+
+Infrastructure for closing-line value tracking across all alert types (EV, Underdog, PP):
+
+- **`PropLineHistory`** ORM model — provider-agnostic prop snapshot table (`provider`, `sport`, `player_name`, `team`, `stat_type`, `line_value`, `game_time`, `external_id`, `game_id`, `fetched_at`). DB methods: `save_prop_line_history()`, `save_prop_line_history_bulk()`, `get_prop_line_history()`, `get_latest_props_for_provider()`, `count_prop_line_history()`.
+- **`AlertCLVSeed`** ORM model — CLV seed table (`source_table`, `source_id`, `alert_type`, `sport`, `market_type`, `event`, `selection`, `bet_odds`, `counterpart_odds`, `tier`, `game_time`, `alerted_at`, `clv_pct`, `clv_computed`). UNIQUE on `(source_table, source_id)` — duplicate-safe. DB methods: `save_alert_clv_seed()`, `get_pending_clv_seeds()`, `count_pending_clv_seeds()`, `mark_clv_seed_computed()`, `get_clv_seed_for_source()`.
+- **`seed_clv_from_ev_records()`** — scans alerted EVRecords not yet seeded, creates AlertCLVSeed entries. Idempotent.
+- **`seed_clv_from_ud_snapshots()`** — same for Underdog snapshots. Idempotent.
+- **`_tier_from_confidence(score)`** — maps 0–100 ai_confidence to S/A/B/PASS tier label.
+- **`_clv_seed_job`** background task — runs every 15 min; calls both seed methods; logs count of new seeds only.
+
+### 15. PrizePicks concrete provider (`bot/providers/prizepicks.py`)
+
+Implements the roadmap-specified `providers/prizepicks.py` file — a concrete `PropProviderBase` that normalises PrizePicks data into the shared `PlayerProp` model:
+
+- **`PrizePicksProvider`** — live provider (wraps `PrizePicksClient` from `bot/prizepicks.py`). `is_available()` returns `False` until DataDome is resolved. `fetch_props()` raises `NotImplementedError` to make the limitation explicit rather than silently failing.
+- **`PrizePicksManualProvider`** — manual/test-feed provider. Accepts raw `dict` records or `PrizePicksLine` objects. Supports `from_dicts(data)` class-method for JSON-friendly ingestion. Handles datetime parsing, stat normalisation, and invalid-value defaults. `is_available()` = True when data is loaded.
+- **`pp_line_to_player_prop(ln)`** — boundary adapter: PrizePicksLine fields → canonical PlayerProp. Only place in the codebase where PrizePicks-specific field names appear.
+- **`_normalize_stat(raw)`** — shared stat normalisation map (pts→points, reb→rebounds, hr→home runs, etc.).
+
+### 16. Underdog concrete provider + bridge (`bot/providers/underdog_provider.py`)
+
+Maps Underdog data into the same normalized model as PrizePicks so both feed a shared `PropLineHistory`:
+
+- **`UnderdogProvider`** — concrete `PropProviderBase` wrapping `UnderdogSnapshotRecord` rows. Skips `removed=True` props. Applies optional sport filter. Used by the bot's Underdog job to feed PropLineHistory.
+- **`ud_snapshot_to_player_prop(snap)`** — adapter: UnderdogSnapshotRecord → PlayerProp. Handles None fields, stat normalisation.
+- **`Database.sync_underdog_snapshots_to_prop_history()`** — bridge method. Reads recent non-removed Underdog snapshot records and bulk-inserts them into `PropLineHistory` (provider="Underdog"), deduped by (player_name, sport, stat_type, external_id). Idempotent — safe to call repeatedly.
+
+### 17. Test suite (`bot/tests/`)
+**Full pipeline coverage across all modules — 1427 tests, all passing.**
+
+| File | Tests | Covers |
 |---|---|---|
-| `TestVigRemover` | 6 | Implied prob math, vig %, fair prob, roundtrip |
-| `TestEVCalculator` | 5 | +EV scenario, Kelly, sign consistency |
-| `TestSteamDetector` | 5 | Score tiers, line change, cap, direction |
-| `TestAIConfidenceScorer` | 8 | All 5 signal tiers, sharp pts, vig tiers, cap |
-| `TestAnalysisEngine` | 6 | Full pipeline, steam attachment, FADE on negative EV |
-| `TestRiskFactors` | 6 | HIGH/MEDIUM/LOW assignment, icons |
-| `TestAlertFormatting` | 19 | All HTML fields, balanced tags, score bar |
-| `TestSharpBooks` | 3 | Known sharp, all-soft, empty input |
-| `TestAlertDeliveryFiltering` | 3 | EV / confidence / steam threshold blocks |
-| `TestAlertDeliveryEndToEnd` | 6 | Real SQLite, mock Telegram, DB fields |
-| `TestAlertDeliveryDeduplication` | 3 | Same event suppressed, different events both send |
-| `TestConfidenceRecalibration` | 7 | 100 reachable, 5★ end-to-end, sharp vs soft, delivery |
+| `test_pipeline.py` | 68 | Full EV/steam/confidence/alert/delivery pipeline |
+| `test_prop_provider.py` | 56 | `PlayerProp`, `PropProviderBase` ABC, `PropComparisonEngine`, vig removal |
+| `test_dashboard.py` | 115 | `DashboardReport.to_telegram()`, `DashboardEngine.gather()` (empty + seeded DB) |
+| `test_alert_clv_seed.py` | 84 | `PropLineHistory` CRUD, `AlertCLVSeed` upsert + dedup, seed methods |
+| `test_prizepicks_provider.py` | 61 | `_normalize_stat`, `_parse_dt`, `pp_line_to_player_prop`, `PrizePicksProvider`, `PrizePicksManualProvider` |
+| `test_underdog_provider.py` | 43 | `_normalize_stat`, `ud_snapshot_to_player_prop`, `UnderdogProvider`, `sync_underdog_snapshots_to_prop_history` |
+| (+ other test files) | ~1000 | Connectors, consensus, CLV engine, AI ranking, backtesting, PP/UD providers |
 
-Run: `python -m pytest bot/tests/test_pipeline.py -v`
+Run: `python -m pytest bot/tests/ -q`
 
 ---
 
