@@ -660,6 +660,22 @@ async def underdog_job(context) -> None:
                         prev_line    = None,
                         hit_rates    = hit_rates,
                     )
+                    # Log every evaluated opportunity (PLAY or PASS) for tracking
+                    try:
+                        await db.log_prop_opportunity(
+                            external_id    = snap.external_id,
+                            player_name    = player,
+                            team           = snap.team or "",
+                            sport          = snap.sport or "UNKNOWN",
+                            stat_type      = stat_type,
+                            line_value     = line_val,
+                            recommendation = decision.recommendation,
+                            decision_tier  = decision.decision_tier,
+                            confidence     = decision.confidence,
+                            game_time      = snap.game_time,
+                        )
+                    except Exception:
+                        pass  # never block alert flow
                 # Always add to the cycle batch — even blocked props appear in digest
                 _new_props_batch.append({
                     "player":     player,
@@ -799,6 +815,22 @@ async def underdog_job(context) -> None:
                             prev_line    = prev_line,
                             hit_rates    = hit_rates,
                         )
+                        # Log every evaluated opportunity (PLAY or PASS) for tracking
+                        try:
+                            await db.log_prop_opportunity(
+                                external_id    = snap.external_id,
+                                player_name    = player,
+                                team           = snap.team or "",
+                                sport          = snap.sport or "UNKNOWN",
+                                stat_type      = stat_type,
+                                line_value     = snap.line or 0.0,
+                                recommendation = decision.recommendation,
+                                decision_tier  = decision.decision_tier,
+                                confidence     = decision.confidence,
+                                game_time      = snap.game_time,
+                            )
+                        except Exception:
+                            pass  # never block alert flow
                     _n_scored += 1
                     _tier_counts[score.tier] = _tier_counts.get(score.tier, 0) + 1
                     logger.debug(
@@ -1157,6 +1189,22 @@ async def underdog_job(context) -> None:
                     prev_line    = None,
                     hit_rates    = _shits,
                 )
+                # Log every evaluated opportunity (PLAY or PASS) for tracking
+                try:
+                    await db.log_prop_opportunity(
+                        external_id    = _ssnap.external_id,
+                        player_name    = _sp,
+                        team           = _ssnap.team or "",
+                        sport          = _ssport,
+                        stat_type      = _st,
+                        line_value     = _line_val,
+                        recommendation = _sdec.recommendation,
+                        decision_tier  = _sdec.decision_tier,
+                        confidence     = _sdec.confidence,
+                        game_time      = _ssnap.game_time,
+                    )
+                except Exception:
+                    pass  # never block alert flow
                 if _sdec is None or _sdec.recommendation == "PASS":
                     continue
     

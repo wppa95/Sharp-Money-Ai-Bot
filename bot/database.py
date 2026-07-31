@@ -338,6 +338,54 @@ class PlayerGameResult(Base):
     )
 
 
+class PropOpportunityLog(Base):
+    """
+    Every evaluated player prop opportunity — both PLAY and PASS decisions.
+
+    One row per (external_id, stat_type) pair, recorded immediately after
+    ``make_ud_bet_decision()`` runs, regardless of recommendation.
+
+    ``result`` is stored from the OVER perspective for consistent analysis:
+      "HIT"     → actual_value > line_value  (over cleared)
+      "MISS"    → actual_value < line_value  (over failed)
+      "PUSH"    → actual_value == line_value
+      "PENDING" → game not yet complete / result not yet available
+
+    Interpretation per recommendation:
+      PLAY OVER  + HIT  → ✅ correct pick
+      PLAY OVER  + MISS → ❌ incorrect pick
+      PLAY UNDER + MISS → ✅ correct pick  (under cleared = over failed)
+      PLAY UNDER + HIT  → ❌ incorrect pick
+      PASS       + HIT  → 📈 missed OVER opportunity
+      PASS       + MISS → ✅ correct pass   (over would have failed)
+    """
+    __tablename__ = "prop_opportunity_log"
+
+    id             = Column(Integer,     primary_key=True, autoincrement=True)
+    external_id    = Column(String(64),  nullable=False, index=True)
+    player_name    = Column(String(128), nullable=False, index=True)
+    team           = Column(String(64),  nullable=False, default="")
+    sport          = Column(String(32),  nullable=False, index=True)
+    stat_type      = Column(String(64),  nullable=False)
+    line_value     = Column(Float,       nullable=False)
+    recommendation = Column(String(8),   nullable=False)   # OVER | UNDER | PASS
+    decision_tier  = Column(String(8),   nullable=False)   # S | A | B | PASS
+    confidence     = Column(Integer,     nullable=False, default=0)
+    game_time      = Column(DateTime,    nullable=True)
+    detected_at    = Column(DateTime,    default=datetime.utcnow, nullable=False)
+    # Grading — filled by the opportunity_grader job after game_time passes
+    result         = Column(String(8),   nullable=False, default="PENDING", index=True)
+    actual_value   = Column(Float,       nullable=True)
+    graded_at      = Column(DateTime,    nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "external_id", "stat_type",
+            name="uq_prop_opportunity_log",
+        ),
+    )
+
+
 # ── Database manager ──────────────────────────────────────────────────────────
 
 class Database:
@@ -369,6 +417,7 @@ class Database:
         await self._migrate_underdog_snapshots()
         await self._migrate_clv_records()
         await self._migrate_prop_line_history()
+        await self._migrate_prop_opportunity_log()
         logger.info("Database initialised at %s", self._url)
 
     def session(self) -> AsyncSession:
@@ -2016,6 +2065,208 @@ class Database:
                 q = q.where(PlayerGameResult.sport == sport)
             result = await s.execute(q)
             return result.scalar() or 0
+
+    # ── Prop Opportunity Tracking ────────────────────────────────────────────
+
+    async def _migrate_prop_opportunity_log(self) -> None:
+        """No-op placeholder — table created by create_all; hook reserved for future columns."""
+        pass
+
+    async def log_prop_opportunity(
+        self,
+        *,
+        external_id: str,
+        player_name: str,
+        team: str,
+        sport: str,
+        stat_type: str,
+        line_value: float,
+        recommendation: str,   # OVER | UNDER | PASS
+        decision_tier: str,    # S | A | B | PASS
+        confidence: int,
+        game_time: "Optional[datetime]",
+    ) -> None:
+        """
+        Upsert a prop opportunity at evaluation time (PLAY or PASS).
+
+        On conflict with the same (external_id, stat_type) — i.e. the prop was
+        re-evaluated in a later cycle — updates recommendation, tier, confidence,
+        and line_value to reflect the latest decision.  Preserves any existing
+        grading (result / actual_value / graded_at) so re-evaluation does not
+        wipe a completed outcome.
+        """
+        from sqlalchemy.dialects.sqlite import insert as _sqlite_insert
+        now = datetime.utcnow()
+        stmt = (
+            _sqlite_insert(PropOpportunityLog)
+            .values(
+                external_id    = external_id,
+                player_name    = player_name,
+                team           = team,
+                sport          = sport,
+                stat_type      = stat_type,
+                line_value     = line_value,
+                recommendation = recommendation,
+                decision_tier  = decision_tier,
+                confidence     = confidence,
+                game_time      = game_time,
+                detected_at    = now,
+                result         = "PENDING",
+                actual_value   = None,
+                graded_at      = None,
+            )
+            .on_conflict_do_update(
+                index_elements = ["external_id", "stat_type"],
+                set_           = {
+                    "recommendation": recommendation,
+                    "decision_tier":  decision_tier,
+                    "confidence":     confidence,
+                    "line_value":     line_value,
+                }
+            )
+        )
+        async with self.session() as s:
+            await s.execute(stmt)
+            await s.commit()
+
+    async def get_pending_opportunities(
+        self, cutoff_hours: int = 4
+    ) -> "list[PropOpportunityLog]":
+        """
+        Return PENDING opportunities whose game_time was at least cutoff_hours ago.
+
+        Used by the opportunity_grader job to find outcomes that can now be
+        looked up in player_game_results.
+        """
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(hours=cutoff_hours)
+        async with self.session() as s:
+            result = await s.execute(
+                select(PropOpportunityLog)
+                .where(
+                    PropOpportunityLog.result    == "PENDING",
+                    PropOpportunityLog.game_time.isnot(None),
+                    PropOpportunityLog.game_time <  cutoff,
+                )
+                .order_by(PropOpportunityLog.game_time)
+                .limit(500)
+            )
+            return list(result.scalars().all())
+
+    async def grade_opportunity(
+        self, opp_id: int, result: str, actual_value: float
+    ) -> None:
+        """Set HIT / MISS / PUSH on a prop opportunity after the game completes."""
+        from sqlalchemy import update as _sa_update
+        async with self.session() as s:
+            await s.execute(
+                _sa_update(PropOpportunityLog)
+                .where(PropOpportunityLog.id == opp_id)
+                .values(
+                    result       = result,
+                    actual_value = actual_value,
+                    graded_at    = datetime.utcnow(),
+                )
+            )
+            await s.commit()
+
+    async def get_game_result_for_grading(
+        self, player_name: str, sport: str, stat_type: str, game_date: str
+    ) -> "Optional[PlayerGameResult]":
+        """Return the PlayerGameResult for a given player / sport / stat / date, or None."""
+        async with self.session() as s:
+            result = await s.execute(
+                select(PlayerGameResult)
+                .where(
+                    PlayerGameResult.player_name == player_name,
+                    PlayerGameResult.sport       == sport,
+                    PlayerGameResult.stat_type   == stat_type,
+                    PlayerGameResult.game_date   == game_date,
+                )
+                .limit(1)
+            )
+            return result.scalar_one_or_none()
+
+    async def get_tracking_summary(self) -> "dict":
+        """
+        Return aggregate tracking statistics for the /tracking command.
+
+        Returns a dict with:
+          counts:   { recommendation → { result → count } }
+          by_tier:  { tier → { recommendation → { result → count } } }
+          by_sport: { sport → { recommendation → { result → count } } }
+          total:    int  (all rows ever logged)
+          pending:  int  (awaiting grading)
+        """
+        async with self.session() as s:
+            # Overall rec × result
+            rows = await s.execute(
+                select(
+                    PropOpportunityLog.recommendation,
+                    PropOpportunityLog.result,
+                    func.count(PropOpportunityLog.id).label("n"),
+                ).group_by(
+                    PropOpportunityLog.recommendation,
+                    PropOpportunityLog.result,
+                )
+            )
+            counts: dict = {}
+            for rec, res, n in rows.all():
+                counts.setdefault(rec, {})[res] = n
+
+            # By decision_tier
+            tier_rows = await s.execute(
+                select(
+                    PropOpportunityLog.decision_tier,
+                    PropOpportunityLog.recommendation,
+                    PropOpportunityLog.result,
+                    func.count(PropOpportunityLog.id).label("n"),
+                ).group_by(
+                    PropOpportunityLog.decision_tier,
+                    PropOpportunityLog.recommendation,
+                    PropOpportunityLog.result,
+                )
+            )
+            by_tier: dict = {}
+            for tier, rec, res, n in tier_rows.all():
+                by_tier.setdefault(tier, {}).setdefault(rec, {})[res] = n
+
+            # By sport
+            sport_rows = await s.execute(
+                select(
+                    PropOpportunityLog.sport,
+                    PropOpportunityLog.recommendation,
+                    PropOpportunityLog.result,
+                    func.count(PropOpportunityLog.id).label("n"),
+                ).group_by(
+                    PropOpportunityLog.sport,
+                    PropOpportunityLog.recommendation,
+                    PropOpportunityLog.result,
+                )
+            )
+            by_sport: dict = {}
+            for sport, rec, res, n in sport_rows.all():
+                by_sport.setdefault(sport, {}).setdefault(rec, {})[res] = n
+
+            # Totals
+            total_row = await s.execute(
+                select(func.count(PropOpportunityLog.id))
+            )
+            total = total_row.scalar() or 0
+
+            pending_row = await s.execute(
+                select(func.count(PropOpportunityLog.id))
+                .where(PropOpportunityLog.result == "PENDING")
+            )
+            pending = pending_row.scalar() or 0
+
+        return {
+            "counts":   counts,
+            "by_tier":  by_tier,
+            "by_sport": by_sport,
+            "total":    total,
+            "pending":  pending,
+        }
 
     async def close(self) -> None:
         if self._engine:

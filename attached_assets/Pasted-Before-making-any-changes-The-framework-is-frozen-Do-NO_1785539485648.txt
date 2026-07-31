@@ -1,0 +1,183 @@
+Before making any changes:
+
+The framework is frozen.
+
+Do NOT rewrite the system.
+Do NOT redesign existing logic.
+Do NOT change working systems unless absolutely required.
+
+This task is ONLY to add tracking/learning data capability.
+
+Do not change:
+- scoring
+- ranking
+- confidence calculations
+- pick generation
+- alert logic
+- current Underdog primary framework
+
+The purpose is to create a feedback system so the bot can improve over time using real results.
+
+---
+
+TASK — Track ALL evaluated player prop opportunities
+
+Do not only track recommended plays.
+
+Track:
+
+1. PLAY decisions
+- Props the bot recommends
+
+2. PASS decisions
+- Props the bot evaluates but does not recommend
+
+Reason:
+The bot needs to learn when it was correct to pass and when it missed profitable opportunities.
+
+Example:
+
+Bot:
+PASS ❌
+
+Player clears line easily:
+3/4 hits
+
+The system should record that as a missed opportunity.
+
+---
+
+For every evaluated prop, store:
+
+- player
+- sport
+- market/stat type
+- line
+- over/under selection
+- Underdog source
+- confidence score
+- tier
+- recommendation:
+  - PLAY
+  - PASS
+- timestamp
+- game/event information when available
+
+---
+
+After the game/event finishes:
+
+The system should:
+
+1. Wait until the event is complete
+
+2. Retrieve final player statistics
+
+3. Compare the actual result against the selected line
+
+4. Grade every evaluated opportunity:
+
+✅ Hit
+
+❌ Miss
+
+➖ Push (when applicable)
+
+---
+
+For recommended PLAY decisions, track:
+
+- total plays
+- hits
+- misses
+- pushes
+- hit rate
+
+---
+
+For PASS decisions, track:
+
+- total passes
+- how many would have hit
+- how many would have missed
+- missed opportunities
+- correct passes
+
+---
+
+Create performance analytics for future development:
+
+Track results by:
+
+- sport
+- market/stat type
+- tier
+- confidence range
+- line value
+- player
+- PLAY vs PASS
+
+Examples of questions this data should eventually answer:
+
+- Are high confidence picks actually performing?
+- Are A-tier picks better than B-tier?
+- Is the model too conservative?
+- Are we passing on profitable opportunities?
+- Which markets are strongest?
+- Which markets should be avoided?
+
+---
+
+IMPORTANT:
+
+Do not automatically adjust the model from this task.
+
+Do not change:
+- scoring weights
+- ranking weights
+- confidence formulas
+
+This data is for:
+- analysis
+- backtesting
+- future model improvements
+
+First collect enough sample size, then evaluate changes.
+
+---
+
+Preserve existing data:
+
+Do NOT delete or reset:
+
+- databases
+- historical records
+- line history
+- lifecycle data
+- existing performance data
+- hit/miss records
+
+---
+
+Verification after implementation:
+
+Run full tests.
+
+Restart bot.
+
+Confirm:
+
+✅ Framework still unchanged  
+✅ Underdog remains primary provider  
+✅ /picks works  
+✅ /slip works  
+✅ Alerts unchanged  
+✅ PLAY opportunities are tracked  
+✅ PASS opportunities are tracked  
+✅ Results grade after games finish  
+✅ Hit/Miss/Push outcomes are stored  
+✅ No existing data lost  
+
+Stop after this.
+
+Do not add new features until live testing confirms the system works.

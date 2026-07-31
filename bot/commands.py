@@ -1921,6 +1921,181 @@ async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.message.reply_text("⚠️ /config failed to send. Check bot logs.")
 
 
+async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/tracking — Show PLAY vs PASS opportunity tracking and grading results."""
+    if not _check_allowed(update):
+        await update.message.reply_text("⛔ Unauthorized.")
+        return
+    if not _db:
+        await update.message.reply_text("⚠️ Database not ready.")
+        return
+
+    try:
+        data = await _db.get_tracking_summary()
+    except Exception as exc:
+        logger.exception("cmd_tracking: DB error: %s", exc)
+        await update.message.reply_text("⚠️ /tracking failed — check bot logs.")
+        return
+
+    counts   = data.get("counts", {})
+    by_tier  = data.get("by_tier", {})
+    by_sport = data.get("by_sport", {})
+    total    = data.get("total", 0)
+    pending  = data.get("pending", 0)
+
+    def _n(d: dict, *keys) -> int:
+        """Safely walk nested dict and return int."""
+        cur = d
+        for k in keys:
+            if not isinstance(cur, dict):
+                return 0
+            cur = cur.get(k, 0)
+        return cur if isinstance(cur, int) else 0
+
+    def _hit_rate(hits: int, total_graded: int) -> str:
+        if total_graded == 0:
+            return "—"
+        return f"{hits / total_graded:.1%}"
+
+    lines: list[str] = [
+        "📊 <b>Prop Opportunity Tracker</b>",
+        f"<i>Total evaluated: {total}  ·  Pending grading: {pending}</i>",
+        "",
+    ]
+
+    # ── PLAY (OVER + UNDER) ────────────────────────────────────────────────────
+    play_recs = ("OVER", "UNDER")
+    play_hit = play_miss = play_push = play_pending = 0
+    for rec in play_recs:
+        play_hit     += _n(counts, rec, "HIT")
+        play_miss    += _n(counts, rec, "MISS")
+        play_push    += _n(counts, rec, "PUSH")
+        play_pending += _n(counts, rec, "PENDING")
+    play_graded = play_hit + play_miss + play_push
+    play_total  = play_graded + play_pending
+
+    # For UNDER picks: HIT from OVER perspective = the UNDER actually failed
+    # so we flip for display of "correct picks"
+    under_hit_correct  = _n(counts, "UNDER", "MISS")   # over missed = under cleared
+    over_hit_correct   = _n(counts, "OVER",  "HIT")    # over hit = over cleared
+    play_correct       = over_hit_correct + under_hit_correct
+
+    lines += [
+        "━━━━━━━━━━━━━━━━━━",
+        "✅ <b>PLAY Results</b>",
+        f"  Total PLAYs:   <code>{play_total}</code>",
+        f"  Graded:        <code>{play_graded}</code>",
+    ]
+    if play_graded > 0:
+        lines += [
+            f"  Correct picks: <code>{play_correct}</code>  "
+            f"({_hit_rate(play_correct, play_graded)})",
+            f"  ➖ Push:       <code>{play_push}</code>",
+            f"  ⏳ Pending:    <code>{play_pending}</code>",
+        ]
+        if _n(counts, "OVER", "HIT") or _n(counts, "OVER", "MISS"):
+            o_hit  = _n(counts, "OVER", "HIT")
+            o_miss = _n(counts, "OVER", "MISS")
+            o_tot  = o_hit + o_miss + _n(counts, "OVER", "PUSH")
+            lines.append(
+                f"  <i>OVER  picks: {o_hit}/{o_tot} ({_hit_rate(o_hit, o_tot)})</i>"
+            )
+        if _n(counts, "UNDER", "HIT") or _n(counts, "UNDER", "MISS"):
+            u_hit  = _n(counts, "UNDER", "MISS")   # OVER miss = UNDER hit
+            u_miss = _n(counts, "UNDER", "HIT")
+            u_tot  = u_hit + u_miss + _n(counts, "UNDER", "PUSH")
+            lines.append(
+                f"  <i>UNDER picks: {u_hit}/{u_tot} ({_hit_rate(u_hit, u_tot)})</i>"
+            )
+    else:
+        lines.append("  <i>No graded PLAY results yet.</i>")
+
+    lines.append("")
+
+    # ── PASS (Missed Opportunity Analysis) ────────────────────────────────────
+    pass_hit     = _n(counts, "PASS", "HIT")     # over cleared — missed opportunity
+    pass_miss    = _n(counts, "PASS", "MISS")    # over failed  — correct pass
+    pass_push    = _n(counts, "PASS", "PUSH")
+    pass_pending = _n(counts, "PASS", "PENDING")
+    pass_graded  = pass_hit + pass_miss + pass_push
+    pass_total   = pass_graded + pass_pending
+
+    lines += [
+        "━━━━━━━━━━━━━━━━━━",
+        "🚫 <b>PASS Analysis</b>  <i>(missed opportunity check)</i>",
+        f"  Total PASSes:       <code>{pass_total}</code>",
+        f"  Graded:             <code>{pass_graded}</code>",
+    ]
+    if pass_graded > 0:
+        lines += [
+            f"  📈 Would have hit:  <code>{pass_hit}</code>  "
+            f"({_hit_rate(pass_hit, pass_graded)})  — missed opportunities",
+            f"  📉 Would have miss: <code>{pass_miss}</code>  "
+            f"({_hit_rate(pass_miss, pass_graded)})  — correct passes",
+            f"  ➖ Push:            <code>{pass_push}</code>",
+            f"  ⏳ Pending:         <code>{pass_pending}</code>",
+        ]
+    else:
+        lines.append("  <i>No graded PASS results yet.</i>")
+
+    # ── By Tier ───────────────────────────────────────────────────────────────
+    if by_tier:
+        lines += ["", "━━━━━━━━━━━━━━━━━━", "<b>By Tier (PLAY correct pick rate)</b>"]
+        for tier in ("S", "A", "B"):
+            tier_data = by_tier.get(tier, {})
+            t_correct = (
+                _n(tier_data, "OVER",  "HIT")
+                + _n(tier_data, "UNDER", "MISS")
+            )
+            t_graded = sum(
+                _n(tier_data, rec, res)
+                for rec in ("OVER", "UNDER")
+                for res in ("HIT", "MISS", "PUSH")
+            )
+            if t_graded > 0:
+                lines.append(
+                    f"  <b>{tier}:</b>  {t_correct}/{t_graded}  ({_hit_rate(t_correct, t_graded)})"
+                )
+
+    # ── By Sport ──────────────────────────────────────────────────────────────
+    if by_sport:
+        lines += ["", "━━━━━━━━━━━━━━━━━━", "<b>By Sport (PLAY correct pick rate)</b>"]
+        for sport, sport_data in sorted(by_sport.items()):
+            s_correct = (
+                _n(sport_data, "OVER",  "HIT")
+                + _n(sport_data, "UNDER", "MISS")
+            )
+            s_graded = sum(
+                _n(sport_data, rec, res)
+                for rec in ("OVER", "UNDER")
+                for res in ("HIT", "MISS", "PUSH")
+            )
+            s_passes = (
+                _n(sport_data, "PASS", "HIT")
+                + _n(sport_data, "PASS", "MISS")
+                + _n(sport_data, "PASS", "PUSH")
+                + _n(sport_data, "PASS", "PENDING")
+            )
+            if s_graded > 0 or s_passes > 0:
+                lines.append(
+                    f"  <b>{sport}:</b>  PLAY {s_correct}/{s_graded} "
+                    f"({_hit_rate(s_correct, s_graded)})  ·  PASS {s_passes}"
+                )
+
+    lines += [
+        "",
+        "━━━━━━━━━━━━━━━━━━",
+        "<i>Results graded every 6 h from stored game stats.</i>",
+        "<i>OVER perspective: HIT = actual &gt; line, MISS = actual &lt; line.</i>",
+    ]
+
+    try:
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+    except Exception as exc:
+        logger.exception("cmd_tracking: send failed: %s", exc)
+        await update.message.reply_text("⚠️ /tracking output too large — check bot logs.")
+
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Log errors raised by handlers and notify the user if possible."""
     logger.error(

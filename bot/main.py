@@ -68,6 +68,7 @@ from commands import (
     cmd_pp_import,
     cmd_health,
     cmd_restarts,
+    cmd_tracking,
     error_handler,
     init_handlers,
 )
@@ -229,7 +230,9 @@ async def post_init(application: Application) -> None:
         # CLV seed job — every 15 minutes (creates AlertCLVSeed entries for alerts)
         jq.run_repeating(_clv_seed_job,        interval=900,                                first=120, name="clv_seeder")
         # CLV harvest job — every hour (processes seeds after game_time passes)
-        jq.run_repeating(_clv_harvest_job,     interval=3600,                               first=300, name="clv_harvester")
+        jq.run_repeating(_clv_harvest_job,          interval=3600,  first=300,  name="clv_harvester")
+        # Opportunity grader — every 6 hours (grades completed prop opportunities)
+        jq.run_repeating(_grade_opportunities_job,  interval=21600, first=3600, name="opportunity_grader")
         # API budget check — every 15 minutes
         jq.run_repeating(_budget_check_job,    interval=900,                                first=900, name="budget_checker")
         # Heartbeat — every 60 s (keeps HealthTracker alive timestamp current)
@@ -264,6 +267,50 @@ async def post_shutdown(application: Application) -> None:
 
 
 # ── Heartbeat job ─────────────────────────────────────────────────────────────
+
+async def _grade_opportunities_job(context) -> None:
+    """
+    Every 6 hours: grade completed prop opportunities from stored game results.
+
+    Finds PENDING rows in prop_opportunity_log whose game_time passed at least
+    4 hours ago, looks up the actual player stat in player_game_results, and
+    records HIT / MISS / PUSH from the OVER perspective:
+      HIT  → actual_value > line_value
+      MISS → actual_value < line_value
+      PUSH → actual_value == line_value
+    """
+    db: Optional[Database] = context.bot_data.get("db")
+    if not db:
+        return
+    try:
+        pending = await db.get_pending_opportunities(cutoff_hours=4)
+        if not pending:
+            return
+        graded = 0
+        for opp in pending:
+            if not opp.game_time:
+                continue
+            game_date = opp.game_time.strftime("%Y-%m-%d")
+            result_row = await db.get_game_result_for_grading(
+                opp.player_name, opp.sport, opp.stat_type, game_date
+            )
+            if result_row is None:
+                continue
+            actual = result_row.actual_value
+            line   = opp.line_value
+            if actual > line:
+                outcome = "HIT"
+            elif actual < line:
+                outcome = "MISS"
+            else:
+                outcome = "PUSH"
+            await db.grade_opportunity(opp.id, outcome, actual)
+            graded += 1
+        if graded:
+            logger.info("_grade_opportunities_job: graded=%d opportunities", graded)
+    except Exception:
+        logger.exception("_grade_opportunities_job: unexpected error")
+
 
 async def _heartbeat_job(context) -> None:
     """Run every 60 s to keep the HealthTracker heartbeat timestamp current."""
@@ -1208,6 +1255,7 @@ def main() -> None:
     app.add_handler(CommandHandler("pp_import",    cmd_pp_import))
     app.add_handler(CommandHandler("health",       cmd_health))
     app.add_handler(CommandHandler("restarts",     cmd_restarts))
+    app.add_handler(CommandHandler("tracking",     cmd_tracking))
     app.add_error_handler(error_handler)
 
     logger.info("Starting polling — press Ctrl+C to stop.")
