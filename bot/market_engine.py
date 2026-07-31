@@ -685,20 +685,35 @@ async def underdog_job(context) -> None:
                     _np_rej = "no_decision"
                 elif decision.recommendation == "PASS":
                     _np_rej = "decision_pass"
+                    logger.info(
+                        "UD decision_pass [new]: %s | %s | %s | line=%.1f"
+                        " | %d★ %d/100 | reason=%s"
+                        " | l5=%s l10=%s games=%s val_data=%s",
+                        player, stat_type, snap.sport or "UNKNOWN", line_val,
+                        score.stars, score.total,
+                        decision.reason,
+                        (f"{decision.l5_hit_rate:.0%}({decision.l5_games}g)"
+                         if decision.l5_hit_rate is not None else "N/A"),
+                        (f"{decision.l10_hit_rate:.0%}({decision.l10_games}g)"
+                         if decision.l10_hit_rate is not None else "N/A"),
+                        (hit_rates.total_games if hit_rates is not None else "no_data"),
+                        getattr(validation, "has_supporting_data", "?"),
+                    )
                 elif (snap.sport or "UNKNOWN") not in config.ud_alert_sports:
                     _np_rej = f"sport_blocked ({snap.sport})"
                 else:
                     _np_rej = "unknown"
                 _scored_props.append({
-                    "player":    player,
-                    "stat_type": stat_type,
-                    "sport":     snap.sport or "UNKNOWN",
-                    "total":     score.total,
-                    "tier":      score.tier,
-                    "stars":     score.stars,
-                    "stars_d":   getattr(score, "stars_display", "?????"),
-                    "rejection": _np_rej,
-                    "path":      "new",
+                    "player":          player,
+                    "stat_type":       stat_type,
+                    "sport":           snap.sport or "UNKNOWN",
+                    "total":           score.total,
+                    "tier":            score.tier,
+                    "stars":           score.stars,
+                    "stars_d":         getattr(score, "stars_display", "?????"),
+                    "rejection":       _np_rej,
+                    "path":            "new",
+                    "decision_reason": (decision.reason if decision is not None else None),
                     # ── component breakdown ──────────────────────────────
                     "vel":       score.move_velocity,
                     "act":       score.historical_activity,
@@ -834,20 +849,36 @@ async def underdog_job(context) -> None:
                         _lc_rej = "no_decision (PASS tier)"
                     elif decision.recommendation == "PASS":
                         _lc_rej = "decision_pass"
+                        logger.info(
+                            "UD decision_pass [lc]: %s | %s | %s | line=%.1f"
+                            " | %d★ %d/100 | reason=%s"
+                            " | l5=%s l10=%s games=%s val_data=%s",
+                            player, stat_type, snap.sport or "UNKNOWN",
+                            snap.line or 0.0,
+                            score.stars, score.total,
+                            decision.reason,
+                            (f"{decision.l5_hit_rate:.0%}({decision.l5_games}g)"
+                             if decision.l5_hit_rate is not None else "N/A"),
+                            (f"{decision.l10_hit_rate:.0%}({decision.l10_games}g)"
+                             if decision.l10_hit_rate is not None else "N/A"),
+                            (hit_rates.total_games if hit_rates is not None else "no_data"),
+                            getattr(validation, "has_supporting_data", "?"),
+                        )
                     elif (snap.sport or "UNKNOWN") not in config.ud_alert_sports:
                         _lc_rej = f"sport_blocked ({snap.sport})"
                     else:
                         _lc_rej = "unknown"
                     _scored_props.append({
-                        "player":    player,
-                        "stat_type": stat_type,
-                        "sport":     snap.sport or "UNKNOWN",
-                        "total":     score.total,
-                        "tier":      score.tier,
-                        "stars":     score.stars,
-                        "stars_d":   getattr(score, "stars_display", "?????"),
-                        "rejection": _lc_rej,
-                        "path":      "cs" if is_cold_start else "lc",
+                        "player":          player,
+                        "stat_type":       stat_type,
+                        "sport":           snap.sport or "UNKNOWN",
+                        "total":           score.total,
+                        "tier":            score.tier,
+                        "stars":           score.stars,
+                        "stars_d":         getattr(score, "stars_display", "?????"),
+                        "rejection":       _lc_rej,
+                        "path":            "cs" if is_cold_start else "lc",
+                        "decision_reason": (decision.reason if decision is not None else None),
                         # ── component breakdown ──────────────────────────────
                         "vel":       score.move_velocity,
                         "act":       score.historical_activity,
@@ -1140,6 +1171,11 @@ async def underdog_job(context) -> None:
                 f" | {_p['sport']:<5} | {_p['total']:3d}/100 {_p['tier']}"
                 f" {_p['stars_d']} [{_p['path']}] → {_p['rejection']}"
             )
+            # Extra line for decision_pass: show the engine's own reason string
+            if _p["rejection"] == "decision_pass" and _p.get("decision_reason"):
+                _dbg_lines.append(
+                    f"        ↳ engine: {_p['decision_reason']}"
+                )
             # Component line: each dimension with its cap, plus n and current line
             _has_comp = "vel" in _p
             if _has_comp:
