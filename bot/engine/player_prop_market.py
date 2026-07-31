@@ -365,11 +365,14 @@ def format_player_prop_market_alert(comp: PlayerPropMarketComparison) -> str:
     }
     s_icon = sport_icons.get(comp.sport.upper(), "🎯")
 
-    div = "─" * 16
+    div   = "─" * 16
+    thick = "━" * 18
 
     # ── Header ────────────────────────────────────────────────────────────────
     parts: list[str] = [
+        thick,
         "🟣 <b>PLAYER PROP MARKET ALERT</b>",
+        thick,
         "",
         f"{s_icon} <b>{comp.sport}</b>  ·  {comp.stat_type}",
         f"👤 <b>{comp.player_name}</b>",
@@ -474,6 +477,8 @@ def format_player_prop_market_alert(comp: PlayerPropMarketComparison) -> str:
         f"📡 <b>Sources:</b>  {' '.join(active_sources)}",
         f"🔬 <b>Proxy Match Confidence:</b>  {comp.proxy_match_confidence}/100  {conf_bar}",
         f"<i>Confidence measures provider agreement/proxy reliability, not betting edge.</i>",
+        "",
+        thick,
     ]
 
     return "\n".join(parts)

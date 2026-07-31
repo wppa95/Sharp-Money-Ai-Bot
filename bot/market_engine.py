@@ -891,12 +891,11 @@ async def underdog_job(context) -> None:
                 # All removals are still saved to the DB regardless.
                 if is_removed:
                     # Removal alerts: only for props that previously triggered a
-                    # quality alert or reached S/A grade (B-tier removals suppressed).
+                    # user-visible Telegram alert. Score-only / DB-only tracking
+                    # does NOT qualify — no removal spam for unseen props.
                     is_qualified = (
-                        prev_record is not None and (
-                            prev_record.alert_sent                   # previously sent a quality alert
-                            or prev_record.score_tier in ("S", "A") # S/A grade only — B suppressed
-                        )
+                        prev_record is not None
+                        and prev_record.alert_sent  # a Telegram alert was previously sent
                     )
                 else:
                     # Line-change props: require A-tier or better, a real directional
@@ -978,6 +977,15 @@ async def underdog_job(context) -> None:
     
                 if should_alert and chat_ids:
                     delivery  = AlertDelivery(db, bot, chat_ids)
+                    # Derive removal reason from game-time context
+                    _removal_reason: Optional[str] = None
+                    if is_removed:
+                        from datetime import datetime as _dtnow
+                        _now_utc = _dtnow.utcnow()
+                        if snap.game_time and snap.game_time.replace(tzinfo=None) < _now_utc:
+                            _removal_reason = "Game started / market closed"
+                        else:
+                            _removal_reason = "Market no longer available from provider"
                     ud_result = await delivery.deliver_underdog(
                         player_name     = player,
                         team            = snap.team or "",
@@ -993,6 +1001,7 @@ async def underdog_job(context) -> None:
                         decision        = decision,
                         market_quality  = market_quality,
                         market_pressure = market_pressure,
+                        removal_reason  = _removal_reason,
                     )
                     if ud_result.filtered:
                         logger.debug(

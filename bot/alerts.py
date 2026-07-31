@@ -1045,6 +1045,7 @@ class AlertDelivery:
         removed: bool = False,
         new_prop: bool = False,
         standing: bool = False,  # True for evidence-driven alerts without line movement
+        removal_reason: Optional[str] = None,  # Why prop was removed (removal alerts only)
     ) -> "DeliveryResult":
         """
         Full Underdog prop alert pipeline:
@@ -1133,6 +1134,7 @@ class AlertDelivery:
                 fd_line=fd_line,
                 removed=removed,
                 standing=standing,
+                removal_reason=removal_reason,
             )
 
         # 5. Broadcast

@@ -917,7 +917,23 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     picks.sort(key=_pick_sort)
 
-    # ── 4. Format ─────────────────────────────────────────────────────────────
+    # ── 4. Fetch historical hit-rates concurrently (non-blocking) ────────────
+    from engine.player_results import compute_hit_rates as _compute_hr
+    import asyncio as _asyncio
+
+    async def _get_hr(plh: "PropLineHistory") -> "object":
+        try:
+            results = await _db.get_player_results(
+                plh.player_name, plh.sport, plh.stat_type, limit=30
+            )
+            return _compute_hr(results, plh.line_value) if results else None
+        except Exception:
+            return None
+
+    _hr_raw   = await _asyncio.gather(*[_get_hr(plh) for plh, _ in picks], return_exceptions=True)
+    _hit_rates = [None if isinstance(r, Exception) else r for r in _hr_raw]
+
+    # ── 5. Format ─────────────────────────────────────────────────────────────
     def _tier_from_conf(c: int) -> str:
         if c >= 90: return "S"
         if c >= 70: return "A"
@@ -983,6 +999,19 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             entry += f"\n{best_row}"
         if detail:
             entry += f"\n  {' · '.join(detail)}"
+
+        # Historical performance context from existing DB pipeline
+        hr = _hit_rates[rank - 1]
+        if hr is not None and getattr(hr, "has_real_data", False):
+            _perf: list[str] = []
+            for _lbl, _ws in [
+                ("L5", hr.l5), ("L10", hr.l10), ("L20", hr.l20),
+                ("L30", hr.l30), ("Season", hr.season),
+            ]:
+                if _ws and _ws.games >= 3:
+                    _perf.append(f"<b>{_lbl}:</b> {_ws.over_display()}")
+            if _perf:
+                entry += f"\n  📊 vs {plh.line_value:.1f} → " + "  ·  ".join(_perf[:3])
 
         out.append(entry)
 

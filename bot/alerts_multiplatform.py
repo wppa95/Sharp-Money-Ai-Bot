@@ -390,6 +390,7 @@ def format_underdog_change_alert(
     *,
     removed: bool = False,
     standing: bool = False,                   # True for evidence-driven alerts without line movement
+    removal_reason: Optional[str] = None,     # Why prop was removed (removal alerts only)
 ) -> str:
     """Format an alert for an Underdog prop line change or removed prop.
 
@@ -461,8 +462,16 @@ def format_underdog_change_alert(
         fd_line = fd_line,
     )
 
+    _thick = "━" * 18
+    _removal_reason_str = ""
+    if removed:
+        _reason = removal_reason or "Market no longer available from provider"
+        _removal_reason_str = f"\n  <b>Removal Reason:</b>  {_reason}"
+
     parts = [
+        _thick,
         header,
+        _thick,
         "",
         f"{sport_icon} <b>{sport} — {stat_type}</b>",
         f"👤 <b>{player_name}</b>",
@@ -471,12 +480,14 @@ def format_underdog_change_alert(
         avail_block.lstrip("\n"),
         "",
         _div(),
-        movement_block + game_str + grade_str + validation_str
+        movement_block + _removal_reason_str + game_str + grade_str + validation_str
         + _format_decision_block(decision)
         + _format_market_quality_block(market_quality)
         + _format_market_pressure_block(market_pressure),
         "",
         f"{EMOJI['clock']} <i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>",
+        "",
+        _thick,
     ]
     return "\n".join(parts)
 
@@ -557,8 +568,11 @@ def format_underdog_new_prop_alert(
         fd_line = fd_line,
     )
 
+    _thick = "━" * 18
     parts = [
+        _thick,
         "🚨 <b>UNDERDOG PROP LIVE</b>",
+        _thick,
         "",
         f"{sport_icon} <b>{sport} — {stat_type}</b>",
         f"👤 <b>{player_name}</b>",
@@ -580,6 +594,8 @@ def format_underdog_new_prop_alert(
         "\n".join(reasons),
         "",
         f"{EMOJI['clock']} <i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>",
+        "",
+        _thick,
     ]
     return "\n".join(parts)
 

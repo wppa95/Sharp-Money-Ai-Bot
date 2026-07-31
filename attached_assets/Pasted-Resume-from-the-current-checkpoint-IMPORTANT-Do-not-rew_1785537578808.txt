@@ -1,0 +1,222 @@
+Resume from the current checkpoint.
+
+IMPORTANT:
+Do not rewrite the framework.
+Do not redesign existing systems.
+Do not change working logic unless absolutely required.
+
+The framework is frozen. This is a cleanup, filtering, and usability pass only.
+
+---
+
+CURRENT STATUS:
+
+Completed discoveries:
+- SofaScore cannot be used from this server because of Cloudflare blocking (403).
+- PickFinder is not a usable service/API.
+- Do not integrate either one.
+- Do not add scraping, fake data, stubs, or unnecessary provider infrastructure.
+
+Use the existing data already available in the bot:
+- PlayerHitRates
+- compute_hit_rates()
+- PropLineHistory
+- existing MLB/ESPN/stat pipelines
+
+The goal is to expose useful information that already exists, not add new dependencies.
+
+---
+
+TASK 1 — Improve /picks context only
+
+Add existing historical context to picks when available.
+
+Display:
+- L5 results
+- L10 results
+- L20 results
+- L30 results
+- Season results
+- Average vs current line when available
+
+Rules:
+- Display/context only.
+- Do not change pick ranking.
+- Do not change confidence calculation.
+- Do not change scoring.
+- Missing data should not block picks.
+
+---
+
+TASK 2 — Fix Telegram readability/spam issue
+
+Current problem:
+Telegram alerts are difficult to read because multiple props blend together.
+
+Improve all alert formatting.
+
+Affected:
+- Player Prop Market Alerts
+- Player Prop Opportunities
+- Line Move Alerts
+- Removed Prop Alerts
+
+Requirements:
+
+Every prop should have a clear beginning and ending.
+
+Use stronger separators:
+
+━━━━━━━━━━━━━━━━━━
+🟣 PLAYER PROP OPPORTUNITY
+━━━━━━━━━━━━━━━━━━
+
+Sport:
+Market:
+Player:
+
+Available Line:
+🐶 Underdog:
+
+Analysis:
+
+Confidence:
+Tier:
+
+━━━━━━━━━━━━━━━━━━
+
+NEXT PROP
+
+━━━━━━━━━━━━━━━━━━
+
+Make each new player visually obvious.
+
+The goal:
+- easier scanning
+- less spam feeling
+- faster decision making
+
+---
+
+TASK 3 — Fix removal alerts
+
+Current problem:
+The bot sends removal alerts for props that were only tracked internally and never shown to the user.
+
+Change logic:
+
+Only send 🚫 REMOVED alerts if the prop was previously user-visible.
+
+User-visible means:
+- appeared in /picks
+- triggered an alert
+- reached qualifying opportunity threshold
+
+Do NOT send removal alerts for:
+- database-only tracking
+- internal lifecycle events
+- unseen props
+
+Keep internal lifecycle tracking unchanged.
+
+---
+
+TASK 4 — Improve removal reason
+
+When a removal alert is sent, include:
+
+Removal Reason:
+
+Examples:
+- Market no longer available
+- Player removed from board
+- Game started / market closed
+- Provider withdrew line
+
+If exact reason is unknown:
+"Market no longer available from provider"
+
+Do not guess.
+
+---
+
+TASK 5 — Provider display cleanup
+
+Keep:
+
+🐶 Underdog = primary provider
+
+Only display providers with real data.
+
+Remove:
+- empty provider rows
+- "Unavailable" text
+
+PrizePicks:
+- Keep compatibility for when available.
+- Do not rely on current PP API.
+
+DraftKings/FanDuel:
+- Do not display.
+- Do not make required.
+- Do not break anything if unavailable.
+
+---
+
+TASK 6 — Keep scanning behavior
+
+Do not limit scanning to:
+- mornings
+- 3 hours before games
+- specific windows
+
+Keep continuous scanning:
+
+- all day
+- all active sports Underdog supports
+- different game times
+- late games included
+
+Do not restrict to only MLB/WNBA.
+
+---
+
+TASK 7 — Preserve frozen framework
+
+Do not change:
+
+- Underdog as primary market source
+- scoring system
+- ranking system
+- confidence system
+- pick builder
+- alert engine
+- lifecycle tracking
+
+This is only cleanup and presentation improvement.
+
+---
+
+FINAL VERIFICATION:
+
+After changes:
+
+Run full test suite.
+
+Restart bot.
+
+Verify:
+
+✅ /picks works  
+✅ /slip works  
+✅ Alerts still fire  
+✅ Telegram alerts are easier to read  
+✅ No unnecessary spam  
+✅ Removal alerts are meaningful  
+✅ No fake providers added  
+✅ No broken dependencies  
+✅ Existing framework remains intact
+
+Stop after this cleanup pass.
+
+Do not continue adding new features until live pick testing is complete.

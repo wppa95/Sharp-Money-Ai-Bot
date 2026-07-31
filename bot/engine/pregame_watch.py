@@ -149,8 +149,11 @@ def format_pregame_watch_alert(
     else:
         time_str = None
 
+    thick = "━" * 18
     parts: list[str] = [
+        thick,
         "🟣 <b>PREGAME PLAYER PROP OPPORTUNITY</b>",
+        thick,
         "",
         f"<b>Sport:</b>   {s_icon} {entry.sport}",
         f"<b>Player:</b>  {entry.player_name}",
@@ -245,7 +248,7 @@ def format_pregame_watch_alert(
                 f"   {entry.movement_summary()}",
             ]
 
-    parts += ["", div, "", "<i>Verify lines before placing. Markets move fast.</i>"]
+    parts += ["", div, "", "<i>Verify lines before placing. Markets move fast.</i>", "", thick]
     return "\n".join(parts)
 
 
