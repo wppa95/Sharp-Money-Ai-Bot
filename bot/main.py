@@ -130,10 +130,11 @@ async def post_init(application: Application) -> None:
 
     # ── Provider health monitor + shared Odds API cache ──────────────────────
     _health_monitor = init_health_monitor()
-    _health_monitor.register("PrizePicks")
+    # PrizePicks provider is temporarily disabled — not registered so it never
+    # shows as a failed provider in /status or logs.
     _health_monitor.register("OddsAPI")
     _health_monitor.register("Underdog")
-    logger.info("Provider health monitor initialised (PrizePicks, OddsAPI, Underdog)")
+    logger.info("Provider health monitor initialised (OddsAPI, Underdog)")
 
     init_odds_cache(ttl_seconds=config.ODDS_API_CACHE_TTL)
     logger.info("Odds API shared cache initialised (TTL=%ds)", config.ODDS_API_CACHE_TTL)
@@ -195,7 +196,7 @@ async def post_init(application: Application) -> None:
         jq.run_repeating(_poll_odds_job,       interval=config.ODDS_POLL_INTERVAL,          first=10,  name="odds_poller")
         jq.run_repeating(_steam_check_job,     interval=config.STEAM_CHECK_INTERVAL,        first=15,  name="steam_checker")
         jq.run_repeating(_player_props_job,    interval=config.PLAYER_PROP_POLL_INTERVAL,   first=60,  name="player_props_fetcher")
-        jq.run_repeating(_prizepicks_job,      interval=config.PRIZEPICKS_POLL_INTERVAL,    first=90,  name="prizepicks_monitor")
+        # _prizepicks_job disabled — PrizePicks provider temporarily off
         # Multi-platform market engine jobs
         jq.run_repeating(connector_poll_job,   interval=config.CONNECTOR_POLL_INTERVAL,     first=20,  name="connector_poller")
         jq.run_repeating(consensus_check_job,  interval=config.CONSENSUS_CHECK_INTERVAL,    first=25,  name="consensus_checker")
@@ -213,13 +214,12 @@ async def post_init(application: Application) -> None:
             )
         logger.info(
             "Jobs scheduled — odds: every %ds, steam: every %ds, "
-            "player_props: every %ds, prizepicks: every %ds, "
+            "player_props: every %ds, "
             "connectors: every %ds, consensus: every %ds, clv: every %ds, "
             "underdog: every %ds, season_check: every %ds",
             config.ODDS_POLL_INTERVAL,
             config.STEAM_CHECK_INTERVAL,
             config.PLAYER_PROP_POLL_INTERVAL,
-            config.PRIZEPICKS_POLL_INTERVAL,
             config.CONNECTOR_POLL_INTERVAL,
             config.CONSENSUS_CHECK_INTERVAL,
             config.CLV_CHECK_INTERVAL,

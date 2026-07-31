@@ -143,8 +143,6 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     total_steam = await _db.count_steam_records() if _db else 0
     total_ev    = await _db.count_ev_records() if _db else 0
     db_records  = await _db.count_odds_records() if _db else 0
-    pp_total    = await _db.count_pp_edge_records() if _db else 0
-
     # Load provider health monitor and odds cache singletons
     try:
         from providers import get_health_monitor
@@ -165,6 +163,8 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     lines.append("📡 <b>Data Providers</b>")
     if _mon:
         for name, h in _mon.get_all_health().items():
+            if name == "PrizePicks":
+                continue  # PP provider temporarily disabled
             last_ok   = h.format_last_success()
             fail_note = (
                 f"  ({h.consecutive_failures} fail{'s' if h.consecutive_failures != 1 else ''})"
@@ -198,7 +198,6 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             pass
     else:
         lines += [
-            "  ⚪ PrizePicks   not yet tracked",
             "  ⚪ Odds API     not yet tracked",
             "  ⚪ Underdog     not yet tracked",
         ]
@@ -242,7 +241,6 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     # ── Database ──────────────────────────────────────────────────────────────
     lines.append("📊 <b>Database Records</b>")
     lines.append(f"  Odds: {db_records:,}  ·  Steam: {total_steam:,}  ·  EV: {total_ev:,}")
-    lines.append(f"  PP edges: {pp_total:,}")
 
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
