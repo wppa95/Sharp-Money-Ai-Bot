@@ -715,6 +715,41 @@ async def cmd_backtest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
 
 
+# ── Season-futures display filter ─────────────────────────────────────────────
+# Applied ONLY in /picks and /slip output — never affects scanning, storage,
+# database records, alerts, or the opportunity tracker.
+_SEASON_FUTURE_PREFIXES: tuple[str, ...] = (
+    "season ",           # "Season Receiving Yards", "Season TDs", …
+    "regular season ",   # "Regular Season Games Started", …
+    "playoff season ",
+    "career ",
+)
+_SEASON_FUTURE_EXACT_WORDS: tuple[str, ...] = (
+    " season",           # " season" appearing anywhere in the stat name
+)
+
+def _is_season_future(stat_type: str) -> bool:
+    """
+    Return True when stat_type represents a long-term future rather than a
+    single-game player prop.  Examples that return True:
+      "Season Receiving Yards", "Regular Season Games Started",
+      "Season Receiving TDs", "Career Home Runs"
+
+    Case-insensitive.  Only called for display filtering — scanning, storage,
+    alert delivery, and opportunity tracking are completely unaffected.
+    """
+    lower = stat_type.strip().lower()
+    # starts-with checks (fast path)
+    if any(lower.startswith(p) for p in _SEASON_FUTURE_PREFIXES):
+        return True
+    # whole-word " season" appearing anywhere (e.g. "Regular Season ...")
+    # but NOT "this season's stats" type wording — simple substring is fine
+    # because all real single-game stats don't include the word "season".
+    if " season" in lower:
+        return True
+    return False
+
+
 # ── /picks tier constants ─────────────────────────────────────────────────────
 # New PPAnalysisScore vocabulary (S/A/B/PASS) plus legacy AlertTier values for
 # any records written before the scoring engine was introduced.
@@ -858,14 +893,17 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     ud_props = await _db.get_top_ud_props_for_picks(limit=limit * 3, since_hours=24)
     if sport_filter:
         ud_props = [p for p in ud_props if p.sport.upper() == sport_filter]
+    # Display filter: hide season-long futures (stored & tracked as normal).
+    ud_props = [p for p in ud_props if not _is_season_future(p.stat_type)]
     ud_props = ud_props[:limit]
 
     if not ud_props:
         hint = f" for {sport_filter}" if sport_filter else ""
         await update.message.reply_text(
             f"🟣 <b>Player Prop Picks</b>\n\n"
-            f"No qualifying player prop opportunities detected{hint}.\n\n"
-            f"<i>Underdog props auto-score every 5 min.\n"
+            f"No qualifying player props available right now{hint}.\n\n"
+            f"<i>Season-long futures are excluded from this view.\n"
+            f"Underdog props auto-score every 5 min.\n"
             f"Use /pp_import to add PrizePicks lines.</i>",
             parse_mode=ParseMode.HTML,
         )
@@ -1253,11 +1291,14 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     # ── 1. Fetch Underdog props (same pool as /picks) ─────────────────────────
     ud_props = await _db.get_top_ud_props_for_picks(limit=30, since_hours=6)
+    # Display filter: hide season-long futures (stored & tracked as normal).
+    ud_props = [p for p in ud_props if not _is_season_future(p.stat_type)]
     if not ud_props:
         await update.message.reply_text(
             "🎰 <b>Player Prop Slip</b>\n\n"
-            "No live props detected in the last 6 hours.\n\n"
-            "<i>Underdog props auto-score every 5 min. Run /picks to check status.</i>",
+            "No qualifying player props available right now.\n\n"
+            "<i>Season-long futures are excluded from this view.\n"
+            "Underdog props auto-score every 5 min. Run /picks to check status.</i>",
             parse_mode=ParseMode.HTML,
         )
         return
