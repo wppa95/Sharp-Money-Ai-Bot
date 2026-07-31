@@ -88,6 +88,7 @@ def _make_db(
     db.get_latest_underdog_snapshot_per_prop = AsyncMock(return_value=recent_dict or {})
     db.count_today_underdog_alerts           = AsyncMock(return_value=0)
     db.save_underdog_snapshot                = AsyncMock()
+    db.save_underdog_snapshots_bulk          = AsyncMock()
     # Default to empty history — validation gate blocks immediate alerts without data.
     # Pass prop_history=_fake_history() in tests that expect immediate alerts to fire.
     db.get_ud_prop_history                   = AsyncMock(
@@ -121,18 +122,19 @@ async def _run_job(snapshots, db, *, deliver_result=None, hit_rates=None):
     hit_rates_mock = AsyncMock(return_value=hit_rates)
 
     with patch.object(me, "_registry", registry):
-        with patch("market_engine._fetch_and_compute_hit_rates", hit_rates_mock):
-            with patch("market_engine.AlertDelivery") as mock_cls:
-                mock_delivery = MagicMock()
-                mock_delivery.deliver_underdog = AsyncMock(return_value=deliver_result)
-                mock_cls.return_value = mock_delivery
-                # The cycle digest is dispatched via broadcast_alert directly (not through
-                # AlertDelivery), so we patch it here to prevent real Telegram calls.
-                with patch("alerts.broadcast_alert",
-                           new_callable=AsyncMock,
-                           return_value={"sent": 1, "failed": 0}):
-                    await me.underdog_job(ctx)
-                return mock_delivery
+        with patch.object(me, "_cold_start_done", True):
+            with patch("market_engine._fetch_and_compute_hit_rates", hit_rates_mock):
+                with patch("market_engine.AlertDelivery") as mock_cls:
+                    mock_delivery = MagicMock()
+                    mock_delivery.deliver_underdog = AsyncMock(return_value=deliver_result)
+                    mock_cls.return_value = mock_delivery
+                    # The cycle digest is dispatched via broadcast_alert directly (not through
+                    # AlertDelivery), so we patch it here to prevent real Telegram calls.
+                    with patch("alerts.broadcast_alert",
+                               new_callable=AsyncMock,
+                               return_value={"sent": 1, "failed": 0}):
+                        await me.underdog_job(ctx)
+                    return mock_delivery
 
 
 # ── New-prop detection ─────────────────────────────────────────────────────────
@@ -343,7 +345,8 @@ async def test_cycle_digest_sent_when_new_props_detected():
             ctx.bot = MagicMock()
 
             with patch.object(me, "_registry", registry):
-                await me.underdog_job(ctx)
+                with patch.object(me, "_cold_start_done", True):
+                    await me.underdog_job(ctx)
 
     # broadcast_alert should have been called for the digest (no individual alert)
     mock_delivery.deliver_underdog.assert_not_called()   # non-immediate → no individual
@@ -378,7 +381,8 @@ async def test_no_digest_when_no_new_props():
             ctx.bot = MagicMock()
 
             with patch.object(me, "_registry", registry):
-                await me.underdog_job(ctx)
+                with patch.object(me, "_cold_start_done", True):
+                    await me.underdog_job(ctx)
 
     # No digest — prop is known, no new props detected
     for c in mock_broadcast.call_args_list:

@@ -65,6 +65,10 @@ _registry: Optional[ConnectorRegistry] = None
 # The date component means stale entries are automatically bypassed next day.
 _player_stats_provider = None
 _player_result_fetch_cache: set = set()
+# Set to True after the first complete Underdog prop scan.  The first cycle
+# scores every active prop (cold-start mode); subsequent cycles use incremental
+# scoring (new props and line-change events only).
+_cold_start_done: bool = False
 
 
 def _get_player_stats_provider():
@@ -478,6 +482,9 @@ async def underdog_job(context) -> None:
     if db is None:
         return
 
+    global _cold_start_done
+    is_cold_start = not _cold_start_done   # True only on the very first successful fetch
+
     chat_ids = list(config.allowed_user_ids)
     now      = datetime.utcnow()
 
@@ -494,8 +501,10 @@ async def underdog_job(context) -> None:
     _n_qualified:     int       = 0   # line-change props that passed the scoring gate
     _n_removed:       int       = 0   # props with [REMOVED] marker
     _n_new_prop:      int       = 0   # first-appearance props detected this cycle
-    _n_new_prop_sent: int       = 0   # immediate new-prop alerts delivered
-    _scored_props:    list[dict] = []  # all scored props this cycle — for end-of-cycle debug log
+    _n_new_prop_sent:      int       = 0   # immediate new-prop alerts delivered
+    _n_cold_start_scored: int       = 0   # props scored during the one-time cold-start pass
+    _cold_start_records:  list       = []  # records buffered for bulk save at end of cold-start
+    _scored_props:        list[dict] = []  # all scored props this cycle — for end-of-cycle debug log
     # Batch for the end-of-cycle new-prop digest sent after the loop.
     # Each entry: {player, stat_type, sport, team, line, score, immediate, game_time}
     _new_props_batch: list[dict] = []
@@ -719,6 +728,32 @@ async def underdog_job(context) -> None:
                     score.n_history, validation.has_supporting_data,
                 )
 
+            elif not is_removed and is_cold_start:
+                # ── Cold-start path ───────────────────────────────────────────
+                # First cycle only: score every active prop so the DB has fresh
+                # tier / stars / validation data from startup.  hit_rates are
+                # intentionally skipped — fetching them for ~1000 props on boot
+                # would hammer the stats API; they are populated lazily on the
+                # first qualifying incremental event.  No alerts are sent.
+                ud_history = await db.get_ud_prop_history(player, stat_type, limit=30)
+                score = score_ud_prop(
+                    player_name  = player,
+                    stat_type    = stat_type,
+                    sport        = snap.sport or "UNKNOWN",
+                    current_line = snap.line or 0.0,
+                    prev_line    = None,   # no change event — baseline score
+                    history      = ud_history,
+                )
+                validation = validate_player_prop(
+                    player_name  = player,
+                    stat_type    = stat_type,
+                    current_line = snap.line or 0.0,
+                    history      = ud_history,
+                    min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
+                )
+                _n_cold_start_scored += 1
+                _tier_counts[score.tier] = _tier_counts.get(score.tier, 0) + 1
+
             # Qualify for alert delivery.
             # Removal notices: only Telegram-alert for three conditions.
             # All removals are still saved to the DB regardless.
@@ -734,8 +769,10 @@ async def underdog_job(context) -> None:
             else:
                 # Line-change props: require A-tier or better, a real directional
                 # pick from the decision engine, and sport in betting whitelist.
+                # Cold-start props always fail this gate — alerts suppressed.
                 is_qualified = (
-                    score is not None
+                    not is_cold_start
+                    and score is not None
                     and score.stars >= config.UD_MIN_STARS_TO_ALERT
                     and decision is not None
                     and decision.recommendation != "PASS"
@@ -743,9 +780,11 @@ async def underdog_job(context) -> None:
                 )
                 if is_qualified:
                     _n_qualified += 1
-                # ── Debug tracking (line-change) ──────────────────────────────
+                # ── Debug tracking (line-change / cold-start) ─────────────────
                 if score is not None:
-                    if is_qualified:
+                    if is_cold_start:
+                        _lc_rej = "cold_start"
+                    elif is_qualified:
                         _lc_rej = "qualified"
                     elif score.stars < config.UD_MIN_STARS_TO_ALERT:
                         _lc_rej = (
@@ -769,7 +808,7 @@ async def underdog_job(context) -> None:
                         "stars":     score.stars,
                         "stars_d":   getattr(score, "stars_display", "?????"),
                         "rejection": _lc_rej,
-                        "path":      "lc",
+                        "path":      "cs" if is_cold_start else "lc",
                     })
 
             should_alert = is_qualified and (is_removed or (
@@ -810,7 +849,12 @@ async def underdog_job(context) -> None:
             else:
                 _alert_outcome = "new_prop_summary"     # in cycle digest, no individual alert
         elif not should_alert:
-            _alert_outcome = "removal_skipped" if is_removed else "skipped"
+            if is_removed:
+                _alert_outcome = "removal_skipped"
+            elif is_cold_start and score is not None:
+                _alert_outcome = "cold_start_scored"
+            else:
+                _alert_outcome = "skipped"
         elif ud_result.sent:
             _alert_outcome = "removal_sent" if is_removed else "sent"
         elif ud_result.filtered:
@@ -848,7 +892,12 @@ async def underdog_job(context) -> None:
             bet_evidence_json  = decision.to_json()      if decision is not None else None,
             fetched_at         = now,
         )
-        await db.save_underdog_snapshot(record)
+        # Cold-start: buffer for a single bulk transaction after the loop.
+        # Incremental: commit immediately (rare, no lock-contention risk).
+        if is_cold_start:
+            _cold_start_records.append(record)
+        else:
+            await db.save_underdog_snapshot(record)
 
     # ── End-of-cycle new-prop digest ──────────────────────────────────────────
     # One batched summary per cycle — only when new props were detected and there
@@ -866,11 +915,31 @@ async def underdog_job(context) -> None:
             len(_new_props_batch) - _n_new_prop_sent,
         )
 
+    # ── Cold-start bulk save + latch — runs once after the prop loop ──────────
+    if is_cold_start:
+        if _cold_start_records:
+            await db.save_underdog_snapshots_bulk(_cold_start_records)
+            logger.info(
+                "underdog_job: cold-start bulk save — %d records written",
+                len(_cold_start_records),
+            )
+        _cold_start_done = True
+        logger.info(
+            "underdog_job: cold-start complete — scored %d props "
+            "(S=%d A=%d B=%d PASS=%d)",
+            _n_cold_start_scored,
+            _tier_counts.get("S",    0),
+            _tier_counts.get("A",    0),
+            _tier_counts.get("B",    0),
+            _tier_counts.get("PASS", 0),
+        )
+
     logger.info(
-        "underdog_job: fetched=%d scored=%d S=%d A=%d B=%d PASS=%d "
+        "underdog_job: fetched=%d scored=%d cold_start=%d S=%d A=%d B=%d PASS=%d "
         "qualified=%d removed=%d new=%d new_sent=%d",
         len(ud_snaps),
         _n_scored,
+        _n_cold_start_scored,
         _tier_counts.get("S",    0),
         _tier_counts.get("A",    0),
         _tier_counts.get("B",    0),
@@ -884,7 +953,9 @@ async def underdog_job(context) -> None:
     _dbg_lines: list[str] = [
         (
             f"  received={len(ud_snaps)}  analyzed={len(_scored_props)}"
-            f"  (new={_n_new_prop}  line_change={_n_scored}  removed={_n_removed})"
+            f"  (new={_n_new_prop}  line_change={_n_scored}"
+            + (f"  cold_start={_n_cold_start_scored}" if _n_cold_start_scored else "")
+            + f"  removed={_n_removed})"
         ),
     ]
     if _scored_props:

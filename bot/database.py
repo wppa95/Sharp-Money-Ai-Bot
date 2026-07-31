@@ -804,6 +804,22 @@ class Database:
             await s.refresh(record)
         return record
 
+    async def save_underdog_snapshots_bulk(
+        self,
+        records: "list[UnderdogSnapshotRecord]",
+    ) -> None:
+        """Insert a list of UnderdogSnapshotRecords in a single transaction.
+
+        Used by the cold-start path to avoid opening one SQLite write
+        transaction per prop (which causes lock contention with concurrent
+        background jobs).
+        """
+        if not records:
+            return
+        async with self.session() as s:
+            s.add_all(records)
+            await s.commit()
+
     async def get_recent_underdog_snapshots(self, limit: int = 50) -> list["UnderdogSnapshotRecord"]:
         async with self.session() as s:
             result = await s.execute(

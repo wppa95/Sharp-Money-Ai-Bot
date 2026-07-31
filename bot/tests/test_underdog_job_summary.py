@@ -89,6 +89,7 @@ def _make_db(
     db.get_known_underdog_prop_keys          = AsyncMock(return_value=known_keys)
     db.count_today_underdog_alerts           = AsyncMock(return_value=today_alerts)
     db.save_underdog_snapshot                = AsyncMock()
+    db.save_underdog_snapshots_bulk          = AsyncMock()
     db.get_ud_prop_history                   = AsyncMock(return_value=prop_history or [])
     return db
 
@@ -110,16 +111,17 @@ async def _run_job(snapshots, db, *, deliver_result=None):
     ctx = _make_context(db)
 
     with patch.object(me, "_registry", registry):
-        with patch("market_engine.AlertDelivery") as mock_cls:
-            mock_delivery = MagicMock()
-            mock_delivery.deliver_underdog = AsyncMock(return_value=deliver_result)
-            mock_cls.return_value = mock_delivery
-            # The cycle digest is dispatched via broadcast_alert directly (not through
-            # AlertDelivery), so we patch it here to prevent real Telegram calls.
-            with patch("alerts.broadcast_alert",
-                       new_callable=AsyncMock,
-                       return_value={"sent": 1, "failed": 0}):
-                await me.underdog_job(ctx)
+        with patch.object(me, "_cold_start_done", True):
+            with patch("market_engine.AlertDelivery") as mock_cls:
+                mock_delivery = MagicMock()
+                mock_delivery.deliver_underdog = AsyncMock(return_value=deliver_result)
+                mock_cls.return_value = mock_delivery
+                # The cycle digest is dispatched via broadcast_alert directly (not through
+                # AlertDelivery), so we patch it here to prevent real Telegram calls.
+                with patch("alerts.broadcast_alert",
+                           new_callable=AsyncMock,
+                           return_value={"sent": 1, "failed": 0}):
+                    await me.underdog_job(ctx)
 
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
@@ -132,7 +134,8 @@ async def test_no_snapshots_no_summary(caplog):
 
     with caplog.at_level(logging.INFO, logger="market_engine"):
         with patch.object(me, "_registry", registry):
-            await me.underdog_job(ctx)
+            with patch.object(me, "_cold_start_done", True):
+                await me.underdog_job(ctx)
 
     summaries = [r for r in caplog.records if "underdog_job: fetched=" in r.message]
     assert len(summaries) == 0
