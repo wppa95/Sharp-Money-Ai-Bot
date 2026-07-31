@@ -504,6 +504,8 @@ async def underdog_job(context) -> None:
     _n_new_prop_sent:      int       = 0   # immediate new-prop alerts delivered
     _n_cold_start_scored: int       = 0   # props scored during the one-time cold-start pass
     _cold_start_records:  list       = []  # records buffered for bulk save at end of cold-start
+    _cs_before_tiers:     dict       = {}  # tier counts under old calibration (before)
+    _cs_after_tiers:      dict       = {}  # tier counts under new calibration (after)
     _scored_props:        list[dict] = []  # all scored props this cycle — for end-of-cycle debug log
     # Batch for the end-of-cycle new-prop digest sent after the loop.
     # Each entry: {player, stat_type, sport, team, line, score, immediate, game_time}
@@ -546,7 +548,10 @@ async def underdog_job(context) -> None:
         )
 
         # ── Scoring gate ─────────────────────────────────────────────────────
-        from engine.ud_scoring import score_ud_prop, UDPropScore
+        from engine.ud_scoring import (
+            score_ud_prop, UDPropScore,
+            _score_historical_activity_legacy,  # for cold-start before/after comparison
+        )
         from engine.player_validator import validate_player_prop
         from engine.ud_bet_decision import make_ud_bet_decision
         from alerts import DeliveryResult
@@ -745,12 +750,13 @@ async def underdog_job(context) -> None:
                 # first qualifying incremental event.  No alerts are sent.
                 ud_history = await db.get_ud_prop_history(player, stat_type, limit=30)
                 score = score_ud_prop(
-                    player_name  = player,
-                    stat_type    = stat_type,
-                    sport        = snap.sport or "UNKNOWN",
-                    current_line = snap.line or 0.0,
-                    prev_line    = None,   # no change event — baseline score
-                    history      = ud_history,
+                    player_name        = player,
+                    stat_type          = stat_type,
+                    sport              = snap.sport or "UNKNOWN",
+                    current_line       = snap.line or 0.0,
+                    prev_line          = None,   # no change event — baseline score
+                    history            = ud_history,
+                    use_drift_velocity = True,   # cumulative drift from earliest known line
                 )
                 validation = validate_player_prop(
                     player_name  = player,
@@ -759,6 +765,16 @@ async def underdog_job(context) -> None:
                     history      = ud_history,
                     min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
                 )
+                # ── Before/after tier comparison for the completion log ───────
+                _legacy_act   = _score_historical_activity_legacy(ud_history)
+                _legacy_total = 0 + _legacy_act + score.avg_vs_line + score.consistency + score.stability
+                if   _legacy_total >= 80: _legacy_tier = "S"
+                elif _legacy_total >= 65: _legacy_tier = "A"
+                elif _legacy_total >= 50: _legacy_tier = "B"
+                else:                     _legacy_tier = "PASS"
+                _cs_before_tiers[_legacy_tier] = _cs_before_tiers.get(_legacy_tier, 0) + 1
+                _cs_after_tiers[score.tier]    = _cs_after_tiers.get(score.tier, 0) + 1
+
                 _n_cold_start_scored += 1
                 _tier_counts[score.tier] = _tier_counts.get(score.tier, 0) + 1
 
@@ -941,13 +957,18 @@ async def underdog_job(context) -> None:
             )
         _cold_start_done = True
         logger.info(
-            "underdog_job: cold-start complete — scored %d props "
-            "(S=%d A=%d B=%d PASS=%d)",
+            "underdog_job: cold-start complete — scored %d props\n"
+            "  before (old cal):  S=%d  A=%d  B=%d  PASS=%d\n"
+            "   after (new cal):  S=%d  A=%d  B=%d  PASS=%d",
             _n_cold_start_scored,
-            _tier_counts.get("S",    0),
-            _tier_counts.get("A",    0),
-            _tier_counts.get("B",    0),
-            _tier_counts.get("PASS", 0),
+            _cs_before_tiers.get("S",    0),
+            _cs_before_tiers.get("A",    0),
+            _cs_before_tiers.get("B",    0),
+            _cs_before_tiers.get("PASS", 0),
+            _cs_after_tiers.get("S",    0),
+            _cs_after_tiers.get("A",    0),
+            _cs_after_tiers.get("B",    0),
+            _cs_after_tiers.get("PASS", 0),
         )
 
     logger.info(

@@ -71,10 +71,15 @@ _B_THRESHOLD = 50
 
 _STAR_BANDS = ((85, 5), (70, 4), (55, 3), (40, 2))   # (min_score, stars)
 
-# Neutral scores returned when there is insufficient history
-_ACTIVITY_NEUTRAL    = 12   # out of 25 — same rationale as pp_scoring._HIT_RATE_NEUTRAL
-_CONSISTENCY_NEUTRAL =  8   # out of 15
-_STABILITY_NEUTRAL   =  8   # out of 15
+# Neutral scores returned when there is insufficient history.
+# _ACTIVITY_NEUTRAL recalibrated from 12→5 for Underdog's observed move-rate
+# distribution (median 0%, p99 ≈3.3%, maximum observed ≈19%).  The original
+# sportsbook-derived value is kept as _ACTIVITY_NEUTRAL_LEGACY for the
+# before/after comparison logged at the end of every cold-start cycle.
+_ACTIVITY_NEUTRAL        =  5   # out of 25 — Underdog-calibrated neutral
+_ACTIVITY_NEUTRAL_LEGACY = 12   # original sportsbook-derived value; comparison only
+_CONSISTENCY_NEUTRAL     =  8   # out of 15
+_STABILITY_NEUTRAL       =  8   # out of 15
 
 # Small-sample blend weights toward neutral  n records → weight applied to raw score
 _SAMPLE_BLEND = {1: 0.40, 2: 0.55, 3: 0.70, 4: 0.85}  # n >= 5 → weight = 1.0
@@ -184,19 +189,59 @@ def _score_historical_activity(
     sharper market attention.
 
     Blended rate = 0.50×L5 + 0.30×L10 + 0.20×L20
-      >= 0.70 → 25
-      >= 0.55 → 20
-      >= 0.40 → 15
-      >= 0.25 → 10
-      >= 0.10 →  5
-      < 0.10  →  2
 
-    No history (n < 3)  → neutral score (12).
+    Thresholds calibrated to Underdog's observed distribution
+    (91 524 records; median per-prop rate 0%, p99 ≈3.3%, max ≈19%):
+
+      >= 0.15 → 25   top ≈0.2% — maximum observed rate (≈19%)
+      >= 0.10 → 20   very active — only ~4 props in corpus
+      >= 0.05 → 15   active — p99+ (~top 1%)
+      >= 0.02 → 10   notable movement
+      >= 0.005 →  5  occasional movement
+      < 0.005 →  2   effectively static (99.8% of props)
+
+    No history (n < 3)  → neutral score (5).
     Small sample n < 5  → raw score blended toward neutral.
     """
     n = len(history)
     if n < 3:
         return _ACTIVITY_NEUTRAL
+
+    def _rate(records: "list[UnderdogSnapshotRecord]") -> float:
+        if not records:
+            return 0.0
+        return sum(1 for r in records if r.line_moved) / len(records)
+
+    blended = (
+        0.50 * _rate(history[:5])
+        + 0.30 * _rate(history[:10])
+        + 0.20 * _rate(history[:20])
+    )
+
+    if   blended >= 0.15:  raw = 25
+    elif blended >= 0.10:  raw = 20
+    elif blended >= 0.05:  raw = 15
+    elif blended >= 0.02:  raw = 10
+    elif blended >= 0.005: raw =  5
+    else:                  raw =  2
+
+    blend_w = _SAMPLE_BLEND.get(n, 1.0)
+    return max(0, min(int(blend_w * raw + (1.0 - blend_w) * _ACTIVITY_NEUTRAL), 25))
+
+
+def _score_historical_activity_legacy(
+    history: "list[UnderdogSnapshotRecord]",
+) -> int:
+    """
+    Legacy Historical Activity — original sportsbook-calibrated thresholds.
+
+    Kept solely for the before/after comparison log emitted at the end of
+    each cold-start cycle.  Do NOT use for live scoring; use
+    _score_historical_activity() instead.
+    """
+    n = len(history)
+    if n < 3:
+        return _ACTIVITY_NEUTRAL_LEGACY
 
     def _rate(records: "list[UnderdogSnapshotRecord]") -> float:
         if not records:
@@ -217,7 +262,7 @@ def _score_historical_activity(
     else:                 raw =  2
 
     blend_w = _SAMPLE_BLEND.get(n, 1.0)
-    return max(0, min(int(blend_w * raw + (1.0 - blend_w) * _ACTIVITY_NEUTRAL), 25))
+    return max(0, min(int(blend_w * raw + (1.0 - blend_w) * _ACTIVITY_NEUTRAL_LEGACY), 25))
 
 
 def _score_avg_vs_line(
@@ -344,44 +389,86 @@ def _score_stability(
     else:             return  0
 
 
+def _score_drift_velocity(opening_line: float, current_line: float) -> int:
+    """
+    Drift Velocity (0–15) — cold-start baseline for accumulated line migration.
+
+    Applied only when prev_line is unavailable (cold-start path) but at least
+    one history record exists.  Unlike Move Velocity — which captures the
+    conviction of a single sharp-money event — this captures the cumulative
+    drift between the prop's earliest recorded line and the current value.
+
+    Capped at 15 (vs 25 for live velocity) to reflect softer conviction:
+    a prop that drifted 1.0 over 30 cycles is less actionable than one that
+    moved 1.0 in a single session.
+
+    Underdog lines move in 0.5 increments, so thresholds mirror that:
+      drift >= 2.0 → 15   (4+ steps — sustained directional pressure)
+      drift >= 1.0 → 10   (2 steps — meaningful cumulative shift)
+      drift >= 0.5 →  5   (1 step — line moved at least once from opening)
+      < 0.5        →  0   (line stable since first observation)
+    """
+    drift = abs(current_line - opening_line)
+    if   drift >= 2.0: return 15
+    elif drift >= 1.0: return 10
+    elif drift >= 0.5: return  5
+    else:              return  0
+
+
 # ── Public entry point ────────────────────────────────────────────────────────
 
 def score_ud_prop(
-    player_name:  str,
-    stat_type:    str,
-    sport:        str,
-    current_line: float,
-    prev_line:    Optional[float],
-    history:      "list[UnderdogSnapshotRecord]",
+    player_name:        str,
+    stat_type:          str,
+    sport:              str,
+    current_line:       float,
+    prev_line:          Optional[float],
+    history:            "list[UnderdogSnapshotRecord]",
+    use_drift_velocity: bool = False,
 ) -> UDPropScore:
     """
     Produce a UDPropScore for an Underdog prop.
 
     Parameters
     ----------
-    player_name:   Display name of the player.
-    stat_type:     Stat category (e.g. "Fantasy Points", "Hits").
-    sport:         Sport code, upper-cased (e.g. "MLB", "NFL").
-    current_line:  The line value just fetched from the API.
-    prev_line:     The line value from the previous DB record, or None if
-                   this is the first detection.  Used for Move Velocity.
-    history:       Most-recent-first list of UnderdogSnapshotRecord rows for
-                   this player+stat from the database.  Pass [] when no history
-                   exists — Activity / Consistency / Stability return neutral
-                   scores; Avg vs Line returns 0.
+    player_name:          Display name of the player.
+    stat_type:            Stat category (e.g. "Fantasy Points", "Hits").
+    sport:                Sport code, upper-cased (e.g. "MLB", "NFL").
+    current_line:         The line value just fetched from the API.
+    prev_line:            The line value from the previous DB record, or None
+                          if this is the first detection.  Used for Move
+                          Velocity.
+    history:              Most-recent-first list of UnderdogSnapshotRecord rows
+                          for this player+stat.  Pass [] when no history exists
+                          — Activity / Consistency / Stability return neutral
+                          scores; Avg vs Line and drift velocity return 0.
+    use_drift_velocity:   When True and prev_line is None, estimate velocity
+                          from the cumulative drift between the oldest history
+                          record and the current line (cold-start path only).
+                          Has no effect when prev_line is set or history is
+                          empty.  Default False.
 
     Returns
     -------
     A frozen UDPropScore instance.
     """
-    magnitude = abs(current_line - prev_line) if prev_line is not None else 0.0
+    if prev_line is not None:
+        # Live line-change event — standard sharp-money velocity.
+        velocity = _score_move_velocity(abs(current_line - prev_line))
+    elif use_drift_velocity and history:
+        # Cold-start baseline: cumulative drift from the earliest known line.
+        # history is most-recent-first, so history[-1] is the oldest record.
+        opening = history[-1].line_value
+        velocity = _score_drift_velocity(opening, current_line) if opening is not None else 0
+    else:
+        velocity = 0
 
     return UDPropScore(
         player_name         = player_name,
         stat_type           = stat_type,
         sport               = sport,
         current_line        = current_line,
-        move_velocity       = _score_move_velocity(magnitude),
+        move_velocity       = velocity,
         historical_activity = _score_historical_activity(history),
         avg_vs_line         = _score_avg_vs_line(current_line, history),
         consistency         = _score_consistency(history),

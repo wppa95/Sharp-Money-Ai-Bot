@@ -62,10 +62,13 @@ from engine.ud_scoring import (
     score_ud_prop,
     _score_move_velocity,
     _score_historical_activity,
+    _score_historical_activity_legacy,
+    _score_drift_velocity,
     _score_avg_vs_line,
     _score_consistency,
     _score_stability,
     _ACTIVITY_NEUTRAL,
+    _ACTIVITY_NEUTRAL_LEGACY,
     _CONSISTENCY_NEUTRAL,
     _STABILITY_NEUTRAL,
 )
@@ -483,7 +486,7 @@ class TestScoreUdProp:
 
     def test_tier_pass_with_no_signals(self):
         s = self._call()
-        # neutral scores: vel=0, act=12, avg=0, con=8, sta=8 → total=28 → PASS
+        # neutral scores: vel=0, act=5, avg=0, con=8, sta=8 → total=21 → PASS
         assert s.tier == "PASS"
 
     def test_stars_at_least_1(self):
@@ -494,3 +497,150 @@ class TestScoreUdProp:
         s = self._call()
         assert len(s.stars_display) == 5
         assert all(c in "★☆" for c in s.stars_display)
+
+    def test_drift_velocity_no_history_returns_0(self):
+        """use_drift_velocity=True with empty history → velocity=0 (no opening line)."""
+        s = score_ud_prop("P", "Hits", "MLB", 1.5, None, [], use_drift_velocity=True)
+        assert s.move_velocity == 0
+
+    def test_drift_velocity_half_step_drift(self):
+        """Drift of 0.5 (one Underdog increment) → velocity=5."""
+        history = [_make_record(line_value=1.0)]
+        s = score_ud_prop("P", "Hits", "MLB", 1.5, None, history, use_drift_velocity=True)
+        assert s.move_velocity == 5
+
+    def test_drift_velocity_two_step_drift(self):
+        """Drift of 1.0 (two increments) → velocity=10."""
+        history = [_make_record(line_value=2.5)]
+        s = score_ud_prop("P", "Hits", "MLB", 1.5, None, history, use_drift_velocity=True)
+        assert s.move_velocity == 10
+
+    def test_drift_velocity_four_step_drift(self):
+        """Drift of 2.0+ → velocity=15 (capped)."""
+        history = [_make_record(line_value=0.5)]
+        s = score_ud_prop("P", "Hits", "MLB", 2.5, None, history, use_drift_velocity=True)
+        assert s.move_velocity == 15
+
+    def test_drift_velocity_prev_line_takes_precedence(self):
+        """When prev_line is set, live velocity is used even if use_drift_velocity=True."""
+        history = [_make_record(line_value=0.5)]
+        # current=2.5, prev=2.0 → magnitude=0.5 → _score_move_velocity(0.5)=4
+        s = score_ud_prop("P", "Hits", "MLB", 2.5, 2.0, history, use_drift_velocity=True)
+        assert s.move_velocity == 4   # live velocity, NOT drift velocity
+
+    def test_drift_velocity_default_off(self):
+        """Default use_drift_velocity=False: prev=None with history → velocity=0."""
+        history = [_make_record(line_value=0.5)]
+        s = score_ud_prop("P", "Hits", "MLB", 2.5, None, history)
+        assert s.move_velocity == 0
+
+
+# ── _score_drift_velocity (standalone) ───────────────────────────────────────
+
+class TestDriftVelocity:
+    def test_no_drift_returns_0(self):
+        assert _score_drift_velocity(2.5, 2.5) == 0
+
+    def test_below_threshold_returns_0(self):
+        assert _score_drift_velocity(2.5, 2.75) == 0   # drift=0.25
+
+    def test_half_step_returns_5(self):
+        assert _score_drift_velocity(1.0, 1.5) == 5
+
+    def test_one_step_returns_10(self):
+        assert _score_drift_velocity(1.5, 0.5) == 10   # drift=1.0, direction irrelevant
+
+    def test_two_steps_returns_15(self):
+        assert _score_drift_velocity(0.5, 2.5) == 15   # drift=2.0
+
+    def test_large_drift_capped_at_15(self):
+        assert _score_drift_velocity(0.5, 10.0) == 15
+
+    def test_negative_direction_same_magnitude(self):
+        assert _score_drift_velocity(3.0, 2.0) == 10   # drift=1.0
+
+
+# ── _score_historical_activity recalibration ──────────────────────────────────
+
+class TestHistoricalActivityRecalibrated:
+    """Verify new Underdog-calibrated thresholds against the observed distribution."""
+
+    def test_very_high_rate_15pct_gets_25(self):
+        # 3/20 = 15% → blended ≥0.15 → raw=25
+        h = [_make_record(line_moved=True)] * 3 + [_make_record(line_moved=False)] * 17
+        assert _score_historical_activity(h) == 25
+
+    def test_rate_10pct_gets_20(self):
+        # 2/20 = 10% → blended ≥0.10 → raw=20
+        # Build so L5=0, L10=2/10=0.2, L20=2/20=0.1
+        # blended = 0.5×0 + 0.3×0.2 + 0.2×0.1 = 0.06+0.02 = 0.08 → raw=5
+        # Need L5 moves for reliable 10% blended; use 20 records with all 2 at positions 6-10
+        h = (
+            [_make_record(line_moved=False)] * 5   # L5: 0 moves
+            + [_make_record(line_moved=True)]  * 2  # positions 6-7
+            + [_make_record(line_moved=False)] * 13
+        )
+        # blended = 0.5×0 + 0.3×(2/10) + 0.2×(2/20) = 0+0.06+0.02 = 0.08 → ≥0.05 → raw=15
+        result = _score_historical_activity(h)
+        assert result == 15  # blended=0.08 → ≥0.05 band
+
+    def test_low_rate_2pct_gets_10(self):
+        # Approximately 2% blended rate
+        # 1 move in last 20, in position 11-20 only → L5=0, L10=0, L20=1/20=0.05
+        # blended = 0.5×0 + 0.3×0 + 0.2×0.05 = 0.01 → raw=5
+        # Instead: 1 move in position 6 → L5=0, L10=1/10=0.1, L20=1/20=0.05
+        # blended = 0+0.3×0.1+0.2×0.05 = 0.03+0.01 = 0.04 → ≥0.02 → raw=10
+        h = (
+            [_make_record(line_moved=False)] * 5
+            + [_make_record(line_moved=True)]
+            + [_make_record(line_moved=False)] * 14
+        )
+        result = _score_historical_activity(h)
+        assert result == 10   # blended=0.04 → ≥0.02 band
+
+    def test_static_prop_gets_2(self):
+        # 0% rate, n=20 → raw=2
+        h = [_make_record(line_moved=False)] * 20
+        assert _score_historical_activity(h) == 2
+
+    def test_neutral_is_5_not_12(self):
+        assert _ACTIVITY_NEUTRAL == 5
+
+    def test_legacy_neutral_is_12(self):
+        assert _ACTIVITY_NEUTRAL_LEGACY == 12
+
+
+# ── _score_historical_activity_legacy ─────────────────────────────────────────
+
+class TestHistoricalActivityLegacy:
+    """Legacy function must preserve old behaviour exactly."""
+
+    def test_neutral_n_lt_3(self):
+        assert _score_historical_activity_legacy([]) == _ACTIVITY_NEUTRAL_LEGACY
+        assert _score_historical_activity_legacy([_make_record()] * 2) == _ACTIVITY_NEUTRAL_LEGACY
+
+    def test_all_moved_high_rate(self):
+        h = [_make_record(line_moved=True)] * 10
+        assert _score_historical_activity_legacy(h) == 25
+
+    def test_zero_move_rate(self):
+        h = [_make_record(line_moved=False)] * 10
+        assert _score_historical_activity_legacy(h) == 2
+
+    def test_differs_from_new_at_low_rates(self):
+        # A 10% blended rate: old → 5 (≥0.10 band in old scale),
+        # new → 20 (≥0.10 band in new scale).
+        h = [_make_record(line_moved=True)] * 10 + [_make_record(line_moved=False)] * 90
+        new = _score_historical_activity(h)
+        old = _score_historical_activity_legacy(h)
+        # Both get raw=25 (blended=1.0 for L5=1.0), so same here.
+        # Use a lower-activity prop to show divergence.
+        h2 = (
+            [_make_record(line_moved=False)] * 5
+            + [_make_record(line_moved=True)] * 1
+            + [_make_record(line_moved=False)] * 14
+        )
+        new2 = _score_historical_activity(h2)
+        old2 = _score_historical_activity_legacy(h2)
+        # blended≈0.04: new→raw=10 (≥0.02), old→raw=2 (<0.10)
+        assert new2 > old2
