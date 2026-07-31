@@ -921,17 +921,26 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     from engine.player_results import compute_hit_rates as _compute_hr
     import asyncio as _asyncio
 
-    async def _get_hr(plh: "PropLineHistory") -> "object":
+    async def _get_hr(plh: "PropLineHistory") -> "tuple":
+        """Return (PlayerHitRates | None, opponent_str | None)."""
         try:
             results = await _db.get_player_results(
                 plh.player_name, plh.sport, plh.stat_type, limit=30
             )
-            return _compute_hr(results, plh.line_value) if results else None
+            if not results:
+                return None, None
+            # Infer current opponent from the most recent game result
+            # (results are sorted newest-first by the DB query).
+            # In series sports (MLB etc.) the last 1-3 games share the same
+            # opponent, making this a reliable proxy for the current matchup.
+            _opp: Optional[str] = results[0].opponent if results else None
+            hr = _compute_hr(results, plh.line_value, opponent=_opp)
+            return hr, _opp
         except Exception:
-            return None
+            return None, None
 
-    _hr_raw   = await _asyncio.gather(*[_get_hr(plh) for plh, _ in picks], return_exceptions=True)
-    _hit_rates = [None if isinstance(r, Exception) else r for r in _hr_raw]
+    _hr_raw    = await _asyncio.gather(*[_get_hr(plh) for plh, _ in picks], return_exceptions=True)
+    _hit_rates = [(None, None) if isinstance(r, Exception) else r for r in _hr_raw]
 
     # ── 5. Format ─────────────────────────────────────────────────────────────
     def _tier_from_conf(c: int) -> str:
@@ -1001,7 +1010,7 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             entry += f"\n  {' · '.join(detail)}"
 
         # Historical performance context from existing DB pipeline
-        hr = _hit_rates[rank - 1]
+        hr, _opp = _hit_rates[rank - 1]
         if hr is not None and getattr(hr, "has_real_data", False):
             _perf: list[str] = []
             for _lbl, _ws in [
@@ -1012,6 +1021,16 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                     _perf.append(f"<b>{_lbl}:</b> {_ws.over_display()}")
             if _perf:
                 entry += f"\n  📊 vs {plh.line_value:.1f} → " + "  ·  ".join(_perf[:3])
+
+            # H2H context — only shown when ≥3 games vs current opponent exist
+            if hr.h2h is not None and hr.h2h.games >= 3 and _opp:
+                _h = hr.h2h
+                _opp_short = _opp[:20] + "…" if len(_opp) > 20 else _opp
+                entry += (
+                    f"\n  🆚 <b>H2H vs {_opp_short}:</b>"
+                    f"  {_h.over_count}/{_h.games} ({_h.hit_rate:.0%})"
+                    f"  avg {_h.average:.1f}"
+                )
 
         out.append(entry)
 
