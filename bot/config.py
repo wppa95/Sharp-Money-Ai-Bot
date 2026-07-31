@@ -127,7 +127,7 @@ class Config:
     MIN_UNDERDOG_LINE_CHANGE: float = float(os.environ.get("MIN_UNDERDOG_LINE_CHANGE", "0.5"))
     # Minimum star rating (1–5) required to send an Underdog alert.
     # 3★ corresponds to a score of 55+ (B-tier or better).  Set to 1 to disable.
-    UD_MIN_STARS_TO_ALERT:    int   = int(os.environ.get("UD_MIN_STARS_TO_ALERT", "3"))
+    UD_MIN_STARS_TO_ALERT:    int   = int(os.environ.get("UD_MIN_STARS_TO_ALERT", "4"))
     # New-prop alert: used for DB qualification tracking (summary inclusion gate).
     # Props at or below this line appear in the end-of-cycle summary regardless
     # of score.  Set to 0.0 to use score-only qualification.
@@ -160,6 +160,21 @@ class Config:
         ).split(",")
         if s.strip()
     ))
+
+    # Sports whose Underdog bet alerts are delivered to Telegram.
+    # ─────────────────────────────────────────────────────────────────────────
+    # Primary (real result data available → OVER/UNDER picks enabled):
+    #   MLB   — MLB Stats API  (statsapi.mlb.com)
+    #   WNBA  — ESPN gamelog   (site.api.espn.com)
+    #
+    # Tracking only (data collected + scored, no Telegram bet alerts):
+    #   NBA, NFL — ESPN gamelog available but user-configured as tracking only.
+    #
+    # Intended but no real result data yet (self-suppress via PASS decision):
+    #   CS2, Tennis, Soccer, NPB, KBO — no public per-game stat API supported;
+    #   the decision engine returns PASS for these, so they never alert even if
+    #   listed here.  Add when real result APIs are integrated.
+    UD_ALERT_SPORTS_RAW: str = os.environ.get("UD_ALERT_SPORTS", "MLB,WNBA")
 
     # Dedup windows for new alert types (seconds)
     INEFFICIENCY_DEDUP_WINDOW: int = int(os.environ.get("INEFFICIENCY_DEDUP_WINDOW", "1800"))
@@ -219,6 +234,11 @@ class Config:
         if not raw:
             return set()
         return {int(uid.strip()) for uid in raw.split(",") if uid.strip()}
+
+    @property
+    def ud_alert_sports(self) -> frozenset[str]:
+        """Sports for which Underdog bet alerts are delivered (others: tracking only)."""
+        return frozenset(s.strip() for s in self.UD_ALERT_SPORTS_RAW.split(",") if s.strip())
 
     @property
     def prizepicks_leagues(self) -> list[str]:

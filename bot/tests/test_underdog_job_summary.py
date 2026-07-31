@@ -5,7 +5,7 @@ Scenarios:
   - No pick'em snapshots returned → no summary line (early return)
   - Only removed props → fetched=N scored=0 S=0 A=0 B=0 PASS=0 qualified=0 removed=N
   - Line-changed prop that scores PASS → scored=1 PASS=1 qualified=0
-  - Line-changed prop that scores B-tier (≥3★) → scored=1 B=1 qualified=1
+  - Line-changed prop that scores A/S-tier with real OVER/UNDER pick → qualified=1
   - Mixed batch (removed + PASS-scored + unchanged) → all counters correct
   - Exactly one summary line emitted per run
   - All eight fields present in the message
@@ -184,8 +184,12 @@ async def test_line_changed_scores_pass(caplog):
 @pytest.mark.asyncio
 async def test_line_changed_qualifies(caplog):
     from alerts import DeliveryResult
-    # Large move (4 units) + rich consistent history → B+ tier
-    snap = _make_snap("Player A", "Hits", 7.0)
+    from engine.player_results import PlayerHitRates, WindowStats
+
+    # Large move (4 units) + rich consistent history → A/S tier.
+    # _fetch_and_compute_hit_rates is patched to return real-looking hit_rates
+    # so the decision engine can produce an OVER pick (required to qualify).
+    snap = _make_snap("Player A", "Hits", 7.0, sport="MLB")
     history = [
         _make_db_record(
             "Player A", "Hits",
@@ -200,11 +204,26 @@ async def test_line_changed_qualifies(caplog):
         prop_history=history,
     )
 
+    # Build hit_rates that will produce an OVER pick (all windows ~80%).
+    def _win(n, r):
+        oc = round(n * r)
+        return WindowStats(games=n, over_count=oc, under_count=n-oc, hit_rate=r, average=8.0)
+
+    fake_hit_rates = PlayerHitRates(
+        player_name="Player A", stat_type="hits", current_line=7.0,
+        l5=_win(5, 0.80), l10=_win(10, 0.80),
+        l20=_win(20, 0.75), l30=_win(30, 0.70),
+        season=_win(50, 0.70), h2h=None,
+        has_real_data=True, total_games=50,
+    )
+
     with caplog.at_level(logging.INFO, logger="market_engine"):
-        await _run_job(
-            [snap], db,
-            deliver_result=DeliveryResult(sent=True, recipients_sent=1),
-        )
+        with patch("market_engine._fetch_and_compute_hit_rates",
+                   new=AsyncMock(return_value=fake_hit_rates)):
+            await _run_job(
+                [snap], db,
+                deliver_result=DeliveryResult(sent=True, recipients_sent=1),
+            )
 
     summary = next(r for r in caplog.records if "underdog_job: fetched=" in r.message)
     assert "fetched=1" in summary.message

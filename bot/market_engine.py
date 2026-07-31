@@ -586,9 +586,11 @@ async def underdog_job(context) -> None:
                     "UD new-prop validation blocked: %s | %s | %s",
                     player, stat_type, validation.reason,
                 )
-            # Fetch real game results — required before any directional pick
+            # Fetch real game results — required before any directional pick.
+            # Also fetch for np_immediate props (e.g. 0.5-line priority stats)
+            # even when they score PASS tier (no prev_line → low movement score).
             hit_rates = None
-            if validation.has_supporting_data and score.tier != "PASS":
+            if validation.has_supporting_data and (score.tier != "PASS" or np_immediate):
                 hit_rates = await _fetch_and_compute_hit_rates(
                     db, player, snap.sport or "UNKNOWN", stat_type, line_val
                 )
@@ -612,7 +614,15 @@ async def underdog_job(context) -> None:
                 "validation": validation,
                 "decision":   decision,
             })
-            if np_immediate and chat_ids:
+            # Send only when: S/A score, real directional pick, and sport is
+            # in the betting-alert whitelist (NBA/NFL are tracking-only).
+            _np_bet_ready = (
+                np_immediate
+                and decision is not None
+                and decision.recommendation != "PASS"
+                and (snap.sport or "UNKNOWN") in config.ud_alert_sports
+            )
+            if _np_bet_ready and chat_ids:
                 delivery  = AlertDelivery(db, bot, chat_ids)
                 ud_result = await delivery.deliver_underdog(
                     player_name = player,
@@ -682,20 +692,23 @@ async def underdog_job(context) -> None:
             # Removal notices: only Telegram-alert for three conditions.
             # All removals are still saved to the DB regardless.
             if is_removed:
+                # Removal alerts: only for props that previously triggered a
+                # quality alert or reached S/A grade (B-tier removals suppressed).
                 is_qualified = (
                     prev_record is not None and (
-                        prev_record.alert_sent                        # previously sent a quality alert
-                        or prev_record.score_tier in ("S", "A", "B") # strong grade
-                        or (                                          # was a 0.5 opportunity
-                            prev_record.line_value is not None
-                            and prev_record.line_value <= 0.5
-                        )
+                        prev_record.alert_sent                   # previously sent a quality alert
+                        or prev_record.score_tier in ("S", "A") # S/A grade only — B suppressed
                     )
                 )
             else:
-                # Line-change props: require B-tier or better.
+                # Line-change props: require A-tier or better, a real directional
+                # pick from the decision engine, and sport in betting whitelist.
                 is_qualified = (
-                    score is not None and score.stars >= config.UD_MIN_STARS_TO_ALERT
+                    score is not None
+                    and score.stars >= config.UD_MIN_STARS_TO_ALERT
+                    and decision is not None
+                    and decision.recommendation != "PASS"
+                    and (snap.sport or "UNKNOWN") in config.ud_alert_sports
                 )
                 if is_qualified:
                     _n_qualified += 1

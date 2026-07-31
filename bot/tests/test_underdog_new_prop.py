@@ -27,6 +27,25 @@ from unittest.mock import AsyncMock, MagicMock, patch, call
 import market_engine as me
 
 
+# ── Hit-rate helper (required for new-prop decision gate) ─────────────────────
+
+def _make_hit_rates(over_rate: float = 0.80):
+    """Return a PlayerHitRates object that makes the decision engine pick OVER."""
+    from engine.player_results import PlayerHitRates, WindowStats
+
+    def _w(n, r):
+        oc = round(n * r)
+        return WindowStats(games=n, over_count=oc, under_count=n - oc,
+                           hit_rate=r, average=1.5)
+    return PlayerHitRates(
+        player_name="test", stat_type="hits", current_line=0.5,
+        l5=_w(5, over_rate), l10=_w(10, over_rate),
+        l20=_w(20, over_rate - 0.05), l30=_w(30, over_rate - 0.10),
+        season=_w(50, over_rate - 0.10), h2h=None,
+        has_real_data=True, total_games=50,
+    )
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _snap(player: str, stat: str, line: float = 2.5, *, removed: bool = False) -> MagicMock:
@@ -84,7 +103,13 @@ def _make_context(db: MagicMock) -> MagicMock:
     return ctx
 
 
-async def _run_job(snapshots, db, *, deliver_result=None):
+async def _run_job(snapshots, db, *, deliver_result=None, hit_rates=None):
+    """Run underdog_job under full mocking.
+
+    Pass *hit_rates* to patch ``_fetch_and_compute_hit_rates`` so the decision
+    engine can produce an OVER/UNDER pick — required for the new-prop immediate
+    alert gate.  Omit when testing paths that should NOT produce an alert.
+    """
     from alerts import DeliveryResult
     if deliver_result is None:
         deliver_result = DeliveryResult(sent=True, recipients_sent=1)
@@ -93,31 +118,33 @@ async def _run_job(snapshots, db, *, deliver_result=None):
     registry.fetch_pickem = AsyncMock(return_value=snapshots)
     ctx = _make_context(db)
 
+    hit_rates_mock = AsyncMock(return_value=hit_rates)
+
     with patch.object(me, "_registry", registry):
-        with patch("market_engine.AlertDelivery") as mock_cls:
-            mock_delivery = MagicMock()
-            mock_delivery.deliver_underdog = AsyncMock(return_value=deliver_result)
-            mock_cls.return_value = mock_delivery
-            # The cycle digest is dispatched via broadcast_alert directly (not through
-            # AlertDelivery), so we patch it here to prevent real Telegram calls.
-            with patch("alerts.broadcast_alert",
-                       new_callable=AsyncMock,
-                       return_value={"sent": 1, "failed": 0}):
-                await me.underdog_job(ctx)
-            return mock_delivery
+        with patch("market_engine._fetch_and_compute_hit_rates", hit_rates_mock):
+            with patch("market_engine.AlertDelivery") as mock_cls:
+                mock_delivery = MagicMock()
+                mock_delivery.deliver_underdog = AsyncMock(return_value=deliver_result)
+                mock_cls.return_value = mock_delivery
+                # The cycle digest is dispatched via broadcast_alert directly (not through
+                # AlertDelivery), so we patch it here to prevent real Telegram calls.
+                with patch("alerts.broadcast_alert",
+                           new_callable=AsyncMock,
+                           return_value={"sent": 1, "failed": 0}):
+                    await me.underdog_job(ctx)
+                return mock_delivery
 
 
 # ── New-prop detection ─────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_low_line_new_prop_triggers_alert(caplog):
-    """A new prop with 0.5 line AND supporting history triggers an immediate alert."""
+    """A new prop with 0.5 line + supporting history + real OVER pick triggers an immediate alert."""
     snaps = [_snap("Aaron Judge", "Home Runs", 0.5)]
-    # Provide 6 history records so validation gate passes (need >= 5 by default)
     db = _make_db(known_keys=set(), prop_history=_fake_history(6))
 
     with caplog.at_level(logging.INFO, logger="market_engine"):
-        delivery = await _run_job(snaps, db)
+        delivery = await _run_job(snaps, db, hit_rates=_make_hit_rates())
 
     delivery.deliver_underdog.assert_called_once()
     _, kwargs = delivery.deliver_underdog.call_args
@@ -204,11 +231,10 @@ async def test_new_prop_outcome_stored_as_new_prop_sent(caplog):
     """When a new-prop alert is sent, alert_outcome='new_prop_sent' in the DB record."""
     from alerts import DeliveryResult
     snaps = [_snap("Aaron Judge", "Home Runs", 0.5)]
-    # Provide history so validation gate passes and immediate alert fires
     db = _make_db(known_keys=set(), prop_history=_fake_history(6))
 
     sent_result = DeliveryResult(sent=True, recipients_sent=1)
-    await _run_job(snaps, db, deliver_result=sent_result)
+    await _run_job(snaps, db, deliver_result=sent_result, hit_rates=_make_hit_rates())
 
     db.save_underdog_snapshot.assert_called_once()
     record = db.save_underdog_snapshot.call_args[0][0]
@@ -274,7 +300,7 @@ async def test_new_prop_sent_increments_new_sent_counter(caplog):
     sent = DeliveryResult(sent=True, recipients_sent=1)
 
     with caplog.at_level(logging.INFO, logger="market_engine"):
-        await _run_job(snaps, db, deliver_result=sent)
+        await _run_job(snaps, db, deliver_result=sent, hit_rates=_make_hit_rates())
 
     summary = next(r.message for r in caplog.records if "fetched=" in r.message)
     assert "new=2" in summary
@@ -380,15 +406,14 @@ async def test_priority_stat_high_line_goes_to_digest_not_immediate():
 
 @pytest.mark.asyncio
 async def test_priority_stat_at_half_line_triggers_immediate_alert():
-    """A priority stat AT 0.5 line WITH supporting history triggers an immediate alert."""
+    """A priority stat AT 0.5 line + history + real OVER pick triggers an immediate alert."""
     snaps = [_snap("Aaron Judge", "Home Runs", 0.5)]
-    # History is required — validation gate blocks immediate alerts without data
     db = _make_db(known_keys=set(), prop_history=_fake_history(6))
 
     from alerts import DeliveryResult
     sent = DeliveryResult(sent=True, recipients_sent=1)
 
-    delivery = await _run_job(snaps, db, deliver_result=sent)
+    delivery = await _run_job(snaps, db, deliver_result=sent, hit_rates=_make_hit_rates())
 
     delivery.deliver_underdog.assert_called_once()
     _, kwargs = delivery.deliver_underdog.call_args
