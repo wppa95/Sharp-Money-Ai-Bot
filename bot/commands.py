@@ -1014,6 +1014,32 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     _hr_raw    = await _asyncio.gather(*[_get_hr(plh) for plh, _ in picks], return_exceptions=True)
     _hit_rates = [(None, None) if isinstance(r, Exception) else r for r in _hr_raw]
 
+    # ── 4b. Fetch bet recommendations + alternate lines concurrently ──────────
+    from engine.player_prop_market import _line_label as _ll
+
+    _rec_map: dict = {}
+    try:
+        _rec_map = await _db.get_ud_recommendations_bulk(
+            [(plh.player_name, plh.sport, plh.stat_type) for plh, _ in picks],
+            since_hours=24,
+        )
+    except Exception:
+        pass   # display falls back to "—" per prop
+
+    _alt_raw = await _asyncio.gather(
+        *[
+            _db.get_all_ud_lines_for_prop(
+                plh.player_name, plh.sport, plh.stat_type, since_hours=24
+            )
+            for plh, _ in picks
+        ],
+        return_exceptions=True,
+    )
+    _alt_lines: list[list[float]] = [
+        [] if isinstance(r, Exception) else (r or [])
+        for r in _alt_raw
+    ]
+
     # ── 5. Format ─────────────────────────────────────────────────────────────
     def _tier_from_conf(c: int) -> str:
         if c >= 90: return "S"
@@ -1021,8 +1047,11 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if c >= 50: return "B"
         return "—"
 
-    def _lv(v: Optional[float]) -> str:
-        return f"<code>{v:.1f}</code>" if v is not None else "—"
+    _PICK_LABEL: dict[str, str] = {
+        "OVER":  "OVER (More) ⬆",
+        "UNDER": "UNDER (Less) ⬇",
+        "PASS":  "PASS ⚪",
+    }
 
     header = f"🟣 <b>Player Prop Picks — {today}</b>"
     if sport_filter:
@@ -1035,81 +1064,97 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         tier_icon = _TIER_EMOJI.get(tier, "⚪")
         stars     = _stars_from_conf(float(conf))
 
-        # Provider lines — only show providers with real data
-        pp_pl = comp.lines.get("PrizePicks") if comp else None
-        ud_pl = comp.lines.get("Underdog")   if comp else None
+        # Underdog line (canonical for this prop)
+        ud_pl = comp.lines.get("Underdog") if comp else None
+        ud_v  = ud_pl.line_value if (ud_pl and ud_pl.available) else plh.line_value
 
-        pp_v = pp_pl.line_value if (pp_pl and pp_pl.available) else None
-        ud_v = ud_pl.line_value if (ud_pl and ud_pl.available) else plh.line_value
+        # Bet direction from UnderdogSnapshot scoring
+        rec_key  = (plh.player_name, plh.sport, plh.stat_type)
+        bet_rec, bet_conf = _rec_map.get(rec_key, (None, None))
+        pick_label = _PICK_LABEL.get(bet_rec or "", "—")
 
-        line_parts = [f"🐶 {_lv(ud_v)}"]
-        if pp_v is not None:
-            line_parts.append(f"🟣 {_lv(pp_v)}")
-        lines_row = "  ".join(line_parts)
-
-        # Best available — only when multiple providers agree/disagree
-        best_row = ""
-        if comp and pp_v is not None and ud_v is not None:
-            # Two providers: show OVER/UNDER-friendly split
-            if comp.best_over_app and comp.best_under_app:
-                oe = _PROV_EMOJI.get(comp.best_over_app,  "?")
-                ue = _PROV_EMOJI.get(comp.best_under_app, "?")
-                best_row = (
-                    f"  ⬆ OVER → {oe} {_lv(comp.best_over_line)}"
-                    f"  ·  ⬇ UNDER → {ue} {_lv(comp.best_under_line)}"
-                )
-
-        # Movement + confidence + timing
-        detail: list[str] = []
+        # Line movement annotation
+        move_str = ""
         if comp and comp.movement is not None and comp.movement != 0:
             sign  = "+" if comp.movement > 0 else ""
             arrow = "↑" if comp.movement > 0 else "↓"
-            detail.append(f"<code>{sign}{comp.movement:.1f} {arrow}</code>")
-        detail.append(f"Conf: {conf}/100 {tier_icon}")
+            move_str = f"  <code>{sign}{comp.movement:.1f}{arrow}</code>"
+
+        # Game time
         gt = plh.game_time
+        gt_str = ""
         if gt:
             lbl = _fmt_gt(gt)
             if lbl:
-                detail.append(f"⏰ {lbl}")
+                gt_str = f"⏰ {lbl}  ·  "
 
-        entry = (
-            f"<b>#{rank} {plh.player_name}</b>  ·  {plh.stat_type}  {stars}\n"
-            f"  {plh.sport}  |  {lines_row}"
-        )
-        if best_row:
-            entry += f"\n{best_row}"
-        if detail:
-            entry += f"\n  {' · '.join(detail)}"
+        # ── Build entry ───────────────────────────────────────────────────────
+        entry_lines: list[str] = [
+            "━━━━━━━━━━━━━━━━━━",
+            f"<b>#{rank} {plh.player_name}</b>",
+            f"Market: {plh.stat_type}",
+            f"🐶 Underdog Line: <code>{ud_v:.1f}</code>  {_ll(ud_v)}",
+            f"{gt_str}{plh.sport}",
+            "",
+            f"🎯 Pick: <b>{pick_label}</b>",
+            f"Confidence: {conf}/100  {stars}",
+            f"Tier: {tier} {tier_icon}{move_str}",
+        ]
 
-        # Historical performance context from existing DB pipeline
+        # ── Evidence block ────────────────────────────────────────────────────
         hr, _opp = _hit_rates[rank - 1]
-        if hr is not None and getattr(hr, "has_real_data", False):
-            _perf: list[str] = []
-            for _lbl, _ws in [
-                ("L5", hr.l5), ("L10", hr.l10), ("L20", hr.l20),
-                ("L30", hr.l30), ("Season", hr.season),
+        has_evidence = hr is not None and getattr(hr, "has_real_data", False)
+
+        if has_evidence:
+            evid: list[str] = []
+            for _wlbl, _ws in [
+                ("L5",     hr.l5),
+                ("L10",    hr.l10),
+                ("L20",    hr.l20),
+                ("L30",    hr.l30),
+                ("Season", hr.season),
             ]:
                 if _ws and _ws.games >= 3:
-                    _perf.append(f"<b>{_lbl}:</b> {_ws.over_display()}")
-            if _perf:
-                entry += f"\n  📊 vs {plh.line_value:.1f} → " + "  ·  ".join(_perf[:3])
+                    evid.append(
+                        f"  {_wlbl:<7} {_ws.over_count}/{_ws.games}"
+                        f" ({_ws.hit_rate:.0%})  avg {_ws.average:.1f}"
+                    )
 
-            # H2H context — only shown when ≥3 games vs current opponent exist
+            if evid:
+                entry_lines.append("")
+                entry_lines.append(f"📊 <b>Evidence</b>  <i>(vs {ud_v:.1f} line)</i>")
+                entry_lines.extend(evid)
+
+            # H2H — only shown when ≥3 games vs current opponent exist
             if hr.h2h is not None and hr.h2h.games >= 3 and _opp:
                 _h = hr.h2h
-                _opp_short = _opp[:20] + "…" if len(_opp) > 20 else _opp
-                entry += (
-                    f"\n  🆚 <b>H2H vs {_opp_short}:</b>"
-                    f"  {_h.over_count}/{_h.games} ({_h.hit_rate:.0%})"
+                _opp_short = _opp[:18] + "…" if len(_opp) > 18 else _opp
+                entry_lines.append(
+                    f"  H2H vs {_opp_short} ({_h.games}g): "
+                    f"{_h.over_count}/{_h.games} ({_h.hit_rate:.0%})"
                     f"  avg {_h.average:.1f}"
                 )
 
-        out.append(entry)
+        # ── Alternate lines (if Underdog offers multiple) ─────────────────────
+        alt = _alt_lines[rank - 1]
+        # Only show when there are ≥2 distinct lines
+        if len(alt) >= 2:
+            alt_str = "  ".join(_ll(v).split("/")[0].split(" ")[0] + f" <code>{v:.1f}</code>" for v in alt)
+            entry_lines.append("")
+            entry_lines.append("📊 <b>Available Underdog Lines:</b>")
+            alt_labeled = "  ".join(
+                f"{_ll(v).split(' ')[0]} <code>{v:.1f}</code>" for v in alt
+            )
+            entry_lines.append(f"  {alt_labeled}")
+            entry_lines.append(f"  Current Selected: 🐶 <code>{ud_v:.1f}</code>")
+
+        out.append("\n".join(entry_lines))
 
     if len(picks) >= limit and not sport_filter:
         out.append(f"\n<i>Showing top {limit}. Use /picks [sport] to filter.</i>")
 
-    await update.message.reply_text("\n".join(out), parse_mode=ParseMode.HTML)
+    # Telegram HTML message; join props with blank line separator
+    await update.message.reply_text("\n\n".join(out), parse_mode=ParseMode.HTML)
 
 
 async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -691,6 +691,100 @@ class Database:
             rows = list(result.scalars().all())
         return rows[:limit]
 
+    async def get_ud_recommendations_bulk(
+        self,
+        player_stat_triples: "list[tuple[str, str, str]]",
+        since_hours: int = 24,
+    ) -> "dict[tuple[str, str, str], tuple[str | None, int | None]]":
+        """
+        Return the most-recent bet_recommendation + bet_confidence from
+        UnderdogSnapshotRecord for each (player_name, sport, stat_type) triple.
+
+        Used by /picks to display the OVER/UNDER pick direction without
+        changing any scoring or pick-generation logic.
+
+        Returns a dict keyed by (player_name, sport, stat_type) →
+        (bet_recommendation, bet_confidence).  Missing props get (None, None).
+        """
+        if not player_stat_triples:
+            return {}
+        from datetime import timedelta
+        from sqlalchemy import or_, and_
+        cutoff = datetime.utcnow() - timedelta(hours=since_hours)
+
+        # Build a filter for each triple so we can do one round-trip.
+        conditions = [
+            and_(
+                UnderdogSnapshotRecord.player_name == pn,
+                UnderdogSnapshotRecord.sport       == sp,
+                UnderdogSnapshotRecord.stat_type   == st,
+            )
+            for pn, sp, st in player_stat_triples
+        ]
+
+        async with self.session() as s:
+            # Subquery: max(id) per (player_name, sport, stat_type), non-removed
+            subq = (
+                select(func.max(UnderdogSnapshotRecord.id))
+                .where(
+                    UnderdogSnapshotRecord.removed    == False,  # noqa: E712
+                    UnderdogSnapshotRecord.fetched_at >= cutoff,
+                    or_(*conditions),
+                )
+                .group_by(
+                    UnderdogSnapshotRecord.player_name,
+                    UnderdogSnapshotRecord.sport,
+                    UnderdogSnapshotRecord.stat_type,
+                )
+                .scalar_subquery()
+            )
+            result = await s.execute(
+                select(UnderdogSnapshotRecord).where(
+                    UnderdogSnapshotRecord.id.in_(subq)
+                )
+            )
+            rows = result.scalars().all()
+
+        return {
+            (r.player_name, r.sport, r.stat_type): (
+                r.bet_recommendation, r.bet_confidence
+            )
+            for r in rows
+        }
+
+    async def get_all_ud_lines_for_prop(
+        self,
+        player_name: str,
+        sport: str,
+        stat_type: str,
+        since_hours: int = 24,
+    ) -> "list[float]":
+        """
+        Return all distinct, active Underdog line_values for a given
+        (player_name, sport, stat_type) combination, sorted ascending.
+
+        Used by /picks to show alternate lines (goblin / standard / high).
+        Returns a single-element list when only one line is available, so
+        callers can skip the multi-line display when len == 1.
+        """
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(hours=since_hours)
+        async with self.session() as s:
+            result = await s.execute(
+                select(PropLineHistory.line_value)
+                .where(
+                    PropLineHistory.provider    == "Underdog",
+                    PropLineHistory.player_name == player_name,
+                    PropLineHistory.sport       == sport,
+                    PropLineHistory.stat_type   == stat_type,
+                    PropLineHistory.fetched_at  >= cutoff,
+                    PropLineHistory.removed.isnot(True),
+                )
+                .distinct()
+                .order_by(PropLineHistory.line_value)
+            )
+            return [row[0] for row in result.all()]
+
     async def get_recent_player_prop_lines(
         self, sportsbooks: "list[str]", since_hours: int = 4
     ) -> "list[OddsRecord]":
