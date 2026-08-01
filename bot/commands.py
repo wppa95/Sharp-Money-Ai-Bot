@@ -2330,6 +2330,278 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text("⚠️ /tracking output too large — check bot logs.")
 
 
+async def cmd_analyst(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/analyst — Show analyst assessment for the most recent prop picks."""
+    if not _check_allowed(update):
+        await update.message.reply_text("⛔ Unauthorized.")
+        return
+    if _db is None:
+        await update.message.reply_text("⚠️ Database not ready.")
+        return
+
+    try:
+        from engine.analyst import build_analyst_narrative, format_analyst_telegram
+        from engine.candidate import candidate_from_ud_decision
+
+        # Retrieve recent alerted Underdog snapshots with bet recommendations
+        snaps = await _db.get_recent_underdog_snapshots(limit=5)
+        alerted = [
+            s for s in snaps
+            if getattr(s, "alert_sent", False) and getattr(s, "bet_recommendation", None)
+        ]
+
+        if not alerted:
+            await update.message.reply_text(
+                "🧠 <b>Analyst Assessment</b>\n\n"
+                "<i>No recent alerted picks with bet recommendations found.\n"
+                "Analyst assessments are generated when props are alerted.</i>",
+                parse_mode="HTML",
+            )
+            return
+
+        lines: list[str] = ["🧠 <b>Recent Analyst Assessments</b>", ""]
+        for snap in alerted[:3]:
+            dec_ns = __import__("types", fromlist=["SimpleNamespace"]).SimpleNamespace(
+                confidence    = getattr(snap, "bet_confidence", 70) or 70,
+                decision_tier = getattr(snap, "score_tier", "B") or "B",
+                recommendation= getattr(snap, "bet_recommendation", "PASS"),
+                reason        = getattr(snap, "bet_reason", "") or "",
+                hit_rates     = {},
+                window_agreement = 0,
+            )
+            score_ns = __import__("types", fromlist=["SimpleNamespace"]).SimpleNamespace(
+                total     = getattr(snap, "score_total", 60) or 60,
+                n_history = 10,
+            )
+            try:
+                c = candidate_from_ud_decision(
+                    player_name = snap.player_name,
+                    sport       = snap.sport,
+                    stat_type   = snap.stat_type,
+                    line        = snap.line_value,
+                    decision    = dec_ns,
+                    score       = score_ns,
+                )
+                # Attach validation data if available
+                import json
+                if getattr(snap, "validation_json", None):
+                    try:
+                        vj = json.loads(snap.validation_json)
+                        from dataclasses import replace
+                        trace = {**c.decision_trace, "validation": vj}
+                        c = replace(c, decision_trace=trace)
+                    except Exception:
+                        pass
+
+                narrative = build_analyst_narrative(c)
+                c = c.with_analyst_narrative(narrative)
+
+                lines.append(
+                    f"<b>{_html.escape(snap.player_name)}</b>  ·  "
+                    f"{_html.escape(snap.sport)}  ·  "
+                    f"{_html.escape(snap.stat_type)} <code>{snap.line_value:.1f}</code>"
+                )
+                lines.append(
+                    f"Decision: <b>{_html.escape(dec_ns.recommendation)}</b>  "
+                    f"Tier: <b>{_html.escape(dec_ns.decision_tier)}</b>"
+                )
+                lines.append("")
+                lines.append(f"✅ {_html.escape(narrative.recommended_because[:200])}")
+                lines.append(f"⚠️ {_html.escape(narrative.risk_because[:200])}")
+                lines.append(f"🎯 <b>{_html.escape(narrative.final_recommendation[:200])}</b>")
+                lines.append("━━━━━━━━━━━━━━━━━━")
+            except Exception as exc:
+                logger.debug("cmd_analyst: skip snap %s: %s", snap.player_name, exc)
+
+        if len(lines) <= 2:
+            lines.append("<i>Could not build analyst assessments for recent picks.</i>")
+
+        await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+    except Exception as exc:
+        logger.exception("cmd_analyst failed: %s", exc)
+        await update.message.reply_text("⚠️ /analyst failed. Check bot logs.")
+
+
+async def cmd_blocks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/blocks — List all active player reliability blocks."""
+    if not _check_allowed(update):
+        await update.message.reply_text("⛔ Unauthorized.")
+        return
+    if _db is None:
+        await update.message.reply_text("⚠️ Database not ready.")
+        return
+
+    try:
+        from engine.player_block import PlayerBlock, blocks_summary_telegram
+
+        db_records = await _db.get_active_blocks()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        blocks = []
+        for rec in db_records:
+            try:
+                b = PlayerBlock(
+                    player_key  = rec.player_key,
+                    player_name = rec.player_name,
+                    sport       = rec.sport or "",
+                    reason_code = rec.reason_code,
+                    description = rec.description or "",
+                    block_type  = rec.block_type,
+                    expires_at  = rec.expires_at,
+                    created_at  = rec.created_at or now,
+                    review_date = rec.review_date,
+                    created_by  = rec.created_by or "system",
+                )
+                blocks.append(b)
+            except Exception as exc:
+                logger.debug("cmd_blocks: skip record %s: %s", rec.player_key, exc)
+
+        text = blocks_summary_telegram(blocks)
+        text += (
+            "\n\n<i>Use /block add &lt;player&gt; &lt;sport&gt; &lt;reason&gt; to add a block.\n"
+            "Use /block remove &lt;player&gt; &lt;sport&gt; to remove a block.</i>"
+        )
+        await update.message.reply_text(text, parse_mode="HTML")
+
+    except Exception as exc:
+        logger.exception("cmd_blocks failed: %s", exc)
+        await update.message.reply_text("⚠️ /blocks failed. Check bot logs.")
+
+
+async def cmd_block(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/block add <player> <sport> <reason> | /block remove <player> [sport]."""
+    if not _check_allowed(update):
+        await update.message.reply_text("⛔ Unauthorized.")
+        return
+    if _db is None:
+        await update.message.reply_text("⚠️ Database not ready.")
+        return
+
+    args = context.args or []
+    if not args:
+        await update.message.reply_text(
+            "Usage:\n"
+            "  /block add &lt;player&gt; &lt;sport&gt; &lt;reason&gt;\n"
+            "  /block remove &lt;player&gt; [sport]\n\n"
+            "Valid reasons: INJURY · MINUTES_RESTRICTION · TENNIS_RETIREMENT · AVAILABILITY\n\n"
+            "Example: /block add LeBron James NBA INJURY",
+            parse_mode="HTML",
+        )
+        return
+
+    from engine.player_block import (
+        PlayerBlock, BLOCKABLE_REASONS, validate_reason_code,
+        reason_code_explanation,
+    )
+    from engine.identity import player_key as _pk
+    from database import PlayerRiskRecord
+    from datetime import timedelta
+
+    action = args[0].lower()
+
+    if action == "remove":
+        if len(args) < 2:
+            await update.message.reply_text("Usage: /block remove <player_key> [sport]")
+            return
+        pkey   = args[1]
+        sport  = args[2].upper() if len(args) >= 3 else ""
+        removed = await _db.remove_player_block(pkey, sport)
+        if removed:
+            await update.message.reply_text(
+                f"✅ Block removed for <code>{_html.escape(pkey)}</code>",
+                parse_mode="HTML",
+            )
+        else:
+            await update.message.reply_text(
+                f"ℹ️ No active block found for <code>{_html.escape(pkey)}</code>",
+                parse_mode="HTML",
+            )
+        return
+
+    if action == "add":
+        if len(args) < 4:
+            await update.message.reply_text(
+                "Usage: /block add &lt;player_name&gt; &lt;sport&gt; &lt;reason&gt;\n\n"
+                f"Valid reasons: {' · '.join(sorted(BLOCKABLE_REASONS))}",
+                parse_mode="HTML",
+            )
+            return
+
+        reason_code = args[-1].upper()
+        sport_code  = args[-2].upper()
+        player_name = " ".join(args[1:-2])
+        pkey        = _pk(player_name)
+
+        if not validate_reason_code(reason_code):
+            await update.message.reply_text(
+                f"❌ Invalid reason: <code>{_html.escape(reason_code)}</code>\n\n"
+                f"Valid reasons: {' · '.join(sorted(BLOCKABLE_REASONS))}\n\n"
+                + "\n".join(
+                    f"<b>{r}</b>: {reason_code_explanation(r)}"
+                    for r in sorted(BLOCKABLE_REASONS)
+                ),
+                parse_mode="HTML",
+            )
+            return
+
+        record = PlayerRiskRecord(
+            player_key   = pkey,
+            player_name  = player_name,
+            sport        = sport_code,
+            reason_code  = reason_code,
+            description  = f"Manual block via /block command by Telegram admin",
+            block_type   = "PERMANENT",
+            expires_at   = None,
+            review_date  = None,
+            created_by   = str(update.effective_user.id if update.effective_user else "admin"),
+            is_active    = True,
+        )
+        try:
+            await _db.add_player_block(record)
+            await update.message.reply_text(
+                f"🚫 Block added:\n"
+                f"  Player: <b>{_html.escape(player_name)}</b>\n"
+                f"  Sport:  <code>{sport_code}</code>\n"
+                f"  Reason: <code>{reason_code}</code>\n"
+                f"  Key:    <code>{pkey}</code>\n\n"
+                "<i>Use /block remove to remove this block.</i>",
+                parse_mode="HTML",
+            )
+        except Exception as exc:
+            logger.exception("cmd_block add failed: %s", exc)
+            await update.message.reply_text(f"⚠️ Failed to add block: {exc}")
+        return
+
+    await update.message.reply_text(
+        "Unknown action. Use /block add ... or /block remove ...",
+    )
+
+
+async def cmd_refinement(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/refinement — Show refinement rules and recent trigger summary."""
+    if not _check_allowed(update):
+        await update.message.reply_text("⛔ Unauthorized.")
+        return
+
+    try:
+        from engine.refinement import get_refinement_engine
+
+        eng = get_refinement_engine()
+        text = eng.rules_summary()
+
+        # Evaluate against last-known metrics if available
+        note = (
+            "\n\n<i>Refinement rules evaluate automatically during /performance and /calibration "
+            "commands. Use /performance to see if any rules have fired.</i>"
+        )
+        await update.message.reply_text(text + note, parse_mode="HTML")
+
+    except Exception as exc:
+        logger.exception("cmd_refinement failed: %s", exc)
+        await update.message.reply_text("⚠️ /refinement failed. Check bot logs.")
+
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Log errors raised by handlers and notify the user if possible."""
     logger.error(

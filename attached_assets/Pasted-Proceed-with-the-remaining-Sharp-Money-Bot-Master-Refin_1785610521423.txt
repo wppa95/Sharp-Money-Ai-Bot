@@ -1,0 +1,174 @@
+Proceed with the remaining Sharp Money Bot Master Refinement Blueprint v3.0 sections as ONE integrated implementation batch.
+
+The foundation layers are complete. Do not create new parallel systems.
+
+Use existing architecture:
+
+Candidate → Confidence → Prop Intelligence → Explanation Service → AI Analyst → Telegram/Dashboard
+
+Remaining implementation areas:
+
+1. AI Analyst Layer
+
+* Consume Candidate objects only.
+* No new scoring engine.
+* No new confidence engine.
+* No live data recalculation.
+* Generate stored decision explanations:
+    * Recommended because
+    * Risk because
+    * Would avoid because
+    * Final recommendation
+
+2. Risk Management Engine
+    Implement:
+
+* correlation detection
+* same-game risk
+* player dependency
+* variance rating
+
+Risk should adjust recommendations, not create duplicate rankings.
+
+3. Player Reliability / Block System
+    Add:
+
+* player risk database
+* reason codes
+* temporary blocks
+* permanent blocks
+* review dates
+
+Block only true reliability issues:
+
+* injuries affecting usage
+* minutes restrictions
+* tennis retirements
+* repeated availability problems
+
+Do not block:
+
+* normal variance
+* one bad game
+* line movement
+* scratches caused by apps
+
+4. Telegram Upgrade
+    Keep existing commands.
+
+Improve output:
+
+/status
+/dashboard
+/picks
+/alerts
+/grade
+/performance
+
+Replace raw alerts with analyst-style explanations.
+
+5. Dashboard Upgrade
+    Add:
+    System:
+
+* uptime
+* crashes
+* previous session
+* provider health
+
+Performance:
+
+* alerts
+* wins/losses
+* CLV
+* EV
+
+Intelligence:
+
+* strongest sports
+* strongest markets
+* player reliability
+
+6. Backtesting + Learning Loop
+    Extend existing grading.
+
+Track:
+
+* alerts
+* results
+* wins
+* losses
+* reasons
+
+Classify failures:
+
+* Model Error
+* Market Error
+* Settlement Error
+* Variance
+
+Only Model Error updates weights.
+
+7. Settlement Awareness
+    Add:
+
+* void detection
+* platform settlement differences
+* unusual results
+
+Do not classify every loss as model failure.
+
+8. Multi-Sport Expansion Framework
+    Do not activate blindly.
+
+Create adapters/framework only.
+
+Priority:
+
+1. Underdog player props
+2. PrizePicks integration
+3. MLB DraftKings/FanDuel Moneyline + Totals
+4. Future sports
+
+Each sport requires:
+
+* data source
+* scoring rules
+* risk rules
+* testing
+* grading
+
+9. Continuous Refinement Engine
+    Create feedback loop:
+
+Problem found →
+Rule created →
+System updated →
+Tested →
+Performance tracked
+
+Requirements:
+
+* Extend existing modules.
+* Deprecate old paths with adapters.
+* Preserve Underdog monitoring.
+* Preserve Telegram commands.
+* Preserve scheduled jobs.
+* Preserve provider integrations.
+
+Testing:
+Add contract tests and integration tests.
+
+Run full regression suite.
+
+Final report:
+
+* files modified
+* architecture changes
+* deprecated systems
+* tests added
+* tests passing
+* feature flags
+* confirmation there are no duplicate confidence, scoring, explanation, or learning systems.
+
+Bundle everything into this single implementation pass.

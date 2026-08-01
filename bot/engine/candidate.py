@@ -289,6 +289,32 @@ class Candidate:
         )
         return _dc_replace(self, confidence=new_dims, tier=new_tier, decision_trace=new_trace)
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # AI Analyst integration (Framework v3.0 Layer 9)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def with_analyst_narrative(self, narrative: Any) -> "Candidate":
+        """
+        Return a new Candidate with an AnalystNarrative stored in decision_trace.
+
+        The narrative is stored under decision_trace["analyst"] and read later
+        by ExplanationService — it is never recomputed.
+
+        Does NOT modify confidence dimensions or tier — the analyst layer is
+        purely narrative.
+
+        Parameters
+        ----------
+        narrative : AnalystNarrative (accepts Any to avoid circular import)
+        """
+        narrative_dict = (
+            narrative.to_dict()
+            if hasattr(narrative, 'to_dict') else dict(narrative)
+            if isinstance(narrative, dict) else {}
+        )
+        new_trace = {**self.decision_trace, "analyst": narrative_dict}
+        return _dc_replace(self, decision_trace=new_trace)
+
     def to_dict(self) -> dict:
         return {
             "player_name":    self.player_name,

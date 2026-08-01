@@ -144,6 +144,65 @@ from .prop_intelligence import (
     _sample_strength,            # exported for testing
 )
 
+# ── Framework v3.0 Layer 9 — AI Analyst ──────────────────────────────────────
+
+from .analyst import (
+    AnalystNarrative,
+    build_analyst_narrative,
+    format_analyst_telegram,
+    format_analyst_console,
+)
+
+# ── Framework v3.0 Layer 10 — Risk Manager ───────────────────────────────────
+
+from .risk_manager import (
+    RiskFactor,
+    RiskAssessment,
+    assess_risk,
+    assess_portfolio_risk,
+    portfolio_risk_summary,
+    RISK_CODES,
+)
+
+# ── Framework v3.0 Layer 11 — Player Block System ────────────────────────────
+
+from .player_block import (
+    PlayerBlock,
+    BLOCKABLE_REASONS,
+    NON_BLOCKABLE_REASONS,
+    is_blocked,
+    filter_blocked,
+    validate_reason_code,
+    reason_code_explanation,
+    blocks_summary_telegram,
+)
+
+# ── Framework v3.0 Layer 12 — Settlement Awareness ───────────────────────────
+
+from .settlement import (
+    SettlementFlag,
+    FLAG_CLEAN,
+    FLAG_PENDING,
+    detect_void,
+    detect_platform_difference,
+    detect_unusual_result,
+    check_settlement,
+    override_miss_type_for_settlement,
+    settlement_flag_telegram,
+)
+
+# ── Framework v3.0 Layer 13 — Continuous Refinement ─────────────────────────
+
+from .refinement import (
+    RefinementRule,
+    RefinementTrigger,
+    RefinementEngine,
+    default_rules,
+    get_refinement_engine,
+    VALID_TRIGGERS,
+    VALID_ACTIONS,
+)
+
 __all__ = [
     # analysis
     "AnalysisEngine",

@@ -69,6 +69,10 @@ from commands import (
     cmd_health,
     cmd_restarts,
     cmd_tracking,
+    cmd_analyst,
+    cmd_blocks,
+    cmd_block,
+    cmd_refinement,
     error_handler,
     init_handlers,
 )
@@ -1301,6 +1305,11 @@ def main() -> None:
     app.add_handler(CommandHandler("health",       cmd_health))
     app.add_handler(CommandHandler("restarts",     cmd_restarts))
     app.add_handler(CommandHandler("tracking",     cmd_tracking))
+    # ── Framework v3.0 commands ───────────────────────────────────────────────
+    app.add_handler(CommandHandler("analyst",    cmd_analyst))
+    app.add_handler(CommandHandler("blocks",     cmd_blocks))
+    app.add_handler(CommandHandler("block",      cmd_block))
+    app.add_handler(CommandHandler("refinement", cmd_refinement))
     app.add_error_handler(error_handler)
 
     logger.info("Starting polling — press Ctrl+C to stop.")

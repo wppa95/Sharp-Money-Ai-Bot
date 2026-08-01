@@ -86,6 +86,34 @@ class DailyTrend:
 
 
 @dataclass
+class SystemPanel:
+    """System health and operational status for the dashboard."""
+    uptime_str:      str                 = "unknown"
+    crash_count:     int                 = 0
+    last_restart:    Optional[str]       = None   # ISO datetime string
+    provider_status: dict                = field(default_factory=dict)  # name → "OK"/"DEGRADED"/"DOWN"
+    active_blocks:   int                 = 0   # active player reliability blocks
+    db_size_mb:      Optional[float]     = None
+
+
+@dataclass
+class IntelligencePanel:
+    """Model learning and intelligence performance summary for the dashboard."""
+    total_graded:      int             = 0
+    total_hits:        int             = 0
+    total_misses:      int             = 0
+    hit_rate:          Optional[float] = None
+    model_errors:      int             = 0
+    market_errors:     int             = 0
+    settlement_errors: int             = 0
+    variance_errors:   int             = 0
+    model_error_rate:  Optional[float] = None    # model_errors / total_misses
+    strongest_sport:   Optional[str]   = None
+    weakest_sport:     Optional[str]   = None
+    strongest_market:  Optional[str]   = None
+
+
+@dataclass
 class DashboardReport:
     """
     Full performance dashboard report.
@@ -133,6 +161,12 @@ class DashboardReport:
     best_sport:         Optional[str] = None
     worst_sport:        Optional[str] = None
     best_market:        Optional[str] = None
+
+    # ── System panel (v3.0 upgrade) ───────────────────────────────────────────
+    system_panel:       Optional[SystemPanel]      = None
+
+    # ── Intelligence panel (v3.0 upgrade) ─────────────────────────────────────
+    intelligence_panel: Optional[IntelligencePanel] = None
 
     # ── Formatting ────────────────────────────────────────────────────────────
 
@@ -252,6 +286,51 @@ class DashboardReport:
                     f"  {d.date_str}  <code>{d.total:>3}</code>  {bar}"
                 )
 
+        # ── System panel ──────────────────────────────────────────────────────
+        sp = self.system_panel
+        if sp is not None:
+            parts += ["", "🖥️ <b>System Status</b>"]
+            parts.append(f"  Uptime:    <code>{sp.uptime_str}</code>")
+            if sp.last_restart:
+                parts.append(f"  Restarted: <code>{sp.last_restart}</code>")
+            if sp.crash_count:
+                parts.append(f"  Crashes:   <code>{sp.crash_count}</code>")
+            if sp.active_blocks:
+                parts.append(f"  Blocks:    <code>{sp.active_blocks}</code> players blocked")
+            for name, status in (sp.provider_status or {}).items():
+                icon = "✅" if status == "OK" else "⚠️" if status == "DEGRADED" else "❌"
+                parts.append(f"  {icon} {name}: <code>{status}</code>")
+            parts.append("")
+
+        # ── Intelligence panel ────────────────────────────────────────────────
+        ip = self.intelligence_panel
+        if ip is not None and ip.total_graded > 0:
+            parts += ["", "🧠 <b>Learning & Intelligence</b>"]
+            if ip.hit_rate is not None:
+                parts.append(
+                    f"  Graded: <code>{ip.total_graded}</code>  "
+                    f"Hit rate: <code>{ip.hit_rate*100:.0f}%</code>"
+                )
+            if ip.total_misses > 0:
+                parts.append(
+                    f"  Miss types:  "
+                    f"Model <code>{ip.model_errors}</code>  "
+                    f"Market <code>{ip.market_errors}</code>  "
+                    f"Settlement <code>{ip.settlement_errors}</code>  "
+                    f"Variance <code>{ip.variance_errors}</code>"
+                )
+            if ip.model_error_rate is not None:
+                parts.append(
+                    f"  Model error rate: <code>{ip.model_error_rate*100:.0f}%</code>"
+                    " <i>(only these update weights)</i>"
+                )
+            if ip.strongest_sport:
+                parts.append(f"  Strongest sport:  <b>{ip.strongest_sport}</b>")
+            if ip.weakest_sport:
+                parts.append(f"  Weakest sport:    <b>{ip.weakest_sport}</b>")
+            if ip.strongest_market:
+                parts.append(f"  Strongest market: <b>{ip.strongest_market}</b>")
+
         return "\n".join(parts)
 
 
@@ -284,6 +363,8 @@ class DashboardEngine:
         await cls._gather_by_market(db, report)
         await cls._gather_daily_trend(db, report)
         cls._compute_best_worst(report)
+        await cls._gather_system_panel(db, report)
+        await cls._gather_intelligence_panel(db, report)
 
         return report
 
@@ -570,6 +651,122 @@ class DashboardEngine:
                     days.append(dt)
 
             r.daily_trend = days
+        except Exception:
+            pass
+
+    @staticmethod
+    async def _gather_system_panel(db: "Database", r: DashboardReport) -> None:
+        """Gather system health metrics for the SystemPanel."""
+        try:
+            sp = SystemPanel()
+
+            # Active player blocks
+            try:
+                sp.active_blocks = await db.count_active_blocks()
+            except Exception:
+                pass
+
+            # Uptime from HealthTracker sidecar if available
+            try:
+                from engine.health import get_health_tracker
+                ht = get_health_tracker()
+                if ht is not None:
+                    summary = ht.summary()
+                    sp.uptime_str  = summary.get("uptime", "unknown")
+                    sp.crash_count = summary.get("crash_count", 0)
+                    last_rs = summary.get("last_restart")
+                    if last_rs:
+                        sp.last_restart = str(last_rs)[:19]
+                    prov_health = summary.get("providers", {})
+                    for pname, ok in prov_health.items():
+                        sp.provider_status[pname] = "OK" if ok else "DEGRADED"
+            except Exception:
+                pass
+
+            r.system_panel = sp
+        except Exception:
+            pass
+
+    @staticmethod
+    async def _gather_intelligence_panel(db: "Database", r: DashboardReport) -> None:
+        """Gather learning and intelligence metrics for the IntelligencePanel."""
+        try:
+            from sqlalchemy import select, func
+            from database import PropOpportunityLog
+
+            ip = IntelligencePanel()
+
+            async with db.session() as s:
+                # Graded totals
+                count_res = await s.execute(
+                    select(
+                        PropOpportunityLog.result,
+                        func.count(),
+                    )
+                    .where(PropOpportunityLog.result.in_(["HIT", "MISS", "PUSH"]))
+                    .group_by(PropOpportunityLog.result)
+                )
+                for result_val, cnt in count_res.all():
+                    if result_val == "HIT":
+                        ip.total_hits = cnt
+                    elif result_val == "MISS":
+                        ip.total_misses = cnt
+
+                ip.total_graded = ip.total_hits + ip.total_misses
+                if ip.total_graded > 0:
+                    ip.hit_rate = ip.total_hits / ip.total_graded
+
+                # Error type breakdown
+                err_res = await s.execute(
+                    select(PropOpportunityLog.error_type, func.count())
+                    .where(
+                        PropOpportunityLog.error_type.isnot(None),
+                        PropOpportunityLog.result == "MISS",
+                    )
+                    .group_by(PropOpportunityLog.error_type)
+                )
+                for err_type, cnt in err_res.all():
+                    if err_type == "Model":
+                        ip.model_errors = cnt
+                    elif err_type == "Market":
+                        ip.market_errors = cnt
+                    elif err_type == "Settlement":
+                        ip.settlement_errors = cnt
+                    elif err_type == "Variance":
+                        ip.variance_errors = cnt
+
+                if ip.total_misses > 0:
+                    ip.model_error_rate = ip.model_errors / ip.total_misses
+
+                # Strongest sport (hit rate by sport, min 5 resolved)
+                sport_res = await s.execute(
+                    select(
+                        PropOpportunityLog.sport,
+                        PropOpportunityLog.result,
+                        func.count(),
+                    )
+                    .where(PropOpportunityLog.result.in_(["HIT", "MISS"]))
+                    .group_by(PropOpportunityLog.sport, PropOpportunityLog.result)
+                )
+                sport_stats: dict = {}
+                for sport_val, res_val, cnt in sport_res.all():
+                    if sport_val not in sport_stats:
+                        sport_stats[sport_val] = {"HIT": 0, "MISS": 0}
+                    sport_stats[sport_val][res_val] = cnt
+
+                sport_hr = {}
+                for sport_val, counts in sport_stats.items():
+                    total = counts["HIT"] + counts["MISS"]
+                    if total >= 5:
+                        sport_hr[sport_val] = counts["HIT"] / total
+
+                if sport_hr:
+                    ip.strongest_sport = max(sport_hr, key=sport_hr.__getitem__)
+                    ip.weakest_sport   = min(sport_hr, key=sport_hr.__getitem__)
+                    if ip.strongest_sport == ip.weakest_sport:
+                        ip.weakest_sport = None
+
+            r.intelligence_panel = ip
         except Exception:
             pass
 

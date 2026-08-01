@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import enum
 import html as _html
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Optional, Union
 
 if TYPE_CHECKING:
     # Avoid circular import at runtime — Candidate is only needed for annotations
@@ -120,6 +120,20 @@ class ExplanationService:
         if snippets:
             lines += ["", "<b>Evidence:</b>"] + [f"  {s}" for s in snippets]
 
+        # Prop intelligence summary (from Layer 8)
+        pi_lines = _format_prop_intelligence_telegram(trace.get("prop_intelligence"))
+        if pi_lines:
+            lines += ["", "<b>🧮 Intelligence:</b>"] + [f"  {l}" for l in pi_lines]
+
+        # Analyst narrative (from Layer 9) — brief inline form
+        analyst = trace.get("analyst")
+        if isinstance(analyst, dict) and analyst.get("final_recommendation"):
+            lines += [
+                "",
+                "🎯 <b>Analyst:</b>",
+                f"  <i>{_esc(analyst['final_recommendation'][:200])}</i>",
+            ]
+
         return "\n".join(lines)
 
     def _render_console(self, candidate: "Candidate") -> str:
@@ -161,6 +175,41 @@ class ExplanationService:
 def _esc(text: str) -> str:
     """HTML-escape a string for Telegram HTML parse mode."""
     return _html.escape(str(text))
+
+
+def _format_prop_intelligence_telegram(pi: Optional[dict]) -> list[str]:
+    """Extract prop intelligence highlights from the prop_intelligence trace dict."""
+    if not isinstance(pi, dict):
+        return []
+    parts: list[str] = []
+
+    hist = pi.get("historical")
+    if isinstance(hist, dict):
+        ss  = hist.get("sample_strength")
+        n   = hist.get("n")
+        hr  = hist.get("hit_rate")
+        if ss is not None and n is not None:
+            parts.append(f"Sample: <code>{n}g</code>  strength <code>{ss}/100</code>")
+        if hr is not None and hr >= 0:
+            parts.append(f"OVER proxy hit rate: <code>{hr*100:.0f}%</code>")
+        dd = hist.get("data_confidence_delta")
+        if dd is not None:
+            sign = "+" if dd >= 0 else ""
+            parts.append(f"Data confidence adj: <code>{sign}{dd}</code>")
+
+    role = pi.get("role")
+    if isinstance(role, dict) and role.get("label") not in (None, "Unknown"):
+        trend = role.get("trend", "")
+        parts.append(f"Role: {_esc(role['label'])} / {_esc(role.get('stability',''))} "
+                     f"({trend})")
+
+    matchup = pi.get("matchup")
+    if isinstance(matchup, dict) and matchup.get("label") not in (None, "Unknown"):
+        sig = matchup.get("signal", 0)
+        sign = "+" if sig >= 0 else ""
+        parts.append(f"Matchup: {_esc(matchup['label'])} (signal {sign}{sig})")
+
+    return parts
 
 
 def _format_trace_snippets_telegram(trace: dict) -> list[str]:

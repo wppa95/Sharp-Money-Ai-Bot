@@ -389,6 +389,38 @@ class PropOpportunityLog(Base):
     )
 
 
+# ── Player Risk / Block System ─────────────────────────────────────────────────
+
+class PlayerRiskRecord(Base):
+    """
+    Player reliability block — prevents alerting on unreliable props.
+
+    Managed via engine.player_block.  One active block per (player_key, sport).
+    Expired TEMPORARY blocks are never hard-deleted; set is_active=False instead.
+    """
+    __tablename__ = "player_risk_records"
+
+    id           = Column(Integer,     primary_key=True, autoincrement=True)
+    player_key   = Column(String(128), nullable=False, index=True)
+    player_name  = Column(String(128), nullable=False)
+    sport        = Column(String(32),  nullable=False, default="")   # "" = all sports
+    reason_code  = Column(String(32),  nullable=False)               # BLOCKABLE_REASONS
+    description  = Column(Text,        nullable=False, default="")
+    block_type   = Column(String(16),  nullable=False)               # TEMPORARY | PERMANENT
+    expires_at   = Column(DateTime,    nullable=True)                # None = permanent
+    review_date  = Column(DateTime,    nullable=True)
+    created_by   = Column(String(64),  nullable=False, default="system")
+    created_at   = Column(DateTime,    default=datetime.utcnow, nullable=False)
+    is_active    = Column(Boolean,     default=True, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "player_key", "sport", "reason_code",
+            name="uq_player_risk_active",
+        ),
+    )
+
+
 # ── Database manager ──────────────────────────────────────────────────────────
 
 class Database:
@@ -421,6 +453,7 @@ class Database:
         await self._migrate_clv_records()
         await self._migrate_prop_line_history()
         await self._migrate_prop_opportunity_log()
+        # player_risk_records is created by create_all (new table); no column migration needed
         logger.info("Database initialised at %s", self._url)
 
     def session(self) -> AsyncSession:
@@ -2392,6 +2425,78 @@ class Database:
             "total":    total,
             "pending":  pending,
         }
+
+    # ── Player Block Management ───────────────────────────────────────────────
+
+    async def get_active_blocks(
+        self,
+        sport: Optional[str] = None,
+    ) -> list[PlayerRiskRecord]:
+        """Return all active PlayerRiskRecord rows, optionally filtered by sport."""
+        async with self.session() as s:
+            stmt = (
+                select(PlayerRiskRecord)
+                .where(PlayerRiskRecord.is_active == True)  # noqa: E712
+            )
+            if sport:
+                stmt = stmt.where(
+                    (PlayerRiskRecord.sport == sport) |
+                    (PlayerRiskRecord.sport == "")
+                )
+            result = await s.execute(stmt.order_by(PlayerRiskRecord.player_name))
+            return list(result.scalars().all())
+
+    async def add_player_block(self, record: PlayerRiskRecord) -> PlayerRiskRecord:
+        """Upsert a player block (replace existing block for same player/sport/reason)."""
+        async with self.session() as s:
+            # Deactivate existing active block for this player/sport combo
+            await s.execute(
+                __import__("sqlalchemy", fromlist=["update"]).update(PlayerRiskRecord)
+                .where(
+                    PlayerRiskRecord.player_key == record.player_key,
+                    PlayerRiskRecord.sport      == record.sport,
+                    PlayerRiskRecord.is_active  == True,  # noqa: E712
+                )
+                .values(is_active=False)
+            )
+            s.add(record)
+            await s.commit()
+            await s.refresh(record)
+        return record
+
+    async def remove_player_block(
+        self,
+        player_key: str,
+        sport:      str = "",
+    ) -> bool:
+        """
+        Deactivate all active blocks for *player_key* (optionally filtered by sport).
+
+        Returns True if at least one block was deactivated.
+        """
+        async with self.session() as s:
+            stmt = (
+                __import__("sqlalchemy", fromlist=["update"]).update(PlayerRiskRecord)
+                .where(
+                    PlayerRiskRecord.player_key == player_key,
+                    PlayerRiskRecord.is_active  == True,  # noqa: E712
+                )
+            )
+            if sport:
+                stmt = stmt.where(PlayerRiskRecord.sport == sport)
+            result = await s.execute(stmt.values(is_active=False))
+            await s.commit()
+            return (result.rowcount or 0) > 0
+
+    async def count_active_blocks(self) -> int:
+        """Count currently active player blocks."""
+        async with self.session() as s:
+            result = await s.execute(
+                select(func.count())
+                .select_from(PlayerRiskRecord)
+                .where(PlayerRiskRecord.is_active == True)  # noqa: E712
+            )
+            return result.scalar() or 0
 
     async def close(self) -> None:
         if self._engine:
