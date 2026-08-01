@@ -26,7 +26,7 @@ the originals.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace as _dc_replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -241,6 +241,54 @@ class Candidate:
         """True when the decision is OVER or UNDER (not PASS or BLOCK)."""
         return self.decision in ("OVER", "UNDER")
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # Prop Intelligence integration (Framework v3.0 Layer 8)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def with_prop_intelligence(self, result: Any) -> "Candidate":
+        """
+        Return a new Candidate with prop intelligence applied.
+
+        Adjusts confidence dimensions by the bounded deltas from
+        ``PropIntelligenceResult`` and extends ``decision_trace`` with stored
+        intelligence reasoning.  The Explanation Service reads the trace — it
+        never re-runs the intelligence computation.
+
+        Does NOT recalculate UDPropScore or UDBetDecision signals.
+        Tier may be adjusted downward based on sample quality, role, and matchup.
+
+        Parameters
+        ----------
+        result : PropIntelligenceResult (accepts Any to avoid circular import)
+
+        Returns
+        -------
+        Candidate — a new instance with updated confidence and decision_trace.
+        """
+        intel_trace = getattr(result, 'intelligence_trace', {})
+        data_delta  = int(getattr(result, 'data_confidence_delta', 0))
+        bet_delta   = int(getattr(result, 'betting_edge_delta', 0))
+
+        new_tier  = _intelligence_adjusted_tier(self.tier, result)
+        new_trace = {**self.decision_trace, "prop_intelligence": intel_trace}
+
+        if self.confidence is None:
+            return _dc_replace(self, tier=new_tier, decision_trace=new_trace)
+
+        old = self.confidence
+        new_data    = max(0, min(100, old.data_confidence + data_delta))
+        new_bet     = max(0, min(100, old.betting_edge + bet_delta))
+        new_mkt     = old.market_confidence   # market_confidence is unchanged
+        new_overall = max(0, min(100, int(0.25 * new_data + 0.25 * new_mkt + 0.50 * new_bet)))
+
+        new_dims = ConfidenceDimensions(
+            data_confidence   = new_data,
+            market_confidence = new_mkt,
+            betting_edge      = new_bet,
+            overall           = new_overall,
+        )
+        return _dc_replace(self, confidence=new_dims, tier=new_tier, decision_trace=new_trace)
+
     def to_dict(self) -> dict:
         return {
             "player_name":    self.player_name,
@@ -267,6 +315,55 @@ class Candidate:
 
     def to_json(self) -> str:
         return json.dumps(self.to_dict(), default=str)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tier adjustment helper (used by Candidate.with_prop_intelligence)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_TIER_ORDER = ["PASS", "B", "A", "S"]
+
+
+def _intelligence_adjusted_tier(tier: str, result: Any) -> str:
+    """
+    Adjust Candidate tier based on PropIntelligenceResult signals.
+
+    Only downgrades are applied — intelligence signals are conservative:
+    • Very thin sample (strength < 20) → cap at B
+    • Thin sample (strength < 35)      → cap at A
+    • Bench role + Volatile minutes    → one step down
+    • Tough matchup                    → one step down
+
+    Upgrades are not applied; the primary scoring engine (UDBetDecision)
+    owns the upgrade path through confidence dimension improvements.
+
+    BLOCK tier passes through unchanged.
+    """
+    if tier not in _TIER_ORDER:
+        return tier   # "BLOCK" or unknown — leave as-is
+
+    idx = _TIER_ORDER.index(tier)
+
+    hist = getattr(result, 'historical', None)
+    if hist is not None:
+        ss = getattr(hist, 'sample_strength', 50)
+        if ss < 20:
+            idx = min(idx, 1)   # cap at B
+        elif ss < 35:
+            idx = min(idx, 2)   # cap at A
+
+    role = getattr(result, 'role', None)
+    if role is not None:
+        if (getattr(role, 'role_label', '') == "Bench"
+                and getattr(role, 'minutes_stability', '') == "Volatile"):
+            idx = max(0, idx - 1)
+
+    matchup = getattr(result, 'matchup', None)
+    if matchup is not None:
+        if getattr(matchup, 'matchup_label', '') == "Tough":
+            idx = max(0, idx - 1)
+
+    return _TIER_ORDER[max(0, min(3, idx))]
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -1,0 +1,177 @@
+Proceed with the next implementation batch.
+
+Before coding:
+Review the completed foundation architecture:
+
+- engine/identity.py
+- engine/candidate.py
+- engine/explanation.py
+- engine/calibration.py
+- confidence dimension wiring
+- alert deduplication changes
+- recovery/error taxonomy changes
+
+Do not create new parallel systems.
+All new intelligence must flow through Candidate.
+
+Implement the next priority layer:
+
+#87 Player Prop Intelligence Engine
+
+Goal:
+Upgrade player prop evaluation from market movement detection into true player-context analysis.
+
+Requirements:
+
+Extend existing systems only.
+
+Add:
+
+1. Historical Performance Intelligence
+
+Analyze:
+
+- L5
+- L10
+- L20
+- L30
+- Season averages
+
+Track:
+
+- average vs line
+- hit rate
+- consistency
+- sample size
+- variance
+
+Add:
+Sample Strength Score.
+
+Rules:
+
+Small samples should reduce confidence.
+Large consistent samples should increase confidence.
+
+Do not create another scoring engine.
+
+Map results into Candidate:
+- data_confidence
+- betting_edge_confidence
+- decision_trace
+
+
+2. Role & Usage Intelligence
+
+Analyze:
+
+- minutes/playing time
+- starting role
+- usage changes
+- injury impact
+- lineup changes
+- volume trends
+
+Examples:
+
+Positive:
+"Starter role increased, minutes stable, usage rising."
+
+Negative:
+"Bench role, inconsistent minutes, low volume."
+
+
+3. Sport-Specific Prop Framework
+
+Create adapters, not separate engines.
+
+Support future expansion:
+
+Current priority:
+1. Underdog player props
+
+Prepare structure for:
+- NBA
+- WNBA
+- MLB
+- Tennis
+- CS
+
+Each sport adapter should define:
+
+- relevant stats
+- variance level
+- sample requirements
+- risk rules
+
+
+4. Opponent Matchup Intelligence
+
+Add matchup context layer.
+
+Analyze where available:
+
+- opponent defense
+- position matchup
+- pace
+- historical matchup
+- weakness/strength indicators
+
+Output stored reasoning only.
+
+Do not recalculate inside Explanation Service.
+
+
+5. Recommendation Upgrade
+
+Connect prop intelligence into Candidate ranking.
+
+Ranking should consider:
+
+- betting edge confidence
+- sample strength
+- role stability
+- matchup
+- risk level
+- market confidence
+
+Maintain:
+
+S Tier
+A Tier
+B Tier
+PASS
+
+
+Testing Requirements:
+
+Add contract tests for:
+
+- sample strength scoring
+- historical calculations
+- role adjustments
+- matchup integration
+- Candidate confidence updates
+- no duplicate scoring systems
+
+Run:
+
+1. New tests
+2. Full regression suite
+
+Release criteria:
+
+- Existing Underdog monitoring preserved
+- Telegram commands preserved
+- Scheduled jobs preserved
+- No duplicate confidence engine
+- No duplicate scoring engine
+- No duplicate explanation engine
+
+Final report:
+
+- Files modified
+- Architecture changes
+- Tests added
+- Tests passing
+- Remaining recommendations

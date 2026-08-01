@@ -117,12 +117,31 @@ from .candidate import (
     candidate_from_ud_decision,
     candidate_from_ev_opportunity,
     candidate_from_alert_object,
+    _intelligence_adjusted_tier,
 )
 
 from .explanation import (
     ExplanationFormat,
     ExplanationService,
     get_explanation_service,
+)
+
+# ── Framework v3.0 Layer 8 — Prop Intelligence ────────────────────────────────
+
+from .prop_intelligence import (
+    WindowStats,
+    HistoricalIntelligence,
+    RoleIntelligence,
+    MatchupIntelligence,
+    SportAdapter,
+    PropIntelligenceResult,
+    SPORT_ADAPTERS,
+    get_sport_adapter,
+    compute_historical_intelligence,
+    compute_role_intelligence,
+    compute_matchup_intelligence,
+    compute_prop_intelligence,
+    _sample_strength,            # exported for testing
 )
 
 __all__ = [
