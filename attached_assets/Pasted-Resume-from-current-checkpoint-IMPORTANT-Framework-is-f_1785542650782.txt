@@ -1,0 +1,159 @@
+Resume from current checkpoint.
+
+IMPORTANT:
+Framework is frozen.
+
+Do not change:
+
+* scoring
+* ranking
+* confidence
+* pick generation
+* alert logic
+* tracking logic
+* provider logic
+
+This task is only a HealthTracker reliability/diagnostic improvement.
+
+⸻
+
+TASK — Improve HealthTracker restart diagnostics
+
+Current problem:
+
+HealthTracker currently reports:
+
+reason=“normal”
+
+for every startup because the startup reason is hardcoded.
+
+This makes it impossible to tell if a restart was:
+
+* intentional restart
+* Replit workflow restart
+* clean shutdown
+* forced shutdown
+* Python crash
+* unexpected failure
+
+⸻
+
+Update HealthTracker so restart causes are accurately tracked.
+
+Requirements:
+
+1. Add real shutdown tracking.
+
+Capture:
+
+* SIGTERM shutdown
+* SIGINT shutdown
+* normal application shutdown
+
+Store the shutdown reason before exit.
+
+⸻
+
+2. Improve startup reason detection.
+
+Startup records should distinguish between:
+
+Examples:
+
+✅ Clean restart:
+“clean_shutdown”
+
+⚠️ Replit/container restart:
+“external_restart”
+
+❌ Crash:
+“unexpected_exit”
+
+❌ Exception:
+“crash_detected”
+
+⸻
+
+3. Persist restart history.
+
+Keep:
+
+* startup timestamp
+* shutdown timestamp (when available)
+* restart reason
+* previous session duration
+
+Do not overwrite previous history.
+
+⸻
+
+4. Add useful diagnostics to /status.
+
+Example:
+
+🤖 Bot Health
+
+Current uptime:
+2h 15m
+
+Last restart:
+23:57 UTC
+
+Restart reason:
+external_restart
+
+Previous session:
+1h 17m
+
+Crash detected:
+No
+
+⸻
+
+5. Add crash visibility.
+
+If the bot exits unexpectedly:
+
+Record:
+
+* last known error
+* traceback summary if available
+* affected job if applicable
+
+Do not change job behavior.
+
+⸻
+
+6. Keep existing monitoring.
+
+Do not remove:
+
+* heartbeat tracking
+* job counters
+* fail streak tracking
+* provider health tracking
+
+Only improve diagnostics.
+
+⸻
+
+FINAL VERIFICATION:
+
+Run full tests.
+
+Restart bot.
+
+Verify:
+
+✅ HealthTracker reports accurate restart reasons
+✅ /status shows useful uptime/restart info
+✅ No false “normal” restarts
+✅ Existing scheduler works
+✅ Existing alerts work
+✅ Framework remains unchanged
+
+Stop after this.
+
+⸻
+
+After this is done, we should finally stop modifying infrastructure and move into live pick testing.

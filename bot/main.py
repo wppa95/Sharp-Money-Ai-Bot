@@ -261,6 +261,14 @@ async def post_init(application: Application) -> None:
 
 async def post_shutdown(application: Application) -> None:
     """Runs once after polling stops, before the process exits."""
+    # Record clean shutdown BEFORE closing DB so the sidecar is written
+    # even if DB close raises.  This covers SIGTERM, SIGINT, and programmatic
+    # stops.  SIGKILL / hard crashes skip this; the atexit fallback handles
+    # the crash path, and hard kills leave no record → "unexpected_exit" on
+    # next startup.
+    ht = get_health_tracker()
+    if ht is not None:
+        ht.record_shutdown("clean_shutdown")
     if _db:
         await _db.close()
     logger.info("Shutdown complete. Goodbye.")
@@ -1215,6 +1223,28 @@ async def _prizepicks_job(context) -> None:
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 
+def _register_atexit_fallback() -> None:
+    """
+    Register an atexit handler that writes 'unexpected_exit' to the health
+    sidecar if post_shutdown never ran (e.g. run_polling raised an exception).
+
+    record_shutdown_if_not_set() is a no-op when post_shutdown already wrote
+    'clean_shutdown', so this never overwrites a clean exit record.
+
+    NOTE: atexit does NOT run on SIGKILL or os._exit().  In those cases the
+    sidecar has no pending_shutdown_reason → next startup infers 'unexpected_exit'
+    from the missing field, which is correct.
+    """
+    import atexit as _atexit
+
+    def _on_exit() -> None:
+        ht = get_health_tracker()
+        if ht is not None:
+            ht.record_shutdown_if_not_set("unexpected_exit")
+
+    _atexit.register(_on_exit)
+
+
 def main() -> None:
     # Validate configuration before building the app
     try:
@@ -1222,6 +1252,10 @@ def main() -> None:
     except ValueError as exc:
         logger.critical("Configuration error: %s", exc)
         sys.exit(1)
+
+    # Register crash-path fallback before run_polling so it is active for
+    # the entire lifetime of the process.
+    _register_atexit_fallback()
 
     app = (
         Application.builder()

@@ -11,6 +11,16 @@ Tracks:
   • last provider fetch time + last provider error
   • heartbeat timestamp (updated every ~60 s by the heartbeat job)
   • last_error (any source)
+  • shutdown reason (pending_shutdown_reason) written before process exit
+  • startup reason inferred from previous session's shutdown record
+
+Shutdown → Startup reason mapping
+  previous pending_shutdown_reason   → startup_reason recorded
+  ─────────────────────────────────   ──────────────────────────────────────────
+  "clean_shutdown"                   → "clean_restart"   (SIGTERM / SIGINT / PTB stop)
+  "unexpected_exit"                  → "crash_detected"  (atexit fired; run_polling raised)
+  missing / None                     → "unexpected_exit" (SIGKILL, OOM, hard crash)
+  no previous session at all         → "first_start"
 
 All methods are synchronous and thread-safe via a simple lock.
 """
@@ -30,6 +40,13 @@ logger = logging.getLogger(__name__)
 _DEFAULT_PATH = Path(__file__).parent.parent / "data" / "health.json"
 _RESTART_HISTORY_LIMIT = 20
 _JOB_HISTORY_LIMIT     = 5
+
+# Maps the shutdown reason written by the previous session to the startup
+# reason label recorded at the beginning of the new session.
+_SHUTDOWN_TO_STARTUP: dict[str, str] = {
+    "clean_shutdown":   "clean_restart",   # PTB post_shutdown ran → clean exit
+    "unexpected_exit":  "crash_detected",  # atexit fallback fired → run_polling raised
+}
 
 
 def _now_iso() -> str:
@@ -53,6 +70,21 @@ def _age_str(ts: Optional[float]) -> str:
     hrs = mins // 60
     rem = mins % 60
     return f"{hrs}h {rem}m ago"
+
+
+def _secs_to_duration(secs: Optional[float]) -> str:
+    """Convert a duration in seconds to a human-readable string."""
+    if secs is None or secs < 0:
+        return "—"
+    secs = int(secs)
+    if secs < 60:
+        return f"{secs}s"
+    mins = secs // 60
+    if mins < 60:
+        return f"{mins}m {secs % 60}s"
+    hrs = mins // 60
+    rem = mins % 60
+    return f"{hrs}h {rem}m"
 
 
 class HealthTracker:
@@ -94,23 +126,99 @@ class HealthTracker:
         except Exception as exc:
             logger.warning("HealthTracker: could not save state: %s", exc)
 
+    # ── Shutdown tracking ─────────────────────────────────────────────────────
+
+    def record_shutdown(self, reason: str) -> None:
+        """
+        Write shutdown reason to the sidecar before the process exits.
+
+        Call from post_shutdown (for clean exits) or an atexit handler
+        (for crash paths).  Safe to call multiple times — last write wins.
+
+        The 'pending_shutdown_reason' field is consumed (and cleared) on
+        the next startup by record_startup().
+        """
+        now_iso = _now_iso()
+        now_ts  = _now_ts()
+        with self._lock:
+            self._state["pending_shutdown_reason"] = reason
+            self._state["last_shutdown_at"]        = now_iso
+            self._state["last_shutdown_ts"]        = now_ts
+            self._save()
+        logger.info("HealthTracker: shutdown recorded — reason=%s", reason)
+
+    def record_shutdown_if_not_set(self, reason: str) -> None:
+        """
+        Write shutdown reason only if none has been recorded yet this
+        session.  Used by the atexit fallback so it never overwrites a
+        'clean_shutdown' written by post_shutdown.
+        """
+        with self._lock:
+            if "pending_shutdown_reason" in self._state:
+                return   # already recorded by a clean-shutdown path
+        self.record_shutdown(reason)
+
     # ── Startup ───────────────────────────────────────────────────────────────
 
     def record_startup(self, reason: str = "normal") -> None:
-        """Call once from post_init. Increments restart count and logs timestamp."""
+        """
+        Call once from post_init.  Increments restart count and infers
+        the startup reason from the previous session's shutdown record.
+
+        The explicit 'reason' parameter is kept for backwards-compat but
+        is ignored — the actual reason is always inferred automatically.
+        """
+        now_iso   = _now_iso()
+        now_ts    = _now_ts()
+
         with self._lock:
-            self._state.setdefault("restart_count", 0)
-            self._state["restart_count"] += 1
+            # ── Infer startup reason from previous session ─────────────────
+            prev_count   = self._state.get("restart_count", 0)
+            pending      = self._state.get("pending_shutdown_reason")  # may be None
+            shutdown_at  = self._state.get("last_shutdown_at")
+            shutdown_ts  = self._state.get("last_shutdown_ts")
+            startup_ts   = self._state.get("last_startup_ts")
+
+            if prev_count == 0:
+                startup_reason = "first_start"
+            elif pending is None:
+                # Nothing wrote before the process died → hard kill / OOM / very early crash
+                startup_reason = "unexpected_exit"
+            else:
+                startup_reason = _SHUTDOWN_TO_STARTUP.get(pending, f"after_{pending}")
+
+            # Session duration = time from last startup to this shutdown
+            session_secs: Optional[float] = None
+            if startup_ts is not None and shutdown_ts is not None and shutdown_ts > startup_ts:
+                session_secs = shutdown_ts - startup_ts
+
+            # ── Update state ───────────────────────────────────────────────
+            self._state["restart_count"] = prev_count + 1
+
             history: list = self._state.setdefault("restart_history", [])
-            history.append({"ts": _now_iso(), "reason": reason})
+            history.append({
+                "ts":            now_iso,
+                "reason":        startup_reason,
+                "shutdown_at":   shutdown_at,
+                "session_secs":  session_secs,
+            })
             if len(history) > _RESTART_HISTORY_LIMIT:
                 self._state["restart_history"] = history[-_RESTART_HISTORY_LIMIT:]
-            self._state["last_startup"]    = _now_iso()
-            self._state["last_startup_ts"] = _now_ts()
+
+            self._state["last_startup"]        = now_iso
+            self._state["last_startup_ts"]     = now_ts
+            self._state["last_startup_reason"] = startup_reason
+
+            # Clear the pending shutdown fields — consumed
+            self._state.pop("pending_shutdown_reason", None)
+            self._state.pop("last_shutdown_at",        None)
+            self._state.pop("last_shutdown_ts",        None)
+
             self._save()
+
         logger.info(
             "HealthTracker: startup #%d recorded (reason=%s)",
-            self._state["restart_count"], reason,
+            self._state["restart_count"], startup_reason,
         )
 
     # ── Heartbeat ─────────────────────────────────────────────────────────────
@@ -218,6 +326,16 @@ class HealthTracker:
     def provider_last_fetch_str(self, provider: str) -> str:
         return _age_str(self.get_provider_info(provider).get("last_fetch_ts"))
 
+    # ── Uptime ────────────────────────────────────────────────────────────────
+
+    def current_uptime_str(self) -> str:
+        """Human-readable uptime since last startup."""
+        return _age_str(self._state.get("last_startup_ts"))
+
+    def current_uptime_secs(self) -> Optional[float]:
+        ts = self._state.get("last_startup_ts")
+        return (_now_ts() - ts) if ts is not None else None
+
     # ── Global summary ────────────────────────────────────────────────────────
 
     def restart_count(self) -> int:
@@ -225,6 +343,32 @@ class HealthTracker:
 
     def last_startup(self) -> Optional[str]:
         return self._state.get("last_startup")
+
+    def last_startup_reason(self) -> str:
+        """Startup reason inferred for this session (set during record_startup)."""
+        return self._state.get("last_startup_reason", "unknown")
+
+    def last_session_duration_str(self) -> str:
+        """
+        Duration of the PREVIOUS session (from the history entry of THIS startup),
+        or '—' if not available.
+        """
+        history = self._state.get("restart_history", [])
+        if not history:
+            return "—"
+        latest = history[-1]
+        return _secs_to_duration(latest.get("session_secs"))
+
+    def last_session_secs(self) -> Optional[float]:
+        history = self._state.get("restart_history", [])
+        if not history:
+            return None
+        return history[-1].get("session_secs")
+
+    def was_unexpected_exit(self) -> bool:
+        """True if this startup followed a crash or unexpected kill."""
+        reason = self.last_startup_reason()
+        return reason in ("unexpected_exit", "crash_detected")
 
     def last_error(self) -> Optional[str]:
         return self._state.get("last_error")

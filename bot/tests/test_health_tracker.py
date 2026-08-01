@@ -37,11 +37,13 @@ class TestRecordStartup:
     def test_persists_to_file(self, tmp_path):
         p = tmp_path / "h.json"
         ht = HealthTracker(path=p)
-        ht.record_startup(reason="test")
+        ht.record_startup()
         assert p.exists()
         raw = json.loads(p.read_text())
         assert raw["restart_count"] == 1
-        assert raw["restart_history"][0]["reason"] == "test"
+        # First-ever startup is always inferred as "first_start";
+        # explicit reason kwarg is ignored (auto-detection takes precedence).
+        assert raw["restart_history"][0]["reason"] == "first_start"
 
     def test_loads_persisted_state(self, tmp_path):
         p = tmp_path / "h.json"

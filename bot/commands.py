@@ -158,12 +158,29 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             await update.message.reply_text("⚠️ Health tracker not initialised.")
             return
 
+        # ── Restart / crash diagnostics ───────────────────────────────────────
+        reason       = ht.last_startup_reason()
+        crash        = ht.was_unexpected_exit()
+        prev_session = ht.last_session_duration_str()
+
+        _REASON_LABEL: dict[str, str] = {
+            "first_start":     "🆕 First start",
+            "clean_restart":   "✅ Clean restart  (SIGTERM / normal stop)",
+            "crash_detected":  "❌ Crash detected  (run_polling raised)",
+            "unexpected_exit": "⚠️ Unexpected exit  (SIGKILL / OOM / hard crash)",
+            "unknown":         "❓ Unknown",
+        }
+        reason_label = _REASON_LABEL.get(reason, f"❓ {reason}")
+
         lines: list[str] = [
             "❤️ <b>Bot Health</b>",
             "",
-            f"Uptime:      {_uptime_str()}",
-            f"Heartbeat:   {ht.heartbeat_age_str()}",
-            f"Last startup: {ht.last_startup() or '—'}",
+            f"Uptime:           {_uptime_str()}",
+            f"Heartbeat:        {ht.heartbeat_age_str()}",
+            f"Last startup:     {ht.last_startup() or '—'}",
+            f"Restart reason:   {reason_label}",
+            f"Previous session: {prev_session}",
+            f"Crash detected:   {'Yes ⚠️' if crash else 'No ✅'}",
             "",
             "<b>📋 Background Jobs</b>",
         ]
@@ -234,21 +251,38 @@ async def cmd_restarts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
         count   = ht.restart_count()
         history = ht.restart_history()
+        reason  = ht.last_startup_reason()
+        crash   = ht.was_unexpected_exit()
+
+        _REASON_ICON: dict[str, str] = {
+            "first_start":     "🆕",
+            "clean_restart":   "✅",
+            "crash_detected":  "❌",
+            "unexpected_exit": "⚠️",
+            "unknown":         "❓",
+        }
 
         lines: list[str] = [
-            f"🔄 <b>Bot Restarts</b>",
+            "🔄 <b>Bot Restarts</b>",
             "",
-            f"Total restarts: <b>{count}</b>",
-            f"Last startup:   {ht.last_startup() or '—'}",
+            f"Total startups:   <b>{count}</b>",
+            f"Last startup:     {ht.last_startup() or '—'}",
+            f"Restart reason:   {_REASON_ICON.get(reason, '❓')} {reason}",
+            f"Crash detected:   {'Yes ⚠️' if crash else 'No ✅'}",
+            f"Prev session:     {ht.last_session_duration_str()}",
         ]
 
         if history:
             lines.append("")
-            lines.append(f"<b>Recent history</b> (last {len(history)}):")
+            lines.append(f"<b>Recent history</b> (last {min(len(history), 10)}):")
             for entry in reversed(history[-10:]):
-                ts     = entry.get("ts", "?")
-                reason = entry.get("reason", "normal")
-                lines.append(f"  · {ts}  <i>{reason}</i>")
+                ts       = entry.get("ts", "?")
+                r        = entry.get("reason", "unknown")
+                icon     = _REASON_ICON.get(r, "❓")
+                sess     = entry.get("session_secs")
+                from engine.health import _secs_to_duration
+                dur_str  = f"  session: {_secs_to_duration(sess)}" if sess else ""
+                lines.append(f"  {icon} {ts}  <i>{r}</i>{dur_str}")
         else:
             lines.append("")
             lines.append("<i>No restart history recorded yet.</i>")
