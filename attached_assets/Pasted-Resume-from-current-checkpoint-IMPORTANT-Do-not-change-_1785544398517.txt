@@ -1,0 +1,169 @@
+Resume from current checkpoint.
+
+IMPORTANT:
+Do not change the framework.
+
+Do not modify:
+
+* scoring
+* ranking
+* confidence
+* pick generation
+* alert logic
+* tracking logic
+* provider strategy
+
+This is a command reliability/debugging pass only.
+
+⸻
+
+TASK 1 — Debug /picks and /health
+
+Current issue:
+
+Working:
+✅ /status
+✅ Alerts
+
+Not responding:
+❌ /picks
+❌ /health
+
+Find the exact issue.
+
+Add temporary logging around:
+
+/picks
+
+Track:
+
+* command received
+* recommendation fetch start/end
+* hit-rate lookup start/end
+* H2H lookup start/end
+* alternate-line lookup start/end
+* formatting start/end
+* Telegram reply sent
+
+/health
+
+Track:
+
+* command received
+* health data loaded
+* response formatting
+* Telegram reply sent
+
+Check for:
+
+* exceptions
+* hanging database queries
+* slow queries
+* unhandled awaits
+* timeouts
+* deadlocks
+
+Fix only the command responsiveness issue.
+
+Do not remove:
+
+* hit-rate context
+* H2H
+* alternate lines
+* OVER/UNDER display
+
+⸻
+
+TASK 2 — Full Telegram command audit
+
+Verify every existing command still works after recent updates.
+
+Test:
+
+* /help
+* /status
+* /health
+* /restarts
+* /picks
+* /slip
+* /tracking
+* /alerts
+* /dashboard
+* /grade
+* /performance
+* /backtest
+* /testalert
+* /analyze
+
+For each command verify:
+
+✅ Receives command
+✅ Returns Telegram response
+✅ No exceptions
+✅ No silent hangs
+
+If any command fails:
+
+* fix only the command issue
+* do not redesign the command
+
+⸻
+
+TASK 3 — Debug recurring API failure in /status
+
+Current issue:
+
+/status repeatedly shows:
+
+🟡 OddsAPI degraded
+(1 fail)
+
+Investigate:
+
+* exact failing endpoint
+* exact error message/code
+* quota issue vs real error
+* timeout vs invalid request
+* parsing issue
+
+Improve status wording so it accurately reports the problem.
+
+Examples:
+
+🟡 OddsAPI quota limited
+
+or
+
+🟡 OddsAPI request failed:
+(reason)
+
+Only if accurate.
+
+Do not add unnecessary API calls.
+
+Do not affect Underdog.
+
+⸻
+
+FINAL VERIFICATION
+
+Run full test suite.
+
+Restart bot.
+
+Verify:
+
+✅ All Telegram commands respond
+✅ /picks responds
+✅ /health responds
+✅ /status gives accurate provider health
+✅ Alerts still fire
+✅ Underdog monitor works
+✅ Scheduler works
+✅ Framework unchanged
+
+Stop after this debugging pass.
+
+⸻
+
+After this, we move directly into live 2-man evaluation.

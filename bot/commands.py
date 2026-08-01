@@ -6,6 +6,7 @@ Each handler is a standalone async function registered with the Application.
 
 from __future__ import annotations
 
+import html as _html
 import logging
 import time
 from datetime import datetime, timezone
@@ -74,6 +75,34 @@ def _check_allowed(update: Update) -> bool:
         return True
     user_id = update.effective_user.id if update.effective_user else None
     return user_id in allowed
+
+
+async def _send_in_chunks(
+    update: Update,
+    text: str,
+    parse_mode: str = ParseMode.HTML,
+    sep: str = "\n\n",
+    max_len: int = 3800,
+) -> None:
+    """Split *text* on *sep* boundaries and send in ≤max_len character bursts.
+
+    Telegram rejects messages longer than 4096 chars.  By splitting on the
+    double-newline that separates each prop block we avoid cutting inside a
+    block's HTML tags (which would produce malformed HTML).
+    """
+    parts = text.split(sep)
+    chunk: list[str] = []
+    chunk_len = 0
+    for part in parts:
+        part_len = len(part) + len(sep)
+        if chunk and chunk_len + part_len > max_len:
+            await update.message.reply_text(sep.join(chunk), parse_mode=parse_mode)
+            chunk = []
+            chunk_len = 0
+        chunk.append(part)
+        chunk_len += part_len
+    if chunk:
+        await update.message.reply_text(sep.join(chunk), parse_mode=parse_mode)
 
 
 # ── Command handlers ──────────────────────────────────────────────────────────
@@ -151,12 +180,15 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if not _check_allowed(update):
         await update.message.reply_text("⛔ Unauthorized.")
         return
+    logger.info("cmd_health: command received")
     try:
         from engine.health import get_health_tracker
         ht = get_health_tracker()
         if ht is None:
             await update.message.reply_text("⚠️ Health tracker not initialised.")
             return
+
+        logger.info("cmd_health: health tracker loaded")
 
         # ── Restart / crash diagnostics ───────────────────────────────────────
         reason       = ht.last_startup_reason()
@@ -170,16 +202,16 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             "unexpected_exit": "⚠️ Unexpected exit  (SIGKILL / OOM / hard crash)",
             "unknown":         "❓ Unknown",
         }
-        reason_label = _REASON_LABEL.get(reason, f"❓ {reason}")
+        reason_label = _REASON_LABEL.get(reason, f"❓ {_html.escape(str(reason))}")
 
         lines: list[str] = [
             "❤️ <b>Bot Health</b>",
             "",
             f"Uptime:           {_uptime_str()}",
             f"Heartbeat:        {ht.heartbeat_age_str()}",
-            f"Last startup:     {ht.last_startup() or '—'}",
+            f"Last startup:     {_html.escape(ht.last_startup() or '—')}",
             f"Restart reason:   {reason_label}",
-            f"Previous session: {prev_session}",
+            f"Previous session: {_html.escape(prev_session)}",
             f"Crash detected:   {'Yes ⚠️' if crash else 'No ✅'}",
             "",
             "<b>📋 Background Jobs</b>",
@@ -193,19 +225,22 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             "_season_check_job":   "Season checker",
         }
 
+        logger.info("cmd_health: reading job info")
         jobs = ht.get_all_jobs()
         for jid, label in _JOB_LABELS.items():
             info = jobs.get(jid, {})
-            last_run   = ht.job_last_run_str(jid)
+            last_run    = ht.job_last_run_str(jid)
             fail_streak = info.get("fail_streak", 0)
             icon = "✅" if fail_streak == 0 else "⚠️" if fail_streak < 3 else "🚨"
-            line = f"  {icon} <b>{label}</b>  ·  last run: {last_run}"
+            line = f"  {icon} <b>{_html.escape(label)}</b>  ·  last run: {_html.escape(last_run)}"
             if fail_streak:
                 line += f"  ·  fails: {fail_streak}"
             lines.append(line)
             last_err = info.get("last_error")
             if last_err:
-                lines.append(f"      ↳ {last_err[:80]}")
+                # HTML-escape the error text — Python exception strings may
+                # contain angle-brackets (e.g. "<class 'X'>") which break HTML.
+                lines.append(f"      ↳ {_html.escape(str(last_err)[:100])}")
 
         # Provider health
         lines.append("")
@@ -217,21 +252,26 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 streak = info.get("error_streak", 0)
                 icon = "✅" if streak == 0 else "⚠️" if streak < 3 else "🚨"
                 lines.append(
-                    f"  {icon} <b>{provider}</b>  ·  last fetch: {last_fetch}"
+                    f"  {icon} <b>{_html.escape(provider)}</b>  ·  last fetch: {_html.escape(last_fetch)}"
                     + (f"  ·  err streak: {streak}" if streak else "")
                 )
+                last_err_msg = info.get("last_error_msg")
+                if last_err_msg and streak:
+                    lines.append(f"      ↳ {_html.escape(str(last_err_msg)[:100])}")
             else:
-                lines.append(f"  ⚪ <b>{provider}</b>  ·  not yet fetched")
+                lines.append(f"  ⚪ <b>{_html.escape(provider)}</b>  ·  not yet fetched")
 
         last_err_global = ht.last_error()
         if last_err_global:
             lines.append("")
-            lines.append(f"⚠️ <b>Last error:</b> {last_err_global[:120]}")
+            lines.append(f"⚠️ <b>Last error:</b> {_html.escape(str(last_err_global)[:120])}")
             ts = ht.last_error_ts()
             if ts:
-                lines.append(f"   at {ts}")
+                lines.append(f"   at {_html.escape(str(ts))}")
 
+        logger.info("cmd_health: sending response (%d lines)", len(lines))
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+        logger.info("cmd_health: response sent")
     except Exception as exc:
         logger.exception("cmd_health: unexpected error: %s", exc)
         await update.message.reply_text("⚠️ /health failed. Check bot logs.")
@@ -326,13 +366,29 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 if name == "PrizePicks":
                     continue  # PP provider temporarily disabled
                 last_ok   = h.format_last_success()
-                fail_note = (
-                    f"  ({h.consecutive_failures} fail{'s' if h.consecutive_failures != 1 else ''})"
-                    if h.consecutive_failures else ""
-                )
+
+                # Build a human-readable failure note with the actual reason.
+                fail_note = ""
+                if h.consecutive_failures:
+                    n       = h.consecutive_failures
+                    n_label = f"{n} fail{'s' if n != 1 else ''}"
+                    # Use failure_type first for well-known categories.
+                    ftype = getattr(h, "failure_type", None)
+                    ftype_name = ftype.value if ftype is not None and hasattr(ftype, "value") else (str(ftype) if ftype else "")
+                    err_msg = getattr(h, "error_msg", "") or ""
+                    if ftype_name.upper() == "QUOTA":
+                        fail_note = f"  🔸 quota limited  ({n_label})"
+                    elif ftype_name.upper() == "BLOCKED":
+                        fail_note = f"  🔴 blocked  ({n_label})"
+                    elif err_msg:
+                        short_err = _html.escape(err_msg[:60])
+                        fail_note = f"  ({n_label}: {short_err})"
+                    else:
+                        fail_note = f"  ({n_label})"
+
                 lines.append(
-                    f"  {h.status_emoji} <b>{name}</b>  {h.status.value}"
-                    f"  ·  last ✓: {last_ok}{fail_note}"
+                    f"  {h.status_emoji} <b>{_html.escape(name)}</b>  {_html.escape(h.status.value)}"
+                    f"  ·  last ✓: {_html.escape(last_ok)}{fail_note}"
                 )
         else:
             lines.append("  ⚪ Underdog     not yet tracked")
@@ -508,44 +564,48 @@ async def cmd_steam(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
         return
 
-    records = await _db.get_recent_steam(limit=5)
+    try:
+        records = await _db.get_recent_steam(limit=5)
 
-    if not records:
+        if not records:
+            await update.message.reply_text(
+                f"{EMOJI['fire']} <b>Steam Alerts</b>\n\n"
+                f"No steam moves detected yet.\n\n"
+                f"<i>Steam detection activates when live odds polling is configured.</i>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
         await update.message.reply_text(
-            f"{EMOJI['fire']} <b>Steam Alerts</b>\n\n"
-            f"No steam moves detected yet.\n\n"
-            f"<i>Steam detection activates when live odds polling is configured.</i>",
+            f"{EMOJI['fire']} <b>Recent Steam Moves ({len(records)})</b>\n\n"
+            f"<i>Showing latest {len(records)} detected steam alerts:</i>",
             parse_mode=ParseMode.HTML,
         )
-        return
 
-    await update.message.reply_text(
-        f"{EMOJI['fire']} <b>Recent Steam Moves ({len(records)})</b>\n\n"
-        f"<i>Showing latest {len(records)} detected steam alerts:</i>",
-        parse_mode=ParseMode.HTML,
-    )
-
-    from models import AlertType, SteamAlert as SteamAlertModel
-    for r in records:
-        # Reconstruct a lightweight display object
-        sa = SteamAlertModel(
-            alert_type=AlertType.STEAM,
-            sport=r.sport,
-            market_type=r.market_type,
-            event=r.event,
-            selection=r.selection,
-            opening_odds=r.opening_odds,
-            current_odds=r.current_odds,
-            steam_score=r.steam_score,
-            steam_direction=r.steam_direction,
-            books_moved=r.books_moved.split(",") if r.books_moved else [],
-            timestamp=r.detected_at,
-            notes=r.notes,
-        )
-        await update.message.reply_text(
-            format_steam_alert(sa),
-            parse_mode=ParseMode.HTML,
-        )
+        from models import AlertType, SteamAlert as SteamAlertModel
+        for r in records:
+            # Reconstruct a lightweight display object
+            sa = SteamAlertModel(
+                alert_type=AlertType.STEAM,
+                sport=r.sport,
+                market_type=r.market_type,
+                event=r.event,
+                selection=r.selection,
+                opening_odds=r.opening_odds,
+                current_odds=r.current_odds,
+                steam_score=r.steam_score,
+                steam_direction=r.steam_direction,
+                books_moved=r.books_moved.split(",") if r.books_moved else [],
+                timestamp=r.detected_at,
+                notes=r.notes,
+            )
+            await update.message.reply_text(
+                format_steam_alert(sa),
+                parse_mode=ParseMode.HTML,
+            )
+    except Exception as exc:
+        logger.exception("cmd_steam: unexpected error: %s", exc)
+        await update.message.reply_text("⚠️ /steam failed. Check bot logs.")
 
 
 async def cmd_ev(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -558,49 +618,53 @@ async def cmd_ev(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
         return
 
-    records = await _db.get_recent_ev(limit=5)
+    try:
+        records = await _db.get_recent_ev(limit=5)
 
-    if not records:
+        if not records:
+            await update.message.reply_text(
+                f"{EMOJI['ev']} <b>+EV Opportunities</b>\n\n"
+                f"No +EV opportunities stored yet.\n\n"
+                f"<i>Automatic +EV detection starts when live odds polling is enabled.</i>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
         await update.message.reply_text(
-            f"{EMOJI['ev']} <b>+EV Opportunities</b>\n\n"
-            f"No +EV opportunities stored yet.\n\n"
-            f"<i>Automatic +EV detection starts when live odds polling is enabled.</i>",
+            f"{EMOJI['ev']} <b>Recent +EV Opportunities ({len(records)})</b>",
             parse_mode=ParseMode.HTML,
         )
-        return
 
-    await update.message.reply_text(
-        f"{EMOJI['ev']} <b>Recent +EV Opportunities ({len(records)})</b>",
-        parse_mode=ParseMode.HTML,
-    )
+        for r in records:
+            stars = EMOJI["star"] * r.stars + EMOJI["star_e"] * (5 - r.stars)
+            line_str = f" ({r.line:+g})" if r.line else ""
+            player_line = f"\n<b>Player:</b>  {r.player}" if r.player else ""
+            reasons = "\n".join(f"  • {rc}" for rc in r.reason_codes.split(",") if rc)
 
-    for r in records:
-        stars = EMOJI["star"] * r.stars + EMOJI["star_e"] * (5 - r.stars)
-        line_str = f" ({r.line:+g})" if r.line else ""
-        player_line = f"\n<b>Player:</b>  {r.player}" if r.player else ""
-        reasons = "\n".join(f"  • {rc}" for rc in r.reason_codes.split(",") if rc)
-
-        msg = "\n".join([
-            f"{EMOJI['ev']} <b>+EV Opportunity</b>",
-            "",
-            f"<b>Sport:</b>   {r.sport}",
-            f"<b>Market:</b>  {r.market_type}",
-            f"<b>Event:</b>   {r.event}",
-            f"{player_line}<b>Line:</b>    {r.selection}{line_str}",
-            f"<b>Odds:</b>    <code>{format_odds(r.best_odds)}</code> @ {r.best_book}",
-            "",
-            f"{EMOJI['target']} <b>Fair Prob:</b>  <code>{r.fair_probability * 100:.1f}%</code>",
-            f"{EMOJI['money']} <b>EV:</b>         <code>{format_ev(r.expected_value)}</code>",
-            f"{EMOJI['fire']} <b>Steam:</b>      <code>{r.steam_score}/100</code>",
-            f"{EMOJI['robot']} <b>Confidence:</b> <code>{r.ai_confidence}/100</code>",
-            f"<b>Rating:</b>  {stars}  {r.recommendation}",
-            "",
-            f"<b>Reasons:</b>",
-            reasons,
-            "",
-            f"{EMOJI['clock']} <i>{r.detected_at.strftime('%Y-%m-%d %H:%M UTC')}</i>",
-        ])
-        await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+            msg = "\n".join([
+                f"{EMOJI['ev']} <b>+EV Opportunity</b>",
+                "",
+                f"<b>Sport:</b>   {r.sport}",
+                f"<b>Market:</b>  {r.market_type}",
+                f"<b>Event:</b>   {r.event}",
+                f"{player_line}<b>Line:</b>    {r.selection}{line_str}",
+                f"<b>Odds:</b>    <code>{format_odds(r.best_odds)}</code> @ {r.best_book}",
+                "",
+                f"{EMOJI['target']} <b>Fair Prob:</b>  <code>{r.fair_probability * 100:.1f}%</code>",
+                f"{EMOJI['money']} <b>EV:</b>         <code>{format_ev(r.expected_value)}</code>",
+                f"{EMOJI['fire']} <b>Steam:</b>      <code>{r.steam_score}/100</code>",
+                f"{EMOJI['robot']} <b>Confidence:</b> <code>{r.ai_confidence}/100</code>",
+                f"<b>Rating:</b>  {stars}  {r.recommendation}",
+                "",
+                f"<b>Reasons:</b>",
+                reasons,
+                "",
+                f"{EMOJI['clock']} <i>{r.detected_at.strftime('%Y-%m-%d %H:%M UTC')}</i>",
+            ])
+            await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+    except Exception as exc:
+        logger.exception("cmd_ev: unexpected error: %s", exc)
+        await update.message.reply_text("⚠️ /ev failed. Check bot logs.")
 
 
 async def cmd_clv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -905,6 +969,19 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
         return
 
+    logger.info("cmd_picks: command received from user %s",
+                update.effective_user.id if update.effective_user else "?")
+    try:
+      return await _cmd_picks_inner(update, context)
+    except Exception as exc:
+        logger.exception("cmd_picks: unhandled error: %s", exc)
+        await update.message.reply_text(
+            "⚠️ /picks failed — check bot logs for details."
+        )
+
+
+async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Inner implementation of /picks — wrapped by cmd_picks try/except."""
     args = context.args or []
     limit = 10
     sport_filter: Optional[str] = None
@@ -924,6 +1001,7 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     today = now.strftime("%b %d, %Y")
 
     # ── 1. Underdog props ─────────────────────────────────────────────────────
+    logger.info("cmd_picks: fetching UD props (limit=%d sport=%s)", limit * 3, sport_filter)
     ud_props = await _db.get_top_ud_props_for_picks(limit=limit * 3, since_hours=24)
     if sport_filter:
         ud_props = [p for p in ud_props if p.sport.upper() == sport_filter]
@@ -942,6 +1020,8 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             parse_mode=ParseMode.HTML,
         )
         return
+
+    logger.info("cmd_picks: UD fetch done — %d props after filter (sport=%s)", len(ud_props), sport_filter)
 
     # ── 2. Cross-provider data (PrizePicks only — DK/FD removed from workflow) ─
     try:
@@ -988,6 +1068,7 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return (-conf, -n_prov, -movement, -disagreement, gt_sort)
 
     picks.sort(key=_pick_sort)
+    logger.info("cmd_picks: built %d comparisons, sorted", len(picks))
 
     # ── 4. Fetch historical hit-rates concurrently (non-blocking) ────────────
     from engine.player_results import compute_hit_rates as _compute_hr
@@ -1011,12 +1092,15 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         except Exception:
             return None, None
 
+    logger.info("cmd_picks: starting hit-rate gather for %d props", len(picks))
     _hr_raw    = await _asyncio.gather(*[_get_hr(plh) for plh, _ in picks], return_exceptions=True)
     _hit_rates = [(None, None) if isinstance(r, Exception) else r for r in _hr_raw]
+    logger.info("cmd_picks: hit-rate gather complete")
 
     # ── 4b. Fetch bet recommendations + alternate lines concurrently ──────────
     from engine.player_prop_market import _line_label as _ll
 
+    logger.info("cmd_picks: fetching recommendations + alternate lines")
     _rec_map: dict = {}
     try:
         _rec_map = await _db.get_ud_recommendations_bulk(
@@ -1039,6 +1123,7 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         [] if isinstance(r, Exception) else (r or [])
         for r in _alt_raw
     ]
+    logger.info("cmd_picks: recs=%d, alt-line queries done", len(_rec_map))
 
     # ── 5. Format ─────────────────────────────────────────────────────────────
     def _tier_from_conf(c: int) -> str:
@@ -1153,8 +1238,11 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if len(picks) >= limit and not sport_filter:
         out.append(f"\n<i>Showing top {limit}. Use /picks [sport] to filter.</i>")
 
-    # Telegram HTML message; join props with blank line separator
-    await update.message.reply_text("\n\n".join(out), parse_mode=ParseMode.HTML)
+    # Telegram HTML message; chunked to stay under the 4096-char API limit.
+    full_text = "\n\n".join(out)
+    logger.info("cmd_picks: formatted output %d chars, sending (%d props)", len(full_text), len(picks))
+    await _send_in_chunks(update, full_text, parse_mode=ParseMode.HTML)
+    logger.info("cmd_picks: send complete")
 
 
 async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1617,6 +1705,15 @@ async def cmd_grade(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
         return
 
+    try:
+      return await _cmd_grade_inner(update, context)
+    except Exception as exc:
+        logger.exception("cmd_grade: unexpected error: %s", exc)
+        await update.message.reply_text("⚠️ /grade failed. Check bot logs.")
+
+
+async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Inner implementation of /grade — wrapped by cmd_grade try/except."""
     resolved  = await _db.get_all_resolved_pp_edges(limit=200)
     total_all = await _db.count_pp_edge_records()
 
@@ -1736,50 +1833,54 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.message.reply_text("⛔ Unauthorized.")
         return
 
-    import os
-    pandascore_key = bool(os.environ.get("PANDASCORE_API_KEY", "").strip())
+    try:
+        import os
+        pandascore_key = bool(os.environ.get("PANDASCORE_API_KEY", "").strip())
 
-    lines: list[str] = [
-        "🔌 <b>Provider Status</b>",
-        "",
-        "<b>Underdog Alert Sports</b>",
-    ]
+        lines: list[str] = [
+            "🔌 <b>Provider Status</b>",
+            "",
+            "<b>Underdog Alert Sports</b>",
+        ]
 
-    # Per-sport provider details
-    providers_info = [
-        ("MLB",    "⚾", "MLB Stats API",      "statsapi.mlb.com", True,            "free — no key"),
-        ("WNBA",   "🏀", "ESPN gamelog",        "espn.com/api",     True,            "free — no key"),
-        ("DOTA",   "🎮", "OpenDota API",        "api.opendota.com", True,            "free — no key"),
-        ("TENNIS", "🎾", "JeffSackmann CSV",   "github.com/JeffSackmann", True,     "free — no key"),
-        ("CS2",    "🖥️", "PandaScore API",     "api.pandascore.co", pandascore_key, "key active" if pandascore_key else "⚠️ PANDASCORE_API_KEY not set"),
-    ]
+        # Per-sport provider details
+        providers_info = [
+            ("MLB",    "⚾", "MLB Stats API",    "statsapi.mlb.com",       True,            "free — no key"),
+            ("WNBA",   "🏀", "ESPN gamelog",      "espn.com/api",           True,            "free — no key"),
+            ("DOTA",   "🎮", "OpenDota API",      "api.opendota.com",       True,            "free — no key"),
+            ("TENNIS", "🎾", "JeffSackmann CSV", "github.com/JeffSackmann", True,            "free — no key"),
+            ("CS2",    "🖥️", "PandaScore API",   "api.pandascore.co",       pandascore_key,  "key active" if pandascore_key else "⚠️ PANDASCORE_API_KEY not set"),
+        ]
 
-    ud_sports = config.ud_alert_sports
+        ud_sports = config.ud_alert_sports
 
-    for sport, icon, provider_name, host, active, note in providers_info:
-        in_scope = sport in ud_sports or (sport == "CS2" and "CS" in ud_sports)
-        scope_tag = "✅" if (in_scope and active) else ("⚠️" if in_scope else "⏸️")
-        lines.append(
-            f"  {scope_tag} {icon} <b>{sport:<6}</b>  {provider_name}\n"
-            f"         <i>{note}  ·  {host}</i>"
-        )
+        for sport, icon, provider_name, host, active, note in providers_info:
+            in_scope  = sport in ud_sports or (sport == "CS2" and "CS" in ud_sports)
+            scope_tag = "✅" if (in_scope and active) else ("⚠️" if in_scope else "⏸️")
+            lines.append(
+                f"  {scope_tag} {icon} <b>{sport:<6}</b>  {provider_name}\n"
+                f"         <i>{note}  ·  {host}</i>"
+            )
 
-    lines.append("")
-    lines.append("<b>DraftKings / FanDuel</b>")
-    lines.append(
-        f"  {'✅' if config.DRAFTKINGS_ENABLED else '❌'} DraftKings  ·  "
-        f"{'✅' if config.FANDUEL_ENABLED else '❌'} FanDuel\n"
-        f"  <i>Odds API — player prop lines (when enabled)</i>"
-    )
-
-    if not pandascore_key:
         lines.append("")
+        lines.append("<b>DraftKings / FanDuel</b>")
         lines.append(
-            "<i>💡 To enable CS2 alerts: add PANDASCORE_API_KEY to environment secrets, "
-            "then restart the bot.</i>"
+            f"  {'✅' if config.DRAFTKINGS_ENABLED else '❌'} DraftKings  ·  "
+            f"{'✅' if config.FANDUEL_ENABLED else '❌'} FanDuel\n"
+            f"  <i>Odds API — player prop lines (when enabled)</i>"
         )
 
-    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+        if not pandascore_key:
+            lines.append("")
+            lines.append(
+                "<i>💡 To enable CS2 alerts: add PANDASCORE_API_KEY to environment secrets, "
+                "then restart the bot.</i>"
+            )
+
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+    except Exception as exc:
+        logger.exception("cmd_providers: unexpected error: %s", exc)
+        await update.message.reply_text("⚠️ /providers failed. Check bot logs.")
 
 
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1791,61 +1892,65 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
         return
 
-    # Gather data
-    ud_today   = await _db.count_today_underdog_alerts()
-    pp_today   = await _db.count_today_pp_alerts()
-    total_pp   = await _db.count_pp_edge_records()
-    resolved   = await _db.get_all_resolved_pp_edges(limit=500)
-    edges_24h  = await _db.get_top_pp_edges(limit=100, hours=24)
+    try:
+        # Gather data
+        ud_today   = await _db.count_today_underdog_alerts()
+        pp_today   = await _db.count_today_pp_alerts()
+        total_pp   = await _db.count_pp_edge_records()
+        resolved   = await _db.get_all_resolved_pp_edges(limit=500)
+        edges_24h  = await _db.get_top_pp_edges(limit=100, hours=24)
 
-    lines: list[str] = [
-        f"📈 <b>Alert Stats</b>  ·  Uptime: {_uptime_str()}",
-        "",
-        "<b>Today's Alerts</b>",
-        f"  Underdog:    <b>{ud_today}</b>",
-        f"  PrizePicks:  <b>{pp_today}</b>",
-        "",
-        "<b>Pipeline (last 24 h)</b>",
-    ]
-
-    # Tier breakdown from 24h edges
-    tier_counts: dict[str, int] = {}
-    for r in edges_24h:
-        t = r.tier or "PASS"
-        tier_counts[t] = tier_counts.get(t, 0) + 1
-
-    if tier_counts:
-        for tier in ("S", "A", "B", "PASS"):
-            n = tier_counts.get(tier, 0)
-            if n:
-                icon = {"S": "🔥", "A": "🟢", "B": "🟡", "PASS": "⚪"}.get(tier, "⚪")
-                lines.append(f"  {icon} {tier}: <b>{n}</b>")
-    else:
-        lines.append("  <i>No edges detected in last 24 h</i>")
-
-    lines.append("")
-    lines.append(f"<b>All-time</b>  ({total_pp:,} edges stored)")
-
-    if resolved:
-        wins   = sum(1 for r in resolved if (r.result or "").upper() == "WIN")
-        losses = sum(1 for r in resolved if (r.result or "").upper() == "LOSS")
-        pushes = sum(1 for r in resolved if (r.result or "").upper() in ("PUSH", "REFUND"))
-        total_res = wins + losses + pushes
-        hit_rate  = wins / total_res * 100 if total_res > 0 else 0.0
-        edges     = [r.best_edge for r in resolved if r.best_edge is not None]
-        avg_edge  = sum(edges) / len(edges) if edges else 0.0
-        lines += [
-            f"  Resolved:    <b>{total_res}</b>  W:{wins}  L:{losses}  P:{pushes}",
-            f"  Hit rate:    <code>{hit_rate:.0f}%</code>",
-            f"  Avg edge:    <code>+{avg_edge:.1f}%</code>",
+        lines: list[str] = [
+            f"📈 <b>Alert Stats</b>  ·  Uptime: {_uptime_str()}",
+            "",
+            "<b>Today's Alerts</b>",
+            f"  Underdog:    <b>{ud_today}</b>",
+            f"  PrizePicks:  <b>{pp_today}</b>",
+            "",
+            "<b>Pipeline (last 24 h)</b>",
         ]
-        if total_res >= 5:
-            implied_roi = (avg_edge / 100) * 0.909
-            lines.append(f"  Implied ROI: <code>{implied_roi * 100:+.1f}%</code> <i>(rough, -110 base)</i>")
-    else:
-        lines.append("  <i>No resolved picks yet — results recorded after games finish.</i>")
 
-    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+        # Tier breakdown from 24h edges
+        tier_counts: dict[str, int] = {}
+        for r in edges_24h:
+            t = r.tier or "PASS"
+            tier_counts[t] = tier_counts.get(t, 0) + 1
+
+        if tier_counts:
+            for tier in ("S", "A", "B", "PASS"):
+                n = tier_counts.get(tier, 0)
+                if n:
+                    icon = {"S": "🔥", "A": "🟢", "B": "🟡", "PASS": "⚪"}.get(tier, "⚪")
+                    lines.append(f"  {icon} {tier}: <b>{n}</b>")
+        else:
+            lines.append("  <i>No edges detected in last 24 h</i>")
+
+        lines.append("")
+        lines.append(f"<b>All-time</b>  ({total_pp:,} edges stored)")
+
+        if resolved:
+            wins   = sum(1 for r in resolved if (r.result or "").upper() == "WIN")
+            losses = sum(1 for r in resolved if (r.result or "").upper() == "LOSS")
+            pushes = sum(1 for r in resolved if (r.result or "").upper() in ("PUSH", "REFUND"))
+            total_res = wins + losses + pushes
+            hit_rate  = wins / total_res * 100 if total_res > 0 else 0.0
+            edges     = [r.best_edge for r in resolved if r.best_edge is not None]
+            avg_edge  = sum(edges) / len(edges) if edges else 0.0
+            lines += [
+                f"  Resolved:    <b>{total_res}</b>  W:{wins}  L:{losses}  P:{pushes}",
+                f"  Hit rate:    <code>{hit_rate:.0f}%</code>",
+                f"  Avg edge:    <code>+{avg_edge:.1f}%</code>",
+            ]
+            if total_res >= 5:
+                implied_roi = (avg_edge / 100) * 0.909
+                lines.append(f"  Implied ROI: <code>{implied_roi * 100:+.1f}%</code> <i>(rough, -110 base)</i>")
+        else:
+            lines.append("  <i>No resolved picks yet — results recorded after games finish.</i>")
+
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+    except Exception as exc:
+        logger.exception("cmd_stats: unexpected error: %s", exc)
+        await update.message.reply_text("⚠️ /stats failed. Check bot logs.")
 
 
 async def cmd_calibration(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1893,6 +1998,15 @@ async def cmd_pp_import(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
         return
 
+    try:
+      return await _cmd_pp_import_inner(update, context)
+    except Exception as exc:
+        logger.exception("cmd_pp_import: unexpected error: %s", exc)
+        await update.message.reply_text("⚠️ /pp_import failed. Check bot logs.")
+
+
+async def _cmd_pp_import_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Inner implementation of /pp_import — wrapped by cmd_pp_import try/except."""
     # Extract text after the command line
     raw_text = update.message.text or ""
     lines_raw = [ln.strip() for ln in raw_text.split("\n")]
