@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
-from .base import FailureType, ProviderHealth, ProviderStatus
+from .base import FailureType, ProviderHealth, ProviderStatus, RecoveryStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +183,60 @@ class ProviderHealthMonitor:
         if state is None:
             return True  # unknown provider — assume healthy (fail-open)
         return state.derive_status() in (ProviderStatus.OK, ProviderStatus.DEGRADED)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Error Taxonomy — recovery strategy registry (Framework v3.0 Layer 3)
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: Streak thresholds that escalate the default recovery strategy.
+_ESCALATE_BACKOFF_TO_DISABLE_STREAK = 5   # HTTP_ERROR: give up after 5 consecutive
+_ESCALATE_SKIP_TO_BACKOFF_STREAK    = 3   # TIMEOUT / PARSE_ERROR: switch to backoff after 3
+
+
+def recovery_strategy_for(
+    failure_type: FailureType,
+    streak: int = 0,
+) -> RecoveryStrategy:
+    """
+    Return the prescribed ``RecoveryStrategy`` for a given ``FailureType``
+    and current consecutive-failure streak.
+
+    Rules
+    ─────
+    QUOTA       → WAIT      (always — never retry until natural quota reset)
+    BLOCKED     → DISABLE   (always — requires manual intervention)
+    HTTP_ERROR  → BACKOFF   (streak < 5)  or DISABLE (streak ≥ 5)
+    TIMEOUT     → SKIP      (streak < 3)  or BACKOFF (streak ≥ 3)
+    PARSE_ERROR → SKIP      (streak < 3)  or BACKOFF (streak ≥ 3)
+    UNKNOWN     → SKIP      (always — safe default)
+
+    Parameters
+    ----------
+    failure_type : FailureType
+        The type of failure that just occurred.
+    streak : int
+        Current consecutive-failure count for this provider.
+        Pass 0 (default) when the streak is unknown.
+    """
+    if failure_type == FailureType.QUOTA:
+        return RecoveryStrategy.WAIT
+
+    if failure_type == FailureType.BLOCKED:
+        return RecoveryStrategy.DISABLE
+
+    if failure_type == FailureType.HTTP_ERROR:
+        if streak >= _ESCALATE_BACKOFF_TO_DISABLE_STREAK:
+            return RecoveryStrategy.DISABLE
+        return RecoveryStrategy.BACKOFF
+
+    if failure_type in (FailureType.TIMEOUT, FailureType.PARSE_ERROR):
+        if streak >= _ESCALATE_SKIP_TO_BACKOFF_STREAK:
+            return RecoveryStrategy.BACKOFF
+        return RecoveryStrategy.SKIP
+
+    # FailureType.UNKNOWN and any future additions
+    return RecoveryStrategy.SKIP
 
 
 # ── Module-level singleton ────────────────────────────────────────────────────

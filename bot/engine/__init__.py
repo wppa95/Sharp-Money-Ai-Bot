@@ -96,6 +96,35 @@ from .backtesting import (
 
 from .season_check import SeasonChecker
 
+# ── Framework v3.0 foundation layers ─────────────────────────────────────────
+
+from .identity import (
+    CanonicalPlayer,
+    CanonicalMarket,
+    CanonicalEvent,
+    normalize_player_name,
+    normalize_stat,
+    player_key,
+    event_key,
+)
+
+from .candidate import (
+    ConfidenceDimensions,
+    Candidate,
+    VALID_DECISIONS,
+    VALID_TIERS,
+    VALID_RISK,
+    candidate_from_ud_decision,
+    candidate_from_ev_opportunity,
+    candidate_from_alert_object,
+)
+
+from .explanation import (
+    ExplanationFormat,
+    ExplanationService,
+    get_explanation_service,
+)
+
 __all__ = [
     # analysis
     "AnalysisEngine",

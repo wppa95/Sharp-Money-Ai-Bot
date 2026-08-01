@@ -27,6 +27,7 @@ All methods are synchronous and thread-safe via a simple lock.
 
 from __future__ import annotations
 
+import enum
 import json
 import logging
 import os
@@ -36,6 +37,37 @@ from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Bot Error Taxonomy (Framework v3.0 Layer 3 — bot-level side)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class BotErrorType(str, enum.Enum):
+    """
+    Classification of bot-level failures (distinct from provider failures).
+
+    Provider failures are typed by ``providers.base.FailureType``.
+    Bot failures are typed here — covering code crashes, database errors,
+    data-processing failures, and hard process crashes.
+
+    Used by HealthTracker to classify recorded failures and surface them in
+    /health output so operators can distinguish transient processing errors
+    from crashes or database outages.
+
+    CODE_FAILURE       — A Python exception was raised and caught in a job
+                         handler or command handler (non-crash).
+    DATABASE_FAILURE   — A database operation failed (read, write, or query).
+    CRASH              — The process exited unexpectedly; detected by the
+                         HealthTracker sidecar on the next startup.
+    PROCESSING_FAILURE — A data-processing step failed (parsing, scoring,
+                         normalization) but the bot continued running.
+    """
+
+    CODE_FAILURE       = "code_failure"
+    DATABASE_FAILURE   = "database_failure"
+    CRASH              = "crash"
+    PROCESSING_FAILURE = "processing_failure"
 
 _DEFAULT_PATH = Path(__file__).parent.parent / "data" / "health.json"
 _RESTART_HISTORY_LIMIT = 20

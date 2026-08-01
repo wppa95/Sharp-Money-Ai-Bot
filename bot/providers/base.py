@@ -31,6 +31,29 @@ class FailureType(str, enum.Enum):
     UNKNOWN     = "unknown"
 
 
+class RecoveryStrategy(str, enum.Enum):
+    """
+    Prescribed recovery behaviour for each FailureType (Framework v3.0 Layer 3).
+
+    SKIP     — Skip this cycle and retry on the next scheduled run.
+               Use for transient issues (parse errors, unknown failures).
+    BACKOFF  — Exponential or stepped back-off before the next retry.
+               Use for recoverable network/HTTP errors.
+    WAIT     — Hold off until a natural refresh occurs (quota reset).
+               Do not aggressively retry; log the quota state.
+    DISABLE  — Stop fetching for this provider until manual review or
+               an explicit re-enable signal.  Use for hard blocks.
+
+    Callers retrieve the strategy via
+    ``providers.health_monitor.recovery_strategy_for(failure_type, streak)``.
+    """
+
+    SKIP    = "skip"
+    BACKOFF = "backoff"
+    WAIT    = "wait"
+    DISABLE = "disable"
+
+
 @dataclass(frozen=True)
 class ProviderHealth:
     """
