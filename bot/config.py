@@ -101,6 +101,11 @@ class Config:
     # event/selection within this window after an alert has been sent.
     EV_DEDUP_WINDOW: int    = int(os.environ.get("EV_DEDUP_WINDOW",    "1800"))  # 30 min
     STEAM_DEDUP_WINDOW: int = int(os.environ.get("STEAM_DEDUP_WINDOW", "3600"))  # 60 min
+    # Underdog player-prop alert dedup window.
+    # Within this window, a second alert for the same player/sport/stat is only
+    # sent when the line moves by ≥ MIN_UNDERDOG_LINE_CHANGE (default 0.5 units).
+    # Set to 0 to disable time-based dedup (line-only dedup still applies).
+    UD_ALERT_DEDUP_WINDOW: int = int(os.environ.get("UD_ALERT_DEDUP_WINDOW", "3600"))  # 60 min
 
     # ── Multi-platform connector settings ────────────────────────────────────
     # Enable/disable individual connectors via env vars

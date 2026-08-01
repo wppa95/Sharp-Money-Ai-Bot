@@ -73,10 +73,15 @@ _player_result_fetch_cache: set = set()
 _cold_start_done: bool = False
 
 # ── Player Prop Market alert dedup ────────────────────────────────────────────
-# Keyed on (player_name, sport, stat_type, line_str) so a new alert fires when
-# the line changes but not on every cycle for the same prop/line.
+# Dict[(player, sport, stat_type)] → (last_alert_timestamp_float, last_alerted_line)
+#
+# An alert is suppressed when BOTH conditions hold:
+#   1. time since last alert < config.UD_ALERT_DEDUP_WINDOW (default 3600 s)
+#   2. line moved < config.MIN_UNDERDOG_LINE_CHANGE (default 0.5 units)
+#
+# A significant line movement always fires, even within the window.
 # Intentionally module-level: persists across cycles, resets on bot restart.
-_prop_market_alerted: set = set()
+_prop_market_alerted: dict = {}
 
 
 def _get_player_stats_provider():

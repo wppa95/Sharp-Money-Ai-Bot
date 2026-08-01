@@ -506,7 +506,7 @@ class TestRunPpReferenceCycle:
     async def test_s_tier_prop_triggers_reference_alert(self):
         db   = self._make_db()
         bot  = self._make_bot()
-        seen: set = set()
+        seen: dict = {}
 
         with patch("alerts.broadcast_alert", new_callable=AsyncMock, return_value={"sent": 1, "failed": 0}):
             count = await run_pp_reference_cycle(
@@ -524,7 +524,7 @@ class TestRunPpReferenceCycle:
     async def test_a_tier_prop_triggers_reference_alert(self):
         db   = self._make_db()
         bot  = self._make_bot()
-        seen: set = set()
+        seen: dict = {}
 
         with patch("alerts.broadcast_alert", new_callable=AsyncMock, return_value={"sent": 1, "failed": 0}):
             count = await run_pp_reference_cycle(
@@ -543,7 +543,7 @@ class TestRunPpReferenceCycle:
         """B-tier props are below the quality bar for PP reference alerts."""
         db   = self._make_db()
         bot  = self._make_bot()
-        seen: set = set()
+        seen: dict = {}
 
         with patch("alerts.broadcast_alert", new_callable=AsyncMock, return_value={"sent": 1, "failed": 0}) as mock_bc:
             count = await run_pp_reference_cycle(
@@ -562,7 +562,7 @@ class TestRunPpReferenceCycle:
     async def test_pass_tier_prop_not_sent(self):
         db   = self._make_db()
         bot  = self._make_bot()
-        seen: set = set()
+        seen: dict = {}
 
         with patch("alerts.broadcast_alert", new_callable=AsyncMock, return_value={"sent": 1, "failed": 0}) as mock_bc:
             count = await run_pp_reference_cycle(
@@ -578,11 +578,14 @@ class TestRunPpReferenceCycle:
 
     @pytest.mark.asyncio
     async def test_dedup_prevents_second_alert_same_prop_line(self):
-        """Same prop/line already in alerted_set → no second alert."""
+        """Same prop/line within dedup window → no second alert."""
+        import time as _time
         db   = self._make_db()
         bot  = self._make_bot()
         prop = self._make_scored_prop(tier="S")
-        seen: set = {("LeBron James", "NBA", "points", "25.5")}
+        # Pre-populate dict dedup: key=(player, sport, stat), value=(ts, line)
+        # Recent alert (10 s ago), same line (25.5) → should be deduped
+        seen: dict = {("LeBron James", "NBA", "points"): (_time.time() - 10, 25.5)}
 
         with patch("alerts.broadcast_alert", new_callable=AsyncMock, return_value={"sent": 1, "failed": 0}) as mock_bc:
             count = await run_pp_reference_cycle(
@@ -599,12 +602,13 @@ class TestRunPpReferenceCycle:
 
     @pytest.mark.asyncio
     async def test_new_line_fires_after_old_line_deduped(self):
-        """Line changed → new dedup key → alert fires again."""
+        """Significant line move (≥ MIN_CHANGE) → fires even within window."""
+        import time as _time
         db   = self._make_db()
         bot  = self._make_bot()
-        # Old line in set; new line not in set
-        seen: set = {("LeBron James", "NBA", "points", "25.5")}
-        prop = self._make_scored_prop(tier="A", line=26.0)   # line moved
+        # Old alert at line 25.5 (10 s ago); new line 26.0 — delta=0.5 ≥ MIN_CHANGE
+        seen: dict = {("LeBron James", "NBA", "points"): (_time.time() - 10, 25.5)}
+        prop = self._make_scored_prop(tier="A", line=26.0)
 
         with patch("alerts.broadcast_alert", new_callable=AsyncMock, return_value={"sent": 1, "failed": 0}):
             count = await run_pp_reference_cycle(
@@ -623,7 +627,7 @@ class TestRunPpReferenceCycle:
         """Successful send populates alerted_set so next call is deduped."""
         db   = self._make_db()
         bot  = self._make_bot()
-        seen: set = set()
+        seen: dict = {}
         prop = self._make_scored_prop(tier="S")
 
         with patch("alerts.broadcast_alert", new_callable=AsyncMock, return_value={"sent": 1, "failed": 0}):
@@ -636,13 +640,14 @@ class TestRunPpReferenceCycle:
                 now          = _NOW,
             )
 
-        assert ("LeBron James", "NBA", "points", "25.5") in seen
+        # New key format: (player, sport, stat) → (timestamp, line)
+        assert ("LeBron James", "NBA", "points") in seen
 
     @pytest.mark.asyncio
     async def test_empty_scored_props_returns_zero(self):
         db   = self._make_db()
         bot  = self._make_bot()
-        seen: set = set()
+        seen: dict = {}
 
         count = await run_pp_reference_cycle(
             db           = db,
@@ -658,7 +663,7 @@ class TestRunPpReferenceCycle:
     async def test_no_high_tier_props_returns_zero(self):
         db   = self._make_db()
         bot  = self._make_bot()
-        seen: set = set()
+        seen: dict = {}
 
         props = [
             self._make_scored_prop(tier="B"),
@@ -680,7 +685,7 @@ class TestRunPpReferenceCycle:
         """broadcast_alert raising should be caught and not propagate."""
         db   = self._make_db()
         bot  = self._make_bot()
-        seen: set = set()
+        seen: dict = {}
 
         with patch("alerts.broadcast_alert", new_callable=AsyncMock, side_effect=RuntimeError("network error")):
             # Must not raise
@@ -694,7 +699,7 @@ class TestRunPpReferenceCycle:
             )
 
         assert count == 0
-        # Nothing added to dedup set on failure
+        # Nothing added to dedup dict on failure
         assert len(seen) == 0
 
     @pytest.mark.asyncio
@@ -703,7 +708,7 @@ class TestRunPpReferenceCycle:
         db = self._make_db()
         db.get_latest_props_for_provider = AsyncMock(side_effect=RuntimeError("DB error"))
         bot  = self._make_bot()
-        seen: set = set()
+        seen: dict = {}
 
         with patch("alerts.broadcast_alert", new_callable=AsyncMock, return_value={"sent": 1, "failed": 0}):
             count = await run_pp_reference_cycle(
@@ -723,7 +728,7 @@ class TestRunPpReferenceCycle:
         """Multiple S/A tier props each trigger their own reference alert."""
         db   = self._make_db()
         bot  = self._make_bot()
-        seen: set = set()
+        seen: dict = {}
 
         props = [
             self._make_scored_prop(player="LeBron James", tier="S", line=25.5),
@@ -747,7 +752,7 @@ class TestRunPpReferenceCycle:
         """Prop with unsupported sport and stale data (conf=70) → no alert."""
         db   = self._make_db()
         bot  = self._make_bot()
-        seen: set = set()
+        seen: dict = {}
 
         prop = {
             "player":    "Tiger Woods",

@@ -312,7 +312,18 @@ async def _grade_opportunities_job(context) -> None:
                 outcome = "MISS"
             else:
                 outcome = "PUSH"
-            await db.grade_opportunity(opp.id, outcome, actual)
+            # Classify MISS outcomes for learning — only Model errors update weights
+            error_type: Optional[str] = None
+            if outcome == "MISS":
+                from engine.calibration import classify_miss
+                error_type = classify_miss(
+                    recommendation = opp.recommendation,
+                    decision_tier  = opp.decision_tier,
+                    confidence     = opp.confidence,
+                    actual_value   = actual,
+                    line_value     = opp.line_value,
+                )
+            await db.grade_opportunity(opp.id, outcome, actual, error_type=error_type)
             graded += 1
         if graded:
             logger.info("_grade_opportunities_job: graded=%d opportunities", graded)

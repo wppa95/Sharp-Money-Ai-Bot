@@ -23,6 +23,7 @@ Additional calibration tracks:
 
 from __future__ import annotations
 
+import enum
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -428,3 +429,74 @@ def _confidence_to_tier(confidence: int) -> str:
     if confidence >= 75:
         return "B"
     return "PASS"
+
+
+# ── Learning Label Classification (Framework v3.0 Layer 7) ───────────────────
+
+class MissType(str, enum.Enum):
+    """
+    Classification of a MISS outcome for learning and model protection.
+
+    IMPORTANT: Only ``Model`` errors should ever update scoring weights.
+
+    ``Variance`` represents correctly-identified edges that did not materialise
+    this time due to normal statistical variance.  Penalising high-confidence
+    picks that lose would corrupt the model by teaching it to avoid its own
+    best signals.
+
+    ``Settlement`` represents data errors where the actual outcome is unknown.
+    These must not be treated as model failures.
+
+    ``Market`` represents cases where the market moved against the position
+    between detection and game time — a structural issue, not a model failure.
+    """
+    MODEL      = "Model"       # Weak signal — learn from this, update weights
+    MARKET     = "Market"      # Market moved; moderate signal, not a model failure
+    SETTLEMENT = "Settlement"  # Data error — actual_value unavailable or corrupt
+    VARIANCE   = "Variance"    # High-confidence pick, bad luck — DO NOT update weights
+
+
+def classify_miss(
+    recommendation: str,
+    decision_tier:  str,
+    confidence:     int,
+    actual_value:   Optional[float],
+    line_value:     Optional[float] = None,
+) -> str:
+    """
+    Classify a MISS outcome into a ``MissType`` value for learning purposes.
+
+    Called by the opportunity grader after a game completes with a MISS result.
+    The returned string is stored in ``PropOpportunityLog.error_type`` and used
+    to determine whether a miss should update scoring weights.
+
+    Only ``"Model"`` errors should feed into weight updates.
+    ``"Variance"`` errors are high-confidence misses that must not damage the
+    model — they are expected in a well-calibrated system.
+
+    Parameters
+    ----------
+    recommendation : str   OVER | UNDER | PASS (from PropOpportunityLog)
+    decision_tier  : str   S | A | B | PASS   (from PropOpportunityLog)
+    confidence     : int   0–100              (from PropOpportunityLog)
+    actual_value   : float | None  Real game result; None = data unavailable
+    line_value     : float | None  The bet line (reserved for future market-drift
+                                   detection; not used in current heuristic)
+
+    Returns
+    -------
+    str  — one of "Model", "Market", "Settlement", "Variance"
+    """
+    if actual_value is None:
+        return MissType.SETTLEMENT.value
+
+    # High-confidence, high-tier: statistical variance — protect the model
+    if confidence >= 75 and decision_tier in ("S", "A"):
+        return MissType.VARIANCE.value
+
+    # Moderate-confidence: market information or signal was partially correct
+    if confidence >= 50 and decision_tier in ("A", "B"):
+        return MissType.MARKET.value
+
+    # Low confidence or weak tier: the model signal itself was wrong
+    return MissType.MODEL.value

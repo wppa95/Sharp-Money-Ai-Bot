@@ -377,6 +377,9 @@ class PropOpportunityLog(Base):
     result         = Column(String(8),   nullable=False, default="PENDING", index=True)
     actual_value   = Column(Float,       nullable=True)
     graded_at      = Column(DateTime,    nullable=True)
+    # Learning label — set by opportunity grader on MISS outcomes
+    # Values: "Model" | "Market" | "Settlement" | "Variance" | None (HIT/PUSH/PENDING)
+    error_type     = Column(String(16),  nullable=True)
 
     __table_args__ = (
         UniqueConstraint(
@@ -2163,8 +2166,17 @@ class Database:
     # ── Prop Opportunity Tracking ────────────────────────────────────────────
 
     async def _migrate_prop_opportunity_log(self) -> None:
-        """No-op placeholder — table created by create_all; hook reserved for future columns."""
-        pass
+        """Add error_type column to existing tables (learning label classification)."""
+        async with self._engine.begin() as conn:
+            try:
+                await conn.execute(text(
+                    "ALTER TABLE prop_opportunity_log ADD COLUMN error_type VARCHAR(16)"
+                ))
+                logger.info(
+                    "_migrate_prop_opportunity_log: added error_type column"
+                )
+            except Exception:
+                pass  # column already exists (SQLite raises OperationalError)
 
     async def log_prop_opportunity(
         self,
@@ -2248,19 +2260,38 @@ class Database:
             return list(result.scalars().all())
 
     async def grade_opportunity(
-        self, opp_id: int, result: str, actual_value: float
+        self,
+        opp_id:      int,
+        result:      str,
+        actual_value: float,
+        error_type:  Optional[str] = None,
     ) -> None:
-        """Set HIT / MISS / PUSH on a prop opportunity after the game completes."""
+        """
+        Set HIT / MISS / PUSH (and learning error_type) on a prop opportunity
+        after the game completes.
+
+        Parameters
+        ----------
+        opp_id      : PropOpportunityLog.id
+        result      : "HIT" | "MISS" | "PUSH"
+        actual_value: The recorded stat value from the game result
+        error_type  : Learning label — "Model" | "Market" | "Settlement" |
+                      "Variance" | None.  Should be set on MISS outcomes only.
+                      Determines whether this miss should update scoring weights.
+        """
         from sqlalchemy import update as _sa_update
+        values: dict = {
+            "result":       result,
+            "actual_value": actual_value,
+            "graded_at":    datetime.utcnow(),
+        }
+        if error_type is not None:
+            values["error_type"] = error_type
         async with self.session() as s:
             await s.execute(
                 _sa_update(PropOpportunityLog)
                 .where(PropOpportunityLog.id == opp_id)
-                .values(
-                    result       = result,
-                    actual_value = actual_value,
-                    graded_at    = datetime.utcnow(),
-                )
+                .values(**values)
             )
             await s.commit()
 

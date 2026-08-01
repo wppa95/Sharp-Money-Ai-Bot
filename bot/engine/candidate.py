@@ -32,6 +32,68 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from engine.identity import normalize_stat, player_key as _player_key
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Confidence dimension wiring — map existing engines to the 4-dim contract
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _data_conf_from_n(n: int) -> int:
+    """
+    Map sample-size n_history to data_confidence (0–90).
+
+    Thresholds mirror the validation gate in engine/player_validator.py
+    (UD_VALIDATION_MIN_SAMPLES = 5) so confidence tracks the validation signal.
+    """
+    if n >= 30: return 90
+    if n >= 20: return 80
+    if n >= 15: return 70
+    if n >= 10: return 60
+    if n >= 5:  return 40
+    return 20
+
+
+def dims_from_ud_components(
+    score: Any,     # UDPropScore
+    decision: Any,  # UDBetDecision
+) -> "ConfidenceDimensions":
+    """
+    Wire ``UDPropScore`` + ``UDBetDecision`` into the 4-dimension
+    ``ConfidenceDimensions`` contract without creating a new scoring engine.
+
+    Mapping
+    ───────
+    data_confidence   ← score.n_history   — sample size (0→20, 5→40, 30+→90)
+    market_confidence ← score.total       — UDPropScore 5-dim sum (0–100)
+    betting_edge      ← decision.confidence scaled 0–95 → 0–100
+    overall           ← 25% data + 25% market + 50% betting_edge
+
+    The 50% weight on betting_edge reflects that hit-rate evidence is the
+    primary signal; market movement and data quality are supporting evidence.
+
+    Parameters
+    ----------
+    score    : UDPropScore    (any object with .n_history and .total attributes)
+    decision : UDBetDecision  (any object with .confidence attribute, 0–95)
+    """
+    n         = int(getattr(score, "n_history", 0) or 0)
+    mkt_total = int(getattr(score, "total", 0) or 0)
+    bet_raw   = int(getattr(decision, "confidence", 0) or 0)
+
+    data_conf = _data_conf_from_n(n)
+    mkt_conf  = min(100, max(0, mkt_total))
+    # Scale UDBetDecision.confidence from 0–95 range to 0–100
+    bet_conf  = min(100, int(bet_raw * 100 / 95)) if bet_raw > 0 else 0
+    overall   = min(100, max(0, int(
+        0.25 * data_conf + 0.25 * mkt_conf + 0.50 * bet_conf
+    )))
+
+    return ConfidenceDimensions(
+        data_confidence   = data_conf,
+        market_confidence = mkt_conf,
+        betting_edge      = bet_conf,
+        overall           = overall,
+    )
+
+
 if TYPE_CHECKING:
     # Only used for type annotations — never at runtime (avoids circular imports)
     from engine.ud_bet_decision import UDBetDecision
@@ -216,36 +278,50 @@ def candidate_from_ud_decision(
     sport: str,
     stat_type: str,
     line: float,
-    decision: Any,                    # UDBetDecision — Any to avoid import
+    decision: Any,                     # UDBetDecision — Any to avoid import
     *,
+    score: Any                 = None, # UDPropScore — wires market + data confidence
     game_time: Optional[datetime] = None,
     snapshot_id: Optional[int]    = None,
 ) -> Candidate:
     """
     Produce a Candidate from a ``UDBetDecision`` + raw prop identity fields.
 
-    UDBetDecision is a frozen dataclass that does not store player/sport/stat;
-    the caller must supply those alongside the decision object.
+    Pass ``score`` (UDPropScore) to populate all four confidence dimensions
+    from the real scoring engines.  When score is None the function falls back
+    to tier-proxy values so existing call sites without UDPropScore continue
+    to work.
 
-    Confidence mapping (interim — Confidence Separation phase refines this)
-    ─────────────────────────────────────────────────────────────────────────
-    data_confidence   ← tier proxy: S→80 / A→70 / B→60 / PASS→30
-    market_confidence ← 50 neutral (UDPropScore not available here)
-    betting_edge      ← decision.confidence (0–95)
-    overall           ← decision.confidence (primary signal for betting value)
+    Confidence mapping
+    ──────────────────
+    WITH score (preferred):
+        Uses ``dims_from_ud_components(score, decision)``:
+        data_confidence   ← score.n_history  (sample size gate)
+        market_confidence ← score.total      (5-dim UDPropScore sum)
+        betting_edge      ← decision.confidence scaled 0–95 → 0–100
+        overall           ← 25% data + 25% market + 50% betting_edge
+
+    WITHOUT score (fallback):
+        data_confidence   ← tier proxy: S→80 / A→70 / B→60 / PASS→30
+        market_confidence ← 50 neutral
+        betting_edge      ← decision.confidence
+        overall           ← decision.confidence
     """
-    tier = getattr(decision, "decision_tier", "PASS")
-    conf = int(getattr(decision, "confidence", 0))
-    rec  = getattr(decision, "recommendation", "PASS")
+    tier   = getattr(decision, "decision_tier",  "PASS")
+    conf   = int(getattr(decision, "confidence", 0))
+    rec    = getattr(decision, "recommendation", "PASS")
     reason = str(getattr(decision, "reason", ""))
 
-    data_conf = {"S": 80, "A": 70, "B": 60, "PASS": 30}.get(tier, 50)
-    dims = ConfidenceDimensions(
-        data_confidence   = data_conf,
-        market_confidence = 50,
-        betting_edge      = conf,
-        overall           = conf,
-    )
+    if score is not None:
+        dims = dims_from_ud_components(score, decision)
+    else:
+        data_conf = {"S": 80, "A": 70, "B": 60, "PASS": 30}.get(tier, 50)
+        dims = ConfidenceDimensions(
+            data_confidence   = data_conf,
+            market_confidence = 50,
+            betting_edge      = conf,
+            overall           = conf,
+        )
 
     # Serialise window evidence into the decision trace
     trace: dict = {"tier": tier, "confidence": conf}

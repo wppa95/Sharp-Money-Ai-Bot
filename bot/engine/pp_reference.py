@@ -29,9 +29,12 @@ Design
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Optional
+
+import config as _config
 
 logger = logging.getLogger(__name__)
 
@@ -285,7 +288,7 @@ async def run_pp_reference_cycle(
     bot:           Any,          # telegram.Bot
     chat_ids:      list,
     scored_props:  list[dict],   # _scored_props from underdog_job
-    alerted_set:   set,          # module-level dedup set in market_engine
+    alerted_set:   dict,         # module-level dedup dict in market_engine
     now:           Optional[datetime] = None,
     confidence_threshold: int = DEFAULT_CONFIDENCE_THRESHOLD,
 ) -> int:
@@ -327,13 +330,18 @@ async def run_pp_reference_cycle(
         sport     = p.get("sport", "")
         line      = float(p.get("line") or 0.0)
 
-        dedup_key = (player, sport, stat_type, f"{line:.1f}")
-        if dedup_key in alerted_set:
-            logger.debug(
-                "pp_reference: deduped — %s / %s / %s @ %.1f",
-                player, stat_type, sport, line,
-            )
-            continue
+        _dedup_key  = (player, sport, stat_type)
+        _now_ts     = time.time()
+        if _dedup_key in alerted_set:
+            _last_ts, _last_line = alerted_set[_dedup_key]
+            _within_window = (_now_ts - _last_ts) < _config.config.UD_ALERT_DEDUP_WINDOW
+            _same_line     = abs(line - _last_line) < _config.config.MIN_UNDERDOG_LINE_CHANGE
+            if _within_window and _same_line:
+                logger.debug(
+                    "pp_reference: deduped — %s / %s / %s @ %.1f",
+                    player, stat_type, sport, line,
+                )
+                continue
 
         match = match_underdog_to_pp(
             player_name         = player,
@@ -352,7 +360,7 @@ async def run_pp_reference_cycle(
             message = format_pp_reference_alert(match)
             counts  = await broadcast_alert(bot, chat_ids, message)
             if counts.get("sent", 0) > 0:
-                alerted_set.add(dedup_key)
+                alerted_set[_dedup_key] = (_now_ts, line)
                 alerts_sent += 1
                 logger.info(
                     "pp_reference alert sent: %s / %s / %s  conf=%d  src=%s",

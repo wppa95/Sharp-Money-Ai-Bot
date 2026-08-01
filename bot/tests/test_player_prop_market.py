@@ -537,7 +537,7 @@ class TestRunCycle:
         db   = self._make_db()
         bot  = self._make_bot()
         props = [self._scored_prop(tier="B"), self._scored_prop(tier="PASS")]
-        alerted: set = set()
+        alerted: dict = {}
 
         # broadcast_alert is imported inside the function body from 'alerts' module,
         # so patch the source module to intercept the call.
@@ -558,7 +558,7 @@ class TestRunCycle:
         """S-tier props with sufficient confidence trigger broadcast."""
         db   = self._make_db()
         bot  = self._make_bot()
-        alerted: set = set()
+        alerted: dict = {}
 
         with patch("alerts.broadcast_alert", new_callable=AsyncMock) as m:
             m.return_value = {"sent": 1}
@@ -574,12 +574,15 @@ class TestRunCycle:
         assert sent >= 0   # passes if build returns None due to test env
 
     def test_dedup_prevents_resend(self):
-        """Same player/sport/stat/line not alerted twice in one session."""
+        """Same player/sport/stat within window and same line not alerted twice."""
+        import time as _time
         db   = self._make_db()
         bot  = self._make_bot()
         prop = self._scored_prop(tier="S")
-        dedup_key = ("Test Player", "MLB", "strikeouts", "5.5")
-        alerted   = {dedup_key}   # pre-populated
+        # Pre-populate the dict-based dedup store: key=(player, sport, stat),
+        # value=(last_alert_timestamp, last_alerted_line).
+        # Line matches the prop (5.5), timestamp is recent (10 s ago).
+        alerted = {("Test Player", "MLB", "strikeouts"): (_time.time() - 10, 5.5)}
 
         with patch("alerts.broadcast_alert", new_callable=AsyncMock) as m:
             m.return_value = {"sent": 1}
@@ -604,7 +607,7 @@ class TestRunCycle:
                 bot          = bot,
                 chat_ids     = [123],
                 scored_props = [],
-                alerted_set  = set(),
+                alerted_set  = {},
                 now          = NOW,
             ))
         assert sent == 0
@@ -620,7 +623,7 @@ class TestRunCycle:
                 bot          = bot,
                 chat_ids     = [],
                 scored_props = [self._scored_prop(tier="S")],
-                alerted_set  = set(),
+                alerted_set  = {},
                 now          = NOW,
             ))
         assert sent == 0
@@ -639,7 +642,7 @@ class TestRunCycle:
                 bot          = bot,
                 chat_ids     = [123],
                 scored_props = [self._scored_prop(tier="S")],
-                alerted_set  = set(),
+                alerted_set  = {},
                 now          = NOW,
             ))
         # Cycle completes without exception
@@ -657,22 +660,25 @@ class TestRunCycle:
                 bot          = bot,
                 chat_ids     = [123],
                 scored_props = [self._scored_prop(tier="S")],
-                alerted_set  = set(),
+                alerted_set  = {},
                 now          = NOW,
             ))
 
     def test_different_lines_same_prop_not_deduped(self):
-        """Same player + new line = new dedup key → sends."""
+        """Same player + significant line move (≥ MIN_CHANGE) → sends despite prior alert."""
+        import time as _time
         db  = self._make_db()
         bot = self._make_bot()
-        alerted = {("Test Player", "MLB", "strikeouts", "5.0")}  # old line
+        # Old alert was at line 5.0, recent (10 s ago)
+        alerted = {("Test Player", "MLB", "strikeouts"): (_time.time() - 10, 5.0)}
 
-        # New prop entry with different line
-        prop = self._scored_prop(tier="S", line=5.5)  # new line
+        # New prop at 5.5 — delta = 0.5 = MIN_CHANGE, which is NOT < MIN_CHANGE
+        # so same_line = False → dedup is skipped → alert fires
+        prop = self._scored_prop(tier="S", line=5.5)
 
         with patch("alerts.broadcast_alert", new_callable=AsyncMock) as m:
             m.return_value = {"sent": 1}
-            # Should attempt (not deduped)
+            # Should attempt (not deduped — significant line move)
             _run(run_player_prop_market_cycle(
                 db           = db,
                 bot          = bot,

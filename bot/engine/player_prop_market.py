@@ -27,6 +27,7 @@ Design principles:
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 
 
@@ -38,6 +39,7 @@ def _line_label(line: float) -> str:
         return "⚪ Standard Line"
     else:
         return "🔴 Higher Difficulty Line"
+import config as _config
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
@@ -501,13 +503,60 @@ def _conf_bar(confidence: int) -> str:
 
 # ── Batch cycle helper ────────────────────────────────────────────────────────
 
+# ── Alert dedup helpers ───────────────────────────────────────────────────────
+
+def _is_prop_deduped(
+    alerted_set:          dict,
+    player:               str,
+    sport:                str,
+    stat_type:            str,
+    line:                 float,
+    dedup_window_seconds: int,
+    min_line_change:      float,
+    now_ts:               Optional[float] = None,
+) -> bool:
+    """
+    Return True when this prop alert should be suppressed.
+
+    Suppressed when BOTH hold:
+      • time since last alert < dedup_window_seconds
+      • line moved < min_line_change since last alert
+
+    A significant line movement always fires, even within the window.
+    Accepts ``now_ts`` for test injection (defaults to ``time.time()``).
+    """
+    key = (player, sport, stat_type)
+    if key not in alerted_set:
+        return False
+    last_ts, last_line = alerted_set[key]
+    ts            = now_ts if now_ts is not None else time.time()
+    within_window = (ts - last_ts) < dedup_window_seconds
+    same_line     = abs(line - last_line) < min_line_change
+    return within_window and same_line
+
+
+def _record_prop_alerted(
+    alerted_set: dict,
+    player:      str,
+    sport:       str,
+    stat_type:   str,
+    line:        float,
+    now_ts:      Optional[float] = None,
+) -> None:
+    """Record that an alert was sent for (player, sport, stat_type, line)."""
+    alerted_set[(player, sport, stat_type)] = (
+        now_ts if now_ts is not None else time.time(),
+        line,
+    )
+
+
 async def run_player_prop_market_cycle(
     *,
     db:            Any,
     bot:           Any,
     chat_ids:      list,
     scored_props:  list[dict],
-    alerted_set:   set,
+    alerted_set:   dict,
     now:           Optional[datetime] = None,
     confidence_threshold: int = PROXY_CONFIDENCE_THRESHOLD,
 ) -> int:
@@ -568,8 +617,12 @@ async def run_player_prop_market_cycle(
         line      = float(p.get("line") or 0.0)
         prev_line = p.get("prev_line")   # may be None
 
-        dedup_key = (player, sport, stat_type, f"{line:.1f}")
-        if dedup_key in alerted_set:
+        if _is_prop_deduped(
+            alerted_set,
+            player, sport, stat_type, line,
+            dedup_window_seconds = _config.config.UD_ALERT_DEDUP_WINDOW,
+            min_line_change      = _config.config.MIN_UNDERDOG_LINE_CHANGE,
+        ):
             logger.debug(
                 "player_prop_market: deduped — %s / %s / %s @ %.1f",
                 player, stat_type, sport, line,
@@ -599,7 +652,7 @@ async def run_player_prop_market_cycle(
             message = format_player_prop_market_alert(comp)
             counts  = await broadcast_alert(bot, chat_ids, message)
             if counts.get("sent", 0) > 0:
-                alerted_set.add(dedup_key)
+                _record_prop_alerted(alerted_set, player, sport, stat_type, line)
                 alerts_sent += 1
                 logger.info(
                     "player_prop_market alert sent: %s / %s / %s  "
