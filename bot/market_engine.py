@@ -1404,24 +1404,26 @@ async def underdog_job(context) -> None:
         _persistence_ok = False
 
     # ── Player Prop Market engine (post-bridge, post-lifecycle) ──────────────
-    # Active framework for multi-provider market alerts. Replaces the old
-    # PrizePicks-only reference alert path.
-    # Run AFTER bridge so PropLineHistory rows reflect the current cycle.
-    # Failures are non-fatal: logged at debug level so they never mask the
-    # main persistence outcome.
-    if chat_ids and _scored_props:
-        try:
-            from engine.player_prop_market import run_player_prop_market_cycle
-            await run_player_prop_market_cycle(
-                db           = db,
-                bot          = bot,
-                chat_ids     = chat_ids,
-                scored_props = _scored_props,
-                alerted_set  = _prop_market_alerted,
-                now          = now,
-            )
-        except Exception as _ref_exc:
-            logger.debug("underdog_job: player_prop_market cycle error: %s", _ref_exc)
+    # DISABLED: run_player_prop_market_cycle sends "🟣 PLAYER PROP MARKET ALERT"
+    # availability-comparison messages that require a live reference provider
+    # (PrizePicks, DraftKings, FanDuel) to produce meaningful output.
+    # With all reference providers currently off it generates empty-data spam.
+    # Re-enable by uncommenting the block below when a reference provider
+    # comes back online.
+    #
+    # if chat_ids and _scored_props:
+    #     try:
+    #         from engine.player_prop_market import run_player_prop_market_cycle
+    #         await run_player_prop_market_cycle(
+    #             db           = db,
+    #             bot          = bot,
+    #             chat_ids     = chat_ids,
+    #             scored_props = _scored_props,
+    #             alerted_set  = _prop_market_alerted,
+    #             now          = now,
+    #         )
+    #     except Exception as _ref_exc:
+    #         logger.debug("underdog_job: player_prop_market cycle error: %s", _ref_exc)
 
     # Record job outcome — failure if any persistence stage raised.
     if _health:

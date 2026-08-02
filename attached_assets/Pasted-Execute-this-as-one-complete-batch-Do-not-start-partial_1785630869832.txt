@@ -1,0 +1,476 @@
+Execute this as one complete batch.
+
+Do not start partial implementations.
+
+Execute Phase 0 Repository Audit before making any code changes. Do not begin implementation until you have mapped the existing architecture, confirmed what already works, and identified the correct integration points.
+
+Before implementation:
+
+1. Audit the repository.
+2. Map:
+   - Existing modules
+   - Data flow
+   - Scheduler jobs
+   - Scoring pipeline
+   - Telegram pipeline
+   - Database models
+   - Provider integrations
+   - Existing tests
+3. Identify:
+   - What already works
+   - What needs extension
+   - What should remain unchanged
+   - Any duplicate/conflicting logic
+4. Create a concise internal implementation plan.
+
+After the audit, continue directly into implementation unless a true breaking architecture conflict or required migration is discovered.
+
+Do not break working systems.
+
+Bundle related changes together to minimize credit usage and avoid multiple implementation cycles.
+
+==================================================
+
+SHARP MONEY BOT — PROP INTELLIGENCE SYSTEM UPGRADE
+
+Goal:
+
+Transform the current Sharp Money Scanner into an Underdog Prop Intelligence System.
+
+The finished system should:
+
+- Monitor markets continuously
+- Detect meaningful prop movement
+- Find actionable edges early
+- Produce S/A/B recommendations
+- Explain why a prop is recommended
+- Track results
+- Learn from outcomes
+- Recover from crashes
+- Operate continuously without manual babysitting
+
+==================================================
+
+Execution Requirements
+
+Implement this as one integrated upgrade.
+
+Do not:
+
+- Build temporary systems
+- Create duplicate scoring engines
+- Create duplicate confidence systems
+- Create duplicate explanation systems
+- Rewrite working architecture unnecessarily
+
+Integrate into the existing v3 architecture.
+
+Reuse and extend existing functionality.
+
+Preserve:
+
+- Underdog connector
+- Existing scoring engine
+- Scheduler
+- Telegram integration
+- Database history
+- Existing regression tests
+
+This is an upgrade, not a rebuild.
+
+==================================================
+
+Production Stability Rule
+
+Current active goal:
+
+Stabilize and finalize the Underdog Prop Intelligence System.
+
+Production scope:
+
+ONLY Underdog should be active.
+
+DraftKings, FanDuel, PrizePicks, and other providers:
+
+- Keep disabled behind feature flags
+- Do not initialize
+- Do not poll
+- Do not affect alerts
+- Do not affect health checks
+- Do not affect startup logs
+- Preserve code for future expansion
+
+Only Underdog data should influence:
+
+- Market scanning
+- Line movement detection
+- Recommendation scoring
+- Telegram alerts
+- Learning/results tracking
+
+==================================================
+
+Current Issues Observed
+
+Production evidence:
+
+- HealthTracker startup #45/#46/#47 unexpected_exit restarts
+- Telegram receiving PLAYER PROP MARKET ALERT messages showing availability instead of betting opportunities
+- Underdog snapshots collecting successfully
+- Existing scoring pipeline working and should be extended
+- OddsAPI player props returning 422 INVALID_MARKET
+- Startup logs showing sportsbook polling confusion
+- Need persistent crash detection and recovery
+
+==================================================
+
+1. Underdog Market Intelligence
+
+Build around the existing Underdog pipeline.
+
+Monitor continuously.
+
+Track:
+
+- Opening lines
+- Current lines
+- Line movement
+- Movement direction
+- Movement magnitude
+- Removed props
+- Available props
+- Historical movement timeline
+
+Goal:
+
+Identify valuable props before movement disappears.
+
+==================================================
+
+2. Telegram Recommendation System
+
+Telegram should ONLY send playable recommendations.
+
+Allowed:
+
+S Tier ⭐⭐⭐⭐⭐
+A Tier ⭐⭐⭐⭐
+B Tier ⭐⭐⭐
+
+Blocked:
+
+C Tier ⭐⭐
+D Tier ⭐
+
+No market availability alerts.
+
+No PLAYER PROP MARKET ALERT spam.
+
+Every alert should contain:
+
+- Player
+- Prop
+- Line
+- Tier
+- Stars
+- Confidence
+- Risk level
+- Short explanation
+
+==================================================
+
+3. Rich Prop Analysis Packet
+
+For every playable recommendation include:
+
+Player Data:
+
+- L5 hit rate
+- L10 hit rate
+- Season hit rate
+- Average stat
+- Recent trend
+
+Matchup Data:
+
+- Opponent
+- Defensive matchup
+- Player role
+- Minutes/usage
+- Injury/news impact
+
+Market Data:
+
+- Opening line
+- Current line
+- Movement
+- Edge vs line
+
+Model Data:
+
+- Projection
+- Confidence score
+- Tier
+- Star rating
+- Explanation
+
+Keep explanations concise.
+
+==================================================
+
+4. Unified Recommendation Architecture
+
+Create one integrated recommendation flow.
+
+Include:
+
+- Canonical prop identity
+- Unified candidate contract
+- Error taxonomy
+- Explanation service
+- Confidence separation
+- Hard blocks vs risk warnings
+
+Do not duplicate existing scoring logic.
+
+Extend the current engine.
+
+==================================================
+
+5. Tier and Star System
+
+Final mapping:
+
+⭐⭐⭐⭐⭐ = S Tier
+
+⭐⭐⭐⭐ = A Tier
+
+⭐⭐⭐ = B Tier
+
+⭐⭐ = C Tier
+
+⭐ = D Tier
+
+
+Telegram:
+
+Only display:
+
+- S
+- A
+- B
+
+Console/internal tools:
+
+Keep full grading available.
+
+==================================================
+
+6. Results Tracking and Learning Loop
+
+Store every recommendation.
+
+Before game:
+
+Store:
+
+- Player
+- Prop
+- Line
+- Tier
+- Stars
+- Confidence
+- Reason
+
+After game:
+
+Store:
+
+- Correct
+- Incorrect
+- Push
+- Void
+- Cancelled
+- Injury void
+- Game interruption
+- Why it won/lost
+- Classification
+- Key factors
+
+Build rollups:
+
+- S-tier record
+- A-tier record
+- B-tier record
+- Sport record
+- Prop type record
+- Player trends
+
+Store outcomes first.
+
+Learning updates must be feature-flagged and cannot change live scoring until validated.
+
+Respect normal variance.
+
+==================================================
+
+7. Crash Detection and Recovery
+
+Add persistent runtime recovery tracking.
+
+Store:
+
+- Last heartbeat
+- Last running job
+- Last completed task
+- Last successful market scan
+- Last database write
+- Runtime status
+- Restart reason
+- Error before crash
+
+Capture:
+
+- Exception traceback
+- Failed job
+- Active module
+- Pipeline stage
+
+Telegram restart message:
+
+⚠️ Sharp Money Bot Restarted
+
+Reason:
+Unexpected Exit
+
+Last Active Task:
+Underdog Market Monitor
+
+Last Heartbeat:
+XX:XX UTC
+
+Recovery Status:
+Resumed Monitoring ✅
+
+==================================================
+
+8. Runtime Persistence / Watchdog
+
+Goal:
+
+The bot should operate like a production service.
+
+Add:
+
+- Watchdog monitoring
+- Heartbeat system
+- Runtime health checks
+- Automatic recovery
+- Scheduler resume
+- State preservation after crashes
+
+After restart:
+
+- Underdog monitoring resumes
+- Scheduled jobs continue
+- Market history remains
+- Line tracking continues
+- Stored recommendations remain
+- Learning data remains
+
+If Replit has hosting limitations preventing true 24/7 operation:
+
+Identify the limitation and implement the strongest available workaround.
+
+Required behavior:
+
+Browser closed ✅
+Replit tab closed ✅
+Crash detected ✅
+State recovered ✅
+Telegram notified ✅
+Monitoring resumed ✅
+
+==================================================
+
+9. Recommendation Gate Adjustment
+
+Current problem:
+
+Signals exist but too few actionable recommendations reach Telegram.
+
+Adjust filtering.
+
+Allow:
+
+- Strong S Tier
+- Strong A Tier
+- Quality B Tier (3+ stars)
+
+Filter:
+
+- Weak B
+- C
+- D
+
+Goal:
+
+Increase actionable picks without returning to alert spam.
+
+==================================================
+
+Database Safety
+
+Before modifying database schemas:
+
+Audit existing structure.
+
+Do not create duplicate tables for:
+
+- Props
+- Recommendations
+- Outcomes
+- Learning data
+
+Extend existing models where possible.
+
+Preserve existing history.
+
+==================================================
+
+Testing Requirements
+
+Before completion run:
+
+- Contract tests
+- Snapshot tests
+- Integration tests
+- Existing regression tests
+
+==================================================
+
+Final Report Required
+
+Provide:
+
+1. Files modified
+2. Architecture changes
+3. New functionality added
+4. Tests added
+5. Tests passing:
+   - Contract
+   - Snapshot
+   - Integration
+   - Regression
+6. Remaining recommendations
+7. Deferred improvements and why they were deferred
+
+==================================================
+
+Final Objective:
+
+Build a true Prop Intelligence System.
+
+Not a notification bot.
+
+The system should help make picks by finding edges, explaining them, tracking results, learning over time, and recovering automatically.

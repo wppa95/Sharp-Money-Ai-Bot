@@ -223,7 +223,11 @@ async def post_init(application: Application) -> None:
         # restart the bot.  All logic is preserved; nothing has been deleted.
         # jq.run_repeating(_poll_odds_job,      interval=config.ODDS_POLL_INTERVAL,        first=10,  name="odds_poller")
         # jq.run_repeating(_steam_check_job,    interval=config.STEAM_CHECK_INTERVAL,      first=15,  name="steam_checker")
-        jq.run_repeating(_player_props_job,    interval=config.PLAYER_PROP_POLL_INTERVAL, first=60,  name="player_props_fetcher")
+        # player_props_fetcher disabled — fetches OddsAPI player-prop markets for
+        # the PrizePicks crossmatch pipeline which is currently off.  Calling
+        # it while PP is disabled causes 422 INVALID_MARKET errors on every cycle
+        # and wastes OddsAPI credits.  Re-enable when PrizePicks resumes.
+        # jq.run_repeating(_player_props_job,  interval=config.PLAYER_PROP_POLL_INTERVAL, first=60, name="player_props_fetcher")
         jq.run_repeating(_pregame_watch_job,   interval=config.PREGAME_SCAN_INTERVAL,    first=30,  name="pregame_watcher")
         # _prizepicks_job disabled — PrizePicks provider temporarily off
         # jq.run_repeating(connector_poll_job,  interval=config.CONNECTOR_POLL_INTERVAL,   first=20,  name="connector_poller")
@@ -251,16 +255,111 @@ async def post_init(application: Application) -> None:
             )
         logger.info(
             "Jobs scheduled — underdog: every %ds, pregame: every %ds, "
-            "player_props: every %ds, season_check: every %ds, heartbeat: every 60s",
+            "season_check: every %ds, heartbeat: every 60s "
+            "[player_props_fetcher disabled — PP pipeline off]",
             config.UNDERDOG_POLL_INTERVAL,
             config.PREGAME_SCAN_INTERVAL,
-            config.PLAYER_PROP_POLL_INTERVAL,
             config.SEASON_CHECK_INTERVAL,
         )
     else:
         logger.warning("JobQueue not available — background jobs disabled.")
 
     logger.info("Bot initialised and ready.")
+
+    # ── Startup / crash-recovery notification ─────────────────────────────────
+    # Fire-and-forget — non-fatal; network errors are logged at WARNING only.
+    try:
+        await _send_startup_notification(
+            bot      = application.bot,
+            chat_ids = list(config.allowed_user_ids),
+            ht       = get_health_tracker(),
+        )
+    except Exception as _notif_exc:
+        logger.warning("Startup notification failed (non-fatal): %s", _notif_exc)
+
+
+async def _send_startup_notification(bot, chat_ids: list[int], ht) -> None:
+    """
+    Send a startup or crash-recovery notification to all configured chat IDs.
+
+    Crash format (unexpected_exit):
+        ⚠️ Sharp Money Bot Restarted
+        Reason: Unexpected Exit
+        Last Active Task: …
+        Last Heartbeat: HH:MM UTC
+        Recovery Status: Resumed Monitoring ✅
+
+    Normal start format:
+        ✅ Sharp Money Bot Online
+        Status: Underdog monitoring active
+        Startup: #N
+    """
+    if not chat_ids:
+        return
+
+    startup_reason = ht.startup_reason() if ht else "unknown"
+    restart_num    = ht.restart_count()  if ht else 0
+    last_hb        = ht.last_heartbeat() if ht else None
+    last_error     = ht.last_error()     if ht else None
+    last_job       = (
+        ht._state.get("last_job_run", {}).get("job", "Underdog Market Monitor")
+        if ht and hasattr(ht, "_state") else "Underdog Market Monitor"
+    )
+
+    if startup_reason == "unexpected_exit":
+        # Format the last heartbeat timestamp
+        hb_str = "unknown"
+        if last_hb:
+            try:
+                from datetime import datetime as _dt
+                hb_dt  = _dt.fromisoformat(last_hb.replace("Z", "+00:00"))
+                hb_str = hb_dt.strftime("%H:%M UTC")
+            except Exception:
+                hb_str = str(last_hb)[:16]
+
+        parts = [
+            "⚠️ <b>Sharp Money Bot Restarted</b>",
+            "",
+            "<b>Reason:</b>  Unexpected Exit",
+            "",
+            f"<b>Last Active Task:</b>  {last_job or 'Underdog Market Monitor'}",
+            f"<b>Last Heartbeat:</b>  {hb_str}",
+        ]
+        if last_error:
+            import html as _h
+            parts += ["", f"<b>Last Error:</b>  <code>{_h.escape(last_error[:200])}</code>"]
+        parts += [
+            "",
+            "<b>Recovery Status:</b>  Resumed Monitoring ✅",
+            f"<i>Startup #{restart_num}</i>",
+        ]
+    elif startup_reason == "first_start":
+        parts = [
+            "✅ <b>Sharp Money Bot Online</b>",
+            "",
+            "<b>Status:</b>  Underdog monitoring active",
+            "<b>Mode:</b>  S / A / B tier recommendations only",
+            "",
+            "<i>Ready. Props will be analysed as they are detected.</i>",
+        ]
+    else:
+        # clean restart / manual restart
+        parts = [
+            "✅ <b>Sharp Money Bot Online</b>",
+            "",
+            "<b>Status:</b>  Underdog monitoring active",
+            f"<b>Startup:</b>  #{restart_num}",
+            "",
+            "<i>S/A/B tier recommendations will be sent as props are detected.</i>",
+        ]
+
+    text = "\n".join(parts)
+    for chat_id in chat_ids:
+        try:
+            await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+            logger.info("Startup notification sent to %d", chat_id)
+        except Exception as exc:
+            logger.warning("Startup notification: failed for %d: %s", chat_id, exc)
 
 
 async def post_shutdown(application: Application) -> None:

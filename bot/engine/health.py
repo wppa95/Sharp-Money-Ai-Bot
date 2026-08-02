@@ -373,6 +373,19 @@ class HealthTracker:
     def restart_count(self) -> int:
         return self._state.get("restart_count", 0)
 
+    def startup_reason(self) -> str:
+        """
+        Return the reason for the most recent startup.
+
+        Values:
+          "first_start"         — first ever run (no prior history).
+          "unexpected_exit"     — process died without writing a shutdown record
+                                  (crash, OOM, SIGKILL, Replit eviction).
+          "after_clean_shutdown"— previous session ended cleanly (SIGTERM / restart).
+          "unknown"             — state file absent or unreadable.
+        """
+        return self._state.get("last_startup_reason", "unknown")
+
     def last_startup(self) -> Optional[str]:
         return self._state.get("last_startup")
 
