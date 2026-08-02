@@ -17,3 +17,4 @@
 - [Phase 2 alert + tracking upgrades](phase2-upgrades.md) — _format_intelligence_block, opening_line tracking, Phase 2 DB columns, UD_MIN_CONF_S/A/B gate, health upgrade methods, /rollups command; 2490 tests passing Aug 2026.
 - [Final completion batch](final-completion.md) — B-tier star gate=3, analyst inline block, recovery events, matchup 3-bullet expansion; 2636 tests passing Aug 2026.
 - [Crash diagnosis patch](crash-diagnosis.md) — sys.excepthook captures unhandled exc to health sidecar; crash_cause_label() classifies DB lock/Python exc/SIGKILL; restart alert shows real cause; 2595 tests Aug 2026.
+- [Alert quality cleanup](alert-quality-cleanup.md) — intelligence block char-split fix; _confidence_label(); _validate_final_tier() gate; Bet Quality label; 2634 tests Aug 2026.

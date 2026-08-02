@@ -329,7 +329,8 @@ def test_intelligence_block_shows_l5_hit_rate():
     assert "80%" in result
 
 
-def test_intelligence_block_shows_up_to_3_matchup_reasons():
+def test_intelligence_block_shows_first_matchup_reason():
+    """reasoning is a string in the real trace; when a list is passed, only first item shown."""
     from alerts_multiplatform import _format_intelligence_block
     trace = {
         "historical": {"sample_strength": None, "windows": {}},
@@ -341,8 +342,8 @@ def test_intelligence_block_shows_up_to_3_matchup_reasons():
     }
     result = _format_intelligence_block(trace)
     assert "Reason A" in result
-    assert "Reason B" in result
-    assert "Reason C" in result
+    # Only the first item is shown — the rest are not shown
+    assert "Reason B" not in result
     assert "Reason D" not in result
 
 

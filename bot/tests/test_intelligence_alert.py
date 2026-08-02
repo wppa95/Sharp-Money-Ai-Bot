@@ -101,8 +101,8 @@ def test_format_intelligence_block_matchup_neutral():
     assert "Neutral" in result
 
 
-def test_format_intelligence_block_limits_reasoning_to_three():
-    """Section 2 expansion: up to 3 reasoning bullets (was 2)."""
+def test_format_intelligence_block_reasoning_string_shows_single_bullet():
+    """reasoning is always a string in real traces; only first item shown for list inputs."""
     from alerts_multiplatform import _format_intelligence_block
     trace = {
         "role": {},
@@ -113,8 +113,8 @@ def test_format_intelligence_block_limits_reasoning_to_three():
     }
     result = _format_intelligence_block(trace)
     assert "reason 1" in result
-    assert "reason 2" in result
-    assert "reason 3" in result
+    # Only the first element is shown — subsequent items are not rendered
+    assert "reason 2" not in result
     assert "reason 4" not in result
 
 

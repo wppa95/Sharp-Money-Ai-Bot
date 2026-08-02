@@ -95,6 +95,32 @@ def _tier_label(tier: str) -> str:
     }.get(tier, tier)
 
 
+def _confidence_label(conf: int) -> str:
+    """
+    Return a calibrated signal label based on actual confidence score.
+
+    Use this instead of ``_tier_label`` when you want the language to
+    reflect the real confidence number rather than the tier name.
+
+    Thresholds
+    ----------
+    95+  →  "Elite confidence signal"
+    80-94 → "High-confidence signal"
+    65-79 → "Strong but monitored signal"
+    55-64 → "Moderate signal"
+    <55  →  "Low-confidence signal"
+    """
+    if conf >= 95:
+        return "Elite confidence signal"
+    if conf >= 80:
+        return "High-confidence signal"
+    if conf >= 65:
+        return "Strong but monitored signal"
+    if conf >= 55:
+        return "Moderate signal"
+    return "Low-confidence signal"
+
+
 def _risk_label(risk: str) -> str:
     return {
         "LOW":    "low-risk",
@@ -437,15 +463,19 @@ def build_analyst_from_alert_parts(
 
     # ── Recommended because ─────────────────────────────────────────────────
     why_parts: list[str] = []
-    tier_str   = _tier_label(decision_tier)
+    # Use actual confidence to calibrate language — not the tier name.
+    # This prevents "highest-confidence" language when confidence is 79/100.
+    conf_label = _confidence_label(confidence)
     why_parts.append(
-        f"This is a {tier_str} {decision_rec} on {stat_type} "
-        f"({line:.1f}) for {player_name}."
+        f"{conf_label} — {decision_rec} on {stat_type} "
+        f"({line:.1f}) for {player_name} ({decision_tier}-tier)."
     )
-    if confidence >= 75:
+    if confidence >= 80:
         why_parts.append(f"Overall confidence is strong at {confidence}/100.")
-    elif confidence >= 60:
-        why_parts.append(f"Moderate confidence at {confidence}/100.")
+    elif confidence >= 65:
+        why_parts.append(f"Confidence at {confidence}/100 — monitoring risk factors.")
+    elif confidence >= 55:
+        why_parts.append(f"Moderate confidence at {confidence}/100 — playable with caution.")
 
     hist = _g(pi, "historical") or {}
     if hist:

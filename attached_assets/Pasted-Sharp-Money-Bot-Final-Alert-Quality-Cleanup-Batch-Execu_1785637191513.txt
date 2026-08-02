@@ -1,0 +1,303 @@
+Sharp Money Bot — Final Alert Quality Cleanup Batch
+
+Execute as one final refinement batch.
+
+Do not rebuild anything.
+
+Do not create duplicate systems.
+
+The architecture is already frozen. Only improve alert quality, ranking consistency, and explanation accuracy.
+
+Before changes:
+
+1. Audit current alert generation flow.
+2. Identify exact integration points for:
+    * Tier assignment
+    * Confidence scoring
+    * Intelligence block
+    * Analyst text generation
+    * Risk classification
+    * Telegram formatting
+
+Reuse existing systems.
+
+⸻
+
+Objective
+
+Improve recommendation quality so Telegram alerts represent true playable opportunities, not just statistical extremes.
+
+The recent Jazz Chisholm alert exposed several issues:
+
+* S-tier recommendation despite major role volatility.
+* Analyst wording too aggressive.
+* Grade and recommendation confidence mismatch.
+* Intelligence section formatting issue.
+* Risk factors not impacting final recommendation enough.
+
+Fix these issues.
+
+⸻
+
+1. Role Risk Adjustment
+
+Current issue:
+
+Players with:
+
+* Bench role
+* Platoon role
+* Unstable minutes
+* Injury uncertainty
+* Volatile usage
+
+should not automatically receive maximum confidence.
+
+Add role-risk adjustment.
+
+Example:
+
+Bench role:
+
+* Reduce recommendation confidence.
+* Prevent automatic S-tier unless other evidence is exceptional.
+
+Starter:
+
+* No penalty.
+
+Elite role stability:
+
+* Confidence boost.
+
+The system should understand:
+
+A great statistical edge with bad playing-time certainty is not a perfect play.
+
+⸻
+
+2. Tier / Confidence Consistency
+
+Current issue:
+
+Example:
+
+Grade:
+A
+66/100
+
+Recommendation:
+S-tier
+79/100
+
+These should align.
+
+Create final tier validation:
+
+S-tier requires:
+
+* High confidence
+* Strong data quality
+* Strong edge
+* Acceptable risk
+
+A-tier:
+
+* Strong but not perfect.
+
+B-tier:
+
+* Playable with more uncertainty.
+
+If risk factors are significant:
+
+* Downgrade tier automatically.
+
+Never allow S-tier when major warnings exist unless explicitly overridden.
+
+⸻
+
+3. Analyst Language Calibration
+
+Current issue:
+
+Analyst says:
+
+“highest-confidence”
+
+while confidence is 79/100 and risk is moderate.
+
+Change wording rules.
+
+Examples:
+
+95+ confidence:
+“Elite confidence signal”
+
+80-94:
+“High-confidence signal”
+
+65-79:
+“Strong but monitored signal”
+
+55-64:
+“Moderate signal”
+
+Avoid over-selling recommendations.
+
+The analyst should explain risk honestly.
+
+⸻
+
+4. Intelligence Block Cleanup
+
+Fix formatting issues.
+
+Current:
+
+Matchup:
+• N
+• e
+• t
+
+Expected:
+
+➖ Matchup: Neutral
+
+No character splitting.
+
+Validate all intelligence fields before formatting:
+
+* Role
+* Trend
+* Matchup
+* Opponent
+* Injury/news
+
+Missing values should display:
+
+N/A
+
+not broken text.
+
+⸻
+
+5. Market Quality vs Betting Quality Separation
+
+Keep:
+
+Market Quality
+
+separate from:
+
+Bet Quality.
+
+A market can be:
+
+ELITE market
+
+but still not be:
+
+ELITE bet.
+
+Add final explanation:
+
+Market Quality:
+“How reliable is the market data?”
+
+Bet Quality:
+“How strong is the actual recommendation?”
+
+⸻
+
+6. Final Recommendation Gate
+
+Before sending Telegram:
+
+Run final validation:
+
+Check:
+
+* Tier
+* Confidence
+* Risk
+* Role
+* Data quality
+* Sample size
+
+If conflicts exist:
+
+Downgrade automatically.
+
+Example:
+
+Bench + moderate risk + S-tier
+→ convert to A/B unless override conditions are met.
+
+⸻
+
+7. Preserve Data Collection
+
+Do not change:
+
+* Underdog monitoring
+* PropLineHistory
+* Results tracking
+* Learning labels
+* Crash recovery
+* Database system
+* Provider isolation
+
+Learning updates remain:
+
+ENABLE_LEARNING_UPDATES=False
+
+Do not modify live weights.
+
+⸻
+
+Testing Requirements
+
+Run:
+
+* Existing regression tests
+* Alert formatting tests
+* Analyst tests
+* Tier calibration tests
+* Intelligence block tests
+
+Confirm:
+
+1. Files changed
+2. Test count
+3. No duplicate logic created
+4. No unnecessary provider/API usage returned
+5. Example alerts before/after
+6. Bot ready for passive data collection
+
+⸻
+
+Final Freeze Requirement
+
+After successful completion:
+
+FREEZE FEATURE DEVELOPMENT.
+
+Do not add new features.
+
+Enter:
+
+PASSIVE MONITORING + DATA COLLECTION MODE
+
+The bot should now:
+
+* Watch Underdog markets
+* Send only quality recommendations
+* Store outcomes
+* Track mistakes
+* Build learning data
+* Improve later from collected results
+
+⸻
+
+After this batch, leave the system alone and collect data.

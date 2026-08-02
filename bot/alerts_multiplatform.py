@@ -290,7 +290,13 @@ def _format_decision_block(decision: Optional[object]) -> str:
     is_pick = rec != "PASS"
 
     tier_line = f"\n   {tier_disp}" if is_pick else ""
-    conf_line = f"\n   <b>Confidence:</b>    {conf}" if is_pick else ""
+    # Bet Quality = How strong is the actual recommendation?
+    # Kept separate from Market Quality (how reliable is the market data).
+    conf_line = (
+        f"\n   <b>Bet Quality:</b>    {conf}"
+        f"  <i>(how strong is the actual recommendation)</i>"
+        if is_pick else ""
+    )
 
     if is_pick:
         evidence_block = (
@@ -319,7 +325,11 @@ def _format_decision_block(decision: Optional[object]) -> str:
 
 
 def _format_market_quality_block(market_quality: Optional[object]) -> str:
-    """Render the Market Quality section for Underdog alerts (informational)."""
+    """Render the Market Quality section for Underdog alerts (informational).
+
+    Market Quality = How reliable is the market data?
+    This is separate from Bet Quality (how strong is the actual recommendation).
+    """
     if market_quality is None:
         return ""
     label   = getattr(market_quality, "label",   None)
@@ -335,8 +345,61 @@ def _format_market_quality_block(market_quality: Optional[object]) -> str:
     return (
         f"\n\n{icon} <b>Market Quality:</b>  {label_str}  "
         f"<code>[{bar}]</code>  {score}/100"
-        f"\n   <i>{reason_str}</i>"
+        f"\n   <i>How reliable is the market data?  {reason_str}</i>"
     )
+
+
+def _validate_final_tier(
+    tier: str,
+    conf: int,
+    intelligence_trace: Optional[dict],
+) -> str:
+    """
+    Final tier validation gate — runs before Telegram formatting.
+
+    Ensures the displayed recommendation tier is consistent with actual
+    confidence score, role stability, and risk signals.  Only downgrades
+    — never upgrades.
+
+    Rules
+    -----
+    S-tier requires:
+      • Confidence ≥ 80  (79/100 confidence should not be labeled S-tier)
+      • Not a Bench role  unless confidence is exceptional (≥ 90)
+
+    A-tier downgrade to B when:
+      • Role is Bench AND stability is Volatile AND confidence < 65
+
+    Parameters
+    ----------
+    tier               : Raw tier string from UDBetDecision ("S" | "A" | "B" | "PASS")
+    conf               : Overall confidence score 0-100
+    intelligence_trace : prop_intelligence trace dict (optional)
+    """
+    if tier not in ("S", "A", "B"):
+        return tier
+
+    validated = tier
+
+    # Gate 1: S-tier requires confidence ≥ 80
+    if validated == "S" and conf < 80:
+        validated = "A"
+
+    # Gate 2: Role-based S-tier gate — bench role prevents S unless evidence is exceptional
+    if intelligence_trace:
+        role       = (intelligence_trace.get("role") or {})
+        role_label = (role.get("label")     or "").strip()
+        stability  = (role.get("stability") or "").strip()
+
+        if role_label == "Bench":
+            # Bench player at S-tier — require conf ≥ 90 to justify
+            if validated == "S" and conf < 90:
+                validated = "A"
+            # Bench + Volatile at A-tier — downgrade to B when confidence is weak
+            if validated == "A" and stability == "Volatile" and conf < 65:
+                validated = "B"
+
+    return validated
 
 
 def _format_market_pressure_block(market_pressure: Optional[object]) -> str:
@@ -396,30 +459,45 @@ def _format_analyst_inline_block(
     Calls engine.analyst.format_analyst_alert_block — which is a pure function
     that builds the narrative from stored decision artifacts.  Returns "" for
     PASS/removal decisions, or when the import fails.
+
+    Applies the final tier validation gate (_validate_final_tier) so the
+    analyst block reflects a consistent tier/confidence/role assessment.
+    A mismatch note is appended when the gate downgrades the tier.
     """
     if decision is None:
         return ""
-    rec   = getattr(decision, "recommendation", None)
-    tier  = getattr(decision, "decision_tier", "B") or "B"
-    conf  = getattr(decision, "confidence", 0) or 0
-    rlvl  = "MEDIUM"
+    rec       = getattr(decision, "recommendation", None)
+    raw_tier  = getattr(decision, "decision_tier", "B") or "B"
+    conf      = getattr(decision, "confidence", 0) or 0
+    rlvl      = "MEDIUM"
     if score is not None:
         # Derive risk from stars: 5=LOW, 4=LOW, 3=MEDIUM, 2/1=HIGH
         stars = getattr(score, "stars", 3) or 3
         rlvl  = "LOW" if stars >= 4 else "MEDIUM" if stars >= 3 else "HIGH"
+
+    # Apply final tier validation gate before passing to analyst
+    validated_tier = _validate_final_tier(raw_tier, int(conf), intelligence_trace)
+    tier_note = ""
+    if validated_tier != raw_tier:
+        tier_note = (
+            f"\n\n⚠️ <i>Tier adjusted {raw_tier}→{validated_tier}: "
+            f"confidence {conf}/100 or role risk does not support {raw_tier}-tier.</i>"
+        )
+
     try:
         from engine.analyst import format_analyst_alert_block
-        return format_analyst_alert_block(
+        block = format_analyst_alert_block(
             player_name        = player_name,
             stat_type          = stat_type,
             sport              = sport or "UNKNOWN",
             line               = float(line),
             decision_rec       = rec,
-            decision_tier      = tier,
+            decision_tier      = validated_tier,
             confidence         = int(conf),
             risk_level         = rlvl,
             intelligence_trace = intelligence_trace,
         )
+        return block + tier_note
     except Exception:
         return ""
 
@@ -481,9 +559,14 @@ def _format_intelligence_block(trace: "Optional[dict]") -> str:
             "Tough": "⚠️",    "Difficult": "⚠️",
         }.get(match_label, "📊")
         lines.append(f"\n   {match_icon} <b>Matchup:</b>  {match_label}")
-        for rsn in list(match_rsns)[:3]:   # up to 3 reasoning bullets
-            if rsn:
-                lines.append(f"\n      <i>• {rsn}</i>")
+        # reasoning is stored as a string (not a list) — display as single bullet
+        rsn_text = ""
+        if isinstance(match_rsns, str):
+            rsn_text = match_rsns.strip()
+        elif isinstance(match_rsns, (list, tuple)):
+            rsn_text = match_rsns[0].strip() if match_rsns else ""
+        if rsn_text:
+            lines.append(f"\n      <i>• {rsn_text}</i>")
 
     return "".join(lines)
 
