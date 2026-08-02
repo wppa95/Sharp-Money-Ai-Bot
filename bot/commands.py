@@ -269,12 +269,128 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             if ts:
                 lines.append(f"   at {_html.escape(str(ts))}")
 
+        # ── Phase 2: extended runtime telemetry ───────────────────────────────
+        lines.append("")
+        lines.append("<b>📡 Underdog Pipeline</b>")
+        ud_scan = ht.last_underdog_scan()
+        ud_scan_age = ht.last_underdog_scan_age_str()
+        ud_props   = ht.last_underdog_props()
+        ud_alerts  = ht.last_underdog_alerts()
+        if ud_scan:
+            lines.append(
+                f"  Last scan:    {_html.escape(ud_scan_age)}"
+                + (f"  props={ud_props}" if ud_props is not None else "")
+                + (f"  alerts={ud_alerts}" if ud_alerts is not None else "")
+            )
+        else:
+            lines.append("  Last scan:    not yet run this session")
+
+        db_write = ht.last_db_write()
+        db_age   = ht.last_db_write_age_str()
+        lines.append(f"  Last DB write: {_html.escape(db_age) if db_write else 'not recorded'}")
+
+        pf = ht.last_pipeline_fail_info()
+        if pf:
+            lines.append("")
+            lines.append(
+                f"🚨 <b>Last pipeline failure:</b>"
+                f"  stage={_html.escape(pf.get('stage','?'))}"
+                f"  module={_html.escape(pf.get('module','?'))}"
+            )
+            lines.append(f"   at {_html.escape(pf.get('ts','?'))}")
+            lines.append(f"   ↳ {_html.escape(str(pf.get('error',''))[:100])}")
+
         logger.info("cmd_health: sending response (%d lines)", len(lines))
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
         logger.info("cmd_health: response sent")
     except Exception as exc:
         logger.exception("cmd_health: unexpected error: %s", exc)
         await update.message.reply_text("⚠️ /health failed. Check bot logs.")
+
+
+async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/rollups — show learning performance rollups by tier, sport, and stat type."""
+    if not _check_allowed(update):
+        await update.message.reply_text("⛔ Unauthorized.")
+        return
+    try:
+        db: "Database" = context.bot_data.get("db")
+        if db is None:
+            await update.message.reply_text("⚠️ Database not available.")
+            return
+
+        rollups = await db.get_learning_rollups()
+        total   = rollups.get("total_graded", 0)
+
+        if total == 0:
+            await update.message.reply_text(
+                "📊 <b>Learning Rollups</b>\n\n"
+                "<i>No graded plays yet — results are graded after game_time passes.</i>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+        def _tier_row(k: str, v: dict) -> str:
+            w, l, p = v.get("W", 0), v.get("L", 0), v.get("P", 0)
+            pct = v.get("win_pct", 0.0)
+            return f"  <b>{k}:</b>  {w}W-{l}L-{p}P  ({pct:.1f}%)"
+
+        lines = [
+            "📊 <b>Learning Rollups</b>",
+            "",
+            f"Total graded plays: <b>{total}</b>",
+            "",
+        ]
+
+        # ── By tier ───────────────────────────────────────────────────────────
+        by_tier = rollups.get("by_tier", {})
+        if by_tier:
+            lines.append("<b>By Tier</b>")
+            for tier in ("S", "A", "B"):
+                if tier in by_tier:
+                    lines.append(_tier_row(tier, by_tier[tier]))
+            lines.append("")
+
+        # ── By sport ──────────────────────────────────────────────────────────
+        by_sport = rollups.get("by_sport", {})
+        if by_sport:
+            lines.append("<b>By Sport</b>")
+            for sport, v in sorted(by_sport.items(), key=lambda kv: -kv[1].get("total", 0))[:6]:
+                lines.append(_tier_row(sport, v))
+            lines.append("")
+
+        # ── Top stat types ────────────────────────────────────────────────────
+        by_stat = rollups.get("by_stat_type", {})
+        if by_stat:
+            lines.append("<b>Top Prop Types</b>")
+            for stat, v in list(by_stat.items())[:8]:
+                lines.append(_tier_row(stat[:28], v))
+            lines.append("")
+
+        # ── Error type breakdown ──────────────────────────────────────────────
+        by_err = rollups.get("by_error_type", {})
+        if by_err:
+            lines.append("<b>Miss Classification</b>")
+            for etype, n in sorted(by_err.items(), key=lambda kv: -kv[1]):
+                lines.append(f"  {_html.escape(str(etype))}: {n}")
+            lines.append("")
+
+        # ── Player trend (top performers) ─────────────────────────────────────
+        player_trend = rollups.get("player_trend", [])
+        if player_trend:
+            lines.append("<b>Player Trend (top by volume)</b>")
+            for pt in player_trend[:6]:
+                w, l, pct = pt["W"], pt["L"], pt.get("win_pct", 0.0)
+                lines.append(
+                    f"  {_html.escape(pt['player'][:22])} ({pt['sport']})"
+                    f"  {w}W-{l}L  ({pct:.0f}%)"
+                    f"  <i>{_html.escape(pt['stat_type'][:18])}</i>"
+                )
+
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+    except Exception as exc:
+        logger.exception("cmd_rollups: failed: %s", exc)
+        await update.message.reply_text("⚠️ /rollups failed. Check bot logs.")
 
 
 async def cmd_restarts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

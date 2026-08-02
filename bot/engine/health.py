@@ -282,6 +282,23 @@ class HealthTracker:
             entry["fail_streak"] = 0
             self._save()
 
+    def record_job_started(self, job_name: str) -> None:
+        """
+        Mark that a job has been dispatched (before completion or failure).
+
+        Writes ``last_started`` / ``last_started_ts`` into the job dict and
+        sets the top-level ``last_job_started`` / ``last_job_started_at`` fields
+        so the health sidecar always shows which job was running last.
+        """
+        with self._lock:
+            jobs:  dict = self._state.setdefault("jobs", {})
+            entry: dict = jobs.setdefault(job_name, {})
+            entry["last_started"]    = _now_iso()
+            entry["last_started_ts"] = _now_ts()
+            self._state["last_job_started"]    = job_name
+            self._state["last_job_started_at"] = _now_iso()
+            self._save()
+
     def record_job_fail(self, job_name: str, error: str) -> None:
         """Mark a failed job execution with error details."""
         with self._lock:
@@ -314,6 +331,46 @@ class HealthTracker:
         return _age_str(self.get_job_info(job_name).get("last_fail_ts"))
 
     # ── Telegram ──────────────────────────────────────────────────────────────
+
+    def record_underdog_scan(self, props_count: int, alerts_sent: int) -> None:
+        """Record a completed successful Underdog scan cycle."""
+        with self._lock:
+            self._state["last_underdog_scan"]    = _now_iso()
+            self._state["last_underdog_scan_ts"] = _now_ts()
+            self._state["last_underdog_props"]   = props_count
+            self._state["last_underdog_alerts"]  = alerts_sent
+            self._save()
+
+    def record_database_write(self, operation: str = "write") -> None:
+        """Record a successful database write operation."""
+        with self._lock:
+            self._state["last_db_write"]     = _now_iso()
+            self._state["last_db_write_ts"]  = _now_ts()
+            self._state["last_db_operation"] = str(operation)[:64]
+            self._save()
+
+    def record_pipeline_fail(self, stage: str, module: str, error: str) -> None:
+        """
+        Record a pipeline stage failure with module attribution.
+
+        Distinct from record_job_fail — this captures *where inside* a job
+        the failure occurred so operators can distinguish e.g. a scoring failure
+        from a delivery failure without reading raw logs.
+        """
+        with self._lock:
+            self._state["last_pipeline_fail"] = {
+                "stage":  str(stage)[:64],
+                "module": str(module)[:64],
+                "error":  str(error)[:200],
+                "ts":     _now_iso(),
+            }
+            self._state["last_error"]    = f"[pipeline:{stage}:{module}] {str(error)[:150]}"
+            self._state["last_error_ts"] = _now_iso()
+            self._save()
+        logger.warning(
+            "HealthTracker: pipeline fail — stage=%s module=%s error=%s",
+            stage, module, str(error)[:80],
+        )
 
     def record_telegram_send(self) -> None:
         """Call after any successful outbound Telegram message."""
@@ -426,6 +483,36 @@ class HealthTracker:
 
     def last_heartbeat(self) -> Optional[str]:
         return self._state.get("heartbeat")
+
+    # ── New Phase 2 accessors ─────────────────────────────────────────────────
+
+    def job_last_started_str(self, job_name: str) -> str:
+        return _age_str(self.get_job_info(job_name).get("last_started_ts"))
+
+    def last_underdog_scan(self) -> Optional[str]:
+        return self._state.get("last_underdog_scan")
+
+    def last_underdog_scan_age_str(self) -> str:
+        return _age_str(self._state.get("last_underdog_scan_ts"))
+
+    def last_underdog_props(self) -> Optional[int]:
+        return self._state.get("last_underdog_props")
+
+    def last_underdog_alerts(self) -> Optional[int]:
+        return self._state.get("last_underdog_alerts")
+
+    def last_db_write(self) -> Optional[str]:
+        return self._state.get("last_db_write")
+
+    def last_db_write_age_str(self) -> str:
+        return _age_str(self._state.get("last_db_write_ts"))
+
+    def last_pipeline_fail_info(self) -> Optional[dict]:
+        """Return the last pipeline failure dict, or None."""
+        return self._state.get("last_pipeline_fail")
+
+    def last_job_started_name(self) -> Optional[str]:
+        return self._state.get("last_job_started")
 
 
 # ── Module-level singleton ────────────────────────────────────────────────────

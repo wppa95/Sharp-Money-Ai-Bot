@@ -36,6 +36,7 @@ from typing import Optional
 
 from config import config
 from engine.health import get_health_tracker
+from engine.prop_intelligence import compute_prop_intelligence as _compute_intel
 from engine.score_validation import clamp_score
 from database import (
     Database,
@@ -502,6 +503,8 @@ async def underdog_job(context) -> None:
     now      = datetime.utcnow()
 
     _health = get_health_tracker()
+    if _health:
+        _health.record_job_started("underdog_job")
 
     try:
         snapshots = await _registry.fetch_pickem()
@@ -702,22 +705,48 @@ async def underdog_job(context) -> None:
                     and decision.recommendation != "PASS"
                     and (snap.sport or "UNKNOWN") in config.ud_alert_sports
                 )
+                # Per-tier confidence gate — filter weak B/A/S picks before alert
+                if _np_bet_ready and decision is not None:
+                    _np_min_conf = {
+                        "S": config.UD_MIN_CONF_S,
+                        "A": config.UD_MIN_CONF_A,
+                        "B": config.UD_MIN_CONF_B,
+                    }.get(decision.decision_tier, 0)
+                    if decision.confidence < _np_min_conf:
+                        _np_bet_ready = False
+                        logger.debug(
+                            "UD conf_gate [new]: %s | %s | conf=%d < min=%d (tier=%s)",
+                            player, stat_type,
+                            decision.confidence, _np_min_conf, decision.decision_tier,
+                        )
+
                 if _np_bet_ready and chat_ids:
+                    # Prop Intelligence trace for richer alert context
+                    _np_intel_trace: Optional[dict] = None
+                    if np_history:
+                        try:
+                            _np_intel = _compute_intel(
+                                player, snap.sport or "UNKNOWN", stat_type, line_val, np_history
+                            )
+                            _np_intel_trace = _np_intel.intelligence_trace
+                        except Exception:
+                            pass
                     delivery  = AlertDelivery(db, bot, chat_ids)
                     ud_result = await delivery.deliver_underdog(
-                        player_name     = player,
-                        team            = snap.team or "",
-                        sport           = snap.sport,
-                        stat_type       = stat_type,
-                        old_line        = line_val,
-                        new_line        = line_val,
-                        game_time       = snap.game_time,
-                        score           = score,
-                        new_prop        = True,
-                        validation      = validation,
-                        decision        = decision,
-                        market_quality  = market_quality,
-                        market_pressure = market_pressure,
+                        player_name        = player,
+                        team               = snap.team or "",
+                        sport              = snap.sport,
+                        stat_type          = stat_type,
+                        old_line           = line_val,
+                        new_line           = line_val,
+                        game_time          = snap.game_time,
+                        score              = score,
+                        new_prop           = True,
+                        validation         = validation,
+                        decision           = decision,
+                        market_quality     = market_quality,
+                        market_pressure    = market_pressure,
+                        intelligence_trace = _np_intel_trace,
                     )
                     if ud_result.sent:
                         _n_new_prop_sent += 1
@@ -1012,7 +1041,35 @@ async def underdog_job(context) -> None:
                     and abs(snap.line - prev_line) >= config.MIN_UNDERDOG_LINE_CHANGE
                 ))
     
+                # Per-tier confidence gate for directional picks (not removals)
+                if should_alert and not is_removed and decision is not None and decision.recommendation != "PASS":
+                    _lc_min_conf = {
+                        "S": config.UD_MIN_CONF_S,
+                        "A": config.UD_MIN_CONF_A,
+                        "B": config.UD_MIN_CONF_B,
+                    }.get(decision.decision_tier, 0)
+                    if decision.confidence < _lc_min_conf:
+                        should_alert = False
+                        logger.debug(
+                            "UD conf_gate [lc]: %s | %s | conf=%d < min=%d (tier=%s)",
+                            player, stat_type,
+                            decision.confidence, _lc_min_conf, decision.decision_tier,
+                        )
+
                 if should_alert and chat_ids:
+                    # Prop Intelligence trace for richer alert context
+                    # ud_history may be unbound in removal-only paths (no scoring was run)
+                    _lc_intel_trace: Optional[dict] = None
+                    try:
+                        _lc_hist = ud_history  # NameError if not yet assigned in this path
+                        if _lc_hist:
+                            _lc_intel = _compute_intel(
+                                player, snap.sport or "UNKNOWN", stat_type,
+                                snap.line or 0.0, _lc_hist,
+                            )
+                            _lc_intel_trace = _lc_intel.intelligence_trace
+                    except (NameError, Exception):
+                        pass
                     delivery  = AlertDelivery(db, bot, chat_ids)
                     # Derive removal reason from game-time context
                     _removal_reason: Optional[str] = None
@@ -1024,21 +1081,22 @@ async def underdog_job(context) -> None:
                         else:
                             _removal_reason = "Market no longer available from provider"
                     ud_result = await delivery.deliver_underdog(
-                        player_name     = player,
-                        team            = snap.team or "",
-                        sport           = snap.sport,
-                        stat_type       = stat_type,
-                        old_line        = prev_line or (snap.line or 0.0),
-                        new_line        = snap.line or 0.0,
-                        game_time       = snap.game_time,
-                        score           = score,
-                        removed         = is_removed,
-                        new_prop        = is_reentry_qualified and not is_removed,
-                        validation      = validation,
-                        decision        = decision,
-                        market_quality  = market_quality,
-                        market_pressure = market_pressure,
-                        removal_reason  = _removal_reason,
+                        player_name        = player,
+                        team               = snap.team or "",
+                        sport              = snap.sport,
+                        stat_type          = stat_type,
+                        old_line           = prev_line or (snap.line or 0.0),
+                        new_line           = snap.line or 0.0,
+                        game_time          = snap.game_time,
+                        score              = score,
+                        removed            = is_removed,
+                        new_prop           = is_reentry_qualified and not is_removed,
+                        validation         = validation,
+                        decision           = decision,
+                        market_quality     = market_quality,
+                        market_pressure    = market_pressure,
+                        removal_reason     = _removal_reason,
+                        intelligence_trace = _lc_intel_trace,
                     )
                     if ud_result.filtered:
                         logger.debug(
@@ -1212,24 +1270,46 @@ async def underdog_job(context) -> None:
                     pass  # never block alert flow
                 if _sdec is None or _sdec.recommendation == "PASS":
                     continue
-    
+
+                # Per-tier confidence gate for standing plays
+                _s_min_conf = {
+                    "S": config.UD_MIN_CONF_S,
+                    "A": config.UD_MIN_CONF_A,
+                    "B": config.UD_MIN_CONF_B,
+                }.get(_sdec.decision_tier, 0)
+                if _sdec.confidence < _s_min_conf:
+                    logger.debug(
+                        "UD conf_gate [standing]: %s | %s | conf=%d < min=%d (tier=%s)",
+                        _sp, _st, _sdec.confidence, _s_min_conf, _sdec.decision_tier,
+                    )
+                    continue
+
                 _smq = _cmq(_st, _line_val, _sscore)
                 _smp = _dmp(None, _shist)
+                # Prop Intelligence trace for standing alerts
+                _s_intel_trace: Optional[dict] = None
+                if _shist:
+                    try:
+                        _s_intel = _compute_intel(_sp, _ssport, _st, _line_val, _shist)
+                        _s_intel_trace = _s_intel.intelligence_trace
+                    except Exception:
+                        pass
                 delivery   = AlertDelivery(db, bot, chat_ids)
                 _sresult   = await delivery.deliver_underdog(
-                    player_name     = _sp,
-                    team            = _ssnap.team or "",
-                    sport           = _ssnap.sport,
-                    stat_type       = _st,
-                    old_line        = _line_val,
-                    new_line        = _line_val,
-                    game_time       = _ssnap.game_time,
-                    score           = _sscore,
-                    validation      = _sval,
-                    decision        = _sdec,
-                    market_quality  = _smq,
-                    market_pressure = _smp,
-                    standing        = True,
+                    player_name        = _sp,
+                    team               = _ssnap.team or "",
+                    sport              = _ssnap.sport,
+                    stat_type          = _st,
+                    old_line           = _line_val,
+                    new_line           = _line_val,
+                    game_time          = _ssnap.game_time,
+                    score              = _sscore,
+                    validation         = _sval,
+                    decision           = _sdec,
+                    market_quality     = _smq,
+                    market_pressure    = _smp,
+                    standing           = True,
+                    intelligence_trace = _s_intel_trace,
                 )
                 if _sresult.sent:
                     _n_standing_sent += 1
@@ -1352,6 +1432,11 @@ async def underdog_job(context) -> None:
         logger.exception("underdog_job: processing error: %s", _job_exc)
         if _health:
             _health.record_job_fail("underdog_job", str(_job_exc))
+            _health.record_pipeline_fail(
+                stage  = "prop_scoring",
+                module = "market_engine.underdog_job",
+                error  = str(_job_exc),
+            )
         return
 
     # ── Bridge to PropLineHistory (lifecycle tracking) ─────────────────────────
@@ -1429,8 +1514,20 @@ async def underdog_job(context) -> None:
     if _health:
         if _persistence_ok:
             _health.record_job_run("underdog_job")
+            _health.record_underdog_scan(
+                props_count = len(ud_snaps) if "ud_snaps" in dir() else 0,
+                alerts_sent = (
+                    (_n_new_prop_sent if "_n_new_prop_sent" in dir() else 0)
+                ),
+            )
+            _health.record_database_write("lifecycle_bridge")
         else:
             _health.record_job_fail(
                 "underdog_job",
                 "persistence stage failed (bridge or lifecycle update)",
+            )
+            _health.record_pipeline_fail(
+                stage  = "lifecycle_bridge",
+                module = "market_engine",
+                error  = "bridge or lifecycle update failed",
             )

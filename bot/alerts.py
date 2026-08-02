@@ -1046,6 +1046,9 @@ class AlertDelivery:
         new_prop: bool = False,
         standing: bool = False,  # True for evidence-driven alerts without line movement
         removal_reason: Optional[str] = None,  # Why prop was removed (removal alerts only)
+        opponent: Optional[str] = None,        # Opponent team/player (when available)
+        intelligence_trace: Optional[dict] = None,  # prop_intelligence trace
+        opening_line: Optional[float] = None,  # First ever line from PropLineHistory
     ) -> "DeliveryResult":
         """
         Full Underdog prop alert pipeline:
@@ -1118,6 +1121,8 @@ class AlertDelivery:
                 dk_line=dk_line,
                 fd_line=fd_line,
                 low_line_threshold=config.UD_NEW_PROP_LOW_LINE_THRESHOLD,
+                opponent=opponent,
+                intelligence_trace=intelligence_trace,
             )
         else:
             message = format_underdog_change_alert(
@@ -1135,6 +1140,9 @@ class AlertDelivery:
                 removed=removed,
                 standing=standing,
                 removal_reason=removal_reason,
+                opponent=opponent,
+                intelligence_trace=intelligence_trace,
+                opening_line=opening_line,
             )
 
         # 5. Broadcast

@@ -225,6 +225,20 @@ class Config:
     # Set DAILY_UNDERDOG_LIMIT env var to a positive integer to re-enable.
     DAILY_UNDERDOG_LIMIT: int = int(os.environ.get("DAILY_UNDERDOG_LIMIT", "0"))
 
+    # ── Per-tier confidence minimums ─────────────────────────────────────────
+    # Alerts for each tier only fire when decision.confidence ≥ the minimum
+    # for that tier.  Set all to 0 to disable (score-tier gate still applies).
+    UD_MIN_CONF_S: int = int(os.environ.get("UD_MIN_CONF_S", "75"))
+    UD_MIN_CONF_A: int = int(os.environ.get("UD_MIN_CONF_A", "65"))
+    UD_MIN_CONF_B: int = int(os.environ.get("UD_MIN_CONF_B", "55"))
+
+    # ── Learning / model update flag ──────────────────────────────────────────
+    # When True, learning rollups are surfaced in /rollups output and future
+    # weight-adjustment logic is enabled.  Default False — off until validated.
+    ENABLE_LEARNING_UPDATES: bool = (
+        os.environ.get("ENABLE_LEARNING_UPDATES", "false").lower() == "true"
+    )
+
     # ── Game timing filter ───────────────────────────────────────────────────
     # Block alerts for games that start sooner than this (minutes).
     # Exception: allows through if edge ≥ URGENT_EDGE_THRESHOLD.

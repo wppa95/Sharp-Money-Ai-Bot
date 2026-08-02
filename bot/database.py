@@ -264,6 +264,9 @@ class PropLineHistory(Base):
     # Alert lifecycle state — "DISCOVERED" | "ACTIVE_ALERTED" | "REMOVED"
     lifecycle_state    = Column(String(16), default="DISCOVERED", nullable=True)
     first_alert_sent_at = Column(DateTime, nullable=True)
+    # Opening line — set once on first INSERT, never updated.
+    # Enables opening-vs-current movement display in alerts.
+    opening_line       = Column(Float,     nullable=True)
 
 
 class AlertCLVSeed(Base):
@@ -380,6 +383,11 @@ class PropOpportunityLog(Base):
     # Learning label — set by opportunity grader on MISS outcomes
     # Values: "Model" | "Market" | "Settlement" | "Variance" | None (HIT/PUSH/PENDING)
     error_type     = Column(String(16),  nullable=True)
+    # Phase 2 enrichment — captured at alert time; added via migration
+    stars          = Column(Integer,     nullable=True)          # 0–5 stars at alert time
+    risk_level     = Column(String(16),  nullable=True)          # "LOW"|"MEDIUM"|"HIGH"|None
+    explanation    = Column(Text,        nullable=True)          # reason / narrative excerpt
+    void_reason    = Column(String(64),  nullable=True)          # why result is VOID/CANCELLED
 
     __table_args__ = (
         UniqueConstraint(
@@ -452,7 +460,9 @@ class Database:
         await self._migrate_underdog_snapshots()
         await self._migrate_clv_records()
         await self._migrate_prop_line_history()
+        await self._migrate_prop_line_history_v2()
         await self._migrate_prop_opportunity_log()
+        await self._migrate_prop_opportunity_log_v2()
         # player_risk_records is created by create_all (new table); no column migration needed
         logger.info("Database initialised at %s", self._url)
 
@@ -1456,6 +1466,7 @@ class Database:
                 row.change_count = 0
                 row.prev_line    = None
                 row.removed      = removed
+                row.opening_line = line_value  # set once; never updated on subsequent changes
             except AttributeError:
                 pass
             async with self.session() as s:
@@ -2198,6 +2209,17 @@ class Database:
 
     # ── Prop Opportunity Tracking ────────────────────────────────────────────
 
+    async def _migrate_prop_line_history_v2(self) -> None:
+        """Add opening_line column to prop_line_history (Phase 2)."""
+        async with self._engine.begin() as conn:
+            try:
+                await conn.execute(text(
+                    "ALTER TABLE prop_line_history ADD COLUMN opening_line REAL"
+                ))
+                logger.info("_migrate_prop_line_history_v2: added opening_line column")
+            except Exception:
+                pass  # already exists
+
     async def _migrate_prop_opportunity_log(self) -> None:
         """Add error_type column to existing tables (learning label classification)."""
         async with self._engine.begin() as conn:
@@ -2211,6 +2233,21 @@ class Database:
             except Exception:
                 pass  # column already exists (SQLite raises OperationalError)
 
+    async def _migrate_prop_opportunity_log_v2(self) -> None:
+        """Add Phase 2 enrichment columns to prop_opportunity_log."""
+        async with self._engine.begin() as conn:
+            for col_sql in [
+                "ALTER TABLE prop_opportunity_log ADD COLUMN stars INTEGER",
+                "ALTER TABLE prop_opportunity_log ADD COLUMN risk_level VARCHAR(16)",
+                "ALTER TABLE prop_opportunity_log ADD COLUMN explanation TEXT",
+                "ALTER TABLE prop_opportunity_log ADD COLUMN void_reason VARCHAR(64)",
+            ]:
+                try:
+                    await conn.execute(text(col_sql))
+                except Exception:
+                    pass  # column already exists
+        logger.info("_migrate_prop_opportunity_log_v2: Phase 2 columns ensured")
+
     async def log_prop_opportunity(
         self,
         *,
@@ -2220,19 +2257,26 @@ class Database:
         sport: str,
         stat_type: str,
         line_value: float,
-        recommendation: str,   # OVER | UNDER | PASS
-        decision_tier: str,    # S | A | B | PASS
+        recommendation: str,            # OVER | UNDER | PASS
+        decision_tier: str,             # S | A | B | PASS
         confidence: int,
         game_time: "Optional[datetime]",
+        # Phase 2 enrichment — optional, captured at alert time
+        stars:       "Optional[int]"   = None,   # 0–5 stars
+        risk_level:  "Optional[str]"   = None,   # "LOW" | "MEDIUM" | "HIGH"
+        explanation: "Optional[str]"   = None,   # reason / narrative excerpt
     ) -> None:
         """
         Upsert a prop opportunity at evaluation time (PLAY or PASS).
 
         On conflict with the same (external_id, stat_type) — i.e. the prop was
         re-evaluated in a later cycle — updates recommendation, tier, confidence,
-        and line_value to reflect the latest decision.  Preserves any existing
-        grading (result / actual_value / graded_at) so re-evaluation does not
-        wipe a completed outcome.
+        line_value, and Phase 2 enrichment to reflect the latest decision.
+        Preserves any existing grading (result / actual_value / graded_at) so
+        re-evaluation does not wipe a completed outcome.
+
+        Extended result codes accepted by grade_opportunity:
+          HIT | MISS | PUSH | PENDING | VOID | CANCELLED | INJURY_VOID | GAME_INTERRUPTED
         """
         from sqlalchemy.dialects.sqlite import insert as _sqlite_insert
         now = datetime.utcnow()
@@ -2253,6 +2297,9 @@ class Database:
                 result         = "PENDING",
                 actual_value   = None,
                 graded_at      = None,
+                stars          = stars,
+                risk_level     = risk_level,
+                explanation    = explanation,
             )
             .on_conflict_do_update(
                 index_elements = ["external_id", "stat_type"],
@@ -2261,6 +2308,9 @@ class Database:
                     "decision_tier":  decision_tier,
                     "confidence":     confidence,
                     "line_value":     line_value,
+                    "stars":          stars,
+                    "risk_level":     risk_level,
+                    "explanation":    explanation,
                 }
             )
         )
@@ -2294,23 +2344,28 @@ class Database:
 
     async def grade_opportunity(
         self,
-        opp_id:      int,
-        result:      str,
+        opp_id:       int,
+        result:       str,
         actual_value: float,
-        error_type:  Optional[str] = None,
+        error_type:   Optional[str] = None,
+        void_reason:  Optional[str] = None,
     ) -> None:
         """
-        Set HIT / MISS / PUSH (and learning error_type) on a prop opportunity
+        Set the outcome (and optional learning label) on a prop opportunity
         after the game completes.
 
         Parameters
         ----------
-        opp_id      : PropOpportunityLog.id
-        result      : "HIT" | "MISS" | "PUSH"
-        actual_value: The recorded stat value from the game result
-        error_type  : Learning label — "Model" | "Market" | "Settlement" |
-                      "Variance" | None.  Should be set on MISS outcomes only.
-                      Determines whether this miss should update scoring weights.
+        opp_id       : PropOpportunityLog.id
+        result       : "HIT" | "MISS" | "PUSH" | "VOID" | "CANCELLED" |
+                       "INJURY_VOID" | "GAME_INTERRUPTED"
+        actual_value : The recorded stat value from the game result
+                       (pass 0.0 for void/cancelled outcomes).
+        error_type   : Learning label — "Model" | "Market" | "Settlement" |
+                       "Variance" | None.  Should be set on MISS outcomes only.
+                       Determines whether this miss should update scoring weights.
+        void_reason  : Free-text reason string for VOID/CANCELLED/INJURY_VOID/
+                       GAME_INTERRUPTED outcomes (stored in void_reason column).
         """
         from sqlalchemy import update as _sa_update
         values: dict = {
@@ -2320,6 +2375,8 @@ class Database:
         }
         if error_type is not None:
             values["error_type"] = error_type
+        if void_reason is not None:
+            values["void_reason"] = str(void_reason)[:64]
         async with self.session() as s:
             await s.execute(
                 _sa_update(PropOpportunityLog)
@@ -2327,6 +2384,157 @@ class Database:
                 .values(**values)
             )
             await s.commit()
+
+    async def get_learning_rollups(self) -> "dict":
+        """
+        Return learning-focused performance rollups for the /rollups command.
+
+        Returns a dict with:
+          by_tier       — { tier → {W, L, P, total, win_pct} }  (graded PLAY rows only)
+          by_sport      — { sport → {W, L, P, total, win_pct} }
+          by_stat_type  — { stat_type → {W, L, P, total, win_pct} } (top 15 by volume)
+          by_error_type — { error_type → count }   (MISS rows with a label)
+          player_trend  — [ {player, sport, stat_type, W, L, P} ] top 10 by volume
+          total_graded  — int (all HIT/MISS/PUSH rows)
+        """
+        def _record(rows_iter) -> dict:
+            """Accumulate (rec, result, n) tuples into W/L/P buckets."""
+            acc: dict = {}
+            for key, rec, res, n in rows_iter:
+                entry = acc.setdefault(key, {"W": 0, "L": 0, "P": 0, "total": 0})
+                entry["total"] += n
+                if rec == "OVER":
+                    if res == "HIT":   entry["W"] += n
+                    elif res == "MISS": entry["L"] += n
+                    else:              entry["P"] += n
+                elif rec == "UNDER":
+                    if res == "MISS":  entry["W"] += n  # under cleared = over failed
+                    elif res == "HIT": entry["L"] += n
+                    else:              entry["P"] += n
+            for v in acc.values():
+                t = v["W"] + v["L"]
+                v["win_pct"] = round(v["W"] / t * 100, 1) if t else 0.0
+            return acc
+
+        graded_filter = PropOpportunityLog.result.in_(["HIT", "MISS", "PUSH"])
+        play_filter   = PropOpportunityLog.recommendation.in_(["OVER", "UNDER"])
+
+        async with self.session() as s:
+            # ── by_tier ──────────────────────────────────────────────────────
+            tier_rows = await s.execute(
+                select(
+                    PropOpportunityLog.decision_tier,
+                    PropOpportunityLog.recommendation,
+                    PropOpportunityLog.result,
+                    func.count(PropOpportunityLog.id).label("n"),
+                ).where(graded_filter, play_filter).group_by(
+                    PropOpportunityLog.decision_tier,
+                    PropOpportunityLog.recommendation,
+                    PropOpportunityLog.result,
+                )
+            )
+            by_tier = _record(tier_rows.all())
+
+            # ── by_sport ─────────────────────────────────────────────────────
+            sport_rows = await s.execute(
+                select(
+                    PropOpportunityLog.sport,
+                    PropOpportunityLog.recommendation,
+                    PropOpportunityLog.result,
+                    func.count(PropOpportunityLog.id).label("n"),
+                ).where(graded_filter, play_filter).group_by(
+                    PropOpportunityLog.sport,
+                    PropOpportunityLog.recommendation,
+                    PropOpportunityLog.result,
+                )
+            )
+            by_sport = _record(sport_rows.all())
+
+            # ── by_stat_type (top 15 by volume) ──────────────────────────────
+            stat_rows = await s.execute(
+                select(
+                    PropOpportunityLog.stat_type,
+                    PropOpportunityLog.recommendation,
+                    PropOpportunityLog.result,
+                    func.count(PropOpportunityLog.id).label("n"),
+                ).where(graded_filter, play_filter).group_by(
+                    PropOpportunityLog.stat_type,
+                    PropOpportunityLog.recommendation,
+                    PropOpportunityLog.result,
+                )
+            )
+            by_stat_type_raw = _record(stat_rows.all())
+            # Sort by volume, keep top 15
+            by_stat_type = dict(
+                sorted(by_stat_type_raw.items(), key=lambda kv: -kv[1]["total"])[:15]
+            )
+
+            # ── by_error_type ─────────────────────────────────────────────────
+            err_rows = await s.execute(
+                select(
+                    PropOpportunityLog.error_type,
+                    func.count(PropOpportunityLog.id).label("n"),
+                ).where(
+                    PropOpportunityLog.result      == "MISS",
+                    PropOpportunityLog.error_type.isnot(None),
+                ).group_by(PropOpportunityLog.error_type)
+            )
+            by_error_type = {row.error_type: row.n for row in err_rows.all()}
+
+            # ── player_trend (top 10 by graded volume) ────────────────────────
+            player_rows = await s.execute(
+                select(
+                    PropOpportunityLog.player_name,
+                    PropOpportunityLog.sport,
+                    PropOpportunityLog.stat_type,
+                    PropOpportunityLog.recommendation,
+                    PropOpportunityLog.result,
+                    func.count(PropOpportunityLog.id).label("n"),
+                ).where(graded_filter, play_filter).group_by(
+                    PropOpportunityLog.player_name,
+                    PropOpportunityLog.sport,
+                    PropOpportunityLog.stat_type,
+                    PropOpportunityLog.recommendation,
+                    PropOpportunityLog.result,
+                )
+            )
+            _player_acc: dict = {}
+            for player, sport, stat, rec, res, n in player_rows.all():
+                key   = (player, sport, stat)
+                entry = _player_acc.setdefault(key, {"W": 0, "L": 0, "P": 0, "total": 0})
+                entry["total"] += n
+                if rec == "OVER":
+                    if res == "HIT":    entry["W"] += n
+                    elif res == "MISS": entry["L"] += n
+                    else:              entry["P"] += n
+                elif rec == "UNDER":
+                    if res == "MISS":   entry["W"] += n
+                    elif res == "HIT":  entry["L"] += n
+                    else:              entry["P"] += n
+            player_trend = [
+                {
+                    "player": k[0], "sport": k[1], "stat_type": k[2],
+                    "W": v["W"], "L": v["L"], "P": v["P"], "total": v["total"],
+                    "win_pct": round(v["W"] / (v["W"] + v["L"]) * 100, 1)
+                              if (v["W"] + v["L"]) > 0 else 0.0,
+                }
+                for k, v in sorted(_player_acc.items(), key=lambda kv: -kv[1]["total"])[:10]
+            ]
+
+            # ── total_graded ──────────────────────────────────────────────────
+            total_row = await s.execute(
+                select(func.count(PropOpportunityLog.id)).where(graded_filter, play_filter)
+            )
+            total_graded = total_row.scalar() or 0
+
+        return {
+            "by_tier":      by_tier,
+            "by_sport":     by_sport,
+            "by_stat_type": by_stat_type,
+            "by_error_type": by_error_type,
+            "player_trend": player_trend,
+            "total_graded": total_graded,
+        }
 
     async def get_game_result_for_grading(
         self, player_name: str, sport: str, stat_type: str, game_date: str

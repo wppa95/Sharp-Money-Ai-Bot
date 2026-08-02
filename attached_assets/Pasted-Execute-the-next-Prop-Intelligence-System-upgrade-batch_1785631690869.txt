@@ -1,0 +1,354 @@
+Execute the next Prop Intelligence System upgrade batch as one integrated implementation.
+
+The previous Phase 0 audit and stabilization batch is complete.
+
+Current completed fixes:
+
+✅ Disabled inactive player prop polling causing OddsAPI 422 errors
+✅ Removed PLAYER PROP MARKET ALERT availability spam
+✅ Added startup/restart Telegram notifications
+✅ Added startup reason tracking
+✅ Preserved existing v3 architecture
+✅ Regression suite passing (2388 tests)
+
+Continue from the current repository state.
+
+Do not rebuild.
+
+Do not create duplicate systems.
+
+Extend the existing v3 architecture.
+
+==================================================
+
+Sharp Money Bot — Prop Intelligence Phase 2 Upgrade
+
+Goal
+
+Transform the stabilized Underdog scanner into a true Underdog Prop Intelligence System.
+
+The system should not just detect movement.
+
+It should:
+
+* Understand the player
+* Understand the matchup
+* Understand the market
+* Understand risk
+* Explain recommendations
+* Track results
+* Learn from outcomes
+
+==================================================
+
+Implementation Rules
+
+Before changing code:
+
+Review the current implementation from the completed stabilization work.
+
+Reuse:
+
+* Existing Underdog connector
+* Existing scoring engine
+* Existing candidate architecture
+* Existing Telegram pipeline
+* Existing scheduler
+* Existing database models
+* Existing tests
+
+Do not create:
+
+* New scoring engines
+* New confidence engines
+* New explanation engines
+* New recommendation pipelines
+
+One integrated system only.
+
+==================================================
+
+1. Rich Prop Intelligence Packet
+
+Upgrade playable recommendations.
+
+Every S/A/B Telegram recommendation should include:
+
+Player Information
+
+* Player name
+* Prop type
+* Current line
+* L5 hit rate
+* L10 hit rate
+* Season hit rate
+* Average stat
+* Recent trend
+
+Role Information
+
+Include when available:
+
+* Minutes
+* Usage
+* Starter/bench role
+* Injury impact
+* Rotation changes
+
+Matchup Information
+
+Add:
+
+* Opponent
+* Defensive matchup
+* Historical matchup context when available
+
+Market Information
+
+Include:
+
+* Opening line
+* Current line
+* Movement direction
+* Movement magnitude
+* Time of movement
+* Edge detected
+
+Model Information
+
+Include:
+
+* Projection
+* Data confidence
+* Market confidence
+* Betting edge confidence
+* Overall confidence
+* Tier
+* Stars
+* Risk level
+* Explanation
+
+Keep Telegram output concise.
+
+==================================================
+
+2. Continuous Underdog Market Surveillance
+
+Upgrade Underdog monitoring.
+
+Track continuously:
+
+* Available props
+* Removed props
+* Opening lines
+* Current lines
+* Line movement
+* Movement timing
+* Historical snapshots
+
+Persist movement history.
+
+Goal:
+
+Identify valuable props before:
+
+* lines move
+* props disappear
+* opportunities close
+
+Use existing snapshot storage if possible.
+
+Do not create duplicate databases.
+
+==================================================
+
+3. Results Tracking System
+
+Store every recommended play.
+
+Before game:
+
+Save:
+
+* Player
+* Prop
+* Line
+* Tier
+* Stars
+* Confidence
+* Risk
+* Explanation
+* Timestamp
+
+After game:
+
+Grade:
+
+* Correct
+* Incorrect
+* Push
+* Void
+* Cancelled
+* Injury void
+* Game interruption
+
+Also store:
+
+Why result happened:
+
+* Model Error
+* Market Error
+* Settlement Error
+* Variance
+
+Important:
+
+Normal variance should not damage the model.
+
+Only true model errors should influence future tuning.
+
+==================================================
+
+4. Learning Rollups
+
+Create performance tracking:
+
+Track:
+
+* S-tier record
+* A-tier record
+* B-tier record
+* Sport record
+* Prop type record
+* Player trend record
+
+Learning updates must:
+
+* Be feature flagged
+* Be tested
+* Not change live scoring until validated
+
+==================================================
+
+5. Recommendation Quality Improvements
+
+Current gate already blocks weak alerts.
+
+Improve recommendation quality by adding:
+
+* Stronger risk filtering
+* Better confidence separation
+* Better explanation support
+
+Telegram remains:
+
+Allowed:
+
+⭐⭐⭐⭐⭐ S
+
+⭐⭐⭐⭐ A
+
+⭐⭐⭐ B
+
+Blocked:
+
+⭐⭐ C
+
+⭐ D
+
+No availability alerts.
+
+==================================================
+
+6. Crash Recovery Expansion
+
+Continue improving reliability.
+
+Add persistent runtime history:
+
+Store:
+
+* Last heartbeat
+* Last job started
+* Last job completed
+* Last successful Underdog scan
+* Last database write
+* Last exception
+* Failed module
+* Failed pipeline stage
+* Restart reason
+
+Expand health reporting so debugging does not require manual investigation.
+
+==================================================
+
+7. Watchdog / Runtime Stability
+
+Improve production behavior.
+
+Ensure:
+
+* Scheduler resumes after restart
+* State is preserved
+* Monitoring continues automatically
+* Existing recommendations are not lost
+* Market history survives crashes
+
+If Replit hosting prevents true 24/7 operation:
+
+Document limitation and implement strongest workaround.
+
+==================================================
+
+Testing Requirements
+
+Before completion run:
+
+* Contract tests
+* Snapshot tests
+* Integration tests
+* Regression tests
+
+Confirm:
+
+* Existing functionality preserved
+* No duplicate systems introduced
+* Telegram behavior correct
+* Underdog pipeline stable
+
+==================================================
+
+Final Report Required
+
+Provide:
+
+1. Files modified
+2. Architecture changes
+3. New features added
+4. Database changes
+5. Tests added
+6. Tests passing
+7. Remaining recommendations
+8. Deferred improvements and reasons
+
+==================================================
+
+Final objective:
+
+Complete the transformation:
+
+Sharp Money Scanner
+
+↓
+
+Underdog Prop Intelligence System
+
+A system that:
+
+* Finds edges early
+* Understands props
+* Explains decisions
+* Tracks results
+* Learns over time
+* Recovers automatically
+* Operates continuously

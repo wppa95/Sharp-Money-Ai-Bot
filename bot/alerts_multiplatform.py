@@ -381,6 +381,54 @@ def _format_available_lines_block(
     return "".join(lines)
 
 
+def _format_intelligence_block(trace: "Optional[dict]") -> str:
+    """
+    Render a 🔍 Intelligence section from a prop_intelligence trace dict.
+
+    The trace is stored in Candidate.decision_trace["prop_intelligence"] and
+    contains role (label, stability, trend, summary) and matchup (label, signal,
+    reasoning) data computed by engine.prop_intelligence.
+
+    Returns an empty string when trace is None or missing the expected keys.
+    """
+    if not trace:
+        return ""
+
+    role    = trace.get("role",    {}) or {}
+    matchup = trace.get("matchup", {}) or {}
+
+    role_label   = (role.get("label")   or "").strip()
+    role_summary = (role.get("summary") or "").strip()
+    role_trend   = (role.get("trend")   or "Stable").strip()
+    match_label  = (matchup.get("label")   or "").strip()
+    match_rsns   = matchup.get("reasoning") or []
+
+    if not role_label and not match_label:
+        return ""
+
+    lines = ["\n\n🔍 <b>Intelligence</b>"]
+
+    if role_label:
+        role_icon = {"Starter": "🟢", "Reserve": "🟡", "Bench": "🔴"}.get(role_label, "⚪")
+        lines.append(f"\n   {role_icon} <b>Role:</b>  {role_label}")
+        if role_summary:
+            lines.append(f"  ·  <i>{role_summary}</i>")
+        if role_trend and role_trend not in ("Stable", ""):
+            lines.append(f"\n   📈 <b>Trend:</b>  {role_trend}")
+
+    if match_label:
+        match_icon = {
+            "Favorable": "✅", "Neutral": "➖",
+            "Tough": "⚠️",    "Difficult": "⚠️",
+        }.get(match_label, "📊")
+        lines.append(f"\n   {match_icon} <b>Matchup:</b>  {match_label}")
+        for rsn in list(match_rsns)[:2]:
+            if rsn:
+                lines.append(f"\n      <i>• {rsn}</i>")
+
+    return "".join(lines)
+
+
 def format_underdog_change_alert(
     player_name: str,
     team: str,
@@ -401,6 +449,9 @@ def format_underdog_change_alert(
     removed: bool = False,
     standing: bool = False,                   # True for evidence-driven alerts without line movement
     removal_reason: Optional[str] = None,     # Why prop was removed (removal alerts only)
+    opponent: Optional[str] = None,           # Opponent team / player (when available)
+    intelligence_trace: Optional[dict] = None, # prop_intelligence trace from decision_trace
+    opening_line: Optional[float] = None,     # First ever line from PropLineHistory
 ) -> str:
     """Format an alert for an Underdog prop line change or removed prop.
 
@@ -436,7 +487,17 @@ def format_underdog_change_alert(
             f"  Movement:         <code>{change_sign}{change:.1f}</code>"
         )
 
+    opponent_str = f"\n  <b>vs:</b>      {opponent}" if opponent else ""
     game_str = f"\n  <b>Game:</b>    {game_time.strftime('%b %d %H:%M')} UTC" if game_time else ""
+
+    # Opening line display — show only when different from current and not a removal
+    opening_str = ""
+    if not removed and opening_line is not None and abs(opening_line - new_line) >= 0.1:
+        total_move_sign = "+" if (new_line - opening_line) >= 0 else ""
+        opening_str = (
+            f"\n  <b>Opened:</b>  <code>{opening_line:.1f}</code>"
+            f"  <i>(total move: {total_move_sign}{new_line - opening_line:.1f})</i>"
+        )
 
     # Grade + movement score vs bet confidence separation
     grade_str = ""
@@ -492,10 +553,12 @@ def format_underdog_change_alert(
         avail_block.lstrip("\n"),
         "",
         _div(),
-        movement_block + _removal_reason_str + game_str + grade_str + validation_str
+        movement_block + _removal_reason_str + opening_str + opponent_str + game_str
+        + grade_str + validation_str
         + _format_decision_block(decision)
         + _format_market_quality_block(market_quality)
-        + _format_market_pressure_block(market_pressure),
+        + _format_market_pressure_block(market_pressure)
+        + _format_intelligence_block(intelligence_trace),
         "",
         f"{EMOJI['clock']} <i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>",
         "",
@@ -523,6 +586,8 @@ def format_underdog_new_prop_alert(
     fd_line: Optional[float] = None,          # FanDuel line if available
     *,
     low_line_threshold: float = 1.0,
+    opponent: Optional[str] = None,           # Opponent team / player (when available)
+    intelligence_trace: Optional[dict] = None, # prop_intelligence trace from decision_trace
 ) -> str:
     """Format a 🚨 UNDERDOG PROP LIVE alert for a first-appearance prop.
 
@@ -535,6 +600,7 @@ def format_underdog_new_prop_alert(
         "NHL": "🏒", "UFC": "🥊", "WNBA": "🏀",
     }.get(sport, "🎯")
 
+    opponent_str = f"\n  <b>vs:</b>          {opponent}" if opponent else ""
     game_str = (
         f"\n  <b>Game:</b>        {game_time.strftime('%b %d %H:%M')} UTC"
         if game_time else ""
@@ -595,12 +661,14 @@ def format_underdog_new_prop_alert(
         _div(),
         f"  🐶 <b>Underdog Line:</b>  <code>{line_value:.1f}</code>  {_line_label(line_value)}",
         f"  <b>First Seen:</b>    {datetime.utcnow().strftime('%H:%M UTC')}"
+        + opponent_str
         + game_str
         + grade_str
         + validation_str
         + _format_decision_block(decision)
         + _format_market_quality_block(market_quality)
-        + _format_market_pressure_block(market_pressure),
+        + _format_market_pressure_block(market_pressure)
+        + _format_intelligence_block(intelligence_trace),
         "",
         "<b>Reason:</b>",
         "\n".join(reasons),
