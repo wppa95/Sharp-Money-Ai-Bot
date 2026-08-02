@@ -283,9 +283,10 @@ async def _send_startup_notification(bot, chat_ids: list[int], ht) -> None:
     """
     Send a startup or crash-recovery notification to all configured chat IDs.
 
-    Crash format (unexpected_exit):
+    Crash format (unexpected_exit / crash_detected):
         ⚠️ Sharp Money Bot Restarted
-        Reason: Unexpected Exit
+        Reason: [actual detected cause]
+        Crash Details: [exc_type: exc_msg / Module / Function]
         Last Active Task: …
         Last Heartbeat: HH:MM UTC
         Recovery Status: Resumed Monitoring ✅
@@ -295,19 +296,23 @@ async def _send_startup_notification(bot, chat_ids: list[int], ht) -> None:
         Status: Underdog monitoring active
         Startup: #N
     """
+    import html as _h
     if not chat_ids:
         return
 
     startup_reason = ht.startup_reason() if ht else "unknown"
     restart_num    = ht.restart_count()  if ht else 0
     last_hb        = ht.last_heartbeat() if ht else None
-    last_error     = ht.last_error()     if ht else None
     last_job       = (
-        ht._state.get("last_job_run", {}).get("job", "Underdog Market Monitor")
-        if ht and hasattr(ht, "_state") else "Underdog Market Monitor"
+        (ht.last_job_started_name() or "Underdog Market Monitor")
+        if ht else "Underdog Market Monitor"
     )
 
-    if startup_reason == "unexpected_exit":
+    if startup_reason in ("unexpected_exit", "crash_detected"):
+        # ── Determine the actual crash cause ─────────────────────────────────
+        cause_label  = ht.crash_cause_label() if ht else "Unknown Exit"
+        crash_detail = ht.last_crash_detail() if ht else None
+
         # Format the last heartbeat timestamp
         hb_str = "unknown"
         if last_hb:
@@ -318,18 +323,39 @@ async def _send_startup_notification(bot, chat_ids: list[int], ht) -> None:
             except Exception:
                 hb_str = str(last_hb)[:16]
 
-        parts = [
+        parts: list[str] = [
             "⚠️ <b>Sharp Money Bot Restarted</b>",
             "",
-            "<b>Reason:</b>  Unexpected Exit",
-            "",
-            f"<b>Last Active Task:</b>  {last_job or 'Underdog Market Monitor'}",
-            f"<b>Last Heartbeat:</b>  {hb_str}",
+            f"<b>Reason:</b>  {_h.escape(cause_label)}",
         ]
-        if last_error:
-            import html as _h
-            parts += ["", f"<b>Last Error:</b>  <code>{_h.escape(last_error[:200])}</code>"]
+
+        # ── Crash details block ───────────────────────────────────────────────
+        if crash_detail:
+            exc_type = crash_detail.get("exc_type", "")
+            exc_msg  = crash_detail.get("exc_msg",  "")[:120]
+            mod      = crash_detail.get("active_module", "")
+            fn       = crash_detail.get("active_function", "")
+            job      = crash_detail.get("active_job", "") or last_job
+
+            parts += [
+                "",
+                "<b>Crash Details:</b>",
+                f"  <code>{_h.escape(exc_type)}: {_h.escape(exc_msg)}</code>",
+            ]
+            if mod:
+                import os as _os
+                parts.append(f"  Module:    <code>{_h.escape(_os.path.basename(mod))}</code>")
+            if fn:
+                parts.append(f"  Function:  <code>{_h.escape(fn)}</code>")
+            if job:
+                parts.append(f"  Active job: {_h.escape(str(job))}")
+        else:
+            parts += ["", f"<i>No crash detail captured — likely {_h.escape(cause_label)}</i>"]
+
         parts += [
+            "",
+            f"<b>Last Active Task:</b>  {_h.escape(last_job)}",
+            f"<b>Last Heartbeat:</b>  {_h.escape(hb_str)}",
             "",
             "<b>Recovery Status:</b>  Resumed Monitoring ✅",
             f"<i>Startup #{restart_num}</i>",
@@ -1382,6 +1408,71 @@ def _register_atexit_fallback() -> None:
     _atexit.register(_on_exit)
 
 
+def _install_excepthook() -> None:
+    """
+    Install a ``sys.excepthook`` that captures unhandled exceptions to the
+    health sidecar before the process exits.
+
+    Fires for any unhandled exception that propagates to the top level,
+    including ``run_polling()`` raising.  SIGKILL and ``os._exit()`` skip
+    this hook entirely — those are handled by the 'unexpected_exit' path
+    (missing shutdown record) in HealthTracker.
+
+    The hook:
+      1. Extracts exc type / message / full traceback / innermost frame.
+      2. Reads the last active job from the health sidecar.
+      3. Persists all of it via HealthTracker.record_crash_detail().
+      4. Writes 'unexpected_exit' shutdown reason (so atexit stays a no-op).
+      5. Calls the original sys.excepthook so the traceback is still printed.
+
+    Never raises — any internal error is silently swallowed so we never
+    interfere with the original exception propagation.
+    """
+    import sys
+    import traceback as _tb
+
+    _orig_hook = sys.excepthook
+
+    def _crash_hook(exc_type, exc_value, exc_tb) -> None:  # type: ignore[override]
+        try:
+            ht = get_health_tracker()
+            if ht is not None:
+                # Full formatted traceback
+                tb_lines   = _tb.format_tb(exc_tb)
+                tb_text    = "".join(tb_lines)
+
+                # Exception identity
+                exc_type_name = getattr(exc_type, "__name__", str(exc_type))
+                exc_msg       = str(exc_value)
+
+                # Innermost frame — where the exception was raised
+                frames        = _tb.extract_tb(exc_tb)
+                last_frame    = frames[-1] if frames else None
+                active_module = last_frame.filename if last_frame else ""
+                active_fn     = last_frame.name     if last_frame else ""
+
+                # Which job was active when the crash happened
+                active_job = ht.last_job_started_name() or ""
+
+                ht.record_crash_detail(
+                    exc_type_name   = exc_type_name,
+                    exc_msg         = exc_msg,
+                    tb_text         = tb_text,
+                    active_job      = active_job,
+                    active_module   = active_module,
+                    active_function = active_fn,
+                )
+                # Mark as unexpected exit so the atexit fallback stays a no-op
+                ht.record_shutdown_if_not_set("unexpected_exit")
+        except Exception:
+            pass   # never let the crash hook itself crash
+        finally:
+            # Always delegate to the original hook — traceback must still print
+            _orig_hook(exc_type, exc_value, exc_tb)
+
+    sys.excepthook = _crash_hook
+
+
 def main() -> None:
     # Validate configuration before building the app
     try:
@@ -1390,6 +1481,8 @@ def main() -> None:
         logger.critical("Configuration error: %s", exc)
         sys.exit(1)
 
+    # Install global exception hook first — captures crash details before atexit.
+    _install_excepthook()
     # Register crash-path fallback before run_polling so it is active for
     # the entire lifetime of the process.
     _register_atexit_fallback()

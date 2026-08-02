@@ -16,3 +16,4 @@
 - [Prop Intelligence Engine](prop-intelligence.md) — engine/prop_intelligence.py: 5-layer pure-function intelligence (historical/role/matchup/sport-adapters/recommendation); Candidate.with_prop_intelligence(result) applies bounded deltas; _sample_strength suppresses variance bonus for n < 3; no imports from ud_scoring/ud_bet_decision.
 - [Phase 2 alert + tracking upgrades](phase2-upgrades.md) — _format_intelligence_block, opening_line tracking, Phase 2 DB columns, UD_MIN_CONF_S/A/B gate, health upgrade methods, /rollups command; 2490 tests passing Aug 2026.
 - [Final completion batch](final-completion.md) — B-tier star gate=3, analyst inline block, recovery events, matchup 3-bullet expansion; 2636 tests passing Aug 2026.
+- [Crash diagnosis patch](crash-diagnosis.md) — sys.excepthook captures unhandled exc to health sidecar; crash_cause_label() classifies DB lock/Python exc/SIGKILL; restart alert shows real cause; 2595 tests Aug 2026.

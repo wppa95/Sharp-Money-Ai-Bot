@@ -566,6 +566,79 @@ class HealthTracker:
         """Return list of up to 5 recent recovery events (oldest first)."""
         return list(self._state.get("recovery_history", []))
 
+    # ── Crash diagnosis ───────────────────────────────────────────────────────
+
+    def record_crash_detail(
+        self,
+        exc_type_name: str,
+        exc_msg: str,
+        tb_text: str,
+        active_job: str = "",
+        active_module: str = "",
+        active_function: str = "",
+    ) -> None:
+        """
+        Persist crash details captured by ``sys.excepthook``.
+
+        Written immediately to the health sidecar so the NEXT startup can
+        read real crash information for the Telegram restart alert.
+
+        Called from the global exception hook in main.py — never from
+        normal job error handling (use record_job_fail / record_pipeline_fail
+        for those).
+        """
+        with self._lock:
+            self._state["last_crash_detail"] = {
+                "ts":              _now_iso(),
+                "ts_unix":         _now_ts(),
+                "exc_type":        str(exc_type_name)[:128],
+                "exc_msg":         str(exc_msg)[:256],
+                "tb_text":         str(tb_text)[:1500],
+                "active_job":      str(active_job)[:64],
+                "active_module":   str(active_module)[:256],
+                "active_function": str(active_function)[:64],
+            }
+            self._save()
+        logger.error(
+            "HealthTracker: crash detail recorded — %s: %s (job=%s module=%s fn=%s)",
+            exc_type_name, str(exc_msg)[:80], active_job, active_module, active_function,
+        )
+
+    def last_crash_detail(self) -> "Optional[dict]":
+        """Return the last persisted crash detail dict, or None."""
+        return self._state.get("last_crash_detail")
+
+    def crash_cause_label(self) -> str:
+        """
+        Human-readable crash cause for the Telegram restart alert.
+
+        Inferred from the startup reason + any persisted crash detail.
+
+        Returns one of:
+          "Database Lock"              — OperationalError with 'locked'
+          "Python Exception"           — unhandled exception captured by excepthook
+          "Memory Kill / Host Restart" — process died with no shutdown record + no crash detail
+          "Unknown Exit"               — unexpected exit with no specific cause available
+        """
+        reason = self.last_startup_reason()
+        detail = self.last_crash_detail()
+
+        if detail:
+            exc_type = detail.get("exc_type", "")
+            exc_msg  = detail.get("exc_msg",  "")
+            if "OperationalError" in exc_type and "locked" in exc_msg.lower():
+                return "Database Lock"
+            return "Python Exception"
+
+        # No crash detail was captured:
+        #   "unexpected_exit" with no pending_shutdown_reason  → SIGKILL / OOM
+        #   "crash_detected"  with no detail                   → atexit fired but hook missed
+        if reason == "unexpected_exit":
+            return "Memory Kill / Host Restart"
+        if reason == "crash_detected":
+            return "Python Exception (no detail captured)"
+        return "Unknown Exit"
+
 
 # ── Module-level singleton ────────────────────────────────────────────────────
 
