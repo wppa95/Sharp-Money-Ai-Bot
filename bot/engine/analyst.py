@@ -401,6 +401,195 @@ def format_analyst_telegram(narrative: AnalystNarrative) -> str:
     return "\n".join(lines)
 
 
+def build_analyst_from_alert_parts(
+    player_name: str,
+    stat_type: str,
+    sport: str,
+    line: float,
+    decision_rec: str,
+    decision_tier: str,
+    confidence: int,
+    risk_level: str = "MEDIUM",
+    intelligence_trace: Optional[dict] = None,
+) -> AnalystNarrative:
+    """
+    Build an AnalystNarrative directly from raw alert-time data.
+
+    This is an alternative entry point to build_analyst_narrative() for use in
+    the Telegram alert pipeline, where a full Candidate object is not always
+    available.  Produces the same four-component narrative structure from
+    individual score/decision/intelligence fields.
+
+    Parameters
+    ----------
+    player_name    : Player display name.
+    stat_type      : Prop stat type (e.g. "Points").
+    sport          : Sport code (e.g. "NBA").
+    line           : Current prop line value.
+    decision_rec   : "OVER" | "UNDER" | "PASS"
+    decision_tier  : "S" | "A" | "B" | "PASS"
+    confidence     : Overall confidence score 0-100.
+    risk_level     : "LOW" | "MEDIUM" | "HIGH"
+    intelligence_trace : prop_intelligence trace dict (optional).
+    """
+    trace = intelligence_trace or {}
+    pi    = trace  # for this path the trace IS the prop_intelligence payload
+
+    # ── Recommended because ─────────────────────────────────────────────────
+    why_parts: list[str] = []
+    tier_str   = _tier_label(decision_tier)
+    why_parts.append(
+        f"This is a {tier_str} {decision_rec} on {stat_type} "
+        f"({line:.1f}) for {player_name}."
+    )
+    if confidence >= 75:
+        why_parts.append(f"Overall confidence is strong at {confidence}/100.")
+    elif confidence >= 60:
+        why_parts.append(f"Moderate confidence at {confidence}/100.")
+
+    hist = _g(pi, "historical") or {}
+    if hist:
+        ss = _g(hist, "sample_strength", default=0)
+        n  = _g(hist, "n", default=0)
+        hr = _g(hist, "hit_rate", default=-1)
+        if n >= 5 and hr >= 0.60:
+            why_parts.append(
+                f"OVER hit rate proxy of {hr * 100:.0f}%"
+                f" across {n} samples supports the {decision_rec} call."
+            )
+        if ss >= 50:
+            why_parts.append(f"Sample strength score of {ss}/100 — history is reliable.")
+        # Window evidence
+        for w_key in ("l5", "l10", "l20"):
+            w = _g(hist, "windows", w_key)
+            if w and _g(w, "n", default=0) >= 3:
+                pct = round((_g(w, "hit_rate") or 0) * 100)
+                if pct >= 60:
+                    why_parts.append(f"{w_key.upper()}: {pct}% hit rate.")
+                    break  # one window example is enough here
+
+    role = _g(pi, "role") or {}
+    if _g(role, "label") and _g(role, "label") not in (None, "Unknown", ""):
+        summary = _g(role, "summary", default="")
+        if summary:
+            why_parts.append(f"Role: {summary}".rstrip(".") + ".")
+
+    matchup = _g(pi, "matchup") or {}
+    if _g(matchup, "label") == "Favorable":
+        rsns = _g(matchup, "reasoning") or []
+        if rsns:
+            why_parts.append(f"Matchup context: {rsns[0]}.")
+
+    recommended_because = " ".join(why_parts) if why_parts else (
+        f"{decision_rec} on {stat_type} ({line:.1f}) for {player_name} in {sport}."
+    )
+
+    # ── Risk because ────────────────────────────────────────────────────────
+    risk_parts: list[str] = [f"Risk level: {_risk_label(risk_level)}."]
+
+    if hist:
+        ss  = _g(hist, "sample_strength", default=0)
+        var = _g(hist, "variance", default=0.0)
+        if ss < 30:
+            risk_parts.append(
+                f"Thin sample (strength score {ss}/100) — history may not be reliable."
+            )
+        if (var or 0) > 3.0:
+            risk_parts.append(
+                f"High line variance ({var:.1f}) — this prop fluctuates significantly."
+            )
+
+    role = _g(pi, "role") or {}
+    if _g(role, "stability") == "Volatile":
+        risk_parts.append("Playing-time volatility detected — usage may be inconsistent.")
+    if _g(role, "trend") == "Falling":
+        risk_parts.append("Usage trend is declining — recent involvement is below baseline.")
+
+    matchup = _g(pi, "matchup") or {}
+    if _g(matchup, "label") == "Tough":
+        rsns = _g(matchup, "reasoning") or []
+        risk_parts.append(
+            "Tough matchup" + (f": {rsns[0]}" if rsns else "") + "."
+        )
+
+    risk_because = " ".join(risk_parts)
+
+    # ── Would avoid because ─────────────────────────────────────────────────
+    conditions = [
+        "player is listed as questionable or out before game time",
+        "line moves more than 1.0 against the recommended side",
+    ]
+    if decision_tier == "B":
+        conditions.append("a contradicting game-time alert appears for this prop")
+    if (confidence or 0) < 65:
+        conditions.append(
+            f"overall confidence falls further from current {confidence}/100"
+        )
+    would_avoid = "Would avoid if: " + "; ".join(conditions[:3]) + "."
+
+    # ── Final recommendation ────────────────────────────────────────────────
+    qualifier = {"S": "Strong signal — ", "A": "Solid edge — ", "B": "Moderate edge — "}.get(
+        decision_tier, ""
+    )
+    final_recommendation = (
+        f"{qualifier}recommended {decision_rec} on {player_name} {stat_type} ({line:.1f}) "
+        f"in {sport} at {confidence}/100 confidence ({decision_tier}-tier, "
+        f"{_risk_label(risk_level).replace('-risk', '')} risk)."
+    )
+
+    return AnalystNarrative(
+        recommended_because  = recommended_because,
+        risk_because         = risk_because,
+        would_avoid_because  = would_avoid,
+        final_recommendation = final_recommendation,
+    )
+
+
+def format_analyst_alert_block(
+    player_name: str,
+    stat_type: str,
+    sport: str,
+    line: float,
+    decision_rec: str,
+    decision_tier: str,
+    confidence: int,
+    risk_level: str = "MEDIUM",
+    intelligence_trace: Optional[dict] = None,
+) -> str:
+    """
+    Return a compact Telegram HTML analyst block for appending to prop alerts.
+
+    Returns an empty string when the recommendation is PASS or missing — the
+    analyst block is only shown for actionable directional picks (OVER/UNDER).
+    Catches all exceptions silently so a narrative failure never blocks an alert.
+    """
+    if not decision_rec or decision_rec == "PASS":
+        return ""
+    try:
+        narrative = build_analyst_from_alert_parts(
+            player_name   = player_name,
+            stat_type     = stat_type,
+            sport         = sport,
+            line          = line,
+            decision_rec  = decision_rec,
+            decision_tier = decision_tier,
+            confidence    = confidence,
+            risk_level    = risk_level,
+            intelligence_trace = intelligence_trace,
+        )
+        def esc(s: str) -> str:
+            return html.escape(str(s))
+
+        return (
+            "\n\n🤖 <b>Analyst</b>\n"
+            f"  ✅ <i>{esc(narrative.recommended_because)}</i>\n"
+            f"  ⚠️ <i>{esc(narrative.risk_because)}</i>\n"
+            f"  🎯 <b>{esc(narrative.final_recommendation)}</b>"
+        )
+    except Exception:
+        return ""
+
+
 def format_analyst_console(narrative: AnalystNarrative) -> str:
     """Compact plain-text analyst summary for logs / CLI."""
     return (

@@ -1,0 +1,483 @@
+IMPORTANT CONTINUATION RULE:
+
+This is a continuation of the existing Sharp Money Bot v3 implementation.
+
+Do NOT restart the project.
+Do NOT rebuild the architecture.
+Do NOT discard existing work.
+Do NOT create a replacement system.
+
+Freeze the current completed state and continue from where the previous implementation stopped.
+
+Current completed state:
+
+- Phase 0 repository audit completed.
+- Underdog Prop Intelligence upgrade completed.
+- 2490 tests passing.
+- Existing scoring pipeline preserved and extended.
+- Underdog connector working.
+- Telegram recommendation filtering completed.
+- Intelligence alerts completed.
+- Opening line tracking completed.
+- Results tracking completed.
+- Learning rollups completed.
+- Confidence gates completed.
+- Crash recovery expansion completed.
+- Existing scheduler and database history preserved.
+
+Your task is to continue from this exact state.
+
+Before changing code:
+
+1. Audit the current implementation.
+2. Confirm previous work exists.
+3. Identify only remaining integration points.
+4. Continue from the existing v3 architecture.
+
+Do not rebuild.
+Do not reset.
+Do not replace working modules.
+
+Extend the existing systems only.
+
+==================================================
+
+SHARP MONEY BOT — FINAL PROP INTELLIGENCE COMPLETION BATCH
+
+Goal:
+
+Complete the remaining Prop Intelligence System features and then move into data collection and monitoring.
+
+After this batch is complete, stop feature expansion and allow the system to collect market data, recommendation history, and outcomes.
+
+==================================================
+
+Execution Requirements
+
+Implement this as one integrated batch.
+
+Do not create partial temporary solutions.
+
+Do not create:
+
+- Duplicate scoring engines
+- Duplicate confidence systems
+- Duplicate explanation systems
+- Duplicate AI analysis systems
+- Parallel recommendation pipelines
+
+Use the existing:
+
+- Candidate Contract
+- Explanation Service
+- Confidence Separation
+- Risk System
+- Learning System
+- Underdog Pipeline
+- Telegram Pipeline
+
+Extend the existing architecture.
+
+==================================================
+
+Remaining Objectives
+
+Complete:
+
+1. B-Tier Calibration
+2. Matchup Intelligence Expansion
+3. Health Timeline Expansion
+4. AI Analyst Layer
+
+==================================================
+
+1. B-Tier Calibration
+
+Current issue:
+
+The system has quality signals that are not always reaching Telegram.
+
+Adjust recommendation filtering.
+
+Allow:
+
+⭐⭐⭐⭐⭐ S Tier
+
+⭐⭐⭐⭐ A Tier
+
+⭐⭐⭐ Strong B Tier
+
+
+Block:
+
+⭐⭐ C Tier
+
+⭐ D Tier
+
+
+B Tier requirements:
+
+- Minimum confidence threshold
+- Acceptable risk level
+- Sufficient data quality
+- No hard blocks
+
+Goal:
+
+Increase actionable recommendations without returning to alert spam.
+
+Do not lower standards blindly.
+
+==================================================
+
+2. Matchup Intelligence Expansion
+
+Complete the prop intelligence packet.
+
+Every playable recommendation should include:
+
+Player Data:
+
+- L5 hit rate
+- L10 hit rate
+- Season hit rate
+- Average stat
+- Recent trend
+
+
+Matchup Data:
+
+- Opponent
+- Defensive matchup
+- Position matchup if available
+- Player role
+- Minutes expectation
+- Usage trend
+- Injury/news impact
+
+
+Market Data:
+
+- Opening line
+- Current line
+- Movement direction
+- Movement magnitude
+- Time of movement
+- Edge vs line
+
+
+Model Data:
+
+- Projection
+- Confidence
+- Tier
+- Stars
+- Risk level
+- Explanation
+
+
+Keep output concise.
+
+==================================================
+
+3. Health Timeline Expansion
+
+Expand the existing health system.
+
+Do not replace HealthTracker.
+
+Extend it.
+
+Persist:
+
+- Restart history
+- Crash timeline
+- Last heartbeat
+- Last running job
+- Last completed task
+- Last successful Underdog scan
+- Last database write
+- Last pipeline failure
+- Recovery events
+
+
+Capture:
+
+- Exception traceback
+- Failed job
+- Active module
+- Pipeline stage
+
+
+Improve /health output to show:
+
+- Current runtime status
+- Last recovery event
+- Recent failures
+- Monitoring status
+- Underdog pipeline status
+
+==================================================
+
+4. AI Analyst Layer
+
+Build the AI Analyst on top of the existing Explanation Service.
+
+IMPORTANT:
+
+The AI Analyst explains decisions.
+
+It does NOT:
+
+- Create a new scoring system
+- Create a new confidence score
+- Override the recommendation engine
+- Recalculate the model decision
+
+
+The AI Analyst consumes stored decision artifacts.
+
+Flow:
+
+Candidate
+
+↓
+
+Existing Decision Engine
+
+↓
+
+Explanation Service
+
+↓
+
+AI Analyst
+
+↓
+
+Telegram / Dashboard
+
+
+==================================================
+
+AI Analyst Responsibilities
+
+For every playable recommendation, generate:
+
+1. Why the model likes it
+
+Include:
+
+- Statistical support
+- Market movement
+- Projection edge
+- Matchup advantage
+- Role/context
+
+
+2. Risk Assessment
+
+Include:
+
+- Main downside factors
+- Variance concerns
+- Injury concerns
+- Minutes concerns
+- Matchup concerns
+
+
+3. Analyst Summary
+
+Provide:
+
+- Short final opinion
+- Confidence context
+- What would invalidate the play
+
+
+Example:
+
+🤖 AI Analyst
+
+Player:
+Anthony Edwards
+
+Prop:
+Over 5.5 Rebounds
+
+
+Why:
+
+• Strong L10 hit rate
+• Increased rebounding role
+• Line dropped from 6.5 to 5.5
+• Favorable matchup
+
+
+Risks:
+
+⚠️ Blowout risk
+⚠️ Minutes volatility
+
+
+Model:
+
+⭐⭐⭐⭐ A Tier
+
+
+Confidence:
+72%
+
+
+Summary:
+
+Good value at the reduced line, but monitor minutes before entry.
+
+
+==================================================
+
+AI Analyst Rules
+
+The AI Analyst must:
+
+- Use stored data
+- Reference existing model decisions
+- Be concise
+- Explain reasoning
+- Identify uncertainty
+
+
+The AI Analyst must not:
+
+- Pretend certainty
+- Change rankings
+- Override hard blocks
+- Modify live scoring semantics
+
+==================================================
+
+Testing Requirements
+
+Before completion run:
+
+- Contract tests
+- Snapshot tests
+- Integration tests
+- Existing regression tests
+
+
+Verify:
+
+- Existing alerts still work
+- Database history preserved
+- Scheduler preserved
+- Underdog monitoring preserved
+- Telegram filtering preserved
+- No duplicate systems created
+
+==================================================
+
+FINAL VERIFICATION CHECKS
+
+Before declaring completion, verify and report:
+
+1. Files changed:
+
+Provide:
+
+- Complete list of modified files
+- Purpose of each change
+
+
+2. Test count:
+
+Provide:
+
+- Total tests passing
+- New tests added
+- Any failures fixed
+
+
+3. Architecture integrity:
+
+Confirm the implementation did NOT create:
+
+- Duplicate scoring logic
+- Duplicate confidence systems
+- Duplicate explanation systems
+- Duplicate recommendation pipelines
+
+
+Confirm the existing v3 architecture was extended correctly.
+
+
+4. Provider/API cleanup:
+
+Verify:
+
+- Underdog remains the only active production provider
+- Disabled providers are not initializing
+- Disabled providers are not being polled
+- Disabled providers are not consuming API usage
+- Disabled providers are not affecting alerts
+- Disabled providers are not affecting logs
+- Disabled providers are not affecting health checks
+- Disabled providers are not affecting model decisions
+
+
+5. Data Collection Readiness:
+
+Confirm whether the bot is ready to enter monitoring/data collection phase.
+
+Verify:
+
+- Market surveillance running
+- Recommendations being stored
+- Results tracking ready
+- Learning loop ready
+- Rollups collecting data
+- Health monitoring stable
+- Telegram alerts clean
+
+
+Only after these checks pass should the system be considered ready for long-term data collection.
+
+==================================================
+
+FINAL STATE AFTER THIS BATCH
+
+Sharp Money Bot becomes:
+
+Underdog Prop Intelligence System
+
+
+A system that:
+
+- Watches markets continuously
+- Finds edges early
+- Understands player context
+- Understands matchup risk
+- Explains recommendations
+- Tracks results
+- Learns from outcomes
+- Recovers from failures
+- Operates continuously
+
+
+After this batch:
+
+STOP FEATURE DEVELOPMENT.
+
+Enter monitoring and data collection phase.
+
+Collect:
+
+- Prop movement
+- Recommendations
+- Wins/losses
+- Player trends
+- Model errors
+- Variance patterns
+
+
+Future improvements should be based on collected data, not assumptions.

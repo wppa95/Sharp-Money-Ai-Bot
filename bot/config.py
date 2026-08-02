@@ -138,8 +138,10 @@ class Config:
     # The grading model then applies a separate quality gate (UD_MIN_STARS_TO_ALERT).
     MIN_UNDERDOG_LINE_CHANGE: float = float(os.environ.get("MIN_UNDERDOG_LINE_CHANGE", "0.5"))
     # Minimum star rating (1–5) required to send an Underdog alert.
-    # 3★ corresponds to a score of 55+ (B-tier or better).  Set to 1 to disable.
-    UD_MIN_STARS_TO_ALERT:    int   = int(os.environ.get("UD_MIN_STARS_TO_ALERT", "4"))
+    # 3★ = B-tier (moderate confidence, sufficient data quality).
+    # B-tier passes only when the per-tier confidence gate (UD_MIN_CONF_B) also clears.
+    # Set to 1 to disable star gating entirely; set to 4 to restore A-tier-only behaviour.
+    UD_MIN_STARS_TO_ALERT:    int   = int(os.environ.get("UD_MIN_STARS_TO_ALERT", "3"))
     # New-prop alert: used for DB qualification tracking (summary inclusion gate).
     # Props at or below this line appear in the end-of-cycle summary regardless
     # of score.  Set to 0.0 to use score-only qualification.

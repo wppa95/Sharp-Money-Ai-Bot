@@ -381,6 +381,49 @@ def _format_available_lines_block(
     return "".join(lines)
 
 
+def _format_analyst_inline_block(
+    player_name: str,
+    stat_type: str,
+    sport: str,
+    line: float,
+    score: "Optional[object]",
+    decision: "Optional[object]",
+    intelligence_trace: "Optional[dict]",
+) -> str:
+    """
+    Generate a compact analyst narrative block for Telegram alerts.
+
+    Calls engine.analyst.format_analyst_alert_block — which is a pure function
+    that builds the narrative from stored decision artifacts.  Returns "" for
+    PASS/removal decisions, or when the import fails.
+    """
+    if decision is None:
+        return ""
+    rec   = getattr(decision, "recommendation", None)
+    tier  = getattr(decision, "decision_tier", "B") or "B"
+    conf  = getattr(decision, "confidence", 0) or 0
+    rlvl  = "MEDIUM"
+    if score is not None:
+        # Derive risk from stars: 5=LOW, 4=LOW, 3=MEDIUM, 2/1=HIGH
+        stars = getattr(score, "stars", 3) or 3
+        rlvl  = "LOW" if stars >= 4 else "MEDIUM" if stars >= 3 else "HIGH"
+    try:
+        from engine.analyst import format_analyst_alert_block
+        return format_analyst_alert_block(
+            player_name        = player_name,
+            stat_type          = stat_type,
+            sport              = sport or "UNKNOWN",
+            line               = float(line),
+            decision_rec       = rec,
+            decision_tier      = tier,
+            confidence         = int(conf),
+            risk_level         = rlvl,
+            intelligence_trace = intelligence_trace,
+        )
+    except Exception:
+        return ""
+
+
 def _format_intelligence_block(trace: "Optional[dict]") -> str:
     """
     Render a 🔍 Intelligence section from a prop_intelligence trace dict.
@@ -403,10 +446,26 @@ def _format_intelligence_block(trace: "Optional[dict]") -> str:
     match_label  = (matchup.get("label")   or "").strip()
     match_rsns   = matchup.get("reasoning") or []
 
-    if not role_label and not match_label:
+    # Hit rate summary from historical windows
+    historical = trace.get("historical", {}) or {}
+    windows    = historical.get("windows", {}) or {}
+    _hr_parts: list[str] = []
+    for wk in ("l5", "l10", "l20"):
+        w = windows.get(wk)
+        if w and isinstance(w, dict) and (w.get("n") or 0) >= 3:
+            pct = round((w.get("hit_rate") or 0) * 100)
+            _hr_parts.append(f"<b>{wk.upper()}:</b> {pct}%")
+    _ss = historical.get("sample_strength")
+
+    if not role_label and not match_label and not _hr_parts:
         return ""
 
     lines = ["\n\n🔍 <b>Intelligence</b>"]
+
+    # Hit rates row
+    if _hr_parts:
+        ss_str = f"  <i>(ss:{_ss})</i>" if _ss is not None else ""
+        lines.append(f"\n   📊 {' | '.join(_hr_parts)}{ss_str}")
 
     if role_label:
         role_icon = {"Starter": "🟢", "Reserve": "🟡", "Bench": "🔴"}.get(role_label, "⚪")
@@ -422,7 +481,7 @@ def _format_intelligence_block(trace: "Optional[dict]") -> str:
             "Tough": "⚠️",    "Difficult": "⚠️",
         }.get(match_label, "📊")
         lines.append(f"\n   {match_icon} <b>Matchup:</b>  {match_label}")
-        for rsn in list(match_rsns)[:2]:
+        for rsn in list(match_rsns)[:3]:   # up to 3 reasoning bullets
             if rsn:
                 lines.append(f"\n      <i>• {rsn}</i>")
 
@@ -558,7 +617,16 @@ def format_underdog_change_alert(
         + _format_decision_block(decision)
         + _format_market_quality_block(market_quality)
         + _format_market_pressure_block(market_pressure)
-        + _format_intelligence_block(intelligence_trace),
+        + _format_intelligence_block(intelligence_trace)
+        + ("" if removed else _format_analyst_inline_block(
+            player_name        = player_name,
+            stat_type          = stat_type,
+            sport              = sport or "UNKNOWN",
+            line               = new_line,
+            score              = score,
+            decision           = decision,
+            intelligence_trace = intelligence_trace,
+        )),
         "",
         f"{EMOJI['clock']} <i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>",
         "",
@@ -668,7 +736,16 @@ def format_underdog_new_prop_alert(
         + _format_decision_block(decision)
         + _format_market_quality_block(market_quality)
         + _format_market_pressure_block(market_pressure)
-        + _format_intelligence_block(intelligence_trace),
+        + _format_intelligence_block(intelligence_trace)
+        + _format_analyst_inline_block(
+            player_name        = player_name,
+            stat_type          = stat_type,
+            sport              = sport or "UNKNOWN",
+            line               = line_value,
+            score              = score,
+            decision           = decision,
+            intelligence_trace = intelligence_trace,
+        ),
         "",
         "<b>Reason:</b>",
         "\n".join(reasons),

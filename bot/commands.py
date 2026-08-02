@@ -269,6 +269,21 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             if ts:
                 lines.append(f"   at {_html.escape(str(ts))}")
 
+        # ── Recovery events ───────────────────────────────────────────────────
+        recovery = ht.last_recovery_event()
+        if recovery:
+            lines.append("")
+            lines.append(
+                f"✅ <b>Last recovery:</b>  {_html.escape(ht.last_recovery_age_str())}"
+                f"  ·  job: {_html.escape(recovery.get('job', '?'))}"
+            )
+            reason_txt = recovery.get("reason", "")
+            if reason_txt:
+                lines.append(f"   ↳ <i>{_html.escape(str(reason_txt)[:100])}</i>")
+        else:
+            lines.append("")
+            lines.append("✅ <b>Last recovery:</b>  <i>No recovery events recorded</i>")
+
         # ── Phase 2: extended runtime telemetry ───────────────────────────────
         lines.append("")
         lines.append("<b>📡 Underdog Pipeline</b>")

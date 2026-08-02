@@ -101,7 +101,8 @@ def test_format_intelligence_block_matchup_neutral():
     assert "Neutral" in result
 
 
-def test_format_intelligence_block_limits_reasoning_to_two():
+def test_format_intelligence_block_limits_reasoning_to_three():
+    """Section 2 expansion: up to 3 reasoning bullets (was 2)."""
     from alerts_multiplatform import _format_intelligence_block
     trace = {
         "role": {},
@@ -113,7 +114,7 @@ def test_format_intelligence_block_limits_reasoning_to_two():
     result = _format_intelligence_block(trace)
     assert "reason 1" in result
     assert "reason 2" in result
-    assert "reason 3" not in result
+    assert "reason 3" in result
     assert "reason 4" not in result
 
 

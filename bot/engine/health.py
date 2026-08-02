@@ -272,15 +272,23 @@ class HealthTracker:
     # ── Job tracking ──────────────────────────────────────────────────────────
 
     def record_job_run(self, job_name: str) -> None:
-        """Mark a successful job execution."""
+        """Mark a successful job execution (resets fail_streak; auto-detects recovery)."""
         with self._lock:
             jobs: dict  = self._state.setdefault("jobs", {})
             entry: dict = jobs.setdefault(job_name, {})
+            prev_streak = entry.get("fail_streak", 0)
+            last_error  = entry.get("last_error", "")
             entry["last_run"]    = _now_iso()
             entry["last_run_ts"] = _now_ts()
             entry["run_count"]   = entry.get("run_count", 0) + 1
             entry["fail_streak"] = 0
             self._save()
+        # Auto-detect and record recovery when transitioning out of a failure streak
+        if prev_streak > 0:
+            self.record_recovery_event(
+                job_name,
+                recovered_from=f"fail_streak={prev_streak}: {str(last_error)[:80]}",
+            )
 
     def record_job_started(self, job_name: str) -> None:
         """
@@ -370,6 +378,36 @@ class HealthTracker:
         logger.warning(
             "HealthTracker: pipeline fail — stage=%s module=%s error=%s",
             stage, module, str(error)[:80],
+        )
+
+    def record_recovery_event(self, job_name: str, recovered_from: str = "") -> None:
+        """
+        Record a recovery event — called when a job succeeds after one or more failures.
+
+        Stores the last recovery in a top-level ``last_recovery_event`` dict so
+        /health can show operators when the system last self-healed.
+
+        This is called automatically by ``record_job_run`` when it detects a
+        non-zero fail_streak, so callers in market_engine.py do not need to
+        call this directly.
+        """
+        with self._lock:
+            event = {
+                "job":     str(job_name)[:64],
+                "reason":  str(recovered_from)[:128] if recovered_from else "job succeeded after failures",
+                "ts":      _now_iso(),
+                "ts_unix": _now_ts(),
+            }
+            self._state["last_recovery_event"] = event
+            # Track a short history of recoveries (last 5)
+            history: list = self._state.setdefault("recovery_history", [])
+            history.append(event)
+            if len(history) > 5:
+                self._state["recovery_history"] = history[-5:]
+            self._save()
+        logger.info(
+            "HealthTracker: recovery event — job=%s reason=%s",
+            job_name, str(recovered_from)[:60],
         )
 
     def record_telegram_send(self) -> None:
@@ -513,6 +551,20 @@ class HealthTracker:
 
     def last_job_started_name(self) -> Optional[str]:
         return self._state.get("last_job_started")
+
+    def last_recovery_event(self) -> Optional[dict]:
+        """Return the most recent recovery event dict, or None."""
+        return self._state.get("last_recovery_event")
+
+    def last_recovery_age_str(self) -> str:
+        evt = self._state.get("last_recovery_event")
+        if not evt:
+            return "—"
+        return _age_str(evt.get("ts_unix"))
+
+    def recovery_history(self) -> list:
+        """Return list of up to 5 recent recovery events (oldest first)."""
+        return list(self._state.get("recovery_history", []))
 
 
 # ── Module-level singleton ────────────────────────────────────────────────────
