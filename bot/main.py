@@ -858,29 +858,51 @@ async def _clv_seed_job(context) -> None:
 
     When sportsbook polling is re-enabled, a separate harvest job will read
     these seeds, fetch closing odds, compute CLV%, and write clv_records.
+
+    Retry policy: up to 3 attempts with exponential backoff (2 s, 4 s) to
+    handle any residual SQLite lock contention not already absorbed by WAL
+    mode and the 30-second busy timeout configured on the engine.
     """
     if _db is None:
-        # DB not ready — record as successful no-op so /health never shows "never ran"
         _ht = get_health_tracker()
         if _ht:
             _ht.record_job_run("_clv_seed_job")
         return
-    try:
-        ev_seeded = await _db.seed_clv_from_ev_records(limit=100)
-        ud_seeded = await _db.seed_clv_from_ud_snapshots(limit=100)
-        if ev_seeded or ud_seeded:
-            logger.info(
-                "_clv_seed_job: seeded %d EV + %d Underdog alerts for CLV tracking",
-                ev_seeded, ud_seeded,
-            )
-        _ht = get_health_tracker()
-        if _ht:
-            _ht.record_job_run("_clv_seed_job")
-    except Exception as exc:
-        logger.exception("_clv_seed_job: error during CLV seeding: %s", exc)
-        _ht = get_health_tracker()
-        if _ht:
-            _ht.record_job_fail("_clv_seed_job", str(exc))
+
+    max_attempts = 3
+    last_exc: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            ev_seeded = await _db.seed_clv_from_ev_records(limit=100)
+            ud_seeded = await _db.seed_clv_from_ud_snapshots(limit=100)
+            if ev_seeded or ud_seeded:
+                logger.info(
+                    "_clv_seed_job: seeded %d EV + %d Underdog alerts for CLV tracking",
+                    ev_seeded, ud_seeded,
+                )
+            _ht = get_health_tracker()
+            if _ht:
+                _ht.record_job_run("_clv_seed_job")
+            return   # success — exit retry loop
+        except Exception as exc:
+            last_exc = exc
+            import sqlalchemy.exc as _sa_exc
+            is_lock = isinstance(exc, _sa_exc.OperationalError) and "locked" in str(exc).lower()
+            if is_lock and attempt < max_attempts:
+                wait = 2 ** attempt   # 2 s, 4 s
+                logger.warning(
+                    "_clv_seed_job: database locked (attempt %d/%d) — retrying in %ds",
+                    attempt, max_attempts, wait,
+                )
+                await asyncio.sleep(wait)
+                continue
+            # Non-lock error or final attempt — record failure
+            break
+
+    logger.exception("_clv_seed_job: error during CLV seeding: %s", last_exc)
+    _ht = get_health_tracker()
+    if _ht:
+        _ht.record_job_fail("_clv_seed_job", str(last_exc))
 
 
 # ── API budget check job ───────────────────────────────────────────────────────

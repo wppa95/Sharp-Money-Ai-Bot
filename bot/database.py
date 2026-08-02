@@ -450,11 +450,29 @@ class Database:
                 if parent:
                     os.makedirs(parent, exist_ok=True)
 
-        self._engine = create_async_engine(self._url, echo=False)
+        # connect_args["timeout"]: SQLite busy timeout — wait up to 30 s before
+        # raising OperationalError("database is locked").  Default is 5 s, which
+        # is too short when the underdog_job, clv_seed_job, and clv_harvest_job
+        # fire within the same scheduler window.
+        _connect_args: dict = {}
+        if self._url.startswith("sqlite"):
+            _connect_args["timeout"] = 30
+        self._engine = create_async_engine(
+            self._url,
+            echo=False,
+            connect_args=_connect_args,
+        )
         self._session_factory = async_sessionmaker(
             self._engine, class_=AsyncSession, expire_on_commit=False
         )
         async with self._engine.begin() as conn:
+            # WAL journal mode: allows concurrent reads while a write is in
+            # progress, eliminating most "database is locked" errors on SQLite.
+            # Setting is persistent — only needs to be applied once per DB file.
+            if self._url.startswith("sqlite"):
+                await conn.execute(text("PRAGMA journal_mode=WAL"))
+                # NORMAL synchronous is safe and faster under WAL.
+                await conn.execute(text("PRAGMA synchronous=NORMAL"))
             await conn.run_sync(Base.metadata.create_all)
         await self._migrate_pp_edge_records()
         await self._migrate_underdog_snapshots()
@@ -1776,14 +1794,15 @@ class Database:
         Create AlertCLVSeed entries for EV alerts that haven't been seeded yet.
 
         Queries ev_records where alert_sent=True and no matching seed exists,
-        then creates seeds.  Returns the number of new seeds created.
+        then bulk-inserts all seeds in a single transaction (ON CONFLICT DO NOTHING).
+        Returns the number of new seeds created.
 
         Safe to call repeatedly — the UNIQUE constraint prevents duplicates.
         """
         from sqlalchemy import not_
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
         async with self.session() as s:
-            # Find ev_records that are alerted but not yet seeded
             seeded_ids_subq = (
                 select(AlertCLVSeed.source_id)
                 .where(AlertCLVSeed.source_table == "ev_records")
@@ -1800,9 +1819,14 @@ class Database:
             )
             ev_rows = list(result.scalars().all())
 
-        created = 0
-        for ev in ev_rows:
-            seed = AlertCLVSeed(
+        if not ev_rows:
+            return 0
+
+        # Build all value dicts first, then insert in ONE transaction.
+        # This holds the write lock for the minimum possible time compared
+        # with N separate save_alert_clv_seed() calls.
+        rows = [
+            dict(
                 source_table     = "ev_records",
                 source_id        = ev.id,
                 alert_type       = "EV",
@@ -1813,22 +1837,32 @@ class Database:
                 bet_odds         = ev.best_odds,
                 counterpart_odds = None,
                 tier             = _tier_from_confidence(ev.ai_confidence),
-                game_time        = None,    # ev_records don't store game_time currently
+                game_time        = None,
                 alerted_at       = ev.detected_at,
+                clv_pct          = None,
                 clv_computed     = False,
             )
-            await self.save_alert_clv_seed(seed)
-            created += 1
-
-        return created
+            for ev in ev_rows
+        ]
+        async with self.session() as s:
+            stmt = (
+                sqlite_insert(AlertCLVSeed)
+                .values(rows)
+                .on_conflict_do_nothing(index_elements=["source_table", "source_id"])
+            )
+            result = await s.execute(stmt)
+            await s.commit()
+            return result.rowcount if result.rowcount >= 0 else len(rows)
 
     async def seed_clv_from_ud_snapshots(self, limit: int = 200) -> int:
         """
         Create AlertCLVSeed entries for Underdog alerts that haven't been seeded.
 
+        Bulk-inserts all seeds in a single transaction (ON CONFLICT DO NOTHING).
         Returns the number of new seeds created.
         """
         from sqlalchemy import not_
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
         async with self.session() as s:
             seeded_ids_subq = (
@@ -1847,9 +1881,11 @@ class Database:
             )
             ud_rows = list(result.scalars().all())
 
-        created = 0
-        for ud in ud_rows:
-            seed = AlertCLVSeed(
+        if not ud_rows:
+            return 0
+
+        rows = [
+            dict(
                 source_table     = "underdog_snapshots",
                 source_id        = ud.id,
                 alert_type       = "UNDERDOG",
@@ -1857,17 +1893,25 @@ class Database:
                 market_type      = ud.stat_type or "",
                 event            = ud.game_id or "",
                 selection        = f"{ud.player_name} {ud.stat_type} {ud.line_value:g}",
-                bet_odds         = None,   # Underdog is pick'em — no American odds
+                bet_odds         = None,
                 counterpart_odds = None,
                 tier             = ud.score_tier or "",
                 game_time        = ud.game_time,
                 alerted_at       = ud.fetched_at,
+                clv_pct          = None,
                 clv_computed     = False,
             )
-            await self.save_alert_clv_seed(seed)
-            created += 1
-
-        return created
+            for ud in ud_rows
+        ]
+        async with self.session() as s:
+            stmt = (
+                sqlite_insert(AlertCLVSeed)
+                .values(rows)
+                .on_conflict_do_nothing(index_elements=["source_table", "source_id"])
+            )
+            result = await s.execute(stmt)
+            await s.commit()
+            return result.rowcount if result.rowcount >= 0 else len(rows)
 
     # ── Underdog snapshots ───────────────────────────────────────────────────
 

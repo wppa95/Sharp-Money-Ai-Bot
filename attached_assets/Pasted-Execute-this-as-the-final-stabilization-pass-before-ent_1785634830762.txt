@@ -1,0 +1,257 @@
+Execute this as the final stabilization pass before entering the data collection phase.
+
+Do not rebuild anything.
+
+Do not restart architecture.
+
+Do not create new systems.
+
+Continue from the current completed state.
+
+==================================================
+
+CURRENT PRODUCTION STATE
+
+Current completed work:
+
+* Underdog Prop Intelligence System implemented
+* Underdog-only production scope active
+* AI Analyst layer implemented
+* S/A/B recommendation system implemented
+* Telegram alert cleanup implemented
+* Market surveillance implemented
+* Results tracking implemented
+* Learning pipeline implemented
+* Crash recovery implemented
+* Runtime monitoring implemented
+* 2564 tests passing
+
+This is now a stabilization and verification pass only.
+
+==================================================
+
+PHASE 1 — DATABASE STABILITY FIX
+
+Audit and fix the remaining database locking issue.
+
+Current issue:
+
+_clv_seed_job:
+
+sqlite3.OperationalError: database is locked
+
+Requirements:
+
+* Do not rebuild the database layer.
+* Do not create duplicate storage systems.
+* Preserve all existing data.
+* Preserve Underdog monitoring priority.
+
+Implement only what is needed:
+
+* SQLite busy timeout if missing
+* Retry handling with exponential backoff
+* Safer transaction boundaries
+* Prevent overlapping database writes
+* Improve scheduled job database isolation
+* Ensure failed background jobs recover without affecting critical monitoring
+
+Verify:
+
+* Underdog monitor continues running
+* PropLineHistory writes continue
+* Recommendation storage continues
+* Learning data storage continues
+* Scheduler remains healthy
+
+==================================================
+
+PHASE 2 — FINAL RUNTIME VERIFICATION
+
+Audit current runtime behavior.
+
+Verify:
+
+/health
+
+Must correctly show:
+
+* Current heartbeat
+* Active job
+* Last Underdog scan
+* Last database write
+* Last pipeline failure
+* Recovery state
+* Restart reason
+
+Confirm:
+
+* Crash detection works
+* Restart notification works
+* Scheduler resumes after restart
+* State persists after crashes
+* Monitoring continues automatically
+
+==================================================
+
+PHASE 3 — PROVIDER CLEANUP VERIFICATION
+
+Confirm production provider scope.
+
+ACTIVE:
+
+✅ Underdog only
+
+DISABLED:
+
+❌ DraftKings
+❌ FanDuel
+❌ PrizePicks
+❌ Other inactive providers
+
+Disabled providers must:
+
+* Not poll
+* Not initialize in active production
+* Not consume API quota
+* Not affect alerts
+* Not affect scoring
+* Not affect health checks
+* Not affect startup logs
+* Remain available only behind feature flags for future expansion
+
+==================================================
+
+PHASE 4 — COMMAND VERIFICATION
+
+Run and verify all existing commands:
+
+/status
+
+/health
+
+/rollups
+
+/picks
+
+/dashboard
+
+/alerts
+
+/performance
+
+/backtest
+
+/grade
+
+/testalert
+
+Confirm:
+
+* No command crashes
+* No missing data errors
+* No formatting issues
+* No database errors
+* Telegram formatting works correctly
+
+==================================================
+
+PHASE 5 — DATA COLLECTION READINESS CHECK
+
+Before completion verify:
+
+Market Intelligence:
+
+✅ Underdog snapshots collecting
+✅ Line movement tracking active
+✅ Opening lines preserved
+✅ Removed props tracked
+✅ Available props tracked
+
+Recommendation System:
+
+✅ Recommendations stored
+✅ S/A/B filtering working
+✅ Confidence system working
+✅ Risk system working
+✅ AI Analyst reading stored decision artifacts
+
+Learning System:
+
+✅ Results grading ready
+✅ HIT/MISS/PUSH/VOID handling ready
+✅ Error classification ready
+✅ Rollups working
+✅ Player trends collecting
+
+Architecture:
+
+Confirm:
+
+* No duplicate scoring engines
+* No duplicate confidence engines
+* No duplicate explanation systems
+* No duplicate recommendation pipelines
+
+==================================================
+
+FINAL VERIFICATION REPORT REQUIRED
+
+Provide:
+
+1. Files changed
+2. Architecture changes
+3. Tests passing count
+4. New tests added
+5. Confirmation whether duplicate logic was created
+6. Confirmation whether unnecessary provider/API usage is fully stopped
+7. Confirmation whether database locking was resolved
+8. Confirmation whether all commands passed
+9. Confirmation whether Sharp Money Bot is ready for passive data collection
+
+==================================================
+
+FINAL FREEZE REQUIREMENT
+
+After completing this stabilization pass:
+
+STOP ALL FEATURE DEVELOPMENT.
+
+Do not add new features.
+
+Do not redesign architecture.
+
+Do not expand scope.
+
+Sharp Money Bot is now entering the monitoring and data collection phase.
+
+The system should remain frozen while collecting real production data.
+
+During this phase:
+
+* Monitor Underdog markets
+* Collect prop movement history
+* Store recommendations
+* Track results
+* Build learning data
+* Measure model performance
+
+Only make future changes if:
+
+* A critical production bug is discovered
+* Data loss risk exists
+* A stability issue affects monitoring
+
+Future improvements must be based on collected results and performance analysis.
+
+Final frozen state:
+
+✅ Architecture frozen
+✅ Underdog monitoring active
+✅ AI Analyst active
+✅ Learning pipeline collecting data
+✅ Results tracking active
+✅ Crash recovery active
+✅ Runtime stability verified
+
+Enter passive monitoring mode.
