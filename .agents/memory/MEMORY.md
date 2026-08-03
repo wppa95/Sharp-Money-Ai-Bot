@@ -18,3 +18,4 @@
 - [Final completion batch](final-completion.md) — B-tier star gate=3, analyst inline block, recovery events, matchup 3-bullet expansion; 2636 tests passing Aug 2026.
 - [Crash diagnosis patch](crash-diagnosis.md) — sys.excepthook captures unhandled exc to health sidecar; crash_cause_label() classifies DB lock/Python exc/SIGKILL; restart alert shows real cause; 2595 tests Aug 2026.
 - [Alert quality cleanup](alert-quality-cleanup.md) — intelligence block char-split fix; _confidence_label(); _validate_final_tier() gate; Bet Quality label; 2634 tests Aug 2026.
+- [Phase 4 Evidence Infrastructure](phase4-evidence.md) — PropCandidateLog table; 8 new PropOpportunityLog cols (recommendation_id, provider, bet_quality_score, qualification_path, reason_codes, watchlist_state, settlement_source, manual_opinion); /funnel command; 2685 tests Aug 2026.

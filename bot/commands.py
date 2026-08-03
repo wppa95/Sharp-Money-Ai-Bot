@@ -2814,6 +2814,76 @@ async def cmd_refinement(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text("⚠️ /refinement failed. Check bot logs.")
 
 
+async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/funnel — Edge transparency: how many candidates passed/failed each qualification gate."""
+    if not _check_allowed(update):
+        await update.message.reply_text("⛔ Unauthorized.")
+        return
+    try:
+        since_h = 24
+        if context.args:
+            try:
+                since_h = max(1, min(168, int(context.args[0])))
+            except ValueError:
+                pass
+
+        summary   = await _db.get_funnel_summary(since_hours=since_h)
+        counts    = summary.get("counts", {})
+        top_rej   = summary.get("top_rejections", [])
+
+        accepted  = counts.get("ACCEPTED",  0)
+        watchlist = counts.get("WATCHLIST", 0)
+        rejected  = counts.get("REJECTED",  0)
+        removed   = counts.get("REMOVED",   0)
+        total     = accepted + watchlist + rejected + removed
+
+        qual_rate = f"{accepted / total * 100:.0f}%" if total > 0 else "—"
+
+        _thick = "━" * 18
+        lines: list[str] = [
+            _thick,
+            "🔭 <b>Prop Candidate Funnel</b>",
+            _thick,
+            "",
+            f"<i>Last {since_h}h  ·  Use /funnel 48 for longer window</i>",
+            "",
+            f"📥 Scanned:           <b>{total}</b>",
+            f"✅ Accepted (alerted): <b>{accepted}</b>",
+            f"👁 Watchlist (B-tier): <b>{watchlist}</b>",
+            f"❌ Rejected:           <b>{rejected}</b>",
+            f"🚫 Removed:            <b>{removed}</b>",
+            "",
+            f"📊 Qualification rate: <b>{qual_rate}</b>",
+        ]
+
+        if top_rej:
+            lines += [
+                "",
+                "─" * 16,
+                "",
+                "📋 <b>Near-Misses (highest-scoring rejected)</b>",
+                "",
+            ]
+            for r in top_rej:
+                sc   = f"{r.get('score_total', 0):.0f}" if r.get("score_total") is not None else "?"
+                tier = r.get("score_tier") or "?"
+                rej  = r.get("rejection_reason") or "?"
+                lines.append(
+                    f"• <b>{r.get('player_name', '?')}</b> "
+                    f"— {r.get('stat_type', '?')} ({r.get('sport', '?')})\n"
+                    f"  {sc}/100 [{tier}]  <i>{rej}</i>"
+                )
+        else:
+            lines += ["", "<i>No rejected candidates recorded yet — data accumulates as the bot runs.</i>"]
+
+        lines.append(f"\n{_thick}")
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+    except Exception as exc:
+        logger.exception("cmd_funnel: error: %s", exc)
+        await update.message.reply_text("⚠️ Could not load funnel data. Check bot logs.")
+
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Log errors raised by handlers and notify the user if possible."""
     logger.error(

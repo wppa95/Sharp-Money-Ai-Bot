@@ -1,0 +1,276 @@
+Continue with the remaining Phase 4 Evidence Infrastructure in one coordinated pass.
+
+Important:
+
+We are trying to conserve credits.
+
+Do NOT ask for approval between each small step.
+
+However:
+
+Before changing code:
+
+* inspect existing implementation
+* identify current gaps
+* make the smallest coordinated changes
+* do not rewrite working systems
+* do not change scoring weights
+* do not add new sports/markets
+* do not change strategy rules blindly
+
+Implement the remaining Phase 4 items in this order:
+
+⸻
+
+Phase 4 Batch 1 — Recommendation Tracking
+
+Create a recommendation event system.
+
+Every serious candidate should receive:
+
+recommendation_id
+
+Connect:
+
+Prop
+→ Decision
+→ Result
+→ Performance
+
+Store:
+
+* recommendation_id
+* player
+* sport
+* market
+* provider
+* line at recommendation time
+* timestamp
+* confidence
+* tier
+* bet quality score
+* reason codes
+* qualification path
+
+Do not break existing alerts.
+
+⸻
+
+Phase 4 Batch 2 — Automatic Grading Loop
+
+Create grading pipeline:
+
+Recommendation created
+
+↓
+
+Game completed
+
+↓
+
+Result collected
+
+↓
+
+Grade assigned
+
+Store:
+
+* outcome
+* settlement time
+* settlement source
+
+Outcomes:
+
+* Win
+* Loss
+* Push
+* Void
+* Ungraded
+
+Requirements:
+
+* idempotent grading
+* no duplicate grades
+* safe reruns
+
+⸻
+
+Phase 4 Batch 3 — Immutable Historical Events
+
+Everything the bot sees should become permanent memory.
+
+Do not overwrite history.
+
+Track:
+
+Prop snapshots:
+
+* player
+* sport
+* market
+* provider
+* line
+* timestamp
+
+Movement events:
+
+* previous line
+* current line
+* movement amount
+* direction
+* timestamp
+
+Decision events:
+
+* alert created
+* recommendation created
+* rejected
+* removed
+* watchlist
+
+⸻
+
+Phase 4 Batch 4 — Edge Transparency
+
+Replace vague messages like:
+
+“No edges detected”
+
+with explainable filtering.
+
+Track:
+
+* candidates detected
+* edge score
+* confidence
+* tier
+* passed gates
+* failed gates
+* rejection reasons
+
+The bot should explain where opportunities disappeared.
+
+⸻
+
+Phase 4 Batch 5 — Qualification Calibration
+
+Track:
+
+Accepted:
+passed qualification
+
+Rejected:
+failed qualification
+
+Removed:
+provider removed prop
+
+Store:
+
+* gate decision
+* confidence
+* tier
+* reason codes
+* snapshot reference
+
+Prepare measurement for:
+
+* false positives
+* false negatives
+* missed winners
+
+⸻
+
+Phase 4 Batch 6 — Analytics / Dashboard Improvements
+
+Track:
+
+* candidates scanned
+* qualified candidates
+* rejected candidates
+* alerts
+* wins
+* losses
+* tier performance
+* confidence accuracy
+* edge conversion rate
+
+⸻
+
+Phase 4 Batch 7 — Reason Codes + Watchlist
+
+Create structured reason codes.
+
+Examples:
+
+Confidence:
+
+* STRONG_L5
+* STRONG_L10
+* STRONG_L30
+* HISTORICAL_EDGE
+* LINE_MOVEMENT
+
+Gate:
+
+* LOW_SAMPLE
+* CONFLICTING_DATA
+* MISSING_INFORMATION
+
+Decision:
+
+* PASSED
+* FAILED
+* WATCHLIST
+
+Add watchlist states:
+
+* Qualified
+* Watchlist
+* Rejected
+* Removed
+
+⸻
+
+Phase 4 Batch 8 — Validation Tools
+
+For serious candidates store:
+
+* bot confidence
+* bot reasoning
+* optional manual opinion
+* final result
+
+Allow comparison:
+
+Bot prediction vs actual outcome.
+
+⸻
+
+Final requirements:
+
+Run full tests.
+
+Provide:
+
+1. Files changed
+2. Tests passed
+3. Phase 4 completion status
+4. Remaining gaps
+5. Confirmation that the project is frozen afterward
+
+After this:
+
+FREEZE PROJECT.
+
+Only allow:
+
+✅ bug fixes
+✅ stability fixes
+✅ performance improvements
+✅ critical alert accuracy fixes
+
+No new features.
+No architecture changes.
+No scoring rewrites.

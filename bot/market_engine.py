@@ -148,6 +148,128 @@ def init_market_engine(registry: ConnectorRegistry) -> None:
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
+def _compute_reason_codes(
+    score:    "Optional[object]",
+    decision: "Optional[object]" = None,
+) -> list[str]:
+    """
+    Derive structured reason codes from a UDPropScore (+ optional UDBetDecision).
+
+    Returns a list of string codes like ["STRONG_L5", "LINE_MOVEMENT", "S_TIER"].
+    Safe to call with None arguments — returns ["NO_SCORE"].
+
+    Confidence codes (sample depth):
+      LOW_SAMPLE    n < 5
+      STRONG_L5     5 ≤ n < 10
+      STRONG_L10    10 ≤ n < 30
+      STRONG_L30    n ≥ 30
+
+    Historical performance:
+      HISTORICAL_EDGE  avg_vs_line ≥ 16
+      WEAK_HISTORY     avg_vs_line ≤ 4 (and n ≥ 5)
+
+    Market signals:
+      LINE_MOVEMENT    move_velocity ≥ 15
+      STABLE_LINE      stability ≥ 12
+      VOLATILE_LINE    stability ≤ 3
+
+    Tier:
+      S_TIER / A_TIER / B_TIER
+
+    Gate outcome (appended when decision is provided):
+      GATE:OVER / GATE:UNDER / GATE:DECISION_PASS
+    """
+    if score is None:
+        return ["NO_SCORE"]
+
+    codes: list[str] = []
+    n    = getattr(score, "n_history",       0) or 0
+    avg  = getattr(score, "avg_vs_line",     0) or 0
+    sta  = getattr(score, "stability",       0) or 0
+    vel  = getattr(score, "move_velocity",   0) or 0
+    tier = getattr(score, "tier",       "PASS")
+
+    # Sample-depth codes
+    if n < 5:
+        codes.append("LOW_SAMPLE")
+    elif n >= 30:
+        codes.append("STRONG_L30")
+    elif n >= 10:
+        codes.append("STRONG_L10")
+    else:
+        codes.append("STRONG_L5")
+
+    # Historical performance
+    if avg >= 16:
+        codes.append("HISTORICAL_EDGE")
+    elif avg <= 4 and n >= 5:
+        codes.append("WEAK_HISTORY")
+
+    # Market signals
+    if vel and vel >= 15:
+        codes.append("LINE_MOVEMENT")
+    if sta >= 12:
+        codes.append("STABLE_LINE")
+    elif sta <= 3 and n >= 5:
+        codes.append("VOLATILE_LINE")
+
+    # Tier code
+    _tier_code = {"S": "S_TIER", "A": "A_TIER", "B": "B_TIER"}.get(tier)
+    if _tier_code:
+        codes.append(_tier_code)
+
+    # Decision gate
+    if decision is not None:
+        _rec = getattr(decision, "recommendation", "PASS")
+        if _rec in ("OVER", "UNDER"):
+            codes.append(f"GATE:{_rec}")
+        else:
+            codes.append("GATE:DECISION_PASS")
+
+    return codes
+
+
+def _compute_reason_codes_from_scored_dict(p: dict) -> list[str]:
+    """
+    Derive structured reason codes from a scored_prop dict (built during the main loop).
+
+    Used for PropCandidateLog batch write.  Mirrors _compute_reason_codes() but reads
+    the flat dict instead of UDPropScore attributes.
+    """
+    codes: list[str] = []
+    n    = p.get("n", 0) or 0
+    avg  = p.get("avg", 0) or 0
+    sta  = p.get("sta", 0) or 0
+    vel  = p.get("vel", 0) or 0
+    tier = p.get("tier", "PASS")
+
+    if n < 5:
+        codes.append("LOW_SAMPLE")
+    elif n >= 30:
+        codes.append("STRONG_L30")
+    elif n >= 10:
+        codes.append("STRONG_L10")
+    else:
+        codes.append("STRONG_L5")
+
+    if avg >= 16:
+        codes.append("HISTORICAL_EDGE")
+    elif avg <= 4 and n >= 5:
+        codes.append("WEAK_HISTORY")
+
+    if vel and vel >= 15:
+        codes.append("LINE_MOVEMENT")
+    if sta >= 12:
+        codes.append("STABLE_LINE")
+    elif sta <= 3 and n >= 5:
+        codes.append("VOLATILE_LINE")
+
+    _tc = {"S": "S_TIER", "A": "A_TIER", "B": "B_TIER"}.get(tier)
+    if _tc:
+        codes.append(_tc)
+    return codes
+
+
 def _extract_ud_stat_type(selection: str, player: str | None, line: float | None) -> str:
     """
     Extract the stat-type label from an UnderdogConnector selection string.
@@ -671,16 +793,22 @@ async def underdog_job(context) -> None:
                     # Log every evaluated opportunity (PLAY or PASS) for tracking
                     try:
                         await db.log_prop_opportunity(
-                            external_id    = snap.external_id,
-                            player_name    = player,
-                            team           = snap.team or "",
-                            sport          = snap.sport or "UNKNOWN",
-                            stat_type      = stat_type,
-                            line_value     = line_val,
-                            recommendation = decision.recommendation,
-                            decision_tier  = decision.decision_tier,
-                            confidence     = decision.confidence,
-                            game_time      = snap.game_time,
+                            external_id       = snap.external_id,
+                            player_name       = player,
+                            team              = snap.team or "",
+                            sport             = snap.sport or "UNKNOWN",
+                            stat_type         = stat_type,
+                            line_value        = line_val,
+                            recommendation    = decision.recommendation,
+                            decision_tier     = decision.decision_tier,
+                            confidence        = decision.confidence,
+                            game_time         = snap.game_time,
+                            provider          = "Underdog",
+                            bet_quality_score = decision.confidence,
+                            reason_codes      = _compute_reason_codes(score, decision),
+                            watchlist_state   = (
+                                "Qualified" if decision.recommendation != "PASS" else "Rejected"
+                            ),
                         )
                     except Exception:
                         pass  # never block alert flow
@@ -852,16 +980,22 @@ async def underdog_job(context) -> None:
                         # Log every evaluated opportunity (PLAY or PASS) for tracking
                         try:
                             await db.log_prop_opportunity(
-                                external_id    = snap.external_id,
-                                player_name    = player,
-                                team           = snap.team or "",
-                                sport          = snap.sport or "UNKNOWN",
-                                stat_type      = stat_type,
-                                line_value     = snap.line or 0.0,
-                                recommendation = decision.recommendation,
-                                decision_tier  = decision.decision_tier,
-                                confidence     = decision.confidence,
-                                game_time      = snap.game_time,
+                                external_id       = snap.external_id,
+                                player_name       = player,
+                                team              = snap.team or "",
+                                sport             = snap.sport or "UNKNOWN",
+                                stat_type         = stat_type,
+                                line_value        = snap.line or 0.0,
+                                recommendation    = decision.recommendation,
+                                decision_tier     = decision.decision_tier,
+                                confidence        = decision.confidence,
+                                game_time         = snap.game_time,
+                                provider          = "Underdog",
+                                bet_quality_score = decision.confidence,
+                                reason_codes      = _compute_reason_codes(score, decision),
+                                watchlist_state   = (
+                                    "Qualified" if decision.recommendation != "PASS" else "Rejected"
+                                ),
                             )
                         except Exception:
                             pass  # never block alert flow
@@ -1017,6 +1151,7 @@ async def underdog_job(context) -> None:
                             "player":          player,
                             "stat_type":       stat_type,
                             "sport":           snap.sport or "UNKNOWN",
+                            "team":            snap.team or "",
                             "total":           score.total,
                             "tier":            score.tier,
                             "stars":           score.stars,
@@ -1033,6 +1168,10 @@ async def underdog_job(context) -> None:
                             "n":         score.n_history,
                             "line":      score.current_line,
                             "prev_line": prev_line,  # previous line for movement tracking
+                            # ── Phase 4 Evidence Infrastructure ─────────────────
+                            "external_id":   snap.external_id,
+                            "game_time":     snap.game_time,
+                            "decision_conf": (decision.confidence if decision is not None else None),
                         })
     
                 should_alert = is_qualified and (is_reentry or is_removed or (
@@ -1255,16 +1394,22 @@ async def underdog_job(context) -> None:
                 # Log every evaluated opportunity (PLAY or PASS) for tracking
                 try:
                     await db.log_prop_opportunity(
-                        external_id    = _ssnap.external_id,
-                        player_name    = _sp,
-                        team           = _ssnap.team or "",
-                        sport          = _ssport,
-                        stat_type      = _st,
-                        line_value     = _line_val,
-                        recommendation = _sdec.recommendation,
-                        decision_tier  = _sdec.decision_tier,
-                        confidence     = _sdec.confidence,
-                        game_time      = _ssnap.game_time,
+                        external_id       = _ssnap.external_id,
+                        player_name       = _sp,
+                        team              = _ssnap.team or "",
+                        sport             = _ssport,
+                        stat_type         = _st,
+                        line_value        = _line_val,
+                        recommendation    = _sdec.recommendation,
+                        decision_tier     = _sdec.decision_tier,
+                        confidence        = _sdec.confidence,
+                        game_time         = _ssnap.game_time,
+                        provider          = "Underdog",
+                        bet_quality_score = _sdec.confidence,
+                        reason_codes      = _compute_reason_codes(_sscore, _sdec),
+                        watchlist_state   = (
+                            "Qualified" if _sdec.recommendation != "PASS" else "Rejected"
+                        ),
                     )
                 except Exception:
                     pass  # never block alert flow
@@ -1427,6 +1572,50 @@ async def underdog_job(context) -> None:
             )
             _dbg_lines.append(f"  rejection breakdown:  {_rej_str}")
         logger.info("underdog_job [debug summary]\n%s", "\n".join(_dbg_lines))
+
+        # ── PropCandidateLog batch write — edge transparency (Phase 4) ───────
+        if _scored_props and db:
+            try:
+                import json as _json
+                _now_ts   = datetime.utcnow()
+                _cand_rows: list[dict] = []
+                for _cp in _scored_props:
+                    _ctier = _cp.get("tier", "PASS")
+                    _crej  = _cp.get("rejection")
+                    # gate_decision from tier + rejection flag
+                    if _ctier == "PASS":
+                        _cgd = "REJECTED"
+                    elif _ctier == "B":
+                        _cgd = "WATCHLIST"   # B-tier: may or may not have alerted
+                    elif _crej is None and _ctier in ("S", "A"):
+                        _cgd = "ACCEPTED"
+                    else:
+                        _cgd = "REJECTED"
+                    _ccodes = _compute_reason_codes_from_scored_dict(_cp)
+                    _cand_rows.append({
+                        "scan_ts":              _now_ts,
+                        "player_name":          _cp.get("player", ""),
+                        "team":                 _cp.get("team", ""),
+                        "sport":                _cp.get("sport", ""),
+                        "stat_type":            _cp.get("stat_type", ""),
+                        "line_value":           float(_cp.get("line") or 0.0),
+                        "provider":             "Underdog",
+                        "score_total":          _cp.get("total"),
+                        "score_tier":           _ctier,
+                        "confidence":           _cp.get("decision_conf"),
+                        "gate_decision":        _cgd,
+                        "rejection_reason":     _crej,
+                        "reason_codes":         _json.dumps(_ccodes) if _ccodes else None,
+                        "snapshot_external_id": _cp.get("external_id"),
+                    })
+                if _cand_rows:
+                    await db.log_prop_candidate_batch(_cand_rows)
+                    logger.debug(
+                        "underdog_job: logged %d candidates to PropCandidateLog",
+                        len(_cand_rows),
+                    )
+            except Exception as _cand_exc:
+                logger.debug("underdog_job: PropCandidateLog write skipped: %s", _cand_exc)
 
     except Exception as _job_exc:
         logger.exception("underdog_job: processing error: %s", _job_exc)

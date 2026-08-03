@@ -74,6 +74,7 @@ from commands import (
     cmd_blocks,
     cmd_block,
     cmd_refinement,
+    cmd_funnel,
     error_handler,
     init_handlers,
 )
@@ -1541,6 +1542,7 @@ def main() -> None:
     app.add_handler(CommandHandler("blocks",     cmd_blocks))
     app.add_handler(CommandHandler("block",      cmd_block))
     app.add_handler(CommandHandler("refinement", cmd_refinement))
+    app.add_handler(CommandHandler("funnel",     cmd_funnel))
     app.add_error_handler(error_handler)
 
     logger.info("Starting polling — press Ctrl+C to stop.")

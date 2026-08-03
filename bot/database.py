@@ -391,6 +391,16 @@ class PropOpportunityLog(Base):
     risk_level     = Column(String(16),  nullable=True)          # "LOW"|"MEDIUM"|"HIGH"|None
     explanation    = Column(Text,        nullable=True)          # reason / narrative excerpt
     void_reason    = Column(String(64),  nullable=True)          # why result is VOID/CANCELLED
+    # Phase 4 Evidence Infrastructure — added via migration
+    recommendation_id  = Column(String(64),  nullable=True, index=True)
+    # Stable ID derived from (external_id, stat_type); links prop → decision → result.
+    provider           = Column(String(32),  nullable=True)               # "Underdog" | "PrizePicks"
+    bet_quality_score  = Column(Integer,     nullable=True)               # 0-100 decision confidence
+    qualification_path = Column(Text,        nullable=True)               # JSON list of gate outcomes
+    reason_codes       = Column(Text,        nullable=True)               # JSON: ["STRONG_L5", …]
+    watchlist_state    = Column(String(16),  nullable=True)               # Qualified|Watchlist|Rejected|Removed
+    settlement_source  = Column(String(64),  nullable=True)               # "auto_grade"|"manual"|None
+    manual_opinion     = Column(String(8),   nullable=True)               # "OVER"|"UNDER"|"PASS"|None
 
     __table_args__ = (
         UniqueConstraint(
@@ -398,6 +408,42 @@ class PropOpportunityLog(Base):
             name="uq_prop_opportunity_log",
         ),
     )
+
+
+# ── Prop Candidate Log ────────────────────────────────────────────────────────
+
+class PropCandidateLog(Base):
+    """
+    Every scored prop candidate — both qualifying and rejected.
+
+    Written once per candidate per scan cycle.  Use this table for:
+      • Edge transparency — see exactly where candidates filter out.
+      • Qualification calibration — measure false positives / false negatives.
+      • Funnel analytics — candidates → qualified → alerted → hit/miss.
+
+    gate_decision values:
+      ACCEPTED  — tier S/A, no gate failures, alert was queued
+      WATCHLIST — tier B without strong enough component scores to alert
+      REJECTED  — tier PASS, or failed confidence/sport/decision gate
+      REMOVED   — provider removed the prop during this cycle
+    """
+    __tablename__ = "prop_candidate_log"
+
+    id                   = Column(Integer,     primary_key=True, autoincrement=True)
+    scan_ts              = Column(DateTime,    nullable=False, index=True, default=datetime.utcnow)
+    player_name          = Column(String(128), nullable=False, index=True)
+    team                 = Column(String(64),  nullable=False, default="")
+    sport                = Column(String(32),  nullable=False, index=True)
+    stat_type            = Column(String(64),  nullable=False)
+    line_value           = Column(Float,       nullable=False, default=0.0)
+    provider             = Column(String(32),  nullable=False, default="Underdog")
+    score_total          = Column(Float,       nullable=True)
+    score_tier           = Column(String(8),   nullable=True)    # S / A / B / PASS
+    confidence           = Column(Integer,     nullable=True)
+    gate_decision        = Column(String(16),  nullable=False)   # ACCEPTED/WATCHLIST/REJECTED/REMOVED
+    rejection_reason     = Column(Text,        nullable=True)    # human-readable rejection label
+    reason_codes         = Column(Text,        nullable=True)    # JSON list e.g. ["STRONG_L5", "S_TIER"]
+    snapshot_external_id = Column(String(64),  nullable=True, index=True)
 
 
 # ── Player Risk / Block System ─────────────────────────────────────────────────
@@ -485,6 +531,7 @@ class Database:
         await self._migrate_prop_line_history_v3()
         await self._migrate_prop_opportunity_log()
         await self._migrate_prop_opportunity_log_v2()
+        await self._migrate_prop_opportunity_log_v3()
         # player_risk_records is created by create_all (new table); no column migration needed
         logger.info("Database initialised at %s", self._url)
 
@@ -2332,6 +2379,25 @@ class Database:
                     pass  # column already exists
         logger.info("_migrate_prop_opportunity_log_v2: Phase 2 columns ensured")
 
+    async def _migrate_prop_opportunity_log_v3(self) -> None:
+        """Add Phase 4 Evidence Infrastructure columns to prop_opportunity_log (idempotent)."""
+        async with self._engine.begin() as conn:
+            for col_sql in [
+                "ALTER TABLE prop_opportunity_log ADD COLUMN recommendation_id VARCHAR(64)",
+                "ALTER TABLE prop_opportunity_log ADD COLUMN provider VARCHAR(32)",
+                "ALTER TABLE prop_opportunity_log ADD COLUMN bet_quality_score INTEGER",
+                "ALTER TABLE prop_opportunity_log ADD COLUMN qualification_path TEXT",
+                "ALTER TABLE prop_opportunity_log ADD COLUMN reason_codes TEXT",
+                "ALTER TABLE prop_opportunity_log ADD COLUMN watchlist_state VARCHAR(16)",
+                "ALTER TABLE prop_opportunity_log ADD COLUMN settlement_source VARCHAR(64)",
+                "ALTER TABLE prop_opportunity_log ADD COLUMN manual_opinion VARCHAR(8)",
+            ]:
+                try:
+                    await conn.execute(text(col_sql))
+                except Exception:
+                    pass  # column already exists
+        logger.info("_migrate_prop_opportunity_log_v3: Phase 4 columns ensured")
+
     async def log_prop_opportunity(
         self,
         *,
@@ -2349,58 +2415,173 @@ class Database:
         stars:       "Optional[int]"   = None,   # 0–5 stars
         risk_level:  "Optional[str]"   = None,   # "LOW" | "MEDIUM" | "HIGH"
         explanation: "Optional[str]"   = None,   # reason / narrative excerpt
+        # Phase 4 Evidence Infrastructure — optional
+        provider:           "Optional[str]"  = None,   # "Underdog" | "PrizePicks"
+        bet_quality_score:  "Optional[int]"  = None,   # 0-100 (== confidence for now)
+        qualification_path: "Optional[list]" = None,   # gates passed, JSON-encoded
+        reason_codes:       "Optional[list]" = None,   # structured codes, JSON-encoded
+        watchlist_state:    "Optional[str]"  = None,   # Qualified|Watchlist|Rejected|Removed
     ) -> None:
         """
         Upsert a prop opportunity at evaluation time (PLAY or PASS).
 
         On conflict with the same (external_id, stat_type) — i.e. the prop was
         re-evaluated in a later cycle — updates recommendation, tier, confidence,
-        line_value, and Phase 2 enrichment to reflect the latest decision.
+        line_value, and enrichment to reflect the latest decision.
         Preserves any existing grading (result / actual_value / graded_at) so
         re-evaluation does not wipe a completed outcome.
 
         Extended result codes accepted by grade_opportunity:
           HIT | MISS | PUSH | PENDING | VOID | CANCELLED | INJURY_VOID | GAME_INTERRUPTED
         """
+        import hashlib
+        import json as _json
         from sqlalchemy.dialects.sqlite import insert as _sqlite_insert
-        now = datetime.utcnow()
+        now    = datetime.utcnow()
+        rec_id = hashlib.sha256(
+            f"{external_id}:{stat_type}".encode()
+        ).hexdigest()[:16]
+        _qpath = _json.dumps(qualification_path) if qualification_path else None
+        _rcodes = _json.dumps(reason_codes) if reason_codes else None
         stmt = (
             _sqlite_insert(PropOpportunityLog)
             .values(
-                external_id    = external_id,
-                player_name    = player_name,
-                team           = team,
-                sport          = sport,
-                stat_type      = stat_type,
-                line_value     = line_value,
-                recommendation = recommendation,
-                decision_tier  = decision_tier,
-                confidence     = confidence,
-                game_time      = game_time,
-                detected_at    = now,
-                result         = "PENDING",
-                actual_value   = None,
-                graded_at      = None,
-                stars          = stars,
-                risk_level     = risk_level,
-                explanation    = explanation,
+                external_id        = external_id,
+                player_name        = player_name,
+                team               = team,
+                sport              = sport,
+                stat_type          = stat_type,
+                line_value         = line_value,
+                recommendation     = recommendation,
+                decision_tier      = decision_tier,
+                confidence         = confidence,
+                game_time          = game_time,
+                detected_at        = now,
+                result             = "PENDING",
+                actual_value       = None,
+                graded_at          = None,
+                stars              = stars,
+                risk_level         = risk_level,
+                explanation        = explanation,
+                recommendation_id  = rec_id,
+                provider           = provider,
+                bet_quality_score  = bet_quality_score,
+                qualification_path = _qpath,
+                reason_codes       = _rcodes,
+                watchlist_state    = watchlist_state,
             )
             .on_conflict_do_update(
                 index_elements = ["external_id", "stat_type"],
                 set_           = {
-                    "recommendation": recommendation,
-                    "decision_tier":  decision_tier,
-                    "confidence":     confidence,
-                    "line_value":     line_value,
-                    "stars":          stars,
-                    "risk_level":     risk_level,
-                    "explanation":    explanation,
+                    "recommendation":     recommendation,
+                    "decision_tier":      decision_tier,
+                    "confidence":         confidence,
+                    "line_value":         line_value,
+                    "stars":              stars,
+                    "risk_level":         risk_level,
+                    "explanation":        explanation,
+                    "recommendation_id":  rec_id,
+                    "provider":           provider,
+                    "bet_quality_score":  bet_quality_score,
+                    "qualification_path": _qpath,
+                    "reason_codes":       _rcodes,
+                    "watchlist_state":    watchlist_state,
                 }
             )
         )
         async with self.session() as s:
             await s.execute(stmt)
             await s.commit()
+
+    async def log_prop_candidate_batch(
+        self,
+        candidates: "list[dict]",
+    ) -> int:
+        """
+        Batch-insert PropCandidateLog rows from a list of scored-prop dicts.
+
+        Each dict must have keys matching PropCandidateLog columns.
+        Keys: scan_ts, player_name, team, sport, stat_type, line_value,
+              provider, score_total, score_tier, confidence, gate_decision,
+              rejection_reason, reason_codes (pre-serialised JSON str), snapshot_external_id.
+
+        Returns count of rows inserted.
+        """
+        if not candidates:
+            return 0
+        async with self.session() as s:
+            for c in candidates:
+                row = PropCandidateLog(
+                    scan_ts              = c.get("scan_ts") or datetime.utcnow(),
+                    player_name          = c.get("player_name", ""),
+                    team                 = c.get("team", ""),
+                    sport                = c.get("sport", ""),
+                    stat_type            = c.get("stat_type", ""),
+                    line_value           = float(c.get("line_value") or 0.0),
+                    provider             = c.get("provider", "Underdog"),
+                    score_total          = c.get("score_total"),
+                    score_tier           = c.get("score_tier"),
+                    confidence           = c.get("confidence"),
+                    gate_decision        = c.get("gate_decision", "REJECTED"),
+                    rejection_reason     = c.get("rejection_reason"),
+                    reason_codes         = c.get("reason_codes"),
+                    snapshot_external_id = c.get("snapshot_external_id"),
+                )
+                s.add(row)
+            await s.commit()
+        return len(candidates)
+
+    async def get_funnel_summary(self, since_hours: int = 24) -> dict:
+        """
+        Aggregate PropCandidateLog gate decisions for the /funnel command.
+
+        Returns:
+          {
+            "since_hours": int,
+            "counts": {"ACCEPTED": n, "WATCHLIST": n, "REJECTED": n, "REMOVED": n},
+            "top_rejections": [{"player_name", "sport", "stat_type",
+                                 "rejection_reason", "score_tier", "score_total"}],
+          }
+        """
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(hours=since_hours)
+        # Gate-decision counts
+        async with self.session() as s:
+            cnt_rows = await s.execute(
+                select(
+                    PropCandidateLog.gate_decision,
+                    func.count(PropCandidateLog.id).label("n"),
+                )
+                .where(PropCandidateLog.scan_ts >= cutoff)
+                .group_by(PropCandidateLog.gate_decision)
+            )
+            counts = {r.gate_decision: r.n for r in cnt_rows.all()}
+
+        # Recent rejections — highest score first so near-misses surface first
+        async with self.session() as s:
+            rej_rows = await s.execute(
+                select(
+                    PropCandidateLog.player_name,
+                    PropCandidateLog.sport,
+                    PropCandidateLog.stat_type,
+                    PropCandidateLog.rejection_reason,
+                    PropCandidateLog.score_tier,
+                    PropCandidateLog.score_total,
+                )
+                .where(
+                    PropCandidateLog.scan_ts    >= cutoff,
+                    PropCandidateLog.gate_decision == "REJECTED",
+                )
+                .order_by(desc(PropCandidateLog.score_total))
+                .limit(8)
+            )
+            top_rej = [dict(r._mapping) for r in rej_rows.all()]
+
+        return {
+            "since_hours":    since_hours,
+            "counts":         counts,
+            "top_rejections": top_rej,
+        }
 
     async def get_pending_opportunities(
         self, cutoff_hours: int = 4
