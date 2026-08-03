@@ -403,7 +403,13 @@ class PregameWatchEngine:
         from alerts import broadcast_alert
 
         for key, entry in targets:
-            if entry.sport.upper() in {"NFL", "NBA"}:
+            # Alert suppression — controlled by ALERT_DISABLED_SPORTS env var (default: NFL,NBA).
+            try:
+                from config import config as _cfg
+                _disabled = _cfg.alert_disabled_sports
+            except Exception:
+                _disabled = {"NFL", "NBA"}
+            if entry.sport.upper() in _disabled:
                 continue
 
             player, stat, _ = key

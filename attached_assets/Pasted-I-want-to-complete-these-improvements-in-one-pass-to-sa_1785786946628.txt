@@ -1,0 +1,218 @@
+I want to complete these improvements in one pass to save credits.
+
+IMPORTANT: Follow the current project freeze.
+
+Do not:
+
+* Refactor unrelated code
+* Rewrite working modules
+* Change alert scoring logic
+* Change data collection logic
+* Change database structure
+* Change scheduler architecture
+
+Only make the smallest required changes.
+
+⸻
+
+1. Persistent Runtime / Hosting Setup
+
+Fix the Replit runtime setup so Sharp Money Bot can run continuously without me keeping the Replit app open.
+
+Current behavior:
+
+* Bot stays running while the Replit app is open.
+* Bot appears to stop/restart after the app is closed for a while.
+* Telegram commands work while the app is active.
+
+Goal:
+Use the correct Replit-supported solution for a long-running Telegram bot.
+
+Inspect:
+
+* Deployment settings
+* Workflow/process settings
+* Run command
+* Sleep/idle behavior
+
+Only change hosting/runtime configuration if needed.
+
+Preserve:
+
+* Underdog pipeline
+* Alert suppression system
+* Scoring
+* Database
+* Scheduler jobs
+* Telegram commands
+* Provider architecture
+
+Verify:
+✅ Bot starts successfully
+✅ Telegram responds
+✅ Scheduler heartbeat is active
+✅ Underdog monitor is running
+
+⸻
+
+2. Clean Telegram UI Wording
+
+Update user-facing Telegram descriptions so they match the current Sharp Money Bot scope.
+
+Current issue:
+The bot still advertises:
+
+* PrizePicks live monitoring
+* DraftKings monitoring
+* FanDuel monitoring
+
+Those are not currently active in the same way.
+
+Update:
+
+* /start
+* /help
+* Any user-facing bot descriptions
+
+Current accurate wording should reflect:
+
+* Underdog Fantasy monitoring
+* Multi-sport player prop data collection
+* Market movement detection
+* Sharp Money opportunity alerts
+
+Do not remove future provider support.
+
+Keep architecture available for:
+
+* PrizePicks
+* DraftKings
+* FanDuel
+
+This is only a UI wording cleanup.
+
+⸻
+
+3. Provider Usage Rules (DK / FD / PP)
+
+Do not remove provider support.
+
+The goal is:
+
+Use providers when real usable data exists.
+
+Provider priority:
+
+* Underdog = primary current provider
+* DraftKings = use when usable lines are available
+* FanDuel = use when usable lines are available
+* PrizePicks = use only when manual import/data becomes available
+
+If DK/FD have usable prop lines:
+Use them for:
+
+* Provider comparison
+* Best available line detection
+* Fair probability calculations
+* EV calculations
+* Market consensus
+* Grading accuracy
+* CLV tracking
+
+If DK/FD are NOT available:
+Remove them completely from that comparison.
+
+Do not:
+
+* show empty DK/FD providers
+* include missing providers in consensus
+* lower confidence because a provider has no data
+* create alerts from unavailable data
+
+The model should dynamically use only real available markets.
+
+Example:
+Underdog ✅
+DraftKings ✅
+FanDuel ❌ no data
+
+Use UD + DK only.
+
+If only Underdog exists:
+Continue normally.
+
+⸻
+
+4. Preserve Current Alert Scope
+
+Keep data collection broad.
+
+The bot should continue collecting and storing data for all supported sports:
+
+* MLB
+* NFL
+* NBA
+* WNBA
+* NHL
+* Soccer
+* Tennis
+* CS2
+* Dota
+* LoL
+* KBO
+* NPB
+* UFC
+* Table Tennis
+* Badminton
+* etc.
+
+Do NOT remove NFL/NBA data collection.
+
+Temporary alert rule:
+
+Disable Telegram alerts for:
+
+* NFL
+* NBA
+
+Keep Telegram alerts active for other sports.
+
+When NFL/NBA seasons return, this should be easy to re-enable.
+
+Preferred approach:
+Use a configurable alert suppression setting, not a permanent removal.
+
+Example:
+ALERT_DISABLED_SPORTS = {“NFL”, “NBA”}
+
+⸻
+
+5. Verification
+
+After changes:
+
+Run:
+
+* syntax checks
+* full test suite
+
+Confirm:
+
+✅ Bot starts correctly
+✅ Hosting/runtime is persistent
+✅ Telegram responds
+✅ Scheduler heartbeat works
+✅ Underdog monitoring works
+✅ NFL/NBA data still collects
+✅ NFL/NBA alerts do not send
+✅ Other sports alerts still work
+✅ DK/FD are used only when real data exists
+✅ Missing providers are ignored
+✅ Existing tests remain passing
+
+Provide a summary of:
+
+* files changed
+* settings changed
+* tests/results
+* any remaining recommendations

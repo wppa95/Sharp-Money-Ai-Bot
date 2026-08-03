@@ -617,10 +617,10 @@ async def run_player_prop_market_cycle(
         line      = float(p.get("line") or 0.0)
         prev_line = p.get("prev_line")   # may be None
 
-        # Temporary alert suppression — NFL/NBA alerts paused during data collection phase.
+        # Alert suppression — controlled by ALERT_DISABLED_SPORTS env var (default: NFL,NBA).
         # Data is still scored and stored; only the Telegram broadcast is skipped.
-        if sport.upper() in {"NFL", "NBA"}:
-            logger.debug("player_prop_market: alert suppressed (NFL/NBA scope) — %s / %s", player, stat_type)
+        if sport.upper() in _config.config.alert_disabled_sports:
+            logger.debug("player_prop_market: alert suppressed (%s scope) — %s / %s", sport, player, stat_type)
             continue
 
         if _is_prop_deduped(

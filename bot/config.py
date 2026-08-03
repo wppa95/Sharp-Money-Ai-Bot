@@ -234,6 +234,13 @@ class Config:
     UD_MIN_CONF_A: int = int(os.environ.get("UD_MIN_CONF_A", "65"))
     UD_MIN_CONF_B: int = int(os.environ.get("UD_MIN_CONF_B", "55"))
 
+    # ── Alert sport suppression ───────────────────────────────────────────────
+    # Sports whose Telegram alerts are temporarily suppressed.
+    # Data collection, scoring, and DB writes continue for all suppressed sports.
+    # Set ALERT_DISABLED_SPORTS="" to re-enable all sports.
+    # Set ALERT_DISABLED_SPORTS="NFL,NBA,NHL" to suppress additional sports.
+    ALERT_DISABLED_SPORTS_RAW: str = os.environ.get("ALERT_DISABLED_SPORTS", "NFL,NBA")
+
     # ── Learning / model update flag ──────────────────────────────────────────
     # When True, learning rollups are surfaced in /rollups output and future
     # weight-adjustment logic is enabled.  Default False — off until validated.
@@ -273,6 +280,21 @@ class Config:
     def ud_alert_sports(self) -> frozenset[str]:
         """Sports for which Underdog bet alerts are delivered (others: tracking only)."""
         return frozenset(s.strip() for s in self.UD_ALERT_SPORTS_RAW.split(",") if s.strip())
+
+    @property
+    def alert_disabled_sports(self) -> frozenset[str]:
+        """
+        Sports whose Telegram alerts are temporarily suppressed (uppercased).
+
+        Data collection, scoring, and DB writes are unaffected — only the
+        Telegram broadcast is skipped for matching sports.  Re-enable a sport
+        by removing it from the ALERT_DISABLED_SPORTS env var.
+        """
+        return frozenset(
+            s.strip().upper()
+            for s in self.ALERT_DISABLED_SPORTS_RAW.split(",")
+            if s.strip()
+        )
 
     @property
     def prizepicks_leagues(self) -> list[str]:
