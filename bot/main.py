@@ -323,6 +323,9 @@ async def _send_startup_notification(bot, chat_ids: list[int], ht) -> None:
             except Exception:
                 hb_str = str(last_hb)[:16]
 
+        crash_id_num = ht.last_crash_id() if ht else None
+        crash_id_str = f"#{crash_id_num}" if crash_id_num else "—"
+
         parts: list[str] = [
             "⚠️ <b>Sharp Money Bot Restarted</b>",
             "",
@@ -336,6 +339,7 @@ async def _send_startup_notification(bot, chat_ids: list[int], ht) -> None:
             mod      = crash_detail.get("active_module", "")
             fn       = crash_detail.get("active_function", "")
             job      = crash_detail.get("active_job", "") or last_job
+            uptime   = crash_detail.get("uptime_secs")
 
             parts += [
                 "",
@@ -348,7 +352,16 @@ async def _send_startup_notification(bot, chat_ids: list[int], ht) -> None:
             if fn:
                 parts.append(f"  Function:  <code>{_h.escape(fn)}</code>")
             if job:
-                parts.append(f"  Active job: {_h.escape(str(job))}")
+                parts.append(f"  Active Job: {_h.escape(str(job))}")
+
+            # Extra context from snapshot
+            mem = crash_detail.get("memory_mb")
+            if mem is not None:
+                parts.append(f"  Memory at crash: {mem} MB")
+            if uptime is not None:
+                mins = int(uptime) // 60
+                secs = int(uptime) % 60
+                parts.append(f"  Uptime at crash: {mins}m {secs}s")
         else:
             parts += ["", f"<i>No crash detail captured — likely {_h.escape(cause_label)}</i>"]
 
@@ -356,8 +369,10 @@ async def _send_startup_notification(bot, chat_ids: list[int], ht) -> None:
             "",
             f"<b>Last Active Task:</b>  {_h.escape(last_job)}",
             f"<b>Last Heartbeat:</b>  {_h.escape(hb_str)}",
+            f"<b>Crash Snapshot:</b>  Saved ✅" if crash_detail else "<b>Crash Snapshot:</b>  Not available",
+            f"<b>Crash ID:</b>  {_h.escape(crash_id_str)}",
             "",
-            "<b>Recovery Status:</b>  Resumed Monitoring ✅",
+            "<b>Recovery:</b>  Resumed Monitoring ✅",
             f"<i>Startup #{restart_num}</i>",
         ]
     elif startup_reason == "first_start":

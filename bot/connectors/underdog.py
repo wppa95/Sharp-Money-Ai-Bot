@@ -203,18 +203,21 @@ class UnderdogConnector(BaseConnector):
                             _mon.record_success("Underdog")
                     except ImportError:
                         pass
+
                     raw = await resp.json(content_type=None)
+                        
+                    projections = self._parse(raw)
+
+                    logger.info(
+                        "Underdog parsed %d projections",
+                                                            len(projections),
+                     )
+
+                    return projections
         except aiohttp.ClientError as exc:
-            logger.warning("Underdog request error: %s", exc)
-            try:
-                from providers.health_monitor import get_health_monitor as _ghm
-                from providers.base import FailureType as _FT
-                _mon = _ghm()
-                if _mon:
-                    _mon.record_failure("Underdog", str(exc)[:120], _FT.HTTP_ERROR)
-            except ImportError:
-                pass
-            return None
+                logger.warning("Underdog request error: %s", exc)
+                return None
+
         except Exception as exc:  # noqa: BLE001
             logger.warning("Underdog unexpected error: %s", exc)
             try:
@@ -227,7 +230,14 @@ class UnderdogConnector(BaseConnector):
                 pass
             return None
 
-        return self._parse(raw)
+            projections = self._parse(raw)
+
+            logger.info(
+                "UD parsed sample stats: %s",
+                [p.stat_type for p in projections[:20]]
+            )
+
+            return projections
 
     def _parse(self, data: dict) -> list[UnderdogProjection]:
         """Parse Underdog API v1 JSON into UnderdogProjection objects.

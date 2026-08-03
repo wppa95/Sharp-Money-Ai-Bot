@@ -750,9 +750,16 @@ class Database:
                 select(PropLineHistory)
                 .where(PropLineHistory.id.in_(subq))
                 .order_by(desc(PropLineHistory.fetched_at))
-                .limit(limit * 3)  # overfetch to allow sport filtering
+                .limit(limit * 10)  # overfetch to allow sport filtering
             )
-            rows = list(result.scalars().all())
+        rows = list(result.scalars().all())
+
+        logger.info(
+            "UD picks query returned %d rows: %s",
+            len(rows),
+            [(r.player_name, r.sport, r.stat_type, r.line_value) for r in rows[:5]]
+        )
+
         return rows[:limit]
 
     async def get_ud_recommendations_bulk(

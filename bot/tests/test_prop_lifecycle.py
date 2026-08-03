@@ -38,7 +38,7 @@ def db():
 
 
 def _ts(delta_minutes: int = 0) -> datetime:
-    return datetime(2026, 7, 31, 12, 0, 0) + timedelta(minutes=delta_minutes)
+        return datetime.utcnow() + timedelta(minutes=delta_minutes)
 
 
 def _make_ud_snap(

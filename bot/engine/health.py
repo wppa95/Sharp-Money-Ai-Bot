@@ -72,6 +72,7 @@ class BotErrorType(str, enum.Enum):
 _DEFAULT_PATH = Path(__file__).parent.parent / "data" / "health.json"
 _RESTART_HISTORY_LIMIT = 20
 _JOB_HISTORY_LIMIT     = 5
+_CRASH_HISTORY_LIMIT   = 20   # how many crash records to keep in crash_history
 
 # Maps the shutdown reason written by the previous session to the startup
 # reason label recorded at the beginning of the new session.
@@ -568,6 +569,29 @@ class HealthTracker:
 
     # ── Crash diagnosis ───────────────────────────────────────────────────────
 
+    # ── Alert tracking ────────────────────────────────────────────────────────
+
+    def record_alert_generated(self, player: str, stat: str, tier: str) -> None:
+        """Call when a prop alert is sent to Telegram."""
+        with self._lock:
+            self._state["last_alert_generated"] = {
+                "player": str(player)[:64],
+                "stat":   str(stat)[:32],
+                "tier":   str(tier)[:8],
+                "ts":     _now_iso(),
+                "ts_unix": _now_ts(),
+            }
+            self._save()
+
+    def last_alert_generated(self) -> "Optional[dict]":
+        return self._state.get("last_alert_generated")
+
+    def last_alert_age_str(self) -> str:
+        ag = self._state.get("last_alert_generated", {})
+        return _age_str(ag.get("ts_unix"))
+
+    # ── Crash forensics black box ─────────────────────────────────────────────
+
     def record_crash_detail(
         self,
         exc_type_name: str,
@@ -580,33 +604,127 @@ class HealthTracker:
         """
         Persist crash details captured by ``sys.excepthook``.
 
-        Written immediately to the health sidecar so the NEXT startup can
-        read real crash information for the Telegram restart alert.
+        Builds a full runtime snapshot (black box) and appends it to the
+        persistent ``crash_history`` list (up to _CRASH_HISTORY_LIMIT entries).
+        Also writes ``last_crash_detail`` for backward-compat with the startup
+        notification.
 
         Called from the global exception hook in main.py — never from
         normal job error handling (use record_job_fail / record_pipeline_fail
         for those).
         """
+        # Try to capture memory / CPU usage (psutil is optional)
+        mem_mb: Optional[float] = None
+        cpu_pct: Optional[float] = None
+        try:
+            import psutil
+            import os as _os
+            proc   = psutil.Process(_os.getpid())
+            mem_mb = round(proc.memory_info().rss / 1024 / 1024, 1)
+            cpu_pct = proc.cpu_percent(interval=None)
+        except Exception:
+            pass
+
+        now_iso = _now_iso()
+        now_ts  = _now_ts()
+
         with self._lock:
-            self._state["last_crash_detail"] = {
-                "ts":              _now_iso(),
-                "ts_unix":         _now_ts(),
-                "exc_type":        str(exc_type_name)[:128],
-                "exc_msg":         str(exc_msg)[:256],
-                "tb_text":         str(tb_text)[:1500],
-                "active_job":      str(active_job)[:64],
-                "active_module":   str(active_module)[:256],
-                "active_function": str(active_function)[:64],
+            # Increment crash ID counter
+            crash_id = self._state.get("crash_id_counter", 0) + 1
+            self._state["crash_id_counter"] = crash_id
+
+            # Build full snapshot from current sidecar state
+            pf = self._state.get("last_pipeline_fail") or {}
+            ag = self._state.get("last_alert_generated") or {}
+
+            # Find last successful job name across all jobs
+            best_job_ts:  Optional[float] = None
+            best_job_name: str = ""
+            for jname, jinfo in self._state.get("jobs", {}).items():
+                ts = jinfo.get("last_run_ts")
+                if ts and (best_job_ts is None or ts > best_job_ts):
+                    best_job_ts  = ts
+                    best_job_name = jname
+
+            record: dict = {
+                "crash_id":           crash_id,
+                "ts":                 now_iso,
+                "ts_unix":            now_ts,
+                "startup_number":     self._state.get("restart_count", 0),
+                "uptime_secs":        (
+                    round(now_ts - self._state["last_startup_ts"], 1)
+                    if self._state.get("last_startup_ts") else None
+                ),
+                "shutdown_reason":    self._state.get("last_startup_reason", "unknown"),
+                # Exception
+                "exc_type":           str(exc_type_name)[:128],
+                "exc_msg":            str(exc_msg)[:256],
+                "tb_text":            str(tb_text)[:1500],
+                "active_job":         str(active_job)[:64],
+                "active_module":      str(active_module)[:256],
+                "active_function":    str(active_function)[:64],
+                # Scheduler / pipeline
+                "last_job_started":   self._state.get("last_job_started", ""),
+                "current_pipeline_stage": str(pf.get("stage", ""))[:64],
+                # Timestamps from sidecar
+                "last_heartbeat":     self._state.get("heartbeat", ""),
+                "last_heartbeat_ts":  self._state.get("heartbeat_ts"),
+                "last_successful_job": best_job_name,
+                "last_successful_job_ts": best_job_ts,
+                "last_underdog_scan": self._state.get("last_underdog_scan", ""),
+                "last_underdog_scan_ts": self._state.get("last_underdog_scan_ts"),
+                "last_db_write":      self._state.get("last_db_write", ""),
+                "last_db_write_ts":   self._state.get("last_db_write_ts"),
+                "last_provider_error": (
+                    self._state.get("providers", {})
+                    .get("Underdog", {})
+                    .get("last_error_msg", "")
+                ),
+                "last_telegram_send": self._state.get("last_telegram_send", ""),
+                "last_alert_player":  ag.get("player", ""),
+                "last_alert_stat":    ag.get("stat", ""),
+                "last_alert_tier":    ag.get("tier", ""),
+                # Resources
+                "memory_mb":          mem_mb,
+                "cpu_pct":            cpu_pct,
+                # DB / pipeline status
+                "last_pipeline_fail_stage":  str(pf.get("stage", ""))[:64],
+                "last_pipeline_fail_module": str(pf.get("module", ""))[:64],
+                "last_error":         self._state.get("last_error", ""),
             }
+
+            # Append to persistent crash history (newest last, trim to limit)
+            history: list = self._state.setdefault("crash_history", [])
+            history.append(record)
+            if len(history) > _CRASH_HISTORY_LIMIT:
+                self._state["crash_history"] = history[-_CRASH_HISTORY_LIMIT:]
+
+            # Keep last_crash_detail for backward compat (startup notification)
+            self._state["last_crash_detail"] = record
             self._save()
+
         logger.error(
-            "HealthTracker: crash detail recorded — %s: %s (job=%s module=%s fn=%s)",
-            exc_type_name, str(exc_msg)[:80], active_job, active_module, active_function,
+            "HealthTracker: crash #%d recorded — %s: %s (job=%s module=%s fn=%s)",
+            crash_id, exc_type_name, str(exc_msg)[:80],
+            active_job, active_module, active_function,
         )
 
     def last_crash_detail(self) -> "Optional[dict]":
         """Return the last persisted crash detail dict, or None."""
         return self._state.get("last_crash_detail")
+
+    def crash_history(self) -> list:
+        """Return all stored crash records (oldest first, up to 20)."""
+        return list(self._state.get("crash_history", []))
+
+    def last_crash_id(self) -> "Optional[int]":
+        """Return the crash ID of the most recent crash, or None."""
+        cd = self._state.get("last_crash_detail")
+        return cd.get("crash_id") if cd else None
+
+    def current_crash_id_counter(self) -> int:
+        """Return the raw crash counter (total crashes ever recorded)."""
+        return self._state.get("crash_id_counter", 0)
 
     def crash_cause_label(self) -> str:
         """

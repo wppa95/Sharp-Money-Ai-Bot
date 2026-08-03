@@ -403,6 +403,9 @@ class PregameWatchEngine:
         from alerts import broadcast_alert
 
         for key, entry in targets:
+            if entry.sport.upper() in {"NFL", "NBA"}:
+                continue
+
             player, stat, _ = key
             alert_key = f"{player}|{stat}|{entry.game_id or ''}"
 

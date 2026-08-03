@@ -315,6 +315,65 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             lines.append(f"   at {_html.escape(pf.get('ts','?'))}")
             lines.append(f"   ↳ {_html.escape(str(pf.get('error',''))[:100])}")
 
+        # ── Crash forensics ───────────────────────────────────────────────────
+        lines.append("")
+        lines.append("<b>💥 Crash Forensics</b>")
+        last_cid = ht.last_crash_id()
+        crash_detail = ht.last_crash_detail()
+        crash_hist   = ht.crash_history()
+
+        if last_cid is not None:
+            cause = ht.crash_cause_label()
+            lines.append(f"  Last crash ID:   <b>#{last_cid}</b>  ({_html.escape(cause)})")
+        else:
+            lines.append("  Last crash ID:   <i>none recorded</i>")
+
+        if crash_detail:
+            cd_ts   = crash_detail.get("ts", "—")
+            cd_exc  = crash_detail.get("exc_type", "")
+            cd_msg  = crash_detail.get("exc_msg", "")[:80]
+            cd_job  = crash_detail.get("active_job") or crash_detail.get("last_job_started") or "—"
+            cd_mod  = crash_detail.get("active_module", "")
+            cd_fn   = crash_detail.get("active_function", "")
+            cd_hb   = crash_detail.get("last_heartbeat", "") or "—"
+            cd_ud   = crash_detail.get("last_underdog_scan", "") or "—"
+            cd_db   = crash_detail.get("last_db_write", "") or "—"
+            cd_mem  = crash_detail.get("memory_mb")
+            cd_uptime = crash_detail.get("uptime_secs")
+
+            import os as _os
+            mod_base = _os.path.basename(cd_mod) if cd_mod else "—"
+
+            lines.append(f"  Last crash at:   {_html.escape(cd_ts)}")
+            if cd_exc:
+                lines.append(f"  Exception:       <code>{_html.escape(cd_exc)}: {_html.escape(cd_msg)}</code>")
+            if mod_base and mod_base != "—":
+                lines.append(f"  Module:          <code>{_html.escape(mod_base)}</code>")
+            if cd_fn:
+                lines.append(f"  Function:        <code>{_html.escape(cd_fn)}</code>")
+            lines.append(f"  Active job:      {_html.escape(str(cd_job))}")
+            lines.append(f"  Last heartbeat:  {_html.escape(cd_hb)}")
+            lines.append(f"  Last UD scan:    {_html.escape(cd_ud)}")
+            lines.append(f"  Last DB write:   {_html.escape(cd_db)}")
+            if cd_mem is not None:
+                lines.append(f"  Memory at crash: {cd_mem} MB")
+            if cd_uptime is not None:
+                mins = int(cd_uptime) // 60
+                secs = int(cd_uptime) % 60
+                lines.append(f"  Uptime at crash: {mins}m {secs}s")
+
+        # Show last 3 crash IDs as a mini-log
+        if len(crash_hist) > 1:
+            lines.append("")
+            lines.append("  <b>Crash log (recent):</b>")
+            for rec in crash_hist[-3:]:
+                cid   = rec.get("crash_id", "?")
+                cts   = rec.get("ts", "—")[:16]
+                cexc  = rec.get("exc_type", "—")
+                lines.append(f"    #{cid}  {_html.escape(cts)}  {_html.escape(cexc[:40])}")
+        elif not crash_detail:
+            lines.append("  No crash history recorded.")
+
         logger.info("cmd_health: sending response (%d lines)", len(lines))
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
         logger.info("cmd_health: response sent")
@@ -987,12 +1046,28 @@ _TIER_ORDER: dict[str, int] = {
     "Critical": 0, "High": 1, "Medium": 2, "Low": 3,
 }
 _TIER_EMOJI: dict[str, str] = {
-    "S": "🔥", "A": "🟢", "B": "🟡", "PASS": "⚪",
-    "Critical": "🔴", "High": "🟠", "Medium": "🟡", "Low": "⚪",
+    "S": "🟩",
+    "A": "⬜",
+    "B": "🟨",
+    "C": "🟧",
+    "D": "🟥",
+    "PASS": "🟥",
+
+    # legacy compatibility
+    "Critical": "🟥",
+    "High": "🟧",
+    "Medium": "🟨",
+    "Low": "🟥",
 }
 
 # Thresholds mirror PPAnalysisScore._STAR_BANDS — display-only, no scoring logic.
-_STAR_BANDS: tuple[tuple[int, int], ...] = ((85, 5), (70, 4), (55, 3), (40, 2))
+_STAR_BANDS: tuple[tuple[int, int], ...] = (
+    (86, 5),  # S tier
+    (70, 4),  # A tier
+    (60, 3),  # B tier
+    (50, 2),  # C tier
+    (0, 1),   # D tier
+)
 
 
 def _stars_from_conf(conf: Optional[float]) -> str:
@@ -1036,17 +1111,20 @@ class PropPickAdapter:
         self.sportsbook  = "Underdog"
         self.comp        = comp
 
-        # Confidence → tier
+            #Confidence → tier
         conf = comp.proxy_match_confidence if comp else 40
-        self.confidence  = float(conf)
-        if conf >= 90:
+        self.confidence = float(conf)
+
+        if conf >= 86:
             self.tier = "S"
         elif conf >= 70:
             self.tier = "A"
-        elif conf >= 50:
+        elif conf >= 60:
             self.tier = "B"
+        elif conf >= 50:
+            self.tier = "C"
         else:
-            self.tier = "Low"
+            self.tier = "D"
 
         # Best line from comparison or fallback to UD line
         best_line = (comp.best_line if comp else None) or plh.line_value
@@ -1134,10 +1212,13 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     # ── 1. Underdog props ─────────────────────────────────────────────────────
     logger.info("cmd_picks: fetching UD props (limit=%d sport=%s)", limit * 3, sport_filter)
     ud_props = await _db.get_top_ud_props_for_picks(limit=limit * 3, since_hours=24)
+    ud_props = [p for p in ud_props if not _is_season_future(p.stat_type)]
+
     if sport_filter:
         ud_props = [p for p in ud_props if p.sport.upper() == sport_filter]
+
     # Display filter: hide season-long futures (stored & tracked as normal).
-    ud_props = [p for p in ud_props if not _is_season_future(p.stat_type)]
+    
     ud_props = ud_props[:limit]
 
     if not ud_props:
@@ -1146,8 +1227,8 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             f"🟣 <b>Player Prop Picks</b>\n\n"
             f"No qualifying player props available right now{hint}.\n\n"
             f"<i>Season-long futures are excluded from this view.\n"
-            f"Underdog props auto-score every 5 min.\n"
-            f"Use /pp_import to add PrizePicks lines.</i>",
+            f"Player props are ranked through the unified market engine.\n"
+            f"Provider data is used when available.</i>",
             parse_mode=ParseMode.HTML,
         )
         return

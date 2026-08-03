@@ -1,0 +1,271 @@
+Execute this as the FINAL stability + diagnostics batch.
+
+IMPORTANT:
+Do not rebuild anything.
+Do not create duplicate systems.
+Do not change the architecture.
+Do not modify the scoring engine, confidence model, AI analyst logic, or recommendation logic except where explicitly required below.
+
+After this batch passes verification:
+
+FREEZE THE PROJECT.
+
+The bot will enter passive monitoring/data collection mode.
+
+Continue from the existing v3 architecture.
+
+==================================================
+
+FINAL OBJECTIVE
+
+Complete the last production stability improvements:
+
+1. Confirm/finalize tier validation behavior.
+2. Add persistent crash forensics / black box recorder.
+3. Improve restart diagnosis.
+4. Run final verification.
+5. Freeze.
+
+==================================================
+
+PHASE 1 — FINAL TIER VALIDATION CHECK
+
+Audit the existing tier validation added previously.
+
+Confirm:
+
+- S Tier requires appropriate confidence.
+- A Tier requires appropriate confidence.
+- B Tier requires appropriate confidence.
+- Bench/volatile roles cannot incorrectly receive elite tiers.
+- Analyst wording matches actual tier.
+- Bet Quality and Market Quality remain separate.
+
+Do not redesign the model.
+
+Only fix remaining mismatches.
+
+Add tests if needed.
+
+Verify examples:
+
+A 79 confidence volatile bench player:
+→ should NOT display highest-confidence S-tier language.
+
+Strong reliable candidate:
+→ can qualify for S/A/B normally.
+
+==================================================
+
+PHASE 2 — CRASH FORENSICS BLACK BOX RECORDER
+
+Extend the existing HealthTracker.
+
+Do not create a second monitoring system.
+
+Add persistent crash history.
+
+Store the last known runtime state before failure.
+
+Persist:
+
+- crash ID
+- timestamp
+- startup number
+- uptime
+- shutdown reason
+- crash classification
+- exception traceback
+- module
+- function
+- active scheduler job
+- current pipeline stage
+- last heartbeat
+- last successful job
+- last Underdog scan
+- last database write
+- last provider action
+- last Telegram action
+- last alert generated
+- last recommendation processed
+- memory usage if available
+- CPU usage if available
+- database status
+- recent log events
+
+Keep historical crash records.
+
+Do not overwrite previous crashes.
+
+==================================================
+
+PHASE 3 — RESTART TELEGRAM DIAGNOSTICS
+
+Update restart notification.
+
+Replace generic:
+
+Reason:
+Unexpected Exit
+
+With real diagnosis when available.
+
+Examples:
+
+⚠️ Sharp Money Bot Restarted
+
+Reason:
+Python Exception
+
+Details:
+ValueError...
+
+Module:
+market_engine.py
+
+Function:
+_parse_line
+
+Active Job:
+underdog_monitor
+
+Crash ID:
+#52
+
+Recovery:
+Resumed Monitoring ✅
+
+
+OR
+
+
+⚠️ Sharp Money Bot Restarted
+
+Reason:
+Possible Host Termination
+
+Details:
+No clean shutdown detected.
+
+Last Heartbeat:
+XX:XX UTC
+
+Last Active Task:
+Underdog Monitor
+
+Crash Snapshot:
+Saved ✅
+
+Recovery:
+Resumed Monitoring ✅
+
+==================================================
+
+PHASE 4 — HEALTH COMMAND UPDATE
+
+Update /health to show:
+
+- Current heartbeat
+- Active jobs
+- Last Underdog scan
+- Last DB write
+- Last pipeline failure
+- Last recovery event
+- Restart reason
+- Last crash ID
+- Last crash summary
+
+Allow reviewing the previous failure without searching logs.
+
+==================================================
+
+PHASE 5 — FINAL VERIFICATION
+
+Run:
+
+/status
+/health
+/rollups
+/picks
+/dashboard
+/alerts
+/performance
+/backtest
+/grade
+/testalert
+
+Confirm all respond.
+
+Run full test suite.
+
+Report:
+
+1. Files changed
+2. Test count
+3. Failures
+4. New tests added
+5. Duplicate logic check
+6. Provider/API usage check
+7. Tier validation check
+8. Crash diagnosis check
+9. Data collection readiness
+
+==================================================
+
+FINAL PROVIDER CHECK
+
+Confirm:
+
+ACTIVE:
+✅ Underdog only
+
+DISABLED:
+❌ DraftKings
+❌ FanDuel
+❌ PrizePicks
+❌ OddsAPI sportsbook polling
+
+Disabled providers must:
+
+- not initialize
+- not poll
+- not consume API quota
+- not affect alerts
+- not affect health checks
+- not affect scoring
+
+==================================================
+
+FREEZE REQUIREMENT
+
+After all tests pass:
+
+FREEZE THE SHARP MONEY BOT.
+
+No more feature additions.
+
+No more architecture changes.
+
+No scoring changes.
+
+No AI analyst changes.
+
+No provider additions.
+
+No alert redesigns.
+
+Enter:
+
+🧊 FROZEN MONITORING MODE
+
+Purpose:
+
+Collect Underdog market data.
+Track recommendations.
+Grade outcomes.
+Build learning dataset.
+
+Future changes only happen after reviewing collected data.
+
+Do not start over.
+Continue from existing v3 system.
