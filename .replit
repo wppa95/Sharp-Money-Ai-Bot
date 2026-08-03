@@ -1,6 +1,7 @@
 modules = ["nodejs-24", "python-3.11"]
 
 [deployment]
+run = ["python", "bot/main.py"]
 router = "application"
 deploymentTarget = "vm"
 
