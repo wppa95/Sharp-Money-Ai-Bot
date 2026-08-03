@@ -1,0 +1,544 @@
+Sharp Money Bot — Current Phase 4 Stabilization + Evidence System Plan
+
+Before changing any code:
+
+Inspect the existing implementation first and identify exactly where each issue occurs.
+
+Make the smallest coordinated fixes possible.
+
+Do not:
+
+* rewrite engines
+* refactor unrelated modules
+* change scoring behavior unless explicitly requested
+* change qualification logic blindly
+* remove working systems
+
+Run tests after each batch of changes.
+
+⸻
+
+Completed — Do Not Touch
+
+✅ VM deployment / always-on setup
+✅ Replit publishing setup
+✅ Underdog monitoring
+✅ Telegram system
+✅ Scheduler system
+✅ NFL/NBA data collection
+✅ NFL/NBA alert suppression config
+✅ DK/FD availability framework
+✅ PropLineHistory foundation
+✅ B+ qualification gate
+✅ Strong B qualification logic
+✅ Scoring weights unchanged
+✅ Test suite passing after B+ changes
+
+⸻
+
+Remaining Stabilization Fixes
+
+1) Player Prop Alert Formatting
+
+Current issue:
+
+Alerts show:
+
+OVER → line
+UNDER → line
+
+but do not show the actual recommendation.
+
+Fix:
+
+Add:
+
+📌 Suggested Play:
+OVER X.X
+
+or
+
+📌 Suggested Play:
+UNDER X.X
+
+Use existing direction/selection fields if available.
+
+Do not change scoring.
+
+⸻
+
+2) Align /picks With Qualification Logic
+
+Current issue:
+
+Alert pipeline recognizes:
+
+✅ S
+✅ A
+✅ qualifying B+
+
+but /picks may only show stored S/A.
+
+Fix:
+
+Make /picks use the same qualification rules.
+
+Show:
+
+✅ S
+✅ A
+✅ qualifying B+
+
+Hide:
+
+❌ weak B
+❌ PASS
+
+Do not change thresholds.
+
+⸻
+
+3) Confidence + Market Quality Accuracy
+
+Current issue:
+
+Example:
+
+Market Quality:
+1/4 providers
+
+Confidence:
+100/100
+
+Fix:
+
+Market Quality must only count providers with available lines.
+
+Examples:
+
+Only Underdog:
+1/1 providers
+
+Underdog + DraftKings:
+2/2 providers
+
+Underdog + DraftKings + FanDuel:
+3/3 providers
+
+Also:
+
+A single-provider market should not automatically receive maximum confidence.
+
+Make the smallest correction possible.
+
+Do not rebuild confidence scoring.
+
+⸻
+
+4) SQLite Stability
+
+Fix:
+
+sqlite3.OperationalError: database is locked
+
+Investigate:
+
+* database initialization
+* connection handling
+* concurrent writes
+* scheduler/database interaction
+
+Implement:
+
+* WAL mode
+* busy timeout
+* retry handling
+* short transactions
+* proper connection cleanup
+
+If needed create:
+
+single database writer queue
+
+Do not migrate databases.
+Do not change schemas unless required.
+
+⸻
+
+Phase 4 Evidence Infrastructure
+
+Implement in order.
+
+Do not skip ahead.
+
+⸻
+
+Priority 1 — Automatic Grading System
+
+Current problem:
+
+The bot creates alerts but cannot prove if they worked.
+
+Create trackable recommendation objects.
+
+Store:
+
+* recommendation_id
+* player
+* sport
+* market
+* provider
+* line at recommendation time
+* timestamp
+* confidence
+* tier
+* bet quality
+* reason codes
+* qualification path
+
+Results:
+
+* Win
+* Loss
+* Push
+* Void
+* Ungraded
+
+Measure:
+
+* hit rate
+* ROI when available
+* tier performance
+* confidence calibration
+
+⸻
+
+Priority 2 — Immutable Historical Storage
+
+Everything the bot sees becomes permanent memory.
+
+Never overwrite history.
+
+Store:
+
+Prop snapshots:
+
+* player
+* sport
+* market
+* provider
+* line
+* timestamp
+
+Movement history:
+
+* previous line
+* current line
+* movement amount
+* direction
+* timestamp
+
+Decision history:
+
+* alert created
+* recommendation created
+* rejected
+* removed
+* watchlist
+
+Goal:
+
+Reconstruct:
+
+What was seen?
+When did it change?
+Why did it react?
+What happened?
+
+⸻
+
+Priority 3 — Edge Detection Transparency
+
+Current problem:
+
+“No edges detected”
+
+does not explain filtering.
+
+Track all candidates.
+
+Store:
+
+* candidate detected
+* edge score
+* confidence
+* tier
+* passed gates
+* failed gates
+* rejection reason
+
+Dashboard example:
+
+5000 props scanned
+
+300 movement signals
+
+75 strong history
+
+20 failed confidence
+
+10 conflicting data
+
+3 watchlisted
+
+Goal:
+
+Explain where opportunities disappear.
+
+⸻
+
+Priority 4 — Qualification Calibration
+
+Track:
+
+Accepted:
+passed qualification
+
+Rejected:
+failed qualification
+
+Removed:
+provider removed prop
+
+Store:
+
+* gate decision
+* confidence at decision
+* tier at decision
+* reason codes
+* snapshot reference
+
+Measure:
+
+* false positives
+* false negatives
+* missed winners
+
+⸻
+
+Priority 5 — Tier System Review
+
+Tiers represent confidence quality, not risk.
+
+Future calibration:
+
+S:
+90-100
+
+A:
+79-89
+
+B:
+69-78
+
+C:
+59-68
+
+D:
+58 and below
+
+Do not change blindly.
+
+Only adjust after grading evidence exists.
+
+⸻
+
+Priority 6 — Remove Risk Labels
+
+Remove:
+
+* low risk
+* moderate risk
+* high risk
+
+Use:
+
+* evidence strength
+* confidence
+* supporting data
+
+⸻
+
+Priority 7 — MLB Cleanup
+
+Remove penalties caused only by unknown information.
+
+Do not penalize:
+
+* unknown lineup
+* unknown batting position
+* unknown usage
+
+Only use confirmed information:
+
+* lineup
+* batting position
+* confirmed starter
+
+⸻
+
+Priority 8 — MLB Line Classification
+
+Do not treat higher lines as automatically bad.
+
+Evaluate:
+
+* L5
+* L10
+* L15
+* L20
+* L30
+* season
+* H2H when relevant
+* average vs line
+* movement
+
+Higher number does not automatically mean worse.
+
+⸻
+
+Priority 9 — Underdog + Sportsbook Integration
+
+Use sportsbook data when available.
+
+Compare:
+
+* Underdog
+* DraftKings
+* FanDuel
+* consensus
+* market movement
+* EV
+
+Purpose:
+
+Find Underdog mispricing.
+
+⸻
+
+Priority 10 — PropLineHistory Validation
+
+Verify:
+
+* snapshots save correctly
+* no overwrites
+* movement reconstructs correctly
+* removed props remain stored
+* cold-start history remains usable
+
+⸻
+
+Priority 11 — Dashboard Improvements
+
+Track:
+
+* candidates scanned
+* qualified candidates
+* rejected candidates
+* alerts
+* wins
+* losses
+* tier performance
+* confidence accuracy
+* edge conversion
+
+⸻
+
+Priority 12 — Reason Code Framework
+
+Create structured machine-readable reasons.
+
+Examples:
+
+Confidence:
+
+* STRONG_L5
+* STRONG_L10
+* STRONG_L30
+* HISTORICAL_EDGE
+* LINE_MOVEMENT
+
+Gate:
+
+* LOW_SAMPLE
+* CONFLICTING_DATA
+* MISSING_INFORMATION
+
+Decision:
+
+* PASSED
+* FAILED
+* WATCHLIST
+
+⸻
+
+Priority 13 — Watchlist System
+
+Create states:
+
+* Qualified
+* Watchlist
+* Rejected
+* Removed
+
+Watchlist reasons:
+
+* missing data
+* conflicting signals
+* needs confirmation
+
+⸻
+
+Priority 14 — Validation System
+
+For serious candidates store:
+
+* bot confidence
+* bot reasoning
+* optional manual opinion
+* final result
+
+Compare:
+
+Bot vs actual outcome.
+
+⸻
+
+FINAL FREEZE RULE
+
+After completing these remaining items:
+
+FREEZE THE PROJECT.
+
+No:
+
+* new features
+* architecture changes
+* scoring rewrites
+* provider expansions
+* major refactors
+
+Only allow:
+
+✅ bug fixes
+✅ stability improvements
+✅ performance improvements
+✅ critical alert accuracy fixes
+
+After completion provide:
+
+1. Files changed
+2. Tests passed
+3. Phase 4 completion summary
+4. Remaining known issues
+5. Confirmation that project is frozen.
