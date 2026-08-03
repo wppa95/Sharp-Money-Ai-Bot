@@ -128,7 +128,8 @@ class TestNormalizeStat:
 # ── _compute_proxy_confidence ──────────────────────────────────────────────────
 
 class TestComputeProxyConfidence:
-    def test_all_four_dimensions(self):
+    def test_all_four_dimensions_no_pp_match(self):
+        """Without a PP match Dimension 1 awards 20 pts (single-provider)."""
         score, reason, source = _compute_proxy_confidence(
             player_name = "Freddy Peralta",
             sport       = "MLB",
@@ -137,9 +138,26 @@ class TestComputeProxyConfidence:
             pp_rows     = [],
             now         = NOW,
         )
-        # player(40) + stat(30) + sport(20) + fresh(10) = 100
+        # player-no-match(20) + stat(30) + sport(20) + fresh(10) = 80
+        assert score == 80
+        assert "player" in reason
+        assert source == "underdog_proxy"
+
+    def test_all_four_dimensions_with_pp_match(self):
+        """With a PP match Dimension 1 awards 40 pts — full cross-provider confidence."""
+        row = _pp_row("Freddy Peralta", "MLB", "strikeouts", 5.5)
+        score, reason, source = _compute_proxy_confidence(
+            player_name = "Freddy Peralta",
+            sport       = "MLB",
+            stat_type   = "strikeouts",
+            fetched_at  = NOW,
+            pp_rows     = [row],
+            now         = NOW,
+        )
+        # PP-match(40) + stat(30) + sport(20) + fresh(10) = 100
         assert score == 100
-        assert "player" in reason or "PP match" in reason
+        assert "PP match" in reason
+        assert source == "prop_history_match"
 
     def test_unknown_player_reduces_score(self):
         score, _, _ = _compute_proxy_confidence(

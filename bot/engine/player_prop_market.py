@@ -210,11 +210,11 @@ def _compute_proxy_confidence(
             and normalize_stat(getattr(r, "stat_type", "")) == norm_stat
         ]
         if matching_pp:
-            score     += 40
+            score     += 40    # cross-provider confirmed
             pp_source  = "prop_history_match"
             reasons.append(f"PP match: {player_clean}")
         else:
-            score     += 40
+            score     += 20    # single-provider (Underdog only); proxy less confirmed
             reasons.append(f"player: {player_clean}")
     else:
         reasons.append("skip: unknown player")

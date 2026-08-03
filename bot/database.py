@@ -267,6 +267,9 @@ class PropLineHistory(Base):
     # Opening line — set once on first INSERT, never updated.
     # Enables opening-vs-current movement display in alerts.
     opening_line       = Column(Float,     nullable=True)
+    # Qualification tier synced from the source provider snapshot.
+    # NULL = not yet scored.  S / A / B = qualifying.  PASS = excluded from picks.
+    score_tier         = Column(String(8), nullable=True)
 
 
 class AlertCLVSeed(Base):
@@ -479,6 +482,7 @@ class Database:
         await self._migrate_clv_records()
         await self._migrate_prop_line_history()
         await self._migrate_prop_line_history_v2()
+        await self._migrate_prop_line_history_v3()
         await self._migrate_prop_opportunity_log()
         await self._migrate_prop_opportunity_log_v2()
         # player_risk_records is created by create_all (new table); no column migration needed
@@ -738,6 +742,8 @@ class Database:
                     PropLineHistory.provider   == "Underdog",
                     PropLineHistory.fetched_at >= cutoff,
                     PropLineHistory.removed.isnot(True),
+                    # Exclude PASS-tier props from /picks (unscored rows have NULL, shown)
+                    PropLineHistory.score_tier != "PASS",
                 )
                 .group_by(
                     PropLineHistory.player_name,
@@ -1354,11 +1360,14 @@ class Database:
             }
 
         # Track changes to accumulate within this batch
-        upserted = 0
+        # ── Build insert/update batches (no DB I/O yet) ──────────────────────
         snap_by_key: dict[tuple, list] = {}
         for snap in snaps:
             key = (snap.player_name or "", snap.sport or "", snap.stat_type or "")
             snap_by_key.setdefault(key, []).append(snap)
+
+        new_rows:    list[PropLineHistory]          = []
+        update_jobs: list[tuple[int, dict]]         = []   # (existing_id, update_vals)
 
         for key, key_snaps in snap_by_key.items():
             player_name, sport, stat_type = key
@@ -1368,62 +1377,75 @@ class Database:
             now_ts      = latest_snap.fetched_at or datetime.utcnow()
             is_removed  = bool(latest_snap.removed)
             new_line    = float(latest_snap.line_value) if latest_snap.line_value is not None else 0.0
+            snap_tier   = getattr(latest_snap, "score_tier", None)  # may be None for unscored
 
             if existing is None:
-                # First appearance — insert
-                async with self.session() as s:
-                    row = PropLineHistory(
-                        provider     = "Underdog",
-                        sport        = sport,
-                        player_name  = player_name,
-                        team         = latest_snap.team        or "",
-                        stat_type    = stat_type,
-                        line_value   = new_line,
-                        game_time    = latest_snap.game_time,
-                        external_id  = latest_snap.external_id or "",
-                        game_id      = latest_snap.game_id     or "",
-                        fetched_at   = now_ts,
-                    )
-                    # Lifecycle columns (may be None on old schema — migration adds them)
-                    try:
-                        row.first_seen   = now_ts
-                        row.last_seen    = now_ts
-                        row.change_count = 0
-                        row.prev_line    = None
-                        row.removed      = is_removed
-                    except AttributeError:
-                        pass
-                    s.add(row)
-                    await s.commit()
-                upserted += 1
+                # First appearance — collect for batch INSERT
+                row = PropLineHistory(
+                    provider     = "Underdog",
+                    sport        = sport,
+                    player_name  = player_name,
+                    team         = latest_snap.team        or "",
+                    stat_type    = stat_type,
+                    line_value   = new_line,
+                    game_time    = latest_snap.game_time,
+                    external_id  = latest_snap.external_id or "",
+                    game_id      = latest_snap.game_id     or "",
+                    fetched_at   = now_ts,
+                )
+                # Lifecycle + score_tier columns (migration adds them; ignore on old schema)
+                try:
+                    row.first_seen   = now_ts
+                    row.last_seen    = now_ts
+                    row.change_count = 0
+                    row.prev_line    = None
+                    row.removed      = is_removed
+                    row.score_tier   = snap_tier
+                except AttributeError:
+                    pass
+                new_rows.append(row)
             else:
-                # Existing row — determine what changed
-                old_line      = existing.line_value or 0.0
-                line_changed  = abs(new_line - old_line) >= 0.01
-                change_delta  = (getattr(existing, "change_count", 0) or 0)
+                # Existing row — collect for batch UPDATE
+                old_line     = existing.line_value or 0.0
+                line_changed = abs(new_line - old_line) >= 0.01
+                change_delta = (getattr(existing, "change_count", 0) or 0)
                 if line_changed:
                     change_delta += 1
 
-                async with self.session() as s:
-                    update_vals: dict = {
-                        "line_value": new_line,
-                        "fetched_at": now_ts,
-                    }
-                    try:
-                        update_vals["last_seen"]    = now_ts
-                        update_vals["change_count"] = change_delta
-                        update_vals["removed"]      = is_removed
-                        if line_changed:
-                            update_vals["prev_line"] = old_line
-                    except Exception:
-                        pass
+                uvals: dict = {
+                    "line_value": new_line,
+                    "fetched_at": now_ts,
+                    "last_seen":  now_ts,
+                    "change_count": change_delta,
+                    "removed":    is_removed,
+                }
+                if line_changed:
+                    uvals["prev_line"] = old_line
+                # Always propagate score_tier when the snapshot has a value
+                if snap_tier is not None:
+                    uvals["score_tier"] = snap_tier
+                update_jobs.append((existing.id, uvals))
+
+        # ── Execute batched INSERTs in a single session ───────────────────────
+        upserted = 0
+        if new_rows:
+            async with self.session() as s:
+                for row in new_rows:
+                    s.add(row)
+                await s.commit()
+            upserted += len(new_rows)
+
+        # ── Execute batched UPDATEs in a single session ───────────────────────
+        if update_jobs:
+            async with self.session() as s:
+                for row_id, uvals in update_jobs:
                     await s.execute(
                         sa_update(PropLineHistory)
-                        .where(PropLineHistory.id == existing.id)
-                        .values(**update_vals)
+                        .where(PropLineHistory.id == row_id)
+                        .values(**uvals)
                     )
-                    await s.commit()
-                upserted += 1
+                await s.commit()
+            upserted += len(update_jobs)
 
         return upserted
 
@@ -2268,6 +2290,17 @@ class Database:
                     "ALTER TABLE prop_line_history ADD COLUMN opening_line REAL"
                 ))
                 logger.info("_migrate_prop_line_history_v2: added opening_line column")
+            except Exception:
+                pass  # already exists
+
+    async def _migrate_prop_line_history_v3(self) -> None:
+        """Add score_tier column to prop_line_history (idempotent)."""
+        async with self._engine.begin() as conn:
+            try:
+                await conn.execute(text(
+                    "ALTER TABLE prop_line_history ADD COLUMN score_tier TEXT"
+                ))
+                logger.info("_migrate_prop_line_history_v3: added score_tier column")
             except Exception:
                 pass  # already exists
 

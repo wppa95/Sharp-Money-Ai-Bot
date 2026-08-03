@@ -255,11 +255,17 @@ def format_clv_result_alert(result: CLVResult) -> str:
 
 # ── Underdog line change alert ─────────────────────────────────────────────────
 
-def _format_decision_block(decision: Optional[object]) -> str:
+def _format_decision_block(
+    decision: Optional[object],
+    line: Optional[float] = None,
+) -> str:
     """
     Format the full OVER / UNDER / PASS evaluation block for Underdog alerts.
 
     Shows tier, confidence, all per-window hit-rate statistics, and a reason.
+    When *line* is supplied and the recommendation is OVER or UNDER, a
+    "📌 Suggested Play: OVER/UNDER X.X" line is added immediately after the
+    recommendation so the actionable play is always visible at a glance.
     Returns an empty string when *decision* is None.
     """
     if decision is None:
@@ -289,6 +295,12 @@ def _format_decision_block(decision: Optional[object]) -> str:
 
     is_pick = rec != "PASS"
 
+    # Suggested Play — shown first so the actionable line is immediately visible.
+    play_line = (
+        f"\n📌 <b>Suggested Play:</b>   {rec} <code>{line:.1f}</code>"
+        if (is_pick and line is not None) else ""
+    )
+
     tier_line = f"\n   {tier_disp}" if is_pick else ""
     # Bet Quality = How strong is the actual recommendation?
     # Kept separate from Market Quality (how reliable is the market data).
@@ -317,6 +329,7 @@ def _format_decision_block(decision: Optional[object]) -> str:
     return (
         f"\n\n{_div()}"
         f"\n🎯 <b>Recommendation:</b>  {emoji} {rec}"
+        f"{play_line}"
         f"{tier_line}"
         f"{conf_line}"
         f"{evidence_block}"
@@ -697,7 +710,7 @@ def format_underdog_change_alert(
         _div(),
         movement_block + _removal_reason_str + opening_str + opponent_str + game_str
         + grade_str + validation_str
-        + _format_decision_block(decision)
+        + _format_decision_block(decision, line=new_line)
         + _format_market_quality_block(market_quality)
         + _format_market_pressure_block(market_pressure)
         + _format_intelligence_block(intelligence_trace)
@@ -816,7 +829,7 @@ def format_underdog_new_prop_alert(
         + game_str
         + grade_str
         + validation_str
-        + _format_decision_block(decision)
+        + _format_decision_block(decision, line=line_value)
         + _format_market_quality_block(market_quality)
         + _format_market_pressure_block(market_pressure)
         + _format_intelligence_block(intelligence_trace)
