@@ -18,7 +18,11 @@ Design principles:
   - "Best available line" = the highest-confidence live line regardless of source
   - Proxy Match Confidence measures provider agreement / proxy reliability —
     NOT betting confidence. Labelled explicitly as "Proxy Match Confidence".
-  - Alerts fire for high-quality props (tier S/A from the Underdog scoring engine)
+  - Alert qualification tiers:
+      S / A  — always qualify
+      B+     — B-tier props with avg_vs_line ≥ 14/20 AND stability ≥ 10/15
+      weak B — B-tier props that fail B+ criteria; suppressed (movement-only noise)
+      PASS   — never alerted
   - Per-session dedup key: (player_name, sport, stat_type, line_str)
   - Old format_pp_reference_alert remains as dead code; this module owns the
     active alert path. No duplicate alert paths exist.
@@ -100,6 +104,39 @@ _STAT_NORM: dict[str, str] = {
 _PP_CANONICAL_STATS: frozenset[str] = frozenset(_STAT_NORM.values())
 
 PROXY_CONFIDENCE_THRESHOLD = 80
+
+# ── B+ qualification gate ──────────────────────────────────────────────────────
+# B-tier props (UDPropScore total 50–64) only qualify for alerts when their
+# *quality* components are strong, not just their movement components.
+#
+# Movement-only B props (high vel/act, low avg/sta) produce noisy alerts with
+# weak historical backing.  The B+ gate ensures a B prop has a meaningful
+# historical deviation signal (avg_vs_line) AND consistent line values
+# (stability) before it fires an alert.
+#
+# Thresholds chosen so that a prop at the top of the avg/sta scales always
+# qualifies regardless of its movement score (e.g. 20/20 avg + 15/15 sta):
+#   avg_vs_line ≥ 14 / 20  (70 % of max)
+#   stability   ≥ 10 / 15  (67 % of max)
+#
+# To adjust, change these constants — do NOT change scoring weights.
+_B_PLUS_AVG_MIN: int = 14   # avg_vs_line threshold (scored_props key "avg")
+_B_PLUS_STA_MIN: int = 10   # stability threshold   (scored_props key "sta")
+
+
+def _is_b_plus(p: dict) -> bool:
+    """Return True if a B-tier scored_prop meets B+ alert-qualification criteria.
+
+    Requires both:
+      avg_vs_line ("avg") ≥ _B_PLUS_AVG_MIN  — strong historical deviation signal
+      stability   ("sta") ≥ _B_PLUS_STA_MIN  — consistent line values over time
+
+    Missing keys are treated as 0 (fails).  S/A/PASS callers should never
+    reach this function — it is only meaningful for tier == "B".
+    """
+    avg = int(p.get("avg") or 0)
+    sta = int(p.get("sta") or 0)
+    return avg >= _B_PLUS_AVG_MIN and sta >= _B_PLUS_STA_MIN
 
 
 def normalize_stat(raw: str) -> str:
@@ -563,7 +600,13 @@ async def run_player_prop_market_cycle(
     """
     Run the Player Prop Market Engine over the current cycle's high-scoring props.
 
-    Only props with tier in ("S", "A") are considered. For each candidate:
+    Qualification rules (see module docstring for B+ criteria):
+      S / A  — always qualify
+      B+     — B-tier with avg_vs_line ≥ 14/20 AND stability ≥ 10/15
+      weak B — suppressed (movement-only noise)
+      PASS   — never alerted
+
+    For each qualifying candidate:
     1. Fetch PP PropLineHistory rows (one DB query for the batch).
     2. Build a PlayerPropMarketComparison.
     3. Broadcast a 🟣 PLAYER PROP MARKET ALERT if confidence >= threshold
@@ -576,9 +619,30 @@ async def run_player_prop_market_cycle(
     if now is None:
         now = datetime.utcnow()
 
-    candidates = [p for p in scored_props if p.get("tier") in ("S", "A")]
+    def _admits(p: dict) -> bool:
+        tier = p.get("tier", "")
+        if tier in ("S", "A"):
+            return True
+        if tier == "B":
+            qualifies = _is_b_plus(p)
+            if qualifies:
+                logger.debug(
+                    "player_prop_market: B+ admitted — %s/%s  avg=%s sta=%s total=%s",
+                    p.get("player"), p.get("stat_type"),
+                    p.get("avg"), p.get("sta"), p.get("total"),
+                )
+            else:
+                logger.debug(
+                    "player_prop_market: B suppressed (weak) — %s/%s  avg=%s sta=%s total=%s",
+                    p.get("player"), p.get("stat_type"),
+                    p.get("avg"), p.get("sta"), p.get("total"),
+                )
+            return qualifies
+        return False
+
+    candidates = [p for p in scored_props if _admits(p)]
     if not candidates:
-        logger.debug("player_prop_market: no S/A tier props — skipping")
+        logger.debug("player_prop_market: no qualifying props (S/A or B+) — skipping")
         return 0
 
     # One DB query for all PP history rows

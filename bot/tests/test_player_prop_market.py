@@ -6,7 +6,8 @@ Covers:
   - _compute_proxy_confidence (all 4 scoring dimensions)
   - build_player_prop_market_comparison (full + below-threshold + re-entry)
   - format_player_prop_market_alert (structure, labels, confidence display)
-  - run_player_prop_market_cycle (dedup, non-S/A skip, alert sent)
+  - run_player_prop_market_cycle (dedup, B+/weak-B gate, alert sent)
+  - _is_b_plus (B+ quality gate — avg_vs_line + stability thresholds)
   - Provider priority (PP > UD > DK > FD)
   - Movement calculation
   - Market consensus rounding
@@ -33,8 +34,11 @@ from engine.player_prop_market import (
     PROXY_CONFIDENCE_THRESHOLD,
     ProviderLine,
     PlayerPropMarketComparison,
+    _B_PLUS_AVG_MIN,
+    _B_PLUS_STA_MIN,
     _compute_proxy_confidence,
     _conf_bar,
+    _is_b_plus,
     build_player_prop_market_comparison,
     format_player_prop_market_alert,
     normalize_stat,
@@ -522,7 +526,12 @@ class TestRunCycle:
     def _make_bot(self):
         return MagicMock()
 
-    def _scored_prop(self, tier="S", line=5.5, prev_line=5.0):
+    def _scored_prop(self, tier="S", line=5.5, prev_line=5.0, avg=0, sta=0):
+        """Build a minimal scored_prop dict.
+
+        avg / sta default to 0 so a B-tier prop is a weak-B (suppressed) unless
+        the caller explicitly passes qualifying values.
+        """
         return {
             "player":    "Test Player",
             "stat_type": "strikeouts",
@@ -530,13 +539,20 @@ class TestRunCycle:
             "tier":      tier,
             "line":      line,
             "prev_line": prev_line,
+            "avg":       avg,
+            "sta":       sta,
+            "total":     50,
         }
 
     def test_no_sa_props_sends_zero_alerts(self):
-        """Non-S/A tier props are skipped entirely."""
+        """Weak B-tier and PASS props are skipped entirely."""
         db   = self._make_db()
         bot  = self._make_bot()
-        props = [self._scored_prop(tier="B"), self._scored_prop(tier="PASS")]
+        # Explicit weak-B: avg=2, sta=1 — both below B+ thresholds
+        props = [
+            self._scored_prop(tier="B", avg=2, sta=1),
+            self._scored_prop(tier="PASS"),
+        ]
         alerted: dict = {}
 
         # broadcast_alert is imported inside the function body from 'alerts' module,
@@ -689,6 +705,200 @@ class TestRunCycle:
             ))
         # Broadcast was called (dedup didn't block)
         # (build may return None depending on confidence, but call was attempted)
+
+
+# ── _is_b_plus / B+ qualification gate ────────────────────────────────────────
+
+class TestIsBPlus:
+    """Unit tests for _is_b_plus() — covers every threshold boundary."""
+
+    # ── Allisha Gray / Pauline Astier examples from the issue ─────────────────
+
+    def test_max_avg_max_sta_qualifies(self):
+        """20/20 avg + 15/15 sta — should always qualify (real-world example)."""
+        assert _is_b_plus({"avg": 20, "sta": 15}) is True
+
+    def test_pauline_astier_example_qualifies(self):
+        """51/100 B with full quality components must not be suppressed."""
+        assert _is_b_plus({"avg": 20, "sta": 15, "tier": "B", "total": 51}) is True
+
+    # ── Boundary checks on avg_vs_line ────────────────────────────────────────
+
+    def test_avg_at_threshold_qualifies(self):
+        assert _is_b_plus({"avg": _B_PLUS_AVG_MIN, "sta": _B_PLUS_STA_MIN}) is True
+
+    def test_avg_one_below_threshold_fails(self):
+        assert _is_b_plus({"avg": _B_PLUS_AVG_MIN - 1, "sta": _B_PLUS_STA_MIN}) is False
+
+    def test_avg_zero_fails(self):
+        assert _is_b_plus({"avg": 0, "sta": 15}) is False
+
+    # ── Boundary checks on stability ──────────────────────────────────────────
+
+    def test_sta_at_threshold_qualifies(self):
+        assert _is_b_plus({"avg": _B_PLUS_AVG_MIN, "sta": _B_PLUS_STA_MIN}) is True
+
+    def test_sta_one_below_threshold_fails(self):
+        assert _is_b_plus({"avg": _B_PLUS_AVG_MIN, "sta": _B_PLUS_STA_MIN - 1}) is False
+
+    def test_sta_zero_fails(self):
+        assert _is_b_plus({"avg": 20, "sta": 0}) is False
+
+    # ── Movement-only B prop ──────────────────────────────────────────────────
+
+    def test_movement_only_prop_fails(self):
+        """High vel/act but zero avg/sta — classic weak-B movement prop."""
+        assert _is_b_plus({"avg": 2, "sta": 1, "vel": 25, "act": 25}) is False
+
+    # ── Missing / None keys ───────────────────────────────────────────────────
+
+    def test_missing_avg_fails(self):
+        assert _is_b_plus({"sta": 15}) is False
+
+    def test_missing_sta_fails(self):
+        assert _is_b_plus({"avg": 20}) is False
+
+    def test_empty_dict_fails(self):
+        assert _is_b_plus({}) is False
+
+    def test_none_avg_fails(self):
+        assert _is_b_plus({"avg": None, "sta": 15}) is False
+
+    def test_none_sta_fails(self):
+        assert _is_b_plus({"avg": 20, "sta": None}) is False
+
+    # ── Both dimensions must pass (AND condition) ─────────────────────────────
+
+    def test_strong_avg_weak_sta_fails(self):
+        """avg qualifies but sta doesn't — AND gate must reject."""
+        assert _is_b_plus({"avg": 20, "sta": _B_PLUS_STA_MIN - 1}) is False
+
+    def test_weak_avg_strong_sta_fails(self):
+        """sta qualifies but avg doesn't — AND gate must reject."""
+        assert _is_b_plus({"avg": _B_PLUS_AVG_MIN - 1, "sta": 15}) is False
+
+
+class TestRunCycleBPlus:
+    """Integration tests: B+ gate wired into run_player_prop_market_cycle."""
+
+    def _make_db(self):
+        db = AsyncMock()
+        db.get_latest_props_for_provider = AsyncMock(return_value=[])
+        db.get_recent_player_prop_lines  = AsyncMock(return_value=[])
+        return db
+
+    def _prop(self, tier="B", avg=0, sta=0):
+        return {
+            "player":    "Allisha Gray",
+            "stat_type": "points",
+            "sport":     "WNBA",
+            "tier":      tier,
+            "line":      18.5,
+            "prev_line": 18.0,
+            "avg":       avg,
+            "sta":       sta,
+            "total":     52,
+        }
+
+    def test_weak_b_sends_zero(self):
+        """B-tier prop with low avg/sta is suppressed."""
+        with patch("alerts.broadcast_alert", new_callable=AsyncMock) as m:
+            m.return_value = {"sent": 1}
+            sent = LOOP.run_until_complete(run_player_prop_market_cycle(
+                db           = self._make_db(),
+                bot          = MagicMock(),
+                chat_ids     = [123],
+                scored_props = [self._prop(tier="B", avg=2, sta=1)],
+                alerted_set  = {},
+                now          = NOW,
+            ))
+        assert sent == 0
+        m.assert_not_called()
+
+    def test_b_plus_prop_is_admitted(self):
+        """B-tier prop with strong avg+sta passes the gate and reaches broadcast."""
+        with patch("alerts.broadcast_alert", new_callable=AsyncMock) as m:
+            m.return_value = {"sent": 1}
+            LOOP.run_until_complete(run_player_prop_market_cycle(
+                db           = self._make_db(),
+                bot          = MagicMock(),
+                chat_ids     = [123],
+                scored_props = [self._prop(tier="B", avg=20, sta=15)],
+                alerted_set  = {},
+                now          = NOW,
+            ))
+        # Gate admitted the prop — broadcast was attempted
+        m.assert_called_once()
+
+    def test_pass_tier_always_suppressed(self):
+        """PASS props never reach broadcast regardless of avg/sta."""
+        with patch("alerts.broadcast_alert", new_callable=AsyncMock) as m:
+            m.return_value = {"sent": 1}
+            sent = LOOP.run_until_complete(run_player_prop_market_cycle(
+                db           = self._make_db(),
+                bot          = MagicMock(),
+                chat_ids     = [123],
+                scored_props = [self._prop(tier="PASS", avg=20, sta=15)],
+                alerted_set  = {},
+                now          = NOW,
+            ))
+        assert sent == 0
+        m.assert_not_called()
+
+    def test_s_tier_always_admitted(self):
+        """S-tier is always admitted regardless of avg/sta (may be 0 in cold-start)."""
+        with patch("alerts.broadcast_alert", new_callable=AsyncMock) as m:
+            m.return_value = {"sent": 1}
+            LOOP.run_until_complete(run_player_prop_market_cycle(
+                db           = self._make_db(),
+                bot          = MagicMock(),
+                chat_ids     = [123],
+                scored_props = [self._prop(tier="S", avg=0, sta=0)],
+                alerted_set  = {},
+                now          = NOW,
+            ))
+        m.assert_called_once()
+
+    def test_a_tier_always_admitted(self):
+        """A-tier is always admitted regardless of avg/sta."""
+        with patch("alerts.broadcast_alert", new_callable=AsyncMock) as m:
+            m.return_value = {"sent": 1}
+            LOOP.run_until_complete(run_player_prop_market_cycle(
+                db           = self._make_db(),
+                bot          = MagicMock(),
+                chat_ids     = [123],
+                scored_props = [self._prop(tier="A", avg=0, sta=0)],
+                alerted_set  = {},
+                now          = NOW,
+            ))
+        m.assert_called_once()
+
+    def test_mixed_batch_only_qualifying_fire(self):
+        """Mixed batch: S admitted, B+ admitted, weak-B suppressed, PASS suppressed."""
+        props = [
+            self._prop(tier="S",    avg=0,  sta=0 ),   # always admitted
+            self._prop(tier="A",    avg=0,  sta=0 ),   # always admitted
+            self._prop(tier="B",    avg=20, sta=15),   # B+ — admitted
+            self._prop(tier="B",    avg=2,  sta=1 ),   # weak-B — suppressed
+            self._prop(tier="PASS", avg=20, sta=15),   # PASS — suppressed
+        ]
+        # Dedup will block duplicates (same player/stat/line), so run each as
+        # its own cycle to count independent admits.
+        call_count = 0
+        for p in props:
+            with patch("alerts.broadcast_alert", new_callable=AsyncMock) as m:
+                m.return_value = {"sent": 1}
+                LOOP.run_until_complete(run_player_prop_market_cycle(
+                    db           = self._make_db(),
+                    bot          = MagicMock(),
+                    chat_ids     = [123],
+                    scored_props = [p],
+                    alerted_set  = {},
+                    now          = NOW,
+                ))
+                call_count += m.call_count
+        # S + A + B+ = 3 admitted; weak-B + PASS = 2 suppressed
+        assert call_count == 3
 
 
 # ── Provider ordering (PP > UD > DK > FD) ────────────────────────────────────
