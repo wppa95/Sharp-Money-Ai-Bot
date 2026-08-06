@@ -237,7 +237,10 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 line += f"  ·  fails: {fail_streak}"
             lines.append(line)
             last_err = info.get("last_error")
-            if last_err:
+            # Only show the error text when the job is currently in a fail streak.
+            # Suppressing stale errors after recovery prevents old messages from
+            # appearing indefinitely alongside a green (✅) status icon.
+            if last_err and fail_streak > 0:
                 # HTML-escape the error text — Python exception strings may
                 # contain angle-brackets (e.g. "<class 'X'>") which break HTML.
                 lines.append(f"      ↳ {_html.escape(str(last_err)[:100])}")
@@ -262,7 +265,22 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 lines.append(f"  ⚪ <b>{_html.escape(provider)}</b>  ·  not yet fetched")
 
         last_err_global = ht.last_error()
+        # Only show the global last error if it's recent (within 2 hours).
+        # Old errors from prior days are stale and misleading once the bot recovers.
+        _show_global_err = False
         if last_err_global:
+            _err_ts = ht.last_error_ts()
+            if _err_ts:
+                try:
+                    from datetime import timezone as _tz
+                    _err_dt = datetime.fromisoformat(str(_err_ts).replace("Z", "+00:00"))
+                    _err_age_h = (datetime.now(_tz.utc) - _err_dt).total_seconds() / 3600
+                    _show_global_err = _err_age_h < 2.0
+                except Exception:
+                    _show_global_err = True  # can't parse — show it to be safe
+            else:
+                _show_global_err = True
+        if _show_global_err:
             lines.append("")
             lines.append(f"⚠️ <b>Last error:</b> {_html.escape(str(last_err_global)[:120])}")
             ts = ht.last_error_ts()

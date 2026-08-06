@@ -61,5 +61,22 @@ Fix: Changed to `logger.warning`; outer send wrapped in try/except with plain-te
 Root cause: `_standing_candidates.sort(...)` compared all sports on one global leaderboard (line 1357).
 Fix: Group by sport first (`_by_sport`), take top-3 per sport, flatten — same per-sport isolation as debug summary.
 
+## Final stabilization patch (applied Aug 2026)
+
+### Memory OOM kills during underdog_job
+Root cause: cold-start path accumulated ALL 5000+ props in `_cold_start_records` + `_scored_props` + `_cand_rows` simultaneously (3× in-memory copies). PropCandidateLog batch was unchunked (one massive insert).
+Fix: cold-start bulk save now chunks 200 props at a time with `.clear()` after each batch. PropCandidateLog writes 100 rows at a time and clears between flushes. Memory RSS logged before/after via `resource.getrusage`.
+
+### /picks and /slip direction "—" after cold-start
+Root cause: cold-start path scored props but NEVER called `make_ud_bet_decision()` → `bet_recommendation=None` on ALL cold-start UnderdogSnapshotRecords → synced as None to PropLineHistory → /picks showed "—".
+Fix: added `make_ud_bet_decision(score, validation, current_line, prev_line=None, hit_rates=[])` call inside the cold-start branch (line ~1040 in market_engine.py) so every cold-start record has a direction.
+
+### SQLite busy_timeout PRAGMA
+Root cause: Python connect_args timeout=30 handles connection-level waits but not intra-process lock contention. Added `PRAGMA busy_timeout=30000` (30s in ms) in database.py init after WAL/synchronous.
+
+### Health dashboard stale failure display
+Root cause: job `last_error` displayed whenever non-null regardless of `fail_streak`. Global `last_error` had no age gate.
+Fix: per-job error only shown when `fail_streak > 0`. Global last_error only shown when < 2 hours old (parsed from ISO timestamp).
+
 ## Test count after fixes: 2672 passing (stable, zero failures)
 Note: count dropped from 2685 to 2672 — difference predates this session (class-based and parametrized tests in some files not matched by the earlier grep; confirmed by per-file collect-only).

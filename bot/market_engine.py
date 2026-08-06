@@ -628,6 +628,13 @@ async def underdog_job(context) -> None:
     if _health:
         _health.record_job_started("underdog_job")
 
+    # Memory baseline — log RSS before the heavy scan to help diagnose OOM kills
+    try:
+        import resource as _resource
+        _mem_before = _resource.getrusage(_resource.RUSAGE_SELF).ru_maxrss
+    except Exception:
+        _mem_before = None
+
     try:
         snapshots = await _registry.fetch_pickem()
     except Exception as _fetch_exc:
@@ -1030,6 +1037,16 @@ async def underdog_job(context) -> None:
                         current_line = snap.line or 0.0,
                         history      = ud_history,
                         min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
+                    )
+                    # Compute bet direction during cold-start (no hit_rates at boot).
+                    # This populates bet_recommendation on the snapshot so /picks and
+                    # /slip can display OVER/UNDER immediately after the first cycle.
+                    decision = make_ud_bet_decision(
+                        score        = score,
+                        validation   = validation,
+                        current_line = snap.line or 0.0,
+                        prev_line    = None,
+                        hit_rates    = [],
                     )
                     # ── Before/after tier comparison for the completion log ───────
                     _legacy_act   = _score_historical_activity_legacy(ud_history)
@@ -1499,10 +1516,18 @@ async def underdog_job(context) -> None:
         # ── Cold-start bulk save + latch — runs once after the prop loop ──────────
         if is_cold_start:
             if _cold_start_records:
-                await db.save_underdog_snapshots_bulk(_cold_start_records)
+                # Chunk saves to avoid holding thousands of ORM objects in memory
+                # simultaneously — saves 200 at a time and releases each batch.
+                _CS_CHUNK = 200
+                _cs_total = len(_cold_start_records)
+                for _cs_i in range(0, _cs_total, _CS_CHUNK):
+                    _cs_batch = _cold_start_records[_cs_i: _cs_i + _CS_CHUNK]
+                    await db.save_underdog_snapshots_bulk(_cs_batch)
+                    del _cs_batch  # release this batch immediately
+                _cold_start_records.clear()  # release full list
                 logger.info(
-                    "underdog_job: cold-start bulk save — %d records written",
-                    len(_cold_start_records),
+                    "underdog_job: cold-start bulk save — %d records written (%d chunks)",
+                    _cs_total, (_cs_total + _CS_CHUNK - 1) // _CS_CHUNK,
                 )
             _cold_start_done = True
             logger.info(
@@ -1593,16 +1618,17 @@ async def underdog_job(context) -> None:
         if _scored_props and db:
             try:
                 import json as _json
-                _now_ts   = datetime.utcnow()
+                _now_ts    = datetime.utcnow()
+                _CAND_CHUNK = 100   # write 100 rows at a time to cap peak memory
+                _cand_total = 0
                 _cand_rows: list[dict] = []
                 for _cp in _scored_props:
                     _ctier = _cp.get("tier", "PASS")
                     _crej  = _cp.get("rejection")
-                    # gate_decision from tier + rejection flag
                     if _ctier == "PASS":
                         _cgd = "REJECTED"
                     elif _ctier == "B":
-                        _cgd = "WATCHLIST"   # B-tier: may or may not have alerted
+                        _cgd = "WATCHLIST"
                     elif _crej is None and _ctier in ("S", "A"):
                         _cgd = "ACCEPTED"
                     else:
@@ -1624,11 +1650,20 @@ async def underdog_job(context) -> None:
                         "reason_codes":         _json.dumps(_ccodes) if _ccodes else None,
                         "snapshot_external_id": _cp.get("external_id"),
                     })
+                    # Flush chunk to DB and release memory
+                    if len(_cand_rows) >= _CAND_CHUNK:
+                        await db.log_prop_candidate_batch(_cand_rows)
+                        _cand_total += len(_cand_rows)
+                        _cand_rows = []
+                # Flush remaining rows
                 if _cand_rows:
                     await db.log_prop_candidate_batch(_cand_rows)
+                    _cand_total += len(_cand_rows)
+                    _cand_rows = []
+                if _cand_total:
                     logger.debug(
                         "underdog_job: logged %d candidates to PropCandidateLog",
-                        len(_cand_rows),
+                        _cand_total,
                     )
             except Exception as _cand_exc:
                 logger.debug("underdog_job: PropCandidateLog write skipped: %s", _cand_exc)
@@ -1714,6 +1749,17 @@ async def underdog_job(context) -> None:
     #         )
     #     except Exception as _ref_exc:
     #         logger.debug("underdog_job: player_prop_market cycle error: %s", _ref_exc)
+
+    # Memory after-job log — helps size the container and catch leaks
+    if _mem_before is not None:
+        try:
+            _mem_after = _resource.getrusage(_resource.RUSAGE_SELF).ru_maxrss
+            logger.info(
+                "underdog_job: memory RSS before=%.1f MB  after=%.1f MB  delta=%.1f MB",
+                _mem_before / 1024, _mem_after / 1024, (_mem_after - _mem_before) / 1024,
+            )
+        except Exception:
+            pass
 
     # Record job outcome — failure if any persistence stage raised.
     if _health:

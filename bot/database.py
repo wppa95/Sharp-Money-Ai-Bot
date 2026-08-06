@@ -526,6 +526,11 @@ class Database:
                 await conn.execute(text("PRAGMA journal_mode=WAL"))
                 # NORMAL synchronous is safe and faster under WAL.
                 await conn.execute(text("PRAGMA synchronous=NORMAL"))
+                # busy_timeout (milliseconds): how long SQLite waits when another
+                # writer holds the lock before raising "database is locked".
+                # The Python-level connect_args["timeout"] (seconds) handles aiosqlite
+                # connection-level waits; this PRAGMA covers intra-process lock contention.
+                await conn.execute(text("PRAGMA busy_timeout=30000"))
             await conn.run_sync(Base.metadata.create_all)
         await self._migrate_pp_edge_records()
         await self._migrate_underdog_snapshots()
