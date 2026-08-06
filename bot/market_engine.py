@@ -1645,6 +1645,9 @@ async def underdog_job(context) -> None:
             )
             _dbg_lines.append(f"  rejection breakdown:  {_rej_str}")
         logger.info("underdog_job [debug summary]\n%s", "\n".join(_dbg_lines))
+        # Debug summary consumed — release the MarketSnapshot list; the scored-prop
+        # list is still needed for the PropCandidateLog write below.
+        ud_snaps.clear()
 
         # ── PropCandidateLog batch write — edge transparency (Phase 4) ───────
         if _scored_props and db:
@@ -1699,6 +1702,12 @@ async def underdog_job(context) -> None:
                     )
             except Exception as _cand_exc:
                 logger.debug("underdog_job: PropCandidateLog write skipped: %s", _cand_exc)
+            finally:
+                # Release the scored-prop accumulator regardless of success/failure.
+                # At 5000+ props this is the largest single allocation that stays alive
+                # through the end of the job; clearing it now lets the GC reclaim it
+                # before the next cycle starts.
+                _scored_props.clear()
 
     except Exception as _job_exc:
         logger.exception("underdog_job: processing error: %s", _job_exc)

@@ -142,7 +142,7 @@ class UnderdogConnector(BaseConnector):
         for rid in removed_ids:
             old = self._previous.pop(rid, None)
             if old:
-                logger.info(
+                logger.debug(
                     "Underdog prop REMOVED: %s %s %.1f",
                     old.player_name, old.stat_type, old.line_value,
                 )

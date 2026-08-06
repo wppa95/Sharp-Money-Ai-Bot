@@ -1,0 +1,319 @@
+We are doing the final Sharp Money Bot stabilization pass.
+
+IMPORTANT RULES:
+
+* DO NOT rewrite the bot.
+* DO NOT rebuild frameworks.
+* DO NOT remove working systems.
+* Only inspect, fix confirmed issues, improve performance, and freeze after completion.
+* We are limited on credits, so do not waste credits rereading unnecessary files or making speculative changes.
+* Make changes only when there is a confirmed bug, performance issue, provider issue, or model improvement that clearly increases accuracy.
+* Run tests after changes and confirm the bot is stable before stopping.
+
+PRIMARY PRIORITY #1:
+Eliminate noise. The bot should NOT notify me just because a prop exists.
+
+I only want BET QUALITY PICKS.
+
+Standing plays, line moves, and alerts must pass a quality filter before sending notifications.
+
+Do NOT send:
+
+* Removed picks
+* Weak props
+* Random market observations
+* Props with no real edge
+* Low sample-size noise
+* Picks that only look good because of one metric
+
+Alerts should represent:
+
+* Actual playable opportunities
+* Strong model confidence
+* Strong bet quality
+* Supported data
+* Clear OVER/UNDER recommendation
+
+The detection layer is important. Keep the difference between:
+
+1. Market detection (finding movement/opportunities)
+2. Bet qualification (deciding if it is actually worth betting)
+
+Detection can find candidates.
+Only qualified candidates should alert.
+
+⸻
+
+BUG FIXES / STABILITY
+
+1. Fix remaining Underdog pipeline errors:
+
+* ‘NoneType’ object has no attribute ‘split’
+* Any bad provider data should fail safely and not kill the pipeline.
+* Add proper type guards and fallback handling.
+
+2. Fix any remaining crash/restart causes:
+
+* Investigate Memory Kill / Host Restart events.
+* Find unbounded memory growth.
+* Keep caches controlled.
+* Keep crash forensics working.
+* Make sure every scheduled job reports start/failure/success.
+
+3. Fix database stability:
+
+* Prevent database locked errors.
+* Preserve WAL mode.
+* Use safe retries where needed.
+* Do not allow one bad record to break an entire batch.
+
+4. Verify no old framework is still running:
+
+* Remove/disable any unused old framework paths.
+* Make sure only current Sharp Money Bot architecture is active.
+* No duplicate pipelines.
+* No old ranking engines.
+* No abandoned task paths causing conflicts.
+
+⸻
+
+SPORT BALANCING (HIGH PRIORITY)
+
+The bot must scan the entire market and not become MLB-only.
+
+DO NOT rank all sports against each other.
+
+Wrong:
+MLB #1
+MLB #2
+MLB #3
+MLB dominates because it has more data.
+
+Correct:
+
+⚾ MLB
+#1
+#2
+#3
+
+🎮 CS2
+#1
+#2
+#3
+
+🎾 Tennis
+#1
+#2
+#3
+
+🏀 NBA/WNBA
+#1
+#2
+#3
+
+Each sport gets its own ranking category.
+
+A sport with 900 props should not eliminate a sport with 9 quality props.
+
+Goal:
+More opportunities across the full slate.
+
+⸻
+
+BET QUALITY DISTRIBUTION
+
+Improve the selection layer so every active sport has a chance to produce quality picks.
+
+Example:
+If MLB has 900 props and CS2 has 9 props:
+
+Do not return only MLB.
+
+Create balanced pools:
+
+* MLB opportunities
+* CS2 opportunities
+* Tennis opportunities
+* DOTA opportunities
+* NBA/WNBA opportunities
+* NFL opportunities
+
+Then rank inside each sport.
+
+⸻
+
+PROVIDERS
+
+Keep Underdog as the main active provider.
+
+Prepare/fix support for:
+
+* PrizePicks
+* DraftKings
+* FanDuel
+* Additional Underdog sources (example: Chalkboard or similar)
+
+Do not activate broken providers if they create noise.
+
+Provider expansion should improve:
+
+* Line comparison
+* Market confidence
+* Detection quality
+* EV detection
+
+⸻
+
+MODEL IMPROVEMENTS
+
+Improve the model without rewriting.
+
+Keep:
+
+* S/A/B tiers
+* Bet Quality score
+* Confidence score
+* Market quality score
+* Historical performance
+* Line movement detection
+
+Improve:
+
+* False positive reduction
+* Better sample-size handling
+* Better sport-specific ranking
+* Better confidence calibration
+* Better separation between “interesting” and “bettable”
+
+A high score should mean:
+“This is a possible wager.”
+
+Not:
+“This prop exists.”
+
+⸻
+
+PROP SCANNING
+
+Keep the large prop scanning system.
+
+DO NOT reduce scanning.
+
+The scan layer is how we find more opportunities.
+
+Instead:
+
+* Scan everything
+* Filter aggressively afterward
+* Alert only the best
+
+⸻
+
+PICKS COMMAND
+
+/picks should only show qualified opportunities.
+
+Needs:
+
+* Per-sport sections
+* Per-sport ranking
+* OVER/UNDER/PASS recommendation
+* Bet quality
+* Confidence
+* Evidence
+
+No blank recommendations.
+
+⸻
+
+SLIP COMMAND
+
+/slip should only build from qualified bets.
+
+No:
+
+* Empty legs
+* Missing direction
+* Weak picks
+* Cross-sport ranking issues
+
+⸻
+
+ALERTS
+
+Alerts should be rare and valuable.
+
+I would rather receive:
+5 strong alerts
+
+than:
+100 noisy alerts.
+
+Only send:
+
+* S-tier
+* A-tier
+* Strong B-tier if configured
+
+No removed prop notifications.
+
+⸻
+
+TASK CLEANUP
+
+Review task list.
+
+Close/remove tasks that describe bugs that do not exist.
+
+Example:
+
+* Old orphan engine.py issues if file does not exist.
+* Duplicate completed fixes.
+* Outdated framework migration tasks.
+
+Keep only real future improvements.
+
+⸻
+
+VPS
+
+DO NOT migrate to VPS yet.
+
+VPS is for:
+
+* Running the finished bot 24/7
+* Preventing Replit sleep/restarts
+* Stable production hosting
+
+It is not for finding props.
+
+Finish the bot first.
+
+⸻
+
+FINAL REQUIREMENT
+
+After this pass:
+
+1. Run full tests.
+2. Restart bot.
+3. Confirm:
+
+* No crashes
+* No memory kills
+* No pipeline errors
+* All providers healthy
+* All sports scanning
+* Rankings separated by sport
+* Alerts only contain real bet-quality picks
+
+Then FREEZE THE BUILD.
+
+Future changes should only be:
+
+* Bug fixes
+* Performance improvements
+* Provider additions
+* Model accuracy improvements
+
+Do not rewrite the system.
