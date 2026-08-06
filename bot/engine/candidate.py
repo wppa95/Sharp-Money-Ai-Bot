@@ -351,45 +351,40 @@ _TIER_ORDER = ["PASS", "B", "A", "S"]
 
 
 def _intelligence_adjusted_tier(tier: str, result: Any) -> str:
-    """
-    Adjust Candidate tier based on PropIntelligenceResult signals.
+        """
+        Adjust Candidate tier based on PropIntelligenceResult signals.
 
-    Only downgrades are applied — intelligence signals are conservative:
-    • Very thin sample (strength < 20) → cap at B
-    • Thin sample (strength < 35)      → cap at A
-    • Bench role + Volatile minutes    → one step down
-    • Tough matchup                    → one step down
+        Only downgrades are applied — intelligence signals are conservative:
+        • Very thin sample (strength < 20) → cap at B
+        • Thin sample (strength < 35)      → cap at A
+        • Tough matchup                    → one step down
 
-    Upgrades are not applied; the primary scoring engine (UDBetDecision)
-    owns the upgrade path through confidence dimension improvements.
+        Role/playtime no longer affects tier.
 
-    BLOCK tier passes through unchanged.
-    """
-    if tier not in _TIER_ORDER:
-        return tier   # "BLOCK" or unknown — leave as-is
+        Upgrades are not applied; the primary scoring engine (UDBetDecision)
+        owns the upgrade path through confidence dimension improvements.
 
-    idx = _TIER_ORDER.index(tier)
+        BLOCK tier passes through unchanged.
+        """
+        if tier not in _TIER_ORDER:
+            return tier   # "BLOCK" or unknown — leave as-is
 
-    hist = getattr(result, 'historical', None)
-    if hist is not None:
-        ss = getattr(hist, 'sample_strength', 50)
-        if ss < 20:
-            idx = min(idx, 1)   # cap at B
-        elif ss < 35:
-            idx = min(idx, 2)   # cap at A
+        idx = _TIER_ORDER.index(tier)
 
-    role = getattr(result, 'role', None)
-    if role is not None:
-        if (getattr(role, 'role_label', '') == "Bench"
-                and getattr(role, 'minutes_stability', '') == "Volatile"):
-            idx = max(0, idx - 1)
+        hist = getattr(result, 'historical', None)
+        if hist is not None:
+            ss = getattr(hist, 'sample_strength', 50)
+            if ss < 20:
+                idx = min(idx, 1)   # cap at B
+            elif ss < 35:
+                idx = min(idx, 2)   # cap at A
 
-    matchup = getattr(result, 'matchup', None)
-    if matchup is not None:
-        if getattr(matchup, 'matchup_label', '') == "Tough":
-            idx = max(0, idx - 1)
+        matchup = getattr(result, 'matchup', None)
+        if matchup is not None:
+            if getattr(matchup, 'matchup_label', '') == "Tough":
+                idx = max(0, idx - 1)
 
-    return _TIER_ORDER[max(0, min(3, idx))]
+        return _TIER_ORDER[max(0, min(3, idx))]
 
 
 # ─────────────────────────────────────────────────────────────────────────────

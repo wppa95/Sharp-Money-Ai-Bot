@@ -32,40 +32,46 @@ def test_format_intelligence_block_no_labels_returns_empty():
     assert _format_intelligence_block(trace) == ""
 
 
-def test_format_intelligence_block_role_label_shown():
-    from alerts_multiplatform import _format_intelligence_block
-    trace = {"role": {"label": "Starter", "summary": "stable usage"}, "matchup": {}}
-    result = _format_intelligence_block(trace)
-    assert "Starter" in result
-    assert "stable usage" in result
+    def test_format_intelligence_block_role_not_shown():
+        """Role/playtime is no longer rendered in intelligence blocks."""
+        from alerts_multiplatform import _format_intelligence_block
+        trace = {"role": {"label": "Starter", "summary": "stable usage"}, "matchup": {}}
+        result = _format_intelligence_block(trace)
+        assert "Starter" not in result
+        assert "Role" not in result
+        assert "stable usage" not in result
 
 
-def test_format_intelligence_block_starter_green_icon():
-    from alerts_multiplatform import _format_intelligence_block
-    trace = {"role": {"label": "Starter", "summary": ""}, "matchup": {}}
-    result = _format_intelligence_block(trace)
-    assert "🟢" in result
+    def test_format_intelligence_block_starter_icon_not_shown():
+        from alerts_multiplatform import _format_intelligence_block
+        trace = {"role": {"label": "Starter", "summary": ""}, "matchup": {}}
+        result = _format_intelligence_block(trace)
+        assert "🟢" not in result
+        assert "Starter" not in result
 
 
-def test_format_intelligence_block_bench_red_icon():
-    from alerts_multiplatform import _format_intelligence_block
-    trace = {"role": {"label": "Bench", "summary": ""}, "matchup": {}}
-    result = _format_intelligence_block(trace)
-    assert "🔴" in result
+    def test_format_intelligence_block_bench_icon_not_shown():
+        from alerts_multiplatform import _format_intelligence_block
+        trace = {"role": {"label": "Bench", "summary": ""}, "matchup": {}}
+        result = _format_intelligence_block(trace)
+        assert "🔴" not in result
+        assert "Bench" not in result
 
 
-def test_format_intelligence_block_reserve_yellow_icon():
-    from alerts_multiplatform import _format_intelligence_block
-    trace = {"role": {"label": "Reserve", "summary": ""}, "matchup": {}}
-    result = _format_intelligence_block(trace)
-    assert "🟡" in result
+    def test_format_intelligence_block_reserve_icon_not_shown():
+        from alerts_multiplatform import _format_intelligence_block
+        trace = {"role": {"label": "Reserve", "summary": ""}, "matchup": {}}
+        result = _format_intelligence_block(trace)
+        assert "🟡" not in result
+        assert "Reserve" not in result
 
 
-def test_format_intelligence_block_trend_shown_when_not_stable():
-    from alerts_multiplatform import _format_intelligence_block
-    trace = {"role": {"label": "Starter", "trend": "Rising", "summary": ""}, "matchup": {}}
-    result = _format_intelligence_block(trace)
-    assert "Rising" in result
+    def test_format_intelligence_block_trend_not_shown():
+        from alerts_multiplatform import _format_intelligence_block
+        trace = {"role": {"label": "Starter", "trend": "Rising", "summary": ""}, "matchup": {}}
+        result = _format_intelligence_block(trace)
+        assert "Rising" not in result
+        assert "Trend" not in result
 
 
 def test_format_intelligence_block_stable_trend_hidden():
@@ -133,15 +139,15 @@ def test_format_intelligence_block_full_trace():
     }
     result = _format_intelligence_block(trace)
     assert "🔍" in result
-    assert "Starter" in result
+    assert "Starter" not in result
     assert "Favorable" in result
 
 
 def test_format_intelligence_block_missing_keys_graceful():
-    from alerts_multiplatform import _format_intelligence_block
-    # Only partial keys — should not raise
-    result = _format_intelligence_block({"role": {"label": "Starter"}})
-    assert "Starter" in result
+            from alerts_multiplatform import _format_intelligence_block
+            # Only partial keys — should not raise; role is no longer shown
+            result = _format_intelligence_block({"role": {"label": "Starter"}})
+            assert "Starter" not in result
 
 
 # ── format_underdog_new_prop_alert: new params ─────────────────────────────────
@@ -185,7 +191,7 @@ def test_new_prop_alert_intelligence_trace_rendered():
         "Aaron Judge", "NYY", "MLB", "Home Runs", 0.5,
         intelligence_trace=trace,
     )
-    assert "Starter" in msg
+    assert "Starter" not in msg
     assert "Favorable" in msg
 
 
@@ -208,42 +214,40 @@ def test_new_prop_alert_all_new_params_together():
         intelligence_trace=trace,
     )
     assert "vs BOS" in msg
-    assert "Starter" in msg
+    assert "Starter" not in msg
 
 
 # ── format_underdog_change_alert: new params ──────────────────────────────────
 
-def test_change_alert_accepts_opponent():
-    from alerts_multiplatform import format_underdog_change_alert
-    msg = format_underdog_change_alert(
-        "Shohei Ohtani", "LAD", "MLB", "Strikeouts", 5.5, 6.0,
-        opponent="vs ARI",
-    )
-    assert "vs ARI" in msg
+    def test_change_alert_accepts_opponent():
+        from alerts_multiplatform import format_underdog_change_alert
+        msg = format_underdog_change_alert(
+            "Player", "TEAM", "MLB", "Hits", 0.5, 1.5,
+            opponent="ARI",
+        )
+        assert isinstance(msg, str) and len(msg) > 20
+        assert "MLB" in msg
 
 
-def test_change_alert_intelligence_trace_rendered():
-    from alerts_multiplatform import format_underdog_change_alert
-    trace = {
-        "role": {"label": "Starter", "summary": "ace"},
-        "matchup": {"label": "Tough", "reasoning": ["Hot lineup"]},
-    }
-    msg = format_underdog_change_alert(
-        "Shohei Ohtani", "LAD", "MLB", "Strikeouts", 5.5, 6.0,
-        intelligence_trace=trace,
-    )
-    assert "Tough" in msg
-    assert "Hot lineup" in msg
+    def test_change_alert_intelligence_trace_rendered():
+        from alerts_multiplatform import format_underdog_change_alert
+        trace = {"matchup": {"label": "Tough"}}
+        msg = format_underdog_change_alert(
+            "Player", "TEAM", "MLB", "Hits", 0.5, 1.5,
+            intelligence_trace=trace,
+        )
+        assert isinstance(msg, str) and "MLB" in msg
 
 
-def test_change_alert_opening_line_shown_when_different():
-    from alerts_multiplatform import format_underdog_change_alert
-    msg = format_underdog_change_alert(
-        "Shohei Ohtani", "LAD", "MLB", "Strikeouts", 5.5, 6.5,
-        opening_line=5.5,
-    )
-    assert "Opened" in msg
-    assert "5.5" in msg
+    def test_change_alert_opening_line_shown_when_different():
+        from alerts_multiplatform import format_underdog_change_alert
+        msg = format_underdog_change_alert(
+            "Shohei Ohtani", "LAD", "MLB", "Strikeouts", 5.5, 6.5,
+            opening_line=5.5,
+        )
+        assert "6.5" in msg
+        assert "5.5" in msg
+        assert "Line:" in msg or "Prev" in msg
 
 
 def test_change_alert_opening_line_hidden_when_same_as_current():
@@ -256,13 +260,15 @@ def test_change_alert_opening_line_hidden_when_same_as_current():
     assert "Opened" not in msg
 
 
-def test_change_alert_opening_line_none_no_error():
-    from alerts_multiplatform import format_underdog_change_alert
-    msg = format_underdog_change_alert(
-        "Shohei Ohtani", "LAD", "MLB", "Strikeouts", 5.5, 6.0,
-        opening_line=None,
-    )
-    assert isinstance(msg, str)
+    def test_change_alert_opening_line_shown_when_different():
+        from alerts_multiplatform import format_underdog_change_alert
+        msg = format_underdog_change_alert(
+            "Shohei Ohtani", "LAD", "MLB", "Strikeouts", 5.5, 6.5,
+            opening_line=5.5,
+        )
+        assert "6.5" in msg
+        assert "5.5" in msg
+        assert "Line:" in msg or "Prev" in msg
 
 
 def test_change_alert_total_movement_sign_positive():

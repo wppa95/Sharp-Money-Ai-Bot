@@ -56,6 +56,7 @@ class MarketSnapshot:
     line:         Optional[float] = None
     game_time:    Optional[datetime] = None
     opening_odds: Optional[int] = None        # set on first sight
+    external_id:  Optional[str] = None
     is_pickem:    bool = False
 
     @property

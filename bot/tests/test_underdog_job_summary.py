@@ -44,6 +44,7 @@ def _make_snap(
     snap.event       = "game-001"
     snap.market_type = "Pick'em"
     snap.is_pickem   = True
+    snap.external_id = f"ud-{player}-{stat_type}"
     suffix           = " [REMOVED]" if removed else ""
     snap.selection   = f"{player} {stat_type} {line}{suffix}"
     return snap

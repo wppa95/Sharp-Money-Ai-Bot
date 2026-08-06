@@ -25,7 +25,7 @@ def _line_label(line: float) -> str:
     else:
         return "🔴 Higher Difficulty Line"
 
-from alerts import EMOJI, _div, _risk_section, format_odds, format_probability, RiskFactor
+from alerts import EMOJI, _div, format_odds, format_probability, RiskFactor
 from engine.consensus import ConsensusResult, MarketInefficiency
 from engine.clv import CLVOpportunity, CLVResult
 
@@ -33,20 +33,21 @@ from engine.clv import CLVOpportunity, CLVResult
 # ── Multi-book steam alert ─────────────────────────────────────────────────────
 
 def format_steam_multibook_alert(
-    event: str,
-    selection: str,
-    sport: str,
-    market_type: str,
-    steam_score: int,
-    steam_direction: str,
-    books_moved: list[str],
-    opening_odds: int,
-    current_odds: int,
-    *,
-    consensus_odds: Optional[int] = None,
-    sharp_books: Optional[list[str]] = None,
-    risk_factors: Optional[list[RiskFactor]] = None,
-) -> str:
+        event: str,
+        selection: str,
+        sport: str,
+        market_type: str,
+        steam_score: int,
+        steam_direction: str,
+        books_moved: list[str],
+        opening_odds: int,
+        current_odds: int,
+        *,
+        consensus_odds: Optional[int] = None,
+        
+        sharp_books: Optional[list[str]] = None,
+        risk_factors: Optional[list[RiskFactor]] = None,
+    ) -> str:
     """
     Format a cross-platform steam alert spanning DraftKings, FanDuel, and
     other registered sportsbooks. Shows book attribution alongside the score.
@@ -56,6 +57,13 @@ def format_steam_multibook_alert(
 
     if sharp_books is None:
         sharp_books = identify_sharp_books(books_moved)
+
+    if risk_factors is None:
+        risk_factors = compute_steam_risk_factors(
+            books_moved,
+            steam_score,
+            sharp_books,
+        )
 
     dir_icon  = EMOJI["down"] if steam_direction == "DOWN" else EMOJI["up"]
     dir_label = "FALLING" if steam_direction == "DOWN" else "RISING"
@@ -117,16 +125,16 @@ def format_steam_multibook_alert(
 # ── Market inefficiency alert ──────────────────────────────────────────────────
 
 def format_inefficiency_alert(
-    ineff: MarketInefficiency,
-    consensus: ConsensusResult,
-    *,
-    risk_factors: Optional[list[RiskFactor]] = None,
-) -> str:
+        ineff: MarketInefficiency,
+        consensus: ConsensusResult,
+        *,
+        risk_factors: Optional[list[RiskFactor]] = None,
+    ) -> str:
     """
     Format an alert for a book offering better-than-consensus odds.
     Positive deviation = value opportunity (book hasn't moved yet).
     """
-    sport_icon = {
+    sport_icon = { 
         "NFL": "🏈", "NBA": "🏀", "MLB": "⚾",
         "NHL": "🏒", "UFC": "🥊", "WNBA": "🏀",
     }.get(ineff.sport, "🎯")
@@ -164,7 +172,6 @@ def format_inefficiency_alert(
         f"  Others: {', '.join(b for b in consensus.books if b != ineff.sportsbook)}",
         "",
         _div(),
-        *_risk_section(risk_factors),
         "",
         f"{EMOJI['clock']} <i>{ineff.detected_at.strftime('%Y-%m-%d %H:%M UTC')}</i>",
     ]
@@ -216,7 +223,6 @@ def format_clv_opportunity_alert(
         f"<i>Book hasn't moved yet — price should close closer to {close_str}</i>",
         "",
         _div(),
-        *_risk_section(risk_factors),
         "",
         f"{EMOJI['clock']} <i>{opp.detected_at.strftime('%Y-%m-%d %H:%M UTC')}</i>",
     ]
@@ -376,12 +382,10 @@ def _validate_final_tier(
 
     Rules
     -----
-    S-tier requires:
+        S-tier requires:
       • Confidence ≥ 80  (79/100 confidence should not be labeled S-tier)
-      • Not a Bench role  unless confidence is exceptional (≥ 90)
 
-    A-tier downgrade to B when:
-      • Role is Bench AND stability is Volatile AND confidence < 65
+    Role/playtime no longer affects tier.
 
     Parameters
     ----------
@@ -398,20 +402,7 @@ def _validate_final_tier(
     if validated == "S" and conf < 80:
         validated = "A"
 
-    # Gate 2: Role-based S-tier gate — bench role prevents S unless evidence is exceptional
-    if intelligence_trace:
-        role       = (intelligence_trace.get("role") or {})
-        role_label = (role.get("label")     or "").strip()
-        stability  = (role.get("stability") or "").strip()
-
-        if role_label == "Bench":
-            # Bench player at S-tier — require conf ≥ 90 to justify
-            if validated == "S" and conf < 90:
-                validated = "A"
-            # Bench + Volatile at A-tier — downgrade to B when confidence is weak
-            if validated == "A" and stability == "Volatile" and conf < 65:
-                validated = "B"
-
+    # Gate 2 (role-based) removed — role/playtime is not reliable across sports.
     return validated
 
 
@@ -494,7 +485,7 @@ def _format_analyst_inline_block(
     if validated_tier != raw_tier:
         tier_note = (
             f"\n\n⚠️ <i>Tier adjusted {raw_tier}→{validated_tier}: "
-            f"confidence {conf}/100 or role risk does not support {raw_tier}-tier.</i>"
+            f"confidence {conf}/100 does not support {raw_tier}-tier.</i>"
         )
 
     try:
@@ -558,13 +549,7 @@ def _format_intelligence_block(trace: "Optional[dict]") -> str:
         ss_str = f"  <i>(ss:{_ss})</i>" if _ss is not None else ""
         lines.append(f"\n   📊 {' | '.join(_hr_parts)}{ss_str}")
 
-    if role_label:
-        role_icon = {"Starter": "🟢", "Reserve": "🟡", "Bench": "🔴"}.get(role_label, "⚪")
-        lines.append(f"\n   {role_icon} <b>Role:</b>  {role_label}")
-        if role_summary:
-            lines.append(f"  ·  <i>{role_summary}</i>")
-        if role_trend and role_trend not in ("Stable", ""):
-            lines.append(f"\n   📈 <b>Trend:</b>  {role_trend}")
+            # Role / playtime display removed — not reliable across all sports.
 
     if match_label:
         match_icon = {
@@ -696,38 +681,95 @@ def format_underdog_change_alert(
         _reason = removal_reason or "Market no longer available from provider"
         _removal_reason_str = f"\n  <b>Removal Reason:</b>  {_reason}"
 
-    parts = [
-        _thick,
-        header,
-        _thick,
-        "",
-        f"{sport_icon} <b>{sport} — {stat_type}</b>",
-        f"👤 <b>{player_name}</b>",
-        "",
-        _div(),
-        avail_block.lstrip("\n"),
-        "",
-        _div(),
-        movement_block + _removal_reason_str + opening_str + opponent_str + game_str
-        + grade_str + validation_str
-        + _format_decision_block(decision, line=new_line)
-        + _format_market_quality_block(market_quality)
-        + _format_market_pressure_block(market_pressure)
-        + _format_intelligence_block(intelligence_trace)
-        + ("" if removed else _format_analyst_inline_block(
-            player_name        = player_name,
-            stat_type          = stat_type,
-            sport              = sport or "UNKNOWN",
-            line               = new_line,
-            score              = score,
-            decision           = decision,
-            intelligence_trace = intelligence_trace,
-        )),
-        "",
-        f"{EMOJI['clock']} <i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>",
-        "",
-        _thick,
-    ]
+    # ── Compact alert (decision-first) ──────────────────────────────────────
+    change = (new_line - old_line) if not removed else 0.0
+    change_sign = "+" if change >= 0 else ""
+
+    # Pick / tier / quality from decision
+    rec = getattr(decision, "recommendation", None) if decision else None
+    tier = getattr(decision, "decision_tier", None) if decision else None
+    conf = getattr(decision, "confidence", None) if decision else None
+    if tier is None and score is not None:
+        tier = getattr(score, "tier", None)
+    if conf is None and score is not None:
+        conf = getattr(score, "total", None)
+
+    pick_line = ""
+    if rec in ("OVER", "UNDER") and not removed:
+        pick_emoji = "🟢" if rec == "OVER" else "🔴"
+        pick_line = f"📌 <b>PICK:</b>  {pick_emoji} <b>{rec} {new_line:.1f}</b>"
+        if tier:
+            pick_line += f"   ·   <b>{tier}-Tier</b>"
+        if conf is not None:
+            pick_line += f"   ·   Bet Quality <code>{int(conf)}/100</code>"
+
+    # Short edge line from decision/validation if available
+    edge_line = ""
+    if decision is not None and not removed:
+        l5 = getattr(decision, "l5_hit_rate", None)
+        l5g = getattr(decision, "l5_games", None)
+        reason = (getattr(decision, "reason", None) or "").strip()
+        bits = []
+        if l5 is not None and l5g:
+            bits.append(f"L5 {l5:.0%} ({l5g}g)")
+        if reason:
+            # keep reason short
+            bits.append(reason.split("•")[0].strip()[:80])
+        if bits:
+            edge_line = "📊 <b>Edge:</b>  " + "  ·  ".join(bits)
+
+    # Market quality one-liner
+    mq_line = ""
+    if market_quality is not None and not removed:
+        mq_label = getattr(market_quality, "label", None) or getattr(market_quality, "tier", "")
+        mq_score = getattr(market_quality, "score", None)
+        if mq_label or mq_score is not None:
+            mq_line = f"📈 <b>Market:</b>  {mq_label or ''}"
+            if mq_score is not None:
+                mq_line += f"  <code>{int(mq_score)}/100</code>"
+
+    if removed:
+        body_lines = [
+            _thick,
+            header,
+            _thick,
+            "",
+            f"{sport_icon} <b>{sport} — {stat_type}</b>",
+            f"👤 <b>{player_name}</b>",
+            "",
+            f"🐶 Last line: <code>{old_line:.1f}</code>",
+            f"Removal: {removal_reason or 'Market no longer available'}",
+            "",
+            f"{EMOJI['clock']} <i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>",
+            "",
+            _thick,
+        ]
+    else:
+        body_lines = [
+            _thick,
+            header,
+            _thick,
+            "",
+            f"{sport_icon} <b>{sport} — {stat_type}</b>",
+            f"👤 <b>{player_name}</b>",
+            "",
+            f"🐶 <b>Line:</b>  <code>{new_line:.1f}</code>   Prev <code>{old_line:.1f}</code>   Move <code>{change_sign}{change:.1f}</code>",
+            "",
+            pick_line,
+        ]
+        if edge_line:
+            body_lines += ["", edge_line]
+        if mq_line:
+            body_lines += [mq_line]
+        body_lines += [
+            "",
+            f"{EMOJI['clock']} <i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>",
+            "",
+            _thick,
+        ]
+
+    # Drop empty strings from optional lines
+    parts = [ln for ln in body_lines if ln is not None]
     return "\n".join(parts)
 
 

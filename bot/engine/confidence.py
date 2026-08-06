@@ -1,51 +1,17 @@
 """
-engine/confidence.py — AI Confidence Scoring Engine.
+engine/confidence.py – Bet Quality Scoring Engine.
 
-Grades the quality of a detected betting edge using pure market intelligence
-signals. This module does NOT predict winners or outcomes.
+Grades the quality of a detected betting opportunity at the CURRENT line
+using pure market-intelligence signals (EV, steam, sharp books, consensus,
+timing, liquidity).
+
+This module does NOT measure how confident the model is in its own projection.
+That is the job of Projection Confidence (separate engine).
 
 It answers one question only:
-    "How confident are we that this is a genuine, exploitable market signal —
-     and how strong is the evidence?"
+    "How good is this bet right now?"
 
-Signal inputs
--------------
-    steam_score         int       0–100   from engine.steam
-    ev_edge_pct         float     any     from engine.ev (edge in %, e.g. 4.5)
-    fair_probability    float     0–1     from engine.fair_probability
-    n_books_moving      int       ≥ 0     number of sportsbooks that moved
-    sharp_book_count    int       ≥ 0     # sharp books (weight ≥ 0.80) that moved
-    market_agreement    float     0–1     fraction of books moving same direction
-    movement_speed      float     ≥ 0     pts/min from engine.steam
-    liquidity_score     int       0–100   proxy for market depth (100 = deepest)
-    minutes_to_game     float     ≥ 0     minutes until event start (None = unknown)
-
-Score components (max 100)
---------------------------
-    EV edge             20 pts   How large is the mathematical edge?
-    Steam signal        18 pts   How strong is the coordinated movement?
-    Books moving        12 pts   How many sportsbooks moved?
-    Sharp books         12 pts   Did the sharper books lead the move?
-    Market agreement    12 pts   Are the books aligned in direction?
-    Movement speed      10 pts   How fast is the line moving?
-    Liquidity           8  pts   How deep / hard to move is this market?
-    Time to game        8  pts   How early is the signal?
-    ──────────────────────────
-    Total               100 pts  (ML override stub adds 0 until trained)
-
-Confidence tiers
-----------------
-    95–100   ★★★★★  ELITE        Exceptional confluence of sharp signals
-    85–94    ★★★★☆  VERY_HIGH    Strong multi-signal confirmation
-    75–84    ★★★☆☆  HIGH         Solid evidence, minor gaps
-    65–74    ★★☆☆☆  MEDIUM       Interesting but not fully confirmed
-    < 65     ★☆☆☆☆  PASS         Insufficient evidence; do not act
-
-ML upgrade path
----------------
-    _score_ml_override() is a documented stub. When a trained model is
-    available, replace the stub's body with the model's prediction.
-    The rest of the pipeline is model-agnostic.
+Output is a 0–100 Bet Quality score + S/A/B/PASS-style tier.
 """
 
 from __future__ import annotations
@@ -62,63 +28,63 @@ STAR_EMPTY  = "☆"
 
 
 class ConfidenceTier(str, enum.Enum):
-    ELITE     = "ELITE"       # 95–100
-    VERY_HIGH = "VERY_HIGH"   # 85–94
-    HIGH      = "HIGH"        # 75–84
-    MEDIUM    = "MEDIUM"      # 65–74
-    PASS      = "PASS"        # < 65
+                                    ELITE = "ELITE"           # 95-100
+                                    VERY_HIGH = "VERY_HIGH"   # 85-94
+                                    HIGH = "HIGH"             # 75-84
+                                    MEDIUM = "MEDIUM"         # 65-74
+                                    PASS = "PASS"             # < 65
 
-    @classmethod
-    def from_score(cls, score: int) -> "ConfidenceTier":
-        if score >= 95:
-            return cls.ELITE
-        if score >= 85:
-            return cls.VERY_HIGH
-        if score >= 75:
-            return cls.HIGH
-        if score >= 65:
-            return cls.MEDIUM
-        return cls.PASS
+                                    @classmethod
+                                    def from_score(cls, score: int) -> "ConfidenceTier":
+                                        if score >= 95:
+                                            return cls.ELITE
+                                        if score >= 85:
+                                            return cls.VERY_HIGH
+                                        if score >= 75:
+                                            return cls.HIGH
+                                        if score >= 65:
+                                            return cls.MEDIUM
+                                        return cls.PASS
 
-    @property
-    def stars(self) -> int:
-        return {
-            ConfidenceTier.ELITE:     5,
-            ConfidenceTier.VERY_HIGH: 4,
-            ConfidenceTier.HIGH:      3,
-            ConfidenceTier.MEDIUM:    2,
-            ConfidenceTier.PASS:      1,
-        }[self]
+                                    @property
+                                    def stars(self) -> int:
+                                        return {
+                                            ConfidenceTier.ELITE: 5,
+                                            ConfidenceTier.VERY_HIGH: 4,
+                                            ConfidenceTier.HIGH: 3,
+                                            ConfidenceTier.MEDIUM: 2,
+                                            ConfidenceTier.PASS: 1,
+                                        }[self]
 
-    @property
-    def star_display(self) -> str:
-        n = self.stars
-        return STAR_FILLED * n + STAR_EMPTY * (5 - n)
+                                    @property
+                                    def star_display(self) -> str:
+                                        n = self.stars
+                                        return STAR_FILLED * n + STAR_EMPTY * (5 - n)
 
-    @property
-    def label(self) -> str:
-        return {
-            ConfidenceTier.ELITE:     "Elite",
-            ConfidenceTier.VERY_HIGH: "Very High",
-            ConfidenceTier.HIGH:      "High",
-            ConfidenceTier.MEDIUM:    "Medium",
-            ConfidenceTier.PASS:      "Pass",
-        }[self]
+                                    @property
+                                    def label(self) -> str:
+                                        return {
+                                            ConfidenceTier.ELITE: "Elite",
+                                            ConfidenceTier.VERY_HIGH: "Very High",
+                                            ConfidenceTier.HIGH: "High",
+                                            ConfidenceTier.MEDIUM: "Medium",
+                                            ConfidenceTier.PASS: "Pass",
+                                        }[self]
 
-    @property
-    def emoji(self) -> str:
-        return {
-            ConfidenceTier.ELITE:     "🟣",
-            ConfidenceTier.VERY_HIGH: "🟢",
-            ConfidenceTier.HIGH:      "🟡",
-            ConfidenceTier.MEDIUM:    "🟠",
-            ConfidenceTier.PASS:      "🔴",
-        }[self]
+                                    @property
+                                    def emoji(self) -> str:
+                                        return {
+                                            ConfidenceTier.ELITE: "🟣",
+                                            ConfidenceTier.VERY_HIGH: "🟢",
+                                            ConfidenceTier.HIGH: "🟡",
+                                            ConfidenceTier.MEDIUM: "🟠",
+                                            ConfidenceTier.PASS: "🔴",
+                                        }[self]
 
-    @property
-    def should_act(self) -> bool:
-        """True for MEDIUM and above — signals worth monitoring or acting on."""
-        return self != ConfidenceTier.PASS
+                                    @property
+                                    def should_act(self) -> bool:
+                                        """True for MEDIUM and above."""
+                                        return self != ConfidenceTier.PASS
 
 
 # ── Supporting factors ─────────────────────────────────────────────────────────

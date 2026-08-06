@@ -793,7 +793,7 @@ async def underdog_job(context) -> None:
                     # Log every evaluated opportunity (PLAY or PASS) for tracking
                     try:
                         await db.log_prop_opportunity(
-                            external_id       = snap.external_id,
+                            external_id = getattr(snap, "external_id", None) or getattr(snap, "id", None) or "",
                             player_name       = player,
                             team              = snap.team or "",
                             sport             = snap.sport or "UNKNOWN",
@@ -980,7 +980,7 @@ async def underdog_job(context) -> None:
                         # Log every evaluated opportunity (PLAY or PASS) for tracking
                         try:
                             await db.log_prop_opportunity(
-                                external_id       = snap.external_id,
+                                external_id       = getattr(snap, "external_id", None) or getattr(snap, "id", None) or "",
                                 player_name       = player,
                                 team              = snap.team or "",
                                 sport             = snap.sport or "UNKNOWN",
@@ -1103,12 +1103,15 @@ async def underdog_job(context) -> None:
                     # Cold-start props always fail this gate — alerts suppressed.
                     # Re-entries qualify via is_reentry_qualified (set above) regardless
                     # of decision engine result — there is no previous line to compare.
-                    is_qualified = is_reentry_qualified or (
+                    # Every non-removal alert requires a real directional pick.
+                    # Re-entries no longer bypass the decision engine.
+                    is_qualified = (
                         not is_cold_start
                         and score is not None
                         and score.stars >= config.UD_MIN_STARS_TO_ALERT
                         and decision is not None
                         and decision.recommendation != "PASS"
+                        and decision.decision_tier in ("S", "A", "B")
                         and (snap.sport or "UNKNOWN") in config.ud_alert_sports
                     )
                     if is_qualified and not is_reentry_qualified:
@@ -1169,7 +1172,7 @@ async def underdog_job(context) -> None:
                             "line":      score.current_line,
                             "prev_line": prev_line,  # previous line for movement tracking
                             # ── Phase 4 Evidence Infrastructure ─────────────────
-                            "external_id":   snap.external_id,
+                            "external_id":   getattr(snap, "external_id", None) or getattr(snap, "id", None) or "",
                             "game_time":     snap.game_time,
                             "decision_conf": (decision.confidence if decision is not None else None),
                         })
@@ -1394,7 +1397,7 @@ async def underdog_job(context) -> None:
                 # Log every evaluated opportunity (PLAY or PASS) for tracking
                 try:
                     await db.log_prop_opportunity(
-                        external_id       = _ssnap.external_id,
+                        external_id = getattr(_ssnap, "external_id", None) or getattr(_ssnap, "id", None) or "",
                         player_name       = _sp,
                         team              = _ssnap.team or "",
                         sport             = _ssport,
@@ -1471,11 +1474,9 @@ async def underdog_job(context) -> None:
         # notification when a prop passes the full qualification gate:
         #   score + validation + decision engine + sport whitelist.
         # To restore the discovery dump: uncomment the block below and restart.
-        # if _new_props_batch and chat_ids:
-        #     from alerts_multiplatform import format_underdog_new_prop_cycle_summary
-        #     from alerts import broadcast_alert
-        #     digest = format_underdog_new_prop_cycle_summary(_new_props_batch)
-        #     await broadcast_alert(bot, chat_ids, digest)
+            # Digest suppressed intentionally.
+            # New props are stored/scored silently.
+            # Telegram only fires on qualified alerts.
         #     logger.info(
         #         "underdog_job: new-prop digest sent — total=%d immediate=%d summary_only=%d",
         #         len(_new_props_batch),

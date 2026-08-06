@@ -722,11 +722,14 @@ class TestCandidateWithPropIntelligence:
         c2 = c.with_prop_intelligence(r)
         assert c2.tier == "S"
 
-    def test_bench_volatile_role_downgrades_tier(self):
-        c  = _make_candidate(tier="A")
-        r  = _make_intelligence_result(ss=60, role_label="Bench", role_stability="Volatile")
-        c2 = c.with_prop_intelligence(r)
-        assert c2.tier in ("B", "PASS")  # one step down from A
+        def test_bench_volatile_role_no_longer_downgrades_tier(self):
+            c = _make_candidate(tier="A")
+            r = _make_intelligence_result(
+                ss=60, role_label="Bench", role_stability="Volatile"
+            )
+            c2 = c.with_prop_intelligence(r)
+            # Role/playtime no longer affects tier
+            assert c2.tier == "A"
 
     def test_tough_matchup_downgrades_tier(self):
         c  = _make_candidate(tier="A")
@@ -776,11 +779,14 @@ class TestIntelligenceAdjustedTier:
         assert _intelligence_adjusted_tier("A", r) == "A"
         assert _intelligence_adjusted_tier("B", r) == "B"
 
-    def test_bench_volatile_downgrades_one_step(self):
-        r = _make_intelligence_result(ss=70, role_label="Bench", role_stability="Volatile")
-        assert _intelligence_adjusted_tier("S", r) == "A"
-        assert _intelligence_adjusted_tier("A", r) == "B"
-        assert _intelligence_adjusted_tier("B", r) == "PASS"
+        def test_bench_volatile_no_longer_downgrades(self):
+            r = _make_intelligence_result(
+                ss=70, role_label="Bench", role_stability="Volatile"
+            )
+            # Role no longer moves tier
+            assert _intelligence_adjusted_tier("S", r) == "S"
+            assert _intelligence_adjusted_tier("A", r) == "A"
+            assert _intelligence_adjusted_tier("B", r) == "B"
 
     def test_tough_matchup_downgrades_one_step(self):
         r = _make_intelligence_result(ss=70, matchup_label="Tough")

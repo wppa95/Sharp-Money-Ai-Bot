@@ -11,9 +11,10 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import (
-    Boolean, Column, DateTime, Float, Integer, String, Text,
+    Boolean, Column, DateTime, Float,
+    Integer, String, Text,
     UniqueConstraint,
-    select, func, desc, text
+    select, func, desc, text, delete
 )
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
@@ -539,7 +540,23 @@ class Database:
         if self._session_factory is None:
             raise RuntimeError("Database.init() has not been called.")
         return self._session_factory()
-
+    async def prune_prop_line_history(self, keep_days: int = 14) -> int:
+        """Delete PropLineHistory rows older than keep_days. Returns rows deleted."""
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(days=keep_days)
+        async with self.session() as s:
+            result = await s.execute(
+                delete(PropLineHistory).where(
+                    PropLineHistory.fetched_at < cutoff
+                )
+            )
+            await s.commit()
+            deleted = result.rowcount or 0
+            logger.info(
+                "prune_prop_line_history: deleted %d rows older than %d days",
+                deleted, keep_days,
+            )
+            return deleted
     # ── Odds ────────────────────────────────────────────────────────────────
 
     async def save_odds(self, record: OddsRecord) -> OddsRecord:
@@ -1436,7 +1453,7 @@ class Database:
                     stat_type    = stat_type,
                     line_value   = new_line,
                     game_time    = latest_snap.game_time,
-                    external_id  = latest_snap.external_id or "",
+                    external_id  = getattr(latest_snap, "external_id", None) or getattr(latest_snap, "id", None) or "",
                     game_id      = latest_snap.game_id     or "",
                     fetched_at   = now_ts,
                 )

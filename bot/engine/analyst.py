@@ -173,9 +173,6 @@ def _build_recommended_because(candidate: "Candidate") -> str:
                 parts.append(f"Historical average line is {avg:.1f} above current line — "
                               "value may exist on the OVER.")
 
-        role = _g(pi, "role")
-        if role and _g(role, "label") not in (None, "Unknown"):
-            parts.append(f"Role context: {_g(role, 'summary', default='')}".rstrip(".") + ".")
 
         matchup = _g(pi, "matchup")
         if matchup and _g(matchup, "label") in ("Favorable",):
@@ -233,13 +230,7 @@ def _build_risk_because(candidate: "Candidate", risk: Optional[Any] = None) -> s
                 parts.append(f"High line variance ({var:.1f}) — "
                               "this prop fluctuates significantly and may be unreliable.")
 
-        role = _g(pi, "role")
-        if role and _g(role, "stability") == "Volatile":
-            parts.append("Playing-time volatility detected — "
-                         "usage may not be consistent enough to trust this prop.")
-        if role and _g(role, "trend") == "Falling":
-            parts.append("Usage trend is declining — "
-                         "recent involvement is lower than historical baseline.")
+            # Role / playtime language removed — not reliable across all sports.
 
         matchup = _g(pi, "matchup")
         if matchup and _g(matchup, "label") == "Tough":
@@ -483,10 +474,11 @@ def build_analyst_from_alert_parts(
         n  = _g(hist, "n", default=0)
         hr = _g(hist, "hit_rate", default=-1)
         if n >= 5 and hr >= 0.60:
-            why_parts.append(
-                f"OVER hit rate proxy of {hr * 100:.0f}%"
-                f" across {n} samples supports the {decision_rec} call."
-            )
+                side = (decision_rec or "OVER").upper()
+                why_parts.append(
+                    f"{side} hit rate proxy of {hr * 100:.0f}%"
+                    f" across {n} samples supports the {side} call."
+                )
         if ss >= 50:
             why_parts.append(f"Sample strength score of {ss}/100 — history is reliable.")
         # Window evidence
@@ -498,11 +490,6 @@ def build_analyst_from_alert_parts(
                     why_parts.append(f"{w_key.upper()}: {pct}% hit rate.")
                     break  # one window example is enough here
 
-    role = _g(pi, "role") or {}
-    if _g(role, "label") and _g(role, "label") not in (None, "Unknown", ""):
-        summary = _g(role, "summary", default="")
-        if summary:
-            why_parts.append(f"Role: {summary}".rstrip(".") + ".")
 
     matchup = _g(pi, "matchup") or {}
     if _g(matchup, "label") == "Favorable":
@@ -515,7 +502,7 @@ def build_analyst_from_alert_parts(
     )
 
     # ── Risk because ────────────────────────────────────────────────────────
-    risk_parts: list[str] = [f"Risk level: {_risk_label(risk_level)}."]
+    risk_parts: list[str] = []
 
     if hist:
         ss  = _g(hist, "sample_strength", default=0)
@@ -529,11 +516,7 @@ def build_analyst_from_alert_parts(
                 f"High line variance ({var:.1f}) — this prop fluctuates significantly."
             )
 
-    role = _g(pi, "role") or {}
-    if _g(role, "stability") == "Volatile":
-        risk_parts.append("Playing-time volatility detected — usage may be inconsistent.")
-    if _g(role, "trend") == "Falling":
-        risk_parts.append("Usage trend is declining — recent involvement is below baseline.")
+        # Role / playtime language removed — not reliable across all sports.
 
     matchup = _g(pi, "matchup") or {}
     if _g(matchup, "label") == "Tough":
@@ -563,8 +546,7 @@ def build_analyst_from_alert_parts(
     )
     final_recommendation = (
         f"{qualifier}recommended {decision_rec} on {player_name} {stat_type} ({line:.1f}) "
-        f"in {sport} at {confidence}/100 confidence ({decision_tier}-tier, "
-        f"{_risk_label(risk_level).replace('-risk', '')} risk)."
+        f"in {sport} at {confidence}/100 confidence ({decision_tier}-tier)."
     )
 
     return AnalystNarrative(

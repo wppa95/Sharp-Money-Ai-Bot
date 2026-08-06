@@ -222,11 +222,11 @@ def _risk_section(factors: list[RiskFactor]) -> list[str]:
 # ── Alert formatters ──────────────────────────────────────────────────────────
 
 def format_ev_alert(
-    opp: EVOpportunity,
-    *,
-    risk_factors: Optional[list[RiskFactor]] = None,
-    ranking_result: Optional[object] = None,
-) -> str:
+        opp: EVOpportunity,
+        *,
+        risk_factors: Optional[list[RiskFactor]] = None,
+        ranking_result: Optional[object] = None,
+    ) -> str:
     """
     Format a +EV opportunity as a rich Telegram HTML message.
 
@@ -306,9 +306,8 @@ def format_ev_alert(
         # ── Confidence ────────────────────────────────────────────────────────
         f"{EMOJI['fire']} <b>Steam Score:</b>     <code>{opp.steam_score}/100</code>",
         f"{EMOJI['robot']} <b>AI Confidence:</b>  <code>{opp.ai_confidence}/100</code>",
-        f"⭐ <b>Rating:</b>          {star_bar}  {rec_display}",
+           f"⭐ <b>Rating:</b>          {star_bar}  {rec_display}",
     ]
-
     parts += steam_section
 
     parts += [
@@ -327,23 +326,15 @@ def format_ev_alert(
     # ── Optional AI Ranking block ─────────────────────────────────────────────
     if ranking_result is not None:
         try:
-            # ranking_result is a RankingResult — use duck-typing to avoid
+            # ranking_result is a RankingResult – use duck-typing to avoid
             # a hard import here (engine imports alerts, not vice versa)
-            ranking_block = ranking_result.to_telegram_block()
+            ranking_block = getattr(ranking_result, "to_telegram_block")()
             if ranking_block:
                 parts += ["", ranking_block]
         except Exception:
             pass  # never let ranking formatting break the main alert
 
     return "\n".join(parts)
-
-
-def format_steam_alert(
-    alert: SteamAlert,
-    *,
-    sharp_books: Optional[list[str]] = None,
-    risk_factors: Optional[list[RiskFactor]] = None,
-) -> str:
     """
     Format a steam / sharp money move alert as a rich Telegram HTML message.
 
@@ -397,7 +388,7 @@ def format_steam_alert(
     if alert.notes:
         parts += ["", f"{EMOJI['info']} <i>{alert.notes}</i>"]
 
-    parts += [
+        parts += [
         "",
         _div(),
         # ── Risk factors ──────────────────────────────────────────────────────
@@ -406,21 +397,55 @@ def format_steam_alert(
         f"{EMOJI['clock']} <i>{alert.timestamp.strftime('%Y-%m-%d %H:%M UTC')}</i>",
     ]
 
-    return "\n".join(parts)
+        return "\n".join(parts)
 
 
-# ── Status / help / start formatters ─────────────────────────────────────────
+def format_steam_alert(
+    alert,
+    *,
+    sharp_books=None,
+    risk_factors=None,
+) -> str:
+    """Temporary stub — full implementation pending."""
+    sport = getattr(alert, "sport", None)
+    sport_str = getattr(sport, "value", str(sport)) if sport else "N/A"
+    market = getattr(alert, "market_type", None)
+    market_str = getattr(market, "value", str(market)) if market else "N/A"
+    event = getattr(alert, "event", "N/A")
+    selection = getattr(alert, "selection", "N/A")
+    score = getattr(alert, "steam_score", 0)
+    direction = getattr(alert, "steam_direction", "")
+    books = getattr(alert, "books_moved", None) or []
+    books_str = ", ".join(books) if books else "None"
+    sharp_str = ", ".join(sharp_books) if sharp_books else books_str
+    opening = getattr(alert, "opening_odds", None)
+    current = getattr(alert, "current_odds", None)
+    return (
+        f"{EMOJI.get('fire', '🔥')} <b>SHARP MONEY ALERT</b>\n"
+        f"<b>{sport_str}</b> {event}\n"
+        f"Market: {market_str}\n"
+        f"Selection: {selection}\n"
+        f"Opening: {opening}  Current: {current}\n"
+        f"Steam Score: {score}/100 {direction}\n"
+        f"Books: {books_str}\n"
+        f"Sharp: {sharp_str}\n"
+        f"Risk factors: none\n"
+        f"<code>[{'█' * (score // 10)}{'░' * (10 - score // 10)}]</code>"
+    )
+
+
+    # ── Status / help / start formatters ─────────────────────────────────────────
 
 def format_status_message(
-    uptime_str: str,
-    total_alerts: int,
-    total_steam: int,
-    total_ev: int,
-    books_monitored: int,
-    active_markets: int,
-    db_records: int,
-    last_update: Optional[datetime],
-) -> str:
+        uptime_str: str,
+        total_alerts: int,
+        total_steam: int,
+        total_ev: int,
+        books_monitored: int,
+        active_markets: int,
+        db_records: int,
+        last_update: Optional[datetime],
+    ) -> str:
     last_upd = last_update.strftime("%H:%M UTC") if last_update else "N/A"
     return "\n".join([
         f"{EMOJI['robot']} <b>Sharp Money Bot — Status</b>",

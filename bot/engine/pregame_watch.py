@@ -474,6 +474,10 @@ class PregameWatchEngine:
                 and prev_alerted_val != ud_line_val
             )
 
+                # Temporarily disabled — pregame alerts fire on market presence alone
+                # and produce spam. Re-enable only after wiring make_ud_bet_decision.
+            if True:
+                continue
             if not chat_ids or not (is_first_alert or has_new_movement):
                 continue
 

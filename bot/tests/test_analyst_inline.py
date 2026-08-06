@@ -34,10 +34,11 @@ def test_build_recommended_because_non_empty():
     assert n.recommended_because.strip()
 
 
-def test_build_risk_because_non_empty():
-    from engine.analyst import build_analyst_from_alert_parts
-    n = build_analyst_from_alert_parts("A.J. Brown", "Receiving Yards", "NFL", 79.5, "OVER", "B", 58)
-    assert n.risk_because.strip()
+    def test_build_risk_because_can_be_empty():
+        """Risk section is blank when there are no real risk flags (no generic Risk Level)."""
+        from engine.analyst import build_analyst_from_alert_parts
+        n = build_analyst_from_alert_parts("A.J. Brown", "Receiving Yards", "NFL", 79.5, "OVER", "B", 58)
+        assert n.risk_because == ""
 
 
 def test_build_final_recommendation_mentions_player():
@@ -53,36 +54,39 @@ def test_build_final_recommendation_mentions_tier():
 
 
 def test_build_uses_intelligence_trace():
-    from engine.analyst import build_analyst_from_alert_parts
-    trace = {
-        "historical": {
-            "sample_strength": 70, "n": 20, "hit_rate": 0.75, "variance": 0.5,
-            "windows": {
-                "l5":  {"n": 5,  "hit_rate": 0.80},
-                "l10": {"n": 10, "hit_rate": 0.70},
+        from engine.analyst import build_analyst_from_alert_parts
+        trace = {
+            "historical": {
+                "sample_strength": 70, "n": 20, "hit_rate": 0.75, "variance": 0.5,
+                "windows": {
+                    "l5": {"n": 5, "hit_rate": 0.80},
+                    "l10": {"n": 10, "hit_rate": 0.70},
+                },
             },
-        },
-        "role": {"label": "Starter", "stability": "Stable", "trend": "Rising", "summary": "Primary scorer"},
-        "matchup": {"label": "Favorable", "reasoning": ["Weak defense allows high scoring"]},
-    }
-    n = build_analyst_from_alert_parts(
-        "Kevin Durant", "Points", "NBA", 28.5, "OVER", "S", 82,
-        intelligence_trace=trace,
-    )
-    assert "75%" in n.recommended_because or "80%" in n.recommended_because or "70%" in n.recommended_because
-    assert "Primary scorer" in n.recommended_because or "Starter" in n.recommended_because
+            "matchup": {
+                "label": "Favorable",
+                "reasoning": ["Weak defense allows high scoring"],
+            },
+        }
+        n = build_analyst_from_alert_parts(
+            "Kevin Durant", "Points", "NBA", 28.5, "OVER", "S", 82,
+            intelligence_trace=trace,
+        )
+        assert (
+            "75%" in n.recommended_because
+            or "80%" in n.recommended_because
+            or "70%" in n.recommended_because
+        )
+        assert "Kevin Durant" in n.recommended_because or "OVER" in n.recommended_because
 
 
-def test_build_risk_detects_volatile_role():
-    from engine.analyst import build_analyst_from_alert_parts
-    trace = {
-        "historical": {"sample_strength": 20, "n": 5, "hit_rate": 0.60, "variance": 4.0, "windows": {}},
-        "role": {"label": "Reserve", "stability": "Volatile", "trend": "Stable", "summary": ""},
-        "matchup": {"label": "Neutral", "reasoning": []},
-    }
-    n = build_analyst_from_alert_parts("Test Player", "Rebounds", "NBA", 4.5, "OVER", "B", 57,
-                                       intelligence_trace=trace)
-    assert "volatil" in n.risk_because.lower()
+def test_build_risk_no_longer_detects_volatile_role():
+        from engine.analyst import build_analyst_from_alert_parts
+        n = build_analyst_from_alert_parts(
+            "Test", "Points", "NBA", 20.5, "OVER", "B", 57
+        )
+        assert "volatil" not in n.risk_because.lower()
+        assert "playing-time" not in n.risk_because.lower()
 
 
 def test_build_risk_detects_tough_matchup():
@@ -208,30 +212,32 @@ def test_format_analyst_inline_block_returns_non_empty_for_over():
     assert result.strip()
 
 
-def test_format_analyst_inline_block_risk_low_for_5_star():
-    """5-star score → risk_level=LOW in the inline block."""
-    from alerts_multiplatform import _format_analyst_inline_block
-    dec = MagicMock()
-    dec.recommendation  = "OVER"
-    dec.decision_tier   = "S"
-    dec.confidence      = 82
-    score = MagicMock()
-    score.stars = 5
-    result = _format_analyst_inline_block("Test", "Points", "NBA", 20.5, score, dec, None)
-    assert "low" in result.lower() or "Low" in result
+    def test_format_analyst_inline_block_no_generic_risk_level():
+        """Risk Level label is no longer shown — Bet Quality already covers strength."""
+        from alerts_multiplatform import _format_analyst_inline_block
+        dec = MagicMock()
+        dec.recommendation  = "OVER"
+        dec.decision_tier   = "S"
+        dec.confidence      = 82
+        score = MagicMock()
+        score.stars = 5
+        result = _format_analyst_inline_block("Test", "Points", "NBA", 20.5, score, dec, None)
+        assert "risk level" not in result.lower()
+        assert "low-risk" not in result.lower()
 
 
-def test_format_analyst_inline_block_risk_high_for_1_star():
-    """1-star score → risk_level=HIGH in the inline block."""
-    from alerts_multiplatform import _format_analyst_inline_block
-    dec = MagicMock()
-    dec.recommendation  = "OVER"
-    dec.decision_tier   = "B"
-    dec.confidence      = 56
-    score = MagicMock()
-    score.stars = 1
-    result = _format_analyst_inline_block("Test", "Points", "NBA", 20.5, score, dec, None)
-    assert "high" in result.lower() or "High" in result
+    def test_format_analyst_inline_block_no_generic_risk_high():
+        """Risk Level label is no longer shown even for 1-star scores."""
+        from alerts_multiplatform import _format_analyst_inline_block
+        dec = MagicMock()
+        dec.recommendation  = "OVER"
+        dec.decision_tier   = "B"
+        dec.confidence      = 56
+        score = MagicMock()
+        score.stars = 1
+        result = _format_analyst_inline_block("Test", "Points", "NBA", 20.5, score, dec, None)
+        assert "risk level" not in result.lower()
+        assert "high-risk" not in result.lower()
 
 
 # ── Analyst block appears in alert formatters ────────────────────────────────
@@ -273,13 +279,15 @@ def test_new_prop_alert_contains_analyst_block_for_directional():
     assert "Analyst" in msg
 
 
-def test_change_alert_contains_analyst_block_for_directional():
-    from alerts_multiplatform import format_underdog_change_alert
-    msg = format_underdog_change_alert(
-        "Jayson Tatum", "BOS", "NBA", "Points", 27.5, 28.5,
-        score=_make_score(), decision=_make_decision(),
-    )
-    assert "Analyst" in msg
+    def test_change_alert_contains_pick_for_directional():
+        from alerts_multiplatform import format_underdog_change_alert
+        msg = format_underdog_change_alert(
+            "Jayson Tatum", "BOS", "NBA", "Points", 27.5, 28.5,
+            score=_make_score(), decision=_make_decision(),
+        )
+        # Compact alert: pick line instead of full Analyst block
+        assert "PICK" in msg or "OVER" in msg or "UNDER" in msg
+        assert "Tatum" in msg or "NBA" in msg
 
 
 def test_change_alert_no_analyst_block_for_removal():

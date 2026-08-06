@@ -125,10 +125,11 @@ class UnderdogConnector(BaseConnector):
                 timestamp    = now,
                 player       = proj.player_name,
                 team         = proj.team,
-                line         = proj.line_value,
-                game_time    = proj.game_time,
-                opening_odds = None,  # pick'em has no American odds
-                is_pickem    = True,
+            line         = proj.line_value,
+            game_time    = proj.game_time,
+            opening_odds = None,  # pick'em has no American odds
+            external_id  = proj.external_id,
+            is_pickem    = True,
             )
             # Stash notes for downstream consumers via a convention attr
             object.__setattr__(snaps, "_notes", notes) if False else None
@@ -160,6 +161,7 @@ class UnderdogConnector(BaseConnector):
                     line         = old.line_value,
                     game_time    = old.game_time,
                     opening_odds = None,
+                    external_id  = old.external_id,
                     is_pickem    = True,
                 ))
 

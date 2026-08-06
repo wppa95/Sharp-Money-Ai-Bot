@@ -91,7 +91,7 @@ def ud_snapshot_to_player_prop(snap: Any) -> PlayerProp:
         stat_type   = _normalize_stat(snap.stat_type or ""),
         line_value  = float(snap.line_value) if snap.line_value is not None else 0.0,
         game_time   = snap.game_time,
-        external_id = snap.external_id  or "",
+        external_id = getattr(snap, "external_id", None) or getattr(snap, "id", None) or "",
         game_id     = snap.game_id      or "",
         fetched_at  = snap.fetched_at   or datetime.utcnow(),
     )

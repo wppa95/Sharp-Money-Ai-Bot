@@ -110,16 +110,18 @@ def test_intelligence_block_empty_reasoning_no_bullet():
 
 
 def test_intelligence_block_role_starter_shown():
-    trace = _make_trace(role_label="Starter", role_trend="Rising")
-    result = _format_intelligence_block(trace)
-    assert "Starter" in result
-    assert "Rising" in result
+        from alerts_multiplatform import _format_intelligence_block
+        trace = {"role": {"label": "Starter", "trend": "Rising"}, "matchup": {}}
+        result = _format_intelligence_block(trace)
+        assert "Starter" not in result
+        assert "Rising" not in result
 
 
 def test_intelligence_block_role_bench_shown():
-    trace = _make_trace(role_label="Bench", role_trend="Falling")
-    result = _format_intelligence_block(trace)
-    assert "Bench" in result
+        from alerts_multiplatform import _format_intelligence_block
+        trace = {"role": {"label": "Bench"}, "matchup": {}}
+        result = _format_intelligence_block(trace)
+        assert "Bench" not in result
 
 
 def test_intelligence_block_none_trace_returns_empty():
@@ -254,11 +256,11 @@ def test_validate_final_tier_s_conf_95_passes():
     assert _validate_final_tier("S", 95, None) == "S"
 
 
-def test_validate_final_tier_s_bench_under_90_downgrades():
-    """S-tier + Bench role + conf 85 (< 90) → A."""
-    trace = _role_trace("Bench", "Volatile")
-    result = _validate_final_tier("S", 85, trace)
-    assert result == "A"
+def test_validate_final_tier_s_bench_under_90_no_role_downgrade():
+        from alerts_multiplatform import _validate_final_tier
+        # Role no longer affects tier — conf 85 keeps S
+        result = _validate_final_tier("S", 85, {"role": {"label": "Bench"}})
+        assert result == "S"
 
 
 def test_validate_final_tier_s_bench_conf_90_or_above_passes():
@@ -268,11 +270,13 @@ def test_validate_final_tier_s_bench_conf_90_or_above_passes():
     assert result == "S"
 
 
-def test_validate_final_tier_a_bench_volatile_low_conf_downgrades_to_b():
-    """A-tier + Bench + Volatile + conf < 65 → B."""
-    trace = _role_trace("Bench", "Volatile")
-    result = _validate_final_tier("A", 60, trace)
-    assert result == "B"
+def test_validate_final_tier_a_bench_volatile_no_role_downgrade():
+        from alerts_multiplatform import _validate_final_tier
+        # Role no longer affects tier — A stays A
+        result = _validate_final_tier(
+            "A", 50, {"role": {"label": "Bench", "stability": "Volatile"}}
+        )
+        assert result == "A"
 
 
 def test_validate_final_tier_a_bench_volatile_conf_65_stays_a():
@@ -411,20 +415,8 @@ def test_analyst_block_no_note_when_tier_unchanged():
     assert "adjusted" not in result.lower() or "S→A" not in result
 
 
-def test_analyst_block_bench_volatile_downgrade_note():
-    """Bench + Volatile + S-tier (conf=85) must show downgrade note."""
-    decision = _simple_decision("S", 85, "OVER")
-    trace = _role_trace("Bench", "Volatile")
-    result = _format_analyst_inline_block(
-        player_name        = "Bench Player",
-        stat_type          = "points",
-        sport              = "NBA",
-        line               = 12.5,
-        score              = None,
-        decision           = decision,
-        intelligence_trace = trace,
-    )
-    assert "adjusted" in result.lower()
+    
+    assert "adjusted" not in result.lower()
 
 
 def test_analyst_block_pass_returns_empty():

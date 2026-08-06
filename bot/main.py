@@ -245,6 +245,8 @@ async def post_init(application: Application) -> None:
         jq.run_repeating(_grade_opportunities_job,  interval=21600, first=3600, name="opportunity_grader")
         # API budget check — every 15 minutes
         jq.run_repeating(_budget_check_job,    interval=900,                                first=900, name="budget_checker")
+        # PropLineHistory prune — once per day (keeps last 14 days)
+        jq.run_repeating(_prune_prop_history_job, interval=86400, first=600, name="prop_history_pruner")
         # Heartbeat — every 60 s (keeps HealthTracker alive timestamp current)
         jq.run_repeating(_heartbeat_job,       interval=60,                                 first=30,  name="heartbeat")
         # Season / market-status refresh (skip when interval is 0 = disabled)
@@ -948,7 +950,23 @@ async def _clv_seed_job(context) -> None:
 
 
 # ── API budget check job ───────────────────────────────────────────────────────
-
+async def _prune_prop_history_job(context) -> None:
+    """Delete PropLineHistory rows older than 14 days to control DB growth."""
+    db = context.bot_data.get("db")
+    if not db:
+        return
+    try:
+        deleted = await db.prune_prop_line_history(keep_days=14)
+        if deleted:
+            logger.info("_prune_prop_history_job: pruned %d old rows", deleted)
+        ht = get_health_tracker()
+        if ht:
+            ht.record_job_run("_prune_prop_history_job")
+    except Exception as exc:
+        logger.exception("_prune_prop_history_job: %s", exc)
+        ht = get_health_tracker()
+        if ht:
+            ht.record_job_fail("_prune_prop_history_job", str(exc))
 async def _budget_check_job(context) -> None:
     """
     Run every 15 minutes.  Checks API usage against the pacing budget and

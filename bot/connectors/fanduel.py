@@ -257,6 +257,7 @@ class FanDuelConnector(BaseConnector):
                             line         = float(line) if line is not None else None,
                             game_time    = game_time,
                             opening_odds = opening,
+                            external_id  = None,
                             is_pickem    = False,
                         ))
 

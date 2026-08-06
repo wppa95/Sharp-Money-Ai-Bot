@@ -71,6 +71,7 @@ def make_snap(
         odds         = odds,
         line         = line,
         opening_odds = opening_odds,
+        external_id  = "ud-test-001",
         is_pickem    = is_pickem,
     )
 
