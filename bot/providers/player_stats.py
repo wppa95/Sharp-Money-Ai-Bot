@@ -108,6 +108,44 @@ _NHL_GOALIE_STAT_MAP: dict[str, Optional[list[str]]] = {
     "saves":           ["SV"],
     "goals allowed":   ["GA"],
 }
+# Merge goalie stats into the unified NHL map so one lookup handles both
+# positions.  Skater gamelogs won't have SV/GA columns → _sum_espn_labels
+# returns None, which is the correct behaviour (stat not applicable).
+_NHL_STAT_MAP.update(_NHL_GOALIE_STAT_MAP)
+
+# Soccer outfielders + goalkeepers  →  ESPN gamelog label(s) to sum.
+# Column labels from site.api.espn.com/apis/site/v2/sports/soccer/{lg}/athletes/{id}/gamelog
+_SOCCER_STAT_MAP: dict[str, Optional[list[str]]] = {
+    # Outfielder / attacking
+    "goals":             ["G"],
+    "assists":           ["A"],
+    "shots":             ["SH"],
+    "shots on target":   ["SOG"],
+    "key passes":        ["KP"],
+    "yellow cards":      ["YC"],
+    "red cards":         ["RC"],
+    "minutes":           ["MIN"],
+    "goals + assists":   ["G", "A"],
+    "g+a":               ["G", "A"],
+    # Goalkeeper
+    "saves":             ["SV"],
+    "goalkeeper saves":  ["SV"],
+    "goals allowed":     ["GA"],
+    "clean sheets":      ["CS"],
+}
+
+# Leagues probed in priority order when searching for a soccer player by name.
+# We query each league's ESPN athlete-search endpoint until we find a match;
+# the winning (athlete_id, league_slug) pair is cached for the process lifetime.
+_SOCCER_LEAGUE_PRIORITY: list[str] = [
+    "eng.1",          # Premier League
+    "esp.1",          # La Liga
+    "ger.1",          # Bundesliga
+    "ita.1",          # Serie A
+    "fra.1",          # Ligue 1
+    "usa.1",          # MLS
+    "usa.nwsl",       # NWSL (women's soccer)
+]
 
 # NFL  →  (category_key, [label(s)])  (ESPN multi-category gamelog)
 _NFL_STAT_MAP: dict[str, tuple[str, list[str]]] = {
@@ -177,10 +215,12 @@ _MLB_PITCHING_STATS: frozenset[str] = frozenset({
     "innings pitched", "outs recorded",
 })
 
-# Lazy singletons for esports / tennis / sleeper providers (avoids re-creating per call)
+# Lazy singletons for esports / tennis / sleeper / NHL providers
 _esports_provider_instance: Optional["object"] = None
 _tennis_provider_instance:  Optional["object"] = None
 _sleeper_provider_instance: Optional["object"] = None
+_nhl_provider_instance:     Optional["object"] = None
+_soccer_provider_instance:  Optional["object"] = None
 
 
 def _get_esports_provider():  # type: ignore[return]
@@ -208,6 +248,24 @@ def _get_sleeper_provider():  # type: ignore[return]
         from providers.sleeper_stats import SleeperStatsProvider
         _sleeper_provider_instance = SleeperStatsProvider()
     return _sleeper_provider_instance
+
+
+def _get_nhl_provider():  # type: ignore[return]
+    """Return the shared NHLStatsProvider singleton (created on first call)."""
+    global _nhl_provider_instance
+    if _nhl_provider_instance is None:
+        from providers.nhl_stats import NHLStatsProvider
+        _nhl_provider_instance = NHLStatsProvider()
+    return _nhl_provider_instance
+
+
+def _get_soccer_provider():  # type: ignore[return]
+    """Return the shared SoccerStatsProvider singleton (created on first call)."""
+    global _soccer_provider_instance
+    if _soccer_provider_instance is None:
+        from providers.soccer_stats import SoccerStatsProvider
+        _soccer_provider_instance = SoccerStatsProvider()
+    return _soccer_provider_instance
 
 
 def _merge_game_results(
@@ -260,6 +318,8 @@ class PlayerStatsProvider:
     def __init__(self) -> None:
         # (player_name_norm, sport, league) → athlete_id or None if not found
         self._id_cache: dict[tuple[str, str, str], Optional[int]] = {}
+        # Soccer multi-league result: player_name_norm → winning league_slug
+        self._soccer_league_cache: dict[str, str] = {}
 
     # ── Public entry point ────────────────────────────────────────────────────
 
@@ -299,6 +359,26 @@ class PlayerStatsProvider:
                     # Sleeper is a supplement — never block the main flow
                     logger.debug("PlayerStatsProvider: Sleeper supplement failed: %s", _sl_exc)
                 return espn_results
+            elif sport_upper == "NHL":
+                # Use the official NHL public API (api-web.nhle.com) which is
+                # verified accessible.  ESPN NHL returns 403 from this env.
+                return await _get_nhl_provider().fetch_results(
+                    player_name, "NHL", stat_type
+                )
+            elif sport_upper == "SOCCER":
+                # Uses SoccerStatsProvider (football-data.org API).
+                # Requires FOOTBALL_DATA_API_KEY env var (free token at
+                # https://www.football-data.org/client/register).
+                # Returns [] gracefully when the key is absent — same pattern
+                # as PandaScore/CS2.
+                # NOTE: SOCCER is NOT in the UD_ALERT_SPORTS default because the
+                # free tier has no lineup/appearance data; without it DNPs cannot
+                # be distinguished from zero-stat games, producing invalid hit rates.
+                # Enable manually: UD_ALERT_SPORTS=...,SOCCER + FOOTBALL_DATA_API_KEY.
+                # _fetch_espn_soccer() is also available for ESPN-accessible envs.
+                return await _get_soccer_provider().fetch_results(
+                    player_name, "SOCCER", stat_type
+                )
             elif sport_upper in _ESPN_ROUTE:
                 sport_slug, league_slug = _ESPN_ROUTE[sport_upper]
                 return await self._fetch_espn(
@@ -628,6 +708,75 @@ class PlayerStatsProvider:
         self._id_cache[cache_key] = aid
         return aid
 
+    # ── Soccer: multi-league ESPN search ─────────────────────────────────────
+
+    async def _fetch_espn_soccer(
+        self,
+        player_name: str,
+        stat_lower: str,
+    ) -> list[RawGameResult]:
+        """
+        Fetch an ESPN soccer player's gamelog, searching across all supported
+        leagues in priority order (_SOCCER_LEAGUE_PRIORITY).
+
+        The first league that contains the player wins; subsequent leagues are
+        not queried.  The winning (athlete_id, league_slug) pair is cached for
+        the process lifetime so the scan only runs once per player.
+        """
+        result = await self._soccer_athlete_id(player_name)
+        if result is None:
+            return []
+        athlete_id, league_slug = result
+        return await self._fetch_espn(
+            player_name, "SOCCER", stat_lower, "soccer", league_slug
+        )
+
+    async def _soccer_athlete_id(
+        self,
+        player_name: str,
+    ) -> Optional[tuple[int, str]]:
+        """
+        Search for a soccer player's ESPN athlete ID across all priority leagues.
+
+        Returns (athlete_id, league_slug) on success, or None if the player is
+        not found in any supported league.
+
+        Caching strategy:
+          • Each per-league lookup is cached in self._id_cache under the key
+            (_normalize(name), "soccer", league_slug).
+          • The winning league is stored in self._soccer_league_cache so that
+            subsequent calls can retrieve (id, league) in O(1).
+          • A None sentinel in self._soccer_league_cache means "not found in
+            any league" — avoids repeating the full scan.
+        """
+        name_norm  = _normalize(player_name)
+        NOT_FOUND  = "__not_found__"
+
+        # Fast path: winning league already known
+        cached_league = self._soccer_league_cache.get(name_norm)
+        if cached_league is not None:
+            if cached_league == NOT_FOUND:
+                return None
+            cached_id = self._id_cache.get((name_norm, "soccer", cached_league))
+            if cached_id is not None:
+                return (cached_id, cached_league)
+
+        # Slow path: search each league in priority order
+        for league_slug in _SOCCER_LEAGUE_PRIORITY:
+            aid = await self._espn_athlete_id(
+                player_name, "SOCCER", "soccer", league_slug
+            )
+            if aid is not None:
+                self._soccer_league_cache[name_norm] = league_slug
+                logger.debug(
+                    "Soccer: found %r in %s (id=%d)", player_name, league_slug, aid
+                )
+                return (aid, league_slug)
+
+        logger.debug("Soccer: %r not found in any supported league", player_name)
+        self._soccer_league_cache[name_norm] = NOT_FOUND
+        return None
+
     # ── HTTP helper ───────────────────────────────────────────────────────────
 
     async def _get_json(self, url: str) -> Optional[dict]:
@@ -659,6 +808,8 @@ def _get_stat_map(sport: str) -> Optional[dict]:
         return _NBA_STAT_MAP
     if s == "NHL":
         return _NHL_STAT_MAP
+    if s == "SOCCER":
+        return _SOCCER_STAT_MAP
     return None
 
 

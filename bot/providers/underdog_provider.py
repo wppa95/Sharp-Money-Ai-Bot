@@ -57,9 +57,23 @@ _STAT_NORM: dict[str, str] = {
     "shots on goal":   "shots on goal",
     "goals+assists":   "points",
     # Soccer
-    "goals":           "goals",
-    "key passes":      "key passes",
-    "shots on target": "shots on target",
+    "goals":              "goals",
+    "assists":            "assists",
+    "key passes":         "key passes",
+    "shots on target":    "shots on target",
+    # Note: "shots" is kept as "shots on goal" (hockey) below; Underdog soccer
+    # uses the more specific "shots on target" key, not a bare "shots" key.
+    "goalkeeper saves":   "goalkeeper saves",
+    "saves":              "goalkeeper saves",
+    "goals allowed":      "goals allowed",
+    "yellow cards":       "yellow cards",
+    "red cards":          "red cards",
+    # Hockey
+    "shots on goal":      "shots on goal",
+    "blocked shots":      "blocked shots",
+    "goals + assists":    "goals + assists",
+    "power play points":  "power play points",
+    "time on ice":        "time on ice",
     # Tennis
     "games won":       "games won",
     "sets won":        "sets won",

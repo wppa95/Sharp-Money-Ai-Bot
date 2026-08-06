@@ -192,23 +192,36 @@ class Config:
     # Sports whose Underdog bet alerts are delivered to Telegram.
     # ─────────────────────────────────────────────────────────────────────────
     # Primary (real result data available → OVER/UNDER picks enabled):
-    #   MLB   — MLB Stats API  (statsapi.mlb.com)
-    #   WNBA  — ESPN gamelog   (site.api.espn.com)
+    #   MLB    — MLB Stats API  (statsapi.mlb.com)
+    #   WNBA   — ESPN gamelog   (site.api.espn.com)
+    #   NHL    — NHL public API (api-web.nhle.com + api.nhle.com) — free, no key
     #
     # Tracking only (data collected + scored, no Telegram bet alerts):
-    #   NBA, NFL — ESPN gamelog available but user-configured as tracking only.
+    #   NBA, NFL — available; muted via ALERT_DISABLED_SPORTS.
     #
     # Supported with real historical data:
-    #   MLB    → MLB Stats API (statsapi.mlb.com)
-    #   WNBA   → ESPN gamelog
-    #   DOTA   → OpenDota API (api.opendota.com) — free, no key required
+    #   MLB    → MLB Stats API (statsapi.mlb.com) — free, no key
+    #   WNBA   → ESPN gamelog (site.api.espn.com) — free, no key
+    #   NFL    → ESPN gamelog + Sleeper supplement — free, no key
+    #   NBA    → ESPN gamelog — free, no key (alerts muted by default)
+    #   NHL    → NHL official public API (api-web.nhle.com) — free, no key ✓ verified
+    #   DOTA   → OpenDota API (api.opendota.com) — free, no key
     #   TENNIS → JeffSackmann ATP/WTA CSV (github.com/JeffSackmann) — free, no key
     #   CS     → PandaScore API — requires PANDASCORE_API_KEY env var;
     #            returns [] gracefully without it (alerts suppressed by decision engine)
     #
-    # Still unsupported (self-suppress via PASS decision):
-    #   Soccer, NPB, KBO — no public per-game stat API integrated.
-    UD_ALERT_SPORTS_RAW: str = os.environ.get("UD_ALERT_SPORTS", "MLB,WNBA,NFL,NBA,DOTA,TENNIS,CS")
+    #   SOCCER → football-data.org API provider is built (bot/providers/soccer_stats.py)
+    #            but NOT in the default.  To enable add SOCCER to UD_ALERT_SPORTS env var
+    #            AND set FOOTBALL_DATA_API_KEY (free token: football-data.org/client/register).
+    #            Disabled by default because the free tier has no lineup/appearance data;
+    #            without it the provider cannot distinguish a DNP (injury/bench) from a
+    #            zero-stat game, which would produce invalid hit rates.
+    #
+    # No free provider available (self-suppress via PASS decision):
+    #   COD  — no public per-game player stat API exists
+    #   LOL  — Riot Games API requires a developer key
+    #   NPB/KBO — no accessible public per-game stat API
+    UD_ALERT_SPORTS_RAW: str = os.environ.get("UD_ALERT_SPORTS", "MLB,WNBA,NFL,NBA,DOTA,TENNIS,CS,NHL")
 
     # Dedup windows for new alert types (seconds)
     INEFFICIENCY_DEDUP_WINDOW: int = int(os.environ.get("INEFFICIENCY_DEDUP_WINDOW", "1800"))

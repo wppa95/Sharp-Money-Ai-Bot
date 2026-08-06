@@ -1,0 +1,328 @@
+IMPORTANT — CREDIT / RESOURCE USAGE RULE
+
+We are limited on credits. Do not burn credits on unnecessary exploration, rewrites, or unrelated tasks.
+
+Before making changes:
+- Read the existing architecture first.
+- Reuse existing systems whenever possible.
+- Make targeted fixes only.
+- Do not rewrite working code.
+- Do not redesign architecture.
+- Do not add unnecessary features outside this list.
+
+This is the final V1.3 completion and stability pass before freeze.
+
+Efficiency, stability, and preserving credits are priorities.
+
+IMPORTANT:
+Telegram is a user-facing alert channel, not a debug console.
+
+Keep detailed diagnostics internally.
+Keep Telegram clean and actionable.
+
+==================================================
+Sharp Money Bot — Final V1.3 Completion / Freeze Update List
+==================================================
+
+
+==================================================
+1. FINISH TASK #101 COMPLETELY (MUST COME FIRST)
+==================================================
+
+- Complete Task #101 before starting any other major work.
+- Do not begin scoring upgrades until Task #101 is fully finished and verified.
+- Do not rewrite existing architecture — update/fix what is already there.
+
+
+==================================================
+2. SLEEPER INTEGRATION (PRIORITY)
+==================================================
+
+- Sleeper becomes a unified historical stats enrichment layer.
+- Keep Underdog as the primary live prop provider.
+- Sleeper data should only enrich existing Underdog props that already have a line.
+- Never create standalone Sleeper props.
+- Sleeper should not become a separate betting signal source.
+
+Integrate Sleeper into the existing pipeline:
+
+Underdog line
+↓
+Historical stats enrichment
+↓
+Hit-rate engine
+↓
+Confidence scoring
+↓
+Final actionable pick
+
+Requirements:
+
+- Do not send separate Sleeper notifications.
+- Do not create duplicate alerts.
+- Sleeper + Underdog data should combine into one final user-facing output.
+
+Add Sleeper visibility:
+
+Example:
+
+📊 Stat Providers
+
+🟢 Sleeper active · last contribution Xm ago
+
+
+==================================================
+3. COMPLETE SOCCER + NHL COVERAGE (TASK #101)
+==================================================
+
+NHL:
+
+- Complete NHL integration.
+- Verify NHL routes through:
+
+upsert_player_result
+→ compute_hit_rates
+→ scoring pipeline
+
+- Include goalie/skater coverage where supported.
+
+
+Soccer:
+
+- Complete soccer stat coverage where possible.
+- Add multi-league support where available.
+- Ensure players can be found across leagues.
+
+Rules:
+
+- Same confidence gates as current sports.
+- No lowered thresholds.
+- No new alert types.
+- No scoring architecture changes.
+
+Only show picks when:
+
+- Real historical data exists.
+- Hit-rate history is valid.
+- No empty L5-L30 samples.
+
+
+==================================================
+4. EXPAND STAT COVERAGE ACROSS ALL SPORTS
+==================================================
+
+- Evaluate Sleeper/stat provider support across ALL supported sports.
+- Do not limit this to NFL/MLB only.
+- Prioritize sports with reliable samples.
+- Do not force weak or incomplete data into scoring.
+
+Goal:
+
+Improve historical context and hit-rate accuracy across all supported sports.
+
+
+==================================================
+5. PROVIDER DISPLAY CLEANUP
+==================================================
+
+Clean Telegram outputs.
+
+Remove inactive providers from normal displays:
+
+- Disabled DraftKings.
+- Disabled FanDuel.
+- Any providers not actively contributing.
+
+Separate:
+
+📡 Market Providers
+
+Example:
+- Underdog
+
+
+📊 Stat Providers
+
+Example:
+- Sleeper
+- ESPN
+- MLB Stats API
+- OpenDota
+- Tennis data
+
+Keep debug/history data internally, but do not clutter active health displays.
+
+
+==================================================
+6. HEALTH DASHBOARD CLEANUP
+==================================================
+
+Current issue:
+
+Historical errors appear like active failures.
+
+Change health display to separate:
+
+Current Issues:
+✅ None
+
+Resolved Issues:
+(stored internally)
+
+Requirements:
+
+- Hide/remove historical issues from active health view.
+- Keep error history stored for debugging.
+- Clearly separate active failures from resolved issues.
+- Optional: add collapsed "Resolved last 24h" section.
+
+Only show current problems prominently.
+
+
+==================================================
+7. STARTUP / RESTART ALERT CLEANUP
+==================================================
+
+Current issue:
+
+Restart notifications are too noisy and include outdated debugging information.
+
+Example:
+
+⚠️ Sharp Money Bot Restarted
+
+Reason:
+Memory Kill / Host Restart
+
+Last Active Task:
+Last Heartbeat:
+Crash Snapshot:
+Crash ID:
+Startup #:
+
+
+This information should remain internal, not in normal Telegram messages.
+
+Change behavior:
+
+Normal startup notification should only confirm the bot is running.
+
+Example:
+
+✅ Sharp Money Bot Started
+
+🟢 Monitoring active
+
+
+Only send detailed crash/recovery information when:
+
+- There is an active unresolved failure.
+- The bot cannot recover normally.
+- Manual debugging is required.
+
+Keep restart history internally for logs/debugging.
+
+Goal:
+
+Telegram should focus on:
+
+- Bot started
+- Monitoring active
+- Qualified alerts only
+- Current issues only
+
+
+==================================================
+8. ACTIONABLE BET PICK SCORING UPGRADE
+(ONLY AFTER TASK #101 IS COMPLETE)
+==================================================
+
+Improve confidence scoring using:
+
+- L5
+- L10
+- L20
+- L30
+- H2H (when sample size allows)
+
+Requirements:
+
+- Do not lower confidence gates.
+- Only adjust internal weighting.
+- Document weighting changes in code comments.
+
+Goal:
+
+Improve pick accuracy, not increase alert volume.
+
+
+==================================================
+9. FINAL TASK #101 COMPLETION REPORT
+==================================================
+
+Before marking Task #101 complete, provide:
+
+- Active market providers.
+- Active stat providers contributing data.
+- Sports with verified hit-rate coverage.
+- Sports still missing reliable providers.
+- Final test count.
+- Final startup number.
+- Confirmation Telegram commands were verified:
+
+/status
+/health
+/dashboard
+/alerts
+/picks
+
+
+Do not mark Task #101 complete until:
+
+- Integration is verified end-to-end.
+- Final report is provided.
+
+
+==================================================
+10. FINAL VERIFICATION BEFORE FREEZE
+==================================================
+
+Run:
+
+✅ Full test suite.
+✅ Clean restart.
+✅ Telegram command verification.
+✅ Provider verification.
+✅ Data pipeline verification.
+
+Extra check:
+
+Confirm high-evidence props no longer show:
+
+Pick: —
+
+
+==================================================
+11. FREEZE BUILD
+==================================================
+
+After completion only allow:
+
+- Bug fixes.
+- Performance improvements.
+- Provider improvements.
+- Data quality upgrades.
+
+No major architecture changes after freeze.
+
+
+FINAL V1.3 STATE:
+
+- Stable.
+- Clean Telegram output.
+- No unnecessary notifications.
+- Only qualified actionable picks reach Telegram.
+- Sleeper integrated as enrichment.
+- Underdog remains primary live prop source.
+- Existing systems preserved.
+- V1.3 frozen.
