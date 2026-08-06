@@ -1,0 +1,178 @@
+FINAL V1.3 CLEANUP PASS BEFORE FREEZE
+
+IMPORTANT:
+Do NOT rewrite anything.
+Do NOT refactor large sections.
+Do NOT redesign architecture.
+Do NOT change scoring architecture.
+Do NOT burn credits on unnecessary tasks.
+
+Only make targeted cleanup and verification fixes.
+
+==================================================
+
+1. SLEEPER ENRICHMENT FINAL CHECK
+    ==================================================
+
+Current state:
+Sleeper is registered and visible:
+
+📊 Stat Providers
+⚪ Sleeper · NFL enrichment · pending first sync
+
+Fix:
+
+* Verify Sleeper enrichment is actually connected to the Underdog prop pipeline.
+* Sleeper should enrich existing Underdog props only.
+* Never create standalone Sleeper props.
+* Never send separate Sleeper alerts.
+
+Requirements:
+
+Underdog line
+↓
+Sleeper/stat enrichment
+↓
+Historical context
+↓
+Confidence scoring
+↓
+Actionable pick
+
+Only change status from pending when real data contribution occurs.
+
+Show:
+
+🟢 Sleeper
+Historical enrichment
+Last contribution: Xm ago
+
+Do not fake activity.
+
+==================================================
+2. HEALTH DASHBOARD CLEANUP
+
+Current issue:
+
+/health still displays old resolved errors:
+
+‘list’ object has no attribute ‘has_real_data’
+
+This is historical, not current.
+
+Fix:
+
+* Keep error stored internally.
+* Remove resolved issues from active health display.
+* Only show active problems.
+* Optional:
+
+Resolved (last 24h)
+
+* old pipeline errors
+* old crashes
+
+A healthy bot should not appear unhealthy because of old history.
+
+==================================================
+3. DASHBOARD UPTIME FIX
+
+Current:
+
+System Status
+Uptime: unknown
+
+Fix:
+
+Use existing health tracker uptime.
+
+Dashboard and health should show the same uptime value.
+
+==================================================
+4. DASHBOARD PROVIDER DISPLAY CLEANUP
+
+Remove duplicate provider heading.
+
+Current:
+
+Providers
+
+📡 Market Providers
+
+📊 Stat Providers
+
+Change to:
+
+📡 Market Providers
+
+📊 Stat Providers
+
+Keep provider separation.
+
+==================================================
+5. PIPELINE DIAGNOSTIC CLEANUP
+
+Keep the new diagnostics.
+
+Do NOT remove:
+
+* daily counts
+* move detection counts
+* gated counts
+* rejection reasons
+
+These are useful.
+
+Only:
+
+* Reduce unnecessary raw log spam.
+* Keep readable grouped output.
+* Keep internal diagnostics separate from Telegram alerts.
+
+Pipeline remains:
+
+daily scan
+↓
+movement detection
+↓
+validation
+↓
+confidence gates
+↓
+actionable alert
+
+Do not lower thresholds.
+
+==================================================
+FINAL VERIFICATION
+
+After cleanup:
+
+Run:
+
+/status
+/health
+/dashboard
+/alerts
+/picks
+
+Confirm:
+
+✅ Underdog active
+✅ Sleeper contribution tracking works
+✅ No stale errors shown as active
+✅ No fake crash state
+✅ Dashboard uptime works
+✅ Only actionable picks reach Telegram
+✅ No unnecessary notifications
+
+Then freeze V1.3.
+
+After freeze only allow:
+
+* Bug fixes
+* Performance improvements
+* Provider improvements
+* Data quality improvements
+
+No major changes after freeze.

@@ -1019,7 +1019,7 @@ async def underdog_job(context) -> None:
                         _np_rej = "no_decision"
                     elif decision.recommendation == "PASS":
                         _np_rej = "decision_pass"
-                        logger.info(
+                        logger.debug(
                             "UD decision_pass [new]: %s | %s | %s | line=%.1f"
                             " | %d★ %d/100 | reason=%s"
                             " | l5=%s l10=%s games=%s val_data=%s",
@@ -1258,7 +1258,7 @@ async def underdog_job(context) -> None:
                             _lc_rej = "no_decision (PASS tier)"
                         elif decision.recommendation == "PASS":
                             _lc_rej = "decision_pass"
-                            logger.info(
+                            logger.debug(
                                 "UD decision_pass [lc]: %s | %s | %s | line=%.1f"
                                 " | %d★ %d/100 | reason=%s"
                                 " | l5=%s l10=%s games=%s val_data=%s",

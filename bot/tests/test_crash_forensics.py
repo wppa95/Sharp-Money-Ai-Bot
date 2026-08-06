@@ -524,7 +524,10 @@ def test_cmd_health_no_crash_shows_none_recorded(tmp_path):
     loop.close()
 
     text = replies[0]
-    assert "none recorded" in text.lower() or "No crash" in text
+    # When no crash has occurred the Crash Forensics section is omitted entirely
+    # so the health output is clean and does not alarm the user with stale data.
+    assert "Crash Forensics" not in text
+    assert "💥" not in text
 
 
 def test_cmd_health_crash_log_shows_multiple_entries(tmp_path):

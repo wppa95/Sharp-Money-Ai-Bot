@@ -671,8 +671,13 @@ class DashboardEngine:
                 from engine.health import get_health_tracker
                 ht = get_health_tracker()
                 if ht is not None:
+                    # Use current_uptime_str() directly — it's always available
+                    # and derived from the startup timestamp, so it matches what
+                    # /health and /status report.  Avoid summary().get("uptime")
+                    # which may return "unknown" when the key is absent.
+                    uptime = ht.current_uptime_str()
+                    sp.uptime_str = uptime if uptime else "unknown"
                     summary = ht.summary()
-                    sp.uptime_str  = summary.get("uptime", "unknown")
                     sp.crash_count = summary.get("crash_count", 0)
                     last_rs = summary.get("last_restart")
                     if last_rs:

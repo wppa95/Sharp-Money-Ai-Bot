@@ -354,7 +354,17 @@ class PlayerStatsProvider:
                         sleeper_results = await _get_sleeper_provider().fetch_results(
                             player_name, "NFL", stat_lower
                         )
-                        espn_results = _merge_game_results(espn_results, sleeper_results)
+                        if sleeper_results:
+                            espn_results = _merge_game_results(espn_results, sleeper_results)
+                            # Record a successful Sleeper contribution so health/status
+                            # commands can show last-sync time and confirm real enrichment.
+                            try:
+                                from engine.health import get_health_tracker as _get_ht_slp
+                                _ht_slp = _get_ht_slp()
+                                if _ht_slp is not None:
+                                    _ht_slp.record_provider_fetch("Sleeper", success=True)
+                            except Exception:
+                                pass
                 except Exception as _sl_exc:  # noqa: BLE001
                     # Sleeper is a supplement — never block the main flow
                     logger.debug("PlayerStatsProvider: Sleeper supplement failed: %s", _sl_exc)
