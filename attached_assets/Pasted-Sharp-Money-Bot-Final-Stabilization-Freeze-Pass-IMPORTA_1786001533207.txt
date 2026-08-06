@@ -1,0 +1,290 @@
+Sharp Money Bot — Final Stabilization + Freeze Pass
+
+IMPORTANT:
+Do not rewrite the project.
+Do not rebuild architecture.
+Do not remove working systems.
+Only fix confirmed bugs, finish missing integrations, and improve stability.
+After this pass is complete, FREEZE the framework. Only allow future bug fixes, performance improvements, and provider additions.
+
+Run a full inspect first. Make changes only where confirmed.
+
+Priority #1 — BOT STABILITY (highest priority)
+
+Fix all remaining crash/restart issues.
+
+Current issues:
+- Bot has experienced Memory Kill / Host Restart events.
+- Need full root-cause investigation for memory leaks, runaway loops, unbounded lists, excessive logging, and database/session buildup.
+- Add stronger crash forensics:
+  - Capture last active task
+  - Capture traceback when possible
+  - Capture memory-related warnings
+  - Record restart reason
+  - Preserve crash snapshot if available
+
+Audit:
+- scheduler jobs
+- asyncio tasks
+- database sessions
+- provider polling
+- cached objects
+- alert queues
+- prop history growth
+
+Goal:
+Bot must survive 24/7 monitoring without unexpected restarts.
+
+--------------------------------------------------
+
+Priority #2 — REMOVE ALL OLD FRAMEWORK LOGIC
+
+Confirm nothing from the old framework is still active.
+
+Inspect for:
+- old ranking logic
+- old alert paths
+- old PrizePicks-first logic
+- deprecated scoring systems
+- unused connectors/jobs
+- duplicate engines
+- duplicate confidence systems
+
+Disable/remove only dead code paths.
+
+Current framework should be:
+Underdog-first monitoring
++
+Sharp Money detection
++
+S/A/B tier recommendations
++
+AI confidence
++
+market movement detection
+
+--------------------------------------------------
+
+Priority #3 — PROP RANKING SYSTEM (VERY IMPORTANT)
+
+No cross-sport ranking.
+
+NEVER compare different sports against each other.
+
+Bad:
+MLB 90 score
+DOTA 85 score
+Tennis 80 score
+
+Good:
+
+⚾ MLB
+#1
+#2
+#3
+
+🎾 Tennis
+#1
+#2
+#3
+
+🎮 CS/DOTA
+#1
+#2
+#3
+
+Each sport gets its own ranking category.
+
+Apply this everywhere:
+- /picks
+- /slip
+- alerts
+- live opportunity queues
+- dashboards
+- analyst outputs
+
+Goal:
+Give opportunities across the entire slate, not only the strongest single sport.
+
+--------------------------------------------------
+
+Priority #4 — Remaining Confirmed Bugs
+
+Fix:
+
+1. Underdog hit_rates type safety
+
+Issue:
+'list' object has no attribute 'has_real_data'
+
+Ensure make_ud_bet_decision safely handles:
+- None
+- empty lists
+- invalid objects
+- missing data
+
+Never crash prop scoring.
+
+--------------------------------------------------
+
+2. SQLite reliability
+
+Continue improving SQLite stability.
+
+Already:
+✅ WAL mode enabled
+
+Still improve:
+- database lock handling
+- retry strategy
+- batch writes
+- session cleanup
+
+No data loss during concurrent writes.
+
+--------------------------------------------------
+
+3. CLV jobs
+
+Fix remaining:
+database locked errors during CLV seeding.
+
+Requirements:
+- retries
+- backoff
+- proper failure logging
+- no permanent job failure
+
+--------------------------------------------------
+
+4. /picks /slip /alerts validation
+
+Verify:
+
+/picks:
+- shows OVER/UNDER/PASS correctly
+- no missing "—" direction
+- uses stored recommendation data
+
+/slip:
+- pulls valid sides
+- does not create empty slips when qualified props exist
+
+/alerts:
+- always responds
+- no silent failures
+
+--------------------------------------------------
+
+Priority #5 — Provider Expansion (after stability)
+
+Prepare pipeline support for:
+
+Underdog:
+✅ current primary
+
+Add secondary prop sources:
+- Chalkboard
+- other reliable pick'em sources
+
+Restore:
+- PrizePicks
+- DraftKings
+- FanDuel
+
+But do not sacrifice stability.
+
+Each provider should have:
+- health status
+- error handling
+- schema validation
+- independent failure isolation
+
+--------------------------------------------------
+
+Priority #6 — Multi-Sport Expansion
+
+Keep sports separated.
+
+Support:
+MLB
+NBA
+WNBA
+NFL
+Tennis
+CS
+DOTA
+other supported sports
+
+Each sport:
+- own ranking
+- own confidence calibration
+- own market behavior
+- own scoring adjustments
+
+--------------------------------------------------
+
+Tweak List To Preserve
+
+Do not lose these:
+
+- Underdog-first workflow
+- PrizePicks/DraftKings/FanDuel separate from ML logic
+- Lowest-risk props prioritized
+- S/A/B tiers
+- Projection Confidence separate from AI confidence
+- No correlated slips
+- No same player twice in a slip
+- No same team risk for 2-man slips
+- Avoid high variance builds
+- Pre-game opportunities only
+- No live betting focus
+
+--------------------------------------------------
+
+Future VPS Plan (NOT NOW)
+
+Do not deploy VPS yet.
+
+Future purpose:
+Move the finished bot from Replit to a VPS for:
+- 24/7 uptime
+- no Replit sleeping
+- better memory limits
+- persistent service
+- stable monitoring
+
+The VPS does NOT find props by itself.
+
+The bot finds props.
+
+The VPS only runs the finished bot reliably.
+
+--------------------------------------------------
+
+Task Cleanup
+
+Confirm and close fake/non-existing bugs:
+
+- orphan engine.py issue
+- duplicate engine package issue
+- any task describing files that do not exist
+
+Only keep real remaining tasks.
+
+--------------------------------------------------
+
+Final Requirements:
+
+1. Run tests.
+2. Confirm bot starts cleanly.
+3. Confirm /health.
+4. Confirm /status.
+5. Confirm /picks.
+6. Confirm /alerts.
+7. Confirm /slip.
+8. Freeze after completion.
+
+No architecture rewrite.
+No unnecessary refactors.
+Only stabilization and finishing.

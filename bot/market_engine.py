@@ -68,6 +68,12 @@ _registry: Optional[ConnectorRegistry] = None
 # The date component means stale entries are automatically bypassed next day.
 _player_stats_provider = None
 _player_result_fetch_cache: set = set()
+# Maximum entries before the cache is wiped.  Each key is (player,sport,stat,date_iso);
+# the date component means old entries are already bypassed by logic, but they
+# accumulate in memory.  Clear the entire set once it grows past this ceiling so
+# the next cycle re-fetches fresh data — a safe, cheap reset at ~300 s cadence.
+_PLAYER_RESULT_CACHE_MAX = 5_000
+
 # Set to True after the first complete Underdog prop scan.  The first cycle
 # scores every active prop (cold-start mode); subsequent cycles use incremental
 # scoring (new props and line-change events only).
@@ -114,6 +120,15 @@ async def _fetch_and_compute_hit_rates(
 
     try:
         if cache_key not in _player_result_fetch_cache:
+            # Guard against unbounded growth: clear the whole set when it exceeds the
+            # ceiling.  The date component in each key means old entries are already
+            # bypassed by logic; this just frees the memory they occupy.
+            if len(_player_result_fetch_cache) >= _PLAYER_RESULT_CACHE_MAX:
+                logger.info(
+                    "_fetch_and_compute_hit_rates: result cache hit %d entries — clearing",
+                    len(_player_result_fetch_cache),
+                )
+                _player_result_fetch_cache.clear()
             raw_results = await provider.fetch_results(player_name, sport, stat_type)
             for r in raw_results:
                 await db.upsert_player_result(r)
@@ -627,6 +642,23 @@ async def underdog_job(context) -> None:
     _health = get_health_tracker()
     if _health:
         _health.record_job_started("underdog_job")
+
+    # ── Evict stale dedup entries ─────────────────────────────────────────────
+    # _prop_market_alerted keys are (player, sport, stat_type); values are
+    # (timestamp_float, line).  Remove any entry whose timestamp is older than
+    # 2× UD_ALERT_DEDUP_WINDOW so the dict never grows without bound across days.
+    _dedup_evict_cutoff = now.timestamp() - (config.UD_ALERT_DEDUP_WINDOW * 2)
+    _stale_keys = [
+        _k for _k, (_ts, _) in _prop_market_alerted.items()
+        if _ts < _dedup_evict_cutoff
+    ]
+    for _k in _stale_keys:
+        del _prop_market_alerted[_k]
+    if _stale_keys:
+        logger.debug(
+            "underdog_job: evicted %d stale dedup entries (window×2=%ds, remaining=%d)",
+            len(_stale_keys), config.UD_ALERT_DEDUP_WINDOW * 2, len(_prop_market_alerted),
+        )
 
     # Memory baseline — log RSS before the heavy scan to help diagnose OOM kills
     try:
