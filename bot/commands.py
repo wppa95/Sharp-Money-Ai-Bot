@@ -573,6 +573,13 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             for name, h in _mon.get_all_health().items():
                 if name == "PrizePicks":
                     continue  # PP provider temporarily disabled
+                # Show disabled sportsbook connectors as inactive rather than "OK · never"
+                if name == "DraftKings" and not config.DRAFTKINGS_ENABLED:
+                    lines.append("  ⏸️ <b>DraftKings</b>  <i>inactive (disabled)</i>")
+                    continue
+                if name == "FanDuel" and not config.FANDUEL_ENABLED:
+                    lines.append("  ⏸️ <b>FanDuel</b>  <i>inactive (disabled)</i>")
+                    continue
                 last_ok   = h.format_last_success()
 
                 # Build a human-readable failure note with the actual reason.
@@ -631,17 +638,29 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 active   = [k for k, v in summary.items() if v]
                 inactive = [k for k, v in summary.items() if not v]
                 lines.append(f"🏈 <b>Active Sports</b>  ({len(active)}/{len(summary)} in season)")
-                if active:
-                    short_active = [k.split("_")[-1].upper()[:6] for k in active[:14]]
+                # Filter market-group keys (e.g. "nfl_winner", "ncaaf_championship_winner")
+                # that the Odds API returns alongside actual sport keys.
+                _MKT_WORDS = frozenset({
+                    "winner", "championship", "futures", "preseason",
+                    "specials", "h2h", "totals", "alternate", "outright",
+                })
+                def _is_sport_key(k: str) -> bool:
+                    return not any(p in _MKT_WORDS for p in k.lower().split("_"))
+
+                active_sp   = [k for k in active   if _is_sport_key(k)]
+                inactive_sp = [k for k in inactive if _is_sport_key(k)]
+
+                if active_sp:
+                    short_active = [k.split("_")[-1].upper()[:6] for k in active_sp[:14]]
                     lines.append(
                         f"  In season:  {' · '.join(short_active)}"
-                        f"{'…' if len(active) > 14 else ''}"
+                        f"{'…' if len(active_sp) > 14 else ''}"
                     )
-                if inactive:
-                    short_inactive = [k.split("_")[-1].upper()[:6] for k in inactive[:8]]
+                if inactive_sp:
+                    short_inactive = [k.split("_")[-1].upper()[:6] for k in inactive_sp[:8]]
                     lines.append(
                         f"  Off season: {' · '.join(short_inactive)}"
-                        f"{'…' if len(inactive) > 8 else ''}"
+                        f"{'…' if len(inactive_sp) > 8 else ''}"
                     )
                 lines.append("")
             else:
@@ -720,46 +739,50 @@ async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text(f"{EMOJI['warn']} Engine not initialised. Try again shortly.")
         return
 
-    opp = _engine.analyze_line(
-        sport=sport,
-        market_type=MarketType.MONEYLINE,
-        event=f"Manual analysis — {sport_raw.upper()}",
-        selection=selection_display,
-        player=None,
-        line=None,
-        side_a_odds=odds_a,
-        side_b_odds=odds_b,
-        is_side_a=True,
-        best_book="Manual",
-    )
+    try:
+        opp = _engine.analyze_line(
+            sport=sport,
+            market_type=MarketType.MONEYLINE,
+            event=f"Manual analysis — {sport_raw.upper()}",
+            selection=selection_display,
+            player=None,
+            line=None,
+            side_a_odds=odds_a,
+            side_b_odds=odds_b,
+            is_side_a=True,
+            best_book="Manual",
+        )
 
-    # Build concise analysis response
-    ev_sign = "✅ POSITIVE EV" if opp.expected_value > 0 else "❌ NEGATIVE EV"
-    response = "\n".join([
-        f"{EMOJI['chart']} <b>Line Analysis</b>",
-        "",
-        f"<b>Sport:</b>     {sport.value}",
-        f"<b>Selection:</b> {selection_display}",
-        f"<b>Your Odds:</b> <code>{format_odds(odds_a)}</code>",
-        f"<b>Opp Odds:</b>  <code>{format_odds(odds_b)}</code>",
-        "",
-        f"{EMOJI['target']} <b>Fair Probability:</b>  <code>{format_probability(opp.fair_probability)}</code>",
-        f"   <i>(Vig removed: {opp.ev_result.fair_odds.vig_percentage:.2f}%)</i>",
-        "",
-        f"{EMOJI['money']} <b>Expected Value:</b>    <code>{format_ev(opp.expected_value)}</code>  {ev_sign}",
-        f"   <i>Edge: {opp.ev_result.edge:+.4f}</i>",
-        "",
-        f"📐 <b>Kelly Criterion:</b>",
-        f"   Full Kelly:  <code>{opp.ev_result.kelly_fraction:.2%}</code>",
-        f"   Half Kelly:  <code>{opp.ev_result.half_kelly:.2%}</code>",
-        "",
-        f"<b>Recommendation:</b>  {opp.star_display}  {opp.recommendation.value}",
-        "",
-        "<b>Reason Codes:</b>",
-        *[f"  • {r}" for r in opp.reason_codes],
-    ])
+        # Build concise analysis response
+        ev_sign = "✅ POSITIVE EV" if opp.expected_value > 0 else "❌ NEGATIVE EV"
+        response = "\n".join([
+            f"{EMOJI['chart']} <b>Line Analysis</b>",
+            "",
+            f"<b>Sport:</b>     {sport.value}",
+            f"<b>Selection:</b> {selection_display}",
+            f"<b>Your Odds:</b> <code>{format_odds(odds_a)}</code>",
+            f"<b>Opp Odds:</b>  <code>{format_odds(odds_b)}</code>",
+            "",
+            f"{EMOJI['target']} <b>Fair Probability:</b>  <code>{format_probability(opp.fair_probability)}</code>",
+            f"   <i>(Vig removed: {opp.ev_result.fair_odds.vig_percentage:.2f}%)</i>",
+            "",
+            f"{EMOJI['money']} <b>Expected Value:</b>    <code>{format_ev(opp.expected_value)}</code>  {ev_sign}",
+            f"   <i>Edge: {opp.ev_result.edge:+.4f}</i>",
+            "",
+            f"📐 <b>Kelly Criterion:</b>",
+            f"   Full Kelly:  <code>{opp.ev_result.kelly_fraction:.2%}</code>",
+            f"   Half Kelly:  <code>{opp.ev_result.half_kelly:.2%}</code>",
+            "",
+            f"<b>Recommendation:</b>  {opp.star_display}  {opp.recommendation.value}",
+            "",
+            "<b>Reason Codes:</b>",
+            *[f"  • {r}" for r in opp.reason_codes],
+        ])
 
-    await update.message.reply_text(response, parse_mode=ParseMode.HTML)
+        await update.message.reply_text(response, parse_mode=ParseMode.HTML)
+    except Exception as exc:
+        logger.exception("cmd_analyze: analysis failed: %s", exc)
+        await update.message.reply_text("⚠️ /analyze failed. Check bot logs.")
 
 
 async def cmd_steam(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2007,13 +2030,13 @@ async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     # ── Player Prop Market alerts (Underdog PropLineHistory) ──────────────────
     lines.append("🟣 <b>Player Prop Alerts</b>")
     try:
-        recent_props = await _db.get_latest_props_for_provider("Underdog", since_hours=24)
+        recent_props = await _db.get_latest_props_for_provider("Underdog", since_hours=72)
         alerted_props = [
             r for r in recent_props
             if getattr(r, "lifecycle_state", None) == "ACTIVE_ALERTED"
         ]
         if alerted_props:
-            lines.append(f"  <i>{len(alerted_props)} props alerted in last 24 h</i>")
+            lines.append(f"  <i>{len(alerted_props)} props alerted in last 72 h</i>")
             lines.append("")
             for r in alerted_props[:8]:
                 _lv = float(getattr(r, "line_value", 0) or 0)
@@ -2029,7 +2052,7 @@ async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             if len(alerted_props) > 8:
                 lines.append(f"  <i>…{len(alerted_props) - 8} more</i>")
         else:
-            lines.append("  <i>No player prop alerts sent in the last 24 h.</i>")
+            lines.append("  <i>No player prop alerts sent in the last 72 h.</i>")
             lines.append("  <i>Alerts fire automatically when qualifying props are detected.</i>")
     except Exception as exc:
         logger.warning("cmd_alerts: prop history lookup failed: %s", exc)

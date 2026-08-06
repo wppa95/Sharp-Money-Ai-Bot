@@ -1,0 +1,578 @@
+Before proceeding:
+
+DO NOT REWRITE ANYTHING.
+DO NOT rebuild the architecture.
+DO NOT create separate systems.
+
+Only update, patch, and improve what already exists.
+
+The current V1.3 cleanup is working:
+
+✅ Telegram now only sends 🎯 ACTIONABLE BET PICKS
+✅ Market movement alerts removed from Telegram
+✅ Internal movement tracking remains
+✅ Game validation added
+✅ Flip/reversal protection added
+✅ Per-sport diagnostics added
+✅ Tests passing
+✅ MLB actionable pipeline is producing quality picks
+
+Important:
+Do not change the current MLB behavior. MLB proving it can produce actionable picks means the core scoring/filtering system is working.
+
+The goal now is improving reliability, information quality, and expanding sport coverage.
+
+⸻
+
+PART 1 — Fix Remaining Pipeline Issues
+
+1. Prop scoring error
+
+Health check found:
+
+⚠️ Last pipeline failure:
+
+stage=prop_scoring
+module=market_engine.underdog_job
+
+Error:
+
+‘list’ object has no attribute ‘has_real_data’
+
+Investigate this issue first.
+
+Possible cause:
+
+The scoring pipeline expects a provider result object with:
+
+.has_real_data
+
+but received a normal list.
+
+Requirements:
+
+* Locate the type mismatch
+* Patch only the affected area
+* Do not rewrite scoring
+* Do not change existing filters
+* Add defensive handling/logging if needed
+* Preserve MLB behavior
+* Run tests
+* Confirm Underdog actionable picks still generate
+
+⸻
+
+PART 2 — Verify Pipeline Data Flow
+
+Dashboard shows:
+
+Underdog snapshots:
+5,281,400+
+
+PropHistory rows:
+459
+
+Verify the pipeline between ingestion and scoring.
+
+Check:
+
+* Are snapshots being normalized correctly?
+* Are important markets being dropped?
+* Are player props reaching PropLineHistory?
+* Is any provider data being lost before scoring?
+
+Do not change scoring.
+
+Only verify data flow and fix issues if data is being lost.
+
+⸻
+
+PART 3 — Alert Tracking Verification
+
+Current behavior:
+
+✅ Telegram only sends 🎯 ACTIONABLE BET PICKS
+✅ No market movement spam
+
+However:
+
+/alerts currently shows no player prop alerts in the last 24 hours while actionable picks were previously delivered.
+
+Investigate:
+
+* Are actionable alerts being recorded?
+* Is alert history filtering incorrectly?
+* Is delivery tracking missing?
+
+Requirements:
+
+* Do not change alert rules
+* Do not re-enable market move alerts
+* Only fix tracking visibility if needed
+
+⸻
+
+PART 4 — Telegram Command Reliability
+
+A Telegram command returned:
+
+“⚠️ Command failed — please try again. If the issue persists, the bot may need to restart.”
+
+Investigate command reliability.
+
+Requirements:
+
+* Identify which command failed
+* Improve error logging
+* Ensure one command failure does not affect the bot
+* Fail gracefully with useful errors
+
+Do not:
+
+* Rewrite Telegram system
+* Change alert logic
+
+Only improve command stability.
+
+⸻
+
+PART 5 — Futures vs Daily Props Separation
+
+Dashboard shows season-long markets being tracked:
+
+Examples:
+
+* NFL regular season games started
+* NFL season receiving yards
+* NFL season totals
+
+Current behavior is correct:
+
+✅ Futures are excluded from /picks
+
+However:
+
+They are still appearing inside tracked market activity.
+
+Requirements:
+
+Separate:
+
+Daily player props
+
+Season-long/futures markets
+
+Do not delete futures data.
+
+Keep collecting if useful.
+
+Prevent futures from:
+
+* Affecting daily actionable prop scoring
+* Affecting daily sport diagnostics
+* Mixing with player prop rankings
+
+Do not rewrite.
+Only isolate market types.
+
+⸻
+
+PART 6 — Provider Status Cleanup
+
+Current status:
+
+DraftKings:
+OK · last successful fetch: never
+
+FanDuel:
+OK · last successful fetch: never
+
+Improve provider reporting.
+
+Show:
+
+* Active/live provider
+* Configured but inactive provider
+* Last successful fetch
+* Failed provider
+
+Do not enable DK/FD yet.
+
+Only improve monitoring clarity.
+
+⸻
+
+PART 7 — Active Sports Display Cleanup
+
+Current status mixes:
+
+Sports + market names
+
+Example:
+
+CFL · NCAAF · WINNER · NFL · PRESEA · MLB · WINNER
+
+Clean this display.
+
+Requirements:
+
+Show actual sports only.
+
+Do not change active sports logic.
+
+Only improve status readability.
+
+⸻
+
+PART 8 — Sleeper Integration (High Priority)
+
+Investigate Sleeper as BOTH:
+
+1. Pick’em line source
+2. Historical stats/data source
+
+Important:
+
+From previous user experience:
+
+Sleeper pick’em lines match PrizePicks lines.
+
+Since PrizePicks API access is blocked, investigate whether Sleeper can restore PrizePicks-style market coverage.
+
+Verify:
+
+* Player
+* Sport
+* Market type
+* Line value
+* Timestamp
+* Availability
+
+If Sleeper markets match PrizePicks:
+
+Integrate Sleeper through the existing provider framework.
+
+Architecture:
+
+Sleeper lines/stats
+
+Underdog lines
+
+Other free sources
+
+↓
+
+Normalized provider data
+
+↓
+
+PropLineHistory
+
+↓
+
+Existing scoring/ranking engine
+
+↓
+
+🎯 ACTIONABLE BET PICKS
+
+Do NOT:
+
+* Create a separate Sleeper system
+* Bypass scoring
+* Turn every Sleeper line into an alert
+
+Use shadow mode first:
+
+Collect → Compare → Validate → Then use.
+
+⸻
+
+PART 9 — Multi-Sport Expansion
+
+Current observation:
+
+The bot is producing more actionable picks, but they are mainly MLB.
+
+This is expected because MLB currently has:
+
+* Better historical data
+* More daily games
+* Strong player samples
+* Mature adapter/data pipeline
+
+Do not force equal picks per sport.
+
+Analyze:
+
+raw → parsed → movement detected → scored → gated → actionable
+
+Review:
+
+⚾ MLB
+🏀 NBA/WNBA
+🏈 NFL
+⚽ Soccer
+🎾 Tennis
+🎯 COD
+🎯 CS
+🎮 DOTA
+Other supported sports
+
+Identify bottlenecks:
+
+* Missing data?
+* Missing adapter?
+* Missing history?
+* Market mapping?
+* Sport thresholds?
+
+Preserve MLB quality.
+
+⸻
+
+PART 10 — Priority Sport Expansion
+
+Soccer (Priority)
+
+Add/improve support using free sources.
+
+Markets:
+
+* Shots
+* Shots on target
+* Pass attempts
+* Goals
+* Assists
+* Fantasy points
+
+Need:
+
+Soccer adapter
+
+Historical player data
+
+Existing scoring compatibility
+
+Tennis
+
+Improve existing support.
+
+Analyze:
+
+* Player stats
+* Tournament coverage
+* Match frequency
+* Sample requirements
+* Prop compatibility
+
+Markets:
+
+* Aces
+* Games won
+* Sets
+* Break points
+* Fantasy points
+
+COD
+
+Evaluate free COD sources.
+
+Need:
+
+* Player history
+* Kills
+* Maps
+* Match context
+
+CS2
+
+Current issue:
+
+Without PandaScore:
+
+* No player history
+* No stats
+* Props cannot qualify
+
+Find free alternatives if possible.
+
+Do not lower standards.
+
+⸻
+
+PART 11 — Provider Rules
+
+Every new source:
+
+Provider data
+
+↓
+
+Normalize into existing format
+
+↓
+
+PropLineHistory
+
+↓
+
+Existing scoring engine
+
+↓
+
+Existing 🎯 ACTIONABLE BET PICK alerts
+
+No new alert types.
+
+No Telegram changes.
+
+No rewrite.
+
+⸻
+
+PART 12 — Additional Pipeline Check
+
+Compare:
+
+Raw Underdog snapshots
+
+vs
+
+Normalized PropLineHistory
+
+Verify:
+
+* Props are being normalized correctly
+* Important markets are not dropped
+* Data is not lost between ingestion and scoring
+* Provider information reaches the ranking engine
+
+Do not change scoring.
+
+Only verify pipeline flow.
+
+⸻
+
+PART 13 — Sleeper Multi-Sport Historical Data Integration
+
+Evaluate Sleeper support across ALL sports supported by Underdog.
+
+Important:
+
+Underdog carries additional prop markets including COD/esports and other sports.
+
+Goal:
+
+Use available free Sleeper data sources to improve ALL SPORTS prop evaluation by adding real historical game/player statistics.
+
+Requirements:
+
+* Determine which sports Sleeper provides reliable data for
+* Map Sleeper stats into the existing provider framework
+* Use Sleeper data for historical hit-rate calculations where available
+* Improve confidence scoring with real player/game history
+* Support all compatible sports, not only NBA/NFL
+
+Examples:
+
+NFL:
+
+* Passing yards
+* Rushing yards
+* Receiving stats
+
+NBA/WNBA:
+
+* Points
+* Rebounds
+* Assists
+* Combos
+
+Other supported sports:
+
+* Evaluate available stat coverage
+* Do not force unsupported data
+
+For esports (COD/CS/etc.):
+
+Evaluate whether Sleeper provides usable historical data.
+
+If Sleeper does not support a sport:
+
+Find another free reliable source before adding support.
+
+Architecture:
+
+Sleeper/stat provider data
+
+↓
+
+Normalize into existing provider format
+
+↓
+
+Player/stat history database
+
+↓
+
+Existing scoring + confidence engine
+
+↓
+
+🎯 ACTIONABLE BET PICKS
+
+Do not:
+
+* Create a separate Sleeper scoring system
+* Bypass existing filters
+* Lower confidence requirements
+* Create alerts from raw Sleeper data alone
+
+Use shadow mode first:
+
+Collect → Compare → Validate → Integrate
+
+⸻
+
+PART 14 — Final Verification
+
+Before completion:
+
+Run:
+
+✅ Full test suite
+✅ Health check
+✅ Telegram command checks
+✅ Confirm Telegram only sends 🎯 ACTIONABLE BET PICKS
+✅ Confirm no alert spam
+✅ Confirm MLB unchanged
+✅ Confirm providers work in shadow mode first
+
+⸻
+
+FINAL REQUIREMENT — FREEZE AFTER COMPLETION
+
+After all requested fixes and integrations are completed:
+
+1. Run full test suite.
+2. Confirm bot starts cleanly.
+3. Confirm Telegram only sends 🎯 ACTIONABLE BET PICKS.
+4. Confirm no notification spam.
+5. Confirm existing MLB performance is preserved.
+6. Confirm new providers run safely in shadow mode.
+
+Once verified:
+
+FREEZE THE BUILD.
+
+Do not make additional architectural changes.
+
+Future changes should only be:
+
+* Bug fixes
+* Performance improvements
+* New verified data providers
+* Targeted improvements that do not affect the core engine
+
+The goal is a stable production version before further expansion.

@@ -188,7 +188,16 @@ async def _fetch_and_compute_hit_rates(
         db_results = await db.get_player_results(player_name, sport, stat_type, limit=30)
         if not db_results:
             return None
-        return compute_hit_rates(db_results, current_line)
+        result = compute_hit_rates(db_results, current_line)
+        # Defensive guard: compute_hit_rates must return PlayerHitRates, never a list.
+        # If it somehow does, log a warning and return None so the caller falls back to PASS.
+        if not hasattr(result, "has_real_data"):
+            logger.warning(
+                "_fetch_and_compute_hit_rates: unexpected type %s for %s/%s — returning None",
+                type(result).__name__, player_name, stat_type,
+            )
+            return None
+        return result
 
     except Exception as exc:  # noqa: BLE001
         logger.warning(
@@ -762,10 +771,10 @@ async def underdog_job(context) -> None:
     _lifecycle_alerted:  list[tuple[str, str, str]] = []   # (player, sport, stat_type) → ACTIVE_ALERTED
     _lifecycle_removed:  list[tuple[str, str, str]] = []   # (player, sport, stat_type) → REMOVED
     # Per-sport pipeline stage counters — emitted in debug summary (#7 diagnostics)
-    _sport_raw:          dict[str, int] = {}  # raw Underdog fetch count (non-removed)
-    _sport_parsed:       dict[str, int] = {}  # after futures filter passes
+    _sport_raw:           dict[str, int] = {}  # daily props: non-removed, non-futures
+    _sport_futures:       dict[str, int] = {}  # season-long/futures props (tracked, not scored)
     _sport_move_detected: dict[str, int] = {}  # significant line moves (≥MIN_LINE_CHANGE)
-    _sport_gated:        dict[str, int] = {}  # passed full betting gate (would send alert)
+    _sport_gated:         dict[str, int] = {}  # passed full scoring gate (actionable)
 
     try:
         # Two DB round-trips before the loop — both O(unique props), no LIMIT.
@@ -780,23 +789,22 @@ async def underdog_job(context) -> None:
             is_removed = "[REMOVED]" in snap.selection
             if is_removed:
                 _n_removed += 1
-            else:
-                # Stage 1: raw fetch count per sport (non-removed only)
-                _sp_raw = snap.sport or "UNKNOWN"
-                _sport_raw[_sp_raw] = _sport_raw.get(_sp_raw, 0) + 1
-            player     = snap.player or "Unknown"
-    
-            # Extract the stable stat-type category from the selection string
+            player = snap.player or "Unknown"
+
+            # Extract stat-type before any counters so futures are correctly separated.
             stat_type = _extract_ud_stat_type(snap.selection, snap.player, snap.line)
 
-            # Skip season-long futures / award markets — not resolvable by game data
+            # Separate season-long futures / award markets from daily props.
+            # Count them in _sport_futures so diagnostics show the split clearly.
             if not is_removed and _is_futures_stat(stat_type):
+                _sp_fut = snap.sport or "UNKNOWN"
+                _sport_futures[_sp_fut] = _sport_futures.get(_sp_fut, 0) + 1
                 continue
 
-            # Stage 2: parsed count per sport (non-removed, passed futures filter)
+            # Stage 1: daily prop count per sport (non-removed, non-futures)
             if not is_removed:
-                _sp_parsed = snap.sport or "UNKNOWN"
-                _sport_parsed[_sp_parsed] = _sport_parsed.get(_sp_parsed, 0) + 1
+                _sp_raw = snap.sport or "UNKNOWN"
+                _sport_raw[_sp_raw] = _sport_raw.get(_sp_raw, 0) + 1
     
             # Detect first-ever appearance: (player, stat) not in DB at all yet
             is_new_prop = not is_removed and (player, stat_type) not in known_keys
@@ -1774,18 +1782,22 @@ async def underdog_job(context) -> None:
             )
             _dbg_lines.append(f"  rejection breakdown:  {_rej_str}")
         # Per-sport pipeline diagnostics (#7) — shows where props drop off each stage
-        if _sport_raw or _sport_parsed or _sport_move_detected or _sport_gated:
+        if _sport_raw or _sport_futures or _sport_move_detected or _sport_gated:
             _all_sports = sorted(set(
-                list(_sport_raw.keys()) + list(_sport_parsed.keys())
+                list(_sport_raw.keys()) + list(_sport_futures.keys())
                 + list(_sport_move_detected.keys()) + list(_sport_gated.keys())
             ))
-            _dbg_lines.append("  per-sport pipeline  raw → parsed → move_det → gated:")
+            _dbg_lines.append("  per-sport pipeline  daily → move_det → gated  (+futures tracked):")
             for _sp in _all_sports:
+                _daily    = _sport_raw.get(_sp, 0)
+                _futures  = _sport_futures.get(_sp, 0)
+                _move_det = _sport_move_detected.get(_sp, 0)
+                _gated    = _sport_gated.get(_sp, 0)
+                _fut_note = f"  +{_futures}f" if _futures else ""
                 _dbg_lines.append(
-                    f"    {_sp:<8}  raw={_sport_raw.get(_sp, 0):4d}"
-                    f"  parsed={_sport_parsed.get(_sp, 0):4d}"
-                    f"  move_det={_sport_move_detected.get(_sp, 0):3d}"
-                    f"  gated={_sport_gated.get(_sp, 0):2d}"
+                    f"    {_sp:<8}  daily={_daily:4d}{_fut_note:<6}"
+                    f"  move_det={_move_det:3d}"
+                    f"  gated={_gated:2d}"
                 )
 
         logger.info("underdog_job [debug summary]\n%s", "\n".join(_dbg_lines))
