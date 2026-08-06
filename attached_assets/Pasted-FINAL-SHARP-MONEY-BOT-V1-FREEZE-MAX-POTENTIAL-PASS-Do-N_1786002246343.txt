@@ -1,0 +1,338 @@
+FINAL SHARP MONEY BOT V1 FREEZE + MAX POTENTIAL PASS
+
+Do NOT rewrite the bot.
+Do NOT rebuild frameworks.
+Do NOT change the architecture.
+
+Only fix what is broken and add the listed improvements.
+
+After this pass, FREEZE the core.
+
+Allowed after freeze:
+✅ Bug fixes
+✅ Performance improvements
+✅ New provider integrations
+✅ Model/scoring improvements
+
+Nothing else.
+
+====================================
+
+💰 CREDENTIAL / RESOURCE SAVING RULE
+
+We are limited on credits/API usage.
+
+Do NOT waste credits on:
+- unnecessary codebase scans
+- repeated reads of the same files
+- rewriting working code
+- rebuilding systems that already work
+- investigating already confirmed fixes
+- making changes without confirming the issue exists
+
+Before making changes:
+- Read only the required files/sections.
+- Confirm the bug exists first.
+- Group independent fixes together.
+- Make fixes in efficient batches.
+- Avoid trial-and-error changes that burn credits.
+
+Use parallel investigation when possible.
+
+Goal:
+Maximum fixes and improvements with minimum credit usage.
+
+Do not spend resources fixing things that are already working.
+
+====================================
+
+🔥 PRIORITY #1 — STABILITY / CRASH PREVENTION
+
+Fix all remaining stability issues.
+
+Requirements:
+
+- Prevent memory kills / host restarts.
+- Improve crash forensics.
+- Always capture:
+  - restart reason
+  - last active job
+  - last heartbeat
+  - crash location if available
+
+Verify all background jobs have:
+- record_job_started
+- record_job_run
+- record_job_fail
+
+Health command must always show accurate status.
+
+Fix remaining issues:
+- NoneType/list object errors
+- database locked issues where possible
+- silent background failures
+- missing recovery details
+
+====================================
+
+📊 PRIORITY #2 — SPORT-SPECIFIC RANKING SYSTEM
+
+NO CROSS-SPORT RANKING.
+
+Never compare:
+
+MLB vs CS2 vs Tennis vs DOTA vs NBA
+
+on one leaderboard.
+
+Every sport gets its own category.
+
+Example:
+
+⚾ MLB
+#1 Player A
+#2 Player B
+#3 Player C
+
+🎾 Tennis
+#1 Player D
+#2 Player E
+#3 Player F
+
+🎮 CS2
+#1 Player G
+#2 Player H
+#3 Player I
+
+
+Rank within each sport only.
+
+The goal is more quality picks across the slate, not one sport taking over because it has more data.
+
+====================================
+
+⚖️ PRIORITY #3 — EQUAL BET QUALITY OPPORTUNITY
+
+Prevent large sports from dominating the opportunity pool.
+
+Current example:
+
+MLB: 900 quality candidates
+CS2: 9 quality candidates
+
+This is not balanced.
+
+Create sport-balanced opportunity pools.
+
+Each sport should have the ability to produce:
+
+- S Tier opportunities
+- A Tier opportunities
+- B Tier opportunities
+
+based on available real data.
+
+Do NOT reduce prop scanning.
+
+Prop scanning stays full because more scanning creates more opportunities.
+
+Optimize ranking, filtering, and output instead of reducing scan volume.
+
+====================================
+
+🎯 PICK OUTPUT FIXES
+
+Verify:
+
+/picks
+- always shows OVER / UNDER / PASS
+- no more "Pick: —"
+- recommendations correctly map from database
+
+/slip
+- always assigns best_side
+- no empty recommendations
+- only qualified props included
+
+/alerts
+- never silently fails
+- always returns response
+- Telegram fallback handling works
+
+====================================
+
+🧠 MODEL IMPROVEMENTS
+
+Improve scoring without replacing the model.
+
+Bet Quality should include:
+
+- line movement
+- movement speed
+- historical hit rate
+- consistency
+- stability
+- market quality
+- AI confidence
+- value compared to line
+
+AI confidence must actually affect:
+
+- rankings
+- tiers
+- alerts
+- bet quality
+
+Remove dead/unwired scoring modules.
+
+====================================
+
+📈 MARKET QUALITY / EDGE IMPROVEMENTS
+
+Verify market scoring is balanced.
+
+Do not allow one sport with massive data volume to automatically dominate.
+
+Every sport should have:
+- fair opportunity ranking
+- sport-specific confidence
+- sport-specific quality distribution
+
+====================================
+
+🚫 OLD FRAMEWORK CLEANUP
+
+Confirm nothing from old frameworks is running.
+
+Remove/disable:
+
+- old ranking paths
+- duplicate scoring logic
+- old alert filters
+- unused framework code
+- conflicting engines
+
+Only Sharp Money framework should be active.
+
+====================================
+
+💾 DATABASE / MEMORY PERFORMANCE
+
+Do NOT reduce prop scanning.
+
+Optimize instead:
+
+- cache cleanup
+- memory usage
+- stale data eviction
+- database growth
+
+Add protection for:
+
+- PropLineHistory growth
+- cache size
+- duplicate records
+- memory leaks
+
+Keep valuable history for model improvement.
+
+====================================
+
+📡 PROVIDER PIPELINE EXPANSION
+
+Do not replace Underdog.
+
+Keep:
+
+Primary:
+🐶 Underdog Fantasy
+
+Add confirmation pipelines:
+
+1. Chalkboard or similar prop source
+2. PrizePicks restore
+3. DraftKings
+4. FanDuel
+
+Use providers for:
+
+- line comparison
+- market confirmation
+- confidence improvement
+- better edge detection
+
+====================================
+
+🖥️ VPS PREPARATION
+
+VPS is for deployment and reliability only.
+
+It is NOT a prop source.
+
+Purpose:
+
+- 24/7 uptime
+- no Replit sleeping
+- better stability
+- persistent services
+- reliable monitoring
+
+Move the finished bot, not rebuild it.
+
+====================================
+
+🧪 TESTING REQUIREMENTS
+
+Before freeze:
+
+Run full test suite.
+
+Confirm:
+
+- no failures
+- no syntax errors
+- clean startup
+- all jobs registered
+- Telegram commands working
+
+Test:
+
+/health
+/status
+/picks
+/slip
+/alerts
+/config
+/providers
+/testalert
+
+====================================
+
+FINAL FREEZE RULE
+
+After completion:
+
+Freeze core development.
+
+Only allow:
+
+✅ Bug fixes
+✅ Performance optimization
+✅ Provider additions
+✅ Model/scoring improvements
+
+No rewrites.
+No new frameworks.
+No unnecessary changes.
+
+Goal:
+
+A stable 24/7 Sharp Money Bot that:
+
+- scans the full slate
+- finds more props
+- ranks fairly by sport
+- creates balanced opportunities
+- detects market movement
+- improves over time
+- uses resources efficiently

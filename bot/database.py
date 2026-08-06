@@ -832,13 +832,30 @@ class Database:
             )
         rows = list(result.scalars().all())
 
+        # ── Sport-balanced selection ───────────────────────────────────────────
+        # A flat [:limit] on fetched_at DESC lets high-volume sports (MLB, DOTA)
+        # dominate the entire pool.  Instead, distribute slots evenly: take the
+        # top ceil(limit / n_sports) rows per sport, then fill to limit.
+        # Within each sport, fetched_at DESC order is preserved from the query.
+        from math import ceil
+        from collections import defaultdict as _dd
+        _buckets: dict = _dd(list)
+        for _row in rows:
+            _buckets[_row.sport.upper()].append(_row)
+        _n_sports   = max(len(_buckets), 1)
+        _per_sport  = max(3, ceil(limit / _n_sports))
+        _balanced: list = []
+        for _sport_rows in _buckets.values():
+            _balanced.extend(_sport_rows[:_per_sport])
+        # Re-sort the balanced set by fetched_at DESC so freshest data leads
+        _balanced.sort(key=lambda r: r.fetched_at, reverse=True)
+
         logger.info(
-            "UD picks query returned %d rows: %s",
-            len(rows),
-            [(r.player_name, r.sport, r.stat_type, r.line_value) for r in rows[:5]]
+            "UD picks query: raw=%d  sports=%d  per_sport_cap=%d  balanced=%d  returning=%d",
+            len(rows), _n_sports, _per_sport, len(_balanced), min(len(_balanced), limit),
         )
 
-        return rows[:limit]
+        return _balanced[:limit]
 
     async def get_ud_recommendations_bulk(
         self,
