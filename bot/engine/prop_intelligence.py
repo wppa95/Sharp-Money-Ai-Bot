@@ -235,6 +235,25 @@ SPORT_ADAPTERS: dict[str, SportAdapter] = {
         },
     ),
 
+    # DOTA 2 — OpenDota API (free, no key required).
+    # Actual stat types sourced from _DOTA_FIELD_MAP in providers/esports_stats.py:
+    # kills, assists, deaths (single and multi-map), fantasy points.
+    # HIGH variance: hero pick/counter-pick and series length create wide outcome spread.
+    # Lower sample thresholds vs. NBA/MLB because pro DOTA series are less frequent.
+    "DOTA": SportAdapter(
+        sport             = "DOTA",
+        relevant_stats    = frozenset({
+            "kills", "deaths", "assists", "fantasy points",
+        }),
+        variance_level    = "HIGH",
+        min_samples       = 4,
+        sample_requirements = {"S": 12, "A": 7, "B": 4},
+        risk_rules        = {
+            "cap_tier_below_n": ("B", 4),
+            "high_variance_cap": "A",  # hero variance keeps S-tier very rare
+        },
+    ),
+
     "DEFAULT": SportAdapter(
         sport             = "DEFAULT",
         relevant_stats    = frozenset(),

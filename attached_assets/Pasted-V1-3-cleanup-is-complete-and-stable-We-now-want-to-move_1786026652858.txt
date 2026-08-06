@@ -1,0 +1,163 @@
+V1.3 cleanup is complete and stable. We now want to move into the next controlled improvement phase.
+
+IMPORTANT:
+Do not rewrite the bot.
+Do not redesign architecture.
+Do not change working systems.
+
+The goal is to improve information quality and multi-sport coverage using the existing framework.
+
+⸻
+
+PART 1 — Improve multi-sport actionable picks
+
+Current observation:
+
+* MLB is currently producing most 🎯 ACTIONABLE BET PICKS.
+* Other sports are producing market movement but fewer qualified picks.
+
+Goal:
+The bot should not become MLB-only.
+
+All supported sports should have the opportunity to produce actionable picks when a real edge exists.
+
+Analyze the funnel:
+
+raw → parsed → movement detected → scored → gated → actionable
+
+Review:
+
+* MLB
+* NBA/WNBA
+* NFL
+* Soccer
+* CS
+* COD
+* DOTA
+* Other supported sports
+
+Determine where sports are dropping off.
+
+Examples:
+
+If movement_detected is low:
+
+* Data quality issue
+* Not enough market activity
+
+If movement_detected is high but actionable is low:
+
+* Scoring/gating issue
+
+If historical data is weak:
+
+* Confidence calculation issue
+
+Do not lower standards just to create more picks.
+
+Before changing anything:
+Report findings.
+
+If a tuning change is needed:
+
+* Prefer sport-specific adjustments
+* Keep MLB behavior unchanged
+* Preserve current alert quality
+
+⸻
+
+PART 2 — Expand free information sources/providers
+
+The current goal is to strengthen the information network.
+
+We want more free and accessible sources that provide:
+
+* Player props
+* Pick’em lines
+* Fantasy projections
+* Public market information
+* Match/player statistics
+* Line movement information
+
+Do not add paid APIs unless specifically approved.
+
+Research and evaluate free/public sources first.
+
+Priority:
+
+1. Sleeper Picks
+2. PrizePicks (only if a reliable accessible method exists)
+3. Betr
+4. ParlayPlay
+5. Chalkboard
+6. Dabble
+7. Other free pick’em/fantasy sources
+
+For each source evaluate:
+
+* Is data accessible?
+* Is it reliable?
+* Does it update frequently?
+* Does it provide useful player/market information?
+* Can it feed the existing provider-agnostic PropLineHistory system?
+
+⸻
+
+Provider expansion rules
+
+Do NOT create separate systems.
+
+Keep:
+
+Provider connector
+↓
+Normalize data
+↓
+PropLineHistory
+↓
+Existing scoring/ranking
+↓
+Existing alerts
+
+Every new provider should include diagnostics:
+
+raw → parsed → stored → scored → actionable
+
+Run new providers in shadow mode first:
+
+* Collect data
+* Compare with Underdog
+* Measure overlap
+* Track movement timing
+* Confirm quality
+
+Do not allow new providers to affect Telegram alerts until validated.
+
+⸻
+
+Final goal
+
+Build a stronger information network:
+
+More sources
++
+More sports coverage
++
+Same scoring engine
++
+Same alert system
+
+The bot should:
+
+Collect everything useful
+Analyze everything
+Send only 🎯 ACTIONABLE BET PICKS
+
+After research and any targeted changes:
+
+* Run full tests
+* Verify Telegram behavior
+* Verify startup health
+* Report changes
+
+Keep changes controlled. No rewrite.
