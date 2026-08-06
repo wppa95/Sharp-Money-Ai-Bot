@@ -1,0 +1,304 @@
+Sharp Money Bot — Final Stabilization + Roadmap Pass
+
+IMPORTANT:
+Do NOT rewrite the bot.
+Do NOT rebuild architecture.
+Do NOT remove working systems.
+Inspect the current code first, identify confirmed issues, apply targeted fixes only, run tests, restart, verify, then FREEZE the build.
+
+Priority #1 right now:
+BOT STABILITY / CRASH PREVENTION
+
+The bot has been experiencing:
+
+* Memory Kill / Host Restart events
+* Unexpected exits
+* Underdog job failures
+* SQLite lock issues
+* Missing crash details
+
+Audit and fix all stability problems:
+
+* Find all uncaught exceptions in background jobs.
+* Make sure every scheduled job has proper health tracking:
+    * record_job_started
+    * record_job_run
+    * record_job_fail
+* Improve crash forensics so we know the exact failure source.
+* Prevent silent failures.
+* Make startup failures report clearly without killing the process unnecessarily.
+* Investigate memory usage and leaks.
+* Verify no duplicate bot instances can create conflicts.
+* Keep the bot running continuously.
+
+PRIORITY #2:
+REMOVE ALL OLD FRAMEWORK / DEAD CODE DEPENDENCIES
+
+Verify nothing is still running from the old framework.
+
+Audit:
+
+* old PrizePicks-first logic
+* old ranking logic
+* old alert paths
+* old unused connectors/jobs
+* old task items that are no longer relevant
+
+The current framework should be:
+
+Primary:
+🐶 Underdog Fantasy player prop monitoring
+
+Secondary/reference:
+🟣 PrizePicks
+🎰 DraftKings
+🦊 FanDuel
+
+Do not allow old systems to interfere with current Underdog pipeline.
+
+Close/remove task references that describe bugs that do not exist:
+
+* orphan engine.py issue
+* duplicate engine package issue
+* any outdated task entries already verified false
+
+PRIORITY #3:
+SPORT RANKING SYSTEM (VERY IMPORTANT)
+
+NEVER rank different sports against each other.
+
+Bad:
+MLB score 90 vs Tennis score 85 vs CS2 score 80
+
+Good:
+MLB:
+#1
+#2
+#3
+
+NBA:
+#1
+#2
+#3
+
+Tennis:
+#1
+#2
+#3
+
+CS/DOTA:
+#1
+#2
+#3
+
+Every sport must have its own ranking category.
+
+Goal:
+Give more opportunities across the slate instead of allowing one sport to dominate the entire leaderboard.
+
+Apply this rule everywhere:
+
+* /picks
+* /slip
+* alerts
+* standing opportunities
+* live opportunity queues
+* AI rankings
+* debug summaries
+
+PRIORITY #4:
+FIX REMAINING PROP ISSUES
+
+Confirmed issues:
+
+1. /picks direction display
+    Problem:
+    Shows:
+    Pick: —
+
+Fix:
+Always display:
+OVER
+UNDER
+PASS
+
+Use PropLineHistory as the reliable source.
+Do not depend only on fresh UnderdogSnapshotRecord lookups.
+
+2. /slip direction display
+    Problem:
+    Slip legs show —
+
+Fix:
+Make sure every qualifying leg receives the correct:
+OVER / UNDER
+
+3. /alerts failures
+    Problem:
+    Silent failures.
+
+Fix:
+Upgrade logging visibility.
+Add safe Telegram fallback response.
+
+4. Underdog decision pipeline
+
+Current error:
+‘list’ object has no attribute ‘has_real_data’
+
+File:
+engine/ud_bet_decision.py
+
+Investigate:
+make_ud_bet_decision()
+
+Expected:
+hit_rates should always be the correct object type.
+
+Fix:
+Add validation before accessing:
+hit_rates.has_real_data
+
+Prevent list/object mismatch.
+
+5. SQLite database locking
+
+Continue improving:
+
+* WAL mode verification
+* Reduce simultaneous writes
+* Safe retries
+* Prevent background jobs fighting over SQLite
+
+6. Remaining batch write issues
+
+Improve:
+log_prop_candidate_batch
+
+Prevent one bad row from losing an entire batch.
+
+PIPELINE EXPANSION
+
+After stability fixes:
+
+Add another Underdog data pipeline source.
+
+Possible:
+
+* Chalkboard
+* Other prop analytics sources
+
+Goal:
+More confirmation data for Underdog props.
+
+Do NOT replace Underdog.
+Use additional sources as confirmation layers.
+
+PROVIDER ROADMAP
+
+Work toward restoring:
+
+PrizePicks:
+
+* line importing
+* prop comparison
+* edge detection
+
+DraftKings:
+
+* connector verification
+* odds comparison
+
+FanDuel:
+
+* connector verification
+* odds comparison
+
+Keep these as reference providers.
+
+Current priority:
+Underdog first.
+
+CONFIDENCE / AI SYSTEM
+
+Audit:
+projection_confidence.py
+
+Current issue:
+Projection confidence exists but may not be connected.
+
+Do not remove it.
+
+Determine if it should feed:
+
+* confidence score
+* tier
+* stars
+* ranking
+
+Only activate if it improves accuracy.
+
+PLAYER PROP MARKET RULES
+
+Maintain:
+
+S/A/B tiers:
+S = strongest opportunities
+A = strong
+B = acceptable
+
+Avoid:
+
+* correlated risk
+* same player duplicates
+* same-team unnecessary exposure
+
+Maintain:
+
+* L5
+* L10
+* L20
+* L30
+* season evidence
+
+Continue tracking:
+
+* line movement
+* consistency
+* market quality
+* confidence
+* hit rates
+
+TESTING
+
+Before finishing:
+
+Run full test suite.
+
+Confirm:
+
+* zero failures
+* bot starts cleanly
+* Telegram commands respond
+* health command works
+* picks command works
+* slip command works
+* alerts work
+* Underdog monitor runs
+
+FINAL REQUIREMENT:
+
+After fixes:
+FREEZE THE BUILD.
+
+No feature rewrites.
+Only:
+
+* bug fixes
+* stability improvements
+* performance improvements
+* provider additions
+* accuracy improvements
+
+Current goal:
+A stable Sharp Money Bot that finds quality Underdog opportunities across multiple sports without crashes and without cross-sport ranking contamination.

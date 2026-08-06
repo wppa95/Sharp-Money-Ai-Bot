@@ -442,6 +442,9 @@ async def _grade_opportunities_job(context) -> None:
         if _ht:
             _ht.record_job_fail("_grade_opportunities_job", "db_not_ready")
         return
+    _ht_start = get_health_tracker()
+    if _ht_start:
+        _ht_start.record_job_started("_grade_opportunities_job")
     try:
         pending = await db.get_pending_opportunities(cutoff_hours=4)
         if not pending:
@@ -494,6 +497,7 @@ async def _heartbeat_job(context) -> None:
     ht = get_health_tracker()
     if ht is None:
         return
+    ht.record_job_started("heartbeat_job")
     try:
         ht.update_heartbeat()
         ht.record_job_run("heartbeat_job")
@@ -795,6 +799,10 @@ async def _clv_harvest_job(context) -> None:
             _ht.record_job_run("_clv_harvest_job")
         return
 
+    _ht_start = get_health_tracker()
+    if _ht_start:
+        _ht_start.record_job_started("_clv_harvest_job")
+
     try:
         from engine.clv import compute_clv
         from database import CLVRecord
@@ -923,6 +931,10 @@ async def _clv_seed_job(context) -> None:
             _ht.record_job_run("_clv_seed_job")
         return
 
+    _ht_start = get_health_tracker()
+    if _ht_start:
+        _ht_start.record_job_started("_clv_seed_job")
+
     max_attempts = 3
     last_exc: Exception | None = None
     for attempt in range(1, max_attempts + 1):
@@ -965,6 +977,9 @@ async def _prune_prop_history_job(context) -> None:
     db = context.bot_data.get("db")
     if not db:
         return
+    _ht_start = get_health_tracker()
+    if _ht_start:
+        _ht_start.record_job_started("_prune_prop_history_job")
     try:
         deleted = await db.prune_prop_line_history(keep_days=14)
         if deleted:
@@ -1008,6 +1023,9 @@ async def _budget_check_job(context) -> None:
             _ht.record_job_run("_budget_check_job")
         return
 
+    _ht_start = get_health_tracker()
+    if _ht_start:
+        _ht_start.record_job_started("_budget_check_job")
     try:
         for provider, stats in _tracker.get_all_stats().items():
             if stats.month_budget <= 0:
@@ -1132,6 +1150,9 @@ async def _season_check_job(context) -> None:
         if _ht:
             _ht.record_job_run("_season_check_job")
         return
+    _ht_start = get_health_tracker()
+    if _ht_start:
+        _ht_start.record_job_started("_season_check_job")
     try:
         await _season_checker.refresh()
         _ht = get_health_tracker()
@@ -1164,6 +1185,8 @@ async def _pregame_watch_job(context) -> None:
         return
 
     _ht = get_health_tracker()
+    if _ht:
+        _ht.record_job_started("_pregame_watch_job")
     try:
         bot      = context.application.bot
         chat_ids = list(config.allowed_user_ids)

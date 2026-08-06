@@ -2545,27 +2545,41 @@ class Database:
         """
         if not candidates:
             return 0
-        async with self.session() as s:
-            for c in candidates:
-                row = PropCandidateLog(
-                    scan_ts              = c.get("scan_ts") or datetime.utcnow(),
-                    player_name          = c.get("player_name", ""),
-                    team                 = c.get("team", ""),
-                    sport                = c.get("sport", ""),
-                    stat_type            = c.get("stat_type", ""),
-                    line_value           = float(c.get("line_value") or 0.0),
-                    provider             = c.get("provider", "Underdog"),
-                    score_total          = c.get("score_total"),
-                    score_tier           = c.get("score_tier"),
-                    confidence           = c.get("confidence"),
-                    gate_decision        = c.get("gate_decision", "REJECTED"),
-                    rejection_reason     = c.get("rejection_reason"),
-                    reason_codes         = c.get("reason_codes"),
-                    snapshot_external_id = c.get("snapshot_external_id"),
+        inserted = 0
+        failed   = 0
+        for c in candidates:
+            try:
+                async with self.session() as s:
+                    row = PropCandidateLog(
+                        scan_ts              = c.get("scan_ts") or datetime.utcnow(),
+                        player_name          = c.get("player_name", ""),
+                        team                 = c.get("team", ""),
+                        sport                = c.get("sport", ""),
+                        stat_type            = c.get("stat_type", ""),
+                        line_value           = float(c.get("line_value") or 0.0),
+                        provider             = c.get("provider", "Underdog"),
+                        score_total          = c.get("score_total"),
+                        score_tier           = c.get("score_tier"),
+                        confidence           = c.get("confidence"),
+                        gate_decision        = c.get("gate_decision", "REJECTED"),
+                        rejection_reason     = c.get("rejection_reason"),
+                        reason_codes         = c.get("reason_codes"),
+                        snapshot_external_id = c.get("snapshot_external_id"),
+                    )
+                    s.add(row)
+                    await s.commit()
+                    inserted += 1
+            except Exception as _row_exc:
+                logger.warning(
+                    "log_prop_candidate_batch: skipping bad row (%s/%s): %s",
+                    c.get("player_name", "?"), c.get("stat_type", "?"), _row_exc,
                 )
-                s.add(row)
-            await s.commit()
-        return len(candidates)
+                failed += 1
+        if failed:
+            logger.warning(
+                "log_prop_candidate_batch: %d/%d rows failed", failed, inserted + failed
+            )
+        return inserted
 
     async def get_funnel_summary(self, since_hours: int = 24) -> dict:
         """

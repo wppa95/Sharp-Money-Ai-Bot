@@ -253,6 +253,10 @@ def make_ud_bet_decision(
     )
 
     # ── Gate 1: real game data required ──────────────────────────────────────
+    # Guard against callers passing a list or other wrong type (e.g. from
+    # cold-start hit_rates=[] path) — treat any non-PlayerHitRates value as None.
+    if not hasattr(hit_rates, "has_real_data"):
+        hit_rates = None
     if hit_rates is None or not hit_rates.has_real_data:
         return UDBetDecision.make_pass(
             reason             = (

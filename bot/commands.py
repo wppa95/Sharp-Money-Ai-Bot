@@ -1388,12 +1388,29 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         "PASS":  "PASS ⚪",
     }
 
+    _SPORT_ICON: dict[str, str] = {
+        "MLB":    "⚾", "WNBA": "🏀", "NBA":    "🏀",
+        "NFL":    "🏈", "DOTA": "🎮", "CS":     "🖥️", "TENNIS": "🎾",
+    }
+
     header = f"🟣 <b>Player Prop Picks — {today}</b>"
     if sport_filter:
         header += f"  <i>({sport_filter})</i>"
     out: list[str] = [header, ""]
 
-    for rank, (plh, comp) in enumerate(picks, 1):
+    # ── Per-sport grouping ─────────────────────────────────────────────────────
+    # Preserve the within-sport confidence order from the earlier sort, but never
+    # rank different sports against each other.  Group into {sport: [(idx, plh, comp)]}
+    # ordered by first occurrence in the sorted picks list.
+    from collections import OrderedDict as _OD
+    _sport_groups: _OD = _OD()
+    for _flat_idx, (plh, comp) in enumerate(picks):
+        _key = plh.sport.upper()
+        if _key not in _sport_groups:
+            _sport_groups[_key] = []
+        _sport_groups[_key].append((_flat_idx, plh, comp))
+
+    def _render_pick_entry(rank: int, flat_idx: int, plh, comp) -> str:
         conf      = comp.proxy_match_confidence if comp else 0
         tier      = _tier_from_conf(conf)
         tier_icon = _TIER_EMOJI.get(tier, "⚪")
@@ -1406,7 +1423,6 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         # Bet direction — primary: synced column on PropLineHistory (always fresh)
         # Secondary: live UnderdogSnapshotRecord via _rec_map (handles same-cycle updates)
         bet_rec  = getattr(plh, "bet_recommendation", None)
-        bet_conf = getattr(plh, "bet_confidence", None)
         rec_key  = (plh.player_name, plh.sport, plh.stat_type)
         _live_rec, _live_conf = _rec_map.get(rec_key, (None, None))
         if _live_rec is None and _rec_map:
@@ -1418,7 +1434,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                     break
         # Prefer live snapshot if available; fall back to synced column
         if _live_rec is not None:
-            bet_rec, bet_conf = _live_rec, _live_conf
+            bet_rec = _live_rec
         if bet_rec is None:
             logger.debug(
                 "cmd_picks: no recommendation found for %s/%s — showing PASS",
@@ -1455,7 +1471,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         ]
 
         # ── Evidence block ────────────────────────────────────────────────────
-        hr, _opp = _hit_rates[rank - 1]
+        hr, _opp = _hit_rates[flat_idx]
         has_evidence = hr is not None and getattr(hr, "has_real_data", False)
 
         if has_evidence:
@@ -1489,10 +1505,9 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 )
 
         # ── Alternate lines (if Underdog offers multiple) ─────────────────────
-        alt = _alt_lines[rank - 1]
+        alt = _alt_lines[flat_idx]
         # Only show when there are ≥2 distinct lines
         if len(alt) >= 2:
-            alt_str = "  ".join(_ll(v).split("/")[0].split(" ")[0] + f" <code>{v:.1f}</code>" for v in alt)
             entry_lines.append("")
             entry_lines.append("📊 <b>Available Underdog Lines:</b>")
             alt_labeled = "  ".join(
@@ -1501,7 +1516,15 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             entry_lines.append(f"  {alt_labeled}")
             entry_lines.append(f"  Current Selected: 🐶 <code>{ud_v:.1f}</code>")
 
-        out.append("\n".join(entry_lines))
+        return "\n".join(entry_lines)
+
+    # Emit each sport group with its own header and per-sport rank numbers
+    for _sport_key, _group in _sport_groups.items():
+        _sport_icon = _SPORT_ICON.get(_sport_key, "🔸")
+        out.append(f"{_sport_icon} <b>{_sport_key}</b>")
+        for _sport_rank, (_flat_idx, plh, comp) in enumerate(_group, 1):
+            out.append(_render_pick_entry(_sport_rank, _flat_idx, plh, comp))
+        out.append("")  # blank line between sport sections
 
     if len(picks) >= limit and not sport_filter:
         out.append(f"\n<i>Showing top {limit}. Use /picks [sport] to filter.</i>")
