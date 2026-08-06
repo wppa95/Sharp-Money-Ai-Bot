@@ -124,9 +124,12 @@ class SoccerStatsProvider:
         # (competition_code, season_year) → list of match dicts
         self._match_cache: dict[tuple[str, int], list[dict]] = {}
 
-        # player_norm → (competition_code, team_name) | None
-        # None means not found in any competition.
-        self._player_info: dict[str, Optional[tuple[str, str]]] = {}
+        # player_norm → list of (competition_code, team_name) found across all leagues.
+        # A player who transferred mid-season may appear in MORE than one league;
+        # we collect all occurrences and merge results so history is preserved.
+        # Negative results are NOT cached: a player invisible in the current event
+        # data may gain events later as the season progresses.
+        self._player_info: dict[str, list[tuple[str, str]]] = {}
 
     # ── Public entry point ────────────────────────────────────────────────────
 
@@ -149,8 +152,8 @@ class SoccerStatsProvider:
         try:
             season      = _current_season()
             player_norm = _normalize(player_name)
-            info        = await self._find_player_info(player_norm, season)
-            if info is None:
+            placements  = await self._find_player_info(player_norm, season)
+            if not placements:
                 logger.debug(
                     "Soccer: %r not found in any competition — "
                     "no goal/assist/booking events available",
@@ -158,11 +161,21 @@ class SoccerStatsProvider:
                 )
                 return []
 
-            comp_code, team_name = info
-            matches = await self._get_competition_matches(comp_code, season)
-            return self._extract_team_results(
-                player_name, player_norm, stat_lower, team_name, matches
-            )
+            # Merge results from every league the player has appeared in.
+            # A player who transferred mid-season (e.g. EPL → Bundesliga) will
+            # have entries in multiple competitions; merging preserves full history.
+            all_results: list[RawGameResult] = []
+            seen_dates: set[str] = set()
+            for comp_code, team_name in placements:
+                matches = await self._get_competition_matches(comp_code, season)
+                leg_results = self._extract_team_results(
+                    player_name, player_norm, stat_lower, team_name, matches
+                )
+                for r in leg_results:
+                    if r.game_date not in seen_dates:
+                        seen_dates.add(r.game_date)
+                        all_results.append(r)
+            return sorted(all_results, key=lambda r: r.game_date)
 
         except Exception as exc:  # noqa: BLE001
             logger.warning(
@@ -174,31 +187,36 @@ class SoccerStatsProvider:
 
     async def _find_player_info(
         self, player_norm: str, season: int
-    ) -> Optional[tuple[str, str]]:
+    ) -> list[tuple[str, str]]:
         """
-        Return (competition_code, team_name) for the player, or None.
+        Return all (competition_code, team_name) pairs for the player.
 
-        Searches competitions in _COMPETITION_CODES order until the player
-        appears in event data (goals or bookings).  Result is cached for the
-        process lifetime.
+        Searches ALL competitions in _COMPETITION_CODES so that a player who
+        transferred mid-season (e.g. EPL → Bundesliga) is found in both
+        leagues and their full history is preserved.
+
+        Positive results are cached.  Negative results (player has no events in
+        any league yet) are NOT cached so subsequent calls can pick up new data
+        as the season progresses.
         """
         if player_norm in self._player_info:
             return self._player_info[player_norm]
 
+        found: list[tuple[str, str]] = []
         for code in _COMPETITION_CODES:
             matches   = await self._get_competition_matches(code, season)
             team_name = self._find_player_team(player_norm, matches)
             if team_name:
-                info = (code, team_name)
-                self._player_info[player_norm] = info
+                found.append((code, team_name))
                 logger.debug(
                     "Soccer: %r → team %r in competition %s (season %d)",
                     player_norm, team_name, code, season,
                 )
-                return info
 
-        self._player_info[player_norm] = None
-        return None
+        if found:
+            self._player_info[player_norm] = found
+        # Do NOT cache empty results — player may gain events later.
+        return found
 
     @staticmethod
     def _find_player_team(player_norm: str, matches: list[dict]) -> Optional[str]:

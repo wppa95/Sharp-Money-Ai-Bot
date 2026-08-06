@@ -389,14 +389,13 @@ async def _send_startup_notification(bot, chat_ids: list[int], ht) -> None:
             "<i>Ready. Props will be analysed as they are detected.</i>",
         ]
     else:
-        # clean restart / manual restart
+        # clean restart / manual restart — simple notice, no noise
         parts = [
             "✅ <b>Sharp Money Bot Online</b>",
             "",
-            "<b>Status:</b>  Underdog monitoring active",
-            f"<b>Startup:</b>  #{restart_num}",
+            "<b>Status:</b>  Monitoring active",
             "",
-            "<i>S/A/B tier recommendations will be sent as props are detected.</i>",
+            "<i>Props will be analysed as they are detected.</i>",
         ]
 
     text = "\n".join(parts)

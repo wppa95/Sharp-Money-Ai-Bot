@@ -1,6 +1,6 @@
 ---
 name: Soccer + NHL stat coverage
-description: How soccer and NHL player stats are fetched and which APIs are accessible from this Replit environment.
+description: How soccer and NHL player stats are fetched, which APIs are accessible, and soccer transfer-handling behavior.
 ---
 
 # Soccer + NHL stat coverage
@@ -35,12 +35,25 @@ infra where ESPN is unblocked will work fine with the existing ESPN code paths.
 **Season ID format:** `YYYYYYYY` (e.g. `20252026`). Computed dynamically from UTC date.
 Month ≥ 10 → `year → year+1`; Month < 10 → `year-1 → year`.
 
-## Soccer — Code wired, disabled in default config
+## Soccer — SoccerStatsProvider (football-data.org v4)
 
-ESPN soccer multi-league cascade is implemented in `player_stats.py` (`_fetch_espn_soccer`,
-`_soccer_athlete_id`, `_SOCCER_LEAGUE_PRIORITY`). ESPN is blocked here, so SOCCER is
-**removed from `UD_ALERT_SPORTS` default**. Add it back manually (`UD_ALERT_SPORTS=...,SOCCER`)
-when deploying where ESPN is accessible. The dispatch code is complete and correct.
+**Provider:** `bot/providers/soccer_stats.py` — `SoccerStatsProvider`
+
+**NOT in `UD_ALERT_SPORTS` default** because the free API tier has no lineup/appearance
+data, so DNPs (games the player missed) cannot be distinguished from zero-stat games.
+Enable manually: `UD_ALERT_SPORTS=...,SOCCER` + `FOOTBALL_DATA_API_KEY`.
+
+**Transfer handling:** `_find_player_info` now searches ALL supported competitions
+(PL, PD, BL1, SA, FL1), not just the first one where the player is found. A player who
+transferred mid-season (e.g. EPL → Bundesliga) appears in both leagues; `fetch_results`
+merges results from all leagues, de-duplicating by game_date, preserving full history.
+
+**Cache behaviour:** Positive results (list of `(competition, team)` tuples) are cached
+for the process lifetime. Negative results are NOT cached so the next call re-searches
+as new event data arrives during the season.
+
+**Stats available:** goals, assists, goals + assists (g+a), yellow cards, red cards.
+Source tag: `"football_data_org"`.
 
 ## Stat normalization (underdog_provider.py)
 

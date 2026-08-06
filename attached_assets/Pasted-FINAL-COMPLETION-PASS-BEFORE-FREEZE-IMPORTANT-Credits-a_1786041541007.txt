@@ -1,0 +1,269 @@
+FINAL COMPLETION PASS BEFORE FREEZE
+
+IMPORTANT:
+
+* Credits are limited. Do not burn credits on unnecessary investigation, repeated analysis, or unrelated improvements.
+* Make only targeted changes that directly complete this list.
+* DO NOT rewrite the bot.
+* DO NOT refactor large working sections.
+* DO NOT redesign architecture.
+* DO NOT replace working systems.
+* Preserve the existing pipeline and scoring engine.
+
+This is a cleanup, integration, and completion pass.
+
+==================================================
+PRIORITY #1 — COMPLETE SLEEPER INTEGRATION
+
+Sleeper is the highest priority.
+
+Sleeper is NOT a live market provider.
+
+Sleeper is a historical stats enrichment layer.
+
+Requirements:
+
+* Keep Underdog as the primary live prop provider.
+* Sleeper should only enrich existing Underdog props that already have a betting line.
+* Never create standalone Sleeper props.
+* Never send separate Sleeper Telegram alerts.
+* Never create a separate Sleeper scoring pipeline.
+
+Final flow:
+
+Underdog prop
+→ historical data enrichment (Sleeper + other stat providers)
+→ hit-rate calculation
+→ scoring
+→ actionable bet pick
+
+Only one final unified output.
+
+Add Sleeper visibility:
+
+📡 Market Providers
+
+* Underdog
+
+📊 Stat Providers
+
+* Sleeper
+* Other active historical providers
+
+Show:
+
+* active status
+* last sync
+* last contribution
+* errors only if currently active
+
+Add Sleeper visibility to:
+
+* /status
+* /health
+* /dashboard
+
+Verify Sleeper is actually contributing data, not just loaded.
+
+==================================================
+TASK #101 COMPLETION
+
+Finish Task #101 completely.
+
+No architecture changes.
+
+⸻
+
+NHL
+
+Complete NHL integration.
+
+Verify:
+
+NHL props route through:
+
+upsert_player_result
+→ compute_hit_rates
+→ scoring pipeline
+
+Use the same confidence gates.
+
+Do not lower thresholds.
+
+Only show NHL picks after real historical data exists.
+
+⸻
+
+SOCCER
+
+Complete Soccer coverage where reliable.
+
+Requirements:
+
+* Soccer must not silently miss players.
+* Prevent missed Soccer alerts when players move leagues mid-season.
+
+Example:
+A player transfers from:
+EPL → Bundesliga
+MLS → Europe
+etc.
+
+The provider must handle league changes by:
+
+* searching supported leagues
+* updating player/team mappings
+* preserving historical data
+
+Do not lose hit-rate history after transfers.
+
+Only score Soccer props when real game history exists.
+
+⸻
+
+CS2
+
+Add CS2 stat handling.
+
+When PandaScore API key is configured:
+
+* CS2 stats should flow into the existing hit-rate pipeline.
+* Picks should not silently skip because stats are unavailable.
+* If no API key exists, fail gracefully.
+
+No separate CS alert system.
+
+==================================================
+PROVIDER + COMMAND CLEANUP
+
+Clean all Telegram command outputs.
+
+⸻
+
+/status
+/health
+/dashboard
+
+Separate:
+
+📡 Market Providers
+
+and
+
+📊 Stat Providers
+
+Remove inactive providers from normal outputs.
+
+Do not display:
+
+* disabled DraftKings
+* disabled FanDuel
+
+as active providers.
+
+Keep historical/debug information internally.
+
+⸻
+
+HEALTH CLEANUP
+
+Current health output contains old resolved failures.
+
+Example:
+Old errors from hours ago appearing as active.
+
+Fix:
+
+Show:
+
+🚨 Active Issues
+
+(current problems only)
+
+📚 Resolved Issues
+
+(history stored internally)
+
+Do not remove debugging data.
+Just stop cluttering the main health view.
+
+⸻
+
+RESTART ALERT CLEANUP
+
+Restart messages are too noisy.
+
+Keep crash/recovery tracking internally.
+
+Only send restart alerts when:
+
+* unexpected crash
+* recovery required
+* actual outage
+
+Normal startup should simply show:
+
+✅ Bot Online
+Status: Monitoring active
+
+==================================================
+ACTIONABLE PICK SCORING UPGRADE
+
+ONLY AFTER ALL ABOVE IS COMPLETE.
+
+Improve confidence scoring using:
+
+* L5
+* L10
+* L20
+* L30
+* H2H (when sufficient sample size exists)
+
+These should influence actionable picks.
+
+Do not only rely on L5.
+
+Do not lower confidence gates.
+
+Document weighting in code comments.
+
+==================================================
+VERIFICATION
+
+Run full test suite.
+
+Confirm clean restart.
+
+Verify:
+
+/status
+/health
+/dashboard
+/alerts
+/picks
+
+Confirm:
+
+✅ Sleeper visible and contributing
+✅ Underdog remains primary market source
+✅ No duplicate Sleeper/Underdog notifications
+✅ NHL data improves as history accumulates
+✅ Soccer data improves as history accumulates
+✅ CS2 works when PandaScore key is set
+✅ Historical issues are stored but not cluttering health
+✅ No regressions
+
+After completion:
+
+FREEZE BUILD.
+
+After freeze only allow:
+
+* bug fixes
+* provider improvements
+* performance improvements
+* data quality improvements
+
+No major rewrites.
+No unnecessary architecture changes.
+No unnecessary credit usage.

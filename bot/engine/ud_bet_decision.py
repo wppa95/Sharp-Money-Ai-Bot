@@ -453,7 +453,9 @@ def _compute_confidence(
     tier: str,
     primary: "WindowStats",
 ) -> int:
-    # Base: scale deviation from 0.5 → max 70 pts
+    # Base: scale primary window deviation from 0.5 → max 70 pts.
+    # The primary window (smallest with ≥ _MIN_GAMES_PRIMARY games) is the
+    # most recent evidence and remains the anchor for the base calculation.
     dev  = abs(primary.hit_rate - 0.5)
     base = min(70, int(dev * 180))
 
@@ -464,13 +466,48 @@ def _compute_confidence(
     # Sample size: +1 per 4 games in primary, cap 10
     sample_bonus = min(10, primary.games // 4)
 
-    # Window agreement: +3 per agreeing window (≥5 games), cap 12
+    # ── Multi-window weighted agreement bonus ─────────────────────────────────
+    # All sufficient windows (L5 / L10 / L20 / L30 / season) vote on direction.
+    # Weights reflect recency: more recent windows carry more signal.
+    #
+    #   L5  → weight 1.50  (most recent, highest signal)
+    #   L10 → weight 1.20
+    #   L20 → weight 1.00
+    #   L30 → weight 0.80
+    #   season (>35 games) → weight 0.60  (large sample but noisy due to line drift)
+    #
+    # A window agrees when its hit rate supports the chosen direction.
+    # The weighted-agreement score replaces the flat +3-per-window approach,
+    # giving L10/L20/L30 proportionally meaningful influence without reducing
+    # the primary-anchored base score.
+    _WIN_WT: dict[str, float] = {"l5": 1.50, "l10": 1.20, "l20": 1.00, "l30": 0.80}
     windows = _all_sufficient_windows(hit_rates)
-    if direction == "OVER":
-        agreeing = sum(1 for w in windows if w.hit_rate >= 0.55)
+    total_wt    = 0.0
+    agreeing_wt = 0.0
+    for w in windows:
+        g = w.games
+        if g <= 7:
+            wt = 1.50
+        elif g <= 13:
+            wt = 1.20
+        elif g <= 25:
+            wt = 1.00
+        elif g <= 35:
+            wt = 0.80
+        else:
+            wt = 0.60
+        total_wt += wt
+        if direction == "OVER" and w.hit_rate >= 0.55:
+            agreeing_wt += wt
+        elif direction == "UNDER" and w.hit_rate <= 0.45:
+            agreeing_wt += wt
+
+    # Scale weighted agreement to a 0–12 bonus (same cap as old flat version)
+    if total_wt > 0:
+        agreement_ratio  = agreeing_wt / total_wt          # 0.0 → 1.0
+        agreement_bonus  = min(12, int(agreement_ratio * 12))
     else:
-        agreeing = sum(1 for w in windows if w.hit_rate <= 0.45)
-    agreement_bonus = min(12, agreeing * 3)
+        agreement_bonus  = 0
 
     # H2H bonus: +3 when H2H confirms direction
     h2h_bonus = 0

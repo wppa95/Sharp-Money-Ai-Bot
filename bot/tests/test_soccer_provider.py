@@ -110,7 +110,9 @@ def _inject_player(
     matches: Optional[list] = None,
 ) -> None:
     """Pre-cache player info and competition matches for unit testing."""
-    provider._player_info[player_norm] = (competition, team)
+    # _player_info now stores a list of (competition, team) tuples to support
+    # mid-season transfers where a player appears in multiple leagues.
+    provider._player_info[player_norm] = [(competition, team)]
     if matches is not None:
         provider._match_cache[(competition, _current_season())] = matches
 
@@ -483,8 +485,11 @@ class TestMatchFiltering:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestCompetitionCascade:
-    def test_found_in_pl_stops_search(self):
-        """Player in PL: only PL is searched."""
+    def test_all_leagues_searched_for_transfer_support(self):
+        """
+        All competitions are searched so a player who transferred mid-season
+        (e.g. EPL → Bundesliga) is found in both leagues and full history kept.
+        """
         provider   = _make_provider()
         fetch_calls: list[str] = []
 
@@ -498,8 +503,9 @@ class TestCompetitionCascade:
                           side_effect=mock_get_competition_matches):
             run(provider.fetch_results("Harry Kane", "SOCCER", "goals"))
 
+        # PL searched first; all other leagues also searched to catch transfers.
         assert fetch_calls[0] == "PL"
-        assert "BL1" not in fetch_calls
+        assert set(fetch_calls) == {"PL", "PD", "BL1", "SA", "FL1"}
 
     def test_found_in_third_competition(self):
         """If player is only in BL1, both PL and PD are searched first."""

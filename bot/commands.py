@@ -245,9 +245,9 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 # contain angle-brackets (e.g. "<class 'X'>") which break HTML.
                 lines.append(f"      ↳ {_html.escape(str(last_err)[:100])}")
 
-        # Provider health
+        # ── Market provider health (live prop sources) ────────────────────────
         lines.append("")
-        lines.append("<b>📡 Providers</b>")
+        lines.append("<b>📡 Market Providers</b>")
         for provider in ("Underdog",):
             info = ht.get_provider_info(provider)
             if info:
@@ -263,6 +263,31 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     lines.append(f"      ↳ {_html.escape(str(last_err_msg)[:100])}")
             else:
                 lines.append(f"  ⚪ <b>{_html.escape(provider)}</b>  ·  not yet fetched")
+
+        # ── Stat provider health (historical enrichment) ──────────────────────
+        lines.append("")
+        lines.append("<b>📊 Stat Providers</b>")
+        try:
+            from config import config as _cfg_h
+            _sleeper_enabled = getattr(_cfg_h, "UD_SLEEPER_ENABLED", True)
+        except Exception:
+            _sleeper_enabled = True
+        _sleeper_info = ht.get_provider_info("Sleeper")
+        if _sleeper_info:
+            _slp_fetch = ht.provider_last_fetch_str("Sleeper")
+            _slp_streak = _sleeper_info.get("error_streak", 0)
+            _slp_icon = "✅" if _slp_streak == 0 else "⚠️"
+            lines.append(
+                f"  {_slp_icon} <b>Sleeper</b>  ·  NFL enrichment  ·  last sync: {_html.escape(_slp_fetch)}"
+                + (f"  ·  err streak: {_slp_streak}" if _slp_streak else "")
+            )
+        elif _sleeper_enabled:
+            lines.append("  ⚪ <b>Sleeper</b>  ·  NFL enrichment  ·  pending first sync")
+        else:
+            lines.append("  ⏸️ <b>Sleeper</b>  ·  <i>disabled</i>")
+        # Other stat providers (ESPN, NHL, PandaScore) are fetched on-demand
+        lines.append("  ⚪ <b>ESPN</b>  ·  on-demand gamelog (NBA/NFL/WNBA/MLB)")
+        lines.append("  ⚪ <b>NHL API</b>  ·  on-demand skater/goalie logs")
 
         last_err_global = ht.last_error()
         # Only show the global last error if it's recent (within 2 hours).
@@ -567,18 +592,12 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             "",
         ]
 
-        # ── Data provider health ──────────────────────────────────────────────────
-        lines.append("📡 <b>Data Providers</b>")
+        # ── Market provider health (live prop lines) ──────────────────────────────
+        lines.append("📡 <b>Market Providers</b>")
         if _mon:
             for name, h in _mon.get_all_health().items():
-                if name == "PrizePicks":
-                    continue  # PP provider temporarily disabled
-                # Show disabled sportsbook connectors as inactive rather than "OK · never"
-                if name == "DraftKings" and not config.DRAFTKINGS_ENABLED:
-                    lines.append("  ⏸️ <b>DraftKings</b>  <i>inactive (disabled)</i>")
-                    continue
-                if name == "FanDuel" and not config.FANDUEL_ENABLED:
-                    lines.append("  ⏸️ <b>FanDuel</b>  <i>inactive (disabled)</i>")
+                # Only show active live-market providers; skip disabled/legacy
+                if name in ("PrizePicks", "DraftKings", "FanDuel"):
                     continue
                 last_ok   = h.format_last_success()
 
@@ -607,6 +626,35 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 )
         else:
             lines.append("  ⚪ Underdog     not yet tracked")
+        lines.append("")
+
+        # ── Stat provider health (historical enrichment) ──────────────────────
+        lines.append("📊 <b>Stat Providers</b>")
+        try:
+            from engine.health import get_health_tracker as _get_ht_stat
+            _ht_stat = _get_ht_stat()
+        except Exception:
+            _ht_stat = None
+        _sleeper_on = getattr(config, "UD_SLEEPER_ENABLED", True)
+        if _ht_stat:
+            _slp_info = _ht_stat.get_provider_info("Sleeper")
+            if _slp_info:
+                _slp_fetch = _ht_stat.provider_last_fetch_str("Sleeper")
+                _slp_streak = _slp_info.get("error_streak", 0)
+                _slp_icon = "✅" if _slp_streak == 0 else "⚠️"
+                lines.append(
+                    f"  {_slp_icon} <b>Sleeper</b>  NFL enrichment  ·  last sync: {_html.escape(_slp_fetch)}"
+                    + (f"  ·  err streak: {_slp_streak}" if _slp_streak else "")
+                )
+            elif _sleeper_on:
+                lines.append("  ⚪ <b>Sleeper</b>  NFL enrichment  ·  pending first sync")
+            else:
+                lines.append("  ⏸️ <b>Sleeper</b>  <i>disabled</i>")
+        else:
+            icon = "⚪" if _sleeper_on else "⏸️"
+            lines.append(f"  {icon} <b>Sleeper</b>  NFL enrichment")
+        lines.append("  ⚪ <b>ESPN</b>  on-demand gamelog (NBA/NFL/WNBA/MLB)")
+        lines.append("  ⚪ <b>NHL API</b>  on-demand skater/goalie logs")
         lines.append("")
 
         # ── Scheduler / job health ─────────────────────────────────────────────
@@ -1932,39 +1980,49 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         pm_lines.append("<b>📡 Providers</b>")
         from providers import get_health_monitor
         _hmon = get_health_monitor()
-        providers_display = [
-            ("PrizePicks", "🟣", "manual import via /pp_import"),
-            ("Underdog",   "🐶", None),
-            ("DraftKings", "🎰", None),
-            ("FanDuel",    "🦊", None),
-        ]
-        for pname, pemoji, override_note in providers_display:
-            if override_note:
-                pm_lines.append(f"  {pemoji} <b>{pname}</b>  ·  <i>{override_note}</i>")
-                continue
-            if _hmon:
-                h = _hmon.get_health(pname) if hasattr(_hmon, "get_health") else None
-                if h is not None:
-                    last_ok   = h.format_last_success() if hasattr(h, "format_last_success") else "—"
-                    fail_note = (
-                        f"  ({h.consecutive_failures} fails)"
-                        if getattr(h, "consecutive_failures", 0) else ""
-                    )
-                    pm_lines.append(
-                        f"  {pemoji} {h.status_emoji} <b>{pname}</b>  {h.status.value}"
-                        f"  ·  last ✓: {last_ok}{fail_note}"
-                    )
-                    continue
-            # Provider not in health monitor (DK/FD when disabled)
-            from config import config as _cfg
-            enabled = {
-                "DraftKings": getattr(_cfg, "DRAFTKINGS_ENABLED", False),
-                "FanDuel":    getattr(_cfg, "FANDUEL_ENABLED", False),
-            }.get(pname)
-            if enabled is False:
-                pm_lines.append(f"  {pemoji} <b>{pname}</b>  ·  <i>disabled</i>")
+        # Market providers (live prop lines)
+        pm_lines.append("<b>📡 Market Providers</b>")
+        _ud_h = _hmon.get_health("Underdog") if (_hmon and hasattr(_hmon, "get_health")) else None
+        if _ud_h is not None:
+            _ud_last = _ud_h.format_last_success() if hasattr(_ud_h, "format_last_success") else "—"
+            _ud_fail = (
+                f"  ({_ud_h.consecutive_failures} fails)"
+                if getattr(_ud_h, "consecutive_failures", 0) else ""
+            )
+            pm_lines.append(
+                f"  🐶 {_ud_h.status_emoji} <b>Underdog</b>  {_ud_h.status.value}"
+                f"  ·  last ✓: {_ud_last}{_ud_fail}"
+            )
+        else:
+            pm_lines.append("  🐶 ⚪ <b>Underdog</b>  ·  not yet tracked")
+        pm_lines.append("")
+
+        # Stat providers (historical enrichment for hit-rate pipeline)
+        pm_lines.append("<b>📊 Stat Providers</b>")
+        try:
+            from engine.health import get_health_tracker as _get_ht_dash
+            _ht_dash = _get_ht_dash()
+        except Exception:
+            _ht_dash = None
+        from config import config as _cfg_dash
+        _slp_on_dash = getattr(_cfg_dash, "UD_SLEEPER_ENABLED", True)
+        if _ht_dash:
+            _slp_dash = _ht_dash.get_provider_info("Sleeper")
+            if _slp_dash:
+                _slp_d_fetch = _ht_dash.provider_last_fetch_str("Sleeper")
+                _slp_d_streak = _slp_dash.get("error_streak", 0)
+                _slp_d_icon = "✅" if _slp_d_streak == 0 else "⚠️"
+                pm_lines.append(
+                    f"  {_slp_d_icon} <b>Sleeper</b>  NFL enrichment  ·  last sync: {_html.escape(_slp_d_fetch)}"
+                )
+            elif _slp_on_dash:
+                pm_lines.append("  ⚪ <b>Sleeper</b>  NFL enrichment  ·  pending first sync")
             else:
-                pm_lines.append(f"  {pemoji} <b>{pname}</b>  ·  <i>not yet tracked</i>")
+                pm_lines.append("  ⏸️ <b>Sleeper</b>  <i>disabled</i>")
+        else:
+            pm_lines.append(f"  {'⚪' if _slp_on_dash else '⏸️'} <b>Sleeper</b>  NFL enrichment")
+        pm_lines.append("  ⚪ <b>ESPN</b>  on-demand gamelog (NBA/NFL/WNBA/MLB)")
+        pm_lines.append("  ⚪ <b>NHL API</b>  on-demand skater/goalie logs")
 
         # ── Underdog prop counts from DB ──────────────────────────────────────
         pm_lines.append("")
