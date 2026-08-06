@@ -43,5 +43,23 @@ Fix: Changed to `patch("market_engine.broadcast_alert", ...)`.
 - `_prune_prop_history_job` — already had `record_job_run` / `record_job_fail`.
 - `cmd_config` fallback `reply_text` — IS inside the except block; real risk was the pre-try code (fixed above).
 
+## Stabilization pass fixes (applied after audit)
+
+### /picks "Pick: —" fix
+Root cause: `get_ud_recommendations_bulk` queries UnderdogSnapshotRecord within 24h non-removed only. When snapshots age out or are marked removed, _rec_map returns empty → "—".
+Fix: Added `bet_recommendation` + `bet_confidence` columns to `PropLineHistory` model + migration. `sync_underdog_snapshots_to_prop_history` now copies these from the source snapshot. `/picks` reads `plh.bet_recommendation` directly as the primary source; live snapshot rec_map used as override for same-cycle freshness.
+
+### /slip best_side always "—" fix
+Root cause: `cmd_slip` built `PropPickAdapter` without ever setting `best_side` from DB recommendation.
+Fix: After building adapters, cmd_slip now calls `get_ud_recommendations_bulk` and sets `adapter.best_side` for each leg that has an OVER/UNDER decision.
+
+### /alerts silent failure fix
+Root cause: DB exception in cmd_alerts was caught at `logger.debug` (invisible); final `reply_text` had no fallback for HTML parse failures.
+Fix: Changed to `logger.warning`; outer send wrapped in try/except with plain-text strip fallback.
+
+### Standing candidates cross-sport ranking fix
+Root cause: `_standing_candidates.sort(...)` compared all sports on one global leaderboard (line 1357).
+Fix: Group by sport first (`_by_sport`), take top-3 per sport, flatten — same per-sport isolation as debug summary.
+
 ## Test count after fixes: 2672 passing (stable, zero failures)
 Note: count dropped from 2685 to 2672 — difference predates this session (class-based and parametrized tests in some files not matched by the earlier grep; confirmed by per-file collect-only).

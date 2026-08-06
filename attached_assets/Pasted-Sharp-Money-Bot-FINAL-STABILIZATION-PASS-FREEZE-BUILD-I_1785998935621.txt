@@ -1,0 +1,501 @@
+Sharp Money Bot — FINAL STABILIZATION PASS + FREEZE BUILD
+
+IMPORTANT:
+DO NOT REWRITE THE BOT.
+DO NOT REFACTOR THE ARCHITECTURE.
+DO NOT CHANGE WORKING SYSTEMS.
+DO NOT ADD NEW FEATURES.
+
+This is a stabilization and bug-fix pass only.
+
+Inspect first.
+Make only targeted fixes.
+Preserve the current Underdog-first architecture.
+
+After fixes:
+- run full tests
+- verify Telegram commands
+- verify startup stability
+- freeze the build
+
+No more major changes after this.
+
+==================================================
+CURRENT GOAL
+==================================================
+
+The bot's purpose:
+
+Find real betting opportunities across the full slate.
+
+Not random picks.
+
+The bot should identify:
+- value opportunities
+- strong prop edges
+- quality OVER/UNDER decisions
+- tiered opportunities
+
+Keep current thresholds and scoring.
+
+==================================================
+1) /picks SHOWS "Pick: —"
+==================================================
+
+Severity: HIGH
+
+Problem:
+
+The bot finds props correctly:
+
+- player
+- market
+- Underdog line
+- confidence
+- tier
+- evidence
+
+Example:
+
+Shohei Ohtani
+Hits
+Line 0.5
+Confidence 70
+Tier A
+
+But output shows:
+
+🎯 Pick: —
+
+instead of:
+
+OVER
+UNDER
+PASS
+
+Investigate:
+
+Files:
+- bot/commands.py
+- bot/database.py
+- bot/market_engine.py
+
+Fix:
+
+- repair recommendation propagation
+- normalize stat_type matching
+- remove fragile exact lookup dependency
+- add fallback lookup
+- log failed recommendation matches
+
+Requirement:
+
+Every qualified prop displays the actual decision.
+
+==================================================
+2) /alerts COMMAND FAILS
+==================================================
+
+Severity: HIGH
+
+Problem:
+
+/alerts returns no response.
+
+Investigate:
+
+- command registration
+- database query
+- formatting errors
+- Telegram reply errors
+
+Fix:
+
+/alerts must always return:
+
+- recent alerts
+
+OR
+
+- "No alerts found"
+
+Never silently fail.
+
+==================================================
+3) ALERT PIPELINE
+==================================================
+
+Problem:
+
+Status shows:
+
+Alerts sent: 0
+
+while:
+
+PropLineHistory contains hundreds of Underdog records.
+
+Investigate:
+
+- alert filters
+- recommendation propagation
+- confidence gates
+- tier gates
+- dedup logic
+
+Do NOT lower thresholds.
+
+Only repair broken paths.
+
+==================================================
+4) MULTI-SPORT SLATE RANKING
+==================================================
+
+IMPORTANT CHANGE:
+
+Do NOT rank all sports together on one global leaderboard.
+
+Current problem:
+
+A single sport can dominate because scoring scales differ.
+
+Required behavior:
+
+Rank opportunities inside their own sport/category.
+
+Example:
+
+MLB Opportunities:
+- S Tier
+- A Tier
+- B Tier
+
+NBA Opportunities:
+- S Tier
+- A Tier
+- B Tier
+
+WNBA Opportunities:
+- S Tier
+- A Tier
+- B Tier
+
+Tennis Opportunities:
+- S Tier
+- A Tier
+- B Tier
+
+CS/DOTA Opportunities:
+- S Tier
+- A Tier
+- B Tier
+
+Goal:
+
+Allow /picks to show quality opportunities across the entire slate.
+
+Do NOT:
+- lower thresholds
+- force equal picks per sport
+- create weak picks
+
+Only rank fairly within each sport.
+
+==================================================
+5) LIVE BET OPPORTUNITY RANKING — SPORT ISOLATION
+==================================================
+
+IMPORTANT:
+
+Prevent cross-sport props from competing against each other in live opportunity ranking.
+
+Do NOT allow:
+
+MLB prop score
+to directly outrank
+NBA/Tennis/CS/DOTA prop score
+
+unless they are being evaluated inside the same sport category.
+
+Required behavior:
+
+Live opportunity ranking:
+
+MLB → ranked against MLB only
+
+NBA → ranked against NBA only
+
+WNBA → ranked against WNBA only
+
+Tennis → ranked against Tennis only
+
+CS → ranked against CS only
+
+DOTA → ranked against DOTA only
+
+Use sport-specific ranking buckets.
+
+Goal:
+
+Surface the best opportunities across the slate without one sport dominating because of different scoring scales.
+
+Do NOT:
+- lower thresholds
+- force equal picks per sport
+- create artificial opportunities
+
+==================================================
+6) VERIFY UD_ALERT_SPORTS CONFIG
+==================================================
+
+File:
+
+bot/config.py
+
+Verify:
+
+UD_ALERT_SPORTS_RAW = os.environ.get(
+    "UD_ALERT_SPORTS",
+    "MLB,WNBA,NFL,NBA,DOTA,TENNIS,CS"
+)
+
+Previous bug:
+
+os.environ.get("MLB,WNBA,NFL...")
+
+returned None.
+
+==================================================
+7) VERIFY CRASH FIX — ASYNCIO
+==================================================
+
+File:
+
+bot/main.py
+
+Verify:
+
+import asyncio
+
+exists.
+
+Reason:
+
+_clv_seed_job uses asyncio.sleep() during SQLite retry handling.
+
+==================================================
+8) DATABASE STABILITY
+==================================================
+
+Files:
+
+bot/database.py
+bot/main.py
+bot/market_engine.py
+
+Verify:
+
+- SQLite WAL mode enabled
+- concurrent writes handled safely
+
+Previous issue:
+
+sqlite3 OperationalError:
+database is locked
+
+Do not redesign database.
+
+==================================================
+9) MARKETSNAPSHOT external_id
+==================================================
+
+Previous crash:
+
+'MarketSnapshot' object has no attribute 'external_id'
+
+Verify all call sites safely handle:
+
+- MarketSnapshot DTO
+- database records
+
+==================================================
+10) HEALTH MONITORING
+==================================================
+
+Verify all active jobs record:
+
+- started
+- success
+- failure
+
+Health dashboard must show real failures.
+
+==================================================
+11) COMMAND SAFETY
+==================================================
+
+Verify:
+
+/config cannot crash from None values.
+
+Verify:
+
+Telegram fallback error handling cannot crash.
+
+==================================================
+12) RECOMMENDATION LOGIC
+==================================================
+
+Verify:
+
+No hardcoded:
+
+best_side = "OVER"
+
+Recommendation must come from actual model decision.
+
+==================================================
+13) DEDUP SYSTEM
+==================================================
+
+Verify:
+
+stat_type normalization is consistent.
+
+Examples:
+
+Fantasy Points
+fantasy_points
+Fantasy Pts
+
+should not bypass dedup.
+
+==================================================
+14) CONFIDENCE SYSTEM
+==================================================
+
+projection_confidence.py exists.
+
+Do NOT delete it.
+
+Determine:
+
+- leave as future module
+
+OR
+
+- safely connect if already designed
+
+Do not force risky integration.
+
+==================================================
+15) PROVIDER STABILITY
+==================================================
+
+Verify:
+
+Underdog connector:
+- schema handling
+- endpoint failures fail safely
+
+PandaScore:
+- missing API key handled gracefully
+
+Do not break other providers.
+
+==================================================
+16) CLEAN UP FALSE TASK LIST ITEMS
+==================================================
+
+Review existing task list.
+
+Close/remove tasks that describe bugs verified as NOT existing.
+
+Confirmed false bug tasks:
+
+Orphan bot/engine.py conflict
+
+Status:
+NOT A BUG
+
+Reason:
+bot/engine/ is a proper package.
+No conflicting bot/engine.py file exists.
+
+
+Related engine import resolution tasks:
+
+#5
+#10
+#74
+
+Status:
+NOT A BUG
+
+Reason:
+Current import structure resolves correctly.
+
+Do not modify code for these.
+
+Only clean task tracking/documentation.
+
+==================================================
+MASTER TWEAK LIST
+==================================================
+
+DO NOT IMPLEMENT DURING THIS PASS.
+
+Keep as future roadmap.
+
+1. Crash/root-cause stability
+2. Better alert quality
+3. AI ranking improvements
+4. Backtesting expansion
+5. More provider integrations
+6. More sports support
+7. Market engine expansion
+8. Projection confidence integration
+9. Telegram UI cleanup
+10. Performance monitoring
+11. AI analyst improvements
+12. Hit/miss grading
+13. Pick tracking
+14. Line movement alerts
+15. Active sports expansion
+16. Better slip building
+17. More sportsbook comparisons
+18. CLV improvements
+19. Historical database improvements
+20. Production stability
+
+==================================================
+FINAL CHECKLIST BEFORE FREEZE
+==================================================
+
+Run full tests.
+
+Verify:
+
+/help ✅
+/status ✅
+/health ✅
+/config ✅
+/picks ✅
+/alerts ✅
+
+Confirm:
+
+- Bot starts cleanly
+- Underdog monitoring works
+- Recommendations display correctly
+- Alerts work
+- Multi-sport ranking works
+- Live opportunity ranking is sport-isolated
+
+Then FREEZE.
+
+No rewrite.
+No refactor.
+No feature additions.
+
+Only fix broken behavior.

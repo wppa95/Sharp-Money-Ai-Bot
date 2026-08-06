@@ -1353,10 +1353,16 @@ async def underdog_job(context) -> None:
     
                 _standing_candidates.append((_snap, _sp, _st, _sport, _prev))
     
-            # Sort by previous score descending, limit to top 5
-            _standing_candidates.sort(key=lambda x: x[4].score_total or 0, reverse=True)
+            # Sort within each sport (top 3 per sport) — never compare across sports
+            _by_sport: dict = {}
+            for _sc in _standing_candidates:
+                _by_sport.setdefault(_sc[3], []).append(_sc)
+            _standing_ordered: list = []
+            for _sp_grp in _by_sport.values():
+                _sp_grp.sort(key=lambda x: x[4].score_total or 0, reverse=True)
+                _standing_ordered.extend(_sp_grp[:3])
     
-            for (_ssnap, _sp, _st, _ssport, _prev) in _standing_candidates[:5]:
+            for (_ssnap, _sp, _st, _ssport, _prev) in _standing_ordered:
                 _line_val = _ssnap.line or 0.0
     
                 # 24 h dedup — skip if already alerted today

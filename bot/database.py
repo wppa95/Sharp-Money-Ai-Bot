@@ -271,6 +271,9 @@ class PropLineHistory(Base):
     # Qualification tier synced from the source provider snapshot.
     # NULL = not yet scored.  S / A / B = qualifying.  PASS = excluded from picks.
     score_tier         = Column(String(8), nullable=True)
+    # Bet direction synced from UnderdogSnapshotRecord — OVER | UNDER | PASS | NULL
+    bet_recommendation = Column(String(8), nullable=True)
+    bet_confidence     = Column(Integer,   nullable=True)
 
 
 class AlertCLVSeed(Base):
@@ -1299,6 +1302,9 @@ class Database:
             # Alert lifecycle state columns (v1.3)
             "ALTER TABLE prop_line_history ADD COLUMN lifecycle_state TEXT DEFAULT 'DISCOVERED'",
             "ALTER TABLE prop_line_history ADD COLUMN first_alert_sent_at DATETIME",
+            # Bet direction synced from UnderdogSnapshotRecord (v1.4)
+            "ALTER TABLE prop_line_history ADD COLUMN bet_recommendation TEXT",
+            "ALTER TABLE prop_line_history ADD COLUMN bet_confidence INTEGER",
         ]
         async with self._engine.begin() as conn:
             for sql in new_cols:
@@ -1465,6 +1471,8 @@ class Database:
                     row.prev_line    = None
                     row.removed      = is_removed
                     row.score_tier   = snap_tier
+                    row.bet_recommendation = getattr(latest_snap, "bet_recommendation", None)
+                    row.bet_confidence     = getattr(latest_snap, "bet_confidence", None)
                 except AttributeError:
                     pass
                 new_rows.append(row)
@@ -1488,6 +1496,12 @@ class Database:
                 # Always propagate score_tier when the snapshot has a value
                 if snap_tier is not None:
                     uvals["score_tier"] = snap_tier
+                # Always propagate bet direction from snapshot
+                _snap_rec = getattr(latest_snap, "bet_recommendation", None)
+                _snap_bc  = getattr(latest_snap, "bet_confidence", None)
+                if _snap_rec is not None:
+                    uvals["bet_recommendation"] = _snap_rec
+                    uvals["bet_confidence"]      = _snap_bc
                 update_jobs.append((existing.id, uvals))
 
         # ── Execute batched INSERTs in a single session ───────────────────────

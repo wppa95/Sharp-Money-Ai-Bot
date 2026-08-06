@@ -1385,20 +1385,27 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         ud_pl = comp.lines.get("Underdog") if comp else None
         ud_v  = ud_pl.line_value if (ud_pl and ud_pl.available) else plh.line_value
 
-        # Bet direction from UnderdogSnapshot scoring
+        # Bet direction — primary: synced column on PropLineHistory (always fresh)
+        # Secondary: live UnderdogSnapshotRecord via _rec_map (handles same-cycle updates)
+        bet_rec  = getattr(plh, "bet_recommendation", None)
+        bet_conf = getattr(plh, "bet_confidence", None)
         rec_key  = (plh.player_name, plh.sport, plh.stat_type)
-        bet_rec, bet_conf = _rec_map.get(rec_key, (None, None))
-        if bet_rec is None and _rec_map:
-            # Fallback: case-insensitive stat_type match (handles normalisation drift)
+        _live_rec, _live_conf = _rec_map.get(rec_key, (None, None))
+        if _live_rec is None and _rec_map:
+            # Case-insensitive fallback (normalisation drift between tables)
             _rec_key_lower = (plh.player_name.lower(), plh.sport.lower(), plh.stat_type.lower())
             for (_rp, _rs, _rst), _rv in _rec_map.items():
                 if (_rp.lower(), _rs.lower(), _rst.lower()) == _rec_key_lower:
-                    bet_rec, bet_conf = _rv
-                    logger.debug(
-                        "cmd_picks: case-insensitive stat_type match for %s/%s",
-                        plh.player_name, plh.stat_type,
-                    )
+                    _live_rec, _live_conf = _rv
                     break
+        # Prefer live snapshot if available; fall back to synced column
+        if _live_rec is not None:
+            bet_rec, bet_conf = _live_rec, _live_conf
+        if bet_rec is None:
+            logger.debug(
+                "cmd_picks: no recommendation found for %s/%s — showing PASS",
+                plh.player_name, plh.stat_type,
+            )
         pick_label = _PICK_LABEL.get(bet_rec or "", "—")
 
         # Line movement annotation
@@ -1733,7 +1740,26 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             now            = now,
             min_confidence = 0,
         )
-        _candidates.append(PropPickAdapter(plh, comp))
+        adapter = PropPickAdapter(plh, comp)
+        # Populate bet direction from synced PropLineHistory column
+        _plh_rec = getattr(plh, "bet_recommendation", None)
+        if _plh_rec in ("OVER", "UNDER"):
+            adapter.best_side = _plh_rec
+        _candidates.append(adapter)
+
+    # Override with fresher live snapshot directions where available
+    try:
+        _slip_rec_map = await _db.get_ud_recommendations_bulk(
+            [(plh.player_name, plh.sport, plh.stat_type) for plh in ud_props],
+            since_hours=24,
+        )
+        for _cand in _candidates:
+            _k = (_cand.player_name, _cand.sport, _cand.stat_type)
+            _lr, _ = _slip_rec_map.get(_k, (None, None))
+            if _lr in ("OVER", "UNDER"):
+                _cand.best_side = _lr
+    except Exception as _slip_rec_exc:
+        logger.debug("cmd_slip: rec_map lookup failed: %s", _slip_rec_exc)
 
     slips = build_all_slips(_candidates, max_size=6)
 
@@ -1933,10 +1959,16 @@ async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             lines.append("  <i>No player prop alerts sent in the last 24 h.</i>")
             lines.append("  <i>Alerts fire automatically when qualifying props are detected.</i>")
     except Exception as exc:
-        logger.debug("cmd_alerts: prop history lookup failed: %s", exc)
+        logger.warning("cmd_alerts: prop history lookup failed: %s", exc)
         lines.append("  <i>Alert history unavailable — check /health for job status.</i>")
 
-    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+    _alerts_body = "\n".join(lines)
+    try:
+        await update.message.reply_text(_alerts_body, parse_mode=ParseMode.HTML)
+    except Exception as _send_exc:
+        logger.warning("cmd_alerts: HTML send failed (%s), retrying as plain text", _send_exc)
+        import re as _re
+        await update.message.reply_text(_re.sub(r"<[^>]+>", "", _alerts_body))
 
 
 async def cmd_grade(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
