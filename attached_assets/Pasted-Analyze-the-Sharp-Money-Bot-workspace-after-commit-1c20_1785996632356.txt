@@ -1,0 +1,189 @@
+Analyze the Sharp Money Bot workspace after commit 1c20c8a.
+
+IMPORTANT:
+- DO NOT make any code changes.
+- DO NOT rewrite anything.
+- DO NOT refactor architecture.
+- DO NOT delete features.
+- ONLY inspect, diagnose, and report.
+
+I need a full audit of every known issue we have been dealing with.
+
+Audit these areas:
+
+1. BOT STABILITY / CRASHES
+- Investigate unexpected exits:
+  - SIGKILL
+  - OOM / memory kills
+  - hard crashes
+  - restarts on Replit
+- Check startup flow in bot/main.py
+- Check scheduler/background task stability
+- Check missing crash forensics and recovery tracking
+
+2. TELEGRAM COMMAND ISSUES
+Inspect all command handlers.
+
+Known failures:
+- /config sometimes returns:
+  "Command failed — please try again"
+- /picks sometimes fails:
+  "please check bot logs"
+
+Find:
+- exact files
+- exact functions
+- possible runtime exceptions
+
+3. UNDERDOG PIPELINE ERRORS
+
+Investigate this error:
+
+'MarketSnapshot' object has no attribute 'external_id'
+
+Trace through:
+- market_engine
+- underdog_job
+- providers/underdog_provider.py
+- database models
+- MarketSnapshot creation/storage
+
+Explain safest fix.
+
+4. DATABASE PROBLEMS
+
+Investigate:
+
+sqlite3.OperationalError: database is locked
+
+Audit:
+- database.py
+- session handling
+- concurrent writes
+- background jobs
+- CLV seeder
+- CLV harvester
+
+Recommend fixes.
+
+5. PLAYER PROP MARKET SYSTEM
+
+Audit the full flow:
+
+Underdog data →
+PropLineHistory →
+PlayerPropMarketComparison →
+market_engine →
+alerts →
+Telegram formatting
+
+Check why /picks showed:
+
+Pick: —
+
+instead of:
+
+OVER (More)
+UNDER (Less)
+
+Find where pick decisions are created.
+
+6. CONFIDENCE SYSTEM
+
+Audit:
+- engine/confidence.py
+- engine/candidate.py
+- engine/analyst.py
+- engine/projection_confidence.py
+
+Verify:
+- Projection Confidence
+- Proxy Match Confidence
+- Tier scoring
+- Stars
+- Bet Quality
+
+Make sure new projection_confidence integration is correct.
+
+7. ALERT SYSTEM
+
+Audit:
+- alerts.py
+- alerts_multiplatform.py
+
+Check:
+- duplicate alerts
+- thresholds
+- dedup windows
+- S/A/B tiers
+- confidence filters
+- market quality filters
+
+8. MULTI-SPORT EXPANSION
+
+Verify:
+- UD_ALERT_SPORTS
+- active sports
+- sport ranking logic
+
+Goal:
+Surface opportunities from every available sport.
+
+Important:
+Rank opportunities within the same sport only.
+Do NOT compare MLB vs Tennis vs CS vs DOTA in one leaderboard.
+
+Check if adding more sports can break existing MLB functionality.
+
+9. PROVIDERS
+
+Audit:
+- Underdog
+- DraftKings
+- FanDuel
+- Odds API
+- PandaScore
+
+Check:
+- missing keys
+- unused connectors
+- broken scopes
+- incorrect assumptions
+
+10. TEST SUITE
+
+Review all recent modified tests:
+
+- test_alert_quality
+- test_pipeline
+- test_prop_intelligence
+- test_underdog_job_summary
+- test_projection_confidence
+
+Find regressions caused by recent changes.
+
+11. CODE HEALTH
+
+Search entire project for:
+- missing attributes
+- broken imports
+- undefined variables
+- bad config references
+- stale code paths
+- duplicate logic
+- hidden runtime exceptions
+
+OUTPUT FORMAT:
+
+For every problem found provide:
+
+Severity:
+Problem:
+File:
+Function:
+Line:
+Cause:
+Recommended fix:
+
+DO NOT FIX ANYTHING YET.
+ONLY PROVIDE THE COMPLETE AUDIT REPORT.
