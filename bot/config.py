@@ -110,6 +110,14 @@ class Config:
     # Prevents rapid line reversals (e.g. 0.5→1.5→0.5) from each triggering a
     # separate Telegram notification.  Set to 0 to disable.
     UD_FLIP_COOLDOWN: int = int(os.environ.get("UD_FLIP_COOLDOWN", "600"))  # 10 min
+    # Sleeper Stats API integration.
+    # When enabled, NFL player stats from api.sleeper.app are fetched as a
+    # supplement to ESPN gamelog data. One NFL game per week maps cleanly to
+    # per-game results, improving hit-rate accuracy for NFL props.
+    # Set UD_SLEEPER_ENABLED=false to disable without code changes.
+    UD_SLEEPER_ENABLED: bool = os.environ.get("UD_SLEEPER_ENABLED", "true").lower() not in (
+        "false", "0", "no", "off"
+    )
 
     # ── Multi-platform connector settings ────────────────────────────────────
     # Enable/disable individual connectors via env vars

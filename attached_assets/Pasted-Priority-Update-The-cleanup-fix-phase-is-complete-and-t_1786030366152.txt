@@ -1,0 +1,249 @@
+Priority Update:
+
+The cleanup/fix phase is complete and the current system is stable.
+
+Current state:
+
+✅ 2672 tests passing
+✅ Clean startup
+✅ Telegram notification filtering is working correctly
+✅ Only 🎯 ACTIONABLE BET PICKS are sent
+✅ Market movement tracking remains internal
+✅ MLB pipeline is producing quality picks
+
+Do not rewrite anything.
+Do not rebuild the architecture.
+
+The next highest priority is:
+
+#1 — Sleeper Integration (MAIN PRIORITY)
+
+Implement Sleeper as an additional data provider using the existing provider architecture.
+
+Sleeper should be a data enhancement layer that improves the current engine, not a separate betting system.
+
+Do NOT:
+
+* Create a separate Sleeper scoring system
+* Create separate Sleeper alerts
+* Create duplicate notifications
+* Change existing alert logic
+* Lower confidence standards
+* Replace the current Underdog engine
+
+Use:
+
+Sleeper data
+
+* Underdog lines
+* Other verified provider data
+
+↓
+
+Existing provider normalization
+
+↓
+
+Player/stat history database
+
+↓
+
+Existing scoring + confidence engine
+
+↓
+
+🎯 FINAL ACTIONABLE BET PICKS
+
+⸻
+
+Sleeper Pick’em / Line Investigation
+
+Investigate whether Sleeper provides accessible pick’em lines that match or overlap with PrizePicks markets.
+
+Reason:
+
+PrizePicks API access is blocked, but Sleeper has historically been used as a stat/line reference because many markets overlap.
+
+Evaluate:
+
+* Player
+* Sport
+* Market type
+* Line value
+* Timestamp
+* Availability
+
+If compatible:
+
+Integrate Sleeper through the existing provider framework.
+
+Do not bypass existing filters.
+
+⸻
+
+Sleeper Historical Stats Integration
+
+Use Sleeper wherever reliable data is available to improve player evaluation.
+
+Add:
+
+* Player game logs
+* Historical performance
+* Hit-rate history
+* Average vs line
+* Recent trends
+* Consistency data
+
+Use this information to improve:
+
+* Confidence scoring
+* Bet quality ranking
+* Sport coverage
+
+Do not lower requirements just to create more picks.
+
+⸻
+
+Multi-Sport Sleeper Evaluation
+
+Evaluate Sleeper coverage across ALL sports supported by Underdog.
+
+Priority:
+
+1. NBA/WNBA
+2. NFL
+3. MLB
+4. Soccer
+5. Tennis
+6. COD/Esports
+7. CS/DOTA
+8. Other supported sports
+
+If Sleeper does not support a sport:
+
+Evaluate other free reliable providers.
+
+Goal:
+
+Better information and stronger picks, not more alerts.
+
+⸻
+
+Sleeper + Underdog Final Output Rule
+
+Sleeper should not create its own picks or notifications.
+
+Do not send:
+
+* Separate Sleeper alerts
+* Separate Underdog alerts
+* Duplicate provider notifications
+
+Instead combine all verified information:
+
+Underdog lines
+
+* Sleeper statistics
+* Other verified providers
+
+↓
+
+Combined analysis
+
+↓
+
+Single final ranked output:
+
+🎯 ACTIONABLE BET PICKS
+
+The user should only receive the strongest final opportunities after all available data is analyzed.
+
+Sleeper should improve:
+
+* Historical accuracy
+* Hit-rate calculations
+* Confidence scoring
+* Market evaluation
+
+⸻
+
+Shadow Mode First
+
+Before Sleeper affects final picks:
+
+Collect
+
+↓
+
+Compare
+
+↓
+
+Validate
+
+↓
+
+Integrate
+
+Track:
+
+* Supported sports
+* Available stats
+* Market compatibility
+* Data quality
+* Accuracy improvement
+
+⸻
+
+Free Provider Expansion
+
+Continue evaluating additional free accessible providers.
+
+Only add providers that:
+
+✅ Work reliably
+✅ Provide valuable data
+✅ Do not require paid API credits
+
+Possible sources:
+
+* Public endpoints
+* Fantasy/stat platforms
+* Free sports databases
+
+All providers must feed into the existing pipeline.
+
+⸻
+
+Final Requirements
+
+DO NOT rewrite the engine.
+
+DO NOT change MLB behavior.
+
+DO NOT create additional notification systems.
+
+DO NOT bypass existing scoring.
+
+Only improve:
+
+* Data quality
+* Historical information
+* Sport coverage
+* Pick confidence
+
+After completion:
+
+1. Run full test suite.
+2. Confirm clean startup.
+3. Confirm Telegram only sends 🎯 ACTIONABLE BET PICKS.
+4. Confirm Sleeper works through the existing pipeline.
+5. Confirm no duplicate alerts.
+6. Freeze the build.
+
+Future changes should only be:
+
+* Bug fixes
+* Performance improvements
+* Verified provider additions
+* Targeted improvements without architectural rewrites

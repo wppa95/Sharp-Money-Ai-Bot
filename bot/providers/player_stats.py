@@ -177,9 +177,10 @@ _MLB_PITCHING_STATS: frozenset[str] = frozenset({
     "innings pitched", "outs recorded",
 })
 
-# Lazy singletons for esports / tennis providers (avoids re-creating per call)
+# Lazy singletons for esports / tennis / sleeper providers (avoids re-creating per call)
 _esports_provider_instance: Optional["object"] = None
 _tennis_provider_instance:  Optional["object"] = None
+_sleeper_provider_instance: Optional["object"] = None
 
 
 def _get_esports_provider():  # type: ignore[return]
@@ -198,6 +199,40 @@ def _get_tennis_provider():  # type: ignore[return]
         from providers.tennis_stats import TennisStatsProvider
         _tennis_provider_instance = TennisStatsProvider()
     return _tennis_provider_instance
+
+
+def _get_sleeper_provider():  # type: ignore[return]
+    """Return the shared SleeperStatsProvider singleton (created on first call)."""
+    global _sleeper_provider_instance
+    if _sleeper_provider_instance is None:
+        from providers.sleeper_stats import SleeperStatsProvider
+        _sleeper_provider_instance = SleeperStatsProvider()
+    return _sleeper_provider_instance
+
+
+def _merge_game_results(
+    primary: "list[RawGameResult]",
+    secondary: "list[RawGameResult]",
+) -> "list[RawGameResult]":
+    """
+    Merge two RawGameResult lists, de-duplicating by game_date.
+
+    Primary results take precedence: if both sources have an entry for the
+    same game_date, the primary value is kept. Secondary entries for dates
+    not covered by primary are appended.
+
+    Used to supplement ESPN gamelog data with Sleeper historical weeks.
+    """
+    if not secondary:
+        return primary
+    primary_dates = {r.game_date for r in primary}
+    extra = [r for r in secondary if r.game_date not in primary_dates]
+    if extra:
+        logger.debug(
+            "_merge_game_results: Sleeper added %d game(s) not in primary source",
+            len(extra),
+        )
+    return primary + extra
 
 
 # ESPN sport routing:  Underdog sport key → (sport_slug, league_slug)
@@ -245,6 +280,25 @@ class PlayerStatsProvider:
         try:
             if sport_upper == "MLB":
                 return await self._fetch_mlb(player_name, stat_lower)
+            elif sport_upper == "NFL":
+                # ESPN gamelog (primary) + Sleeper historical weeks (supplement).
+                # Sleeper provides one game per NFL week, so per-week = per-game.
+                # Results are merged by game_date; ESPN values take precedence.
+                sport_slug, league_slug = _ESPN_ROUTE["NFL"]
+                espn_results = await self._fetch_espn(
+                    player_name, "NFL", stat_lower, sport_slug, league_slug
+                )
+                try:
+                    import config as _cfg
+                    if getattr(_cfg, "UD_SLEEPER_ENABLED", True):
+                        sleeper_results = await _get_sleeper_provider().fetch_results(
+                            player_name, "NFL", stat_lower
+                        )
+                        espn_results = _merge_game_results(espn_results, sleeper_results)
+                except Exception as _sl_exc:  # noqa: BLE001
+                    # Sleeper is a supplement — never block the main flow
+                    logger.debug("PlayerStatsProvider: Sleeper supplement failed: %s", _sl_exc)
+                return espn_results
             elif sport_upper in _ESPN_ROUTE:
                 sport_slug, league_slug = _ESPN_ROUTE[sport_upper]
                 return await self._fetch_espn(
