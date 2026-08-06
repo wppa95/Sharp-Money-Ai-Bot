@@ -279,15 +279,20 @@ class TestTierClassification:
         assert d.recommendation == "OVER"
         assert d.decision_tier  == "A"
 
-    def test_not_s_tier_when_season_too_low(self):
-        """Season at 55% < 60% requirement → A-tier."""
+    def test_s_tier_allowed_when_season_barely_positive(self):
+        """Season at 55% >= 55% threshold with strong L5/L10/L20 (80/70/70%) → S-tier.
+
+        The season gate was relaxed from 0.60 to 0.55 so that players on a hot
+        streak aren't denied S-tier purely because their season average is only
+        marginally positive.  L5/L10/L20 at 70-80% outweigh a 55% season rate.
+        """
         hr = _hit_rates(
             l5_r=0.80, l10_r=0.70, l20_n=20, l20_r=0.70,
-            season_n=50, season_r=0.55,       # below 0.60 threshold
+            season_n=50, season_r=0.55,   # exactly at new 0.55 threshold → S allowed
         )
         d = make_ud_bet_decision(_score(), _validation(), 25.5, hit_rates=hr)
         assert d.recommendation == "OVER"
-        assert d.decision_tier  == "A"
+        assert d.decision_tier  == "S"
 
     def test_a_tier_primary_in_a_range(self):
         """L5 at 63% (A-range 62–65%)."""

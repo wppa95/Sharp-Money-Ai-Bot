@@ -1,0 +1,319 @@
+Sharp Money Bot — Final Max Potential Optimization Pass
+
+IMPORTANT:
+We are trying to save API/provider credits. Do not waste credits rebuilding working systems, running unnecessary tests, or repeatedly hitting unavailable APIs.
+
+Only make targeted changes that improve:
+
+- Accuracy
+- Stability
+- Performance
+- Pick quality
+- Provider coverage
+- Model decisions
+
+Do not reduce prop scanning. Full market scanning stays active.
+
+Goal:
+
+Scan the entire market →
+Detect opportunities →
+Evaluate quality →
+Send ONLY real betting picks.
+
+No noise.
+
+━━━━━━━━━━━━━━━━━━
+#1 PRIORITY — SPORT RANKING / DATA BALANCE CORRECTION
+━━━━━━━━━━━━━━━━━━
+
+Critical issue:
+
+Sports are being affected by raw prop volume.
+
+Example:
+
+⚾ MLB: 1000+ props
+🎮 CS2: 9 props
+🎮 DOTA: 1 prop
+🎾 Tennis: low volume
+
+MLB should not dominate simply because it has more available props.
+
+DO NOT reduce MLB scanning.
+
+Fix the ranking and selection layer only.
+
+Required:
+
+Every sport gets its own independent ecosystem:
+
+- Separate candidate pools
+- Separate rankings
+- Separate scoring calibration
+- Separate tier distribution
+- Separate quality comparisons
+
+Example:
+
+⚾ MLB
+#1
+#2
+#3
+
+🎾 Tennis
+#1
+#2
+#3
+
+🎮 CS2
+#1
+#2
+#3
+
+🎮 DOTA/LOL
+#1
+#2
+#3
+
+Remove:
+
+❌ Global leaderboard across sports
+❌ "Best sport" ranking
+❌ MLB volume advantage
+❌ One sport overpowering all others
+
+Every sport competes only against itself.
+
+Also audit:
+
+- Why MLB has thousands of props while other sports have very low counts
+- Provider coverage differences
+- Whether smaller sports are filtered out too early
+- Whether each sport has enough opportunities reaching S/A/B tiers
+
+━━━━━━━━━━━━━━━━━━
+#2 BET QUALITY ONLY ALERTS
+━━━━━━━━━━━━━━━━━━
+
+I do not want notifications showing me what exists.
+
+I only want actual betting opportunities.
+
+Separate:
+
+Detection Layer:
+- Scan everything
+- Track movement
+- Store data
+- Evaluate markets
+
+Bet Pick Layer:
+Only send qualified picks.
+
+Tier system:
+
+🟣 S Tier: 85-100
+🟢 A Tier: 70-84
+🟡 B Tier: 55-69
+
+Must have:
+
+✅ OVER/UNDER direction
+✅ Real betting edge
+✅ Validation
+✅ Quality score
+✅ Passed filters
+
+Never send:
+
+❌ Pick: —
+❌ PASS
+❌ Raw market movement
+❌ Provider agreement only
+❌ Proxy confidence only
+❌ Removed props
+❌ Noise alerts
+
+━━━━━━━━━━━━━━━━━━
+#3 RESTORE PROPER S-TIER OUTPUT
+━━━━━━━━━━━━━━━━━━
+
+Current issue:
+
+Dashboard showed:
+
+A: 99
+B: 103
+PASS: 192
+No S tier.
+
+Expected:
+
+S = 85-100
+A = 70-84
+B = 55-69
+
+Audit:
+
+- Bet quality calculation
+- Confidence scoring
+- Tier assignment
+- Alert thresholds
+
+Do not allow true S-tier plays to get downgraded.
+
+━━━━━━━━━━━━━━━━━━
+#4 /PICKS AND /SLIP QUALITY CONTROL
+━━━━━━━━━━━━━━━━━━
+
+/picks should only show actionable betting candidates.
+
+/slip should only contain playable picks.
+
+Fix:
+
+- Remove "Pick: —" entries
+- Remove non-actionable candidates
+- Prevent duplicate players
+- Prevent correlated risk
+- Prevent duplicate exposure
+
+━━━━━━━━━━━━━━━━━━
+#5 REMOVE FUTURES / NON-GAME MARKETS
+━━━━━━━━━━━━━━━━━━
+
+Remove from player prop pipeline:
+
+❌ Season futures
+❌ Awards
+❌ Long-term projections
+❌ Non-game markets
+
+Only:
+
+✅ Single-game props
+✅ Pre-game opportunities
+
+━━━━━━━━━━━━━━━━━━
+#6 KEEP FULL MARKET SCANNING
+━━━━━━━━━━━━━━━━━━
+
+Do NOT reduce prop scanning.
+
+The scanner is valuable because it creates more opportunities.
+
+Correct flow:
+
+Scan everything →
+
+Detection →
+
+Quality filter →
+
+Bet picks only
+
+The fix is filtering/ranking, not reducing data.
+
+━━━━━━━━━━━━━━━━━━
+#7 PROVIDER EXPANSION
+━━━━━━━━━━━━━━━━━━
+
+Add additional Underdog comparison sources:
+
+- Chalkboard
+- Other reliable comparison sources
+
+Restore when possible:
+
+- PrizePicks
+- DraftKings
+- FanDuel
+
+Do not burn credits testing unavailable providers repeatedly.
+
+━━━━━━━━━━━━━━━━━━
+#8 STABILITY / PERFORMANCE
+━━━━━━━━━━━━━━━━━━
+
+Continue improving:
+
+- Memory usage
+- OOM prevention
+- Database locks
+- Provider failures
+- Job recovery
+- Logging efficiency
+- Crash recovery
+
+Need reliable 24/7 operation.
+
+━━━━━━━━━━━━━━━━━━
+#9 MODEL IMPROVEMENTS
+━━━━━━━━━━━━━━━━━━
+
+Improve:
+
+- Bet Quality score
+- Confidence calibration
+- Sport-specific models
+- Historical weighting
+- Line movement weighting
+- Detection vs betting separation
+
+No one universal model ranking every sport.
+
+Each sport should have its own calibration.
+
+━━━━━━━━━━━━━━━━━━
+#10 VPS PURPOSE
+━━━━━━━━━━━━━━━━━━
+
+VPS is NOT for finding more props.
+
+Purpose after development:
+
+- Move finished bot off Replit
+- Prevent sleep/suspension
+- 24/7 uptime
+- Stable scheduled jobs
+- Persistent database
+- Reliable Telegram alerts
+
+━━━━━━━━━━━━━━━━━━
+#11 LESSONS FROM TODAY'S TESTING
+━━━━━━━━━━━━━━━━━━
+
+Confirmed issues found:
+
+- Detection alerts were mixed with betting picks
+- Removed props created unnecessary noise
+- Memory kills happened during large scans
+- S-tier disappeared due to tier logic issue
+- Smaller sports were disadvantaged by volume
+- Futures entered player prop views
+- /grade and /backtest need real resolved pick data before results appear
+
+Do not repeat failed approaches.
+
+━━━━━━━━━━━━━━━━━━
+FINAL TARGET
+
+The bot should:
+
+Scan the entire market.
+
+Cover all active sports.
+
+Rank sports independently.
+
+Find the best opportunities inside each sport.
+
+Filter aggressively.
+
+Send only real betting picks.
+
+No noise.
+No fake edges.
+No wasted notifications.
+No wasted API credits.

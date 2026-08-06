@@ -1277,9 +1277,9 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
         picks.append((plh, comp))
 
-    # Sort: confidence DESC → provider count DESC → |movement| DESC →
-    #        provider disagreement DESC → game_time ASC (None last)
-    # No sport preference — value + market quality + confidence ranks first.
+    # Sort within each sport independently — never rank different sports against each other.
+    # Each sport forms its own candidate pool: confidence DESC → providers DESC →
+    # movement DESC → disagreement DESC → game_time ASC (None last).
     import datetime as _dt_mod
 
     def _pick_sort(item: tuple) -> tuple:
@@ -1299,8 +1299,17 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             gt_sort = gt.replace(tzinfo=None) if gt.tzinfo else gt
         return (-conf, -n_prov, -movement, -disagreement, gt_sort)
 
-    picks.sort(key=_pick_sort)
-    logger.info("cmd_picks: built %d comparisons, sorted", len(picks))
+    # Per-sport sort: group → sort each sport independently → flatten in sport order.
+    # This ensures MLB's large volume cannot push smaller sports off the leaderboard.
+    _by_sport_sort: dict = {}
+    for _item in picks:
+        _sk = (_item[0].sport or "UNKNOWN").upper()
+        _by_sport_sort.setdefault(_sk, []).append(_item)
+    picks = []
+    for _sk in sorted(_by_sport_sort.keys()):
+        _by_sport_sort[_sk].sort(key=_pick_sort)
+        picks.extend(_by_sport_sort[_sk])
+    logger.info("cmd_picks: built %d comparisons, sorted per-sport", len(picks))
 
     # ── 4. Fetch historical hit-rates concurrently (non-blocking) ────────────
     from engine.player_results import compute_hit_rates as _compute_hr
@@ -1377,9 +1386,9 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     # ── 5. Format ─────────────────────────────────────────────────────────────
     def _tier_from_conf(c: int) -> str:
-        if c >= 90: return "S"
+        if c >= 85: return "S"
         if c >= 70: return "A"
-        if c >= 50: return "B"
+        if c >= 55: return "B"
         return "—"
 
     _PICK_LABEL: dict[str, str] = {
@@ -1398,14 +1407,27 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         header += f"  <i>({sport_filter})</i>"
     out: list[str] = [header, ""]
 
-    # ── Per-sport grouping ─────────────────────────────────────────────────────
-    # Preserve the within-sport confidence order from the earlier sort, but never
-    # rank different sports against each other.  Group into {sport: [(idx, plh, comp)]}
-    # ordered by first occurrence in the sorted picks list.
+    # ── Per-sport grouping — actionable picks only ────────────────────────────
+    # Preserve the within-sport confidence order. Never rank sports against each
+    # other. Skip props with no actionable direction (Pick: — or PASS).
     from collections import OrderedDict as _OD
     _sport_groups: _OD = _OD()
     for _flat_idx, (plh, comp) in enumerate(picks):
         _key = plh.sport.upper()
+        # Resolve effective recommendation: live snapshot overrides synced column
+        _eff_rec = getattr(plh, "bet_recommendation", None)
+        _live_r, _ = _rec_map.get(
+            (plh.player_name, plh.sport, plh.stat_type), (None, None)
+        )
+        if _live_r is not None:
+            _eff_rec = _live_r
+        # Skip PASS / no-direction props — user only wants actionable picks
+        if _eff_rec not in ("OVER", "UNDER"):
+            logger.debug(
+                "cmd_picks: skipping %s/%s — no actionable direction (rec=%s)",
+                plh.player_name, plh.stat_type, _eff_rec,
+            )
+            continue
         if _key not in _sport_groups:
             _sport_groups[_key] = []
         _sport_groups[_key].append((_flat_idx, plh, comp))
@@ -1517,6 +1539,16 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             entry_lines.append(f"  Current Selected: 🐶 <code>{ud_v:.1f}</code>")
 
         return "\n".join(entry_lines)
+
+    # Guard: if all fetched props were PASS/no-direction after filtering, say so.
+    if not _sport_groups:
+        await update.message.reply_text(
+            "No actionable betting picks right now.\n\n"
+            "<i>Props are scanned continuously — picks only appear once a prop "
+            "has a clear OVER/UNDER direction with sufficient evidence.</i>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
 
     # Emit each sport group with its own header and per-sport rank numbers
     for _sport_key, _group in _sport_groups.items():

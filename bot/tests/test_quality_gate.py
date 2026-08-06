@@ -2,7 +2,7 @@
 tests/test_quality_gate.py — Phase 2: per-tier confidence gate config and logic.
 
 Tests:
-  • Config defaults: UD_MIN_CONF_S=75, UD_MIN_CONF_A=65, UD_MIN_CONF_B=55
+  • Config defaults: UD_MIN_CONF_S=80, UD_MIN_CONF_A=70, UD_MIN_CONF_B=55
   • Config env override: values read from environment
   • ENABLE_LEARNING_UPDATES defaults to False
   • Confidence gate logic: S/A/B correctly block below threshold, pass above
@@ -20,13 +20,15 @@ import pytest
 # ── Config defaults ───────────────────────────────────────────────────────────
 
 def test_config_ud_min_conf_s_default():
+    # Raised from 75 → 80: S-tier alerts require stronger evidence.
     from config import config
-    assert config.UD_MIN_CONF_S == 75
+    assert config.UD_MIN_CONF_S == 80
 
 
 def test_config_ud_min_conf_a_default():
+    # Raised from 65 → 70: A-tier alerts require stronger evidence.
     from config import config
-    assert config.UD_MIN_CONF_A == 65
+    assert config.UD_MIN_CONF_A == 70
 
 
 def test_config_ud_min_conf_b_default():

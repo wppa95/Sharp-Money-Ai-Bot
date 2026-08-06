@@ -409,8 +409,9 @@ def _determine_tier(
                 w.games >= _MIN_GAMES_S_TIER and w.hit_rate >= _S_RATE
                 for w in windows
             )
-            all_support = all(w.hit_rate >= 0.55 for w in windows)
-            if has_large and all_support and _season_supports(hit_rates, "OVER", 0.60):
+            # Allow slight wobble in long windows (e.g. L30 at 0.52 while L5/L10 strong)
+            all_support = all(w.hit_rate >= 0.52 for w in windows)
+            if has_large and all_support and _season_supports(hit_rates, "OVER", 0.55):
                 return "S"
             return "A"
         elif rate >= _A_RATE:
@@ -423,8 +424,9 @@ def _determine_tier(
                 w.games >= _MIN_GAMES_S_TIER and w.hit_rate <= (1.0 - _S_RATE)
                 for w in windows
             )
-            all_support = all(w.hit_rate <= 0.45 for w in windows)
-            if has_large and all_support and _season_supports(hit_rates, "UNDER", 0.40):
+            # Allow slight wobble in long windows (e.g. L30 at 0.48 while L5/L10 strong)
+            all_support = all(w.hit_rate <= 0.48 for w in windows)
+            if has_large and all_support and _season_supports(hit_rates, "UNDER", 0.45):
                 return "S"
             return "A"
         elif rate <= (1.0 - _A_RATE):
@@ -456,7 +458,8 @@ def _compute_confidence(
     base = min(70, int(dev * 180))
 
     # Tier bonus
-    tier_bonus = {"S": 12, "A": 7, "B": 0}.get(tier, 0)
+    # Higher bonus for stronger tiers so S-tier picks reliably clear the 80-conf gate.
+    tier_bonus = {"S": 18, "A": 10, "B": 0}.get(tier, 0)
 
     # Sample size: +1 per 4 games in primary, cap 10
     sample_bonus = min(10, primary.games // 4)

@@ -90,6 +90,44 @@ _cold_start_done: bool = False
 # Intentionally module-level: persists across cycles, resets on bot restart.
 _prop_market_alerted: dict = {}
 
+# ── Futures / season-long market filter ───────────────────────────────────────
+# These stat types are season-aggregate or award markets, NOT single-game props.
+# They cannot be resolved by game-result data and must not enter the alert pipeline.
+_FUTURES_STAT_KEYWORDS: frozenset = frozenset({
+    "season win",
+    "season loss",
+    "season era",
+    "season hr",
+    "season home run",
+    "season strikeout",
+    "season save",
+    "season rbi",
+    "season point",
+    "season rebound",
+    "season assist",
+    "season steal",
+    "season block",
+    "season goal",
+    "season kill",
+    "season ace",
+    "award",
+    "cy young",
+    " mvp",
+    "hall of fame",
+    "hof",
+    "career",
+    "world series",
+    "championship",
+    "pennant",
+    "title",
+})
+
+
+def _is_futures_stat(stat_type: str) -> bool:
+    """Return True if the stat_type matches a season-long / futures market keyword."""
+    low = stat_type.lower()
+    return any(kw in low for kw in _FUTURES_STAT_KEYWORDS)
+
 
 def _get_player_stats_provider():
     global _player_stats_provider
@@ -733,6 +771,10 @@ async def underdog_job(context) -> None:
     
             # Extract the stable stat-type category from the selection string
             stat_type = _extract_ud_stat_type(snap.selection, snap.player, snap.line)
+
+            # Skip season-long futures / award markets — not resolvable by game data
+            if not is_removed and _is_futures_stat(stat_type):
+                continue
     
             # Detect first-ever appearance: (player, stat) not in DB at all yet
             is_new_prop = not is_removed and (player, stat_type) not in known_keys
@@ -1388,7 +1430,11 @@ async def underdog_job(context) -> None:
                 _sp      = _snap.player or "Unknown"
                 _st      = _extract_ud_stat_type(_snap.selection, _snap.player, _snap.line)
                 _sport   = _snap.sport or "UNKNOWN"
-    
+
+                # Futures gate — same as the main loop
+                if _is_futures_stat(_st):
+                    continue
+
                 if _st not in _HFS:
                     continue
                 if _sport not in config.ud_alert_sports:

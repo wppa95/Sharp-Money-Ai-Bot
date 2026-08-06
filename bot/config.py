@@ -230,8 +230,8 @@ class Config:
     # ── Per-tier confidence minimums ─────────────────────────────────────────
     # Alerts for each tier only fire when decision.confidence ≥ the minimum
     # for that tier.  Set all to 0 to disable (score-tier gate still applies).
-    UD_MIN_CONF_S: int = int(os.environ.get("UD_MIN_CONF_S", "75"))
-    UD_MIN_CONF_A: int = int(os.environ.get("UD_MIN_CONF_A", "65"))
+    UD_MIN_CONF_S: int = int(os.environ.get("UD_MIN_CONF_S", "80"))
+    UD_MIN_CONF_A: int = int(os.environ.get("UD_MIN_CONF_A", "70"))
     UD_MIN_CONF_B: int = int(os.environ.get("UD_MIN_CONF_B", "55"))
 
     # ── Alert sport suppression ───────────────────────────────────────────────
