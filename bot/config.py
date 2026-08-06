@@ -106,6 +106,10 @@ class Config:
     # sent when the line moves by ≥ MIN_UNDERDOG_LINE_CHANGE (default 0.5 units).
     # Set to 0 to disable time-based dedup (line-only dedup still applies).
     UD_ALERT_DEDUP_WINDOW: int = int(os.environ.get("UD_ALERT_DEDUP_WINDOW", "3600"))  # 60 min
+    # Minimum seconds between any two bet-pick alerts for the same prop.
+    # Prevents rapid line reversals (e.g. 0.5→1.5→0.5) from each triggering a
+    # separate Telegram notification.  Set to 0 to disable.
+    UD_FLIP_COOLDOWN: int = int(os.environ.get("UD_FLIP_COOLDOWN", "600"))  # 10 min
 
     # ── Multi-platform connector settings ────────────────────────────────────
     # Enable/disable individual connectors via env vars

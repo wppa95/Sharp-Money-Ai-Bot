@@ -1,0 +1,373 @@
+Before making any changes, review the entire current system state.
+
+IMPORTANT:
+We are limited on credits. Do not burn credits unnecessarily.
+
+If any requested fix requires a large rewrite, major refactor, architecture change, or anything beyond a small targeted change, STOP and report before proceeding.
+
+Do NOT:
+
+* Rewrite the bot
+* Refactor large sections
+* Replace working systems
+* Redesign architecture
+* Change the scoring engine
+* Change database structure
+* Change the Underdog pipeline
+
+This is a final cleanup/stability pass before freezing V1.3.
+
+⸻
+
+Current completed work ✅
+
+CORE SYSTEM
+
+✅ Stable Underdog-first pipeline
+✅ Provider-agnostic PropLineHistory system
+✅ Existing scoring/ranking engine working
+✅ 2672 tests passing
+
+⸻
+
+ALERT SYSTEM
+
+✅ Two alert categories created:
+
+1. 📈 MARKET MOVE DETECTED
+
+* Internal market intelligence signal
+* Tracks movement
+* Not a bet recommendation
+
+2. 🎯 ACTIONABLE BET PICK
+
+* Passed scoring gates
+* Has direction
+* Has confidence/tier
+* Intended user-facing alert
+
+⸻
+
+LIFECYCLE
+
+✅ Removal tracking improved
+✅ Removal alerts disabled
+✅ Market timing data preserved internally
+✅ Availability status added:
+
+* 🟢 AVAILABLE NOW
+* 🟡 CLOSING SOON
+* 🔴 GAME LIVE
+
+⸻
+
+DIAGNOSTICS
+
+✅ Per-sport pipeline diagnostics added:
+
+raw → parsed → gated
+
+Example:
+
+* MLB raw → parsed → gated
+* NBA/WNBA raw → parsed → gated
+* CS raw → parsed → gated
+* Other sports tracked separately
+
+⸻
+
+PROVIDERS
+
+✅ DraftKings disabled by default
+✅ FanDuel disabled by default
+
+Provider expansion is deferred.
+
+Future providers:
+
+* Sleeper
+* PrizePicks (if possible)
+* Betr
+* Other free sources
+
+Do not add providers in this pass.
+
+⸻
+
+LIVE TESTING FOUND THESE ISSUES
+
+⸻
+
+1) TELEGRAM SPAM FILTERING 🚨
+
+Problem:
+The scanner is working correctly, but raw market movements are flooding Telegram.
+
+Live examples:
+
+* 50+ notifications in 1 minute
+* Another 40–50 notifications in 1 minute
+
+This confirms raw market movement alerts cannot be user-facing.
+
+Fix:
+
+* Keep 📈 MARKET MOVE DETECTED stored internally.
+* Do not send market movement alerts to Telegram.
+* Telegram should ONLY receive:
+
+🎯 ACTIONABLE BET PICK
+
+Goal:
+
+Scan everything internally.
+Notify only when there is a real betting opportunity.
+
+Important:
+Do not reduce data collection.
+
+We want all useful market information stored for analysis, future modeling, and provider comparison.
+
+⸻
+
+2) ACTIONABLE PICK REQUIREMENTS
+
+A Telegram alert should only happen when:
+
+✅ Active sport/event
+✅ Valid upcoming game
+✅ Valid player/market
+✅ Clear OVER/UNDER direction
+✅ Passed confidence/tier/quality gates
+
+Do not send:
+
+* Raw line movements
+* Unqualified signals
+* Markets without betting direction
+
+Do not artificially cap the number of actionable picks.
+
+If 20 real opportunities qualify, they should be available.
+
+If zero qualify, send zero.
+
+Quality decides volume, not a daily limit.
+
+⸻
+
+3) SPORT/EVENT VALIDATION 🚨
+
+Problem:
+The system detected props from inactive situations.
+
+Example:
+NFL offseason pass yards movement.
+
+Fix:
+Before Telegram delivery verify:
+
+* Sport is active
+* Event exists
+* Game has not passed
+* Market is valid
+
+Keep internal data if useful, but do not alert.
+
+⸻
+
+4) DUPLICATE / REVERSAL PROTECTION 🚨
+
+Problem:
+Same player/market can flip repeatedly.
+
+Example:
+
+Ryan Jeffers:
+
+0.5 → 1.5
+1.5 → 0.5
+0.5 → 1.5
+
+Fix:
+
+Add lightweight alert memory.
+
+Track:
+
+* Provider
+* Player
+* Market
+* Game
+
+Prevent repeated conflicting Telegram spam.
+
+Do not permanently block future opportunities.
+
+⸻
+
+5) SPORT PERFORMANCE TRACKING
+
+Observation:
+
+MLB is currently producing most actionable opportunities.
+
+The goal is NOT to become an MLB-only system.
+
+The bot should evaluate all supported sports and allow any sport to produce actionable opportunities when the data and edge qualify.
+
+Track internally:
+
+raw → parsed → movement detected → scored → actionable picks
+
+Break down conversion rates by sport:
+
+* MLB
+* NBA/WNBA
+* NFL
+* Soccer
+* CS
+* COD
+* DOTA
+* Other supported sports
+
+Do not change scoring thresholds yet.
+
+We need more data first.
+
+Investigate why other sports are producing mostly market movements but fewer actionable picks.
+
+Possible causes:
+
+* Sport-specific thresholds too strict
+* Not enough historical data
+* Market scoring differences
+* Missing sport-specific logic
+
+Do not rewrite the scoring engine in this pass.
+
+This is diagnosis only.
+
+⸻
+
+6) MARKET MOVEMENT DATA QUALITY
+
+For internal tracking only, preserve:
+
+* Movement direction
+* Previous line
+* New line
+* Provider
+* Time of movement
+
+This data should remain available for future analysis.
+
+Do not send these as Telegram alerts unless they become actionable picks.
+
+⸻
+
+7) FINAL TELEGRAM BEHAVIOR
+
+Final desired behavior:
+
+Internal system:
+
+✅ Collect all useful market movement data
+✅ Track all providers/sports
+✅ Continue analyzing everything
+
+Telegram:
+
+✅ Only send:
+
+🎯 ACTIONABLE BET PICK
+
+The bot should behave like:
+
+Collect everything → Analyze everything → Notify only when there is an actual betting opportunity.
+
+⸻
+
+8) TELEGRAM ALERT VOLUME CONFIRMATION 🚨
+
+Additional live testing confirmed the issue:
+
+Received another 40–50 notifications within 1 minute.
+
+This confirms that raw market movement alerts cannot be user-facing.
+
+Final Telegram behavior:
+
+Internal system:
+✅ Collect all useful market movement data
+✅ Store movement history
+✅ Continue analyzing all sports/providers
+
+Telegram:
+✅ Only send 🎯 ACTIONABLE BET PICK alerts
+
+Do not cap actionable picks artificially.
+
+If 20 real actionable opportunities exist, they should be available.
+
+If zero qualify, send zero.
+
+The filter should be based on quality and edge, not a daily alert limit.
+
+⸻
+
+AFTER THESE FIXES
+
+Run:
+
+✅ Full test suite
+✅ Startup health check
+✅ Verify Telegram behavior
+✅ Confirm no regressions
+
+Then FREEZE the project.
+
+⸻
+
+FINAL STATE REQUIRED
+
+The bot should be:
+
+✅ Stable
+✅ Collecting all useful information
+✅ Not wasting credits
+✅ Not flooding Telegram
+✅ Supporting all sports
+✅ Only sending actionable opportunities
+✅ Existing systems unchanged
+
+⸻
+
+FUTURE WORK AFTER FREEZE
+
+Phase 2:
+
+Add free providers one at a time:
+
+1. Sleeper first
+2. Evaluate PrizePicks/Betr/other sources
+3. Compare providers
+4. Improve information quality
+
+For this pass:
+
+ONLY CLEANUP.
+NO REWRITE.
+NO FEATURE EXPANSION.
+FREEZE WHEN COMPLETE.
+
+⸻
+
+Final report required:
+
+* Files changed
+* Tests passed
+* Startup status
+* Telegram behavior confirmation
+* Confirmation project is frozen.

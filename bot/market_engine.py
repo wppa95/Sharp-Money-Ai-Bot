@@ -81,10 +81,11 @@ _PLAYER_RESULT_CACHE_MAX = 5_000
 _cold_start_done: bool = False
 
 # ── Market availability tracking ─────────────────────────────────────────────
-# Maps "player__stat_type" → datetime of first alert (market move or bet pick).
+# Maps "player__stat_type" → datetime of first alert (bet pick).
 # Used to compute how long a market was available before removal.
 # Internal only — no Telegram alert is sent on removal (doc #4).
 _MARKET_FIRST_ALERT: dict = {}
+
 
 # ── Player Prop Market alert dedup ────────────────────────────────────────────
 # Dict[(player, sport, stat_type)] → (last_alert_timestamp_float, last_alerted_line)
@@ -761,9 +762,10 @@ async def underdog_job(context) -> None:
     _lifecycle_alerted:  list[tuple[str, str, str]] = []   # (player, sport, stat_type) → ACTIVE_ALERTED
     _lifecycle_removed:  list[tuple[str, str, str]] = []   # (player, sport, stat_type) → REMOVED
     # Per-sport pipeline stage counters — emitted in debug summary (#7 diagnostics)
-    _sport_raw:    dict[str, int] = {}  # raw Underdog fetch count (non-removed)
-    _sport_parsed: dict[str, int] = {}  # after futures filter passes
-    _sport_gated:  dict[str, int] = {}  # passed full betting gate (would send alert)
+    _sport_raw:          dict[str, int] = {}  # raw Underdog fetch count (non-removed)
+    _sport_parsed:       dict[str, int] = {}  # after futures filter passes
+    _sport_move_detected: dict[str, int] = {}  # significant line moves (≥MIN_LINE_CHANGE)
+    _sport_gated:        dict[str, int] = {}  # passed full betting gate (would send alert)
 
     try:
         # Two DB round-trips before the loop — both O(unique props), no LIMIT.
@@ -808,6 +810,15 @@ async def underdog_job(context) -> None:
                 if prev_record.line_value != snap.line:
                     line_changed = True
                     prev_line    = prev_record.line_value
+
+            # Stage 3 — movement detected: significant line move, non-cold-start
+            if (
+                not is_removed and not is_cold_start
+                and line_changed and prev_line is not None
+                and abs((snap.line or 0.0) - prev_line) >= config.MIN_UNDERDOG_LINE_CHANGE
+            ):
+                _sp_move = snap.sport or "UNKNOWN"
+                _sport_move_detected[_sp_move] = _sport_move_detected.get(_sp_move, 0) + 1
     
             should_alert = is_removed or (
                 line_changed
@@ -1311,36 +1322,41 @@ async def underdog_job(context) -> None:
                     _sp_gated = snap.sport or "UNKNOWN"
                     _sport_gated[_sp_gated] = _sport_gated.get(_sp_gated, 0) + 1
 
-                # ── Market Move Detection (doc #3) ────────────────────────────────
-                # Significant line moves that do NOT qualify as bet picks are sent as
-                # a lightweight "📈 MARKET MOVE DETECTED" alert — keeping the user
-                # informed of sharp movement without implying a betting edge.
-                _market_move_sent = False
-                if (
-                    not is_removed
-                    and not is_cold_start
-                    and line_changed
-                    and prev_line is not None
-                    and abs((snap.line or 0.0) - prev_line) >= config.MIN_UNDERDOG_LINE_CHANGE
-                    and not should_alert
-                    and chat_ids
-                ):
-                    _mm_delivery = AlertDelivery(db, bot, chat_ids)
-                    _mm_result = await _mm_delivery.deliver_underdog(
-                        player_name      = player,
-                        team             = snap.team or "",
-                        sport            = snap.sport or "UNKNOWN",
-                        stat_type        = stat_type,
-                        old_line         = prev_line,
-                        new_line         = snap.line or 0.0,
-                        game_time        = snap.game_time,
-                        market_move_only = True,
-                    )
-                    _market_move_sent = _mm_result.sent
-                    if _market_move_sent:
+                # Market movement data is stored in UnderdogSnapshotRecord + PropCandidateLog.
+                # No Telegram delivery for market moves — only 🎯 ACTIONABLE BET PICK alerts
+                # reach users (doc #1/#8).  format_market_move_detected() kept for future use.
+
+                # Game time validation: suppress alerts when game has already started/passed (#3)
+                # Catches offseason props that slipped through with a past game_time.
+                # Does NOT block when game_time is None — many valid props lack a scheduled time.
+                if should_alert and not is_removed:
+                    _gt_raw = snap.game_time
+                    if _gt_raw is not None and _gt_raw.replace(tzinfo=None) < now:
+                        should_alert = False
                         logger.debug(
-                            "Market move alert sent: %s | %s | %.1f→%.1f",
-                            player, stat_type, prev_line, snap.line or 0.0,
+                            "UD alert blocked (game passed %s): %s | %s",
+                            _gt_raw.replace(tzinfo=None).strftime('%Y-%m-%d %H:%M'),
+                            player, stat_type,
+                        )
+
+                # Flip/reversal cooldown: prevent rapid back-and-forth alerts (#4)
+                # Uses the most-recent DB snapshot: if it had alert_sent=True and was
+                # stored within UD_FLIP_COOLDOWN seconds, suppress the new alert.
+                # This avoids module-level state and works correctly across test runs.
+                if should_alert and not is_removed and config.UD_FLIP_COOLDOWN > 0:
+                    _pr_fetched = getattr(prev_record, "fetched_at", None)
+                    if (
+                        prev_record is not None
+                        and prev_record.alert_sent
+                        and isinstance(_pr_fetched, datetime)
+                        and (now - _pr_fetched.replace(tzinfo=None)).total_seconds() < config.UD_FLIP_COOLDOWN
+                    ):
+                        should_alert = False
+                        logger.debug(
+                            "UD flip_cooldown: %s | %s — last alert %.0fs ago (cooldown=%ds)",
+                            player, stat_type,
+                            (now - _pr_fetched.replace(tzinfo=None)).total_seconds(),
+                            config.UD_FLIP_COOLDOWN,
                         )
 
                 if should_alert and chat_ids:
@@ -1406,8 +1422,8 @@ async def underdog_job(context) -> None:
                         player, stat_type, _win_mins,
                     )
                     del _MARKET_FIRST_ALERT[_mfa_key]
-            # Record first alert time for market availability tracking (doc #4)
-            if ud_result.sent or _market_move_sent:
+            # Record first alert time for market availability window tracking
+            if ud_result.sent:
                 _mfa_key = f"{player}__{stat_type}"
                 if _mfa_key not in _MARKET_FIRST_ALERT:
                     _MARKET_FIRST_ALERT[_mfa_key] = now
@@ -1758,15 +1774,17 @@ async def underdog_job(context) -> None:
             )
             _dbg_lines.append(f"  rejection breakdown:  {_rej_str}")
         # Per-sport pipeline diagnostics (#7) — shows where props drop off each stage
-        if _sport_raw or _sport_parsed or _sport_gated:
-            _all_sports = sorted(
-                set(list(_sport_raw.keys()) + list(_sport_parsed.keys()) + list(_sport_gated.keys()))
-            )
-            _dbg_lines.append("  per-sport pipeline  raw → parsed → gated:")
+        if _sport_raw or _sport_parsed or _sport_move_detected or _sport_gated:
+            _all_sports = sorted(set(
+                list(_sport_raw.keys()) + list(_sport_parsed.keys())
+                + list(_sport_move_detected.keys()) + list(_sport_gated.keys())
+            ))
+            _dbg_lines.append("  per-sport pipeline  raw → parsed → move_det → gated:")
             for _sp in _all_sports:
                 _dbg_lines.append(
                     f"    {_sp:<8}  raw={_sport_raw.get(_sp, 0):4d}"
                     f"  parsed={_sport_parsed.get(_sp, 0):4d}"
+                    f"  move_det={_sport_move_detected.get(_sp, 0):3d}"
                     f"  gated={_sport_gated.get(_sp, 0):2d}"
                 )
 
