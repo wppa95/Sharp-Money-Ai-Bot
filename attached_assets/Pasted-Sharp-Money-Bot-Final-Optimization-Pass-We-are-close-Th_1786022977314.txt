@@ -1,0 +1,294 @@
+Sharp Money Bot — Final Optimization Pass
+
+We are close. The detection layer is working, but we need to finish turning it into a true bet-pick engine. Do not rewrite working systems. Preserve current Underdog pipeline. Save API/API credits and do not waste time testing things that are not needed.
+
+Priority order:
+
+#1 — Sport Balance / Ranking Correction
+
+Problem:
+MLB has 1000+ props while other sports have very few. We need sports ranked against themselves, not against each other by volume.
+
+Requirements:
+- Keep per-sport ranking.
+- Do not let MLB volume dominate all picks.
+- Each sport should have its own qualified ranking pool.
+- Display the best opportunities from each sport when available.
+- Do not force weak picks from small sports.
+- Only show sports that actually have quality opportunities.
+
+Goal:
+A good NBA/CS2/Tennis/DOTA/WNBA opportunity should not lose because MLB has more data.
+
+---
+
+#2 — Bet Picks Only (Zero Noise)
+
+The user only wants actionable betting picks.
+
+Remove from Telegram:
+- PASS props
+- Pick: — entries
+- informational line moves without edge
+- removed props notifications
+- market activity that is not playable
+
+Only send:
+- Real OVER/UNDER direction
+- Qualified confidence
+- Bet quality threshold passed
+
+If no picks qualify:
+
+Message:
+"No actionable betting picks right now.
+
+Props are scanned continuously — picks only appear once a prop has a clear OVER/UNDER direction with sufficient evidence."
+
+---
+
+#3 — Separate Detection Layer From Betting Pick Layer
+
+Current detection is good.
+
+Example:
+Underdog detects:
+
+Player:
+Matt Olson
+
+Hits:
+1.5 → 0.5
+
+Then market disappears 6 minutes later.
+
+This is valuable information, but it should not appear as a normal bet alert.
+
+Create two categories:
+
+A) Market Detection
+
+Example:
+
+📈 MARKET MOVE DETECTED
+
+Matt Olson Hits
+
+Line:
+1.5 → 0.5
+
+Movement:
+-1.0
+
+Status:
+Tracking
+
+---
+
+B) Actionable Bet Pick
+
+Only if the new line passes:
+
+- Confidence threshold
+- Tier threshold
+- Evidence requirements
+- Direction confirmed
+
+Send:
+
+🎯 ACTIONABLE BET PICK
+
+Player:
+Matt Olson
+
+Pick:
+OVER 0.5 Hits
+
+Tier:
+S
+
+Quality:
+85/100
+
+Trigger:
+Underdog moved 1.5 → 0.5
+
+Status:
+AVAILABLE NOW
+
+---
+
+#4 — Add Market Removal Timing
+
+Do not notify removed props.
+
+Instead track internally:
+
+Example:
+
+Bet detected:
+13:05 UTC
+
+Market removed:
+13:12 UTC
+
+Window:
+7 minutes
+
+Use this data for model improvement.
+
+Add status:
+
+🟢 Available
+🟡 Closing Soon
+🔴 Closed
+
+---
+
+#5 — Provider Expansion Test
+
+Do not blindly add providers.
+
+Test one at a time.
+
+Candidates:
+
+1. Sleeper Picks
+2. Chalkboard
+3. Betr Picks
+4. PrizePicks (only if reliable access method exists)
+5. Any other accessible pick'em providers
+
+For every provider test:
+
+Check:
+✅ Data fetch works
+✅ Multiple sports available
+✅ Player props available
+✅ Data quality
+✅ Stability
+✅ Adds value
+
+Reject:
+❌ Expensive API requirements
+❌ Unstable scraping
+❌ Duplicate data
+❌ Adds noise
+
+Keep only providers that improve the bot.
+
+---
+
+#6 — Keep Current Stability Improvements
+
+Do not remove:
+
+✅ Sport-balanced /picks system
+✅ PASS filtering
+✅ S-tier restoration
+✅ Futures market filtering
+✅ Memory cleanup
+✅ REMOVED log spam reduction
+✅ Existing Underdog scoring
+
+---
+
+#7 — Investigate Remaining Pipeline Issue
+
+Current issue:
+
+Underdog health sometimes shows:
+
+Underdog Pipeline:
+props=0
+
+Need diagnostics:
+
+Add tracking:
+
+Raw Underdog fetch:
+MLB:
+NBA:
+NFL:
+WNBA:
+CS:
+DOTA:
+Tennis:
+
+After parsing:
+
+MLB:
+NBA:
+NFL:
+WNBA:
+CS:
+DOTA:
+Tennis:
+
+After validation:
+
+MLB:
+NBA:
+NFL:
+WNBA:
+CS:
+DOTA:
+Tennis:
+
+After betting gates:
+
+MLB:
+NBA:
+NFL:
+WNBA:
+CS:
+DOTA:
+Tennis:
+
+Find exactly where sports disappear.
+
+---
+
+#8 — Tier System Confirmation
+
+Keep:
+
+S Tier:
+85-100
+
+A Tier:
+70-84
+
+B Tier:
+55-69
+
+But ensure scoring model can actually produce S-tier when the evidence supports it.
+
+---
+
+#9 — Provider Scope For Now
+
+Temporarily prioritize:
+
+✅ Underdog only
+
+Disable DK/FD/other providers until Underdog pipeline is fully validated.
+
+Then add providers back one by one.
+
+---
+
+Final Goal:
+
+The bot should become:
+
+- Multi-sport
+- No noise
+- Only actionable bets
+- Detect sharp line opportunities
+- Convert only real edges into picks
+- Preserve credits/API usage
+- Stable 24/7
+- Ready for actual betting decisions
+
+Do not burn credits testing unnecessary features. Make targeted fixes only.

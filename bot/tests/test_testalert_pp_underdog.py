@@ -374,7 +374,8 @@ class TestDeliverUnderdog:
         assert "Saquon Barkley" in msg
         assert "85.5" in msg
         assert "89.5" in msg
-        assert "HIGHER" in msg or "📈" in msg
+        # New format: direction shown via Move amount; header is 🎯 ACTIONABLE BET PICK
+        assert "ACTIONABLE BET PICK" in msg or "+4.0" in msg
 
     @pytest.mark.asyncio
     async def test_line_change_lower_broadcast(self):
@@ -400,7 +401,8 @@ class TestDeliverUnderdog:
         assert "Travis Kelce" in msg
         assert "72.5" in msg
         assert "68.5" in msg
-        assert "LOWER" in msg or "📉" in msg
+        # New format: direction shown via Move amount; header is 🎯 ACTIONABLE BET PICK
+        assert "ACTIONABLE BET PICK" in msg or "-4.0" in msg
 
     @pytest.mark.asyncio
     async def test_removed_prop_formatting(self):

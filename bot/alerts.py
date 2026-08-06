@@ -1075,6 +1075,7 @@ class AlertDelivery:
         opponent: Optional[str] = None,        # Opponent team/player (when available)
         intelligence_trace: Optional[dict] = None,  # prop_intelligence trace
         opening_line: Optional[float] = None,  # First ever line from PropLineHistory
+        market_move_only: bool = False,  # True → send lightweight market-move alert only
     ) -> "DeliveryResult":
         """
         Full Underdog prop alert pipeline:
@@ -1083,9 +1084,10 @@ class AlertDelivery:
           2. Game timing filter — skipped for removals and new-prop alerts.
           3. Daily Underdog cap check (disabled by default; set DAILY_UNDERDOG_LIMIT > 0).
           4. Format and broadcast.
-             - new_prop=True  → format_underdog_new_prop_alert  (🚨 PROP LIVE)
-             - removed=True   → format_underdog_change_alert    (🚫 REMOVED)
-             - default        → format_underdog_change_alert    (🔄 LINE CHANGE)
+             - market_move_only=True → format_market_move_detected (📈 MARKET MOVE)
+             - new_prop=True         → format_underdog_new_prop_alert (🚨 PROP LIVE)
+             - removed=True          → format_underdog_change_alert   (🚫 REMOVED)
+             - default               → format_underdog_change_alert   (🎯 BET PICK)
           5. Broadcast to all registered chat IDs.
         """
         from alert_normalizer import normalize_underdog
@@ -1093,6 +1095,7 @@ class AlertDelivery:
         from alerts_multiplatform import (
             format_underdog_change_alert,
             format_underdog_new_prop_alert,
+            format_market_move_detected,
         )
         from engine.timing import is_game_alertable
 
@@ -1133,7 +1136,13 @@ class AlertDelivery:
                 return DeliveryResult(sent=False, filtered=True, filtered_reason=reason)
 
         # 4. Format
-        if new_prop:
+        if market_move_only:
+            message = format_market_move_detected(
+                player_name, team, sport, stat_type,
+                old_line, new_line,
+                game_time,
+            )
+        elif new_prop:
             message = format_underdog_new_prop_alert(
                 player_name, team, sport, stat_type,
                 new_line,

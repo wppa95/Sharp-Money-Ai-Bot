@@ -55,6 +55,7 @@ from alerts_multiplatform import (
     format_inefficiency_alert,
     format_clv_opportunity_alert,
     format_underdog_change_alert,
+    format_market_move_detected,  # noqa: F401 — imported for availability check
 )
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,12 @@ _PLAYER_RESULT_CACHE_MAX = 5_000
 # scores every active prop (cold-start mode); subsequent cycles use incremental
 # scoring (new props and line-change events only).
 _cold_start_done: bool = False
+
+# ── Market availability tracking ─────────────────────────────────────────────
+# Maps "player__stat_type" → datetime of first alert (market move or bet pick).
+# Used to compute how long a market was available before removal.
+# Internal only — no Telegram alert is sent on removal (doc #4).
+_MARKET_FIRST_ALERT: dict = {}
 
 # ── Player Prop Market alert dedup ────────────────────────────────────────────
 # Dict[(player, sport, stat_type)] → (last_alert_timestamp_float, last_alerted_line)
@@ -753,6 +760,10 @@ async def underdog_job(context) -> None:
     # PropLineHistory rows exist before we try to update them.
     _lifecycle_alerted:  list[tuple[str, str, str]] = []   # (player, sport, stat_type) → ACTIVE_ALERTED
     _lifecycle_removed:  list[tuple[str, str, str]] = []   # (player, sport, stat_type) → REMOVED
+    # Per-sport pipeline stage counters — emitted in debug summary (#7 diagnostics)
+    _sport_raw:    dict[str, int] = {}  # raw Underdog fetch count (non-removed)
+    _sport_parsed: dict[str, int] = {}  # after futures filter passes
+    _sport_gated:  dict[str, int] = {}  # passed full betting gate (would send alert)
 
     try:
         # Two DB round-trips before the loop — both O(unique props), no LIMIT.
@@ -767,6 +778,10 @@ async def underdog_job(context) -> None:
             is_removed = "[REMOVED]" in snap.selection
             if is_removed:
                 _n_removed += 1
+            else:
+                # Stage 1: raw fetch count per sport (non-removed only)
+                _sp_raw = snap.sport or "UNKNOWN"
+                _sport_raw[_sp_raw] = _sport_raw.get(_sp_raw, 0) + 1
             player     = snap.player or "Unknown"
     
             # Extract the stable stat-type category from the selection string
@@ -775,6 +790,11 @@ async def underdog_job(context) -> None:
             # Skip season-long futures / award markets — not resolvable by game data
             if not is_removed and _is_futures_stat(stat_type):
                 continue
+
+            # Stage 2: parsed count per sport (non-removed, passed futures filter)
+            if not is_removed:
+                _sp_parsed = snap.sport or "UNKNOWN"
+                _sport_parsed[_sp_parsed] = _sport_parsed.get(_sp_parsed, 0) + 1
     
             # Detect first-ever appearance: (player, stat) not in DB at all yet
             is_new_prop = not is_removed and (player, stat_type) not in known_keys
@@ -805,14 +825,15 @@ async def underdog_job(context) -> None:
             from engine.player_validator import validate_player_prop
             from engine.ud_bet_decision import make_ud_bet_decision
             from alerts import DeliveryResult
-            score:           Optional[UDPropScore] = None
-            ud_result:       DeliveryResult        = DeliveryResult(sent=False)
-            np_immediate:    bool                  = False   # set inside is_new_prop branch
-            validation:      Optional[object]      = None    # PlayerPropValidation or None
-            decision:        Optional[object]      = None    # UDBetDecision or None
-            hit_rates:       Optional[object]      = None    # PlayerHitRates or None
-            market_quality:  Optional[object]      = None    # MarketQuality — display context
-            market_pressure: Optional[object]      = None    # MarketPressureFlag — warning only
+            score:              Optional[UDPropScore] = None
+            ud_result:          DeliveryResult        = DeliveryResult(sent=False)
+            np_immediate:       bool                  = False   # set inside is_new_prop branch
+            _market_move_sent:  bool                  = False   # lightweight market-move alert
+            validation:         Optional[object]      = None    # PlayerPropValidation or None
+            decision:           Optional[object]      = None    # UDBetDecision or None
+            hit_rates:          Optional[object]      = None    # PlayerHitRates or None
+            market_quality:     Optional[object]      = None    # MarketQuality — display context
+            market_pressure:    Optional[object]      = None    # MarketPressureFlag — warning only
     
             if is_new_prop:
                 # ── New-prop path ────────────────────────────────────────────────
@@ -1181,13 +1202,9 @@ async def underdog_job(context) -> None:
                 # Removal notices: only Telegram-alert for three conditions.
                 # All removals are still saved to the DB regardless.
                 if is_removed:
-                    # Removal alerts: only for props that previously triggered a
-                    # user-visible Telegram alert. Score-only / DB-only tracking
-                    # does NOT qualify — no removal spam for unseen props.
-                    is_qualified = (
-                        prev_record is not None
-                        and prev_record.alert_sent  # a Telegram alert was previously sent
-                    )
+                    # Removal alerts suppressed from Telegram (doc #2/#3).
+                    # Lifecycle tracking (REMOVED state) still applied via _lifecycle_removed.
+                    is_qualified = False
                 else:
                     # Line-change props: require A-tier or better, a real directional
                     # pick from the decision engine, and sport in betting whitelist.
@@ -1268,7 +1285,7 @@ async def underdog_job(context) -> None:
                             "decision_conf": (decision.confidence if decision is not None else None),
                         })
     
-                should_alert = is_qualified and (is_reentry or is_removed or (
+                should_alert = is_qualified and (is_reentry or (
                     line_changed
                     and prev_line is not None
                     and abs(snap.line - prev_line) >= config.MIN_UNDERDOG_LINE_CHANGE
@@ -1287,6 +1304,43 @@ async def underdog_job(context) -> None:
                             "UD conf_gate [lc]: %s | %s | conf=%d < min=%d (tier=%s)",
                             player, stat_type,
                             decision.confidence, _lc_min_conf, decision.decision_tier,
+                        )
+
+                # Stage 4: gated count — full betting gate passed
+                if should_alert and not is_removed:
+                    _sp_gated = snap.sport or "UNKNOWN"
+                    _sport_gated[_sp_gated] = _sport_gated.get(_sp_gated, 0) + 1
+
+                # ── Market Move Detection (doc #3) ────────────────────────────────
+                # Significant line moves that do NOT qualify as bet picks are sent as
+                # a lightweight "📈 MARKET MOVE DETECTED" alert — keeping the user
+                # informed of sharp movement without implying a betting edge.
+                _market_move_sent = False
+                if (
+                    not is_removed
+                    and not is_cold_start
+                    and line_changed
+                    and prev_line is not None
+                    and abs((snap.line or 0.0) - prev_line) >= config.MIN_UNDERDOG_LINE_CHANGE
+                    and not should_alert
+                    and chat_ids
+                ):
+                    _mm_delivery = AlertDelivery(db, bot, chat_ids)
+                    _mm_result = await _mm_delivery.deliver_underdog(
+                        player_name      = player,
+                        team             = snap.team or "",
+                        sport            = snap.sport or "UNKNOWN",
+                        stat_type        = stat_type,
+                        old_line         = prev_line,
+                        new_line         = snap.line or 0.0,
+                        game_time        = snap.game_time,
+                        market_move_only = True,
+                    )
+                    _market_move_sent = _mm_result.sent
+                    if _market_move_sent:
+                        logger.debug(
+                            "Market move alert sent: %s | %s | %.1f→%.1f",
+                            player, stat_type, prev_line, snap.line or 0.0,
                         )
 
                 if should_alert and chat_ids:
@@ -1338,12 +1392,25 @@ async def underdog_job(context) -> None:
                         )
     
             # Queue lifecycle transitions — applied after bridge so PropLineHistory rows exist
-            if ud_result.sent:
-                _sport_key = snap.sport or "UNKNOWN"
-                if is_removed:
-                    _lifecycle_removed.append((player, _sport_key, stat_type))
-                else:
-                    _lifecycle_alerted.append((player, _sport_key, stat_type))
+            if ud_result.sent and not is_removed:
+                _lifecycle_alerted.append((player, snap.sport or "UNKNOWN", stat_type))
+            # Removals: track lifecycle independently of alert sent status (no Telegram alert)
+            if is_removed and prev_record is not None:
+                _lifecycle_removed.append((player, snap.sport or "UNKNOWN", stat_type))
+                # Log market availability window (detection → removal) for model improvement
+                _mfa_key = f"{player}__{stat_type}"
+                if _mfa_key in _MARKET_FIRST_ALERT:
+                    _win_mins = (now - _MARKET_FIRST_ALERT[_mfa_key]).total_seconds() / 60
+                    logger.info(
+                        "Market window: %s | %s — available %.0f min before removal",
+                        player, stat_type, _win_mins,
+                    )
+                    del _MARKET_FIRST_ALERT[_mfa_key]
+            # Record first alert time for market availability tracking (doc #4)
+            if ud_result.sent or _market_move_sent:
+                _mfa_key = f"{player}__{stat_type}"
+                if _mfa_key not in _MARKET_FIRST_ALERT:
+                    _MARKET_FIRST_ALERT[_mfa_key] = now
     
             # Resolve alert_outcome for historical analysis
             if is_new_prop:
@@ -1690,6 +1757,19 @@ async def underdog_job(context) -> None:
                 for _k, _v in sorted(_rej_counts.items(), key=lambda x: -x[1])
             )
             _dbg_lines.append(f"  rejection breakdown:  {_rej_str}")
+        # Per-sport pipeline diagnostics (#7) — shows where props drop off each stage
+        if _sport_raw or _sport_parsed or _sport_gated:
+            _all_sports = sorted(
+                set(list(_sport_raw.keys()) + list(_sport_parsed.keys()) + list(_sport_gated.keys()))
+            )
+            _dbg_lines.append("  per-sport pipeline  raw → parsed → gated:")
+            for _sp in _all_sports:
+                _dbg_lines.append(
+                    f"    {_sp:<8}  raw={_sport_raw.get(_sp, 0):4d}"
+                    f"  parsed={_sport_parsed.get(_sp, 0):4d}"
+                    f"  gated={_sport_gated.get(_sp, 0):2d}"
+                )
+
         logger.info("underdog_job [debug summary]\n%s", "\n".join(_dbg_lines))
         # Debug summary consumed — release the MarketSnapshot list; the scored-prop
         # list is still needed for the PropCandidateLog write below.

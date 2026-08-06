@@ -569,6 +569,20 @@ def _format_intelligence_block(trace: "Optional[dict]") -> str:
     return "".join(lines)
 
 
+def _market_availability_status(game_time: Optional[datetime]) -> str:
+    """Return availability label based on time until game start."""
+    if game_time is None:
+        return "🟢 AVAILABLE NOW"
+    gt = game_time.replace(tzinfo=None)
+    mins_until = (gt - datetime.utcnow()).total_seconds() / 60
+    if mins_until <= 0:
+        return "🔴 GAME LIVE / CLOSING"
+    elif mins_until <= 30:
+        return "🟡 CLOSING SOON"
+    else:
+        return "🟢 AVAILABLE NOW"
+
+
 def format_underdog_change_alert(
     player_name: str,
     team: str,
@@ -610,7 +624,7 @@ def format_underdog_change_alert(
         header         = "🚫 <b>UNDERDOG PROP REMOVED</b>"
         movement_block = f"  🐶 <b>Last Line:</b>  <code>{old_line:.1f}</code>"
     elif standing:
-        header         = "🎯 <b>UNDERDOG STANDING PLAY</b>"
+        header         = "🎯 <b>ACTIONABLE BET PICK</b>"
         movement_block = (
             f"📊 <b>Underdog Line</b>\n"
             f"  🐶 <code>{new_line:.1f}</code>  {_line_label(new_line)}"
@@ -618,13 +632,13 @@ def format_underdog_change_alert(
     else:
         change         = new_line - old_line
         direction_icon = "📈" if change > 0 else "📉"
-        header         = f"{direction_icon} <b>UNDERDOG LINE MOVE</b>"
+        header         = "🎯 <b>ACTIONABLE BET PICK</b>"
         change_sign    = "+" if change >= 0 else ""
         movement_block = (
             f"📊 <b>Underdog Line</b>\n"
             f"  🐶 <code>{new_line:.1f}</code>  {_line_label(new_line)}\n"
             f"  Previous:         <code>{old_line:.1f}</code>\n"
-            f"  Movement:         <code>{change_sign}{change:.1f}</code>"
+            f"  {direction_icon} Move:  <code>{change_sign}{change:.1f}</code>"
         )
 
     opponent_str = f"\n  <b>vs:</b>      {opponent}" if opponent else ""
@@ -763,12 +777,66 @@ def format_underdog_change_alert(
             body_lines += [mq_line]
         body_lines += [
             "",
+            f"📍 <b>Status:</b>  {_market_availability_status(game_time)}",
             f"{EMOJI['clock']} <i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>",
             "",
             _thick,
         ]
 
     # Drop empty strings from optional lines
+    parts = [ln for ln in body_lines if ln is not None]
+    return "\n".join(parts)
+
+
+def format_market_move_detected(
+    player_name: str,
+    team: str,
+    sport: str,
+    stat_type: str,
+    old_line: float,
+    new_line: float,
+    game_time: Optional[datetime] = None,
+) -> str:
+    """Lightweight alert for significant line moves that do not yet qualify as bet picks.
+
+    Fires when Underdog moves a line by ≥ MIN_UNDERDOG_LINE_CHANGE but the prop
+    has not passed the full scoring + confidence + tier gate.  Keeps the user
+    informed of sharp market movement without implying a betting edge.
+    """
+    sport_icon = {
+        "NFL": "🏈", "NBA": "🏀", "MLB": "⚾",
+        "NHL": "🏒", "UFC": "🥊", "WNBA": "🏀",
+    }.get(sport, "🎯")
+
+    change = new_line - old_line
+    change_sign = "+" if change >= 0 else ""
+    direction_icon = "📈" if change > 0 else "📉"
+
+    game_str = (
+        f"\n🕐 <b>Game:</b>  {game_time.strftime('%b %d %H:%M')} UTC"
+        if game_time else ""
+    )
+
+    _thick = "━" * 18
+    body_lines = [
+        _thick,
+        f"{direction_icon} <b>MARKET MOVE DETECTED</b>",
+        _thick,
+        "",
+        f"{sport_icon} <b>{sport} — {stat_type}</b>",
+        f"👤 <b>{player_name}</b>",
+        "",
+        f"🐶 <b>Line:</b>  <code>{old_line:.1f}</code>  →  <code>{new_line:.1f}</code>",
+        f"📉 <b>Movement:</b>  <code>{change_sign}{change:.1f}</code>",
+        "",
+        "📊 <b>Status:</b>  Tracking — evaluating for bet quality",
+        "<i>This is a market signal, not yet a bet pick.</i>",
+        game_str,
+        "",
+        f"🕐 <i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>",
+        "",
+        _thick,
+    ]
     parts = [ln for ln in body_lines if ln is not None]
     return "\n".join(parts)
 
