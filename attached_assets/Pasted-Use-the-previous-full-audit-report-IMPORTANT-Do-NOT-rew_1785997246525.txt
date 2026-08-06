@@ -1,0 +1,213 @@
+Use the previous full audit report.
+
+IMPORTANT:
+Do NOT rewrite the bot.
+Do NOT refactor architecture.
+Do NOT redesign systems.
+Do NOT remove features.
+Do NOT change strategy.
+
+Only fix what is confirmed broken.
+
+Make the smallest safe changes possible.
+
+Fix ALL confirmed issues from the audit:
+
+1. BOT CRASHES / STABILITY
+
+Fix:
+- Missing asyncio import in bot/main.py causing _clv_seed_job retry failure.
+- Startup failures that can kill the process without proper logging.
+- Missing health tracking for jobs that silently return.
+- Missing job_started/job_failed tracking where needed.
+- Improve crash visibility without changing scheduler behavior.
+
+2. TELEGRAM COMMAND FAILURES
+
+Fix:
+- /config command failures.
+- /picks command failures.
+
+Investigate and repair:
+- Pick: — issue.
+- Missing OVER/UNDER recommendation display.
+- bet_recommendation lookup failures.
+- PlayerPropHistory vs UnderdogSnapshotRecord matching problems.
+
+Normalize matching for:
+- player names
+- sport names
+- stat_type names
+- capitalization
+- spaces
+- alternate stat labels
+
+Add logging where data lookup fails.
+
+3. UNDERDOG PIPELINE ERROR
+
+Fix:
+
+'MarketSnapshot' object has no attribute 'external_id'
+
+Location:
+bot/market_engine.py
+
+Use the safest minimal fix.
+
+Do not rewrite the pipeline.
+
+4. DATABASE LOCKING
+
+Fix:
+
+sqlite3.OperationalError: database is locked
+
+Audit and repair:
+- database.py
+- concurrent writes
+- background jobs
+- CLV seeder
+- CLV harvester
+- grading writes
+- Underdog writes
+
+Enable safer SQLite operation (WAL mode if appropriate).
+
+Do not change database schema.
+
+5. PLAYER PROP MARKET ENGINE
+
+Verify and fix:
+
+Flow:
+Underdog data
+→ PropLineHistory
+→ PlayerPropMarketComparison
+→ scoring
+→ alerts
+→ Telegram output
+
+Fix any broken links.
+
+Make sure qualifying props produce actual:
+OVER
+UNDER
+PASS
+
+Do not change scoring logic unless required for a bug fix.
+
+6. CONFIDENCE SYSTEM
+
+Inspect:
+
+- engine/confidence.py
+- engine/candidate.py
+- engine/analyst.py
+- engine/projection_confidence.py
+
+Fix only broken integration.
+
+Do not redesign confidence scoring.
+
+Make sure:
+- Proxy Match Confidence
+- Projection Confidence
+- Tier scoring
+- Stars
+- Bet Quality
+
+do not conflict.
+
+7. ALERT SYSTEM
+
+Fix:
+- duplicate alert risks
+- stat_type normalization issues
+- dedup problems
+- incorrect alert formatting
+
+Verify:
+- Player Prop Market Alerts
+- Underdog alerts
+- Telegram formatting
+
+Do not redesign alerts.
+
+8. MULTI-SPORT EXPANSION
+
+Keep the goal:
+Expand all available sports.
+
+Fix only bugs preventing expansion.
+
+Verify:
+UD_ALERT_SPORTS
+active sports
+sport filtering
+ranking logic
+
+Important:
+Rank opportunities within the same sport only.
+
+Do not compare MLB scores against Tennis/CS/DOTA scores.
+
+9. PROVIDERS
+
+Inspect:
+- Underdog
+- DraftKings
+- FanDuel
+- Odds API
+- PandaScore
+
+Fix only broken behavior.
+
+Do not enable disabled providers/jobs.
+
+Improve missing API key visibility only.
+
+10. TESTS
+
+Review failures/regressions in:
+
+- test_alert_quality.py
+- test_pipeline.py
+- test_prop_intelligence.py
+- test_underdog_job_summary.py
+- test_projection_confidence.py
+- test_consensus.py
+- test_intelligence tests
+
+Fix broken tests only when caused by real code issues.
+
+11. CODE HEALTH
+
+Search for:
+- broken imports
+- missing attributes
+- undefined variables
+- stale config references
+- hidden runtime exceptions
+- duplicate broken logic
+
+Only fix confirmed problems.
+
+After changes:
+- run the full test suite
+- start the bot
+- verify /health
+- verify /config
+- verify /picks
+- verify Underdog monitoring
+- verify alerts
+
+Report:
+1. Files changed
+2. Bugs fixed
+3. Tests passed/failed
+4. Remaining issues
+
+Do not perform a rewrite.
+Do not refactor.
+Only repair what is broken.

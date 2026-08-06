@@ -119,7 +119,7 @@ async def _run_job(snapshots, db, *, deliver_result=None):
                 mock_cls.return_value = mock_delivery
                 # The cycle digest is dispatched via broadcast_alert directly (not through
                 # AlertDelivery), so we patch it here to prevent real Telegram calls.
-                with patch("alerts.broadcast_alert",
+                with patch("market_engine.broadcast_alert",
                            new_callable=AsyncMock,
                            return_value={"sent": 1, "failed": 0}):
                     await me.underdog_job(ctx)

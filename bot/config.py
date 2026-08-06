@@ -194,7 +194,7 @@ class Config:
     #
     # Still unsupported (self-suppress via PASS decision):
     #   Soccer, NPB, KBO — no public per-game stat API integrated.
-    UD_ALERT_SPORTS_RAW: str = os.environ.get("MLB,WNBA,NFL,NBA,DOTA,TENNIS,CS")
+    UD_ALERT_SPORTS_RAW: str = os.environ.get("UD_ALERT_SPORTS", "MLB,WNBA,NFL,NBA,DOTA,TENNIS,CS")
 
     # Dedup windows for new alert types (seconds)
     INEFFICIENCY_DEDUP_WINDOW: int = int(os.environ.get("INEFFICIENCY_DEDUP_WINDOW", "1800"))

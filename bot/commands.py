@@ -1137,7 +1137,9 @@ class PropPickAdapter:
         self.best_edge = abs(movement) * 2.0 if movement else 0.0
 
         # Direction: market-information label, not a betting call
-        self.best_side = "OVER"
+        # Direction placeholder — updated from DB recommendation in cmd_picks/cmd_slip
+        # rendering loop so it reflects the actual OVER/UNDER/PASS from Underdog scoring.
+        self.best_side = "—"
 
 
 def _build_dk_fd_index(records: list) -> "dict[tuple[str,str], float]":
@@ -1319,8 +1321,26 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             [(plh.player_name, plh.sport, plh.stat_type) for plh, _ in picks],
             since_hours=24,
         )
-    except Exception:
-        pass   # display falls back to "—" per prop
+        if not _rec_map and picks:
+            logger.warning(
+                "cmd_picks: get_ud_recommendations_bulk returned empty for %d props "
+                "(stat_type mismatch or no recent snapshots within 24h)",
+                len(picks),
+            )
+        else:
+            _missing = [
+                (plh.player_name, plh.stat_type)
+                for plh, _ in picks
+                if (plh.player_name, plh.sport, plh.stat_type) not in _rec_map
+            ]
+            if _missing:
+                logger.warning(
+                    "cmd_picks: no recommendation found for %d/%d props: %s",
+                    len(_missing), len(picks),
+                    "; ".join(f"{p}/{s}" for p, s in _missing[:5]),
+                )
+    except Exception as _rec_exc:
+        logger.warning("cmd_picks: recommendation lookup failed: %s", _rec_exc)
 
     _alt_raw = await _asyncio.gather(
         *[
@@ -1368,6 +1388,17 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         # Bet direction from UnderdogSnapshot scoring
         rec_key  = (plh.player_name, plh.sport, plh.stat_type)
         bet_rec, bet_conf = _rec_map.get(rec_key, (None, None))
+        if bet_rec is None and _rec_map:
+            # Fallback: case-insensitive stat_type match (handles normalisation drift)
+            _rec_key_lower = (plh.player_name.lower(), plh.sport.lower(), plh.stat_type.lower())
+            for (_rp, _rs, _rst), _rv in _rec_map.items():
+                if (_rp.lower(), _rs.lower(), _rst.lower()) == _rec_key_lower:
+                    bet_rec, bet_conf = _rv
+                    logger.debug(
+                        "cmd_picks: case-insensitive stat_type match for %s/%s",
+                        plh.player_name, plh.stat_type,
+                    )
+                    break
         pick_label = _PICK_LABEL.get(bet_rec or "", "—")
 
         # Line movement annotation
@@ -2322,8 +2353,8 @@ async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     pandascore_set = bool(os.environ.get("PANDASCORE_API_KEY", "").strip())
     odds_api_set   = bool(config.ODDS_API_KEY)
 
-    ud_sports = ", ".join(sorted(config.ud_alert_sports)) or "none"
-    active_sp = ", ".join(config.active_sports) or "none"
+    ud_sports = ", ".join(sorted(config.ud_alert_sports or [])) or "none"
+    active_sp = ", ".join(config.active_sports or []) or "none"
 
     lines: list[str] = [
         "⚙️ <b>Bot Configuration</b>",

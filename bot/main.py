@@ -10,6 +10,7 @@ post_shutdown lifecycle hooks — do NOT wrap run_polling() in asyncio.run().
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import sys
@@ -437,6 +438,9 @@ async def _grade_opportunities_job(context) -> None:
     """
     db: Optional[Database] = context.bot_data.get("db")
     if not db:
+        _ht = get_health_tracker()
+        if _ht:
+            _ht.record_job_fail("_grade_opportunities_job", "db_not_ready")
         return
     try:
         pending = await db.get_pending_opportunities(cutoff_hours=4)
@@ -475,8 +479,14 @@ async def _grade_opportunities_job(context) -> None:
             graded += 1
         if graded:
             logger.info("_grade_opportunities_job: graded=%d opportunities", graded)
+        _ht_g = get_health_tracker()
+        if _ht_g:
+            _ht_g.record_job_run("_grade_opportunities_job")
     except Exception:
         logger.exception("_grade_opportunities_job: unexpected error")
+        _ht_g = get_health_tracker()
+        if _ht_g:
+            _ht_g.record_job_fail("_grade_opportunities_job", "unexpected error")
 
 
 async def _heartbeat_job(context) -> None:

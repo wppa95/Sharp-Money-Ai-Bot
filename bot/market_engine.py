@@ -1540,8 +1540,17 @@ async def underdog_job(context) -> None:
         ]
         if _scored_props:
             from collections import Counter
-            _top = sorted(_scored_props, key=lambda x: x["total"], reverse=True)[:10]
-            _dbg_lines.append("  top 10 by score:")
+            # Group by sport first — never compare scores across sports
+            from collections import defaultdict as _dd
+            _sport_buckets: dict = _dd(list)
+            for _p in _scored_props:
+                _sport_buckets[_p.get("sport", "?")].append(_p)
+            _top = []
+            for _sn in sorted(_sport_buckets.keys()):
+                _top.extend(
+                    sorted(_sport_buckets[_sn], key=lambda x: x["total"], reverse=True)[:3]
+                )
+            _dbg_lines.append(f"  top 3/sport by score (sports: {', '.join(sorted(_sport_buckets.keys()))}):")
             for _i, _p in enumerate(_top, 1):
                 # Header line: rank, player, stat, sport, total, tier, stars, path, rejection
                 _dbg_lines.append(
