@@ -76,6 +76,7 @@ from commands import (
     cmd_block,
     cmd_refinement,
     cmd_funnel,
+    cmd_backfill,
     error_handler,
     init_handlers,
 )
@@ -87,6 +88,7 @@ from connectors import (
 )
 from market_engine import (
     init_market_engine,
+    init_odds_confirmation,
     connector_poll_job,
     consensus_check_job,
     clv_check_job,
@@ -260,6 +262,7 @@ async def post_init(application: Application) -> None:
     ))
 
     init_market_engine(registry)
+    init_odds_confirmation(_engine)   # wire OddsAPI confirmation into market engine
 
     # Store db reference in bot_data for market engine jobs
     application.bot_data["db"] = _db
@@ -1667,6 +1670,7 @@ def main() -> None:
     app.add_handler(CommandHandler("block",      cmd_block))
     app.add_handler(CommandHandler("refinement", cmd_refinement))
     app.add_handler(CommandHandler("funnel",     cmd_funnel))
+    app.add_handler(CommandHandler("backfill",   cmd_backfill))
     app.add_error_handler(error_handler)
 
     logger.info("Starting polling — press Ctrl+C to stop.")

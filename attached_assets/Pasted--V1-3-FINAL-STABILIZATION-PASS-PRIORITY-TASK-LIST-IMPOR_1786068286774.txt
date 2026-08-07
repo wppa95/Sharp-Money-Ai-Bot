@@ -1,0 +1,455 @@
+🚨 V1.3 FINAL STABILIZATION PASS — PRIORITY TASK LIST
+
+IMPORTANT CREDIT RULE:
+
+⚠️ DO NOT WASTE CREDITS.
+
+Before making changes:
+
+* Review current system state
+* Do not repeat completed work
+* Do not investigate unrelated issues
+* Do not redesign anything
+* Do not rewrite working systems
+
+This is a FINAL stabilization and improvement pass.
+
+After ALL PRIORITY tasks are completed:
+
+🛑 FREEZE THE PROJECT.
+
+Do not continue exploring.
+Do not add extra features.
+Do not refactor.
+
+Provide final report and stop.
+
+⸻
+
+CURRENT VERIFIED STATUS ✅
+
+Completed:
+
+✅ 2968 tests passing
+✅ Telegram bot working
+✅ Health routes working
+✅ Sport priority updated
+✅ MLB S-tier restriction added
+✅ Automatic grading fixes deployed
+✅ Underdog pipeline guarded
+✅ No architecture rewrite
+
+⸻
+
+🔴 PRIORITY 1 — AUTOMATIC RESULT GRADING (URGENT)
+
+Current problem:
+
+Picks are tracked but never graded as hits or misses.
+
+Current:
+
+* Picks saved
+* Games finish
+* Results not populated
+* Performance shows 0%
+
+Required:
+
+Fix and verify automatic grading.
+
+Must support:
+
+✅ OVER HIT
+✅ OVER MISS
+✅ UNDER HIT
+✅ UNDER MISS
+
+After games:
+
+1. Detect completed event
+2. Match stored prop
+3. Pull final stats
+4. Compare result
+5. Save:
+
+* HIT
+* MISS
+
+Store:
+
+* Sport
+* Player/team
+* Market
+* Line
+* Direction
+* Tier
+* Confidence
+* Quality score
+* Final result
+* Date
+
+⸻
+
+🔴 PRIORITY 2 — HISTORICAL GRADING BACKFILL
+
+Current:
+
+Performance starts empty.
+
+Required:
+
+Create safe backfill process.
+
+Check existing actionable picks:
+
+* Junior Caminero
+* Hunter Goodman
+* Acuña
+* Rengifo
+* Other stored picks
+
+If data exists:
+
+* Match completed games
+* Grade results
+* Populate dashboard
+
+Goal:
+
+Do not start learning from zero.
+
+⸻
+
+🔴 PRIORITY 3 — SPORT PRIORITY VALIDATION
+
+Current config:
+
+Tier 1 enabled:
+
+✅ NBA
+✅ WNBA
+✅ CS2
+✅ Soccer
+✅ Tennis
+✅ Dota
+✅ LoL
+✅ Valorant
+✅ Table Tennis
+✅ Badminton
+✅ PGA
+✅ NFL
+✅ NCAAF
+✅ MMA
+
+MLB:
+
+✅ Track
+✅ Validate
+✅ Grade
+
+Telegram:
+
+✅ S-tier only
+
+Verify:
+
+* MLB does not dominate alerts
+* Tier 1 sports receive priority
+
+⸻
+
+🔴 PRIORITY 4 — ADAPTIVE SPORT GATES
+
+Current issue:
+
+Same strict requirements across all sports.
+
+Update:
+
+Tier 1 sports allow:
+
+* S Tier
+* A Tier
+* B Tier
+* C Tier where appropriate
+
+Review:
+
+* Minimum history
+* Snapshot requirements
+* Cold start rules
+
+Maintain:
+
+✅ Valid event checks
+✅ Clear direction
+✅ Quality gates
+✅ Duplicate protection
+
+⸻
+
+🔴 PRIORITY 5 — FULL PROP MEMORY SYSTEM
+
+Track every evaluated prop.
+
+Not only alerts.
+
+Store:
+
+* Sport
+* Player/team
+* Market
+* Line
+* Direction
+* Provider
+* Score
+* Tier
+* Timestamp
+
+After completion:
+
+Store:
+
+* HIT/MISS
+* Win/Loss
+* Final stat
+
+Goal:
+
+Build a real learning database.
+
+⸻
+
+🟠 PRIORITY 6 — ODDSAPI MARKET CONFIRMATION
+
+OddsAPI key confirmed:
+
+✅ Available
+
+Use OddsAPI intelligently.
+
+DO NOT run OddsAPI on every prop.
+
+Only:
+
+✅ S-tier picks
+✅ A-tier picks
+
+Workflow:
+
+1. Underdog detects opportunity
+2. Scoring ranks pick
+3. Pick reaches S/A
+4. Query OddsAPI
+5. Compare:
+
+* Market direction
+* Line movement
+* Consensus
+* Sportsbook confirmation
+
+Add confirmation data.
+
+IMPORTANT:
+
+OddsAPI is a confirmation layer only.
+
+It must NOT block picks.
+
+If OddsAPI fails:
+
+* Log failure
+* Continue normally
+
+Protect API quota.
+
+⸻
+
+🟠 PRIORITY 7 — EXTERNAL VALIDATION SOURCES
+
+Add future validation sources carefully.
+
+MLB:
+
+* StatMuse
+* ESPN gamelog
+
+CS2:
+
+* HLTV
+
+Soccer:
+
+* FotMob
+
+Golf:
+
+* PGA stats
+
+Badminton:
+
+* Badminton4U
+
+Table Tennis:
+
+* TTStats
+
+Purpose:
+
+Detection + external validation.
+
+Do not add unnecessary architecture changes.
+
+⸻
+
+🟠 PRIORITY 8 — CS2 DATA PROVIDER
+
+Current:
+
+PandaScore missing.
+
+Result:
+
+CS2 alerts suppressed.
+
+Required:
+
+Create CS2 validation plan.
+
+Preferred:
+
+HLTV integration.
+
+Validate:
+
+* Player form
+* Maps
+* Match history
+* Recent performance
+
+⸻
+
+🟡 PRIORITY 9 — UNDERDOG PIPELINE MONITORING
+
+Previous error:
+
+list object has no attribute has_real_data
+
+Status:
+
+Reported fixed.
+
+Continue monitoring only.
+
+Verify:
+
+* No repeat failures
+* Props importing
+* Scoring healthy
+
+Do not rewrite.
+
+⸻
+
+🟡 PRIORITY 10 — DEPLOYMENT STABILITY
+
+Completed:
+
+✅ Health routes
+✅ API health checks
+
+Verify:
+
+* Telegram uptime
+* No false downtime
+* Reliable runtime
+
+Do not redesign architecture.
+
+⸻
+
+REQUIRED TEST CHECKLIST
+
+Before completion:
+
+⬜ Full test suite passes
+
+⬜ Grading tests:
+
+* OVER hit
+* OVER miss
+* UNDER hit
+* UNDER miss
+
+⬜ Historical grading test
+
+⬜ Sport priority test
+
+⬜ MLB S-tier restriction test
+
+⬜ Tier 1 sport test
+
+⬜ OddsAPI confirmation test
+
+⬜ OddsAPI failure fallback test
+
+⬜ Duplicate protection test
+
+⬜ Telegram alert test
+
+⸻
+
+FINAL COMPLETION CHECKLIST
+
+Stability
+
+⬜ Bot running
+⬜ Telegram working
+⬜ Health routes working
+⬜ No crashes
+⬜ Scheduler healthy
+
+Grading
+
+⬜ Automatic HIT/MISS working
+⬜ Backfill completed if possible
+⬜ Performance dashboard populated
+⬜ S/A/B accuracy tracking working
+
+Sports
+
+⬜ Tier 1 priority active
+⬜ MLB separated
+⬜ MLB S-tier only alerts
+⬜ CS2 plan created
+
+Market Intelligence
+
+⬜ OddsAPI S/A confirmation active
+⬜ API usage controlled
+⬜ Confirmation stored
+
+Data
+
+⬜ All props tracked
+⬜ Results stored
+⬜ Learning database growing
+
+⸻
+
+FINAL REPORT REQUIRED
+
+Return:
+
+1. Files changed
+2. Tests passed
+3. Current health status
+4. Completed checklist
+5. Remaining issues
+
+Then:
+
+🛑 FREEZE V1.3.
+
+No more changes unless a new Phase 2/Phase 3 task is approved.

@@ -1076,6 +1076,7 @@ class AlertDelivery:
         intelligence_trace: Optional[dict] = None,  # prop_intelligence trace
         opening_line: Optional[float] = None,  # First ever line from PropLineHistory
         market_move_only: bool = False,  # True → send lightweight market-move alert only
+        market_confirmation: Optional[dict] = None,  # OddsAPI sportsbook confirmation data
     ) -> "DeliveryResult":
         """
         Full Underdog prop alert pipeline:
@@ -1158,6 +1159,7 @@ class AlertDelivery:
                 low_line_threshold=config.UD_NEW_PROP_LOW_LINE_THRESHOLD,
                 opponent=opponent,
                 intelligence_trace=intelligence_trace,
+                market_confirmation=market_confirmation,
             )
         else:
             message = format_underdog_change_alert(
@@ -1178,6 +1180,7 @@ class AlertDelivery:
                 opponent=opponent,
                 intelligence_trace=intelligence_trace,
                 opening_line=opening_line,
+                market_confirmation=market_confirmation,
             )
 
         # 5. Broadcast

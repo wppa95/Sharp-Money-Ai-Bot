@@ -2270,6 +2270,124 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
 
+async def cmd_backfill(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/backfill — Fetch latest stats for all pending opportunities and grade them."""
+    if not _check_allowed(update):
+        await update.message.reply_text("⛔ Unauthorized.")
+        return
+    if _db is None:
+        await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
+        return
+
+    await update.message.reply_text("⏳ Running backfill grading pass…")
+
+    try:
+        from providers.player_stats import PlayerStatsProvider
+        from engine.calibration import classify_miss
+
+        provider = PlayerStatsProvider()
+
+        # All PENDING opportunities whose game already finished (4+ h ago)
+        pending = await _db.get_pending_opportunities(cutoff_hours=4)
+
+        if not pending:
+            await update.message.reply_text(
+                "✅ No pending opportunities eligible for grading yet.\n"
+                "<i>Opportunities become eligible 4 h after game_time.</i>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+        # ── Step 1: Fetch stats for all unique (player, sport, stat_type) ────────
+        fetched_keys:  set   = set()
+        players_found: int   = 0
+        for opp in pending:
+            key = (opp.player_name, opp.sport, opp.stat_type.lower().strip())
+            if key in fetched_keys:
+                continue
+            fetched_keys.add(key)
+            try:
+                raw = await provider.fetch_results(opp.player_name, opp.sport, opp.stat_type)
+                for r in raw:
+                    await _db.upsert_player_result(r)
+                if raw:
+                    players_found += 1
+                    logger.info(
+                        "backfill: fetched %d results for %s/%s",
+                        len(raw), opp.player_name, opp.stat_type,
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "backfill: fetch failed for %s/%s: %s",
+                    opp.player_name, opp.stat_type, exc,
+                )
+
+        # ── Step 2: Grade every pending opportunity that now has result data ──────
+        graded:  int = 0
+        no_data: int = 0
+        hits:    int = 0
+        misses:  int = 0
+        pushes:  int = 0
+        for opp in pending:
+            if not opp.game_time:
+                continue
+            game_date  = opp.game_time.strftime("%Y-%m-%d")
+            result_row = await _db.get_game_result_for_grading(
+                opp.player_name, opp.sport, opp.stat_type, game_date
+            )
+            if result_row is None:
+                no_data += 1
+                continue
+            actual    = result_row.actual_value
+            line      = opp.line_value
+            _push_tol = 0.01
+            if abs(actual - line) < _push_tol:
+                outcome = "PUSH"
+                pushes += 1
+            elif (opp.recommendation or "OVER").upper() == "UNDER":
+                outcome = "HIT" if actual < line else "MISS"
+                hits += 1 if outcome == "HIT" else 0
+                misses += 1 if outcome == "MISS" else 0
+            else:
+                outcome = "HIT" if actual > line else "MISS"
+                hits += 1 if outcome == "HIT" else 0
+                misses += 1 if outcome == "MISS" else 0
+            error_type: Optional[str] = None
+            if outcome == "MISS":
+                error_type = classify_miss(
+                    recommendation=opp.recommendation,
+                    decision_tier=opp.decision_tier,
+                    confidence=opp.confidence,
+                    actual_value=actual,
+                    line_value=opp.line_value,
+                )
+            await _db.grade_opportunity(opp.id, outcome, actual, error_type=error_type)
+            graded += 1
+
+        hit_rate = f"{hits / graded * 100:.0f}%" if graded else "N/A"
+        lines_out = [
+            "📊 <b>Backfill Complete</b>",
+            "",
+            f"  Pending props scanned:  <b>{len(pending)}</b>",
+            f"  Unique players fetched: <b>{len(fetched_keys)}</b>",
+            f"  Players with new data:  <b>{players_found}</b>",
+            "",
+            f"  Graded this pass:       <b>{graded}</b>",
+            f"  ✅ HIT:    <b>{hits}</b>",
+            f"  ❌ MISS:   <b>{misses}</b>",
+            f"  ➖ PUSH:   <b>{pushes}</b>",
+            f"  Hit rate:               <b>{hit_rate}</b>",
+            f"  Still no data:          <b>{no_data}</b>",
+            "",
+            "<i>Use /rollups to see updated performance metrics.</i>",
+        ]
+        await update.message.reply_text("\n".join(lines_out), parse_mode=ParseMode.HTML)
+
+    except Exception as exc:
+        logger.exception("cmd_backfill: unexpected error: %s", exc)
+        await update.message.reply_text(f"⚠️ /backfill failed: {exc}")
+
+
 async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/providers — Show status of every sport data provider."""
     if not _check_allowed(update):

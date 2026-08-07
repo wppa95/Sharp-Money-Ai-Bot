@@ -63,6 +63,17 @@ logger = logging.getLogger(__name__)
 # Module-level registry — set by init_market_engine()
 _registry: Optional[ConnectorRegistry] = None
 
+# ── OddsAPI confirmation engine ───────────────────────────────────────────────
+# Set once at startup via init_odds_confirmation(); used by
+# _get_odds_api_confirmation() to call fetch_player_prop_lines().
+_analysis_engine: Optional[object] = None
+
+
+def init_odds_confirmation(engine: object) -> None:
+    """Store the AnalysisEngine reference for OddsAPI player prop confirmation calls."""
+    global _analysis_engine
+    _analysis_engine = engine
+
 # ── Player results integration ────────────────────────────────────────────────
 # Singleton provider and per-day fetch dedup cache.
 # Cache key: (player_name, sport, stat_type_lower, date_iso)
@@ -135,6 +146,117 @@ def _is_futures_stat(stat_type: str) -> bool:
     """Return True if the stat_type matches a season-long / futures market keyword."""
     low = stat_type.lower()
     return any(kw in low for kw in _FUTURES_STAT_KEYWORDS)
+
+
+# ── OddsAPI stat-type → market-key mapping ────────────────────────────────────
+# Maps Underdog stat_type (lowercase) → OddsAPI player-prop market key.
+# Only sports with entries in _SPORT_PLAYER_PROP_MARKETS (NBA + MLB) are queried.
+_UD_TO_ODDS_API_MARKET: dict[str, str] = {
+    "points":                  "player_points",
+    "rebounds":                "player_rebounds",
+    "assists":                 "player_assists",
+    "3-pointers made":         "player_threes",
+    "three-pointers made":     "player_threes",
+    "3pt made":                "player_threes",
+    "3-pt made":               "player_threes",
+    "steals":                  "player_steals",
+    "blocks":                  "player_blocks",
+    "hits":                    "player_hits",
+    "pitcher strikeouts":      "player_pitcher_strikeouts",
+    "strikeouts":              "player_pitcher_strikeouts",
+    "total bases":             "player_total_bases",
+}
+
+
+async def _get_odds_api_confirmation(
+    sport: str,
+    player_name: str,
+    stat_type: str,
+    direction: str,
+    line: float,
+) -> Optional[dict]:
+    """
+    Query OddsAPI player prop lines as a non-blocking market confirmation signal.
+
+    Only fires for sports/stats configured in _UD_TO_ODDS_API_MARKET (NBA + MLB).
+    Uses the cached OddsApiCache — no extra quota if already fetched this cycle.
+
+    Returns None when:
+      • sport/stat not mapped, or _analysis_engine not initialised
+      • player not found on any sportsbook
+      • any exception or 5-second timeout
+
+    Returns dict with keys: num_books, avg_line (float|None), notes (str), confirmed (bool).
+    """
+    if _analysis_engine is None:
+        return None
+    market_key = _UD_TO_ODDS_API_MARKET.get(stat_type.lower().strip())
+    if not market_key:
+        return None
+
+    try:
+        import asyncio as _asyncio
+        from engine.analysis import Sport as _Sport
+        try:
+            sport_enum = _Sport(sport)
+        except ValueError:
+            return None
+
+        lines = await _asyncio.wait_for(
+            _analysis_engine.fetch_player_prop_lines(sport_enum),
+            timeout=5.0,
+        )
+    except Exception:
+        return None
+
+    # Search for this player's market across all bookmakers
+    player_lower   = player_name.lower().strip()
+    direction_label = direction.strip().lower()  # "over" | "under"
+
+    book_lines: list[float] = []
+    sportsbooks:  set[str]  = set()
+
+    for pl in lines:
+        if pl.market_key != market_key:
+            continue
+        pl_name = (pl.player_name or "").lower().strip()
+        # Accept exact match or surname suffix match (e.g. "Caminero" in "Junior Caminero")
+        if pl_name != player_lower:
+            parts_ud  = player_lower.split()
+            parts_pl  = pl_name.split()
+            if not (parts_ud and parts_pl and (
+                parts_ud[-1] in pl_name or parts_pl[-1] in player_lower
+            )):
+                continue
+        if pl.line is None:
+            continue
+        sportsbooks.add(pl.sportsbook)
+        if (pl.description or "").lower().strip() == direction_label:
+            book_lines.append(pl.line)
+
+    if not sportsbooks:
+        return None
+
+    num_books = len(sportsbooks)
+    avg_line  = sum(book_lines) / len(book_lines) if book_lines else None
+
+    if avg_line is not None:
+        diff = avg_line - line
+        if abs(diff) < 0.05:
+            notes = f"{num_books} book{'s' if num_books != 1 else ''} · avg {avg_line:.1f} ✅"
+        elif diff > 0:
+            notes = f"{num_books} book{'s' if num_books != 1 else ''} · avg {avg_line:.1f} ({diff:+.1f} vs UD)"
+        else:
+            notes = f"{num_books} book{'s' if num_books != 1 else ''} · avg {avg_line:.1f} ({diff:+.1f} vs UD)"
+    else:
+        notes = f"{num_books} book{'s' if num_books != 1 else ''} · no direct line match"
+
+    return {
+        "num_books": num_books,
+        "avg_line":  avg_line,
+        "notes":     notes,
+        "confirmed": avg_line is not None,
+    }
 
 
 def _get_player_stats_provider():
@@ -989,22 +1111,38 @@ async def underdog_job(context) -> None:
                             _np_intel_trace = _np_intel.intelligence_trace
                         except Exception:
                             pass
+                    # OddsAPI market confirmation — non-blocking, S/A tier only
+                    _np_odds_confirm: Optional[dict] = None
+                    if (decision is not None
+                            and decision.decision_tier in ("S", "A")
+                            and decision.recommendation != "PASS"):
+                        try:
+                            _np_odds_confirm = await _get_odds_api_confirmation(
+                                snap.sport or "UNKNOWN",
+                                player,
+                                stat_type,
+                                decision.recommendation,
+                                line_val,
+                            )
+                        except Exception:
+                            pass
                     delivery  = AlertDelivery(db, bot, chat_ids)
                     ud_result = await delivery.deliver_underdog(
-                        player_name        = player,
-                        team               = snap.team or "",
-                        sport              = snap.sport,
-                        stat_type          = stat_type,
-                        old_line           = line_val,
-                        new_line           = line_val,
-                        game_time          = snap.game_time,
-                        score              = score,
-                        new_prop           = True,
-                        validation         = validation,
-                        decision           = decision,
-                        market_quality     = market_quality,
-                        market_pressure    = market_pressure,
-                        intelligence_trace = _np_intel_trace,
+                        player_name         = player,
+                        team                = snap.team or "",
+                        sport               = snap.sport,
+                        stat_type           = stat_type,
+                        old_line            = line_val,
+                        new_line            = line_val,
+                        game_time           = snap.game_time,
+                        score               = score,
+                        new_prop            = True,
+                        validation          = validation,
+                        decision            = decision,
+                        market_quality      = market_quality,
+                        market_pressure     = market_pressure,
+                        intelligence_trace  = _np_intel_trace,
+                        market_confirmation = _np_odds_confirm,
                     )
                     if ud_result.sent:
                         _n_new_prop_sent += 1
@@ -1417,6 +1555,22 @@ async def underdog_job(context) -> None:
                             _lc_intel_trace = _lc_intel.intelligence_trace
                     except (NameError, Exception):
                         pass
+                    # OddsAPI market confirmation — non-blocking, S/A tier only, non-removal
+                    _lc_odds_confirm: Optional[dict] = None
+                    if (not is_removed
+                            and decision is not None
+                            and decision.decision_tier in ("S", "A")
+                            and decision.recommendation != "PASS"):
+                        try:
+                            _lc_odds_confirm = await _get_odds_api_confirmation(
+                                snap.sport or "UNKNOWN",
+                                player,
+                                stat_type,
+                                decision.recommendation,
+                                snap.line or 0.0,
+                            )
+                        except Exception:
+                            pass
                     delivery  = AlertDelivery(db, bot, chat_ids)
                     # Derive removal reason from game-time context
                     _removal_reason: Optional[str] = None
@@ -1428,22 +1582,23 @@ async def underdog_job(context) -> None:
                         else:
                             _removal_reason = "Market no longer available from provider"
                     ud_result = await delivery.deliver_underdog(
-                        player_name        = player,
-                        team               = snap.team or "",
-                        sport              = snap.sport,
-                        stat_type          = stat_type,
-                        old_line           = prev_line or (snap.line or 0.0),
-                        new_line           = snap.line or 0.0,
-                        game_time          = snap.game_time,
-                        score              = score,
-                        removed            = is_removed,
-                        new_prop           = is_reentry_qualified and not is_removed,
-                        validation         = validation,
-                        decision           = decision,
-                        market_quality     = market_quality,
-                        market_pressure    = market_pressure,
-                        removal_reason     = _removal_reason,
-                        intelligence_trace = _lc_intel_trace,
+                        player_name         = player,
+                        team                = snap.team or "",
+                        sport               = snap.sport,
+                        stat_type           = stat_type,
+                        old_line            = prev_line or (snap.line or 0.0),
+                        new_line            = snap.line or 0.0,
+                        game_time           = snap.game_time,
+                        score               = score,
+                        removed             = is_removed,
+                        new_prop            = is_reentry_qualified and not is_removed,
+                        validation          = validation,
+                        decision            = decision,
+                        market_quality      = market_quality,
+                        market_pressure     = market_pressure,
+                        removal_reason      = _removal_reason,
+                        intelligence_trace  = _lc_intel_trace,
+                        market_confirmation = _lc_odds_confirm,
                     )
                     if ud_result.filtered:
                         logger.debug(
@@ -1678,22 +1833,36 @@ async def underdog_job(context) -> None:
                         _s_intel_trace = _s_intel.intelligence_trace
                     except Exception:
                         pass
+                # OddsAPI market confirmation — non-blocking, S/A tier only
+                _s_odds_confirm: Optional[dict] = None
+                if _sdec.decision_tier in ("S", "A"):
+                    try:
+                        _s_odds_confirm = await _get_odds_api_confirmation(
+                            _ssport,
+                            _sp,
+                            _st,
+                            _sdec.recommendation,
+                            _line_val,
+                        )
+                    except Exception:
+                        pass
                 delivery   = AlertDelivery(db, bot, chat_ids)
                 _sresult   = await delivery.deliver_underdog(
-                    player_name        = _sp,
-                    team               = _ssnap.team or "",
-                    sport              = _ssnap.sport,
-                    stat_type          = _st,
-                    old_line           = _line_val,
-                    new_line           = _line_val,
-                    game_time          = _ssnap.game_time,
-                    score              = _sscore,
-                    validation         = _sval,
-                    decision           = _sdec,
-                    market_quality     = _smq,
-                    market_pressure    = _smp,
-                    standing           = True,
-                    intelligence_trace = _s_intel_trace,
+                    player_name         = _sp,
+                    team                = _ssnap.team or "",
+                    sport               = _ssnap.sport,
+                    stat_type           = _st,
+                    old_line            = _line_val,
+                    new_line            = _line_val,
+                    game_time           = _ssnap.game_time,
+                    score               = _sscore,
+                    validation          = _sval,
+                    decision            = _sdec,
+                    market_quality      = _smq,
+                    market_pressure     = _smp,
+                    standing            = True,
+                    intelligence_trace  = _s_intel_trace,
+                    market_confirmation = _s_odds_confirm,
                 )
                 if _sresult.sent:
                     _n_standing_sent += 1

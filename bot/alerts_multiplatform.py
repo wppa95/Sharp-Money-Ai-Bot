@@ -606,6 +606,7 @@ def format_underdog_change_alert(
     opponent: Optional[str] = None,           # Opponent team / player (when available)
     intelligence_trace: Optional[dict] = None, # prop_intelligence trace from decision_trace
     opening_line: Optional[float] = None,     # First ever line from PropLineHistory
+    market_confirmation: Optional[dict] = None,  # OddsAPI sportsbook confirmation data
 ) -> str:
     """Format an alert for an Underdog prop line change or removed prop.
 
@@ -759,6 +760,13 @@ def format_underdog_change_alert(
             _thick,
         ]
     else:
+        # OddsAPI sportsbook confirmation footer (S/A tier only)
+        _confirm_line = ""
+        if market_confirmation is not None:
+            _cn = market_confirmation.get("notes", "")
+            if _cn:
+                _confirm_line = f"📡 <b>Market Check:</b>  {_cn}"
+
         body_lines = [
             _thick,
             header,
@@ -775,6 +783,8 @@ def format_underdog_change_alert(
             body_lines += ["", edge_line]
         if mq_line:
             body_lines += [mq_line]
+        if _confirm_line:
+            body_lines += [_confirm_line]
         body_lines += [
             "",
             f"📍 <b>Status:</b>  {_market_availability_status(game_time)}",
@@ -862,6 +872,7 @@ def format_underdog_new_prop_alert(
     low_line_threshold: float = 1.0,
     opponent: Optional[str] = None,           # Opponent team / player (when available)
     intelligence_trace: Optional[dict] = None, # prop_intelligence trace from decision_trace
+    market_confirmation: Optional[dict] = None,  # OddsAPI sportsbook confirmation data
 ) -> str:
     """Format a 🚨 UNDERDOG PROP LIVE alert for a first-appearance prop.
 
@@ -955,6 +966,8 @@ def format_underdog_new_prop_alert(
         "",
         "<b>Reason:</b>",
         "\n".join(reasons),
+        *([f"📡 <b>Market Check:</b>  {market_confirmation['notes']}"]
+          if market_confirmation and market_confirmation.get("notes") else []),
         "",
         f"{EMOJI['clock']} <i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>",
         "",
