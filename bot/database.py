@@ -2871,14 +2871,21 @@ class Database:
     async def get_game_result_for_grading(
         self, player_name: str, sport: str, stat_type: str, game_date: str
     ) -> "Optional[PlayerGameResult]":
-        """Return the PlayerGameResult for a given player / sport / stat / date, or None."""
+        """
+        Return the PlayerGameResult for a given player / sport / stat / date, or None.
+
+        stat_type is normalised to lowercase before lookup because upsert_player_result
+        stores all stat types in lowercase.  This prevents silent mismatches between
+        Underdog's mixed-case stat names ("Points") and the stored values ("points").
+        """
+        normalised_stat = stat_type.lower().strip()
         async with self.session() as s:
             result = await s.execute(
                 select(PlayerGameResult)
                 .where(
                     PlayerGameResult.player_name == player_name,
                     PlayerGameResult.sport       == sport,
-                    PlayerGameResult.stat_type   == stat_type,
+                    PlayerGameResult.stat_type   == normalised_stat,
                     PlayerGameResult.game_date   == game_date,
                 )
                 .limit(1)

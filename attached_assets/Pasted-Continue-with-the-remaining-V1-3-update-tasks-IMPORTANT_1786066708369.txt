@@ -1,0 +1,475 @@
+Continue with the remaining V1.3 update tasks.
+
+IMPORTANT:
+
+Complete Phase 1 and Phase 2 together in one pass to minimize credit usage.
+
+Do NOT split these into multiple future tasks if they can safely be completed now.
+
+Do NOT:
+
+* Rewrite the bot
+* Refactor large sections
+* Replace working systems
+* Redesign architecture
+* Change database structure
+* Change the core scoring engine unless required
+
+Only make targeted fixes and improvements.
+
+⸻
+
+PRIORITY 1 — FIX AUTOMATIC RESULT GRADING ⭐⭐⭐⭐⭐
+
+Current Problem:
+
+Picks are tracked but never graded as hits or misses.
+
+Current behavior:
+
+* Actionable picks are saved
+* Games finish
+* Results are not automatically matched
+* S/A/B performance remains:
+
+S Tier: 0%
+A Tier: 0%
+B Tier: 0%
+
+The system cannot learn without automatic grading.
+
+⸻
+
+Required Fix:
+
+Implement automatic result grading.
+
+After games finish:
+
+1. Detect completed events
+2. Match completed games to stored props
+3. Pull final player/team statistics
+4. Compare actual result against selected line
+5. Automatically mark:
+
+✅ HIT
+❌ MISS
+
+⸻
+
+Store permanently:
+
+* Sport
+* Player/team
+* Market
+* Line
+* Direction
+* Provider
+* Tier
+* Confidence score
+* Quality score
+* Final stat result
+* Hit/Miss result
+* Date/game
+
+⸻
+
+Performance tracking:
+
+Track results by:
+
+* Sport
+* Market
+* Tier
+* Confidence score
+* Provider
+* Line movement type
+
+Goal:
+
+The bot must not only find picks.
+
+It must learn which signals actually work.
+
+⸻
+
+PRIORITY 2 — SPORT PRIORITY SYSTEM ⭐⭐⭐⭐⭐
+
+Current Problem:
+
+The bot is producing mostly MLB alerts.
+
+This does not match actual betting behavior.
+
+⸻
+
+Tier 1 Sports
+
+These should be prioritized:
+
+* NBA
+* WNBA
+* CS2
+* Soccer
+* Tennis
+* Dota
+* LoL
+* Valorant
+* Table Tennis
+* Badminton
+* PGA Golf
+* NFL
+* NCAAF
+* MMA
+
+⸻
+
+MLB Mode
+
+MLB should be separate.
+
+MLB should:
+
+✅ Continue tracking
+✅ Continue validation
+✅ Continue grading
+
+But Telegram actionable alerts should require:
+
+* S-Tier only
+* Highest confidence
+* Strong validation
+* Strong market agreement
+
+MLB should not dominate alerts.
+
+⸻
+
+PRIORITY 3 — ADAPTIVE SPORT GATES ⭐⭐⭐⭐
+
+Current issue:
+
+Every sport uses the same strict gate.
+
+Update:
+
+Tier 1 sports should allow:
+
+* S Tier
+* A Tier
+* B Tier
+* C Tier (where appropriate)
+
+Do not only allow S-tier.
+
+Adjust:
+
+* Historical sample requirements
+* Market maturity requirements
+
+Allow opportunities while maintaining:
+
+✅ Valid event
+✅ Active sport
+✅ Valid market/player
+✅ Clear direction
+✅ Quality threshold
+✅ Duplicate protection
+
+Goal:
+
+More useful opportunities without lowering quality.
+
+⸻
+
+PRIORITY 4 — FULL PROP TRACKING MEMORY ⭐⭐⭐⭐⭐
+
+Track all props across all sports.
+
+Not only actionable picks.
+
+Every tracked prop stores:
+
+* Sport
+* Player/team
+* Market
+* Line
+* Direction
+* Provider
+* Tier
+* Score
+* Timestamp
+* Result
+
+After games:
+
+Keep records permanently.
+
+Track:
+
+* Hit/Miss
+* Win/Loss
+* Actual stat result
+
+⸻
+
+PRIORITY 5 — EXTERNAL VALIDATION SOURCES ⭐⭐⭐
+
+Add validation paths:
+
+MLB
+
+* StatMuse
+* ESPN gamelog
+
+CS2
+
+* HLTV
+
+Soccer
+
+* FotMob
+
+Golf
+
+* PGA stats
+
+Badminton
+
+* Badminton4U
+
+Table Tennis
+
+* TTStats
+
+Purpose:
+
+Bot detects opportunities.
+
+External sources validate quality.
+
+⸻
+
+PRIORITY 6 — ODDSAPI MARKET CONFIRMATION ⭐⭐⭐⭐
+
+We paid for OddsAPI.
+
+Use it.
+
+Add:
+
+* Market movement tracking
+* Line movement confirmation
+* Market direction
+* Confidence support for Underdog picks
+
+Do not limit OddsAPI only to sportsbook alerts.
+
+Use it as market intelligence.
+
+Review current quota restrictions.
+
+Remove unnecessary limits if they are blocking useful data.
+
+⸻
+
+PRIORITY 7 — UNDERDOG PIPELINE FIX ⭐⭐⭐⭐
+
+Investigate:
+
+'list' object has no attribute 'has_real_data'
+
+Location:
+
+pipeline:
+prop_scoring:
+market_engine.underdog_job
+
+Verify:
+
+* Parsing
+* Scoring
+* Qualification
+* Alert generation
+
+Fix only what is required.
+
+⸻
+
+PRIORITY 8 — DEPLOYMENT / RUNTIME STABILITY ⭐⭐⭐⭐
+
+Current finding:
+
+Deployment was running API server instead of Telegram bot.
+
+Completed:
+
+✅ Health routes added
+✅ / returns 200
+✅ /health returns 200
+✅ /api/healthz returns 200
+
+Remaining:
+
+Confirm safest way for Telegram bot to run reliably.
+
+Do not redesign architecture.
+
+Goal:
+
+Reliable 24/7 operation.
+
+⸻
+
+REQUIRED TESTING AFTER CHANGES
+
+Run:
+
+✅ Full test suite
+✅ Startup health check
+✅ Telegram alert test
+✅ Result grading test
+✅ Completed game grading test
+✅ Sport filter test
+✅ Tier gate test
+✅ Duplicate alert test
+
+⸻
+
+✅ FINAL COMPLETION CHECKLIST
+
+Before marking complete, verify every item.
+
+⸻
+
+Credit Protection
+
+⬜ No unnecessary rewrite performed
+⬜ No large refactor performed
+⬜ No database replacement
+⬜ No architecture redesign
+⬜ Credits only used for requested work
+
+⸻
+
+Automatic Grading
+
+⬜ Picks automatically detected after games finish
+⬜ Final stats pulled automatically
+⬜ Props matched correctly
+⬜ HIT/MISS generated automatically
+⬜ Results stored permanently
+⬜ S/A/B percentages update correctly
+⬜ Performance dashboard works
+
+⸻
+
+Sport Priority
+
+⬜ Tier 1 sports configured:
+
+⬜ NBA
+⬜ WNBA
+⬜ CS2
+⬜ Soccer
+⬜ Tennis
+⬜ Dota
+⬜ LoL
+⬜ Valorant
+⬜ Table Tennis
+⬜ Badminton
+⬜ PGA
+⬜ NFL
+⬜ NCAAF
+⬜ MMA
+
+⬜ MLB separated from Tier 1
+⬜ MLB S-tier only alerts
+⬜ MLB still tracked
+⬜ MLB still graded
+
+⸻
+
+Adaptive Gates
+
+⬜ Tier 1 allows S/A/B/C where appropriate
+⬜ Historical requirements reviewed
+⬜ No invalid events pass
+⬜ No inactive markets pass
+⬜ Quality protection remains active
+
+⸻
+
+Prop Memory
+
+⬜ All props tracked
+⬜ Non-actionable props saved
+⬜ Completed games saved
+⬜ Hit/Miss stored
+⬜ Win/Loss stored
+⬜ Historical database working
+
+⸻
+
+Validation Sources
+
+⬜ StatMuse reviewed
+⬜ ESPN reviewed
+⬜ HLTV reviewed
+⬜ FotMob reviewed
+⬜ PGA reviewed
+⬜ Badminton4U reviewed
+⬜ TTStats reviewed
+
+⸻
+
+OddsAPI
+
+⬜ OddsAPI integrated into market confirmation
+⬜ Line movement tracked
+⬜ Market direction tracked
+⬜ Quota restrictions reviewed
+
+⸻
+
+Underdog
+
+⬜ has_real_data error investigated
+⬜ Pipeline healthy
+⬜ Scoring healthy
+⬜ Qualification healthy
+⬜ Alerts working
+
+⸻
+
+Deployment
+
+⬜ Health routes working
+⬜ Telegram bot uptime verified
+⬜ No false downtime reports
+⬜ Runtime stability checked
+
+⸻
+
+Final Report Required
+
+Provide:
+
+⬜ Files changed
+⬜ Tests passed
+⬜ Current health status
+⬜ Remaining issues
+⬜ Completed checklist
+⬜ Confirmation V1.3 remains stable
+
+⸻
+
+Final acceptance:
+
+✅ Bot finds better opportunities
+✅ Bot focuses on correct sports
+✅ Bot learns from results
+✅ Bot grades every pick automatically
+✅ Bot tracks everything permanently
+✅ Bot runs reliably
+✅ No unnecessary credit waste

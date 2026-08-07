@@ -221,7 +221,24 @@ class Config:
     #   COD  — no public per-game player stat API exists
     #   LOL  — Riot Games API requires a developer key
     #   NPB/KBO — no accessible public per-game stat API
-    UD_ALERT_SPORTS_RAW: str = os.environ.get("UD_ALERT_SPORTS", "MLB,WNBA,NFL,NBA,DOTA,TENNIS,CS,NHL")
+    UD_ALERT_SPORTS_RAW: str = os.environ.get(
+        "UD_ALERT_SPORTS",
+        "MLB,WNBA,NFL,NBA,DOTA,TENNIS,CS,NHL,LOL,MMA,GOLF,NCAAF,SOCCER,VALORANT,TT,BADMINTON",
+    )
+
+    # ── Sport priority system ─────────────────────────────────────────────────
+    # Tier 1 sports are prioritized for alert delivery.  They pass S, A, B, and
+    # C-tier alerts.  All other sports (including MLB) follow their own rules.
+    # Override via UD_TIER1_SPORTS env var (comma-separated sport codes).
+    UD_TIER1_SPORTS_RAW: str = os.environ.get(
+        "UD_TIER1_SPORTS",
+        "NBA,WNBA,CS,TENNIS,DOTA,LOL,VALORANT,TT,BADMINTON,GOLF,NFL,NCAAF,MMA,SOCCER",
+    )
+
+    # MLB alert gate — MLB only sends Telegram alerts when the tier is at or
+    # above this value.  "S" = S-tier only (default).  "A" allows A and S.
+    # "B" allows B, A, S.  Set to "" to disable the MLB restriction.
+    UD_MLB_MIN_TIER: str = os.environ.get("UD_MLB_MIN_TIER", "S")
 
     # Dedup windows for new alert types (seconds)
     INEFFICIENCY_DEDUP_WINDOW: int = int(os.environ.get("INEFFICIENCY_DEDUP_WINDOW", "1800"))
@@ -264,9 +281,10 @@ class Config:
     # ── Alert sport suppression ───────────────────────────────────────────────
     # Sports whose Telegram alerts are temporarily suppressed.
     # Data collection, scoring, and DB writes continue for all suppressed sports.
-    # Set ALERT_DISABLED_SPORTS="" to re-enable all sports.
-    # Set ALERT_DISABLED_SPORTS="NFL,NBA,NHL" to suppress additional sports.
-    ALERT_DISABLED_SPORTS_RAW: str = os.environ.get("ALERT_DISABLED_SPORTS", "NFL,NBA")
+    # Set ALERT_DISABLED_SPORTS="" to re-enable all sports (current default).
+    # Set ALERT_DISABLED_SPORTS="NFL,NBA" to suppress specific sports.
+    # NBA and NFL are now Tier 1 priority sports — enabled by default.
+    ALERT_DISABLED_SPORTS_RAW: str = os.environ.get("ALERT_DISABLED_SPORTS", "")
 
     # ── Learning / model update flag ──────────────────────────────────────────
     # When True, learning rollups are surfaced in /rollups output and future
@@ -307,6 +325,29 @@ class Config:
     def ud_alert_sports(self) -> frozenset[str]:
         """Sports for which Underdog bet alerts are delivered (others: tracking only)."""
         return frozenset(s.strip() for s in self.UD_ALERT_SPORTS_RAW.split(",") if s.strip())
+
+    @property
+    def ud_tier1_sports(self) -> frozenset[str]:
+        """Tier 1 priority sports — pass S/A/B/C tier alerts without restrictions."""
+        return frozenset(s.strip() for s in self.UD_TIER1_SPORTS_RAW.split(",") if s.strip())
+
+    @property
+    def ud_mlb_alert_tiers(self) -> frozenset[str]:
+        """
+        Which decision tiers can generate MLB Telegram alerts.
+
+        Controlled by UD_MLB_MIN_TIER:
+          "S" → only S-tier (default — prevents MLB from dominating alert volume)
+          "A" → S and A
+          "B" → S, A, and B
+          ""  → no restriction (same as all other sports)
+        """
+        min_tier = (self.UD_MLB_MIN_TIER or "").upper().strip()
+        _all = ("S", "A", "B", "C")
+        if not min_tier or min_tier not in _all:
+            return frozenset(_all)
+        idx = _all.index(min_tier)
+        return frozenset(_all[:idx + 1])
 
     @property
     def alert_disabled_sports(self) -> frozenset[str]:

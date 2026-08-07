@@ -616,17 +616,17 @@ class TestSoccerDispatch:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestConfigSoccer:
-    def test_soccer_not_in_default_ud_alert_sports(self):
+    def test_soccer_in_default_ud_alert_sports(self):
         """
-        SOCCER is NOT in the default because the free API tier lacks lineup data;
-        without it DNPs cannot be distinguished from zero-stat games.
-        Enable manually via UD_ALERT_SPORTS env var + FOOTBALL_DATA_API_KEY.
+        SOCCER is now in the default UD_ALERT_SPORTS as a Tier 1 priority sport.
+        Fully activate by setting FOOTBALL_DATA_API_KEY — without it the provider
+        returns [] and Soccer props get PASS decisions gracefully (no false alerts).
         """
         import os
         import config as cfg
         if "UD_ALERT_SPORTS" not in os.environ:
             c = cfg.Config()
-            assert "SOCCER" not in c.ud_alert_sports
+            assert "SOCCER" in c.ud_alert_sports
 
     def test_nhl_still_in_ud_alert_sports(self):
         import config as cfg

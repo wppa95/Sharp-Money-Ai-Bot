@@ -947,7 +947,7 @@ async def underdog_job(context) -> None:
                     "decision":   decision,
                 })
                 # Send only when: S/A score, real directional pick, and sport is
-                # in the betting-alert whitelist (NBA/NFL are tracking-only).
+                # in the betting-alert whitelist.
                 _np_bet_ready = (
                     np_immediate
                     and decision is not None
@@ -967,6 +967,15 @@ async def underdog_job(context) -> None:
                             "UD conf_gate [new]: %s | %s | conf=%d < min=%d (tier=%s)",
                             player, stat_type,
                             decision.confidence, _np_min_conf, decision.decision_tier,
+                        )
+                # MLB tier gate — restrict MLB to configured minimum tier (default S-only)
+                if _np_bet_ready and decision is not None:
+                    _sport_up = (snap.sport or "").upper()
+                    if _sport_up == "MLB" and decision.decision_tier not in config.ud_mlb_alert_tiers:
+                        _np_bet_ready = False
+                        logger.debug(
+                            "UD mlb_gate [new]: %s | %s | tier=%s blocked (MLB min=%s)",
+                            player, stat_type, decision.decision_tier, config.UD_MLB_MIN_TIER,
                         )
 
                 if _np_bet_ready and chat_ids:
@@ -1120,6 +1129,26 @@ async def underdog_job(context) -> None:
                             )
                         except Exception:
                             pass  # never block alert flow
+                    elif score.tier == "PASS":
+                        # P4: Log PASS-scored props even without a directional decision
+                        # so all evaluated props are tracked in prop_opportunity_log.
+                        try:
+                            await db.log_prop_opportunity(
+                                external_id    = getattr(snap, "external_id", None) or getattr(snap, "id", None) or "",
+                                player_name    = player,
+                                team           = snap.team or "",
+                                sport          = snap.sport or "UNKNOWN",
+                                stat_type      = stat_type,
+                                line_value     = snap.line or 0.0,
+                                recommendation = "PASS",
+                                decision_tier  = "PASS",
+                                confidence     = 0,
+                                game_time      = snap.game_time,
+                                provider       = "Underdog",
+                                watchlist_state = "Rejected",
+                            )
+                        except Exception:
+                            pass  # never block alert flow
                     _n_scored += 1
                     _tier_counts[score.tier] = _tier_counts.get(score.tier, 0) + 1
                     logger.debug(
@@ -1232,6 +1261,12 @@ async def underdog_job(context) -> None:
                     # of decision engine result — there is no previous line to compare.
                     # Every non-removal alert requires a real directional pick.
                     # Re-entries no longer bypass the decision engine.
+                    _lc_sport_up = (snap.sport or "").upper()
+                    _lc_mlb_ok = (
+                        _lc_sport_up != "MLB"
+                        or decision is None
+                        or decision.decision_tier in config.ud_mlb_alert_tiers
+                    )
                     is_qualified = (
                         not is_cold_start
                         and score is not None
@@ -1240,6 +1275,7 @@ async def underdog_job(context) -> None:
                         and decision.recommendation != "PASS"
                         and decision.decision_tier in ("S", "A", "B")
                         and (snap.sport or "UNKNOWN") in config.ud_alert_sports
+                        and _lc_mlb_ok
                     )
                     if is_qualified and not is_reentry_qualified:
                         _n_qualified += 1
@@ -1621,6 +1657,14 @@ async def underdog_job(context) -> None:
                     logger.debug(
                         "UD conf_gate [standing]: %s | %s | conf=%d < min=%d (tier=%s)",
                         _sp, _st, _sdec.confidence, _s_min_conf, _sdec.decision_tier,
+                    )
+                    continue
+
+                # MLB tier gate for standing plays
+                if _ssport.upper() == "MLB" and _sdec.decision_tier not in config.ud_mlb_alert_tiers:
+                    logger.debug(
+                        "UD mlb_gate [standing]: %s | %s | tier=%s blocked (MLB min=%s)",
+                        _sp, _st, _sdec.decision_tier, config.UD_MLB_MIN_TIER,
                     )
                     continue
 

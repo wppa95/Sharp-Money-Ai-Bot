@@ -505,7 +505,8 @@ async def _grade_opportunities_job(context) -> None:
         pending = await db.get_pending_opportunities(cutoff_hours=4)
         if not pending:
             return
-        graded = 0
+        graded   = 0
+        no_data  = 0
         for opp in pending:
             if not opp.game_time:
                 continue
@@ -514,15 +515,28 @@ async def _grade_opportunities_job(context) -> None:
                 opp.player_name, opp.sport, opp.stat_type, game_date
             )
             if result_row is None:
+                no_data += 1
+                logger.debug(
+                    "_grade_opportunities_job: no result for %s | %s | %s | %s",
+                    opp.player_name, opp.sport, opp.stat_type, game_date,
+                )
                 continue
             actual = result_row.actual_value
             line   = opp.line_value
-            if actual > line:
-                outcome = "HIT"
-            elif actual < line:
-                outcome = "MISS"
-            else:
+
+            # Direction-aware grading: HIT means the bet won.
+            #   OVER recommendation → won if actual > line
+            #   UNDER recommendation → won if actual < line
+            #   PUSH when actual == line (within tolerance)
+            _push_tol = 0.01
+            if abs(actual - line) < _push_tol:
                 outcome = "PUSH"
+            elif (opp.recommendation or "OVER").upper() == "UNDER":
+                outcome = "HIT" if actual < line else "MISS"
+            else:
+                # OVER (default) or unknown direction
+                outcome = "HIT" if actual > line else "MISS"
+
             # Classify MISS outcomes for learning — only Model errors update weights
             error_type: Optional[str] = None
             if outcome == "MISS":
@@ -536,8 +550,11 @@ async def _grade_opportunities_job(context) -> None:
                 )
             await db.grade_opportunity(opp.id, outcome, actual, error_type=error_type)
             graded += 1
-        if graded:
-            logger.info("_grade_opportunities_job: graded=%d opportunities", graded)
+        if graded or no_data:
+            logger.info(
+                "_grade_opportunities_job: graded=%d opportunities (no_data=%d)",
+                graded, no_data,
+            )
         _ht_g = get_health_tracker()
         if _ht_g:
             _ht_g.record_job_run("_grade_opportunities_job")

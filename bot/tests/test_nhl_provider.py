@@ -783,20 +783,58 @@ class TestConfigNHL:
         c = cfg.Config()
         assert "NHL" in c.ud_alert_sports
 
-    def test_soccer_not_in_default_ud_alert_sports(self):
+    def test_soccer_in_default_ud_alert_sports(self):
         """
-        SOCCER is NOT in the default: the free API tier lacks lineup/appearance
-        data, so DNPs can't be distinguished from zero-stat games.
-        Enable manually: UD_ALERT_SPORTS=...,SOCCER + FOOTBALL_DATA_API_KEY.
+        SOCCER is now in the default alert sports (Tier 1 priority sport).
+        Enable fully by setting FOOTBALL_DATA_API_KEY — without it the provider
+        returns [] and Soccer props get PASS decisions gracefully.
         """
         import os
         import config as cfg
         if "UD_ALERT_SPORTS" not in os.environ:
             c = cfg.Config()
-            assert "SOCCER" not in c.ud_alert_sports
+            assert "SOCCER" in c.ud_alert_sports
 
     def test_existing_sports_still_present(self):
         import config as cfg
         c = cfg.Config()
         for sport in ("MLB", "WNBA", "NFL", "NBA", "DOTA", "TENNIS", "CS"):
             assert sport in c.ud_alert_sports, f"{sport} missing"
+
+    def test_tier1_sports_in_ud_alert_sports(self):
+        """All Tier 1 priority sports must be in the alert-sports whitelist."""
+        import os
+        import config as cfg
+        if "UD_ALERT_SPORTS" not in os.environ and "UD_TIER1_SPORTS" not in os.environ:
+            c = cfg.Config()
+            for sport in c.ud_tier1_sports:
+                assert sport in c.ud_alert_sports, f"Tier 1 sport {sport} not in ud_alert_sports"
+
+    def test_mlb_alert_tiers_default_s_only(self):
+        """Default MLB gate allows S-tier only."""
+        import os
+        import config as cfg
+        if "UD_MLB_MIN_TIER" not in os.environ:
+            c = cfg.Config()
+            assert "S" in c.ud_mlb_alert_tiers
+            assert "A" not in c.ud_mlb_alert_tiers
+            assert "B" not in c.ud_mlb_alert_tiers
+
+    def test_mlb_alert_tiers_a_includes_s(self):
+        """When UD_MLB_MIN_TIER=A, both S and A tiers are allowed."""
+        import config as cfg
+        c = cfg.Config()
+        c.UD_MLB_MIN_TIER = "A"
+        tiers = c.ud_mlb_alert_tiers
+        assert "S" in tiers
+        assert "A" in tiers
+        assert "B" not in tiers
+
+    def test_nba_nfl_enabled_by_default(self):
+        """NBA and NFL are now Tier 1 — not in ALERT_DISABLED_SPORTS by default."""
+        import os
+        import config as cfg
+        if "ALERT_DISABLED_SPORTS" not in os.environ:
+            c = cfg.Config()
+            assert "NBA" not in c.alert_disabled_sports
+            assert "NFL" not in c.alert_disabled_sports
