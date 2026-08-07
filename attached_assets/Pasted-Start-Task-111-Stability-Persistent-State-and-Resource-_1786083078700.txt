@@ -1,0 +1,274 @@
+Start Task #111 — Stability, Persistent State, and Resource Cleanup
+
+IMPORTANT:
+This is the final stability pass before freezing V3.1.
+
+Do NOT:
+
+* Rewrite the bot
+* Refactor large sections
+* Replace working systems
+* Redesign architecture
+* Change scoring logic
+* Change alert qualification rules
+* Change Underdog pipeline structure
+* Change database structure unless absolutely required for persistence bug fixes
+
+Goal:
+Make the bot survive restarts, preserve intelligence, reduce resource usage, and then freeze V3.1.
+
+⸻
+
+1. Fix SIGKILL / OOM Memory Growth
+
+Current finding:
+
+Multiple unexpected exits show:
+
+* shutdown_at = null
+* session_secs = null
+* last_crash_detail = null
+
+This indicates host-level termination (SIGKILL/OOM), not a Python exception.
+
+Observed:
+
+* Memory RSS grows approximately 50 MB per Underdog scan cycle.
+* Bot is being killed every 10–20 minutes.
+
+Investigate:
+
+* Underdog scan memory growth
+* Objects accumulating between scans
+* In-memory lists/caches growing without limits
+* Duplicate stored objects
+* Unreleased scan results
+* Background job memory retention
+
+Fix:
+
+* Add cleanup where needed
+* Add limits to temporary memory structures
+* Prevent unbounded growth
+* Keep database as the source of truth
+
+Do not solve this by disabling the pipeline.
+
+⸻
+
+2. Persistent State Recovery After Restart
+
+Current issue:
+
+When the bot restarts, it loses working context and behaves like it is starting from zero.
+
+A monitoring system should recover where it left off.
+
+After restart, the bot should reload:
+
+Prop intelligence
+
+Preserve:
+
+* Player
+* Sport
+* Market
+* Provider
+* Previous lines
+* Line movement history
+* Timestamps
+* Previous evaluations
+
+Example:
+
+Before restart:
+
+Freddie Freeman
+Hits
+1.5 → 0.5
+OVER signal
+S-tier
+
+After restart:
+
+Bot should know:
+
+Freddie Freeman
+Hits
+Previous movement exists
+Already evaluated
+Continue monitoring
+
+It should NOT rebuild from zero.
+
+⸻
+
+Alert memory
+
+Preserve:
+
+* Previously alerted props
+* Alert timestamps
+* Direction
+* Previous movement
+* Duplicate protection memory
+
+Goal:
+
+Prevent:
+
+0.5 → 1.5
+1.5 → 0.5
+0.5 → 1.5
+
+from creating repeated spam after restart.
+
+⸻
+
+3. Use Database as Memory Source
+
+Do not rely on RAM for important bot knowledge.
+
+Important state should survive:
+
+* Restart
+* Replit rebuild
+* Host crash
+* Process kill
+
+Existing systems to preserve:
+
+* PropLineHistory
+* Actionable pick tracking
+* CLV tracking
+* Alert history
+
+⸻
+
+4. Resource / Credential / Credit Usage Cleanup
+
+Do not use unnecessary resources.
+
+Requirements:
+
+* Do not call providers unnecessarily.
+* Do not poll disabled providers.
+* Do not burn API quota.
+* Avoid duplicate fetches.
+* Avoid duplicate processing.
+* Keep free providers prioritized.
+* Preserve existing provider enable/disable controls.
+
+Examples:
+
+Do NOT:
+
+* Call DraftKings/FanDuel if disabled.
+* Call paid APIs when free sources are available.
+* Repeat identical provider requests unnecessarily.
+
+Goal:
+
+Lower:
+
+* Memory usage
+* API usage
+* Credential usage
+* Provider load
+
+⸻
+
+5. Verify Current Provider Strategy
+
+Keep:
+
+Primary:
+🐶 Underdog Fantasy
+
+Stat enrichment:
+
+* ESPN
+* MLB Stats API
+* NHL API
+* OpenDota
+* JeffSackmann
+* Sleeper
+
+Optional:
+
+* PandaScore CS2 only if configured
+
+Do not add providers.
+
+⸻
+
+6. Restart Recovery Testing
+
+After fixes:
+
+Test:
+
+1. Start bot
+2. Allow Underdog monitoring to run
+3. Confirm data is stored
+4. Restart bot
+5. Confirm previous state reloads
+6. Confirm monitoring continues normally
+
+Verify:
+
+* No reset to zero
+* No duplicate alerts
+* No memory spike
+* No OOM kill
+
+⸻
+
+7. Run Final Validation
+
+After completion:
+
+Run:
+
+✅ Full test suite
+
+Verify:
+
+✅ /status
+✅ /health
+✅ /restarts
+✅ /dashboard
+✅ /picks
+✅ /alerts
+✅ /testalert
+✅ Telegram behavior
+
+Confirm:
+
+* Only 🎯 ACTIONABLE BET PICK reaches Telegram
+* 📈 MARKET MOVE DETECTED stays internal
+* State survives restart
+* Memory stable
+
+⸻
+
+Final report required:
+
+* Files changed
+* Tests passed
+* Memory improvement
+* Restart behavior
+* Persistence verification
+* Resource usage improvements
+
+After this:
+
+🔒 FREEZE V3.1
+
+No more changes except:
+
+* Critical bugs
+* Stability fixes
+* Security issues
+
+Future feature work becomes a separate phase.

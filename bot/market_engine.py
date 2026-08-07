@@ -30,6 +30,7 @@ Pick'em isolation:
 
 from __future__ import annotations
 
+import gc
 import logging
 from datetime import datetime, timedelta
 from typing import Optional
@@ -96,6 +97,61 @@ _cold_start_done: bool = False
 # Used to compute how long a market was available before removal.
 # Internal only — no Telegram alert is sent on removal (doc #4).
 _MARKET_FIRST_ALERT: dict = {}
+# Evict entries older than this many hours each scan cycle (prevents unbounded growth).
+_MARKET_FIRST_ALERT_TTL_H: int = 24
+
+
+def _rss_mb() -> Optional[float]:
+    """Return current process RSS in MB.
+
+    Reads VmRSS from /proc/self/status (Linux) which reflects *actual current*
+    RSS — unlike resource.ru_maxrss which is the all-time high-water mark and
+    never decreases.  Falls back to ru_maxrss on non-Linux systems.
+    """
+    try:
+        with open("/proc/self/status") as _f:
+            for _line in _f:
+                if _line.startswith("VmRSS:"):
+                    return float(_line.split()[1]) / 1024  # kB → MB
+    except Exception:
+        pass
+    try:
+        import resource as _res
+        return _res.getrusage(_res.RUSAGE_SELF).ru_maxrss / 1024
+    except Exception:
+        return None
+
+
+async def _init_state_from_db(db: "Database") -> None:
+    """Restore module-level state from the database after a restart.
+
+    Called once per process on the first (cold-start) underdog_job cycle.
+    This prevents the bot from losing context it had before it was stopped:
+
+    * _MARKET_FIRST_ALERT — re-populated from recently alerted props so the
+      market availability window (detection → removal) is accurate.
+
+    Non-fatal: any individual failure is logged at DEBUG and skipped.
+    """
+    global _MARKET_FIRST_ALERT
+    try:
+        first_alerts = await db.get_first_alert_times_ud(since_hours=_MARKET_FIRST_ALERT_TTL_H)
+        restored = 0
+        for (player, stat), ts in first_alerts.items():
+            key = f"{player}__{stat}"
+            if key not in _MARKET_FIRST_ALERT:
+                _MARKET_FIRST_ALERT[key] = ts
+                restored += 1
+        if restored:
+            logger.info(
+                "State recovery: restored %d market first-alert entries from DB "
+                "(window=%dh)",
+                restored, _MARKET_FIRST_ALERT_TTL_H,
+            )
+        else:
+            logger.debug("State recovery: no recent market first-alert entries to restore")
+    except Exception as _exc:
+        logger.debug("State recovery: _MARKET_FIRST_ALERT restore skipped — %s", _exc)
 
 
 # ── Player Prop Market alert dedup ────────────────────────────────────────────
@@ -837,12 +893,30 @@ async def underdog_job(context) -> None:
             len(_stale_keys), config.UD_ALERT_DEDUP_WINDOW * 2, len(_prop_market_alerted),
         )
 
-    # Memory baseline — log RSS before the heavy scan to help diagnose OOM kills
-    try:
-        import resource as _resource
-        _mem_before = _resource.getrusage(_resource.RUSAGE_SELF).ru_maxrss
-    except Exception:
-        _mem_before = None
+    # ── Evict stale _MARKET_FIRST_ALERT entries ───────────────────────────────
+    # Keys are "player__stat_type" → datetime.  Entries older than
+    # _MARKET_FIRST_ALERT_TTL_H hours are removed so the dict never grows
+    # without bound.  The removal path deletes entries inline (line 1639), but
+    # props that are never removed would otherwise accumulate indefinitely.
+    _mfa_cutoff = now - timedelta(hours=_MARKET_FIRST_ALERT_TTL_H)
+    _mfa_stale  = [_k for _k, _v in _MARKET_FIRST_ALERT.items() if _v < _mfa_cutoff]
+    for _k in _mfa_stale:
+        del _MARKET_FIRST_ALERT[_k]
+    if _mfa_stale:
+        logger.debug(
+            "underdog_job: evicted %d stale _MARKET_FIRST_ALERT entries "
+            "(ttl=%dh, remaining=%d)",
+            len(_mfa_stale), _MARKET_FIRST_ALERT_TTL_H, len(_MARKET_FIRST_ALERT),
+        )
+
+    # On first run: restore module-level state from DB (market availability tracking)
+    if is_cold_start:
+        await _init_state_from_db(db)
+
+    # Memory baseline — log current RSS before the heavy scan to diagnose OOM kills.
+    # Uses VmRSS (/proc/self/status) which reflects actual live RSS rather than the
+    # all-time high-water mark returned by resource.ru_maxrss.
+    _mem_before = _rss_mb()
 
     try:
         snapshots = await _registry.fetch_pickem()
@@ -2101,6 +2175,10 @@ async def underdog_job(context) -> None:
                 # through the end of the job; clearing it now lets the GC reclaim it
                 # before the next cycle starts.
                 _scored_props.clear()
+                # Force a GC collection so Python returns unreferenced pages to the
+                # OS allocator before the next scan cycle.  Without this, the allocator
+                # holds freed memory as its own pool, which looks like growth in RSS.
+                gc.collect()
 
     except Exception as _job_exc:
         logger.exception("underdog_job: processing error: %s", _job_exc)
@@ -2184,16 +2262,17 @@ async def underdog_job(context) -> None:
     #     except Exception as _ref_exc:
     #         logger.debug("underdog_job: player_prop_market cycle error: %s", _ref_exc)
 
-    # Memory after-job log — helps size the container and catch leaks
-    if _mem_before is not None:
-        try:
-            _mem_after = _resource.getrusage(_resource.RUSAGE_SELF).ru_maxrss
-            logger.info(
-                "underdog_job: memory RSS before=%.1f MB  after=%.1f MB  delta=%.1f MB",
-                _mem_before / 1024, _mem_after / 1024, (_mem_after - _mem_before) / 1024,
-            )
-        except Exception:
-            pass
+    # Memory after-job log — helps size the container and catch leaks.
+    # VmRSS is the *current* live RSS; delta shows whether this cycle allocated
+    # memory that the GC/allocator has not yet returned to the OS.
+    _mem_after = _rss_mb()
+    if _mem_before is not None and _mem_after is not None:
+        logger.info(
+            "underdog_job: memory VmRSS before=%.1f MB  after=%.1f MB  delta=%+.1f MB  "
+            "_MARKET_FIRST_ALERT=%d  _prop_market_alerted=%d",
+            _mem_before, _mem_after, _mem_after - _mem_before,
+            len(_MARKET_FIRST_ALERT), len(_prop_market_alerted),
+        )
 
     # Record job outcome — failure if any persistence stage raised.
     if _health:

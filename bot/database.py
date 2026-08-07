@@ -2143,23 +2143,66 @@ class Database:
             )
             return list(result.scalars().all())
 
-    async def get_known_underdog_prop_keys(self) -> "set[tuple[str, str]]":
+    async def get_known_underdog_prop_keys(
+        self,
+        since_days: int = 60,
+    ) -> "set[tuple[str, str]]":
         """
-        Return every (player_name, stat_type) pair ever stored in
-        underdog_snapshots, including removed rows.
+        Return every (player_name, stat_type) pair seen in underdog_snapshots
+        within the last *since_days* days, including removed rows.
 
         Used at the start of each underdog_job cycle to detect genuinely
         new props on their very first appearance.  Including removed rows
         ensures a re-listed prop is NOT re-flagged as new.
+
+        The *since_days* cutoff (default 60 days) keeps the result set bounded
+        as the DB grows.  Props absent for longer than this window are treated
+        as new on re-appearance — acceptable because Underdog rarely re-lists
+        props that have been gone for two months.
         """
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(hours=since_days * 24)
         async with self.session() as s:
             result = await s.execute(
                 select(
                     UnderdogSnapshotRecord.player_name,
                     UnderdogSnapshotRecord.stat_type,
-                ).distinct()
+                )
+                .distinct()
+                .where(UnderdogSnapshotRecord.fetched_at >= cutoff)
             )
             return {(row[0], row[1]) for row in result.all()}
+
+    async def get_first_alert_times_ud(
+        self,
+        since_hours: int = 24,
+    ) -> "dict[tuple[str, str], datetime]":
+        """
+        Return the earliest alert timestamp for each (player_name, stat_type)
+        pair that had an Underdog alert sent within the last *since_hours*.
+
+        Used at startup to restore _MARKET_FIRST_ALERT state so the market
+        availability window is accurate after a restart.
+        """
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(hours=since_hours)
+        async with self.session() as s:
+            result = await s.execute(
+                select(
+                    UnderdogSnapshotRecord.player_name,
+                    UnderdogSnapshotRecord.stat_type,
+                    func.min(UnderdogSnapshotRecord.fetched_at),
+                )
+                .where(
+                    UnderdogSnapshotRecord.alert_sent == True,   # noqa: E712
+                    UnderdogSnapshotRecord.fetched_at >= cutoff,
+                )
+                .group_by(
+                    UnderdogSnapshotRecord.player_name,
+                    UnderdogSnapshotRecord.stat_type,
+                )
+            )
+            return {(row[0], row[1]): row[2] for row in result.all()}
 
     async def get_latest_underdog_snapshot_per_prop(
         self,
