@@ -29,3 +29,4 @@
 - [Soccer + NHL stat coverage](soccer-nhl-coverage.md) — Soccer uses multi-league ESPN cascade (EPL→LaLiga→Bundesliga→SerieA→Ligue1→MLS→NWSL); NHL uses existing ESPN route + merged goalie stats; both added to UD_ALERT_SPORTS; 2796 tests passing Aug 2026.
 - [Backfill + OddsAPI confirmation](backfill-odds-confirmation.md) — /backfill command grades pending props; OddsAPI confirmation layer for S/A picks (NBA+MLB only, non-blocking, surname fuzzy match); 3006 tests Aug 2026.
 - [Slip journal + player memory](slip-journal.md) — SlipJournal/SlipJournalLeg tables; /slip create|add|grade|journal subcommands; /player hit-rate history; /slipstats pick+slip performance; get_pick_accuracy_by_sport; 3054 tests Aug 2026.
+- [V1.3 freeze gates + DK/FD removal](v13-freeze-gates.md) — MLB UNDER blocked at all 3 alert paths; C-tier added to line-change gate ("S","A","B","C"); DK/FD connectors removed; sport funnel breakdown in /funnel; 3070 tests Aug 2026.

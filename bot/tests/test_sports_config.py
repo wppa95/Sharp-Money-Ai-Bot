@@ -4,10 +4,13 @@ Tests for the expanded active-sports configuration.
 Covers:
   - Sport enum contains all newly supported sports
   - Every default active sport parses to a Sport enum value
-  - Every default active sport has an Odds API key in every mapping dict
-    (analysis engine, DraftKings connector, FanDuel connector)
-  - Legacy "Soccer" alias still maps to soccer_epl everywhere
+  - Every default active sport has an Odds API key in the analysis engine mapping
+  - Legacy "Soccer" alias still maps to soccer_epl
   - ACTIVE_SPORTS env-var override behavior is preserved
+
+Note: DraftKings and FanDuel connector mapping tests removed Aug 2026.
+Those connectors were removed from the framework (provider rule: only
+providers that improve Underdog actionable picks are kept).
 """
 
 from __future__ import annotations
@@ -22,8 +25,6 @@ import pytest
 
 from models import Sport
 from engine.analysis import _SPORT_TO_ODDS_API_KEY
-from connectors.draftkings import _SPORT_KEYS as DK_SPORT_KEYS
-from connectors.fanduel import _SPORT_KEYS as FD_SPORT_KEYS
 from config import Config, config
 
 
@@ -81,31 +82,6 @@ class TestAnalysisEngineMapping:
         assert _SPORT_TO_ODDS_API_KEY[Sport.SOCCER] == "soccer_epl"
 
 
-class TestConnectorMappings:
-    @pytest.mark.parametrize("mapping", [DK_SPORT_KEYS, FD_SPORT_KEYS],
-                             ids=["draftkings", "fanduel"])
-    def test_every_default_sport_present(self, mapping):
-        for value in EXPECTED_DEFAULT_SPORTS:
-            assert value in mapping, f"missing {value}"
-
-    @pytest.mark.parametrize("mapping", [DK_SPORT_KEYS, FD_SPORT_KEYS],
-                             ids=["draftkings", "fanduel"])
-    def test_keys_match_verified_odds_api_keys(self, mapping):
-        for value, key in EXPECTED_KEYS.items():
-            assert mapping[value] == key
-
-    @pytest.mark.parametrize("mapping", [DK_SPORT_KEYS, FD_SPORT_KEYS],
-                             ids=["draftkings", "fanduel"])
-    def test_legacy_soccer_alias(self, mapping):
-        assert mapping["Soccer"] == "soccer_epl"
-
-    def test_connector_maps_consistent_with_engine_map(self):
-        engine_by_value = {s.value: k for s, k in _SPORT_TO_ODDS_API_KEY.items()}
-        for mapping in (DK_SPORT_KEYS, FD_SPORT_KEYS):
-            for value, key in mapping.items():
-                assert engine_by_value.get(value) == key, value
-
-
 class TestActiveSportsConfig:
     def test_default_includes_all_expected_sports(self):
         assert config.active_sports == EXPECTED_DEFAULT_SPORTS
@@ -114,11 +90,9 @@ class TestActiveSportsConfig:
         for value in config.active_sports:
             Sport(value)  # must not raise
 
-    def test_every_default_active_sport_has_mapping_everywhere(self):
+    def test_every_default_active_sport_has_analysis_engine_mapping(self):
         for value in config.active_sports:
             assert Sport(value) in _SPORT_TO_ODDS_API_KEY
-            assert value in DK_SPORT_KEYS
-            assert value in FD_SPORT_KEYS
 
     def test_env_var_override_still_works(self):
         c = Config(ACTIVE_SPORTS_RAW="NFL, NBA ,MLB")

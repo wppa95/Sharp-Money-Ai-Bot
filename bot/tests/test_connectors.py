@@ -4,10 +4,12 @@ Tests for multi-platform market connectors.
 Covers:
   - MarketSnapshot data model (market_key, implied_probability, odds_change)
   - BaseConnector interface
-  - DraftKingsConnector._normalize (mocked API response)
-  - FanDuelConnector._normalize (mocked API response)
   - UnderdogConnector._parse (mocked API response) + line movement detection
   - ConnectorRegistry (register, fetch_all concurrently, health checks)
+
+Note: DraftKings and FanDuel connector tests removed Aug 2026.
+Those connectors were removed from the framework (provider rule:
+only providers that improve Underdog actionable picks are kept).
 """
 
 from __future__ import annotations
@@ -23,8 +25,6 @@ from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from connectors.base import MarketSnapshot, ConnectorStatus
-from connectors.draftkings import DraftKingsConnector
-from connectors.fanduel import FanDuelConnector
 from connectors.underdog import UnderdogConnector, UnderdogProjection
 from connectors.registry import ConnectorRegistry
 
@@ -196,123 +196,6 @@ class TestMarketSnapshot:
         s1 = self._make(selection="Kansas City Chiefs")
         s2 = self._make(selection="Las Vegas Raiders")
         assert s1.market_key != s2.market_key
-
-
-# ── DraftKings connector ──────────────────────────────────────────────────────
-
-class TestDraftKingsConnector:
-    def _make_connector(self) -> DraftKingsConnector:
-        return DraftKingsConnector(
-            odds_api_key  = "test-key",
-            active_sports = ["NFL"],
-            enabled       = True,
-        )
-
-    def test_normalize_extracts_dk_outcomes(self):
-        c = self._make_connector()
-        snaps = c._normalize(ODDS_API_RESPONSE, "NFL")
-        # h2h: 2 outcomes + spreads: 2 outcomes = 4
-        assert len(snaps) == 4
-
-    def test_normalize_sets_correct_sportsbook(self):
-        c = self._make_connector()
-        snaps = c._normalize(ODDS_API_RESPONSE, "NFL")
-        assert all(s.sportsbook == "DraftKings" for s in snaps)
-
-    def test_normalize_sets_sport(self):
-        c = self._make_connector()
-        snaps = c._normalize(ODDS_API_RESPONSE, "NFL")
-        assert all(s.sport == "NFL" for s in snaps)
-
-    def test_normalize_moneyline_odds(self):
-        c = self._make_connector()
-        snaps = c._normalize(ODDS_API_RESPONSE, "NFL")
-        ml = [s for s in snaps if s.market_type == "Moneyline"]
-        assert len(ml) == 2
-        chiefs = next(s for s in ml if "Chiefs" in s.selection)
-        assert chiefs.odds == -165
-
-    def test_normalize_spread_has_line(self):
-        c = self._make_connector()
-        snaps = c._normalize(ODDS_API_RESPONSE, "NFL")
-        spreads = [s for s in snaps if s.market_type == "Spread"]
-        assert all(s.line is not None for s in spreads)
-
-    def test_normalize_sets_game_time(self):
-        c = self._make_connector()
-        snaps = c._normalize(ODDS_API_RESPONSE, "NFL")
-        assert all(s.game_time is not None for s in snaps)
-
-    def test_normalize_tracks_opening_odds(self):
-        c = self._make_connector()
-        snaps1 = c._normalize(ODDS_API_RESPONSE, "NFL")
-        # Modify response to show movement
-        import copy
-        response2 = copy.deepcopy(ODDS_API_RESPONSE)
-        response2[0]["bookmakers"][0]["markets"][0]["outcomes"][0]["price"] = -175
-        snaps2 = c._normalize(response2, "NFL")
-        # Opening should still be the original -165
-        chiefs2 = next(
-            s for s in snaps2
-            if s.market_type == "Moneyline" and "Chiefs" in s.selection
-        )
-        assert chiefs2.opening_odds == -165
-        assert chiefs2.odds == -175
-        assert chiefs2.odds_change == -10
-
-    def test_normalize_is_not_pickem(self):
-        c = self._make_connector()
-        snaps = c._normalize(ODDS_API_RESPONSE, "NFL")
-        assert all(not s.is_pickem for s in snaps)
-
-    @pytest.mark.asyncio
-    async def test_disabled_connector_returns_empty(self):
-        c = DraftKingsConnector(odds_api_key="key", active_sports=["NFL"], enabled=False)
-        result = await c.fetch()
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_no_api_key_returns_empty(self):
-        c = DraftKingsConnector(odds_api_key="", active_sports=["NFL"])
-        result = await c.fetch()
-        assert result == []
-
-
-# ── FanDuel connector ─────────────────────────────────────────────────────────
-
-class TestFanDuelConnector:
-    def _make_connector(self) -> FanDuelConnector:
-        return FanDuelConnector(
-            odds_api_key  = "test-key",
-            active_sports = ["NFL"],
-            enabled       = True,
-        )
-
-    def test_normalize_extracts_fd_outcomes(self):
-        c = self._make_connector()
-        snaps = c._normalize(ODDS_API_RESPONSE, "NFL")
-        # FanDuel has only h2h: 2 outcomes
-        assert len(snaps) == 2
-
-    def test_normalize_sets_fanduel_sportsbook(self):
-        c = self._make_connector()
-        snaps = c._normalize(ODDS_API_RESPONSE, "NFL")
-        assert all(s.sportsbook == "FanDuel" for s in snaps)
-
-    def test_normalize_fanduel_moneyline_odds(self):
-        c = self._make_connector()
-        snaps = c._normalize(ODDS_API_RESPONSE, "NFL")
-        chiefs = next(s for s in snaps if "Chiefs" in s.selection)
-        assert chiefs.odds == -170
-
-    def test_different_odds_from_draftkings(self):
-        dk = DraftKingsConnector("key", ["NFL"])
-        fd = FanDuelConnector("key", ["NFL"])
-        dk_snaps = dk._normalize(ODDS_API_RESPONSE, "NFL")
-        fd_snaps = fd._normalize(ODDS_API_RESPONSE, "NFL")
-        dk_chiefs = next(s for s in dk_snaps if s.market_type == "Moneyline" and "Chiefs" in s.selection)
-        fd_chiefs = next(s for s in fd_snaps if s.market_type == "Moneyline" and "Chiefs" in s.selection)
-        assert dk_chiefs.odds != fd_chiefs.odds   # DK=-165, FD=-170
 
 
 # ── Underdog connector ────────────────────────────────────────────────────────

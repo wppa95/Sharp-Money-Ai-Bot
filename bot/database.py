@@ -2687,10 +2687,44 @@ class Database:
             )
             top_rej = [dict(r._mapping) for r in rej_rows.all()]
 
+        # Per-sport breakdown — sport × gate_decision counts, aggregated in Python
+        async with self.session() as s:
+            sport_rows = await s.execute(
+                select(
+                    PropCandidateLog.sport,
+                    PropCandidateLog.gate_decision,
+                    func.count(PropCandidateLog.id).label("n"),
+                )
+                .where(PropCandidateLog.scan_ts >= cutoff)
+                .group_by(PropCandidateLog.sport, PropCandidateLog.gate_decision)
+                .order_by(PropCandidateLog.sport)
+            )
+            _sport_gate_rows = sport_rows.all()
+
+        # Aggregate into per-sport dicts
+        _sport_map: dict[str, dict] = {}
+        for row in _sport_gate_rows:
+            sp = row.sport or "UNKNOWN"
+            if sp not in _sport_map:
+                _sport_map[sp] = {
+                    "sport":     sp,
+                    "scanned":   0,
+                    "accepted":  0,
+                    "watchlist": 0,
+                    "rejected":  0,
+                    "removed":   0,
+                }
+            _sport_map[sp]["scanned"] += row.n
+            key = row.gate_decision.lower() if row.gate_decision else "unknown"
+            if key in _sport_map[sp]:
+                _sport_map[sp][key] += row.n
+        by_sport = sorted(_sport_map.values(), key=lambda d: d["scanned"], reverse=True)
+
         return {
             "since_hours":    since_hours,
             "counts":         counts,
             "top_rejections": top_rej,
+            "by_sport":       by_sport,
         }
 
     async def get_pending_opportunities(

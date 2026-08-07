@@ -1099,6 +1099,14 @@ async def underdog_job(context) -> None:
                             "UD mlb_gate [new]: %s | %s | tier=%s blocked (MLB min=%s)",
                             player, stat_type, decision.decision_tier, config.UD_MLB_MIN_TIER,
                         )
+                # MLB UNDER block — user bets MLB OVER only (upside preference)
+                if _np_bet_ready and decision is not None:
+                    if (snap.sport or "").upper() == "MLB" and decision.recommendation == "UNDER":
+                        _np_bet_ready = False
+                        logger.debug(
+                            "UD mlb_under_gate [new]: %s | %s | UNDER blocked for MLB",
+                            player, stat_type,
+                        )
 
                 if _np_bet_ready and chat_ids:
                     # Prop Intelligence trace for richer alert context
@@ -1403,7 +1411,10 @@ async def underdog_job(context) -> None:
                     _lc_mlb_ok = (
                         _lc_sport_up != "MLB"
                         or decision is None
-                        or decision.decision_tier in config.ud_mlb_alert_tiers
+                        or (
+                            decision.decision_tier in config.ud_mlb_alert_tiers
+                            and decision.recommendation != "UNDER"  # MLB OVER-only preference
+                        )
                     )
                     is_qualified = (
                         not is_cold_start
@@ -1411,7 +1422,7 @@ async def underdog_job(context) -> None:
                         and score.stars >= config.UD_MIN_STARS_TO_ALERT
                         and decision is not None
                         and decision.recommendation != "PASS"
-                        and decision.decision_tier in ("S", "A", "B")
+                        and decision.decision_tier in ("S", "A", "B", "C")
                         and (snap.sport or "UNKNOWN") in config.ud_alert_sports
                         and _lc_mlb_ok
                     )
@@ -1820,6 +1831,14 @@ async def underdog_job(context) -> None:
                     logger.debug(
                         "UD mlb_gate [standing]: %s | %s | tier=%s blocked (MLB min=%s)",
                         _sp, _st, _sdec.decision_tier, config.UD_MLB_MIN_TIER,
+                    )
+                    continue
+
+                # MLB UNDER block — user bets MLB OVER only (upside preference)
+                if _ssport.upper() == "MLB" and _sdec.recommendation == "UNDER":
+                    logger.debug(
+                        "UD mlb_under_gate [standing]: %s | %s | UNDER blocked for MLB",
+                        _sp, _st,
                     )
                     continue
 

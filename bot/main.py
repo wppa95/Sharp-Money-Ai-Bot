@@ -84,8 +84,6 @@ from commands import (
 )
 from connectors import (
     ConnectorRegistry,
-    DraftKingsConnector,
-    FanDuelConnector,
     UnderdogConnector,
 )
 from market_engine import (
@@ -242,18 +240,6 @@ async def post_init(application: Application) -> None:
     registry = ConnectorRegistry()
     active_sports = config.active_sports
 
-    registry.register(DraftKingsConnector(
-        odds_api_key   = config.ODDS_API_KEY,
-        active_sports  = active_sports,
-        enabled        = config.DRAFTKINGS_ENABLED,
-        season_checker = _season_checker,
-    ))
-    registry.register(FanDuelConnector(
-        odds_api_key   = config.ODDS_API_KEY,
-        active_sports  = active_sports,
-        enabled        = config.FANDUEL_ENABLED,
-        season_checker = _season_checker,
-    ))
     registry.register(UnderdogConnector(
         # active_sports=None: accept every sport the Underdog API returns.
         # Underdog only lists currently-active props, so out-of-season sports

@@ -1,0 +1,565 @@
+🚨 FINAL V1.3 STABILIZATION PASS — DATA COLLECTION START
+
+🚨 CREDIT PROTECTION RULE (IMPORTANT)
+
+⚠️ DO NOT BURN UNNECESSARY CREDITS.
+
+Before making any changes:
+
+Review the current system state first.
+
+Do NOT:
+
+* Rewrite working systems
+* Redesign architecture
+* Create duplicate alert systems
+* Change database structure unnecessarily
+* Change scoring engine without diagnostics
+* Repeat completed work
+* Spend credits on tasks that do not improve pick quality, accuracy, or stability
+
+Only make targeted improvements.
+
+🚨 EVERYTHING HERE MUST BE COMPLETED BEFORE FREEZING.
+
+After completion:
+
+🛑 FREEZE THE SYSTEM.
+
+The goal now is:
+
+Collect quality data.
+Improve decision making.
+Stop unnecessary building.
+
+⸻
+
+PRIORITY 1 — SPORT ALERT DISTRIBUTION CHECK
+
+Problem:
+
+The bot is producing many MLB actionable picks, but almost no actionable picks from other sports.
+
+Current concern:
+
+MLB is dominating alerts while sports the user actually bets daily are not producing opportunities.
+
+Do NOT immediately disable MLB.
+
+First diagnose the bottleneck.
+
+Run full sport funnel diagnostics.
+
+For every sport show:
+
+* Props scanned
+* Props parsed
+* Props evaluated
+* Props passing gates
+* S/A/B/C tier distribution
+* Rejection reasons
+
+Example:
+
+MLB:
+
+Scanned:
+Parsed:
+Evaluated:
+Passed:
+
+S:
+A:
+B:
+C:
+
+Rejected reasons:
+
+NBA:
+
+Scanned:
+Parsed:
+Evaluated:
+Passed:
+
+S:
+A:
+B:
+C:
+
+Rejected reasons:
+
+CS2:
+
+Scanned:
+Parsed:
+Evaluated:
+Passed:
+
+S:
+A:
+B:
+C:
+
+Rejected reasons:
+
+Tennis:
+
+Scanned:
+Parsed:
+Evaluated:
+Passed:
+
+S:
+A:
+B:
+C:
+
+Rejected reasons:
+
+Goal:
+
+Find whether the issue is:
+
+1. Missing provider data
+2. Missing historical data
+3. Gates too strict
+4. Scoring imbalance
+5. MLB receiving too much preference
+
+Do not blindly loosen gates.
+
+⸻
+
+PRIORITY 2 — SPORT TIER GATE CORRECTION
+
+Important correction:
+
+Tier 1 sports should allow:
+
+✅ S-Tier
+✅ A-Tier
+✅ B-Tier
+✅ C-Tier
+
+Do NOT restrict Tier 1 sports to only S/A/B.
+
+The previous implementation was too restrictive.
+
+⸻
+
+TIER 1 SPORTS
+
+These are the sports the user actively bets daily.
+
+Allow:
+
+✅ S-tier actionable picks
+✅ A-tier actionable picks
+✅ B-tier actionable picks
+✅ C-tier actionable picks
+
+Keep:
+
+* Quality validation
+* Confidence scoring
+* Historical checks
+
+Do NOT remove quality controls.
+
+Goal:
+
+Increase daily opportunities while maintaining quality.
+
+⸻
+
+MLB RULE UPDATE
+
+MLB remains separate.
+
+Do NOT remove MLB tracking.
+
+Continue:
+
+✅ Tracking all MLB props
+✅ Grading all MLB results
+✅ Saving all MLB outcomes
+✅ Learning from MLB performance
+
+However, Telegram actionable alerts need a preference filter.
+
+⸻
+
+MLB ACTIONABLE ALERT RULE
+
+MLB S-Tier
+
+Allow:
+
+✅ OVER actionable picks only
+
+Block:
+
+❌ UNDER actionable picks
+
+Reason:
+
+User does not want MLB UNDER recommendations.
+
+Reasons:
+
+* MLB has higher variance
+* Strong UNDER signals can still fail
+* User prefers MLB upside opportunities
+
+⸻
+
+MLB INTERNAL TRACKING
+
+Keep all MLB data for:
+
+* PropLineHistory
+* PropOpportunityLog
+* Grading
+* Learning database
+* Performance analysis
+
+This is only an alert preference.
+
+⸻
+
+PRIORITY 3 — VERIFY UNIFIED PROVIDER PIPELINE
+
+All providers must improve Underdog actionable picks through ONE unified pipeline.
+
+No separate alert systems.
+
+Provider flow:
+
+🐶 Underdog
+
+→ Primary prop source
+
+↓
+
+📊 OddsAPI
+
+→ Market confirmation
+
+↓
+
+🏦 DraftKings/FanDuel
+
+→ Additional confirmation only if reliable
+
+↓
+
+🟡 Sleeper
+
+→ Player/fantasy enrichment
+
+⸻
+
+All providers must feed:
+
+✅ Scoring engine
+✅ Confidence system
+✅ PropLineHistory
+✅ Grading system
+✅ Learning database
+
+Rules:
+
+* No provider creates extra spam
+* No provider bypasses scoring
+* No separate alert systems
+* Quality > quantity
+
+⸻
+
+PRIORITY 4 — PROVIDER AVAILABILITY RULE
+
+If a provider cannot reliably improve the system:
+
+Remove it completely from the framework.
+
+No inactive systems.
+
+Applies to:
+
+🏦 DraftKings
+
+🏦 FanDuel
+
+🟡 Sleeper
+
+Requirements:
+
+* No broken connectors
+* No unused imports
+* No inactive registrations
+* No unnecessary resource usage
+* No alert noise
+
+A provider must provide real value to remain.
+
+⸻
+
+DRAFTKINGS / FANDUEL DECISION
+
+Check current status.
+
+If DK/FD are:
+
+✅ Working
+✅ Providing reliable data
+✅ Improving Underdog actionable picks
+
+Then:
+
+Migrate into the unified provider pipeline.
+
+If DK/FD are:
+
+❌ Not working
+❌ Not providing usable data
+❌ Not improving picks
+
+Then:
+
+Remove completely.
+
+Remove:
+
+* Connectors
+* Imports
+* Registrations
+* Unused framework references
+
+Do not keep inactive systems.
+
+⸻
+
+SLEEPER DECISION
+
+Keep only if providing useful enrichment.
+
+Sleeper should not create alerts.
+
+Sleeper should support:
+
+* Player context
+* Stat enrichment
+* Confidence improvement
+
+If Sleeper cannot provide value:
+
+Remove completely.
+
+⸻
+
+PRIORITY 5 — PROVIDER EXPANSION RULE
+
+Only add providers that improve decisions.
+
+Before enabling:
+
+Verify:
+
+✅ Reliable data
+✅ No crashes
+✅ No unnecessary API burn
+✅ Improves confidence
+✅ Improves actionable picks
+
+If a provider creates noise:
+
+Disable or remove.
+
+If a provider is:
+
+* unavailable
+* broken
+* unreliable
+* unable to provide usable data
+
+➡️ Remove it completely from the framework.
+
+⸻
+
+PRIORITY 6 — DATA COLLECTION MODE
+
+Now that the system is stable:
+
+Focus on collecting real performance data.
+
+Track:
+
+Every evaluated prop:
+
+✅ Sport
+✅ Player
+✅ Market
+✅ Line
+✅ Direction
+✅ Tier
+✅ Confidence
+✅ Result
+✅ Actual value
+✅ Hit/Miss
+
+Track:
+
+Every actionable pick.
+
+Track:
+
+Every user-selected slip.
+
+Goal:
+
+Build enough data to evaluate:
+
+* Sport accuracy
+* Tier accuracy
+* Player reliability
+* Market reliability
+* Slip performance
+* ROI
+
+⸻
+
+PRIORITY 7 — BETTING JOURNAL + SLIP INTELLIGENCE
+
+Continue improving user decision support.
+
+Track actual slips separately from individual props.
+
+Need:
+
+Slip Tracking
+
+Track:
+
+* 2-Man slips
+* 3-Man slips
+* 6-Man slips
+* Stake
+* Return
+* ROI
+* Win/Loss
+
+⸻
+
+Player Memory
+
+Before picks:
+
+Show:
+
+* Previous results
+* Hit rate
+* Miss rate
+* Recent streak
+* Warning signs
+
+Example:
+
+Player:
+Anthony Edwards
+
+Tracked:
+10 picks
+
+Hits:
+7
+
+Misses:
+3
+
+Rate:
+70%
+
+⸻
+
+PRIORITY 8 — AUTOMATIC GRADING
+
+Verify:
+
+✅ OVER grading
+✅ UNDER grading
+✅ Stat normalization
+✅ Result storage
+✅ Historical backfill
+
+No picks should remain ungraded.
+
+⸻
+
+FINAL SYSTEM WORKFLOW
+
+Detection
+
+↓
+
+Market Intelligence
+
+↓
+
+Scoring
+
+↓
+
+Actionable Pick
+
+↓
+
+User Slip Selection
+
+↓
+
+Slip Journal
+
+↓
+
+Results
+
+↓
+
+Player/Sport Memory
+
+↓
+
+System Improvement
+
+⸻
+
+FINAL FREEZE CHECKLIST
+
+Before freezing confirm:
+
+✅ Tier 1 sports produce S/A/B/C opportunities
+✅ MLB UNDER actionable alerts removed
+✅ MLB tracking remains active
+✅ Sport funnel diagnostics completed
+✅ Other sports producing opportunities
+✅ DK/FD tested and either migrated or removed
+✅ Sleeper tested and either kept or removed
+✅ All providers unified
+✅ No duplicate alert systems
+✅ Slip intelligence active
+✅ Player memory active
+✅ Automatic grading verified
+✅ No unnecessary credit usage
+
+Then:
+
+🛑 FREEZE.
+
+No unnecessary rewrites.
+
+Protect credits.
+
+Protect stability.
+
+Start collecting real data.

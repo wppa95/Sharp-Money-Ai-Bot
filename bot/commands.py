@@ -3386,6 +3386,33 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             f"📊 Qualification rate: <b>{qual_rate}</b>",
         ]
 
+        # Per-sport breakdown
+        by_sport = summary.get("by_sport", [])
+        if by_sport:
+            lines += [
+                "",
+                "─" * 16,
+                "",
+                "⚽ <b>Sport Funnel Breakdown</b>",
+                "",
+                f"{'Sport':<12} {'Scan':>4} {'Acc':>4} {'Watch':>5} {'Rej':>4} {'Rm':>3}",
+                "─" * 36,
+            ]
+            for row in by_sport:
+                sp    = (row.get("sport") or "?")[:11]
+                sc    = row.get("scanned",   0)
+                acc   = row.get("accepted",  0)
+                watch = row.get("watchlist", 0)
+                rej   = row.get("rejected",  0)
+                rm    = row.get("removed",   0)
+                pass_pct = f"{acc / sc * 100:.0f}%" if sc > 0 else "—"
+                lines.append(
+                    f"<code>{sp:<12} {sc:>4} {acc:>4} {watch:>5} {rej:>4} {rm:>3}</code>"
+                    f"  <i>{pass_pct}</i>"
+                )
+        else:
+            lines += ["", "<i>Sport breakdown accumulates as the bot scans props.</i>"]
+
         if top_rej:
             lines += [
                 "",
