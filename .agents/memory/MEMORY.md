@@ -30,3 +30,4 @@
 - [Backfill + OddsAPI confirmation](backfill-odds-confirmation.md) — /backfill command grades pending props; OddsAPI confirmation layer for S/A picks (NBA+MLB only, non-blocking, surname fuzzy match); 3006 tests Aug 2026.
 - [Slip journal + player memory](slip-journal.md) — SlipJournal/SlipJournalLeg tables; /slip create|add|grade|journal subcommands; /player hit-rate history; /slipstats pick+slip performance; get_pick_accuracy_by_sport; 3054 tests Aug 2026.
 - [V1.3 freeze gates + DK/FD removal](v13-freeze-gates.md) — MLB UNDER blocked at all 3 alert paths; C-tier added to line-change gate ("S","A","B","C"); DK/FD connectors removed; sport funnel breakdown in /funnel; 3070 tests Aug 2026.
+- [Market-signal bypass (Gate 1)](market-signal-bypass.md) — score≥70 + |avg_vs_line_pct|≥2% produces OVER/UNDER pick when no game history; cold-start hit_rates=[] bug fixed (→None); C-tier tier_display added; 3090 tests Aug 2026.

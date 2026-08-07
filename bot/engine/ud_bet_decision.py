@@ -164,6 +164,7 @@ class UDBetDecision:
             "S":    "⭐ S-Tier",
             "A":    "🔷 A-Tier",
             "B":    "🔹 B-Tier",
+            "C":    "▪️ C-Tier",
             "PASS": "—",
         }.get(self.decision_tier, "—")
 
@@ -254,10 +255,47 @@ def make_ud_bet_decision(
 
     # ── Gate 1: real game data required ──────────────────────────────────────
     # Guard against callers passing a list or other wrong type (e.g. from
-    # cold-start hit_rates=[] path) — treat any non-PlayerHitRates value as None.
+    # cold-start hit_rates=None path) — treat any non-PlayerHitRates value as None.
     if not hasattr(hit_rates, "has_real_data"):
         hit_rates = None
     if hit_rates is None or not hit_rates.has_real_data:
+        # Market-signal bypass: high-confidence props (score ≥ 70) with a clear
+        # directional signal from line movement should NOT be silently dropped as
+        # decision_pass — they should produce a market pick so they reach Telegram.
+        # Gate 1 PASS (decision_pass) is reserved for low-confidence props only
+        # (score < 70) where market signals are also inconclusive.
+        # avg_vs_line_pct: (avg_line − current_line) / avg_line
+        #   > 0  → line moved DOWN from historical avg → OVER opportunity
+        #   < 0  → line moved UP from historical avg   → UNDER opportunity
+        _mkt_dir: Optional[str] = None
+        _score_total = getattr(score, "total", None)
+        if (
+            score is not None
+            and isinstance(_score_total, (int, float))
+            and _score_total >= 70
+            and getattr(score, "tier", None) in ("S", "A", "B", "C")
+            and avg_vs_line_pct is not None
+            and abs(avg_vs_line_pct) >= 0.02  # ≥2% line movement required for signal
+        ):
+            _mkt_dir = "OVER" if avg_vs_line_pct > 0 else "UNDER"
+
+        if _mkt_dir is not None:
+            _mkt_conf = min(int(score.total * 0.90), 85)  # capped — no game history
+            _move_dir = "down" if _mkt_dir == "OVER" else "up"
+            return UDBetDecision.make_pick(
+                recommendation    = _mkt_dir,
+                decision_tier     = score.tier,
+                confidence        = _mkt_conf,
+                reason            = (
+                    f"Market pick: line moved {_move_dir} {abs(avg_vs_line_pct):.0%} "
+                    f"from historical avg — {score.total:.0f}/100 score "
+                    f"(no game history yet)"
+                ),
+                hit_rates         = None,
+                avg_vs_line_pct   = avg_vs_line_pct,
+                at_historical_low = at_low,
+            )
+
         return UDBetDecision.make_pass(
             reason             = (
                 "No player game history available — "

@@ -1335,7 +1335,7 @@ async def underdog_job(context) -> None:
                         validation   = validation,
                         current_line = snap.line or 0.0,
                         prev_line    = None,
-                        hit_rates    = [],
+                        hit_rates    = None,  # no game history at cold-start
                     )
                     # ── Before/after tier comparison for the completion log ───────
                     _legacy_act   = _score_historical_activity_legacy(ud_history)
@@ -1460,6 +1460,11 @@ async def underdog_job(context) -> None:
                             )
                         elif (snap.sport or "UNKNOWN") not in config.ud_alert_sports:
                             _lc_rej = f"sport_blocked ({snap.sport})"
+                        elif not _lc_mlb_ok:
+                            if decision.recommendation == "UNDER":
+                                _lc_rej = f"mlb_under_blocked ({decision.decision_tier})"
+                            else:
+                                _lc_rej = f"mlb_tier_blocked ({decision.decision_tier}, MLB min=S)"
                         else:
                             _lc_rej = "unknown"
                         _scored_props.append({

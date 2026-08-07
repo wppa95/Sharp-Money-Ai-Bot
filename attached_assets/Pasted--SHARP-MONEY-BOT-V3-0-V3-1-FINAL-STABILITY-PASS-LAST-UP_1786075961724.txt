@@ -1,0 +1,630 @@
+🚨 SHARP MONEY BOT V3.0 → V3.1 FINAL STABILITY PASS — LAST UPDATE BEFORE FREEZE
+
+🚨 CREDIT PROTECTION RULE (IMPORTANT)
+
+⚠️ DO NOT BURN UNNECESSARY CREDITS.
+
+Before making any changes:
+
+Review the current system state first.
+
+The project has already completed major architecture work.
+
+Do NOT spend credits:
+
+* Rediscovering completed systems
+* Rebuilding working features
+* Rechecking already verified systems
+* Making unnecessary refactors
+
+Do NOT:
+
+❌ Rewrite working systems
+❌ Redesign architecture
+❌ Create duplicate alert systems
+❌ Create duplicate scoring systems
+❌ Create duplicate confidence systems
+❌ Change database structure unnecessarily
+❌ Change scoring engine without diagnostics
+❌ Change provider flow without a clear reason
+❌ Repeat completed work
+
+Only make targeted fixes that improve:
+
+* Pick quality
+* Accuracy
+* Stability
+* Data collection
+
+🚨 EVERYTHING BELOW MUST BE COMPLETED BEFORE FREEZING.
+
+━━━━━━━━━━━━━━━━━━
+
+🚨 IMPORTANT — DO NOT TOUCH WORKING SYSTEMS
+
+Before making this final update:
+
+Do NOT change the main systems already working.
+
+Keep unchanged:
+
+✅ Scoring engine
+✅ Provider pipeline
+✅ PropLineHistory
+✅ Grading system
+✅ Slip journal
+✅ Player memory
+✅ OddsAPI confirmation
+✅ Data collection systems
+✅ Database structure
+
+Do NOT:
+
+* Rewrite scoring
+* Adjust the entire model
+* Redesign gates
+* Change provider architecture
+* Remove working features
+* Create new architecture
+
+This is a targeted stability and classification correction only.
+
+━━━━━━━━━━━━━━━━━━
+
+📌 SHARP MONEY BOT V3.0 COMPLETION CHECKPOINT
+
+Status: COMPLETE
+
+Validation:
+
+✅ 2,388 tests passing
+✅ 0 failures
+
+Core Architecture:
+
+✅ Candidate object is the single decision pathway
+✅ No duplicate confidence systems
+✅ No duplicate scoring systems
+✅ No duplicate explanation systems
+
+━━━━━━━━━━━━━━━━━━
+
+COMPLETED FRAMEWORK LAYERS
+
+1. Canonical Identity Layer
+2. Unified Candidate Contract
+3. Error Taxonomy
+4. Explanation Service
+5. Confidence Separation
+6. Hard Block vs Risk Warning
+7. Learning Labels & Variance Protection
+8. Session Recovery / Job Isolation
+9. Feature Framework
+
+━━━━━━━━━━━━━━━━━━
+
+COMPLETED INTELLIGENCE SYSTEMS
+
+✅ AI Analyst Layer
+✅ Prop Intelligence
+✅ Risk Management
+✅ Player Reliability Blocks
+✅ Settlement Awareness
+✅ Learning/Refinement Loop
+✅ Telegram upgrades
+✅ Dashboard upgrades
+
+Current focus:
+
+Monitor live performance.
+
+Improve alert quality from real results.
+
+━━━━━━━━━━━━━━━━━━
+
+CURRENT V1.3 SYSTEM CHECKPOINT
+
+The project is already in a stable state.
+
+Completed:
+
+✅ Underdog primary prop pipeline
+✅ OddsAPI confirmation system
+✅ Unified candidate framework
+✅ Sport funnel diagnostics
+✅ S/A/B/C tier structure
+✅ MLB UNDER alert block
+✅ DK/FD removed from framework
+✅ Sleeper kept for enrichment
+✅ Slip journal system
+✅ Player memory system
+✅ Automatic grading system
+✅ Prop tracking and learning database
+✅ 3,070 tests passing before latest stability fix
+✅ Bot previously running stable
+
+DO NOT rebuild or revisit completed systems.
+
+Credits are limited.
+
+━━━━━━━━━━━━━━━━━━
+
+UNIFIED PROP PIPELINE
+
+Current flow:
+
+🐶 Underdog
+
+↓
+
+Candidate Contract
+
+↓
+
+Scoring
+
+↓
+
+Validation
+
+↓
+
+Actionable Pick Decision
+
+↓
+
+Learning Database
+
+↓
+
+Grading
+
+No separate alert pipelines.
+
+━━━━━━━━━━━━━━━━━━
+
+DATA + LEARNING SYSTEMS
+
+Completed:
+
+✅ PropLineHistory
+✅ PropOpportunityLog
+✅ Candidate tracking
+✅ HIT/MISS tracking
+✅ Result grading
+✅ /backfill historical grading
+✅ Player memory
+✅ Slip journal
+✅ Performance tracking
+
+━━━━━━━━━━━━━━━━━━
+
+GRADING SYSTEM
+
+Completed:
+
+✅ OVER grading
+✅ UNDER grading
+✅ stat_type normalization
+✅ Result storage
+✅ Historical backfill support
+
+Do not rebuild grading.
+
+━━━━━━━━━━━━━━━━━━
+🚨 PRIORITY 0 — FIX POST-UPDATE UNDERDOG PIPELINE CRASH (BLOCKING)
+Discovered during live monitoring after the stabilization update.
+Problem:
+No actionable picks have been received after the latest update.
+Health checks show:
+'list' object has no attribute 'has_real_data'
+Location:
+market_engine.underdog_job
+Stage:
+prop_scoring
+Current behavior:
+Underdog fetch:
+✅ Working
+↓
+Prop scoring:
+❌ Crashing
+↓
+Validation:
+⏸ Not reached
+↓
+Decision classification:
+⏸ Not reached
+↓
+Actionable pick gate:
+⏸ Not reached
+↓
+Telegram:
+❌ 0 alerts
+Evidence:
+Last scan: props=0 alerts=0
+ 
+⸻
+ 
+Required Fix
+Fix ONLY the runtime type handling issue.
+The system appears to expect a Candidate/Prop object but is receiving a list.
+Correct the object handling so the existing pipeline continues.
+ 
+⸻
+ 
+DO NOT CHANGE:
+❌ Scoring engine ❌ Decision Pass rules ❌ S+/S/A+/A/B/C tier system ❌ Provider pipeline ❌ Alert logic ❌ Database structure ❌ PropLineHistory ❌ Grading system ❌ Slip journal ❌ Player memory
+This is a targeted stability fix only.
+ 
+⸻
+ 
+After Fix Verify:
+Run:
+✅ Full test suite ✅ Startup health check ✅ Underdog scan verification ✅ Confirm props > 0 after scans ✅ Confirm funnel fills again ✅ Confirm scoring runs successfully ✅ Confirm actionable picks can reach Telegram ✅ Confirm no alert spam
+Only after this is fixed should classification changes be evaluated.
+━━━━━━━━━━━━━━━━━━
+🚨 ADDITIONAL FINDING — HIGH SCORE GATES BLOCKING ACTIONABLE FLOW
+Live funnel verification shows the discovery engine is working.
+Examples:
+Caty McNally — Breakpoints Won
+87/100 [S] decision_pass
+Yandy Díaz — Fantasy Points
+87/100 [S] cold_start
+Smash — Kills Maps 1+2
+85/100 [S] decision_pass
+These are exactly the type of opportunities the system should evaluate for actionable picks.
+The scoring engine is finding strong opportunities.
+Do NOT change scoring.
+Investigate the final routing gates.
+Check:
+* decision_pass classification
+* cold_start gate
+* real-data gate
+* validation gate
+* snapshot requirements
+* actionable pick gate
+Goal:
+High-confidence opportunities should not be silently blocked.
+Do NOT remove quality controls.
+Only correct incorrect classifications or overly broad blocking conditions.
+━━━━━━━━━━━━━━━━━━
+PRIORITY 1 — FIX DECISION PASS CLASSIFICATION LOGIC
+Problem:
+The system is incorrectly labeling elite opportunities as:
+decision_pass
+Examples:
+Caty McNally:
+87/100 [S] decision_pass
+Smash:
+85/100 [S] decision_pass
+These are the exact types of props the system was built to surface.
+The scoring engine is working.
+Do NOT change the scoring engine.
+Only fix the final classification flow.
+━━━━━━━━━━━━━━━━━━
+DECISION PASS RULE
+Decision Pass should only represent borderline opportunities.
+Decision Pass:
+✅ 69/100 and below
+Meaning:
+* Lower confidence
+* Needs review
+* Not ready for actionable alert
+High-confidence opportunities should not disappear.
+━━━━━━━━━━━━━━━━━━
+SCORE + TIER ROUTING RULES
+Important:
+Do NOT lower scoring standards.
+Do NOT bypass validation.
+Do NOT remove quality checks.
+Correct flow:
+Detection
+↓
+Scoring
+↓
+Validation
+↓
+Actionable Pick Gate
+↓
+Telegram
+Allow:
+✅ S+ ✅ S ✅ A+ ✅ A ✅ B ✅ C
+Examples of expected routing:
+90+ = elite S+
+85+ = S
+80+ = A+
+75+ = A
+70+ = B
+69 and below = review / decision_pass
+Do not allow high-quality props to be incorrectly classified as decision_pass.
+━━━━━━━━━━━━━━━━━━
+PRIORITY 2 — SPORT TIER SYSTEM
+Confirm the tier correction remains active.
+Tier 1 sports allow:
+✅ S+ ✅ S ✅ A+ ✅ A ✅ B ✅ C
+Keep:
+* Quality validation
+* Confidence scoring
+* Historical checks
+Do not remove quality controls.
+━━━━━━━━━━━━━━━━━━
+PRIORITY 3 — MLB ALERT PREFERENCE
+MLB remains separate.
+Continue:
+✅ Tracking MLB props ✅ Grading MLB results ✅ Saving MLB outcomes ✅ Learning from MLB performance
+Telegram preference:
+Allow:
+✅ MLB OVER actionable picks only
+Block:
+❌ MLB UNDER actionable picks
+Do not remove MLB from:
+* PropLineHistory
+* PropOpportunityLog
+* Grading
+* Learning database
+* Performance tracking
+This is only a user-facing alert preference.
+━━━━━━━━━━━━━━━━━━
+PRIORITY 4 — UNIFIED PROVIDER PIPELINE
+All providers must use ONE unified pipeline.
+No separate alert systems.
+Provider flow:
+🐶 Underdog
+↓
+Primary prop source
+📊 OddsAPI
+↓
+Market confirmation
+🏦 DraftKings/FanDuel
+↓
+Only if reliable and providing value
+🟡 Sleeper
+↓
+Enrichment/confirmation only
+All providers must feed:
+✅ Scoring engine ✅ Confidence system ✅ PropLineHistory ✅ Grading system ✅ Learning database
+Rules:
+* No provider creates extra spam
+* No provider bypasses scoring
+* Quality > quantity
+━━━━━━━━━━━━━━━━━━
+PRIORITY 5 — PROVIDER AVAILABILITY RULE
+If a provider cannot reliably improve the system:
+REMOVE IT COMPLETELY.
+No inactive systems.
+A provider must provide real value.
+Requirements:
+* No broken connectors
+* No unused imports
+* No inactive registrations
+* No unnecessary resource usage
+* No alert noise
+━━━━━━━━━━━━━━━━━━
+DRAFTKINGS / FANDUEL DECISION
+Check current status.
+If DK/FD are:
+✅ Working ✅ Providing reliable data ✅ Improving Underdog actionable picks
+Then:
+Migrate into the unified provider pipeline.
+If DK/FD are:
+❌ Not working ❌ Not providing usable data ❌ Not improving picks
+Then:
+Remove completely.
+Remove:
+* Connectors
+* Imports
+* Registrations
+* Unused framework references
+Do not keep inactive systems.
+━━━━━━━━━━━━━━━━━━
+SLEEPER DECISION
+Keep only if providing useful enrichment.
+Sleeper should:
+* Support player context
+* Improve confidence
+* Fill data gaps
+No direct alerts.
+If Sleeper cannot provide value:
+Remove completely.
+
+━━━━━━━━━━━━━━━━━━
+
+PRIORITY 6 — DATA COLLECTION MODE
+
+After the stability fix and decision classification fix:
+
+Focus on collecting real performance data.
+
+Track every evaluated prop:
+
+✅ Sport
+✅ Player
+✅ Market
+✅ Line
+✅ Direction
+✅ Provider
+✅ Tier
+✅ Confidence score
+✅ Result
+✅ Actual value
+✅ HIT/MISS/PUSH
+✅ Timestamp
+
+Track:
+
+* Actionable picks
+* Near misses
+* User-selected slips
+* Missed opportunities
+* Model decisions
+
+Goal:
+
+Build intelligence around:
+
+✅ Sport accuracy
+✅ Tier accuracy
+✅ Player reliability
+✅ Market reliability
+✅ Provider reliability
+✅ Slip ROI
+
+The goal is not more alerts.
+
+The goal is better alerts.
+
+━━━━━━━━━━━━━━━━━━
+
+LIVE FUNNEL EXPECTATION
+
+The funnel is working as a discovery tool.
+
+Example:
+
+Current near-misses:
+
+Caty McNally — Breakpoints Won
+87/100 [S]
+
+Yandy Díaz — Fantasy Points
+87/100 [S]
+
+Smash — Kills Maps 1+2
+85/100 [S]
+
+These should be treated as:
+
+🔥 High-confidence opportunities requiring final validation
+
+NOT:
+
+❌ decision_pass
+
+The discovery engine is working.
+
+The final decision routing needs correction.
+
+━━━━━━━━━━━━━━━━━━
+
+FINAL VERIFICATION BEFORE FREEZE
+
+After all fixes:
+
+Run:
+
+✅ Full test suite
+✅ Startup health check
+✅ Telegram verification
+✅ Funnel verification
+✅ Underdog pipeline verification
+✅ Actionable alert verification
+
+Verify:
+
+✅ High-confidence props are not incorrectly labeled decision_pass
+✅ Decision Pass only applies to 69 and below
+✅ S+/S/A+/A/B/C tier system works correctly
+✅ Tier 1 sports can produce actionable picks
+✅ MLB UNDER alerts remain blocked
+✅ MLB tracking/grading remains active
+✅ No alert spam is created
+✅ Provider pipeline remains unified
+✅ Data collection continues
+✅ No regressions introduced
+
+━━━━━━━━━━━━━━━━━━
+
+FINAL FREEZE RULE
+
+After verification:
+
+🛑 FREEZE THE PROJECT.
+
+No more:
+
+❌ Feature additions
+❌ Provider expansions
+❌ Architecture changes
+❌ Scoring rewrites
+❌ Database redesigns
+❌ New alert systems
+
+Only allow:
+
+✅ Critical bugs
+✅ Stability issues
+✅ Data quality fixes
+
+The goal after freeze:
+
+Collect data.
+
+Track results.
+
+Grade picks.
+
+Measure performance.
+
+Improve from real outcomes.
+
+Do not disturb systems already working.
+
+━━━━━━━━━━━━━━━━━━
+
+🚨 SHARP MONEY BOT V3.1 RELEASE
+
+After completing this final stabilization pass:
+
+🛑 Sharp Money Bot V3.1 becomes the official frozen release.
+
+V3.1 represents:
+
+✅ Stable production operation
+✅ Reliable actionable pick delivery
+✅ Correct S+/S/A+/A/B/C classification
+✅ Clean unified provider pipeline
+✅ Accurate learning database
+✅ Slip intelligence tracking
+✅ Player reliability tracking
+✅ Performance measurement from real results
+
+V3.1 release standards:
+
+* Detection works
+* Scoring works
+* Validation works
+* Actionable pick routing works
+* Telegram only receives qualified opportunities
+* Data collection continues automatically
+
+After Sharp Money Bot V3.1 freeze:
+
+No:
+
+❌ Feature expansion
+❌ Provider expansion
+❌ Architecture changes
+❌ Scoring rewrites
+❌ Database changes
+
+Only:
+
+✅ Critical bugs
+✅ Stability fixes
+✅ Data quality fixes
+
+The next phase is not rebuilding.
+
+The next phase is letting Sharp Money Bot V3.1:
+
+Collect data.
+
+Learn.
+
+Track results.
+
+Grade performance.
+
+Improve from real outcomes.
+
+🛑 SHARP MONEY BOT V3.1 — FINALIZED.
