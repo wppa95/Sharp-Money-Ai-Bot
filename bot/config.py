@@ -350,6 +350,19 @@ class Config:
         return frozenset(_all[:idx + 1])
 
     @property
+    def ud_strict_alert_sports(self) -> frozenset[str]:
+        """
+        Sports where only the configured minimum tier (ud_mlb_alert_tiers) is
+        allowed to generate Telegram alerts.  All other sports follow the normal
+        S/A/B/C tier rules.
+
+        Currently: MLB and NFL.  Both sports generate very high prop volume and
+        are restricted to S-tier only by default (UD_MLB_MIN_TIER=S) so alerts
+        stay actionable rather than flooding the channel.
+        """
+        return frozenset({"MLB", "NFL"})
+
+    @property
     def alert_disabled_sports(self) -> frozenset[str]:
         """
         Sports whose Telegram alerts are temporarily suppressed (uppercased).

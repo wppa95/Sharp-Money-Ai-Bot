@@ -108,6 +108,38 @@ class TestSportPriorityConfig:
         assert "S" in tiers
         assert "A" in tiers
 
+    # ── ud_strict_alert_sports ────────────────────────────────────────────────
+
+    def test_strict_alert_sports_contains_mlb_and_nfl(self):
+        """MLB and NFL must both be in ud_strict_alert_sports."""
+        c = self._cfg()
+        assert "MLB" in c.ud_strict_alert_sports
+        assert "NFL" in c.ud_strict_alert_sports
+
+    def test_strict_alert_sports_does_not_include_other_sports(self):
+        """Spot-check that non-strict sports are not in ud_strict_alert_sports."""
+        c = self._cfg()
+        for sport in ("NBA", "WNBA", "CS", "LOL", "TENNIS", "MMA", "SOCCER", "NHL"):
+            assert sport not in c.ud_strict_alert_sports, (
+                f"{sport} should not be in ud_strict_alert_sports"
+            )
+
+    def test_nfl_blocked_at_a_tier_by_default(self):
+        """Default UD_MLB_MIN_TIER=S → NFL A-tier must not be in allowed tiers."""
+        c = self._cfg()
+        assert "NFL" in c.ud_strict_alert_sports
+        assert "A" not in c.ud_mlb_alert_tiers
+
+    def test_nfl_blocked_at_b_tier_by_default(self):
+        """Default UD_MLB_MIN_TIER=S → NFL B-tier must not be in allowed tiers."""
+        c = self._cfg()
+        assert "B" not in c.ud_mlb_alert_tiers
+
+    def test_nfl_s_tier_allowed_by_default(self):
+        """Default UD_MLB_MIN_TIER=S → NFL S-tier IS in the allowed set."""
+        c = self._cfg()
+        assert "S" in c.ud_mlb_alert_tiers
+
     # ── ALERT_DISABLED_SPORTS default ─────────────────────────────────────────
 
     def test_nba_nfl_enabled_by_default(self):

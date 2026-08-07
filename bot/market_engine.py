@@ -1164,14 +1164,17 @@ async def underdog_job(context) -> None:
                             player, stat_type,
                             decision.confidence, _np_min_conf, decision.decision_tier,
                         )
-                # MLB tier gate — restrict MLB to configured minimum tier (default S-only)
+                # Strict-sport tier gate — MLB and NFL are S-tier only (default).
+                # All other sports follow normal S/A/B/C tier rules.
                 if _np_bet_ready and decision is not None:
                     _sport_up = (snap.sport or "").upper()
-                    if _sport_up == "MLB" and decision.decision_tier not in config.ud_mlb_alert_tiers:
+                    if (_sport_up in config.ud_strict_alert_sports
+                            and decision.decision_tier not in config.ud_mlb_alert_tiers):
                         _np_bet_ready = False
                         logger.debug(
-                            "UD mlb_gate [new]: %s | %s | tier=%s blocked (MLB min=%s)",
-                            player, stat_type, decision.decision_tier, config.UD_MLB_MIN_TIER,
+                            "UD sport_tier_gate [new]: %s | %s | sport=%s tier=%s blocked (min=%s)",
+                            player, stat_type, _sport_up,
+                            decision.decision_tier, config.UD_MLB_MIN_TIER,
                         )
                 # MLB UNDER block — user bets MLB OVER only (upside preference)
                 if _np_bet_ready and decision is not None:
@@ -1905,11 +1908,12 @@ async def underdog_job(context) -> None:
                     )
                     continue
 
-                # MLB tier gate for standing plays
-                if _ssport.upper() == "MLB" and _sdec.decision_tier not in config.ud_mlb_alert_tiers:
+                # Strict-sport tier gate for standing plays — MLB and NFL are S-tier only.
+                if (_ssport.upper() in config.ud_strict_alert_sports
+                        and _sdec.decision_tier not in config.ud_mlb_alert_tiers):
                     logger.debug(
-                        "UD mlb_gate [standing]: %s | %s | tier=%s blocked (MLB min=%s)",
-                        _sp, _st, _sdec.decision_tier, config.UD_MLB_MIN_TIER,
+                        "UD sport_tier_gate [standing]: %s | %s | sport=%s tier=%s blocked (min=%s)",
+                        _sp, _st, _ssport.upper(), _sdec.decision_tier, config.UD_MLB_MIN_TIER,
                     )
                     continue
 
