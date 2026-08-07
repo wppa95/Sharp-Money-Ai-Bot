@@ -1,0 +1,685 @@
+Before making changes, review the entire current system state.
+
+🚨 IMPORTANT: CREDIT USAGE RULES
+
+We are limited on credits. Do not burn credits unnecessarily.
+
+Before doing any work:
+
+DO NOT:
+
+* Rewrite the bot
+* Refactor large sections
+* Replace working systems
+* Redesign architecture
+* Change database structure
+* Replace working pipelines
+* Change the core scoring engine unless specifically required
+* Run unnecessary tasks or repeated checks
+* Spend credits validating completed work without a reason
+
+Avoid:
+
+* Large rebuilds
+* Unnecessary experiments
+* Feature expansion outside this list
+
+Use credits only for:
+
+1. Stability fixes
+2. Required bug fixes
+3. Testing
+4. Grading improvements
+5. Sport coverage improvements
+6. Runtime/deployment improvements
+
+Every task should have a clear reason before using credits.
+
+This is a V1.3 refinement/stability pass and transition into Phase 2.
+
+The goal is:
+
+* Preserve what works
+* Fix what is broken
+* Improve quality
+* Avoid unnecessary credit usage
+
+⸻
+
+CURRENT COMPLETED WORK ✅
+
+CORE SYSTEM
+
+✅ Underdog-first pipeline
+✅ Provider-agnostic PropLineHistory system
+✅ Existing scoring/ranking engine working
+✅ Large test suite previously passing
+✅ Telegram alert system working
+✅ Health/status commands working
+
+⸻
+
+ALERT SYSTEM
+
+Current alert categories:
+
+1. 📈 MARKET MOVE DETECTED
+
+Internal market intelligence.
+
+Tracks:
+
+* Line movement
+* Market activity
+* Changes
+
+Do NOT send raw market movement spam to Telegram.
+
+Keep internally.
+
+⸻
+
+2. 🎯 ACTIONABLE BET PICK
+
+User-facing alert.
+
+Requirements:
+
+✅ Active sport/event
+✅ Valid upcoming game
+✅ Valid player/market
+✅ Clear OVER/UNDER direction
+✅ Passed quality gates
+✅ Has confidence/tier
+
+Only actionable opportunities should reach Telegram.
+
+⸻
+
+3. ⏰ PRE-GAME REMINDER (KEEP THIS)
+
+Live testing showed this is useful.
+
+Behavior:
+
+Initial pick:
+→ Send actionable alert
+
+Near game start:
+→ Send one reminder
+
+Do NOT spam repeated reminders.
+
+Track lifecycle:
+
+DETECTED
+QUALIFIED
+SENT
+REMINDER SENT
+RESULT PENDING
+GRADED
+
+⸻
+
+LIVE TESTING FINDINGS
+
+1. Alert Lifecycle / Duplicate Protection
+
+Current issue:
+
+Same player/market can trigger multiple alerts.
+
+Need lightweight memory.
+
+Track:
+
+* Provider
+* Player
+* Market
+* Line
+* Direction
+* Game
+* Timestamp
+
+Rules:
+
+Same opportunity:
+
+✅ Update internally
+✅ Allow reminder
+❌ Do not spam Telegram
+
+Do not completely block future opportunities.
+
+⸻
+
+2. SPORT PRIORITY SYSTEM (IMPORTANT)
+
+Current issue:
+
+The bot is mostly producing MLB alerts.
+
+This does not match user betting habits.
+
+The bot should prioritize sports the user actually bets.
+
+⸻
+
+🥇 TIER 1 SPORTS
+
+All of these belong together:
+
+NBA
+WNBA
+CS2
+Soccer
+Table Tennis
+Badminton
+PGA Golf
+NFL
+NCAAF
+Tennis
+Dota
+LoL
+Valorant
+MMA
+
+These are the user’s main betting sports.
+
+⸻
+
+⚾ MLB MODE
+
+MLB is the ONLY sport excluded from Tier 1.
+
+MLB should still:
+
+✅ Be tracked
+✅ Be validated
+✅ Be graded
+
+But Telegram actionable alerts should require:
+
+* S-Tier only
+* Highest confidence
+* Strong validation
+* Prefer market + stats agreement
+
+MLB should be premium-only.
+
+Not the main alert source.
+
+⸻
+
+3. ADAPTIVE SPORT GATES
+
+Current issue:
+
+Every sport uses the same strict gate.
+
+Change:
+
+Use sport preference weighting.
+
+Tier 1 sports:
+
+Allow:
+
+* S Tier
+* A Tier
+* B Tier
+* C Tier (if applicable)
+
+Do not only allow S-tier.
+
+Reason:
+
+The current gate was designed before the bot had enough sport coverage.
+
+Tier 1 sports should have:
+
+* Slightly lighter gate
+* More opportunities allowed
+* Lower historical sample requirement when reasonable
+
+Example:
+
+A newer market should not automatically fail because it lacks a large history sample.
+
+Still require:
+
+✅ Valid event
+✅ Active sport
+✅ Valid market/player
+✅ Clear direction
+✅ Quality threshold
+✅ Duplicate protection
+
+Goal:
+
+More opportunities without sacrificing quality.
+
+⸻
+
+4. EXTERNAL STAT VALIDATION LAYER
+
+Add future validation sources:
+
+MLB
+
+* StatMuse
+* ESPN gamelog
+
+CS2
+
+* HLTV
+
+Soccer
+
+* FotMob
+
+Golf
+
+* PGA stats
+
+Badminton
+
+* Badminton4U
+
+Table Tennis
+
+* TTStats
+
+Purpose:
+
+Bot finds opportunities.
+
+External sources validate.
+
+⸻
+
+5. FULL PROP TRACKING + PERMANENT MEMORY
+
+Track ALL props across ALL sports.
+
+Not only actionable picks.
+
+Every tracked prop should store:
+
+* Sport
+* Player/team
+* Market
+* Line
+* Direction
+* Provider
+* Tier
+* Quality score
+* Timestamp
+* Result
+
+After games finish:
+
+Keep historical records permanently.
+
+Track:
+
+* Hit/Miss
+* Win/Loss
+* Actual stat result
+* Sport performance
+* Market performance
+* Tier performance
+* Score performance
+
+The system should learn:
+
+Which:
+
+* Sports
+* Markets
+* Tiers
+* Scores
+
+actually perform.
+
+⸻
+
+6. ODDSAPI USAGE
+
+We paid for the OddsAPI plan.
+
+Currently underused.
+
+Use it for:
+
+* Market confirmation
+* Line movement
+* Market direction
+* Supporting Underdog analysis
+
+OddsAPI should not only be viewed as DK/FD alerts.
+
+It can provide market intelligence.
+
+If needed:
+
+Remove the current 667 daily quota restriction.
+
+Now that the bot is more stable, we should use the paid API capacity appropriately.
+
+⸻
+
+7. REPLIT / HOSTING ISSUE
+
+New finding:
+
+The issue is not only the app being closed.
+
+Testing showed:
+
+* Background app does not guarantee 24/7 uptime.
+* Bot only stays continuously active when credits are available.
+
+Credit exhaustion caused:
+
+* Services suspension
+* Runtime interruptions
+* Deployment issues
+
+This is likely a major reason credits are being consumed quickly.
+
+Need investigate:
+
+* Better hosting options
+* Always-on alternatives
+* Lower-cost deployment solutions
+
+Goal:
+
+Reliable 24/7 operation without burning credits.
+
+⸻
+
+8. UNDERDOG PIPELINE ISSUE
+
+Health showed:
+
+Error:
+
+'list' object has no attribute 'has_real_data'
+
+Location:
+
+pipeline:prop_scoring:market_engine.underdog_job
+
+Current behavior:
+
+Underdog monitor still runs.
+
+However some scans show:
+
+props=0
+alerts=0
+
+Need confirm whether this error affects:
+
+* Parsing
+* Scoring
+* Qualification
+* Alert generation
+
+Fix only if needed.
+
+⸻
+
+9. GRADING SYSTEM ISSUE (HIGH PRIORITY)
+
+Current dashboard shows:
+
+S Tier:
+0 (0%)
+
+A Tier:
+112 (0%)
+
+B Tier:
+103 (0%)
+
+This needs investigation.
+
+The bot is collecting picks, but grading is not completing.
+
+Verify:
+
+* Are completed games detected?
+* Are results pulled?
+* Are props matched correctly?
+* Are hit/miss results stored?
+* Are performance stats updating?
+
+A working grading system is required before evaluating the model.
+
+⸻
+
+10. LIVE TEST RESULTS
+
+First live V1.3 test:
+
+Ronald Acuña Jr. Hits OVER 0.5:
+
+✅ CASHED
+
+Anthony Seigler UNDER:
+
+❌ Lost
+
+Lesson:
+
+Do not judge the system from one result.
+
+The important part:
+
+The bot is producing real opportunities.
+
+Now we need:
+
+* Better sport coverage
+* Better grading
+* Better historical learning
+
+⸻
+
+FINAL GOAL
+
+Build a personal Sharp Money assistant that:
+
+✅ Finds opportunities in the sports I actually bet
+✅ Tracks everything permanently
+✅ Learns from results
+✅ Uses external validation
+✅ Runs reliably 24/7
+✅ Improves over time
+
+Do not optimize for more alerts.
+
+Optimize for:
+
+Better information.
+Better decisions.
+Better long-term results.
+
+Keep V1.3 stable. Make targeted improvements only.
+
+⸻
+
+✅ COMPLETION CHECKLIST
+
+Before marking this update complete, verify every item below.
+
+🛑 Credit Protection
+
+⬜ Confirm no unnecessary rewrites were performed
+⬜ Confirm no large architecture changes were made
+⬜ Confirm existing working systems were preserved
+⬜ Confirm changes were limited to requested improvements
+
+⸻
+
+🔔 Alert System
+
+⬜ Market Move alerts remain internal only
+⬜ Telegram only receives actionable picks
+⬜ Duplicate alert protection implemented
+⬜ Alert lifecycle tracking implemented
+
+⬜ DETECTED
+⬜ QUALIFIED
+⬜ SENT
+⬜ REMINDER SENT
+⬜ RESULT PENDING
+⬜ GRADED
+
+⬜ Pre-game reminder system verified working
+⬜ Reminder does not create spam
+
+⸻
+
+🏆 Sport Priority System
+
+⬜ Tier 1 sports configured correctly:
+
+⬜ NBA
+⬜ WNBA
+⬜ CS2
+⬜ Soccer
+⬜ Table Tennis
+⬜ Badminton
+⬜ PGA
+⬜ NFL
+⬜ NCAAF
+⬜ Tennis
+⬜ Dota
+⬜ LoL
+⬜ Valorant
+⬜ MMA
+
+⬜ MLB separated from Tier 1
+⬜ MLB restricted to S-tier only alerts
+⬜ MLB still tracked internally
+⬜ MLB still graded after games
+
+⸻
+
+🎯 Adaptive Gate System
+
+⬜ Tier 1 sports allow S/C tier range where appropriate
+⬜ Historical requirements reviewed
+⬜ Gate is slightly lighter for Tier 1 sports
+⬜ Quality protection remains active
+⬜ Invalid events blocked
+⬜ Inactive/offseason markets blocked
+⬜ Spam protection active
+
+⸻
+
+📊 Validation Sources
+
+⬜ StatMuse path reviewed
+⬜ ESPN validation path reviewed
+⬜ HLTV CS2 path reviewed
+⬜ FotMob soccer path reviewed
+⬜ PGA stats path reviewed
+⬜ Badminton4U path reviewed
+⬜ TTStats path reviewed
+
+⸻
+
+📚 Prop Tracking / Memory
+
+⬜ All sports props tracked
+⬜ Non-actionable props stored
+⬜ Completed games remain saved
+⬜ Hit/Miss tracking implemented
+⬜ Win/Loss tracking implemented
+⬜ Actual stat results stored
+
+Performance tracking:
+
+⬜ By sport
+⬜ By market
+⬜ By tier
+⬜ By confidence score
+⬜ By provider
+
+⸻
+
+📡 OddsAPI
+
+⬜ OddsAPI usage reviewed
+⬜ Market confirmation usage added if needed
+⬜ Line movement tracking reviewed
+⬜ Daily quota restrictions reviewed
+⬜ Paid API capacity used appropriately
+
+⸻
+
+🖥️ Hosting / Runtime
+
+⬜ Replit credit usage investigated
+⬜ Confirm why runtime depends on credits
+⬜ Confirm deployment behavior
+⬜ Review cheaper 24/7 hosting options
+⬜ Confirm bot can run reliably without manual app opening
+
+⸻
+
+🐶 Underdog Pipeline
+
+⬜ Investigate has_real_data error
+⬜ Confirm scoring impact
+⬜ Confirm parser health
+⬜ Confirm qualification health
+⬜ Confirm alerts are not blocked
+
+⸻
+
+📈 Performance Grading
+
+⬜ Resolve S/A/B showing 0%
+⬜ Confirm completed games detected
+⬜ Confirm props match correctly
+⬜ Confirm grading runs automatically
+⬜ Confirm dashboard updates correctly
+
+⸻
+
+🧪 Final Testing
+
+⬜ Run full test suite
+⬜ Run startup health check
+⬜ Verify Telegram behavior
+⬜ Verify actionable picks still work
+⬜ Confirm no regressions
+
+Final report required:
+
+⬜ Files changed
+⬜ Tests passed
+⬜ Startup status
+⬜ Remaining issues
+⬜ Confirmation V1.3 remains stable
+⬜ Confirmation requested updates are complete
+
+⸻
+
+FINAL ACCEPTANCE CRITERIA
+
+The update is complete only when:
+
+✅ Bot is stable
+✅ Alerts are useful
+✅ Sports match user preferences
+✅ Picks are tracked and graded
+✅ System learns from results
+✅ Runtime is reliable
+✅ No unnecessary credit waste occurred

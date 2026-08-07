@@ -29,6 +29,12 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// ── Root health check ─────────────────────────────────────────────────────────
+// Uptime monitors ping "/" on the deployment URL. Returning 200 here prevents
+// them from recording false outages when the API server is running normally.
+app.get("/", (_req, res) => { res.status(200).send("OK"); });
+app.get("/health", (_req, res) => { res.status(200).send("OK"); });
+
 app.use("/api", router);
 
 export default app;

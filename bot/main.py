@@ -16,7 +16,7 @@ import os
 import sys
 from collections import defaultdict
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Any, Optional
 
 from telegram import Update
 from telegram.ext import Application, CommandHandler
@@ -119,6 +119,52 @@ _season_checker: SeasonChecker | None = None
 # per provider.  Reset implicitly when get_usage_tracker()._roll_month_if_needed()
 # fires, or on bot restart (acceptable — at worst one duplicate alert per month).
 _last_budget_alerted: dict[str, set[int]] = {}
+
+# aiohttp AppRunner for the HTTP health-check server (started in post_init).
+_health_runner: Optional[Any] = None
+
+
+# ── HTTP health-check server ───────────────────────────────────────────────────
+
+async def _start_health_server() -> None:
+    """
+    Start a minimal HTTP health-check server so uptime monitors can verify the
+    bot process is alive.
+
+    Listens on the PORT environment variable (Replit deployments set this to the
+    port mapped to external port 80).  Falls back to 8080 when PORT is unset
+    (local dev).
+
+    Routes:
+        GET /          → 200 OK
+        GET /health    → 200 OK
+        GET /healthz   → 200 OK
+
+    Uses aiohttp (already a dependency via stat providers) so it runs natively
+    in the same event loop as the Telegram bot without blocking.
+    """
+    global _health_runner
+    try:
+        import aiohttp.web as _web
+
+        port = int(os.environ.get("PORT", 8080))
+
+        async def _ok(_req: _web.Request) -> _web.Response:
+            return _web.Response(text="OK", content_type="text/plain")
+
+        _app = _web.Application()
+        _app.router.add_get("/",        _ok)
+        _app.router.add_get("/health",  _ok)
+        _app.router.add_get("/healthz", _ok)
+
+        _health_runner = _web.AppRunner(_app)
+        await _health_runner.setup()
+        site = _web.TCPSite(_health_runner, "0.0.0.0", port)
+        await site.start()
+        logger.info("Health server listening on port %d", port)
+    except Exception as exc:  # noqa: BLE001
+        # Non-fatal — the Telegram bot continues even if health server fails.
+        logger.warning("Health server failed to start (non-fatal): %s", exc)
 
 
 # ── PTB lifecycle hooks ────────────────────────────────────────────────────────
@@ -271,6 +317,11 @@ async def post_init(application: Application) -> None:
 
     logger.info("Bot initialised and ready.")
 
+    # ── HTTP health-check server ───────────────────────────────────────────────
+    # Start in the background so uptime monitors can ping the process.
+    # Non-fatal: the Telegram bot starts even if aiohttp is unavailable.
+    asyncio.create_task(_start_health_server())
+
     # ── Startup / crash-recovery notification ─────────────────────────────────
     # Fire-and-forget — non-fatal; network errors are logged at WARNING only.
     try:
@@ -419,6 +470,12 @@ async def post_shutdown(application: Application) -> None:
         ht.record_shutdown("clean_shutdown")
     if _db:
         await _db.close()
+    # Stop the health-check server if it started
+    if _health_runner is not None:
+        try:
+            await _health_runner.cleanup()
+        except Exception:
+            pass
     logger.info("Shutdown complete. Goodbye.")
 
 
