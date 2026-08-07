@@ -733,13 +733,11 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         # ── Database ──────────────────────────────────────────────────────────────
         total_prop_history = await _db.count_prop_line_history() if _db else 0
         lines.append("📊 <b>Database Records</b>")
-        lines.append(f"  Odds: {db_records:,}  ·  Steam: {total_steam:,}  ·  EV: {total_ev:,}")
         if total_prop_history:
-            ud_history  = await _db.count_prop_line_history(provider="Underdog") if _db else 0
-            pp_history  = await _db.count_prop_line_history(provider="PrizePicks") if _db else 0
+            ud_history = await _db.count_prop_line_history(provider="Underdog") if _db else 0
             lines.append(
                 f"  PropLineHistory: {total_prop_history:,}"
-                + (f"  (UD:{ud_history:,}  PP:{pp_history:,})" if ud_history or pp_history else "")
+                + (f"  (UD:{ud_history:,})" if ud_history else "")
             )
 
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
@@ -990,7 +988,7 @@ async def cmd_clv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def cmd_market(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/market — Show cross-book consensus and market inefficiencies."""
+    """/market — Show line movement and validation summary."""
     if not _check_allowed(update):
         await update.message.reply_text("⛔ Unauthorized.")
         return
@@ -1005,9 +1003,9 @@ async def cmd_market(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
         if not all_snaps:
             await update.message.reply_text(
-                f"📊 <b>Market Consensus</b>\n\n"
-                f"No cross-book market data available yet.\n"
-                f"<i>Data accumulates as the multi-platform connectors poll live odds.</i>",
+                f"📊 <b>Market Intelligence</b>\n\n"
+                f"No market snapshot data available yet.\n"
+                f"<i>Data accumulates as Underdog props are polled and scored.</i>",
                 parse_mode="HTML",
             )
             return
@@ -1042,7 +1040,7 @@ async def cmd_performance(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         if not records:
             await update.message.reply_text(
                 "📊 <b>Performance History</b>\n\n"
-                "<i>No resolved bets yet.  Win/loss results are recorded automatically"
+                "<i>No resolved actionable picks yet.  Win/loss results are recorded automatically"
                 " once an event's final score is available.</i>",
                 parse_mode="HTML",
             )
@@ -1488,7 +1486,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         "NFL":    "🏈", "DOTA": "🎮", "CS":     "🖥️", "TENNIS": "🎾",
     }
 
-    header = f"🟣 <b>Player Prop Picks — {today}</b>"
+    header = f"🎯 <b>Actionable Player Prop Picks — {today}</b>"
     if sport_filter:
         header += f"  <i>({sport_filter})</i>"
     out: list[str] = [header, ""]
@@ -1655,14 +1653,14 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/testalert — Send a mock Player Prop Market Alert to verify Telegram delivery."""
+    """/testalert — Send a mock Actionable Pick Alert to verify Telegram delivery."""
     uid = getattr(update.effective_user, "id", "?")
     logger.info("cmd_testalert: user_id=%s", uid)
     if not _check_allowed(update):
         await update.message.reply_text("⛔ Unauthorized.")
         return
 
-    await update.message.reply_text("⏳ Generating mock Player Prop Market Alert…")
+    await update.message.reply_text("⏳ Generating mock Actionable Pick Alert…")
 
     try:
         from datetime import datetime as _dt
@@ -1698,7 +1696,7 @@ async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True,
         )
-        await update.message.reply_text("✅ Player Prop Market Alert test sent.")
+        await update.message.reply_text("✅ Actionable Pick Alert test sent.")
 
     except Exception as exc:
         logger.exception("cmd_testalert error: %s", exc)
@@ -1724,7 +1722,7 @@ def _render_slip_section(
     total_move = 0.0   # replaces avg_edge for PropPickAdapter legs
     has_adapters = any(hasattr(r, "comp") for r in records)
 
-    heading = f"🎰 <b>{size}-Man Slip</b>"
+    heading = f"🎯 <b>{size}-Man Slip</b>"
     if label:
         heading += f"  <i>{label}</i>"
     section: list[str] = [heading, ""]
@@ -2052,7 +2050,7 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     ud_props = [p for p in ud_props if not _is_season_future(p.stat_type)]
     if not ud_props:
         await update.message.reply_text(
-            "🎰 <b>Player Prop Slip</b>\n\n"
+            "🎯 <b>Sharp Money Prop Slip</b>\n\n"
             "No qualifying player props available right now.\n\n"
             "<i>Season-long futures are excluded from this view.\n"
             "Underdog props auto-score every 5 min. Run /picks to check status.</i>",
@@ -2105,7 +2103,7 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     if not slips:
         await update.message.reply_text(
-            "🎰 <b>Player Prop Slip</b>\n\n"
+            "🎯 <b>Sharp Money Prop Slip</b>\n\n"
             f"Not enough independent picks to build a slip "
             f"({len(_candidates)} candidate{'s' if len(_candidates) != 1 else ''} "
             f"after correlation filtering).\n\n"
@@ -2118,7 +2116,7 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         slip = slips.get(single_size)
         if slip is None:
             await update.message.reply_text(
-                f"🎰 <b>Player Prop Slip</b>\n\n"
+                f"🎯 <b>Sharp Money Prop Slip</b>\n\n"
                 f"Could not build a {single_size}-man slip from today's picks.\n"
                 f"<i>Available sizes: {', '.join(str(s) for s in sorted(slips))}.</i>",
                 parse_mode=ParseMode.HTML,
@@ -2126,12 +2124,12 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             return
         label = "✅ Recommended (Safest)" if single_size == 2 else ""
         lines: list[str] = [
-            f"🎰 <b>Player Prop Slips — {today}</b>",
+            f"🎯 <b>Sharp Money Prop Slips — {today}</b>",
             "",
         ] + _render_slip_section(single_size, slip, label)
     else:
         lines = [
-            f"🎰 <b>Player Prop Slips — {today}</b>",
+            f"🎯 <b>Sharp Money Prop Slips — {today}</b>",
             f"<i>{len(slips)} slip size{'s' if len(slips) != 1 else ''} built "
             f"from {len(_candidates)} Underdog props</i>",
             "",
@@ -2280,8 +2278,8 @@ async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         "",
     ]
 
-    # ── Player Prop Market alerts (Underdog PropLineHistory) ──────────────────
-    lines.append("🟣 <b>Player Prop Alerts</b>")
+    # ── Actionable pick alerts (Underdog PropLineHistory) ────────────────────
+    lines.append("🎯 <b>Actionable Pick Alerts</b>")
     try:
         recent_props = await _db.get_latest_props_for_provider("Underdog", since_hours=72)
         alerted_props = [
@@ -2321,7 +2319,7 @@ async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 async def cmd_grade(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/grade — Grade resolved PP picks by tier (WIN/LOSS/PUSH breakdown)."""
+    """/grade — Grade resolved actionable picks by tier (WIN/LOSS/PUSH breakdown)."""
     if not _check_allowed(update):
         await update.message.reply_text("⛔ Unauthorized.")
         return
@@ -2341,7 +2339,7 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     resolved  = await _db.get_all_resolved_pp_edges(limit=200)
     total_all = await _db.count_pp_edge_records()
 
-    lines: list[str] = ["📈 <b>PP Pick Grades</b>", ""]
+    lines: list[str] = ["📊 <b>Sharp Money Pick Grades</b>", ""]
 
     if not resolved:
         pending_count = total_all  # all stored picks must be PENDING
@@ -2354,7 +2352,7 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             f"  Pending:       <b>{pending_count}</b>",
             f"  Resolved:      <b>0</b>",
             "",
-            "<i>Use /picks to see active edges.</i>",
+            "<i>Use /picks to see active picks.</i>",
         ]
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
         return
@@ -2392,8 +2390,7 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         lines.append(
             f"  {icon} <b>{tier:<4}</b>  "
             f"{total_res} picks  W:{w}  L:{l}  P:{p}  "
-            f"→ <code>{hit_rate:.0f}%</code> hit  "
-            f"avg edge <code>+{avg_edge:.1f}%</code>"
+            f"→ <code>{hit_rate:.0f}%</code> hit"
         )
         overall_w += w
         overall_l += l
@@ -2409,8 +2406,7 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         "─ <b>Overall</b> " + "─" * 21,
         f"  <b>{overall_res}</b> resolved  "
         f"W:{overall_w}  L:{overall_l}  P:{overall_p}  "
-        f"→ <code>{overall_hit:.0f}%</code> hit  "
-        f"avg edge <code>+{overall_edge:.1f}%</code>",
+        f"→ <code>{overall_hit:.0f}%</code> hit",
         "",
         f"<i>{pending_n} picks still PENDING · results set when games finish.</i>",
     ]
@@ -2604,14 +2600,6 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 f"         <i>{note}  ·  {host}</i>"
             )
 
-        lines.append("")
-        lines.append("<b>DraftKings / FanDuel</b>")
-        lines.append(
-            f"  {'✅' if config.DRAFTKINGS_ENABLED else '❌'} DraftKings  ·  "
-            f"{'✅' if config.FANDUEL_ENABLED else '❌'} FanDuel\n"
-            f"  <i>Odds API — player prop lines (when enabled)</i>"
-        )
-
         if not pandascore_key:
             lines.append("")
             lines.append(
@@ -2643,11 +2631,10 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         edges_24h  = await _db.get_top_pp_edges(limit=100, hours=24)
 
         lines: list[str] = [
-            f"📈 <b>Alert Stats</b>  ·  Uptime: {_uptime_str()}",
+            f"📈 <b>Pick Stats</b>  ·  Uptime: {_uptime_str()}",
             "",
-            "<b>Today's Alerts</b>",
+            "<b>Today's Actionable Picks</b>",
             f"  Underdog:    <b>{ud_today}</b>",
-            f"  PrizePicks:  <b>{pp_today}</b>",
             "",
             "<b>Pipeline (last 24 h)</b>",
         ]
@@ -2659,16 +2646,16 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             tier_counts[t] = tier_counts.get(t, 0) + 1
 
         if tier_counts:
-            for tier in ("S", "A", "B", "PASS"):
+            for tier in ("S", "A", "B", "C", "PASS"):
                 n = tier_counts.get(tier, 0)
                 if n:
-                    icon = {"S": "🔥", "A": "🟢", "B": "🟡", "PASS": "⚪"}.get(tier, "⚪")
+                    icon = {"S": "🔥", "A": "🟢", "B": "🟡", "C": "▪️", "PASS": "⚪"}.get(tier, "⚪")
                     lines.append(f"  {icon} {tier}: <b>{n}</b>")
         else:
-            lines.append("  <i>No edges detected in last 24 h</i>")
+            lines.append("  <i>No qualified picks detected in last 24 h</i>")
 
         lines.append("")
-        lines.append(f"<b>All-time</b>  ({total_pp:,} edges stored)")
+        lines.append(f"<b>All-time</b>  ({total_pp:,} picks stored)")
 
         if resolved:
             wins   = sum(1 for r in resolved if (r.result or "").upper() == "WIN")
@@ -2676,16 +2663,10 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             pushes = sum(1 for r in resolved if (r.result or "").upper() in ("PUSH", "REFUND"))
             total_res = wins + losses + pushes
             hit_rate  = wins / total_res * 100 if total_res > 0 else 0.0
-            edges     = [r.best_edge for r in resolved if r.best_edge is not None]
-            avg_edge  = sum(edges) / len(edges) if edges else 0.0
             lines += [
                 f"  Resolved:    <b>{total_res}</b>  W:{wins}  L:{losses}  P:{pushes}",
                 f"  Hit rate:    <code>{hit_rate:.0f}%</code>",
-                f"  Avg edge:    <code>+{avg_edge:.1f}%</code>",
             ]
-            if total_res >= 5:
-                implied_roi = (avg_edge / 100) * 0.909
-                lines.append(f"  Implied ROI: <code>{implied_roi * 100:+.1f}%</code> <i>(rough, -110 base)</i>")
         else:
             lines.append("  <i>No resolved picks yet — results recorded after games finish.</i>")
 
@@ -2860,28 +2841,29 @@ async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         "",
         "<b>Alert Scope</b>",
         f"  Underdog sports:   <code>{ud_sports}</code>",
-        f"  DK/FD sports:      <code>{active_sp}</code>",
         f"  Min stars (alert): <code>{config.UD_MIN_STARS_TO_ALERT}★</code>",
         f"  Min validation:    <code>{config.UD_VALIDATION_MIN_SAMPLES} snapshots</code>",
         "",
-        "<b>Thresholds</b>",
-        f"  Min EV:            <code>{config.MIN_EV_THRESHOLD:.1f}%</code>",
-        f"  Min steam score:   <code>{config.MIN_STEAM_SCORE}/100</code>",
+        "<b>Scoring Thresholds</b>",
         f"  Min AI confidence: <code>{config.MIN_AI_CONFIDENCE}/100</code>",
-        f"  Min PP edge:       <code>{config.MIN_PP_EDGE:.1f}%</code>",
+        f"  Min conf S-tier:   <code>{getattr(config, 'UD_MIN_CONF_S', '—')}</code>",
+        f"  Min conf A-tier:   <code>{getattr(config, 'UD_MIN_CONF_A', '—')}</code>",
+        f"  Market bypass:     <code>score≥70 + |line move|≥2%</code>",
         "",
         "<b>Alert Limits</b>",
-        f"  Daily PP cap:      <code>{'unlimited' if config.DAILY_ALERT_LIMIT == 0 else config.DAILY_ALERT_LIMIT}</code>",
         f"  Daily UD cap:      <code>{'unlimited' if config.DAILY_UNDERDOG_LIMIT == 0 else config.DAILY_UNDERDOG_LIMIT}</code>",
         "",
-        "<b>Connectors</b>",
-        f"  DraftKings:        {'✅ enabled' if config.DRAFTKINGS_ENABLED else '❌ disabled'}",
-        f"  FanDuel:           {'✅ enabled' if config.FANDUEL_ENABLED else '❌ disabled'}",
-        f"  Underdog:          {'✅ enabled' if config.UNDERDOG_ENABLED else '❌ disabled'}",
+        "<b>Primary Provider</b>",
+        f"  🐶 Underdog:       {'✅ enabled' if config.UNDERDOG_ENABLED else '❌ disabled'}",
         "",
-        "<b>API Keys</b>",
-        f"  Odds API:          {'✅ set' if odds_api_set else '❌ not set'}",
-        f"  PandaScore (CS2):  {'✅ set' if pandascore_set else '⚠️ not set — CS2 alerts suppressed'}",
+        "<b>Stat Data Sources</b>",
+        f"  ESPN gamelog:      ✅ active (NBA/NFL/WNBA/MLB/Soccer/NHL)",
+        f"  MLB Stats API:     ✅ active",
+        f"  NHL API:           ✅ active",
+        f"  OpenDota (DOTA):   ✅ active",
+        f"  JeffSackmann:      ✅ active (Tennis)",
+        f"  PandaScore (CS2):  {'✅ active' if pandascore_set else '⚠️ not set — CS2 alerts suppressed'}",
+        f"  Sleeper (NFL):     {'✅ active' if getattr(config, 'UD_SLEEPER_ENABLED', True) else '⏸️ disabled'}",
         "",
         "<b>Poll Intervals</b>",
         f"  Underdog:          <code>{config.UNDERDOG_POLL_INTERVAL}s ({config.UNDERDOG_POLL_INTERVAL // 60} min)</code>",

@@ -337,8 +337,10 @@ def test_startup_notification_contains_crash_id():
 
     assert len(sent) == 1
     msg = sent[0]
-    assert "Crash ID" in msg
-    assert "#4" in msg
+    # V3.1: Crash ID removed from notification; crash details block still present
+    assert "Crash Details" in msg
+    assert "ValueError" in msg
+    assert "bad prop line" in msg
 
 
 def test_startup_notification_crash_snapshot_saved_label():
@@ -377,7 +379,8 @@ def test_startup_notification_crash_snapshot_saved_label():
 
     assert len(sent) == 1
     msg = sent[0]
-    assert "Resumed Monitoring" in msg
+    # V3.1 wording: "Monitoring resumed ✅"
+    assert "Monitoring resumed" in msg
 
 
 def test_startup_notification_module_basename_shown():

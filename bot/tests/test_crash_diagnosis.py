@@ -343,6 +343,7 @@ async def _send(ht, startup_reason: str) -> str:
 
 
 def test_crash_alert_shows_actual_cause_not_unexpected_exit(tmp_path):
+    """Crash detail block is shown; generic 'Unexpected Exit' label is suppressed."""
     detail = {
         "exc_type": "ValueError", "exc_msg": "bad line value",
         "tb_text": "  File market_engine.py, line 99\n",
@@ -352,7 +353,9 @@ def test_crash_alert_shows_actual_cause_not_unexpected_exit(tmp_path):
     ht = _mock_ht("unexpected_exit", crash_detail=detail)
     msg = _run(_send(ht, "unexpected_exit"))
     assert "Unexpected Exit" not in msg
-    assert "Python Exception" in msg
+    # V3.1: cause label removed; crash details block shown instead
+    assert "Crash Details" in msg
+    assert "ValueError" in msg
 
 
 def test_crash_alert_shows_crash_details_block(tmp_path):
@@ -395,7 +398,8 @@ def test_crash_alert_shows_active_function(tmp_path):
 def test_crash_alert_shows_recovery_status(tmp_path):
     ht = _mock_ht("unexpected_exit")
     msg = _run(_send(ht, "unexpected_exit"))
-    assert "Resumed Monitoring" in msg
+    # V3.1 wording: "Monitoring resumed ✅"
+    assert "Monitoring resumed" in msg
     assert "✅" in msg
 
 
@@ -407,6 +411,7 @@ def test_crash_alert_shows_last_active_task(tmp_path):
 
 
 def test_crash_alert_db_lock_shows_database_lock_reason(tmp_path):
+    """DB lock crashes show exception type and message in the crash details block."""
     detail = {
         "exc_type": "OperationalError", "exc_msg": "database is locked",
         "tb_text": "  File database.py, line 500\n",
@@ -415,16 +420,21 @@ def test_crash_alert_db_lock_shows_database_lock_reason(tmp_path):
     }
     ht = _mock_ht("crash_detected", crash_detail=detail)
     msg = _run(_send(ht, "crash_detected"))
-    assert "Database Lock" in msg
+    # V3.1: cause label removed; exc_type/exc_msg shown in crash details block
+    assert "Crash Details" in msg
+    assert "OperationalError" in msg
+    assert "database is locked" in msg
 
 
 def test_crash_alert_memory_kill_shows_appropriate_reason(tmp_path):
-    """No crash detail → Memory Kill / Host Restart label shown."""
+    """No crash detail → notification sent without crash details block."""
     ht = _mock_ht("unexpected_exit", crash_detail=None)
     msg = _run(_send(ht, "unexpected_exit"))
-    # Should NOT show "Unexpected Exit" (old generic label)
+    # V3.1: cause label removed; no crash detail block shown
     assert "Unexpected Exit" not in msg
-    assert "Memory Kill" in msg or "Host Restart" in msg
+    assert "Crash Details" not in msg
+    # Basic recovery status still present
+    assert "Monitoring resumed" in msg
 
 
 def test_normal_start_notification_unaffected(tmp_path):
@@ -437,8 +447,10 @@ def test_normal_start_notification_unaffected(tmp_path):
 
     for msg in (msg_first, msg_restart):
         assert "Crash Details" not in msg
-        assert "Resumed Monitoring" not in msg   # only on crash path
-        assert "Sharp Money Bot Online" in msg
+        # V3.1: clean paths show "Monitoring active/resumed", not "Resumed Monitoring"
+        assert "Resumed Monitoring" not in msg
+        # Both include "Sharp Money Bot" branding
+        assert "Sharp Money Bot" in msg
 
 
 def test_crash_alert_html_safe(tmp_path):

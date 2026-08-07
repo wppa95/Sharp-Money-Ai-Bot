@@ -1,0 +1,551 @@
+Before making changes:
+
+⚠️ CREDIT WARNING — DO NOT BURN CREDITS UNNECESSARILY
+
+This is a final cleanup/stability pass for Sharp Money Bot V3.1.
+
+Do NOT:
+
+❌ Rewrite the bot
+❌ Refactor large sections
+❌ Replace working systems
+❌ Redesign architecture
+❌ Change scoring engine
+❌ Change database structure
+❌ Change Underdog pipeline
+❌ Add new features
+
+Only perform:
+✅ Display cleanup
+✅ Remove outdated framework references
+✅ Align commands with V3.1
+✅ Fix wording/formatting issues
+
+━━━━━━━━━━━━━━━━━━
+🎯 SHARP MONEY BOT V3.1
+DISPLAY CLEANUP TASKS
+━━━━━━━━━━━━━━━━━━
+
+1. Restart Notification Cleanup
+
+Current restart message changes between formats.
+
+Standardize to:
+
+🤖 Sharp Money Bot Restarted
+
+Status:
+Monitoring resumed ✅
+
+Last Active Task:
+(task)
+
+Last Heartbeat:
+(timestamp)
+
+Startup #:
+
+No crash details unless available.
+
+Remove:
+❌ CAUTION/warning icon
+
+Use:
+🤖 robot symbol
+
+Remove:
+❌ Restart reason text
+
+We already know restart causes.
+
+━━━━━━━━━━━━━━━━━━
+
+2. /status Cleanup
+
+Clean display.
+
+Keep:
+
+✅ Uptime
+✅ Alerts sent
+✅ Provider health
+✅ Scheduler heartbeat
+✅ Active sports
+✅ Database records
+
+Remove old framework references.
+
+Make status match V3.1 architecture.
+
+━━━━━━━━━━━━━━━━━━
+
+3. /health Cleanup
+
+Major cleanup.
+
+Keep:
+
+✅ Background jobs
+✅ Current errors
+✅ Recovery status
+✅ Pipeline health
+
+Remove:
+
+❌ Old crash wording if resolved
+❌ Stale errors dominating display
+
+Only show relevant current failures.
+
+━━━━━━━━━━━━━━━━━━
+
+4. /dashboard Cleanup
+
+Clean performance/activity display.
+
+Keep:
+
+✅ Player prop activity
+✅ Provider status
+✅ Tracking data
+✅ Pick history
+
+Remove:
+
+❌ Old sportsbook references
+
+━━━━━━━━━━━━━━━━━━
+
+5. /activity Command Review
+
+Verify activity display.
+
+It should show:
+
+✅ Real player prop activity
+✅ Recent scans
+✅ Qualified opportunities
+
+Remove stale/unused activity sections.
+
+━━━━━━━━━━━━━━━━━━
+
+6. /help Command Cleanup
+
+Remove:
+
+❌ PrizePicks
+❌ DraftKings
+❌ FanDuel
+❌ /pp_import
+❌ Old sportsbook wording
+
+Update commands to V3.1:
+
+Player Prop Monitoring:
+
+/picks
+/slip
+/dashboard
+/alerts
+/grade
+
+Performance:
+
+/performance
+/backtest
+/stats
+/calibration
+
+System:
+
+/status
+/health
+/restarts
+/providers
+/config
+/testalert
+
+━━━━━━━━━━━━━━━━━━
+
+7. /providers Cleanup
+
+Remove:
+
+❌ DraftKings
+❌ FanDuel
+❌ PrizePicks
+❌ Odds API references
+
+Show:
+
+🐶 Underdog Fantasy
+
+Primary prop provider
+
+Supporting data:
+
+✅ ESPN
+✅ MLB Stats API
+✅ NHL API
+✅ OpenDota
+✅ Tennis data
+
+━━━━━━━━━━━━━━━━━━
+
+8. PrizePicks Framework Removal
+
+Remove PP references across:
+
+* Commands
+* Displays
+* Config
+* Alerts
+* Stats
+* Grading
+
+PrizePicks is no longer part of V3.1.
+
+━━━━━━━━━━━━━━━━━━
+
+9. /restarts Cleanup
+
+Keep:
+
+✅ Startup count
+✅ Restart history
+✅ Clean vs unexpected restart
+
+Clean wording.
+
+Remove unnecessary crash details.
+
+━━━━━━━━━━━━━━━━━━
+
+10. /performance Cleanup
+
+Replace:
+
+“Resolved bets”
+
+With:
+
+“Resolved actionable picks”
+
+Track:
+
+✅ Tier accuracy
+✅ Sport performance
+✅ Pick results
+✅ Model learning
+
+━━━━━━━━━━━━━━━━━━
+
+11. /grade Cleanup
+
+Remove:
+
+❌ PP Pick Grades
+
+Replace with:
+
+📊 Sharp Money Pick Grades
+
+Track:
+
+✅ S/A/B/C tier performance
+✅ Wins/losses
+✅ Sport accuracy
+
+━━━━━━━━━━━━━━━━━━
+
+12. /alerts Cleanup
+
+Replace:
+
+🟣 Player Prop Alerts
+
+With:
+
+🎯 Actionable Pick Alerts
+
+Only show:
+
+✅ Qualified picks
+
+Do NOT show:
+
+❌ Raw market movements
+
+━━━━━━━━━━━━━━━━━━
+
+13. /market Cleanup
+
+Remove:
+
+❌ Cross-book wording
+❌ Old sportsbook comparison
+
+Rename concept:
+
+📊 Market Intelligence
+
+Only keep if useful for:
+
+✅ Line movement
+✅ Validation
+✅ Pick quality
+
+━━━━━━━━━━━━━━━━━━
+
+14. /clv Review
+
+Review CLV.
+
+Keep only if useful for V3.1.
+
+Remove if dependent on:
+
+❌ DK/FD
+❌ Sportsbook odds framework
+
+━━━━━━━━━━━━━━━━━━
+
+15. /calibration Cleanup
+
+Remove:
+
+❌ EV records
+❌ Bet recommendation wording
+
+Track:
+
+✅ Tier accuracy
+✅ Direction accuracy
+✅ Model improvement
+
+━━━━━━━━━━━━━━━━━━
+
+16. /stats Cleanup
+
+Remove:
+
+❌ PrizePicks count
+❌ Edge terminology
+❌ EV language
+
+Track:
+
+✅ Picks generated
+✅ Alerts sent
+✅ Tier activity
+✅ Results
+
+━━━━━━━━━━━━━━━━━━
+
+17. /backtest Cleanup
+
+Keep only if useful.
+
+Purpose:
+
+Historical actionable pick evaluation.
+
+Remove:
+
+❌ Old EV backtesting
+
+━━━━━━━━━━━━━━━━━━
+
+18. /config Cleanup
+
+Remove:
+
+❌ DK/FD sports
+❌ Min EV
+❌ PP edge
+❌ Daily PP cap
+❌ Old sportsbook settings
+
+Show:
+
+✅ Underdog primary provider
+✅ Active sports
+✅ Pick requirements
+✅ Scoring system
+✅ Data systems
+
+━━━━━━━━━━━━━━━━━━
+
+19. /testalert Cleanup
+
+Replace old:
+
+🟣 PLAYER PROP MARKET ALERT
+
+With:
+
+🎯 ACTIONABLE PICK ALERT
+
+Must simulate:
+
+✅ Direction
+✅ Tier
+✅ Score
+✅ Validation
+
+Do not test raw market alerts.
+
+━━━━━━━━━━━━━━━━━━
+
+20. /help Final Review
+
+After all removals:
+
+Confirm help menu matches reality.
+
+━━━━━━━━━━━━━━━━━━
+
+21. /picks Cleanup
+
+Replace:
+
+🟣 Player Prop Picks
+
+With:
+
+🎯 Actionable Player Prop Picks
+
+Explain:
+
+Only qualified picks appear.
+
+━━━━━━━━━━━━━━━━━━
+
+22. /slip Cleanup
+
+Replace:
+
+🎰 Player Prop Slip
+
+With:
+
+🎯 Sharp Money Prop Slip
+
+Remove:
+
+❌ Gambling icon
+
+Keep:
+
+✅ Correlation protection
+✅ Qualified picks only
+
+━━━━━━━━━━━━━━━━━━
+
+23. /providers Final Review
+
+Confirm no removed providers appear.
+
+━━━━━━━━━━━━━━━━━━
+
+24. /market Final Decision
+
+Decide:
+
+Keep if:
+✅ Helps Underdog analysis
+
+Remove if:
+❌ Only old sportsbook logic
+
+━━━━━━━━━━━━━━━━━━
+
+25. /alerts Final Review
+
+Confirm only actionable alerts are stored/displayed.
+
+━━━━━━━━━━━━━━━━━━
+
+26. /grade Final Review
+
+Confirm grading tracks:
+
+✅ Actionable picks
+
+Not:
+
+❌ PP picks
+
+━━━━━━━━━━━━━━━━━━
+
+27. /performance Final Review
+
+Confirm learning dashboard works.
+
+━━━━━━━━━━━━━━━━━━
+
+28. /calibration Final Review
+
+Confirm scoring evaluation matches V3.1.
+
+━━━━━━━━━━━━━━━━━━
+
+29. /stats Final Review
+
+Confirm statistics match new alert system.
+
+━━━━━━━━━━━━━━━━━━
+
+30. /backtest Final Review
+
+Confirm it supports learning loop.
+
+━━━━━━━━━━━━━━━━━━
+
+31. /config Final Review
+
+Confirm configuration is the true V3.1 source of truth.
+
+━━━━━━━━━━━━━━━━━━
+
+FINAL VALIDATION AFTER CLEANUP:
+
+Run:
+
+✅ Full test suite
+
+✅ Startup health check
+
+✅ /status
+
+✅ /health
+
+✅ /dashboard
+
+✅ /providers
+
+✅ /config
+
+✅ /testalert
+
+Verify:
+
+* No PP references
+* No DK/FD references
+* No raw market alerts sent
+* Only actionable picks reach Telegram
+* Existing scoring unchanged
+
+After completion:
+
+🛑 Freeze Sharp Money Bot V3.1
+
+Next phase only:
+
+* Collect data
+* Grade results
+* Improve model accuracy
+
+No rewrites.
+No architecture changes.

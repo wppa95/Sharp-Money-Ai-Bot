@@ -373,12 +373,12 @@ async def _send_startup_notification(bot, chat_ids: list[int], ht) -> None:
         crash_id_str = f"#{crash_id_num}" if crash_id_num else "—"
 
         parts: list[str] = [
-            "⚠️ <b>Sharp Money Bot Restarted</b>",
+            "🤖 <b>Sharp Money Bot Restarted</b>",
             "",
-            f"<b>Reason:</b>  {_h.escape(cause_label)}",
+            "<b>Status:</b>  Monitoring resumed ✅",
         ]
 
-        # ── Crash details block ───────────────────────────────────────────────
+        # ── Crash details block (only when captured) ──────────────────────────
         if crash_detail:
             exc_type = crash_detail.get("exc_type", "")
             exc_msg  = crash_detail.get("exc_msg",  "")[:120]
@@ -399,8 +399,6 @@ async def _send_startup_notification(bot, chat_ids: list[int], ht) -> None:
                 parts.append(f"  Function:  <code>{_h.escape(fn)}</code>")
             if job:
                 parts.append(f"  Active Job: {_h.escape(str(job))}")
-
-            # Extra context from snapshot
             mem = crash_detail.get("memory_mb")
             if mem is not None:
                 parts.append(f"  Memory at crash: {mem} MB")
@@ -408,34 +406,29 @@ async def _send_startup_notification(bot, chat_ids: list[int], ht) -> None:
                 mins = int(uptime) // 60
                 secs = int(uptime) % 60
                 parts.append(f"  Uptime at crash: {mins}m {secs}s")
-        else:
-            parts += ["", f"<i>No crash detail captured — likely {_h.escape(cause_label)}</i>"]
 
         parts += [
             "",
             f"<b>Last Active Task:</b>  {_h.escape(last_job)}",
             f"<b>Last Heartbeat:</b>  {_h.escape(hb_str)}",
-            f"<b>Crash Snapshot:</b>  Saved ✅" if crash_detail else "<b>Crash Snapshot:</b>  Not available",
-            f"<b>Crash ID:</b>  {_h.escape(crash_id_str)}",
-            "",
-            "<b>Recovery:</b>  Resumed Monitoring ✅",
-            f"<i>Startup #{restart_num}</i>",
+            f"Startup #{restart_num}",
         ]
     elif startup_reason == "first_start":
         parts = [
-            "✅ <b>Sharp Money Bot Online</b>",
+            "🤖 <b>Sharp Money Bot Online</b>",
             "",
-            "<b>Status:</b>  Underdog monitoring active",
-            "<b>Mode:</b>  S / A / B tier recommendations only",
+            "<b>Status:</b>  Monitoring active ✅",
+            f"Startup #{restart_num}",
             "",
             "<i>Ready. Props will be analysed as they are detected.</i>",
         ]
     else:
         # clean restart / manual restart — simple notice, no noise
         parts = [
-            "✅ <b>Sharp Money Bot Online</b>",
+            "🤖 <b>Sharp Money Bot Restarted</b>",
             "",
-            "<b>Status:</b>  Monitoring active",
+            "<b>Status:</b>  Monitoring resumed ✅",
+            f"Startup #{restart_num}",
             "",
             "<i>Props will be analysed as they are detected.</i>",
         ]
