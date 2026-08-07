@@ -188,30 +188,13 @@ class DashboardReport:
             "",
         ]
 
-        # ── Overall alert totals ──────────────────────────────────────────────
+        # ── Activity summary (Underdog-focused) ──────────────────────────────
         parts += [
-            "📬 <b>All-Time Alerts</b>",
-            f"  EV:       <b>{self.total_ev_alerts:,}</b>",
-            f"  Steam:    <b>{self.total_steam_alerts:,}</b>",
-            f"  Underdog: <b>{self.total_ud_alerts:,}</b>",
-            f"  PP:       <b>{self.total_pp_alerts:,}</b>",
-            f"  Total:    <b>{self.total_all_alerts:,}</b>",
+            "📬 <b>Activity Summary</b>",
+            f"  Underdog Snapshots:  <b>{self.total_ud_alerts:,}</b>",
+            f"  Actionable Picks Today: <b>{self.today_ud_alerts:,}</b>",
             "",
         ]
-
-        # ── EV performance ────────────────────────────────────────────────────
-        parts.append("💰 <b>EV Alert Performance</b>")
-        if self.avg_ev_pct is not None:
-            sign = "+" if self.avg_ev_pct >= 0 else ""
-            parts.append(f"  Avg EV:   <code>{sign}{self.avg_ev_pct:.2f}%</code>")
-        if self.ev_win_rate is not None:
-            parts.append(
-                f"  Win rate: <code>{self.ev_win_rate * 100:.1f}%</code>"
-                f"  W/L/P: <code>{self.ev_wins}/{self.ev_losses}/{self.ev_pushes}</code>"
-            )
-        else:
-            parts.append("  Win rate: <i>awaiting resolved results</i>")
-        parts.append("")
 
         # ── CLV performance ───────────────────────────────────────────────────
         parts.append("💎 <b>Closing Line Value</b>")
@@ -231,9 +214,9 @@ class DashboardReport:
 
         # ── Underdog tier breakdown ───────────────────────────────────────────
         if self.total_ud_alerts > 0:
-            parts.append("🐶 <b>Underdog Tier Breakdown</b>")
-            tier_order = ["S", "A", "B", "PASS"]
-            tier_emojis = {"S": "🔥", "A": "🟢", "B": "🟡", "PASS": "⚪"}
+            parts.append("🐶 <b>Tier Breakdown</b>")
+            tier_order = ["S", "A", "B", "C", "PASS"]
+            tier_emojis = {"S": "🔥", "A": "🟢", "B": "🟡", "C": "▪️", "PASS": "⚪"}
             for t in tier_order:
                 n = self.ud_tier_breakdown.get(t, 0)
                 if n:

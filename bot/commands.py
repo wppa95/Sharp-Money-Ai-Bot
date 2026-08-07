@@ -1328,11 +1328,11 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if not ud_props:
         hint = f" for {sport_filter}" if sport_filter else ""
         await update.message.reply_text(
-            f"🟣 <b>Player Prop Picks</b>\n\n"
+            f"🎯 <b>Actionable Player Prop Picks</b>\n\n"
             f"No qualifying player props available right now{hint}.\n\n"
             f"<i>Season-long futures are excluded from this view.\n"
-            f"Player props are ranked through the unified market engine.\n"
-            f"Provider data is used when available.</i>",
+            f"Ranked through the Sharp Money scoring engine.\n"
+            f"Underdog data used as the primary source.</i>",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -1663,34 +1663,21 @@ async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await update.message.reply_text("⏳ Generating mock Actionable Pick Alert…")
 
     try:
-        from datetime import datetime as _dt
-        from engine.player_prop_market import (
-            build_player_prop_market_comparison,
-            format_player_prop_market_alert,
+        from alerts_multiplatform import format_underdog_change_alert
+
+        # MLB strikeouts — Freddy Peralta, line moved 5.0 → 5.5.
+        # Uses the same format as live 🎯 ACTIONABLE BET PICK alerts.
+        msg = format_underdog_change_alert(
+            player_name = "Freddy Peralta",
+            team        = "MIL",
+            sport       = "MLB",
+            stat_type   = "Strikeouts",
+            old_line    = 5.0,
+            new_line    = 5.5,
+            score       = None,
+            validation  = None,
+            decision    = None,
         )
-
-        _now = _dt.utcnow()
-
-        # MLB strikeouts — Freddy Peralta, line moved 5.0 → 5.5 (Underdog only;
-        # PrizePicks / DK / FD show as Unavailable to demonstrate the multi-provider layout).
-        comp = build_player_prop_market_comparison(
-            player_name    = "Freddy Peralta",
-            sport          = "MLB",
-            stat_type      = "strikeouts",
-            ud_line        = 5.5,
-            previous_line  = 5.0,
-            now            = _now,
-            min_confidence = 0,  # always render; confidence is shown as info not a gate
-        )
-
-        if comp is None:
-            await update.message.reply_text(
-                f"{EMOJI['warn']} Test comparison could not be built "
-                f"(proxy confidence below threshold). Check bot logs."
-            )
-            return
-
-        msg = format_player_prop_market_alert(comp)
         await update.message.reply_text(
             msg,
             parse_mode=ParseMode.HTML,
@@ -2053,7 +2040,7 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             "🎯 <b>Sharp Money Prop Slip</b>\n\n"
             "No qualifying player props available right now.\n\n"
             "<i>Season-long futures are excluded from this view.\n"
-            "Underdog props auto-score every 5 min. Run /picks to check status.</i>",
+            "Underdog props are tracked every 5 min. Run /picks to check current opportunities.</i>",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -2168,7 +2155,7 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     # ── Player Prop Market section ────────────────────────────────────────────
     try:
-        pm_lines: list[str] = ["🟣 <b>Player Prop Market — Live Activity</b>", ""]
+        pm_lines: list[str] = ["🐶 <b>Underdog Activity — Live</b>", ""]
 
         # ── Provider status ───────────────────────────────────────────────────
         from providers import get_health_monitor
@@ -2304,7 +2291,7 @@ async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 lines.append(f"  <i>…{len(alerted_props) - 8} more</i>")
         else:
             lines.append("  <i>No player prop alerts sent in the last 72 h.</i>")
-            lines.append("  <i>Alerts fire automatically when qualifying props are detected.</i>")
+            lines.append("  <i>Alerts are sent automatically when props pass all qualification gates.</i>")
     except Exception as exc:
         logger.warning("cmd_alerts: prop history lookup failed: %s", exc)
         lines.append("  <i>Alert history unavailable — check /health for job status.</i>")
@@ -2603,8 +2590,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         if not pandascore_key:
             lines.append("")
             lines.append(
-                "<i>💡 To enable CS2 alerts: add PANDASCORE_API_KEY to environment secrets, "
-                "then restart the bot.</i>"
+                "<i>⚪ CS2 enrichment: optional — not configured.</i>"
             )
 
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
@@ -2626,7 +2612,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         # Gather data
         ud_today   = await _db.count_today_underdog_alerts()
         pp_today   = await _db.count_today_pp_alerts()
-        total_pp   = await _db.count_pp_edge_records()
+        total_ud   = await _db.count_underdog_records()
         resolved   = await _db.get_all_resolved_pp_edges(limit=500)
         edges_24h  = await _db.get_top_pp_edges(limit=100, hours=24)
 
@@ -2655,7 +2641,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             lines.append("  <i>No qualified picks detected in last 24 h</i>")
 
         lines.append("")
-        lines.append(f"<b>All-time</b>  ({total_pp:,} picks stored)")
+        lines.append(f"<b>All-time</b>  ({total_ud:,} Underdog snapshots)")
 
         if resolved:
             wins   = sum(1 for r in resolved if (r.result or "").upper() == "WIN")

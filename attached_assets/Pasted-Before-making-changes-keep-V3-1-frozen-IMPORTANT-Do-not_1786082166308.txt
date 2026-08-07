@@ -1,0 +1,241 @@
+Before making changes, keep V3.1 frozen.
+
+IMPORTANT:
+
+* Do not rewrite the bot
+* Do not refactor large sections
+* Do not change architecture
+* Do not change scoring engine
+* Do not change database structure
+* Do not change Underdog pipeline
+
+This is a targeted cleanup/stability pass only.
+
+Current V3.1 status:
+✅ Underdog-first framework working
+✅ Actionable pick alerts working
+✅ Multi-sport scanning active
+✅ PP removed from framework
+✅ DK/FD removed from user-facing framework
+✅ 3090 tests passing after previous cleanup
+
+⸻
+
+DISPLAY CLEANUP ITEMS
+
+1. /dashboard legacy metrics cleanup
+
+Remove old framework counters:
+
+Remove:
+
+* EV
+* Steam
+* PrizePicks
+* Total mixed alert counters
+
+Replace with Underdog-focused activity:
+
+Example:
+
+📬 Activity Summary
+
+Underdog Snapshots: X
+Tracked Props: X
+Actionable Picks: X
+
+Keep CLV section.
+
+⸻
+
+2. /providers optional provider wording
+
+CS2 currently shows:
+
+⚠️ PandaScore API not set
+To enable CS2 alerts add key…
+
+Change to softer optional wording:
+
+🖥️ CS2
+⚪ Optional enrichment
+Not configured
+
+Do not make optional providers look like failures.
+
+⸻
+
+3. /picks wording cleanup
+
+Current:
+🟣 Player Prop Picks
+
+Change to:
+
+🎯 Actionable Player Prop Picks
+
+Footer:
+
+Current:
+Player props are ranked through the unified market engine.
+Provider data is used when available.
+
+Change to:
+
+Ranked through the Sharp Money scoring engine.
+Underdog data used as the primary source.
+
+⸻
+
+4. /alerts wording cleanup
+
+Current:
+Alerts fire automatically when qualifying props are detected.
+
+Change to:
+
+Alerts are sent automatically when props pass all qualification gates.
+
+⸻
+
+5. /slip wording refinement
+
+Current:
+Underdog props auto-score every 5 min.
+
+Change to:
+
+Underdog props are tracked every 5 min.
+Run /picks to check current opportunities.
+
+⸻
+
+6. /stats consistency check
+
+Current:
+
+Today’s Actionable Picks:
+Underdog: 2
+
+Pipeline:
+No qualified picks detected in last 24h
+
+Verify these are using the same data source/window.
+
+Also verify:
+
+All-time:
+0 picks stored
+
+Because actionable picks have fired already.
+
+⸻
+
+7. /calibration cleanup
+
+Remove EV wording.
+
+Current:
+
+Based on 0 EV records, 500 Underdog records, 0 CLV records
+
+Change to:
+
+Based on tracked Underdog records and CLV history.
+
+⸻
+
+ACTUAL ISSUES FOUND
+
+8. Unexpected exits / restart stability
+
+Confirmed through:
+
+/restarts
+
+Multiple:
+
+⚠️ unexpected_exit
+
+Examples:
+
+* 05:25 UTC unexpected_exit
+* 04:20 UTC unexpected_exit
+* 03:50 UTC unexpected_exit
+* 03:33 UTC unexpected_exit
+
+Need investigation.
+
+Do not redesign.
+
+Check:
+
+* memory kills
+* uncaught exceptions
+* worker crashes
+* Replit restart causes
+
+Keep current recovery system.
+
+⸻
+
+9. /testalert sends wrong alert type
+
+Problem:
+
+/testalert still sends:
+
+🟣 PLAYER PROP MARKET ALERT
+
+This should not happen.
+
+V3.1 Telegram rules:
+
+📈 MARKET MOVE DETECTED
+
+* Internal only
+* Stored only
+* Never sent to Telegram
+
+🎯 ACTIONABLE BET PICK
+
+* User-facing
+* Telegram only
+
+Update /testalert to send:
+
+🎯 ACTIONABLE BET PICK
+
+⸻
+
+10. Restart notification verification
+
+Current format is good:
+
+🤖 Sharp Money Bot Restarted
+
+Status: Monitoring resumed ✅
+
+Keep this.
+
+No reason/crash details needed in the user-facing message.
+
+⸻
+
+After changes:
+
+Run:
+✅ Full test suite
+✅ Restart test
+✅ /status
+✅ /health
+✅ /restarts
+✅ /testalert
+✅ Verify Telegram only receives ACTIONABLE BET PICK
+
+Final report:
+
+* Files changed
+* Tests passed
+* Restart status
+* Confirmation V3.1 remains frozen

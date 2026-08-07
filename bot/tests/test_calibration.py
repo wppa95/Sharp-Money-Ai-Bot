@@ -226,9 +226,11 @@ class TestCalibrationReportToTelegram:
         report.ud_records_used  = 17
         report.clv_records_used = 5
         msg = report.to_telegram()
-        assert "42" in msg
+        # Footer now shows Underdog and CLV counts only (EV records removed from display)
         assert "17" in msg
         assert "5" in msg
+        assert "Underdog records" in msg
+        assert "CLV history" in msg
 
     def test_detection_separates_from_recommendation(self):
         """Key invariant: detection and recommendation are shown in separate sections."""

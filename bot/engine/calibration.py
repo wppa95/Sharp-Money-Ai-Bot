@@ -239,9 +239,8 @@ class CalibrationReport:
 
         lines.append("")
         lines.append(
-            f"<i>Based on {self.ev_records_used:,} EV records, "
-            f"{self.ud_records_used:,} Underdog records, "
-            f"{self.clv_records_used:,} CLV records</i>"
+            f"<i>Based on {self.ud_records_used:,} tracked Underdog records"
+            f" and {self.clv_records_used:,} CLV history records</i>"
         )
         return "\n".join(lines)
 

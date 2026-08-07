@@ -142,27 +142,30 @@ class TestDashboardReport:
         assert "Performance Dashboard" in msg
 
     def test_to_telegram_has_alerts_section(self):
-        r = DashboardReport(total_ev_alerts=7, total_ud_alerts=3)
+        r = DashboardReport(total_ud_alerts=3, today_ud_alerts=1)
         msg = r.to_telegram()
-        assert "All-Time Alerts" in msg
-        assert "7" in msg
+        assert "Activity Summary" in msg
+        assert "3" in msg
 
     def test_to_telegram_ev_section_with_data(self):
-        r = DashboardReport(avg_ev_pct=4.5)
+        # EV section removed from display — CLV is the primary performance metric
+        r = DashboardReport(avg_clv_pct=4.5, total_clv_records=5)
         msg = r.to_telegram()
-        assert "EV Alert Performance" in msg
         assert "4.5" in msg
 
     def test_to_telegram_ev_win_rate(self):
-        r = DashboardReport(ev_win_rate=0.62, ev_wins=10, ev_losses=6, ev_pushes=1)
+        # EV win rate no longer shown — verify CLV beat-close rate still renders
+        r = DashboardReport(
+            total_clv_records=17, avg_clv_pct=2.0, clv_beat_close_rate=0.62
+        )
         msg = r.to_telegram()
-        assert "62.0%" in msg
-        assert "10/6/1" in msg
+        assert "62%" in msg
 
     def test_to_telegram_no_win_rate_awaiting(self):
-        r = DashboardReport(ev_win_rate=None)
+        # The "awaiting" placeholder is now in the CLV section
+        r = DashboardReport(total_clv_records=0)
         msg = r.to_telegram()
-        assert "awaiting resolved results" in msg
+        assert "No CLV records yet" in msg
 
     def test_to_telegram_clv_section_no_records(self):
         r = DashboardReport(total_clv_records=0)
