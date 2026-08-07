@@ -1837,12 +1837,186 @@ def _render_slip_section(
     return section
 
 
+async def _cmd_slip_journal(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    args: list[str],
+) -> None:
+    """Handle /slip journal subcommands: create, add, grade, journal/history."""
+    subcmd = args[0].lower() if args else "journal"
+
+    # ── /slip create [stake] ────────────────────────────────────────────────
+    if subcmd == "create":
+        stake: Optional[float] = None
+        if len(args) >= 2:
+            try:
+                stake = float(args[1])
+            except ValueError:
+                pass
+        code = await _db.create_slip_journal(stake=stake)
+        stake_str = f"  ·  ${stake:.2f} staked" if stake else ""
+        await update.message.reply_text(
+            f"📓 <b>Slip Journal Created</b>\n\n"
+            f"Code: <code>{code}</code>{stake_str}\n"
+            f"Status: OPEN\n\n"
+            f"Add picks with:\n"
+            f"<code>/slip add &lt;player name or pick ID&gt;</code>\n\n"
+            f"Grade when ready:\n"
+            f"<code>/slip grade</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    # ── /slip add &lt;query&gt; ────────────────────────────────────────────────────
+    if subcmd == "add":
+        if len(args) < 2:
+            await update.message.reply_text(
+                "Usage: <code>/slip add &lt;player name or pick ID&gt;</code>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+        query = " ".join(args[1:])
+        # Ensure an open slip exists
+        open_slip = await _db.get_open_slip_journal()
+        if open_slip is None:
+            await update.message.reply_text(
+                f"{EMOJI['warn']} No open slip. Create one first: <code>/slip create</code>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+        opp = await _db.find_opportunity_for_slip(query)
+        if opp is None:
+            await update.message.reply_text(
+                f"{EMOJI['warn']} No matching pick found for <b>{query}</b>.\n"
+                f"Try the player name, or use a numeric ID from <code>/picks</code>.",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+        leg = await _db.add_slip_journal_leg(
+            slip_code   = open_slip.slip_code,
+            player_name = opp.player_name,
+            stat_type   = opp.stat_type,
+            opp_id      = opp.id,
+            team        = opp.team or "",
+            sport       = opp.sport or "",
+            line_value  = opp.line_value,
+            direction   = opp.recommendation,
+            tier        = opp.decision_tier,
+            confidence  = opp.confidence,
+            game_time   = opp.game_time,
+        )
+        legs = await _db.get_slip_journal_legs(open_slip.slip_code)
+        tier_icon = _TIER_EMOJI.get(opp.decision_tier or "", "⚪")
+        await update.message.reply_text(
+            f"✅ <b>Leg added to {open_slip.slip_code}</b>\n\n"
+            f"{tier_icon} <b>{opp.player_name}</b> · {opp.stat_type}\n"
+            f"{opp.recommendation} <code>{opp.line_value:g}</code>  ·  "
+            f"conf <code>{opp.confidence}/100</code>  ·  {opp.sport}\n\n"
+            f"<i>{open_slip.slip_code} now has {len(legs)} leg{'s' if len(legs) != 1 else ''}.</i>\n"
+            f"Grade: <code>/slip grade</code>  ·  View: <code>/slip journal</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    # ── /slip grade [payout] ─────────────────────────────────────────────────
+    if subcmd == "grade":
+        open_slip = await _db.get_open_slip_journal()
+        if open_slip is None:
+            # Try to grade the most recent graded slip (idempotent re-grade)
+            history = await _db.get_slip_journal_history(limit=1)
+            if history:
+                open_slip = history[0]
+            else:
+                await update.message.reply_text(
+                    f"{EMOJI['warn']} No slip to grade. Create one: <code>/slip create</code>",
+                    parse_mode=ParseMode.HTML,
+                )
+                return
+        payout: Optional[float] = None
+        if len(args) >= 2:
+            try:
+                payout = float(args[1])
+            except ValueError:
+                pass
+        summary = await _db.grade_slip_journal(open_slip.slip_code, payout=payout)
+        legs    = await _db.get_slip_journal_legs(open_slip.slip_code)
+
+        hit_icons  = {l.player_name + l.stat_type: l.result for l in legs}
+        result_sym = {"HIT": "✅", "MISS": "❌", "PUSH": "🔁", "PENDING": "⏳"}
+
+        lines = [
+            f"📋 <b>Slip Grade — {open_slip.slip_code}</b>",
+            "",
+        ]
+        for leg in legs:
+            sym = result_sym.get(leg.result, "⏳")
+            av  = f"  <i>(actual: {leg.actual_value:g})</i>" if leg.actual_value is not None else ""
+            lines.append(
+                f"{sym} <b>{leg.player_name}</b> {leg.direction or ''} "
+                f"<code>{leg.line_value:g}</code> · {leg.stat_type}{av}"
+            )
+
+        lines += [""]
+        lines.append(
+            f"{'✅ CASH' if summary['all_hit'] else '❌ NO CASH'} — "
+            f"{summary['hit']}H / {summary['miss']}M / {summary['push']}P"
+            f"{' / ' + str(summary['pending']) + ' pending' if summary['pending'] else ''}"
+        )
+        if payout is not None and open_slip.stake:
+            roi_str = f"+{summary['roi_pct']:.1f}%" if (summary.get("roi_pct") or 0) >= 0 else f"{summary['roi_pct']:.1f}%"
+            lines.append(f"${open_slip.stake:.2f} → ${payout:.2f}  ·  ROI {roi_str}")
+
+        if summary["pending"] > 0:
+            lines.append(f"\n<i>{summary['pending']} leg(s) still pending — run /slip grade again after results are in.</i>")
+
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+        return
+
+    # ── /slip journal | /slip j | /slip history ──────────────────────────────
+    history = await _db.get_slip_journal_history(limit=8)
+    if not history:
+        await update.message.reply_text(
+            "📓 <b>Slip Journal</b>\n\n"
+            "No slips recorded yet.\n\n"
+            "Create one: <code>/slip create [stake]</code>\n"
+            "Add picks:  <code>/slip add &lt;player&gt;</code>\n"
+            "Grade:      <code>/slip grade [payout]</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    status_sym = {"OPEN": "🟡", "GRADED": "✅", "VOID": "❌"}
+    lines = [f"📓 <b>Slip Journal</b>  ({len(history)} recent)", ""]
+    for slip in history:
+        sym   = status_sym.get(slip.status, "❓")
+        st    = f"${slip.stake:.2f}" if slip.stake else "—"
+        pay   = f"${slip.payout:.2f}" if slip.payout else "—"
+        roi   = f"  {slip.roi_pct:+.1f}%" if slip.roi_pct is not None else ""
+        ttype = slip.slip_type or "?"
+        date  = slip.created_at.strftime("%b %d") if slip.created_at else "?"
+        lines.append(f"{sym} <b>{slip.slip_code}</b>  {ttype}  ·  {date}  ·  {st} → {pay}{roi}")
+
+    open_slip = next((s for s in history if s.status == "OPEN"), None)
+    if open_slip:
+        legs = await _db.get_slip_journal_legs(open_slip.slip_code)
+        lines += ["", f"<b>Open: {open_slip.slip_code}</b>  ({len(legs)} leg{'s' if len(legs) != 1 else ''})"]
+        for leg in legs:
+            sym = {"HIT": "✅", "MISS": "❌", "PUSH": "🔁", "PENDING": "⏳"}.get(leg.result, "⏳")
+            lines.append(f"  {sym} {leg.player_name} · {leg.direction or ''} {leg.line_value:g} · {leg.stat_type}")
+
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+
 async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/slip — Build correlation-aware prop slips (2–6 legs) from live market props.
 
     Usage:
-      /slip      — show best 2-man through 6-man slips simultaneously
-      /slip 3    — show only the 3-man slip
+      /slip             — show best 2-man through 6-man slips simultaneously
+      /slip 3           — show only the 3-man slip
+      /slip create [N]  — create a new betting journal slip ($N stake)
+      /slip add NAME    — add a pick to the open journal slip
+      /slip grade [N]   — grade open slip ($N payout)
+      /slip journal     — show slip journal history
     """
     if not _check_allowed(update):
         await update.message.reply_text("⛔ Unauthorized.")
@@ -1852,6 +2026,13 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     args = context.args or []
+
+    # ── Journal subcommand dispatcher ────────────────────────────────────────
+    _JOURNAL_SUBCMDS = {"create", "add", "grade", "journal", "j", "history"}
+    if args and args[0].lower() in _JOURNAL_SUBCMDS:
+        await _cmd_slip_journal(update, context, args)
+        return
+
     single_size: Optional[int] = None
     if args:
         try:
@@ -3231,6 +3412,164 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     except Exception as exc:
         logger.exception("cmd_funnel: error: %s", exc)
         await update.message.reply_text("⚠️ Could not load funnel data. Check bot logs.")
+
+
+async def cmd_player(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/player NAME — show tracked prop history and hit rate for a player (P11).
+
+    Usage:
+      /player LeBron James
+      /player Acuña
+    """
+    if not _check_allowed(update):
+        await update.message.reply_text("⛔ Unauthorized.")
+        return
+    if _db is None:
+        await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
+        return
+
+    args = context.args or []
+    if not args:
+        await update.message.reply_text(
+            "Usage: <code>/player &lt;player name&gt;</code>\n"
+            "Example: <code>/player LeBron James</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    name_query = " ".join(args)
+    try:
+        rows = await _db.get_player_prop_history(name_query, limit=20)
+    except Exception as exc:
+        logger.exception("cmd_player: db error: %s", exc)
+        await update.message.reply_text(f"{EMOJI['warn']} DB error: {exc}")
+        return
+
+    if not rows:
+        await update.message.reply_text(
+            f"🔍 No tracked picks found matching <b>{_html.escape(name_query)}</b>.\n"
+            f"<i>Picks are tracked when the bot generates alerts.</i>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    # Aggregate stats
+    total  = len(rows)
+    graded = [r for r in rows if r.result in ("HIT", "MISS", "PUSH")]
+    hits   = sum(1 for r in graded if r.result == "HIT")
+    misses = sum(1 for r in graded if r.result == "MISS")
+    pushes = sum(1 for r in graded if r.result == "PUSH")
+    hit_rate = hits / len(graded) * 100 if graded else None
+
+    # Warning thresholds
+    warn = ""
+    if hit_rate is not None and len(graded) >= 3:
+        if hit_rate < 30:
+            warn = "\n⛔ <b>Warning:</b> Very low hit rate — consider fading."
+        elif hit_rate < 45:
+            warn = "\n⚠️ <b>Caution:</b> Below-average hit rate."
+        elif hit_rate >= 70:
+            warn = "\n🔥 <b>Hot streak:</b> Strong recent performance."
+
+    # Header
+    player_display = _html.escape(rows[0].player_name)
+    rate_str = f"{hit_rate:.0f}%" if hit_rate is not None else "—"
+    lines = [
+        f"👤 <b>Player History — {player_display}</b>",
+        "",
+        f"Tracked picks:  <b>{total}</b>",
+        f"Graded:         <b>{len(graded)}</b>  ({hits}H / {misses}M / {pushes}P)",
+        f"Hit rate:       <b>{rate_str}</b>",
+    ]
+    if warn:
+        lines.append(warn)
+
+    # Recent 8 picks
+    lines += ["", "<b>Recent picks</b>"]
+    result_sym = {"HIT": "✅", "MISS": "❌", "PUSH": "🔁", "PENDING": "⏳"}
+    for r in rows[:8]:
+        sym   = result_sym.get(r.result, "⏳")
+        date  = r.detected_at.strftime("%b %d") if r.detected_at else "?"
+        tier  = _TIER_EMOJI.get(r.decision_tier or "", "⚪")
+        av    = f" → <i>{r.actual_value:g}</i>" if r.actual_value is not None else ""
+        lines.append(
+            f"{sym} {tier} <b>{r.stat_type}</b> {r.recommendation or ''} "
+            f"<code>{r.line_value:g}</code>  ·  {r.sport}  ·  {date}{av}"
+        )
+
+    lines.append("\n<i>Source: prop_opportunity_log</i>")
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+
+async def cmd_slipstats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/slipstats — Pick accuracy and slip journal performance summary (P12)."""
+    if not _check_allowed(update):
+        await update.message.reply_text("⛔ Unauthorized.")
+        return
+    if _db is None:
+        await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
+        return
+
+    try:
+        slip_stats = await _db.get_slip_journal_stats()
+        # Pick accuracy per-sport from prop_opportunity_log
+        sport_rows = await _db.get_pick_accuracy_by_sport(limit_sports=10)
+    except Exception as exc:
+        logger.exception("cmd_slipstats: db error: %s", exc)
+        await update.message.reply_text(f"{EMOJI['warn']} DB error: {exc}")
+        return
+
+    _thick = "━" * 30
+    lines = [
+        f"📊 <b>Performance Intelligence</b>",
+        "",
+        f"<b>PICK ACCURACY</b>  (prop_opportunity_log)",
+        _thick,
+    ]
+
+    if sport_rows:
+        for row in sport_rows[:8]:
+            sp   = row.get("sport", "?")
+            h    = row.get("hits", 0)
+            m    = row.get("misses", 0)
+            tot  = h + m
+            rate = f"{h / tot * 100:.0f}%" if tot > 0 else "—"
+            lines.append(f"  {sp:<12} {h}H / {m}M  →  {rate}")
+    else:
+        lines.append("  <i>No graded picks yet — data accumulates as games complete.</i>")
+
+    # Slip journal stats
+    lines += [
+        "",
+        f"<b>SLIP JOURNAL</b>  ({slip_stats['total_slips']} graded slips)",
+        _thick,
+    ]
+    by_size = slip_stats.get("by_size", {})
+    if by_size:
+        for size in sorted(by_size):
+            d   = by_size[size]
+            w   = d["win"]
+            l   = d["loss"]
+            tot = w + l
+            win_pct = f"{w / tot * 100:.0f}%" if tot > 0 else "—"
+            stk = f"${d['staked']:.2f}" if d["staked"] else "—"
+            pay = f"${d['payout']:.2f}" if d["payout"] else "—"
+            lines.append(f"  {size:<8}  {w}W / {l}L  ({win_pct})  ·  {stk} → {pay}")
+    else:
+        lines.append("  <i>No graded slips yet. Create one: /slip create</i>")
+
+    # Overall
+    if slip_stats["total_staked"] > 0:
+        roi_str = f"{slip_stats['overall_roi']:+.1f}%" if slip_stats["overall_roi"] is not None else "—"
+        lines += [
+            "",
+            f"Total staked:  ${slip_stats['total_staked']:.2f}",
+            f"Total payout:  ${slip_stats['total_payout']:.2f}",
+            f"Overall ROI:   <b>{roi_str}</b>",
+        ]
+
+    lines.append(f"\n{_thick}")
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -482,6 +482,49 @@ class PlayerRiskRecord(Base):
     )
 
 
+# ── Slip Journal (P9/P10) ─────────────────────────────────────────────────────
+
+class SlipJournal(Base):
+    """User betting journal — one row per slip the user records.
+
+    Created via /slip create, graded via /slip grade.
+    status: OPEN → GRADED | VOID
+    """
+    __tablename__ = "slip_journal"
+
+    id         = Column(Integer,   primary_key=True, autoincrement=True)
+    slip_code  = Column(String(12), nullable=False, unique=True, index=True)  # e.g. SLP-001
+    created_at = Column(DateTime,  default=datetime.utcnow, nullable=False)
+    stake      = Column(Float,     nullable=True)    # $ staked (optional)
+    slip_type  = Column(String(8),  nullable=True)   # "2-man" / "3-man" / etc.
+    status     = Column(String(12), nullable=False, default="OPEN")  # OPEN/GRADED/VOID
+    payout     = Column(Float,     nullable=True)    # $ returned
+    roi_pct    = Column(Float,     nullable=True)    # (payout/stake - 1)*100
+    notes      = Column(Text,      nullable=True)
+    graded_at  = Column(DateTime,  nullable=True)
+
+
+class SlipJournalLeg(Base):
+    """One leg (prop pick) within a slip journal entry."""
+    __tablename__ = "slip_journal_legs"
+
+    id           = Column(Integer,    primary_key=True, autoincrement=True)
+    slip_code    = Column(String(12),  nullable=False, index=True)   # → SlipJournal.slip_code
+    opp_id       = Column(Integer,    nullable=True,  index=True)    # → PropOpportunityLog.id
+    player_name  = Column(String(128), nullable=False)
+    team         = Column(String(64),  nullable=False, default="")
+    sport        = Column(String(32),  nullable=False, default="")
+    stat_type    = Column(String(64),  nullable=False, default="")
+    line_value   = Column(Float,      nullable=True)
+    direction    = Column(String(8),  nullable=True)   # OVER / UNDER
+    tier         = Column(String(8),  nullable=True)   # S / A / B / PASS
+    confidence   = Column(Integer,    nullable=True)
+    game_time    = Column(DateTime,   nullable=True)
+    result       = Column(String(8),  nullable=False, default="PENDING")  # HIT/MISS/PUSH/PENDING
+    actual_value = Column(Float,      nullable=True)
+    graded_at    = Column(DateTime,   nullable=True)
+
+
 # ── Database manager ──────────────────────────────────────────────────────────
 
 class Database:
@@ -3044,6 +3087,327 @@ class Database:
                 .where(PlayerRiskRecord.is_active == True)  # noqa: E712
             )
             return result.scalar() or 0
+
+    # ── Slip Journal CRUD (P9/P10) ───────────────────────────────────────────
+
+    async def create_slip_journal(
+        self,
+        stake: Optional[float] = None,
+        notes: Optional[str]   = None,
+    ) -> str:
+        """Create a new OPEN slip journal entry.  Returns the slip_code (e.g. 'SLP-007')."""
+        async with self.session() as s:
+            # Auto-increment slip number from existing rows
+            count_result = await s.execute(select(func.count()).select_from(SlipJournal))
+            n = (count_result.scalar() or 0) + 1
+            code = f"SLP-{n:03d}"
+            row  = SlipJournal(slip_code=code, stake=stake, notes=notes, status="OPEN")
+            s.add(row)
+            await s.commit()
+        return code
+
+    async def get_open_slip_journal(self) -> Optional[SlipJournal]:
+        """Return the most recently created OPEN slip, or None."""
+        async with self.session() as s:
+            result = await s.execute(
+                select(SlipJournal)
+                .where(SlipJournal.status == "OPEN")
+                .order_by(desc(SlipJournal.created_at))
+                .limit(1)
+            )
+            return result.scalar_one_or_none()
+
+    async def add_slip_journal_leg(
+        self,
+        slip_code:   str,
+        player_name: str,
+        stat_type:   str,
+        *,
+        opp_id:      Optional[int]      = None,
+        team:        str                = "",
+        sport:       str                = "",
+        line_value:  Optional[float]    = None,
+        direction:   Optional[str]      = None,
+        tier:        Optional[str]      = None,
+        confidence:  Optional[int]      = None,
+        game_time:   Optional[datetime] = None,
+    ) -> SlipJournalLeg:
+        """Append a leg to an existing slip journal entry."""
+        async with self.session() as s:
+            leg = SlipJournalLeg(
+                slip_code   = slip_code,
+                opp_id      = opp_id,
+                player_name = player_name,
+                team        = team,
+                sport       = sport,
+                stat_type   = stat_type,
+                line_value  = line_value,
+                direction   = direction,
+                tier        = tier,
+                confidence  = confidence,
+                game_time   = game_time,
+                result      = "PENDING",
+            )
+            s.add(leg)
+            await s.commit()
+            await s.refresh(leg)
+            return leg
+
+    async def get_slip_journal_legs(self, slip_code: str) -> list[SlipJournalLeg]:
+        """Return all legs for a slip_code, ordered by id."""
+        async with self.session() as s:
+            result = await s.execute(
+                select(SlipJournalLeg)
+                .where(SlipJournalLeg.slip_code == slip_code)
+                .order_by(SlipJournalLeg.id)
+            )
+            return list(result.scalars().all())
+
+    async def grade_slip_journal(
+        self,
+        slip_code: str,
+        payout:    Optional[float] = None,
+    ) -> dict:
+        """
+        Auto-grade slip legs from prop_opportunity_log results.
+
+        For each PENDING leg with an opp_id, fetch the graded result from
+        PropOpportunityLog and copy it to the leg.  Legs without opp_id remain
+        PENDING (user must manually update them).
+
+        Returns a summary dict:
+          { total, graded, hit, miss, push, pending, all_hit, payout, roi_pct }
+        """
+        now = datetime.utcnow()
+        async with self.session() as s:
+            legs_result = await s.execute(
+                select(SlipJournalLeg)
+                .where(SlipJournalLeg.slip_code == slip_code)
+                .order_by(SlipJournalLeg.id)
+            )
+            legs: list[SlipJournalLeg] = list(legs_result.scalars().all())
+
+        counts = {"HIT": 0, "MISS": 0, "PUSH": 0, "PENDING": 0}
+        for leg in legs:
+            if leg.result != "PENDING":
+                counts[leg.result if leg.result in counts else "PENDING"] += 1
+                continue
+            if leg.opp_id is None:
+                counts["PENDING"] += 1
+                continue
+            # Look up result from PropOpportunityLog
+            async with self.session() as s:
+                opp_result = await s.execute(
+                    select(PropOpportunityLog)
+                    .where(PropOpportunityLog.id == leg.opp_id)
+                )
+                opp = opp_result.scalar_one_or_none()
+            if opp is None or opp.result in (None, "PENDING"):
+                counts["PENDING"] += 1
+                continue
+            # Map graded result — only HIT/MISS/PUSH matter for slips
+            mapped = opp.result if opp.result in ("HIT", "MISS", "PUSH") else "PENDING"
+            async with self.session() as s:
+                await s.execute(
+                    __import__("sqlalchemy", fromlist=["update"]).update(SlipJournalLeg)
+                    .where(SlipJournalLeg.id == leg.id)
+                    .values(
+                        result       = mapped,
+                        actual_value = opp.actual_value,
+                        graded_at    = now,
+                    )
+                )
+                await s.commit()
+            counts[mapped if mapped in counts else "PENDING"] += 1
+
+        total    = len(legs)
+        graded   = counts["HIT"] + counts["MISS"] + counts["PUSH"]
+        all_hit  = (counts["HIT"] == total and total > 0)
+
+        # Compute payout/ROI and close the slip if fully graded
+        slip_roi: Optional[float] = None
+        if payout is not None:
+            async with self.session() as s:
+                slip_row_res = await s.execute(
+                    select(SlipJournal).where(SlipJournal.slip_code == slip_code)
+                )
+                slip_row = slip_row_res.scalar_one_or_none()
+            stake = slip_row.stake if slip_row else None
+            slip_roi = ((payout / stake) - 1) * 100 if (stake and stake > 0) else None
+
+        new_status = "GRADED" if graded == total else "OPEN"
+        async with self.session() as s:
+            update_vals: dict = {"status": new_status}
+            if new_status == "GRADED":
+                update_vals["graded_at"] = now
+                update_vals["slip_type"] = f"{total}-man"
+            if payout is not None:
+                update_vals["payout"]  = payout
+                update_vals["roi_pct"] = slip_roi
+            await s.execute(
+                __import__("sqlalchemy", fromlist=["update"]).update(SlipJournal)
+                .where(SlipJournal.slip_code == slip_code)
+                .values(**update_vals)
+            )
+            await s.commit()
+
+        return {
+            "total":   total,
+            "graded":  graded,
+            "hit":     counts["HIT"],
+            "miss":    counts["MISS"],
+            "push":    counts["PUSH"],
+            "pending": counts["PENDING"],
+            "all_hit": all_hit,
+            "payout":  payout,
+            "roi_pct": slip_roi,
+        }
+
+    async def get_slip_journal_history(self, limit: int = 10) -> list[SlipJournal]:
+        """Return recent slip journal entries (most recent first)."""
+        async with self.session() as s:
+            result = await s.execute(
+                select(SlipJournal)
+                .order_by(desc(SlipJournal.created_at))
+                .limit(limit)
+            )
+            return list(result.scalars().all())
+
+    async def get_slip_journal_stats(self) -> dict:
+        """
+        Aggregate slip journal performance for /slipstats.
+
+        Returns per-size (2-man / 3-man / 6-man) record, plus overall totals.
+        """
+        async with self.session() as s:
+            graded_result = await s.execute(
+                select(SlipJournal)
+                .where(SlipJournal.status == "GRADED")
+                .order_by(desc(SlipJournal.created_at))
+            )
+            graded: list[SlipJournal] = list(graded_result.scalars().all())
+
+        by_size: dict = {}
+        total_staked  = 0.0
+        total_payout  = 0.0
+        for slip in graded:
+            size = slip.slip_type or "?"
+            if size not in by_size:
+                by_size[size] = {"win": 0, "loss": 0, "staked": 0.0, "payout": 0.0}
+            # A slip is a WIN if payout > stake (or payout is set and > 0)
+            is_win = (slip.payout is not None and slip.stake is not None and slip.payout > slip.stake)
+            if is_win:
+                by_size[size]["win"] += 1
+            else:
+                by_size[size]["loss"] += 1
+            if slip.stake:
+                by_size[size]["staked"] += slip.stake
+                total_staked += slip.stake
+            if slip.payout:
+                by_size[size]["payout"] += slip.payout
+                total_payout += slip.payout
+
+        overall_roi = ((total_payout / total_staked) - 1) * 100 if total_staked > 0 else None
+        return {
+            "by_size":      by_size,
+            "total_staked": total_staked,
+            "total_payout": total_payout,
+            "overall_roi":  overall_roi,
+            "total_slips":  len(graded),
+        }
+
+    async def find_opportunity_for_slip(
+        self,
+        query: str,
+        since_hours: int = 48,
+    ) -> Optional[PropOpportunityLog]:
+        """
+        Find a PropOpportunityLog row to add to a slip.
+
+        `query` is either:
+          - A numeric string → lookup by id
+          - A player-name substring → most recent matching row (non-PASS)
+        """
+        from datetime import timedelta
+        if query.isdigit():
+            async with self.session() as s:
+                result = await s.execute(
+                    select(PropOpportunityLog).where(PropOpportunityLog.id == int(query))
+                )
+                return result.scalar_one_or_none()
+        # Fuzzy name match
+        cutoff = datetime.utcnow() - timedelta(hours=since_hours)
+        pattern = f"%{query.strip()}%"
+        async with self.session() as s:
+            result = await s.execute(
+                select(PropOpportunityLog)
+                .where(
+                    PropOpportunityLog.player_name.ilike(pattern),
+                    PropOpportunityLog.detected_at >= cutoff,
+                    PropOpportunityLog.recommendation != "PASS",
+                )
+                .order_by(desc(PropOpportunityLog.detected_at))
+                .limit(1)
+            )
+            return result.scalar_one_or_none()
+
+    async def get_player_prop_history(
+        self,
+        player_name: str,
+        limit: int = 20,
+    ) -> list[PropOpportunityLog]:
+        """
+        Return recent PropOpportunityLog rows for a player (P11).
+        Uses ILIKE for case-insensitive partial match.
+        """
+        pattern = f"%{player_name.strip()}%"
+        async with self.session() as s:
+            result = await s.execute(
+                select(PropOpportunityLog)
+                .where(PropOpportunityLog.player_name.ilike(pattern))
+                .order_by(desc(PropOpportunityLog.detected_at))
+                .limit(limit)
+            )
+            return list(result.scalars().all())
+
+    async def get_pick_accuracy_by_sport(self, limit_sports: int = 10) -> list[dict]:
+        """
+        Aggregate HIT/MISS counts per sport from PropOpportunityLog (P12).
+
+        Returns a list of dicts sorted by total picks desc:
+          [{"sport": str, "hits": int, "misses": int, "pushes": int, "total": int}]
+        """
+        async with self.session() as s:
+            rows = await s.execute(
+                select(
+                    PropOpportunityLog.sport,
+                    PropOpportunityLog.result,
+                    func.count(PropOpportunityLog.id).label("n"),
+                )
+                .where(PropOpportunityLog.result.in_(["HIT", "MISS", "PUSH"]))
+                .group_by(PropOpportunityLog.sport, PropOpportunityLog.result)
+            )
+            raw = rows.all()
+
+        # Aggregate into per-sport dicts
+        by_sport: dict[str, dict] = {}
+        for row in raw:
+            sp = row.sport or "?"
+            if sp not in by_sport:
+                by_sport[sp] = {"sport": sp, "hits": 0, "misses": 0, "pushes": 0}
+            if row.result == "HIT":
+                by_sport[sp]["hits"] += row.n
+            elif row.result == "MISS":
+                by_sport[sp]["misses"] += row.n
+            elif row.result == "PUSH":
+                by_sport[sp]["pushes"] += row.n
+
+        result_list = sorted(
+            by_sport.values(),
+            key=lambda d: d["hits"] + d["misses"] + d["pushes"],
+            reverse=True,
+        )
+        return result_list[:limit_sports]
 
     async def close(self) -> None:
         if self._engine:

@@ -77,6 +77,8 @@ from commands import (
     cmd_refinement,
     cmd_funnel,
     cmd_backfill,
+    cmd_player,
+    cmd_slipstats,
     error_handler,
     init_handlers,
 )
@@ -1671,6 +1673,9 @@ def main() -> None:
     app.add_handler(CommandHandler("refinement", cmd_refinement))
     app.add_handler(CommandHandler("funnel",     cmd_funnel))
     app.add_handler(CommandHandler("backfill",   cmd_backfill))
+    # ── P11/P12 commands ─────────────────────────────────────────────────────
+    app.add_handler(CommandHandler("player",     cmd_player))
+    app.add_handler(CommandHandler("slipstats",  cmd_slipstats))
     app.add_error_handler(error_handler)
 
     logger.info("Starting polling — press Ctrl+C to stop.")

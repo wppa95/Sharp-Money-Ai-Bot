@@ -1,0 +1,532 @@
+🚨 V1.3 FINAL STABILIZATION + PHASE 2 QUEUE
+
+IMPORTANT CREDIT RULE:
+
+⚠️ DO NOT WASTE CREDITS.
+
+🚨 EVERYTHING HERE MUST BE DONE BEFORE FREEZING V1.3.
+
+Before making changes:
+
+* Review current system state
+* Do not repeat completed work
+* Do not investigate unrelated issues
+* Do not burn credits on unnecessary tasks
+
+Do NOT:
+
+* Rewrite bot
+* Refactor large sections
+* Replace working systems
+* Redesign architecture
+* Replace database structure
+
+This is the final stabilization and completion pass.
+
+If any task requires major architecture changes:
+
+➡️ Stop and report before proceeding.
+
+After completion:
+
+🛑 FREEZE V1.3.
+
+⸻
+
+CURRENT COMPLETED STATUS ✅
+
+Completed:
+
+✅ 3006 tests passing
+✅ Telegram bot working
+✅ Health routes working
+✅ Automatic grading fixed
+✅ Sport priority system added
+✅ MLB S-tier restriction added
+✅ OddsAPI confirmation active
+✅ Underdog pipeline protected
+✅ PASS/PLAY prop tracking improved
+✅ Backfill command added
+
+⸻
+
+🔴 PRIORITY 1 — AUTOMATIC RESULT GRADING
+
+Status:
+Implemented, verify.
+
+Requirements:
+
+✅ OVER HIT
+✅ OVER MISS
+✅ UNDER HIT
+✅ UNDER MISS
+
+Verify:
+
+* Completed games detected
+* Stats matched
+* Results stored
+* Performance updated
+
+Track:
+
+* Sport
+* Player/team
+* Market
+* Line
+* Direction
+* Tier
+* Confidence
+* Quality score
+* Final result
+
+⸻
+
+🔴 PRIORITY 2 — HISTORICAL GRADING BACKFILL
+
+Verify:
+
+Existing actionable picks can be graded.
+
+Use:
+
+/backfill
+
+Requirements:
+
+✅ Find pending picks
+✅ Pull final stats
+✅ Grade results
+✅ Populate performance history
+
+⸻
+
+🔴 PRIORITY 3 — SPORT PRIORITY SYSTEM
+
+Current goal:
+
+Prioritize sports the user actually bets daily.
+
+Tier 1 — Daily Betting Focus
+
+Keep:
+
+✅ CS2
+✅ Soccer
+✅ Tennis
+✅ Dota
+✅ LoL
+✅ Valorant
+✅ Table Tennis
+✅ Badminton
+✅ MMA
+✅ WNBA (when active)
+✅ Other active daily sports
+
+⸻
+
+Tier 2 — Seasonal / Out of Season
+
+Move:
+
+🏀 NBA
+🏈 NFL
+
+Reason:
+
+Currently out of season.
+
+Requirements:
+
+* Still track
+* Still validate
+* Still collect data
+
+When season starts:
+
+Automatically promote back to Tier 1.
+
+⸻
+
+🔴 PRIORITY 4 — ADAPTIVE SPORT GATES
+
+Tier 1 sports should allow:
+
+✅ S Tier
+✅ A Tier
+✅ B Tier
+✅ C Tier when justified
+
+Review:
+
+* Minimum history
+* Snapshot requirements
+* Cold-start restrictions
+
+Maintain:
+
+✅ Event validation
+✅ Direction requirement
+✅ Quality checks
+✅ Duplicate protection
+
+⸻
+
+🔴 PRIORITY 5 — MLB SEPARATION
+
+MLB remains:
+
+✅ Tracked
+✅ Validated
+✅ Graded
+
+Telegram:
+
+Only:
+
+⭐ S-tier alerts
+
+Reason:
+
+MLB is higher variance compared to preferred sports.
+
+Do not remove MLB completely.
+
+⸻
+
+🔴 PRIORITY 6 — ODDSAPI MARKET CONFIRMATION
+
+OddsAPI is now active.
+
+Use for:
+
+⭐ S-tier picks
+⭐ A-tier picks
+
+Workflow:
+
+Underdog detects opportunity →
+
+Scoring qualifies pick →
+
+OddsAPI confirms market.
+
+Check:
+
+* Market movement
+* Consensus
+* Available books
+* Line confirmation
+
+Requirements:
+
+✅ Cache protected
+✅ Budget protected
+✅ Non-blocking
+
+OddsAPI failure:
+
+Do NOT block picks.
+
+⸻
+
+🔴 PRIORITY 7 — DRAFTKINGS / FANDUEL REACTIVATION
+
+Current:
+
+DraftKings:
+Disabled
+
+FanDuel:
+Disabled
+
+Now evaluate reopening because OddsAPI is active.
+
+Only enable if:
+
+✅ API connection works
+✅ Data parses correctly
+✅ Lines are reliable
+✅ No crashes
+✅ No unnecessary quota usage
+✅ Improves pick quality
+
+Use for:
+
+* Market confirmation
+* Line comparison
+* Better information
+
+⸻
+
+🚨 DK/FD FAILSAFE RULE
+
+If DraftKings or FanDuel are tested and fail:
+
+DO NOT FORCE ENABLE.
+
+Keep them disabled.
+
+If:
+
+❌ Bad data
+❌ API issues
+❌ Wrong lines
+❌ Crashes
+❌ Creates noise
+
+Then:
+
+➡️ Leave provider disabled.
+
+System continues with:
+
+✅ Underdog
+✅ OddsAPI
+✅ Existing scoring engine
+
+Quality > quantity.
+
+Only add providers that improve decisions.
+
+⸻
+
+🔴 PRIORITY 8 — FULL PROP MEMORY SYSTEM
+
+Track every evaluated prop.
+
+Store:
+
+* Sport
+* Player/team
+* Market
+* Line
+* Direction
+* Provider
+* Tier
+* Score
+* Timestamp
+
+After games:
+
+Store:
+
+* HIT/MISS
+* Final stat
+* Result
+
+Goal:
+
+Build learning database.
+
+⸻
+
+🔴 PRIORITY 9 — BETTING JOURNAL / SLIP INTELLIGENCE
+
+Track what the user actually plays.
+
+Current:
+
+Bot knows recommendations.
+
+Missing:
+
+User-selected slips.
+
+Add:
+
+Slip Tracking
+
+Track:
+
+* Slip ID
+* Date
+* Stake
+* Legs
+* Sport
+* Result
+* Payout
+* ROI
+
+Example:
+
+Slip #001
+
+Type:
+2-Man
+
+Legs:
+
+✅ Ronald Acuña Jr.
+✅ Luke
+
+Result:
+
+✅ CASH
+
+⸻
+
+🔴 PRIORITY 10 — SLIP COMMANDS
+
+Add:
+
+Create:
+
+/slip create
+
+Add:
+
+/slip add PICK_ID
+
+View:
+
+/slip
+
+Grade:
+
+/slip grade
+
+⸻
+
+🔴 PRIORITY 11 — PLAYER MEMORY SYSTEM
+
+Add personal performance memory.
+
+Before future slips:
+
+Show:
+
+* Previous results
+* HIT rate
+* MISS rate
+
+Example:
+
+Player:
+
+Ronald Acuña Jr.
+
+Previous tracked picks:
+
+5
+
+Hits:
+
+4
+
+Misses:
+
+1
+
+Win rate:
+
+80%
+
+Warnings:
+
+Players who repeatedly fail.
+
+⸻
+
+🔴 PRIORITY 12 — SLIP PERFORMANCE INTELLIGENCE
+
+Separate:
+
+Pick Performance
+
+Question:
+
+Does the model find good props?
+
+Track:
+
+* Sport
+* Market
+* Tier
+* Accuracy
+
+⸻
+
+Slip Performance
+
+Question:
+
+Can we build winning entries?
+
+Track:
+
+* 2-Man record
+* 3-Man record
+* 6-Man record
+* Stake
+* Return
+* ROI
+
+⸻
+
+REQUIRED FINAL CHECKLIST
+
+Stability
+
+⬜ Bot running
+⬜ Telegram working
+⬜ Health routes working
+⬜ No crashes
+⬜ Scheduler healthy
+
+⸻
+
+Grading
+
+⬜ Automatic grading working
+⬜ OVER/UNDER verified
+⬜ Backfill working
+⬜ Performance updating
+
+⸻
+
+Sports
+
+⬜ Tier 1 prioritized
+⬜ NBA/NFL Tier 2 while out of season
+⬜ MLB S-tier only alerts
+⬜ Seasonal promotion logic planned
+
+⸻
+
+Market Intelligence
+
+⬜ OddsAPI active
+⬜ S/A confirmation active
+⬜ DK/FD tested safely
+⬜ Failed providers remain disabled
+
+⸻
+
+Learning
+
+⬜ Props tracked
+⬜ Results stored
+⬜ Player history stored
+⬜ Slip intelligence created
+
+⸻
+
+FINAL REPORT REQUIRED
+
+Return:
+
+1. Files changed
+2. Tests passed
+3. Bot health
+4. Completed checklist
+5. Deferred items
+
+Then:
+
+🛑 FREEZE V1.3.
+
+No more feature additions.
+
+Future work becomes Phase 2 only.
