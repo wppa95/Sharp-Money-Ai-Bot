@@ -1,0 +1,264 @@
+🔒 FINAL LONG-TERM PROJECT NOTES + V1.3 FREEZE RULES
+
+🚨 CREDIT PROTECTION RULE (IMPORTANT)
+
+⚠️ DO NOT BURN UNNECESSARY CREDITS.
+
+Before making any changes:
+
+* Review the current system state first
+* Do not repeat completed work
+* Do not spend credits investigating already solved issues
+* Do not make unnecessary changes
+* Do not create duplicate systems
+
+Only make changes that directly improve:
+
+✅ Pick quality
+✅ Accuracy
+✅ Stability
+✅ Data intelligence
+
+🚨 EVERYTHING HERE MUST BE COMPLETED BEFORE FREEZING.
+
+After all required items are verified:
+
+🛑 FREEZE V1.3.
+
+⸻
+
+PROVIDER AVAILABILITY RULE
+
+If a provider cannot reliably improve the system:
+
+Remove it completely from the framework.
+
+Applies to:
+
+🏦 DraftKings
+🏦 FanDuel
+🟡 Sleeper
+
+Requirements:
+
+* No broken connectors left active
+* No unused systems consuming resources
+* No unnecessary API costs
+* No extra alert noise
+
+A provider must prove value before remaining in the framework.
+
+Quality > quantity.
+
+⸻
+
+PROVIDER PIPELINE REQUIREMENT
+
+All providers must feed into the same unified pipeline to improve Underdog actionable bet picks.
+
+DO NOT create separate alert systems.
+
+Provider flow:
+
+🐶 Underdog
+→ Primary prop source
+
+📊 OddsAPI
+→ Sportsbook market confirmation
+
+🏦 DraftKings/FanDuel
+→ Additional market confirmation if reliable
+
+🟡 Sleeper
+→ Player prop/fantasy enrichment
+
+All provider data must feed the same:
+
+✅ Scoring engine
+✅ Confidence system
+✅ PropLineHistory
+✅ Grading system
+✅ Learning database
+
+Goal:
+
+Use all reliable available information sources to improve Underdog actionable picks.
+
+Rules:
+
+* No provider creates extra alert spam
+* No provider bypasses scoring
+* No separate alert pipelines
+* Failed providers are removed or disabled
+* Providers only increase confidence and pick quality
+
+Quality of picks > number of alerts.
+
+⸻
+
+DATA LEARNING GOALS
+
+The system should continue building intelligence from:
+
+* Every evaluated prop
+* Every actionable pick
+* Every user-selected slip
+* Every hit/miss result
+
+Track:
+
+* Sport performance
+* Market performance
+* Tier performance
+* Player performance
+* Slip performance
+
+⸻
+
+USER BETTING INTELLIGENCE
+
+The system should help answer:
+
+“Has this player helped or hurt me before?”
+
+Before future slips, show:
+
+* Previous tracked picks
+* Hit rate
+* Miss rate
+* Recent streak
+* Warning signs
+
+Example:
+
+Player:
+
+Ronald Acuña Jr.
+
+Tracked Picks:
+5
+
+Hits:
+4
+
+Misses:
+1
+
+Win Rate:
+80%
+
+⸻
+
+SLIP INTELLIGENCE GOAL
+
+Track actual user slips separately from individual props.
+
+Measure:
+
+* 2-Man record
+* 3-Man record
+* 6-Man record
+* ROI
+* Stake
+* Return
+
+Goal:
+
+Not just finding good picks.
+
+Finding the best combinations.
+
+⸻
+
+PROVIDER EXPANSION RULE
+
+Only add providers that improve decisions.
+
+Before enabling:
+
+Verify:
+
+✅ Reliable data
+✅ No crashes
+✅ No unnecessary API burn
+✅ Improves confidence
+✅ Improves actionable picks
+
+If a provider creates noise:
+
+Disable or remove it.
+
+If a provider is unavailable, broken, unreliable, or cannot provide usable data:
+
+➡️ Remove it completely from the framework.
+
+Do not keep inactive, broken, or unused providers consuming resources.
+
+Quality > quantity.
+
+⸻
+
+FINAL SYSTEM DIRECTION
+
+The final workflow:
+
+Detection
+
+Bot finds opportunities.
+
+↓
+
+Market Intelligence
+
+Providers confirm information.
+
+↓
+
+Scoring
+
+System ranks confidence.
+
+↓
+
+Actionable Pick
+
+Telegram receives only qualified picks.
+
+↓
+
+User Selection
+
+User builds slips.
+
+↓
+
+Memory
+
+Bot tracks results.
+
+↓
+
+Improvement
+
+System learns.
+
+⸻
+
+FINAL STATUS
+
+V1.3:
+
+✅ Frozen
+✅ Stable
+✅ Tested
+✅ Learning system active
+
+Future changes become Phase 2 only.
+
+No unnecessary rewrites.
+
+Protect credits.
+
+Protect stability.
+
+🛑 FREEZE WHEN COMPLETE.
