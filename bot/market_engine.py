@@ -2241,7 +2241,11 @@ async def underdog_job(context) -> None:
                         _cgd = "REJECTED"
                     elif _ctier == "B":
                         _cgd = "WATCHLIST"
-                    elif _crej is None and _ctier in ("S", "A"):
+                    elif _crej in ("qualified", "sent", "filtered", "new_prop_failed") and _ctier in ("S", "A"):
+                        # "qualified"       — is_qualified=True (S/A tier, passed scoring gate, eligible for alert)
+                        # "sent"            — new-prop path: alert delivered to Telegram
+                        # "filtered"        — new-prop path: reached delivery, filtered by dedup/reversal
+                        # "new_prop_failed" — new-prop path: passed all gates, delivery failed
                         _cgd = "ACCEPTED"
                     else:
                         _cgd = "REJECTED"
@@ -2307,7 +2311,10 @@ async def underdog_job(context) -> None:
     _persistence_ok = True
     try:
         bridged = await db.sync_underdog_snapshots_to_prop_history(
-            limit=200, since_hours=4
+            limit=6000, since_hours=0.17   # ~10 min window covers the current cycle's rows
+            # limit=200 / since_hours=4 previously caused only ~200 of 5,210 active props
+            # to be synced per cycle (oldest-first ordering always hit the same small batch).
+            # 0.17 h ≈ 10 min catches the current cycle's saves; limit=6000 covers all props.
         )
         if bridged:
             logger.debug("underdog_job: bridged %d rows to PropLineHistory", bridged)

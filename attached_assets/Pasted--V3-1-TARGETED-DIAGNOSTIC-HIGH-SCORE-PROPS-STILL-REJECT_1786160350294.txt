@@ -1,0 +1,269 @@
+🚨 V3.1 TARGETED DIAGNOSTIC — HIGH-SCORE PROPS STILL REJECTED
+
+IMPORTANT — CREDIT / RESOURCE PROTECTION
+
+Do NOT burn unnecessary credits.
+
+Before changing anything:
+
+* Review the current code/state first.
+* Trace the exact existing logic.
+* Do not explore unrelated systems.
+* Do not rewrite or refactor working code.
+
+SCOPE PROTECTION:
+
+❌ Do NOT change the scoring engine
+❌ Do NOT change scoring thresholds
+❌ Do NOT change database structure
+❌ Do NOT change the Underdog pipeline architecture
+❌ Do NOT add providers
+❌ Do NOT redesign alert logic
+❌ Do NOT change MLB/NFL rules
+❌ Do NOT start Phase 2 features
+
+This is a TARGETED DIAGNOSTIC/FIX only.
+
+━━━━━━━━━━━━━━━━━━
+
+CURRENT EVIDENCE
+
+Latest /funnel 48:
+
+Scanned: 260,695
+Accepted: 0
+Watchlist: 7,718
+Rejected: 252,977
+
+Highest-scoring near-misses:
+
+• Caty McNally — Breakpoints Won
+87/100 [S] — decision_pass
+
+• Yandy Díaz — Fantasy Points
+87/100 [S] — cold_start
+
+• Smash — Kills on Maps 1+2
+85/100 [S] — decision_pass
+
+• Alanna Smith — Rebounds
+80/100 [S] — qualified
+
+Latest /picks:
+
+🎯 Actionable Player Prop Picks
+No qualifying player props available right now.
+
+This means the bot IS finding high-scoring opportunities, but they are still not reaching the actionable-pick/Telegram path.
+
+━━━━━━━━━━━━━━━━━━
+
+GOAL
+
+Find the EXACT reason these high-score candidates are still being rejected.
+
+Do NOT assume the cause.
+
+Trace the existing pipeline:
+
+Underdog
+↓
+Parser
+↓
+Scoring
+↓
+Tier / Recommendation
+↓
+Validation
+↓
+Actionable Pick Gate
+↓
+Storage
+↓
+Telegram
+
+━━━━━━━━━━━━━━━━━━
+
+CHECK #1 — DECISION_PASS
+
+Investigate why:
+
+87/S Caty McNally → decision_pass
+85/S Smash → decision_pass
+
+Verify the actual code that assigns:
+
+* recommendation
+* decision_pass
+* S+/S/A+/A/B/C
+* actionable eligibility
+
+Determine whether the high score is being incorrectly classified as decision_pass OR whether another downstream gate is producing that label.
+
+IMPORTANT:
+
+Do NOT simply change decision_pass to allow high scores.
+
+First identify the actual classification logic and prove what is wrong.
+
+━━━━━━━━━━━━━━━━━━
+
+CHECK #2 — COLD_START
+
+Investigate:
+
+Yandy Díaz
+87/S
+cold_start
+
+Determine:
+
+* Why is this prop still marked cold_start?
+* Is it genuinely in baseline/cold-start state?
+* Is cold_start preventing actionable routing?
+* Is the cold_start flag persistent when it should no longer be?
+
+Do NOT remove cold-start protections unless the code proves they are incorrectly persisting.
+
+━━━━━━━━━━━━━━━━━━
+
+CHECK #3 — QUALIFIED BUT NOT ACTIONABLE
+
+Investigate:
+
+Alanna Smith
+80/S
+qualified
+
+Determine exactly which downstream gate prevents:
+
+qualified
+↓
+actionable
+↓
+Telegram
+
+Check only existing gates:
+
+* sport eligibility
+* event/game validation
+* tier gate
+* confidence gate
+* bet quality gate
+* direction
+* game-live protection
+* line movement/re-entry requirements
+* duplicate/reversal protection
+* alert delivery gate
+
+Do not modify these gates unless a specific bug is identified.
+
+━━━━━━━━━━━━━━━━━━
+
+CHECK #4 — /FUNNEL VS /PICKS
+
+Explain why:
+
+/funnel:
+High-score candidates exist
+
+BUT
+
+/picks:
+No qualifying player props
+
+Determine whether this is:
+
+A) classification problem
+B) routing/gating problem
+C) storage/retrieval problem
+D) display/filter problem
+
+Do not guess. Trace one real candidate end-to-end.
+
+━━━━━━━━━━━━━━━━━━
+
+CHECK #5 — TELEGRAM
+
+Do NOT send test spam.
+
+Verify whether an eligible candidate would actually reach:
+
+🎯 ACTIONABLE BET PICK
+
+Telegram should continue receiving ONLY actionable picks.
+
+📈 MARKET MOVE DETECTED must remain internal.
+
+━━━━━━━━━━━━━━━━━━
+
+REQUIRED IMPLEMENTATION RULE
+
+If you identify an actual bug:
+
+1. Make the SMALLEST possible targeted fix.
+2. Reuse existing infrastructure.
+3. Do not rewrite surrounding systems.
+4. Add regression tests specifically for the bug.
+5. Run the relevant tests.
+6. Then run the full test suite ONCE.
+7. Restart the bot once.
+8. Verify the live funnel and /picks.
+
+If no bug is found, DO NOT change code.
+
+━━━━━━━━━━━━━━━━━━
+
+ACCEPTANCE CRITERIA
+
+We need to prove:
+
+✅ High-score S-tier props are not incorrectly classified as decision_pass.
+
+✅ Cold-start only blocks genuine baseline data.
+
+✅ Qualified props can reach the actionable gate when all existing requirements are satisfied.
+
+✅ /funnel and /picks are consistent.
+
+✅ Eligible actionable picks are stored correctly.
+
+✅ Telegram can receive a valid 🎯 ACTIONABLE BET PICK.
+
+✅ 📈 MARKET MOVE DETECTED remains internal only.
+
+✅ No alert spam.
+
+✅ No scoring changes.
+
+✅ No threshold changes.
+
+✅ No database changes.
+
+✅ No provider additions.
+
+✅ No architecture changes.
+
+━━━━━━━━━━━━━━━━━━
+
+FINAL REPORT
+
+Return:
+
+1. Exact root cause
+2. Candidate traced end-to-end
+3. Exact gate where it stopped
+4. Files changed
+5. Tests added
+6. Full test count
+7. Startup status
+8. /funnel result
+9. /picks result
+10. Whether Telegram actionable delivery was verified
+11. Confirmation that scoring/thresholds/database/provider architecture were NOT changed
+
+STOP after this task.
+
+Do NOT begin Phase 2.
+Do NOT add features.
+Do NOT perform unrelated cleanup.
