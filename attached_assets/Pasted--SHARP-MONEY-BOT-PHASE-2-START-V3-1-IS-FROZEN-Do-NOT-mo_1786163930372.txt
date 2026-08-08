@@ -1,0 +1,90 @@
+🚀 SHARP MONEY BOT — PHASE 2 START
+
+V3.1 IS FROZEN.
+Do NOT modify the frozen V3.1 behavior except for the specific Phase 2 task being investigated.
+
+IMPORTANT:
+We are low on credits. Work diagnostically first.
+Do not burn credits on broad exploration or unnecessary rewrites.
+
+PHASE 2 PRIORITIES:
+
+#112 🔴 CONFIRM ACTIONABLE PICKS ACTUALLY REACH TELEGRAM
+#113 🔴 STOP S-TIER PICKS FROM BEING SILENTLY REJECTED AFTER QUALIFICATION
+#114 🔴 MAKE BOT HEALTH ACCURATELY SHOW PROPS PROCESSED PER CYCLE
+#115 🔴 CLASSIFY RESTARTS: INTENTIONAL VS GENUINE CRASH
+#116 🟡 VALIDATE OUTCOMES / GRADING AFTER REAL GAMES RESOLVE
+
+START WITH #112 ONLY.
+
+TASK #112 — TELEGRAM DELIVERY TRACE
+
+Before changing code, trace the complete path for a currently qualified actionable Underdog prop:
+
+Underdog prop
+→ scoring
+→ qualification
+→ direction
+→ actionable decision
+→ PropOpportunityLog
+→ deliver_underdog()
+→ Telegram send
+→ alert_sent / alert_sent_at
+→ /stats
+→ /alerts
+→ /grade
+
+We already have evidence that:
+
+* /picks showed actionable props
+* /grade showed Stored: 1 / Pending: 1
+* /stats showed Today’s Actionable Picks
+* /alerts showed NO player prop alerts sent
+* Bot status showed Alerts sent: 0
+
+That inconsistency is the target.
+
+DO NOT assume the pick was sent just because it was stored.
+DO NOT assume Telegram delivery succeeded because the database record exists.
+
+Determine exactly where the path breaks.
+
+Check specifically:
+
+1. What condition causes deliver_underdog() to execute?
+2. What does deliver_underdog() return on the affected pick?
+3. Is Telegram actually called?
+4. Does Telegram return success/failure?
+5. Is PropOpportunityLog.alert_sent updated only after confirmed Telegram success?
+6. Why can /grade show Pending: 1 while /alerts says no alerts sent?
+7. Why can /stats report an actionable pick while Bot Health says Alerts sent: 0?
+8. Verify whether the “Alerts sent” health counter is measuring Telegram deliveries or something else.
+9. Verify deduplication / processed-key logic is not suppressing delivery after the pick is created.
+10. Check all three actionable delivery paths:
+
+* new prop
+* line change
+* standing/re-evaluation
+
+IMPORTANT:
+Do NOT fix anything yet unless the root cause is confirmed.
+
+After tracing, report:
+
+* Exact root cause
+* Exact file + line
+* Which counter/table/path is wrong
+* Whether Telegram delivery itself is working
+* Minimal fix required
+* Tests that should be added
+
+Then STOP.
+
+Do not implement #113/#114/#115/#116 yet.
+
+No architecture changes.
+No database schema changes.
+No scoring changes.
+No threshold changes.
+No provider additions.
+No broad refactor.
