@@ -225,7 +225,6 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             f"Uptime:           {_uptime_str()}",
             f"Heartbeat:        {ht.heartbeat_age_str()}",
             f"Last startup:     {_html.escape(ht.last_startup() or '—')}",
-            f"Restart reason:   {reason_label}",
             f"Previous session: {_html.escape(prev_session)}",
             f"Crash detected:   {'Yes ⚠️' if crash else 'No ✅'}",
             "",
@@ -1529,6 +1528,20 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             logger.debug(
                 "cmd_picks: skipping %s/%s — MLB UNDER blocked from user-facing output",
                 plh.player_name, plh.stat_type,
+            )
+            continue
+        # Confidence floor — proxy_match_confidence < 55 means no reliable market
+        # signal (displayed tier would be "—"); these are not actionable picks.
+        # Also gate on _live_conf from the recommendation snapshot if available.
+        _display_conf = comp.proxy_match_confidence if comp else 0
+        _live_r2, _live_conf2 = _rec_map.get(
+            (plh.player_name, plh.sport, plh.stat_type), (None, None)
+        )
+        _eff_conf = _live_conf2 if _live_conf2 is not None else _display_conf
+        if _eff_conf < 55:
+            logger.debug(
+                "cmd_picks: skipping %s/%s — eff conf %d < 55 (Tier —, not actionable)",
+                plh.player_name, plh.stat_type, _eff_conf,
             )
             continue
         if _key not in _sport_groups:

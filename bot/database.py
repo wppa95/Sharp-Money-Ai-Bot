@@ -863,8 +863,11 @@ class Database:
                     PropLineHistory.provider   == "Underdog",
                     PropLineHistory.fetched_at >= cutoff,
                     PropLineHistory.removed.isnot(True),
-                    # Exclude PASS-tier props from /picks (unscored rows have NULL, shown)
-                    PropLineHistory.score_tier != "PASS",
+                    # Only S/A-tier scored props — unscored (NULL), PASS-tier,
+                    # and B-tier rows are excluded from /picks.  Previously the
+                    # filter was `!= "PASS"` which allowed NULL-tier (unscored)
+                    # props through, causing low-confidence rows to appear.
+                    PropLineHistory.score_tier.in_(["S", "A"]),
                 )
                 .group_by(
                     PropLineHistory.player_name,
@@ -1222,12 +1225,29 @@ class Database:
             return result.scalar() or 0
 
     async def count_actionable_pick_records(self) -> int:
-        """Total 🎯 ACTIONABLE BET PICK records ever delivered to Telegram."""
+        """Total 🎯 ACTIONABLE BET PICK records ever delivered to Telegram.
+
+        Counts PropOpportunityLog rows where:
+          - alert_sent=True   (Telegram Bot API accepted the send_message call)
+          - recommendation in (OVER, UNDER)  (actionable direction — same filter
+            as get_alerted_opportunity_log so the "shown" and "all-time" counts
+            are drawn from the same universe)
+
+        Note: one row per (external_id, stat_type) due to the upsert model.
+        A row whose recommendation was later overwritten (e.g. OVER → PASS) after
+        alerting would otherwise inflate this count.  The OVER/UNDER filter keeps
+        both counts consistent.
+
+        "sent" = Telegram Bot API accepted the send; no message-ID receipt stored.
+        """
         async with self.session() as s:
             result = await s.execute(
                 select(func.count())
                 .select_from(PropOpportunityLog)
-                .where(PropOpportunityLog.alert_sent == True)   # noqa: E712
+                .where(
+                    PropOpportunityLog.alert_sent == True,          # noqa: E712
+                    PropOpportunityLog.recommendation.in_(["OVER", "UNDER"]),
+                )
             )
             return result.scalar() or 0
 
@@ -2781,8 +2801,32 @@ class Database:
             )
             counts = {r.gate_decision: r.n for r in cnt_rows.all()}
 
-        # Recent rejections — highest score first so near-misses surface first
+        # Recent rejections — highest score first so near-misses surface first.
+        # Props that were ACCEPTED at any point in the window are excluded: the
+        # same prop can accumulate multiple PropCandidateLog rows across scan
+        # cycles (INSERT, not upsert), so a prop rejected in one cycle but
+        # accepted in another would otherwise appear as a Near-Miss even though
+        # it was correctly handled.
         async with self.session() as s:
+            # Build set of (player_name, sport, stat_type) that had ANY ACCEPTED
+            # row in the window — these are not true near-misses.
+            acc_rows = await s.execute(
+                select(
+                    PropCandidateLog.player_name,
+                    PropCandidateLog.sport,
+                    PropCandidateLog.stat_type,
+                )
+                .where(
+                    PropCandidateLog.scan_ts >= cutoff,
+                    PropCandidateLog.gate_decision == "ACCEPTED",
+                )
+                .distinct()
+            )
+            _accepted_keys: set = {
+                (r.player_name, r.sport, r.stat_type)
+                for r in acc_rows.all()
+            }
+
             rej_rows = await s.execute(
                 select(
                     PropCandidateLog.player_name,
@@ -2797,9 +2841,22 @@ class Database:
                     PropCandidateLog.gate_decision == "REJECTED",
                 )
                 .order_by(desc(PropCandidateLog.score_total))
-                .limit(8)
+                .limit(20)  # overfetch to allow filtering before returning 8
             )
-            top_rej = [dict(r._mapping) for r in rej_rows.all()]
+            _all_rej = [dict(r._mapping) for r in rej_rows.all()]
+
+        # Filter out any prop that was also ACCEPTED in the window, then deduplicate
+        # by (player_name, sport, stat_type) keeping the highest-scoring REJECTED row.
+        _seen_keys: set = set()
+        top_rej: list = []
+        for _r in _all_rej:
+            _k = (_r.get("player_name"), _r.get("sport"), _r.get("stat_type"))
+            if _k in _accepted_keys or _k in _seen_keys:
+                continue
+            _seen_keys.add(_k)
+            top_rej.append(_r)
+            if len(top_rej) >= 8:
+                break
 
         # Per-sport breakdown — sport × gate_decision counts, aggregated in Python
         async with self.session() as s:

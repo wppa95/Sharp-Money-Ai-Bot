@@ -1,0 +1,379 @@
+SHARP MONEY BOT V3.2 — FINAL CONSOLIDATED CLEANUP / VALIDATION PASS
+
+🔐 CREDENTIAL / CREDIT PROTECTION — READ FIRST
+
+We are limited on API credits.
+
+DO NOT burn API credits unnecessarily.
+
+Do NOT:
+
+* Change ODDS_API_KEY
+* Enable OddsAPI polling
+* Enable FanDuel
+* Enable DraftKings
+* Add sportsbook providers
+* Make unnecessary external API calls
+* Expose credentials/secrets anywhere
+* Rewrite the bot
+* Rewrite the scoring engine
+* Rewrite the Underdog pipeline
+* Change thresholds
+* Lower qualification requirements
+* Promote all Near-Misses
+
+Use existing DB data, logs, fixtures, and mocks wherever possible.
+
+This is one coordinated cleanup/diagnostic pass.
+
+━━━━━━━━━━━━━━━━━━
+🚨 PRIORITY 1 — TELEGRAM ALERT DISCREPANCY
+━━━━━━━━━━━━━━━━━━
+
+THIS IS THE HIGHEST PRIORITY.
+
+The bot currently reports:
+
+Alerts today: 11
+All-time: 11
+
+/alerts:
+
+8 shown · 11 all-time sent
+
+But from the user’s actual Telegram experience, only approximately 1–2 actionable notifications have actually been seen.
+
+This discrepancy MUST be investigated before anything else.
+
+Do NOT assume “alert_sent=True” means the user actually received the message.
+
+Trace the complete path:
+
+QUALIFIED CANDIDATE
+→ FINAL ACTIONABLE GATE
+→ ALERT CREATION
+→ broadcast_alert()
+→ Telegram Bot API send_message()
+→ alert_sent=True
+→ stored alert record
+→ /alerts count
+
+Determine exactly:
+
+1. How many actual Telegram send_message attempts occurred.
+2. How many returned successfully.
+3. How many raised Telegram errors.
+4. Whether alert_sent=True is being set before or after the Telegram API call.
+5. Whether multiple database records can be marked alert_sent=True for a single actual Telegram message.
+6. Whether the all-time count is counting actual sends or merely database opportunities.
+7. Whether alerts are being sent to the correct configured chat/group.
+8. Whether the alert is being suppressed after qualification but before Telegram.
+9. Whether deduplication is incorrectly suppressing alerts.
+10. Whether Telegram delivery is failing silently.
+11. Whether the bot is sending alerts to a different destination than expected.
+12. Whether “11 sent” represents 11 successful Bot API send_message calls or merely 11 alert records.
+
+IMPORTANT:
+
+Do NOT build a fake delivery confirmation system.
+
+Telegram does not provide a simple “user read this” receipt.
+
+We only need to establish:
+
+“Telegram Bot API accepted X send requests”
+
+versus
+
+“X alert records were created.”
+
+These MUST NOT be presented as the same thing unless they are actually the same.
+
+If the code already stores sufficient information to establish successful API sends, use that existing evidence.
+
+If it does NOT, identify the exact observability gap.
+
+Do NOT add unnecessary API calls.
+
+Do NOT spam Telegram during testing.
+
+Use mocks/fakes for send_message tests.
+
+Add focused tests proving the alert counter corresponds to the correct event.
+
+━━━━━━━━━━━━━━━━━━
+🚨 PRIORITY 2 — NEAR-MISS / QUALIFICATION MISMATCH
+━━━━━━━━━━━━━━━━━━
+
+SECOND HIGHEST PRIORITY.
+
+Current /funnel 48 showed:
+
+Yandy Díaz — Fantasy Points (MLB)
+87/100 [S] cold_start
+
+Sandy Alcantara — Fantasy Points (MLB)
+87/100 [S] mlb_under_blocked (S)
+
+CoD: CLEANX — Fantasy Points on Games 1-3 (ESPORTS)
+85/100 [S] decision_pass
+
+rx — Kills on Maps 1+2 (CS)
+85/100 [S] qualified
+
+None Quad — Kills on Maps 1+2 (LOL)
+83/100 [S] qualified
+
+MahaR — Kills on Maps 1+2 (CS)
+82/100 [S] cold_start
+
+These are appearing in:
+
+Near-Misses (highest-scoring rejected)
+
+But several reasons indicate intermediate qualification rather than final rejection:
+
+* qualified
+* decision_pass
+* cold_start
+
+Trace ONE exact candidate through the entire path, preferably:
+
+rx — CS — Kills on Maps 1+2 — 85/S
+
+Then trace:
+
+SCORE
+→ SPORT TIER
+→ VALIDATION
+→ DIRECTION
+→ QUALITY
+→ FINAL GATE
+→ CORRELATION/DEDUP
+→ ALERT CREATION
+→ STORED PICK
+→ TELEGRAM
+
+Also inspect:
+
+None Quad — LOL — Kills on Maps 1+2 — 83/S
+
+Determine exactly where each candidate stops.
+
+Answer specifically:
+
+1. Is “qualified” an intermediate gate or final actionable qualification?
+2. Can gate_decision=ACCEPTED still appear in the Near-Miss query?
+3. Can cold_start S/A candidates be displayed as rejected even though they are not finally rejected?
+4. Is decision_pass being recorded before a later gate rejects the prop?
+5. If a later gate rejects it, is the actual final rejection reason preserved?
+6. Are qualified candidates being converted into PropOpportunityLog records?
+7. Are they being marked alert_sent?
+8. Are they being filtered by dedup?
+9. Are they reaching Telegram alert creation?
+10. Are they being blocked because of sport-tier policy?
+11. Are they being blocked because of BQ/confidence/stars?
+12. Are they being blocked because the event is invalid/inactive?
+13. Are they simply being misreported by /funnel?
+
+DO NOT blindly promote them.
+
+The goal is to make the funnel accurately describe what happened.
+
+A candidate that passes the qualification gate but fails a later actionable gate should NOT appear as though it failed the qualification gate.
+
+A candidate that truly fails should remain rejected with the actual rejection reason.
+
+Fix the actual source of the mismatch only after tracing it.
+
+Add focused regression tests.
+
+━━━━━━━━━━━━━━━━━━
+🔴 PRIORITY 3 — /PICKS NON-ACTIONABLE PROPS
+━━━━━━━━━━━━━━━━━━
+
+Current /picks showed:
+
+None Jemkin
+VAL
+Kills on Maps 1+2
+31.5
+OVER
+Confidence 30/100
+1★
+Tier —
+Higher Difficulty
+
+This should NOT appear in /picks.
+
+Trace the /picks query/filter.
+
+Require the existing appropriate actionable conditions:
+
+* Valid active/upcoming event
+* Valid player/market
+* Clear direction
+* Required validation
+* Required confidence
+* Required stars
+* Appropriate tier
+* Existing final quality gates
+* Existing sport-specific policy
+* Existing dedup/correlation rules
+
+Do NOT lower thresholds.
+
+Do NOT change scoring.
+
+Add regression tests proving a 30-confidence / 1-star / un-tiered prop cannot appear.
+
+━━━━━━━━━━━━━━━━━━
+🟡 PRIORITY 4 — /HEALTH DISPLAY CLEANUP
+━━━━━━━━━━━━━━━━━━
+
+Remove ONLY this user-facing line:
+
+Restart reason: ⚠️ Unexpected exit (SIGKILL / OOM / hard crash)
+
+Keep all underlying restart detection and health tracking intact.
+
+Do NOT remove:
+
+* Heartbeat
+* Last startup
+* Background job health
+* Provider health
+* Pipeline health
+* Historical recovery
+* Persistent state
+
+The previous stale-recovery fix must remain intact.
+
+Recent recovery should still display normally.
+
+Old recovery should still display as:
+
+ℹ️ Last recovery: … (historical — no recent failures)
+
+Add/update focused tests.
+
+━━━━━━━━━━━━━━━━━━
+⏰ USER-FACING TIME FORMAT
+━━━━━━━━━━━━━━━━━━
+
+Keep the existing 12-hour AM/PM format.
+
+Example:
+
+Aug 08 · 5:05 PM
+
+Do NOT revert to military/24-hour time.
+
+Internal UTC timestamps remain unchanged.
+
+━━━━━━━━━━━━━━━━━━
+💾 PERSISTENT MEMORY
+━━━━━━━━━━━━━━━━━━
+
+The bot must resume from its existing state after restart.
+
+Verify existing persistence for:
+
+* PropLineHistory
+* PropOpportunityLog
+* Stored picks
+* Pending picks
+* Resolved picks
+* Qualification history
+* Scoring history
+* CLV seeds
+* CLV records
+* Alert history
+* Alert dedup state
+
+Do NOT create unnecessary tables.
+
+Do NOT delete/reset records.
+
+The existing _prop_market_alerted restoration from DB must remain intact.
+
+━━━━━━━━━━━━━━━━━━
+🧪 VALIDATION
+━━━━━━━━━━━━━━━━━━
+
+After the fixes:
+
+1. Run focused tests.
+2. Run FULL test suite.
+3. Confirm zero regressions.
+4. Confirm no credentials/secrets appear anywhere.
+5. Confirm no unnecessary external API calls were made.
+6. Confirm OddsAPI/FanDuel/DraftKings remain disabled/not polled.
+7. Confirm Underdog remains PRIMARY.
+
+Expected current baseline:
+
+3,563 passed, 0 failed.
+
+Do not declare success if tests fail.
+
+━━━━━━━━━━━━━━━━━━
+🚫 PHASE BOUNDARY
+━━━━━━━━━━━━━━━━━━
+
+DO NOT start sportsbook polling during this pass.
+
+Do NOT:
+
+* Enable OddsAPI
+* Enable FanDuel
+* Enable DraftKings
+* Change OddsAPI key
+* Restore sportsbook ML/totals/spreads
+* Add providers
+
+That is a separate future stage.
+
+━━━━━━━━━━━━━━━━━━
+📋 FINAL REPORT
+━━━━━━━━━━━━━━━━━━
+
+Report:
+
+* Files changed
+* Priority 1 Telegram diagnosis/fix
+* Priority 2 Near-Miss diagnosis/fix
+* Priority 3 /picks diagnosis/fix
+* Priority 4 /health change
+* Focused tests
+* Full suite
+* Alert-count explanation
+* Persistence/restart verification
+* Credential/credit safety
+* Remaining known issues
+
+Do NOT simply say “done.”
+
+Explain exactly where each issue was found and what was changed.
+
+━━━━━━━━━━━━━━━━━━
+🧊 FREEZE AT THE END
+━━━━━━━━━━━━━━━━━━
+
+After all fixes pass testing and verification:
+
+FREEZE V3.2.
+
+Do NOT make additional changes.
+
+Do NOT lower thresholds.
+
+Do NOT rewrite scoring.
+
+Do NOT rewrite Underdog.
+
+Do NOT enable sportsbook polling.
+
+Do NOT change credentials.
+
+STOP after the final report.

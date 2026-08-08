@@ -328,9 +328,14 @@ class TestRegressionGuards(unittest.TestCase):
         output = _run_cmd_health(self.ht)
         self.assertIn("Underdog Pipeline", output)
 
-    def test_restart_reason_section_still_present(self):
+    def test_restart_reason_section_removed(self):
+        """P4 cleanup: 'Restart reason:' display line intentionally removed from /health.
+
+        Underlying detection (was_unexpected_exit, last_startup_reason, crash_cause_label)
+        is preserved in health.py — only the user-facing display line was removed.
+        """
         output = _run_cmd_health(self.ht)
-        self.assertIn("Restart reason", output)
+        self.assertNotIn("Restart reason", output)
 
     def test_restarts_command_not_present(self):
         """cmd_restarts must remain removed."""
