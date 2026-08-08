@@ -405,6 +405,11 @@ class PropOpportunityLog(Base):
     watchlist_state    = Column(String(16),  nullable=True)               # Qualified|Watchlist|Rejected|Removed
     settlement_source  = Column(String(64),  nullable=True)               # "auto_grade"|"manual"|None
     manual_opinion     = Column(String(8),   nullable=True)               # "OVER"|"UNDER"|"PASS"|None
+    # Telegram actionable pick tracking — set True only when the 🎯 ACTIONABLE BET PICK
+    # alert was successfully delivered to Telegram.  Props that were evaluated but not
+    # sent (PASS, blocked, filtered, market-move-only) remain False.
+    alert_sent         = Column(Boolean,     nullable=False, default=False)
+    alert_sent_at      = Column(DateTime,    nullable=True)               # UTC timestamp of delivery
 
     __table_args__ = (
         UniqueConstraint(
@@ -584,6 +589,7 @@ class Database:
         await self._migrate_prop_opportunity_log()
         await self._migrate_prop_opportunity_log_v2()
         await self._migrate_prop_opportunity_log_v3()
+        await self._migrate_prop_opportunity_log_v4()
         # player_risk_records is created by create_all (new table); no column migration needed
         logger.info("Database initialised at %s", self._url)
 
@@ -2537,6 +2543,19 @@ class Database:
                     pass  # column already exists
         logger.info("_migrate_prop_opportunity_log_v3: Phase 4 columns ensured")
 
+    async def _migrate_prop_opportunity_log_v4(self) -> None:
+        """Add Telegram actionable pick tracking columns to prop_opportunity_log (idempotent)."""
+        async with self._engine.begin() as conn:
+            for col_sql in [
+                "ALTER TABLE prop_opportunity_log ADD COLUMN alert_sent BOOLEAN NOT NULL DEFAULT 0",
+                "ALTER TABLE prop_opportunity_log ADD COLUMN alert_sent_at DATETIME",
+            ]:
+                try:
+                    await conn.execute(text(col_sql))
+                except Exception:
+                    pass  # column already exists
+        logger.info("_migrate_prop_opportunity_log_v4: Telegram pick tracking columns ensured")
+
     async def log_prop_opportunity(
         self,
         *,
@@ -2836,6 +2855,90 @@ class Database:
                 .values(**values)
             )
             await s.commit()
+
+    async def mark_opportunity_alert_sent(
+        self,
+        external_id: str,
+        stat_type:   str,
+    ) -> None:
+        """
+        Mark an existing PropOpportunityLog row as a delivered Telegram actionable pick.
+
+        Called immediately after ``deliver_underdog()`` returns ``sent=True`` for a
+        🎯 ACTIONABLE BET PICK alert.  Only those rows end up with alert_sent=True —
+        📈 MARKET MOVE, blocked/filtered/PASS props, and removals are never marked.
+
+        The row must already exist (created by ``log_prop_opportunity``).  If it
+        doesn't exist yet this is a no-op (which is safe — the try/except in the
+        engine prevents it from blocking the alert flow).
+        """
+        from sqlalchemy import update as _sa_update
+        async with self.session() as s:
+            await s.execute(
+                _sa_update(PropOpportunityLog)
+                .where(
+                    PropOpportunityLog.external_id == external_id,
+                    PropOpportunityLog.stat_type   == stat_type,
+                )
+                .values(
+                    alert_sent    = True,
+                    alert_sent_at = datetime.utcnow(),
+                )
+            )
+            await s.commit()
+
+    async def get_telegram_pick_performance(self) -> "dict":
+        """
+        Return HIT/MISS/PUSH/PENDING counts for Telegram actionable picks only
+        (``alert_sent=True``, recommendation in OVER|UNDER).
+
+        Used by /rollups to show 🎯 TELEGRAM PICKS performance separately from the
+        broader 'all evaluated props' rollup.
+
+        Returns
+        -------
+        dict with keys:
+          total     — total actionable picks sent (OVER + UNDER)
+          hit       — count of HIT results
+          miss      — count of MISS results
+          push      — count of PUSH results
+          pending   — count still PENDING (or VOID/CANCELLED)
+          graded    — hit + miss + push
+          hit_rate  — float (0.0–100.0) based on graded picks only
+        """
+        async with self.session() as s:
+            rows = await s.execute(
+                select(PropOpportunityLog.result, func.count(PropOpportunityLog.id))
+                .where(
+                    PropOpportunityLog.alert_sent       == True,    # noqa: E712
+                    PropOpportunityLog.recommendation.in_(["OVER", "UNDER"]),
+                )
+                .group_by(PropOpportunityLog.result)
+            )
+            buckets: dict = {}
+            for result_val, n in rows.all():
+                buckets[result_val] = buckets.get(result_val, 0) + n
+
+        hit     = buckets.get("HIT",  0)
+        miss    = buckets.get("MISS", 0)
+        push    = buckets.get("PUSH", 0)
+        # Treat VOID/CANCELLED/INJURY_VOID/GAME_INTERRUPTED as still-pending for display
+        pending = sum(
+            n for k, n in buckets.items()
+            if k not in ("HIT", "MISS", "PUSH")
+        )
+        graded  = hit + miss + push
+        total   = graded + pending
+        hit_rate = round(hit / graded * 100, 1) if graded > 0 else 0.0
+        return {
+            "total":    total,
+            "hit":      hit,
+            "miss":     miss,
+            "push":     push,
+            "pending":  pending,
+            "graded":   graded,
+            "hit_rate": hit_rate,
+        }
 
     async def get_learning_rollups(self) -> "dict":
         """

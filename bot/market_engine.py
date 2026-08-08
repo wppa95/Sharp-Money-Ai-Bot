@@ -1282,6 +1282,13 @@ async def underdog_job(context) -> None:
                     )
                     if ud_result.sent:
                         _n_new_prop_sent += 1
+                        # Mark as Telegram actionable pick so performance tracking
+                        # separates alerted picks from all evaluated props.
+                        try:
+                            _np_ext_id = getattr(snap, "external_id", None) or getattr(snap, "id", None) or ""
+                            await db.mark_opportunity_alert_sent(_np_ext_id, stat_type)
+                        except Exception:
+                            pass  # never block alert flow
                     elif ud_result.filtered:
                         logger.debug(
                             "Underdog new-prop filtered: %s | %s | %s",
@@ -1755,6 +1762,12 @@ async def underdog_job(context) -> None:
             # Queue lifecycle transitions — applied after bridge so PropLineHistory rows exist
             if ud_result.sent and not is_removed:
                 _lifecycle_alerted.append((player, snap.sport or "UNKNOWN", stat_type))
+                # Mark as Telegram actionable pick for performance tracking (not removals).
+                try:
+                    _lc_ext_id = getattr(snap, "external_id", None) or getattr(snap, "id", None) or ""
+                    await db.mark_opportunity_alert_sent(_lc_ext_id, stat_type)
+                except Exception:
+                    pass  # never block alert flow
             # Removals: track lifecycle independently of alert sent status (no Telegram alert)
             if is_removed and prev_record is not None:
                 _lifecycle_removed.append((player, snap.sport or "UNKNOWN", stat_type))
@@ -2036,6 +2049,12 @@ async def underdog_job(context) -> None:
                 )
                 if _sresult.sent:
                     _n_standing_sent += 1
+                    # Mark as Telegram actionable pick for performance tracking.
+                    try:
+                        _s_ext_id = getattr(_ssnap, "external_id", None) or getattr(_ssnap, "id", None) or ""
+                        await db.mark_opportunity_alert_sent(_s_ext_id, _st)
+                    except Exception:
+                        pass  # never block alert flow
                     logger.info(
                         "Underdog standing alert sent: %s | %s | %s | score=%d",
                         _sp, _st, _ssport, _sscore.total,

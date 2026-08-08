@@ -33,3 +33,4 @@
 - [Market-signal bypass (Gate 1)](market-signal-bypass.md) — score≥70 + |avg_vs_line_pct|≥2% produces OVER/UNDER pick when no game history; cold-start hit_rates=[] bug fixed (→None); C-tier tier_display added; 3090 tests Aug 2026.
 - [V3.1 stability pass](v31-stability-pass.md) — OOM fix: _MARKET_FIRST_ALERT TTL eviction, known_keys 60d filter, gc.collect, VmRSS measurement; state recovery: _init_state_from_db on cold start; 3090 tests Aug 2026.
 - [V3.1 cleanup pass — 5 gate fixes](v31-cleanup-pass.md) — BQ≥85 gate (MLB/NFL); relaxed non-strict stars/conf; _is_game_live_or_past helper (all 3 paths); ET time format; max_instances=1 explicit; 3129 tests Aug 2026.
+- [Telegram pick grading (alert_sent)](telegram-pick-grading.md) — alert_sent+alert_sent_at on PropOpportunityLog; mark_opportunity_alert_sent(); get_telegram_pick_performance(); 3 engine paths marked; /rollups updated; 3158 tests Aug 2026.

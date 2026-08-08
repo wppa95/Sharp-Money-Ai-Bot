@@ -1,0 +1,299 @@
+IMPORTANT:
+We are limited on credits. Do not burn credits unnecessarily.
+
+CREDIT / SCOPE RULE:
+
+Keep this task isolated and minimal.
+
+Do NOT:
+
+* Rewrite working systems
+* Refactor unrelated code
+* Rewrite the scoring engine
+* Rewrite the alert engine
+* Redesign the database
+* Add providers
+* Add moneylines/totals
+* Change MLB/NFL gates
+* Change other-sport gates
+* Change the 24/7 scanner
+* Change frozen V1.3 behavior unless explicitly required for this task
+
+Reuse existing infrastructure wherever possible.
+
+Only make the specific changes required by this task.
+
+==================================================
+POST-FREEZE TASK — SEPARATE TELEGRAM PICK GRADING
+
+V1.3 is now frozen.
+
+This is a small post-freeze hardening task.
+
+Currently the bot grades evaluated player props as:
+
+✅ HIT
+❌ MISS
+🟡 PUSH
+⏳ PENDING
+
+That grading infrastructure works.
+
+The missing piece is separating:
+
+ALL EVALUATED PROPS
+
+from:
+
+🎯 TELEGRAM ACTIONABLE BET PICKS
+
+We need to specifically track the results of actionable picks that were actually sent to Telegram.
+
+==================================================
+REQUIRED BEHAVIOR
+
+When a 🎯 ACTIONABLE BET PICK is successfully delivered:
+
+Mark/associate that PropOpportunityLog record as:
+
+alert_sent = TRUE
+
+or use an equivalent existing field/relationship if one already exists.
+
+Do NOT create duplicate opportunity records unnecessarily.
+
+Preserve the existing fields:
+
+* player
+* stat_type
+* line_value
+* game_time
+* recommendation
+* tier
+* confidence/bet quality
+* provider
+* event/game association
+* result
+* timestamps
+
+==================================================
+IMPORTANT DISTINCTION
+
+A prop being evaluated does NOT automatically mean it was a Telegram pick.
+
+Only mark alert_sent when the actionable alert was actually accepted/sent through the Telegram delivery path.
+
+Do NOT mark:
+
+* 📈 MARKET MOVE DETECTED
+* PASS
+* blocked picks
+* rejected picks
+* suppressed picks
+* internal-only intelligence
+
+as Telegram actionable picks.
+
+==================================================
+GRADING
+
+Keep the existing grading logic.
+
+Continue grading evaluated props normally.
+
+But add a separate way to identify:
+
+🎯 TELEGRAM ALERT PICKS
+
+The system must be able to answer:
+
+* How many Telegram actionable picks were sent?
+* How many HIT?
+* How many MISS?
+* How many PUSH?
+* How many are still PENDING?
+* What is the hit rate for Telegram picks only?
+
+Do NOT mix unrelated evaluated props into Telegram-pick performance totals.
+
+==================================================
+RESULT ASSOCIATION
+
+Make sure the final player result remains associated with the exact actionable pick that generated the alert.
+
+Example:
+
+Player: Alex Bregman
+Market: Hits
+Alert line: 0.5
+Direction: OVER
+Tier: S
+Bet Quality: 95
+Alert Sent: TRUE
+
+Final stat:
+1 hit
+
+Result:
+✅ HIT
+
+The result must remain tied to the exact line that generated the alert.
+
+Do NOT substitute a later market line.
+
+==================================================
+PERFORMANCE REPORTING
+
+Add a separate Telegram-actionable performance view to the existing reporting where appropriate.
+
+Example:
+
+🎯 TELEGRAM ACTIONABLE PICKS
+
+Total: 10
+✅ Hits: 7
+❌ Misses: 2
+🟡 Pushes: 1
+⏳ Pending: 0
+Hit Rate: 70%
+
+Keep the existing overall prop grading available separately.
+
+Do NOT replace the existing overall grading.
+
+==================================================
+SLIP TRACKING COMPATIBILITY
+
+Preserve the existing:
+
+SlipJournalLeg → PropOpportunityLog
+
+relationship.
+
+If a Telegram actionable pick is later used in a slip, the slip must still be able to reference the same opportunity record.
+
+Do not redesign the slip system.
+
+==================================================
+TESTS REQUIRED
+
+Add targeted tests proving:
+
+1. Evaluated prop that was NOT sent to Telegram:
+    alert_sent = FALSE
+2. Successful 🎯 actionable Telegram pick:
+    alert_sent = TRUE
+3. 📈 MARKET MOVE DETECTED:
+    alert_sent = FALSE
+4. Blocked/rejected pick:
+    alert_sent = FALSE
+5. Telegram pick grades HIT correctly.
+6. Telegram pick grades MISS correctly.
+7. Telegram pick grades PUSH correctly.
+8. Later line movement does NOT change the original pick line used for grading.
+9. Telegram-only performance totals exclude non-alerted props.
+10. Existing overall grading still works.
+11. Existing slip relationships still work.
+12. Pending Telegram picks remain PENDING until valid player-result data is available.
+
+==================================================
+DATA / DATABASE RULE
+
+Prefer reusing the existing PropOpportunityLog.
+
+If an alert_sent field can be added safely without redesigning the database, use it.
+
+If an existing relationship can accomplish the same thing cleanly, reuse it instead.
+
+Do NOT create a new grading architecture.
+
+Do NOT migrate or rewrite unrelated historical records unnecessarily.
+
+Existing evaluated props should remain valid.
+
+Existing results should not be lost.
+
+==================================================
+CREDIT / API USAGE
+
+Do not add unnecessary API calls.
+
+Do not create a new polling system.
+
+Reuse the existing player-result/stat providers and grading job.
+
+Do not increase scan frequency.
+
+Do not increase provider usage.
+
+Do not burn credits simply to test data that can be tested with mocked/simulated results.
+
+==================================================
+VERIFICATION
+
+After implementation:
+
+1. Run targeted tests.
+2. Run the full test suite.
+3. Verify existing tests remain green.
+4. Verify a simulated 🎯 Telegram actionable pick becomes alert_sent=TRUE.
+5. Verify a normal evaluated prop remains alert_sent=FALSE.
+6. Verify MARKET MOVE DETECTED remains internal-only.
+7. Verify HIT grading.
+8. Verify MISS grading.
+9. Verify PUSH grading.
+10. Verify original alerted line is preserved.
+11. Verify Telegram-only performance reporting.
+12. Verify overall grading still works.
+13. Verify SlipJournalLeg relationships.
+14. Verify pending behavior.
+15. Verify no unnecessary API/polling changes were introduced.
+16. Restart the bot only if necessary.
+
+==================================================
+DO NOT TOUCH FROZEN V1.3
+
+Do NOT change:
+
+* MLB/NFL S-Tier + 85 Bet Quality gate
+* Relaxed non-MLB/NFL gates
+* Game-live hard gate
+* ET time formatting
+* Scheduler max_instances=1
+* Moneylines
+* Totals
+* Underdog provider configuration
+* Telegram market-move suppression
+* Existing scoring/ranking logic
+* Existing OOM/crash protections
+
+These are frozen.
+
+==================================================
+FINAL REPORT
+
+Report:
+
+* Overall status
+* Files changed
+* Database/schema changes
+* Tests added
+* Full test result
+* Telegram alert tracking verification
+* HIT/MISS/PUSH verification
+* Telegram-only performance verification
+* Slip tracking verification
+* Pending-result verification
+* Any limitations
+* Confirmation that frozen V1.3 behavior was not changed
+
+Then STOP.
+
+Do not make additional feature changes without approval.
+
+NO REWRITE.
+NO FEATURE CREEP.
+NO MONEYLINE/TOTALS BUILD.
+NO NEW PROVIDERS.
+NO SCORING ENGINE CHANGES.
+NO UNNECESSARY CREDIT/API USAGE.

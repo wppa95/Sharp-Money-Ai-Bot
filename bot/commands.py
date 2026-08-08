@@ -452,14 +452,29 @@ async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             return
 
         rollups = await db.get_learning_rollups()
+        tg_perf = await db.get_telegram_pick_performance()
         total   = rollups.get("total_graded", 0)
 
+        # ── 🎯 Telegram actionable picks block (always shown first) ───────────
+        tg_lines = ["📊 <b>Learning Rollups</b>", "", "🎯 <b>TELEGRAM ACTIONABLE PICKS</b>"]
+        tg_total = tg_perf.get("total", 0)
+        if tg_total == 0:
+            tg_lines.append("  <i>No picks sent yet.</i>")
+        else:
+            tg_h    = tg_perf["hit"]
+            tg_m    = tg_perf["miss"]
+            tg_p    = tg_perf["push"]
+            tg_pend = tg_perf["pending"]
+            tg_hr   = tg_perf["hit_rate"]
+            tg_lines.append(f"  Total: <b>{tg_total}</b>")
+            tg_lines.append(f"  ✅ Hits: {tg_h}   ❌ Misses: {tg_m}   🟡 Pushes: {tg_p}   ⏳ Pending: {tg_pend}")
+            if tg_perf["graded"] > 0:
+                tg_lines.append(f"  Hit Rate: <b>{tg_hr}%</b>")
+        tg_lines.append("")
+
         if total == 0:
-            await update.message.reply_text(
-                "📊 <b>Learning Rollups</b>\n\n"
-                "<i>No graded plays yet — results are graded after game_time passes.</i>",
-                parse_mode=ParseMode.HTML,
-            )
+            tg_lines.append("<i>No overall graded plays yet — results are graded after game_time passes.</i>")
+            await update.message.reply_text("\n".join(tg_lines), parse_mode=ParseMode.HTML)
             return
 
         def _tier_row(k: str, v: dict) -> str:
@@ -467,8 +482,9 @@ async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             pct = v.get("win_pct", 0.0)
             return f"  <b>{k}:</b>  {w}W-{l}L-{p}P  ({pct:.1f}%)"
 
-        lines = [
-            "📊 <b>Learning Rollups</b>",
+        # Extend the Telegram-picks header block with the overall grading section.
+        lines = tg_lines + [
+            "<b>Overall Grading</b>",
             "",
             f"Total graded plays: <b>{total}</b>",
             "",
