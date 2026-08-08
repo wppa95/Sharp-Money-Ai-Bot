@@ -1,0 +1,188 @@
+FINAL VERIFICATION ONLY — DO NOT MAKE MORE CODE CHANGES.
+
+The five targeted fixes are reported complete:
+
+* 3129 tests passing
+* 34 new tests added
+* Bot restarted cleanly
+* MLB/NFL S-Tier + 85 Bet Quality gate implemented
+* Non-MLB/NFL gates relaxed
+* Game-live hard gate implemented
+* Telegram game time converted to ET
+* Underdog scheduler max_instances=1 explicitly configured
+* Moneylines OFF
+* Totals OFF
+
+Now perform the FINAL V1.3 verification/check-off pass.
+
+IMPORTANT:
+We are credit-limited.
+
+DO NOT:
+
+* Make additional feature changes
+* Refactor
+* Rewrite anything
+* Change the scoring engine
+* Build moneyline/totals
+* Add providers
+* Change the current MLB/NFL 85 + S-tier rule
+* Change the relaxed other-sport testing gates
+* Build new hit/miss/push tracking
+
+Only verify the current state.
+
+==================================================
+FINAL CHECK-OFF
+
+Review ALL 19 priorities from the V1.3 cleanup specification.
+
+For each priority, report exactly one:
+
+✅ COMPLETE + VERIFIED
+⚠️ PARTIAL / NEEDS VERIFICATION
+❌ OUTSTANDING
+⏸️ DEFERRED / OUT OF SCOPE
+
+Use evidence from the actual current code/config/tests/runtime.
+
+Specifically verify:
+
+1. MLB:
+    S-Tier ONLY + Bet Quality >=85
+2. NFL:
+    S-Tier ONLY + Bet Quality >=85
+3. Other sports:
+    Relaxed testing gates active
+4. 24/7 Underdog scanning active
+5. Live-game hard gate:
+    LIVE / IN_PROGRESS / FINAL / COMPLETED / CLOSED blocked
+    plus game-time fallback
+6. Telegram:
+    Only 🎯 ACTIONABLE BET PICK reaches users
+7. Game time:
+    Readable ET 12-hour format
+8. Line freshness:
+    Opening/current/previous line preserved
+9. Movement:
+    Previous → current direction correct
+10. Stat/line consistency
+11. Duplicate/reversal protection
+12. Moneylines:
+    OFF
+13. Totals:
+    OFF
+14. Funnel diagnostics
+15. Internal market intelligence
+16. Pipeline type safety
+17. Scheduler:
+    max_instances=1
+    misfire_grace_time configured
+18. OOM/crash stability
+19. No regressions
+
+==================================================
+HIT / MISS / PUSH TRACKING — VERIFY ONLY
+
+Before freeze, inspect the current code and determine whether automated result tracking already exists.
+
+Specifically verify whether the system currently has working logic/data storage for:
+
+* 🎯 Actionable pick created
+* Game/player/market association
+* Original alerted line
+* Direction (OVER/UNDER)
+* Game start time
+* Final result/stat
+* ✅ HIT
+* ❌ MISS
+* 🟡 PUSH
+
+Also verify whether the system can associate the final result back to the exact actionable pick that generated the alert.
+
+IMPORTANT:
+
+DO NOT IMPLEMENT OR MODIFY THIS FEATURE DURING THIS PASS.
+
+Only report:
+
+✅ Already implemented + verified
+
+⚠️ Partially implemented
+
+❌ Not implemented
+
+If it exists, identify the relevant files/modules/tests as evidence.
+
+If it does not exist, clearly state that it should be handled separately after V1.3 freeze.
+
+==================================================
+RUNTIME VERIFICATION
+
+Confirm:
+
+* Bot is currently running
+* Startup completed cleanly
+* Underdog provider healthy
+* Background jobs healthy
+* No active pipeline errors
+* No scheduler overlap errors
+* No unexpected restart currently occurring
+* Telegram delivery path is healthy
+
+==================================================
+TEST VERIFICATION
+
+Confirm:
+
+* Full test suite: 3129 passing
+* 34 new tests added
+* No failed tests
+* No skipped critical tests
+* Alex Bregman live-game regression passes
+* MLB/NFL 84 BQ blocks
+* MLB/NFL 85 BQ allows when S-tier
+* Non-S-tier MLB/NFL blocks
+* ET formatter tests pass
+* Scheduler max_instances test/config verification passes
+
+==================================================
+FREEZE DECISION
+
+If AND ONLY IF every required V1.3 cleanup item is verified:
+
+Report:
+
+🔒 V1.3 READY TO FREEZE
+
+If anything is not verified:
+
+DO NOT freeze.
+
+Instead report exactly what remains and STOP.
+
+Do not make another round of changes unless explicitly instructed.
+
+==================================================
+FINAL REPORT FORMAT
+
+Provide:
+
+1. Overall status
+2. 19-priority check-off table
+3. Hit/miss/push tracking status
+4. Tests
+5. Runtime health
+6. Telegram verification
+7. MLB/NFL gate verification
+8. Other-sport gate verification
+9. Moneyline/totals OFF verification
+10. Remaining issues
+11. Freeze recommendation
+
+Then STOP.
+
+NO REWRITE.
+NO FEATURE CREEP.
+NO MONEYLINE/TOTALS BUILD.
+NO NEW HIT/MISS/PUSH IMPLEMENTATION.
