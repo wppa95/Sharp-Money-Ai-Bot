@@ -1,0 +1,397 @@
+IMPORTANT:
+We are limited on credits. Do not burn credits unnecessarily.
+
+Before making ANY changes, review the entire current system state and inspect the evidence below.
+
+DO NOT:
+
+* Rewrite the bot
+* Refactor large sections
+* Redesign architecture
+* Replace working systems
+* Change the scoring engine
+* Change database structure unless absolutely required for this specific fix
+* Change the Underdog pipeline
+* Change MLB/NFL strict gates
+* Change the relaxed non-MLB/NFL gates
+* Turn moneylines/totals back on
+* Add providers
+* Expand scope beyond this diagnostic/fix
+
+This is a targeted post-freeze bug fix.
+
+CURRENT CONFIGURATION — DO NOT CHANGE:
+
+MLB/NFL:
+
+* S-tier only
+* Bet Quality >= 85
+* MLB/NFL strict treatment remains active
+
+ALL OTHER SPORTS:
+
+* Relaxed testing gates are active
+* 2★ minimum
+* A-tier >= 60
+* B-tier >= 45
+* S-tier remains >= 80
+* Non-MLB/NFL are allowed to produce S/A/B/C opportunities according to the existing system
+
+Moneylines:
+
+* OFF
+
+Totals:
+
+* OFF
+
+Primary provider:
+
+* Underdog only
+
+Telegram:
+
+* Only 🎯 ACTIONABLE BET PICK reaches Telegram
+* 📈 MARKET MOVE DETECTED remains internal only
+
+IMPORTANT:
+The Telegram Bot API token was recently rotated. Telegram is working again. Do not modify Telegram credentials.
+
+⸻
+
+CURRENT EVIDENCE
+
+We ran:
+
+/health
+
+Bot is running and Telegram restarted successfully.
+
+Underdog is connected and fetching.
+
+Historical error shown by /health:
+
+‘list’ object has no attribute ‘has_real_data’
+
+This is from August 6 and appears to be historical, NOT necessarily the current failure. Do not assume it is the current cause without evidence.
+
+⸻
+
+CRITICAL /funnel RESULT
+
+The latest /funnel showed:
+
+Last 24h:
+
+Scanned: 83,103
+Accepted (alerted): 0
+Watchlist (B-tier): 3,676
+Rejected: 79,427
+Removed: 0
+Qualification rate: 0%
+
+Sport examples:
+
+MLB:
+29,571 scanned
+0 accepted
+1,303 watchlist
+28,268 rejected
+
+NFL:
+16,297 scanned
+0 accepted
+30 watchlist
+16,267 rejected
+
+LOL:
+7,129 scanned
+0 accepted
+1,290 watchlist
+5,839 rejected
+
+TENNIS:
+6,132 scanned
+0 accepted
+85 watchlist
+6,047 rejected
+
+CS:
+5,571 scanned
+0 accepted
+511 watchlist
+5,060 rejected
+
+MMA:
+4,420 scanned
+0 accepted
+8 watchlist
+4,412 rejected
+
+WNBA:
+4,040 scanned
+0 accepted
+270 watchlist
+3,770 rejected
+
+PGA:
+3,792 scanned
+0 accepted
+46 watchlist
+3,746 rejected
+
+⸻
+
+MOST IMPORTANT EVIDENCE
+
+The Near-Misses section showed candidates that were explicitly labeled:
+
+CS:
+rx — Kills on Maps 1+2
+85/100 [S]
+status: qualified
+
+LOL:
+None Quad — Kills on Maps 1+2
+83/100 [S]
+status: qualified
+
+WNBA:
+Alanna Smith — Rebounds
+80/100 [S]
+status: qualified
+
+Yet:
+
+Accepted (alerted): 0
+
+So the system is clearly finding high-quality candidates and at least some are reaching a state labeled “qualified”, but NONE are becoming Telegram actionable picks.
+
+⸻
+
+/picks RESULT
+
+/picks returned:
+
+🎯 Actionable Player Prop Picks
+
+No qualifying player props available right now.
+
+Season-long futures are excluded from this view.
+
+This conflicts with /funnel, which showed multiple candidates marked “qualified”.
+
+⸻
+
+/rollups RESULT
+
+/rollups returned:
+
+🎯 TELEGRAM ACTIONABLE PICKS
+No picks sent yet.
+
+No overall graded plays yet — results are graded after game_time passes.
+
+This is expected because no Telegram picks have successfully been sent.
+
+⸻
+
+PRIMARY BUG TO DIAGNOSE
+
+Find exactly where the pipeline diverges between:
+
+SCANNED
+→ CANDIDATE
+→ SCORED
+→ QUALIFIED
+→ ACTIONABLE PICK
+→ TELEGRAM DELIVERY
+→ alert_sent=True
+
+We need to determine why /funnel can report:
+
+status = qualified
+
+while:
+
+/picks = 0
+Accepted (alerted) = 0
+Telegram actionable picks = 0
+
+Do NOT assume the problem is the scoring engine.
+
+Do NOT loosen additional gates until the actual rejection point is identified.
+
+⸻
+
+COLD-START INVESTIGATION
+
+Earlier console logs showed:
+
+rejection breakdown:
+cold_start=4023
+
+And the per-sport diagnostic showed:
+
+move_det = 0
+gated = 0
+
+This may be related, but do not assume it is the cause.
+
+Determine:
+
+1. What exactly triggers cold_start rejection?
+2. Does cold_start apply to all sports?
+3. When does a prop graduate out of cold_start?
+4. Can a prop be labeled “qualified” while still being blocked by another later gate?
+5. Is the funnel’s “qualified” status referring to an intermediate state rather than final Telegram eligibility?
+6. Why is move_det still 0?
+7. Why is gated still 0?
+8. Why are qualified CS/LOL/WNBA candidates not appearing in /picks?
+9. Which exact gate rejects them after the funnel labels them qualified?
+
+⸻
+
+REQUIRED DIAGNOSTIC
+
+Before changing code, inspect the exact path for at least these examples:
+
+* CS rx — Kills on Maps 1+2 — 85/S — qualified
+* LOL None Quad — Kills on Maps 1+2 — 83/S — qualified
+* WNBA Alanna Smith — Rebounds — 80/S — qualified
+
+Trace each one through the actual pipeline.
+
+Report:
+
+Candidate
+→ scored?
+→ tier?
+→ confidence?
+→ stars?
+→ movement detected?
+→ cold_start?
+→ sport gate?
+→ confidence gate?
+→ direction gate?
+→ game-live gate?
+→ duplicate/reversal gate?
+→ final actionable?
+→ Telegram delivery?
+→ alert_sent?
+
+Do this using existing logs/database state where possible.
+
+⸻
+
+IMPORTANT DISTINCTION
+
+We want the bot to be able to discover more opportunities across the non-MLB/NFL sports.
+
+We do NOT want the system to suppress legitimate S/A/B/C props after we’ve intentionally relaxed those gates.
+
+But we also do NOT want to blindly remove safety protections.
+
+The goal is:
+
+SCAN MORE
+→ QUALIFY MORE
+→ DELIVER ONLY VALID ACTIONABLE PICKS
+
+Not:
+
+SCAN MORE
+→ SPAM TELEGRAM
+
+⸻
+
+GRADING
+
+The new alert_sent tracking is already implemented.
+
+Preserve:
+
+* HIT
+* MISS
+* PUSH
+* PENDING
+
+Preserve the separation between:
+
+ALL evaluated props
+
+and:
+
+🎯 TELEGRAM ACTIONABLE PICKS
+
+Do not change the grading system during this fix unless the diagnostic proves it is necessary.
+
+⸻
+
+ACCEPTANCE CRITERIA
+
+After the targeted fix:
+
+1. /funnel should show candidates progressing beyond cold_start when their required history exists.
+2. move_det should become non-zero when real line movement is detected.
+3. gated should become non-zero when candidates pass the appropriate gates.
+4. /picks should show actual qualifying player props when valid candidates exist.
+5. Telegram should receive valid 🎯 ACTIONABLE BET PICK alerts.
+6. Non-MLB/NFL sports should continue using the relaxed gate configuration.
+7. MLB/NFL should remain S-tier only with Bet Quality >= 85.
+8. Moneylines remain OFF.
+9. Totals remain OFF.
+10. No raw market-move spam reaches Telegram.
+11. Game-live protection remains active.
+12. alert_sent tracking remains accurate.
+13. HIT/MISS/PUSH/PENDING grading remains intact.
+14. Existing tests must continue passing.
+
+⸻
+
+TESTING
+
+After the targeted fix:
+
+* Run the full test suite.
+* Add only the minimum regression tests needed for this specific bug.
+* Run /health.
+* Run /funnel.
+* Run /picks.
+* Run /rollups.
+* Verify Telegram delivery behavior.
+
+Do not restart repeatedly while debugging unless necessary.
+
+⸻
+
+FINAL REPORT REQUIRED
+
+Report:
+
+1. Exact root cause.
+2. Exact file(s) changed.
+3. Exact logic changed.
+4. Why qualified candidates were not reaching /picks/Telegram.
+5. Cold-start behavior before vs after.
+6. Full test count.
+7. Test failures, if any.
+8. /health status.
+9. /funnel results.
+10. Confirmation that:
+
+* MLB/NFL = S-tier + BQ >= 85
+* other sports = relaxed gates
+* moneylines OFF
+* totals OFF
+* Telegram only receives actionable picks
+* grading remains HIT/MISS/PUSH/PENDING
+
+11. Confirm no unrelated systems were changed.
+
+IMPORTANT:
+Everything must be completed and checked off before freeze.
+NO FEATURE EXPANSION.
+NO REWRITE.
+NO ARCHITECTURAL CHANGES.
+ONLY FIX THE ACTUAL BOTTLENECK IDENTIFIED ABOVE.

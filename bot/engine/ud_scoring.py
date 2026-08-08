@@ -84,6 +84,7 @@ class PropDifficultyClass(str, enum.Enum):
 # Stat categories that produce high-floor, daily-production outcomes.
 # These are the "green goblin" targets — reliable hits for active players.
 _HIGH_FLOOR_STATS: frozenset[str] = frozenset({
+    # Traditional sports — repeatable, aggregate stats with high hit-rate predictability
     "Hits",
     "Hits + Runs + RBIs",
     "Fantasy Score",
@@ -98,6 +99,10 @@ _HIGH_FLOOR_STATS: frozenset[str] = frozenset({
     "Receiving Yards",
     "Rushing Yards",
     "Passing Yards",
+    # Esports — multi-map aggregates are reliable repeatable stats comparable to
+    # traditional sports cumulative lines (e.g. "Kills on Maps 1+2" ≈ "Points" in NBA)
+    "Kills on Maps 1+2",
+    "Assists on Maps 1+2",
 })
 
 # Stat categories that are inherently volatile — low-frequency outcomes where

@@ -1367,7 +1367,11 @@ async def underdog_job(context) -> None:
                     _lc_magnitude   = abs(snap.line - prev_line) if (snap.line is not None and prev_line is not None) else None
                     market_quality  = compute_market_quality(stat_type, snap.line or 0.0, score)
                     market_pressure = detect_market_pressure(_lc_magnitude, ud_history)
-                    _processed_keys.add((player, stat_type))
+                    # NOTE: _processed_keys is NOT set here for every line-change.
+                    # It is only set when should_alert=True (actual alert eligible),
+                    # so that qualified props with sub-threshold line movement
+                    # (is_qualified=True, should_alert=False) remain available for
+                    # the standing path to evaluate as stable high-quality props.
                     validation = validate_player_prop(
                         player_name  = player,
                         stat_type    = stat_type,
@@ -1655,6 +1659,11 @@ async def underdog_job(context) -> None:
                 if should_alert and not is_removed:
                     _sp_gated = snap.sport or "UNKNOWN"
                     _sport_gated[_sp_gated] = _sport_gated.get(_sp_gated, 0) + 1
+                    # Mark as handled: props that are actually alert-eligible (should_alert=True)
+                    # are excluded from the standing path to prevent double-evaluation.
+                    # Props with sub-threshold line movement (should_alert=False) are intentionally
+                    # left out of _processed_keys so the standing path can evaluate them.
+                    _processed_keys.add((player, stat_type))
 
                 # Market movement data is stored in UnderdogSnapshotRecord + PropCandidateLog.
                 # No Telegram delivery for market moves — only 🎯 ACTIONABLE BET PICK alerts
@@ -1922,6 +1931,10 @@ async def underdog_job(context) -> None:
                     min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
                 )
                 if not _sval.has_supporting_data:
+                    logger.debug(
+                        "UD standing_gate [no_data]: %s | %s | %s — validation has no supporting data (n=%d)",
+                        _sp, _st, _ssport, getattr(_sval, "n_games", 0),
+                    )
                     continue
                 # Sport-conditional star floor: strict for MLB/NFL, relaxed for others (#2)
                 if _sscore.stars < config.min_stars_for_sport(_ssport):
@@ -1960,6 +1973,12 @@ async def underdog_job(context) -> None:
                 except Exception:
                     pass  # never block alert flow
                 if _sdec is None or _sdec.recommendation == "PASS":
+                    logger.debug(
+                        "UD standing_gate [decision_pass]: %s | %s | %s — decision=%s reason=%s",
+                        _sp, _st, _ssport,
+                        (_sdec.recommendation if _sdec is not None else "None"),
+                        (_sdec.reason if _sdec is not None else "no_decision"),
+                    )
                     continue
 
                 # Per-tier confidence gate — sport-conditional for standing plays (#2)
