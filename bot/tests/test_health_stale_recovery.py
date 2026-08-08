@@ -337,6 +337,22 @@ class TestRegressionGuards(unittest.TestCase):
         output = _run_cmd_health(self.ht)
         self.assertNotIn("Restart reason", output)
 
+    def test_previous_session_section_removed(self):
+        """P4 phase-2 cleanup: 'Previous session:' display line removed from /health."""
+        output = _run_cmd_health(self.ht)
+        self.assertNotIn("Previous session", output)
+
+    def test_crash_detected_section_removed(self):
+        """P4 phase-2 cleanup: 'Crash detected:' display line removed from /health."""
+        output = _run_cmd_health(self.ht)
+        self.assertNotIn("Crash detected", output)
+
+    def test_underlying_crash_detection_intact(self):
+        """Crash detection functions remain in health.py even though display line removed."""
+        from engine.health import HealthTracker
+        assert hasattr(HealthTracker, "was_unexpected_exit")
+        assert hasattr(HealthTracker, "last_session_duration_str")
+
     def test_restarts_command_not_present(self):
         """cmd_restarts must remain removed."""
         self.assertFalse(

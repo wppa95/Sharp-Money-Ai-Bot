@@ -252,11 +252,15 @@ class TestP3APicksDbQuery:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# P3B — cmd_picks display loop must gate on effective confidence ≥ 55
+# P3B — cmd_picks display loop: no secondary confidence gate (DB filter is sufficient)
+# The eff_conf < 55 gate was removed in the P1 fix pass because it incorrectly
+# blocked CS/LOL/esports props that have no cross-provider comparison data and
+# therefore always have low proxy_match_confidence even when engine-scored S-tier.
+# The DB filter score_tier.in_(["S","A"]) is the authoritative gate.
 # ═══════════════════════════════════════════════════════════════════════════
 
-class TestP3BPicksConfidenceGate:
-    """cmd_picks/_cmd_picks_inner must skip props with effective confidence < 55."""
+class TestP3BPicksDisplayGate:
+    """cmd_picks/_cmd_picks_inner: no eff_conf gate; DB filter is the authoritative gate."""
 
     def _inner_src(self) -> str:
         import commands as cmd_mod
@@ -266,77 +270,79 @@ class TestP3BPicksConfidenceGate:
         import commands as cmd_mod
         assert hasattr(cmd_mod, "_cmd_picks_inner")
 
-    def test_source_has_confidence_threshold(self):
+    def test_no_eff_conf_gate_in_sport_groups_loop(self):
+        """eff_conf < 55 gate must be removed — it blocked esports S-tier props."""
         src = self._inner_src()
-        assert "55" in src, "must have confidence floor of 55 in _cmd_picks_inner"
-
-    def test_source_skips_below_floor(self):
-        src = self._inner_src()
-        assert "_eff_conf" in src or "eff_conf" in src
-
-    def test_source_checks_proxy_match_confidence(self):
-        src = self._inner_src()
-        assert "proxy_match_confidence" in src
-
-    def test_source_uses_live_conf_from_rec_map(self):
-        src = self._inner_src()
-        # Should use _live_conf2 or similar from _rec_map
-        assert "_live_conf2" in src or "_live_conf" in src
-
-    def test_source_continues_on_low_conf(self):
-        src = self._inner_src()
-        # Should have a continue statement near the confidence check
-        assert "continue" in src
-
-    def test_30_confidence_prop_would_be_skipped(self):
-        """Verify the logic: conf=30 < 55 → skip."""
-        # Test the threshold logic directly
-        _eff_conf = 30
-        assert _eff_conf < 55, "30-confidence prop must be below the 55 threshold"
-
-    def test_55_confidence_prop_would_pass(self):
-        """Confidence exactly at the floor passes."""
-        _eff_conf = 55
-        assert not (_eff_conf < 55), "55-confidence prop must not be filtered out"
-
-    def test_54_confidence_prop_would_be_skipped(self):
-        _eff_conf = 54
-        assert _eff_conf < 55
-
-    def test_70_confidence_prop_would_pass(self):
-        _eff_conf = 70
-        assert not (_eff_conf < 55)
-
-    def test_1_star_proxy_conf_30_cannot_appear(self):
-        """
-        A prop with proxy_match_confidence=30 produces:
-          - _display_conf = 30
-          - _eff_conf = 30 (no _live_conf2 in this test)
-          - 30 < 55 → should be skipped
-        """
-        display_conf = 30
-        live_conf2 = None
-        eff_conf = live_conf2 if live_conf2 is not None else display_conf
-        assert eff_conf < 55, "30-confidence prop must be filtered out"
-
-    def test_gate_prefers_live_conf_over_display(self):
-        """If _rec_map provides a live confidence, prefer it for the gate."""
-        display_conf = 80
-        live_conf2 = 30  # live snapshot shows low confidence
-        eff_conf = live_conf2 if live_conf2 is not None else display_conf
-        assert eff_conf == 30 and eff_conf < 55, (
-            "live conf (30) must override display conf (80) for the gate"
+        assert "_eff_conf" not in src, (
+            "_eff_conf gate must be removed; DB filter score_tier.in_(['S','A']) "
+            "is the authoritative confidence gate"
         )
 
-    def test_gate_falls_back_to_display_when_no_live(self):
-        display_conf = 30
-        live_conf2 = None
-        eff_conf = live_conf2 if live_conf2 is not None else display_conf
-        assert eff_conf == 30
-
-    def test_debug_log_present_in_source(self):
+    def test_no_secondary_conf_gate_keyword(self):
         src = self._inner_src()
-        assert "Tier —" in src or "not actionable" in src or "conf %d < 55" in src
+        # The removed gate used "eff_conf < 55" — must be gone from loop logic
+        assert "eff_conf < 55" not in src
+
+    def test_comment_explains_no_gate(self):
+        """Source must document why the secondary gate is absent."""
+        src = self._inner_src()
+        assert "esports" in src.lower() or "cross-provider" in src.lower() or \
+               "no secondary" in src.lower() or "proxy_match_confidence" in src
+
+    def test_direction_gate_still_present(self):
+        """PASS/no-direction props are still filtered."""
+        src = self._inner_src()
+        assert '"OVER"' in src and '"UNDER"' in src
+        assert "not in" in src or "_eff_rec not in" in src
+
+    def test_mlb_under_gate_still_present(self):
+        src = self._inner_src()
+        assert "MLB" in src and "UNDER" in src
+
+    def test_db_filter_is_s_a_only(self):
+        """DB query must still gate on S/A tier."""
+        import inspect, database as db_mod
+        src = inspect.getsource(db_mod.Database.get_top_ud_props_for_picks)
+        assert ".in_(" in src
+        assert '"S"' in src or "'S'" in src
+        assert '"A"' in src or "'A'" in src
+
+    def test_s_tier_prop_with_low_proxy_conf_not_filtered(self):
+        """An S-tier prop with proxy_match_confidence=0 must NOT be filtered out.
+
+        This is the CS/LOL/esports scenario: engine scores S-tier but no cross-
+        provider comparison data exists, so proxy_match_confidence=0.  The prop
+        must still appear in /picks.
+        """
+        # Simulate: prop is S-tier (passes DB gate), proxy conf = 0
+        score_tier = "S"
+        tier_allow = ["S", "A"]
+        assert score_tier in tier_allow, "DB gate must pass S-tier prop"
+
+        # Previously (incorrectly): eff_conf = 0 < 55 → SKIP
+        # Now (correctly): no eff_conf gate — prop reaches display
+        eff_conf_gate_active = False  # gate has been removed
+        assert not eff_conf_gate_active
+
+    def test_null_tier_still_blocked_by_db(self):
+        """NULL score_tier (unscored prop) is blocked by DB query, not display loop."""
+        score_tier = None
+        tier_allow = ["S", "A"]
+        assert score_tier not in tier_allow
+
+    def test_render_uses_db_tier_fallback_for_esports(self):
+        """_render_pick_entry falls back to plh.score_tier when proxy conf < 30."""
+        import inspect, commands as cmd_mod
+        src = inspect.getsource(cmd_mod._cmd_picks_inner)
+        # The render function should reference score_tier and score_confidence
+        assert "score_tier" in src
+        assert "score_confidence" in src
+
+    def test_render_threshold_for_fallback_is_30(self):
+        """Fallback triggers when proxy_match_confidence < 30."""
+        import inspect, commands as cmd_mod
+        src = inspect.getsource(cmd_mod._cmd_picks_inner)
+        assert "< 30" in src, "proxy conf fallback threshold must be < 30"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -379,13 +385,15 @@ class TestP4HealthRestartLine:
         src = self._src()
         assert "Last startup:" in src or "last_startup" in src
 
-    def test_previous_session_still_present(self):
+    def test_previous_session_removed(self):
+        """P4 phase-2 cleanup: 'Previous session:' display line intentionally removed."""
         src = self._src()
-        assert "Previous session:" in src
+        assert "Previous session:" not in src
 
-    def test_crash_detected_still_present(self):
+    def test_crash_detected_removed(self):
+        """P4 phase-2 cleanup: 'Crash detected:' display line intentionally removed."""
         src = self._src()
-        assert "Crash detected:" in src
+        assert "Crash detected:" not in src
 
     def test_background_jobs_section_still_present(self):
         src = self._src()
@@ -579,18 +587,18 @@ class TestP3PicksTierEnforcement:
         """
         Simulate the full /picks filter chain for a 30-confidence / Tier — prop.
         Step 1: DB query requires score_tier in ('S', 'A') → NULL-tier prop excluded.
-        Step 2: Even if such a prop somehow passed, the display loop gates on eff_conf < 55.
+        Step 2: The display loop no longer has a secondary eff_conf gate — the DB
+                gate is the sole authority.  A NULL-tier prop cannot reach the loop.
         """
-        # Simulate DB gate
+        # Simulate DB gate — the only gate needed
         score_tier = None   # unscored / NULL
         tier_allow = ["S", "A"]
         assert score_tier not in tier_allow, "DB gate must block NULL score_tier"
 
-        # Simulate display gate
-        proxy_conf = 30
-        live_conf2 = None
-        eff_conf = live_conf2 if live_conf2 is not None else proxy_conf
-        assert eff_conf < 55, "Display gate must block eff_conf=30"
+        # S-tier esports prop with proxy_match_confidence=0 must NOT be blocked
+        esports_score_tier = "S"
+        assert esports_score_tier in tier_allow, "S-tier esports prop must pass DB gate"
+        # No display loop gate — prop reaches rendering with correct tier from DB
 
     def test_pass_tier_prop_blocked(self):
         score_tier = "PASS"

@@ -225,8 +225,6 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             f"Uptime:           {_uptime_str()}",
             f"Heartbeat:        {ht.heartbeat_age_str()}",
             f"Last startup:     {_html.escape(ht.last_startup() or '—')}",
-            f"Previous session: {_html.escape(prev_session)}",
-            f"Crash detected:   {'Yes ⚠️' if crash else 'No ✅'}",
             "",
             "<b>📋 Background Jobs</b>",
         ]
@@ -1530,29 +1528,36 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 plh.player_name, plh.stat_type,
             )
             continue
-        # Confidence floor — proxy_match_confidence < 55 means no reliable market
-        # signal (displayed tier would be "—"); these are not actionable picks.
-        # Also gate on _live_conf from the recommendation snapshot if available.
-        _display_conf = comp.proxy_match_confidence if comp else 0
-        _live_r2, _live_conf2 = _rec_map.get(
-            (plh.player_name, plh.sport, plh.stat_type), (None, None)
-        )
-        _eff_conf = _live_conf2 if _live_conf2 is not None else _display_conf
-        if _eff_conf < 55:
-            logger.debug(
-                "cmd_picks: skipping %s/%s — eff conf %d < 55 (Tier —, not actionable)",
-                plh.player_name, plh.stat_type, _eff_conf,
-            )
-            continue
+        # Note: no secondary confidence gate here.  The DB query already requires
+        # score_tier in ("S","A") — all props reaching this loop have been scored
+        # above the A-tier confidence floor by the engine.  A secondary gate using
+        # bet_confidence or proxy_match_confidence incorrectly blocks esports sports
+        # (CS/LOL/VAL/ESPORTS) that have no cross-provider comparison data and
+        # therefore always report low proxy_match_confidence even when they are
+        # genuinely S-tier.
         if _key not in _sport_groups:
             _sport_groups[_key] = []
         _sport_groups[_key].append((_flat_idx, plh, comp))
 
     def _render_pick_entry(rank: int, flat_idx: int, plh, comp) -> str:
         conf      = comp.proxy_match_confidence if comp else 0
-        tier      = _tier_from_conf(conf)
+
+        # For sports with no cross-provider comparison data (CS, LOL, ESPORTS, VAL,
+        # TENNIS, etc.), proxy_match_confidence is 0 because no PrizePicks/DK/FD
+        # lines exist.  In those cases, fall back to the engine's own scoring:
+        #   - tier  → plh.score_tier  (set by the Underdog scoring engine)
+        #   - conf  → plh.score_confidence  (the engine's overall confidence score)
+        # This prevents S-tier esports picks from displaying as "Tier —" with 1 star.
+        _db_tier = getattr(plh, "score_tier", None) or ""
+        _db_conf = getattr(plh, "score_confidence", None)
+        if conf < 30 and _db_tier in ("S", "A", "B") and _db_conf is not None:
+            # No cross-provider data — use engine scores for display
+            tier  = _db_tier
+            stars = _stars_from_conf(float(_db_conf))
+        else:
+            tier  = _tier_from_conf(conf)
+            stars = _stars_from_conf(float(conf))
         tier_icon = _TIER_EMOJI.get(tier, "⚪")
-        stars     = _stars_from_conf(float(conf))
 
         # Underdog line (canonical for this prop)
         ud_pl = comp.lines.get("Underdog") if comp else None
