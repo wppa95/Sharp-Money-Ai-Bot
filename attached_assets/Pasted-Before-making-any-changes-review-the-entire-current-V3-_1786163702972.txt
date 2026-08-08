@@ -1,0 +1,222 @@
+Before making any changes, review the entire current V3.1 system state.
+
+IMPORTANT:
+We are limited on credits. Do not burn credits unnecessarily.
+
+This is the FINAL V3.1 cleanup/freeze pass.
+
+Do NOT:
+
+* Rewrite the bot
+* Refactor large sections
+* Replace working systems
+* Redesign architecture
+* Change the scoring engine
+* Change database structure
+* Change the Underdog pipeline architecture
+* Add providers
+* Add new features
+
+If something is incomplete or needs deeper investigation, DO NOT fix it now unless it is required for V3.1 stability. Add it to PHASE 2 instead.
+
+⸻
+
+CURRENT V3.1 STATE ✅
+
+CORE:
+✅ Underdog-first pipeline
+✅ Provider-agnostic PropLineHistory
+✅ Existing scoring/ranking engine
+✅ 3,212 tests passing
+✅ No database schema changes
+✅ No scoring changes
+
+ALERTS:
+✅ MARKET MOVE DETECTED remains internal
+✅ ACTIONABLE BET PICK is the only user-facing alert type
+✅ Market-move Telegram spam blocked
+✅ Removal alerts disabled
+✅ Actionable alert storage implemented
+✅ /grade now reads actionable Underdog records
+✅ /stats uses actual actionable alert records
+✅ /alerts uses actionable alert lifecycle
+
+PROP HISTORY:
+✅ PropLineHistory sync expanded to cover the full active-prop cycle
+✅ Previous ~200-row sync bottleneck fixed
+✅ Stable S/A-tier props no longer age out simply because their line did not move
+
+USER-FACING FILTERS:
+✅ MLB UNDER blocked from /picks
+✅ MLB UNDER blocked from /slip
+✅ Missing-direction props blocked from /slip
+✅ Internal tracking/scoring remains unchanged
+
+DIAGNOSTICS:
+✅ PICK CREATED diagnostic added
+✅ Funnel Accepted counter fixed
+✅ /picks and /grade paths corrected
+✅ No known regressions
+✅ Full suite: 3,212 passing
+
+⸻
+
+PHASE 2 — INCOMPLETE WORK ONLY
+
+Add the following items to Phase 2.
+
+1. 🔴 UNDERDOG RUNTIME VISIBILITY
+
+Current /health can report:
+
+Underdog Pipeline:
+props=0
+alerts=0
+
+while /status shows:
+
+* Underdog provider healthy
+* recent fetches succeeding
+* thousands of PropLineHistory rows
+
+Phase 2:
+
+* Investigate why /health reports props=0.
+* Verify the actual runtime path:
+    Underdog fetch → parse → score → validation → actionable routing.
+* Make the health counters accurately reflect actual processing.
+* Separate “provider fetch succeeded” from “props successfully processed.”
+* Do not change scoring or pipeline architecture unless diagnostics prove it is necessary.
+
+2. 🔴 RESTART / CRASH CLASSIFICATION
+
+Current /restarts shows many unexpected_exit events.
+
+However, many restarts were intentional after completing development tasks.
+
+Phase 2:
+
+* Distinguish intentional task/redeploy restarts from genuine crashes.
+* Distinguish:
+    * intentional restart
+    * Replit/workflow restart
+    * unexpected process exit
+    * confirmed OOM
+    * SIGKILL/hard crash
+* Only classify a restart as a crash when there is evidence supporting that classification.
+* Preserve restart history.
+* Do not treat the existing 173 startup count itself as a bug.
+
+3. 🔴 ACTIONABLE PICK → TELEGRAM DELIVERY VERIFICATION
+
+Current evidence showed:
+
+* /grade: stored actionable pick(s)
+* /stats: actionable picks exist
+* /alerts: no player prop alerts sent
+* /status: alerts sent = 0
+
+Phase 2:
+Trace one genuine actionable pick end-to-end:
+
+ACTIONABLE DECISION
+→ PropOpportunityLog
+→ Telegram delivery
+→ alert_sent / alert_sent_at
+→ /alerts
+→ /stats
+→ /grade
+
+Make sure all systems agree on whether an actionable pick was actually delivered.
+
+Do not rebuild the alert system.
+
+4. 🔴 TIER-1 ROUTING VERIFICATION
+
+The funnel still shows examples such as:
+
+S-tier prop → qualified → rejected
+
+The intended Tier-1 behavior must be verified.
+
+Phase 2:
+
+* Verify the final actionable gate correctly allows the intended S/A/B tiers for Tier-1 sports where configured.
+* Confirm S-tier props are not being incorrectly blocked by an old minimum-tier rule.
+* Verify sport-specific rules are applied at the FINAL delivery gate.
+* Do not lower confidence requirements.
+* Do not bypass game/event validation.
+* Do not alter the scoring engine unless the diagnostics prove the scoring engine itself is wrong.
+
+5. 🟡 OUTCOME / GRADING VALIDATION
+
+The grading pipeline is now connected to actionable Underdog picks.
+
+Phase 2:
+
+* Allow completed games to resolve naturally.
+* Validate HIT / MISS / PUSH recording.
+* Verify /grade resolves stored picks correctly.
+* Verify player/sport/tier performance over real outcomes.
+* Validate slip performance after enough completed samples exist.
+* Do not change grading logic prematurely based on a tiny sample.
+
+⸻
+
+IMPORTANT: DO NOT REOPEN COMPLETED FIXES
+
+The following are considered complete and should remain frozen:
+
+✅ Funnel Accepted counter fix
+✅ PropLineHistory sync fix
+✅ /stats actionable counter fix
+✅ /grade Underdog storage fix
+✅ /picks MLB UNDER filter
+✅ /slip direction filter
+✅ /slip MLB UNDER filter
+✅ PICK CREATED diagnostic
+✅ Market-move Telegram spam prevention
+✅ Removal alert prevention
+✅ No scoring changes
+✅ No threshold changes
+✅ No provider additions
+✅ No database schema changes
+✅ No architecture rewrite
+
+If any of these appear imperfect during Phase 2 testing, diagnose first. Do not automatically rewrite them.
+
+⸻
+
+FINAL V3.1 FREEZE
+
+After confirming the current state:
+
+🛑 FREEZE V3.1.
+
+Do not make additional cleanup changes.
+
+Phase 2 will be separate work and will address only the five items listed above.
+
+Future provider expansion remains deferred until Phase 2:
+
+* Sleeper first
+* Then evaluate PrizePicks/Betr/other free sources
+* One provider at a time
+
+No provider expansion during V3.1.
+
+⸻
+
+FINAL REPORT
+
+Return only:
+
+1. Files changed during this final pass
+2. Tests passed
+3. Startup status
+4. Confirmation that V3.1 is frozen
+5. Confirmation that the five incomplete items were moved to Phase 2
+
+Do not add feature suggestions or additional cleanup tasks.
+
+🛑 SHARP MONEY BOT V3.1 — FREEZE.
