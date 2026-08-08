@@ -1,0 +1,554 @@
+SHARP MONEY BOT V3.2 — PHASE 2 CORE EXECUTION PLAN
+
+🔐 CREDENTIAL / SECRET PROTECTION
+
+Do NOT expose, print, paste, hardcode, or request any API keys, tokens, passwords, credentials, or secrets in:
+
+* Source code
+* Console output
+* Logs
+* Telegram
+* Bot commands
+* Diagnostics
+* Status/config displays
+* Reports
+* Messages
+
+If credentials are required for an existing system, use the existing secure environment-variable/config mechanism.
+
+Never reveal the actual secret value.
+
+━━━━━━━━━━━━━━━━━━
+✅ MANDATORY EXECUTION CHECKLIST
+━━━━━━━━━━━━━━━━━━
+
+Before making ANY changes:
+
+☐ Review the entire current system state
+☐ Record a baseline snapshot
+☐ Confirm V1.3 frozen systems
+☐ Confirm Underdog-first pipeline
+☐ Confirm current tests/status
+☐ Confirm current database/PropLineHistory/pick counts
+☐ Confirm current Telegram behavior
+
+Then execute Phase 2 CORE in order:
+
+☐ STEP 1 — Full system review + baseline snapshot
+☐ STEP 2 — Underdog primary pipeline
+☐ STEP 3 — Tier qualification
+☐ STEP 4 — High-priority Near-Miss investigation
+☐ STEP 5 — Funnel/dashboard accuracy
+☐ STEP 6 — Persistent memory/restart survival
+☐ STEP 7 — Complete prop grading + Hit/Loss tracking
+☐ STEP 8 — CLV/calibration
+☐ FULL VALIDATION — tests + startup + real-data verification
+☐ FREEZE — Phase 2 Core
+
+Do NOT skip steps.
+
+Do NOT move to the next step until the current step is verified.
+
+After every step, explicitly mark:
+
+🔄 In progress
+✅ Verified complete
+❌ Failed / needs investigation
+
+If a step fails, STOP and fix/investigate it before continuing.
+
+━━━━━━━━━━━━━━━━━━
+IMPORTANT SCOPE
+━━━━━━━━━━━━━━━━━━
+
+This is Phase 2 CORE work.
+
+We are limited on credits.
+
+Do NOT burn credits unnecessarily.
+
+Do NOT:
+
+* Rewrite the bot
+* Refactor large sections unnecessarily
+* Replace working systems
+* Redesign architecture
+* Replace the existing scoring engine
+* Change database structure unless absolutely required
+* Break the Underdog-first pipeline
+* Remove working functionality
+* Add unrelated features
+* Add unnecessary providers
+
+Use existing systems wherever possible.
+
+━━━━━━━━━━━━━━━━━━
+STEP 1 — FULL SYSTEM REVIEW + BASELINE
+━━━━━━━━━━━━━━━━━━
+
+☐ Review the entire current system
+☐ Identify existing modules and working systems
+☐ Confirm current V1.3 state
+☐ Record baseline tests/status/config
+☐ Record current database counts
+☐ Record PropLineHistory count
+☐ Record stored/pending/resolved pick counts
+☐ Record current Telegram behavior
+☐ Preserve baseline for before/after comparison
+
+Do not make changes until the baseline is recorded.
+
+━━━━━━━━━━━━━━━━━━
+STEP 2 — UNDERDOG PRIMARY PIPELINE
+━━━━━━━━━━━━━━━━━━
+
+Underdog remains the PRIMARY source.
+
+Confirm:
+
+UNDERDOG
+→ SCAN
+→ SNAPSHOT
+→ SCORE
+→ VALIDATE
+→ QUALIFY
+→ ACTIONABLE PICK
+→ TELEGRAM
+
+☐ Underdog ingestion works
+☐ Player props are scanned
+☐ Historical snapshots are preserved
+☐ Scoring works
+☐ Qualification works
+☐ Actionable picks reach Telegram
+☐ Internal market intelligence remains separate from Telegram alerts
+
+Do NOT replace the Underdog pipeline.
+
+━━━━━━━━━━━━━━━━━━
+STEP 3 — TIER QUALIFICATION
+━━━━━━━━━━━━━━━━━━
+
+KEEP THE TWO TIER SYSTEMS SEPARATE.
+
+TIER 1 — NON-MLB/NFL
+
+Tier 1 retains:
+
+* S-Tier
+* A-Tier
+* B-Tier
+
+Use the existing Tier 1 qualification rules/gates.
+
+TIER 2 — MLB/NFL
+
+Tier 2 retains:
+
+* S-Tier ONLY
+
+MLB/NFL must continue using the strict S-tier decision gate.
+
+Do NOT:
+
+* Merge Tier 1 and Tier 2
+* Lower MLB/NFL to A-tier
+* Change existing scoring thresholds
+* Change tier definitions
+* Replace the existing qualification engine
+
+The existing scoring tier and bet-decision tier are separate concepts.
+
+━━━━━━━━━━━━━━━━━━
+STEP 4 — #113 NEAR-MISS / TIER CLARITY
+━━━━━━━━━━━━━━━━━━
+
+The diagnostic found two tier values:
+
+* Composite score tier
+* Bet-decision tier
+
+Example:
+
+Composite Tier: S
+Decision Tier: A
+
+That can appear as an apparent “S-tier rejection” even though the actual MLB/NFL decision tier was A.
+
+This is primarily a clarity problem.
+
+☐ Add decision_tier to scored prop data
+☐ Display both tiers where appropriate
+☐ Make rejection reason understandable
+☐ Preserve existing gate logic
+☐ Confirm MLB/NFL S-tier gate still requires decision_tier=S
+☐ Confirm Tier 1 S/A/B logic remains separate
+
+Example display:
+
+Composite Tier: S
+Decision Tier: A
+Result: MLB S-tier gate blocked
+
+Do NOT change the qualification thresholds simply to make Near-Misses become picks.
+
+Investigate the highest-scoring Near-Misses first.
+
+━━━━━━━━━━━━━━━━━━
+STEP 5 — #114 HEALTH / FUNNEL / DASHBOARD ACCURACY
+━━━━━━━━━━━━━━━━━━
+
+Fix the health reporting bug where:
+
+ud_snaps
+
+is cleared before the health system records the count.
+
+☐ Capture snapshot count before .clear()
+☐ Use captured count for health reporting
+☐ Verify /health no longer reports props=0 when props were scanned
+
+Then verify dashboard/funnel consistency.
+
+Current reports have shown different counts because different commands intentionally count different things.
+
+Document and preserve legitimate differences.
+
+The dashboard must accurately reflect its underlying database records.
+
+☐ Funnel accepted count verified
+☐ Watchlist count verified
+☐ Rejected count verified
+☐ Near-Miss reporting verified
+☐ Actionable-pick count verified
+☐ Stored count verified
+☐ Pending count verified
+☐ Resolved count verified
+☐ Sport breakdown verified
+☐ Telegram delivery count verified
+
+Do not change the scoring engine merely to make reports match.
+
+Fix reporting/aggregation only where the diagnostic proves it is wrong.
+
+━━━━━━━━━━━━━━━━━━
+STEP 6 — PERSISTENT MEMORY / RESTART SURVIVAL
+━━━━━━━━━━━━━━━━━━
+
+Important:
+
+A bot restart must NOT erase persistent memory.
+
+Verify:
+
+☐ PropLineHistory survives restart
+☐ Historical snapshots survive restart
+☐ Stored picks survive restart
+☐ Pending picks survive restart
+☐ Resolved picks survive restart
+☐ Hit/Loss records survive restart
+☐ Historical lines survive restart
+☐ CLV seeds/history survive restart
+☐ Qualification history survives restart
+
+Do NOT rely on temporary in-memory variables for important historical state.
+
+Restarting the bot is NOT the same as resetting the database.
+
+━━━━━━━━━━━━━━━━━━
+STEP 7 — #116 COMPLETE PROP GRADING
+━━━━━━━━━━━━━━━━━━
+
+This is a major requirement.
+
+The bot should grade the props it has historically tracked, not only props that became Telegram actionable picks.
+
+PROP TRACKING and ACTIONABLE QUALIFICATION are separate systems.
+
+A prop can be:
+
+* Scanned
+* Stored
+* Tracked
+* Not qualified
+* Still graded later
+
+The bot must preserve the information needed to determine the eventual outcome.
+
+Desired lifecycle:
+
+PROP SEEN
+↓
+SNAPSHOT SAVED
+↓
+LINE HISTORY PRESERVED
+↓
+SCORING / QUALIFICATION
+↓
+QUALIFIED OR NOT QUALIFIED
+↓
+GAME FINISHES
+↓
+FINAL RESULT FETCHED
+↓
+HIT / MISS / PUSH
+↓
+PERSISTENT RECORD
+↓
+PERFORMANCE / BACKTEST / CALIBRATION
+
+Do NOT make grading dependent on Telegram delivery.
+
+Do NOT require the bot to see the same prop again after the game.
+
+The automated grader must proactively obtain final player results when necessary.
+
+Use the existing /backfill result-fetching pattern as the implementation reference.
+
+━━━━━━━━━━━━━━━━━━
+HISTORICAL / PREVIOUS-DAY GRADING
+━━━━━━━━━━━━━━━━━━
+
+The system must be able to grade historical props from previous days.
+
+Example:
+
+A prop was tracked on August 7.
+
+The game finishes.
+
+The bot must be able to find that historical prop on August 8 and resolve it.
+
+☐ Find historical prop
+☐ Preserve original line
+☐ Preserve historical snapshot
+☐ Fetch final player result
+☐ Determine HIT/MISS/PUSH
+☐ Store result
+☐ Keep historical record permanently available
+
+A prop removed from Underdog before or during the event must still be gradeable when a final player result is available.
+
+Do not allow removal of the market to erase the historical record.
+
+━━━━━━━━━━━━━━━━━━
+PROP DATA THAT MUST BE PRESERVED
+━━━━━━━━━━━━━━━━━━
+
+For legitimately tracked props, preserve applicable:
+
+* Player
+* Sport
+* Event/game
+* Market/stat type
+* Original line
+* Previous line
+* Current line
+* Line movement
+* Direction when available
+* Timestamp
+* Historical snapshots
+* Final result
+* HIT/MISS/PUSH
+* Relevant qualification information
+
+Do NOT create a new database architecture if the existing tables can support this.
+
+Use the existing persistence systems.
+
+━━━━━━━━━━━━━━━━━━
+STEP 8 — CLV / CALIBRATION
+━━━━━━━━━━━━━━━━━━
+
+Keep existing CLV functionality.
+
+Verify:
+
+☐ CLV seeds are created
+☐ Closing values are captured
+☐ CLV data persists
+☐ CLV survives restart
+☐ Confidence tier accuracy populates after results exist
+☐ Line-movement accuracy remains separate from recommendation accuracy
+☐ Resolved recommendations feed calibration
+
+“No CLV records yet” is acceptable until applicable markets close.
+
+“No resolved picks yet” is acceptable until events finish.
+
+Do not modify these merely because there is not enough resolved data yet.
+
+━━━━━━━━━━━━━━━━━━
+🚫 REMOVE /RESTART NOISE
+━━━━━━━━━━━━━━━━━━
+
+Remove the entire /restarts command/report.
+
+Do NOT spend Phase 2 Core effort investigating restart counts.
+
+The important requirement is:
+
+RESTARTS MUST NOT ERASE PERSISTENT MEMORY.
+
+━━━━━━━━━━━━━━━━━━
+🧪 FULL PHASE 2 CORE VALIDATION
+━━━━━━━━━━━━━━━━━━
+
+After Steps 1–8:
+
+☐ Run full test suite
+☐ Run startup health check
+☐ Verify Underdog pipeline
+☐ Verify Tier 1 S/A/B gates
+☐ Verify Tier 2 MLB/NFL S-only gate
+☐ Verify #113 tier clarity
+☐ Verify #114 health counter
+☐ Verify funnel
+☐ Verify dashboard
+☐ Verify persistence
+☐ Verify restart survival
+☐ Verify historical prop grading
+☐ Verify previous-day grading
+☐ Verify removed-prop grading
+☐ Verify HIT/MISS/PUSH persistence
+☐ Verify performance
+☐ Verify backtest
+☐ Verify CLV
+☐ Verify calibration
+☐ Verify Telegram actionable-pick behavior
+
+Then allow the bot to run and collect real data.
+
+Do not immediately start another change cycle.
+
+Use real accumulated data to validate the fixes.
+
+━━━━━━━━━━━━━━━━━━
+📊 REAL-DATA VALIDATION
+━━━━━━━━━━━━━━━━━━
+
+Monitor:
+
+* PropLineHistory growth
+* Historical snapshots
+* Qualification behavior
+* Near-Misses
+* Actionable picks
+* Tier distribution
+* Telegram alerts
+* Stored picks
+* Pending picks
+* Resolved picks
+* Hit/Loss records
+* Previous-day resolutions
+* CLV seeds
+* Calibration data
+
+Do not judge the system from only a few minutes of data.
+
+Allow enough real data to accumulate before deciding whether another change is necessary.
+
+━━━━━━━━━━━━━━━━━━
+📋 MANDATORY STEP REPORT
+━━━━━━━━━━━━━━━━━━
+
+For every step, report:
+
+STEP X — ✅ VERIFIED
+
+or
+
+STEP X — ❌ FAILED
+
+If failed, report:
+
+* What failed
+* Why it failed
+* What was changed
+* What still needs to be fixed
+
+Do not simply say “done.”
+
+━━━━━━━━━━━━━━━━━━
+🔒 PHASE 2 CORE FREEZE
+━━━━━━━━━━━━━━━━━━
+
+When all Phase 2 Core steps are verified:
+
+1. Run the final full test suite.
+2. Run startup health check.
+3. Verify no regressions.
+4. Verify real-data behavior.
+5. Provide the final implementation report.
+6. FREEZE THE PROJECT.
+
+After the freeze:
+
+NO additional feature expansion.
+
+NO unnecessary refactors.
+
+NO architecture redesign.
+
+NO scoring-engine rewrite.
+
+NO new providers.
+
+Future work must be handled as a separate phase/task.
+
+━━━━━━━━━━━━━━━━━━
+📋 FINAL REPORT
+━━━━━━━━━━━━━━━━━━
+
+Provide:
+
+* Files changed
+* Tests passed
+* Baseline vs final comparison
+* #113 status
+* #114 status
+* #115 status
+* #116 status
+* Underdog pipeline status
+* Tier 1 status
+* Tier 2 status
+* Funnel status
+* Dashboard status
+* Persistence status
+* Historical grading status
+* Hit/Loss status
+* Performance/backtest status
+* CLV status
+* Calibration status
+* Telegram status
+* Remaining known issues
+
+Then:
+
+🔒 PHASE 2 CORE = FROZEN
+
+Do not continue modifying the project after the freeze unless explicitly instructed to begin a separate phase.
+
+━━━━━━━━━━━━━━━━━━
+🎯 FINAL PRIORITY
+━━━━━━━━━━━━━━━━━━
+
+UNDERDOG FIRST.
+
+DATA QUALITY FIRST.
+
+HISTORICAL DATA FIRST.
+
+QUALIFICATION FIRST.
+
+GRADING MUST BE COMPLETE.
+
+PERSISTENCE MUST BE RELIABLE.
+
+REAL-DATA VALIDATION BEFORE MORE CHANGES.
+
+NO UNNECESSARY REWRITES.
+
+NO UNNECESSARY FEATURE EXPANSION.
+
+FREEZE WHEN VERIFIED.
