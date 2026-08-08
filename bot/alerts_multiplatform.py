@@ -16,6 +16,22 @@ from datetime import datetime
 from typing import Optional
 
 
+def _format_game_time_et(dt: datetime) -> str:
+    """Convert a naive-UTC datetime to a readable 12-hour ET string.
+
+    Returns e.g. ``"8:40 PM ET"`` for Telegram display.
+    Falls back to ``"HH:MM UTC"`` if the zoneinfo conversion fails.
+    UTC is kept internally everywhere; this is display-only.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        dt_et = dt.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo("America/New_York"))
+        # %-I strips the leading zero on Linux ("8:40 PM ET" not "08:40 PM ET")
+        return dt_et.strftime("%-I:%M %p ET")
+    except Exception:
+        return dt.strftime("%H:%M UTC")
+
+
 def _line_label(line: float) -> str:
     """General line-level reference label — context only, not a difficulty rating."""
     if line <= 0.5:
@@ -643,7 +659,10 @@ def format_underdog_change_alert(
         )
 
     opponent_str = f"\n  <b>vs:</b>      {opponent}" if opponent else ""
-    game_str = f"\n  <b>Game:</b>    {game_time.strftime('%b %d %H:%M')} UTC" if game_time else ""
+    game_str = (
+        f"\n  🕐 <b>Game starts:</b>  {_format_game_time_et(game_time)}"
+        if game_time else ""
+    )
 
     # Opening line display — show only when different from current and not a removal
     opening_str = ""
@@ -887,7 +906,7 @@ def format_underdog_new_prop_alert(
 
     opponent_str = f"\n  <b>vs:</b>          {opponent}" if opponent else ""
     game_str = (
-        f"\n  <b>Game:</b>        {game_time.strftime('%b %d %H:%M')} UTC"
+        f"\n  🕐 <b>Game starts:</b>  {_format_game_time_et(game_time)}"
         if game_time else ""
     )
 

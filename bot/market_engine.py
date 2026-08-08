@@ -101,6 +101,34 @@ _MARKET_FIRST_ALERT: dict = {}
 _MARKET_FIRST_ALERT_TTL_H: int = 24
 
 
+def _is_game_live_or_past(snap: object, now: datetime) -> bool:
+    """Return True when actionable alerts for this snap must be suppressed.
+
+    Checks two signals in order:
+    1. ``game_status`` attribute on *snap* — blocks when Underdog reports
+       LIVE / IN_PROGRESS / FINAL / COMPLETED / CLOSED.  This is
+       forward-compatible: if the field is absent it is silently skipped.
+    2. ``game_time`` past check — blocks when the stored kick-off time has
+       already elapsed (game_time < now).  If game_time is None the prop
+       is allowed through (many valid props lack a scheduled time).
+
+    Internal scanning may continue regardless; this gate only controls
+    Telegram delivery of 🎯 ACTIONABLE BET PICK alerts.
+    """
+    _BLOCKED_STATUSES = {"live", "in_progress", "final", "completed", "closed"}
+    _status = getattr(snap, "game_status", None)
+    if isinstance(_status, str) and _status.lower() in _BLOCKED_STATUSES:
+        return True
+    _gt = getattr(snap, "game_time", None)
+    if _gt is not None:
+        try:
+            if _gt.replace(tzinfo=None) < now:
+                return True
+        except Exception:
+            pass
+    return False
+
+
 def _rss_mb() -> Optional[float]:
     """Return current process RSS in MB.
 
@@ -1150,19 +1178,19 @@ async def underdog_job(context) -> None:
                     and decision.recommendation != "PASS"
                     and (snap.sport or "UNKNOWN") in config.ud_alert_sports
                 )
-                # Per-tier confidence gate — filter weak B/A/S picks before alert
+                # Per-tier confidence gate — sport-conditional: MLB/NFL use strict thresholds;
+                # all other sports use relaxed thresholds to surface more opportunities (#2).
                 if _np_bet_ready and decision is not None:
-                    _np_min_conf = {
-                        "S": config.UD_MIN_CONF_S,
-                        "A": config.UD_MIN_CONF_A,
-                        "B": config.UD_MIN_CONF_B,
-                    }.get(decision.decision_tier, 0)
+                    _np_min_conf = config.min_conf_for_sport_tier(
+                        snap.sport or "", decision.decision_tier
+                    )
                     if decision.confidence < _np_min_conf:
                         _np_bet_ready = False
                         logger.debug(
-                            "UD conf_gate [new]: %s | %s | conf=%d < min=%d (tier=%s)",
+                            "UD conf_gate [new]: %s | %s | conf=%d < min=%d (tier=%s sport=%s)",
                             player, stat_type,
-                            decision.confidence, _np_min_conf, decision.decision_tier,
+                            decision.confidence, _np_min_conf,
+                            decision.decision_tier, snap.sport or "UNKNOWN",
                         )
                 # Strict-sport tier gate — MLB and NFL are S-tier only (default).
                 # All other sports follow normal S/A/B/C tier rules.
@@ -1182,6 +1210,29 @@ async def underdog_job(context) -> None:
                         _np_bet_ready = False
                         logger.debug(
                             "UD mlb_under_gate [new]: %s | %s | UNDER blocked for MLB",
+                            player, stat_type,
+                        )
+                # Strict-sport Bet Quality gate — MLB/NFL require BQ ≥ UD_STRICT_SPORT_MIN_BET_QUALITY
+                # in addition to passing S-tier classification.  Prevents low-confidence S picks
+                # from reaching Telegram even when they clear the tier gate.
+                if _np_bet_ready and decision is not None:
+                    _np_sport_bq = (snap.sport or "").upper()
+                    if (_np_sport_bq in config.ud_strict_alert_sports
+                            and decision.confidence < config.UD_STRICT_SPORT_MIN_BET_QUALITY):
+                        _np_bet_ready = False
+                        logger.debug(
+                            "UD bq_gate [new]: %s | %s | sport=%s BQ=%d < %d",
+                            player, stat_type, _np_sport_bq,
+                            decision.confidence, config.UD_STRICT_SPORT_MIN_BET_QUALITY,
+                        )
+                # Game-live hard gate — block actionable alerts when game has already started (#5).
+                # Uses _is_game_live_or_past which checks status field + game_time elapsed.
+                # Internal market intelligence continues regardless.
+                if _np_bet_ready:
+                    if _is_game_live_or_past(snap, now):
+                        _np_bet_ready = False
+                        logger.debug(
+                            "UD live_gate [new]: %s | %s | game started/live, alert blocked",
                             player, stat_type,
                         )
 
@@ -1496,7 +1547,8 @@ async def underdog_job(context) -> None:
                     is_qualified = (
                         not is_cold_start
                         and score is not None
-                        and score.stars >= config.UD_MIN_STARS_TO_ALERT
+                        # Sport-conditional star floor: strict for MLB/NFL, relaxed for others (#2)
+                        and score.stars >= config.min_stars_for_sport(snap.sport or "")
                         and decision is not None
                         and decision.recommendation != "PASS"
                         and decision.decision_tier in ("S", "A", "B", "C")
@@ -1604,13 +1656,14 @@ async def underdog_job(context) -> None:
                 # Game time validation: suppress alerts when game has already started/passed (#3)
                 # Catches offseason props that slipped through with a past game_time.
                 # Does NOT block when game_time is None — many valid props lack a scheduled time.
+                # Game-live hard gate — strengthened: checks game_status field (if available)
+                # AND game_time elapsed.  Alex Bregman regression: game already live for 30 min
+                # → alert must be suppressed.  Internal scanning continues regardless.
                 if should_alert and not is_removed:
-                    _gt_raw = snap.game_time
-                    if _gt_raw is not None and _gt_raw.replace(tzinfo=None) < now:
+                    if _is_game_live_or_past(snap, now):
                         should_alert = False
                         logger.debug(
-                            "UD alert blocked (game passed %s): %s | %s",
-                            _gt_raw.replace(tzinfo=None).strftime('%Y-%m-%d %H:%M'),
+                            "UD live_gate [lc]: %s | %s | game started/live, alert blocked",
                             player, stat_type,
                         )
 
@@ -1857,7 +1910,8 @@ async def underdog_job(context) -> None:
                 )
                 if not _sval.has_supporting_data:
                     continue
-                if _sscore.stars < config.UD_MIN_STARS_TO_ALERT:
+                # Sport-conditional star floor: strict for MLB/NFL, relaxed for others (#2)
+                if _sscore.stars < config.min_stars_for_sport(_ssport):
                     continue
     
                 _shits = await _fetch_and_compute_hit_rates(
@@ -1895,16 +1949,12 @@ async def underdog_job(context) -> None:
                 if _sdec is None or _sdec.recommendation == "PASS":
                     continue
 
-                # Per-tier confidence gate for standing plays
-                _s_min_conf = {
-                    "S": config.UD_MIN_CONF_S,
-                    "A": config.UD_MIN_CONF_A,
-                    "B": config.UD_MIN_CONF_B,
-                }.get(_sdec.decision_tier, 0)
+                # Per-tier confidence gate — sport-conditional for standing plays (#2)
+                _s_min_conf = config.min_conf_for_sport_tier(_ssport, _sdec.decision_tier)
                 if _sdec.confidence < _s_min_conf:
                     logger.debug(
-                        "UD conf_gate [standing]: %s | %s | conf=%d < min=%d (tier=%s)",
-                        _sp, _st, _sdec.confidence, _s_min_conf, _sdec.decision_tier,
+                        "UD conf_gate [standing]: %s | %s | conf=%d < min=%d (tier=%s sport=%s)",
+                        _sp, _st, _sdec.confidence, _s_min_conf, _sdec.decision_tier, _ssport,
                     )
                     continue
 
@@ -1921,6 +1971,24 @@ async def underdog_job(context) -> None:
                 if _ssport.upper() == "MLB" and _sdec.recommendation == "UNDER":
                     logger.debug(
                         "UD mlb_under_gate [standing]: %s | %s | UNDER blocked for MLB",
+                        _sp, _st,
+                    )
+                    continue
+
+                # Strict-sport Bet Quality gate for standing plays — MLB/NFL require BQ ≥ 85 (#1).
+                if (_ssport.upper() in config.ud_strict_alert_sports
+                        and _sdec.confidence < config.UD_STRICT_SPORT_MIN_BET_QUALITY):
+                    logger.debug(
+                        "UD bq_gate [standing]: %s | %s | sport=%s BQ=%d < %d",
+                        _sp, _st, _ssport.upper(),
+                        _sdec.confidence, config.UD_STRICT_SPORT_MIN_BET_QUALITY,
+                    )
+                    continue
+
+                # Game-live hard gate for standing plays — block if game already started (#5).
+                if _is_game_live_or_past(_ssnap, now):
+                    logger.debug(
+                        "UD live_gate [standing]: %s | %s | game started/live, alert blocked",
                         _sp, _st,
                     )
                     continue

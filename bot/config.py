@@ -156,6 +156,10 @@ class Config:
     # B-tier passes only when the per-tier confidence gate (UD_MIN_CONF_B) also clears.
     # Set to 1 to disable star gating entirely; set to 4 to restore A-tier-only behaviour.
     UD_MIN_STARS_TO_ALERT:    int   = int(os.environ.get("UD_MIN_STARS_TO_ALERT", "3"))
+    # Relaxed star floor for non-strict sports (all sports except MLB/NFL).
+    # Lowered to 2★ so the pipeline surfaces more non-MLB/NFL opportunities
+    # during stress-testing without touching the MLB/NFL quality bar.
+    UD_NON_STRICT_MIN_STARS:  int   = int(os.environ.get("UD_NON_STRICT_MIN_STARS", "2"))
     # New-prop alert: used for DB qualification tracking (summary inclusion gate).
     # Props at or below this line appear in the end-of-cycle summary regardless
     # of score.  Set to 0.0 to use score-only qualification.
@@ -277,6 +281,17 @@ class Config:
     UD_MIN_CONF_S: int = int(os.environ.get("UD_MIN_CONF_S", "80"))
     UD_MIN_CONF_A: int = int(os.environ.get("UD_MIN_CONF_A", "70"))
     UD_MIN_CONF_B: int = int(os.environ.get("UD_MIN_CONF_B", "55"))
+    # Relaxed A/B confidence floors for non-strict sports (all except MLB/NFL).
+    # Allows the pipeline to surface more legitimate non-MLB/NFL A and B picks
+    # during stress-testing while leaving MLB/NFL thresholds untouched.
+    UD_NON_STRICT_MIN_CONF_A: int = int(os.environ.get("UD_NON_STRICT_MIN_CONF_A", "60"))
+    UD_NON_STRICT_MIN_CONF_B: int = int(os.environ.get("UD_NON_STRICT_MIN_CONF_B", "45"))
+    # Minimum bet_quality_score (= decision.confidence) for strict sports (MLB/NFL).
+    # A strict-sport pick must pass BOTH S-tier classification AND this BQ floor.
+    # Default 85: filters out low-confidence S picks before they reach Telegram.
+    UD_STRICT_SPORT_MIN_BET_QUALITY: int = int(
+        os.environ.get("UD_STRICT_SPORT_MIN_BET_QUALITY", "85")
+    )
 
     # ── Alert sport suppression ───────────────────────────────────────────────
     # Sports whose Telegram alerts are temporarily suppressed.
@@ -361,6 +376,29 @@ class Config:
         stay actionable rather than flooding the channel.
         """
         return frozenset({"MLB", "NFL"})
+
+    def min_stars_for_sport(self, sport: str) -> int:
+        """Stars floor — strict (UD_MIN_STARS_TO_ALERT) for MLB/NFL,
+        relaxed (UD_NON_STRICT_MIN_STARS) for all other sports."""
+        if sport.upper() in self.ud_strict_alert_sports:
+            return self.UD_MIN_STARS_TO_ALERT
+        return self.UD_NON_STRICT_MIN_STARS
+
+    def min_conf_for_sport_tier(self, sport: str, tier: str) -> int:
+        """Confidence floor for a sport/tier pair.
+
+        S-tier uses the same threshold regardless of sport.
+        A and B use relaxed thresholds for non-strict (non-MLB/NFL) sports
+        so the pipeline can surface more opportunities during stress-testing.
+        """
+        strict = sport.upper() in self.ud_strict_alert_sports
+        if tier == "S":
+            return self.UD_MIN_CONF_S
+        if tier == "A":
+            return self.UD_MIN_CONF_A if strict else self.UD_NON_STRICT_MIN_CONF_A
+        if tier == "B":
+            return self.UD_MIN_CONF_B if strict else self.UD_NON_STRICT_MIN_CONF_B
+        return 0
 
     @property
     def alert_disabled_sports(self) -> frozenset[str]:

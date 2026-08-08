@@ -1,0 +1,222 @@
+Proceed with the outstanding targeted cleanup items.
+
+IMPORTANT:
+We are credit-limited. Make only targeted changes. Do NOT redo anything already confirmed DONE.
+
+==================================================
+FINAL MLB / NFL RULE
+
+MLB:
+
+* Player props only
+* S-Tier ONLY
+* Bet Quality >= 85/100
+
+NFL:
+
+* Player props only
+* S-Tier ONLY
+* Bet Quality >= 85/100
+
+The Bet Quality requirement is a HARD Telegram-delivery gate separate from the S-tier classification.
+
+An MLB/NFL pick must satisfy BOTH:
+
+1. S-Tier
+2. Bet Quality >= 85
+
+Tests required:
+
+* MLB S-tier 84 → BLOCK
+* MLB S-tier 85 → ALLOW
+* NFL S-tier 84 → BLOCK
+* NFL S-tier 85 → ALLOW
+* MLB/NFL non-S-tier → BLOCK
+
+==================================================
+💰 MONEYLINES / TOTALS — KEEP OFF
+
+Do NOT implement the moneyline/totals pipeline right now.
+
+Keep:
+
+* Moneylines → OFF
+* Totals → OFF
+
+Do not build or expand an OddsAPI moneyline/totals system during this cleanup.
+
+This remains DEFERRED for a future phase.
+
+Do not spend credits on it.
+
+==================================================
+#2 — RELAX GATES FOR NON-MLB/NFL
+
+Keep MLB/NFL strict.
+
+Relax the old global requirements for other sports so we can properly stress-test the pipeline.
+
+Review:
+
+* UD_MIN_STARS_TO_ALERT
+* Minimum validation snapshots
+* Minimum confidence
+* A-tier threshold
+* B-tier threshold
+* Market bypass requirements
+
+Do NOT remove all quality control.
+
+The goal is simply to allow more legitimate non-MLB/NFL props to survive the funnel so we can see where opportunities are being suppressed.
+
+MLB/NFL must remain isolated from these relaxed settings.
+
+Add diagnostics showing the effect of the relaxed gates.
+
+==================================================
+#5 — STRENGTHEN GAME-LIVE HARD GATE
+
+Keep the existing game-time protection.
+
+Strengthen it so that if Underdog provides an event/game status, actionable Telegram delivery also respects that status.
+
+BLOCK actionable Telegram alerts when status indicates:
+
+* LIVE
+* IN_PROGRESS
+* FINAL
+* COMPLETED
+* CLOSED
+
+Also retain the existing scheduled-time protection.
+
+If live status is unavailable, safely fall back to the existing event/time validation.
+
+Do NOT build a new large live-data architecture.
+
+Alex Bregman must become a regression test:
+
+Game already live → 🎯 ACTIONABLE BET PICK MUST NOT be sent.
+
+Internal scanning may continue.
+
+==================================================
+#7 — FIX TELEGRAM GAME START TIME
+
+Replace UTC military-time display.
+
+Current:
+
+Aug 07 20:40 UTC
+
+Required:
+
+🕐 Game starts: 8:40 PM ET
+
+Use proper timezone conversion.
+
+Keep UTC internally for database/logging.
+
+Telegram must use readable 12-hour time.
+
+Add a formatter test.
+
+==================================================
+#18 — EXPLICIT SCHEDULER PROTECTION
+
+Make Underdog scheduler protection explicit.
+
+Set:
+
+max_instances=1
+
+Configure a reasonable misfire_grace_time if appropriate.
+
+Do NOT increase concurrency.
+
+Goal:
+
+* One Underdog scan at a time
+* No overlapping scans
+* No duplicate processing
+* No unnecessary API usage
+
+Add a verification/test proving max_instances=1 is explicitly configured.
+
+==================================================
+DO NOT TOUCH CONFIRMED-DONE ITEMS
+
+Do NOT redo:
+
+#3 Funnel diagnostics
+#4 24/7 early scanning
+#6 Direction gate
+#8 First-seen/line freshness
+#9 Movement direction
+#10 Stat/line consistency
+#11 Reversal protection
+#13 Telegram spam filtering
+#16 Internal market intelligence
+#17 Pipeline type guard
+#19 OOM/crash stability
+
+Only touch these if testing discovers an actual regression.
+
+==================================================
+TEST REQUIREMENT
+
+After implementing the targeted fixes:
+
+1. Run targeted tests
+2. Run full test suite
+3. Run startup health check
+4. Verify scheduler configuration
+5. Verify MLB/NFL S-tier + 85/100 hard gate
+6. Verify other-sport relaxed gates
+7. Verify live-game protection
+8. Verify Alex Bregman regression case
+9. Verify readable ET game time
+10. Verify Telegram behavior
+11. Verify no existing functionality regressed
+12. Verify moneylines remain OFF
+13. Verify totals remain OFF
+
+Every completed item must be:
+
+✅ Implemented
+✅ Tested
+✅ Verified
+✅ Checked off
+
+Do NOT claim completion based only on code changes.
+
+==================================================
+FREEZE RULE
+
+Do NOT freeze V1.3 yet.
+
+Moneylines/totals remain OFF and DEFERRED.
+
+Complete and verify the targeted cleanup items first.
+
+Then report:
+
+* Files changed
+* Tests passed
+* Tests added
+* Startup status
+* Scheduler status
+* MLB/NFL gate verification
+* Other-sport gate verification
+* Live-game gate verification
+* Game-time format verification
+* Moneyline/totals OFF verification
+* Any remaining issues
+
+Then STOP.
+
+Do not make additional feature changes without approval.
+
+NO REWRITE.
+NO FEATURE CREEP.
+NO MONEYLINE/TOTALS BUILD.

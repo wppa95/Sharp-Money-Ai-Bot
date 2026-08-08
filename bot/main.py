@@ -274,7 +274,18 @@ async def post_init(application: Application) -> None:
         # jq.run_repeating(consensus_check_job, interval=config.CONSENSUS_CHECK_INTERVAL,  first=25,  name="consensus_checker")
         # jq.run_repeating(clv_check_job,       interval=config.CLV_CHECK_INTERVAL,        first=35,  name="clv_checker")
         # ─────────────────────────────────────────────────────────────────────
-        jq.run_repeating(underdog_job,         interval=config.UNDERDOG_POLL_INTERVAL,      first=45,  name="underdog_monitor")
+        jq.run_repeating(
+            underdog_job,
+            interval=config.UNDERDOG_POLL_INTERVAL,
+            first=45,
+            name="underdog_monitor",
+            # Explicit single-instance protection: if a scan is still running when
+            # the next trigger fires, APScheduler skips the new trigger rather than
+            # spawning a second concurrent scan.  misfire_grace_time=60 lets a
+            # trigger that fires up to 60 s late still execute (avoids missed scans
+            # during brief process pauses).
+            job_kwargs={"max_instances": 1, "misfire_grace_time": 60},
+        )
         # CLV seed job — every 15 minutes (creates AlertCLVSeed entries for alerts)
         jq.run_repeating(_clv_seed_job,        interval=900,                                first=120, name="clv_seeder")
         # CLV harvest job — every hour (processes seeds after game_time passes)
