@@ -266,19 +266,20 @@ class TestStrictSportBQConfig:
             setattr(c, k, v)
         return c
 
-    def test_default_bq_is_85(self):
+    def test_default_bq_is_95(self):
+        """Default MLB/NFL BQ threshold is 95 (raised from 85 — fix #117)."""
         c = self._cfg()
-        assert c.UD_STRICT_SPORT_MIN_BET_QUALITY == 85
+        assert c.UD_STRICT_SPORT_MIN_BET_QUALITY == 95
 
-    def test_bq_84_would_be_below_threshold(self):
-        """BQ=84 < 85 → should be blocked by gate logic."""
+    def test_bq_94_would_be_below_threshold(self):
+        """BQ=94 < 95 → should be blocked by gate logic."""
         c = self._cfg()
-        assert 84 < c.UD_STRICT_SPORT_MIN_BET_QUALITY
+        assert 94 < c.UD_STRICT_SPORT_MIN_BET_QUALITY
 
-    def test_bq_85_meets_threshold(self):
-        """BQ=85 == 85 → should be allowed by gate logic."""
+    def test_bq_95_meets_threshold(self):
+        """BQ=95 == 95 → should be allowed by gate logic."""
         c = self._cfg()
-        assert 85 >= c.UD_STRICT_SPORT_MIN_BET_QUALITY
+        assert 95 >= c.UD_STRICT_SPORT_MIN_BET_QUALITY
 
     def test_bq_threshold_configurable(self):
         """UD_STRICT_SPORT_MIN_BET_QUALITY can be overridden."""

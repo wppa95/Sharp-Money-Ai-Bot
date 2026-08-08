@@ -561,9 +561,12 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             _mon   = None
             _cache = None
 
+        # DB-backed alert count — survives restart, counts only Telegram-delivered picks.
+        _alerts_today = await _db.count_today_actionable_alerts() if _db else 0
+        _alerts_total = await _db.count_actionable_pick_records() if _db else 0
         lines: list[str] = [
             f"🤖 <b>Sharp Money Bot</b>  ·  Uptime: {_uptime_str()}",
-            f"📬 Alerts sent: {_total_alerts_sent:,}",
+            f"📬 Alerts today: {_alerts_today:,}  ·  All-time: {_alerts_total:,}",
             "",
         ]
 
@@ -3340,7 +3343,7 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             f"<i>Last {since_h}h  ·  Use /funnel 48 for longer window</i>",
             "",
             f"📥 Scanned:           <b>{total}</b>",
-            f"✅ Accepted (alerted): <b>{accepted}</b>",
+            f"✅ Qualified candidates: <b>{accepted}</b>",
             f"👁 Watchlist (B-tier): <b>{watchlist}</b>",
             f"❌ Rejected:           <b>{rejected}</b>",
             f"🚫 Removed:            <b>{removed}</b>",

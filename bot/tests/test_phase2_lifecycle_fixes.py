@@ -372,11 +372,11 @@ class TestSourceCodeFixes:
     def test_new_prop_path_has_lifecycle_append(self):
         """New-prop path must append to _lifecycle_alerted on sent=True."""
         src = self._load_source()
-        # The new-prop block increments _n_new_prop_sent then appends lifecycle
-        # Verify both are present in close proximity
+        # The new-prop block increments _n_new_prop_sent then (after _record_prop_alerted)
+        # appends lifecycle. Window widened to 700 to clear the dedup-record block (#118).
         idx = src.find("_n_new_prop_sent += 1")
         assert idx != -1, "_n_new_prop_sent += 1 not found"
-        snippet = src[idx: idx + 400]
+        snippet = src[idx: idx + 900]
         assert "_lifecycle_alerted.append" in snippet, (
             "_lifecycle_alerted.append() missing from new-prop delivery block"
         )

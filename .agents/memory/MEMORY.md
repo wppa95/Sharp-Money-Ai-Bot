@@ -36,3 +36,4 @@
 - [Telegram pick grading (alert_sent)](telegram-pick-grading.md) — alert_sent+alert_sent_at on PropOpportunityLog; mark_opportunity_alert_sent(); get_telegram_pick_performance(); 3 engine paths marked; /rollups updated; 3158 tests Aug 2026.
 - [Pipeline bottleneck fix (standing path + esports HFS)](pipeline-bottleneck-fix.md) — two root causes: _HFS excluded esports stats; _processed_keys blocked standing path for sub-threshold movers; 3179 tests Aug 2026.
 - [Phase 2 Core fixes](phase2-core-fixes.md) — props=0 (#114), /restarts removed (#115), auto-grading fetch loop (#116), decision_tier clarity (#113); 3256 tests Aug 2026.
+- [Post-freeze bugs 117-120](bugs-117-120.md) — BQ gate 85→95 (#117); new-prop dedup gate (#118); funnel label + /status DB counter (#119); Tier 1 gate verified correct (#120); 3288 tests Aug 2026.

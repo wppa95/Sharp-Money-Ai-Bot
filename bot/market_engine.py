@@ -38,6 +38,7 @@ from typing import Optional
 from config import config
 from engine.health import get_health_tracker
 from engine.prop_intelligence import compute_prop_intelligence as _compute_intel
+from engine.player_prop_market import _is_prop_deduped, _record_prop_alerted
 from engine.score_validation import clamp_score
 from database import (
     Database,
@@ -1240,6 +1241,25 @@ async def underdog_job(context) -> None:
                             player, stat_type,
                         )
 
+                # Dedup gate (#118) — suppress if same player/sport/stat/line was alerted
+                # recently (within UD_ALERT_DEDUP_WINDOW) with no significant line move.
+                # Prevents the same new-prop from firing every scan cycle.
+                if _np_bet_ready:
+                    if _is_prop_deduped(
+                        _prop_market_alerted,
+                        player,
+                        snap.sport or "UNKNOWN",
+                        stat_type,
+                        line_val,
+                        dedup_window_seconds=config.UD_ALERT_DEDUP_WINDOW,
+                        min_line_change=config.MIN_UNDERDOG_LINE_CHANGE,
+                    ):
+                        _np_bet_ready = False
+                        logger.debug(
+                            "UD dedup_gate [new]: %s | %s | already alerted recently at line=%.1f",
+                            player, stat_type, line_val,
+                        )
+
                 if _np_bet_ready and chat_ids:
                     # Prop Intelligence trace for richer alert context
                     _np_intel_trace: Optional[dict] = None
@@ -1286,6 +1306,14 @@ async def underdog_job(context) -> None:
                     )
                     if ud_result.sent:
                         _n_new_prop_sent += 1
+                        # Record in dedup dict so next scan cycle does not re-alert (#118).
+                        _record_prop_alerted(
+                            _prop_market_alerted,
+                            player,
+                            snap.sport or "UNKNOWN",
+                            stat_type,
+                            line_val,
+                        )
                         # Queue lifecycle transition → ACTIVE_ALERTED (applied after bridge).
                         # Previously missing from the new-prop path; the line-change path
                         # always had this, but new-prop picks were never surfaced in /alerts.

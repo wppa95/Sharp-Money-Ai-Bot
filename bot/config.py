@@ -288,9 +288,11 @@ class Config:
     UD_NON_STRICT_MIN_CONF_B: int = int(os.environ.get("UD_NON_STRICT_MIN_CONF_B", "45"))
     # Minimum bet_quality_score (= decision.confidence) for strict sports (MLB/NFL).
     # A strict-sport pick must pass BOTH S-tier classification AND this BQ floor.
-    # Default 85: filters out low-confidence S picks before they reach Telegram.
+    # Default 95: MLB/NFL require very high confidence before Telegram delivery.
+    # Raised from 85 → 95 (fix #117: BQ=85 picks were reaching Telegram).
+    # Set via UD_STRICT_SPORT_MIN_BET_QUALITY env var to override.
     UD_STRICT_SPORT_MIN_BET_QUALITY: int = int(
-        os.environ.get("UD_STRICT_SPORT_MIN_BET_QUALITY", "85")
+        os.environ.get("UD_STRICT_SPORT_MIN_BET_QUALITY", "95")
     )
 
     # ── Alert sport suppression ───────────────────────────────────────────────

@@ -48,13 +48,17 @@ def _make_hit_rates(over_rate: float = 0.80):
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-def _snap(player: str, stat: str, line: float = 2.5, *, removed: bool = False) -> MagicMock:
+def _snap(player: str, stat: str, line: float = 2.5, *, removed: bool = False,
+          sport: str = "NBA") -> MagicMock:
+    """Build a snapshot mock.  Default sport=NBA (not in ud_strict_alert_sports)
+    so generic new-prop delivery tests are not affected by the MLB/NFL BQ≥95 gate.
+    Pass sport='MLB' explicitly when testing MLB-specific gate behavior."""
     s = MagicMock()
     s.sportsbook = "Underdog"
     s.player     = player
     s.selection  = f"[REMOVED] {player} {stat} {line}" if removed else f"{player} {stat} {line}"
     s.line       = line
-    s.sport      = "MLB"
+    s.sport      = sport
     s.team       = "TeamA"
     s.event      = "game123"
     s.game_time  = None
@@ -123,18 +127,22 @@ async def _run_job(snapshots, db, *, deliver_result=None, hit_rates=None):
 
     with patch.object(me, "_registry", registry):
         with patch.object(me, "_cold_start_done", True):
-            with patch("market_engine._fetch_and_compute_hit_rates", hit_rates_mock):
-                with patch("market_engine.AlertDelivery") as mock_cls:
-                    mock_delivery = MagicMock()
-                    mock_delivery.deliver_underdog = AsyncMock(return_value=deliver_result)
-                    mock_cls.return_value = mock_delivery
-                    # The cycle digest is dispatched via broadcast_alert directly (not through
-                    # AlertDelivery), so we patch it here to prevent real Telegram calls.
-                    with patch("alerts.broadcast_alert",
-                               new_callable=AsyncMock,
-                               return_value={"sent": 1, "failed": 0}):
-                        await me.underdog_job(ctx)
-                    return mock_delivery
+            # Reset per-test: _prop_market_alerted is module-level and persists across
+            # tests in the same process.  A fresh dict prevents the dedup gate (#118)
+            # from suppressing alerts in tests that follow a test that recorded an alert.
+            with patch.object(me, "_prop_market_alerted", {}):
+                with patch("market_engine._fetch_and_compute_hit_rates", hit_rates_mock):
+                    with patch("market_engine.AlertDelivery") as mock_cls:
+                        mock_delivery = MagicMock()
+                        mock_delivery.deliver_underdog = AsyncMock(return_value=deliver_result)
+                        mock_cls.return_value = mock_delivery
+                        # The cycle digest is dispatched via broadcast_alert directly (not through
+                        # AlertDelivery), so we patch it here to prevent real Telegram calls.
+                        with patch("alerts.broadcast_alert",
+                                   new_callable=AsyncMock,
+                                   return_value={"sent": 1, "failed": 0}):
+                            await me.underdog_job(ctx)
+                        return mock_delivery
 
 
 # ── New-prop detection ─────────────────────────────────────────────────────────

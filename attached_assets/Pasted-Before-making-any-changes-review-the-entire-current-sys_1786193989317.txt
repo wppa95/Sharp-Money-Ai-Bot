@@ -1,0 +1,331 @@
+Before making any changes, review the entire current system state.
+
+🔐 CREDENTIAL PROTECTION
+
+Do NOT expose, print, paste, hardcode, request, or reveal any API keys, tokens, passwords, credentials, or secrets.
+
+━━━━━━━━━━━━━━━━━━
+✅ MANDATORY CHECKLIST
+━━━━━━━━━━━━━━━━━━
+
+☐ Review current frozen Phase 2 Core state
+☐ Preserve Tier 1 and Tier 2 as separate systems
+☐ Trace the actual Max Muncy alert
+☐ Trace the actual Jake McCarthy alert
+☐ Reconcile /funnel “Accepted (alerted)” with actual Telegram delivery
+☐ Verify /status alert counter
+☐ Verify Tier 2 MLB/NFL gate
+☐ Verify Tier 1 non-MLB/NFL delivery
+☐ Investigate duplicate actionable alerts
+☐ Make smallest possible fixes only
+☐ Add regression tests
+☐ Run full test suite
+☐ Verify actual Telegram behavior
+☐ Freeze when complete
+
+Do NOT skip checklist items.
+
+━━━━━━━━━━━━━━━━━━
+🚨 BUG #117 — MLB/NFL TIER 2 GATE
+━━━━━━━━━━━━━━━━━━
+
+We observed this MLB alert repeatedly:
+
+MLB — Max Muncy
+Batter Strikeouts
+Line: 0.5
+Previous: 1.5
+Move: -1.0
+PICK: OVER 0.5
+S-Tier
+Bet Quality: 85/100
+
+This should NOT have reached Telegram.
+
+The intended qualification structure is:
+
+TIER 1 — GENERAL SPORTS
+
+S / A / B tiers remain unchanged.
+
+TIER 2 — MLB/NFL
+
+MLB and NFL have their own stricter gate:
+
+S-tier + Bet Quality >=95/100
+
+Keep Tier 1 and Tier 2 completely separate.
+
+IMPORTANT:
+
+Do NOT merge the tier systems.
+
+Do NOT change the Tier 1 S/A/B thresholds.
+
+Do NOT rewrite the scoring engine.
+
+Do NOT lower or raise unrelated thresholds.
+
+First trace the actual Max Muncy prop through every qualification and delivery stage.
+
+Record the actual values for:
+
+* Composite score
+* Tier 1 score tier
+* Decision confidence
+* Decision tier
+* Bet Quality
+* Tier 2 MLB/NFL gate
+* Final qualification result
+* Final actionable-pick result
+* Telegram delivery result
+
+Determine exactly why an MLB S-tier prop with Bet Quality 85/100 reached Telegram.
+
+Then make the smallest possible fix so:
+
+MLB/NFL:
+S-tier + Bet Quality >=95
+→ actionable
+
+Anything below:
+→ NOT actionable
+
+Regression tests must prove:
+
+☐ MLB S + 95 qualifies
+☐ MLB S + 94 does not qualify
+☐ NFL S + 95 qualifies
+☐ NFL S + 94 does not qualify
+☐ MLB/NFL A-tier does not qualify
+☐ Tier 1 non-MLB/NFL S/A/B behavior remains unchanged
+
+━━━━━━━━━━━━━━━━━━
+🚨 BUG #118 — DUPLICATE ACTIONABLE ALERTS
+━━━━━━━━━━━━━━━━━━
+
+The exact same Max Muncy opportunity has been sent repeatedly every few minutes.
+
+Same:
+
+* Player
+* Sport
+* Market
+* Game
+* Line
+* Direction
+* Previous line
+* Movement
+* Tier
+* Bet Quality
+
+This must be suppressed.
+
+Use lightweight existing alert memory/deduplication.
+
+Do NOT permanently block the player or market.
+
+A genuinely new opportunity must still be able to alert.
+
+Regression tests:
+
+☐ Same opportunity across polling cycles does not repeatedly alert
+☐ Meaningful line change can create a new alert
+☐ New game can create a new alert
+☐ Future legitimate opportunity is not permanently blocked
+
+━━━━━━━━━━━━━━━━━━
+🚨 BUG #119 — FUNNEL VS TELEGRAM DELIVERY MISMATCH
+━━━━━━━━━━━━━━━━━━
+
+Current diagnostic outputs:
+
+/funnel 48 shows:
+
+Accepted (alerted): 47
+
+But /status shows:
+
+Alerts sent: 0
+
+And actual Telegram behavior shows that only the alerts we manually observed were received, including the repeated Max Muncy/Jake McCarthy alerts.
+
+Therefore:
+
+DO NOT assume:
+
+“Accepted (alerted)” = “Telegram delivered.”
+
+Trace exactly what /funnel counts as:
+
+ACCEPTED / ALERTED
+
+versus what /status counts as:
+
+ALERTS SENT
+
+versus what Telegram actually receives.
+
+Identify whether the funnel is counting:
+
+* Qualified candidates
+* Alert-eligible candidates
+* Alert attempts
+* Broadcast attempts
+* Successfully delivered Telegram alerts
+* Something else
+
+These counters must have clearly defined meanings.
+
+Do NOT simply change the numbers to make them match.
+
+Fix the underlying accounting/logic if they are supposed to represent the same thing.
+
+If they intentionally represent different stages, rename/clarify the display so it cannot imply that 47 Telegram alerts were delivered.
+
+━━━━━━━━━━━━━━━━━━
+🚨 BUG #120 — TIER 1 NON-MLB/NFL DELIVERY
+━━━━━━━━━━━━━━━━━━
+
+We also have evidence that Tier 1 is producing qualified non-MLB/NFL candidates.
+
+From /funnel 48:
+
+CS:
+rx — Kills on Maps 1+2
+85/100 [S]
+decision: qualified
+
+LOL:
+None Quad — Kills on Maps 1+2
+83/100 [S]
+decision: qualified
+
+ESPORTS:
+CoD: CLEANX — Fantasy Points on Games 1-3
+85/100 [S]
+decision: decision_pass
+
+Yet I have NOT received Telegram actionable alerts for these types of props.
+
+Do NOT assume these opportunities should automatically have been sent.
+
+Trace them.
+
+For representative qualified non-MLB/NFL candidates, determine:
+
+1. Was the candidate actually qualified?
+2. Did it pass the final actionable-pick gate?
+3. Was an OVER/UNDER direction available?
+4. Was the event active/upcoming?
+5. Did it pass the minimum stars requirement?
+6. Did it pass validation requirements?
+7. Did it enter the Telegram delivery path?
+8. Was delivery attempted?
+9. If not delivered, exactly which gate rejected it?
+
+Also verify that MLB/NFL Tier 2 restrictions are NOT accidentally being applied to Tier 1 sports.
+
+Do NOT change Tier 1 thresholds just to create more alerts.
+
+If there simply were no final-delivery-qualified Tier 1 opportunities, leave the logic alone and document why.
+
+If valid Tier 1 opportunities are being blocked after qualification, fix only that specific bottleneck.
+
+Regression tests must prove:
+
+☐ Valid Tier 1 S-tier non-MLB/NFL opportunity can reach final delivery
+☐ Valid Tier 1 A-tier non-MLB/NFL opportunity can reach final delivery when existing rules allow it
+☐ B-tier behavior remains unchanged
+☐ MLB/NFL Tier 2 rules do not apply to other sports
+☐ Final delivery does not globally suppress non-MLB/NFL picks
+
+━━━━━━━━━━━━━━━━━━
+⚠️ IMPORTANT — DO NOT CONFUSE /PICKS WITH ACTIONABLE ALERTS
+━━━━━━━━━━━━━━━━━━
+
+Current /picks showed:
+
+Jackson Holliday
+MLB H+R+RBI
+OVER 0.5
+Confidence 50/100
+2★
+No tier
+
+This is NOT an actionable Telegram pick and should remain excluded.
+
+Do not use /picks alone as proof that a Telegram alert should have been sent.
+
+Trace the actual qualification and delivery pipeline.
+
+━━━━━━━━━━━━━━━━━━
+⚠️ SCOPE
+━━━━━━━━━━━━━━━━━━
+
+This is a small post-freeze diagnostic/fix.
+
+Do NOT:
+
+* Rewrite the bot
+* Rewrite scoring
+* Change Tier 1 thresholds
+* Merge Tier 1/Tier 2
+* Change Underdog ingestion
+* Redesign architecture
+* Add providers
+* Add features
+* Change database structure unless absolutely necessary
+* Reopen unrelated frozen work
+
+Preserve the existing Phase 2 Core implementation.
+
+━━━━━━━━━━━━━━━━━━
+🧪 VALIDATION
+━━━━━━━━━━━━━━━━━━
+
+After fixes:
+
+☐ Run targeted regression tests
+☐ Run full test suite
+☐ Startup health check
+☐ Verify Underdog pipeline
+☐ Verify Tier 1 qualification
+☐ Verify Tier 2 MLB/NFL qualification
+☐ Verify funnel accounting
+☐ Verify duplicate suppression
+☐ Verify Telegram delivery
+☐ Confirm no regressions
+
+Do NOT declare success based only on tests.
+
+Verify the actual Telegram delivery path.
+
+━━━━━━━━━━━━━━━━━━
+📋 FINAL REPORT
+━━━━━━━━━━━━━━━━━━
+
+Report:
+
+* Root cause #117
+* Root cause #118
+* Root cause #119
+* Root cause #120
+* Files changed
+* Exact logic changed
+* Tests added
+* Full test count
+* Tests passed
+* Startup health
+* Telegram verification
+* Tier 1 verification
+* Tier 2 MLB/NFL verification
+* Funnel accounting verification
+* Duplicate-alert verification
+* Remaining known issues
+
+Then:
+
+🔒 FREEZE THE PROJECT AGAIN.
+
+No additional changes after this work unless a new phase is explicitly started.
