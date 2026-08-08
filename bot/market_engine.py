@@ -1282,6 +1282,10 @@ async def underdog_job(context) -> None:
                     )
                     if ud_result.sent:
                         _n_new_prop_sent += 1
+                        # Queue lifecycle transition → ACTIVE_ALERTED (applied after bridge).
+                        # Previously missing from the new-prop path; the line-change path
+                        # always had this, but new-prop picks were never surfaced in /alerts.
+                        _lifecycle_alerted.append((player, snap.sport or "UNKNOWN", stat_type))
                         # Mark as Telegram actionable pick so performance tracking
                         # separates alerted picks from all evaluated props.
                         try:
@@ -2098,6 +2102,10 @@ async def underdog_job(context) -> None:
                 )
                 if _sresult.sent:
                     _n_standing_sent += 1
+                    # Queue lifecycle transition → ACTIVE_ALERTED (applied after bridge).
+                    # Previously missing from the standing path; stable S/A-tier props
+                    # that fire here were never surfaced in /alerts.
+                    _lifecycle_alerted.append((_sp, _ssport, _st))
                     # Mark as Telegram actionable pick for performance tracking.
                     try:
                         _s_ext_id = getattr(_ssnap, "external_id", None) or getattr(_ssnap, "id", None) or ""
@@ -2439,7 +2447,8 @@ async def underdog_job(context) -> None:
             _health.record_underdog_scan(
                 props_count = len(ud_snaps) if "ud_snaps" in dir() else 0,
                 alerts_sent = (
-                    (_n_new_prop_sent if "_n_new_prop_sent" in dir() else 0)
+                    (_n_new_prop_sent  if "_n_new_prop_sent"  in dir() else 0)
+                    + (_n_standing_sent if "_n_standing_sent" in dir() else 0)
                 ),
             )
             _health.record_database_write("lifecycle_bridge")
