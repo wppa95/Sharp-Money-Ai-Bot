@@ -394,8 +394,9 @@ class TestSourceCodeFixes:
     def test_health_counter_includes_standing(self):
         """record_underdog_scan alerts_sent must reference _n_standing_sent."""
         src = self._load_source()
-        scan_idx = src.find("record_underdog_scan")
-        assert scan_idx != -1
+        # Search for the actual call site, not comment references to the function name
+        scan_idx = src.find("_health.record_underdog_scan(")
+        assert scan_idx != -1, "_health.record_underdog_scan( call not found in market_engine.py"
         snippet = src[scan_idx: scan_idx + 300]
         assert "_n_standing_sent" in snippet, (
             "_n_standing_sent missing from record_underdog_scan call — "

@@ -541,62 +541,6 @@ async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text("⚠️ /rollups failed. Check bot logs.")
 
 
-async def cmd_restarts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/restarts — show bot restart count and recent restart history."""
-    if not _check_allowed(update):
-        await update.message.reply_text("⛔ Unauthorized.")
-        return
-    try:
-        from engine.health import get_health_tracker
-        ht = get_health_tracker()
-        if ht is None:
-            await update.message.reply_text("⚠️ Health tracker not initialised.")
-            return
-
-        count   = ht.restart_count()
-        history = ht.restart_history()
-        reason  = ht.last_startup_reason()
-        crash   = ht.was_unexpected_exit()
-
-        _REASON_ICON: dict[str, str] = {
-            "first_start":     "🆕",
-            "clean_restart":   "✅",
-            "crash_detected":  "❌",
-            "unexpected_exit": "⚠️",
-            "unknown":         "❓",
-        }
-
-        lines: list[str] = [
-            "🔄 <b>Bot Restarts</b>",
-            "",
-            f"Total startups:   <b>{count}</b>",
-            f"Last startup:     {ht.last_startup() or '—'}",
-            f"Restart reason:   {_REASON_ICON.get(reason, '❓')} {reason}",
-            f"Crash detected:   {'Yes ⚠️' if crash else 'No ✅'}",
-            f"Prev session:     {ht.last_session_duration_str()}",
-        ]
-
-        if history:
-            lines.append("")
-            lines.append(f"<b>Recent history</b> (last {min(len(history), 10)}):")
-            for entry in reversed(history[-10:]):
-                ts       = entry.get("ts", "?")
-                r        = entry.get("reason", "unknown")
-                icon     = _REASON_ICON.get(r, "❓")
-                sess     = entry.get("session_secs")
-                from engine.health import _secs_to_duration
-                dur_str  = f"  session: {_secs_to_duration(sess)}" if sess else ""
-                lines.append(f"  {icon} {ts}  <i>{r}</i>{dur_str}")
-        else:
-            lines.append("")
-            lines.append("<i>No restart history recorded yet.</i>")
-
-        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
-    except Exception as exc:
-        logger.exception("cmd_restarts: unexpected error: %s", exc)
-        await update.message.reply_text("⚠️ /restarts failed. Check bot logs.")
-
-
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/status — show bot and market status."""
     if not _check_allowed(update):

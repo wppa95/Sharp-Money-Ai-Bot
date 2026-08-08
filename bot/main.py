@@ -68,7 +68,7 @@ from commands import (
     cmd_calibration,
     cmd_pp_import,
     cmd_health,
-    cmd_restarts,
+
     cmd_tracking,
     cmd_analyst,
     cmd_rollups,
@@ -500,6 +500,35 @@ async def _grade_opportunities_job(context) -> None:
         pending = await db.get_pending_opportunities(cutoff_hours=4)
         if not pending:
             return
+
+        # ── Proactively fetch player results so grading works without /backfill ──
+        # The grader previously only looked up pre-existing PlayerResult rows.
+        # Props removed from Underdog before the game finished would never get
+        # a result row from scanning, leaving them PENDING forever.
+        # This mirrors the /backfill fetch pattern so auto-grading is self-contained.
+        try:
+            from providers.player_stats import PlayerStatsProvider as _GradeStatProvider
+            _grade_stat_prov = _GradeStatProvider()
+            _grade_fetched: set = set()
+            for _gopp in pending:
+                _gkey = (_gopp.player_name, _gopp.sport, (_gopp.stat_type or "").lower().strip())
+                if _gkey in _grade_fetched:
+                    continue
+                _grade_fetched.add(_gkey)
+                try:
+                    _graw = await _grade_stat_prov.fetch_results(
+                        _gopp.player_name, _gopp.sport, _gopp.stat_type
+                    )
+                    for _gr in _graw:
+                        await db.upsert_player_result(_gr)
+                except Exception as _gfetch_exc:
+                    logger.debug(
+                        "_grade_opportunities_job: fetch_results failed for %s/%s: %s",
+                        _gopp.player_name, _gopp.stat_type, _gfetch_exc,
+                    )
+        except Exception as _prov_exc:
+            logger.warning("_grade_opportunities_job: stat provider init failed: %s", _prov_exc)
+
         graded   = 0
         no_data  = 0
         for opp in pending:
@@ -1653,7 +1682,7 @@ def main() -> None:
     app.add_handler(CommandHandler("calibration",  cmd_calibration))
     app.add_handler(CommandHandler("pp_import",    cmd_pp_import))
     app.add_handler(CommandHandler("health",       cmd_health))
-    app.add_handler(CommandHandler("restarts",     cmd_restarts))
+
     app.add_handler(CommandHandler("tracking",     cmd_tracking))
     # ── Framework v3.0 commands ───────────────────────────────────────────────
     app.add_handler(CommandHandler("analyst",    cmd_analyst))

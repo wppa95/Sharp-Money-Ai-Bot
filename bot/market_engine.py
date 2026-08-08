@@ -966,6 +966,10 @@ async def underdog_job(context) -> None:
         _health.record_provider_fetch("Underdog")
 
     ud_snaps = [s for s in snapshots if s.sportsbook == "Underdog"]
+    # Capture count before the list is cleared later for memory recovery.
+    # record_underdog_scan() at end-of-cycle reads this variable so it
+    # always reflects the actual number of snapshots processed this cycle.
+    _n_ud_snaps_this_cycle: int = len(ud_snaps)
 
     if not ud_snaps:
         logger.debug("underdog_job: no Underdog pick'em snapshots in response")
@@ -1357,6 +1361,10 @@ async def underdog_job(context) -> None:
                         "rejection":       _np_rej,
                         "path":            "new",
                         "decision_reason": (decision.reason if decision is not None else None),
+                        # decision_tier is the bet-decision confidence tier (S≥85/A≥70/B≥50),
+                        # distinct from score.tier (composite UDPropScore tier).
+                        # MLB/NFL gate uses decision_tier; score.tier is the composite label.
+                        "decision_tier":   (decision.decision_tier if decision is not None else None),
                         # ── component breakdown ──────────────────────────────
                         "vel":       score.move_velocity,
                         "act":       score.historical_activity,
@@ -1638,6 +1646,10 @@ async def underdog_job(context) -> None:
                             "rejection":       _lc_rej,
                             "path":            "cs" if is_cold_start else "lc",
                             "decision_reason": (decision.reason if decision is not None else None),
+                            # decision_tier is the bet-decision confidence tier (S≥85/A≥70/B≥50),
+                            # distinct from score.tier (composite UDPropScore tier).
+                            # MLB/NFL gate uses decision_tier; score.tier is the composite label.
+                            "decision_tier":   (decision.decision_tier if decision is not None else None),
                             # ── component breakdown ──────────────────────────────
                             "vel":       score.move_velocity,
                             "act":       score.historical_activity,
@@ -2445,7 +2457,7 @@ async def underdog_job(context) -> None:
         if _persistence_ok:
             _health.record_job_run("underdog_job")
             _health.record_underdog_scan(
-                props_count = len(ud_snaps) if "ud_snaps" in dir() else 0,
+                props_count = _n_ud_snaps_this_cycle if "_n_ud_snaps_this_cycle" in dir() else 0,
                 alerts_sent = (
                     (_n_new_prop_sent  if "_n_new_prop_sent"  in dir() else 0)
                     + (_n_standing_sent if "_n_standing_sent" in dir() else 0)

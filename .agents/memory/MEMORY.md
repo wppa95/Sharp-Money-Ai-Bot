@@ -35,3 +35,4 @@
 - [V3.1 cleanup pass — 5 gate fixes](v31-cleanup-pass.md) — BQ≥85 gate (MLB/NFL); relaxed non-strict stars/conf; _is_game_live_or_past helper (all 3 paths); ET time format; max_instances=1 explicit; 3129 tests Aug 2026.
 - [Telegram pick grading (alert_sent)](telegram-pick-grading.md) — alert_sent+alert_sent_at on PropOpportunityLog; mark_opportunity_alert_sent(); get_telegram_pick_performance(); 3 engine paths marked; /rollups updated; 3158 tests Aug 2026.
 - [Pipeline bottleneck fix (standing path + esports HFS)](pipeline-bottleneck-fix.md) — two root causes: _HFS excluded esports stats; _processed_keys blocked standing path for sub-threshold movers; 3179 tests Aug 2026.
+- [Phase 2 Core fixes](phase2-core-fixes.md) — props=0 (#114), /restarts removed (#115), auto-grading fetch loop (#116), decision_tier clarity (#113); 3256 tests Aug 2026.
