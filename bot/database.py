@@ -1197,6 +1197,58 @@ class Database:
             )
             return result.scalar() or 0
 
+    async def count_today_actionable_alerts(self) -> int:
+        """
+        Count 🎯 ACTIONABLE BET PICK alerts successfully delivered to Telegram today (UTC).
+
+        Uses PropOpportunityLog.alert_sent=True / alert_sent_at as the canonical
+        source of truth — set only when broadcast_alert() returns sent=True for
+        an actionable pick.  UnderdogSnapshotRecord.alert_sent is NOT used here
+        because it tracks internal market-move dedup writes, not Telegram delivery.
+        """
+        today_start = datetime.utcnow().replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        async with self.session() as s:
+            result = await s.execute(
+                select(func.count())
+                .select_from(PropOpportunityLog)
+                .where(
+                    PropOpportunityLog.alert_sent    == True,    # noqa: E712
+                    PropOpportunityLog.alert_sent_at >= today_start,
+                    PropOpportunityLog.recommendation.in_(["OVER", "UNDER"]),
+                )
+            )
+            return result.scalar() or 0
+
+    async def count_actionable_pick_records(self) -> int:
+        """Total 🎯 ACTIONABLE BET PICK records ever delivered to Telegram."""
+        async with self.session() as s:
+            result = await s.execute(
+                select(func.count())
+                .select_from(PropOpportunityLog)
+                .where(PropOpportunityLog.alert_sent == True)   # noqa: E712
+            )
+            return result.scalar() or 0
+
+    async def get_resolved_actionable_picks(self, limit: int = 200) -> list:
+        """
+        Actionable picks (alert_sent=True) that have been graded (result ≠ PENDING).
+        Ordered newest-first.  Used by /grade.
+        """
+        async with self.session() as s:
+            rows = await s.execute(
+                select(PropOpportunityLog)
+                .where(
+                    PropOpportunityLog.alert_sent     == True,   # noqa: E712
+                    PropOpportunityLog.result.notin_(["PENDING", ""]),
+                    PropOpportunityLog.result.isnot(None),
+                )
+                .order_by(PropOpportunityLog.alert_sent_at.desc())
+                .limit(limit)
+            )
+            return list(rows.scalars().all())
+
     async def find_player_prop_odds(
         self,
         player_name: str,

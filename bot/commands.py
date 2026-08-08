@@ -1528,6 +1528,13 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 plh.player_name, plh.stat_type, _eff_rec,
             )
             continue
+        # MLB: OVER only for user-facing picks (UNDER is internally tracked but not surfaced)
+        if _key == "MLB" and _eff_rec == "UNDER":
+            logger.debug(
+                "cmd_picks: skipping %s/%s — MLB UNDER blocked from user-facing output",
+                plh.player_name, plh.stat_type,
+            )
+            continue
         if _key not in _sport_groups:
             _sport_groups[_key] = []
         _sport_groups[_key].append((_flat_idx, plh, comp))
@@ -2102,6 +2109,35 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception as _slip_rec_exc:
         logger.debug("cmd_slip: rec_map lookup failed: %s", _slip_rec_exc)
 
+    # Slip eligibility gate — same rules as Telegram alerts:
+    #   1. Must have an explicit OVER or UNDER direction (no "—" / PASS props)
+    #   2. MLB UNDER blocked from user-facing slips (internally tracked, not surfaced)
+    _slip_ineligible = 0
+    _candidates_eligible: list[PropPickAdapter] = []
+    for _cand in _candidates:
+        if _cand.best_side not in ("OVER", "UNDER"):
+            _slip_ineligible += 1
+            logger.debug(
+                "cmd_slip: excluding %s/%s — no direction (best_side=%r)",
+                _cand.player_name, _cand.stat_type, _cand.best_side,
+            )
+            continue
+        if _cand.sport.upper() == "MLB" and _cand.best_side == "UNDER":
+            _slip_ineligible += 1
+            logger.debug(
+                "cmd_slip: excluding %s/%s — MLB UNDER blocked from user-facing slips",
+                _cand.player_name, _cand.stat_type,
+            )
+            continue
+        _candidates_eligible.append(_cand)
+    if _slip_ineligible:
+        logger.info(
+            "cmd_slip: filtered %d ineligible candidates (no direction or MLB UNDER); "
+            "%d eligible remain",
+            _slip_ineligible, len(_candidates_eligible),
+        )
+    _candidates = _candidates_eligible
+
     slips = build_all_slips(_candidates, max_size=6)
 
     if not slips:
@@ -2338,9 +2374,18 @@ async def cmd_grade(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Inner implementation of /grade — wrapped by cmd_grade try/except."""
-    resolved  = await _db.get_all_resolved_pp_edges(limit=200)
-    total_all = await _db.count_pp_edge_records()
+    """
+    Inner implementation of /grade.
+
+    Source of truth: PropOpportunityLog rows with alert_sent=True.
+    These are the only rows that represent actual 🎯 ACTIONABLE BET PICK alerts
+    delivered to Telegram.  PPEdgeRecord (legacy PP system) is NOT used here.
+
+    PropOpportunityLog result values: HIT | MISS | PUSH | PENDING
+    Mapped to display:  HIT→W  MISS→L  PUSH/REFUND→P
+    """
+    resolved  = await _db.get_resolved_actionable_picks(limit=200)
+    total_all = await _db.count_actionable_pick_records()
 
     lines: list[str] = ["📊 <b>Sharp Money Pick Grades</b>", ""]
 
@@ -2361,24 +2406,21 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     # ── Aggregate by tier ─────────────────────────────────────────────────────
-    # tier → {W, L, P, edges}
+    # PropOpportunityLog uses decision_tier (not .tier); result is HIT/MISS/PUSH (not WIN/LOSS)
     from collections import defaultdict
-    stats: dict[str, dict] = defaultdict(lambda: {"W": 0, "L": 0, "P": 0, "edges": []})
+    stats: dict[str, dict] = defaultdict(lambda: {"W": 0, "L": 0, "P": 0})
 
     for r in resolved:
-        tier = r.tier or "—"
+        tier = getattr(r, "decision_tier", None) or "—"
         res  = (r.result or "").upper()
-        if res == "WIN":
+        if res == "HIT":
             stats[tier]["W"] += 1
-        elif res == "LOSS":
+        elif res == "MISS":
             stats[tier]["L"] += 1
         elif res in ("PUSH", "REFUND"):
             stats[tier]["P"] += 1
-        if r.best_edge is not None:
-            stats[tier]["edges"].append(r.best_edge)
 
     overall_w = overall_l = overall_p = 0
-    all_edges: list[float] = []
 
     lines.append("─ <b>By Tier</b> " + "─" * 20)
     for tier in ("S", "A", "B", "PASS", "—"):
@@ -2388,7 +2430,6 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         w, l, p = s["W"], s["L"], s["P"]
         total_res = w + l + p
         hit_rate  = w / total_res * 100 if total_res > 0 else 0.0
-        avg_edge  = sum(s["edges"]) / len(s["edges"]) if s["edges"] else 0.0
         icon      = _TIER_EMOJI.get(tier, "⚪")
         lines.append(
             f"  {icon} <b>{tier:<4}</b>  "
@@ -2398,12 +2439,10 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         overall_w += w
         overall_l += l
         overall_p += p
-        all_edges.extend(s["edges"])
 
-    overall_res  = overall_w + overall_l + overall_p
-    overall_hit  = overall_w / overall_res * 100 if overall_res > 0 else 0.0
-    overall_edge = sum(all_edges) / len(all_edges) if all_edges else 0.0
-    pending_n    = total_all - len(resolved)
+    overall_res = overall_w + overall_l + overall_p
+    overall_hit = overall_w / overall_res * 100 if overall_res > 0 else 0.0
+    pending_n   = total_all - len(resolved)
 
     lines += [
         "─ <b>Overall</b> " + "─" * 21,
@@ -2414,31 +2453,26 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         f"<i>{pending_n} picks still PENDING · results set when games finish.</i>",
     ]
 
-    # ── Trend analysis ────────────────────────────────────────────────────────
-    from engine.decision_engine import compute_tier_performance
-    _perf_g = compute_tier_performance(resolved)
-    _qual   = [(t, s) for t, s in _perf_g.items() if s.picks >= 3 and t in ("S", "A", "B")]
+    # ── Best/worst tier summary (inline — no PPEdgeRecord dependency) ─────────
+    _qual = [
+        (t, s) for t, s in stats.items()
+        if t in ("S", "A", "B") and (s["W"] + s["L"] + s["P"]) >= 3
+    ]
     if _qual:
-        best_t  = max(_qual, key=lambda x: x[1].hit_rate)
-        worst_t = min(_qual, key=lambda x: x[1].hit_rate)
+        best_t  = max(_qual, key=lambda x: x[1]["W"] / max(x[1]["W"] + x[1]["L"] + x[1]["P"], 1))
+        worst_t = min(_qual, key=lambda x: x[1]["W"] / max(x[1]["W"] + x[1]["L"] + x[1]["P"], 1))
         lines.append("")
         lines.append("─ <b>Trends</b> " + "─" * 22)
         if best_t[0] != worst_t[0]:
+            _bhr = best_t[1]["W"] / max(best_t[1]["W"] + best_t[1]["L"] + best_t[1]["P"], 1) * 100
+            _whr = worst_t[1]["W"] / max(worst_t[1]["W"] + worst_t[1]["L"] + worst_t[1]["P"], 1) * 100
             lines.append(
                 f"  Best tier:  {_TIER_EMOJI.get(best_t[0], '⚪')} {best_t[0]}  "
-                f"{best_t[1].hit_rate_pct:.0f}% hit  "
-                f"({best_t[1].wins}W / {best_t[1].losses}L)"
+                f"{_bhr:.0f}% hit  ({best_t[1]['W']}W / {best_t[1]['L']}L)"
             )
             lines.append(
                 f"  Worst tier: {_TIER_EMOJI.get(worst_t[0], '⚪')} {worst_t[0]}  "
-                f"{worst_t[1].hit_rate_pct:.0f}% hit  "
-                f"({worst_t[1].wins}W / {worst_t[1].losses}L)"
-            )
-        if overall_edge > 0 and overall_res >= 5:
-            _roi = (overall_edge / 100) * 0.909
-            lines.append(
-                f"  Implied ROI: <code>{_roi * 100:+.1f}%</code>"
-                f" <i>(rough, -110 base)</i>"
+                f"{_whr:.0f}% hit  ({worst_t[1]['W']}W / {worst_t[1]['L']}L)"
             )
     elif overall_res > 0:
         lines.append("")
@@ -2626,7 +2660,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     try:
         # Gather data
-        ud_today   = await _db.count_today_underdog_alerts()
+        ud_today   = await _db.count_today_actionable_alerts()   # Telegram-delivered picks only
         pp_today   = await _db.count_today_pp_alerts()
         total_ud   = await _db.count_underdog_records()
         resolved   = await _db.get_all_resolved_pp_edges(limit=500)

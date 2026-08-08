@@ -1287,8 +1287,23 @@ async def underdog_job(context) -> None:
                         try:
                             _np_ext_id = getattr(snap, "external_id", None) or getattr(snap, "id", None) or ""
                             await db.mark_opportunity_alert_sent(_np_ext_id, stat_type)
+                            _np_stored = "YES"
                         except Exception:
-                            pass  # never block alert flow
+                            _np_stored = "NO (mark failed)"
+                        logger.info(
+                            "🎯 PICK CREATED | Player: %s | Sport: %s | Market: %s"
+                            " | Line: %.1f | Direction: %s | Tier: %s | Confidence: %d"
+                            " | Quality: %s | Telegram: SENT | Stored: %s",
+                            player,
+                            snap.sport or "UNKNOWN",
+                            stat_type,
+                            line_val,
+                            decision.recommendation if decision else "UNKNOWN",
+                            score.tier if score else "UNKNOWN",
+                            score.total if score else 0,
+                            getattr(score, "bet_quality_label", "—") if score else "—",
+                            _np_stored,
+                        )
                     elif ud_result.filtered:
                         logger.debug(
                             "Underdog new-prop filtered: %s | %s | %s",
@@ -1775,8 +1790,23 @@ async def underdog_job(context) -> None:
                 try:
                     _lc_ext_id = getattr(snap, "external_id", None) or getattr(snap, "id", None) or ""
                     await db.mark_opportunity_alert_sent(_lc_ext_id, stat_type)
+                    _lc_stored = "YES"
                 except Exception:
-                    pass  # never block alert flow
+                    _lc_stored = "NO (mark failed)"
+                logger.info(
+                    "🎯 PICK CREATED | Player: %s | Sport: %s | Market: %s"
+                    " | Line: %.1f | Direction: %s | Tier: %s | Confidence: %d"
+                    " | Quality: %s | Telegram: SENT | Stored: %s",
+                    player,
+                    snap.sport or "UNKNOWN",
+                    stat_type,
+                    snap.line or 0.0,
+                    decision.recommendation if decision else "UNKNOWN",
+                    score.tier if score else "UNKNOWN",
+                    score.total if score else 0,
+                    getattr(score, "bet_quality_label", "—") if score else "—",
+                    _lc_stored,
+                )
             # Removals: track lifecycle independently of alert sent status (no Telegram alert)
             if is_removed and prev_record is not None:
                 _lifecycle_removed.append((player, snap.sport or "UNKNOWN", stat_type))
@@ -2072,11 +2102,22 @@ async def underdog_job(context) -> None:
                     try:
                         _s_ext_id = getattr(_ssnap, "external_id", None) or getattr(_ssnap, "id", None) or ""
                         await db.mark_opportunity_alert_sent(_s_ext_id, _st)
+                        _s_stored = "YES"
                     except Exception:
-                        pass  # never block alert flow
+                        _s_stored = "NO (mark failed)"
                     logger.info(
-                        "Underdog standing alert sent: %s | %s | %s | score=%d",
-                        _sp, _st, _ssport, _sscore.total,
+                        "🎯 PICK CREATED | Player: %s | Sport: %s | Market: %s"
+                        " | Line: %.1f | Direction: %s | Tier: %s | Confidence: %d"
+                        " | Quality: %s | Telegram: SENT | Stored: %s",
+                        _sp,
+                        _ssport,
+                        _st,
+                        _line_val,
+                        _sdec.recommendation if _sdec else "UNKNOWN",
+                        _sscore.tier if _sscore else "UNKNOWN",
+                        _sscore.total if _sscore else 0,
+                        getattr(_sscore, "bet_quality_label", "—") if _sscore else "—",
+                        _s_stored,
                     )
     
             if _n_standing_sent:

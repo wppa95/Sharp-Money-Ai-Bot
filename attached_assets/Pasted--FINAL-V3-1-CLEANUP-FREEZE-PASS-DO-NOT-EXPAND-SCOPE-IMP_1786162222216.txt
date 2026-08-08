@@ -1,0 +1,582 @@
+🚨 FINAL V3.1 CLEANUP / FREEZE PASS — DO NOT EXPAND SCOPE
+
+IMPORTANT:
+We are extremely limited on credits/runtime.
+
+Before touching anything, review the CURRENT system state and the fixes already completed.
+
+Do NOT:
+
+* Rewrite the bot
+* Refactor large sections
+* Redesign architecture
+* Change scoring logic
+* Change scoring thresholds
+* Change database structure
+* Change the Underdog ingestion pipeline
+* Add providers
+* Create duplicate alert/scoring/confidence systems
+* Rebuild systems that are already working
+* Repeat completed diagnostics unnecessarily
+
+This is the FINAL targeted lifecycle/routing cleanup before freezing V3.1.
+
+━━━━━━━━━━━━━━━━━━
+CURRENT VERIFIED STATE
+━━━━━━━━━━━━━━━━━━
+
+Working:
+✅ Underdog ingestion
+✅ Scoring engine
+✅ Candidate funnel
+✅ PropLineHistory sync
+✅ Multi-sport detection
+✅ /picks now returns props
+✅ /slip builds slips
+✅ Bot health/scheduler running
+✅ 3212 tests passing after latest fixes
+
+Latest fixes already completed:
+✅ Fixed _HIGH_FLOOR_STATS for esports aggregate stats
+✅ Fixed _processed_keys blocking qualified stable props
+✅ Fixed /funnel ACCEPTED counter
+✅ Fixed PropLineHistory sync bottleneck
+✅ PropLineHistory now refreshing thousands of active props instead of only ~200
+✅ No scoring changes
+✅ No threshold changes
+✅ No schema changes
+
+━━━━━━━━━━━━━━━━━━
+CONFIRMED REMAINING ISSUES
+━━━━━━━━━━━━━━━━━━
+
+🔴 PRIORITY 1 — ACTIONABLE PICK LIFECYCLE
+
+Current evidence:
+
+/stats:
+Actionable Picks Today: 2
+
+/picks:
+Shows actionable-looking props
+
+But:
+
+/alerts:
+No player prop alerts sent
+
+Telegram:
+No notification received
+
+/grade:
+Stored picks: 0
+Pending: 0
+Resolved: 0
+
+This means the system is counting/exposing picks before the actual Telegram + grading lifecycle completes.
+
+TRACE ONE OF THE CURRENT “2 ACTIONABLE PICKS” END-TO-END.
+
+Required lifecycle:
+
+Underdog
+↓
+Parser
+↓
+Scoring
+↓
+Validation
+↓
+Actionable Pick Gate
+↓
+🎯 Telegram ACTIONABLE BET PICK
+↓
+📦 Stored Pick Record
+↓
+⏳ Pending Grade
+↓
+✅ Resolved Grade
+↓
+📊 Performance
+
+Fix the exact broken connection.
+
+IMPORTANT:
+
+* Actionable Picks Today must NOT increment merely because a candidate is qualified.
+* It should represent an actual actionable pick that passes the final gate.
+* Successful Telegram delivery must be tied to the stored actionable pick record.
+* A failed Telegram delivery must NOT be counted as an alert.
+* Every real actionable alert must create a grading record.
+* /stats, /picks, /alerts, /grade, and Telegram must use the same underlying actionable-pick truth.
+* Do not create a second pick system.
+
+Add minimal diagnostic logging if needed:
+
+🎯 PICK CREATED
+Player:
+Sport:
+Market:
+Line:
+Direction:
+Tier:
+Confidence:
+Quality:
+
+Telegram:
+SENT / FAILED
+
+Stored:
+YES / NO
+
+Database ID:
+Alert Status:
+
+━━━━━━━━━━━━━━━━━━
+🔴 PRIORITY 2 — USER-FACING ACTIONABLE ELIGIBILITY
+━━━━━━━━━━━━━━━━━━
+
+Current /picks output is showing MLB UNDER selections even though V3.1 explicitly requires:
+
+⚾ MLB:
+Telegram actionable alerts = OVER only
+
+MLB UNDER may remain internally tracked, graded, and stored.
+
+It must NOT appear as a user-facing actionable pick.
+
+Enforce this at the final user-facing eligibility/routing layer.
+
+Do NOT remove MLB UNDER from:
+
+* PropLineHistory
+* PropOpportunityLog
+* grading
+* learning/history
+* internal scoring
+
+Only block it from user-facing actionable output.
+
+━━━━━━━━━━━━━━━━━━
+🔴 PRIORITY 3 — /SLIP ELIGIBILITY
+━━━━━━━━━━━━━━━━━━
+
+Current /slip is building slips from props that should not be eligible.
+
+Examples observed:
+
+* MLB UNDER props appearing in slips
+* Props with missing direction shown as —
+
+Before a prop can enter /slip, verify:
+
+✅ Valid player
+✅ Valid sport
+✅ Valid upcoming game/event
+✅ Valid market
+✅ Explicit OVER or UNDER direction
+✅ Passes final actionable eligibility
+✅ Sport-specific alert rules
+✅ Not live/past
+✅ Not stale
+✅ No duplicate/reversal conflict
+
+/slip must use the same eligible actionable-pick source of truth as /picks.
+
+Do NOT create separate slip scoring logic.
+
+━━━━━━━━━━━━━━━━━━
+🔴 PRIORITY 4 — COMMAND CONSISTENCY
+━━━━━━━━━━━━━━━━━━
+
+Verify these all agree:
+
+/stats
+/picks
+/slip
+/alerts
+/grade
+/dashboard
+
+There must not be a situation where:
+
+“Actionable Picks Today = 2”
+
+while:
+
+“Alerts sent = 0”
+“Stored picks = 0”
+
+unless the system explicitly identifies those as non-alert candidates.
+
+Use the existing records/systems.
+
+Do not create duplicate counters.
+
+━━━━━━━━━━━━━━━━━━
+🟠 PRIORITY 5 — HEALTH ERROR DISPLAY
+━━━━━━━━━━━━━━━━━━
+
+Historical error:
+
+'list' object has no attribute 'has_real_data'
+
+Do NOT chase/rebuild this if it is not currently occurring.
+
+The previous pipeline fix already addressed the runtime issue.
+
+Health reporting should distinguish:
+
+CURRENT ACTIVE ERROR
+vs.
+LAST HISTORICAL ERROR
+
+Do not make an old error appear to be an active failure.
+
+If the error actually returns during testing, fix only the exact runtime issue.
+
+━━━━━━━━━━━━━━━━━━
+🟠 PRIORITY 6 — RESTART / OOM TELEMETRY
+━━━━━━━━━━━━━━━━━━
+
+Recent health output shows:
+
+Restart reason:
+Unexpected exit (SIGKILL / OOM / hard crash)
+
+This should be classified more clearly if existing telemetry can support it.
+
+Do NOT redesign the health system.
+
+If a minimal existing-system fix is needed, distinguish:
+
+* Replit/environment shutdown
+* Memory/OOM kill
+* Application crash
+* Manual restart
+* Unknown exit
+
+Do not spend significant credits investigating Replit infrastructure unless the code can actually identify the cause.
+
+━━━━━━━━━━━━━━━━━━
+🟡 PRIORITY 7 — PROPLINEHISTORY VALIDATION
+━━━━━━━━━━━━━━━━━━
+
+Latest dashboard:
+
+Underdog snapshots: 7,370,118
+PropHistory rows: 4,045
+
+This is improved from the previous 571 rows.
+
+Do NOT rebuild PropLineHistory.
+
+Only verify that the latest sync fix is actually refreshing current active props and that S/A candidates remain visible within the /picks time window.
+
+━━━━━━━━━━━━━━━━━━
+IMPORTANT RULES
+━━━━━━━━━━━━━━━━━━
+
+Do NOT lower confidence requirements.
+
+Do NOT change tier thresholds.
+
+Do NOT change scoring.
+
+Do NOT change the Underdog pipeline.
+
+Do NOT add providers.
+
+Do NOT change database schema.
+
+Do NOT change MLB internal tracking.
+
+Do NOT remove CLV backend/database functionality.
+
+CLV is only a user-facing display cleanup item if still present.
+
+Keep:
+
+📈 MARKET MOVE DETECTED
+= internal intelligence only
+
+🎯 ACTIONABLE BET PICK
+= actual user-facing actionable alert
+
+Telegram must ONLY receive:
+
+🎯 ACTIONABLE BET PICK
+
+No raw market-movement spam.
+
+━━━━━━━━━━━━━━━━━━
+FINAL VALIDATION
+━━━━━━━━━━━━━━━━━━
+
+After ONLY these targeted fixes:
+
+1. Run the full test suite ONCE.
+2. Run startup health check.
+3. Verify Underdog scan produces props > 0.
+4. Verify /picks.
+5. Verify /slip.
+6. Verify /stats.
+7. Verify /alerts.
+8. Verify /grade.
+9. Verify /dashboard.
+10. Verify Telegram delivery with one controlled actionable test.
+
+Do not repeatedly rerun tests unless a failure requires it.
+
+FINAL ACCEPTANCE REQUIREMENTS:
+
+✅ Underdog ingestion works
+✅ Scoring works
+✅ Existing scoring logic unchanged
+✅ /picks only shows genuinely eligible actionable props
+✅ /slip only uses genuinely eligible props
+✅ MLB UNDER remains internally tracked but is blocked from user-facing actionable output
+✅ No missing-direction props reach actionable slips/alerts
+✅ Telegram receives actual actionable picks
+✅ Every successful actionable alert creates a stored grading record
+✅ /stats matches actual actionable records
+✅ /alerts matches actual Telegram alerts
+✅ /grade contains sent picks as pending
+✅ Historical grading remains intact
+✅ PropLineHistory continues collecting data
+✅ No market-move spam reaches Telegram
+✅ No architecture changes
+✅ No database changes
+✅ No provider additions
+✅ No scoring changes
+✅ No threshold changes
+✅ No regressions
+
+━━━━━━━━━━━━━━━━━━
+FREEZE V3.1
+━━━━━━━━━━━━━━━━━━
+
+If all acceptance criteria pass:
+
+🛑 FREEZE SHARP MONEY BOT V3.1.
+
+After freeze, only allow:
+
+✅ Critical bugs
+✅ Stability fixes
+✅ Data-quality fixes
+
+No feature expansion during V3.1.
+
+━━━━━━━━━━━━━━━━━━
+PHASE 2 — DO NOT IMPLEMENT NOW
+━━━━━━━━━━━━━━━━━━
+
+Everything below is DEFERRED until V3.1 is proven stable.
+
+PHASE 2 GOAL:
+
+Transform Sharp Money from:
+
+“Finds possible opportunities”
+
+into:
+
+“Tracks every prop, learns from every result, understands its own strengths, and builds smarter slips over time.”
+
+PHASE 2 PRIORITIES:
+
+⭐ 2.1 Internal Historical Prop Intelligence
+
+* Track every evaluated prop, not only alerts
+* Player
+* Sport
+* Market
+* Line
+* Direction
+* Provider
+* Timestamp
+* Game/event
+* Opponent
+* Tier
+* Confidence
+* Bet quality
+* Market quality
+* Model decision
+* Result
+* Actual value
+* HIT/MISS/PUSH
+
+⭐ 2.2 Automatic Grading Expansion
+
+* Automatically grade every tracked prop after games
+* HIT
+* MISS
+* PUSH
+* Actual stat
+* Historical retention
+
+⭐ 2.3 Historical Intelligence
+Analyze:
+
+* Player reliability
+* Market reliability
+* Sport reliability
+* Provider reliability
+* Tier performance
+* Historical hit rate
+
+⭐ 2.4 Smart Slip Builder
+Eventually consider:
+
+* Current tier
+* Confidence
+* Quality
+* Historical hit rate
+* Player history
+* Market reliability
+* Sport reliability
+* Correlation risk
+* Duplicate/reversal risk
+
+The slip builder should eventually become data-driven, not simply score-driven.
+
+⭐ 2.5 Pick Grading Lifecycle
+Continue improving:
+
+Alert
+↓
+Stored
+↓
+Pending
+↓
+Automatic Grade
+↓
+Performance
+
+Keep:
+
+/dashboard
+/stats
+/grade
+/performance
+
+synchronized.
+
+⭐ 2.6 Model Performance Tracking
+Break down by:
+
+Sport
+Market
+Tier
+Player
+Provider
+
+Goal:
+Learn what the model is actually good at.
+
+⭐ 2.7 Alert Quality
+Improve:
+
+* Duplicate protection
+* Reversal protection
+* Market timing
+* Confidence validation
+* Less noise
+* Less spam
+
+⭐ 2.8 Memory / Recovery
+Improve:
+
+* Restart recovery
+* State persistence
+* Historical retention
+* Recovery after unexpected exits
+
+The bot must never lose:
+
+* Prop history
+* Results
+* Tracking data
+* Model history
+
+⭐ 2.9 Provider Evaluation — LATER
+
+Only after internal intelligence is working.
+
+Rules:
+
+* Add providers one at a time
+* Evaluate value before enabling
+* Avoid unnecessary API costs
+* Avoid increasing noise
+
+Potential future providers:
+
+* Sleeper
+* PrizePicks if technically possible
+* Other free sources
+
+OddsAPI:
+Keep existing confirmation functionality only if it remains useful and reliable. Do not expand API usage during this freeze pass.
+
+━━━━━━━━━━━━━━━━━━
+PHASE 2 ADDITIONAL ITEMS FROM PRIOR DIAGNOSTICS
+━━━━━━━━━━━━━━━━━━
+
+Carry forward anything not completed from the previous V3.0/V3.1 notes:
+
+* Actionable-pick storage audit
+* Single source of truth across commands
+* Historical error separation
+* Restart/OOM classification
+* PropLineHistory retention/dedup/filter audit
+* Data collection visibility:
+    Received → Validated → Stored → Scored → Actionable → Resolved
+* Alert duplicate protection
+* Reversal protection
+* Market timing
+* Confidence validation
+
+These are Phase 2 work unless required as a critical V3.1 stability fix.
+
+━━━━━━━━━━━━━━━━━━
+CREDIT PROTECTION
+━━━━━━━━━━━━━━━━━━
+
+This is the FINAL coding pass.
+
+Use the smallest possible targeted changes.
+
+Reuse existing systems.
+
+Do not explore unrelated code.
+
+Do not rewrite.
+
+Do not refactor.
+
+Do not add features.
+
+Do not add providers.
+
+Do not change architecture.
+
+Run the full suite ONCE after the fixes.
+
+Then provide the final report:
+
+1. Files changed
+2. Exact bugs fixed
+3. Tests passed
+4. Startup status
+5. Telegram verification
+6. /picks verification
+7. /slip verification
+8. /grade verification
+9. Confirmation no scoring changes
+10. Confirmation no database/schema changes
+11. Confirmation no provider additions
+12. Confirmation V3.1 is frozen
+
+🛑 SHARP MONEY BOT V3.1 — FREEZE AFTER ACCEPTANCE CRITERIA PASS.
