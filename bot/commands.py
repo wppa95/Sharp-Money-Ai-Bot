@@ -298,7 +298,10 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             if _err_ts:
                 try:
                     from datetime import timezone as _tz
-                    _err_dt = datetime.fromisoformat(str(_err_ts).replace("Z", "+00:00"))
+                    # _now_iso() stores "YYYY-MM-DD HH:MM:SS UTC" — fromisoformat can't
+                    # handle the " UTC" suffix directly; strip it and treat as UTC.
+                    _ts_clean = str(_err_ts).replace(" UTC", "").replace("Z", "").strip()
+                    _err_dt = datetime.fromisoformat(_ts_clean).replace(tzinfo=_tz.utc)
                     _err_age_h = (datetime.now(_tz.utc) - _err_dt).total_seconds() / 3600
                     _show_global_err = _err_age_h < 2.0
                 except Exception:
@@ -356,7 +359,9 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             if _pf_ts_raw:
                 try:
                     from datetime import timezone as _pf_tz
-                    _pf_dt = datetime.fromisoformat(str(_pf_ts_raw).replace("Z", "+00:00"))
+                    # Same UTC-suffix handling as global last_error: strip " UTC" before parse.
+                    _pf_ts_clean = str(_pf_ts_raw).replace(" UTC", "").replace("Z", "").strip()
+                    _pf_dt = datetime.fromisoformat(_pf_ts_clean).replace(tzinfo=_pf_tz.utc)
                     _pf_age_h = (datetime.now(_pf_tz.utc) - _pf_dt).total_seconds() / 3600
                     _pf_recent = _pf_age_h < 2.0
                 except Exception:

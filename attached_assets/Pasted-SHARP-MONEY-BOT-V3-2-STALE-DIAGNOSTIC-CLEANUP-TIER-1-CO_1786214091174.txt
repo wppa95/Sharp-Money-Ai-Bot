@@ -1,0 +1,427 @@
+SHARP MONEY BOT V3.2 — STALE DIAGNOSTIC CLEANUP + TIER 1 COLD_START FIX
+
+Before making ANY changes:
+
+Review the entire current system state first.
+
+IMPORTANT:
+
+We are limited on credits.
+Do NOT burn credits unnecessarily.
+
+This is a SMALL, TARGETED V3.2 cleanup/fix pass.
+
+Do NOT:
+
+* Rewrite the bot
+* Refactor large sections
+* Redesign architecture
+* Replace the scoring engine
+* Replace the Underdog pipeline
+* Change the database structure unless absolutely required
+* Add providers
+* Enable sportsbook polling
+* Enable FanDuel
+* Enable DraftKings
+* Change the OddsAPI key
+* Remove working functionality
+* Make unrelated improvements
+
+Use the existing systems wherever possible.
+
+API credentials/secrets must never be exposed in logs, Telegram, /status, /config, diagnostics, or messages.
+
+━━━━━━━━━━━━━━━━━━
+PART 1 — STALE FAILURE / DIAGNOSTIC CLEANUP
+━━━━━━━━━━━━━━━━━━
+
+Current /health output is misleading because it continues showing old historical failures as if they are current.
+
+Examples:
+
+* Restart reason: SIGKILL / OOM / hard crash
+* Crash detected: Yes
+* Old last error:
+    [pipeline:prop_scoring:market_engine.underdog_job]
+    ‘list’ object has no attribute ‘has_real_data’
+    from Aug 06
+* Old pipeline failure
+* Old recovery information
+* Old fail_streak information
+
+The user has also explained that some app/background interruptions are caused by the mobile app being killed after inactivity while working in the background.
+
+Do NOT interpret those app interruptions as evidence of a bot crash unless the bot itself independently records a real failure.
+
+TASK:
+
+Identify where these operational diagnostics are stored:
+
+* last_error
+* last_pipeline_failure
+* fail_streak
+* last_recovery
+* crash_detected
+* restart_reason
+* restart history
+* related health/recovery state
+
+Make the SMALLEST safe change necessary so stale historical failure state is not presented as the current bot health.
+
+Requirements:
+
+1. Old failures must not continue appearing as current failures after a clean/current startup.
+2. A genuine NEW failure must still be captured and displayed normally.
+3. Current heartbeat must continue working.
+4. Current background-job health must continue working.
+5. Current provider health must continue working.
+6. Do NOT delete legitimate betting/pick history.
+7. Do NOT delete or modify:
+
+* PropLineHistory
+* Stored picks
+* Pending picks
+* Resolved picks
+* Hit/Loss records
+* Qualification history
+* CLV data
+* Calibration data
+* Other persistent betting intelligence
+
+8. Do NOT alter scoring or qualification behavior in this part.
+
+━━━━━━━━━━━━━━━━━━
+/RESTARTS CLEANUP
+━━━━━━━━━━━━━━━━━━
+
+If /restarts or restart-history reporting is still present:
+
+Remove the /restarts command and user-facing restart-history reporting as previously requested.
+
+Do NOT spend time investigating Replit/development restart behavior.
+
+Requirement:
+
+RESTARTS MUST NOT ERASE PERSISTENT BOT MEMORY.
+
+━━━━━━━━━━━━━━━━━━
+OLD has_real_data ERROR
+━━━━━━━━━━━━━━━━━━
+
+The:
+
+‘list’ object has no attribute ‘has_real_data’
+
+error from Aug 06 should NOT be treated as a current failure.
+
+If it is NOT occurring in the current runtime:
+
+* Do not fix unrelated code because of it.
+* Do not display it as the current/latest active failure.
+
+If it IS occurring again in the current runtime:
+
+STOP and report that it is active again.
+
+Do not make an unrelated fix.
+
+━━━━━━━━━━━━━━━━━━
+PART 2 — TIER 1 cold_start INVESTIGATION + TARGETED FIX
+━━━━━━━━━━━━━━━━━━
+
+We now have strong evidence of a separate Tier 1 qualification/delivery problem.
+
+This is NOT the same problem as the earlier CS/LOL line-movement issue.
+
+The previous V3.2 fix addressed:
+
+STABLE PROP
+→ score_tier becomes NULL on a later no-change snapshot
+→ standing-path filter incorrectly rejects it
+
+That fix has already been implemented and must remain intact.
+
+The current problem is:
+
+Tier 1 candidates are still being labeled:
+
+cold_start
+
+even when they already have strong A/S-level scores.
+
+━━━━━━━━━━━━━━━━━━
+6-HOUR FUNNEL EVIDENCE
+━━━━━━━━━━━━━━━━━━
+
+Observed 6-hour funnel:
+
+📥 Scanned: 28,681
+
+✅ Qualified candidates: 16
+
+👁 Watchlist/B-tier: 646
+
+❌ Rejected: 28,019
+
+🚫 Removed: 0
+
+Sport breakdown:
+
+MLB      13,431   Acc 10   Watch 236
+NFL       5,960   Acc 0    Watch 4
+LOL       2,002   Acc 0    Watch 11
+WNBA      1,899   Acc 2    Watch 183
+MMA       1,610   Acc 1    Watch 17
+TENNIS    1,351   Acc 1    Watch 14
+ESPORTS     633   Acc 0    Watch 98
+CS          475   Acc 2    Watch 36
+PGA         457   Acc 0    Watch 40
+CFB         428   Acc 0    Watch 0
+RACING      144   Acc 0    Watch 0
+VAL         141   Acc 0    Watch 1
+CFL          59   Acc 0    Watch 2
+MOTORCYCLE  48   Acc 0    Watch 0
+BASKETBALL  36   Acc 0    Watch 0
+OUTLAWS     17   Acc 0    Watch 4
+
+Highest Near-Misses included:
+
+* Dominique Malonga — 1H Pts + Rebs + Asts — 76/100 [A] — cold_start
+* Vladimir Guerrero — Hits — 76/100 [A] — cold_start
+* CoD: 04 — Kills on Game 1 — 76/100 [A] — cold_start
+* CoD: Mercules — Kills on Game 1 — 76/100 [A] — cold_start
+* CoD: HUKE — Kills on Game 1 — 76/100 [A] — cold_start
+* Dominique Malonga — 1H Points — 75/100 [A] — cold_start
+
+Earlier 1-hour data showed the same pattern across:
+
+* LOL
+* WNBA
+* CS
+* ESPORTS
+
+This is NOT simply a lack-of-data-volume problem.
+
+━━━━━━━━━━━━━━━━━━
+TIER 1 POLICY — DO NOT CHANGE
+━━━━━━━━━━━━━━━━━━
+
+Tier 2:
+
+* MLB
+* NFL
+
+Tier 2 requires S-tier.
+
+Tier 1:
+
+* All other monitored sports.
+
+Tier 1 should use the configured preference/gates.
+
+Tier 1 does NOT require S-tier.
+
+DO NOT change this policy.
+
+DO NOT change:
+
+* Min AI confidence = 60
+* S-tier threshold = 80
+* A-tier threshold = 70
+* Min validation = 5
+* Min stars = 3
+* Market bypass = score ≥70 + |line move| ≥2%
+* MIN_UNDERDOG_LINE_CHANGE = 0.5
+
+Do NOT lower thresholds to force alerts.
+
+Do NOT blindly promote Near-Misses.
+
+━━━━━━━━━━━━━━━━━━
+READ-ONLY TRACE FIRST
+━━━━━━━━━━━━━━━━━━
+
+Before changing code, trace the complete Tier 1 path:
+
+SCORE
+→ TIER
+→ cold_start
+→ is_qualified
+→ standing path
+→ supporting data
+→ direction
+→ quality
+→ final gate
+→ should_alert
+→ alert delivery
+→ stored pick
+→ Telegram
+
+Specifically determine:
+
+1. Why an A-tier Tier 1 prop is still labeled cold_start.
+2. Exactly where cold_start is set.
+3. Exactly what clears cold_start.
+4. Whether cold_start is:
+
+* global
+* per sport
+* per player
+* per market
+* per prop
+* per provider
+* or based on some other state.
+
+5. Determine whether cold_start is intended only for initial data/scoring initialization or is functioning as a permanent blocker.
+6. Verify whether the affected candidates actually have:
+
+* enough snapshots
+* enough historical data
+* enough supporting data
+* valid direction
+* valid upcoming event
+* valid market
+* valid quality/evidence
+
+7. Determine whether the V3.2 standing-path fix is actually being reached after the cold_start decision.
+8. Determine whether a Tier 1 A-tier candidate satisfying the configured gates can reach:
+
+should_alert=True
+
+9. Determine exactly which condition prevents Telegram delivery.
+
+DO NOT make assumptions.
+
+DO NOT modify code until the exact blocking condition is identified.
+
+━━━━━━━━━━━━━━━━━━
+TARGETED FIX
+━━━━━━━━━━━━━━━━━━
+
+If the code confirms that cold_start is incorrectly blocking otherwise-qualified Tier 1 candidates:
+
+Make ONLY the smallest targeted fix necessary.
+
+The fix must:
+
+* Preserve legitimate cold-start protection.
+* Prevent incomplete/unsupported props from being alerted.
+* Allow genuinely qualified Tier 1 props to proceed once the required data/gates are satisfied.
+* Preserve Tier 2 MLB/NFL strict S-tier requirements.
+* Preserve all existing validation and quality gates.
+* Preserve direction requirements.
+* Preserve active/upcoming event validation.
+* Preserve Telegram actionable-only behavior.
+* Preserve the V3.2 score_tier NULL standing-path fix.
+* Preserve deduplication.
+* Preserve persistence.
+
+Do NOT remove cold-start protection globally without evidence.
+
+━━━━━━━━━━━━━━━━━━
+TESTING
+━━━━━━━━━━━━━━━━━━
+
+After the targeted fix:
+
+First run focused tests covering:
+
+* Tier 1 A-tier candidate with sufficient data
+* Tier 1 S-tier candidate with sufficient data
+* Tier 1 insufficient-data candidate
+* Tier 1 cold-start candidate
+* Tier 2 MLB A-tier candidate
+* Tier 2 MLB S-tier candidate
+* Tier 2 NFL A-tier candidate
+* Tier 2 NFL S-tier candidate
+* score_tier=NULL standing-path behavior
+* explicit B/PASS tiers not being promoted
+* Telegram delivery gates
+* deduplication
+* persistence
+
+Then run the full test suite.
+
+Do NOT run unnecessary commands or tests unrelated to these changes.
+
+━━━━━━━━━━━━━━━━━━
+VALIDATION
+━━━━━━━━━━━━━━━━━━
+
+After tests:
+
+* Run startup health check.
+* Confirm /health no longer shows stale Aug 06 failures.
+* Confirm current heartbeat works.
+* Confirm Underdog is healthy.
+* Confirm background jobs are healthy.
+* Confirm /restarts is removed if present.
+* Confirm persistent betting data remains intact.
+* Confirm V3.2 standing-path fix remains intact.
+* Confirm Tier 1 qualified candidates can reach final actionable status when all gates are satisfied.
+* Confirm Tier 2 MLB/NFL still require S-tier.
+* Confirm Telegram receives ONLY final actionable picks.
+
+Do NOT enable sportsbook polling.
+
+Do NOT touch OddsAPI.
+
+Do NOT enable FanDuel.
+
+Do NOT enable DraftKings.
+
+Do NOT add providers.
+
+━━━━━━━━━━━━━━━━━━
+🚨 CRITICAL BOUNDARY
+━━━━━━━━━━━━━━━━━━
+
+This pass is ONLY:
+
+1. Stale operational diagnostic cleanup.
+2. /restarts cleanup if still present.
+3. Tier 1 cold_start diagnosis.
+4. One targeted cold_start fix ONLY if the code proves it is the blocker.
+5. Tests and validation.
+
+Do NOT:
+
+* Rewrite architecture
+* Replace scoring
+* Change thresholds
+* Change Tier policy
+* Change Underdog pipeline
+* Add providers
+* Enable sportsbooks
+* Change OddsAPI
+* Modify unrelated systems
+
+━━━━━━━━━━━━━━━━━━
+📋 FINAL REPORT
+━━━━━━━━━━━━━━━━━━
+
+Report:
+
+* Files changed
+* Exact functions changed
+* Exact stale diagnostic state cleaned
+* Exact cold_start root cause
+* Exact cold_start fix
+* Focused tests passed
+* Full test count/result
+* /health result
+* /restarts status
+* Tier 1 status
+* Tier 2 status
+* V3.2 standing-path fix status
+* Telegram status
+* Persistence status
+* Confirmation scoring thresholds were unchanged
+* Confirmation Underdog remains PRIMARY
+* Any remaining known issues
+
+Do not say “done” without evidence.
+
+If the cold_start root cause cannot be proven, make NO code change and report the exact blocker.
+
+🧊 FREEZE V3.2

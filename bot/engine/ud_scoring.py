@@ -99,10 +99,22 @@ _HIGH_FLOOR_STATS: frozenset[str] = frozenset({
     "Receiving Yards",
     "Rushing Yards",
     "Passing Yards",
+    # Half-game variants — same aggregate nature as their full-game counterparts;
+    # multi-component lines dampen single-event variance (e.g. 1H PRA ≈ full-game PRA).
+    "1H Points",
+    "1H Rebounds",
+    "1H Assists",
+    "1H Pts + Rebs + Asts",
     # Esports — multi-map aggregates are reliable repeatable stats comparable to
     # traditional sports cumulative lines (e.g. "Kills on Maps 1+2" ≈ "Points" in NBA)
     "Kills on Maps 1+2",
     "Assists on Maps 1+2",
+    # Per-game esports equivalents — single-game kill/assist lines for CoD/esports;
+    # comparable reliability to the Maps 1+2 equivalents already in this set.
+    "Kills on Game 1",
+    "Kills on Game 2",
+    "Assists on Game 1",
+    "Assists on Game 2",
 })
 
 # Stat categories that are inherently volatile — low-frequency outcomes where
