@@ -1,0 +1,164 @@
+Before making any changes, review the ENTIRE current system state and the existing V1.3 freeze requirements.
+
+IMPORTANT:
+We are limited on credits. Do not burn credits unnecessarily.
+
+This is a SMALL FINAL GATE ADJUSTMENT only.
+
+DO NOT:
+
+* Rewrite the bot
+* Refactor large sections
+* Redesign architecture
+* Replace working systems
+* Change the scoring engine
+* Change database structure
+* Change the Underdog pipeline
+* Change Tier 1 grading
+* Change Tier 2 grading logic
+* Add providers
+* Add features
+
+Current state:
+✅ V1.3 core is frozen
+✅ Tier 1 S/A/B system is established
+✅ Tier 2 MLB/NFL S-only system is established
+✅ Persistent SQLite memory is working
+✅ Prop grading/hit-miss tracking is working
+✅ Deduplication fixes #117–#120 were completed
+✅ 3,288 tests were passing
+✅ Startup #179 was clean
+
+ONE CHANGE:
+
+MLB/NFL STRICT ALERT GATE
+
+For MLB and NFL ONLY:
+
+Telegram ACTIONABLE BET PICK alerts must require:
+
+* Sport = MLB or NFL
+* Tier = S
+* Bet Quality = 95/100 OR HIGHER
+* Valid active/upcoming event
+* Valid player/market
+* Clear OVER/UNDER direction
+* All existing required validation gates still pass
+* Existing deduplication still applies
+
+Therefore:
+
+MLB/NFL:
+
+* S + 95 → ALLOW
+* S + 96 → ALLOW
+* S + 97 → ALLOW
+* S + 98 → ALLOW
+* S + 99 → ALLOW
+* S + 100 → ALLOW
+* S + 94 → BLOCK
+* A + 100 → BLOCK
+* B + 100 → BLOCK
+* Any non-S tier → BLOCK
+
+IMPORTANT:
+The 95 threshold applies to the FINAL Bet Quality score used for Telegram delivery.
+
+Do NOT simply change the global Tier 1 thresholds.
+
+OTHER SPORTS
+
+Do NOT apply the 95/100 MLB/NFL requirement to other sports.
+
+Other sports must continue using the existing Tier 1 S/A/B grading and delivery gates exactly as currently implemented.
+
+The existing separation must remain:
+
+Tier 1:
+
+* All applicable sports
+* S/A/B grading
+* Existing Tier 1 gates
+
+Tier 2:
+
+* MLB/NFL only
+* S-tier only
+* MLB/NFL strict quality gate = 95+
+
+Do not merge these systems.
+
+IMPORTANT TELEGRAM RULE
+
+Telegram should ONLY receive ACTIONABLE BET PICK alerts.
+
+Do not send:
+
+* Raw market movement
+* Watchlist/B-tier props
+* A-tier MLB/NFL props
+* S-tier MLB/NFL props below 95
+* Unqualified props
+* Props without valid direction
+* Inactive/offseason markets
+
+Internal scanning and grading should continue normally.
+
+VALIDATION
+
+Before changing anything:
+
+1. Read the current config and alert-gate implementation.
+2. Identify exactly where the MLB/NFL strict gate is applied.
+3. Confirm whether the current 85 threshold is still active anywhere.
+4. Confirm no other sports inherit the MLB/NFL 95 gate.
+5. Make the smallest possible change.
+
+Then add regression tests proving:
+
+✅ MLB S 95 = allowed
+✅ MLB S 94 = blocked
+✅ NFL S 95 = allowed
+✅ NFL S 94 = blocked
+✅ MLB A 100 = blocked
+✅ NFL A 100 = blocked
+✅ MLB B 100 = blocked
+✅ NFL B 100 = blocked
+✅ NBA S below/above 95 still follows Tier 1 rules
+✅ CS S below/above 95 still follows Tier 1 rules
+✅ Other sports are NOT affected
+✅ Deduplication remains intact
+✅ Existing actionable-pick delivery behavior remains intact
+
+Run the FULL test suite.
+
+Then run:
+
+* Startup health check
+* /status
+* /funnel
+* /alerts
+* /picks MLB
+* /picks NFL
+* /picks [one other sport]
+
+Verify that MLB/NFL only show Telegram-eligible picks when they meet S-tier + 95 quality.
+
+Do NOT freeze until all tests and validation pass.
+
+FINAL REPORT:
+
+* Files changed
+* Exact gate changed
+* Tests passed
+* Startup status
+* Confirmation MLB/NFL = S-tier + 95 minimum
+* Confirmation Tier 1 remains unchanged
+* Confirmation other sports remain unchanged
+* Confirmation deduplication remains intact
+
+Then:
+
+🔒 FREEZE THE PROJECT.
+
+No additional changes after this unless a new phase is explicitly started.

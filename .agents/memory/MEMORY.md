@@ -37,3 +37,4 @@
 - [Pipeline bottleneck fix (standing path + esports HFS)](pipeline-bottleneck-fix.md) — two root causes: _HFS excluded esports stats; _processed_keys blocked standing path for sub-threshold movers; 3179 tests Aug 2026.
 - [Phase 2 Core fixes](phase2-core-fixes.md) — props=0 (#114), /restarts removed (#115), auto-grading fetch loop (#116), decision_tier clarity (#113); 3256 tests Aug 2026.
 - [Post-freeze bugs 117-120](bugs-117-120.md) — BQ gate 85→95 (#117); new-prop dedup gate (#118); funnel label + /status DB counter (#119); Tier 1 gate verified correct (#120); 3288 tests Aug 2026.
+- [Final gate adjustment](final-gate-adjustment.md) — lc path was missing NFL tier gate + BQ gate; _lc_strict_tier_ok added; bq_gate [lc] added; all 3 paths now symmetric; 3334 tests Aug 2026.

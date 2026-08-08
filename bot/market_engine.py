@@ -1610,6 +1610,13 @@ async def underdog_job(context) -> None:
                             and decision.recommendation != "UNDER"  # MLB OVER-only preference
                         )
                     )
+                    # Strict-sport tier gate for line-change path — MLB AND NFL are S-tier only.
+                    # _lc_mlb_ok above only covers MLB; this covers all ud_strict_alert_sports.
+                    _lc_strict_tier_ok = (
+                        _lc_sport_up not in config.ud_strict_alert_sports
+                        or decision is None
+                        or decision.decision_tier in config.ud_mlb_alert_tiers
+                    )
                     is_qualified = (
                         not is_cold_start
                         and score is not None
@@ -1620,6 +1627,7 @@ async def underdog_job(context) -> None:
                         and decision.decision_tier in ("S", "A", "B", "C")
                         and (snap.sport or "UNKNOWN") in config.ud_alert_sports
                         and _lc_mlb_ok
+                        and _lc_strict_tier_ok
                     )
                     if is_qualified and not is_reentry_qualified:
                         _n_qualified += 1
@@ -1655,6 +1663,8 @@ async def underdog_job(context) -> None:
                             )
                         elif (snap.sport or "UNKNOWN") not in config.ud_alert_sports:
                             _lc_rej = f"sport_blocked ({snap.sport})"
+                        elif not _lc_strict_tier_ok:
+                            _lc_rej = f"strict_tier_blocked ({decision.decision_tier}, {_lc_sport_up} min=S)"
                         elif not _lc_mlb_ok:
                             if decision.recommendation == "UNDER":
                                 _lc_rej = f"mlb_under_blocked ({decision.decision_tier})"
@@ -1712,6 +1722,20 @@ async def underdog_job(context) -> None:
                             "UD conf_gate [lc]: %s | %s | conf=%d < min=%d (tier=%s)",
                             player, stat_type,
                             decision.confidence, _lc_min_conf, decision.decision_tier,
+                        )
+
+                # Strict-sport Bet Quality gate for line-change plays — MLB/NFL require
+                # BQ ≥ UD_STRICT_SPORT_MIN_BET_QUALITY (default 95) in addition to S-tier.
+                # Mirrors bq_gate [new] and bq_gate [standing] in the other two paths.
+                if should_alert and not is_removed and decision is not None:
+                    _lc_bq_sport = (snap.sport or "").upper()
+                    if (_lc_bq_sport in config.ud_strict_alert_sports
+                            and decision.confidence < config.UD_STRICT_SPORT_MIN_BET_QUALITY):
+                        should_alert = False
+                        logger.debug(
+                            "UD bq_gate [lc]: %s | %s | sport=%s BQ=%d < %d",
+                            player, stat_type, _lc_bq_sport,
+                            decision.confidence, config.UD_STRICT_SPORT_MIN_BET_QUALITY,
                         )
 
                 # Stage 4: gated count — full betting gate passed
@@ -2081,7 +2105,7 @@ async def underdog_job(context) -> None:
                     )
                     continue
 
-                # Strict-sport Bet Quality gate for standing plays — MLB/NFL require BQ ≥ 85 (#1).
+                # Strict-sport Bet Quality gate for standing plays — MLB/NFL require BQ ≥ 95.
                 if (_ssport.upper() in config.ud_strict_alert_sports
                         and _sdec.confidence < config.UD_STRICT_SPORT_MIN_BET_QUALITY):
                     logger.debug(
