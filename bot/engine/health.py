@@ -563,6 +563,23 @@ class HealthTracker:
             return "—"
         return _age_str(evt.get("ts_unix"))
 
+    def last_recovery_age_hours(self) -> Optional[float]:
+        """
+        Return the age of the most recent recovery event in hours, or None if
+        no recovery event has been recorded.
+
+        Uses the ``ts_unix`` float stored by ``record_recovery_event`` so the
+        result is independent of ISO-string timezone formatting.
+        """
+        evt = self._state.get("last_recovery_event")
+        if not evt:
+            return None
+        ts_unix = evt.get("ts_unix")
+        if ts_unix is None:
+            return None
+        age_secs = _now_ts() - float(ts_unix)
+        return age_secs / 3600.0
+
     def recovery_history(self) -> list:
         """Return list of up to 5 recent recovery events (oldest first)."""
         return list(self._state.get("recovery_history", []))

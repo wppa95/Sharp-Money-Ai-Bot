@@ -41,3 +41,4 @@
 - [V3.2 Tier 1 stable actionable fix](v32-stable-actionable.md) — standing path score_tier=NULL fallback; only applies when score_tier is None (not "B"/"PASS"); derives from score_total (S≥80,A≥65); 3369 tests Aug 2026.
 - [V3.2 stale diagnostic + cold_start cleanup](v32-stale-coldstart.md) — health.json timestamp bug (_now_iso " UTC" suffix breaks fromisoformat); _HFS expanded with 1H/per-game stats; 3418 tests Aug 2026.
 - [V3.2 final targeted fix pass](v32-final-targeted-fix.md) — 8 issues: cold_start ACCEPTED gate; /picks strict-sport filter; /alerts PropOpportunityLog; funnel rate precision; dashboard tier % denominator; 3474 tests Aug 2026.
+- [Stale recovery display fix](stale-recovery-display.md) — /health showed 61h-old recovery as active; _RECOVERY_STALE_HOURS=6.0 gate added; last_recovery_age_hours() on HealthTracker; 3509 tests Aug 2026.

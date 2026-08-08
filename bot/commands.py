@@ -316,18 +316,36 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 lines.append(f"   at {_html.escape(str(ts))}")
 
         # ── Recovery events ───────────────────────────────────────────────────
+        # Stale-recovery threshold: recoveries older than this are historical
+        # (the bot is clearly running fine now) and must not be presented as
+        # the current active recovery.  Matches the same philosophy as the
+        # global-error and pipeline-failure staleness gates above.
+        _RECOVERY_STALE_HOURS = 6.0
+
         recovery = ht.last_recovery_event()
+        lines.append("")
         if recovery:
-            lines.append("")
-            lines.append(
-                f"✅ <b>Last recovery:</b>  {_html.escape(ht.last_recovery_age_str())}"
-                f"  ·  job: {_html.escape(recovery.get('job', '?'))}"
-            )
-            reason_txt = recovery.get("reason", "")
-            if reason_txt:
-                lines.append(f"   ↳ <i>{_html.escape(str(reason_txt)[:100])}</i>")
+            _rec_age_h = ht.last_recovery_age_hours()
+            _rec_age_str = ht.last_recovery_age_str()
+            _rec_job = _html.escape(recovery.get("job", "?"))
+            if _rec_age_h is not None and _rec_age_h >= _RECOVERY_STALE_HOURS:
+                # Historical recovery — label it clearly so it isn't read as
+                # an active or ongoing issue.
+                lines.append(
+                    f"ℹ️ <b>Last recovery:</b>  {_html.escape(_rec_age_str)}"
+                    f"  ·  job: {_rec_job}"
+                    f"  <i>(historical — no recent failures)</i>"
+                )
+            else:
+                # Recent recovery — show prominently.
+                lines.append(
+                    f"✅ <b>Last recovery:</b>  {_html.escape(_rec_age_str)}"
+                    f"  ·  job: {_rec_job}"
+                )
+                reason_txt = recovery.get("reason", "")
+                if reason_txt:
+                    lines.append(f"   ↳ <i>{_html.escape(str(reason_txt)[:100])}</i>")
         else:
-            lines.append("")
             lines.append("✅ <b>Last recovery:</b>  <i>No recovery events recorded</i>")
 
         # ── Phase 2: extended runtime telemetry ───────────────────────────────
