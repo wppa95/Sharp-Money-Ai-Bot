@@ -2967,6 +2967,51 @@ class Database:
             )
             return list(result.scalars().all())
 
+    async def get_recent_alerted_props_for_dedup(
+        self,
+        since_hours: int = 24,
+    ) -> "dict[tuple[str, str, str], tuple[float, float]]":
+        """
+        Return recently alerted props for restoring the in-memory dedup dict
+        (_prop_market_alerted) after a bot restart.
+
+        Returns {(player_name, sport, stat_type): (alert_sent_at_unix, line_value)}
+        for props where alert_sent=True within the last since_hours.
+
+        Only OVER/UNDER recommendations are included (same filter as the alert
+        pipeline).  Rows are ordered oldest-first so that if the same prop was
+        alerted multiple times, the most-recent entry ends up in the dict.
+        """
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(hours=since_hours)
+        async with self.session() as s:
+            result = await s.execute(
+                select(
+                    PropOpportunityLog.player_name,
+                    PropOpportunityLog.sport,
+                    PropOpportunityLog.stat_type,
+                    PropOpportunityLog.alert_sent_at,
+                    PropOpportunityLog.line_value,
+                )
+                .where(
+                    PropOpportunityLog.alert_sent    == True,   # noqa: E712
+                    PropOpportunityLog.alert_sent_at >= cutoff,
+                    PropOpportunityLog.recommendation.in_(["OVER", "UNDER"]),
+                )
+                # Oldest first so later (newer) rows overwrite earlier ones,
+                # leaving the most-recent alert for each key in the dict.
+                .order_by(PropOpportunityLog.alert_sent_at)
+            )
+            out: dict = {}
+            for row in result.all():
+                player, sport, stat, sent_at, line = row
+                if sent_at is None:
+                    continue
+                ts_unix = sent_at.timestamp()
+                line_f  = float(line or 0)
+                out[(player, sport or "UNKNOWN", stat)] = (ts_unix, line_f)
+            return out
+
     async def get_telegram_pick_performance(self) -> "dict":
         """
         Return HIT/MISS/PUSH/PENDING counts for Telegram actionable picks only

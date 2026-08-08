@@ -68,6 +68,21 @@ def _uptime_str() -> str:
     return f"{h}h {m}m {s}s"
 
 
+def _fmt_user_ts(dt: Optional[datetime]) -> str:
+    """Format a UTC datetime for user-facing display.
+
+    Output format: ``Aug 08 · 5:05 PM``  (12-hour clock, no leading zero on hour)
+
+    This is purely a display helper — stored timestamps and internal logic
+    remain in UTC.  Returns "—" when dt is None.
+    """
+    if dt is None:
+        return "—"
+    # lstrip("0") removes leading zero; "or '12'" handles midnight (12 AM)
+    hour_str = dt.strftime("%I").lstrip("0") or "12"
+    return dt.strftime(f"%b %d · {hour_str}:%M %p")
+
+
 def _check_allowed(update: Update) -> bool:
     """Return True if the user is in the allowed list (or if the list is empty)."""
     allowed = config.allowed_user_ids
@@ -937,7 +952,7 @@ async def cmd_ev(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 f"<b>Reasons:</b>",
                 reasons,
                 "",
-                f"{EMOJI['clock']} <i>{r.detected_at.strftime('%Y-%m-%d %H:%M UTC')}</i>",
+                f"{EMOJI['clock']} <i>{_fmt_user_ts(r.detected_at)}</i>",
             ])
             await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
     except Exception as exc:
@@ -2309,12 +2324,13 @@ async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         # Also count all alerted picks (not just the display limit)
         _total_alerted = await _db.count_actionable_pick_records()
         if alerted_opps:
-            lines.append(f"  <i>{len(alerted_opps)} shown · {_total_alerted} all-time delivered</i>")
+            # "sent" = Telegram API accepted the send; no message ID stored.
+            lines.append(f"  <i>{len(alerted_opps)} shown (last 72h) · {_total_alerted} all-time sent</i>")
             lines.append("")
             for r in alerted_opps:
                 _lv   = float(getattr(r, "line_value", 0) or 0)
                 _ts   = getattr(r, "alert_sent_at", None)
-                _ts_str = _ts.strftime("%b %d %H:%M UTC") if _ts else "—"
+                _ts_str = _fmt_user_ts(_ts)
                 _rec  = getattr(r, "recommendation", "")
                 _tier = getattr(r, "decision_tier", "")
                 _rec_icon = "⬆️" if _rec == "OVER" else ("⬇️" if _rec == "UNDER" else "")
@@ -2327,7 +2343,7 @@ async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             lines.append("  <i>No player prop alerts sent in the last 72 h.</i>")
             lines.append("  <i>Alerts fire when props pass all qualification + delivery gates.</i>")
             if _total_alerted:
-                lines.append(f"  <i>({_total_alerted} all-time delivered — use /performance for history.)</i>")
+                lines.append(f"  <i>({_total_alerted} all-time sent — use /performance for history.)</i>")
     except Exception as exc:
         logger.warning("cmd_alerts: prop history lookup failed: %s", exc)
         lines.append("  <i>Alert history unavailable — check /health for job status.</i>")

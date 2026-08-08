@@ -157,12 +157,19 @@ async def _init_state_from_db(db: "Database") -> None:
     Called once per process on the first (cold-start) underdog_job cycle.
     This prevents the bot from losing context it had before it was stopped:
 
-    * _MARKET_FIRST_ALERT — re-populated from recently alerted props so the
+    * _MARKET_FIRST_ALERT    — re-populated from recently alerted props so the
       market availability window (detection → removal) is accurate.
 
-    Non-fatal: any individual failure is logged at DEBUG and skipped.
+    * _prop_market_alerted   — rebuilt from PropOpportunityLog.alert_sent=True
+      records within the dedup window so the bot does not re-alert the same
+      prop shortly after a restart.
+
+    Both restorations are non-fatal: any individual failure is logged at DEBUG
+    and skipped so a DB error never prevents the bot from starting.
     """
-    global _MARKET_FIRST_ALERT
+    global _MARKET_FIRST_ALERT, _prop_market_alerted
+
+    # ── Restore _MARKET_FIRST_ALERT ──────────────────────────────────────────
     try:
         first_alerts = await db.get_first_alert_times_ud(since_hours=_MARKET_FIRST_ALERT_TTL_H)
         restored = 0
@@ -181,6 +188,33 @@ async def _init_state_from_db(db: "Database") -> None:
             logger.debug("State recovery: no recent market first-alert entries to restore")
     except Exception as _exc:
         logger.debug("State recovery: _MARKET_FIRST_ALERT restore skipped — %s", _exc)
+
+    # ── Restore _prop_market_alerted (alert dedup dict) ───────────────────────
+    # Use 2× the dedup window so we cover the full suppression period even
+    # when the bot was down for a while (capped at 24 h to match FIRST_ALERT_TTL).
+    try:
+        _dedup_restore_hours = min(
+            24,
+            max(2, int(config.UD_ALERT_DEDUP_WINDOW / 1800)),  # 2× half-hours → hours
+        )
+        recent_alerted = await db.get_recent_alerted_props_for_dedup(
+            since_hours=_dedup_restore_hours,
+        )
+        restored_dedup = 0
+        for (player, sport, stat), (ts_unix, line_f) in recent_alerted.items():
+            key = (player, sport, stat)
+            if key not in _prop_market_alerted:
+                _prop_market_alerted[key] = (ts_unix, line_f)
+                restored_dedup += 1
+        if restored_dedup:
+            logger.info(
+                "State recovery: restored %d prop-dedup entries from DB (window=%dh)",
+                restored_dedup, _dedup_restore_hours,
+            )
+        else:
+            logger.debug("State recovery: no recent prop-dedup entries to restore")
+    except Exception as _exc:
+        logger.debug("State recovery: _prop_market_alerted restore skipped — %s", _exc)
 
 
 # ── Player Prop Market alert dedup ────────────────────────────────────────────
