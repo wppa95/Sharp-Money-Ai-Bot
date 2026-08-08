@@ -1,0 +1,740 @@
+Before making any changes, review the entire current system state.
+
+==================================================
+🔴 IMPORTANT — CREDIT + FREEZE RULE
+
+We are limited on credits. Do not burn credits unnecessarily.
+
+Everything in this cleanup list must be completed, tested, verified, and checked off before the project is frozen.
+
+DO NOT freeze V1.3 while ANY item remains:
+
+* Incomplete
+* Unverified
+* Untested
+* Partially implemented
+* Showing a regression
+* Not checked off
+
+The goal is to finish the entire cleanup list first, then freeze V1.3.
+
+Do not stop halfway through the list.
+
+==================================================
+🔴 DO NOT REWRITE THE BOT
+
+Do NOT:
+
+* Rewrite the bot
+* Refactor large sections
+* Replace working systems
+* Redesign architecture
+* Change database structure
+* Change the Underdog pipeline
+* Broadly rewrite the scoring engine
+* Add unnecessary features
+* Add new providers during this pass
+
+This is a final cleanup/stability/tuning pass before freezing V1.3.
+
+Make the smallest safe changes necessary.
+
+==================================================
+CURRENT SYSTEM
+
+CORE SYSTEM:
+✅ Stable Underdog-first pipeline
+✅ Provider-agnostic PropLineHistory system
+✅ Existing scoring/ranking engine working
+✅ Existing test suite passing
+
+ALERT SYSTEM:
+
+1. 📈 MARKET MOVE DETECTED
+    * Internal market intelligence
+    * Tracks movement
+    * NOT a bet recommendation
+    * Never send to Telegram
+2. 🎯 ACTIONABLE BET PICK
+    * Passed scoring gates
+    * Must have clear OVER/UNDER direction
+    * Has confidence/tier
+    * User-facing alert
+    * Telegram should ONLY receive this category
+
+LIFECYCLE:
+✅ Removal tracking improved
+✅ Removal alerts disabled
+✅ Market timing data preserved internally
+✅ Availability states:
+
+🟢 AVAILABLE NOW
+🟡 CLOSING SOON
+🔴 GAME LIVE
+
+DIAGNOSTICS:
+✅ Per-sport raw → parsed → gated diagnostics
+
+PROVIDERS:
+✅ Underdog primary
+✅ OddsAPI available
+⚪ DraftKings disabled unless specifically needed
+⚪ FanDuel disabled unless specifically needed
+⏳ Sleeper/other free providers deferred
+
+Do not add providers during this pass.
+
+==================================================
+🔴 PRIORITY #1 — SPORT ALERT GATES
+
+DO NOT remove MLB or NFL.
+
+Keep MLB and NFL active, but make their Telegram alerts extremely selective.
+
+MLB:
+
+* S-Tier ONLY
+* Minimum Bet Quality: 95/100
+
+NFL:
+
+* S-Tier ONLY
+* Minimum Bet Quality: 95/100
+
+OTHER SPORTS:
+
+Temporarily allow:
+
+* S-Tier
+* A-Tier
+* B-Tier
+* C-Tier
+
+Purpose:
+
+Use other sports to stress-test the complete pipeline and determine whether the old gates are suppressing too many legitimate opportunities.
+
+This is temporary testing configuration.
+
+Do not permanently finalize other-sport thresholds until enough real output has been evaluated.
+
+==================================================
+🔴 PRIORITY #2 — REVIEW OLD GLOBAL GATES
+
+Current configuration still carries old global requirements:
+
+* Min stars: 3★
+* Min validation: 5 snapshots
+* Min AI confidence: 60
+* S-tier: 80
+* A-tier: 70
+* Market bypass: score ≥70 + |line move| ≥2%
+
+These requirements were built around the older system and are suppressing too many props.
+
+Review and relax these requirements for non-MLB/NFL testing.
+
+Specifically review:
+
+* Minimum stars
+* Minimum validation snapshots
+* Minimum confidence
+* Market bypass
+* Tier thresholds
+
+Do NOT blindly remove safety checks.
+
+Hard safety checks must remain.
+
+==================================================
+🔴 PRIORITY #3 — PROP FUNNEL DIAGNOSTICS
+
+We have seen the bot process large numbers of props while very few survive to the final stage.
+
+Determine exactly where props are being filtered.
+
+Track:
+
+RAW
+→ PARSED
+→ VALIDATED
+→ SCORED
+→ TIERED
+→ ACTIONABLE
+→ TELEGRAM
+
+For each sport, show counts at every stage.
+
+Goal:
+
+Determine whether props are being rejected because:
+
+A) They genuinely fail quality requirements
+
+OR
+
+B) The gates are too strict
+
+Do NOT assume the answer.
+
+Do not modify the scoring engine unless a clear bug is proven.
+
+==================================================
+🔴 PRIORITY #4 — 24/7 EARLY MARKET SCANNING
+
+The entire purpose of the bot is to catch opportunities EARLY.
+
+Do NOT wait until 2–3 hours before game time.
+
+Markets can appear:
+
+* Overnight
+* Early morning
+* During the day
+* Evening
+* At different times across sports
+
+The bot should continuously scan.
+
+Goal:
+
+FIND EARLY
+→ ALERT EARLY
+→ USER EVALUATES
+→ LINE MAY MOVE
+
+NOT:
+
+WAIT
+→ LINE MOVES
+→ ALERT AFTER THE MOVE
+
+The user wants time to evaluate picks before games and build slips ahead of game time.
+
+==================================================
+🔴 PRIORITY #5 — CRITICAL GAME-LIVE HARD GATE
+
+THIS IS A HARD SAFETY REQUIREMENT.
+
+The bot recently sent another Alex Bregman actionable alert even though his game had already been live for approximately 30 minutes.
+
+That MUST NOT happen.
+
+Before ANY:
+
+🎯 ACTIONABLE BET PICK
+
+is sent to Telegram, verify:
+
+1. Event exists
+2. Event is valid
+3. Event is upcoming
+4. Game/event has not started
+5. Current time < actual start time
+6. Event status is NOT LIVE
+7. Event status is NOT FINAL
+8. Event status is NOT COMPLETED
+9. Delayed/postponed start times are handled
+10. Updated start time is respected
+11. If an event becomes live, stop future actionable alerts for that event
+
+Internal scanning may continue after an event becomes live.
+
+Internal market intelligence may continue.
+
+BUT:
+
+Telegram actionable pick = BLOCKED once event is live.
+
+This gate must remain active even while other sport grading gates are temporarily relaxed.
+
+==================================================
+🔴 PRIORITY #6 — PICK DIRECTION MUST BE VALID
+
+Every actionable pick must contain:
+
+* Clear OVER or UNDER
+* Valid current line
+* Valid market
+* Valid event
+* Valid player/team
+* Valid start time
+
+Never send:
+
+❌ Raw line movement
+❌ Signal with no direction
+❌ Unqualified market
+❌ Malformed pick
+
+Example:
+
+BAD:
+Market moved +1.0
+
+GOOD:
+PICK: 🟢 OVER 1.5
+
+Direction must come from the actual scoring/selection logic.
+
+==================================================
+🔴 PRIORITY #7 — GAME START TIME
+
+Every actionable pick must include the game/event start time.
+
+Telegram must display normal user-friendly time.
+
+Do NOT display military/24-hour time unless specifically requested.
+
+BAD:
+🕐 20:40 UTC
+
+GOOD:
+🕐 Game starts: 8:40 PM ET
+
+UTC can remain internally for logging.
+
+Telegram should display readable local time.
+
+==================================================
+🔴 PRIORITY #8 — LINE FRESHNESS / FIRST-SEEN TRACKING
+
+The bot needs to catch lines BEFORE they move.
+
+Preserve:
+
+* First detected line
+* Previous line
+* Current line
+* Movement
+* First-seen timestamp
+* Alert timestamp
+* Game start time
+
+Do not silently overwrite line history.
+
+Example:
+
+Alex Bregman:
+
+Bot detected:
+OVER 0.5
+
+User checked Underdog:
+1.5
+
+Later:
+0.5
+
+This shows why line history matters.
+
+The alert should clearly distinguish:
+
+FIRST SEEN
+CURRENT
+PREVIOUS
+MOVEMENT
+
+The bot must not present an old line as if it is guaranteed to still be available.
+
+==================================================
+🔴 PRIORITY #9 — LINE MOVEMENT CALCULATION
+
+We found an alert that said the market moved DOWN while the displayed line went UP.
+
+Movement must be calculated strictly from:
+
+Previous line
+→ Current line
+
+Example:
+
+Previous: 13.5
+Current: 18.5
+Move: +5.0
+
+Therefore:
+
+Movement = UP
+
+Do NOT confuse:
+
+* Historical average
+* Historical percentage
+* Previous market line
+* Current market line
+* Line movement
+
+Historical average is NOT the previous market line.
+
+==================================================
+🔴 PRIORITY #10 — STAT / LINE CONSISTENCY
+
+Statistics must correspond to the actual line being evaluated.
+
+Do not grade:
+
+OVER 0.5
+
+and then treat the result as equivalent to:
+
+OVER 1.5
+
+Those are different bets.
+
+Preserve the exact line attached to the scoring event.
+
+If the line changes:
+
+* Preserve original line
+* Record new line
+* Re-score if appropriate
+* Do not silently overwrite history
+* Show current availability
+
+==================================================
+🔴 PRIORITY #11 — DUPLICATE / REVERSAL PROTECTION
+
+Markets can flip repeatedly:
+
+0.5 → 1.5
+1.5 → 0.5
+0.5 → 1.5
+
+Track:
+
+* Provider
+* Player
+* Market
+* Event/game
+* Direction
+* Line
+* Timestamp
+
+Prevent Telegram spam.
+
+Do NOT permanently block future opportunities.
+
+A legitimate new opportunity should still be able to alert.
+
+==================================================
+🔴 PRIORITY #12 — MONEYLINES / TOTALS
+
+Moneylines and totals are allowed back as a separate S-tier category.
+
+MLB/NFL:
+
+ONLY 95/100 S-tier moneyline/total opportunities.
+
+Other sports:
+
+Evaluate during broader testing.
+
+Use OddsAPI when sufficient.
+
+Do NOT enable DraftKings/FanDuel just for the sake of having them.
+
+Keep DK/FD disabled if OddsAPI provides the required information.
+
+Only enable DK/FD intentionally if they are actually necessary.
+
+==================================================
+🔴 PRIORITY #13 — TELEGRAM SPAM FILTERING
+
+Scanner:
+
+Scan everything internally.
+
+Telegram:
+
+Send ONLY qualified actionable picks.
+
+Do NOT send:
+
+❌ Raw market movements
+❌ Every line change
+❌ Unqualified signals
+❌ Duplicate alerts
+❌ No-direction markets
+❌ Live-game actionable alerts
+
+Goal:
+
+SCAN EVERYTHING
+→ FILTER
+→ RANK
+→ ALERT ONLY REAL OPPORTUNITIES
+
+==================================================
+🔴 PRIORITY #14 — REAL PICK TESTING
+
+Do not judge the system from the first few slips.
+
+We are intentionally testing the bot’s data with small stakes.
+
+Minimum evaluation sample:
+
+10 slips.
+
+Track:
+
+* Slip number
+* Stake
+* Picks
+* Sport
+* Tier
+* Bet Quality
+* Original line
+* Actual playable line
+* Direction
+* Result
+* Alert timing
+* Whether line moved
+* Whether alert was early/late
+* Reason for miss
+* Same-game correlation
+
+Do NOT make major conclusions from Slip #1–#3.
+
+At Slip #10 evaluate:
+
+* Overall hit rate
+* S-tier performance
+* A-tier performance
+* B-tier performance
+* C-tier performance
+* Sport-by-sport performance
+* Direction accuracy
+* Early-line accuracy
+* Late-line performance
+* Line freshness
+* False positives
+* Missed opportunities
+
+==================================================
+🔴 PRIORITY #15 — SAME-GAME CORRELATION
+
+The scanner should still detect legitimate picks from the same game.
+
+Do NOT delete a legitimate individual pick simply because another player from that game is also a pick.
+
+The user does NOT want same-game correlated combinations when building slips.
+
+That is a slip-construction rule, not necessarily a market-scanning rule.
+
+==================================================
+🔴 PRIORITY #16 — INTERNAL MARKET INTELLIGENCE
+
+Continue storing:
+
+* Market movement
+* Line history
+* Removed markets
+* Availability
+* Timing
+* Provider
+* Player
+* Market
+* Event
+
+Internal intelligence is valuable even when it does not produce a Telegram alert.
+
+Do not delete useful data.
+
+==================================================
+🔴 PRIORITY #17 — FIX CURRENT UNDERDOG PIPELINE ERROR
+
+Health previously reported:
+
+[pipeline:prop_scoring:market_engine.underdog_job]
+
+‘list’ object has no attribute ‘has_real_data’
+
+Investigate the actual type/interface mismatch.
+
+Do NOT paper over it.
+
+Verify the object passed into prop scoring is the expected structure.
+
+After fixing:
+
+* Targeted tests
+* Full tests
+* Underdog monitor
+* Scoring
+* Telegram behavior
+
+==================================================
+🔴 PRIORITY #18 — SCHEDULER OVERLAP
+
+We observed:
+
+Execution of job “underdog_monitor” skipped:
+maximum number of running instances reached (1)
+
+Investigate why an Underdog scan can still be running when the next scheduled scan begins.
+
+Do NOT simply increase concurrency.
+
+Goal:
+
+* Continuous monitoring
+* No overlapping scans
+* No duplicate processing
+* No wasted API usage
+* No Telegram spam
+
+==================================================
+🔴 PRIORITY #19 — CRASH / OOM STABILITY
+
+Health has reported:
+
+Unexpected exit
+SIGKILL / OOM / hard crash
+
+Investigate root cause.
+
+Look for:
+
+* Memory growth
+* Overlapping jobs
+* Long-running tasks
+* Excessive in-memory data
+* Unbounded logging
+* Duplicate scheduler instances
+* Resource leaks
+
+Do NOT redesign the architecture.
+
+Stability > feature expansion.
+
+==================================================
+🔴 FINAL COMPLETION + CHECK-OFF REQUIREMENT
+
+Before freezing V1.3, EVERY priority above must be:
+
+✅ Implemented
+✅ Tested
+✅ Verified
+✅ Regression checked
+✅ Checked off
+
+If an item cannot be verified, V1.3 is NOT ready to freeze.
+
+Do not report the project as frozen simply because the code changes were made.
+
+The actual behavior must be verified.
+
+==================================================
+FINAL TEST PLAN
+
+After ALL fixes:
+
+1. Run targeted tests
+2. Run full test suite
+3. Startup health check
+4. Verify scheduler jobs
+5. Verify no Underdog monitor overlap
+6. Verify no pipeline type errors
+7. Verify Telegram only receives actionable picks
+8. Verify every pick has direction
+9. Verify every pick has game start time
+10. Verify readable time format
+11. Verify first-seen/current-line tracking
+12. Verify accurate line movement
+13. Verify live-game hard gate
+14. Verify delayed/postponed games
+15. Verify other sports can produce S/A/B/C testing alerts
+16. Verify MLB/NFL only allow 95/100 S-tier alerts
+17. Verify moneyline/totals gating
+18. Verify DK/FD remain off unless needed
+19. Verify internal market intelligence remains stored
+20. Verify duplicate/reversal protection
+21. Verify real-time/24-7 scanning behavior
+22. Monitor real Telegram output
+23. Confirm no regressions
+
+Then and ONLY then:
+
+🔒 FREEZE V1.3
+
+==================================================
+FINAL V1.3 STATE
+
+Stable.
+
+Continuous 24/7 scanning.
+
+Early opportunity detection.
+
+Accurate line tracking.
+
+Accurate direction.
+
+Correct game status.
+
+No live-game actionable alerts.
+
+No unnecessary Telegram spam.
+
+MLB:
+95/100 S-tier only.
+
+NFL:
+95/100 S-tier only.
+
+Other sports:
+Temporary S/A/B/C testing.
+
+Moneylines/totals:
+S-tier only.
+
+Internal market intelligence:
+Continue storing.
+
+No unnecessary provider activation.
+
+No architecture rewrite.
+
+NO REWRITE.
+NO UNNECESSARY FEATURE EXPANSION.
+
+EVERY CLEANUP ITEM MUST BE COMPLETE AND CHECKED OFF BEFORE FREEZE.
+
+After freeze, future work is Phase 2:
+
+* Add free providers one at a time
+* Sleeper first
+* Evaluate PrizePicks/Betr/other sources
+* Compare providers
+* Improve information quality
+* Improve statistical enrichment
+
+For THIS pass:
+
+ONLY CLEANUP + STABILITY + GATE/TIMING CORRECTIONS.
+
+NO REWRITE.
+NO FEATURE CREEP.
+NO FREEZE UNTIL EVERYTHING IS COMPLETE AND VERIFIED.
+
+==================================================
+FINAL REPORT REQUIRED
+
+Provide:
+
+* Files changed
+* What was fixed
+* Tests passed
+* Startup status
+* Scheduler status
+* Pipeline diagnostics
+* Alert behavior verification
+* Sport gate configuration
+* Live-game gate verification
+* Line freshness verification
+* Movement-direction verification
+* Telegram verification
+* Any remaining issues
+* Confirmation every cleanup item was checked off
+* Confirmation project is frozen
