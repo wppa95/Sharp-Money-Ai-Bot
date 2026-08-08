@@ -1,0 +1,351 @@
+We are going to do ONE final comprehensive diagnostic pass before making any more code changes.
+
+IMPORTANT:
+We are extremely limited on credits. Do NOT burn credits on unnecessary reads or repeated exploration.
+
+Do NOT modify code yet.
+
+Do NOT implement fixes yet.
+
+Do NOT restart the bot yet.
+
+The goal of this message is to diagnose ALL remaining Phase 2 issues at once so we can send ONE final implementation message afterward and freeze the project.
+
+V3.1 is already frozen.
+
+Phase 2 Task #112 was just completed and verified:
+
+✅ 22 new regression tests
+✅ 3212 existing tests
+✅ 3234 total passing
+✅ 0 failures
+✅ Startup #174 clean
+
+#112 fixes:
+
+* New-prop delivery now populates _lifecycle_alerted
+* Standing delivery now populates _lifecycle_alerted
+* /alerts can now see those successful deliveries
+* /status health alert counter now includes both new-prop and standing sends
+
+DO NOT modify #112.
+
+⸻
+
+REMAINING PHASE 2 ISSUES
+
+We need a complete diagnostic of ALL of these together:
+
+#113 — S-tier picks being silently rejected
+
+We previously established that Tier-1 sports were supposed to allow:
+
+🟢 S
+🟢 A
+🟢 B
+
+But the funnel is still showing things such as:
+
+• rx — CS — 85/100 [S] — qualified
+• None Quad — LOL — 83/100 [S] — qualified
+• Alanna Smith — WNBA — 80/100 [S] — qualified
+
+while other S-tier props are showing rejection reasons such as:
+
+mlb_tier_blocked (S)
+
+We need to determine EXACTLY:
+
+* Where S/A/B eligibility is defined
+* What sports are considered Tier-1
+* Whether Tier-1 currently means S/A/B
+* Whether MLB/CS/LOL/WNBA/etc. are being classified correctly
+* Every gate between:
+    scored → qualified → actionable → stored → Telegram
+* Whether an S-tier qualified prop can be rejected after qualification
+* Whether /picks, /slip, funnel, or delivery logic applies a second tier restriction
+* Whether there are multiple conflicting tier rules
+* Whether the restriction is intentional legacy behavior or a bug
+
+Trace the complete path.
+
+Do not guess.
+
+Identify the exact file, function, and relevant code section for every conflicting gate.
+
+⸻
+
+#114 — Underdog pipeline shows props=0
+
+Health currently shows:
+
+📡 Underdog Pipeline
+Last scan: ~1m ago
+props=0
+alerts=0
+Last DB write: successful
+
+But the bot is clearly processing thousands of Underdog snapshots and PropLineHistory contains thousands of rows.
+
+Determine EXACTLY why the health display reports:
+
+props=0
+
+even though the Underdog monitor is running and data is being processed.
+
+Trace:
+
+Underdog fetch
+→ parsing
+→ snapshot creation
+→ scoring
+→ pipeline counters
+→ record_underdog_scan()
+→ /health display
+
+Determine whether:
+
+* The wrong variable is being counted
+* props_count is using the wrong collection
+* the collection is emptied before health recording
+* the pipeline is returning a list/object different from what health expects
+* the previous 'list' object has no attribute 'has_real_data' error is related
+* props=0 is merely a reporting bug or represents an actual processing failure
+
+Also identify why the old error still appears in health:
+
+‘list’ object has no attribute ‘has_real_data’
+
+even though the bot appears to recover and continue scanning.
+
+Do not change anything yet.
+
+⸻
+
+#115 — Restart / crash classification
+
+We have many:
+
+⚠️ unexpected_exit
+SIGKILL / OOM / hard crash
+
+But many restarts appear to happen immediately after completing development tasks and may be intentional/restart-related rather than genuine crashes.
+
+Recent history includes:
+
+clean_restart
+unexpected_exit
+unexpected_exit
+unexpected_exit
+etc.
+
+Determine exactly how restart reason is currently classified.
+
+Trace:
+
+startup
+→ previous session detection
+→ shutdown/restart detection
+→ crash detector
+→ restart reason
+→ health display
+
+Determine:
+
+1. How clean restarts are recorded.
+2. How intentional/manual restarts are recorded.
+3. How SIGKILL/OOM/hard exits are detected.
+4. Whether a normal Replit/task restart can incorrectly become unexpected_exit.
+5. Whether the current “Crash detected: Yes” can be stale from an older failure.
+6. Whether this is an actual runtime stability problem or primarily a diagnostics/classification problem.
+
+IMPORTANT:
+Do not redesign the restart system.
+
+We only need to know whether a minimal classification/reporting correction is required.
+
+⸻
+
+#116 — Outcome / grading validation
+
+We now have:
+
+/grade
+Stored: 1
+Pending: 1
+Resolved: 0
+
+Determine whether the grading pipeline is ready to correctly resolve an actionable Underdog pick after the actual game finishes.
+
+Trace:
+
+PropOpportunityLog
+→ stored actionable pick
+→ event/game identification
+→ final player/game result
+→ outcome calculation
+→ HIT/MISS/PUSH
+→ resolved_at
+→ /grade
+
+Determine:
+
+* Whether Underdog actionable picks have enough information to resolve.
+* Whether the player/game identifiers line up with available stat data.
+* Whether MLB props can resolve.
+* Whether OVER and UNDER resolve correctly.
+* Whether PUSH is handled correctly where applicable.
+* Whether unresolved picks remain Pending until the game actually finishes.
+* Whether /grade is now reading the correct table and fields.
+* Whether there is any legacy PrizePicks dependency remaining in the resolution path.
+* Whether ESPN/on-demand gamelog data is actually connected to the grading process.
+* Whether there are tests covering real outcome resolution.
+
+Do not implement grading changes yet.
+
+⸻
+
+ALSO CHECK THE FULL DELIVERY CONSISTENCY
+
+Since #112 just fixed the lifecycle/counter mismatch, verify the complete relationship between:
+
+/status
+/health
+/stats
+/funnel
+/alerts
+/picks
+/slip
+/grade
+
+For each one, identify:
+
+* What database/table it reads
+* What counter it reads
+* What constitutes an actionable pick
+* What constitutes a Telegram-delivered pick
+* Whether it can disagree with the other commands
+* Whether the disagreement is real data or only display/reporting
+
+We want ONE source-of-truth model for understanding the system, but do NOT redesign architecture.
+
+⸻
+
+IMPORTANT: CHECK FOR DUPLICATE / CONFLICTING RULES
+
+Search specifically for duplicate definitions of:
+
+* Tier-1 sports
+* S/A/B eligibility
+* MLB restrictions
+* UNDER restrictions
+* direction requirements
+* confidence thresholds
+* actionable gates
+* Telegram delivery gates
+* daily alert limits
+* lifecycle states
+* health counters
+* restart classification
+
+If the same rule is implemented in multiple places, identify every location and explain whether they agree.
+
+Do not change them.
+
+⸻
+
+RESOURCE RULES
+
+Do not:
+
+* Rewrite the bot
+* Refactor architecture
+* Change scoring
+* Change scoring weights
+* Change tiers unless #113 proves the current tier gate contradicts the intended rule
+* Change thresholds unless absolutely required by an identified bug
+* Add providers
+* Change Underdog ingestion
+* Change database schema
+* Replace working systems
+* Modify #112
+* Restart the bot
+* Run the full test suite yet
+
+Diagnostic reads only.
+
+Prioritize exact code paths over broad exploration.
+
+⸻
+
+FINAL DIAGNOSTIC REPORT FORMAT
+
+Return ONE consolidated report containing:
+
+#113 S-tier eligibility
+
+* Root cause
+* Exact file/function
+* Conflicting gates
+* Minimal fix required
+
+#114 Pipeline props=0
+
+* Root cause
+* Exact file/function
+* Why the displayed counter is wrong
+* Minimal fix required
+* Whether has_real_data error is related
+
+#115 Restart classification
+
+* Root cause
+* Exact file/function
+* Whether this is genuine instability or classification
+* Minimal fix required
+
+#116 Grading
+
+* Current state
+* What works
+* What is broken/missing
+* Minimal fix required
+
+Cross-command consistency
+
+Show whether:
+/status
+/health
+/stats
+/funnel
+/alerts
+/picks
+/slip
+/grade
+
+are currently consistent.
+
+Duplicate/conflicting rules
+
+List every conflicting or duplicated gate discovered.
+
+Final implementation plan
+
+Give the SMALLEST possible set of code changes needed to resolve all remaining issues.
+
+Include:
+
+* exact files
+* exact functions/areas
+* tests that need to be added
+* expected behavior after the fix
+
+DO NOT WRITE CODE YET.
+
+DO NOT IMPLEMENT ANYTHING YET.
+
+DO NOT RESTART.
+
+STOP after the consolidated diagnostic report.
+
+After this report, we will send ONE final implementation message covering the necessary fixes, run the full suite once, verify startup/Telegram behavior, and FREEZE V1.3/Phase 2 cleanup.

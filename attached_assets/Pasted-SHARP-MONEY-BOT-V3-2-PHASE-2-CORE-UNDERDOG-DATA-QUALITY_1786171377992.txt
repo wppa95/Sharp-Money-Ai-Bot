@@ -1,0 +1,538 @@
+SHARP MONEY BOT V3.2 — PHASE 2 CORE
+UNDERDOG + DATA QUALITY + ACTIONABLE PICK IMPROVEMENT
+
+Before making ANY changes:
+
+Review the entire current system state first.
+
+IMPORTANT:
+
+We are limited on credits.
+Do not burn credits unnecessarily.
+
+This is Phase 2 CORE work AFTER the V1.3 cleanup/stability pass.
+
+DO NOT:
+
+* Rewrite the bot
+* Refactor large sections unnecessarily
+* Replace working systems
+* Redesign architecture
+* Replace the existing scoring engine
+* Change the database structure unless absolutely required
+* Break the Underdog-first pipeline
+* Remove working functionality
+* Create unnecessary new providers
+* Expand into unrelated features
+
+Use the existing systems wherever possible.
+
+━━━━━━━━━━━━━━━━━━
+✅ PHASE 2 CORE EXECUTION CHECKLIST
+━━━━━━━━━━━━━━━━━━
+
+IMPORTANT:
+
+This checklist is mandatory.
+
+Work through Phase 2 CORE in order.
+
+DO NOT skip a step.
+DO NOT move to the next step until the current step is verified.
+
+After completing each step, explicitly mark it:
+
+☐ = Not started
+🔄 = In progress
+✅ = Verified complete
+❌ = Failed / needs investigation
+
+If a step fails, STOP and fix/investigate that step before continuing.
+
+━━━━━━━━━━━━━━━━━━
+STEP 1 — FULL SYSTEM REVIEW + BASELINE SNAPSHOT
+━━━━━━━━━━━━━━━━━━
+
+☐ Review the entire current system
+☐ Identify existing modules and working systems
+☐ Confirm current V1.3 state
+☐ Confirm no unnecessary rewrite is planned
+☐ Record baseline tests/status/config BEFORE making changes
+☐ Record current database/pick/PropLineHistory counts
+☐ Record current Telegram behavior
+☐ Preserve this baseline for before/after comparison
+
+Do not make changes until the baseline has been recorded.
+
+━━━━━━━━━━━━━━━━━━
+STEP 2 — UNDERDOG PRIMARY PIPELINE
+━━━━━━━━━━━━━━━━━━
+
+☐ Confirm Underdog remains PRIMARY
+☐ Confirm existing Underdog pipeline is intact
+☐ Confirm player-prop scanning works
+☐ Confirm actionable Telegram delivery works
+☐ Confirm internal market intelligence remains separate from Telegram alerts
+
+The primary flow must remain:
+
+UNDERDOG
+→ SCAN
+→ SCORE
+→ VALIDATE
+→ QUALIFY
+→ ACTIONABLE PICK
+→ TELEGRAM
+
+Do not replace the Underdog pipeline.
+
+━━━━━━━━━━━━━━━━━━
+STEP 3 — TIER QUALIFICATION
+━━━━━━━━━━━━━━━━━━
+
+Verify the actual qualification code.
+
+TIER 2:
+
+* MLB
+* NFL
+
+Tier 2 requires:
+
+* S-Tier
+* Required validation
+* Valid event
+* Valid player/market
+* Clear direction
+* Required quality/evidence gates
+
+TIER 1:
+
+All other monitored sports.
+
+Tier 1 should use the configured preference/gates rather than automatically requiring S-Tier.
+
+☐ Verify Tier 2 = MLB/NFL
+☐ Verify Tier 2 requires S-Tier
+☐ Verify Tier 1 uses configured preference/gates
+☐ Verify actual qualification code matches configuration
+☐ Test both Tier 1 and Tier 2 behavior
+☐ Confirm tier policy is enforced by code, not merely displayed in /config
+
+Do not change the scoring engine just to force the desired results.
+
+━━━━━━━━━━━━━━━━━━
+STEP 4 — HIGH-PRIORITY NEAR-MISS INVESTIGATION
+━━━━━━━━━━━━━━━━━━
+
+We are seeing strong props appear as Near-Misses even when they appear to have passed the appropriate decision gate.
+
+Examples:
+
+Caty McNally
+Breakpoints Won
+87/100 [S]
+decision_pass
+
+Yandy Díaz
+Fantasy Points
+87/100 [S]
+cold_start
+
+Smash
+Kills on Maps 1+2
+85/100 [S]
+decision_pass
+
+Multiple high-scoring props are appearing in Near-Misses.
+
+Do NOT blindly promote every Near-Miss.
+
+Trace the entire qualification path:
+
+SCORE
+→ SPORT TIER
+→ VALIDATION
+→ DIRECTION
+→ QUALITY
+→ FINAL GATE
+→ ACCEPTED PICK
+→ STORED PICK
+→ TELEGRAM
+
+☐ Trace the highest-scoring Near-Misses
+☐ Identify why S-Tier props become Near-Misses
+☐ Determine whether cold-start is incorrectly blocking qualified props
+☐ Determine whether decision_pass is being rejected later
+☐ Identify exactly which gate rejects each strong Near-Miss
+☐ Fix the actual qualification problem
+☐ Verify strong qualified props reach actionable status
+☐ Verify false Near-Misses are no longer incorrectly rejected
+
+Priority:
+
+Investigate the highest-scoring Near-Misses first.
+
+Do not assume every Near-Miss should become a pick.
+
+The goal is to correctly identify where qualified opportunities are being lost.
+
+━━━━━━━━━━━━━━━━━━
+STEP 5 — FUNNEL / DASHBOARD ACCURACY
+━━━━━━━━━━━━━━━━━━
+
+Current /funnel output showed:
+
+Accepted: 27
+
+But the accepted breakdown showed:
+
+LOL: 27
+
+while legitimate actionable MLB S-Tier picks had been observed.
+
+There was also a dashboard mismatch:
+
+Actionable Picks Today: 4
+
+while the Tier Breakdown showed:
+
+A
+B
+PASS
+
+with no S-Tier displayed.
+
+Investigate:
+
+☐ Tier assignment
+☐ Final qualification
+☐ Acceptance counter
+☐ Stored pick record
+☐ Telegram delivery
+☐ Funnel aggregation
+☐ Dashboard aggregation
+☐ Sport breakdown
+☐ Near-Miss reporting
+☐ Pending/resolved counts
+
+Do NOT assume the dashboard or funnel is correct.
+
+Do NOT change the scoring engine simply to make the numbers look correct.
+
+Fix the reporting/aggregation path if that is the actual problem.
+
+The dashboard must reflect the actual underlying records.
+
+━━━━━━━━━━━━━━━━━━
+STEP 6 — PERSISTENT MEMORY / RESTART SURVIVAL
+━━━━━━━━━━━━━━━━━━
+
+Important requirement:
+
+A restart must NOT erase persistent bot memory.
+
+Verify:
+
+☐ Stored picks survive restart
+☐ Pending picks survive restart
+☐ PropLineHistory survives restart
+☐ Historical scoring information survives restart
+☐ Qualification history survives restart
+☐ Hit/loss records survive restart
+☐ Resolution state survives restart
+☐ CLV seeds/history survive restart
+☐ Other important persistent intelligence survives restart
+
+Do NOT rely on temporary in-memory variables for important long-term state.
+
+Use the existing database/persistent storage.
+
+The development environment may restart the bot frequently.
+
+That must NOT reset the bot’s actual stored memory.
+
+Important:
+
+Restarting the bot is NOT the same thing as resetting the database.
+
+Persistent state must remain intact.
+
+━━━━━━━━━━━━━━━━━━
+STEP 7 — PICK RESOLUTION / HIT-LOSS RECORDING
+━━━━━━━━━━━━━━━━━━
+
+Verify the complete lifecycle:
+
+Stored Pick
+→ Pending
+→ Event Finishes
+→ Resolved
+→ Hit/Loss
+→ Performance
+
+Definitions:
+
+Stored = pick exists in persistent storage.
+
+Pending = pick is stored but the event has not been resolved.
+
+Resolved = event has finished and the result has been graded.
+
+Verify the system saves:
+
+☐ Hit
+☐ Loss
+☐ Final result
+☐ Pick direction
+☐ Original line
+☐ Sport
+☐ Player
+☐ Market
+☐ Event
+☐ Tier
+☐ Confidence
+
+Then verify resolved records feed:
+
+☐ /performance
+☐ /backtest
+☐ /calibration
+☐ /grade
+☐ Other grading/reporting commands
+
+Do NOT assume this works until actual picks resolve and the records are verified.
+
+The system must retain the historical Hit/Loss record after resolution.
+
+━━━━━━━━━━━━━━━━━━
+STEP 8 — CLV / CALIBRATION
+━━━━━━━━━━━━━━━━━━
+
+Keep the existing CLV functionality.
+
+CLV should be computed when applicable markets close.
+
+Verify:
+
+☐ CLV seeds are created
+☐ Closing values are captured
+☐ CLV data persists
+☐ CLV survives restart
+☐ Resolved recommendations feed calibration
+☐ Confidence tier accuracy populates after results exist
+☐ Line-movement accuracy remains separate from bet recommendation accuracy
+
+“No CLV records yet” is acceptable until applicable markets close.
+
+“No resolved picks yet” is acceptable until events finish.
+
+Do NOT modify these simply because there is no resolved data yet.
+
+━━━━━━━━━━━━━━━━━━
+🧪 PHASE 2 CORE VALIDATION
+━━━━━━━━━━━━━━━━━━
+
+After Steps 1–8 are implemented:
+
+☐ Run full test suite
+☐ Run startup health check
+☐ Verify Underdog pipeline
+☐ Verify tier qualification
+☐ Verify Near-Miss fix
+☐ Verify funnel
+☐ Verify dashboard
+☐ Verify persistence
+☐ Verify restart survival
+☐ Verify pick lifecycle
+☐ Verify Hit/Loss recording
+☐ Verify performance reporting
+☐ Verify backtest reporting
+☐ Verify calibration
+☐ Verify CLV persistence
+☐ Verify Telegram behavior
+
+Then let the bot run and collect real data.
+
+Do NOT immediately start another large change.
+
+We have already observed that the system’s improvements become more visible after allowing the bot to run for a period of time.
+
+Use real accumulated data to validate the fixes.
+
+Do not judge the final quality from a few minutes of data alone.
+
+━━━━━━━━━━━━━━━━━━
+🚫 REMOVE /RESTART NOISE
+━━━━━━━━━━━━━━━━━━
+
+Remove the entire /restarts command/reporting.
+
+The restart count is currently noise.
+
+We already understand that many restarts are caused by the development environment restarting the bot.
+
+Do NOT spend Phase 2 Core effort investigating restart counts.
+
+The important requirement is:
+
+RESTARTS MUST NOT ERASE PERSISTENT BOT MEMORY.
+
+━━━━━━━━━━━━━━━━━━
+🔒 PHASE 2 CORE BOUNDARY
+━━━━━━━━━━━━━━━━━━
+
+For this phase:
+
+ONLY work on Steps 1–8.
+
+Do NOT expand the scope beyond:
+
+* Underdog
+* Qualification
+* Near-Misses
+* Funnel
+* Dashboard
+* Persistent memory
+* Pick resolution
+* Hit/Loss recording
+* CLV
+* Calibration
+* Telegram actionable-pick behavior
+* Restart-safe persistence
+
+Do NOT add unrelated features.
+
+Do NOT rewrite working systems.
+
+Do NOT replace the existing scoring engine.
+
+Do NOT change the database structure unless absolutely required by a verified problem.
+
+Do NOT add unnecessary providers.
+
+Keep this phase focused until the framework is locked in.
+
+━━━━━━━━━━━━━━━━━━
+🎯 CORE PRIORITY
+━━━━━━━━━━━━━━━━━━
+
+The priority is NOT to make the bot generate more alerts.
+
+The priority is to make sure the bot correctly identifies and preserves REAL actionable opportunities.
+
+We want:
+
+SCAN EVERYTHING
+→ FILTER EVERYTHING
+→ SCORE EVERYTHING
+→ VALIDATE EVERYTHING
+→ ALERT ONLY QUALIFIED PICKS
+
+Internal market intelligence can remain broad.
+
+Telegram must remain selective.
+
+━━━━━━━━━━━━━━━━━━
+📊 REAL-DATA VALIDATION
+━━━━━━━━━━━━━━━━━━
+
+After the fixes are implemented and tests pass:
+
+Let the bot run.
+
+Allow it to collect real Underdog data.
+
+Monitor:
+
+* PropLineHistory growth
+* Qualification behavior
+* Near-Misses
+* Actionable picks
+* Tier distribution
+* Telegram alerts
+* Stored picks
+* Pending picks
+* Resolved picks
+* Hit/Loss records
+* CLV seeds
+* Calibration data
+
+Do not immediately make another round of changes just because the first few minutes look different.
+
+We have already seen that improvements become more visible after the bot runs for a while.
+
+Use the accumulated data to determine whether the changes actually improved the system.
+
+━━━━━━━━━━━━━━━━━━
+📋 MANDATORY STEP REPORTING
+━━━━━━━━━━━━━━━━━━
+
+Do not simply say “done.”
+
+For every step, report:
+
+STEP X — ✅ VERIFIED
+
+or
+
+STEP X — ❌ FAILED
+
+If failed, include:
+
+* What failed
+* Why it failed
+* What was changed
+* What still needs to be fixed
+
+Only proceed to the next step after the previous step is verified.
+
+━━━━━━━━━━━━━━━━━━
+📋 FINAL REPORT
+━━━━━━━━━━━━━━━━━━
+
+When Phase 2 Core is complete, provide:
+
+* Files changed
+* Tests passed
+* Baseline vs final comparison
+* Underdog status
+* Tier qualification status
+* Near-Miss fix status
+* Funnel status
+* Dashboard status
+* Persistence status
+* Restart-survival status
+* Pick resolution status
+* Hit/Loss status
+* Performance/backtest status
+* CLV status
+* Calibration status
+* Telegram status
+* Any remaining known issues
+
+Then FREEZE Phase 2 Core.
+
+Do NOT begin another expansion pass until Phase 2 Core has been fully verified and the framework is locked in.
+
+━━━━━━━━━━━━━━━━━━
+🔒 FINAL RULE
+━━━━━━━━━━━━━━━━━━
+
+CORE FIRST.
+
+UNDERDOG FIRST.
+
+DATA QUALITY FIRST.
+
+PERSISTENCE FIRST.
+
+QUALIFICATION FIRST.
+
+REAL-DATA VALIDATION BEFORE MORE CHANGES.
+
+NO UNNECESSARY REWRITES.
+
+NO UNNECESSARY FEATURE EXPANSION.
+
+FREEZE WHEN VERIFIED.
