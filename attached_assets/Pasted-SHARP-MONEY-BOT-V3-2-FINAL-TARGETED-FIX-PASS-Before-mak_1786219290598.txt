@@ -1,0 +1,452 @@
+SHARP MONEY BOT V3.2 — FINAL TARGETED FIX PASS
+
+Before making ANY changes:
+
+Review the entire current system state first.
+
+IMPORTANT:
+
+We are limited on credits.
+Do NOT burn credits unnecessarily.
+
+Do NOT rewrite the bot.
+Do NOT refactor large sections unnecessarily.
+Do NOT replace working systems.
+Do NOT redesign the architecture.
+Do NOT replace the scoring engine.
+Do NOT change the database structure unless absolutely required.
+Do NOT break the Underdog-first pipeline.
+Do NOT lower qualification thresholds.
+Do NOT broadly promote Near-Misses.
+Do NOT add sportsbook providers.
+Do NOT enable OddsAPI/FanDuel/DraftKings during this pass.
+Do NOT change the OddsAPI key.
+
+API credentials/secrets must NEVER be exposed in logs, Telegram, /status, /config, /health, diagnostics, or messages.
+
+This is a targeted cleanup/fix pass based on the evidence collected after the V3.2 changes.
+
+━━━━━━━━━━━━━━━━━━
+🎯 ISSUES TO FIX
+━━━━━━━━━━━━━━━━━━
+
+1 — 80+ / S-TIER ACTIONABLE DELIVERY MISMATCH
+
+Current evidence:
+
+80+ props are still appearing in Near-Misses instead of consistently reaching the final actionable path.
+
+Examples observed:
+
+* Natsuki Takeuchi — Strikeouts — 80/S — cold_start
+* rx — Kills on Maps 1+2 — 85/S — qualified
+* Alanna Smith — Rebounds — 80/S — qualified
+* Sandy Alcantara — Fantasy Points — 87/S — mlb_under_blocked
+
+Under 80/100 does NOT need to be promoted right now.
+
+However, if a prop is 80+ and satisfies the appropriate sport/tier policy plus all required validation, direction, quality, supporting-data, and final gates, determine why it is not reaching actionable status.
+
+Trace ONE or MORE real 80+ examples end-to-end:
+
+SCORE
+→ TIER
+→ SPORT POLICY
+→ VALIDATION
+→ DIRECTION
+→ SUPPORTING DATA
+→ QUALITY
+→ FINAL GATE
+→ should_alert
+→ STORED PICK
+→ TELEGRAM ALERT
+
+Do NOT simply promote the Near-Miss.
+
+Find the exact gate rejecting each qualified 80+ candidate.
+
+Fix only the actual blocking logic.
+
+Verify the fix with focused tests.
+
+━━━━━━━━━━━━━━━━━━
+📊 2 — /PICKS VS FINAL ACTIONABLE DEFINITION
+
+Current evidence:
+
+/picks shows:
+
+Yandy Díaz — Hits — 80/A
+
+But MLB/NFL Tier 2 requires S-tier.
+
+Also /alerts reports:
+
+No player prop alerts sent in the last 72h.
+
+Therefore /picks may be displaying stored/intermediate records rather than confirmed final actionable alerts.
+
+Investigate the /picks query and definition.
+
+Determine exactly what /picks is supposed to show.
+
+If it is intended to show ACTIONABLE PICKS, it must use the same final-actionable criteria as the actual delivery pipeline.
+
+It must NOT display records simply because they have a score/tier.
+
+For MLB/NFL:
+
+* S-tier requirement remains intact.
+* Do not alter the S-tier threshold.
+* Do not change BQ requirements.
+* Do not weaken final gates.
+
+Make /picks consistent with the actual final actionable definition.
+
+Add focused tests.
+
+━━━━━━━━━━━━━━━━━━
+🔔 3 — /ALERTS HISTORY MISMATCH
+
+Current evidence:
+
+/status:
+Alerts today: 11
+All-time: 11
+
+/stats:
+Today’s Actionable Picks
+Underdog: 11
+
+But:
+
+/alerts:
+No player prop alerts sent in the last 72h.
+
+Investigate the entire alert lifecycle:
+
+QUALIFIED
+→ ACTIONABLE
+→ ALERT CREATED
+→ TELEGRAM DELIVERY
+→ ALERT HISTORY STORAGE
+→ /alerts QUERY
+
+Determine why /alerts cannot see alerts that other commands report.
+
+Fix the underlying storage/query/reporting mismatch.
+
+Do NOT fake the count.
+Do NOT copy counts between commands.
+Do NOT change scoring to make the numbers match.
+
+All commands should derive their numbers from the correct underlying records.
+
+Add focused tests.
+
+━━━━━━━━━━━━━━━━━━
+📊 4 — /STATS / FUNNEL / PICKS / ALERTS COUNT MISMATCH
+
+Current evidence:
+
+/stats:
+Today’s Actionable Picks: 11
+
+/funnel 24:
+Qualified candidates: 62
+
+/picks:
+Yandy Díaz and other stored records
+
+/alerts:
+0 alerts in last 72h
+
+These are clearly different populations or queries.
+
+Trace what each command actually counts.
+
+Define the intended meaning of:
+
+* Scanned
+* Qualified candidate
+* Watchlist
+* Accepted
+* Actionable pick
+* Stored pick
+* Pending pick
+* Resolved pick
+* Alert sent
+
+Then make reporting accurate and internally consistent.
+
+IMPORTANT:
+
+Do NOT force all numbers to be identical if they legitimately represent different lifecycle stages.
+
+Instead, make sure each command reports the correct population and labels it accurately.
+
+Add focused tests for the aggregation/query paths.
+
+━━━━━━━━━━━━━━━━━━
+🩺 5 — STALE /HEALTH DIAGNOSTICS
+
+Current /health still shows:
+
+Restart reason:
+Unexpected exit (SIGKILL / OOM / hard crash)
+
+and:
+
+[list] object has no attribute ‘has_real_data’
+
+at:
+
+2026-08-06 07:28:04 UTC
+
+This is stale historical diagnostic information.
+
+The timestamp parsing bug was already identified because timestamps are stored as:
+
+YYYY-MM-DD HH:MM:SS UTC
+
+and Python fromisoformat() was previously unable to parse the literal “ UTC” suffix correctly.
+
+The timestamp cleanup was already implemented.
+
+Now verify that stale errors are actually filtered correctly.
+
+Current errors should only display when they are genuinely within the intended freshness window.
+
+Old errors should remain historical if needed internally, but should NOT appear as current health failures.
+
+Also verify that restart reason/status is not falsely reporting an old restart as the current runtime failure.
+
+Do NOT delete useful historical diagnostic records merely to hide them.
+
+Fix the rendering/current-state logic.
+
+Add focused tests for:
+
+* Fresh error
+* Expired error
+* Old pipeline failure
+* No current error
+* Current startup/restart state
+* Historical error remaining available internally
+
+━━━━━━━━━━━━━━━━━━
+🚫 6 — /RESTARTS NOISE
+
+The /restarts command/reporting is already supposed to be removed.
+
+Verify it is completely absent from user-facing command/help/reporting surfaces.
+
+Do NOT spend time investigating development-environment restart counts.
+
+The requirement is simply:
+
+Development/runtime restarts must NOT erase persistent bot memory.
+
+━━━━━━━━━━━━━━━━━━
+📈 7 — FUNNEL QUALIFICATION RATE DISPLAY
+
+Current examples:
+
+1 qualified / 5,545 scanned
+displays:
+
+Qualification rate: 0%
+
+62 qualified / 103,894 scanned
+displays:
+
+Qualification rate: 0%
+
+These are technically small percentages, but displaying 0% is misleading.
+
+Fix the formatting so small non-zero rates remain visible.
+
+For example:
+
+1 / 5,545 ≈ 0.018%
+62 / 103,894 ≈ 0.060%
+
+Use appropriate precision.
+
+Do NOT change the underlying counts.
+
+Add a test for small non-zero qualification rates.
+
+━━━━━━━━━━━━━━━━━━
+🏆 8 — TIER BREAKDOWN PERCENTAGE DISPLAY
+
+/dashboard currently shows:
+
+S 1 (0%)
+A 129 (0%)
+B 160 (0%)
+PASS 192 (0%)
+
+Verify why all percentages display 0%.
+
+If this is integer rounding, fix the formatting/percentage calculation.
+
+The underlying tier counts must NOT be changed.
+
+S-tier must remain visible.
+
+Add focused tests.
+
+━━━━━━━━━━━━━━━━━━
+🐶 UNDERDOG-FIRST POLICY — DO NOT CHANGE
+
+Underdog remains PRIMARY.
+
+Keep:
+
+* Existing Underdog connector
+* Existing Underdog scanning
+* Existing PropLineHistory
+* Existing scoring engine
+* Existing actionable alert gates
+
+Do NOT turn the system into sportsbook-first.
+
+Do NOT enable sportsbook polling in this pass.
+
+━━━━━━━━━━━━━━━━━━
+🏆 TIER POLICY — DO NOT CHANGE
+
+TIER 2:
+
+* MLB
+* NFL
+
+Requires:
+
+* S-tier
+* Normal validation
+* Required supporting data
+* Clear direction where applicable
+* Final quality gates
+
+TIER 1:
+
+All other monitored sports.
+
+Tier 1 may become actionable according to the configured preference/gates.
+
+Do NOT require S-tier for every Tier 1 sport.
+
+Verify the actual code still follows this policy.
+
+━━━━━━━━━━━━━━━━━━
+🧪 VALIDATION REQUIREMENTS
+━━━━━━━━━━━━━━━━━━
+
+After implementing the targeted fixes:
+
+1. Run all new focused tests first.
+2. Run the full test suite.
+3. Run startup health check.
+4. Verify:
+
+* Underdog scanning
+* Tier qualification
+* 80+ candidate path
+* Near-Miss handling
+* /funnel
+* /picks
+* /alerts
+* /status
+* /health
+* /stats
+* /performance
+* /backtest
+* /calibration
+* /clv
+
+5. Confirm:
+
+* No threshold was lowered
+* MLB/NFL S-tier enforcement remains intact
+* No scoring-engine rewrite occurred
+* No Underdog pipeline rewrite occurred
+* No unnecessary provider was added
+* No credentials were exposed
+* Telegram still receives ONLY final actionable picks
+* Raw market movements do NOT spam Telegram
+* Near-Misses do NOT automatically become alerts
+* Persistent betting data remains intact
+
+━━━━━━━━━━━━━━━━━━
+💾 PERSISTENCE SAFETY
+━━━━━━━━━━━━━━━━━━
+
+Do NOT delete:
+
+* PropLineHistory
+* Stored picks
+* Pending picks
+* Qualification history
+* Hit/loss records
+* Resolution state
+* CLV history/seeds
+* Historical diagnostics
+
+Historical records may remain in the database.
+
+The goal is to fix what the user-facing reports DISPLAY as current, not destroy historical intelligence.
+
+━━━━━━━━━━━━━━━━━━
+🚨 CREDIT / RESOURCE PROTECTION
+━━━━━━━━━━━━━━━━━━
+
+VERY IMPORTANT:
+
+Do not repeatedly poll external APIs just to test reporting.
+
+Do not burn OddsAPI credits.
+
+Do not change the OddsAPI key.
+
+Do not enable sportsbook polling.
+
+Use existing database records and focused/unit tests wherever possible.
+
+Only use live Underdog data when necessary to verify the actual pipeline.
+
+━━━━━━━━━━━━━━━━━━
+📋 FINAL REPORT
+━━━━━━━━━━━━━━━━━━
+
+When finished, provide:
+
+* Files changed
+* Exact functions changed
+* Focused tests passed
+* Full test count
+* Baseline vs final comparison
+* 80+ actionable-path result
+* Near-Miss result
+* /picks result
+* /alerts result
+* /stats result
+* /funnel result
+* /health result
+* Dashboard result
+* Persistence status
+* Telegram status
+* Any remaining known issues
+
+If an issue cannot be safely fixed without a larger architectural change, STOP and report it instead of rewriting the system.
+
+Do not add unrelated features.
+
+Do not begin sportsbook polling.
+
+Do not change OddsAPI credentials.
+
+After all targeted fixes are verified and the full test suite passes:
+
+🧊 FREEZE V3.2

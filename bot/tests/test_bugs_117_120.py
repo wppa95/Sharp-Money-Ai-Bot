@@ -223,12 +223,13 @@ class TestBug119FunnelAndStatusCounters:
             "these are Telegram-delivered alerts"
         )
 
-    def test_funnel_label_says_qualified_candidates(self):
-        """/funnel must display 'Qualified candidates' for PropCandidateLog.ACCEPTED count."""
+    def test_funnel_label_says_qualified(self):
+        """/funnel must display the qualified/accepted count with a 'Qualified' label."""
         src = self._load_commands_source()
-        assert "Qualified candidates" in src, (
-            "'Qualified candidates' label not found in commands.py — "
-            "funnel display not updated"
+        # Accept either the original label or the updated tier-aware label
+        assert ("Qualified candidates" in src or "Qualified (S/A-tier)" in src), (
+            "Neither 'Qualified candidates' nor 'Qualified (S/A-tier)' label found "
+            "in commands.py — funnel qualified-count label is missing"
         )
 
     def test_status_uses_db_backed_alert_count(self):

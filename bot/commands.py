@@ -1286,11 +1286,22 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     ud_props = await _db.get_top_ud_props_for_picks(limit=limit * 3, since_hours=24)
     ud_props = [p for p in ud_props if not _is_season_future(p.stat_type)]
 
+    # Enforce strict-sport tier policy — mirrors the actual alert delivery pipeline.
+    # MLB and NFL require S-tier; A/B-tier props for those sports are never alerted
+    # so they must not appear in an "Actionable Picks" display either.
+    from config import config as _picks_cfg
+    _strict_sports = {s.upper() for s in _picks_cfg.ud_strict_alert_sports}
+    ud_props = [
+        p for p in ud_props
+        if (p.sport or "").upper() not in _strict_sports
+        or (p.score_tier or "") == "S"
+    ]
+
     if sport_filter:
         ud_props = [p for p in ud_props if p.sport.upper() == sport_filter]
 
     # Display filter: hide season-long futures (stored & tracked as normal).
-    
+
     ud_props = ud_props[:limit]
 
     if not ud_props:
@@ -2269,33 +2280,36 @@ async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         "",
     ]
 
-    # ── Actionable pick alerts (Underdog PropLineHistory) ────────────────────
+    # ── Actionable pick alerts (PropOpportunityLog — canonical delivery source) ─
+    # PropOpportunityLog.alert_sent=True is set only when broadcast_alert()
+    # successfully delivers a 🎯 ACTIONABLE BET PICK to Telegram.  Using
+    # PropLineHistory.lifecycle_state was unreliable because new PropLineHistory
+    # rows written by subsequent scans reset that field to None/DISCOVERED.
     lines.append("🎯 <b>Actionable Pick Alerts</b>")
     try:
-        recent_props = await _db.get_latest_props_for_provider("Underdog", since_hours=72)
-        alerted_props = [
-            r for r in recent_props
-            if getattr(r, "lifecycle_state", None) == "ACTIVE_ALERTED"
-        ]
-        if alerted_props:
-            lines.append(f"  <i>{len(alerted_props)} props alerted in last 72 h</i>")
+        alerted_opps = await _db.get_alerted_opportunity_log(since_hours=72, limit=8)
+        # Also count all alerted picks (not just the display limit)
+        _total_alerted = await _db.count_actionable_pick_records()
+        if alerted_opps:
+            lines.append(f"  <i>{len(alerted_opps)} shown · {_total_alerted} all-time delivered</i>")
             lines.append("")
-            for r in alerted_props[:8]:
-                _lv = float(getattr(r, "line_value", 0) or 0)
-                _ts = (
-                    getattr(r, "first_alert_sent_at", None) or
-                    getattr(r, "fetched_at", None)
-                )
+            for r in alerted_opps:
+                _lv   = float(getattr(r, "line_value", 0) or 0)
+                _ts   = getattr(r, "alert_sent_at", None)
                 _ts_str = _ts.strftime("%b %d %H:%M UTC") if _ts else "—"
+                _rec  = getattr(r, "recommendation", "")
+                _tier = getattr(r, "decision_tier", "")
+                _rec_icon = "⬆️" if _rec == "OVER" else ("⬇️" if _rec == "UNDER" else "")
                 lines.append(
-                    f"  🐶 <b>{r.player_name}</b>  {r.stat_type}  "
-                    f"<code>{_lv:.1f}</code>  ·  <i>{r.sport}</i>  ·  {_ts_str}"
+                    f"  🐶 {_rec_icon} <b>{r.player_name}</b>  {r.stat_type}  "
+                    f"<code>{_lv:.1f}</code>  ·  <i>{r.sport}</i>"
+                    f"  ·  {_tier}  ·  {_ts_str}"
                 )
-            if len(alerted_props) > 8:
-                lines.append(f"  <i>…{len(alerted_props) - 8} more</i>")
         else:
             lines.append("  <i>No player prop alerts sent in the last 72 h.</i>")
-            lines.append("  <i>Alerts are sent automatically when props pass all qualification gates.</i>")
+            lines.append("  <i>Alerts fire when props pass all qualification + delivery gates.</i>")
+            if _total_alerted:
+                lines.append(f"  <i>({_total_alerted} all-time delivered — use /performance for history.)</i>")
     except Exception as exc:
         logger.warning("cmd_alerts: prop history lookup failed: %s", exc)
         lines.append("  <i>Alert history unavailable — check /health for job status.</i>")
@@ -3337,7 +3351,22 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         removed   = counts.get("REMOVED",   0)
         total     = accepted + watchlist + rejected + removed
 
-        qual_rate = f"{accepted / total * 100:.0f}%" if total > 0 else "—"
+        def _fmt_rate(num: int, denom: int) -> str:
+            """Format a small percentage with enough precision to stay non-zero."""
+            if denom == 0:
+                return "—"
+            v = num / denom * 100
+            if v == 0.0:
+                return "0%"
+            if v < 0.01:
+                return f"{v:.4f}%"
+            if v < 0.1:
+                return f"{v:.3f}%"
+            if v < 1.0:
+                return f"{v:.2f}%"
+            return f"{v:.1f}%"
+
+        qual_rate = _fmt_rate(accepted, total)
 
         _thick = "━" * 18
         lines: list[str] = [
@@ -3347,13 +3376,18 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             "",
             f"<i>Last {since_h}h  ·  Use /funnel 48 for longer window</i>",
             "",
-            f"📥 Scanned:           <b>{total}</b>",
-            f"✅ Qualified candidates: <b>{accepted}</b>",
-            f"👁 Watchlist (B-tier): <b>{watchlist}</b>",
-            f"❌ Rejected:           <b>{rejected}</b>",
-            f"🚫 Removed:            <b>{removed}</b>",
+            f"📥 Scanned:              <b>{total}</b>",
+            f"✅ Qualified (S/A-tier): <b>{accepted}</b>",
+            f"👁 Watchlist (B-tier):   <b>{watchlist}</b>",
+            f"❌ Rejected:             <b>{rejected}</b>",
+            f"🚫 Removed:              <b>{removed}</b>",
             "",
             f"📊 Qualification rate: <b>{qual_rate}</b>",
+            "",
+            "<i>ℹ️ Qualified = passed scoring gates (S/A-tier).</i>",
+            "<i>   Delivered alerts go through additional gates</i>",
+            "<i>   (direction, BQ, conf, dedup, live-game).</i>",
+            "<i>   Use /alerts to see Telegram-delivered picks.</i>",
         ]
 
         # Per-sport breakdown
@@ -3375,7 +3409,7 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 watch = row.get("watchlist", 0)
                 rej   = row.get("rejected",  0)
                 rm    = row.get("removed",   0)
-                pass_pct = f"{acc / sc * 100:.0f}%" if sc > 0 else "—"
+                pass_pct = _fmt_rate(acc, sc)
                 lines.append(
                     f"<code>{sp:<12} {sc:>4} {acc:>4} {watch:>5} {rej:>4} {rm:>3}</code>"
                     f"  <i>{pass_pct}</i>"

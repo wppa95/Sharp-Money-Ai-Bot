@@ -217,13 +217,22 @@ class DashboardReport:
             parts.append("🐶 <b>Tier Breakdown</b>")
             tier_order = ["S", "A", "B", "C", "PASS"]
             tier_emojis = {"S": "🔥", "A": "🟢", "B": "🟡", "C": "▪️", "PASS": "⚪"}
+            # Use the sum of tier counts as the denominator — total_ud_alerts counts
+            # ALL UnderdogSnapshotRecord rows (scanned), not just the alerted subset.
+            # The tier breakdown only covers alerted snapshots, so dividing by the
+            # scan total produces near-zero percentages for every tier.
+            _tier_total = sum(self.ud_tier_breakdown.values()) or 1
             for t in tier_order:
                 n = self.ud_tier_breakdown.get(t, 0)
                 if n:
-                    pct = n / self.total_ud_alerts * 100
+                    pct = n / _tier_total * 100
+                    pct_str = (
+                        f"{pct:.1f}%" if pct < 1.0
+                        else f"{pct:.0f}%"
+                    )
                     parts.append(
                         f"  {tier_emojis.get(t, '⚪')} {t:<4} "
-                        f"<code>{n:>4}</code>  ({pct:.0f}%)"
+                        f"<code>{n:>4}</code>  ({pct_str})"
                     )
             if self.ud_avg_score is not None:
                 parts.append(f"  Avg score: <code>{self.ud_avg_score:.0f}/100</code>")

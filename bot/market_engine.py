@@ -2369,11 +2369,12 @@ async def underdog_job(context) -> None:
                         _cgd = "REJECTED"
                     elif _ctier == "B":
                         _cgd = "WATCHLIST"
-                    elif _crej in ("qualified", "sent", "filtered", "new_prop_failed") and _ctier in ("S", "A"):
+                    elif _crej in ("qualified", "sent", "filtered", "new_prop_failed", "cold_start") and _ctier in ("S", "A"):
                         # "qualified"       — is_qualified=True (S/A tier, passed scoring gate, eligible for alert)
                         # "sent"            — new-prop path: alert delivered to Telegram
                         # "filtered"        — new-prop path: reached delivery, filtered by dedup/reversal
                         # "new_prop_failed" — new-prop path: passed all gates, delivery failed
+                        # "cold_start"      — S/A tier prop scored during init; standing path may deliver it
                         _cgd = "ACCEPTED"
                     else:
                         _cgd = "REJECTED"

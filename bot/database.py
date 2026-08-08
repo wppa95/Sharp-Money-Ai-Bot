@@ -2939,6 +2939,34 @@ class Database:
             )
             await s.commit()
 
+    async def get_alerted_opportunity_log(
+        self,
+        since_hours: int = 72,
+        limit: int = 8,
+    ) -> "list[PropOpportunityLog]":
+        """
+        Return recently delivered 🎯 ACTIONABLE BET PICK alerts, newest first.
+
+        Uses PropOpportunityLog.alert_sent=True as the canonical source of truth.
+        Unlike PropLineHistory.lifecycle_state (which is overwritten every time a
+        new snapshot is saved for the same prop), alert_sent is write-once and
+        is never cleared by subsequent scan cycles.
+        """
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(hours=since_hours)
+        async with self.session() as s:
+            result = await s.execute(
+                select(PropOpportunityLog)
+                .where(
+                    PropOpportunityLog.alert_sent    == True,   # noqa: E712
+                    PropOpportunityLog.alert_sent_at >= cutoff,
+                    PropOpportunityLog.recommendation.in_(["OVER", "UNDER"]),
+                )
+                .order_by(desc(PropOpportunityLog.alert_sent_at))
+                .limit(limit)
+            )
+            return list(result.scalars().all())
+
     async def get_telegram_pick_performance(self) -> "dict":
         """
         Return HIT/MISS/PUSH/PENDING counts for Telegram actionable picks only
