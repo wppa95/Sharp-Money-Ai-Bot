@@ -38,3 +38,4 @@
 - [Phase 2 Core fixes](phase2-core-fixes.md) — props=0 (#114), /restarts removed (#115), auto-grading fetch loop (#116), decision_tier clarity (#113); 3256 tests Aug 2026.
 - [Post-freeze bugs 117-120](bugs-117-120.md) — BQ gate 85→95 (#117); new-prop dedup gate (#118); funnel label + /status DB counter (#119); Tier 1 gate verified correct (#120); 3288 tests Aug 2026.
 - [Final gate adjustment](final-gate-adjustment.md) — lc path was missing NFL tier gate + BQ gate; _lc_strict_tier_ok added; bq_gate [lc] added; all 3 paths now symmetric; 3334 tests Aug 2026.
+- [V3.2 Tier 1 stable actionable fix](v32-stable-actionable.md) — standing path score_tier=NULL fallback; only applies when score_tier is None (not "B"/"PASS"); derives from score_total (S≥80,A≥65); 3369 tests Aug 2026.

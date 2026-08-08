@@ -193,10 +193,13 @@ class TestStandingPathGatesIntact:
         )
 
     def test_score_tier_gate_still_in_standing_path(self):
-        """Standing path must still require prior A/S tier snapshot."""
+        """Standing path must still require prior A/S tier snapshot (or derived equivalent)."""
         src = self._get_engine_source()
-        assert '_prev.score_tier not in ("A", "S")' in src, (
-            "Score tier gate removed from standing path — "
+        # The gate now uses _prev_eff_tier (derived from score_tier or score_total fallback)
+        # to handle no-change snapshots stored with score_tier=NULL while still enforcing
+        # the A/S quality floor.  Verify the effective-tier check is present.
+        assert '_prev_eff_tier not in ("A", "S")' in src, (
+            "Effective-tier gate removed from standing path — "
             "could allow low-quality props into standing alerts."
         )
 

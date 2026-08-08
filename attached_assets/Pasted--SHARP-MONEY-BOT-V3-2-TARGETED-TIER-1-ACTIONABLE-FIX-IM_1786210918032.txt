@@ -1,0 +1,370 @@
+🚨 SHARP MONEY BOT V3.2 — TARGETED TIER 1 ACTIONABLE FIX
+
+IMPORTANT — READ THIS FIRST:
+
+💳 WE ARE LIMITED ON CREDITS.
+
+DO NOT BURN CREDITS UNNECESSARILY.
+
+The full read-only diagnosis has ALREADY been completed.
+
+DO NOT re-review the entire project.
+DO NOT reread unrelated files.
+DO NOT perform another broad architecture analysis.
+DO NOT repeat the previous diagnosis.
+
+Use ONLY the exact diagnosis below and inspect ONLY the specific functions/files needed to make this targeted fix.
+
+━━━━━━━━━━━━━━━━━━
+🔒 HARD BOUNDARY
+━━━━━━━━━━━━━━━━━━
+
+This is ONE targeted fix.
+
+DO NOT:
+
+* Rewrite the bot
+* Refactor large sections
+* Redesign architecture
+* Replace the scoring engine
+* Replace the Underdog pipeline
+* Change database structure
+* Change unrelated modules
+* Add providers
+* Enable sportsbook polling
+* Enable FanDuel
+* Enable DraftKings
+* Change OddsAPI
+* Lower global alert thresholds
+* Rebuild Telegram delivery
+* Add unrelated features
+
+Use the existing systems.
+
+Make the smallest possible code change.
+
+━━━━━━━━━━━━━━━━━━
+✅ DIAGNOSIS ALREADY CONFIRMED
+━━━━━━━━━━━━━━━━━━
+
+The exact issue has already been traced.
+
+Problem 1 — “Qualified” is NOT the same as “Actionable”
+
+/funnel “Qualified candidates” comes from:
+
+PropCandidateLog.gate_decision == “ACCEPTED”
+
+The “qualified” state is assigned when:
+
+is_qualified=True
+
+This happens BEFORE the final should_alert decision.
+
+Therefore:
+
+QUALIFIED
+≠
+ACTIONABLE
+
+A prop can appear as qualified in /funnel while never becoming a Telegram actionable pick.
+
+━━━━━━━━━━━━━━━━━━
+🚨 EXACT BLOCKER
+━━━━━━━━━━━━━━━━━━
+
+Module:
+
+market_engine.py
+
+Approximate location already identified:
+
+lines 1696–1700
+
+Current logic:
+
+should_alert = is_qualified and (is_reentry or (
+line_changed
+and prev_line is not None
+and abs(snap.line - prev_line) >= config.MIN_UNDERDOG_LINE_CHANGE
+))
+
+Current default:
+
+MIN_UNDERDOG_LINE_CHANGE = 0.5
+
+This means a strong stable prop can be:
+
+* S-tier
+* is_qualified=True
+* “qualified” in /funnel
+
+but still:
+
+should_alert=False
+
+because the line did not move enough.
+
+When that happens:
+
+* no actionable alert
+* no Telegram alert
+* no actionable stored pick
+* no alert_sent state
+
+━━━━━━━━━━━━━━━━━━
+🎯 EXAMPLES ALREADY CONFIRMED
+━━━━━━━━━━━━━━━━━━
+
+CS:
+
+rx — Kills on Maps 1+2
+85/100 [S]
+qualified
+
+LOL:
+
+None Quad — Kills on Maps 1+2
+83/100 [S]
+qualified
+
+WNBA:
+
+Alanna Smith — Rebounds
+80/100 [S]
+qualified
+
+These are examples of strong Tier 1 candidates that can pass the intermediate qualification gate but never reach final actionable delivery.
+
+━━━━━━━━━━━━━━━━━━
+❌ DO NOT MAKE THIS WRONG FIX
+━━━━━━━━━━━━━━━━━━
+
+DO NOT simply lower:
+
+MIN_UNDERDOG_LINE_CHANGE
+
+DO NOT change it from 0.5 to 0.25, 0.1, 0, etc.
+
+DO NOT remove the line-movement requirement globally.
+
+That could recreate the previous Telegram spam problem.
+
+Line movement and actionable qualification must remain separate concepts.
+
+━━━━━━━━━━━━━━━━━━
+🐶 CORRECT FIX
+━━━━━━━━━━━━━━━━━━
+
+For TIER 1 sports ONLY:
+
+A stable prop should be able to become an ACTIONABLE BET PICK when it satisfies the existing configured Tier 1 actionable requirements.
+
+Line movement should NOT be mandatory for a Tier 1 prop if the prop otherwise satisfies all existing final actionable gates.
+
+The flow should effectively be:
+
+PROP
+→ SCORE
+→ SPORT TIER
+→ VALIDATION
+→ DIRECTION
+→ QUALITY
+→ FINAL ACTIONABLE GATE
+→ DEDUP/CORRELATION
+→ STORED PICK
+→ TELEGRAM
+
+A qualifying Tier 1 prop should not require an arbitrary line movement merely to reach the final actionable gate.
+
+━━━━━━━━━━━━━━━━━━
+🏆 TIER POLICY MUST REMAIN
+━━━━━━━━━━━━━━━━━━
+
+TIER 2:
+
+* MLB
+* NFL
+
+Tier 2 remains strict.
+
+MLB/NFL must still require:
+
+* S-tier
+* Existing validation requirements
+* Existing quality requirements
+* Existing Bet Quality 95 requirement
+* Active/upcoming valid event
+* Valid player/market
+* Clear direction
+* Existing final gates
+
+DO NOT weaken MLB/NFL.
+
+TIER 1:
+
+All other monitored sports.
+
+Tier 1 continues using the configured preference/gates.
+
+Do NOT force Tier 1 to require S-tier unless the existing configuration specifically requires it.
+
+━━━━━━━━━━━━━━━━━━
+🧠 STANDING-PATH ISSUE
+━━━━━━━━━━━━━━━━━━
+
+The previous diagnosis also found a secondary problem in the existing standing path.
+
+Stable props were supposed to be able to qualify without line movement, but the standing path can be blocked by:
+
+1. Previous snapshot score_tier state
+
+and/or
+
+2. has_supporting_data requirements
+
+and/or
+
+3. A latest no-change snapshot having score_tier=NULL, causing PropLineHistory rows to become invisible to /picks.
+
+Do NOT redesign this.
+
+Make the smallest targeted correction necessary so a valid Tier 1 stable prop is not lost merely because a later no-change snapshot has score_tier=NULL.
+
+Use the existing persistent PropLineHistory/scoring state.
+
+━━━━━━━━━━━━━━━━━━
+🚫 DEDUPLICATION IS NOT THE PRIMARY PROBLEM
+━━━━━━━━━━━━━━━━━━
+
+The diagnosis confirmed:
+
+* _prop_market_alerted is not blocking these examples.
+* has_recent_ud_alert is not blocking them.
+* These props have not previously been alerted.
+
+DO NOT modify deduplication unless the targeted code change absolutely requires it.
+
+━━━━━━━━━━━━━━━━━━
+📢 TELEGRAM RULE
+━━━━━━━━━━━━━━━━━━
+
+Telegram must STILL receive ONLY:
+
+🎯 ACTIONABLE BET PICK
+
+Never send:
+
+* Raw market movement
+* Qualified intermediate candidates
+* Near-Misses
+* Watchlist noise
+* Unqualified signals
+* Props without direction
+
+The fix must NOT turn every “qualified” funnel candidate into a Telegram alert.
+
+━━━━━━━━━━━━━━━━━━
+🧪 EXACT TESTS REQUIRED
+━━━━━━━━━━━━━━━━━━
+
+Do NOT run the full test suite until the targeted change is complete.
+
+First create/run ONLY focused tests for:
+
+1. Stable Tier 1 S-tier prop with all final gates passing
+    → becomes actionable.
+2. Stable Tier 1 A-tier prop where configured Tier 1 gates pass
+    → becomes actionable.
+3. Stable Tier 1 prop without sufficient validation
+    → rejected.
+4. Stable Tier 1 prop without supporting data
+    → rejected.
+5. Stable Tier 1 prop without clear direction
+    → rejected.
+6. Stable Tier 1 prop with invalid/inactive event
+    → rejected.
+7. Previously alerted prop
+    → dedup protection still works.
+8. MLB/NFL prop without S-tier
+    → rejected.
+9. MLB/NFL prop without Bet Quality 95
+    → rejected.
+10. Global MIN_UNDERDOG_LINE_CHANGE behavior
+    → remains unchanged for market-movement detection.
+11. A qualified intermediate candidate that fails final actionable gates
+    → does NOT reach Telegram.
+12. A valid stable Tier 1 candidate that passes all final actionable gates
+    → DOES reach actionable alert creation.
+
+━━━━━━━━━━━━━━━━━━
+💳 CREDIT CONTROL
+━━━━━━━━━━━━━━━━━━
+
+IMPORTANT:
+
+After the focused tests pass:
+
+Run the full test suite ONCE.
+
+Do NOT repeatedly rerun tests.
+
+Do NOT repeatedly inspect the same files.
+
+Do NOT perform another broad diagnosis.
+
+Do NOT make additional cleanup changes.
+
+Do NOT continue exploring unrelated issues.
+
+━━━━━━━━━━━━━━━━━━
+📋 FINAL REPORT
+━━━━━━━━━━━━━━━━━━
+
+Report only:
+
+1. Files changed
+2. Exact functions changed
+3. Focused tests passed
+4. Full test count
+5. Confirmation global line-movement threshold was NOT lowered
+6. Confirmation MLB/NFL strict rules were NOT changed
+7. Confirmation Tier 1 stable actionable path now works
+8. Confirmation Telegram still receives only final actionable picks
+9. Any remaining issue directly related to this fix
+
+Then STOP.
+
+Do not begin another task.
+
+Do not enable sportsbook polling.
+
+Do not touch OddsAPI.
+
+Do not enable FanDuel.
+
+Do not enable DraftKings.
+
+Do not add providers.
+
+Do not make unrelated changes.
+
+━━━━━━━━━━━━━━━━━━
+🔒 V3.2 FREEZE
+━━━━━━━━━━━━━━━━━━
+
+Once the targeted fix is verified and the final report is complete:
+
+🧊 FREEZE SHARP MONEY BOT V3.2.
+
+No further code changes after the freeze unless I explicitly authorize them.
+
+Phase 2 Core is COMPLETE.
+
+Do NOT begin sportsbook polling.
+Do NOT begin Steps 9–11.
+Do NOT change OddsAPI.
+Do NOT enable FanDuel.
+Do NOT enable DraftKings.
+
+V3.2 is frozen until explicitly instructed otherwise.

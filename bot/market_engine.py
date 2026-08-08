@@ -1991,7 +1991,22 @@ async def underdog_job(context) -> None:
                     continue  # already handled in the main loop this cycle
     
                 _prev = recent_by_key.get((_sp, _st))
-                if _prev is None or _prev.score_tier not in ("A", "S"):
+                if _prev is None:
+                    continue
+                # Derive effective tier: if the latest snapshot has score_tier=NULL (stored
+                # during a no-change cycle without re-scoring), fall back to deriving tier
+                # from score_total so stable high-quality Tier 1 props aren't silently
+                # dropped merely because a later no-change snapshot has score_tier=NULL.
+                _prev_eff_tier = _prev.score_tier
+                # Only apply score_total fallback when score_tier is NULL (no-change
+                # cycle stored without re-scoring).  An explicitly stored "B" or "PASS"
+                # tier must NOT be promoted by the fallback.
+                if _prev_eff_tier is None and _prev.score_total is not None:
+                    if _prev.score_total >= 80:
+                        _prev_eff_tier = "S"
+                    elif _prev.score_total >= 65:
+                        _prev_eff_tier = "A"
+                if _prev_eff_tier not in ("A", "S"):
                     continue
     
                 _standing_candidates.append((_snap, _sp, _st, _sport, _prev))

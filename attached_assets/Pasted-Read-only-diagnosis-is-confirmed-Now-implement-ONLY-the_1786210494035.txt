@@ -1,0 +1,102 @@
+Read-only diagnosis is confirmed.
+
+Now implement ONLY the targeted Tier 1 stable-prop actionable fix.
+
+IMPORTANT:
+Do not rewrite anything.
+Do not change the scoring engine.
+Do not lower the global 0.5 line-movement threshold.
+Do not change MLB/NFL strict rules.
+Do not change database structure.
+Do not change Underdog.
+Do not recreate Telegram spam.
+
+The diagnosis found:
+
+1. /funnel “qualified” is an intermediate qualification state.
+2. Normal alert delivery currently requires:
+    should_alert = is_qualified AND sufficient line movement
+3. This causes stable CS/LOL Tier 1 props to remain qualified but never become actionable.
+4. The existing standing path was intended to handle stable high-quality props, but it has blockers involving previous score_tier state and supporting-data availability.
+5. Deduplication is NOT the problem.
+6. The props never reach alert creation/storage because should_alert remains false.
+
+TARGETED FIX:
+
+For Tier 1 sports ONLY:
+
+Allow a stable prop to become an ACTIONABLE BET PICK when it satisfies the existing configured Tier 1 qualification requirements, including:
+
+* Valid active/upcoming event
+* Valid player/market
+* Valid direction
+* Appropriate score/tier
+* Required validation
+* Required supporting data
+* Existing quality gates
+* Existing correlation/dedup protection
+* Existing availability checks
+
+A line movement should NOT be mandatory for a Tier 1 stable actionable pick if the prop otherwise satisfies the existing Tier 1 actionable gates.
+
+IMPORTANT:
+
+The line-movement threshold remains unchanged for MARKET MOVE DETECTED behavior.
+
+Do NOT globally change:
+
+MIN_UNDERDOG_LINE_CHANGE
+
+Do NOT turn every qualified candidate into an alert.
+
+Do NOT promote Near-Misses automatically.
+
+Do NOT bypass validation.
+
+Do NOT bypass supporting-data requirements.
+
+Do NOT bypass correlation/deduplication.
+
+Do NOT bypass event/sport validation.
+
+MLB/NFL must remain strict:
+
+* Tier 2 = MLB/NFL
+* S-tier required
+* Existing Bet Quality 95 requirement remains unchanged
+
+Tier 1 should continue using the configured preference/gates.
+
+Also fix the standing-path state issue identified in the diagnosis if necessary so stable Tier 1 props do not disappear simply because the latest no-change snapshot has score_tier=NULL.
+
+Use existing PropLineHistory / persistent data wherever possible.
+
+After implementation:
+
+1. Add focused tests for:
+    * Stable Tier 1 S-tier prop → actionable when all gates pass
+    * Stable Tier 1 A-tier prop → actionable only when configured Tier 1 gates pass
+    * Stable Tier 1 prop without sufficient validation → rejected
+    * Stable Tier 1 prop without supporting data → rejected
+    * Stable Tier 1 prop without direction → rejected
+    * Stable Tier 1 prop with invalid/inactive event → rejected
+    * Previously alerted prop → dedup protection still works
+    * MLB/NFL prop without required strict conditions → still rejected
+    * MLB/NFL 95 BQ requirement remains unchanged
+    * Line-movement threshold remains unchanged for market-movement detection
+    * Qualified candidate that does NOT satisfy final actionable gates does NOT reach Telegram
+2. Run the focused tests.
+3. Run the full test suite.
+4. Do NOT make any additional changes.
+
+Report:
+
+* Files changed
+* Exact functions changed
+* Focused tests passed
+* Full test count
+* Confirmation that global line-movement threshold was NOT lowered
+* Confirmation MLB/NFL strict rules were NOT changed
+* Confirmation Telegram still receives only final actionable picks
+
+STOP after this verification.
