@@ -1,0 +1,136 @@
+⚠️ IMPORTANT — CREDIT / COST CONTROL
+
+We are limited on credits.
+
+DO NOT burn credits unnecessarily.
+
+Before making changes:
+
+* Review the existing code/state first.
+* Use the minimum number of reads, searches, and tests necessary.
+* Do NOT repeat work that has already been verified.
+* Do NOT make unnecessary changes.
+* Diagnosis first — no code changes until the exact problem is identified.
+
+━━━━━━━━━━━━━━━━━━
+
+IMPORTANT TIER 1 CORRECTION
+
+The previous fix correctly identified the CS/LOL blocker, but CS/LOL are NOT the definition of Tier 1.
+
+The actual policy is:
+
+TIER 2:
+
+* MLB
+* NFL
+* Requires S-tier
+
+TIER 1:
+
+* ALL OTHER monitored sports
+* Uses the configured Tier 1 preference/gates
+* Does NOT require S-tier unless explicitly configured
+* Does NOT inherit the MLB/NFL S-tier requirement
+* Does NOT inherit hidden MLB/NFL-specific gates
+
+This must be enforced GENERICALLY by sport tier.
+
+Do NOT:
+
+* Create a CS-only exception
+* Create a LOL-only exception
+* Hardcode Tier 1 as only CS/LOL
+* Lower scoring thresholds
+* Promote all Near-Misses
+* Rewrite the scoring engine
+* Change the Underdog-first pipeline
+
+━━━━━━━━━━━━━━━━━━
+
+TASK — DIAGNOSIS ONLY
+
+Review the current Tier 1/Tier 2 qualification and actionable-pick code.
+
+Do NOT modify code yet.
+
+Verify:
+
+1. MLB/NFL are classified as Tier 2.
+2. Every other monitored sport is classified as Tier 1.
+3. Tier 2 correctly requires S-tier.
+4. Tier 1 correctly uses the configured preference/gates.
+5. No hidden S-tier requirement is being applied to Tier 1.
+6. No hidden MLB/NFL-specific gate is being applied to Tier 1.
+7. The same generic Tier 1 logic applies to every configured non-MLB/NFL sport, including CS, LOL, WNBA, Tennis, MMA, DOTA, VALORANT, PGA/Golf, Table Tennis, Badminton, Soccer, NHL, NCAAF, and every other configured Tier 1 sport.
+8. /picks follows the same tier policy.
+9. Telegram actionable alerts follow the same tier policy.
+10. /funnel reporting reflects the actual tier policy.
+
+━━━━━━━━━━━━━━━━━━
+
+CURRENT EVIDENCE
+
+We have already confirmed:
+
+* CS/LOL were being blocked by an incorrect confidence display gate.
+* That gate was removed.
+* The current /funnel still shows Tier 1 candidates being marked as rejected.
+* /picks CS and /picks LOL still show no qualifying props.
+* MLB is producing actionable S-tier picks.
+
+Do NOT assume the previous CS/LOL fix solved the entire Tier 1 problem.
+
+Trace the actual generic Tier 1 path:
+
+SCORE
+→ SPORT TIER
+→ VALIDATION
+→ DIRECTION
+→ QUALITY
+→ FINAL GATE
+→ ACCEPTED PICK
+→ STORED PICK
+→ TELEGRAM
+
+━━━━━━━━━━━━━━━━━━
+
+REPORT EXACTLY
+
+1. Exact function/module controlling Tier 1 vs Tier 2.
+2. Exact condition enforcing the tier requirement.
+3. Whether Tier 1 is truly generic or accidentally hardcoded.
+4. Which Tier 1 sports are currently being blocked.
+5. Exact gate responsible for the blocking.
+6. Whether /picks and Telegram use the same qualification logic.
+7. Whether /funnel is reporting intermediate qualification rather than final actionable qualification.
+8. Exact minimal code change required.
+9. What must remain untouched.
+
+Do NOT change code yet.
+
+Diagnosis first.
+
+Then STOP and wait for approval before making any changes.
+
+━━━━━━━━━━━━━━━━━━
+
+🧊 FREEZE RULE
+
+No code changes until the diagnosis is reviewed and approved.
+
+After the approved minimal fix is implemented:
+
+* Run focused tests.
+* Run the full test suite.
+* Run startup health check.
+* Verify Tier 1 behavior across multiple sports.
+* Verify Tier 2 MLB/NFL behavior.
+* Verify /picks.
+* Verify Telegram actionable-only behavior.
+* Verify /funnel.
+* Confirm no regressions.
+
+Then FREEZE the project again.
+
+Do NOT begin sportsbook polling or any other feature expansion during this pass.
