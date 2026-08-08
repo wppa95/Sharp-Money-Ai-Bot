@@ -1,0 +1,90 @@
+We have confirmed a qualification/reporting mismatch.bg. G
+
+DO NOT change any thresholds yet.
+DO NOT lower Tier 1 requirements.
+DO NOT promote all Near-Misses.
+DO NOT rewrite the scoring engine.
+
+Current evidence:
+
+/funnel 24:
+
+* Qualified candidates: 61
+* LOL accepted: 41
+* CS accepted: 2
+* MLB accepted: 14
+
+Near-Miss examples:
+
+* rx — Kills on Maps 1+2 (CS) — 85/100 [S] — qualified
+* None Quad — Kills on Maps 1+2 (LOL) — 83/100 [S] — qualified
+* Alanna Smith — Rebounds (WNBA) — 80/100 [S] — qualified
+* None Cryogen — Assists on Maps 1+2 (LOL) — 78/100 [A] — qualified
+
+But:
+
+/picks
+→ No actionable betting picks right now.
+
+/picks LOL
+→ No actionable betting picks right now.
+
+/picks CS
+→ No actionable betting picks right now.
+
+/picks 20
+→ No actionable betting picks right now.
+
+Meanwhile MLB successfully produced and stored a real actionable pick:
+
+Gage Jump — Walks Allowed
+OVER 1.5
+S-Tier
+Bet Quality 95/100
+
+Current stored state:
+Stored picks: 11
+Pending: 11
+Resolved: 0
+
+This proves the final actionable/stored pipeline can work.
+
+TASK:
+
+Trace ONE exact Tier 1 candidate:
+
+rx — Kills on Maps 1+2 (CS) — score 85 — S-tier — reason “qualified”
+
+Trace:
+
+funnel accepted
+→ tier assignment
+→ validation
+→ direction
+→ quality
+→ final actionable gate
+→ correlation/dedup checks
+→ stored pick creation
+→ Telegram alert eligibility
+
+Determine EXACTLY where it stops.
+
+Also inspect the same path for:
+
+None Quad — Kills on Maps 1+2 (LOL) — 83 S — qualified
+
+Do NOT modify code yet.
+
+I only want the diagnosis first.
+
+Report:
+
+1. Exact function/module where the candidate is rejected or dropped.
+2. Exact condition responsible.
+3. Whether “qualified” in /funnel means intermediate qualification rather than final actionable qualification.
+4. Whether Tier 1 is incorrectly requiring a hidden S-tier/95 BQ/final gate.
+5. Whether correlation/deduplication is blocking them.
+6. Whether they are never being converted into stored picks.
+7. Whether Telegram delivery is the problem or the pick never reaches alert creation.
+
+Then STOP and wait for approval before changing anything.
