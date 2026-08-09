@@ -45,6 +45,45 @@ from alerts import EMOJI, _div, format_odds, format_probability, RiskFactor
 from engine.consensus import ConsensusResult, MarketInefficiency
 from engine.clv import CLVOpportunity, CLVResult
 
+# ── V3.4 Bet Quality star + priority helpers ───────────────────────────────────
+
+_BQ_STAR_BANDS = ((100, 5), (80, 4), (70, 3), (40, 2))  # (min_bq, stars)
+
+def _bq_stars(bq: int) -> str:
+    """Star display from Bet Quality (decision.confidence).
+
+    V3.4 mapping (independent of raw market score):
+      100     → ★★★★★
+      80–99   → ★★★★☆
+      70–79   → ★★★☆☆
+      40–69   → ★★☆☆☆
+      0–39    → ★☆☆☆☆
+    """
+    n = 1
+    for min_bq, stars in _BQ_STAR_BANDS:
+        if bq >= min_bq:
+            n = stars
+            break
+    return "★" * n + "☆" * (5 - n)
+
+
+def _bq_priority_label(bq: int) -> str:
+    """Priority/actionability label for a given Bet Quality score.
+
+    V3.4 classification:
+      80+   → 🔥 HIGH PRIORITY
+      75–79 → 🟢 ACTIONABLE
+      70–74 → 👀 WATCHLIST ONLY
+      <70   → (not shown; would not reach alert formatter)
+    """
+    if bq >= 80:
+        return "🔥 HIGH PRIORITY"
+    elif bq >= 75:
+        return "🟢 ACTIONABLE"
+    elif bq >= 70:
+        return "👀 WATCHLIST ONLY"
+    return ""
+
 
 # ── Multi-book steam alert ─────────────────────────────────────────────────────
 
@@ -674,15 +713,23 @@ def format_underdog_change_alert(
         )
 
     # Grade + movement score vs bet confidence separation
+    # V3.4: stars and displayed BQ come from decision.confidence, not score.total.
     grade_str = ""
     if score is not None:
         tier      = getattr(score, "tier",          "?")
-        s_disp    = getattr(score, "stars_display",  "?" * 5)
         total     = getattr(score, "total",          0)
         n_hist    = getattr(score, "n_history",      0)
         move_vel  = getattr(score, "move_velocity",  None)  # market movement component
+        # Stars and BQ label from decision.confidence when available; fall back to score
+        _bq_conf_g = getattr(decision, "confidence", None) if decision is not None else None
+        if _bq_conf_g is not None:
+            s_disp    = _bq_stars(int(_bq_conf_g))
+            _bq_label = f"BQ {int(_bq_conf_g)}/100"
+        else:
+            s_disp    = getattr(score, "stars_display", "?" * 5)
+            _bq_label = f"{total}/100"
 
-        grade_str = f"\n\n📊 <b>Grade:</b>  <code>{tier}</code>  {s_disp}  <code>{total}/100</code>  <i>(n={n_hist})</i>"
+        grade_str = f"\n\n📊 <b>Grade:</b>  <code>{tier}</code>  {s_disp}  <code>{_bq_label}</code>  <i>(n={n_hist})</i>"
 
         if not removed and move_vel is not None:
             grade_str += (
@@ -729,13 +776,24 @@ def format_underdog_change_alert(
         conf = getattr(score, "total", None)
 
     pick_line = ""
+    strong_under_line = ""
     if rec in ("OVER", "UNDER") and not removed:
         pick_emoji = "🟢" if rec == "OVER" else "🔴"
         pick_line = f"📌 <b>PICK:</b>  {pick_emoji} <b>{rec} {new_line:.1f}</b>"
         if tier:
             pick_line += f"   ·   <b>{tier}-Tier</b>"
         if conf is not None:
-            pick_line += f"   ·   Bet Quality <code>{int(conf)}/100</code>"
+            _bq_int = int(conf)
+            pick_line += f"   ·   Bet Quality <code>{_bq_int}/100</code>  {_bq_stars(_bq_int)}"
+            _priority_lbl = _bq_priority_label(_bq_int)
+            if _priority_lbl:
+                pick_line += f"   ·   {_priority_lbl}"
+        # V3.4: Strong UNDER Signal — low underlying score is directional evidence for UNDER
+        if rec == "UNDER" and score is not None and getattr(score, "total", 100) <= 30:
+            strong_under_line = (
+                "🔴 <b>Strong UNDER Signal</b>"
+                f"  <i>(underlying score {int(getattr(score, 'total', 0))}/100 ≤ 30)</i>"
+            )
 
     # Short edge line from decision/validation if available
     edge_line = ""
@@ -797,6 +855,7 @@ def format_underdog_change_alert(
             f"🐶 <b>Line:</b>  <code>{new_line:.1f}</code>   Prev <code>{old_line:.1f}</code>   Move <code>{change_sign}{change:.1f}</code>",
             "",
             pick_line,
+            *([strong_under_line] if strong_under_line else []),
         ]
         if edge_line:
             body_lines += ["", edge_line]
@@ -910,17 +969,22 @@ def format_underdog_new_prop_alert(
         if game_time else ""
     )
 
-    # Grade block
+    # Grade block — V3.4: stars and BQ label from decision.confidence when available
     grade_str = ""
     if score is not None:
         tier   = getattr(score, "tier",         "?")
-        stars  = getattr(score, "stars",         0)
         total  = getattr(score, "total",         0)
-        s_disp = getattr(score, "stars_display", "?" * 5)
         n_hist = getattr(score, "n_history",     0)
+        _bq_conf_np = getattr(decision, "confidence", None) if decision is not None else None
+        if _bq_conf_np is not None:
+            s_disp    = _bq_stars(int(_bq_conf_np))
+            _bq_label = f"BQ {int(_bq_conf_np)}/100"
+        else:
+            s_disp    = getattr(score, "stars_display", "?" * 5)
+            _bq_label = f"{total}/100"
         grade_str = (
             f"\n\n📊 <b>Grade:</b>  <code>{tier}</code>  {s_disp}  "
-            f"<code>{total}/100</code>"
+            f"<code>{_bq_label}</code>"
             f"  <i>(n={n_hist})</i>"
         )
 
@@ -930,6 +994,15 @@ def format_underdog_new_prop_alert(
         validation_str = (
             f"\n💡 <b>History:</b>  "
             f"<code>{getattr(validation, 'rate_summary', lambda: '')()}</code>"
+        )
+
+    # Strong UNDER signal — V3.4: low underlying score = directional evidence for UNDER
+    _np_rec = getattr(decision, "recommendation", None) if decision is not None else None
+    _np_strong_under = ""
+    if _np_rec == "UNDER" and score is not None and getattr(score, "total", 100) <= 30:
+        _np_strong_under = (
+            "🔴 <b>Strong UNDER Signal</b>"
+            f"  <i>(underlying score {int(getattr(score, 'total', 0))}/100 ≤ 30)</i>"
         )
 
     # Reason bullets
@@ -968,6 +1041,7 @@ def format_underdog_new_prop_alert(
         + opponent_str
         + game_str
         + grade_str
+        + (_np_strong_under and f"\n{_np_strong_under}" or "")
         + validation_str
         + _format_decision_block(decision, line=line_value)
         + _format_market_quality_block(market_quality)

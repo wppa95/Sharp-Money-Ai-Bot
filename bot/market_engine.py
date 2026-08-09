@@ -108,6 +108,24 @@ _MARKET_FIRST_ALERT_TTL_H: int = 24
 _priority_override_sent: set = set()
 
 
+def _bq_stars(bq: int) -> str:
+    """V3.4 star display string computed from Bet Quality (decision.confidence).
+
+    Mapping:
+      100     → ★★★★★
+      80–99   → ★★★★☆
+      70–79   → ★★★☆☆
+      40–69   → ★★☆☆☆
+      0–39    → ★☆☆☆☆
+    """
+    if bq >= 100: n = 5
+    elif bq >= 80: n = 4
+    elif bq >= 70: n = 3
+    elif bq >= 40: n = 2
+    else: n = 1
+    return "★" * n + "☆" * (5 - n)
+
+
 def _format_95_priority_alert(
     player: str,
     snap: object,
@@ -123,9 +141,9 @@ def _format_95_priority_alert(
     is enforced before this function is called.
     """
     sport  = getattr(snap, "sport", None) or "UNKNOWN"
-    stars  = "★" * score.stars + "☆" * (5 - score.stars)
     rec    = getattr(decision, "recommendation", "PASS") if decision is not None else "PASS"
     conf   = getattr(decision, "confidence", 0)      if decision is not None else 0
+    stars  = _bq_stars(int(conf))  # V3.4: stars from Bet Quality, not raw score.total
 
     dir_line = ""
     if rec not in ("PASS", None):
@@ -1448,7 +1466,7 @@ async def underdog_job(context) -> None:
                         market_confirmation = _np_odds_confirm,
                         high_priority       = (
                             decision is not None
-                            and 85 <= decision.confidence < 95  # 95+ uses override path; 85-94 (4★+) gets label
+                            and 80 <= decision.confidence < 95  # 95+ uses override path; 80-94 (4★+) gets label
                             and decision.decision_tier == "S"
                             and decision.recommendation != "PASS"
                         ),
@@ -2055,7 +2073,7 @@ async def underdog_job(context) -> None:
                         high_priority       = (
                             decision is not None
                             and not is_removed
-                            and 85 <= decision.confidence < 95  # 95+ uses override path; 85-94 (4★+) gets label
+                            and 80 <= decision.confidence < 95  # 95+ uses override path; 80-94 (4★+) gets label
                             and decision.decision_tier == "S"
                             and decision.recommendation != "PASS"
                         ),
@@ -2428,7 +2446,7 @@ async def underdog_job(context) -> None:
                     market_confirmation = _s_odds_confirm,
                     high_priority       = (
                         _sdec is not None
-                        and 85 <= _sdec.confidence < 95  # 95+ uses override path; 85-94 (4★+) gets label
+                        and 80 <= _sdec.confidence < 95  # 95+ uses override path; 80-94 (4★+) gets label
                         and _sdec.decision_tier == "S"
                         and _sdec.recommendation != "PASS"
                     ),

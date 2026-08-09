@@ -331,19 +331,22 @@ class TestHighPriorityParam:
             f"high_priority appears {count}x in underdog_job — expected ≥ 3"
         )
 
-    def test_high_priority_condition_85_to_94(self):
-        """high_priority condition must check 85 <= decision.confidence < 95 AND decision_tier == 'S'.
+    def test_high_priority_condition_80_to_94(self):
+        """high_priority condition must check 80 <= decision.confidence < 95 AND decision_tier == 'S'.
 
-        V3.4: 4★+ (BQ ≥ 85) qualifies for HIGH PRIORITY; 90 is no longer the floor.
+        V3.4 final: 4★ floor is BQ ≥ 80 (HIGH PRIORITY); 95+ uses V3.3 override path.
         """
         import market_engine as me
         src = inspect.getsource(me.underdog_job)
-        assert "85 <= decision.confidence < 95" in src or "85 <= _sdec.confidence < 95" in src, (
-            "85-94 Bet Quality range check not found in high_priority condition — V3.4 requires 85 as floor"
+        assert "80 <= decision.confidence < 95" in src or "80 <= _sdec.confidence < 95" in src, (
+            "80-94 Bet Quality range check not found in high_priority condition — V3.4 requires 80 as floor"
         )
-        # Old 90 threshold must not remain as the high_priority floor
+        # Old 85/90 thresholds must not remain as the high_priority floor
+        assert "85 <= decision.confidence < 95" not in src, (
+            "Old 85 <= threshold still present — V3.4 sets 80 as the high_priority floor"
+        )
         assert "90 <= decision.confidence < 95" not in src and "90 <= _sdec.confidence < 95" not in src, (
-            "Old 90 <= threshold still present — V3.4 requires 85 as the high_priority floor"
+            "Old 90 <= threshold still present — V3.4 sets 80 as the high_priority floor"
         )
         assert "decision.decision_tier == \"S\"" in src or "decision.decision_tier == 'S'" in src or \
                "_sdec.decision_tier == \"S\"" in src or "_sdec.decision_tier == 'S'" in src, (
@@ -370,7 +373,7 @@ class TestThresholdLogicSimulation:
         Mirrors the three-layer check in each alert path:
           1. PASS guard — never actionable
           2. Sport Direction — MLB/NFL OVER-only; UNDER always blocked
-          3. BQ threshold routing — 95+ override, 85-94 high-priority (V3.4: 4★+ floor), else normal
+          3. BQ threshold routing — 95+ override, 80-94 high-priority (V3.4 final: 4★ floor = 80), else normal
         """
         # 1. PASS decisions never trigger an override regardless of confidence
         if recommendation == "PASS" or decision_tier == "PASS":
@@ -378,39 +381,45 @@ class TestThresholdLogicSimulation:
         # 2. Sport Direction check — MLB/NFL are OVER-only; UNDER blocked even at 95+ BQ
         if sport.upper() in ("MLB", "NFL") and recommendation == "UNDER":
             return "DIRECTION_BLOCKED"
-        # 3. BQ threshold routing (V3.4: high-priority floor lowered from 90 to 85)
+        # 3. BQ threshold routing (V3.4 final: high-priority floor = 80)
         if confidence >= 95 and decision_tier == "S":
             return "OVERRIDE_95_PLUS"
-        if 85 <= confidence < 95 and decision_tier == "S":
-            return "HIGH_PRIORITY_85_94"
+        if 80 <= confidence < 95 and decision_tier == "S":
+            return "HIGH_PRIORITY_80_94"
         return "NORMAL"
 
-    def test_84_s_tier_is_normal(self):
-        """84/100 is below the V3.4 4★ floor — must be NORMAL."""
-        assert self._route(84, "S") == "NORMAL", "84/100 S-tier must be NORMAL (below V3.4 floor)"
+    def test_79_s_tier_is_normal(self):
+        """79/100 is below the V3.4 final 4★ floor (80) — must be NORMAL."""
+        assert self._route(79, "S") == "NORMAL", "79/100 S-tier must be NORMAL (below V3.4 floor)"
 
-    def test_84_point_9_is_normal(self):
-        assert self._route(84.9, "S") == "NORMAL"
+    def test_79_point_9_is_normal(self):
+        assert self._route(79.9, "S") == "NORMAL"
+
+    def test_80_s_tier_is_high_priority(self):
+        """80/100 is the V3.4 final minimum for HIGH PRIORITY (4★ floor)."""
+        assert self._route(80, "S") == "HIGH_PRIORITY_80_94", "80/100 S-tier must be HIGH_PRIORITY_80_94"
+
+    def test_84_s_tier_is_high_priority(self):
+        """84/100 is above the V3.4 floor — HIGH PRIORITY."""
+        assert self._route(84, "S") == "HIGH_PRIORITY_80_94", "84/100 S-tier must be HIGH_PRIORITY_80_94"
 
     def test_85_s_tier_is_high_priority(self):
-        """85/100 is the V3.4 minimum for HIGH PRIORITY (4★ floor)."""
-        assert self._route(85, "S") == "HIGH_PRIORITY_85_94", "85/100 S-tier must be HIGH_PRIORITY_85_94"
+        assert self._route(85, "S") == "HIGH_PRIORITY_80_94"
 
     def test_89_s_tier_is_high_priority(self):
-        """89/100 was NORMAL under old rules — V3.4 makes it HIGH PRIORITY."""
-        assert self._route(89, "S") == "HIGH_PRIORITY_85_94", "89/100 S-tier must be HIGH_PRIORITY_85_94 under V3.4"
+        assert self._route(89, "S") == "HIGH_PRIORITY_80_94"
 
     def test_90_s_tier_is_high_priority(self):
-        assert self._route(90, "S") == "HIGH_PRIORITY_85_94"
+        assert self._route(90, "S") == "HIGH_PRIORITY_80_94"
 
     def test_91_s_tier_is_high_priority(self):
-        assert self._route(91, "S") == "HIGH_PRIORITY_85_94"
+        assert self._route(91, "S") == "HIGH_PRIORITY_80_94"
 
     def test_94_s_tier_is_high_priority(self):
-        assert self._route(94, "S") == "HIGH_PRIORITY_85_94"
+        assert self._route(94, "S") == "HIGH_PRIORITY_80_94"
 
     def test_94_point_9_is_high_priority(self):
-        assert self._route(94.9, "S") == "HIGH_PRIORITY_85_94"
+        assert self._route(94.9, "S") == "HIGH_PRIORITY_80_94"
 
     def test_95_s_tier_is_override(self):
         assert self._route(95, "S") == "OVERRIDE_95_PLUS"
@@ -661,8 +670,8 @@ class TestV33SportDirectionPolicy:
             return "DIRECTION_BLOCKED"
         if confidence >= 95 and decision_tier == "S":
             return "OVERRIDE_95_PLUS"
-        if 85 <= confidence < 95 and decision_tier == "S":
-            return "HIGH_PRIORITY_85_94"
+        if 80 <= confidence < 95 and decision_tier == "S":  # V3.4 final floor
+            return "HIGH_PRIORITY_80_94"
         return "NORMAL"
 
     # ── Spec case 1: Raw Score low + BQ 95 + MLB OVER → Priority ────────────
@@ -707,35 +716,43 @@ class TestV33SportDirectionPolicy:
         """Tier 1 (TENNIS) UNDER + BQ 95 → OVERRIDE_95_PLUS."""
         assert self._route(95, "S", "UNDER", "TENNIS") == "OVERRIDE_95_PLUS"
 
-    # ── V3.4 boundary: 84 is NORMAL, 85 is HIGH PRIORITY ────────────────────
-    def test_bq84_is_normal(self):
-        """84/100 is below the V3.4 4★ floor — not high priority."""
-        assert self._route(84, "S", "OVER", "WNBA") == "NORMAL"
+    # ── V3.4 final boundary: 79 is NORMAL, 80 is HIGH PRIORITY ─────────────
+    def test_bq79_is_normal(self):
+        """79/100 is below the V3.4 final floor (80) — not high priority."""
+        assert self._route(79, "S", "OVER", "WNBA") == "NORMAL"
+
+    def test_bq80_is_high_priority(self):
+        """80/100 is the V3.4 final minimum for HIGH PRIORITY (4★ floor)."""
+        assert self._route(80, "S", "OVER", "WNBA") == "HIGH_PRIORITY_80_94"
+
+    def test_bq80_mlb_over_is_high_priority(self):
+        """MLB OVER at BQ 80 → HIGH_PRIORITY_80_94 (normal gates apply)."""
+        assert self._route(80, "S", "OVER", "MLB") == "HIGH_PRIORITY_80_94"
+
+    def test_bq84_is_also_high_priority(self):
+        """84/100 is above the V3.4 floor — also HIGH PRIORITY."""
+        assert self._route(84, "S", "OVER", "WNBA") == "HIGH_PRIORITY_80_94"
 
     def test_bq85_is_high_priority(self):
-        """85/100 is the V3.4 minimum for HIGH PRIORITY (4★ floor)."""
-        assert self._route(85, "S", "OVER", "WNBA") == "HIGH_PRIORITY_85_94"
-
-    def test_bq85_mlb_over_is_high_priority(self):
-        """MLB OVER at BQ 85 → HIGH_PRIORITY_85_94 (normal gates apply)."""
-        assert self._route(85, "S", "OVER", "MLB") == "HIGH_PRIORITY_85_94"
+        """85/100 is HIGH PRIORITY under V3.4 (floor is 80)."""
+        assert self._route(85, "S", "OVER", "WNBA") == "HIGH_PRIORITY_80_94"
 
     # ── Spec case 7: BQ 94 → NOT 95+ priority ───────────────────────────────
     def test_bq94_is_not_override(self):
-        """BQ 94 S-tier → HIGH_PRIORITY_85_94, NOT override."""
-        assert self._route(94, "S", "OVER", "WNBA") == "HIGH_PRIORITY_85_94"
+        """BQ 94 S-tier → HIGH_PRIORITY_80_94, NOT override."""
+        assert self._route(94, "S", "OVER", "WNBA") == "HIGH_PRIORITY_80_94"
         assert self._route(94, "S", "OVER", "MLB") != "OVERRIDE_95_PLUS"
 
     # ── Spec case 8: BQ 85-94 → High Priority (normal gates) ────────────────
     def test_bq90_is_high_priority(self):
-        assert self._route(90, "S", "OVER", "WNBA") == "HIGH_PRIORITY_85_94"
+        assert self._route(90, "S", "OVER", "WNBA") == "HIGH_PRIORITY_80_94"
 
     def test_bq89_is_high_priority(self):
         """89/100 was NORMAL under old 90 threshold — V3.4 makes it HIGH PRIORITY."""
-        assert self._route(89, "S", "OVER", "WNBA") == "HIGH_PRIORITY_85_94"
+        assert self._route(89, "S", "OVER", "WNBA") == "HIGH_PRIORITY_80_94"
 
     def test_bq93_is_high_priority(self):
-        assert self._route(93, "S", "OVER", "CS") == "HIGH_PRIORITY_85_94"
+        assert self._route(93, "S", "OVER", "CS") == "HIGH_PRIORITY_80_94"
 
     # ── Spec case 11: PASS recommendation → NEVER actionable ────────────────
     def test_pass_rec_never_actionable(self):
