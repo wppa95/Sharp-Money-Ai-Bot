@@ -1448,7 +1448,7 @@ async def underdog_job(context) -> None:
                         market_confirmation = _np_odds_confirm,
                         high_priority       = (
                             decision is not None
-                            and 90 <= decision.confidence < 95  # 95+ uses override path; 90-94 gets label
+                            and 85 <= decision.confidence < 95  # 95+ uses override path; 85-94 (4★+) gets label
                             and decision.decision_tier == "S"
                             and decision.recommendation != "PASS"
                         ),
@@ -2055,7 +2055,7 @@ async def underdog_job(context) -> None:
                         high_priority       = (
                             decision is not None
                             and not is_removed
-                            and 90 <= decision.confidence < 95  # 95+ uses override path; 90-94 gets label
+                            and 85 <= decision.confidence < 95  # 95+ uses override path; 85-94 (4★+) gets label
                             and decision.decision_tier == "S"
                             and decision.recommendation != "PASS"
                         ),
@@ -2428,7 +2428,7 @@ async def underdog_job(context) -> None:
                     market_confirmation = _s_odds_confirm,
                     high_priority       = (
                         _sdec is not None
-                        and 90 <= _sdec.confidence < 95  # 95+ uses override path; 90-94 gets label
+                        and 85 <= _sdec.confidence < 95  # 95+ uses override path; 85-94 (4★+) gets label
                         and _sdec.decision_tier == "S"
                         and _sdec.recommendation != "PASS"
                     ),

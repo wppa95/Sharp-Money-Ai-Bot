@@ -1069,7 +1069,7 @@ class AlertDelivery:
         opening_line: Optional[float] = None,  # First ever line from PropLineHistory
         market_move_only: bool = False,  # True → send lightweight market-move alert only
         market_confirmation: Optional[dict] = None,  # OddsAPI sportsbook confirmation data
-        high_priority: bool = False,  # True for 90–94/100 S-tier → prepend 🔥 header
+        high_priority: bool = False,  # True for 85–94/100 S-tier (4★+) → prepend 🔥 header
     ) -> "DeliveryResult":
         """
         Full Underdog prop alert pipeline:
@@ -1177,9 +1177,9 @@ class AlertDelivery:
             )
 
         # 5. Broadcast
-        # 90–94/100 S-tier priority: prepend a priority header to the formatted message.
+        # 85–94/100 S-tier priority (4★+): prepend a priority header to the formatted message.
         # The header is prepended AFTER formatting so the existing alert body is unchanged.
-        # 95+/100 props use the override path (broadcast_alert directly) and never reach here.
+        # 95+/100 props use the V3.3 override path (broadcast_alert directly) and never reach here.
         if high_priority and message and not removed:
             _hp_score = int(score.total) if score is not None else "??"
             message = (

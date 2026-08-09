@@ -47,4 +47,4 @@
 - [V3.2 Phase 2 Core](v32-phase2-core.md) — removed eff_conf<55 loop gate (blocked CS/LOL S-tier); _render_pick_entry DB-tier fallback (proxy<30); /health prev-session+crash-detected removed; 3733 tests Aug 2026.
 - [V3.2 Final Tier 1 Fix](v32-tier1-final-fix.md) — /picks allows B-tier for Tier 1; np_immediate uses min_stars_for_sport(); PropCandidateLog Tier 1 B-tier→ACCEPTED; 3817 tests Aug 2026.
 - [Diagnosis pass Aug 2026](diagnosis-pass-aug2026.md) — 4 targeted fixes: or_/and_ import, score_tier midpoint display, rejection label, funnel label; ESPN only covers MLB/NFL; 3817 tests.
-- [S-tier priority override system](priority-override.md) — 90-94: high_priority=True label in deliver_underdog; 95+: immediate broadcast_alert bypass all gates; _priority_override_sent (module-level), _priority_alerted_this_scan (per-scan); 3882 tests Aug 2026.
+- [S-tier priority override system](priority-override.md) — V3.4: 85+ BQ=HIGH PRIORITY (4★); V3.3: 95+ BQ=override (direction gate enforced); MLB/NFL UNDER blocked at both levels; message shows BQ not score.total; 3908 tests Aug 2026.
