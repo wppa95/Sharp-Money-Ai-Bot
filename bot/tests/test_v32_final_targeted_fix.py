@@ -208,11 +208,17 @@ class TestAlertsCanonicalSource:
         from database import Database
         assert hasattr(Database, "get_alerted_opportunity_log")
 
-    def test_all_time_count_also_shown(self):
-        """cmd_alerts must show all-time alert count so user can compare with /stats."""
+    def test_all_time_count_removed_v35(self):
+        """V3.5: all-time count removed from /alerts display; only 24h window shown."""
         import inspect
         src = inspect.getsource(cmd_mod.cmd_alerts)
-        assert "count_actionable_pick_records" in src
+        # V3.5 spec: all-time count no longer fetched or displayed in /alerts
+        assert "count_actionable_pick_records" not in src, (
+            "V3.5: /alerts must NOT fetch all-time count — only 24h window shown"
+        )
+        assert "since_hours=24" in src, (
+            "V3.5: /alerts must query with since_hours=24"
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

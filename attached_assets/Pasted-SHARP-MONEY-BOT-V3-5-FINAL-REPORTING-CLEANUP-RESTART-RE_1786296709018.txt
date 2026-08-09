@@ -1,0 +1,669 @@
+SHARP MONEY BOT V3.5 — FINAL REPORTING CLEANUP + RESTART-RESUME + COLD-START QUALIFICATION
+
+⚠️ IMPORTANT: We are limited on credentials/credits.
+
+DO NOT burn credentials.
+
+Use existing data, database state, logs, and persistence wherever possible.
+
+This is a targeted cleanup/improvement pass after V3.4-final.
+
+━━━━━━━━━━━━━━━━━━
+🚫 DO NOT REWRITE
+━━━━━━━━━━━━━━━━━━
+
+DO NOT:
+
+* Rewrite the bot
+* Rewrite the scoring engine
+* Redesign the architecture
+* Replace the Underdog pipeline
+* Change qualification thresholds without evidence
+* Change Tier 1/Tier 2 rules without evidence
+* Add sportsbook polling
+* Enable FanDuel
+* Enable DraftKings
+* Change the OddsAPI key
+* Delete historical data
+* Redesign the database
+* Run unnecessary broad rescans
+* Run repeated expensive polling
+* Add unnecessary features
+
+Use existing systems wherever possible.
+
+Underdog remains PRIMARY.
+
+━━━━━━━━━━━━━━━━━━
+STEP 1 — CURRENT SYSTEM BASELINE
+━━━━━━━━━━━━━━━━━━
+
+Before making changes, review the entire current V3.4-final state.
+
+Current verified runtime:
+
+* Startup #203 completed successfully
+* Underdog = healthy
+* /status = working
+* /health = working
+* /picks = working
+* /picks 20 = working
+* /picks MLB = working
+* /picks WNBA = working
+* /picks CS = working
+* /funnel 24 = working
+* /dashboard = working
+* /alerts = working
+* Actionable alerts today = 7
+* All-time alerts = 18
+* PropLineHistory = 8,761+ and increasing
+* Latest health scan = 5,142 props
+* Database writes are continuing
+
+Do not change working functionality simply because these values exist.
+
+Record the current baseline before edits.
+
+━━━━━━━━━━━━━━━━━━
+STEP 2 — DASHBOARD SHOULD BE DAILY
+━━━━━━━━━━━━━━━━━━
+
+Current dashboard contains:
+
+📅 Last 7 Days
+
+Change the dashboard display to a CURRENT-DAY / DAILY BREAKDOWN.
+
+The dashboard should primarily represent today’s UTC activity.
+
+Remove the visible “Last 7 Days” section from the dashboard.
+
+IMPORTANT:
+
+Removing the display does NOT mean deleting historical data.
+
+Keep all historical data stored:
+
+* Picks
+* Alerts
+* PropLineHistory
+* Scoring records
+* Qualification records
+* Hit/Loss records
+* Resolution records
+* CLV
+* Calibration data
+
+Only change the dashboard presentation/query window.
+
+Historical data must remain available for future reporting/backtesting/calibration.
+
+━━━━━━━━━━━━━━━━━━
+STEP 3 — DASHBOARD / FUNNEL POPULATION DIAGNOSIS
+━━━━━━━━━━━━━━━━━━
+
+Current /funnel 24 shows approximately:
+
+Scanned: 116,347+
+Qualified: 813
+Watchlist: 2,156+
+
+Current dashboard shows approximately:
+
+S: 1
+A: 135
+B: 161
+PASS: 192
+
+By Sport:
+
+MLB: 1109
+WNBA: 11
+CS: 10
+LOL: 4
+DOTA: 1
+PGA: 1
+
+These numbers do NOT appear to represent the same population.
+
+Do NOT force them to match.
+
+First determine exactly what each dashboard section represents.
+
+Inspect:
+
+* Table/source
+* Query
+* Time window
+* UTC boundary
+* Current vs historical snapshot
+* Tier filtering
+* Sport filtering
+* Event filtering
+* NULL handling
+* Whether dashboard uses scored records
+* Whether funnel uses candidate records
+* Whether either is intentionally measuring a different population
+
+Determine whether this is:
+
+A) intentional different populations
+
+OR
+
+B) reporting/aggregation bug.
+
+If reporting is wrong, make the smallest reporting-only fix necessary.
+
+Do NOT change scoring or qualification just to make numbers match.
+
+Final dashboard numbers should be explainable and internally consistent with the population they claim to represent.
+
+━━━━━━━━━━━━━━━━━━
+STEP 4 — ALERTS DISPLAY CLEANUP
+━━━━━━━━━━━━━━━━━━
+
+Current /alerts shows:
+
+8 shown (last 72h) · 18 all-time sent
+
+Change the visible display to:
+
+🎯 Actionable Pick Alerts
+8 shown (last 24h)
+
+Requirements:
+
+* Change visible alert window from 72h → 24h
+* Remove visible all-time sent count
+* Keep historical alert records stored
+* Do NOT delete old alerts
+* Do NOT change the underlying alert history storage
+
+Historical records must remain available internally.
+
+━━━━━━━━━━━━━━━━━━
+STEP 5 — STATUS ALERT DISPLAY CLEANUP
+━━━━━━━━━━━━━━━━━━
+
+Current /status shows:
+
+📬 Alerts today: 7 · All-time: 18
+
+Change to:
+
+📬 Alerts today: 7
+
+Remove the visible all-time number.
+
+The daily alert count should reset automatically at the beginning of each new UTC calendar day.
+
+Example:
+
+Aug 9:
+Alerts today: 7
+
+After UTC midnight:
+
+Aug 10:
+Alerts today: 0
+
+IMPORTANT:
+
+Daily counter ≠ historical storage.
+
+Reset the displayed daily count only.
+
+Do NOT delete historical alert records.
+
+━━━━━━━━━━━━━━━━━━
+STEP 6 — RESTART-RESUME / PROGRESS CHECKPOINT
+━━━━━━━━━━━━━━━━━━
+
+IMPORTANT NEW REQUIREMENT:
+
+After a bot restart, the system should NOT behave like it was just opened for the first time.
+
+Currently the bot can restart and appear to rebuild scanning/evidence from scratch.
+
+We want the bot to RESUME from its previous progress wherever safely possible.
+
+Goal:
+
+BEFORE RESTART
+→ save scanner progress/checkpoint
+
+RESTART
+→ load checkpoint
+
+RESUME
+→ continue from previous progress
+
+Do NOT blindly perform a massive fresh rescan after every restart.
+
+Use existing persistent storage/database wherever possible.
+
+Persist safe scanner state such as:
+
+* Last successful scan/checkpoint timestamp
+* Last processed prop/event cursor if one exists
+* Last successful fetch state
+* Existing PropLineHistory state
+* Safe provider pagination/cursor state if supported
+* Other durable progress markers already supported by the system
+
+After restart:
+
+1. Load the last checkpoint.
+2. Resume from that point.
+3. Use a small safety overlap/window if needed so props changed during downtime are not missed.
+4. Continue normal scanning.
+5. Continue writing new PropLineHistory records.
+6. Do NOT erase previous history.
+7. Do NOT reset scoring history.
+8. Do NOT reset stored picks.
+9. Do NOT reset pending/resolved state.
+10. Do NOT treat the bot as a brand-new installation.
+
+Do NOT persist unsafe/transient objects simply for the sake of persistence.
+
+Use durable state that can safely reconstruct scanner progress.
+
+Do NOT change:
+
+* Scoring engine
+* Qualification thresholds
+* Alert gates
+* Telegram behavior
+* Tier policy
+
+━━━━━━━━━━━━━━━━━━
+STEP 7 — /PICKS STARTUP BEHAVIOR
+━━━━━━━━━━━━━━━━━━
+
+We observed:
+
+Immediately after restart:
+
+/picks
+→ No actionable betting picks right now.
+
+After the bot has been running and scanning:
+
+/picks 20
+→ No actionable betting picks right now.
+
+However:
+
+* Underdog scanning is healthy
+* PropLineHistory is increasing
+* /funnel 24 contains qualified candidates
+* Actionable alerts are being generated
+* /picks itself is not throwing an error
+
+Do NOT assume /picks is broken.
+
+It may be expected that actionable picks require:
+
+* Multiple snapshots
+* Historical line movement
+* Accumulated evidence
+* Confidence evidence
+* Current actionable qualification
+
+FIRST diagnose the actual /picks data dependency.
+
+Determine whether /picks intentionally requires accumulated evidence/history.
+
+If the behavior is intentional:
+
+DO NOT change it.
+
+If there is an actual defect:
+
+Fix only the actual defect.
+
+Do NOT:
+
+* Manufacture picks immediately after restart
+* Weaken gates
+* Lower thresholds
+* Force /picks to populate
+* Create fake qualification
+
+The goal is to make /picks accurate, not artificially populated.
+
+━━━━━━━━━━━━━━━━━━
+STEP 8 — COLD-START QUALIFICATION
+━━━━━━━━━━━━━━━━━━
+
+IMPORTANT:
+
+Do NOT assume every cold_start prop must remain blocked indefinitely.
+
+Current funnel Near-Misses frequently contain:
+
+cold_start
+
+Cold-start should mean:
+
+→ insufficient historical evidence
+
+It should NOT automatically mean:
+
+→ permanently ineligible
+
+Investigate the actual cold-start gate.
+
+Determine whether it is:
+
+A) an unconditional blocker
+
+OR
+
+B) an evidence-based blocker.
+
+The desired behavior is:
+
+COLD-START + insufficient evidence
+→ ❌ BLOCKED / WATCHLIST
+
+COLD-START + sufficient valid evidence + ALL required gates pass
+→ ✅ eligible for normal actionable qualification
+
+A cold-start prop may become actionable ONLY if it independently satisfies the applicable requirements.
+
+Check:
+
+* Valid upcoming event
+* Active event
+* Valid player/market
+* Clear OVER/UNDER direction where required
+* Required confidence gate
+* Required Bet Quality gate
+* Required evidence/quality requirements
+* Dedup/reversal protection
+* Event integrity
+* No stale/live/removal issue
+* Any other existing required safety/integrity gate
+
+Do NOT blindly promote cold-start props.
+
+Do NOT remove cold-start protection globally.
+
+Do NOT lower confidence requirements.
+
+Do NOT lower BQ requirements.
+
+Do NOT bypass integrity checks.
+
+If cold-start already behaves correctly, do NOT modify it.
+
+Add focused tests for:
+
+1. Cold-start + insufficient evidence → blocked
+2. Cold-start + sufficient evidence + failed confidence → blocked
+3. Cold-start + sufficient evidence + failed BQ → blocked
+4. Cold-start + sufficient evidence + all applicable gates passed → actionable
+5. MLB/NFL cold-start UNDER → blocked
+6. Tier 1 cold-start UNDER + all applicable gates passed → eligible
+
+Preserve Tier 1/Tier 2 rules.
+
+━━━━━━━━━━━━━━━━━━
+STEP 9 — PRESERVE V3.4-FINAL PRIORITY / STAR SYSTEM
+━━━━━━━━━━━━━━━━━━
+
+DO NOT regress the V3.4-final changes.
+
+Current BQ star mapping:
+
+★★★★★ = 100/100
+
+★★★★☆ = 80–99/100
+
+★★★☆☆ = 70–79/100
+
+★★☆☆☆ = 40–69/100
+
+★☆☆☆☆ = 0–39/100
+
+Priority classification:
+
+BQ 95+
+→ 🔥 Highest priority / existing priority override
+
+BQ 80–94
+→ 🔥 HIGH PRIORITY
+
+BQ 75–79
+→ 🟢 ACTIONABLE if ALL normal gates pass
+
+BQ 70–74
+→ 👀 WATCHLIST ONLY
+
+BQ 40–69
+→ Normal / non-priority
+
+BQ 0–39
+→ Normal / non-priority
+
+IMPORTANT:
+
+4-star and 5-star picks are the highest-priority classes.
+
+3-star picks are WATCHLIST ONLY unless they fall into the specifically defined 75–79 actionable range.
+
+Do NOT confuse:
+
+* score.total
+* Bet Quality
+* Confidence
+* Stars
+
+Stars must be based on the actual Bet Quality value.
+
+A BQ 95 pick must display 4 stars, not 2 or 3 stars.
+
+━━━━━━━━━━━━━━━━━━
+STEP 10 — STRONG UNDER SIGNAL
+━━━━━━━━━━━━━━━━━━
+
+Preserve the V3.4-final Strong UNDER Signal.
+
+If:
+
+recommendation = UNDER
+
+AND
+
+score.total <= 30
+
+display:
+
+🔴 Strong UNDER Signal
+
+IMPORTANT:
+
+This is a display/intelligence signal only.
+
+It must NOT:
+
+* Bypass qualification
+* Override confidence
+* Override Bet Quality
+* Override event validation
+* Override dedup
+* Create an actionable pick by itself
+* Force a Telegram alert
+
+It simply identifies a potentially strong UNDER movement signal.
+
+━━━━━━━━━━━━━━━━━━
+STEP 11 — TIER POLICY REGRESSION CHECK
+━━━━━━━━━━━━━━━━━━
+
+Preserve the existing tier policy.
+
+TIER 2:
+
+* MLB
+* NFL
+* OVER only
+* Existing confidence/quality/integrity gates
+* Existing event checks
+* Existing dedup/reversal checks
+
+MLB/NFL UNDER must remain blocked.
+
+TIER 1:
+
+* Every monitored sport other than MLB/NFL
+* OVER and UNDER allowed
+* 80+ BQ can be high priority
+* 95+ BQ can use priority path
+* Normal applicable gates still apply
+
+Do NOT weaken Tier 2.
+
+Do NOT accidentally force Tier 1 into MLB/NFL rules.
+
+Verify actual code, not only /config display.
+
+━━━━━━━━━━━━━━━━━━
+STEP 12 — IMPLEMENT ONLY TARGETED FIXES
+━━━━━━━━━━━━━━━━━━
+
+ONLY after diagnosis:
+
+* Document exact root cause
+* Make the smallest necessary fix
+* Preserve architecture
+* Preserve scoring engine
+* Preserve Underdog PRIMARY
+* Preserve V3.4 priority behavior
+* Preserve Telegram actionable-only behavior
+* Preserve historical database state
+
+Do not make speculative changes.
+
+━━━━━━━━━━━━━━━━━━
+STEP 13 — VALIDATION
+━━━━━━━━━━━━━━━━━━
+
+Run focused regression tests first.
+
+Then run the full test suite.
+
+Verify:
+
+☐ Dashboard daily view
+☐ Historical data preserved
+☐ /alerts = 24h display
+☐ /alerts all-time count removed from display
+☐ /status shows Alerts today only
+☐ Daily alert counter reset behavior
+☐ Historical alerts remain stored
+☐ Dashboard population is explainable
+☐ Funnel remains functional
+☐ /picks behavior is understood
+☐ Cold-start behavior is understood
+☐ Cold-start qualified props can pass when genuinely eligible
+☐ Cold-start protections remain intact
+☐ Restart checkpoint saves
+☐ Restart checkpoint loads
+☐ Scanner resumes after restart
+☐ PropLineHistory survives restart
+☐ Stored picks survive restart
+☐ Pending picks survive restart
+☐ Resolution state survives restart
+☐ V3.4 star mapping remains correct
+☐ 80+ priority remains correct
+☐ 95+ priority remains correct
+☐ Strong UNDER display remains correct
+☐ MLB/NFL UNDER remains blocked
+☐ Tier 1 UNDER remains allowed
+☐ Telegram remains actionable-only
+
+Do not run unnecessary broad rescans or expensive API tests.
+
+━━━━━━━━━━━━━━━━━━
+STEP 14 — FINAL RUNTIME CHECK
+━━━━━━━━━━━━━━━━━━
+
+After tests, verify the live bot:
+
+* Underdog fetching
+* Scanner continuing
+* Database writes continuing
+* PropLineHistory increasing
+* /status
+* /health
+* /picks
+* /picks 20
+* /picks MLB
+* /picks WNBA
+* /picks CS
+* /funnel 24
+* /dashboard
+* /alerts
+* Restart-resume behavior
+
+If /picks requires accumulated evidence after restart and that is confirmed intentional, label it:
+
+⚠️ EXPECTED BEHAVIOR
+
+Do NOT change it simply because it is empty immediately after restart.
+
+If there is a real defect, document the exact cause and fix only that defect.
+
+━━━━━━━━━━━━━━━━━━
+🧊 FINAL FREEZE
+━━━━━━━━━━━━━━━━━━
+
+Do NOT freeze until all required work is verified.
+
+Final report must contain:
+
+* Files changed
+* Exact functions changed
+* Baseline vs final comparison
+* Dashboard old window → new daily window
+* /alerts old window → new 24h window
+* /status alert-count behavior
+* Daily reset behavior
+* Dashboard/funnel population explanation
+* /picks startup diagnosis
+* Cold-start diagnosis
+* Cold-start qualification behavior
+* Restart checkpoint implementation
+* Restart-resume verification
+* V3.4 star/priority regression status
+* Strong UNDER status
+* Tier 1 status
+* Tier 2 MLB/NFL status
+* Tests passed/failed
+* Final runtime status
+* Remaining known issues
+
+For every step, report:
+
+STEP X — ✅ VERIFIED
+
+or
+
+STEP X — ❌ FAILED
+
+or
+
+STEP X — ⚠️ UNVERIFIED
+
+Do not mark anything complete without evidence.
+
+If anything is ❌ FAILED or ⚠️ UNVERIFIED, DO NOT FREEZE.
+
+Only after everything required is verified:
+
+🧊 FREEZE SHARP MONEY BOT V3.5
+
+Do NOT begin another feature pass automatically.

@@ -339,6 +339,35 @@ class HealthTracker:
     def job_last_fail_str(self, job_name: str) -> str:
         return _age_str(self.get_job_info(job_name).get("last_fail_ts"))
 
+    # ── Scan checkpoint (restart-resume) ─────────────────────────────────────
+
+    def record_scan_checkpoint(self) -> None:
+        """Persist a checkpoint timestamp after each successful Underdog scan.
+
+        Loaded on the next startup by get_scan_checkpoint_age_minutes() so the
+        bot can determine whether to do a full cold-start rescore or a fast
+        resume (skip rescoring existing props whose scores are still fresh).
+        """
+        import time as _time
+        with self._lock:
+            self._state["last_scan_checkpoint_ts"] = _time.time()
+            self._state["last_scan_checkpoint_at"] = _now_iso()
+            self._save()
+
+    def get_scan_checkpoint_age_minutes(self) -> Optional[float]:
+        """Return minutes since last scan checkpoint, or None if none exists.
+
+        Used during cold-start to decide whether a fast resume is safe:
+          age < threshold  → scores are fresh; skip cold-start rescore
+          age >= threshold → scores may be stale; do full cold-start rescore
+        """
+        import time as _time
+        with self._lock:
+            ts = self._state.get("last_scan_checkpoint_ts")
+        if ts is None:
+            return None
+        return (_time.time() - float(ts)) / 60.0
+
     # ── Telegram ──────────────────────────────────────────────────────────────
 
     def record_underdog_scan(self, props_count: int, alerts_sent: int) -> None:

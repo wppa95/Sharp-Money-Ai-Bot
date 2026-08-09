@@ -238,7 +238,11 @@ class TestBug119FunnelAndStatusCounters:
         )
 
     def test_status_uses_db_backed_alert_count(self):
-        """/status must call count_today_actionable_alerts (DB-backed) not _total_alerts_sent."""
+        """/status must call count_today_actionable_alerts (DB-backed).
+
+        V3.5: all-time count removed from /status; only daily count shown.
+        Daily counter is DB-backed (resets at UTC midnight, survives restart).
+        """
         src = self._load_commands_source()
         idx = src.find("async def cmd_status")
         assert idx != -1
@@ -247,9 +251,11 @@ class TestBug119FunnelAndStatusCounters:
             "cmd_status does not call count_today_actionable_alerts — "
             "Alerts today will always show 0 after a restart"
         )
-        assert "count_actionable_pick_records" in fn_src, (
-            "cmd_status does not call count_actionable_pick_records — "
-            "Alerts all-time not shown"
+        # V3.5: all-time count removed from /status display
+        # count_actionable_pick_records is no longer called in cmd_status
+        assert "count_actionable_pick_records" not in fn_src, (
+            "V3.5: cmd_status must NOT call count_actionable_pick_records — "
+            "all-time count removed from /status display"
         )
 
     def test_status_does_not_use_raw_total_alerts_sent_variable(self):

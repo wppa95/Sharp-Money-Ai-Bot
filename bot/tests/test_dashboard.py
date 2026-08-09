@@ -306,12 +306,20 @@ class TestDashboardEngineEmpty:
         assert report.by_market  == []
         assert report.ud_tier_breakdown == {}
 
-    def test_gather_daily_trend_seven_days(self, empty_db):
-        """Daily trend always produces 7 DailyTrend entries (all zeros on empty DB)."""
+    def test_gather_daily_trend_today_only(self, empty_db):
+        """V3.5: Daily trend now produces only 1 entry (today's UTC day, zeros on empty DB).
+
+        V3.5 changed _gather_daily_trend from a 7-day loop to a today-only query.
+        Historical data is preserved in DB for backtesting; display focuses on today.
+        """
         report = _run(
             DashboardEngine.gather(empty_db)
         )
-        assert len(report.daily_trend) == 7
+        # Today-only: exactly 1 entry (which may or may not have data)
+        assert len(report.daily_trend) == 1, (
+            f"V3.5: _gather_daily_trend must produce 1 entry (today only), "
+            f"got {len(report.daily_trend)}"
+        )
 
     def test_gather_no_best_worst(self, empty_db):
         report = _run(
@@ -413,10 +421,13 @@ class TestDashboardEngineWithData:
         assert "Player Prop" in markets
 
     def test_daily_trend_has_today(self, db_with_ev):
+        """V3.5: daily_trend contains today's entry as the single (or last) element."""
         report = _run(
             DashboardEngine.gather(db_with_ev)
         )
-        # Today should have 5 EV records
+        # V3.5: only today's entry; daily_trend has exactly 1 entry
+        assert len(report.daily_trend) >= 1, "daily_trend must contain at least today"
+        # Today should have 5 EV records (all seeded records are today)
         today = report.daily_trend[-1]
         assert today.ev_count == 5
 

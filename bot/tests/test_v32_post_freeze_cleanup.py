@@ -49,33 +49,40 @@ class TestAlertsWording(unittest.TestCase):
             "Must not claim 'delivered' — only 'sent' (Telegram API accepted) is provable"
         )
 
-    def test_all_time_sent_present(self):
-        """"all-time sent" must be the wording used."""
+    def test_all_time_sent_removed_v35(self):
+        """V3.5: 'all-time sent' removed from /alerts display (24h window only)."""
         src = self._alerts_src()
-        self.assertIn(
+        self.assertNotIn(
             "all-time sent", src,
-            "'all-time sent' must be used instead of 'all-time delivered'"
+            "V3.5: 'all-time sent' must be removed from /alerts display"
         )
+        # V3.5 uses 24h window instead
+        self.assertIn("24h", src, "V3.5: /alerts must show '24h' window label")
 
-    def test_shown_label_includes_window(self):
-        """The 'N shown' label must mention the 72h window."""
+    def test_shown_label_includes_24h_window_v35(self):
+        """V3.5: The 'N shown' label must mention the 24h window (not 72h)."""
         src = self._alerts_src()
         self.assertIn(
+            "shown (last 24h)", src,
+            "V3.5: Display window changed from 72h to 24h"
+        )
+        self.assertNotIn(
             "shown (last 72h)", src,
-            "Should indicate the display window so users know it's not all-time"
+            "V3.5: Old 72h label must be removed"
         )
 
-    def test_delivered_not_claimed_in_empty_case(self):
-        """Empty-case text must also not claim delivery."""
+    def test_delivered_not_claimed_in_empty_case_v35(self):
+        """V3.5: Empty-case text must not claim delivery or show all-time count."""
         src = self._alerts_src()
-        # The no-alerts-sent fallback line
+        # Must not claim 'delivered'
         self.assertNotIn(
             "all-time delivered — use", src,
             "Empty-case fallback must not claim 'delivered'"
         )
-        # Should use "sent" instead
-        self.assertIn(
-            "all-time sent", src
+        # V3.5: all-time count also removed from empty case
+        self.assertNotIn(
+            "all-time sent", src,
+            "V3.5: 'all-time sent' removed from empty-case fallback"
         )
 
     def test_alert_sent_is_canonical_source_mentioned_in_comment(self):
@@ -101,10 +108,11 @@ class TestAlertsWording(unittest.TestCase):
             "Must clarify that 'sent' means Telegram API accepted the send"
         )
 
-    def test_72h_window_explicit_in_query(self):
-        """since_hours=72 must appear — confirms the window is intentional."""
+    def test_24h_window_explicit_in_query_v35(self):
+        """V3.5: since_hours=24 must appear — window changed from 72h to 24h."""
         src = self._alerts_src()
-        self.assertIn("since_hours=72", src)
+        self.assertIn("since_hours=24", src, "V3.5: /alerts must use 24h window")
+        self.assertNotIn("since_hours=72", src, "V3.5: Old 72h window must be gone")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -501,10 +509,13 @@ class TestRegressionGuards(unittest.TestCase):
         src = inspect.getsource(db_mod.Database.mark_opportunity_alert_sent)
         self.assertIn("utcnow", src)
 
-    def test_cmd_alerts_still_queries_72h(self):
-        """72-hour display window for /alerts must be unchanged."""
+    def test_cmd_alerts_queries_24h_v35(self):
+        """V3.5: /alerts display window changed from 72h to 24h."""
         src = inspect.getsource(cmd_mod.cmd_alerts)
-        self.assertIn("72", src)
+        self.assertIn("24", src, "V3.5: /alerts must use 24h window")
+        # since_hours=72 must be gone; since_hours=24 must be present
+        self.assertIn("since_hours=24", src, "V3.5: since_hours=24 required")
+        self.assertNotIn("since_hours=72", src, "V3.5: 72h window removed")
 
     def test_restarts_command_absent(self):
         self.assertFalse(hasattr(cmd_mod, "cmd_restarts"))

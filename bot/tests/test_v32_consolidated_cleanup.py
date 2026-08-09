@@ -506,13 +506,23 @@ class TestP1AlertsWording:
         visible = [ln for ln in lines if not ln.strip().startswith("#")]
         assert not visible, f"'delivered' in user-visible line(s): {visible}"
 
-    def test_all_time_sent_label_present(self):
+    def test_all_time_sent_label_removed_v35(self):
+        """V3.5: 'all-time sent' label removed from /alerts; only 24h window shown."""
         src = self._src()
-        assert "all-time sent" in src
+        assert "all-time sent" not in src, (
+            "V3.5: 'all-time sent' must be removed from /alerts display"
+        )
+        assert "24h" in src, "V3.5: /alerts must show 24h window label"
 
-    def test_72h_window_labeled(self):
+    def test_24h_window_labeled_v35(self):
+        """V3.5: Display window changed from 72h to 24h."""
         src = self._src()
-        assert "72h" in src or "72 h" in src
+        assert "24h" in src or "24 h" in src, (
+            "V3.5: /alerts must use 24h window label"
+        )
+        assert "72h" not in src and "72 h" not in src, (
+            "V3.5: Old 72h label must be removed"
+        )
 
     def test_api_accepted_comment_present(self):
         src = self._src()

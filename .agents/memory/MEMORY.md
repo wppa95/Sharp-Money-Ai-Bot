@@ -48,3 +48,4 @@
 - [V3.2 Final Tier 1 Fix](v32-tier1-final-fix.md) — /picks allows B-tier for Tier 1; np_immediate uses min_stars_for_sport(); PropCandidateLog Tier 1 B-tier→ACCEPTED; 3817 tests Aug 2026.
 - [Diagnosis pass Aug 2026](diagnosis-pass-aug2026.md) — 4 targeted fixes: or_/and_ import, score_tier midpoint display, rejection label, funnel label; ESPN only covers MLB/NFL; 3817 tests.
 - [S-tier priority override system](priority-override.md) — V3.4-final: 80+ BQ=HIGH PRIORITY (4★); 95+ BQ=override; stars from _bq_stars(conf) not score.total; Strong UNDER signal when direction=UNDER+score≤30; 3981 tests Aug 2026.
+- [V3.5 Reporting Cleanup + Restart Resume](v35-reporting-cleanup.md) — /alerts 24h window, /status daily-only, dashboard Today-only, fast-resume checkpoint (HealthTracker+market_engine), cold-start tests; 4030 tests Aug 2026.

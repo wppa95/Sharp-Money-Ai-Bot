@@ -268,11 +268,13 @@ class DashboardReport:
                 parts.append(f"  🥇 Best market: <b>{self.best_market}</b>")
             parts.append("")
 
-        # ── 7-day trend ───────────────────────────────────────────────────────
+        # ── Today's activity ──────────────────────────────────────────────────
+        # daily_trend now contains only today's UTC entry; show "Today" header.
+        # Historical trend data is preserved in DB for backtesting/reporting.
         trend_days = [d for d in self.daily_trend if d.total > 0]
         if trend_days:
-            parts.append("📅 <b>Last 7 Days</b>")
-            for d in trend_days[-7:]:
+            parts.append("📅 <b>Today</b>")
+            for d in trend_days[-1:]:
                 bar = "▪" * min(d.total, 10)
                 parts.append(
                     f"  {d.date_str}  <code>{d.total:>3}</code>  {bar}"
@@ -579,6 +581,12 @@ class DashboardEngine:
 
     @staticmethod
     async def _gather_daily_trend(db: "Database", r: DashboardReport) -> None:
+        """Gather today's UTC activity counts for the dashboard.
+
+        Only queries today's UTC calendar day (not a 7-day window).
+        Historical data remains stored in DB for backtesting; this display
+        focuses on the current day's actionable activity.
+        """
         try:
             from sqlalchemy import select, func
             from database import EVRecord, UnderdogSnapshotRecord, SteamRecord, PPEdgeRecord
@@ -587,12 +595,13 @@ class DashboardEngine:
             days: list[DailyTrend] = []
 
             async with db.session() as s:
-                for delta in range(6, -1, -1):
+                # Only query today's UTC calendar day (delta=0).
+                for delta in (0,):
                     day_start = (now - timedelta(days=delta)).replace(
                         hour=0, minute=0, second=0, microsecond=0
                     )
-                    day_end   = day_start + timedelta(days=1)
-                    date_str  = day_start.strftime("%m/%d")
+                    day_end  = day_start + timedelta(days=1)
+                    date_str = day_start.strftime("%m/%d")
 
                     dt = DailyTrend(date_str=date_str)
 

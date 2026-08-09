@@ -596,12 +596,12 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             _mon   = None
             _cache = None
 
-        # DB-backed alert count — survives restart, counts only Telegram-delivered picks.
+        # DB-backed daily alert count — resets at UTC midnight; survives restart.
+        # Historical records are preserved in PropOpportunityLog; use /alerts for history.
         _alerts_today = await _db.count_today_actionable_alerts() if _db else 0
-        _alerts_total = await _db.count_actionable_pick_records() if _db else 0
         lines: list[str] = [
             f"🤖 <b>Sharp Money Bot</b>  ·  Uptime: {_uptime_str()}",
-            f"📬 Alerts today: {_alerts_today:,}  ·  All-time: {_alerts_total:,}",
+            f"📬 Alerts today: {_alerts_today:,}",
             "",
         ]
 
@@ -2349,12 +2349,11 @@ async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     # rows written by subsequent scans reset that field to None/DISCOVERED.
     lines.append("🎯 <b>Actionable Pick Alerts</b>")
     try:
-        alerted_opps = await _db.get_alerted_opportunity_log(since_hours=72, limit=8)
-        # Also count all alerted picks (not just the display limit)
-        _total_alerted = await _db.count_actionable_pick_records()
+        # 24-hour display window; historical records remain stored in PropOpportunityLog.
+        alerted_opps = await _db.get_alerted_opportunity_log(since_hours=24, limit=8)
         if alerted_opps:
             # "sent" = Telegram API accepted the send; no message ID stored.
-            lines.append(f"  <i>{len(alerted_opps)} shown (last 72h) · {_total_alerted} all-time sent</i>")
+            lines.append(f"  <i>{len(alerted_opps)} shown (last 24h)</i>")
             lines.append("")
             for r in alerted_opps:
                 _lv   = float(getattr(r, "line_value", 0) or 0)
@@ -2369,10 +2368,8 @@ async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     f"  ·  {_tier}  ·  {_ts_str}"
                 )
         else:
-            lines.append("  <i>No player prop alerts sent in the last 72 h.</i>")
+            lines.append("  <i>No player prop alerts sent in the last 24 h.</i>")
             lines.append("  <i>Alerts fire when props pass all qualification + delivery gates.</i>")
-            if _total_alerted:
-                lines.append(f"  <i>({_total_alerted} all-time sent — use /performance for history.)</i>")
     except Exception as exc:
         logger.warning("cmd_alerts: prop history lookup failed: %s", exc)
         lines.append("  <i>Alert history unavailable — check /health for job status.</i>")

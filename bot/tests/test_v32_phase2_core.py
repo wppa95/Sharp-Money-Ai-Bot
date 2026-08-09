@@ -273,10 +273,13 @@ class TestP2AlertsCountIntact:
         ]
         assert not lines_with_delivered
 
-    def test_alerts_uses_sent_wording(self):
+    def test_alerts_uses_24h_window_v35(self):
+        """V3.5: /alerts uses 24h window; all-time count removed from display."""
         import commands as cmd_mod
         src = inspect.getsource(cmd_mod.cmd_alerts)
-        assert "all-time sent" in src
+        # V3.5 changed 72h → 24h and removed all-time count
+        assert "since_hours=24" in src, "V3.5: /alerts must use 24h window"
+        assert "all-time sent" not in src, "V3.5: all-time count removed from /alerts"
 
     def test_12h_time_format_intact(self):
         """_fmt_user_ts() 12h format from prior pass is still present."""
