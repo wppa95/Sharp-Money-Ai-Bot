@@ -116,10 +116,11 @@ def _format_95_priority_alert(
     decision: "Optional[object]",
     line_val: float,
 ) -> str:
-    """Format the Telegram message for a 95+/100 S-tier priority override alert.
+    """Format the Telegram message for a 95+ Bet Quality S-tier priority alert.
 
-    This alert bypasses all downstream qualification gates.  It is sent
-    immediately when a prop reaches score ≥ 95 AND tier == "S".
+    Triggered when decision.confidence ≥ 95 AND decision_tier == "S".
+    Confidence + Quality gates apply; Sport Direction policy (MLB/NFL OVER-only)
+    is enforced before this function is called.
     """
     sport  = getattr(snap, "sport", None) or "UNKNOWN"
     stars  = "★" * score.stars + "☆" * (5 - score.stars)
@@ -139,15 +140,14 @@ def _format_95_priority_alert(
             pass
 
     return (
-        f"🔥🚨 <b>S-TIER PRIORITY OVERRIDE — {int(score.total)}/100</b>\n"
+        f"🔥🚨 <b>S-TIER PRIORITY OVERRIDE — {conf}/100</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"<b>{player}</b>  ·  {stat_type}\n"
         f"🏆 S-TIER  {stars}  {sport}"
         f"{gt_line}"
         f"\nLine: {line_val:.1f}"
         f"{dir_line}\n"
-        f"\n<i>⚡ Score ≥ 95/100 — immediate priority override.</i>"
-        f"\n<i>All validation gates bypassed.</i>"
+        f"\n<i>🔥 Bet Quality {conf}/100 — Priority</i>"
     )
 
 
@@ -1257,13 +1257,18 @@ async def underdog_job(context) -> None:
 
                 # ── 95+ S-tier priority override [new-prop path] ─────────────────
                 # Bet Quality (decision.confidence) ≥ 95 AND decision tier == "S":
-                # bypass ALL downstream gates, send immediately.
-                # Uses Bet Quality (game-history confidence), not raw UD score total,
-                # so MLB props with conf=95 trigger correctly regardless of market score.
+                # bypasses secondary/historical gates but still enforces:
+                #   1. Sport Direction policy — MLB/NFL OVER-only; UNDER always blocked
+                #   2. Confidence Gate (implicitly met: conf ≥ 95 ≥ any min_conf)
+                #   3. Quality Gate  (implicitly met: conf ≥ 95 = UD_STRICT_SPORT_MIN_BET_QUALITY)
+                #   4. Existing dedup / reversal protection
                 _np_pp_key = (player, snap.sport or "UNKNOWN", stat_type)
                 if decision is not None and decision.confidence >= 95 and decision.decision_tier == "S" and decision.recommendation != "PASS":
                     np_immediate = False  # 95+ always uses the override path
-                    if (
+                    # Sport Direction check — MLB/NFL are OVER-only; block UNDER regardless of BQ
+                    _np_95_sport = (snap.sport or "").upper()
+                    _np_95_dir_ok = not (_np_95_sport in ("MLB", "NFL") and decision.recommendation == "UNDER")
+                    if _np_95_dir_ok and (
                         _np_pp_key not in _priority_alerted_this_scan
                         and _np_pp_key not in _priority_override_sent
                         and chat_ids
@@ -1638,11 +1643,17 @@ async def underdog_job(context) -> None:
 
                     # ── 95+ S-tier priority override [lc path] ───────────────────
                     # Bet Quality (decision.confidence) ≥ 95 AND decision tier == "S":
-                    # bypass ALL downstream gates. _lc_95_sent=True forces should_alert=False.
+                    # bypasses secondary/historical gates but still enforces:
+                    #   1. Sport Direction — MLB/NFL OVER-only; UNDER always blocked
+                    #   2. Confidence + Quality gates implicitly met at BQ ≥ 95
+                    #   3. Existing dedup / reversal protection
                     _lc_pp_key = (player, snap.sport or "UNKNOWN", stat_type)
                     if decision is not None and decision.confidence >= 95 and decision.decision_tier == "S" and decision.recommendation != "PASS":
                         _lc_95_sent = True  # block normal lc gate sequence
-                        if (
+                        # Sport Direction check — MLB/NFL are OVER-only; block UNDER regardless of BQ
+                        _lc_95_sport = (snap.sport or "").upper()
+                        _lc_95_dir_ok = not (_lc_95_sport in ("MLB", "NFL") and decision.recommendation == "UNDER")
+                        if _lc_95_dir_ok and (
                             _lc_pp_key not in _priority_alerted_this_scan
                             and _lc_pp_key not in _priority_override_sent
                             and chat_ids
@@ -2291,12 +2302,16 @@ async def underdog_job(context) -> None:
                     pass  # never block alert flow
                 # ── 95+ S-tier priority override [standing path] ─────────────
                 # Bet Quality (_sdec.confidence) ≥ 95 AND decision tier == "S":
-                # bypass all remaining gates and send immediately.
-                # `continue` ensures normal gates are skipped regardless of
-                # whether the override was previously sent.
+                # bypasses secondary/historical gates but still enforces:
+                #   1. Sport Direction — MLB/NFL OVER-only; UNDER always blocked
+                #   2. Confidence + Quality gates implicitly met at BQ ≥ 95
+                #   3. Existing dedup / reversal protection
+                # `continue` skips remaining gates for all 95+ props (sent or not).
                 _sp_pp_key = (_sp, _ssport, _st)
                 if _sdec is not None and _sdec.confidence >= 95 and _sdec.decision_tier == "S" and _sdec.recommendation != "PASS":
-                    if (
+                    # Sport Direction check — MLB/NFL are OVER-only; block UNDER regardless of BQ
+                    _sp_95_dir_ok = not (_ssport.upper() in ("MLB", "NFL") and _sdec.recommendation == "UNDER")
+                    if _sp_95_dir_ok and (
                         _sp_pp_key not in _priority_alerted_this_scan
                         and _sp_pp_key not in _priority_override_sent
                         and chat_ids

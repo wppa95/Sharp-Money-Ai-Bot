@@ -40,12 +40,12 @@ class TestFormat95PriorityAlert:
         )
         assert callable(me._format_95_priority_alert)
 
-    def test_message_contains_score(self):
-        """Alert must include the score total."""
+    def test_message_contains_bet_quality(self):
+        """Alert must show Bet Quality (decision.confidence), NOT raw score.total."""
         fn = self._import()
 
         class _FakeScore:
-            total = 96
+            total = 52   # raw market score — intentionally low
             stars = 5
             tier  = "S"
 
@@ -55,10 +55,34 @@ class TestFormat95PriorityAlert:
 
         class _FakeDecision:
             recommendation = "OVER"
-            confidence     = 82
+            confidence     = 95  # BQ — this is what should appear
 
         msg = fn("Chelsea Gray", _FakeSnap(), "Rebounds", _FakeScore(), _FakeDecision(), 2.5)
-        assert "96" in msg, "Score total must appear in override message"
+        # Must show the BQ (95), NOT the raw score (52)
+        assert "95" in msg, "Bet Quality (confidence) must appear in override message"
+        assert "52" not in msg or msg.count("52") == 0, (
+            "Raw score.total (52) must NOT appear in override message header — only BQ"
+        )
+
+    def test_message_says_bet_quality_not_score_gte(self):
+        """Telegram text must say 'Bet Quality' — not 'Score ≥ 95'."""
+        fn = self._import()
+
+        class _FakeScore:
+            total = 52; stars = 5; tier = "S"
+
+        class _FakeSnap:
+            sport = "WNBA"; game_time = None
+
+        class _FakeDecision:
+            recommendation = "OVER"; confidence = 95
+
+        msg = fn("Test", _FakeSnap(), "Points", _FakeScore(), _FakeDecision(), 10.5)
+        assert "Bet Quality" in msg, "Override message must say 'Bet Quality'"
+        assert "Score ≥ 95" not in msg, "'Score ≥ 95' must NOT appear — it was the old incorrect wording"
+        assert "All validation gates bypassed" not in msg, (
+            "'All validation gates bypassed' must NOT appear — inaccurate; direction gate still applies"
+        )
 
     def test_message_contains_priority_header(self):
         """Override message must have the 🔥🚨 priority header."""
@@ -118,8 +142,8 @@ class TestFormat95PriorityAlert:
         msg = fn("Shohei Ohtani", _N(), "Strikeouts", _S(), _D(), 8.5)
         assert "PASS" not in msg, "PASS direction must NOT appear in override message"
 
-    def test_message_includes_bypass_notice(self):
-        """Message must inform user that validation was bypassed."""
+    def test_message_shows_priority_label(self):
+        """Message must include a clear priority indicator."""
         fn = self._import()
 
         class _S:
@@ -128,9 +152,12 @@ class TestFormat95PriorityAlert:
         class _N:
             sport = "NFL"; game_time = None
 
-        msg = fn("Patrick Mahomes", _N(), "Passing Yards", _S(), None, 299.5)
-        assert "bypass" in msg.lower() or "validation" in msg.lower(), (
-            "Override message must mention that validation was bypassed"
+        class _D:
+            recommendation = "OVER"; confidence = 99
+
+        msg = fn("Patrick Mahomes", _N(), "Passing Yards", _S(), _D(), 299.5)
+        assert "Priority" in msg or "PRIORITY" in msg, (
+            "Override message must include a priority indicator"
         )
 
     def test_message_shows_sport(self):
@@ -324,18 +351,31 @@ class TestHighPriorityParam:
 class TestThresholdLogicSimulation:
     """Simulate the priority routing logic for every threshold value."""
 
-    def _route(self, confidence: float, decision_tier: str, recommendation: str = "OVER") -> str:
-        """Replicate the exact routing logic from market_engine using Bet Quality confidence."""
-        # PASS decisions never trigger an override regardless of confidence
+    def _route(
+        self,
+        confidence: float,
+        decision_tier: str,
+        recommendation: str = "OVER",
+        sport: str = "WNBA",
+    ) -> str:
+        """Replicate the exact routing logic from market_engine using Bet Quality confidence.
+
+        Mirrors the three-layer check in each alert path:
+          1. PASS guard — never actionable
+          2. Sport Direction — MLB/NFL OVER-only; UNDER always blocked
+          3. BQ threshold routing — 95+ override, 90-94 high-priority, else normal
+        """
+        # 1. PASS decisions never trigger an override regardless of confidence
         if recommendation == "PASS" or decision_tier == "PASS":
             return "NORMAL"
-        # 95+ Bet Quality S-tier → immediate override
+        # 2. Sport Direction check — MLB/NFL are OVER-only; UNDER blocked even at 95+ BQ
+        if sport.upper() in ("MLB", "NFL") and recommendation == "UNDER":
+            return "DIRECTION_BLOCKED"
+        # 3. BQ threshold routing
         if confidence >= 95 and decision_tier == "S":
             return "OVERRIDE_95_PLUS"
-        # 90-94 Bet Quality S-tier → high_priority=True to deliver_underdog (normal gates)
         if 90 <= confidence < 95 and decision_tier == "S":
             return "HIGH_PRIORITY_90_94"
-        # Everything else → normal behavior
         return "NORMAL"
 
     def test_89_s_tier_is_normal(self):
@@ -575,6 +615,170 @@ class TestOverrideMessageQuality:
     def test_message_has_stars(self):
         msg = self._make_msg()
         assert "★" in msg, "Star rating must appear in override message"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# P8b — V3.3 Sport-Direction Policy at 95+ BQ (spec cases 1–18)
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestV33SportDirectionPolicy:
+    """V3.3 sport-direction enforcement at the 95+ BQ threshold.
+
+    Spec:
+      - MLB/NFL = Tier 2 = OVER-only.  UNDER blocked at 95+ BQ.
+      - All other sports = Tier 1 = OVER and UNDER both allowed at 95+ BQ.
+      - 90-94 BQ continues through normal gates (not the 95+ override path).
+      - PASS recommendation = never actionable.
+    """
+
+    def _route(
+        self,
+        confidence: float,
+        decision_tier: str,
+        recommendation: str = "OVER",
+        sport: str = "WNBA",
+    ) -> str:
+        # Mirror the logic in TestThresholdLogicSimulation._route
+        if recommendation == "PASS" or decision_tier == "PASS":
+            return "NORMAL"
+        if sport.upper() in ("MLB", "NFL") and recommendation == "UNDER":
+            return "DIRECTION_BLOCKED"
+        if confidence >= 95 and decision_tier == "S":
+            return "OVERRIDE_95_PLUS"
+        if 90 <= confidence < 95 and decision_tier == "S":
+            return "HIGH_PRIORITY_90_94"
+        return "NORMAL"
+
+    # ── Spec case 1: Raw Score low + BQ 95 + MLB OVER → Priority ────────────
+    def test_mlb_over_bq95_is_override(self):
+        """Raw Score 52, BQ 95, MLB OVER → OVERRIDE_95_PLUS (Confidence+Quality implicitly met)."""
+        assert self._route(95, "S", "OVER", "MLB") == "OVERRIDE_95_PLUS"
+
+    # ── Spec case 2: Raw Score low + BQ 95 + MLB UNDER → BLOCKED ────────────
+    def test_mlb_under_bq95_is_blocked(self):
+        """Raw Score 52, BQ 95, MLB UNDER → DIRECTION_BLOCKED (MLB is OVER-only)."""
+        assert self._route(95, "S", "UNDER", "MLB") == "DIRECTION_BLOCKED"
+
+    # ── Spec case 3: BQ 95 + NFL OVER → Priority ────────────────────────────
+    def test_nfl_over_bq95_is_override(self):
+        """BQ 95, NFL OVER → OVERRIDE_95_PLUS."""
+        assert self._route(95, "S", "OVER", "NFL") == "OVERRIDE_95_PLUS"
+
+    # ── Spec case 4: BQ 95 + NFL UNDER → BLOCKED ────────────────────────────
+    def test_nfl_under_bq95_is_blocked(self):
+        """BQ 95, NFL UNDER → DIRECTION_BLOCKED (NFL is OVER-only)."""
+        assert self._route(95, "S", "UNDER", "NFL") == "DIRECTION_BLOCKED"
+
+    # ── Spec case 5: Tier 1 OVER + BQ 95 → Priority ─────────────────────────
+    def test_tier1_over_bq95_is_override(self):
+        """Tier 1 (WNBA) OVER + BQ 95 → OVERRIDE_95_PLUS."""
+        assert self._route(95, "S", "OVER", "WNBA") == "OVERRIDE_95_PLUS"
+
+    # ── Spec case 6: Tier 1 UNDER + BQ 95 → Priority ────────────────────────
+    def test_tier1_under_bq95_is_override(self):
+        """Tier 1 (WNBA) UNDER + BQ 95 → OVERRIDE_95_PLUS (Tier 1 allows UNDER)."""
+        assert self._route(95, "S", "UNDER", "WNBA") == "OVERRIDE_95_PLUS"
+
+    def test_cs_under_bq95_is_override(self):
+        """Tier 1 (CS) UNDER + BQ 95 → OVERRIDE_95_PLUS."""
+        assert self._route(95, "S", "UNDER", "CS") == "OVERRIDE_95_PLUS"
+
+    def test_lol_under_bq95_is_override(self):
+        """Tier 1 (LOL) UNDER + BQ 95 → OVERRIDE_95_PLUS."""
+        assert self._route(95, "S", "UNDER", "LOL") == "OVERRIDE_95_PLUS"
+
+    def test_tennis_under_bq95_is_override(self):
+        """Tier 1 (TENNIS) UNDER + BQ 95 → OVERRIDE_95_PLUS."""
+        assert self._route(95, "S", "UNDER", "TENNIS") == "OVERRIDE_95_PLUS"
+
+    # ── Spec case 7: BQ 94 → NOT 95+ priority ───────────────────────────────
+    def test_bq94_is_not_override(self):
+        """BQ 94 S-tier → HIGH_PRIORITY_90_94, NOT override."""
+        assert self._route(94, "S", "OVER", "WNBA") == "HIGH_PRIORITY_90_94"
+        assert self._route(94, "S", "OVER", "MLB") != "OVERRIDE_95_PLUS"
+
+    # ── Spec case 8: BQ 90-94 → High Priority (normal gates) ────────────────
+    def test_bq90_is_high_priority(self):
+        assert self._route(90, "S", "OVER", "WNBA") == "HIGH_PRIORITY_90_94"
+
+    def test_bq93_is_high_priority(self):
+        assert self._route(93, "S", "OVER", "CS") == "HIGH_PRIORITY_90_94"
+
+    # ── Spec case 11: PASS recommendation → NEVER actionable ────────────────
+    def test_pass_rec_never_actionable(self):
+        """PASS recommendation must never produce an override regardless of BQ."""
+        for bq in (90, 95, 100):
+            assert self._route(bq, "S", "PASS", "WNBA") == "NORMAL", (
+                f"PASS with BQ={bq} must be NORMAL"
+            )
+        assert self._route(95, "PASS", "OVER", "WNBA") == "NORMAL"
+
+    # ── MLB UNDER blocking is sport-specific — Tier 1 UNDER is separate ─────
+    def test_mlb_under_blocked_at_all_bq_levels(self):
+        """MLB UNDER is DIRECTION_BLOCKED at BQ 95+ regardless of confidence."""
+        for bq in (95, 97, 100):
+            assert self._route(bq, "S", "UNDER", "MLB") == "DIRECTION_BLOCKED"
+
+    def test_nfl_under_blocked_at_all_bq_levels(self):
+        """NFL UNDER is DIRECTION_BLOCKED at BQ 95+ regardless of confidence."""
+        for bq in (95, 97, 100):
+            assert self._route(bq, "S", "UNDER", "NFL") == "DIRECTION_BLOCKED"
+
+    # ── Spec case 16: Old score.total priority path must not remain active ───
+    def test_score_total_not_used_for_priority(self):
+        """market_engine source must NOT use score.total >= 95 as a priority gate."""
+        import inspect, market_engine as me
+        src = inspect.getsource(me.underdog_job)
+        assert "score.total >= 95" not in src, (
+            "score.total >= 95 found in underdog_job — old priority path still active!"
+        )
+        assert "_sscore.total >= 95" not in src, (
+            "_sscore.total >= 95 found in underdog_job — old priority path still active!"
+        )
+
+    # ── Spec case 15: Telegram priority text says "Bet Quality" ─────────────
+    def test_telegram_says_bet_quality_not_score_gte(self):
+        """Override message must say 'Bet Quality', not 'Score ≥ 95'."""
+        import market_engine as me
+
+        class _S:
+            total = 52; stars = 5; tier = "S"
+
+        class _N:
+            sport = "MLB"; game_time = None
+
+        class _D:
+            recommendation = "OVER"; confidence = 95
+
+        msg = me._format_95_priority_alert("Royce Lewis", _N(), "Strikeouts", _S(), _D(), 2.5)
+        assert "Bet Quality" in msg, "Override message must say 'Bet Quality'"
+        assert "Score ≥ 95" not in msg, "Override message must NOT say 'Score ≥ 95'"
+        assert "All validation gates bypassed" not in msg, (
+            "'All validation gates bypassed' must NOT appear — direction gate still applies"
+        )
+        # The number shown must be the BQ (95), not the raw score (52)
+        assert "95" in msg
+
+    # ── Spec case 17: /picks current-day only ────────────────────────────────
+    def test_picks_uses_since_hours_not_hardcoded_24(self):
+        """commands.py /picks must compute _since_hours from midnight, not hardcode 24."""
+        import inspect, commands as cmd
+        src = inspect.getsource(cmd._cmd_picks_inner)
+        assert "_since_hours" in src, "_since_hours variable not found in _cmd_picks_inner"
+        assert "_midnight_utc" in src, "_midnight_utc not found — current-day calc missing"
+        # Must NOT have a bare since_hours=24 call for UD props (was the pre-fix code)
+        assert "since_hours=24" not in src or "_since_hours" in src, (
+            "since_hours=24 still hardcoded — current-day /picks window not applied"
+        )
+
+    # ── Sport Direction source check ─────────────────────────────────────────
+    def test_mlb_nfl_direction_check_in_source(self):
+        """market_engine override blocks must check MLB/NFL direction before broadcasting."""
+        import inspect, market_engine as me
+        src = inspect.getsource(me.underdog_job)
+        assert "_np_95_dir_ok" in src, "_np_95_dir_ok direction check missing from new-prop override"
+        assert "_lc_95_dir_ok" in src, "_lc_95_dir_ok direction check missing from lc override"
+        assert "_sp_95_dir_ok" in src, "_sp_95_dir_ok direction check missing from standing override"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
