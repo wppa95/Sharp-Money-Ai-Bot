@@ -1,0 +1,454 @@
+⚠️ SHARP MONEY BOT V3.5 — FINAL DIAGNOSIS + TARGETED FIX
+
+IMPORTANT:
+
+We are out of credentials/credits after this message.
+
+DO NOT burn credentials.
+DO NOT run unnecessary broad rescans, repeated polling, or expensive tests.
+
+This is the FINAL targeted fix pass before we let the bot run and collect real data.
+
+Do NOT:
+
+* Rewrite the bot
+* Rewrite the scoring engine
+* Redesign architecture
+* Replace the Underdog pipeline
+* Change the database structure unless absolutely required
+* Lower qualification thresholds
+* Promote all Near-Misses
+* Weaken MLB/NFL Tier 2 rules
+* Add providers
+* Enable sportsbook polling
+* Change OddsAPI keys
+* Create unrelated features
+
+Use the existing systems.
+
+API credentials/secrets must never appear in logs, Telegram, /status, /config, diagnostics, or tests.
+
+━━━━━━━━━━━━━━━━━━
+📋 MANDATORY ORDER
+━━━━━━━━━━━━━━━━━━
+
+Work strictly in this order:
+
+1. Diagnose qualified Near-Miss issue
+2. Diagnose dashboard mismatch
+3. Verify restart/cold-start coverage
+4. Implement only evidence-based fixes
+5. Run focused tests
+6. Run full test suite
+7. Run startup health check
+8. Final runtime verification
+9. Freeze V3.5
+
+Do NOT skip diagnosis and do NOT change code before the root cause is understood.
+
+━━━━━━━━━━━━━━━━━━
+🚨 ISSUE 1 — QUALIFIED NEAR-MISSES
+━━━━━━━━━━━━━━━━━━
+
+The funnel is showing high-scoring candidates as:
+
+80–87/100
+S-tier
+reason = qualified
+
+Examples from /funnel 48:
+
+* rx — Kills on Maps 1+2 (CS)
+    85/100 [S] — qualified
+* None Quad — Kills on Maps 1+2 (LOL)
+    83/100 [S] — qualified
+* Alanna Smith — Rebounds (WNBA)
+    80/100 [S] — qualified
+
+Trace ONE exact candidate end-to-end:
+
+rx — CS — Kills on Maps 1+2 — 85 S — qualified
+
+Trace:
+
+PropCandidateLog / funnel
+→ score
+→ tier
+→ confidence
+→ validation
+→ direction
+→ Bet Quality
+→ event/activity checks
+→ cold-start state
+→ dedup/correlation
+→ final actionable gate
+→ stored pick creation
+→ alert creation
+→ Telegram eligibility
+
+Then trace:
+
+None Quad — LOL — Kills on Maps 1+2 — 83 S — qualified
+
+Determine EXACTLY where each candidate stops.
+
+Report before changing code:
+
+1. Exact function/module where candidate is rejected/dropped
+2. Exact condition responsible
+3. Whether “qualified” is intermediate qualification rather than final actionable qualification
+4. Whether Tier 1 requires an unintended hidden threshold
+5. Whether Bet Quality blocks it
+6. Whether confidence blocks it
+7. Whether direction blocks it
+8. Whether event/activity validation blocks it
+9. Whether cold-start blocks it
+10. Whether dedup/correlation blocks it
+11. Whether it reaches stored-pick creation
+12. Whether it reaches alert creation
+13. Whether Telegram is the final problem or the pick never reaches alert creation
+
+DO NOT:
+
+* Lower thresholds
+* Promote all Near-Misses
+* Remove legitimate safety gates
+
+If the candidate is correctly rejected by a legitimate final gate, leave the gate alone and document why.
+
+If there is an actual implementation bug where the candidate satisfies all required gates but is incorrectly rejected, fix ONLY that bug.
+
+━━━━━━━━━━━━━━━━━━
+🔄 ISSUE 2 — RESTART / COLD-START COVERAGE
+━━━━━━━━━━━━━━━━━━
+
+We already implemented V3.5 restart-resume behavior.
+
+We now need to verify it is completely correct.
+
+A restart must NOT cause the bot to lose progress or permanently miss strong props.
+
+IMPORTANT:
+
+After EVERY restart, the system must correctly handle props that were already present during the previous session but were in cold-start / insufficient-history state.
+
+The purpose is:
+
+Restart
+→ resume previous progress
+→ identify existing cold-start props
+→ continue accumulating their history
+→ re-evaluate them as data becomes sufficient
+→ allow qualified S/A props through the normal gates
+
+Do NOT simply skip all existing props because a recent checkpoint exists.
+
+We need to distinguish:
+
+A) Props with sufficient prior history
+→ resume incrementally
+
+B) Existing cold-start props
+→ continue/revisit them so they can graduate into normal qualification
+
+C) Genuinely new props
+→ initialize and process normally
+
+Verify that this happens on EVERY restart.
+
+━━━━━━━━━━━━━━━━━━
+🎯 SPORT COVERAGE REQUIREMENT
+━━━━━━━━━━━━━━━━━━
+
+Cold-start recovery must be verified individually for:
+
+TIER 1:
+
+Every monitored sport other than MLB/NFL.
+
+Examples include:
+
+* CS
+* LOL
+* WNBA
+* TENNIS
+* MMA
+* VAL
+* DOTA
+* PGA
+* ESPORTS
+* NPB
+* CFB
+* CFL
+* RACING
+* BASKETBALL
+* and every other currently monitored Tier 1 sport
+
+For EACH Tier 1 sport verify:
+
+☐ Existing cold-start S-tier props are revisited
+☐ Existing cold-start A-tier props are revisited
+☐ Their history continues accumulating
+☐ They can graduate into normal qualification
+☐ They are not permanently skipped because of restart-resume
+☐ Normal validation/direction/BQ/conf/dedup gates still apply
+
+TIER 2:
+
+MLB
+NFL
+
+For EACH Tier 2 sport verify:
+
+☐ Existing cold-start S-tier props are revisited
+☐ Existing cold-start A-tier props are revisited/checked
+☐ Tier 2 rules remain enforced
+☐ MLB/NFL S-tier requirements remain intact
+☐ Existing UNDER restrictions remain intact
+☐ Restart-resume cannot bypass Tier 2 safety gates
+
+IMPORTANT:
+
+The requirement is NOT:
+
+“Promote every cold-start prop.”
+
+The requirement IS:
+
+“Never permanently lose a legitimate S/A candidate simply because the bot restarted while that prop was still in cold-start.”
+
+Cold-start props must continue through the normal qualification process once enough history exists.
+
+━━━━━━━━━━━━━━━━━━
+🧪 COLD-START TEST REQUIREMENTS
+━━━━━━━━━━━━━━━━━━
+
+Add focused tests proving:
+
+1. New prop enters cold-start.
+2. Bot restarts.
+3. Cold-start prop remains in persistent state.
+4. Restart-resume identifies it.
+5. Existing history is preserved.
+6. Prop receives subsequent snapshots.
+7. Prop is re-evaluated after sufficient history.
+8. S-tier cold-start prop can become qualified.
+9. A-tier cold-start prop can become qualified.
+10. Tier 1 behavior works independently for each sport.
+11. Tier 2 MLB behavior works.
+12. Tier 2 NFL behavior works.
+13. A recent checkpoint does NOT incorrectly skip cold-start props.
+14. Props with sufficient history still use fast incremental resume.
+15. Genuinely new props still initialize correctly.
+16. Restart does not duplicate stored picks or alerts.
+
+Use lightweight simulated/database-backed tests.
+
+Do NOT perform an expensive live rescan just to prove this.
+
+━━━━━━━━━━━━━━━━━━
+📊 ISSUE 3 — DASHBOARD POPULATION MISMATCH
+━━━━━━━━━━━━━━━━━━
+
+Current dashboard:
+
+📬 Actionable Picks Today: 7
+
+📅 Today:
+08/09 = 7
+
+These are correct.
+
+But:
+
+🐶 Tier Breakdown:
+S = 1
+A = 135
+B = 161
+PASS = 192
+
+🏆 By Sport:
+MLB = 1109
+WNBA = 11
+CS = 10
+LOL = 4
+DOTA = 1
+PGA = 1
+
+These appear to represent a larger historical/stored population.
+
+Historical records MUST remain stored.
+
+DO NOT delete historical records.
+
+FIRST diagnose:
+
+* Exact function responsible for Tier Breakdown
+* Exact function responsible for By Sport
+* Exact table/query used
+* Exact time window used
+* Why it differs from Today
+* Whether those sections intentionally show historical data
+* Whether they should instead show today’s population
+* Whether they represent actionable picks, qualified candidates, or another population
+
+Do NOT force all numbers to equal 7.
+
+Determine the correct intended population first.
+
+The funnel remains separate:
+
+/funnel 24 = candidate qualification population
+
+/alerts = Telegram-delivered actionable alerts
+
+/dashboard = dashboard reporting population
+
+These populations do not necessarily have to match.
+
+If Tier Breakdown/By Sport are incorrectly missing the intended daily filter, make the smallest reporting-only fix.
+
+Historical DB data must remain intact.
+
+━━━━━━━━━━━━━━━━━━
+⭐ EXISTING V3.4/V3.5 RULES — PRESERVE
+━━━━━━━━━━━━━━━━━━
+
+BQ-based stars:
+
+★★★★★ = 100
+★★★★☆ = 80–99
+★★★☆☆ = 70–79
+★★☆☆☆ = 40–69
+★☆☆☆☆ = 0–39
+
+Priority:
+
+80+ = HIGH PRIORITY
+75–79 = ACTIONABLE if all gates pass
+70–74 = WATCHLIST ONLY
+
+Strong UNDER display:
+
+score.total ≤ 30 + UNDER
+→ display Strong UNDER Signal
+
+This is display/priority logic only.
+
+It must NOT bypass qualification or safety gates.
+
+Preserve:
+
+* Underdog PRIMARY
+* Tier 1 qualification
+* Tier 2 MLB/NFL rules
+* Telegram actionable-only behavior
+* Restart-resume
+* Persistent history
+* CLV tracking
+* Existing scoring engine
+
+━━━━━━━━━━━━━━━━━━
+🛠️ IMPLEMENTATION
+━━━━━━━━━━━━━━━━━━
+
+ONLY after diagnosis:
+
+☐ Document exact root causes
+☐ Implement only fixes supported by evidence
+☐ Preserve existing architecture
+☐ Preserve existing scoring engine
+☐ Preserve Underdog-first pipeline
+☐ Preserve V3.4/V3.5 behavior
+☐ Fix only the qualified→actionable bug if one exists
+☐ Fix only the dashboard reporting bug if one exists
+☐ Fix only the restart/cold-start coverage bug if one exists
+
+If no bug exists in one area, DO NOT modify that area.
+
+━━━━━━━━━━━━━━━━━━
+🧪 VALIDATION
+━━━━━━━━━━━━━━━━━━
+
+Run:
+
+1. Focused regression tests
+2. Cold-start/restart tests
+3. Dashboard tests
+4. Full test suite
+5. Startup health check
+
+Verify:
+
+☐ /status works
+☐ /health works
+☐ /picks works
+☐ /picks 20 works
+☐ /funnel 24 works
+☐ /funnel 48 works
+☐ /dashboard works
+☐ /alerts works
+☐ Underdog monitor works
+☐ Database writes work
+☐ Restart-resume works
+☐ Cold-start props are not permanently skipped
+☐ Tier 1 S/A cold-start coverage works by sport
+☐ Tier 2 MLB/NFL behavior remains correct
+☐ Qualified candidates reach final gates correctly
+☐ No false Near-Miss rejection remains
+☐ Dashboard populations are explainable
+☐ Historical data remains intact
+☐ Telegram remains actionable-only
+☐ No raw market movement spam
+☐ No known command failure remains
+
+If something cannot be verified because there is no live qualifying event, label it UNVERIFIED.
+
+Do NOT claim success without evidence.
+
+━━━━━━━━━━━━━━━━━━
+📋 FINAL REPORT
+━━━━━━━━━━━━━━━━━━
+
+Report:
+
+* Exact root cause of qualified Near-Miss issue
+* Exact fix made
+* Exact root cause of dashboard mismatch
+* Exact dashboard fix made
+* Exact root cause of restart/cold-start issue
+* Exact restart/cold-start fix made
+* Files changed
+* Focused tests passed
+* Full test count
+* /picks status
+* /funnel status
+* Dashboard status
+* /alerts status
+* Tier 1 status by sport
+* Tier 2 MLB/NFL status
+* Restart-resume status
+* Cold-start status
+* Persistence status
+* Telegram status
+* Remaining known issues
+
+If any required item is FAILED or UNVERIFIED, DO NOT freeze.
+
+If everything is verified:
+
+🧊 FREEZE V3.5
+
+Then STOP making changes.
+
+Let the bot run and collect real data.
+
+Do NOT:
+
+* Enable sportsbook polling
+* Change OddsAPI
+* Add providers
+* Start another feature pass
+* Rewrite anything
+
+The next phase should be observation and real-data collection, not another rewrite.

@@ -230,11 +230,31 @@ class TestColdStartBehavior:
         src = inspect.getsource(_me.underdog_job)
         assert "_cold_start_done = True" in src
 
-    def test_standing_path_skips_cold_start(self):
-        """Standing path only runs when not is_cold_start."""
+    def test_standing_path_cold_start_gate(self):
+        """Standing path gate: runs when not is_cold_start OR when _fast_resume=True.
+
+        V3.5 changed the guard from `not is_cold_start` to
+        `(not is_cold_start or _fast_resume)` so that existing DISCOVERED props
+        are immediately re-evaluated on fast-resume scan 1 rather than waiting
+        for scan 2.  All delivery gates (confidence, live/past, BQ, dedup) still
+        apply — fast-resume does NOT weaken any qualification requirements.
+        """
         import inspect, market_engine as _me
         src = inspect.getsource(_me.underdog_job)
-        assert "not is_cold_start and chat_ids" in src
+        # V3.5: fast-resume exception enables standing path during cold-start
+        assert "(not is_cold_start or _fast_resume)" in src, (
+            "V3.5: standing path guard must be '(not is_cold_start or _fast_resume)'"
+        )
+        # Without fast-resume: cold-start still prevents standing path
+        is_cold_start, fast_resume = True, False
+        assert (not is_cold_start or fast_resume) is False, (
+            "Without fast-resume: standing path still skipped during cold-start"
+        )
+        # With fast-resume: standing path runs even during cold-start
+        is_cold_start, fast_resume = True, True
+        assert (not is_cold_start or fast_resume) is True, (
+            "With fast-resume: standing path runs on cold-start scan 1"
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

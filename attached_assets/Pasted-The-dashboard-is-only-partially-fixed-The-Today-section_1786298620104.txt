@@ -1,0 +1,111 @@
+The dashboard is only partially fixed.
+
+The Today section is now correct, but Tier Breakdown and By Sport are still clearly using a historical population instead of today’s daily population.
+
+Current dashboard:
+
+📬 Actionable Picks Today: 7
+
+🐶 Tier Breakdown:
+S = 1
+A = 135
+B = 161
+PASS = 192
+
+🏆 By Sport:
+MLB = 1109
+WNBA = 11
+CS = 10
+LOL = 4
+DOTA = 1
+PGA = 1
+
+📅 Today:
+08/09 = 7
+
+This means the dashboard is still mixing different populations/windows.
+
+IMPORTANT:
+
+DO NOT change:
+
+* Scoring engine
+* Qualification thresholds
+* Tier rules
+* Bet Quality
+* Alert gates
+* Underdog pipeline
+
+This is a REPORTING WINDOW issue unless the code proves otherwise.
+
+TASK:
+
+Trace the exact data source/query/time window used by:
+
+1. Tier Breakdown
+2. By Sport
+3. Actionable Picks Today
+4. Today trend
+
+Determine why:
+
+Actionable Picks Today = 7
+
+and:
+
+Today = 7
+
+but Tier Breakdown and By Sport are showing much larger historical counts.
+
+The desired dashboard behavior is:
+
+📬 Activity Summary
+→ today’s activity
+
+🐶 Tier Breakdown
+→ TODAY’S actionable/qualified population, using the same defined UTC daily window
+
+🏆 By Sport
+→ TODAY’S actionable/qualified population, using the same defined UTC daily window
+
+📅 Today
+→ TODAY’S daily activity
+
+Historical records must remain stored in the database.
+
+We are NOT deleting historical data.
+
+We are only making the dashboard’s displayed populations consistent.
+
+IMPORTANT:
+
+Before changing code, report:
+
+* Exact function/module responsible
+* Exact query/table used by Tier Breakdown
+* Exact query/table used by By Sport
+* Exact time window for each
+* Why they differ from the Today query
+* Whether Tier Breakdown/By Sport are intentionally historical or accidentally missing the daily filter
+
+Then make the smallest reporting-only fix necessary.
+
+Add focused tests proving:
+
+* Today’s Tier Breakdown uses today’s UTC window
+* Today’s By Sport uses today’s UTC window
+* Historical records remain stored
+* Dashboard sections use the intended population
+* Midnight UTC rolls the dashboard into the new day
+
+Then run the focused tests.
+
+Do NOT run a broad rescan.
+
+Do NOT modify scoring.
+
+Do NOT modify qualification.
+
+Do NOT modify Telegram behavior.
+
+After the diagnosis/fix, report the exact change and test results.

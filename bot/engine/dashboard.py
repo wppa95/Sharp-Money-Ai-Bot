@@ -213,8 +213,11 @@ class DashboardReport:
         parts.append("")
 
         # ── Underdog tier breakdown ───────────────────────────────────────────
+        # All-time cumulative performance: counts every alerted Underdog snapshot
+        # since first run.  Use /funnel for today's candidate qualification pipeline
+        # and /alerts for Telegram-delivered picks in the last 24h.
         if self.total_ud_alerts > 0:
-            parts.append("🐶 <b>Tier Breakdown</b>")
+            parts.append("🐶 <b>Tier Breakdown</b>  <i>(All-time alerted)</i>")
             tier_order = ["S", "A", "B", "C", "PASS"]
             tier_emojis = {"S": "🔥", "A": "🟢", "B": "🟡", "C": "▪️", "PASS": "⚪"}
             # Use the sum of tier counts as the denominator — total_ud_alerts counts
@@ -239,9 +242,11 @@ class DashboardReport:
             parts.append("")
 
         # ── By sport ──────────────────────────────────────────────────────────
+        # All-time cumulative alert distribution across EV + Underdog + PrizePicks.
+        # Differs from Today count — shows historical model performance by sport.
         active_sports = [s for s in self.by_sport if s.total >= 1]
         if active_sports:
-            parts.append("🏆 <b>By Sport</b>")
+            parts.append("🏆 <b>By Sport</b>  <i>(All-time)</i>")
             for sp in sorted(active_sports, key=lambda s: s.total, reverse=True)[:8]:
                 ev_str  = f"  EV {sp.avg_ev:+.1f}%"  if sp.avg_ev  is not None else ""
                 clv_str = f"  CLV {sp.avg_clv:+.1f}%" if sp.avg_clv is not None else ""

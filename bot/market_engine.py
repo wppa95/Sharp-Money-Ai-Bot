@@ -2239,7 +2239,14 @@ async def underdog_job(context) -> None:
         #   • No Underdog alert sent for this player/stat in the last 24 h
         #   • Top 5 candidates per cycle (avoids hammering the stats API)
         #   • Full scoring + validation + decision gate — same standard as live alerts
-        if not is_cold_start and chat_ids:
+        #
+        # Fast-resume exception: when _fast_resume=True the cold-start rescore was
+        # skipped (existing DB scores are fresh), so we run the standing scan on
+        # scan 1 as well.  This ensures existing "DISCOVERED" cold-start props are
+        # immediately re-evaluated rather than waiting for scan 2 (~5 min delay).
+        # All normal delivery gates (confidence, live/past, dedup, direction) still
+        # apply — fast-resume does NOT weaken any qualification requirements.
+        if (not is_cold_start or _fast_resume) and chat_ids:
             from engine.ud_scoring import (  # already imported above but local scope
                 compute_market_quality as _cmq,
                 detect_market_pressure as _dmp,
