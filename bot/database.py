@@ -855,6 +855,7 @@ class Database:
         Used as the primary data source for /picks and /slip.
         """
         from datetime import timedelta
+        from sqlalchemy import or_, and_
         cutoff = datetime.utcnow() - timedelta(hours=since_hours)
         async with self.session() as s:
             subq = (

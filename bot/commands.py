@@ -1546,10 +1546,16 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         # TENNIS, etc.), proxy_match_confidence is 0 because no PrizePicks/DK/FD
         # lines exist.  In those cases, fall back to the engine's own scoring:
         #   - tier  → plh.score_tier  (set by the Underdog scoring engine)
-        #   - conf  → plh.score_confidence  (the engine's overall confidence score)
-        # This prevents S-tier esports picks from displaying as "Tier —" with 1 star.
+        #   - conf  → derived from score_tier band midpoint
+        # PropLineHistory stores score_tier but not score_confidence; bet_confidence
+        # is the DECISION confidence (0 for PASS props) — unsuitable for tier display.
+        # We derive a representative display confidence from the tier band midpoint so
+        # S-tier props show 5 stars and A-tier props show 4 stars.
         _db_tier = getattr(plh, "score_tier", None) or ""
         _db_conf = getattr(plh, "score_confidence", None)
+        # Derive a display confidence from score_tier when score_confidence is absent.
+        if _db_conf is None and _db_tier in ("S", "A", "B"):
+            _db_conf = {"S": 87, "A": 72, "B": 57}.get(_db_tier)
         if conf < 30 and _db_tier in ("S", "A", "B") and _db_conf is not None:
             # No cross-provider data — use engine scores for display
             tier  = _db_tier
@@ -3429,8 +3435,8 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             f"<i>Last {since_h}h  ·  Use /funnel 48 for longer window</i>",
             "",
             f"📥 Scanned:              <b>{total}</b>",
-            f"✅ Qualified (S/A-tier): <b>{accepted}</b>",
-            f"👁 Watchlist (B-tier):   <b>{watchlist}</b>",
+            f"✅ Qualified (S/A/B-tier): <b>{accepted}</b>",
+            f"👁 Watchlist (near-miss): <b>{watchlist}</b>",
             f"❌ Rejected:             <b>{rejected}</b>",
             f"🚫 Removed:              <b>{removed}</b>",
             "",

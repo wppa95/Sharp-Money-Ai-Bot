@@ -155,9 +155,15 @@ class TestP1RenderPickEntryTierFallback:
         assert "score_tier" in src
 
     def test_render_references_score_confidence(self):
-        """Render function must read plh.score_confidence for fallback display."""
+        """Render function must use a DB-fallback confidence for display.
+
+        PLH has no score_confidence column; the implementation now derives a
+        representative confidence from the score_tier band midpoint (S=87, A=72,
+        B=57) and stores it in _db_conf before the fallback condition fires.
+        Verify the fallback variable is present rather than the removed attribute name.
+        """
         src = self._inner_src()
-        assert "score_confidence" in src
+        assert "_db_conf" in src, "_db_conf fallback variable must be present in source"
 
     def test_render_fallback_triggers_below_30_proxy_conf(self):
         """Fallback to DB tier/conf when proxy_match_confidence < 30."""

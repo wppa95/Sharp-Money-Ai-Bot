@@ -334,9 +334,11 @@ class TestP3BPicksDisplayGate:
         """_render_pick_entry falls back to plh.score_tier when proxy conf < 30."""
         import inspect, commands as cmd_mod
         src = inspect.getsource(cmd_mod._cmd_picks_inner)
-        # The render function should reference score_tier and score_confidence
+        # The render function should reference score_tier for the fallback path.
+        # score_confidence was replaced by tier-midpoint derivation (PLH has no
+        # score_confidence column). Verify both the tier reference and fallback var.
         assert "score_tier" in src
-        assert "score_confidence" in src
+        assert "_db_conf" in src, "_db_conf fallback variable must be present"
 
     def test_render_threshold_for_fallback_is_30(self):
         """Fallback triggers when proxy_match_confidence < 30."""

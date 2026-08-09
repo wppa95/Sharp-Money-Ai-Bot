@@ -226,10 +226,15 @@ class TestBug119FunnelAndStatusCounters:
     def test_funnel_label_says_qualified(self):
         """/funnel must display the qualified/accepted count with a 'Qualified' label."""
         src = self._load_commands_source()
-        # Accept either the original label or the updated tier-aware label
-        assert ("Qualified candidates" in src or "Qualified (S/A-tier)" in src), (
-            "Neither 'Qualified candidates' nor 'Qualified (S/A-tier)' label found "
-            "in commands.py — funnel qualified-count label is missing"
+        # Accept any form of the Qualified label (original, S/A-tier, or S/A/B-tier now
+        # that B-tier is included for Tier 1 sports).
+        assert (
+            "Qualified candidates" in src
+            or "Qualified (S/A-tier)" in src
+            or "Qualified (S/A/B-tier)" in src
+        ), (
+            "No 'Qualified' label variant found in commands.py — "
+            "funnel qualified-count label is missing"
         )
 
     def test_status_uses_db_backed_alert_count(self):

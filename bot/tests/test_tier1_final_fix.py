@@ -601,7 +601,9 @@ class TestPriorPassesIntact:
         import commands as cmd_mod
         src = inspect.getsource(cmd_mod._cmd_picks_inner)
         assert "score_tier" in src
-        assert "score_confidence" in src
+        # score_confidence was replaced by tier-midpoint derivation in the DB fallback
+        # (PLH has no score_confidence column). Verify the new derivation is present.
+        assert "_db_conf" in src, "_db_conf fallback variable must be present"
         assert "< 30" in src
 
     def test_no_eff_conf_gate_in_picks_loop(self):

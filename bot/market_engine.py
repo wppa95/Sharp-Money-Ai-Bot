@@ -1676,10 +1676,14 @@ async def underdog_job(context) -> None:
                             _lc_rej = "cold_start"
                         elif is_qualified:
                             _lc_rej = "qualified"
-                        elif score.stars < config.UD_MIN_STARS_TO_ALERT:
+                        elif score.stars < config.min_stars_for_sport(snap.sport or ""):
+                            # Use the sport-aware star floor so Tier 1 sports (2★ min) are
+                            # not incorrectly labelled as "below_threshold" when the actual
+                            # rejection reason is something else (e.g. decision_pass).
+                            _lc_min_stars = config.min_stars_for_sport(snap.sport or "")
                             _lc_rej = (
                                 f"below_threshold"
-                                f" ({score.stars}★ < {config.UD_MIN_STARS_TO_ALERT}★)"
+                                f" ({score.stars}★ < {_lc_min_stars}★)"
                             )
                         elif decision is None:
                             _lc_rej = "no_decision (PASS tier)"
