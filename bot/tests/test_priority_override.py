@@ -190,10 +190,10 @@ class TestSourceCodeOverridePaths:
         return inspect.getsource(me)
 
     def test_95_threshold_present_in_source(self):
-        """score.total >= 95 must appear in market_engine source."""
+        """Bet Quality confidence >= 95 threshold must appear in market_engine source."""
         src = self._src()
-        assert "score.total >= 95" in src or "score_total >= 95" in src, (
-            "95-point threshold not found in market_engine source"
+        assert "decision.confidence >= 95" in src or "_sdec.confidence >= 95" in src, (
+            "95-point Bet Quality threshold not found in market_engine source"
         )
 
     def test_format_95_priority_alert_called_in_source(self):
@@ -305,15 +305,15 @@ class TestHighPriorityParam:
         )
 
     def test_high_priority_condition_90_to_94(self):
-        """high_priority condition must check 90 <= score.total < 95 AND tier == 'S'."""
+        """high_priority condition must check 90 <= decision.confidence < 95 AND decision_tier == 'S'."""
         import market_engine as me
         src = inspect.getsource(me.underdog_job)
-        assert "90 <= score.total < 95" in src or "90 <= _sscore.total < 95" in src, (
-            "90-94 range check not found in high_priority condition"
+        assert "90 <= decision.confidence < 95" in src or "90 <= _sdec.confidence < 95" in src, (
+            "90-94 Bet Quality range check not found in high_priority condition"
         )
-        assert "score.tier == \"S\"" in src or "score.tier == 'S'" in src or \
-               "_sscore.tier == \"S\"" in src or "_sscore.tier == 'S'" in src, (
-            "S-tier check not found in high_priority condition"
+        assert "decision.decision_tier == \"S\"" in src or "decision.decision_tier == 'S'" in src or \
+               "_sdec.decision_tier == \"S\"" in src or "_sdec.decision_tier == 'S'" in src, (
+            "S decision-tier check not found in high_priority condition"
         )
 
 
@@ -324,13 +324,16 @@ class TestHighPriorityParam:
 class TestThresholdLogicSimulation:
     """Simulate the priority routing logic for every threshold value."""
 
-    def _route(self, score_total: float, score_tier: str) -> str:
-        """Replicate the exact routing logic from market_engine."""
-        # 95+ S-tier → immediate override
-        if score_total >= 95 and score_tier == "S":
+    def _route(self, confidence: float, decision_tier: str, recommendation: str = "OVER") -> str:
+        """Replicate the exact routing logic from market_engine using Bet Quality confidence."""
+        # PASS decisions never trigger an override regardless of confidence
+        if recommendation == "PASS" or decision_tier == "PASS":
+            return "NORMAL"
+        # 95+ Bet Quality S-tier → immediate override
+        if confidence >= 95 and decision_tier == "S":
             return "OVERRIDE_95_PLUS"
-        # 90-94 S-tier → high_priority=True to deliver_underdog (normal gates)
-        if 90 <= score_total < 95 and score_tier == "S":
+        # 90-94 Bet Quality S-tier → high_priority=True to deliver_underdog (normal gates)
+        if 90 <= confidence < 95 and decision_tier == "S":
             return "HIGH_PRIORITY_90_94"
         # Everything else → normal behavior
         return "NORMAL"

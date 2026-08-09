@@ -1256,11 +1256,12 @@ async def underdog_job(context) -> None:
                         pass  # never block alert flow
 
                 # ── 95+ S-tier priority override [new-prop path] ─────────────────
-                # Score ≥ 95 AND tier == "S": bypass ALL downstream gates, send
-                # immediately.  Gate is always forced off (np_immediate=False) for
-                # 95+ props so the normal gate sequence never fires for them.
+                # Bet Quality (decision.confidence) ≥ 95 AND decision tier == "S":
+                # bypass ALL downstream gates, send immediately.
+                # Uses Bet Quality (game-history confidence), not raw UD score total,
+                # so MLB props with conf=95 trigger correctly regardless of market score.
                 _np_pp_key = (player, snap.sport or "UNKNOWN", stat_type)
-                if score.total >= 95 and score.tier == "S":
+                if decision is not None and decision.confidence >= 95 and decision.decision_tier == "S" and decision.recommendation != "PASS":
                     np_immediate = False  # 95+ always uses the override path
                     if (
                         _np_pp_key not in _priority_alerted_this_scan
@@ -1441,9 +1442,10 @@ async def underdog_job(context) -> None:
                         intelligence_trace  = _np_intel_trace,
                         market_confirmation = _np_odds_confirm,
                         high_priority       = (
-                            score is not None
-                            and 90 <= score.total < 95  # 95+ uses override path; 90-94 gets label
-                            and score.tier == "S"
+                            decision is not None
+                            and 90 <= decision.confidence < 95  # 95+ uses override path; 90-94 gets label
+                            and decision.decision_tier == "S"
+                            and decision.recommendation != "PASS"
                         ),
                     )
                     if ud_result.sent:
@@ -1635,10 +1637,10 @@ async def underdog_job(context) -> None:
                     _tier_counts[score.tier] = _tier_counts.get(score.tier, 0) + 1
 
                     # ── 95+ S-tier priority override [lc path] ───────────────────
-                    # Score ≥ 95 AND tier == "S": bypass ALL downstream gates.
-                    # _lc_95_sent=True causes should_alert to be forced False below.
+                    # Bet Quality (decision.confidence) ≥ 95 AND decision tier == "S":
+                    # bypass ALL downstream gates. _lc_95_sent=True forces should_alert=False.
                     _lc_pp_key = (player, snap.sport or "UNKNOWN", stat_type)
-                    if score.total >= 95 and score.tier == "S":
+                    if decision is not None and decision.confidence >= 95 and decision.decision_tier == "S" and decision.recommendation != "PASS":
                         _lc_95_sent = True  # block normal lc gate sequence
                         if (
                             _lc_pp_key not in _priority_alerted_this_scan
@@ -2040,10 +2042,11 @@ async def underdog_job(context) -> None:
                         intelligence_trace  = _lc_intel_trace,
                         market_confirmation = _lc_odds_confirm,
                         high_priority       = (
-                            score is not None
+                            decision is not None
                             and not is_removed
-                            and 90 <= score.total < 95  # 95+ uses override path; 90-94 gets label
-                            and score.tier == "S"
+                            and 90 <= decision.confidence < 95  # 95+ uses override path; 90-94 gets label
+                            and decision.decision_tier == "S"
+                            and decision.recommendation != "PASS"
                         ),
                     )
                     if ud_result.filtered:
@@ -2287,11 +2290,12 @@ async def underdog_job(context) -> None:
                 except Exception:
                     pass  # never block alert flow
                 # ── 95+ S-tier priority override [standing path] ─────────────
-                # Score ≥ 95 AND tier == "S": bypass all remaining gates and
-                # send immediately.  `continue` ensures normal gates are skipped
-                # regardless of whether the override was previously sent.
+                # Bet Quality (_sdec.confidence) ≥ 95 AND decision tier == "S":
+                # bypass all remaining gates and send immediately.
+                # `continue` ensures normal gates are skipped regardless of
+                # whether the override was previously sent.
                 _sp_pp_key = (_sp, _ssport, _st)
-                if _sscore.total >= 95 and _sscore.tier == "S":
+                if _sdec is not None and _sdec.confidence >= 95 and _sdec.decision_tier == "S" and _sdec.recommendation != "PASS":
                     if (
                         _sp_pp_key not in _priority_alerted_this_scan
                         and _sp_pp_key not in _priority_override_sent
@@ -2408,9 +2412,10 @@ async def underdog_job(context) -> None:
                     intelligence_trace  = _s_intel_trace,
                     market_confirmation = _s_odds_confirm,
                     high_priority       = (
-                        _sscore is not None
-                        and 90 <= _sscore.total < 95  # 95+ uses override path; 90-94 gets label
-                        and _sscore.tier == "S"
+                        _sdec is not None
+                        and 90 <= _sdec.confidence < 95  # 95+ uses override path; 90-94 gets label
+                        and _sdec.decision_tier == "S"
+                        and _sdec.recommendation != "PASS"
                     ),
                 )
                 if _sresult.sent:

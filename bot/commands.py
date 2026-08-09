@@ -1311,9 +1311,14 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     now   = datetime.utcnow()
     today = now.strftime("%b %d, %Y")
 
+    # Window: hours since UTC midnight today (minimum 4h so early-AM runs still show data).
+    # This prevents yesterday's completed-game slate from appearing as "today's picks".
+    _midnight_utc = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    _since_hours  = max((now - _midnight_utc).total_seconds() / 3600, 4.0)
+
     # ── 1. Underdog props ─────────────────────────────────────────────────────
     logger.info("cmd_picks: fetching UD props (limit=%d sport=%s)", limit * 3, sport_filter)
-    ud_props = await _db.get_top_ud_props_for_picks(limit=limit * 3, since_hours=24)
+    ud_props = await _db.get_top_ud_props_for_picks(limit=limit * 3, since_hours=_since_hours)
     ud_props = [p for p in ud_props if not _is_season_future(p.stat_type)]
 
     # Enforce strict-sport tier policy — mirrors the actual alert delivery pipeline.
@@ -1350,7 +1355,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     # ── 2. Cross-provider data (PrizePicks only — DK/FD removed from workflow) ─
     try:
-        pp_rows = await _db.get_latest_props_for_provider("PrizePicks", since_hours=24)
+        pp_rows = await _db.get_latest_props_for_provider("PrizePicks", since_hours=_since_hours)
     except Exception:
         pp_rows = []
 

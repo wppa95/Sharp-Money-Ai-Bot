@@ -1,0 +1,420 @@
+⚠️ IMPORTANT — WE ARE ALMOST OUT OF CREDITS.
+
+Do NOT burn credits unnecessarily.
+
+Make all required changes in one targeted pass.
+
+Do NOT waste credits on unnecessary diagnostics, rewrites, refactors, repeated checks, or unrelated work.
+
+━━━━━━━━━━━━━━━━━━
+🎯 SHARP MONEY BOT — FINAL TARGETED FIX
+━━━━━━━━━━━━━━━━━━
+
+Before making ANY changes:
+
+Review the current final-gate path and the existing implementation first.
+
+We already completed the full diagnostic review.
+
+Do NOT rewrite the bot.
+
+Do NOT rewrite the scoring engine.
+
+Do NOT redesign the architecture.
+
+Do NOT change unrelated systems.
+
+Use the existing systems wherever possible.
+
+Only make the targeted fixes identified below.
+
+━━━━━━━━━━━━━━━━━━
+🏆 CONFIRMED ISSUE 1 — 95+ PRIORITY OVERRIDE
+━━━━━━━━━━━━━━━━━━
+
+Implement the 95+ Bet Quality priority override for ALL SPORTS.
+
+The priority system must be evaluated SPORT-BY-SPORT.
+
+Do NOT rank sports against each other.
+
+Do NOT make MLB inherently higher priority than WNBA, CS, Tennis, LoL, etc.
+
+Each sport gets its own priority ranking based on the Bet Quality score within that sport.
+
+Examples:
+
+* MLB 95/100 = MLB priority
+* WNBA 95/100 = WNBA priority
+* CS 95/100 = CS priority
+* Tennis 95/100 = Tennis priority
+* LoL 95/100 = LoL priority
+
+The same rule applies regardless of whether the sport is Tier 1 or Tier 2.
+
+95/100+ — IMMEDIATE PRIORITY
+
+For ANY sport:
+
+✅ S-Tier
+✅ Bet Quality ≥ 95/100
+
+→ IMMEDIATE PRIORITY
+
+When a qualifying 95/100+ S-Tier prop is detected:
+
+* Notify immediately.
+* Bypass the normal validation/final qualification gates.
+* Do not require the normal validation check.
+* Do not require the normal BQ gate again.
+* Do not require the normal confidence gate.
+* Do not require the normal live-game/final timing gate.
+* Do not allow normal dedup/final-gate logic to prevent the exceptional alert.
+* Send the priority alert immediately.
+
+This is an alert-priority override, not a rewrite of the scoring engine.
+
+Keep the sport clearly identified in the alert.
+
+Keep Tier 1/Tier 2 classification intact.
+
+Do not compare one sport’s score against another sport’s score.
+
+90–94/100 — HIGH PRIORITY
+
+For ANY sport:
+
+✅ S-Tier
+✅ Bet Quality 90–94/100
+
+→ HIGH PRIORITY
+
+But:
+
+⚠️ ALL NORMAL GATES STILL APPLY.
+
+90–94 must still pass:
+
+* Validation
+* Direction
+* Confidence
+* BQ requirements
+* Sport/tier requirements
+* Deduplication
+* Live/upcoming-game checks
+* Other existing final gates
+
+90–94 gets priority handling, but it does NOT bypass the gates.
+
+89/100 AND BELOW
+
+Normal behavior.
+
+No priority override.
+
+Do not lower any existing thresholds.
+
+━━━━━━━━━━━━━━━━━━
+🏆 CONFIRMED ISSUE 2 — TIER POLICY
+━━━━━━━━━━━━━━━━━━
+
+Keep the existing Tier 1 / Tier 2 sport policy.
+
+TIER 2
+
+MLB + NFL
+
+Tier 2 requires:
+
+* S-Tier
+* Normal validation
+* Clear direction
+* Required confidence
+* Required BQ
+* Valid upcoming event
+* Existing final gates
+
+EXCEPTION:
+
+95/100+ S-Tier receives the immediate priority override described above.
+
+90–94 S-Tier receives high priority but still goes through all normal gates.
+
+TIER 1
+
+All other monitored sports.
+
+Tier 1 should continue using the configured Tier 1 preference/gates.
+
+Do NOT force Tier 1 sports to require S-Tier simply because MLB/NFL do.
+
+EXCEPTION:
+
+95/100+ S-Tier receives the immediate priority override.
+
+90–94 S-Tier receives high priority but still goes through all normal gates.
+
+IMPORTANT:
+
+Tier 1 and Tier 2 should NOT be compared against each other.
+
+Priority is evaluated within each sport.
+
+━━━━━━━━━━━━━━━━━━
+🚨 CONFIRMED ISSUE 3 — OLD PASS / COLD-START PROPS
+━━━━━━━━━━━━━━━━━━
+
+The diagnostic showed that some high-scoring props were stored with old PASS decisions during previous cold-start processing.
+
+Examples included:
+
+* Smash — 94/100
+* Ersin — 94/100
+* Other high-scoring Tier 1 props
+
+These old stored PASS decisions can prevent the current priority logic from getting another opportunity.
+
+Fix this without rewriting the scoring engine.
+
+Ensure that when a currently valid prop reaches the current 95+ S-Tier priority condition, the priority override can trigger even if an older stored PASS decision exists.
+
+Do not blindly promote every old Near-Miss.
+
+Only promote when the current prop actually satisfies the 95+ priority rule.
+
+━━━━━━━━━━━━━━━━━━
+📊 CONFIRMED ISSUE 4 — MLB BET QUALITY / CONFIDENCE
+━━━━━━━━━━━━━━━━━━
+
+The previous diagnostic confirmed that the old assumption about MLB 95/100 scoring was incorrect.
+
+The important metric is Bet Quality / confidence, not merely the raw Underdog scoring-engine score.
+
+Use the existing Bet Quality value that appears in actionable alerts.
+
+Example:
+
+Bet Quality 95/100
+
+That is the exceptional priority signal.
+
+Do not confuse:
+
+* Raw scoring score
+* Confidence
+* Bet Quality
+
+Make sure the 95+ override is using the correct existing Bet Quality field.
+
+━━━━━━━━━━━━━━━━━━
+📈 CONFIRMED ISSUE 5 — MLB FANTASY POINTS
+━━━━━━━━━━━━━━━━━━
+
+The diagnostic found that MLB Fantasy Points does not currently have corresponding player-game result data.
+
+Do NOT rebuild the entire stats system.
+
+Do NOT create a large new provider.
+
+Use the existing systems wherever possible.
+
+The immediate priority is ensuring that valid 95+ Bet Quality S-Tier opportunities can still trigger the priority path when appropriate.
+
+Do not blindly promote Fantasy Points props simply because they have a high raw score.
+
+━━━━━━━━━━━━━━━━━━
+🎯 CONFIRMED ISSUE 6 — STRONG UNDERS
+━━━━━━━━━━━━━━━━━━
+
+Preserve the ability to identify strong UNDER opportunities.
+
+Low Bet Quality + UNDER can be a useful candidate signal, but:
+
+Do NOT automatically promote every low-BQ UNDER.
+
+Do NOT create a blanket bypass based only on low BQ.
+
+Keep this information available for manual evaluation through /picks.
+
+Example:
+
+30/100 Bet Quality + UNDER
+
+→ candidate for manual review
+
+NOT automatically actionable unless it satisfies the existing qualification rules.
+
+━━━━━━━━━━━━━━━━━━
+📋 CONFIRMED ISSUE 7 — /PICKS DATE FILTER
+━━━━━━━━━━━━━━━━━━
+
+Fix /picks so the actionable player-prop view is based on the CURRENT DAY’S SLATE.
+
+Do NOT show stale actionable picks from the previous 72 hours as if they are today’s picks.
+
+Historical alerts may remain available through alert history.
+
+But:
+
+/picks
+
+should show today’s actionable player props.
+
+The current date should be determined correctly.
+
+Yesterday’s completed slate should not appear in today’s actionable-pick list.
+
+However, if we intentionally request a historical window, that historical data can remain accessible separately.
+
+━━━━━━━━━━━━━━━━━━
+📝 CONFIRMED ISSUE 8 — MANUAL LOOKUP CANDIDATES
+━━━━━━━━━━━━━━━━━━
+
+Keep lower-confidence / lower-BQ actionable candidates available for manual review through /picks.
+
+Examples such as:
+
+* Tennis 50/100
+* Esports 30/100 UNDER
+* Other low-BQ directional props
+
+should not automatically become Telegram alerts.
+
+But they should remain visible as manual lookup candidates when appropriate.
+
+This allows manual stat research without weakening Telegram’s actionable-only behavior.
+
+━━━━━━━━━━━━━━━━━━
+🔔 CONFIRMED ISSUE 9 — TELEGRAM ALERT BEHAVIOR
+━━━━━━━━━━━━━━━━━━
+
+Telegram should remain:
+
+🎯 ACTIONABLE ONLY
+
+Do NOT send:
+
+* Raw market movement
+* Watchlist noise
+* Near-Misses
+* Low-confidence manual candidates
+* PASS props
+* Undirected props
+
+Except:
+
+95/100+ S-Tier
+
+→ Immediate priority override.
+
+90–94 S-Tier
+
+→ Priority handling, but ALL normal gates still apply.
+
+Everything else follows the existing system.
+
+━━━━━━━━━━━━━━━━━━
+💾 CONFIRMED ISSUE 10 — PERSISTENCE
+━━━━━━━━━━━━━━━━━━
+
+Do not break existing persistence.
+
+Stored picks, PropLineHistory, pending picks, resolution state, scoring history, and other important persistent intelligence must continue surviving restarts.
+
+Do not replace the database.
+
+Do not introduce unnecessary storage changes.
+
+━━━━━━━━━━━━━━━━━━
+🧪 FINAL VALIDATION
+━━━━━━━━━━━━━━━━━━
+
+After the targeted fixes:
+
+✅ Run the full test suite once.
+
+✅ Run the startup health check once.
+
+✅ Verify the priority logic.
+
+✅ Verify 95+ S-Tier behavior.
+
+✅ Verify 90–94 behavior.
+
+✅ Verify 89 and below remain normal.
+
+✅ Verify multiple sports independently.
+
+✅ Verify Tier 1 and Tier 2 behavior.
+
+✅ Verify /picks uses the current-day slate.
+
+✅ Verify manual lookup candidates remain available.
+
+✅ Verify Telegram remains actionable-only.
+
+✅ Verify existing stored picks are not broken.
+
+Do not repeatedly run expensive diagnostics.
+
+Do not perform unrelated testing.
+
+━━━━━━━━━━━━━━━━━━
+🚫 ABSOLUTE BOUNDARY
+━━━━━━━━━━━━━━━━━━
+
+Do NOT:
+
+* Rewrite the bot
+* Rewrite the scoring engine
+* Redesign architecture
+* Change unrelated thresholds
+* Promote every Near-Miss
+* Add unnecessary providers
+* Rebuild the stats system
+* Enable sportsbook polling
+* Enable FanDuel
+* Enable DraftKings
+* Change the OddsAPI key
+* Spend credits on unrelated diagnostics
+
+Use the existing systems.
+
+Make only the targeted fixes above.
+
+━━━━━━━━━━━━━━━━━━
+❄️ FINAL FREEZE
+━━━━━━━━━━━━━━━━━━
+
+After the targeted fixes pass validation:
+
+FREEZE THE PROJECT.
+
+Do not make additional changes after the validation pass.
+
+Final state should be:
+
+* Sport-by-sport priority ranking
+* 95/100+ S-Tier = immediate priority override
+* 90–94 S-Tier = high priority, all gates required
+* 89 and below = normal processing
+* Tier 1/Tier 2 policy preserved
+* Strong UNDER candidates available for manual lookup
+* /picks shows the correct current-day slate
+* Telegram remains actionable-only
+* Persistence remains intact
+* No unnecessary architecture changes
+
+Then STOP.
+
+Provide the final report:
+
+* Files changed
+* Tests passed
+* Exact priority behavior verified
+* /picks date behavior verified
+* Telegram behavior verified
+* Persistence verified
+* Remaining known issues
+
+FREEZE AFTER COMPLETION.
