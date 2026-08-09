@@ -863,11 +863,18 @@ class Database:
                     PropLineHistory.provider   == "Underdog",
                     PropLineHistory.fetched_at >= cutoff,
                     PropLineHistory.removed.isnot(True),
-                    # Only S/A-tier scored props — unscored (NULL), PASS-tier,
-                    # and B-tier rows are excluded from /picks.  Previously the
-                    # filter was `!= "PASS"` which allowed NULL-tier (unscored)
-                    # props through, causing low-confidence rows to appear.
-                    PropLineHistory.score_tier.in_(["S", "A"]),
+                    # Tier-aware score_tier filter — mirrors the actual alert policy:
+                    #   Tier 2 (MLB/NFL): S and A only (strict).
+                    #   Tier 1 (all others): S, A, and B allowed — the alert engine
+                    #     permits B-tier props for non-MLB/NFL sports.
+                    # NULL/unscored and PASS-tier rows are excluded for all sports.
+                    or_(
+                        PropLineHistory.score_tier.in_(["S", "A"]),
+                        and_(
+                            PropLineHistory.score_tier == "B",
+                            PropLineHistory.sport.notin_(["MLB", "NFL"]),
+                        ),
+                    ),
                 )
                 .group_by(
                     PropLineHistory.player_name,

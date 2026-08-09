@@ -45,3 +45,4 @@
 - [V3.2 post-freeze cleanup](v32-post-freeze-cleanup.md) — /alerts wording (sent not delivered); _fmt_user_ts() 12h AM/PM; _prop_market_alerted rebuilt from DB on restart; 3563 tests Aug 2026.
 - [V3.2 consolidated cleanup](v32-consolidated-cleanup.md) — count_actionable OVER/UNDER filter; funnel near-miss accepted-key dedup; picks tier .in_(S,A); cmd_picks conf<55 gate; /health restart-reason line removed; 3675 tests Aug 2026.
 - [V3.2 Phase 2 Core](v32-phase2-core.md) — removed eff_conf<55 loop gate (blocked CS/LOL S-tier); _render_pick_entry DB-tier fallback (proxy<30); /health prev-session+crash-detected removed; 3733 tests Aug 2026.
+- [V3.2 Final Tier 1 Fix](v32-tier1-final-fix.md) — /picks allows B-tier for Tier 1; np_immediate uses min_stars_for_sport(); PropCandidateLog Tier 1 B-tier→ACCEPTED; 3817 tests Aug 2026.

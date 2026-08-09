@@ -1,0 +1,450 @@
+SHARP MONEY BOT V3.2 — FINAL TIER 1 FIX + VALIDATION + FREEZE
+
+IMPORTANT — CREDIT / CREDENTIAL SAFETY:
+
+We are extremely limited on credits.
+
+DO NOT burn credits unnecessarily.
+
+Do not make multiple exploratory passes after this message.
+Review the current system state first, then make ONLY the targeted fixes described below.
+
+Never expose, print, log, echo, or display any credentials, API keys, tokens, secrets, environment variables, or private configuration values.
+
+They must NEVER appear in:
+
+* logs
+* Telegram
+* /status
+* /health
+* /config
+* diagnostics
+* test output
+* error messages
+* final reports
+
+Use existing credentials/configuration as-is.
+Do not change, rotate, or request credentials during this pass.
+
+━━━━━━━━━━━━━━━━━━
+🎯 OBJECTIVE
+━━━━━━━━━━━━━━━━━━
+
+This is the final targeted fix for the Tier 1 qualification/reporting mismatch.
+
+Do NOT:
+
+* Rewrite the bot
+* Rewrite the scoring engine
+* Change scoring thresholds
+* Lower or raise any thresholds
+* Change the Underdog-first architecture
+* Change the database structure
+* Add providers
+* Enable OddsAPI polling
+* Enable FanDuel
+* Enable DraftKings
+* Change API keys
+* Redesign the alert system
+* Promote every Near-Miss
+* Remove working functionality
+
+Use the existing systems.
+
+We already completed the previous V3.2 cleanup and confirmed:
+
+3,733 tests passed, 0 failed.
+
+The current diagnosis found a remaining generic Tier 1 problem.
+
+━━━━━━━━━━━━━━━━━━
+🏆 CORRECT SPORT TIER POLICY
+━━━━━━━━━━━━━━━━━━
+
+Tier 2:
+
+* MLB
+* NFL
+
+Tier 2 requires:
+
+* S-tier
+* Normal validation
+* Direction
+* Required confidence
+* BQ requirements
+* Final quality gates
+
+Tier 1:
+
+EVERY OTHER monitored sport.
+
+Examples include:
+
+* CS
+* LOL
+* VAL
+* WNBA
+* TENNIS
+* MMA
+* CFL
+* CFB
+* DOTA
+* and every other monitored sport that is NOT MLB/NFL
+
+Tier 1 must use the configured Tier 1 preference/gates.
+
+Do NOT make Tier 1 a CS/LOL-specific exception.
+
+The policy must remain generic:
+
+MLB/NFL = strict Tier 2
+
+ALL OTHER SPORTS = Tier 1
+
+━━━━━━━━━━━━━━━━━━
+🔴 ROOT CAUSE 1 — /PICKS HIDES TIER 1 B-TIER PROPS
+━━━━━━━━━━━━━━━━━━
+
+File:
+
+bot/database.py
+
+Function:
+
+get_top_ud_props_for_picks()
+
+Current behavior:
+
+PropLineHistory.score_tier.in_([“S”, “A”])
+
+This applies an S/A-only requirement to every sport.
+
+That is incorrect.
+
+The alert engine already allows Tier 1 sports to qualify at:
+
+* S
+* A
+* B
+* C
+
+while MLB/NFL remain strict.
+
+Fix ONLY the database selection logic so that:
+
+* MLB/NFL → S/A only as appropriate to Tier 2
+* Non-MLB/NFL → B-tier can also be surfaced by /picks
+
+Use the existing sport classification.
+
+Do NOT change scoring thresholds.
+
+Do NOT change the scoring engine.
+
+Do NOT change MLB/NFL requirements.
+
+Conceptually:
+
+S/A → allowed
+
+OR
+
+B + sport NOT in {“MLB”, “NFL”} → allowed
+
+Do NOT blindly include NULL/unscored/PASS records.
+
+━━━━━━━━━━━━━━━━━━
+🔴 ROOT CAUSE 2 — NEW-PROP PATH USES WRONG STAR THRESHOLD
+━━━━━━━━━━━━━━━━━━
+
+File:
+
+bot/market_engine.py
+
+Current condition around np_immediate:
+
+or score.stars >= config.UD_MIN_STARS_TO_ALERT
+
+This uses the strict 3-star threshold for every sport.
+
+That violates the generic Tier 1 policy.
+
+Fix ONLY this condition so it uses:
+
+config.min_stars_for_sport(snap.sport or “”)
+
+Therefore:
+
+Tier 2 MLB/NFL → existing 3★ requirement
+
+Tier 1 other sports → existing configured 2★ requirement
+
+Do NOT change the configured values.
+
+Do NOT change:
+
+UD_MIN_STARS_TO_ALERT
+
+UD_NON_STRICT_MIN_STARS
+
+or any other threshold.
+
+Only make the new-prop path use the existing sport-aware helper.
+
+━━━━━━━━━━━━━━━━━━
+🟡 ROOT CAUSE 3 — /FUNNEL MARKS TIER 1 B-TIER AS WATCHLIST
+━━━━━━━━━━━━━━━━━━
+
+File:
+
+bot/market_engine.py
+
+PropCandidateLog classification around the _ctier == “B” branch.
+
+Current behavior:
+
+elif _ctier == “B”:
+_cgd = “WATCHLIST”
+
+This treats B-tier as WATCHLIST regardless of sport.
+
+That is inconsistent with the actual Tier 1 policy.
+
+Fix ONLY the classification:
+
+* MLB/NFL B-tier → WATCHLIST
+* Non-MLB/NFL B-tier → ACCEPTED when it has a legitimate qualifying reason
+
+Use the existing accepted reasons:
+
+* qualified
+* sent
+* filtered
+* new_prop_failed
+* cold_start
+
+Do NOT promote arbitrary rejected B-tier records.
+
+The purpose is to make /funnel accurately reflect the existing Tier 1 qualification policy.
+
+━━━━━━━━━━━━━━━━━━
+🧠 IMPORTANT — DO NOT CHANGE THESE
+━━━━━━━━━━━━━━━━━━
+
+Leave completely untouched:
+
+* ud_strict_alert_sports = {“MLB”, “NFL”}
+* Existing S/A/B confidence thresholds
+* Existing star threshold values
+* Existing BQ threshold
+* MLB UNDER block
+* MLB/NFL strict alert gates
+* Existing Tier 1 alert gates
+* Existing direction requirements
+* Existing deduplication logic
+* _render_pick_entry proxy-confidence fallback
+* Persistent memory restoration
+* PropLineHistory
+* PropOpportunityLog
+* CLV functionality
+* Underdog connector
+* Telegram actionable-only behavior
+* OddsAPI
+* FanDuel
+* DraftKings
+
+Do NOT undo any fixes from the previous V3.2 passes.
+
+━━━━━━━━━━━━━━━━━━
+🧪 TESTS
+━━━━━━━━━━━━━━━━━━
+
+Before declaring completion:
+
+1. Add focused tests for all three fixes.
+
+Test that:
+
+* Tier 1 B-tier props can appear in /picks.
+* MLB/NFL B-tier props remain excluded from /picks.
+* NULL/unscored props remain excluded.
+* PASS props remain excluded.
+* New Tier 1 props use the Tier 1 star requirement.
+* MLB/NFL new props still use the Tier 2 star requirement.
+* Tier 1 B-tier qualifying props are ACCEPTED in /funnel.
+* MLB/NFL B-tier props remain WATCHLIST.
+* Existing S/A behavior remains unchanged.
+* Existing /render_pick_entry tier/confidence fallback remains intact.
+* No credentials appear in output.
+* Existing persistence behavior remains intact.
+
+2. Run the focused tests.
+3. Run the FULL test suite.
+
+Do not stop after focused tests.
+
+━━━━━━━━━━━━━━━━━━
+🏥 STARTUP / RUNTIME VALIDATION
+━━━━━━━━━━━━━━━━━━
+
+After tests pass:
+
+Run the startup health check.
+
+Confirm:
+
+* Bot starts successfully.
+* Underdog is healthy.
+* Underdog remains PRIMARY.
+* Scheduler is running.
+* Persistent database is accessible.
+* PropLineHistory remains intact.
+* Alert dedup restoration remains intact.
+* Telegram actionable-only behavior remains intact.
+
+Do NOT enable sportsbook polling.
+
+Do NOT spend API credits.
+
+━━━━━━━━━━━━━━━━━━
+🎯 FINAL FUNCTIONAL CHECK
+━━━━━━━━━━━━━━━━━━
+
+Verify /picks behavior for Tier 1 generically.
+
+Do NOT only test CS and LOL.
+
+Test representative non-strict sports where data exists.
+
+Confirm that eligible Tier 1 S/A/B props can reach /picks when they have:
+
+* valid sport
+* valid event
+* valid player/market
+* valid direction
+* appropriate Tier 1 qualification
+* required evidence
+* no dedup block
+
+Confirm MLB/NFL still follow their stricter Tier 2 requirements.
+
+Verify /funnel:
+
+* Tier 1 qualifying B-tier = ACCEPTED
+* Tier 2 B-tier = WATCHLIST
+* S/A qualification remains correct
+* False Near-Miss reporting does not return accepted props as rejected
+
+━━━━━━━━━━━━━━━━━━
+🔔 TELEGRAM
+━━━━━━━━━━━━━━━━━━
+
+Telegram must continue receiving ONLY actionable betting picks.
+
+Do NOT send:
+
+* raw market movements
+* watchlist
+* rejected props
+* Near-Misses
+* PASS props
+* props without direction
+* unqualified props
+
+Do not alter the existing actionable alert behavior except where necessary to ensure the corrected Tier 1 qualification reaches the existing actionable pipeline.
+
+━━━━━━━━━━━━━━━━━━
+📊 REPORTING
+━━━━━━━━━━━━━━━━━━
+
+After validation, verify:
+
+/picks
+
+/funnel
+
+/alerts
+
+/health
+
+/status
+
+/config
+
+Make sure the displayed information is consistent with the actual qualification logic.
+
+Do NOT expose credentials or private configuration values.
+
+━━━━━━━━━━━━━━━━━━
+📋 FINAL REPORT
+━━━━━━━━━━━━━━━━━━
+
+Report:
+
+* Files changed
+* Exact changes made
+* Focused tests passed
+* Full test count
+* Full test failures
+* Tier 1 verification
+* Tier 2 verification
+* /picks verification
+* /funnel verification
+* Near-Miss verification
+* Persistence verification
+* Telegram verification
+* Startup health
+* Any remaining known issues
+
+Do NOT claim something was verified unless it was actually tested.
+
+━━━━━━━━━━━━━━━━━━
+🧊 FREEZE
+━━━━━━━━━━━━━━━━━━
+
+When the above validation is complete and the full test suite passes:
+
+FREEZE V3.2 PHASE 2 CORE.
+
+Do NOT make additional changes after the freeze.
+
+Do NOT begin:
+
+* OddsAPI polling
+* FanDuel
+* DraftKings
+* Moneyline sportsbook alerts
+* Totals sportsbook alerts
+* Spread sportsbook alerts
+* New providers
+* New features
+* Architecture changes
+
+Those are a separate future stage.
+
+The final state should be:
+
+🐶 Underdog PRIMARY
+
+🏆 Generic Tier 1 / Tier 2 policy
+
+🎯 Tier 1 supports all non-MLB/NFL sports using existing configured gates
+
+⚾ MLB/NFL remain strict Tier 2
+
+📊 /picks matches qualification policy
+
+🔭 /funnel accurately reflects qualification
+
+🧠 Near-Misses are accurate
+
+💾 Persistent memory survives restart
+
+🔔 Telegram remains actionable-only
+
+🔐 Credentials remain protected
+
+🧪 Full test suite passes
+
+🧊 V3.2 PHASE 2 CORE — FROZEN

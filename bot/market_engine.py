@@ -1144,13 +1144,18 @@ async def underdog_job(context) -> None:
                     history      = np_history,
                     min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
                 )
-                # Immediate criteria (strict):
-                #   - 0.5 line AND supported betting category
-                #   - OR score reaches quality threshold
+                # Immediate criteria — sport-aware:
+                #   - 0.5 line AND supported betting category (all sports)
+                #   - OR score reaches the sport-specific quality threshold:
+                #       Tier 2 (MLB/NFL) → UD_MIN_STARS_TO_ALERT (default 3)
+                #       Tier 1 (others)  → UD_NON_STRICT_MIN_STARS (default 2)
+                #     Uses the same min_stars_for_sport() helper as line-change
+                #     and standing paths so the star floor is consistent across
+                #     all three alert paths.
                 np_immediate = (
                     (line_val <= config.UD_NEW_PROP_IMMEDIATE_LINE_THRESHOLD
                      and stat_type in config.UD_PRIORITY_STAT_CATEGORIES)
-                    or score.stars >= config.UD_MIN_STARS_TO_ALERT
+                    or score.stars >= config.min_stars_for_sport(snap.sport or "")
                 )
                 # Validation gate: block if insufficient player history
                 if np_immediate and not validation.has_supporting_data:
@@ -2399,11 +2404,24 @@ async def underdog_job(context) -> None:
                 for _cp in _scored_props:
                     _ctier = _cp.get("tier", "PASS")
                     _crej  = _cp.get("rejection")
+                    _csport = (_cp.get("sport") or "").upper()
+                    _is_strict_sport = _csport in {"MLB", "NFL"}
+                    _accepted_rejections = (
+                        "qualified", "sent", "filtered", "new_prop_failed", "cold_start"
+                    )
                     if _ctier == "PASS":
                         _cgd = "REJECTED"
                     elif _ctier == "B":
-                        _cgd = "WATCHLIST"
-                    elif _crej in ("qualified", "sent", "filtered", "new_prop_failed", "cold_start") and _ctier in ("S", "A"):
+                        # Tier 1 (non-MLB/NFL): B-tier props are ACCEPTED when they
+                        # have a legitimate qualifying reason — mirrors the alert engine
+                        # which allows S/A/B/C for non-strict sports.
+                        # Tier 2 (MLB/NFL): B-tier is WATCHLIST (strict sports never
+                        # alert at B-tier so they should not appear as ACCEPTED).
+                        if not _is_strict_sport and _crej in _accepted_rejections:
+                            _cgd = "ACCEPTED"
+                        else:
+                            _cgd = "WATCHLIST"
+                    elif _crej in _accepted_rejections and _ctier in ("S", "A"):
                         # "qualified"       — is_qualified=True (S/A tier, passed scoring gate, eligible for alert)
                         # "sent"            — new-prop path: alert delivered to Telegram
                         # "filtered"        — new-prop path: reached delivery, filtered by dedup/reversal

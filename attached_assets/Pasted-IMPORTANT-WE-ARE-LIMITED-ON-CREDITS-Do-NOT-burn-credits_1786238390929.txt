@@ -1,0 +1,562 @@
+IMPORTANT — WE ARE LIMITED ON CREDITS.
+
+Do NOT burn credits unnecessarily.
+
+We just bought more credits, but I still want them used carefully.
+
+Before making ANY changes:
+
+Review the entire current system and existing code first.
+
+This is a strict targeted fix pass.
+
+Do NOT:
+
+* Rewrite the bot
+* Rebuild working systems
+* Refactor large sections unnecessarily
+* Replace the scoring engine
+* Redesign the architecture
+* Create unnecessary new features
+* Create unnecessary new providers
+* Change the database structure unless absolutely required
+* Throw away working functionality
+* Remove existing qualification gates
+
+Use what we already have.
+
+If something is broken, FIX IT.
+
+If something needs a small addition to the existing system, ADD IT.
+
+Do not create a new system when the existing one can be corrected.
+
+━━━━━━━━━━━━━━━━━━
+🎯 PRIORITY — TIER QUALIFICATION
+━━━━━━━━━━━━━━━━━━
+
+The current problem is that Tier 1 sports are being treated as one combined group.
+
+I do NOT want Tier 1 reported or graded as:
+
+TIER 1 → S/A
+
+Instead:
+
+EVERY TIER 1 SPORT must be evaluated INDIVIDUALLY.
+
+The existing Tier 1 gate should remain.
+
+Do NOT remove the qualification gates.
+
+The goal is to fix how the existing gates are routed/applied, not eliminate them.
+
+Example:
+
+CS
+
+S-TIER:
+
+* Evaluate CS props that qualify as S-tier
+
+A-TIER:
+
+* Evaluate CS props that qualify as A-tier
+
+LOL
+
+S-TIER:
+
+* Evaluate LOL props that qualify as S-tier
+
+A-TIER:
+
+* Evaluate LOL props that qualify as A-tier
+
+VAL
+
+S-TIER:
+
+* Evaluate VAL props that qualify as S-tier
+
+A-TIER:
+
+* Evaluate VAL props that qualify as A-tier
+
+WNBA
+
+S-TIER:
+
+* Evaluate WNBA props that qualify as S-tier
+
+A-TIER:
+
+* Evaluate WNBA props that qualify as A-tier
+
+TENNIS
+
+S-TIER:
+
+* Evaluate Tennis props that qualify as S-tier
+
+A-TIER:
+
+* Evaluate Tennis props that qualify as A-tier
+
+And continue this same structure for EVERY Tier 1 sport currently monitored.
+
+Do NOT combine all Tier 1 sports into one S/A bucket.
+
+Each sport must be independently evaluated and reported.
+
+━━━━━━━━━━━━━━━━━━
+🏆 TIER 1 POLICY
+━━━━━━━━━━━━━━━━━━
+
+Tier 1 = every monitored sport OTHER than MLB and NFL.
+
+Tier 1 should continue using the existing Tier 1 qualification gates.
+
+Do NOT remove those gates.
+
+Do NOT globally lower the gates simply to produce more picks.
+
+Instead, make sure the existing gates are being applied correctly to Tier 1 sports.
+
+For each individual Tier 1 sport:
+
+1. Identify qualifying S-tier props.
+2. Identify qualifying A-tier props.
+3. Apply the existing Tier 1 gates.
+4. Apply direction requirements.
+5. Apply quality/evidence requirements.
+6. Apply deduplication/correlation checks.
+7. Determine whether the prop becomes actionable.
+8. Keep the result associated with the correct sport and tier.
+
+Do not allow a qualifying prop from one sport to affect the grading or reporting of another sport.
+
+━━━━━━━━━━━━━━━━━━
+⭐ MIN STARS
+━━━━━━━━━━━━━━━━━━
+
+DO NOT remove the stars gate.
+
+Use the existing tier-specific configuration.
+
+Tier 1:
+
+* Existing Tier 1 minimum stars
+
+Tier 2:
+
+* Existing stricter minimum stars
+
+Do NOT globally change the existing 3-star requirement to 2 just to increase volume.
+
+We previously identified that Tier 1 should be allowed to use its own lower stars requirement.
+
+Verify the code is actually using the sport/tier-specific minimum rather than incorrectly applying the Tier 2 threshold to Tier 1.
+
+━━━━━━━━━━━━━━━━━━
+🔎 MIN VALIDATION
+━━━━━━━━━━━━━━━━━━
+
+DO NOT remove the validation gate.
+
+Keep the current minimum validation requirement at 5 for now.
+
+Do NOT lower it to 4 yet.
+
+We need actual rejection data before deciding whether validation=5 is unnecessarily restrictive.
+
+If the data later proves that legitimate S/A-tier Tier 1 props are consistently being rejected solely because validation is 4 instead of 5, then we can evaluate a targeted adjustment.
+
+For this pass:
+
+Validation 5 stays.
+
+━━━━━━━━━━━━━━━━━━
+🥇 TIER 2 POLICY
+━━━━━━━━━━━━━━━━━━
+
+Tier 2 is ONLY:
+
+* MLB
+* NFL
+
+Tier 2 must remain STRICT.
+
+Only:
+
+S-TIER
++
+OVER
+
+is actionable.
+
+Tier 2 requirements:
+
+* S-tier only
+* OVER only
+* Valid player prop
+* Valid upcoming event
+* Active sport/event
+* Clear OVER direction
+* Existing validation gates
+* Existing confidence gates
+* Existing quality gates
+* Existing deduplication/correlation protection
+
+DO NOT allow Tier 2 UNDER player props to become actionable.
+
+DO NOT allow Tier 2 A-tier props to become actionable.
+
+DO NOT allow Tier 2 B-tier props to become actionable.
+
+Examples:
+
+MLB S-tier OVER → eligible
+
+MLB S-tier UNDER → blocked
+
+MLB A-tier OVER → blocked
+
+NFL S-tier OVER → eligible
+
+NFL S-tier UNDER → blocked
+
+NFL A-tier OVER → blocked
+
+Do NOT weaken Tier 2.
+
+━━━━━━━━━━━━━━━━━━
+🚨 HIGH-PRIORITY NEAR-MISS ISSUE
+━━━━━━━━━━━━━━━━━━
+
+We previously found strong Tier 1 props appearing as Near-Misses even though they had strong scores.
+
+Examples included:
+
+* rx — Kills on Maps 1+2 — CS — 85 — S
+* None Quad — Kills on Maps 1+2 — LOL — 83 — S
+* Alanna Smith — Rebounds — WNBA — 80 — S
+
+Do NOT blindly promote Near-Misses.
+
+Trace the existing path:
+
+SCORE
+→ SPORT
+→ TIER
+→ VALIDATION
+→ STARS
+→ DIRECTION
+→ QUALITY
+→ FINAL GATE
+→ ACTIONABLE PICK
+→ STORED PICK
+→ TELEGRAM
+
+Determine whether a prop is actually blocked or whether reporting is showing an intermediate state.
+
+Fix the actual problem found.
+
+Do NOT simply lower thresholds because a prop appears in Near-Misses.
+
+━━━━━━━━━━━━━━━━━━
+🎯 /PICKS REQUIREMENT
+━━━━━━━━━━━━━━━━━━
+
+/picks must follow the actual Tier 1 / Tier 2 policy.
+
+For Tier 1:
+
+Show qualifying props from each sport individually.
+
+Each sport should have its own:
+
+S-TIER section
+A-TIER section
+
+Do NOT combine Tier 1 sports.
+
+Do NOT display Tier 1 simply as:
+
+S/A
+
+Instead:
+
+CS
+→ S
+→ A
+
+LOL
+→ S
+→ A
+
+VAL
+→ S
+→ A
+
+WNBA
+→ S
+→ A
+
+etc.
+
+For Tier 2:
+
+Only show:
+
+S-tier
+OVER
+
+No UNDER.
+
+No non-S-tier MLB/NFL props.
+
+No unqualified props.
+
+No PASS props.
+
+No B-tier props.
+
+No season-long futures.
+
+No props without direction.
+
+━━━━━━━━━━━━━━━━━━
+📊 /FUNNEL REQUIREMENT
+━━━━━━━━━━━━━━━━━━
+
+/funnel reporting must accurately represent the actual qualification system.
+
+Do NOT combine all Tier 1 sports into one S/A category.
+
+Show the breakdown individually:
+
+Sport
+→ S-tier
+→ A-tier
+→ other applicable states
+
+The funnel should distinguish:
+
+* Scanned
+* S-tier qualified
+* A-tier qualified
+* Watchlist/B-tier
+* Rejected
+* Removed
+
+The numbers must correspond to the actual stored candidate records.
+
+Do NOT change scoring thresholds simply to make the funnel look better.
+
+Fix the reporting/aggregation path if that is the actual problem.
+
+━━━━━━━━━━━━━━━━━━
+🔔 TELEGRAM REQUIREMENT
+━━━━━━━━━━━━━━━━━━
+
+Telegram should ONLY receive actionable picks.
+
+Do NOT send:
+
+* Raw market movement
+* Watchlist props
+* Near-Misses
+* PASS signals
+* Props without direction
+* Unqualified props
+* Tier 2 UNDER picks
+* Tier 2 non-S-tier picks
+
+Tier 1 actionable picks should be evaluated according to their individual sport and S/A tier.
+
+Tier 2 actionable picks must be S-tier OVER only.
+
+Keep internal market intelligence separate from Telegram alerts.
+
+Also investigate the discrepancy where the bot can report alerts as sent while I am not receiving notifications.
+
+Determine whether:
+
+* The alert was actually created
+* The alert was actually passed to Telegram
+* The Telegram send call succeeded
+* The alert count is counting historical/persistent alerts
+* Restart persistence is causing old alerts to remain in the count
+
+Do not assume “alerts today” or “all-time sent” means I personally received/read every message.
+
+━━━━━━━━━━━━━━━━━━
+💾 PERSISTENCE
+━━━━━━━━━━━━━━━━━━
+
+Preserve the existing persistent memory system.
+
+Do not reset stored data.
+
+Do not erase:
+
+* PropLineHistory
+* Stored picks
+* Pending picks
+* Historical scoring
+* Qualification history
+* Hit/Loss records
+* Resolution state
+* CLV data
+* Existing alert history
+* Existing persistent intelligence
+
+Restarts must not cause the bot to start from zero.
+
+We have intentionally made the bot preserve memory across restarts.
+
+Do NOT undo that behavior.
+
+━━━━━━━━━━━━━━━━━━
+🛠️ IMPLEMENTATION RULE
+━━━━━━━━━━━━━━━━━━
+
+Use the existing code and systems.
+
+Make only the changes required to correctly implement the policy above.
+
+Do NOT create a new scoring engine.
+
+Do NOT create a new qualification engine.
+
+Do NOT create a new database system.
+
+Do NOT create a separate system for every sport.
+
+Use the existing generic Tier 1 logic and make the output/qualification handling sport-specific where necessary.
+
+The goal is:
+
+ONE EXISTING TIER 1 GATE
++
+INDIVIDUAL SPORT GRADING
++
+INDIVIDUAL S-TIER/A-TIER RESULTS
+
+Not multiple new engines.
+
+Keep the existing gates.
+
+Fix their routing/application rather than deleting them.
+
+━━━━━━━━━━━━━━━━━━
+🧪 VALIDATION
+━━━━━━━━━━━━━━━━━━
+
+After making the targeted fixes:
+
+* Run focused tests
+* Run the full test suite
+* Run startup health check
+* Verify Underdog pipeline
+* Verify Tier 1 qualification
+* Verify each Tier 1 sport is separated
+* Verify S-tier and A-tier are separated within each sport
+* Verify Tier 1 uses the correct existing stars gate
+* Verify validation=5 remains enforced
+* Verify Tier 2 is MLB/NFL only
+* Verify Tier 2 is S-tier OVER only
+* Verify Tier 2 UNDER is blocked
+* Verify /picks
+* Verify /funnel
+* Verify /alerts
+* Verify persistence
+* Verify restart survival
+* Verify Telegram behavior
+
+Do NOT change thresholds unless the existing code is demonstrably violating the stated policy.
+
+If you discover that a gate is the actual blocker, report the exact gate and condition before changing the threshold.
+
+━━━━━━━━━━━━━━━━━━
+🎯 FINAL EXPECTED RESULT
+━━━━━━━━━━━━━━━━━━
+
+The system should behave like this:
+
+TIER 1:
+
+CS
+→ S-tier
+→ A-tier
+
+LOL
+→ S-tier
+→ A-tier
+
+VAL
+→ S-tier
+→ A-tier
+
+WNBA
+→ S-tier
+→ A-tier
+
+TENNIS
+→ S-tier
+→ A-tier
+
+MMA
+→ S-tier
+→ A-tier
+
+PGA
+→ S-tier
+→ A-tier
+
+and every other Tier 1 sport individually.
+
+Every Tier 1 sport uses the same underlying Tier 1 gate, but results are graded and reported separately by sport and tier.
+
+TIER 2:
+
+MLB
+→ S-tier OVER only
+
+NFL
+→ S-tier OVER only
+
+No Tier 2 UNDER.
+
+No Tier 2 A/B.
+
+Keep Underdog as PRIMARY.
+
+Keep the existing scoring engine.
+
+Keep the existing persistence.
+
+Keep the existing Telegram actionable-only behavior.
+
+Do NOT remove qualification gates.
+
+Do NOT globally lower thresholds.
+
+Fix what is actually broken instead of rebuilding what already works.
+
+When finished, provide:
+
+* Files changed
+* Exact fixes made
+* Tests passed
+* Tier 1 sport-by-sport results
+* Tier 2 results
+* /picks result
+* /funnel result
+* /alerts result
+* Telegram status
+* Persistence/restart status
+* Any remaining issues
+
+Then stop.
