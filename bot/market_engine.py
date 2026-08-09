@@ -101,6 +101,55 @@ _MARKET_FIRST_ALERT: dict = {}
 # Evict entries older than this many hours each scan cycle (prevents unbounded growth).
 _MARKET_FIRST_ALERT_TTL_H: int = 24
 
+# ── 95+ S-tier priority override ─────────────────────────────────────────────
+# Tracks (player, sport, stat_type) tuples for which a 95+ override alert was
+# already sent this session.  Persists across scan cycles; cleared on bot restart.
+# Prevents the same exceptional prop from firing the override repeatedly.
+_priority_override_sent: set = set()
+
+
+def _format_95_priority_alert(
+    player: str,
+    snap: object,
+    stat_type: str,
+    score: object,
+    decision: "Optional[object]",
+    line_val: float,
+) -> str:
+    """Format the Telegram message for a 95+/100 S-tier priority override alert.
+
+    This alert bypasses all downstream qualification gates.  It is sent
+    immediately when a prop reaches score ≥ 95 AND tier == "S".
+    """
+    sport  = getattr(snap, "sport", None) or "UNKNOWN"
+    stars  = "★" * score.stars + "☆" * (5 - score.stars)
+    rec    = getattr(decision, "recommendation", "PASS") if decision is not None else "PASS"
+    conf   = getattr(decision, "confidence", 0)      if decision is not None else 0
+
+    dir_line = ""
+    if rec not in ("PASS", None):
+        dir_line = f"\n📈 <b>{rec}</b>   Confidence: {conf}"
+
+    gt_line = ""
+    gt = getattr(snap, "game_time", None)
+    if gt is not None:
+        try:
+            gt_line = f"\n🕐 {gt.strftime('%-I:%M %p ET')}"
+        except Exception:
+            pass
+
+    return (
+        f"🔥🚨 <b>S-TIER PRIORITY OVERRIDE — {int(score.total)}/100</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"<b>{player}</b>  ·  {stat_type}\n"
+        f"🏆 S-TIER  {stars}  {sport}"
+        f"{gt_line}"
+        f"\nLine: {line_val:.1f}"
+        f"{dir_line}\n"
+        f"\n<i>⚡ Score ≥ 95/100 — immediate priority override.</i>"
+        f"\n<i>All validation gates bypassed.</i>"
+    )
+
 
 def _is_game_live_or_past(snap: object, now: datetime) -> bool:
     """Return True when actionable alerts for this snap must be suppressed.
@@ -1038,6 +1087,9 @@ async def underdog_job(context) -> None:
     _sport_futures:       dict[str, int] = {}  # season-long/futures props (tracked, not scored)
     _sport_move_detected: dict[str, int] = {}  # significant line moves (≥MIN_LINE_CHANGE)
     _sport_gated:         dict[str, int] = {}  # passed full scoring gate (actionable)
+    # Per-scan set: prevents the 95+ priority override from firing more than once
+    # for the same (player, sport, stat_type) within a single scan cycle.
+    _priority_alerted_this_scan: set = set()
 
     try:
         # Two DB round-trips before the loop — both O(unique props), no LIMIT.
@@ -1116,6 +1168,7 @@ async def underdog_job(context) -> None:
             hit_rates:          Optional[object]      = None    # PlayerHitRates or None
             market_quality:     Optional[object]      = None    # MarketQuality — display context
             market_pressure:    Optional[object]      = None    # MarketPressureFlag — warning only
+            _lc_95_sent:        bool                  = False   # 95+ override already sent via lc path
     
             if is_new_prop:
                 # ── New-prop path ────────────────────────────────────────────────
@@ -1201,6 +1254,51 @@ async def underdog_job(context) -> None:
                         )
                     except Exception:
                         pass  # never block alert flow
+
+                # ── 95+ S-tier priority override [new-prop path] ─────────────────
+                # Score ≥ 95 AND tier == "S": bypass ALL downstream gates, send
+                # immediately.  Gate is always forced off (np_immediate=False) for
+                # 95+ props so the normal gate sequence never fires for them.
+                _np_pp_key = (player, snap.sport or "UNKNOWN", stat_type)
+                if score.total >= 95 and score.tier == "S":
+                    np_immediate = False  # 95+ always uses the override path
+                    if (
+                        _np_pp_key not in _priority_alerted_this_scan
+                        and _np_pp_key not in _priority_override_sent
+                        and chat_ids
+                    ):
+                        # Attempt to get a direction; decision may be None if validation
+                        # blocked the computation — try with market signals only.
+                        _np_pp_dec = decision
+                        if _np_pp_dec is None:
+                            try:
+                                _np_pp_dec = make_ud_bet_decision(
+                                    score        = score,
+                                    validation   = validation,
+                                    current_line = line_val,
+                                    prev_line    = None,
+                                    hit_rates    = None,
+                                )
+                            except Exception:
+                                _np_pp_dec = None
+                        _priority_alerted_this_scan.add(_np_pp_key)
+                        _priority_override_sent.add(_np_pp_key)
+                        await broadcast_alert(
+                            bot, chat_ids,
+                            _format_95_priority_alert(player, snap, stat_type, score, _np_pp_dec, line_val),
+                        )
+                        _record_prop_alerted(
+                            _prop_market_alerted, player, snap.sport or "UNKNOWN", stat_type, line_val
+                        )
+                        _lifecycle_alerted.append((player, snap.sport or "UNKNOWN", stat_type))
+                        logger.info(
+                            "🔥🚨 PRIORITY OVERRIDE [new] | Player: %s | Sport: %s"
+                            " | Market: %s | Line: %.1f | Score: %d/100 | Dir: %s",
+                            player, snap.sport or "UNKNOWN", stat_type, line_val,
+                            int(score.total),
+                            (_np_pp_dec.recommendation if _np_pp_dec is not None else "UNKNOWN"),
+                        )
+
                 # Always add to the cycle batch — even blocked props appear in digest
                 _new_props_batch.append({
                     "player":     player,
@@ -1342,6 +1440,11 @@ async def underdog_job(context) -> None:
                         market_pressure     = market_pressure,
                         intelligence_trace  = _np_intel_trace,
                         market_confirmation = _np_odds_confirm,
+                        high_priority       = (
+                            score is not None
+                            and 90 <= score.total < 95  # 95+ uses override path; 90-94 gets label
+                            and score.tier == "S"
+                        ),
                     )
                     if ud_result.sent:
                         _n_new_prop_sent += 1
@@ -1530,6 +1633,51 @@ async def underdog_job(context) -> None:
                             pass  # never block alert flow
                     _n_scored += 1
                     _tier_counts[score.tier] = _tier_counts.get(score.tier, 0) + 1
+
+                    # ── 95+ S-tier priority override [lc path] ───────────────────
+                    # Score ≥ 95 AND tier == "S": bypass ALL downstream gates.
+                    # _lc_95_sent=True causes should_alert to be forced False below.
+                    _lc_pp_key = (player, snap.sport or "UNKNOWN", stat_type)
+                    if score.total >= 95 and score.tier == "S":
+                        _lc_95_sent = True  # block normal lc gate sequence
+                        if (
+                            _lc_pp_key not in _priority_alerted_this_scan
+                            and _lc_pp_key not in _priority_override_sent
+                            and chat_ids
+                        ):
+                            _lc_pp_dec = decision
+                            if _lc_pp_dec is None:
+                                try:
+                                    _lc_pp_dec = make_ud_bet_decision(
+                                        score        = score,
+                                        validation   = validation,
+                                        current_line = snap.line or 0.0,
+                                        prev_line    = prev_line,
+                                        hit_rates    = hit_rates,
+                                    )
+                                except Exception:
+                                    _lc_pp_dec = None
+                            _priority_alerted_this_scan.add(_lc_pp_key)
+                            _priority_override_sent.add(_lc_pp_key)
+                            await broadcast_alert(
+                                bot, chat_ids,
+                                _format_95_priority_alert(
+                                    player, snap, stat_type, score, _lc_pp_dec, snap.line or 0.0
+                                ),
+                            )
+                            _record_prop_alerted(
+                                _prop_market_alerted, player, snap.sport or "UNKNOWN",
+                                stat_type, snap.line or 0.0,
+                            )
+                            _lifecycle_alerted.append((player, snap.sport or "UNKNOWN", stat_type))
+                            logger.info(
+                                "🔥🚨 PRIORITY OVERRIDE [lc] | Player: %s | Sport: %s"
+                                " | Market: %s | Line: %.1f | Score: %d/100 | Dir: %s",
+                                player, snap.sport or "UNKNOWN", stat_type, snap.line or 0.0,
+                                int(score.total),
+                                (_lc_pp_dec.recommendation if _lc_pp_dec is not None else "UNKNOWN"),
+                            )
+
                     logger.debug(
                         "UD score: %s | %s | %s (tier=%s stars=%d n=%d has_data=%s)",
                         player, stat_type, score.total, score.tier, score.stars,
@@ -1751,6 +1899,10 @@ async def underdog_job(context) -> None:
                     and prev_line is not None
                     and abs(snap.line - prev_line) >= config.MIN_UNDERDOG_LINE_CHANGE
                 ))
+                # 95+ override already sent for this prop via the lc scoring block above.
+                # Force should_alert=False so the normal gate sequence does not also fire.
+                if _lc_95_sent:
+                    should_alert = False
     
                 # Per-tier confidence gate for directional picks (not removals)
                 if should_alert and not is_removed and decision is not None and decision.recommendation != "PASS":
@@ -1887,6 +2039,12 @@ async def underdog_job(context) -> None:
                         removal_reason      = _removal_reason,
                         intelligence_trace  = _lc_intel_trace,
                         market_confirmation = _lc_odds_confirm,
+                        high_priority       = (
+                            score is not None
+                            and not is_removed
+                            and 90 <= score.total < 95  # 95+ uses override path; 90-94 gets label
+                            and score.tier == "S"
+                        ),
                     )
                     if ud_result.filtered:
                         logger.debug(
@@ -2128,6 +2286,34 @@ async def underdog_job(context) -> None:
                     )
                 except Exception:
                     pass  # never block alert flow
+                # ── 95+ S-tier priority override [standing path] ─────────────
+                # Score ≥ 95 AND tier == "S": bypass all remaining gates and
+                # send immediately.  `continue` ensures normal gates are skipped
+                # regardless of whether the override was previously sent.
+                _sp_pp_key = (_sp, _ssport, _st)
+                if _sscore.total >= 95 and _sscore.tier == "S":
+                    if (
+                        _sp_pp_key not in _priority_alerted_this_scan
+                        and _sp_pp_key not in _priority_override_sent
+                        and chat_ids
+                    ):
+                        _priority_alerted_this_scan.add(_sp_pp_key)
+                        _priority_override_sent.add(_sp_pp_key)
+                        await broadcast_alert(
+                            bot, chat_ids,
+                            _format_95_priority_alert(_sp, _ssnap, _st, _sscore, _sdec, _line_val),
+                        )
+                        _record_prop_alerted(_prop_market_alerted, _sp, _ssport, _st, _line_val)
+                        _n_standing_sent += 1
+                        _lifecycle_alerted.append((_sp, _ssport, _st))
+                        logger.info(
+                            "🔥🚨 PRIORITY OVERRIDE [standing] | Player: %s | Sport: %s"
+                            " | Market: %s | Line: %.1f | Score: %d/100 | Dir: %s",
+                            _sp, _ssport, _st, _line_val, int(_sscore.total),
+                            (_sdec.recommendation if _sdec is not None else "UNKNOWN"),
+                        )
+                    continue  # skip normal gate sequence for all 95+ props
+
                 if _sdec is None or _sdec.recommendation == "PASS":
                     logger.debug(
                         "UD standing_gate [decision_pass]: %s | %s | %s — decision=%s reason=%s",
@@ -2221,6 +2407,11 @@ async def underdog_job(context) -> None:
                     standing            = True,
                     intelligence_trace  = _s_intel_trace,
                     market_confirmation = _s_odds_confirm,
+                    high_priority       = (
+                        _sscore is not None
+                        and 90 <= _sscore.total < 95  # 95+ uses override path; 90-94 gets label
+                        and _sscore.tier == "S"
+                    ),
                 )
                 if _sresult.sent:
                     _n_standing_sent += 1

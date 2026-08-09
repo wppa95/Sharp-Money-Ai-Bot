@@ -1,0 +1,230 @@
+DO NOT MODIFY ANYTHING UNTIL THE CURRENT FINAL-GATE PATH HAS BEEN REVIEWED AND THE EXACT CHANGE IS IDENTIFIED.
+
+🚨 IMPORTANT — DO NOT BURN CREDITS
+
+We are limited on credits.
+
+DO NOT BURN CREDITS UNNECESSARILY.
+
+Use what already exists.
+
+Make ONLY the targeted fix needed.
+
+━━━━━━━━━━━━━━━━━━
+🎯 S-TIER PRIORITY RULE
+━━━━━━━━━━━━━━━━━━
+
+I want a targeted priority system for exceptionally strong S-tier props.
+
+IMPORTANT:
+
+Do NOT implement this until the CURRENT final-gate path has been fully reviewed.
+
+First trace:
+
+SCORE
+→ TIER
+→ SPORT RULES
+→ VALIDATION
+→ DIRECTION
+→ BET QUALITY
+→ CONFIDENCE
+→ DEDUP/CORRELATION
+→ LIVE-GAME CHECK
+→ FINAL ACTIONABLE GATE
+→ PICK CREATION
+→ TELEGRAM
+
+Identify exactly where the current system can block an S-tier prop.
+
+Only then make the smallest targeted change necessary.
+
+━━━━━━━━━━━━━━━━━━
+🔥 90/100 S-TIER — PRIORITY
+━━━━━━━━━━━━━━━━━━
+
+Any prop that reaches:
+
+90/100 or higher
+AND
+S-Tier
+
+gets PRIORITY STATUS.
+
+This applies to EVERY sport.
+
+For 90–94/100 S-tier props:
+
+* Priority handling
+* Existing validation remains active
+* Existing safety checks remain active
+* Existing actionable gates remain active
+* Do NOT blindly bypass validation
+
+The purpose is to make extremely strong S-tier props get handled with higher priority without removing the normal protection.
+
+━━━━━━━━━━━━━━━━━━
+🚨 95/100 S-TIER — IMMEDIATE OVERRIDE
+━━━━━━━━━━━━━━━━━━
+
+Any prop that reaches:
+
+95/100 or higher
+AND
+S-Tier
+
+gets an IMMEDIATE PRIORITY ALERT.
+
+IMPORTANT:
+
+95/100+ S-tier props have NO validation checks.
+
+They should:
+
+95+ S-tier
+→ detected
+→ immediately prioritized
+→ immediately sent to Telegram
+
+NO validation gate.
+NO BQ gate.
+NO confidence gate.
+NO dedup/correlation gate.
+NO other downstream qualification gate.
+
+This is intentional.
+
+A 95/100+ S-tier score is considered strong enough to receive the immediate override.
+
+This applies to EVERY sport.
+
+Examples:
+
+* MLB
+* WNBA
+* NFL
+* Tennis
+* CS
+* LoL
+* VAL
+* PGA
+* NPB
+* Any other monitored sport
+
+Do NOT extend this override to anything below 95.
+
+━━━━━━━━━━━━━━━━━━
+🚫 BELOW 90
+━━━━━━━━━━━━━━━━━━
+
+Anything 89/100 or lower receives:
+
+* No S-tier priority override
+* No immediate override
+
+Keep the existing system behavior unchanged.
+
+Do NOT lower other thresholds just to create more alerts.
+
+━━━━━━━━━━━━━━━━━━
+🔍 REQUIRED REVIEW BEFORE CODE CHANGE
+━━━━━━━━━━━━━━━━━━
+
+Before changing code:
+
+☐ Review the current final-gate path
+☐ Identify exactly where 90–94 S-tier props can be blocked
+☐ Identify exactly where 95+ S-tier props can be blocked
+☐ Confirm where priority handling should be inserted
+☐ Confirm where the 95+ immediate override should be inserted
+☐ Confirm the smallest possible code change
+☐ Do NOT modify anything until this review is complete
+
+Do not guess.
+
+Do not rewrite.
+
+━━━━━━━━━━━━━━━━━━
+🧪 VERIFICATION
+━━━━━━━━━━━━━━━━━━
+
+After the exact targeted change is identified and implemented:
+
+☐ 89/100 S-tier → normal behavior
+☐ 90/100 S-tier → priority handling + normal gates
+☐ 91/100 S-tier → priority handling + normal gates
+☐ 94/100 S-tier → priority handling + normal gates
+☐ 95/100 S-tier → immediate alert, NO validation checks
+☐ 96/100 S-tier → immediate alert, NO validation checks
+☐ 100/100 S-tier → immediate alert, NO validation checks
+☐ Non-S-tier → no override
+☐ No duplicate alert spam
+☐ Existing Underdog pipeline unchanged
+☐ Existing scoring engine unchanged
+☐ Existing normal actionable picks still work
+☐ Full test suite passes
+☐ Startup health check passes
+☐ Telegram behavior verified
+
+━━━━━━━━━━━━━━━━━━
+🚫 DO NOT CHANGE
+━━━━━━━━━━━━━━━━━━
+
+Do NOT:
+
+* Rewrite the bot
+* Rewrite the scoring engine
+* Change scoring calculations
+* Promote every S-tier prop
+* Promote A-tier props
+* Promote anything below 90
+* Add new providers
+* Enable sportsbook polling
+* Change OddsAPI keys
+* Change database structure unnecessarily
+* Make unrelated improvements
+
+This is a targeted priority-alert change only.
+
+━━━━━━━━━━━━━━━━━━
+📋 FINAL REPORT
+━━━━━━━━━━━━━━━━━━
+
+Report:
+
+* Exact final-gate path reviewed
+* Exact blocking condition identified
+* Exact file/function changed
+* Exact condition changed
+* Tests before
+* Tests after
+* 89 behavior
+* 90–94 behavior
+* 95+ behavior
+* Telegram verification
+* Any remaining issues
+
+Then:
+
+🔒 FREEZE THE CHANGE.
+
+Do not continue modifying the system after verification.
+
+━━━━━━━━━━━━━━━━━━
+🔒 FINAL FREEZE CHECKLIST
+━━━━━━━━━━━━━━━━━━
+
+☐ Final-gate path reviewed
+☐ Exact blocking condition identified
+☐ Targeted change only
+☐ 89 = normal behavior
+☐ 90–94 = priority + normal gates
+☐ 95+ = immediate alert + NO validation checks
+☐ Applies to every sport
+☐ No duplicate spam
+☐ Full tests passed
+☐ Startup health passed
+☐ Telegram verified
+☐ Existing systems unchanged
+☐ Final report provided
+☐ PROJECT FROZEN

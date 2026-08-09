@@ -136,6 +136,9 @@ async def _run_job(snapshots, db, *, deliver_result=None, health: "HealthTracker
                 mock_cls.return_value = mock_delivery
                 with patch("alerts.broadcast_alert",
                            new_callable=AsyncMock,
+                           return_value={"sent": 1, "failed": 0}), \
+                     patch("market_engine.broadcast_alert",
+                           new_callable=AsyncMock,
                            return_value={"sent": 1, "failed": 0}):
                     with patch("market_engine.get_health_tracker", return_value=health):
                         await me.underdog_job(ctx)
