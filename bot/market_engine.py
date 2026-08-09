@@ -439,6 +439,7 @@ async def _get_odds_api_confirmation(
     direction_label = direction.strip().lower()  # "over" | "under"
 
     book_lines: list[float] = []
+    book_odds:  list[int]   = []   # American odds for this direction (CLV seed use)
     sportsbooks:  set[str]  = set()
 
     for pl in lines:
@@ -458,12 +459,17 @@ async def _get_odds_api_confirmation(
         sportsbooks.add(pl.sportsbook)
         if (pl.description or "").lower().strip() == direction_label:
             book_lines.append(pl.line)
+            if pl.american_odds:
+                book_odds.append(pl.american_odds)
 
     if not sportsbooks:
         return None
 
     num_books = len(sportsbooks)
     avg_line  = sum(book_lines) / len(book_lines) if book_lines else None
+    # avg_odds: average American odds across books for this direction.
+    # Used for CLV seeding when the pick is stored as an AlertCLVSeed.
+    avg_odds  = round(sum(book_odds) / len(book_odds)) if book_odds else None
 
     if avg_line is not None:
         diff = avg_line - line
@@ -479,6 +485,7 @@ async def _get_odds_api_confirmation(
     return {
         "num_books": num_books,
         "avg_line":  avg_line,
+        "avg_odds":  avg_odds,   # American odds for this direction (CLV seeding support)
         "notes":     notes,
         "confirmed": avg_line is not None,
     }
@@ -2462,9 +2469,13 @@ async def underdog_job(context) -> None:
                         _s_intel_trace = _s_intel.intelligence_trace
                     except Exception:
                         pass
-                # OddsAPI market confirmation — non-blocking, S/A tier only
+                # OddsAPI market confirmation — non-blocking, S/A tier only.
+                # Strong UNDER candidates (direction=UNDER) are included because
+                # they must pass S/A-tier qualification to reach this path.
+                # B/PASS candidates are explicitly excluded.
                 _s_odds_confirm: Optional[dict] = None
-                if _sdec.decision_tier in ("S", "A"):
+                if (_sdec.decision_tier in ("S", "A")
+                        and _sdec.recommendation != "PASS"):
                     try:
                         _s_odds_confirm = await _get_odds_api_confirmation(
                             _ssport,

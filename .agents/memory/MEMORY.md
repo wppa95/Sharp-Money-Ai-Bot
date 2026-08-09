@@ -50,3 +50,4 @@
 - [S-tier priority override system](priority-override.md) — V3.4-final: 80+ BQ=HIGH PRIORITY (4★); 95+ BQ=override; stars from _bq_stars(conf) not score.total; Strong UNDER signal when direction=UNDER+score≤30; 3981 tests Aug 2026.
 - [V3.5 Reporting Cleanup + Restart Resume](v35-reporting-cleanup.md) — /alerts 24h window, /status daily-only, dashboard Today-only, fast-resume checkpoint (HealthTracker+market_engine), cold-start tests; 4030 tests Aug 2026.
 - [V3.5 Final Diagnosis + Targeted Fixes](v35-final-diagnosis.md) — qualified=intermediate gate (no bug); fast-resume standing-path scan-1 fix; dashboard All-time labels; 16-item lifecycle tests; 4105 tests Aug 2026.
+- [OddsAPI supporting data pass](oddsapi-supporting-data.md) — method alias bug fix (fetch_player_prop_lines); avg_odds CLV field; standing path PASS guard; health monitor registration; 47 new tests; 4152 total Aug 2026.

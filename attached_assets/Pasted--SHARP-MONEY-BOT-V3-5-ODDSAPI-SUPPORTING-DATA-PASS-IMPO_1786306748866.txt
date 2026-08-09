@@ -1,0 +1,258 @@
+⚠️ SHARP MONEY BOT V3.5 — ODDSAPI SUPPORTING DATA PASS
+
+IMPORTANT — CREDENTIAL / CREDIT LIMIT:
+
+We are low on API credits.
+
+Do NOT burn credits on broad rescans, unnecessary polling, or repeated external requests.
+
+Before making ANY changes, review the entire current V3.5 system state.
+
+━━━━━━━━━━━━━━━━━━
+🎯 GOAL
+━━━━━━━━━━━━━━━━━━
+
+Enable the EXISTING OddsAPI integration as a SUPPORTING data source for grading and market context.
+
+🐶 UNDERDOG REMAINS PRIMARY.
+
+Do NOT turn the bot into a sportsbook-first system.
+
+Hierarchy:
+
+🐶 Underdog
+→ PRIMARY prop/line source
+→ primary qualification
+→ primary actionable decision
+
+📊 OddsAPI
+→ SECONDARY supporting data
+→ market context
+→ grading/CLV support
+→ NOT an independent pick source
+
+━━━━━━━━━━━━━━━━━━
+🚫 DO NOT
+━━━━━━━━━━━━━━━━━━
+
+Do NOT:
+
+* Rewrite the bot
+* Redesign architecture
+* Replace the scoring engine
+* Replace the Underdog pipeline
+* Change qualification thresholds
+* Lower Tier 1 requirements
+* Weaken Tier 2 MLB/NFL rules
+* Add providers
+* Enable FanDuel
+* Enable DraftKings
+* Change the OddsAPI key
+* Create new sportsbook alert systems
+* Send OddsAPI-only alerts to Telegram
+* Let OddsAPI override Underdog
+* Run broad OddsAPI polling across every prop/market
+
+Use existing OddsAPI code wherever possible.
+
+━━━━━━━━━━━━━━━━━━
+STEP 1 — REVIEW EXISTING ODDSAPI SYSTEM
+━━━━━━━━━━━━━━━━━━
+
+Before changing anything:
+
+☐ Locate existing OddsAPI connector
+☐ Locate existing OddsAPI configuration
+☐ Determine current enabled/disabled state
+☐ Determine current polling behavior
+☐ Determine current market filters
+☐ Determine how OddsAPI data is stored
+☐ Determine whether existing CLV/grading code already consumes OddsAPI data
+☐ Determine current configured quota/status reporting
+☐ Confirm current environment key is used without exposing it
+☐ Confirm no key needs to be changed
+
+Do NOT change anything until this review is complete.
+
+━━━━━━━━━━━━━━━━━━
+STEP 2 — STRICT ODDSAPI SCOPE
+━━━━━━━━━━━━━━━━━━
+
+OddsAPI requests should ONLY be triggered for candidates that meet one of these conditions:
+
+1. S-Tier candidate
+2. A-Tier candidate
+3. Strong UNDER candidate
+
+Do NOT request OddsAPI data for:
+
+* PASS/B-tier candidates
+* ordinary low-confidence props
+* raw market movements
+* every scanned prop
+* every player
+* every sport indiscriminately
+
+The existing Underdog qualification should determine which candidates deserve supporting OddsAPI data.
+
+━━━━━━━━━━━━━━━━━━
+STEP 3 — USE ODDSAPI FOR SUPPORTING DATA ONLY
+━━━━━━━━━━━━━━━━━━
+
+For eligible candidates, use OddsAPI data for:
+
+* Market consensus/context
+* Sportsbook line comparison
+* Price context when available
+* CLV seeding
+* Closing-line capture
+* Post-result grading support
+* Market-movement analysis
+
+Do NOT use OddsAPI to independently create an actionable pick.
+
+Do NOT allow OddsAPI to replace the Underdog line.
+
+Do NOT allow OddsAPI to override the Underdog direction.
+
+━━━━━━━━━━━━━━━━━━
+STEP 4 — STRONG UNDER SUPPORT
+━━━━━━━━━━━━━━━━━━
+
+Strong UNDER candidates are important.
+
+When an Underdog candidate has a strong UNDER signal and passes the existing qualification/quality requirements, OddsAPI may be queried for supporting market evidence.
+
+The purpose is to determine whether the broader market also supports the UNDER.
+
+Do NOT automatically promote an UNDER simply because sportsbook odds agree.
+
+Existing qualification gates remain authoritative.
+
+━━━━━━━━━━━━━━━━━━
+STEP 5 — S/A-TIER SUPPORT
+━━━━━━━━━━━━━━━━━━
+
+For S/A-tier candidates:
+
+Underdog candidate
+→ existing scoring
+→ existing tier qualification
+→ existing validation
+→ OddsAPI supporting lookup
+→ existing final gates
+→ actionable/stored pick
+
+Keep the existing final-gate architecture.
+
+Do NOT bypass safety/integrity gates merely because OddsAPI agrees.
+
+━━━━━━━━━━━━━━━━━━
+STEP 6 — API CREDIT CONTROL
+━━━━━━━━━━━━━━━━━━
+
+Use controlled polling.
+
+Avoid duplicate requests.
+
+Cache/reuse existing OddsAPI data when possible.
+
+Do not repeatedly request the same:
+
+* sport
+* event
+* player
+* market
+
+within unnecessary short intervals.
+
+If the same candidate already has recent OddsAPI supporting data, reuse it instead of making another request.
+
+Log useful quota/status information without exposing the API key.
+
+Never print:
+
+* ODDS_API_KEY
+* API tokens
+* secrets
+* authorization headers
+
+━━━━━━━━━━━━━━━━━━
+STEP 7 — TELEGRAM
+━━━━━━━━━━━━━━━━━━
+
+OddsAPI must NOT create raw Telegram notifications.
+
+Telegram remains:
+
+🎯 ACTIONABLE BET PICKS ONLY
+
+OddsAPI is supporting intelligence.
+
+No:
+
+* raw sportsbook movements
+* sportsbook-only picks
+* API diagnostics
+* quota details
+* credentials
+
+to Telegram.
+
+━━━━━━━━━━━━━━━━━━
+STEP 8 — VALIDATION
+━━━━━━━━━━━━━━━━━━
+
+After implementation:
+
+☐ Run focused OddsAPI tests
+☐ Verify S-tier candidate lookup
+☐ Verify A-tier candidate lookup
+☐ Verify strong UNDER lookup
+☐ Verify B/PASS candidates do NOT trigger unnecessary OddsAPI requests
+☐ Verify duplicate requests are avoided
+☐ Verify OddsAPI data can feed existing grading/CLV paths
+☐ Verify Underdog remains PRIMARY
+☐ Verify Telegram behavior is unchanged
+☐ Verify no credentials appear in logs/status
+☐ Run full test suite
+
+Do NOT perform expensive external rescans just to prove the integration.
+
+Use existing stored candidates/data wherever possible.
+
+━━━━━━━━━━━━━━━━━━
+🔒 IMPORTANT
+━━━━━━━━━━━━━━━━━━
+
+DO NOT change the OddsAPI key during this pass.
+
+Use the currently configured key.
+
+If the current key is the 500-request key, let it operate under this controlled scope.
+
+We will decide separately when to manually switch to the larger quota.
+
+The user will manually change the secret when instructed.
+
+━━━━━━━━━━━━━━━━━━
+📋 FINAL REPORT
+━━━━━━━━━━━━━━━━━━
+
+Report:
+
+* Exact files changed
+* Existing OddsAPI system discovered
+* Current key/config state WITHOUT exposing credentials
+* Markets being requested
+* S/A/strong-UNDER filtering behavior
+* Credit-control behavior
+* CLV/grading integration status
+* Underdog primary status
+* Telegram status
+* Tests passed
+* Any remaining issues
+
+Do NOT begin the tweak-list work yet.
+
+STOP after this OddsAPI pass and provide the report.

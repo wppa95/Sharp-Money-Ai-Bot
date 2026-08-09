@@ -707,6 +707,16 @@ class AnalysisEngine:
 
     # ── Future integration stubs ───────────────────────────────────────────────
 
+    async def fetch_player_prop_lines(self, sport: Sport) -> list["PlayerPropLine"]:
+        """
+        Alias for fetch_player_prop_odds(), called by
+        market_engine._get_odds_api_confirmation().
+
+        Uses the shared OddsApiCache (TTL=55s) so repeated calls within the
+        same scan cycle cost zero extra API credits.
+        """
+        return await self.fetch_player_prop_odds(sport)
+
     async def fetch_prizepicks_lines(self, sport: Sport) -> list[OddsLine]:
         """PLACEHOLDER: Fetch PrizePicks player prop lines."""
         logger.debug("fetch_prizepicks_lines called for %s (not yet implemented)", sport)

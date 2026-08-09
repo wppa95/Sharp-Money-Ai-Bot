@@ -204,9 +204,13 @@ async def post_init(application: Application) -> None:
     _health_monitor = init_health_monitor()
     # PrizePicks provider is temporarily disabled — not registered so it never
     # shows as a failed provider in /status or logs.
-    # _health_monitor.register("OddsAPI")  # sportsbook polling disabled — Underdog-only mode
+    # OddsAPI is registered so quota headers (x-requests-remaining/used) recorded
+    # by OddsApiCache._fetch() appear in /status and health logs.  The broad
+    # sportsbook EV polling job (_poll_odds_job) remains disabled; the only
+    # OddsAPI calls are the on-demand S/A-tier confirmation calls in market_engine.
+    _health_monitor.register("OddsAPI")
     _health_monitor.register("Underdog")
-    logger.info("Provider health monitor initialised (Underdog) [sportsbook polling disabled]")
+    logger.info("Provider health monitor initialised (OddsAPI + Underdog)")
 
     init_odds_cache(ttl_seconds=config.ODDS_API_CACHE_TTL)
     logger.info("Odds API shared cache initialised (TTL=%ds)", config.ODDS_API_CACHE_TTL)
