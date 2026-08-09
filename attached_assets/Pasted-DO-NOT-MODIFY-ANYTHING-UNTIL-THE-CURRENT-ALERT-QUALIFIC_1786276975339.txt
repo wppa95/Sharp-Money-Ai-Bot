@@ -1,0 +1,464 @@
+DO NOT MODIFY ANYTHING UNTIL THE CURRENT ALERT/QUALIFICATION PATH HAS BEEN REVIEWED AND THE EXACT CAUSE IS IDENTIFIED.
+
+We are limited on credits.
+
+DO NOT BURN CREDITS UNNECESSARILY.
+
+This is DIAGNOSTIC ONLY.
+
+Do not edit files.
+Do not change thresholds.
+Do not change gates.
+Do not rewrite the scoring engine.
+Do not promote Near-Misses.
+Do not restart repeatedly.
+
+━━━━━━━━━━━━━━━━━━
+
+1. COMPARE CURRENT VS PREVIOUS MLB SCORING
+    ━━━━━━━━━━━━━━━━━━
+
+We need to determine why we are currently getting ZERO actionable alerts when we previously saw MLB props scoring around 95/100 frequently.
+
+CURRENT STATUS:
+
+* Underdog: healthy
+* PropLineHistory: 8,434 rows
+* Alerts today: 0
+* All-time alerts: 11
+* /picks: no actionable picks
+* /funnel 24h: 366 qualified candidates
+* /funnel 48h: 411 qualified candidates
+* Highest current S-tier Near-Misses are around 87/100
+* No 90+ S-tier candidate has appeared in the funnel output we have seen
+* Previous behavior produced many MLB 95/100 picks
+
+IMPORTANT:
+
+Do NOT assume the old 95/100 picks were necessarily correct.
+
+We need to determine whether the scoring system, input data, qualification path, or alert path changed.
+
+Trace historical MLB props that previously scored 95/100 or higher.
+
+Find examples from the database/logs if available.
+
+For at least 3 historical MLB 95+ props, report:
+
+* Player
+* Market
+* Original line
+* Score
+* Tier
+* Bet Quality
+* Direction
+* Confidence
+* Supporting stats
+* Validation state
+* Final qualification state
+* Whether alert was sent
+
+Then compare those exact scoring inputs against current MLB props.
+
+Determine:
+
+* Did the scoring formula change?
+* Did one or more scoring inputs disappear?
+* Did historical stats availability change?
+* Did validation behavior change?
+* Did confidence calculation change?
+* Did bet-quality calculation change?
+* Did tier assignment change?
+* Did cold-start behavior change?
+* Did the source data change?
+* Did the MLB scoring path change after the recent fixes?
+
+Do NOT modify anything.
+
+━━━━━━━━━━━━━━━━━━
+2. FIND CURRENT HIGHEST MLB SCORES
+━━━━━━━━━━━━━━━━━━
+
+Find the highest-scoring CURRENT MLB candidates in the database.
+
+Report the top 20 if available.
+
+For each, show:
+
+* Player
+* Market
+* Score
+* Tier
+* Bet Quality
+* Direction
+* Confidence
+* Validation
+* Rejection reason
+* Lifecycle state
+
+Determine the current maximum MLB score.
+
+If the current MLB maximum is materially lower than the previous 95/100 range, identify EXACTLY which scoring component is responsible.
+
+━━━━━━━━━━━━━━━━━━
+3. TRACE ONE CURRENT MLB CANDIDATE END-TO-END
+━━━━━━━━━━━━━━━━━━
+
+Pick the highest-scoring CURRENT MLB candidate.
+
+Trace:
+
+RAW PROP
+→ PARSED PROP
+→ SCORE
+→ TIER
+→ VALIDATION
+→ DIRECTION
+→ CONFIDENCE
+→ BET QUALITY
+→ FINAL GATE
+→ DEDUP
+→ STORED PICK
+→ TELEGRAM
+
+Report the exact function/module at every stage.
+
+If it stops, identify:
+
+* Exact function
+* Exact condition
+* Exact rejection reason
+
+Do not change code.
+
+━━━━━━━━━━━━━━━━━━
+4. TRACE THE OLD 95/100 PATH
+━━━━━━━━━━━━━━━━━━
+
+Find one historical MLB 95/100+ prop that actually produced an alert.
+
+Trace the same path:
+
+RAW
+→ SCORE
+→ TIER
+→ VALIDATION
+→ DIRECTION
+→ CONFIDENCE
+→ BQ
+→ FINAL GATE
+→ DEDUP
+→ ALERT
+
+Compare it directly against the current highest MLB candidate.
+
+We need to know:
+
+WHAT CHANGED?
+
+━━━━━━━━━━━━━━━━━━
+5. VERIFY 95+ PRIORITY OVERRIDE
+━━━━━━━━━━━━━━━━━━
+
+Review the CURRENT implementation of the 95+ S-tier priority override.
+
+Do not modify it.
+
+Confirm:
+
+* 95+ requires S-tier
+* 95+ receives the priority override
+* 95+ bypasses validation
+* 95+ bypasses BQ
+* 95+ bypasses confidence
+* 95+ bypasses live/past-game gate
+* 95+ bypasses dedup
+* 95+ bypasses timing filter
+* 95+ sends directly to the intended Telegram alert function
+* 90–94 keeps all normal gates
+* 89 and below receive no priority override
+
+Also verify all three alert paths:
+
+1. New-prop
+2. Line-change
+3. Standing
+
+Do not edit anything.
+
+━━━━━━━━━━━━━━━━━━
+6. CHECK WHETHER THE OVERRIDE HAS EVER BEEN TRIGGERED
+━━━━━━━━━━━━━━━━━━
+
+Search logs/database/runtime state for evidence of:
+
+* 95+ priority override
+* priority override alert
+* S-tier priority
+* _priority_override_sent
+* _priority_alerted_this_scan
+
+Report:
+
+* Has the 95+ override ever triggered since implementation?
+* If yes, when and for which prop?
+* If no, confirm that no 95+ candidate has actually reached it.
+
+━━━━━━━━━━━━━━━━━━
+7. CRITICAL QUESTION — WHY DID MLB 95/100 PICKS DISAPPEAR?
+━━━━━━━━━━━━━━━━━━
+
+Give the most likely root cause based ONLY on evidence.
+
+Possible categories:
+
+A. Scoring inputs changed
+B. Scoring formula changed
+C. Historical/stat data disappeared
+D. Validation changed
+E. Confidence changed
+F. Bet Quality changed
+G. Tier assignment changed
+H. Cold-start is affecting current scoring
+I. Final alert gate is blocking them
+J. Dedup is blocking them
+K. Timing/live-game logic is blocking them
+L. No current MLB prop is actually reaching 90+
+M. Other — identify exact cause
+
+Do NOT guess.
+
+━━━━━━━━━━━━━━━━━━
+8. PERSISTENCE / CURRENT SYSTEM HEALTH
+━━━━━━━━━━━━━━━━━━
+
+Also verify that the current healthy runtime is actually writing and processing new props.
+
+Current observed state:
+
+* Underdog healthy
+* UD monitor running
+* CLV seeder running
+* CLV harvester running
+* PropLineHistory = 8,434
+
+Verify:
+
+* New Underdog scans are occurring
+* New props are being parsed
+* New PropLineHistory records are being written
+* Scoring is occurring on new records
+* The alert pipeline is being reached
+* No background exception is silently stopping actionable delivery
+
+Do not modify anything.
+
+━━━━━━━━━━━━━━━━━━
+9. CRITICAL QUESTION — WHY ARE TIER 1 SPORTS NOT ALERTING?
+━━━━━━━━━━━━━━━━━━
+
+We also need to explain why NONE of the Tier 1 sports have produced a new actionable Telegram alert.
+
+Tier 1 includes sports such as:
+
+* WNBA
+* Tennis
+* CS
+* LoL
+* PGA
+* NPB
+* MMA
+* VAL
+* Esports
+* Dota
+* Racing
+* CFL
+* Other configured Tier 1 sports
+
+The funnel shows that Tier 1 candidates ARE being qualified.
+
+Recent funnel examples:
+
+* WNBA: 68 qualified
+* CS: 74 qualified
+* Tennis: 27 qualified
+* LoL: 48 qualified
+* PGA: 13 qualified
+* NPB: 6 qualified
+* VAL: 8 qualified
+
+But:
+
+* Alerts today: 0
+* All-time alerts: 11
+
+Alert history shows the previous CS alert:
+
+MahaR — Kills on Maps 1+2 — UNDER 31.5 — S-tier
+
+But there have been no new Tier 1 alerts since then.
+
+DO NOT assume Tier 1 is broken.
+
+Trace the exact path for the highest-scoring CURRENT Tier 1 candidates.
+
+For at least:
+
+* 1 WNBA candidate
+* 1 Tennis candidate
+* 1 CS candidate
+* 1 LoL candidate
+
+trace:
+
+QUALIFIED
+→ TIER ASSIGNMENT
+→ VALIDATION
+→ DIRECTION
+→ CONFIDENCE
+→ BET QUALITY
+→ FINAL GATE
+→ DEDUP
+→ GAME/TIMING CHECK
+→ STORED PICK
+→ TELEGRAM
+
+For each candidate report the exact reason it stops.
+
+Specifically determine:
+
+* Are Tier 1 qualified candidates actually receiving OVER/UNDER direction?
+* Are they being assigned PASS by the decision engine?
+* Is missing player-game history preventing a decision?
+* Is the market-signal bypass being reached?
+* Is the required line-movement condition being met?
+* Is cold_start still blocking them?
+* Is validation blocking them?
+* Is confidence blocking them?
+* Is BQ blocking them?
+* Is dedup blocking them?
+* Is lifecycle/removal blocking them?
+* Is the game already live/past?
+* Are they being stored but not sent?
+* Or are they never reaching alert creation?
+
+━━━━━━━━━━━━━━━━━━
+10. COMPARE TIER 1 AGAINST THE PREVIOUS SUCCESSFUL CS ALERT
+━━━━━━━━━━━━━━━━━━
+
+Use:
+
+MahaR — Kills on Maps 1+2 — UNDER 31.5 — S-tier
+
+Trace the exact conditions MahaR satisfied.
+
+Then compare those conditions directly against current:
+
+* WNBA
+* Tennis
+* CS
+* LoL
+
+candidates.
+
+Determine exactly what MahaR satisfied that the current candidates do not.
+
+━━━━━━━━━━━━━━━━━━
+11. TIER 1 DATA AVAILABILITY
+━━━━━━━━━━━━━━━━━━
+
+Verify whether the current stat providers actually provide usable historical data for Tier 1 sports.
+
+Check:
+
+* WNBA
+* Tennis
+* CS
+* LoL
+* PGA
+* NPB
+* VAL
+* Other Tier 1 sports
+
+Report:
+
+* Number of player-game history rows available per sport
+* Whether hit-rate data is available
+* Whether the decision engine can calculate direction
+* Whether confidence can be calculated
+* Whether bet quality can be calculated
+* Whether the market bypass can activate without historical data
+
+Do NOT add providers.
+
+Do NOT change the scoring engine.
+
+Do NOT change gates.
+
+This is diagnosis only.
+
+━━━━━━━━━━━━━━━━━━
+12. TIER 1 ALERT CAPABILITY TEST
+━━━━━━━━━━━━━━━━━━
+
+Without modifying production code, determine whether a hypothetical Tier 1 candidate with:
+
+* S-tier
+* Score 90+
+* Valid upcoming event
+* Valid player/market
+* Clear OVER/UNDER
+* Required confidence
+* Required quality
+* No dedup conflict
+
+would currently reach Telegram.
+
+Also determine whether a hypothetical Tier 1 95+ S-tier candidate would trigger the new priority override.
+
+Do NOT send a fake Telegram alert.
+
+Do NOT modify code.
+
+Just trace the logic and report the result.
+
+━━━━━━━━━━━━━━━━━━
+13. FINAL DIAGNOSTIC REPORT
+━━━━━━━━━━━━━━━━━━
+
+Report clearly:
+
+1. Previous MLB 95+ behavior
+2. Current MLB maximum score
+3. Current top MLB candidates
+4. Exact scoring difference
+5. Exact alert-path difference
+6. Whether 95+ override has ever triggered
+7. Exact reason no MLB alerts are currently being generated
+8. Why Tier 1 sports are producing zero new alerts
+9. Whether Tier 1 qualification is working
+10. Whether Tier 1 direction generation is working
+11. Whether missing stat/history data is preventing alerts
+12. Whether the market bypass is working
+13. Whether dedup is blocking anything
+14. Whether lifecycle/removal is blocking anything
+15. Whether candidates are reaching alert creation
+16. Whether a real 90+ S-tier Tier 1 candidate would alert today
+17. Whether a real 95+ S-tier Tier 1 candidate would receive the immediate priority override
+18. Whether the issue is scoring, data, qualification, final gating, persistence, or Telegram delivery
+
+IMPORTANT:
+
+DIAGNOSTIC ONLY.
+
+NO CODE CHANGES.
+
+NO THRESHOLD CHANGES.
+
+NO GATE CHANGES.
+
+NO SCORING CHANGES.
+
+NO REWRITE.
+
+After the complete diagnosis, STOP and wait for approval.
