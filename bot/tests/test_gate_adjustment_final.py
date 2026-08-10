@@ -219,12 +219,10 @@ class TestAllPathsHaveGate:
         )
 
     def test_lc_path_under_blocked(self, src):
-        """_lc_strict_tier_ok must contain UNDER direction check for Tier 2."""
-        idx = src.find("_lc_strict_tier_ok")
-        assert idx != -1, "_lc_strict_tier_ok not found"
-        snippet = src[idx: idx + 500]
-        assert "recommendation != \"UNDER\"" in snippet, (
-            "_lc_strict_tier_ok does not block UNDER for Tier 2 — add direction check"
+        """MLB UNDER whitelist gate (_lc_mlb_ok) must be present in the LC path."""
+        assert "_lc_mlb_ok" in src, "_lc_mlb_ok missing — MLB UNDER whitelist gate not in LC path"
+        assert "is_mlb_under_allowed" in src, (
+            "is_mlb_under_allowed missing — MLB UNDER whitelist check not wired in market_engine"
         )
 
     def test_bq_gate_removed_from_new_prop(self, src):

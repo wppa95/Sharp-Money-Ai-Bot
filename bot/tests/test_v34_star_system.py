@@ -315,23 +315,23 @@ class TestStrongUnderSignal:
 
     # ── Trigger conditions ───────────────────────────────────────────────────
     def test_under_score_30_triggers_signal(self):
-        """UNDER + score 30 → Strong UNDER Signal in alert."""
-        msg = self._change_alert(rec="UNDER", score_total=30)
-        assert "Strong UNDER Signal" in msg, (
-            "UNDER + score 30 must show Strong UNDER Signal"
+        """UNDER + BQ ≥ 70 (Tier 1) → STRONG UNDER in alert (replaces old score ≤ 30 condition)."""
+        msg = self._change_alert(rec="UNDER", score_total=30, conf=80)
+        assert "STRONG UNDER" in msg, (
+            "Tier 1 UNDER + BQ ≥ 70 must show STRONG UNDER label"
         )
 
     def test_under_score_29_triggers_signal(self):
-        msg = self._change_alert(rec="UNDER", score_total=29)
-        assert "Strong UNDER Signal" in msg
+        msg = self._change_alert(rec="UNDER", score_total=29, conf=80)
+        assert "STRONG UNDER" in msg
 
     def test_under_score_20_triggers_signal(self):
-        msg = self._change_alert(rec="UNDER", score_total=20)
-        assert "Strong UNDER Signal" in msg
+        msg = self._change_alert(rec="UNDER", score_total=20, conf=75)
+        assert "STRONG UNDER" in msg
 
     def test_under_score_0_triggers_signal(self):
-        msg = self._change_alert(rec="UNDER", score_total=0)
-        assert "Strong UNDER Signal" in msg
+        msg = self._change_alert(rec="UNDER", score_total=0, conf=70)
+        assert "STRONG UNDER" in msg
 
     # ── Non-trigger conditions ───────────────────────────────────────────────
     def test_under_score_31_no_signal(self):
@@ -355,10 +355,10 @@ class TestStrongUnderSignal:
 
     # ── New prop alert also shows signal ─────────────────────────────────────
     def test_new_prop_under_score_28_triggers_signal(self):
-        """New-prop alert with UNDER + score ≤ 30 must also show signal."""
-        msg = self._new_prop_alert(rec="UNDER", score_total=28)
-        assert "Strong UNDER Signal" in msg, (
-            "format_underdog_new_prop_alert must show Strong UNDER Signal when conditions met"
+        """New-prop alert with Tier 1 UNDER + BQ ≥ 70 must show STRONG UNDER label."""
+        msg = self._new_prop_alert(rec="UNDER", score_total=28, conf=80)
+        assert "STRONG UNDER" in msg, (
+            "format_underdog_new_prop_alert must show STRONG UNDER when Tier 1 UNDER + BQ ≥ 70"
         )
 
     def test_new_prop_over_score_28_no_signal(self):
@@ -372,11 +372,11 @@ class TestStrongUnderSignal:
         assert "80/100" in msg, "BQ 80 must still appear unchanged in the alert"
 
     def test_signal_does_not_affect_over_logic(self):
-        """OVER alerts with the same score must be fully unaffected."""
+        """OVER alerts must never get the STRONG UNDER label; UNDER at BQ ≥ 70 must get it."""
         msg_over  = self._change_alert(rec="OVER",  score_total=28, conf=80)
         msg_under = self._change_alert(rec="UNDER", score_total=28, conf=80)
-        assert "Strong UNDER Signal" not in msg_over
-        assert "Strong UNDER Signal" in msg_under
+        assert "STRONG UNDER" not in msg_over
+        assert "STRONG UNDER" in msg_under
 
 
 # ═══════════════════════════════════════════════════════════════════════════

@@ -548,7 +548,9 @@ class TestTierPolicyUnchanged:
 
     def test_ud_non_strict_min_conf_a_unchanged(self):
         from config import config as cfg
-        assert cfg.UD_NON_STRICT_MIN_CONF_A == 60
+        # Per Final Prop Acceptance Spec: Tier 1 A-tier cutoff is 70.
+        # 70 = actionable, 69 = watchlist.  Updated from prior 60 default.
+        assert cfg.UD_NON_STRICT_MIN_CONF_A == 70
 
     def test_ud_non_strict_min_conf_b_unchanged(self):
         from config import config as cfg
@@ -585,7 +587,8 @@ class TestTierPolicyUnchanged:
 
     def test_min_conf_for_sport_tier_cs_a(self):
         from config import config as cfg
-        assert cfg.min_conf_for_sport_tier("CS", "A") == 60
+        # Per spec: Tier 1 A-tier cutoff is 70 (was 60).
+        assert cfg.min_conf_for_sport_tier("CS", "A") == 70
 
     def test_min_conf_for_sport_tier_cs_b(self):
         from config import config as cfg

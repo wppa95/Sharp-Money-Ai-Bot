@@ -612,11 +612,11 @@ class TestV34RegressionGuard:
         )
 
     def test_strong_under_signal_in_alerts(self):
-        """Strong UNDER signal must still be present in alerts_multiplatform."""
+        """STRONG UNDER label must still be present in alerts_multiplatform (label updated per spec)."""
         import alerts_multiplatform as am
         assert hasattr(am, "_bq_stars"), "V3.4 _bq_stars must still be in alerts_multiplatform"
         import inspect
         src = inspect.getsource(am.format_underdog_change_alert)
-        assert "Strong UNDER Signal" in src, (
-            "V3.4 Strong UNDER Signal must still be in format_underdog_change_alert"
+        assert "STRONG UNDER" in src, (
+            "STRONG UNDER label must still be in format_underdog_change_alert (Tier 1 BQ ≥ 70)"
         )

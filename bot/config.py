@@ -286,7 +286,7 @@ class Config:
     # Relaxed A/B confidence floors for non-strict sports (all except MLB/NFL).
     # Allows the pipeline to surface more legitimate non-MLB/NFL A and B picks
     # during stress-testing while leaving MLB/NFL thresholds untouched.
-    UD_NON_STRICT_MIN_CONF_A: int = int(os.environ.get("UD_NON_STRICT_MIN_CONF_A", "60"))
+    UD_NON_STRICT_MIN_CONF_A: int = int(os.environ.get("UD_NON_STRICT_MIN_CONF_A", "70"))
     UD_NON_STRICT_MIN_CONF_B: int = int(os.environ.get("UD_NON_STRICT_MIN_CONF_B", "45"))
     # Minimum bet_quality_score (= decision.confidence) for strict sports (MLB/NFL).
     # A strict-sport pick must pass BOTH S-tier classification AND this BQ floor.
@@ -367,6 +367,30 @@ class Config:
             return frozenset(_all)
         idx = _all.index(min_tier)
         return frozenset(_all[:idx + 1])
+
+    @property
+    def mlb_under_allowed_markets(self) -> frozenset[str]:
+        """
+        MLB UNDER is allowed only for these prop markets (case-insensitive match).
+        MLB OVER is unrestricted across all available markets.
+        NFL UNDER is fully allowed (no market restriction).
+        """
+        return frozenset({
+            "strikeouts",
+            "pitcher strikeouts",
+            "pitching outs",
+            "hits allowed",
+            "earned runs allowed",
+            "earned runs",
+            "walks allowed",
+            "walks",
+            "fantasy points",
+            "runs",
+        })
+
+    def is_mlb_under_allowed(self, stat_type: str) -> bool:
+        """Return True when this stat_type qualifies for an MLB UNDER alert."""
+        return stat_type.lower().strip() in self.mlb_under_allowed_markets
 
     @property
     def ud_strict_alert_sports(self) -> frozenset[str]:

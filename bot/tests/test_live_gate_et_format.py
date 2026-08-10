@@ -234,7 +234,10 @@ class TestConfigHelperMethods:
         c = self._cfg()
         cs_a = c.min_conf_for_sport_tier("CS", "A")
         assert cs_a == c.UD_NON_STRICT_MIN_CONF_A
-        assert cs_a < c.UD_MIN_CONF_A
+        # Per spec: Tier 1 A-tier threshold is 70 (same as strict A-tier floor).
+        # The "relaxed" label is preserved for Tier 1 (they bypass BQ and star gates
+        # that strict sports apply), but the numeric conf floor is now aligned at 70.
+        assert cs_a <= c.UD_MIN_CONF_A
 
     def test_b_tier_strict_for_nfl(self):
         c = self._cfg()

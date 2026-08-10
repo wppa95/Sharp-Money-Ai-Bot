@@ -1226,6 +1226,7 @@ async def underdog_job(context) -> None:
             from alerts import DeliveryResult
             score:              Optional[UDPropScore] = None
             ud_result:          DeliveryResult        = DeliveryResult(sent=False)
+            _lc_odds_confirm:   Optional[dict]        = None    # initialised here so `if ud_result.sent` always sees it
             np_immediate:       bool                  = False   # set inside is_new_prop branch
             _market_move_sent:  bool                  = False   # lightweight market-move alert
             validation:         Optional[object]      = None    # PlayerPropValidation or None
@@ -1332,10 +1333,11 @@ async def underdog_job(context) -> None:
                 if decision is not None and decision.confidence >= 95 and decision.decision_tier == "S" and decision.recommendation != "PASS":
                     np_immediate = False  # 95+ always uses the override path
                     _np_95_sport = (snap.sport or "").upper()
-                    # Tier 2: MLB/NFL UNDER is NEVER actionable regardless of BQ or tier.
+                    # NFL UNDER: allowed. MLB UNDER: whitelist only. MLB/NFL OVER: always allowed.
                     _np_95_dir_ok = (
-                        _np_95_sport not in config.ud_strict_alert_sports
+                        _np_95_sport != "MLB"
                         or decision.recommendation != "UNDER"
+                        or config.is_mlb_under_allowed(stat_type)
                     )
                     if (
                         _np_pp_key not in _priority_alerted_this_scan
@@ -1422,17 +1424,21 @@ async def underdog_job(context) -> None:
                             player, stat_type, _sport_up,
                             decision.decision_tier, config.UD_MLB_MIN_TIER,
                         )
-                # Tier 2 UNDER gate — MLB/NFL S-tier UNDER is always watchlist (Tier 2 spec).
-                # Tier 1 (all other sports) allows UNDER for S/A tier.
+                # Direction gate for Tier 2 (MLB/NFL):
+                #   NFL UNDER → fully allowed (all markets)
+                #   MLB UNDER → restricted to whitelist markets only
+                #   MLB/NFL OVER → always allowed
                 if _np_bet_ready and decision is not None:
                     _np_sport_strict = (snap.sport or "").upper()
-                    if (_np_sport_strict in config.ud_strict_alert_sports
-                            and decision.recommendation == "UNDER"):
+                    if (_np_sport_strict == "MLB"
+                            and decision.recommendation == "UNDER"
+                            and not config.is_mlb_under_allowed(stat_type)):
                         _np_bet_ready = False
                         logger.debug(
-                            "UD mlb_under_gate [new]: %s | %s | sport=%s UNDER blocked (Tier 2 = OVER only)",
-                            player, stat_type, _np_sport_strict,
+                            "UD mlb_under_gate [new]: %s | %s | market not in MLB UNDER whitelist",
+                            player, stat_type,
                         )
+                    # NFL UNDER: no gate — fully allowed per spec
                 # BQ gate removed: decision_tier (S/A) enforces quality.
                 # Game-live hard gate — block actionable alerts when game has already started (#5).
                 # Uses _is_game_live_or_past which checks status field + game_time elapsed.
@@ -1737,10 +1743,11 @@ async def underdog_job(context) -> None:
                     if decision is not None and decision.confidence >= 95 and decision.decision_tier == "S" and decision.recommendation != "PASS":
                         _lc_95_sent = True  # block normal lc gate sequence
                         _lc_95_sport = (snap.sport or "").upper()
-                        # Tier 2: MLB/NFL UNDER is NEVER actionable regardless of BQ or tier.
+                        # NFL UNDER: allowed. MLB UNDER: whitelist only. OVER: always allowed.
                         _lc_95_dir_ok = (
-                            _lc_95_sport not in config.ud_strict_alert_sports
+                            _lc_95_sport != "MLB"
                             or decision.recommendation != "UNDER"
+                            or config.is_mlb_under_allowed(stat_type)
                         )
                         if (
                             _lc_pp_key not in _priority_alerted_this_scan
@@ -1899,19 +1906,20 @@ async def underdog_job(context) -> None:
                     # Every non-removal alert requires a real directional pick.
                     # Re-entries no longer bypass the decision engine.
                     _lc_sport_up = (snap.sport or "").upper()
+                    # MLB UNDER direction gate — restricted to whitelist markets only.
+                    # MLB OVER: unrestricted. NFL UNDER: no gate (fully allowed).
                     _lc_mlb_ok = (
                         _lc_sport_up != "MLB"
                         or decision is None
-                        or (decision.decision_tier in config.ud_mlb_alert_tiers
-                            and decision.recommendation != "UNDER")  # Tier 2: MLB UNDER blocked
+                        or decision.recommendation != "UNDER"
+                        or config.is_mlb_under_allowed(stat_type)
                     )
-                    # Strict-sport tier gate for line-change path — MLB AND NFL are S-tier OVER only.
-                    # _lc_mlb_ok above only covers MLB; this covers all ud_strict_alert_sports.
+                    # Strict-sport tier gate (MLB + NFL) — S/A tier required for alerts.
+                    # Direction filtering is handled by _lc_mlb_ok above (MLB) or omitted (NFL).
                     _lc_strict_tier_ok = (
                         _lc_sport_up not in config.ud_strict_alert_sports
                         or decision is None
-                        or (decision.decision_tier in config.ud_mlb_alert_tiers
-                            and decision.recommendation != "UNDER")  # Tier 2: UNDER always blocked
+                        or decision.decision_tier in config.ud_mlb_alert_tiers
                     )
                     is_qualified = (
                         (not is_cold_start or _fast_resume)  # fast-resume: allow lc delivery on first scan
@@ -2094,7 +2102,6 @@ async def underdog_job(context) -> None:
                     except (NameError, Exception):
                         pass
                     # OddsAPI market confirmation — non-blocking, S/A tier only, non-removal
-                    _lc_odds_confirm: Optional[dict] = None
                     if (not is_removed
                             and decision is not None
                             and decision.decision_tier in ("S", "A")
@@ -2430,9 +2437,11 @@ async def underdog_job(context) -> None:
                 _sp_pp_key = (_sp, _ssport, _st)
                 if _sdec is not None and _sdec.confidence >= 95 and _sdec.decision_tier == "S" and _sdec.recommendation != "PASS":
                     # Tier 2: MLB/NFL UNDER is NEVER actionable regardless of BQ or tier.
+                    # NFL UNDER: allowed. MLB UNDER: whitelist only. OVER: always allowed.
                     _sp_95_dir_ok = (
-                        _ssport.upper() not in config.ud_strict_alert_sports
+                        _ssport.upper() != "MLB"
                         or _sdec.recommendation != "UNDER"
+                        or config.is_mlb_under_allowed(_st)
                     )
                     if (
                         _sp_pp_key not in _priority_alerted_this_scan
@@ -2484,15 +2493,18 @@ async def underdog_job(context) -> None:
                     )
                     continue
 
-                # Tier 2 UNDER gate — MLB/NFL S-tier UNDER is always watchlist (Tier 2 spec).
-                # BQ gate removed: decision_tier (S) enforces quality for Tier 2.
-                if (_ssport.upper() in config.ud_strict_alert_sports
-                        and _sdec.recommendation == "UNDER"):
+                # Direction gate for Tier 2:
+                #   NFL UNDER → fully allowed (no market restriction)
+                #   MLB UNDER → restricted to whitelist markets only
+                if (_ssport.upper() == "MLB"
+                        and _sdec.recommendation == "UNDER"
+                        and not config.is_mlb_under_allowed(_st)):
                     logger.debug(
-                        "UD mlb_under_gate [standing]: %s | %s | sport=%s UNDER blocked (Tier 2 = OVER only)",
-                        _sp, _st, _ssport.upper(),
+                        "UD mlb_under_gate [standing]: %s | %s | market not in MLB UNDER whitelist",
+                        _sp, _st,
                     )
                     continue
+                # NFL UNDER: no gate — fully allowed per spec
 
                 # Game-live hard gate for standing plays — block if game already started (#5).
                 if _is_game_live_or_past(_ssnap, now):

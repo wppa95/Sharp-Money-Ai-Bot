@@ -1,0 +1,335 @@
+🚨 CRED BURN WARNING — DO NOT WASTE CREDITS ON ANOTHER DIAGNOSTIC PASS
+
+We already know the architecture and the previous fixes. Do NOT spend the next pass explaining/diagnosing what is wrong.
+
+IMPLEMENT THE SPEC BELOW DIRECTLY.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 FINAL PROP ACCEPTANCE SPEC
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+There are TWO sport tiers.
+
+TIER 2 = MLB + NFL
+TIER 1 = all other supported sports
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+⚾🏈 TIER 2 — MLB + NFL
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+ACTIONABLE:
+
+🔥 S-TIER = ACTIONABLE + PRIORITY
+🟢 A-TIER = ACTIONABLE
+
+WATCHLIST:
+
+🟡 B-TIER = WATCHLIST
+⚪ C-TIER = WATCHLIST
+
+Both directions are allowed:
+
+🟢 OVER = allowed
+🔴 UNDER = allowed
+
+Do NOT block NFL UNDER.
+
+Do NOT make NFL OVER-only.
+
+Do NOT allow B/C to become actionable.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+⚾ MLB UNDER SPECIAL RULE
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+MLB UNDER is restricted ONLY to these markets:
+
+• Strikeouts
+• Pitching Outs
+• Hits Allowed
+• Earned Runs Allowed
+• Walks Allowed
+• Fantasy Points
+• Runs
+
+MLB OVER remains unrestricted across available MLB prop markets.
+
+If an MLB UNDER market is not on this list:
+
+→ BLOCK IT.
+
+MLB OVER:
+
+→ ALLOW ALL PROP MARKETS.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🏈 NFL UNDER
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+NFL UNDER is fully allowed.
+
+All available NFL UNDER prop markets may qualify.
+
+S/A = actionable
+S = priority
+B/C = watchlist
+
+Do NOT create an MLB-style UNDER market restriction for NFL.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🏆 TIER 1 — ALL OTHER SPORTS
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+OVER + UNDER are both allowed.
+
+🔥 S-TIER = ACTIONABLE + PRIORITY
+
+🟢 A-TIER 70–100 = ACTIONABLE
+
+🟡 A-TIER 69 = WATCHLIST
+
+🟡 B-TIER = WATCHLIST
+
+⚪ C-TIER = WATCHLIST
+
+IMPORTANT:
+
+The Tier 1 A-tier actionable cutoff is EXACTLY 70/100.
+
+69/100 must NOT be actionable.
+
+70/100 MUST be actionable.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🔥 STRONG UNDER SIGNAL
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+For Tier 1 UNDER props:
+
+Confidence >= 30/100
+AND
+Bet Quality >= 70/100
+
+→ label as:
+
+🔥 STRONG UNDER
+
+This is a strong signal.
+
+It does NOT artificially promote the prop to S-tier.
+
+The normal tier/confidence rules still determine whether it is actionable.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+❗ CONFIDENCE VS BET QUALITY
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+This MUST be enforced everywhere.
+
+CONFIDENCE determines the tier/actionability.
+
+BET QUALITY determines the quality/strength label.
+
+BQ must NEVER manufacture an S-tier.
+
+INVALID:
+
+Confidence: 60/100
+BQ: 85/100
+
+Do NOT output:
+
+🔥 S-TIER HIGH PRIORITY
+
+That prop is NOT S-tier because confidence is only 60.
+
+VALID:
+
+Confidence: 95/100
+BQ: 95/100
+
+→ S-TIER PRIORITY
+
+Example:
+
+🔥🚨 S-TIER PRIORITY OVERRIDE — 95/100
+━━━━━━━━━━━━━━━━━━━━━━━━
+Player · Prop
+🏆 S-TIER ★★★★☆
+Line: X
+📈 UNDER · Confidence: 95
+
+🔥 Bet Quality 95/100 — Priority
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+📊 ALERT DISPLAY RULE
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+The large headline confidence number must ALWAYS represent the actual model confidence.
+
+Never use BQ as the confidence headline.
+
+If:
+
+Confidence = 60
+BQ = 85
+
+Display:
+
+60/100
+
+NOT:
+
+85/100
+
+The BQ should remain separately labeled:
+
+Bet Quality: 85/100
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+📈 LAST-5 FALLBACK
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+For EVERY player prop:
+
+If sportsbook/player historical history is unavailable:
+
+→ pull/display the player’s LAST 5 available results for that exact prop/stat if Underdog provides enough information.
+
+Do NOT leave the historical section blank simply because the normal history provider has no record.
+
+Use:
+
+L5: X/5
+L5 hit rate: X%
+
+when available.
+
+If no valid L5 data exists anywhere, explicitly say:
+
+L5: No history available
+
+Do NOT fabricate historical data.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+📡 PIPELINE REQUIREMENT
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Continue monitoring ALL active Underdog props every polling cycle.
+
+The bot must:
+
+1. Fetch all active props.
+2. Monitor ALL known props.
+3. Detect line movement.
+4. Detect re-entry/removal/reappearance.
+5. Re-score qualifying changes.
+6. Apply the FINAL tier/direction rules above.
+7. Deliver alerts when they pass all gates.
+
+Do NOT stop monitoring a prop simply because it is already in known_keys.
+
+known_keys may prevent duplicate processing, but it MUST NOT prevent continuous monitoring for:
+
+• line changes
+• re-entry
+• availability changes
+• market changes
+
+The earlier 0.5 → 1.5 stale-alert problem must remain fixed.
+
+Every actionable alert must include:
+
+⏱ Line as of [timestamp] ET — verify on Underdog before placing
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🧪 REQUIRED REGRESSION TESTS
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Add/update tests for ALL boundaries:
+
+1. MLB OVER S-tier → actionable
+2. MLB OVER A-tier → actionable
+3. MLB UNDER S-tier allowed markets → actionable
+4. MLB UNDER A-tier allowed markets → actionable
+5. MLB UNDER prohibited market → blocked
+6. MLB OVER unrestricted markets → allowed
+7. NFL OVER S-tier → actionable
+8. NFL UNDER S-tier → actionable
+9. NFL OVER A-tier → actionable
+10. NFL UNDER A-tier → actionable
+11. NFL B-tier → watchlist
+12. NFL C-tier → watchlist
+13. Tier 1 S-tier → actionable
+14. Tier 1 A-tier 70/100 → actionable
+15. Tier 1 A-tier 69/100 → watchlist
+16. Tier 1 A-tier 71/100 → actionable
+17. Tier 1 UNDER confidence 30 + BQ 70 → STRONG UNDER
+18. Tier 1 UNDER confidence 29 + BQ 70 → NOT strong-under
+19. Confidence 60 + BQ 85 → NOT S-tier
+20. Confidence 95 + BQ 95 → S-tier priority
+21. BQ must never override confidence tier
+22. L5 fallback appears when normal history unavailable
+23. No fabricated L5 data
+24. Known prop with line movement is re-scored
+25. Known prop with unchanged line remains monitored
+26. Removed → reappeared prop can qualify again
+27. Alert timestamp reflects current line timestamp
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🚨 OUTPUT VALIDATION
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Before declaring success, inspect actual Telegram output.
+
+Verify that:
+
+• S-tier actually displays S-tier
+• A 70 actually displays actionable A-tier
+• A 69 displays WATCHLIST
+• B/C display WATCHLIST
+• NFL UNDER can alert
+• MLB allowed UNDER markets can alert
+• prohibited MLB UNDER markets cannot alert
+• confidence headline equals confidence score
+• BQ is displayed separately
+• STRONG UNDER label works
+• L5 fallback works
+• line timestamp is current
+
+Do not rely only on unit tests.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🛠️ EXECUTION RULE
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Implement the changes directly.
+
+Then:
+
+1. Run syntax checks.
+2. Run regression tests.
+3. Run full test suite.
+4. Fix failures caused by this implementation.
+5. Restart bot.
+6. Wait for live scan.
+7. Inspect actual scan pipeline.
+8. Inspect actual Telegram alerts.
+9. Confirm the rules above with live output.
+10. Only then report completion.
+
+Do NOT give me another long diagnosis before fixing.
+
+Implement → Test → Restart → Live Verify → Freeze.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🧊 FREEZE
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Once all requirements pass:
+
+🧊 FREEZE THE RULESET.
+
+No further rule changes unless explicitly requested.
+
+Only bug fixes, stability fixes, performance improvements, provider fixes, and regression tests after the freeze.
