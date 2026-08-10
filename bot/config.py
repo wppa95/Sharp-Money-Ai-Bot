@@ -242,7 +242,7 @@ class Config:
     # MLB alert gate — MLB only sends Telegram alerts when the tier is at or
     # above this value.  "S" = S-tier only (default).  "A" allows A and S.
     # "B" allows B, A, S.  Set to "" to disable the MLB restriction.
-    UD_MLB_MIN_TIER: str = os.environ.get("UD_MLB_MIN_TIER", "S")
+    UD_MLB_MIN_TIER: str = os.environ.get("UD_MLB_MIN_TIER", "A")
 
     # Dedup windows for new alert types (seconds)
     INEFFICIENCY_DEDUP_WINDOW: int = int(os.environ.get("INEFFICIENCY_DEDUP_WINDOW", "1800"))

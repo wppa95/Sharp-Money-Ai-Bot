@@ -489,18 +489,18 @@ class TestReq11MLBTier2:
         strict = {s.upper() for s in (config.ud_strict_alert_sports or [])}
         assert "MLB" in strict, "MLB must be in ud_strict_alert_sports"
 
-    def test_mlb_under_blocked_in_standing_path(self):
-        """MLB UNDER must be blocked in the standing path."""
+    def test_mlb_under_allowed_in_standing_path(self):
+        """MLB UNDER is now ALLOWED — spec Tier 2: both directions valid."""
         src = inspect.getsource(__import__("market_engine").underdog_job)
-        assert '"MLB"' in src and "UNDER" in src, (
-            "MLB UNDER block must be in underdog_job (standing path)"
+        assert "mlb_under_gate [standing]" not in src, (
+            "mlb_under_gate [standing] found — UNDER block must be removed per spec Tier 2"
         )
 
-    def test_mlb_requires_bq95_in_standing_path(self):
-        """MLB requires BQ ≥ 95 in the standing path."""
+    def test_mlb_bq_gate_removed_from_standing_path(self):
+        """BQ gate removed — decision_tier (S/A only) enforces quality per spec Tier 2."""
         src = inspect.getsource(__import__("market_engine").underdog_job)
-        assert "UD_STRICT_SPORT_MIN_BET_QUALITY" in src, (
-            "Strict BQ gate (UD_STRICT_SPORT_MIN_BET_QUALITY) must be in standing path"
+        assert "bq_gate [standing]" not in src, (
+            "bq_gate [standing] found — gate must be removed per spec Tier 2"
         )
 
     def test_mlb_requires_s_tier_only(self):
@@ -511,22 +511,20 @@ class TestReq11MLBTier2:
         )
 
     def test_mlb_cold_start_props_face_same_gates_as_normal(self):
-        """MLB cold-start props that reach the standing path face the SAME gates.
+        """MLB cold-start props face the SAME gates as normal: S/A tier, both directions.
 
-        fast_resume does NOT weaken MLB/NFL gates — all of:
-        - BQ ≥ 95
-        - S-tier only
-        - OVER only (no UNDER)
-        remain active during fast-resume evaluation.
+        fast_resume does NOT weaken MLB/NFL gates — the tier gate remains active.
+        BQ gate and UNDER block removed per spec Tier 2.
         """
         src = inspect.getsource(__import__("market_engine").underdog_job)
-        # All three gates must be present in standing path (after the 4A comment)
         standing_start = src.find("4A: Standing opportunity scan")
         assert standing_start != -1, "Standing path header must exist"
         standing_src = src[standing_start:]
-        assert "ud_strict_alert_sports" in standing_src, "Strict sport check in standing"
-        assert "UD_STRICT_SPORT_MIN_BET_QUALITY" in standing_src, "BQ≥95 in standing"
-        assert "MLB" in standing_src and "UNDER" in standing_src, "MLB UNDER block in standing"
+        assert "ud_strict_alert_sports" in standing_src, "Strict sport tier check in standing"
+        assert "ud_mlb_alert_tiers" in standing_src, "MLB/NFL tier gate must be in standing path"
+        # BQ gate and UNDER block must be REMOVED per spec Tier 2
+        assert "bq_gate [standing]" not in standing_src, "BQ gate removed"
+        assert "mlb_under_gate [standing]" not in standing_src, "UNDER block removed"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -555,17 +553,17 @@ class TestReq12NFLTier2:
         if tiers:
             assert "S" in tiers or "s" in tiers, "S must be an allowed tier for strict sports"
 
-    def test_fast_resume_does_not_bypass_nfl_gates(self):
-        """fast_resume=True must NOT bypass NFL safety gates."""
+    def test_fast_resume_does_not_bypass_nfl_tier_gate(self):
+        """fast_resume=True must NOT bypass NFL/MLB tier gate (S/A only)."""
         src = inspect.getsource(__import__("market_engine").underdog_job)
         standing_start = src.find("4A: Standing opportunity scan")
         standing_src = src[standing_start:]
-        # All strict gates must still exist after the fast_resume guard change
+        # Tier gate must still exist; BQ gate intentionally removed per spec
         assert "ud_strict_alert_sports" in standing_src, (
-            "fast_resume must NOT bypass ud_strict_alert_sports gate"
+            "fast_resume must NOT bypass ud_strict_alert_sports tier gate"
         )
-        assert "UD_STRICT_SPORT_MIN_BET_QUALITY" in standing_src, (
-            "fast_resume must NOT bypass strict BQ gate"
+        assert "ud_mlb_alert_tiers" in standing_src, (
+            "fast_resume must NOT bypass MLB/NFL tier gate"
         )
 
 

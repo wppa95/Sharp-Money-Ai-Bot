@@ -1,0 +1,204 @@
+🚨 CRED BURNING — DIAGNOSE + FIX, DO NOT JUST REPORT
+
+We need you to diagnose and FIX the current Sharp Money Bot pipeline in one pass. Do not stop at explaining the issue. Read the relevant code, identify the root cause, implement the fixes, run regression tests, restart the bot, and verify the live pipeline.
+
+REQUIRED ALERT RULES
+
+Implement these rules exactly:
+
+TIER 2 — MLB + NFL
+
+* Actionable alerts: S-tier or A-tier ONLY
+* B/C = WATCHLIST only
+* Both OVER and UNDER are allowed
+* Do NOT block MLB/NFL UNDER
+* Do NOT require S-tier only for MLB
+* Do NOT suppress valid A-tier MLB/NFL candidates
+
+TIER 1 — ALL OTHER SPORTS
+
+* Actionable alerts: S-tier or A-tier ONLY
+* B/C = WATCHLIST only
+* Both OVER and UNDER are allowed
+* Valid S/A candidates must be eligible for Telegram delivery
+
+The sport tier must NOT accidentally cause valid S/A Tier-1 candidates to disappear.
+
+CRITICAL PIPELINE REQUIREMENT
+
+The Underdog feed must continuously monitor ALL active props on every polling cycle, including props already present in known_keys.
+
+Every scan must:
+
+1. Fetch the complete Underdog feed.
+2. Normalize every active prop.
+3. Track removed/futures separately.
+4. Compare EVERY known prop against its previous state.
+5. Detect line movement.
+6. Re-score props when their line changes.
+7. Re-enter/re-score/re-alert eligible props when appropriate.
+8. Continue monitoring unchanged props without treating them as new candidates.
+9. Never use known_keys as a permanent suppression mechanism.
+
+The current behavior where ~4,600–4,800 props are fetched but only ~1–30 are analyzed is acceptable ONLY if the remaining props are genuinely unchanged. However, the system must prove that with scan-cycle accounting and must immediately re-score any line movement.
+
+We previously had a real-world failure where the bot alerted:
+
+0.5
+
+but by the time we went to enter the play, Underdog was already:
+
+1.5
+
+The system must therefore prioritize fresh line state and must never present a stale line as actionable.
+
+Every actionable alert must include a freshness timestamp such as:
+
+⏱ Line as of 3:27 PM ET — verify on Underdog before placing.
+
+CURRENT PROBLEM
+
+The latest funnel shows:
+
+* 4,766 props fetched
+* 4,753 unchanged
+* 13 line-moved
+* 13 scored
+* 18 qualified candidates in the candidate funnel
+* 0 qualified for alert
+* 0 delivered
+
+This is suspicious because we have known S/A candidates available.
+
+We also have examples such as:
+
+* KBO: 13/13 qualified
+* MLB: qualified S/A candidates
+* WNBA: qualified S/A candidates
+
+Yet Telegram delivery remains:
+
+0
+
+Do NOT assume this is correct. Trace the exact path:
+
+score → tier → direction → BQ → confidence → sport gate → delivery gate → dedup → live-game gate → Telegram
+
+Find exactly which gate is eliminating the candidates.
+
+VERY IMPORTANT
+
+The /picks command must NOT misleadingly display undelivered candidates as if they are actionable picks.
+
+Every pick should clearly state either:
+
+📤 Delivered
+
+or
+
+⏳ Candidate — not yet delivered
+
+If something is classified as an actionable pick, its delivery status must be accurate.
+
+ALSO FIX / VERIFY
+
+1. /alerts
+    * Must accurately reflect Telegram-delivered player-prop alerts.
+    * If zero were delivered, say zero.
+2. /picks
+    * Must distinguish candidates from delivered alerts.
+3. /funnel
+    * Must show the complete scan pipeline:
+        fetched
+        removed
+        futures
+        active
+        unchanged
+        new
+        line changed
+        scored
+        qualified
+        delivered
+    * Candidate funnel must remain separate from the complete scan pipeline.
+    * Escape all dynamic Telegram HTML fields.
+4. Scan-cycle logging
+    * Every Underdog polling cycle must write a ScanCycleLog record.
+    * We need hard evidence that the entire feed is being monitored every cycle.
+5. Re-entry
+    * Removed/relisted props must be eligible to re-enter the pipeline.
+    * If they qualify again, they must be capable of generating a new alert.
+6. Silent exceptions
+    * Remove all except Exception: pass around critical candidate logging and alert-delivery/database operations.
+    * Replace with useful WARNING/ERROR logging including the exception.
+7. _HIGH_FLOOR_STATS
+    * Verify multi-game/combo markets are included where the actual Underdog stat_type requires them.
+    * Do not accidentally suppress valid S/A Tier-1 props because of stat-type mismatch.
+8. Freshness
+    * Never trust an old cached line for an actionable alert.
+    * Verify the alert is based on the most recent observed Underdog line.
+
+DIAGNOSTIC REQUIREMENT
+
+Do not simply tell me:
+
+“the delivery gate is blocking picks.”
+
+Trace actual candidates through every gate and print/log something like:
+
+PLAYER / SPORT / STAT
+SCORE / TIER / DIRECTION
+BQ
+CONFIDENCE
+SPORT TIER
+GATE RESULT
+REJECTION REASON
+
+For at least the highest-scoring S/A candidates from MLB, WNBA, KBO and another Tier-1 sport.
+
+I specifically want to know why a candidate that is already S/A qualified does or does not reach Telegram.
+
+IMPLEMENTATION
+
+Make the fixes directly.
+
+Do NOT ask me what to change unless you encounter an actual ambiguity that makes implementation impossible.
+
+After changes:
+
+1. Run syntax checks.
+2. Run the full regression suite.
+3. Add regression tests for every changed delivery rule.
+4. Verify Tier 2 MLB/NFL S/A Over and Under.
+5. Verify Tier 1 S/A Over and Under.
+6. Verify B/C become watchlist only.
+7. Verify known props with line movement are re-scored.
+8. Verify unchanged props remain monitored but aren’t unnecessarily re-scored.
+9. Verify re-entry alerts.
+10. Verify /funnel.
+11. Verify /alerts.
+12. Verify /picks.
+13. Restart the bot.
+14. Wait for at least one complete Underdog scan cycle.
+15. Report the actual scan-cycle numbers and actual delivery-gate results.
+
+FINAL OUTPUT
+
+Do not give me a long diagnostic before fixing it.
+
+Give me:
+
+✅ Root cause(s)
+✅ Files changed
+✅ Fixes implemented
+✅ Tests passed
+✅ First live scan after restart
+✅ Number of props fetched
+✅ Number monitored
+✅ Number unchanged
+✅ Number line-changed
+✅ Number scored
+✅ Number S/A qualified
+✅ Number delivered
+✅ Any remaining blockers
+
+The goal is a working bot, not another diagnosis.

@@ -329,20 +329,19 @@ class TestBug120Tier1DeliveryGates:
             "one of the delivery paths may not be guarding the BQ gate correctly"
         )
 
-    def test_source_code_no_direct_mlb_string_in_bq_gate(self):
-        """BQ gate must use ud_strict_alert_sports lookup, not a hardcoded sport string."""
+    def test_source_code_bq_gate_removed(self):
+        """BQ gate must be removed — decision_tier enforces quality per spec Tier 2."""
         import os
         base = os.path.dirname(os.path.dirname(__file__))
         with open(os.path.join(base, "market_engine.py")) as f:
             src = f.read()
-        # Find the new-prop BQ gate comment; the `if` block with ud_strict_alert_sports
-        # follows in the next ~400 chars (comment + if condition + rejection log)
-        gate_start = src.find("# Strict-sport Bet Quality gate — MLB/NFL require BQ")
-        assert gate_start != -1, "BQ gate comment not found in market_engine.py"
-        snippet = src[gate_start: gate_start + 500]
-        assert "ud_strict_alert_sports" in snippet, (
-            "New-prop BQ gate does not use ud_strict_alert_sports — "
-            "MLB/NFL check is not using the config-driven set"
+        # Old BQ gate comment must not exist — it was removed when the gate was dropped
+        assert "# Strict-sport Bet Quality gate — MLB/NFL require BQ" not in src, (
+            "Old BQ gate comment found — gate should have been removed per spec Tier 2"
+        )
+        # The removal note must exist instead
+        assert "BQ gate removed" in src, (
+            "BQ gate removal comment not found — confirm all three paths removed the gate"
         )
 
     def test_tier1_min_stars_is_lower_than_tier2(self):

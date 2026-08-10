@@ -1,20 +1,24 @@
 """
-Regression tests for the final gate adjustment:
+Regression tests for the delivery gate spec (updated):
 
-  MLB/NFL strict alert gate:
-    - S-tier only (ud_mlb_alert_tiers)
-    - BQ ≥ 95 (UD_STRICT_SPORT_MIN_BET_QUALITY)
+  MLB/NFL strict alert gate (Tier 2):
+    - S-tier or A-tier ONLY  (UD_MLB_MIN_TIER=A default)
+    - B/C = WATCHLIST, not delivered
+    - BOTH OVER and UNDER are allowed
+    - No separate BQ gate — decision_tier enforces quality
+
+  Tier 1 (all other sports):
+    - S or A delivered; B/C watchlist
+    - Both directions allowed
 
   Three paths covered: new-prop, line-change, standing.
-  Non-strict sports (NBA, CS, WNBA, …) must NOT be affected by either gate.
+  Non-strict sports (NBA, CS, WNBA, …) must NOT be affected by the strict-sport gate.
 
 Spec:
-  MLB/NFL S + BQ ≥ 95 → ALLOW
-  MLB/NFL S + BQ < 95  → BLOCK (bq_gate)
-  MLB/NFL A or B       → BLOCK (tier gate)
-  Other sports         → unaffected by MLB/NFL gates
+  MLB/NFL S or A  → ALLOW (both directions)
+  MLB/NFL B or C  → BLOCK (tier gate)
+  Other sports    → unaffected by MLB/NFL tier gate
 """
-
 from __future__ import annotations
 
 import os
@@ -27,25 +31,21 @@ os.environ.setdefault("TELEGRAM_TOKEN", "test:token")
 
 import market_engine as me
 
+
 # ── helpers ────────────────────────────────────────────────────────────────────
 
-def _gate_allows(sport: str, tier: str, bq: int) -> bool:
+def _gate_allows(sport: str, tier: str) -> bool:
     """
-    Replicate the combined MLB/NFL gate used in all three delivery paths.
-    Returns True iff the prop is NOT blocked by either the tier gate or the BQ gate.
+    Replicate the Tier 2 MLB/NFL strict gate (tier only, no BQ gate).
+    Returns True iff NOT blocked by the tier gate.
     """
     config = me.config
     sport_up = sport.upper()
 
-    # Tier gate: strict sports must pass ud_mlb_alert_tiers (default {"S"})
+    # Tier gate: strict sports must pass ud_mlb_alert_tiers (default {"S","A"})
     if sport_up in config.ud_strict_alert_sports:
         if tier not in config.ud_mlb_alert_tiers:
             return False  # blocked by tier gate
-
-    # BQ gate: strict sports must meet UD_STRICT_SPORT_MIN_BET_QUALITY (default 95)
-    if sport_up in config.ud_strict_alert_sports:
-        if bq < config.UD_STRICT_SPORT_MIN_BET_QUALITY:
-            return False  # blocked by BQ gate
 
     return True
 
@@ -55,17 +55,21 @@ def _gate_allows(sport: str, tier: str, bq: int) -> bool:
 class TestConfigValues:
     """Verify the gate thresholds stored in config."""
 
-    def test_bq_threshold_is_95(self):
-        """UD_STRICT_SPORT_MIN_BET_QUALITY default must be 95."""
-        assert me.config.UD_STRICT_SPORT_MIN_BET_QUALITY == 95
-
     def test_strict_sports_are_mlb_and_nfl_only(self):
         """Only MLB and NFL are in ud_strict_alert_sports."""
         assert me.config.ud_strict_alert_sports == frozenset({"MLB", "NFL"})
 
-    def test_mlb_alert_tiers_is_s_only(self):
-        """ud_mlb_alert_tiers must contain only 'S' (default UD_MLB_MIN_TIER=S)."""
-        assert me.config.ud_mlb_alert_tiers == frozenset({"S"})
+    def test_mlb_alert_tiers_includes_s_and_a(self):
+        """ud_mlb_alert_tiers must contain 'S' AND 'A' (default UD_MLB_MIN_TIER=A)."""
+        tiers = me.config.ud_mlb_alert_tiers
+        assert "S" in tiers, "S-tier must be in ud_mlb_alert_tiers"
+        assert "A" in tiers, "A-tier must be in ud_mlb_alert_tiers (spec Tier 2)"
+
+    def test_mlb_alert_tiers_excludes_b_and_c(self):
+        """B and C must NOT be in ud_mlb_alert_tiers (watchlist only)."""
+        tiers = me.config.ud_mlb_alert_tiers
+        assert "B" not in tiers, "B-tier must remain watchlist for MLB"
+        assert "C" not in tiers, "C-tier must remain watchlist for MLB"
 
     def test_nba_not_in_strict_sports(self):
         assert "NBA" not in me.config.ud_strict_alert_sports
@@ -80,69 +84,49 @@ class TestConfigValues:
 # ── 2. MLB gate logic ──────────────────────────────────────────────────────────
 
 class TestMLBGate:
-    """MLB: S + BQ ≥ 95 → ALLOW; everything else → BLOCK."""
+    """MLB: S or A → ALLOW; B/C → BLOCK. Both directions valid."""
 
-    def test_mlb_s_95_allowed(self):
-        assert _gate_allows("MLB", "S", 95) is True
+    def test_mlb_s_allowed(self):
+        assert _gate_allows("MLB", "S") is True
 
-    def test_mlb_s_96_allowed(self):
-        assert _gate_allows("MLB", "S", 96) is True
+    def test_mlb_a_allowed(self):
+        """A-tier MLB is NOW allowed (spec Tier 2: S or A)."""
+        assert _gate_allows("MLB", "A") is True
 
-    def test_mlb_s_100_allowed(self):
-        assert _gate_allows("MLB", "S", 100) is True
+    def test_mlb_b_blocked(self):
+        """B-tier MLB is WATCHLIST only — not delivered."""
+        assert _gate_allows("MLB", "B") is False
 
-    def test_mlb_s_94_blocked(self):
-        assert _gate_allows("MLB", "S", 94) is False
+    def test_mlb_c_blocked(self):
+        """C-tier MLB is WATCHLIST only — not delivered."""
+        assert _gate_allows("MLB", "C") is False
 
-    def test_mlb_s_85_blocked(self):
-        """Old default BQ=85 must now be blocked for MLB."""
-        assert _gate_allows("MLB", "S", 85) is False
-
-    def test_mlb_a_100_blocked(self):
-        """A-tier MLB is always blocked regardless of BQ."""
-        assert _gate_allows("MLB", "A", 100) is False
-
-    def test_mlb_b_100_blocked(self):
-        """B-tier MLB is always blocked regardless of BQ."""
-        assert _gate_allows("MLB", "B", 100) is False
-
-    def test_mlb_a_94_blocked(self):
-        """A-tier + sub-threshold BQ — both gates block."""
-        assert _gate_allows("MLB", "A", 94) is False
+    def test_mlb_under_not_blocked_by_gate_logic(self):
+        """UNDER direction is not a gate condition — direction must not block delivery."""
+        # The _gate_allows helper uses only tier; direction not a factor
+        assert _gate_allows("MLB", "S") is True
+        assert _gate_allows("MLB", "A") is True
 
 
 # ── 3. NFL gate logic ──────────────────────────────────────────────────────────
 
 class TestNFLGate:
-    """NFL: same S + BQ ≥ 95 requirement as MLB."""
+    """NFL: same S/A tier requirement as MLB."""
 
-    def test_nfl_s_95_allowed(self):
-        assert _gate_allows("NFL", "S", 95) is True
+    def test_nfl_s_allowed(self):
+        assert _gate_allows("NFL", "S") is True
 
-    def test_nfl_s_97_allowed(self):
-        assert _gate_allows("NFL", "S", 97) is True
+    def test_nfl_a_allowed(self):
+        """A-tier NFL is NOW allowed (spec Tier 2: S or A)."""
+        assert _gate_allows("NFL", "A") is True
 
-    def test_nfl_s_100_allowed(self):
-        assert _gate_allows("NFL", "S", 100) is True
+    def test_nfl_b_blocked(self):
+        """B-tier NFL is WATCHLIST only."""
+        assert _gate_allows("NFL", "B") is False
 
-    def test_nfl_s_94_blocked(self):
-        assert _gate_allows("NFL", "S", 94) is False
-
-    def test_nfl_s_85_blocked(self):
-        """Old default BQ=85 must now be blocked for NFL."""
-        assert _gate_allows("NFL", "S", 85) is False
-
-    def test_nfl_a_100_blocked(self):
-        """A-tier NFL is always blocked regardless of BQ."""
-        assert _gate_allows("NFL", "A", 100) is False
-
-    def test_nfl_b_100_blocked(self):
-        """B-tier NFL is always blocked regardless of BQ."""
-        assert _gate_allows("NFL", "B", 100) is False
-
-    def test_nfl_a_94_blocked(self):
-        """A-tier + sub-threshold BQ — both gates apply."""
-        assert _gate_allows("NFL", "A", 94) is False
+    def test_nfl_c_blocked(self):
+        """C-tier NFL is WATCHLIST only."""
+        assert _gate_allows("NFL", "C") is False
 
 
 # ── 4. Non-strict sports are unaffected ────────────────────────────────────────
@@ -150,64 +134,48 @@ class TestNFLGate:
 class TestNonStrictSportsUnaffected:
     """NBA, CS, WNBA, etc. must pass through both gates unconditionally."""
 
-    def test_nba_s_95_allowed(self):
-        assert _gate_allows("NBA", "S", 95) is True
+    def test_nba_s_allowed(self):
+        assert _gate_allows("NBA", "S") is True
 
-    def test_nba_s_60_allowed(self):
-        """NBA S-tier with BQ=60 — not blocked by MLB/NFL gate."""
-        assert _gate_allows("NBA", "S", 60) is True
+    def test_nba_a_allowed(self):
+        assert _gate_allows("NBA", "A") is True
 
-    def test_nba_a_50_allowed(self):
-        """NBA A-tier — not restricted to S-only."""
-        assert _gate_allows("NBA", "A", 50) is True
+    def test_nba_b_allowed(self):
+        """NBA B-tier — not blocked by MLB/NFL gate."""
+        assert _gate_allows("NBA", "B") is True
 
-    def test_nba_b_40_allowed(self):
-        """NBA B-tier — allowed through the MLB/NFL gate."""
-        assert _gate_allows("NBA", "B", 40) is True
+    def test_cs_s_allowed(self):
+        assert _gate_allows("CS", "S") is True
 
-    def test_cs_s_70_allowed(self):
-        assert _gate_allows("CS", "S", 70) is True
+    def test_cs_a_allowed(self):
+        assert _gate_allows("CS", "A") is True
 
-    def test_cs_a_50_allowed(self):
-        assert _gate_allows("CS", "A", 50) is True
+    def test_wnba_s_allowed(self):
+        assert _gate_allows("WNBA", "S") is True
 
-    def test_wnba_s_80_allowed(self):
-        assert _gate_allows("WNBA", "S", 80) is True
+    def test_nhl_s_allowed(self):
+        assert _gate_allows("NHL", "S") is True
 
-    def test_nhl_s_88_allowed(self):
-        assert _gate_allows("NHL", "S", 88) is True
+    def test_tennis_a_allowed(self):
+        assert _gate_allows("TENNIS", "A") is True
 
-    def test_tennis_a_75_allowed(self):
-        assert _gate_allows("TENNIS", "A", 75) is True
-
-    def test_soccer_b_60_allowed(self):
-        assert _gate_allows("SOCCER", "B", 60) is True
+    def test_soccer_b_allowed(self):
+        assert _gate_allows("SOCCER", "B") is True
 
 
-# ── 5. Source code: all three paths have the gate ─────────────────────────────
+# ── 5. Source code: all three paths have the tier gate ─────────────────────────
 
 class TestAllPathsHaveGate:
     """
-    Verify the BQ gate and strict-tier gate appear in all three delivery paths
+    Verify the strict-tier gate appears in all three delivery paths
     inside market_engine.py via source-code inspection.
+    BQ gate removed per spec — decision_tier enforces quality.
     """
 
     @pytest.fixture(scope="class")
     def src(self) -> str:
         import inspect
         return inspect.getsource(me)
-
-    def test_bq_gate_new_prop_path(self, src):
-        """bq_gate [new] must be present (new-prop delivery path)."""
-        assert "bq_gate [new]" in src, "bq_gate [new] not found in market_engine source"
-
-    def test_bq_gate_line_change_path(self, src):
-        """bq_gate [lc] must be present (line-change delivery path — added in this pass)."""
-        assert "bq_gate [lc]" in src, "bq_gate [lc] not found — line-change path missing BQ gate"
-
-    def test_bq_gate_standing_path(self, src):
-        """bq_gate [standing] must be present (standing delivery path)."""
-        assert "bq_gate [standing]" in src, "bq_gate [standing] not found in market_engine source"
 
     def test_strict_tier_gate_new_prop(self, src):
         """sport_tier_gate [new] must be present."""
@@ -229,24 +197,48 @@ class TestAllPathsHaveGate:
             "strict_tier_blocked rejection label not found in line-change path debug tracking"
         )
 
-    def test_lc_bq_gate_uses_config_threshold(self, src):
-        """bq_gate [lc] must use UD_STRICT_SPORT_MIN_BET_QUALITY (not a hardcoded value)."""
-        # Look for the bq_gate [lc] comment adjacent to config reference
-        idx = src.find("bq_gate [lc]")
-        window = src[max(0, idx - 50): idx + 400]
-        assert "UD_STRICT_SPORT_MIN_BET_QUALITY" in window, (
-            "bq_gate [lc] does not reference config.UD_STRICT_SPORT_MIN_BET_QUALITY"
+    def test_bq_gate_removed_from_new_prop(self, src):
+        """BQ gate must NOT be enforced in the new-prop path (removed per spec)."""
+        assert "bq_gate [new]" not in src, (
+            "bq_gate [new] found — BQ gate was removed from new-prop path per spec Tier 2"
         )
 
-    def test_no_hardcoded_95_in_bq_gates(self, src):
-        """Gate must use config attribute — not a magic literal 95."""
-        # Each bq_gate block must NOT have a bare `< 95` literal
-        # (it should reference config.UD_STRICT_SPORT_MIN_BET_QUALITY)
-        import re
-        # Find all `< 95` that appear outside of a comment (heuristic)
-        bare = re.findall(r"<\s*95\b(?!\s*#)", src)
-        assert len(bare) == 0, (
-            f"Found {len(bare)} bare '< 95' literal(s) in market_engine — should use config attribute"
+    def test_bq_gate_removed_from_lc_path(self, src):
+        """BQ gate must NOT be enforced in the line-change path."""
+        assert "bq_gate [lc]" not in src, (
+            "bq_gate [lc] found — BQ gate was removed from lc path per spec Tier 2"
+        )
+
+    def test_bq_gate_removed_from_standing_path(self, src):
+        """BQ gate must NOT be enforced in the standing path."""
+        assert "bq_gate [standing]" not in src, (
+            "bq_gate [standing] found — BQ gate was removed from standing path per spec Tier 2"
+        )
+
+    def test_mlb_under_not_blocked_in_lc_path(self, src):
+        """lc-path _lc_mlb_ok must NOT contain UNDER direction block."""
+        idx = src.find("_lc_mlb_ok")
+        assert idx != -1, "_lc_mlb_ok not found"
+        snippet = src[idx: idx + 600]
+        assert "recommendation != \"UNDER\"" not in snippet, (
+            "_lc_mlb_ok still blocks UNDER — remove per spec Tier 2"
+        )
+
+    def test_mlb_under_not_blocked_in_standing_path(self, src):
+        """Standing path must not have an MLB UNDER block."""
+        assert "mlb_under_gate [standing]" not in src, (
+            "mlb_under_gate [standing] found — UNDER block must be removed per spec Tier 2"
+        )
+
+    def test_fast_resume_allows_lc_delivery(self, src):
+        """is_qualified must allow delivery when _fast_resume=True (first post-restart scan)."""
+        assert "_fast_resume" in src, "_fast_resume flag not referenced in market_engine"
+        # The is_qualified gate must include _fast_resume as an OR condition
+        idx = src.find("is_qualified = (")
+        assert idx != -1, "is_qualified gate not found"
+        snippet = src[idx: idx + 500]
+        assert "_fast_resume" in snippet, (
+            "_fast_resume not in is_qualified gate — post-restart first scan blocks all lc delivery"
         )
 
 

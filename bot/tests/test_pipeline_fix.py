@@ -227,12 +227,11 @@ class TestStandingPathGatesIntact:
             "Confidence gate removed from standing path."
         )
 
-    def test_bq_gate_still_in_standing_path(self):
-        """BQ gate for strict sports (MLB/NFL) must still be applied in standing path."""
+    def test_bq_gate_removed_from_standing_path(self):
+        """BQ gate removed from standing path — decision_tier (S/A only) enforces quality."""
         src = self._get_engine_source()
-        assert "bq_gate [standing]" in src, (
-            "BQ gate removed from standing path — "
-            "MLB/NFL props could bypass the BQ >= 85 requirement."
+        assert "bq_gate [standing]" not in src, (
+            "bq_gate [standing] found — BQ gate must be removed per spec Tier 2"
         )
 
     def test_debug_logging_added_for_no_data_rejection(self):
@@ -263,19 +262,18 @@ class TestMLBNFLGatesUnchanged:
         path = pathlib.Path(__file__).parent.parent / "market_engine.py"
         return path.read_text()
 
-    def test_strict_sport_bq_gate_present_in_new_prop_path(self):
-        """BQ gate for strict sports must still be in the new-prop path."""
+    def test_bq_gate_removed_from_new_prop_path(self):
+        """BQ gate removed from new-prop path — decision_tier enforces quality."""
         src = self._get_engine_source()
-        assert "bq_gate" in src, "BQ gate comment not found in market_engine.py"
-        assert "UD_STRICT_SPORT_MIN_BET_QUALITY" in src, (
-            "UD_STRICT_SPORT_MIN_BET_QUALITY not referenced in market_engine.py"
+        assert "bq_gate [new]" not in src, (
+            "bq_gate [new] found — BQ gate must be removed per spec Tier 2"
         )
 
-    def test_mlb_under_block_present(self):
-        """MLB UNDER block must still be active."""
+    def test_mlb_under_block_removed(self):
+        """MLB UNDER block removed — both directions valid per spec Tier 2."""
         src = self._get_engine_source()
-        assert "mlb_under" in src.lower() or "MLB UNDER" in src, (
-            "MLB UNDER block not found in market_engine.py"
+        assert "mlb_under_gate" not in src, (
+            "mlb_under_gate found — UNDER block must be removed per spec Tier 2"
         )
 
     def test_strict_alert_sports_config_referenced(self):

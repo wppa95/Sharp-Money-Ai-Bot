@@ -60,12 +60,12 @@ class TestSportPriorityConfig:
 
     # ── ud_mlb_alert_tiers ─────────────────────────────────────────────────────
 
-    def test_mlb_alert_tiers_default_s_only(self):
-        """Default: MLB only alerts on S-tier."""
+    def test_mlb_alert_tiers_default_s_and_a(self):
+        """Default: MLB alerts on S and A tier (spec Tier 2)."""
         c = self._cfg()
         tiers = c.ud_mlb_alert_tiers
         assert "S" in tiers
-        assert "A" not in tiers
+        assert "A" in tiers   # A-tier now allowed
         assert "B" not in tiers
 
     def test_mlb_alert_tiers_a_includes_s(self):
@@ -124,11 +124,11 @@ class TestSportPriorityConfig:
                 f"{sport} should not be in ud_strict_alert_sports"
             )
 
-    def test_nfl_blocked_at_a_tier_by_default(self):
-        """Default UD_MLB_MIN_TIER=S → NFL A-tier must not be in allowed tiers."""
+    def test_nfl_allowed_at_a_tier_by_default(self):
+        """Default UD_MLB_MIN_TIER=A → NFL A-tier IS in allowed tiers (spec Tier 2)."""
         c = self._cfg()
         assert "NFL" in c.ud_strict_alert_sports
-        assert "A" not in c.ud_mlb_alert_tiers
+        assert "A" in c.ud_mlb_alert_tiers
 
     def test_nfl_blocked_at_b_tier_by_default(self):
         """Default UD_MLB_MIN_TIER=S → NFL B-tier must not be in allowed tiers."""
@@ -355,9 +355,10 @@ class TestMLBGateLogic:
         c = self._cfg("S")
         assert "S" in c.ud_mlb_alert_tiers
 
-    def test_mlb_a_tier_blocked_by_default_gate(self):
-        c = self._cfg("S")
-        assert "A" not in c.ud_mlb_alert_tiers
+    def test_mlb_a_tier_allowed_when_min_a(self):
+        """With UD_MLB_MIN_TIER=A (now the default), A-tier is allowed."""
+        c = self._cfg("A")
+        assert "A" in c.ud_mlb_alert_tiers
 
     def test_mlb_b_tier_blocked_by_default_gate(self):
         c = self._cfg("S")

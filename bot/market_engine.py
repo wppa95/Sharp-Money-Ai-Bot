@@ -148,8 +148,7 @@ def _format_95_priority_alert(
     """Format the Telegram message for a 95+ Bet Quality S-tier priority alert.
 
     Triggered when decision.confidence ≥ 95 AND decision_tier == "S".
-    Confidence + Quality gates apply; Sport Direction policy (MLB/NFL OVER-only)
-    is enforced before this function is called.
+    Confidence + Quality gates apply; both OVER and UNDER are valid for all sports.
     """
     sport  = getattr(snap, "sport", None) or "UNKNOWN"
     rec    = getattr(decision, "recommendation", "PASS") if decision is not None else "PASS"
@@ -1326,17 +1325,15 @@ async def underdog_job(context) -> None:
                 # ── 95+ S-tier priority override [new-prop path] ─────────────────
                 # Bet Quality (decision.confidence) ≥ 95 AND decision tier == "S":
                 # bypasses secondary/historical gates but still enforces:
-                #   1. Sport Direction policy — MLB/NFL OVER-only; UNDER always blocked
+                #   1. Both OVER and UNDER valid for all sports (Tier 2 spec)
                 #   2. Confidence Gate (implicitly met: conf ≥ 95 ≥ any min_conf)
-                #   3. Quality Gate  (implicitly met: conf ≥ 95 = UD_STRICT_SPORT_MIN_BET_QUALITY)
-                #   4. Existing dedup / reversal protection
+                #   3. Existing dedup / reversal protection
                 _np_pp_key = (player, snap.sport or "UNKNOWN", stat_type)
                 if decision is not None and decision.confidence >= 95 and decision.decision_tier == "S" and decision.recommendation != "PASS":
                     np_immediate = False  # 95+ always uses the override path
-                    # Sport Direction check — MLB/NFL are OVER-only; block UNDER regardless of BQ
+                    # Both OVER and UNDER are valid for all sports — spec Tier 2 requirement
                     _np_95_sport = (snap.sport or "").upper()
-                    _np_95_dir_ok = not (_np_95_sport in ("MLB", "NFL") and decision.recommendation == "UNDER")
-                    if _np_95_dir_ok and (
+                    if (
                         _np_pp_key not in _priority_alerted_this_scan
                         and _np_pp_key not in _priority_override_sent
                         and chat_ids
@@ -1420,27 +1417,8 @@ async def underdog_job(context) -> None:
                             player, stat_type, _sport_up,
                             decision.decision_tier, config.UD_MLB_MIN_TIER,
                         )
-                # MLB UNDER block — user bets MLB OVER only (upside preference)
-                if _np_bet_ready and decision is not None:
-                    if (snap.sport or "").upper() == "MLB" and decision.recommendation == "UNDER":
-                        _np_bet_ready = False
-                        logger.debug(
-                            "UD mlb_under_gate [new]: %s | %s | UNDER blocked for MLB",
-                            player, stat_type,
-                        )
-                # Strict-sport Bet Quality gate — MLB/NFL require BQ ≥ UD_STRICT_SPORT_MIN_BET_QUALITY
-                # in addition to passing S-tier classification.  Prevents low-confidence S picks
-                # from reaching Telegram even when they clear the tier gate.
-                if _np_bet_ready and decision is not None:
-                    _np_sport_bq = (snap.sport or "").upper()
-                    if (_np_sport_bq in config.ud_strict_alert_sports
-                            and decision.confidence < config.UD_STRICT_SPORT_MIN_BET_QUALITY):
-                        _np_bet_ready = False
-                        logger.debug(
-                            "UD bq_gate [new]: %s | %s | sport=%s BQ=%d < %d",
-                            player, stat_type, _np_sport_bq,
-                            decision.confidence, config.UD_STRICT_SPORT_MIN_BET_QUALITY,
-                        )
+                # UNDER is allowed for all sports including MLB/NFL — Tier 2 spec requirement.
+                # BQ gate removed: decision_tier (S/A only) already enforces quality.
                 # Game-live hard gate — block actionable alerts when game has already started (#5).
                 # Uses _is_game_live_or_past which checks status field + game_time elapsed.
                 # Internal market intelligence continues regardless.
@@ -1716,16 +1694,15 @@ async def underdog_job(context) -> None:
                     # ── 95+ S-tier priority override [lc path] ───────────────────
                     # Bet Quality (decision.confidence) ≥ 95 AND decision tier == "S":
                     # bypasses secondary/historical gates but still enforces:
-                    #   1. Sport Direction — MLB/NFL OVER-only; UNDER always blocked
+                    #   1. Both OVER and UNDER valid for all sports (Tier 2 spec)
                     #   2. Confidence + Quality gates implicitly met at BQ ≥ 95
                     #   3. Existing dedup / reversal protection
                     _lc_pp_key = (player, snap.sport or "UNKNOWN", stat_type)
                     if decision is not None and decision.confidence >= 95 and decision.decision_tier == "S" and decision.recommendation != "PASS":
                         _lc_95_sent = True  # block normal lc gate sequence
-                        # Sport Direction check — MLB/NFL are OVER-only; block UNDER regardless of BQ
+                        # Both OVER and UNDER are valid for all sports — spec Tier 2 requirement
                         _lc_95_sport = (snap.sport or "").upper()
-                        _lc_95_dir_ok = not (_lc_95_sport in ("MLB", "NFL") and decision.recommendation == "UNDER")
-                        if _lc_95_dir_ok and (
+                        if (
                             _lc_pp_key not in _priority_alerted_this_scan
                             and _lc_pp_key not in _priority_override_sent
                             and chat_ids
@@ -1884,10 +1861,8 @@ async def underdog_job(context) -> None:
                     _lc_mlb_ok = (
                         _lc_sport_up != "MLB"
                         or decision is None
-                        or (
-                            decision.decision_tier in config.ud_mlb_alert_tiers
-                            and decision.recommendation != "UNDER"  # MLB OVER-only preference
-                        )
+                        or decision.decision_tier in config.ud_mlb_alert_tiers
+                        # UNDER is allowed for MLB/NFL — spec Tier 2: both directions valid
                     )
                     # Strict-sport tier gate for line-change path — MLB AND NFL are S-tier only.
                     # _lc_mlb_ok above only covers MLB; this covers all ud_strict_alert_sports.
@@ -1897,7 +1872,7 @@ async def underdog_job(context) -> None:
                         or decision.decision_tier in config.ud_mlb_alert_tiers
                     )
                     is_qualified = (
-                        not is_cold_start
+                        (not is_cold_start or _fast_resume)  # fast-resume: allow lc delivery on first scan
                         and score is not None
                         # Sport-conditional star floor: strict for MLB/NFL, relaxed for others (#2)
                         and score.stars >= config.min_stars_for_sport(snap.sport or "")
@@ -1912,7 +1887,7 @@ async def underdog_job(context) -> None:
                         _n_qualified += 1
                     # ── Debug tracking (line-change / cold-start) ─────────────────
                     if score is not None:
-                        if is_cold_start:
+                        if is_cold_start and not _fast_resume:
                             _lc_rej = "cold_start"
                         elif is_qualified:
                             _lc_rej = "qualified"
@@ -2011,19 +1986,8 @@ async def underdog_job(context) -> None:
                             decision.confidence, _lc_min_conf, decision.decision_tier,
                         )
 
-                # Strict-sport Bet Quality gate for line-change plays — MLB/NFL require
-                # BQ ≥ UD_STRICT_SPORT_MIN_BET_QUALITY (default 95) in addition to S-tier.
-                # Mirrors bq_gate [new] and bq_gate [standing] in the other two paths.
-                if should_alert and not is_removed and decision is not None:
-                    _lc_bq_sport = (snap.sport or "").upper()
-                    if (_lc_bq_sport in config.ud_strict_alert_sports
-                            and decision.confidence < config.UD_STRICT_SPORT_MIN_BET_QUALITY):
-                        should_alert = False
-                        logger.debug(
-                            "UD bq_gate [lc]: %s | %s | sport=%s BQ=%d < %d",
-                            player, stat_type, _lc_bq_sport,
-                            decision.confidence, config.UD_STRICT_SPORT_MIN_BET_QUALITY,
-                        )
+                # BQ gate removed — decision_tier (S/A only) already enforces quality.
+                # MLB/NFL UNDER is now allowed per Tier 2 spec.
 
                 # Stage 4: gated count — full betting gate passed
                 if should_alert and not is_removed:
@@ -2402,9 +2366,8 @@ async def underdog_job(context) -> None:
                 # `continue` skips remaining gates for all 95+ props (sent or not).
                 _sp_pp_key = (_sp, _ssport, _st)
                 if _sdec is not None and _sdec.confidence >= 95 and _sdec.decision_tier == "S" and _sdec.recommendation != "PASS":
-                    # Sport Direction check — MLB/NFL are OVER-only; block UNDER regardless of BQ
-                    _sp_95_dir_ok = not (_ssport.upper() in ("MLB", "NFL") and _sdec.recommendation == "UNDER")
-                    if _sp_95_dir_ok and (
+                    # Both OVER and UNDER are valid for all sports — spec Tier 2 requirement
+                    if (
                         _sp_pp_key not in _priority_alerted_this_scan
                         and _sp_pp_key not in _priority_override_sent
                         and chat_ids
@@ -2453,23 +2416,7 @@ async def underdog_job(context) -> None:
                     )
                     continue
 
-                # MLB UNDER block — user bets MLB OVER only (upside preference)
-                if _ssport.upper() == "MLB" and _sdec.recommendation == "UNDER":
-                    logger.debug(
-                        "UD mlb_under_gate [standing]: %s | %s | UNDER blocked for MLB",
-                        _sp, _st,
-                    )
-                    continue
-
-                # Strict-sport Bet Quality gate for standing plays — MLB/NFL require BQ ≥ 95.
-                if (_ssport.upper() in config.ud_strict_alert_sports
-                        and _sdec.confidence < config.UD_STRICT_SPORT_MIN_BET_QUALITY):
-                    logger.debug(
-                        "UD bq_gate [standing]: %s | %s | sport=%s BQ=%d < %d",
-                        _sp, _st, _ssport.upper(),
-                        _sdec.confidence, config.UD_STRICT_SPORT_MIN_BET_QUALITY,
-                    )
-                    continue
+                # MLB/NFL UNDER is allowed and BQ gate removed — decision_tier enforces quality.
 
                 # Game-live hard gate for standing plays — block if game already started (#5).
                 if _is_game_live_or_past(_ssnap, now):
