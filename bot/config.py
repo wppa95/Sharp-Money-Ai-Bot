@@ -377,13 +377,10 @@ class Config:
         """
         return frozenset({
             "strikeouts",
-            "pitcher strikeouts",
             "pitching outs",
             "hits allowed",
             "earned runs allowed",
-            "earned runs",
             "walks allowed",
-            "walks",
             "fantasy points",
             "runs",
         })

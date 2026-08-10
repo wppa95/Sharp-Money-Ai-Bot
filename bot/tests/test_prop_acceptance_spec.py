@@ -90,20 +90,23 @@ class TestTier2MLBOver:
 # ─── 2. MLB UNDER — allowed markets ───────────────────────────────────────────
 
 class TestMLBUnderWhitelist:
+    # Exactly the 7 markets from the Final Prop Acceptance Spec — no more, no less.
     ALLOWED_MARKETS = [
         "strikeouts",
-        "pitcher strikeouts",
         "pitching outs",
         "hits allowed",
         "earned runs allowed",
-        "earned runs",
         "walks allowed",
-        "walks",
         "fantasy points",
         "runs",
     ]
 
     BLOCKED_MARKETS = [
+        # Former aliases that were removed from the whitelist
+        "pitcher strikeouts",
+        "earned runs",
+        "walks",
+        # General MLB markets — never allowed for UNDER
         "points",
         "home runs",
         "stolen bases",

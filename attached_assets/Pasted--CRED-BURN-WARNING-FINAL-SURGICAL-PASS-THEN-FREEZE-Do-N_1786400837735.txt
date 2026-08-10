@@ -1,0 +1,99 @@
+🔥 CRED BURN WARNING — FINAL SURGICAL PASS THEN FREEZE
+
+Do NOT perform another broad diagnosis.
+
+The Final Prop Acceptance Spec is implemented and 4,259 tests pass with zero new regressions.
+
+There is ONE remaining verification before we freeze:
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+⚾ MLB UNDER WHITELIST — EXACTLY 7
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+The requested MLB UNDER markets are ONLY:
+
+1. Strikeouts
+2. Pitching Outs
+3. Hits Allowed
+4. Earned Runs Allowed
+5. Walks Allowed
+6. Fantasy Points
+7. Runs
+
+The config currently reports a 10-market whitelist.
+
+FIX THIS IF NECESSARY.
+
+The whitelist must contain EXACTLY those 7 markets.
+
+No other MLB UNDER market may be actionable.
+
+MLB OVER remains unrestricted.
+
+NFL OVER + UNDER remain unrestricted.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🧪 FINAL VERIFICATION
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Before freezing:
+
+• Verify the actual config whitelist contains exactly 7 markets.
+• Run the targeted MLB UNDER acceptance tests.
+• Verify an allowed MLB UNDER can qualify.
+• Verify a non-whitelisted MLB UNDER is blocked.
+• Verify MLB OVER remains unrestricted.
+• Verify NFL UNDER remains unrestricted.
+• Verify Tier 1 A 70/100 is actionable.
+• Verify Tier 1 A 69/100 is watchlist.
+• Verify Tier 2 B/C remain watchlist.
+• Verify Tier 2 S remains priority.
+• Verify confidence determines tier.
+• Verify BQ does NOT manufacture S-tier.
+• Verify Tier 2 UNDER displays STRONG BET, not STRONG UNDER.
+• Verify Tier 1 STRONG UNDER requires confidence >=70 and BQ 70–100.
+• Verify L5 fallback works when normal history is unavailable.
+• Verify all known props continue being monitored for line movement/re-entry.
+• Verify current-line timestamps remain on alerts.
+
+Then run the full test suite.
+
+If tests pass, restart the bot and perform one live verification scan.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🧊 FREEZE — FINAL
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Once the above verification passes:
+
+🧊 FREEZE THE PROP ACCEPTANCE RULESET.
+
+DO NOT change:
+
+• Tier definitions
+• Confidence thresholds
+• BQ thresholds
+• MLB UNDER whitelist
+• NFL direction rules
+• Tier 1/Tier 2 rules
+• Strong Bet logic
+• Strong Under logic
+
+No more rule experimentation after this.
+
+Only the following are permitted after freeze:
+
+✅ Bug fixes
+✅ Stability fixes
+✅ Performance improvements
+✅ Provider/API fixes
+✅ Data-quality fixes
+✅ Regression tests
+✅ Alert formatting fixes
+✅ Line freshness / monitoring fixes
+
+Do NOT reopen or redesign the acceptance rules unless I explicitly request a ruleset change.
+
+Final sequence:
+
+VERIFY → TEST → RESTART → LIVE CHECK → 🧊 FREEZE
