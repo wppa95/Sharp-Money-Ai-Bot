@@ -1,0 +1,499 @@
+🚨 CRED BURNING PROTECTION — IMPLEMENT, TEST, VERIFY, THEN FREEZE
+
+We need to make one final surgical pass on the Sharp Money Bot. Do NOT just diagnose and report problems. Read the relevant code, implement the fixes, run the full test suite, restart the bot, verify live Telegram output, and only then report completion.
+
+⚠️ IMPORTANT:
+Do not change unrelated architecture.
+Do not loosen gates globally.
+Do not remove deduplication.
+Do not change scoring formulas unless required for the rules below.
+Preserve all existing working functionality.
+At the end of this pass, FREEZE the build. Only bug fixes should be made afterward.
+
+━━━━━━━━━━━━━━━━━━
+🎯 AUTHORITATIVE PROP RULES
+━━━━━━━━━━━━━━━━━━
+
+There are TWO sport tiers.
+
+TIER 2 — MLB + NFL
+━━━━━━━━━━━━━━━━━━
+
+ACTIONABLE:
+• S-tier ONLY
+• OVER only
+• UNDER is NEVER actionable for Tier 2
+• S-tier must be delivered when all normal delivery gates pass
+
+WATCHLIST:
+• A-tier
+• B-tier
+• C-tier
+• Both OVER and UNDER may appear on the watchlist
+• These are NOT actionable bets
+
+Therefore:
+
+Tier 2:
+S + OVER = actionable
+S + UNDER = blocked
+A/B/C = watchlist only
+
+Do NOT allow A-tier MLB/NFL props to become actionable merely because BQ is high.
+
+━━━━━━━━━━━━━━━━━━
+TIER 1 — ALL OTHER ACTIVE SPORTS
+━━━━━━━━━━━━━━━━━━
+
+ACTIONABLE:
+• S-tier
+• A-tier
+• OVER allowed
+• UNDER allowed
+
+WATCHLIST:
+• B-tier
+• C-tier
+• Strong unders may be displayed prominently when they meet the strong-under criteria below, but must still respect the Tier 1 S/A actionability rules.
+
+Therefore:
+
+Tier 1:
+S/A + OVER = actionable
+S/A + UNDER = actionable
+B/C = watchlist
+
+Do NOT block legitimate Tier 1 S/A UNDERs.
+
+━━━━━━━━━━━━━━━━━━
+💪 STRONG BET / BQ RULE
+━━━━━━━━━━━━━━━━━━
+
+Bet Quality is a separate quality signal from tier.
+
+If:
+• BQ >= 80
+
+label the prop as:
+
+💪 STRONG BET
+
+This applies to both OVER and UNDER.
+
+For strong UNDERs specifically:
+• UNDER + BQ 80–100 = 💪 STRONG UNDER
+• Do not incorrectly downgrade it simply because it is an UNDER.
+• Tier rules still determine whether it is actionable or watchlist.
+
+Examples:
+
+Tier 1:
+A UNDER + BQ 85 → ACTIONABLE + 💪 STRONG UNDER
+
+Tier 1:
+B UNDER + BQ 90 → WATCHLIST + 💪 STRONG UNDER
+
+Tier 2:
+S UNDER + BQ 90 → WATCHLIST/BLOCKED because Tier 2 is OVER-only
+
+Tier 2:
+S OVER + BQ 85 → ACTIONABLE + 💪 STRONG BET
+
+Tier 2:
+A OVER + BQ 95 → WATCHLIST, NOT actionable
+
+━━━━━━━━━━━━━━━━━━
+🔥 PRIORITY / S-TIER DISPLAY
+━━━━━━━━━━━━━━━━━━
+
+Fix the priority/display inconsistency.
+
+If a prop is genuinely S-tier, it must display as S-tier.
+
+Do NOT allow:
+
+S-tier score → generic 57/100 priority
+S-tier → no priority
+S-tier → WATCHLIST ONLY
+
+unless a specific rule legitimately blocks delivery.
+
+For an actionable S-tier prop:
+
+🔥 S-TIER HIGH PRIORITY
+
+must be displayed.
+
+Priority should be based on the actual final tier/decision, not an unrelated confidence field.
+
+Example from the current bug:
+
+Willi Castro
+MLB Hits + Runs + RBIs
+Line 0.5
+Prev 1.5
+Move -1.0
+OVER
+S-tier
+BQ 85
+
+This is Tier 2.
+
+Correct result:
+
+🔥 S-TIER HIGH PRIORITY
+S-tier
+OVER
+💪 STRONG BET
+BQ 85
+ACTIONABLE
+
+The displayed “57/100” must NOT override the S-tier designation or priority.
+
+Investigate why the message currently says:
+
+🔥 S-TIER HIGH PRIORITY — 57/100
+
+and make the header/priority semantics internally consistent.
+
+Do not necessarily change the underlying score of 57 unless the scoring model itself proves incorrect. The critical requirement is that the FINAL tier/priority classification is authoritative and displayed correctly.
+
+━━━━━━━━━━━━━━━━━━
+📊 LAST 5 PLAYER HISTORY
+━━━━━━━━━━━━━━━━━━
+
+Add a universal fallback for player-prop history.
+
+For EVERY player prop:
+
+1. If the bot has valid historical player-prop history for that exact player/market:
+    show the available L5 information.
+2. If no exact history is available:
+    attempt to retrieve/display the player’s last 5 results for that prop/market from the available stat provider(s).
+3. If exact prop history is unavailable but a valid underlying player-stat history exists:
+    use that underlying stat history when appropriate and clearly label it.
+4. Never fabricate L5 data.
+5. Never silently show an unrelated stat as if it were the requested prop.
+6. If no valid history can be obtained from any provider:
+    explicitly display:
+    L5: N/A — no history available
+
+The goal is:
+
+Every player prop should have an L5 context whenever the underlying data is actually available.
+
+This must work across ALL active sports, not just MLB.
+
+Do not hardcode MLB-only behavior.
+
+Also ensure history retrieval does not become a reason to reject otherwise valid props.
+
+History is enrichment, not a qualification gate.
+
+━━━━━━━━━━━━━━━━━━
+🔁 CONTINUOUS PROP MONITORING
+━━━━━━━━━━━━━━━━━━
+
+Preserve the fix already implemented for full-feed monitoring.
+
+Every Underdog polling cycle must inspect the entire active feed.
+
+The bot must NOT use known_keys as a gate that prevents monitoring known props.
+
+Correct behavior:
+
+4,700+ fetched
+→ all active props monitored
+→ unchanged props remain monitored
+→ changed props are rescored
+→ newly appearing props are scored
+→ removed props are handled
+→ futures are filtered appropriately
+
+The known_keys mechanism may be used for historical/change detection, but MUST NOT prevent the bot from continuously monitoring known props.
+
+A known prop whose line changes must be rescored.
+
+A known prop whose line does not change must still remain part of the monitored scan.
+
+Do NOT regress the ScanCycleLog functionality.
+
+Every scan should continue proving:
+
+Fetched
+Removed
+Futures
+Active monitored
+Unchanged
+New
+Line changed
+Scored
+Qualified
+Delivered
+
+━━━━━━━━━━━━━━━━━━
+🚨 ALERT DELIVERY
+━━━━━━━━━━━━━━━━━━
+
+Preserve deduplication.
+
+Do NOT send exact duplicate alerts repeatedly.
+
+Dedup key must distinguish:
+
+player
+sport
+market/stat type
+line
+direction
+
+An identical player + market + line + direction should NOT repeatedly alert merely because the prop was rescanned.
+
+A meaningful line movement may create a legitimate new alert.
+
+Do NOT weaken dedup to solve the current priority problem.
+
+Also preserve re-entry handling:
+
+REMOVED → relisted props should be eligible for a new alert when appropriate.
+
+━━━━━━━━━━━━━━━━━━
+⏱ ALERT FRESHNESS
+━━━━━━━━━━━━━━━━━━
+
+Keep the line freshness timestamp.
+
+Every actionable Telegram alert should show:
+
+⏱ Line as of HH:MM AM/PM ET — verify on Underdog before placing
+
+This is required because we already caught:
+
+0.5 alert → Underdog displayed 1.5
+
+The freshness timestamp must reflect the actual line snapshot used to generate the alert.
+
+━━━━━━━━━━━━━━━━━━
+📋 /PICKS SEMANTICS
+━━━━━━━━━━━━━━━━━━
+
+Do NOT make /picks imply that every scored candidate was delivered.
+
+Every pick must clearly show either:
+
+📤 Delivered: 
+
+or
+
+⏳ Candidate — not yet delivered via Telegram
+
+Tier 2 A/B/C watchlist candidates should remain visible as watchlist/candidates but must not be represented as actionable alerts.
+
+Tier 1 B/C should similarly remain watchlist.
+
+━━━━━━━━━━━━━━━━━━
+🔭 /FUNNEL
+━━━━━━━━━━━━━━━━━━
+
+Keep the new Scan Pipeline section.
+
+It must distinguish:
+
+FULL FEED MONITORING
+
+from:
+
+SCORING / CANDIDATE FUNNEL
+
+and:
+
+ALERT DELIVERY
+
+The funnel should make it impossible to confuse:
+
+4,700 monitored props
+
+with:
+
+13 scored props
+
+with:
+
+3 qualified props
+
+with:
+
+1 delivered alert
+
+The full-feed scan should show that all active props are monitored even when their lines are unchanged.
+
+Also preserve the HTML escaping fix.
+
+Dynamic values such as:
+
+player_name
+stat_type
+sport
+rejection_reason
+
+must be HTML escaped before Telegram rendering.
+
+No silent Telegram HTML failures.
+
+━━━━━━━━━━━━━━━━━━
+🧾 ERROR HANDLING
+━━━━━━━━━━━━━━━━━━
+
+Do NOT use:
+
+except Exception:
+pass
+
+around critical database/logging operations.
+
+Especially preserve the warning/error logging fixes for:
+
+log_prop_opportunity
+mark_opportunity_alert_sent
+PropCandidateLog writes
+ScanCycleLog writes
+
+If a database write fails, emit a useful WARNING/ERROR containing enough context to diagnose it.
+
+━━━━━━━━━━━━━━━━━━
+🧪 REQUIRED TESTS
+━━━━━━━━━━━━━━━━━━
+
+Add/update regression tests for:
+
+1. Tier 2 MLB S OVER → actionable
+2. Tier 2 MLB S UNDER → blocked/watchlist
+3. Tier 2 MLB A OVER → watchlist
+4. Tier 2 MLB A UNDER → watchlist
+5. Tier 2 NFL S OVER → actionable
+6. Tier 2 NFL S UNDER → blocked/watchlist
+7. Tier 1 S OVER → actionable
+8. Tier 1 S UNDER → actionable
+9. Tier 1 A OVER → actionable
+10. Tier 1 A UNDER → actionable
+11. Tier 1 B OVER → watchlist
+12. Tier 1 B UNDER → watchlist
+13. Tier 1 C OVER → watchlist
+14. Tier 1 C UNDER → watchlist
+15. BQ 80 → STRONG BET
+16. BQ 100 → STRONG BET
+17. BQ 79 → not strong bet
+18. Strong UNDER BQ 80+ gets correct strong-under label
+19. S-tier actionable pick displays S-TIER HIGH PRIORITY
+20. S-tier priority cannot be overwritten by a lower confidence display value
+21. Exact duplicate alert is deduplicated
+22. Meaningful line movement can create a new alert
+23. Removed → relisted prop can re-enter alert flow
+24. Every active prop is monitored every polling cycle
+25. Stable known prop remains monitored
+26. Known prop with line movement is rescored
+27. New prop is scored
+28. L5 history is displayed when available
+29. L5 fallback works when exact prop history is unavailable
+30. No-history case displays N/A rather than fabricated stats
+31. History enrichment failure does not reject a valid prop
+32. ScanCycleLog accurately records full-feed counts
+33. /funnel HTML escaping works with special characters
+34. /picks correctly distinguishes delivered vs candidate
+35. Alert freshness timestamp uses the actual snapshot time
+36. Critical DB logging failures emit warnings/errors
+
+Run the COMPLETE existing test suite after these changes.
+
+Do not stop at unit tests if integration/runtime tests are available.
+
+━━━━━━━━━━━━━━━━━━
+🧪 LIVE VERIFICATION
+━━━━━━━━━━━━━━━━━━
+
+After tests pass:
+
+1. Restart the bot.
+2. Wait for at least one complete Underdog scan cycle.
+3. Verify ScanCycleLog.
+4. Verify all active props are being monitored.
+5. Verify changed props are rescored.
+6. Verify qualified props are evaluated against the correct Tier 1/Tier 2 rules.
+7. Verify Telegram alerts.
+8. Verify /picks.
+9. Verify /funnel.
+10. Verify /alerts.
+11. Verify that no stale 0.5/1.5-type alert discrepancy is being introduced by stale snapshots.
+
+Specifically inspect live output for:
+
+• MLB S OVER
+• MLB S UNDER
+• MLB A OVER
+• Tier 1 S/A OVER
+• Tier 1 S/A UNDER
+• B/C watchlist behavior
+• BQ 80+ strong-bet labeling
+
+Do not claim success until the live pipeline confirms the behavior.
+
+━━━━━━━━━━━━━━━━━━
+🚫 DO NOT DO
+━━━━━━━━━━━━━━━━━━
+
+Do NOT:
+
+• globally lower thresholds
+• make all A-tier props actionable
+• make MLB/NFL UNDER actionable
+• remove dedup
+• disable live-game protection
+• bypass direction gates globally
+• fabricate L5 history
+• use unrelated player stats without labeling them
+• make history retrieval a qualification requirement
+• revert continuous full-feed monitoring
+• revert ScanCycleLog
+• change unrelated scoring logic
+• delete existing regression tests
+• weaken tests just to make them pass
+
+━━━━━━━━━━━━━━━━━━
+📌 FINAL REPORT
+━━━━━━━━━━━━━━━━━━
+
+After implementation, report ONLY:
+
+1. Root causes found
+2. Exact files/functions changed
+3. Exact rule behavior now implemented
+4. L5 fallback behavior
+5. Test count + pass/fail
+6. Live scan verification
+7. Live alert verification
+8. Any remaining issue that is genuinely unresolved
+
+If anything fails, FIX IT before reporting.
+
+Do not merely give me a diagnosis.
+
+IMPLEMENT → TEST → RESTART → VERIFY LIVE → FIX REMAINING ISSUES → FREEZE.
+
+━━━━━━━━━━━━━━━━━━
+🔒 FREEZE
+━━━━━━━━━━━━━━━━━━
+
+Once all requirements pass:
+
+FREEZE THE BUILD.
+
+No additional feature changes after this pass.
+
+Only:
+• confirmed bugs
+• performance fixes
+• provider/API fixes
+• reliability fixes
+• data-integrity fixes
+
+are allowed after freeze.

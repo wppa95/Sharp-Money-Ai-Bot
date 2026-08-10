@@ -34,13 +34,15 @@ def _derive_standing_tier(score_tier, score_total):
     return eff if eff in ("A", "S") else None
 
 
-def _strict_gates_allow(sport: str, decision_tier: str, bq: int = 0) -> bool:
-    """Mirror the MLB/NFL tier gate (BQ gate removed per spec Tier 2)."""
+def _strict_gates_allow(sport: str, decision_tier: str, bq: int = 0, direction: str = "OVER") -> bool:
+    """Mirror the MLB/NFL gates: tier gate + direction gate (BQ gate removed)."""
     cfg = me.config
     su = sport.upper()
     if su in cfg.ud_strict_alert_sports:
         if decision_tier not in cfg.ud_mlb_alert_tiers:
             return False
+        if direction == "UNDER":
+            return False  # Tier 2: UNDER is always watchlist
     return True
 
 
@@ -260,32 +262,38 @@ class TestColdStartBehavior:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestTier2StrictGatesUnchanged:
-    """MLB/NFL strict rules updated per spec Tier 2 (S/A deliver, B/C watchlist, no BQ gate)."""
+    """MLB/NFL: S+OVER actionable; S+UNDER + A/B/C watchlist; no BQ gate."""
 
-    def test_mlb_a_tier_allowed(self):
-        """A-tier MLB is now allowed — spec Tier 2."""
-        assert _strict_gates_allow("MLB", "A")
+    def test_mlb_s_over_allowed(self):
+        """S+OVER is the ONLY actionable MLB pick."""
+        assert _strict_gates_allow("MLB", "S", direction="OVER")
 
-    def test_mlb_s_tier_any_bq_allowed(self):
-        """No BQ gate — S-tier MLB allowed at any confidence."""
-        assert _strict_gates_allow("MLB", "S", 60)
+    def test_mlb_s_under_blocked(self):
+        """S+UNDER is always watchlist — Tier 2 is OVER only."""
+        assert not _strict_gates_allow("MLB", "S", direction="UNDER")
 
-    def test_mlb_s_tier_always_allowed(self):
-        assert _strict_gates_allow("MLB", "S")
+    def test_mlb_a_tier_blocked(self):
+        """A-tier MLB is watchlist only."""
+        assert not _strict_gates_allow("MLB", "A")
 
-    def test_nfl_a_tier_allowed(self):
-        """A-tier NFL is now allowed — spec Tier 2."""
-        assert _strict_gates_allow("NFL", "A")
+    def test_mlb_s_any_bq_over_allowed(self):
+        """No BQ gate — S+OVER MLB allowed at any confidence."""
+        assert _strict_gates_allow("MLB", "S", 60, direction="OVER")
 
-    def test_nfl_s_tier_always_allowed(self):
-        assert _strict_gates_allow("NFL", "S")
+    def test_nfl_s_over_allowed(self):
+        assert _strict_gates_allow("NFL", "S", direction="OVER")
+
+    def test_nfl_s_under_blocked(self):
+        assert not _strict_gates_allow("NFL", "S", direction="UNDER")
+
+    def test_nfl_a_tier_blocked(self):
+        """A-tier NFL is watchlist only."""
+        assert not _strict_gates_allow("NFL", "A")
 
     def test_mlb_b_tier_blocked(self):
-        """B-tier MLB remains watchlist only."""
         assert not _strict_gates_allow("MLB", "B")
 
     def test_bq_threshold_still_defined(self):
-        """Config value still defined even though gate is removed."""
         assert me.config.UD_STRICT_SPORT_MIN_BET_QUALITY == 95
 
     def test_mlb_in_strict_sports(self):

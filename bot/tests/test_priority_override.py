@@ -822,13 +822,13 @@ class TestV33SportDirectionPolicy:
         )
 
     # ── Sport Direction source check ─────────────────────────────────────────
-    def test_mlb_nfl_direction_check_removed_from_source(self):
-        """Direction checks removed from overrides — both OVER and UNDER valid per spec Tier 2."""
+    def test_mlb_nfl_direction_check_in_source(self):
+        """95+ override paths must block MLB/NFL UNDER (Tier 2: OVER only)."""
         import inspect, market_engine as me
         src = inspect.getsource(me.underdog_job)
-        assert "_np_95_dir_ok" not in src, "_np_95_dir_ok must be removed — UNDER now allowed"
-        assert "_lc_95_dir_ok" not in src, "_lc_95_dir_ok must be removed — UNDER now allowed"
-        assert "_sp_95_dir_ok" not in src, "_sp_95_dir_ok must be removed — UNDER now allowed"
+        assert "_np_95_dir_ok" in src, "_np_95_dir_ok missing — MLB/NFL UNDER may fire via new-prop 95+ override"
+        assert "_lc_95_dir_ok" in src, "_lc_95_dir_ok missing — MLB/NFL UNDER may fire via lc 95+ override"
+        assert "_sp_95_dir_ok" in src, "_sp_95_dir_ok missing — MLB/NFL UNDER may fire via standing 95+ override"
 
 
 # ═══════════════════════════════════════════════════════════════════════════

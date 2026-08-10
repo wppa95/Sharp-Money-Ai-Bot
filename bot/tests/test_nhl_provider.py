@@ -810,14 +810,14 @@ class TestConfigNHL:
             for sport in c.ud_tier1_sports:
                 assert sport in c.ud_alert_sports, f"Tier 1 sport {sport} not in ud_alert_sports"
 
-    def test_mlb_alert_tiers_default_s_and_a(self):
-        """Default MLB gate allows S and A tier (spec Tier 2: both OVER and UNDER, S/A only)."""
+    def test_mlb_alert_tiers_default_s_only(self):
+        """Default MLB gate allows S-tier only (Tier 2: S+OVER actionable, A=watchlist)."""
         import os
         import config as cfg
         if "UD_MLB_MIN_TIER" not in os.environ:
             c = cfg.Config()
             assert "S" in c.ud_mlb_alert_tiers
-            assert "A" in c.ud_mlb_alert_tiers   # A-tier now allowed per spec
+            assert "A" not in c.ud_mlb_alert_tiers  # A-tier is watchlist for Tier 2
             assert "B" not in c.ud_mlb_alert_tiers
 
     def test_mlb_alert_tiers_a_includes_s(self):

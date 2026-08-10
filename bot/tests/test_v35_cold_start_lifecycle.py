@@ -489,11 +489,11 @@ class TestReq11MLBTier2:
         strict = {s.upper() for s in (config.ud_strict_alert_sports or [])}
         assert "MLB" in strict, "MLB must be in ud_strict_alert_sports"
 
-    def test_mlb_under_allowed_in_standing_path(self):
-        """MLB UNDER is now ALLOWED — spec Tier 2: both directions valid."""
+    def test_mlb_under_blocked_in_standing_path(self):
+        """MLB/NFL UNDER must be blocked in the standing path — Tier 2 is OVER only."""
         src = inspect.getsource(__import__("market_engine").underdog_job)
-        assert "mlb_under_gate [standing]" not in src, (
-            "mlb_under_gate [standing] found — UNDER block must be removed per spec Tier 2"
+        assert "mlb_under_gate [standing]" in src, (
+            "mlb_under_gate [standing] not found — MLB/NFL UNDER must be blocked for Tier 2"
         )
 
     def test_mlb_bq_gate_removed_from_standing_path(self):
@@ -511,10 +511,11 @@ class TestReq11MLBTier2:
         )
 
     def test_mlb_cold_start_props_face_same_gates_as_normal(self):
-        """MLB cold-start props face the SAME gates as normal: S/A tier, both directions.
+        """MLB cold-start props face the SAME gates: S+OVER only.
 
-        fast_resume does NOT weaken MLB/NFL gates — the tier gate remains active.
-        BQ gate and UNDER block removed per spec Tier 2.
+        fast_resume does NOT weaken MLB/NFL gates.
+        Tier gate (S-only) + UNDER gate both remain active.
+        BQ gate removed per spec (tier gate enforces quality).
         """
         src = inspect.getsource(__import__("market_engine").underdog_job)
         standing_start = src.find("4A: Standing opportunity scan")
@@ -522,9 +523,8 @@ class TestReq11MLBTier2:
         standing_src = src[standing_start:]
         assert "ud_strict_alert_sports" in standing_src, "Strict sport tier check in standing"
         assert "ud_mlb_alert_tiers" in standing_src, "MLB/NFL tier gate must be in standing path"
-        # BQ gate and UNDER block must be REMOVED per spec Tier 2
-        assert "bq_gate [standing]" not in standing_src, "BQ gate removed"
-        assert "mlb_under_gate [standing]" not in standing_src, "UNDER block removed"
+        assert "mlb_under_gate [standing]" in standing_src, "UNDER gate must be in standing path"
+        assert "bq_gate [standing]" not in standing_src, "BQ gate removed per spec"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -553,17 +553,19 @@ class TestReq12NFLTier2:
         if tiers:
             assert "S" in tiers or "s" in tiers, "S must be an allowed tier for strict sports"
 
-    def test_fast_resume_does_not_bypass_nfl_tier_gate(self):
-        """fast_resume=True must NOT bypass NFL/MLB tier gate (S/A only)."""
+    def test_fast_resume_does_not_bypass_nfl_gates(self):
+        """fast_resume=True must NOT bypass NFL/MLB tier or UNDER gates."""
         src = inspect.getsource(__import__("market_engine").underdog_job)
         standing_start = src.find("4A: Standing opportunity scan")
         standing_src = src[standing_start:]
-        # Tier gate must still exist; BQ gate intentionally removed per spec
         assert "ud_strict_alert_sports" in standing_src, (
             "fast_resume must NOT bypass ud_strict_alert_sports tier gate"
         )
         assert "ud_mlb_alert_tiers" in standing_src, (
-            "fast_resume must NOT bypass MLB/NFL tier gate"
+            "fast_resume must NOT bypass MLB/NFL S-only tier gate"
+        )
+        assert "mlb_under_gate [standing]" in standing_src, (
+            "fast_resume must NOT bypass MLB/NFL UNDER direction gate"
         )
 
 

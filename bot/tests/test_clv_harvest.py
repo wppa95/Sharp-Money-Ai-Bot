@@ -5,8 +5,10 @@ Rather than running the full PTB Application, these tests exercise the
 harvest logic in isolation using mock database objects.
 
 Key invariants:
-  - Seeds without bet_odds are expired immediately (Underdog pick'em)
+  - Seeds without bet_odds are expired immediately (pick'em / no market price)
   - Seeds without game_time are expired immediately (no timing info)
+  - UNDERDOG seeds WITH bet_odds (from OddsAPI confirmation) proceed to
+    closing-line lookup — NOT immediately expired.
   - Seeds with bet_odds + closing odds → compute CLV and mark computed
   - Seeds with bet_odds but no closing odds → expired after grace period
   - harvest job is idempotent (no side effects on already-computed seeds)
@@ -98,7 +100,10 @@ async def _run_harvest_logic(db: Database, now: datetime, grace: timedelta):
             expired += 1
             continue
 
-        if not seed.bet_odds or seed.alert_type == "UNDERDOG":
+        # Seeds without bet_odds cannot produce CLV%.
+        # UNDERDOG seeds seeded via seed_clv_from_ud_confirmation() DO have
+        # bet_odds (OddsAPI avg_odds) and must proceed to closing-line lookup.
+        if not seed.bet_odds:
             await db.mark_clv_seed_expired(seed.id)
             expired += 1
             continue
@@ -176,14 +181,51 @@ class TestHarvestLogic:
         assert h == 0
         assert e == 0  # not stale yet — stays pending
 
-    # ── Seeds without bet_odds (Underdog) → expired immediately ──────────────
+    # ── Seeds without bet_odds → expired immediately ──────────────────────────
 
     def test_underdog_seed_no_bet_odds_expired(self, db):
+        """Underdog pick'em seeds with no bet_odds are expired — CLV% not computable."""
         seed = _make_seed(
             source_id  = 2,
             alert_type = "UNDERDOG",
             bet_odds   = None,
             game_time  = self._past_game(2),
+        )
+        _run(db.save_alert_clv_seed(seed))
+
+        h, e = _run(_run_harvest_logic(db, self.NOW, self.GRACE))
+        assert e == 1
+        assert h == 0
+
+    def test_underdog_seed_with_bet_odds_not_immediately_expired(self, db):
+        """
+        UNDERDOG seeds that have bet_odds (from OddsAPI confirmation via
+        seed_clv_from_ud_confirmation) must NOT be immediately expired.
+        They proceed to closing-line lookup, then sit in grace period.
+        """
+        seed = _make_seed(
+            source_id  = 13,
+            alert_type = "UNDERDOG",
+            bet_odds   = -115,          # OddsAPI avg_odds populated at alert time
+            game_time  = self._past_game(1),   # 1h ago, still within 4h grace
+        )
+        _run(db.save_alert_clv_seed(seed))
+
+        h, e = _run(_run_harvest_logic(db, self.NOW, self.GRACE))
+        # Within grace, no closing odds → left pending (not expired, not harvested)
+        assert h == 0
+        assert e == 0
+
+    def test_underdog_seed_with_bet_odds_expires_after_grace(self, db):
+        """
+        UNDERDOG seed with bet_odds that passes grace period without closing
+        odds must be expired normally (same as EV seeds).
+        """
+        seed = _make_seed(
+            source_id  = 14,
+            alert_type = "UNDERDOG",
+            bet_odds   = -115,
+            game_time  = self._past_game(5),   # 5h ago > 4h grace
         )
         _run(db.save_alert_clv_seed(seed))
 
@@ -306,3 +348,137 @@ class TestHarvestLogic:
 
         pending = _run(db.get_pending_clv_seeds(limit=50))
         assert not any(s.source_id == 99 for s in pending)
+
+
+class TestSeedClvFromUdConfirmation:
+    """
+    Tests for Database.seed_clv_from_ud_confirmation().
+
+    This method creates an AlertCLVSeed for an Underdog S/A alert that has
+    OddsAPI market confirmation, setting bet_odds from avg_odds so the seed
+    survives the harvest guard and can be CLV-graded when closing odds arrive.
+    """
+
+    NOW = datetime.utcnow()
+
+    def _past_game(self, hours_ago: float) -> datetime:
+        return datetime.utcnow() - timedelta(hours=hours_ago)
+
+    def test_inserts_seed_with_bet_odds(self, db):
+        """A fresh call creates a seed with bet_odds populated."""
+        inserted = _run(db.seed_clv_from_ud_confirmation(
+            source_id   = 200,
+            sport       = "NBA",
+            stat_type   = "points",
+            player_name = "LeBron James",
+            line        = 25.5,
+            game_time   = self._past_game(1),
+            tier        = "S",
+            avg_odds    = -115,
+        ))
+        # rowcount behaviour: True when the row is created or upgraded
+        fetched = _run(db.get_clv_seed_for_source("underdog_snapshots", 200))
+        assert fetched is not None
+        assert fetched.bet_odds == -115
+        assert fetched.alert_type == "UNDERDOG"
+        assert fetched.sport == "NBA"
+        assert fetched.tier == "S"
+        assert "LeBron James" in fetched.selection
+        assert fetched.clv_computed is False
+
+    def test_upserts_bet_odds_when_existing_seed_has_none(self, db):
+        """
+        If seed_clv_from_ud_snapshots already created a seed with bet_odds=None,
+        seed_clv_from_ud_confirmation upgrades it with the OddsAPI avg_odds.
+        """
+        # Simulate the periodic seed job creating a seed with bet_odds=None
+        bare_seed = AlertCLVSeed(
+            source_table = "underdog_snapshots",
+            source_id    = 201,
+            alert_type   = "UNDERDOG",
+            sport        = "NBA",
+            market_type  = "rebounds",
+            event        = "Anthony Davis NBA",
+            selection    = "Anthony Davis rebounds 12",
+            bet_odds     = None,
+            counterpart_odds = None,
+            tier         = "A",
+            game_time    = self._past_game(0.5),
+            alerted_at   = datetime.utcnow(),
+            clv_computed = False,
+        )
+        _run(db.save_alert_clv_seed(bare_seed))
+
+        _run(db.seed_clv_from_ud_confirmation(
+            source_id   = 201,
+            sport       = "NBA",
+            stat_type   = "rebounds",
+            player_name = "Anthony Davis",
+            line        = 12.0,
+            game_time   = self._past_game(0.5),
+            tier        = "A",
+            avg_odds    = -108,
+        ))
+
+        fetched = _run(db.get_clv_seed_for_source("underdog_snapshots", 201))
+        assert fetched is not None
+        assert fetched.bet_odds == -108    # upgraded from None
+
+    def test_does_not_overwrite_existing_bet_odds(self, db):
+        """
+        If a seed already has bet_odds (e.g. a second alert for the same snap),
+        the existing bet_odds is preserved — on_conflict WHERE bet_odds IS NULL.
+        """
+        # First confirmation call — sets bet_odds = -110
+        _run(db.seed_clv_from_ud_confirmation(
+            source_id   = 202,
+            sport       = "MLB",
+            stat_type   = "hits",
+            player_name = "Freddie Freeman",
+            line        = 1.5,
+            game_time   = self._past_game(1),
+            tier        = "S",
+            avg_odds    = -110,
+        ))
+        # Second confirmation call with different odds — must NOT overwrite
+        _run(db.seed_clv_from_ud_confirmation(
+            source_id   = 202,
+            sport       = "MLB",
+            stat_type   = "hits",
+            player_name = "Freddie Freeman",
+            line        = 1.5,
+            game_time   = self._past_game(1),
+            tier        = "S",
+            avg_odds    = -105,
+        ))
+
+        fetched = _run(db.get_clv_seed_for_source("underdog_snapshots", 202))
+        assert fetched is not None
+        assert fetched.bet_odds == -110    # original preserved
+
+    def test_seed_survives_harvest_guard(self, db):
+        """
+        A seed created by seed_clv_from_ud_confirmation must NOT be immediately
+        expired by the harvest guard — it passes the `if not seed.bet_odds` check.
+        """
+        _run(db.seed_clv_from_ud_confirmation(
+            source_id   = 203,
+            sport       = "NBA",
+            stat_type   = "assists",
+            player_name = "Nikola Jokic",
+            line        = 8.5,
+            game_time   = self._past_game(1),   # past game, within grace
+            tier        = "A",
+            avg_odds    = -120,
+        ))
+
+        now   = datetime.utcnow()
+        grace = timedelta(hours=4)
+        h, e  = _run(_run_harvest_logic(db, now, grace))
+        # 1h ago < 4h grace, no closing odds → left pending
+        assert h == 0
+        assert e == 0
+
+        fetched = _run(db.get_clv_seed_for_source("underdog_snapshots", 203))
+        assert fetched is not None
+        assert fetched.clv_computed is False   # still pending

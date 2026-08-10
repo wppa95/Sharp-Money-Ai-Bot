@@ -1181,9 +1181,8 @@ class AlertDelivery:
         # The header is prepended AFTER formatting so the existing alert body is unchanged.
         # 95+/100 props use the V3.3 override path (broadcast_alert directly) and never reach here.
         if high_priority and message and not removed:
-            _hp_score = int(score.total) if score is not None else "??"
             message = (
-                f"🔥 <b>S-TIER HIGH PRIORITY — {_hp_score}/100</b>\n"
+                f"🔥 <b>S-TIER HIGH PRIORITY</b>\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 + message
             )

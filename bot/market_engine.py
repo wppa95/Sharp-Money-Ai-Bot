@@ -1325,18 +1325,23 @@ async def underdog_job(context) -> None:
                 # ── 95+ S-tier priority override [new-prop path] ─────────────────
                 # Bet Quality (decision.confidence) ≥ 95 AND decision tier == "S":
                 # bypasses secondary/historical gates but still enforces:
-                #   1. Both OVER and UNDER valid for all sports (Tier 2 spec)
+                #   1. Tier 2 UNDER block — MLB/NFL UNDER is always watchlist, not actionable
                 #   2. Confidence Gate (implicitly met: conf ≥ 95 ≥ any min_conf)
                 #   3. Existing dedup / reversal protection
                 _np_pp_key = (player, snap.sport or "UNKNOWN", stat_type)
                 if decision is not None and decision.confidence >= 95 and decision.decision_tier == "S" and decision.recommendation != "PASS":
                     np_immediate = False  # 95+ always uses the override path
-                    # Both OVER and UNDER are valid for all sports — spec Tier 2 requirement
                     _np_95_sport = (snap.sport or "").upper()
+                    # Tier 2: MLB/NFL UNDER is NEVER actionable regardless of BQ or tier.
+                    _np_95_dir_ok = (
+                        _np_95_sport not in config.ud_strict_alert_sports
+                        or decision.recommendation != "UNDER"
+                    )
                     if (
                         _np_pp_key not in _priority_alerted_this_scan
                         and _np_pp_key not in _priority_override_sent
                         and chat_ids
+                        and _np_95_dir_ok
                     ):
                         # Attempt to get a direction; decision may be None if validation
                         # blocked the computation — try with market signals only.
@@ -1417,8 +1422,18 @@ async def underdog_job(context) -> None:
                             player, stat_type, _sport_up,
                             decision.decision_tier, config.UD_MLB_MIN_TIER,
                         )
-                # UNDER is allowed for all sports including MLB/NFL — Tier 2 spec requirement.
-                # BQ gate removed: decision_tier (S/A only) already enforces quality.
+                # Tier 2 UNDER gate — MLB/NFL S-tier UNDER is always watchlist (Tier 2 spec).
+                # Tier 1 (all other sports) allows UNDER for S/A tier.
+                if _np_bet_ready and decision is not None:
+                    _np_sport_strict = (snap.sport or "").upper()
+                    if (_np_sport_strict in config.ud_strict_alert_sports
+                            and decision.recommendation == "UNDER"):
+                        _np_bet_ready = False
+                        logger.debug(
+                            "UD mlb_under_gate [new]: %s | %s | sport=%s UNDER blocked (Tier 2 = OVER only)",
+                            player, stat_type, _np_sport_strict,
+                        )
+                # BQ gate removed: decision_tier (S/A) enforces quality.
                 # Game-live hard gate — block actionable alerts when game has already started (#5).
                 # Uses _is_game_live_or_past which checks status field + game_time elapsed.
                 # Internal market intelligence continues regardless.
@@ -1521,6 +1536,27 @@ async def underdog_job(context) -> None:
                             _np_stored = "YES"
                         except Exception:
                             _np_stored = "NO (mark failed)"
+                        # Seed CLV record with OddsAPI avg_odds so S/A pick performance
+                        # is tracked when closing-line data becomes available.
+                        if (_np_odds_confirm is not None
+                                and _np_odds_confirm.get("avg_odds") is not None):
+                            try:
+                                _np_snap_id = int(getattr(snap, "id", 0) or 0)
+                                await db.seed_clv_from_ud_confirmation(
+                                    source_id   = _np_snap_id,
+                                    sport       = snap.sport or "",
+                                    stat_type   = stat_type,
+                                    player_name = player,
+                                    line        = line_val,
+                                    game_time   = snap.game_time,
+                                    tier        = decision.decision_tier if decision else "",
+                                    avg_odds    = _np_odds_confirm["avg_odds"],
+                                )
+                            except Exception as _clv_exc:
+                                logger.debug(
+                                    "seed_clv_from_ud_confirmation [new-prop] failed: %s | %s — %s",
+                                    player, stat_type, _clv_exc,
+                                )
                         logger.info(
                             "🎯 PICK CREATED | Player: %s | Sport: %s | Market: %s"
                             " | Line: %.1f | Direction: %s | Tier: %s | Confidence: %d"
@@ -1694,18 +1730,23 @@ async def underdog_job(context) -> None:
                     # ── 95+ S-tier priority override [lc path] ───────────────────
                     # Bet Quality (decision.confidence) ≥ 95 AND decision tier == "S":
                     # bypasses secondary/historical gates but still enforces:
-                    #   1. Both OVER and UNDER valid for all sports (Tier 2 spec)
+                    #   1. Tier 2 UNDER block — MLB/NFL UNDER is always watchlist, not actionable
                     #   2. Confidence + Quality gates implicitly met at BQ ≥ 95
                     #   3. Existing dedup / reversal protection
                     _lc_pp_key = (player, snap.sport or "UNKNOWN", stat_type)
                     if decision is not None and decision.confidence >= 95 and decision.decision_tier == "S" and decision.recommendation != "PASS":
                         _lc_95_sent = True  # block normal lc gate sequence
-                        # Both OVER and UNDER are valid for all sports — spec Tier 2 requirement
                         _lc_95_sport = (snap.sport or "").upper()
+                        # Tier 2: MLB/NFL UNDER is NEVER actionable regardless of BQ or tier.
+                        _lc_95_dir_ok = (
+                            _lc_95_sport not in config.ud_strict_alert_sports
+                            or decision.recommendation != "UNDER"
+                        )
                         if (
                             _lc_pp_key not in _priority_alerted_this_scan
                             and _lc_pp_key not in _priority_override_sent
                             and chat_ids
+                            and _lc_95_dir_ok
                         ):
                             _lc_pp_dec = decision
                             if _lc_pp_dec is None:
@@ -1861,15 +1902,16 @@ async def underdog_job(context) -> None:
                     _lc_mlb_ok = (
                         _lc_sport_up != "MLB"
                         or decision is None
-                        or decision.decision_tier in config.ud_mlb_alert_tiers
-                        # UNDER is allowed for MLB/NFL — spec Tier 2: both directions valid
+                        or (decision.decision_tier in config.ud_mlb_alert_tiers
+                            and decision.recommendation != "UNDER")  # Tier 2: MLB UNDER blocked
                     )
-                    # Strict-sport tier gate for line-change path — MLB AND NFL are S-tier only.
+                    # Strict-sport tier gate for line-change path — MLB AND NFL are S-tier OVER only.
                     # _lc_mlb_ok above only covers MLB; this covers all ud_strict_alert_sports.
                     _lc_strict_tier_ok = (
                         _lc_sport_up not in config.ud_strict_alert_sports
                         or decision is None
-                        or decision.decision_tier in config.ud_mlb_alert_tiers
+                        or (decision.decision_tier in config.ud_mlb_alert_tiers
+                            and decision.recommendation != "UNDER")  # Tier 2: UNDER always blocked
                     )
                     is_qualified = (
                         (not is_cold_start or _fast_resume)  # fast-resume: allow lc delivery on first scan
@@ -2123,6 +2165,27 @@ async def underdog_job(context) -> None:
                     logger.warning(
                         "underdog_job: mark_opportunity_alert_sent [lc] failed: %s", _mark_exc
                     )
+                # Seed CLV record with OddsAPI avg_odds so S/A pick performance
+                # is tracked when closing-line data becomes available.
+                if (_lc_odds_confirm is not None
+                        and _lc_odds_confirm.get("avg_odds") is not None):
+                    try:
+                        _lc_snap_id = int(getattr(snap, "id", 0) or 0)
+                        await db.seed_clv_from_ud_confirmation(
+                            source_id   = _lc_snap_id,
+                            sport       = snap.sport or "",
+                            stat_type   = stat_type,
+                            player_name = player,
+                            line        = snap.line or 0.0,
+                            game_time   = snap.game_time,
+                            tier        = decision.decision_tier if decision else "",
+                            avg_odds    = _lc_odds_confirm["avg_odds"],
+                        )
+                    except Exception as _clv_exc:
+                        logger.debug(
+                            "seed_clv_from_ud_confirmation [lc] failed: %s | %s — %s",
+                            player, stat_type, _clv_exc,
+                        )
                 logger.info(
                     "🎯 PICK CREATED | Player: %s | Sport: %s | Market: %s"
                     " | Line: %.1f | Direction: %s | Tier: %s | Confidence: %d"
@@ -2366,11 +2429,16 @@ async def underdog_job(context) -> None:
                 # `continue` skips remaining gates for all 95+ props (sent or not).
                 _sp_pp_key = (_sp, _ssport, _st)
                 if _sdec is not None and _sdec.confidence >= 95 and _sdec.decision_tier == "S" and _sdec.recommendation != "PASS":
-                    # Both OVER and UNDER are valid for all sports — spec Tier 2 requirement
+                    # Tier 2: MLB/NFL UNDER is NEVER actionable regardless of BQ or tier.
+                    _sp_95_dir_ok = (
+                        _ssport.upper() not in config.ud_strict_alert_sports
+                        or _sdec.recommendation != "UNDER"
+                    )
                     if (
                         _sp_pp_key not in _priority_alerted_this_scan
                         and _sp_pp_key not in _priority_override_sent
                         and chat_ids
+                        and _sp_95_dir_ok
                     ):
                         _priority_alerted_this_scan.add(_sp_pp_key)
                         _priority_override_sent.add(_sp_pp_key)
@@ -2416,7 +2484,15 @@ async def underdog_job(context) -> None:
                     )
                     continue
 
-                # MLB/NFL UNDER is allowed and BQ gate removed — decision_tier enforces quality.
+                # Tier 2 UNDER gate — MLB/NFL S-tier UNDER is always watchlist (Tier 2 spec).
+                # BQ gate removed: decision_tier (S) enforces quality for Tier 2.
+                if (_ssport.upper() in config.ud_strict_alert_sports
+                        and _sdec.recommendation == "UNDER"):
+                    logger.debug(
+                        "UD mlb_under_gate [standing]: %s | %s | sport=%s UNDER blocked (Tier 2 = OVER only)",
+                        _sp, _st, _ssport.upper(),
+                    )
+                    continue
 
                 # Game-live hard gate for standing plays — block if game already started (#5).
                 if _is_game_live_or_past(_ssnap, now):
@@ -2494,6 +2570,27 @@ async def underdog_job(context) -> None:
                             "underdog_job: mark_opportunity_alert_sent [standing] failed: %s",
                             _mark_exc,
                         )
+                    # Seed CLV record with OddsAPI avg_odds so S/A pick performance
+                    # is tracked when closing-line data becomes available.
+                    if (_s_odds_confirm is not None
+                            and _s_odds_confirm.get("avg_odds") is not None):
+                        try:
+                            _s_snap_id = int(getattr(_ssnap, "id", 0) or 0)
+                            await db.seed_clv_from_ud_confirmation(
+                                source_id   = _s_snap_id,
+                                sport       = _ssport,
+                                stat_type   = _st,
+                                player_name = _sp,
+                                line        = _line_val,
+                                game_time   = _ssnap.game_time,
+                                tier        = _sdec.decision_tier if _sdec else "",
+                                avg_odds    = _s_odds_confirm["avg_odds"],
+                            )
+                        except Exception as _clv_exc:
+                            logger.debug(
+                                "seed_clv_from_ud_confirmation [standing] failed: %s | %s — %s",
+                                _sp, _st, _clv_exc,
+                            )
                     logger.info(
                         "🎯 PICK CREATED | Player: %s | Sport: %s | Market: %s"
                         " | Line: %.1f | Direction: %s | Tier: %s | Confidence: %d"

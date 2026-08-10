@@ -1,0 +1,246 @@
+🚨 STOP — RECOVERY / VERIFY BEFORE CONTINUING
+
+The implementation agent just reported:
+
+“Agent ran into an error.”
+
+Do NOT continue making speculative edits.
+
+We need to recover safely from the partial implementation.
+
+━━━━━━━━━━━━━━━━━━
+1️⃣ CHECK CURRENT STATE FIRST
+━━━━━━━━━━━━━━━━━━
+
+Before changing anything else:
+
+• Check git diff / working-tree changes.
+• List every file modified during this attempted pass.
+• Identify exactly which edits successfully applied and which failed.
+• Do NOT overwrite or revert unrelated working changes from the previous completed freeze.
+• Do NOT blindly rerun the previous edit commands.
+
+Run syntax/compile checks on every modified Python file.
+
+If syntax is broken, fix only the syntax/partial-edit issue first.
+
+━━━━━━━━━━━━━━━━━━
+2️⃣ AUTHORITATIVE RULE — DO NOT CHANGE
+━━━━━━━━━━━━━━━━━━
+
+The final intended rules are:
+
+TIER 2 = MLB + NFL
+
+S + OVER = ACTIONABLE
+S + UNDER = WATCHLIST/BLOCKED
+A/B/C + OVER = WATCHLIST
+A/B/C + UNDER = WATCHLIST
+
+BQ 80–100 NEVER overrides the Tier-2 direction restriction.
+
+S-tier priority NEVER overrides the Tier-2 direction restriction.
+
+Therefore:
+
+MLB S UNDER → NEVER Telegram-actionable
+NFL S UNDER → NEVER Telegram-actionable
+
+Even if:
+
+Confidence = 95
+BQ = 95
+S-tier priority = TRUE
+
+it must still fail final eligibility.
+
+━━━━━━━━━━━━━━━━━━
+3️⃣ PRIORITY OVERRIDE IS THE CRITICAL BUG
+━━━━━━━━━━━━━━━━━━
+
+The previous live output proved this path is bypassing the normal gate:
+
+🔥🚨 S-TIER PRIORITY OVERRIDE — 95/100
+Garrett Stubbs · MLB · Hits + Runs + RBIs
+UNDER 1.5
+S-TIER
+BQ 95
+
+This MUST NOT be delivered.
+
+The priority-override path must call/use the SAME FINAL eligibility decision as the normal alert path.
+
+There must NOT be a separate shortcut like:
+
+if s_tier and high_bq:
+send_alert()
+
+without first enforcing:
+
+Tier 2 + UNDER → blocked/watchlist
+
+Do not duplicate the eligibility logic in multiple places.
+
+Create/use one authoritative final eligibility decision if the current architecture allows it.
+
+━━━━━━━━━━━━━━━━━━
+4️⃣ SECOND CONFIRMED BUG
+━━━━━━━━━━━━━━━━━━
+
+This was also incorrectly delivered:
+
+Jacob Lopez · MLB · Hits Allowed
+S-tier
+UNDER 5.5
+BQ 85
+
+That must also be blocked/watchlist.
+
+This confirms the issue is systemic, not player/market-specific.
+
+━━━━━━━━━━━━━━━━━━
+5️⃣ DO NOT BREAK TIER 1
+━━━━━━━━━━━━━━━━━━
+
+Tier 1 behavior is correct and MUST remain:
+
+S/A + OVER → ACTIONABLE
+S/A + UNDER → ACTIONABLE
+B/C → WATCHLIST
+
+Do NOT restore a global MLB/NFL UNDER block.
+
+The direction restriction must be scoped specifically to Tier 2.
+
+━━━━━━━━━━━━━━━━━━
+6️⃣ BQ RULE
+━━━━━━━━━━━━━━━━━━
+
+BQ 80–100 = 💪 STRONG BET
+
+BQ is a quality label, NOT an eligibility override.
+
+Examples:
+
+Tier 1 A UNDER + BQ 95
+→ ACTIONABLE + 💪 STRONG UNDER
+
+Tier 2 S UNDER + BQ 95
+→ WATCHLIST/BLOCKED + 💪 STRONG UNDER label if displayed
+
+Tier 2 S OVER + BQ 95
+→ ACTIONABLE + 💪 STRONG BET
+
+Do not allow BQ to bypass direction eligibility.
+
+━━━━━━━━━━━━━━━━━━
+7️⃣ S-TIER DISPLAY
+━━━━━━━━━━━━━━━━━━
+
+S-tier must display as S-tier.
+
+Do not allow a lower confidence number to change the final tier.
+
+If:
+
+tier = S
+priority = true
+
+the alert must show:
+
+🔥 S-TIER HIGH PRIORITY
+
+The numeric confidence/score can still be displayed separately.
+
+Do not use the numeric score as a substitute for the tier.
+
+━━━━━━━━━━━━━━━━━━
+8️⃣ TESTS BEFORE RESTART
+━━━━━━━━━━━━━━━━━━
+
+Add/fix regression tests for the exact failure:
+
+• MLB S OVER → allowed
+• MLB S UNDER → blocked
+• NFL S OVER → allowed
+• NFL S UNDER → blocked
+• MLB S UNDER + BQ 95 → blocked
+• NFL S UNDER + BQ 100 → blocked
+• MLB S UNDER + priority override → blocked
+• NFL S UNDER + priority override → blocked
+• Tier 1 S UNDER → allowed
+• Tier 1 A UNDER → allowed
+• Tier 1 S OVER → allowed
+• Tier 1 A OVER → allowed
+• Tier 1 B/C → watchlist
+
+Most importantly, test the actual Telegram delivery/priority path, not just the low-level scoring function.
+
+━━━━━━━━━━━━━━━━━━
+9️⃣ RUN TESTS
+━━━━━━━━━━━━━━━━━━
+
+After repairing the partial implementation:
+
+1. Syntax-check all modified files.
+2. Run the targeted Tier 1/Tier 2 tests.
+3. Run the COMPLETE test suite.
+4. Do not weaken existing tests merely to make them pass.
+
+Only restart the bot after the tests pass.
+
+━━━━━━━━━━━━━━━━━━
+🔟 LIVE VERIFICATION
+━━━━━━━━━━━━━━━━━━
+
+After restart, inspect the first completed scan.
+
+Verify:
+
+MLB S OVER → can alert
+MLB S UNDER → cannot alert
+NFL S OVER → can alert
+NFL S UNDER → cannot alert
+Tier 1 S/A UNDER → can alert
+Tier 1 B/C → watchlist
+
+If an MLB/NFL S UNDER reaches Telegram as an actionable alert, STOP and fix it before reporting success.
+
+━━━━━━━━━━━━━━━━━━
+🔒 DO NOT EXPAND SCOPE
+━━━━━━━━━━━━━━━━━━
+
+Do NOT:
+
+• redesign the scoring model
+• change BQ thresholds
+• change Tier 1 rules
+• change Tier 2 definitions
+• remove dedup
+• remove freshness timestamps
+• remove ScanCycleLog
+• alter unrelated providers
+• refactor unrelated modules
+• add new features
+
+This is a surgical correction to the final eligibility/priority ordering.
+
+━━━━━━━━━━━━━━━━━━
+FINAL REQUIRED RESULT
+━━━━━━━━━━━━━━━━━━
+
+Do not tell me merely what is wrong.
+
+Recover the partial edit → implement the surgical fix → test → restart → verify live → fix any remaining failure.
+
+Only then report:
+
+• files changed
+• exact eligibility behavior
+• test count
+• live verification
+• confirmation that Tier 2 S UNDER cannot bypass the final gate through priority override
+
+If the current partial edits introduced conflicts, resolve them before continuing.
+
+DO NOT FREEZE AGAIN UNTIL LIVE VERIFICATION PASSES.

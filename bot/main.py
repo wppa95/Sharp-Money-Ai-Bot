@@ -936,8 +936,10 @@ async def _clv_harvest_job(context) -> None:
                 expired += 1
                 continue
 
-            # Underdog pick'em seeds have no sportsbook bet_odds → expire immediately
-            if not seed.bet_odds or seed.alert_type == "UNDERDOG":
+            # Seeds without bet_odds cannot produce CLV% — expire immediately.
+            # Underdog seeds seeded via seed_clv_from_ud_confirmation() DO have
+            # bet_odds (from OddsAPI avg_odds), so they proceed to closing-line lookup.
+            if not seed.bet_odds:
                 await _db.mark_clv_seed_expired(seed.id)
                 expired += 1
                 continue

@@ -558,18 +558,18 @@ class TestTierPolicyUnchanged:
         from config import config as cfg
         assert cfg.UD_STRICT_SPORT_MIN_BET_QUALITY == 95
 
-    def test_ud_mlb_alert_tiers_includes_s_and_a(self):
-        """Default now includes S and A — spec Tier 2: S/A deliver, B/C watchlist."""
+    def test_ud_mlb_alert_tiers_still_s_only(self):
+        """Default: S-tier only (Tier 2: S+OVER actionable, A=watchlist)."""
         from config import config as cfg
         tiers = cfg.ud_mlb_alert_tiers
         assert "S" in tiers
-        assert "A" in tiers   # A-tier now allowed
+        assert "A" not in tiers  # A-tier is watchlist for Tier 2
         assert "B" not in tiers
 
-    def test_ud_mlb_min_tier_is_a(self):
-        """Default UD_MLB_MIN_TIER changed from S to A per spec Tier 2."""
+    def test_ud_mlb_min_tier_still_s(self):
+        """Default UD_MLB_MIN_TIER must be 'S' (Tier 2 spec)."""
         from config import config as cfg
-        assert cfg.UD_MLB_MIN_TIER == "A"
+        assert cfg.UD_MLB_MIN_TIER == "S"
 
     def test_validation_min_samples_unchanged(self):
         from config import config as cfg

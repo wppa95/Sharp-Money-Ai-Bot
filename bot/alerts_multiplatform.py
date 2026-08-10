@@ -67,17 +67,17 @@ def _bq_stars(bq: int) -> str:
     return "★" * n + "☆" * (5 - n)
 
 
-def _bq_priority_label(bq: int) -> str:
+def _bq_priority_label(bq: int, direction: str = "") -> str:
     """Priority/actionability label for a given Bet Quality score.
 
-    V3.4 classification:
-      80+   → 🔥 HIGH PRIORITY
+    Classification:
+      80+   → 💪 STRONG BET (OVER) / 💪 STRONG UNDER (UNDER direction)
       75–79 → 🟢 ACTIONABLE
       70–74 → 👀 WATCHLIST ONLY
       <70   → (not shown; would not reach alert formatter)
     """
     if bq >= 80:
-        return "🔥 HIGH PRIORITY"
+        return "💪 STRONG UNDER" if direction == "UNDER" else "💪 STRONG BET"
     elif bq >= 75:
         return "🟢 ACTIONABLE"
     elif bq >= 70:
@@ -785,30 +785,34 @@ def format_underdog_change_alert(
         if conf is not None:
             _bq_int = int(conf)
             pick_line += f"   ·   Bet Quality <code>{_bq_int}/100</code>  {_bq_stars(_bq_int)}"
-            _priority_lbl = _bq_priority_label(_bq_int)
+            _priority_lbl = _bq_priority_label(_bq_int, direction=rec)
             if _priority_lbl:
                 pick_line += f"   ·   {_priority_lbl}"
-        # V3.4: Strong UNDER Signal — low underlying score is directional evidence for UNDER
-        if rec == "UNDER" and score is not None and getattr(score, "total", 100) <= 30:
+        # STRONG UNDER: BQ ≥ 80 UNDER pick gets 💪 label (already in pick_line via _bq_priority_label)
+        # Also surface as standalone line for visibility when it qualifies.
+        if rec == "UNDER" and conf is not None and int(conf) >= 80:
+            strong_under_line = "💪 <b>STRONG UNDER</b>  <i>(BQ ≥ 80 — verify line on Underdog before placing)</i>"
+        elif rec == "UNDER" and score is not None and getattr(score, "total", 100) <= 30:
             strong_under_line = (
                 "🔴 <b>Strong UNDER Signal</b>"
                 f"  <i>(underlying score {int(getattr(score, 'total', 0))}/100 ≤ 30)</i>"
             )
 
-    # Short edge line from decision/validation if available
+    # Short edge line with L5 — always shown; falls back to N/A when no history available.
     edge_line = ""
-    if decision is not None and not removed:
-        l5 = getattr(decision, "l5_hit_rate", None)
-        l5g = getattr(decision, "l5_games", None)
-        reason = (getattr(decision, "reason", None) or "").strip()
+    if not removed:
+        l5 = getattr(decision, "l5_hit_rate", None) if decision is not None else None
+        l5g = getattr(decision, "l5_games", None) if decision is not None else None
+        reason = (getattr(decision, "reason", None) or "").strip() if decision is not None else ""
         bits = []
         if l5 is not None and l5g:
             bits.append(f"L5 {l5:.0%} ({l5g}g)")
+        else:
+            bits.append("L5: N/A — no history available")
         if reason:
             # keep reason short
             bits.append(reason.split("•")[0].strip()[:80])
-        if bits:
-            edge_line = "📊 <b>Edge:</b>  " + "  ·  ".join(bits)
+        edge_line = "📊 <b>Edge:</b>  " + "  ·  ".join(bits)
 
     # Market quality one-liner
     mq_line = ""
@@ -996,14 +1000,27 @@ def format_underdog_new_prop_alert(
             f"<code>{getattr(validation, 'rate_summary', lambda: '')()}</code>"
         )
 
-    # Strong UNDER signal — V3.4: low underlying score = directional evidence for UNDER
+    # Strong UNDER label: BQ ≥ 80 UNDER pick → 💪 STRONG UNDER
     _np_rec = getattr(decision, "recommendation", None) if decision is not None else None
+    _np_bq  = getattr(decision, "confidence", None)     if decision is not None else None
     _np_strong_under = ""
-    if _np_rec == "UNDER" and score is not None and getattr(score, "total", 100) <= 30:
-        _np_strong_under = (
-            "🔴 <b>Strong UNDER Signal</b>"
-            f"  <i>(underlying score {int(getattr(score, 'total', 0))}/100 ≤ 30)</i>"
-        )
+    if _np_rec == "UNDER":
+        if _np_bq is not None and int(_np_bq) >= 80:
+            _np_strong_under = "💪 <b>STRONG UNDER</b>  <i>(BQ ≥ 80 — verify line on Underdog before placing)</i>"
+        elif score is not None and getattr(score, "total", 100) <= 30:
+            _np_strong_under = (
+                "🔴 <b>Strong UNDER Signal</b>"
+                f"  <i>(underlying score {int(getattr(score, 'total', 0))}/100 ≤ 30)</i>"
+            )
+
+    # L5 history block — always shown; falls back to N/A when no history available.
+    _np_l5     = getattr(decision, "l5_hit_rate", None) if decision is not None else None
+    _np_l5g    = getattr(decision, "l5_games",    None) if decision is not None else None
+    _np_l5_str = (
+        f"📊 <b>L5:</b>  {_np_l5:.0%} ({_np_l5g}g)"
+        if (_np_l5 is not None and _np_l5g)
+        else "📊 <b>L5:</b>  N/A — no history available"
+    )
 
     # Reason bullets
     reasons = ["• New prop detected"]
@@ -1041,6 +1058,7 @@ def format_underdog_new_prop_alert(
         + opponent_str
         + game_str
         + grade_str
+        + f"\n{_np_l5_str}"
         + (_np_strong_under and f"\n{_np_strong_under}" or "")
         + validation_str
         + _format_decision_block(decision, line=line_value)
