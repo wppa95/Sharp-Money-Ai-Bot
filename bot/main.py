@@ -967,7 +967,7 @@ async def _clv_harvest_job(context) -> None:
                         bet_odds               = seed.bet_odds,
                         closing_odds           = closing_record.american_odds,
                         clv_pct                = clv_result.clv_pct,
-                        clv_proxy              = clv_result.clv_lead,
+                        clv_proxy              = clv_result.clv_proxy,
                         fair_prob_bet          = clv_result.fair_prob_bet,
                         fair_prob_close        = clv_result.fair_prob_close,
                         counterpart_bet_odds   = seed.counterpart_odds,

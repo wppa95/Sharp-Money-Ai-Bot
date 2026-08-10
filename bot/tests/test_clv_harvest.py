@@ -125,7 +125,7 @@ async def _run_harvest_logic(db: Database, now: datetime, grace: timedelta):
                 bet_odds     = seed.bet_odds,
                 closing_odds = closing_record.american_odds,
                 clv_pct      = clv_result.clv_pct,
-                clv_proxy    = clv_result.clv_lead,
+                clv_proxy    = clv_result.clv_proxy,
                 fair_prob_bet   = clv_result.fair_prob_bet,
                 fair_prob_close = clv_result.fair_prob_close,
                 notes        = "",
@@ -348,6 +348,134 @@ class TestHarvestLogic:
 
         pending = _run(db.get_pending_clv_seeds(limit=50))
         assert not any(s.source_id == 99 for s in pending)
+
+
+class TestHarvestComputePath:
+    """
+    End-to-end tests for the CLV compute path:
+    seed + closing OddsRecord → CLVRecord written, no AttributeError.
+
+    These tests would have crashed before the clv_result.clv_lead →
+    clv_result.clv_proxy fix because CLVResult has no `clv_lead` attribute.
+    """
+
+    def _past_game(self, hours_ago: float) -> datetime:
+        return datetime.utcnow() - timedelta(hours=hours_ago)
+
+    def test_compute_path_writes_clv_record(self, db):
+        """
+        When a seed has bet_odds and a matching OddsRecord exists (closing odds),
+        the harvest logic must compute CLV% and write a CLVRecord — no crash.
+        """
+        from database import OddsRecord
+
+        # Create a seed past game_time
+        seed = _make_seed(
+            source_id  = 500,
+            alert_type = "EV",
+            bet_odds   = -110,
+            game_time  = self._past_game(2),
+            event      = "Chiefs vs Ravens",
+            selection  = "Chiefs ML",
+        )
+        _run(db.save_alert_clv_seed(seed))
+
+        # Create a matching OddsRecord (simulates closing-line data)
+        closing = OddsRecord(
+            event         = "Chiefs vs Ravens",
+            selection     = "Chiefs ML",
+            sport         = "NFL",
+            market_type   = "h2h",
+            sportsbook    = "fanduel",
+            american_odds = -130,   # market moved from -110 → -130 (positive CLV)
+            recorded_at   = datetime.utcnow(),
+        )
+        _run(db.save_odds(closing))
+
+        now   = datetime.utcnow()
+        grace = timedelta(hours=4)
+        h, e  = _run(_run_harvest_logic(db, now, grace))
+
+        assert h == 1, "CLVRecord should have been written"
+        assert e == 0
+        assert _run(db.count_clv_records()) == 1
+
+    def test_compute_path_clv_pct_sign(self, db):
+        """
+        Bet at -110, closed at -130 → market tightened → positive CLV%.
+        Verifies the math survives the full pipeline end-to-end.
+        """
+        from database import OddsRecord
+        from engine.clv import compute_clv
+
+        # Independently compute expected CLV%
+        expected = compute_clv(bet_odds=-110, closing_odds=-130)
+        assert expected.clv_pct > 0, "pre-condition: -110 vs -130 close should be +CLV"
+
+        seed = _make_seed(
+            source_id  = 501,
+            alert_type = "EV",
+            bet_odds   = -110,
+            game_time  = self._past_game(2),
+            event      = "Lakers vs Celtics",
+            selection  = "Lakers ML",
+        )
+        _run(db.save_alert_clv_seed(seed))
+
+        closing = OddsRecord(
+            event         = "Lakers vs Celtics",
+            selection     = "Lakers ML",
+            sport         = "NBA",
+            market_type   = "h2h",
+            sportsbook    = "draftkings",
+            american_odds = -130,
+            recorded_at   = datetime.utcnow(),
+        )
+        _run(db.save_odds(closing))
+
+        h, e = _run(_run_harvest_logic(db, datetime.utcnow(), timedelta(hours=4)))
+        assert h == 1
+
+        # The seed should now be marked computed
+        fetched = _run(db.get_clv_seed_for_source("ev_records", 501))
+        assert fetched is not None
+        assert fetched.clv_computed is True
+        assert fetched.clv_pct is not None
+        assert fetched.clv_pct > 0
+
+    def test_compute_path_underdog_seed_with_bet_odds(self, db):
+        """
+        UNDERDOG seed created via seed_clv_from_ud_confirmation should also
+        be harvested correctly (no crash, CLVRecord written) when closing odds arrive.
+        """
+        from database import OddsRecord
+
+        _run(db.seed_clv_from_ud_confirmation(
+            source_id   = 502,
+            sport       = "NBA",
+            stat_type   = "points",
+            player_name = "LeBron James",
+            line        = 25.5,
+            game_time   = self._past_game(2),
+            tier        = "S",
+            avg_odds    = -115,
+        ))
+
+        # Simulate a closing OddsRecord for this player prop
+        closing = OddsRecord(
+            event         = "LeBron James NBA",
+            selection     = "LeBron James points 25.5",
+            sport         = "NBA",
+            market_type   = "player_points",
+            sportsbook    = "fanduel",
+            american_odds = -130,
+            recorded_at   = datetime.utcnow(),
+        )
+        _run(db.save_odds(closing))
+
+        h, e = _run(_run_harvest_logic(db, datetime.utcnow(), timedelta(hours=4)))
+        assert h == 1
+        assert e == 0
 
 
 class TestSeedClvFromUdConfirmation:
