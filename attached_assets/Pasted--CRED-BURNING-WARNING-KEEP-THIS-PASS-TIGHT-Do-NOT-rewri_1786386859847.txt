@@ -1,0 +1,232 @@
+🚨 CRED BURNING WARNING — KEEP THIS PASS TIGHT
+
+Do NOT rewrite working systems, refactor unrelated code, or change existing tier/gate behavior.
+
+Only diagnose the issues below and make the smallest targeted fixes AFTER identifying the root cause.
+
+━━━━━━━━━━━━━━━━━━
+
+1. FUNNEL COMMAND BUG — HIGH PRIORITY
+    ━━━━━━━━━━━━━━━━━━
+
+All /funnel time windows have been unreliable.
+
+Examples:
+
+* /funnel 1 worked earlier, then stopped working
+* /funnel 2 failed
+* /funnel 3 failed
+* Other windows have also behaved inconsistently
+
+Error:
+“⚠️ Could not load funnel data. Check bot logs.”
+
+Trace the entire /funnel command/data-loading path.
+
+Check:
+
+* argument parsing
+* database/query failures
+* time-window handling
+* timestamp handling
+* UTC/local-time conversion
+* missing/invalid data
+* exceptions
+* shared state/cache
+
+Do NOT hardcode /funnel 1/2/3.
+
+Fix the underlying cause so all valid time windows work consistently.
+
+━━━━━━━━━━━━━━━━━━
+2. DUPLICATE ALERT BUG
+━━━━━━━━━━━━━━━━━━
+
+Jonathan Aranda — MLB Hits OVER 0.5 — S-tier 95/100 generated an actionable alert AGAIN even though the exact same alert had already been sent earlier.
+
+Trace the complete dedup path and determine why the duplicate passed.
+
+Verify the dedup identity correctly distinguishes:
+
+* player
+* sport
+* market/prop
+* line
+* direction
+
+Determine whether this was:
+A) an exact duplicate that bypassed dedup
+OR
+B) a legitimate re-alert caused by meaningful line movement.
+
+Do NOT change tier gates while diagnosing this.
+
+━━━━━━━━━━━━━━━━━━
+3. SCANNED PROP COUNT DROPPING
+━━━━━━━━━━━━━━━━━━
+
+The number of props represented in the funnel dropped dramatically compared with earlier behavior.
+
+We previously had a funnel scan showing roughly 82,000+ scanned props.
+
+Later windows were showing only hundreds:
+
+1h:
+~200–500 scanned
+
+2h:
+~500–600 scanned
+
+3h:
+~600–700 scanned
+
+Meanwhile the Underdog monitor is still fetching thousands of props per scan.
+
+Example:
+Last scan: props=4,244
+
+PropLineHistory:
+~9,830+ rows
+
+Determine why the funnel’s “Scanned” count is so much lower than the actual props being fetched/monitored.
+
+Check whether:
+
+* funnel scanning counts the correct records
+* records are being filtered before entering funnel statistics
+* the correct PropLineHistory data is being queried
+* recent polling data is being persisted
+* database cleanup/retention is removing records
+* deduplication is incorrectly affecting funnel counts
+* polling frequency changed
+* provider response size changed
+* startup/restart changed the data source
+* the definition of “Scanned” changed between funnel versions
+
+Do NOT artificially inflate the count.
+
+━━━━━━━━━━━━━━━━━━
+4. NEW EVIDENCE — 24H VS 48H IS A MAJOR DISCREPANCY
+━━━━━━━━━━━━━━━━━━
+
+We just ran:
+
+/funnel 48
+
+Result:
+Scanned = 106,249
+Qualified = 881
+Watchlist = 2,670
+Rejected = 102,698
+
+Then:
+
+/funnel 24
+
+Result:
+Scanned = 2,201
+Qualified = 30
+Watchlist = 588
+Rejected = 1,583
+
+This is a major difference.
+
+The important point is that /funnel 48 successfully retrieves 106,249 historical funnel records.
+
+Therefore, the underlying historical funnel data DOES exist.
+
+This makes the shorter-window behavior much more suspicious.
+
+Compare the exact database queries and filters used for:
+
+* 1h
+* 2h
+* 3h
+* 24h
+* 48h
+
+Determine exactly why approximately 104,000 records are excluded from the 24h result while they are included in the 48h result.
+
+Specifically inspect:
+
+* timestamp column being used
+* record creation timestamp
+* event timestamp
+* updated timestamp
+* UTC vs local timezone conversion
+* cutoff calculation
+* datetime formatting/parsing
+* database timezone assumptions
+* whether recent records are actually timestamped correctly
+* whether different commands use different data sources
+* whether the shorter windows are accidentally filtering on the wrong timestamp
+
+Compare actual sample records returned by /funnel 24 against records returned by /funnel 48.
+
+DO NOT assume the 48h number is wrong.
+
+The 48h result strongly suggests the historical data is present and the problem may be in the shorter-window cutoff/query logic.
+
+━━━━━━━━━━━━━━━━━━
+5. CURRENT TIER RULES — DO NOT CHANGE
+━━━━━━━━━━━━━━━━━━
+
+Tier 2:
+
+* MLB = S-tier only
+* NFL = S-tier only
+
+Tier 1:
+
+* All other sports = S/A/B actionable
+* C = watchlist
+
+NFL is currently out of season.
+
+NFL props may still be scanned because Underdog has NFL props available.
+
+NFL being present in the scan is NOT itself a bug.
+
+Also, this behavior is currently correct:
+
+Corbin Carroll — MLB Hits
+76/100 A
+strict_tier_blocked (B, MLB min=S)
+
+That confirms the MLB Tier 2 gate is correctly blocking below-S props.
+
+Do NOT loosen or change this gate.
+
+━━━━━━━━━━━━━━━━━━
+6. IMPORTANT — DIAGNOSE BEFORE MODIFYING
+━━━━━━━━━━━━━━━━━━
+
+Before changing code, identify the root cause of ALL FOUR issues:
+
+1. /funnel command reliability
+2. duplicate Jonathan Aranda alert
+3. scanned-prop count discrepancy
+4. 24h vs 48h timestamp/query discrepancy
+
+Do not perform speculative refactors.
+
+Do not rebuild the funnel.
+
+Do not change scoring.
+
+Do not change tier thresholds.
+
+Do not change alert gates.
+
+Do not change dedup behavior until the existing logic is traced and the failure is understood.
+
+After diagnosis, make ONLY the smallest targeted fixes necessary.
+
+Then report:
+
+* root cause
+* files/functions involved
+* exact changes made
+* tests run
+* test results
+* confirmation that tier rules were NOT changed

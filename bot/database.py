@@ -2797,8 +2797,12 @@ class Database:
         """
         from datetime import timedelta
         cutoff = datetime.utcnow() - timedelta(hours=since_hours)
-        # Gate-decision counts
+
+        # Run all four queries inside a single session to avoid DB lock contention
+        # between separate session acquisitions (particularly during cold-start
+        # PropCandidateLog writes of ~5000 rows).
         async with self.session() as s:
+            # 1. Gate-decision counts
             cnt_rows = await s.execute(
                 select(
                     PropCandidateLog.gate_decision,
@@ -2809,15 +2813,12 @@ class Database:
             )
             counts = {r.gate_decision: r.n for r in cnt_rows.all()}
 
-        # Recent rejections — highest score first so near-misses surface first.
-        # Props that were ACCEPTED at any point in the window are excluded: the
-        # same prop can accumulate multiple PropCandidateLog rows across scan
-        # cycles (INSERT, not upsert), so a prop rejected in one cycle but
-        # accepted in another would otherwise appear as a Near-Miss even though
-        # it was correctly handled.
-        async with self.session() as s:
-            # Build set of (player_name, sport, stat_type) that had ANY ACCEPTED
-            # row in the window — these are not true near-misses.
+            # 2. Recent rejections — highest score first so near-misses surface first.
+            # Props that were ACCEPTED at any point in the window are excluded: the
+            # same prop can accumulate multiple PropCandidateLog rows across scan
+            # cycles (INSERT, not upsert), so a prop rejected in one cycle but
+            # accepted in another would otherwise appear as a Near-Miss even though
+            # it was correctly handled.
             acc_rows = await s.execute(
                 select(
                     PropCandidateLog.player_name,
@@ -2853,6 +2854,19 @@ class Database:
             )
             _all_rej = [dict(r._mapping) for r in rej_rows.all()]
 
+            # 3. Per-sport breakdown — sport × gate_decision counts
+            sport_rows = await s.execute(
+                select(
+                    PropCandidateLog.sport,
+                    PropCandidateLog.gate_decision,
+                    func.count(PropCandidateLog.id).label("n"),
+                )
+                .where(PropCandidateLog.scan_ts >= cutoff)
+                .group_by(PropCandidateLog.sport, PropCandidateLog.gate_decision)
+                .order_by(PropCandidateLog.sport)
+            )
+            _sport_gate_rows = sport_rows.all()
+
         # Filter out any prop that was also ACCEPTED in the window, then deduplicate
         # by (player_name, sport, stat_type) keeping the highest-scoring REJECTED row.
         _seen_keys: set = set()
@@ -2865,20 +2879,6 @@ class Database:
             top_rej.append(_r)
             if len(top_rej) >= 8:
                 break
-
-        # Per-sport breakdown — sport × gate_decision counts, aggregated in Python
-        async with self.session() as s:
-            sport_rows = await s.execute(
-                select(
-                    PropCandidateLog.sport,
-                    PropCandidateLog.gate_decision,
-                    func.count(PropCandidateLog.id).label("n"),
-                )
-                .where(PropCandidateLog.scan_ts >= cutoff)
-                .group_by(PropCandidateLog.sport, PropCandidateLog.gate_decision)
-                .order_by(PropCandidateLog.sport)
-            )
-            _sport_gate_rows = sport_rows.all()
 
         # Aggregate into per-sport dicts
         _sport_map: dict[str, dict] = {}
@@ -3041,16 +3041,26 @@ class Database:
         (_prop_market_alerted) after a bot restart.
 
         Returns {(player_name, sport, stat_type): (alert_sent_at_unix, line_value)}
-        for props where alert_sent=True within the last since_hours.
+        for props alerted within the last since_hours.
 
-        Only OVER/UNDER recommendations are included (same filter as the alert
-        pipeline).  Rows are ordered oldest-first so that if the same prop was
-        alerted multiple times, the most-recent entry ends up in the dict.
+        Primary source: PropOpportunityLog rows where alert_sent=True.
+        Fallback source: PropLineHistory rows where first_alert_sent_at is set,
+          used when log_prop_opportunity failed silently (DB stress) so no
+          PropOpportunityLog row was created — without this, a post-restart scan
+          would re-alert the same prop because the dedup dict would be empty.
+
+        Only OVER/UNDER recommendations are included from PropOpportunityLog.
+        PropLineHistory entries are included unconditionally (no recommendation
+        column) because they represent confirmed deliveries.
+
+        Rows are ordered oldest-first so newer entries overwrite older ones,
+        leaving the most-recent alert for each key in the dict.
         """
         from datetime import timedelta
         cutoff = datetime.utcnow() - timedelta(hours=since_hours)
         async with self.session() as s:
-            result = await s.execute(
+            # Primary: PropOpportunityLog rows with alert_sent=True
+            pol_result = await s.execute(
                 select(
                     PropOpportunityLog.player_name,
                     PropOpportunityLog.sport,
@@ -3068,13 +3078,45 @@ class Database:
                 .order_by(PropOpportunityLog.alert_sent_at)
             )
             out: dict = {}
-            for row in result.all():
+            for row in pol_result.all():
                 player, sport, stat, sent_at, line = row
                 if sent_at is None:
                     continue
                 ts_unix = sent_at.timestamp()
                 line_f  = float(line or 0)
                 out[(player, sport or "UNKNOWN", stat)] = (ts_unix, line_f)
+
+            # Fallback: PropLineHistory rows where first_alert_sent_at is set.
+            # Covers cases where log_prop_opportunity failed silently and left
+            # no PropOpportunityLog row to mark — the lifecycle state transition
+            # (update_prop_lifecycle_state → first_alert_sent_at) runs in a
+            # separate try/except block and is more reliable than the POL write.
+            # We only ADD keys that are NOT already in out (POL takes priority).
+            plh_result = await s.execute(
+                select(
+                    PropLineHistory.player_name,
+                    PropLineHistory.sport,
+                    PropLineHistory.stat_type,
+                    PropLineHistory.first_alert_sent_at,
+                    PropLineHistory.line_value,
+                )
+                .where(
+                    PropLineHistory.first_alert_sent_at.isnot(None),
+                    PropLineHistory.first_alert_sent_at >= cutoff,
+                )
+                .order_by(PropLineHistory.first_alert_sent_at)
+            )
+            for row in plh_result.all():
+                player, sport, stat, sent_at, line = row
+                if sent_at is None:
+                    continue
+                key = (player, sport or "UNKNOWN", stat)
+                if key in out:
+                    continue  # POL entry takes priority
+                ts_unix = sent_at.timestamp()
+                line_f  = float(line or 0)
+                out[key] = (ts_unix, line_f)
+
             return out
 
     async def get_telegram_pick_performance(self) -> "dict":

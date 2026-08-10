@@ -3393,6 +3393,9 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if not _check_allowed(update):
         await update.message.reply_text("⛔ Unauthorized.")
         return
+    if _db is None:
+        await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
+        return
     try:
         since_h = 24
         if context.args:
@@ -3436,15 +3439,17 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             "",
             f"<i>Last {since_h}h  ·  Use /funnel 48 for longer window</i>",
             "",
-            f"📥 Scanned:              <b>{total}</b>",
-            f"✅ Qualified (S/A/B-tier): <b>{accepted}</b>",
-            f"👁 Watchlist (near-miss): <b>{watchlist}</b>",
-            f"❌ Rejected:             <b>{rejected}</b>",
-            f"🚫 Removed:              <b>{removed}</b>",
+            f"📥 Evaluated (new/changed): <b>{total}</b>",
+            f"✅ Qualified (S/A/B-tier):  <b>{accepted}</b>",
+            f"👁 Watchlist (near-miss):   <b>{watchlist}</b>",
+            f"❌ Rejected:                <b>{rejected}</b>",
+            f"🚫 Removed:                 <b>{removed}</b>",
             "",
             f"📊 Qualification rate: <b>{qual_rate}</b>",
             "",
-            "<i>ℹ️ Qualified = passed scoring gates (S/A-tier).</i>",
+            "<i>ℹ️ Evaluated = props that were newly seen or had a</i>",
+            "<i>   line change this period (not all monitored props).</i>",
+            "<i>   Restarts re-score all props, inflating older windows.</i>",
             "<i>   Delivered alerts go through additional gates</i>",
             "<i>   (direction, BQ, conf, dedup, live-game).</i>",
             "<i>   Use /alerts to see Telegram-delivered picks.</i>",
