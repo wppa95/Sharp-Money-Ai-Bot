@@ -2482,6 +2482,32 @@ class Database:
             )
             return (result.scalar() or 0) > 0
 
+    async def mark_ud_snapshot_alert_sent(
+        self,
+        player_name: str,
+        stat_type: str,
+    ) -> None:
+        """Set alert_sent=True on recent UnderdogSnapshotRecord rows for player+stat.
+
+        Called after every 95+ priority-override broadcast_alert so that
+        has_recent_ud_alert() returns True in subsequent scan cycles, preventing
+        the standing-opportunity path from sending a cross-cycle duplicate.
+        """
+        from sqlalchemy import update as sa_update
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(hours=25)  # 25 h to cover one full day + slack
+        async with self.session() as s:
+            await s.execute(
+                sa_update(UnderdogSnapshotRecord)
+                .where(
+                    UnderdogSnapshotRecord.player_name == player_name,
+                    UnderdogSnapshotRecord.stat_type   == stat_type,
+                    UnderdogSnapshotRecord.fetched_at  >= cutoff,
+                )
+                .values(alert_sent=True)
+            )
+            await s.commit()
+
     async def has_recent_inefficiency_alert(
         self,
         event: str,

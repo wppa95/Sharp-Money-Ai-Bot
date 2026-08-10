@@ -1,0 +1,269 @@
+🔥 CRED BURN WARNING — SURGICAL FIX PASS ONLY
+
+The V3.5 ruleset is FROZEN.
+
+We have TWO production issues to fix.
+
+Do NOT change:
+
+• Tier definitions
+• Confidence thresholds
+• BQ thresholds
+• MLB UNDER whitelist
+• NFL direction rules
+• Tier 1 / Tier 2 rules
+• Strong Bet / Strong Under logic
+• L5 fallback
+• Scoring thresholds
+
+Fix ONLY the two issues below.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🚨 ISSUE #1 — /FUNNEL ACCOUNTING
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Current /funnel says:
+
+“Scored props only — not all 41015 monitored”
+
+That is misleading.
+
+The bot IS monitoring all active props. /funnel needs to clearly distinguish:
+
+📡 FULL MONITORING PIPELINE
+
+Fetched
+Removed
+Futures/awards skipped
+Active monitored
+├─ Unchanged
+├─ New first-appearance
+└─ Line moved / re-scored
+
+Scored
+Qualified
+Delivered
+
+Then separately:
+
+🔭 CANDIDATE / DECISION FUNNEL
+
+Evaluated
+Qualified
+Watchlist
+Rejected
+Delivered
+
+The Candidate Funnel must NOT be presented as if it represents all monitored props.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️ RECONCILE THIS DISCREPANCY
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Example live scan:
+
+Fetched: 41,317
+Removed: 302
+Active: 41,015
+
+Unchanged: 40,920
+New: 56
+Line moved: 158
+
+56 + 158 = 214 scored.
+
+But Candidate Funnel reported:
+
+Evaluated: 224
+
+Find the actual reason for the 10-prop difference.
+
+Do NOT simply force the numbers to match.
+
+Inspect:
+
+• standing path
+• re-entry path
+• duplicate candidate records
+• scan-window boundaries
+• timestamp aggregation
+• database queries
+• multiple evaluation paths
+
+Document the accounting relationship.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🚨 ISSUE #2 — DUPLICATE TELEGRAM ALERTS
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+We observed the EXACT same prop being delivered twice.
+
+Example:
+
+Jordan Walker
+MLB
+Hits
+0.5
+OVER
+S-Tier
+Confidence 95
+BQ 95
+
+The same actionable alert was sent twice.
+
+The prop itself was valid.
+
+The duplicate delivery was NOT.
+
+Trace every Telegram delivery path:
+
+• new-prop
+• line-change
+• standing
+• re-entry
+• S-tier priority override
+• normal actionable delivery
+• multiplatform delivery
+• retry handling
+• scheduler overlap
+• deduplication
+• mark_opportunity_alert_sent
+• PropLineHistory
+• opportunity/candidate IDs
+• database alert state
+• in-memory deduplication
+
+Find the ROOT CAUSE.
+
+Do not just suppress the visible message.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🛡️ REQUIRED DEDUP BEHAVIOR
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+The same underlying opportunity must produce ONE Telegram alert.
+
+If the same opportunity is processed twice:
+
+→ ONE alert.
+
+If two delivery paths encounter the same opportunity:
+
+→ ONE alert.
+
+If two scheduler workers overlap:
+
+→ ONE alert.
+
+If Telegram succeeds but the database update is delayed:
+
+→ MUST NOT resend the same alert.
+
+If Telegram genuinely fails:
+
+→ retry must remain possible.
+
+Legitimate new opportunities MUST still alert:
+
+• genuine line movement
+• legitimate re-entry
+• new opportunity state
+
+Do not accidentally suppress legitimate line-change/re-entry alerts.
+
+Use the existing V3.5 opportunity/delivery architecture wherever possible.
+
+Make the delivery claim/state race-safe if necessary.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🧪 REQUIRED DUPLICATE TESTS
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Add regression tests for:
+
+1. Same opportunity processed twice
+2. Same candidate through two delivery paths
+3. Concurrent duplicate processing
+4. Telegram retry after successful send
+5. Telegram failure remains retryable
+6. Legitimate line movement creates a new alert
+7. Legitimate re-entry creates a new alert
+8. Restart does not resend delivered opportunity
+9. S-tier priority + normal path cannot duplicate
+10. Jordan Walker reproduction case
+
+Expected:
+
+ONE underlying opportunity
+
+ONE Telegram actionable alert.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🧪 VALIDATION
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Run:
+
+1. Syntax checks
+2. /funnel regression tests
+3. Duplicate-alert regression tests
+4. Alert/delivery tests
+5. Scan-cycle tests
+6. Re-entry tests
+7. Full regression suite
+
+Then restart if code changes require it.
+
+Verify only ONE bot process is running.
+
+Run a live scan.
+
+Verify:
+
+• all props remain continuously monitored
+• /funnel accounting is correct
+• duplicate alerts are suppressed
+• legitimate new line movements still alert
+• legitimate re-entries still alert
+• S-tier alerts still work
+• frozen V3.5 rules remain unchanged
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🧊 FINAL PROTECTION
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+This is NOT a ruleset redesign.
+
+Do not tune the model.
+
+Do not change thresholds.
+
+Do not change tier logic.
+
+Do not change MLB/NFL acceptance rules.
+
+Fix only:
+
+1. /funnel full-monitoring/accounting presentation
+2. duplicate Telegram opportunity delivery
+
+After verification:
+
+🟢 RETURN TO V3.5 OBSERVE MODE
+🧊 RULESET REMAINS FROZEN
+
+Final report:
+
+FUNNEL ROOT CAUSE:
+FUNNEL FIX:
+ACCOUNTING RECONCILIATION:
+
+DUPLICATE ROOT CAUSE:
+DEDUP FIX:
+DEDUP KEY/STATE:
+REGRESSION TESTS:
+FULL SUITE:
+LIVE VERIFICATION:
+BOT STATUS:
+
+Then STOP modifying the system and let it collect production data.

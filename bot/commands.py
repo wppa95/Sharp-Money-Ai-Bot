@@ -3470,25 +3470,32 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             sc_unchanged = scan_summary.get("unchanged", 0)
             sc_new       = scan_summary.get("new_props", 0)
             sc_lc        = scan_summary.get("line_changed", 0)
+            sc_cold      = scan_summary.get("cold_start", 0)
             sc_analyzed  = scan_summary.get("analyzed", 0)
             sc_qualified = scan_summary.get("qualified", 0)
             sc_delivered = scan_summary.get("alert_delivered", 0)
             _avg_mins    = (since_h * 60) // max(sc_cycles, 1)
+            # Note: sc_analyzed = sc_new + sc_lc + sc_cold (all scored paths).
+            # sc_cold = cold-start re-scored (first cycle after restart, every active prop).
             lines += [
                 "",
                 f"<i>Last {since_h}h  ·  {sc_cycles} scans  (~{_avg_mins}min each)</i>",
                 "",
-                f"📥 Fetched from Underdog:       <b>{sc_fetched:,}</b>",
-                f"🚫 Removed from feed:           <b>{sc_removed:,}</b>",
-                f"🔮 Futures/awards skipped:      <b>{sc_futures:,}</b>",
-                f"👁 Active props monitored:       <b>{sc_active:,}</b>",
-                f"   └─ Unchanged (stable lines): <b>{sc_unchanged:,}</b>",
-                f"   └─ New first-appearance:     <b>{sc_new:,}</b>",
-                f"   └─ Line moved (re-scored):   <b>{sc_lc:,}</b>",
+                "📡 <b>Full Monitoring Pipeline</b>",
                 "",
-                f"🔬 Scored this period:          <b>{sc_analyzed:,}</b>",
-                f"✅ Qualified for alert:         <b>{sc_qualified:,}</b>",
-                f"📤 Delivered to Telegram:       <b>{sc_delivered:,}</b>",
+                f"📥 Fetched from Underdog:          <b>{sc_fetched:,}</b>",
+                f"🚫 Removed from feed:              <b>{sc_removed:,}</b>",
+                f"🔮 Futures/awards skipped:         <b>{sc_futures:,}</b>",
+                f"👁 Active props monitored:          <b>{sc_active:,}</b>",
+                f"   └─ Unchanged (stable lines):    <b>{sc_unchanged:,}</b>",
+                f"   └─ New first-appearance:        <b>{sc_new:,}</b>",
+                f"   └─ Line moved (re-scored):      <b>{sc_lc:,}</b>",
+                f"   └─ Cold-start re-scanned:       <b>{sc_cold:,}</b>",
+                "",
+                f"🔬 Scored this period:             <b>{sc_analyzed:,}</b>",
+                f"   <i>(= new + line-moved + cold-start)</i>",
+                f"✅ Qualified for alert:            <b>{sc_qualified:,}</b>",
+                f"📤 Delivered to Telegram:          <b>{sc_delivered:,}</b>",
             ]
         else:
             lines += [
@@ -3505,9 +3512,9 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             "🔭 <b>Candidate Funnel</b>",
             _thick,
             "",
-            f"<i>Scored props only — not all {scan_summary.get('active', 0) or '~4,600'} monitored</i>",
+            f"<i>Subset of scored props — all {scan_summary.get('active', 0) or 4600:,} active props are monitored above.</i>",
             "",
-            f"📥 Evaluated (new/changed): <b>{total}</b>",
+            f"📥 Evaluated (new/changed/cold): <b>{total}</b>",
             f"✅ Qualified (S/A/B-tier):  <b>{accepted}</b>",
             f"👁 Watchlist (near-miss):   <b>{watchlist}</b>",
             f"❌ Rejected:                <b>{rejected}</b>",

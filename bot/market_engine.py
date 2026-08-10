@@ -1369,6 +1369,12 @@ async def underdog_job(context) -> None:
                             _prop_market_alerted, player, snap.sport or "UNKNOWN", stat_type, line_val
                         )
                         _lifecycle_alerted.append((player, snap.sport or "UNKNOWN", stat_type))
+                        # Mark snapshot alert_sent so has_recent_ud_alert returns True in
+                        # future scan cycles (prevents cross-cycle standing-path duplicates).
+                        try:
+                            await db.mark_ud_snapshot_alert_sent(player, stat_type)
+                        except Exception as _msa_exc:
+                            logger.debug("mark_ud_snapshot_alert_sent [np-95] failed: %s", _msa_exc)
                         logger.info(
                             "🔥🚨 PRIORITY OVERRIDE [new] | Player: %s | Sport: %s"
                             " | Market: %s | Line: %.1f | Score: %d/100 | Dir: %s",
@@ -1780,6 +1786,12 @@ async def underdog_job(context) -> None:
                                 stat_type, snap.line or 0.0,
                             )
                             _lifecycle_alerted.append((player, snap.sport or "UNKNOWN", stat_type))
+                            # Mark snapshot alert_sent so has_recent_ud_alert returns True in
+                            # future scan cycles (prevents cross-cycle standing-path duplicates).
+                            try:
+                                await db.mark_ud_snapshot_alert_sent(player, stat_type)
+                            except Exception as _msa_exc:
+                                logger.debug("mark_ud_snapshot_alert_sent [lc-95] failed: %s", _msa_exc)
                             logger.info(
                                 "🔥🚨 PRIORITY OVERRIDE [lc] | Player: %s | Sport: %s"
                                 " | Market: %s | Line: %.1f | Score: %d/100 | Dir: %s",
@@ -2018,8 +2030,11 @@ async def underdog_job(context) -> None:
                 ))
                 # 95+ override already sent for this prop via the lc scoring block above.
                 # Force should_alert=False so the normal gate sequence does not also fire.
+                # Also add to _processed_keys so the standing path cannot re-evaluate and
+                # send a duplicate alert in the same scan cycle.
                 if _lc_95_sent:
                     should_alert = False
+                    _processed_keys.add((player, stat_type))
     
                 # Per-tier confidence gate for directional picks (not removals)
                 if should_alert and not is_removed and decision is not None and decision.recommendation != "PASS":
@@ -2363,10 +2378,25 @@ async def underdog_job(context) -> None:
             for (_ssnap, _sp, _st, _ssport, _prev) in _standing_ordered:
                 _line_val = _ssnap.line or 0.0
     
-                # 24 h dedup — skip if already alerted today
+                # 24 h dedup — skip if already alerted today (DB: UnderdogSnapshotRecord.alert_sent)
                 if await db.has_recent_ud_alert(_sp, _st, within_seconds=86400):
                     continue
-    
+
+                # In-memory dedup — catches same-session props sent via 95+ broadcast_alert.
+                # broadcast_alert does NOT set UnderdogSnapshotRecord.alert_sent, so
+                # has_recent_ud_alert misses them.  _prop_market_alerted IS set by all 95+
+                # paths, so this check closes the gap within the current bot session.
+                if _is_prop_deduped(
+                    _prop_market_alerted, _sp, _ssport, _st, _line_val,
+                    dedup_window_seconds=config.UD_ALERT_DEDUP_WINDOW,
+                    min_line_change=config.MIN_UNDERDOG_LINE_CHANGE,
+                ):
+                    logger.debug(
+                        "standing dedup [in-memory]: %s | %s | %s — skipped (already alerted this session)",
+                        _sp, _ssport, _st,
+                    )
+                    continue
+
                 _shist = await db.get_ud_prop_history(_sp, _st, limit=30)
                 _sscore = score_ud_prop(
                     player_name  = _sp,
@@ -2458,6 +2488,12 @@ async def underdog_job(context) -> None:
                         _record_prop_alerted(_prop_market_alerted, _sp, _ssport, _st, _line_val)
                         _n_standing_sent += 1
                         _lifecycle_alerted.append((_sp, _ssport, _st))
+                        # Mark snapshot alert_sent so has_recent_ud_alert returns True in
+                        # future scan cycles (prevents cross-cycle duplicates).
+                        try:
+                            await db.mark_ud_snapshot_alert_sent(_sp, _st)
+                        except Exception as _msa_exc:
+                            logger.debug("mark_ud_snapshot_alert_sent [sp-95] failed: %s", _msa_exc)
                         logger.info(
                             "🔥🚨 PRIORITY OVERRIDE [standing] | Player: %s | Sport: %s"
                             " | Market: %s | Line: %.1f | Score: %d/100 | Dir: %s",
