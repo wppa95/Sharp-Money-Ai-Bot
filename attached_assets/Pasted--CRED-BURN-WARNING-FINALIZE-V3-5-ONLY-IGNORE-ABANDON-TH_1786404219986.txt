@@ -1,0 +1,182 @@
+🔥 CRED BURN WARNING — FINALIZE V3.5 ONLY
+
+IGNORE / ABANDON THE L5 INVESTIGATION COMPLETELY.
+
+Do not spend any more credits on:
+
+• ESPN history
+• Underdog L5 fallback
+• player history enrichment
+• last-5 retrieval
+• alternative L5 providers
+
+Leave L5 exactly as it currently works.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 PART 1 — FINISH FAST RESUME REMOVAL
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Continue from the CURRENT working-tree state.
+
+Do NOT start over.
+
+First inspect:
+
+• git status
+• git diff
+• remaining Fast Resume references
+
+Search entire codebase for:
+
+_fast_resume
+fast_resume
+FAST_RESUME
+Fast Resume
+
+Fast Resume should be completely removed from the runtime.
+
+The normal startup path must remain the ONLY startup/monitoring path.
+
+Preserve:
+
+• normal Underdog scanning
+• all active-prop monitoring
+• new-prop detection
+• line-movement detection
+• re-entry detection
+• ScanCycleLog
+• CLV pipeline
+• Telegram deduplication
+• delivered-state persistence
+• all 9 scheduler jobs
+
+Do not modify any frozen V3.5 rules.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🧪 PART 2 — FIX THE 11 TEST FAILURES
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+The current suite is:
+
+4,276 passing
+11 pre-existing failures
+
+Now inspect those 11 failures individually.
+
+Determine whether they are:
+
+A) stale tests expecting behavior that is intentionally no longer part of V3.5, or
+
+B) genuine regressions.
+
+If they are stale tests caused by previous intentional V3.5 changes:
+
+→ update the tests to reflect the CURRENT frozen behavior.
+
+If any are genuine regressions:
+
+→ fix the code, but ONLY if the failure is actually caused by the current implementation.
+
+Do NOT weaken production logic simply to make tests pass.
+
+Do NOT alter the frozen acceptance rules.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🧊 FROZEN RULESET
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Absolutely do NOT change:
+
+• Tier definitions
+• Confidence thresholds
+• BQ thresholds
+• MLB UNDER whitelist
+• NFL direction rules
+• Tier 1 / Tier 2 rules
+• Strong Bet logic
+• Strong Under logic
+• scoring thresholds
+• alert qualification rules
+• deduplication rules
+• /funnel accounting
+• CLV fixes
+• alert formatting
+• L5 behavior
+
+The only objectives are:
+
+1. Finish Fast Resume removal.
+2. Resolve the 11 test failures correctly.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🧪 FINAL VERIFICATION
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Run:
+
+1. Search for ALL Fast Resume references.
+2. Fast Resume targeted tests.
+3. Cold-start/restart lifecycle tests.
+4. Dedup tests.
+5. Funnel tests.
+6. Alert/delivery tests.
+7. Full regression suite.
+
+Expected:
+
+• No runtime Fast Resume references.
+• Full suite clean unless there are independently documented unavoidable failures.
+
+Then restart the bot ONCE after successful verification.
+
+Verify:
+
+🟢 Bot startup
+🟢 All 9 scheduler jobs
+🟢 First normal Underdog scan
+🟢 ScanCycleLog
+🟢 /funnel
+🟢 No duplicate delivery
+🟢 No Fast Resume execution
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+📋 FINAL REPORT
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Return:
+
+FAST RESUME:
+References remaining:
+Runtime status:
+Tests:
+
+11 TEST FAILURES:
+Root cause of each:
+Updated tests:
+Code fixes, if any:
+
+FULL SUITE:
+Passing:
+Failures:
+Pre-existing:
+
+BOT:
+Startup:
+9 jobs:
+First scan:
+Funnel:
+Dedup:
+
+RULESET:
+🧊 V3.5 FROZEN
+
+Then STOP.
+
+No L5 work.
+No tuning.
+No new features.
+No further architecture changes.
+
+🟢 SHARP MONEY AI BOT V3.5
+📡 OBSERVE MODE
+🧊 FROZEN

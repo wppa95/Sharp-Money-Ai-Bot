@@ -215,11 +215,15 @@ class TestDeduplication:
     def test_21_exact_duplicate_is_deduped(self):
         """21. Same player + market + line + direction is deduplicated."""
         from market_engine import _is_prop_deduped, _record_prop_alerted
+        import config as cfg
         store = {}
         _record_prop_alerted(store, "PlayerA", "MLB", "Hits", 1.5)
-        assert _is_prop_deduped(store, "PlayerA", "MLB", "Hits", 1.5), (
-            "Identical prop must be deduped within the window"
-        )
+        # Pass the required dedup_window_seconds and min_line_change args (V3.5 signature)
+        assert _is_prop_deduped(
+            store, "PlayerA", "MLB", "Hits", 1.5,
+            dedup_window_seconds=int(cfg.config.UD_ALERT_DEDUP_WINDOW),
+            min_line_change=cfg.config.MIN_UNDERDOG_LINE_CHANGE,
+        ), "Identical prop must be deduped within the window"
 
     def test_22_meaningful_line_move_can_alert(self):
         """22. Same prop with a meaningfully different line can re-alert."""
@@ -229,9 +233,11 @@ class TestDeduplication:
         _record_prop_alerted(store, "PlayerB", "MLB", "Hits", 1.5)
         # A line change of 1.0 (>> MIN_UNDERDOG_LINE_CHANGE=0.5) should allow re-alert
         new_line = 1.5 + cfg.config.MIN_UNDERDOG_LINE_CHANGE + 0.1
-        assert not _is_prop_deduped(store, "PlayerB", "MLB", "Hits", new_line), (
-            f"Line move from 1.5 to {new_line} should NOT be deduped"
-        )
+        assert not _is_prop_deduped(
+            store, "PlayerB", "MLB", "Hits", new_line,
+            dedup_window_seconds=int(cfg.config.UD_ALERT_DEDUP_WINDOW),
+            min_line_change=cfg.config.MIN_UNDERDOG_LINE_CHANGE,
+        ), f"Line move from 1.5 to {new_line} should NOT be deduped"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -260,10 +266,12 @@ class TestContinuousMonitoring:
     def test_24_all_active_props_monitored_every_cycle(self):
         """24. Every active prop must be in the scan every polling cycle."""
         src = inspect.getsource(__import__("market_engine").underdog_job)
-        # The scan must iterate ALL active props (not filter by known_keys before monitoring)
-        assert "active_snaps" in src or "all_snaps" in src or "snap_map" in src, (
-            "Could not find evidence of full-feed iteration in underdog_job"
-        )
+        # The scan must iterate ALL active Underdog props
+        # V3.5: the full feed is stored in `ud_snaps`; standing path iterates `ud_snaps` too
+        assert (
+            "active_snaps" in src or "all_snaps" in src
+            or "snap_map" in src or "ud_snaps" in src
+        ), "Could not find evidence of full-feed iteration in underdog_job"
 
     def test_25_stable_known_prop_remains_monitored(self):
         """25. Unchanged known prop still shows in scan (known_keys not a monitoring gate)."""

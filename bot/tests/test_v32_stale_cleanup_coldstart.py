@@ -231,30 +231,26 @@ class TestColdStartBehavior:
         assert "_cold_start_done = True" in src
 
     def test_standing_path_cold_start_gate(self):
-        """Standing path gate: runs when not is_cold_start OR when _fast_resume=True.
+        """Standing path gate: runs only when NOT in cold-start cycle.
 
-        V3.5 changed the guard from `not is_cold_start` to
-        `(not is_cold_start or _fast_resume)` so that existing DISCOVERED props
-        are immediately re-evaluated on fast-resume scan 1 rather than waiting
-        for scan 2.  All delivery gates (confidence, live/past, BQ, dedup) still
-        apply — fast-resume does NOT weaken any qualification requirements.
+        Fast Resume is removed — the guard is plain `not is_cold_start`.
+        Cold-start cycle scores all props without sending; standing begins scan 2+.
         """
         import inspect, market_engine as _me
         src = inspect.getsource(_me.underdog_job)
-        # V3.5: fast-resume exception enables standing path during cold-start
-        assert "(not is_cold_start or _fast_resume)" in src, (
-            "V3.5: standing path guard must be '(not is_cold_start or _fast_resume)'"
+        # Fast Resume removed: must NOT use the old fast-resume exception
+        assert "_fast_resume" not in src, (
+            "Fast Resume removed: _fast_resume must NOT appear in underdog_job"
         )
-        # Without fast-resume: cold-start still prevents standing path
-        is_cold_start, fast_resume = True, False
-        assert (not is_cold_start or fast_resume) is False, (
-            "Without fast-resume: standing path still skipped during cold-start"
+        # Standing gate must use plain not is_cold_start (no OR clause)
+        assert "not is_cold_start and chat_ids" in src, (
+            "Standing path guard must be 'not is_cold_start and chat_ids'"
         )
-        # With fast-resume: standing path runs even during cold-start
-        is_cold_start, fast_resume = True, True
-        assert (not is_cold_start or fast_resume) is True, (
-            "With fast-resume: standing path runs on cold-start scan 1"
-        )
+        # Verify cold-start correctly blocks the standing path
+        is_cold_start = True
+        assert not (not is_cold_start), "Cold-start must block the standing path"
+        is_cold_start = False
+        assert (not is_cold_start), "Non-cold-start must allow the standing path"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -163,21 +163,22 @@ class TestBqPriorityLabel:
         assert hasattr(am, "_bq_priority_label"), "_bq_priority_label not found"
 
     def test_100_high_priority(self):
-        assert "HIGH PRIORITY" in self._fn()(100)
+        """V3.5: label is '💪 STRONG BET' for BQ 80+ (renamed from HIGH PRIORITY)."""
+        assert "STRONG BET" in self._fn()(100)
 
     def test_95_high_priority(self):
-        assert "HIGH PRIORITY" in self._fn()(95)
+        assert "STRONG BET" in self._fn()(95)
 
     def test_90_high_priority(self):
-        assert "HIGH PRIORITY" in self._fn()(90)
+        assert "STRONG BET" in self._fn()(90)
 
     def test_85_high_priority(self):
-        assert "HIGH PRIORITY" in self._fn()(85)
+        assert "STRONG BET" in self._fn()(85)
 
     def test_80_high_priority(self):
-        """80 is the HIGH PRIORITY floor per V3.4."""
+        """V3.5: 80+ returns STRONG BET label (renamed from HIGH PRIORITY in V3.4)."""
         lbl = self._fn()(80)
-        assert "HIGH PRIORITY" in lbl, f"80 must be HIGH PRIORITY, got {lbl!r}"
+        assert "STRONG BET" in lbl, f"80 must be STRONG BET, got {lbl!r}"
 
     def test_79_actionable(self):
         lbl = self._fn()(79)
@@ -205,10 +206,10 @@ class TestBqPriorityLabel:
         assert "ACTIONABLE" not in lbl
 
     def test_boundary_80_not_79_confusion(self):
-        """80 → HIGH PRIORITY; 79 → ACTIONABLE. Must be distinct."""
-        assert "HIGH PRIORITY" in self._fn()(80)
+        """V3.5: 80 → STRONG BET; 79 → ACTIONABLE. Must be distinct."""
+        assert "STRONG BET" in self._fn()(80)
         assert "ACTIONABLE" in self._fn()(79)
-        assert "HIGH PRIORITY" not in self._fn()(79)
+        assert "STRONG BET" not in self._fn()(79)
 
 
 # ═══════════════════════════════════════════════════════════════════════════

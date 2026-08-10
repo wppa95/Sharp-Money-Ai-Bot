@@ -251,6 +251,9 @@ def _make_decision(rec="OVER", tier="A", conf=70):
     d.is_playable     = True
     d.hit_rates       = {}
     d.window_agreement = 0
+    # Explicit None so alert formatters don't try to format a MagicMock as a percentage
+    d.l5_hit_rate     = None
+    d.l5_games        = None
     return d
 
 

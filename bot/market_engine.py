@@ -93,17 +93,6 @@ _PLAYER_RESULT_CACHE_MAX = 5_000
 # scoring (new props and line-change events only).
 _cold_start_done: bool = False
 
-# ── Restart-resume fast-resume flag ──────────────────────────────────────────
-# Set to True in _init_state_from_db when the last scan checkpoint was recent
-# (< _FAST_RESUME_THRESHOLD_MINUTES).  When True, the cold-start path skips
-# rescoring existing props because their DB scores are still fresh.  Truly new
-# props (not yet in PropLineHistory) are always processed regardless.
-_fast_resume: bool = False
-
-# If the bot was last seen scanning within this many minutes, skip the full
-# cold-start rescore and resume directly from DB state.
-_FAST_RESUME_THRESHOLD_MINUTES: int = 30
-
 # ── Market availability tracking ─────────────────────────────────────────────
 # Maps "player__stat_type" → datetime of first alert (bet pick).
 # Used to compute how long a market was available before removal.
@@ -241,15 +230,10 @@ async def _init_state_from_db(db: "Database") -> None:
       records within the dedup window so the bot does not re-alert the same
       prop shortly after a restart.
 
-    * _fast_resume           — set True when the last scan checkpoint is recent
-      (< _FAST_RESUME_THRESHOLD_MINUTES), enabling the bot to skip rescoring
-      existing props whose DB scores are still fresh.  Existing props continue
-      via the standing path; only genuinely new props trigger cold-start scoring.
-
     All restorations are non-fatal: any individual failure is logged at DEBUG
     and skipped so a DB error never prevents the bot from starting.
     """
-    global _MARKET_FIRST_ALERT, _prop_market_alerted, _fast_resume
+    global _MARKET_FIRST_ALERT, _prop_market_alerted
 
     # ── Restore _MARKET_FIRST_ALERT ──────────────────────────────────────────
     try:
@@ -298,28 +282,6 @@ async def _init_state_from_db(db: "Database") -> None:
     except Exception as _exc:
         logger.debug("State recovery: _prop_market_alerted restore skipped — %s", _exc)
 
-    # ── Fast-resume: skip cold-start rescore when scores are still fresh ──────
-    try:
-        _health_for_resume = get_health_tracker()
-        if _health_for_resume is not None:
-            _checkpoint_age = _health_for_resume.get_scan_checkpoint_age_minutes()
-            if _checkpoint_age is not None and _checkpoint_age < _FAST_RESUME_THRESHOLD_MINUTES:
-                _fast_resume = True
-                logger.info(
-                    "State recovery: FAST RESUME — last scan checkpoint %.1f min ago "
-                    "(threshold=%d min); existing prop scores are fresh, "
-                    "skipping cold-start rescore for known props",
-                    _checkpoint_age, _FAST_RESUME_THRESHOLD_MINUTES,
-                )
-            else:
-                logger.info(
-                    "State recovery: FULL cold-start rescore — last checkpoint %s "
-                    "(threshold=%d min); will rescore all active props",
-                    f"{_checkpoint_age:.1f} min ago" if _checkpoint_age is not None else "never",
-                    _FAST_RESUME_THRESHOLD_MINUTES,
-                )
-    except Exception as _exc:
-        logger.debug("State recovery: fast-resume check skipped — %s", _exc)
 
 
 # ── Player Prop Market alert dedup ────────────────────────────────────────────
@@ -1806,15 +1768,13 @@ async def underdog_job(context) -> None:
                         score.n_history, validation.has_supporting_data,
                     )
     
-                elif not is_removed and is_cold_start and not _fast_resume:
+                elif not is_removed and is_cold_start:
                     # ── Cold-start path ───────────────────────────────────────────
                     # First cycle only: score every active prop so the DB has fresh
                     # tier / stars / validation data from startup.  hit_rates are
                     # intentionally skipped — fetching them for ~1000 props on boot
                     # would hammer the stats API; they are populated lazily on the
                     # first qualifying incremental event.  No alerts are sent.
-                    # Skipped when _fast_resume=True (recent checkpoint) because
-                    # existing DB scores are still fresh — standing path picks them up.
                     ud_history = await db.get_ud_prop_history(player, stat_type, limit=30)
                     score = score_ud_prop(
                         player_name        = player,
@@ -1934,7 +1894,7 @@ async def underdog_job(context) -> None:
                         or decision.decision_tier in config.ud_mlb_alert_tiers
                     )
                     is_qualified = (
-                        (not is_cold_start or _fast_resume)  # fast-resume: allow lc delivery on first scan
+                        not is_cold_start
                         and score is not None
                         # Sport-conditional star floor: strict for MLB/NFL, relaxed for others (#2)
                         and score.stars >= config.min_stars_for_sport(snap.sport or "")
@@ -1949,7 +1909,7 @@ async def underdog_job(context) -> None:
                         _n_qualified += 1
                     # ── Debug tracking (line-change / cold-start) ─────────────────
                     if score is not None:
-                        if is_cold_start and not _fast_resume:
+                        if is_cold_start:
                             _lc_rej = "cold_start"
                         elif is_qualified:
                             _lc_rej = "qualified"
@@ -2314,13 +2274,10 @@ async def underdog_job(context) -> None:
         #   • Top 5 candidates per cycle (avoids hammering the stats API)
         #   • Full scoring + validation + decision gate — same standard as live alerts
         #
-        # Fast-resume exception: when _fast_resume=True the cold-start rescore was
-        # skipped (existing DB scores are fresh), so we run the standing scan on
-        # scan 1 as well.  This ensures existing "DISCOVERED" cold-start props are
-        # immediately re-evaluated rather than waiting for scan 2 (~5 min delay).
-        # All normal delivery gates (confidence, live/past, dedup, direction) still
-        # apply — fast-resume does NOT weaken any qualification requirements.
-        if (not is_cold_start or _fast_resume) and chat_ids:
+        # Standing scan runs on scan 2+ only (after the cold-start cycle completes).
+        # Cold-start cycle scores all props without sending alerts; standing picks
+        # up high-confidence candidates from the next scan onward.
+        if not is_cold_start and chat_ids:
             from engine.ud_scoring import (  # already imported above but local scope
                 compute_market_quality as _cmq,
                 detect_market_pressure as _dmp,
@@ -2695,14 +2652,7 @@ async def underdog_job(context) -> None:
                     _cs_total, (_cs_total + _CS_CHUNK - 1) // _CS_CHUNK,
                 )
             _cold_start_done = True
-            if _fast_resume:
-                logger.info(
-                    "underdog_job: cold-start complete (FAST RESUME) — "
-                    "skipped cold-start rescore; %d new props scored",
-                    _n_cold_start_scored,
-                )
-            else:
-                logger.info(
+            logger.info(
                     "underdog_job: cold-start complete — scored %d props\n"
                     "  before (old cal):  S=%d  A=%d  B=%d  PASS=%d\n"
                     "   after (new cal):  S=%d  A=%d  B=%d  PASS=%d",
@@ -2717,10 +2667,9 @@ async def underdog_job(context) -> None:
                     _cs_after_tiers.get("PASS", 0),
                 )
     
-        # ── Persist scan checkpoint for restart-resume ────────────────────────────
-        # Written after every successful scan so the next startup can determine
-        # whether a fast resume is safe (scores are still fresh) or a full
-        # cold-start rescore is required.  Non-fatal if health tracker is missing.
+        # ── Persist scan checkpoint ────────────────────────────────────────────────
+        # Written after every successful scan for health monitoring.
+        # Non-fatal if health tracker is missing.
         try:
             if _health:
                 _health.record_scan_checkpoint()

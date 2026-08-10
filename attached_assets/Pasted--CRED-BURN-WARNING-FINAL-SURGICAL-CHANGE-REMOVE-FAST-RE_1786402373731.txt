@@ -1,0 +1,183 @@
+🔥 CRED BURN WARNING — FINAL SURGICAL CHANGE: REMOVE FAST RESUME
+
+This is the LAST implementation change before returning the Sharp Money AI Bot v3.5 to observe mode.
+
+The V3.5 ruleset is FROZEN.
+
+Do NOT modify:
+
+• Tier definitions
+• Confidence thresholds
+• BQ thresholds
+• MLB UNDER whitelist
+• NFL direction rules
+• Tier 1 / Tier 2 rules
+• Strong Bet / Strong Under logic
+• L5 fallback
+• Scoring thresholds
+• Deduplication rules we just fixed
+• /funnel accounting we just fixed
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 OBJECTIVE
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Remove the Fast Resume system completely.
+
+We no longer want a separate Fast Resume execution path.
+
+Fast Resume has already contributed to cold-start/state-dependent behavior and we want ONE predictable startup → scan → scoring → delivery pipeline.
+
+Replace Fast Resume with the existing normal startup/monitoring path.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+📡 REQUIRED BEHAVIOR AFTER RESTART
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+After every restart:
+
+1. Initialize normally.
+2. Start all scheduler jobs normally.
+3. Perform the normal Underdog scan.
+4. Continue monitoring ALL active props.
+5. Stable/unchanged props remain monitored.
+6. New props are tracked.
+7. Line movements are detected and scored.
+8. Legitimate re-entry props are detected.
+9. Existing deduplication remains active.
+10. Previously delivered opportunities must NOT be resent.
+11. Valid new opportunities must still be eligible for alerts.
+
+There must be NO Fast Resume shortcut.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🛡️ IMPORTANT
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Removing Fast Resume must NOT disable or weaken:
+
+• cold-start protection
+• PropLineHistory
+• ScanCycleLog
+• continuous prop monitoring
+• line movement detection
+• re-entry detection
+• Telegram deduplication
+• delivered-state persistence
+• CLV seed pipeline
+• CLV harvest
+• scheduler health monitoring
+
+Only remove the alternate Fast Resume path.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🔎 SEARCH THE ENTIRE CODEBASE
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Find and remove/disable all Fast Resume references, including:
+
+• configuration flags
+• environment variables
+• startup branches
+• resume flags
+• fast-resume conditionals
+• fast-resume scheduler behavior
+• fast-resume logging
+• tests specifically enforcing Fast Resume behavior
+• stale comments/documentation
+
+Do NOT leave dead Fast Resume code that can accidentally execute later.
+
+If the feature is controlled by an environment variable, remove its runtime effect and update tests/configuration accordingly.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🧪 REQUIRED REGRESSION TESTS
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Add/update tests proving:
+
+1. Normal startup performs the standard scan.
+2. Fast Resume is never invoked.
+3. Restart does not resend an already-delivered opportunity.
+4. Restart still monitors all active props.
+5. New props are detected after restart.
+6. Line movements are detected after restart.
+7. Re-entry detection still works.
+8. Deduplication still works after restart.
+9. ScanCycleLog still records the scan.
+10. All scheduler jobs still start normally.
+11. No Fast Resume code path executes.
+12. Frozen V3.5 acceptance rules remain unchanged.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🧪 VALIDATION SEQUENCE
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Run in this exact order:
+
+VERIFY CODE
+→ RUN TARGETED TESTS
+→ RUN FULL TEST SUITE
+→ FIX ONLY REGRESSIONS CAUSED BY THIS CHANGE
+→ RESTART BOT
+→ VERIFY ALL 9 JOBS
+→ WAIT FOR NORMAL SCAN
+→ VERIFY SCAN CYCLE
+→ VERIFY /FUNNEL
+→ VERIFY NO DUPLICATE DELIVERY
+→ RETURN TO OBSERVE MODE
+
+Do not create fake production alerts just to test Telegram.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🧊 FINAL FREEZE
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+After this change is verified:
+
+🧊 FREEZE THE SYSTEM.
+
+No more architecture/ruleset changes.
+
+Permitted afterward ONLY:
+
+• real bug fixes
+• crash/stability fixes
+• scheduler failures
+• provider/API failures
+• database failures
+• Telegram delivery failures
+• duplicate-alert bugs
+• stale-data/line-freshness bugs
+• data-quality bugs
+• performance issues
+• regression tests
+• alert formatting fixes
+
+No model/tier/threshold tuning during observation.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+📋 FINAL REPORT
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Return:
+
+FAST RESUME REMOVED:
+STARTUP PATH:
+TARGETED TESTS:
+FULL SUITE:
+PRE-EXISTING FAILURES:
+BOT STARTUP:
+SCHEDULER STATUS:
+FIRST NORMAL SCAN:
+FUNNEL STATUS:
+DEDUP STATUS:
+RULESET STATUS:
+
+Then:
+
+🟢 SHARP MONEY AI BOT V3.5
+🧊 FULLY FROZEN
+📡 OBSERVE MODE
+
+STOP AFTER VERIFICATION.

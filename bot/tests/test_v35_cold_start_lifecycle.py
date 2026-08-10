@@ -110,9 +110,12 @@ class TestReq1NewPropColdStart:
 class TestReq2BotRestart:
     """2. Bot restart correctly resets in-memory state while preserving DB state."""
 
-    def test_fast_resume_flag_is_module_level(self):
+    def test_fast_resume_flag_removed(self):
+        """Fast Resume is removed — _fast_resume must NOT exist as a module-level flag."""
         import market_engine as me
-        assert hasattr(me, "_fast_resume"), "_fast_resume must be module-level"
+        assert not hasattr(me, "_fast_resume"), (
+            "_fast_resume must be removed — Fast Resume is no longer supported"
+        )
 
     def test_init_state_from_db_called_during_restart(self):
         """_init_state_from_db is the restart restoration entry point."""
@@ -199,17 +202,18 @@ class TestReq4RestartResumeIdentification:
             "Standing path must check S/A tier from DB records"
         )
 
-    def test_fast_resume_enables_standing_on_scan1(self):
-        """Critical: fast-resume must enable standing path on scan 1 (cold-start=True).
+    def test_standing_path_cold_start_gate(self):
+        """Fast Resume removed — standing path uses plain `not is_cold_start` gate.
 
-        This ensures DISCOVERED props are immediately re-evaluated after a quick
-        restart rather than waiting for scan 2 (~5 minute delay).
+        Cold-start cycle (scan 1) scores all props without alerts.
+        Standing path (scan 2+) picks up qualified props on every subsequent scan.
         """
         src = inspect.getsource(__import__("market_engine").underdog_job)
-        # The guard must allow standing path when _fast_resume=True even during is_cold_start
-        assert "(not is_cold_start or _fast_resume)" in src, (
-            "Standing path guard must be '(not is_cold_start or _fast_resume)' — "
-            "enables immediate re-evaluation of DISCOVERED props during fast-resume scan 1"
+        assert "_fast_resume" not in src, (
+            "Fast Resume removed: _fast_resume must not appear in underdog_job"
+        )
+        assert "not is_cold_start and chat_ids" in src, (
+            "Standing path must gate on plain `not is_cold_start` after Fast Resume removal"
         )
 
     def test_standing_path_gate_logic(self):
@@ -576,11 +580,17 @@ class TestReq12NFLTier2:
 class TestReq13CheckpointDoesNotSkipColdStart:
     """13. A recent checkpoint enables fast standing evaluation, not a permanent skip."""
 
-    def test_fast_resume_enables_standing_on_scan1(self):
-        """When _fast_resume=True, standing path runs on scan 1 to pick up DISCOVERED props."""
+    def test_standing_path_blocked_during_cold_start(self):
+        """Fast Resume removed — standing path is blocked during cold-start (scan 1).
+
+        After cold-start completes, standing path evaluates props on every subsequent scan.
+        """
         src = inspect.getsource(__import__("market_engine").underdog_job)
-        assert "(not is_cold_start or _fast_resume)" in src, (
-            "Standing path must run when _fast_resume=True even during is_cold_start"
+        assert "_fast_resume" not in src, (
+            "Fast Resume removed: _fast_resume must not appear in underdog_job"
+        )
+        assert "not is_cold_start and chat_ids" in src, (
+            "Standing path must use plain 'not is_cold_start' gate (no fast-resume bypass)"
         )
 
     def test_fast_resume_not_skip_gate_logic(self):
@@ -662,32 +672,26 @@ class TestReq14FastIncrementalResume:
         finally:
             tmp.unlink(missing_ok=True)
 
-    def test_fast_resume_threshold_is_reasonable(self):
-        """Fast-resume threshold must be long enough to cover a brief restart."""
+    def test_fast_resume_threshold_removed(self):
+        """Fast Resume removed — _FAST_RESUME_THRESHOLD_MINUTES must NOT exist."""
         import market_engine as me
-        threshold = me._FAST_RESUME_THRESHOLD_MINUTES
-        assert threshold >= 5, f"Threshold too short ({threshold} min) — bot may miss quick restarts"
-        assert threshold <= 120, f"Threshold too long ({threshold} min) — scores may be stale"
+        assert not hasattr(me, "_FAST_RESUME_THRESHOLD_MINUTES"), (
+            "_FAST_RESUME_THRESHOLD_MINUTES must be removed — Fast Resume is no longer supported"
+        )
 
-    def test_fast_resume_only_when_checkpoint_recent(self):
-        """fast_resume=True only when checkpoint age < threshold."""
+    def test_always_performs_full_cold_start_rescore(self):
+        """After Fast Resume removal, every restart performs a full cold-start rescore.
+
+        Checkpoints are still recorded for health monitoring, but no longer
+        short-circuit the startup execution path.
+        """
         import market_engine as me
-        threshold = me._FAST_RESUME_THRESHOLD_MINUTES
-
-        # Simulate _init_state_from_db decision logic
-        recent_age = 5.0   # minutes
-        stale_age  = float(threshold) + 10.0
-        no_age     = None
-
-        assert (recent_age is not None and recent_age < threshold) is True, (
-            "Recent checkpoint → fast_resume=True"
-        )
-        assert (stale_age is not None and stale_age < threshold) is False, (
-            "Stale checkpoint → fast_resume=False (full rescore)"
-        )
-        assert (no_age is not None and no_age < threshold) is False, (
-            "No checkpoint → fast_resume=False (full rescore)"
-        )
+        # Threshold removed — no conditional skip logic
+        assert not hasattr(me, "_FAST_RESUME_THRESHOLD_MINUTES")
+        # Checkpoint recording still works (health monitoring)
+        from engine.health import HealthTracker
+        assert hasattr(HealthTracker, "record_scan_checkpoint")
+        assert hasattr(HealthTracker, "get_scan_checkpoint_age_minutes")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -702,24 +706,28 @@ class TestReq15NewPropsInitialize:
         src = inspect.getsource(__import__("market_engine").underdog_job)
         assert "is_new_prop" in src
 
-    def test_new_prop_path_runs_regardless_of_fast_resume(self):
-        """New prop processing is NOT gated by _fast_resume — always runs.
+    def test_new_prop_path_always_runs(self):
+        """New prop processing is never gated by fast_resume — always runs on every scan.
 
-        New props (not in PropLineHistory) must ALWAYS be initialized
-        even during fast-resume scan 1.
+        New props (not in PropLineHistory) go through the is_new_prop branch
+        BEFORE the cold-start elif — they are always initialized regardless of
+        whether it is a cold-start cycle or not.
         """
         src = inspect.getsource(__import__("market_engine").underdog_job)
-        # The cold-start gate: `elif not is_removed and is_cold_start and not _fast_resume`
-        # New props go through the `is_new_prop` branch BEFORE this elif —
-        # they are NOT subject to the _fast_resume gate.
-        # Verify is_new_prop branch comes before cold-start elif
+        # Fast Resume must be gone
+        assert "_fast_resume" not in src, (
+            "Fast Resume removed: _fast_resume must not appear in underdog_job"
+        )
+        # is_new_prop branch must still exist and precede the cold-start elif
         new_prop_idx = src.find("is_new_prop")
-        cold_start_idx = src.find("is_cold_start and not _fast_resume")
-        assert new_prop_idx != -1, "is_new_prop must exist"
-        assert cold_start_idx != -1, "cold-start gate must exist"
+        cold_start_idx = src.find("is_cold_start")
+        # Use the cold-start elif gate (more specific than bare is_cold_start)
+        cold_start_idx = src.find("elif not is_removed and is_cold_start")
+        assert new_prop_idx != -1, "is_new_prop must exist in underdog_job"
+        assert cold_start_idx != -1, "cold-start elif gate must exist in underdog_job"
         assert new_prop_idx < cold_start_idx, (
-            "is_new_prop path must come BEFORE cold-start gate — "
-            "new props are not subject to _fast_resume filtering"
+            "is_new_prop path must come BEFORE cold-start elif gate — "
+            "new props initialize regardless of startup cycle"
         )
 
     def test_new_prop_sent_to_digest_or_alerted(self):

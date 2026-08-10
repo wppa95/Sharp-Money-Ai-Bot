@@ -244,11 +244,17 @@ class TestAllPathsHaveGate:
     def test_sp_95_dir_ok_present(self, src):
         assert "_sp_95_dir_ok" in src, "_sp_95_dir_ok missing — Tier 2 UNDER may fire via standing 95+ override"
 
-    def test_fast_resume_allows_lc_delivery(self, src):
+    def test_no_fast_resume_in_lc_qualified_gate(self, src):
+        """Fast Resume is removed — is_qualified gate must use plain `not is_cold_start`."""
         idx = src.find("is_qualified = (")
         assert idx != -1, "is_qualified gate not found"
         snippet = src[idx: idx + 500]
-        assert "_fast_resume" in snippet
+        assert "_fast_resume" not in snippet, (
+            "_fast_resume must NOT appear in is_qualified gate — Fast Resume is removed"
+        )
+        assert "not is_cold_start" in snippet, (
+            "is_qualified gate must check `not is_cold_start` directly"
+        )
 
 
 # ── 6. Deduplication still intact ─────────────────────────────────────────────

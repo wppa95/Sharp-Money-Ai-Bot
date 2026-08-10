@@ -1,0 +1,282 @@
+🔥 CRED BURN WARNING — RESUME INCOMPLETE WORK + L5 DATA FIX
+
+IMPORTANT: The previous Fast Resume removal attempt was interrupted by a Replit account/credit restriction.
+
+DO NOT start over.
+
+DO NOT assume Fast Resume removal was completed.
+
+First inspect the CURRENT working tree and continue from the exact state already modified.
+
+The V3.5 ruleset remains FROZEN.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+PART 1 — FINISH FAST RESUME REMOVAL
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+First:
+
+1. Check git status/diff.
+2. Search the entire codebase for:
+
+_fast_resume
+fast_resume
+FAST_RESUME
+Fast Resume
+
+3. Determine exactly which edits from the previous attempt were already applied.
+4. Do NOT repeat completed edits.
+
+The previous attempt had already removed all _fast_resume references from market_engine.py, but was interrupted while updating tests and adding the regression suite.
+
+Finish the remaining work.
+
+Required:
+
+• No runtime Fast Resume path.
+• No active Fast Resume configuration.
+• No scheduler dependency on Fast Resume.
+• Normal startup uses the standard monitoring path.
+• All active props remain monitored.
+• New props still detected.
+• Line movements still detected.
+• Re-entry still detected.
+• ScanCycleLog still works.
+• CLV pipeline still works.
+• Existing deduplication remains intact.
+• Previously delivered opportunities are NOT resent after restart.
+
+Update only tests that legitimately enforced Fast Resume.
+
+Add/finish regression tests proving:
+
+1. Normal startup performs the standard scan.
+2. Fast Resume is never invoked.
+3. Restart does not resend delivered opportunities.
+4. Restart monitors all active props.
+5. New props are detected.
+6. Line movements are detected.
+7. Re-entry works.
+8. Dedup works after restart.
+9. ScanCycleLog records the scan.
+10. All 9 scheduler jobs start normally.
+11. No Fast Resume path executes.
+12. Frozen V3.5 rules remain unchanged.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+PART 2 — L5 DATA QUALITY BUG
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+We found a separate production issue.
+
+Example:
+
+WNBA — Aneesah Morrow
+Rebounds
+Line 5.5
+OVER
+A-Tier
+BQ 70
+
+Our alert says:
+
+“L5: N/A — no history available”
+
+BUT Underdog is visibly showing last-5 history for this prop.
+
+Therefore the bot is failing to retrieve, map, or use available historical data.
+
+This is a DATA QUALITY / ENRICHMENT issue.
+
+Do NOT change the betting rules to solve it.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🔎 TRACE THE ENTIRE L5 PATH
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Trace:
+
+Underdog prop
+→ player identity
+→ stat type
+→ historical lookup
+→ provider/fallback
+→ game logs
+→ recent-game filtering
+→ L5 calculation
+→ alert formatter
+
+Check:
+
+• Underdog player ID
+• ESPN/provider player ID
+• WNBA identity mapping
+• stat_type normalization
+• Rebounds mapping
+• provider market-name mapping
+• game-log lookup
+• date filtering
+• recent-game ordering
+• cache/database history
+• Underdog historical data
+• fallback logic
+
+Find the exact reason the alert says N/A.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 REQUIRED L5 BEHAVIOR
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+If normal historical data is unavailable:
+
+→ attempt the supported Underdog history/fallback path.
+
+If history exists:
+
+→ calculate and display the verified L5.
+
+Example:
+
+L5: 80% (4/5)
+
+Do NOT fabricate values.
+
+If every supported source genuinely has no history:
+
+→ L5: N/A — no history available
+
+This must be generic across supported player props.
+
+Do NOT hard-code Aneesah Morrow.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🧪 L5 TESTS
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Add regression tests for:
+
+1. WNBA rebounds with Underdog L5 available.
+2. Primary history unavailable + Underdog history available.
+3. MLB prop.
+4. NFL prop.
+5. Other supported esports props where applicable.
+6. Stat-type normalization.
+7. Player-ID mapping.
+8. True no-history case.
+9. L5 calculation accuracy.
+10. Alert formatting.
+11. No fabricated history.
+12. Existing tier/scoring behavior unchanged.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🧊 FROZEN V3.5 PROTECTION
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+DO NOT change:
+
+• Tier definitions
+• Confidence thresholds
+• BQ thresholds
+• MLB UNDER whitelist
+• NFL direction rules
+• Tier 1 / Tier 2 rules
+• Strong Bet logic
+• Strong Under logic
+• L5 scoring interpretation
+• Scoring thresholds
+• Deduplication architecture
+• /funnel accounting
+• CLV fixes
+• Alert delivery rules
+
+Only:
+
+1. Finish Fast Resume removal.
+2. Fix L5 data retrieval/fallback.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🧪 REQUIRED EXECUTION ORDER
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+FIRST:
+
+VERIFY CURRENT WORKING TREE
+→ SEARCH FAST RESUME REFERENCES
+→ FINISH FAST RESUME REMOVAL
+
+THEN:
+
+TARGETED FAST RESUME TESTS
+→ TARGETED L5 TESTS
+→ ALERT TESTS
+→ DEDUP TESTS
+→ FUNNEL TESTS
+→ FULL REGRESSION SUITE
+
+Only fix regressions caused by these changes.
+
+Do NOT rewrite unrelated tests just to make the suite green.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🟢 LIVE VERIFICATION
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+If code changes are completed and tests pass:
+
+→ Restart bot.
+→ Verify all 9 jobs.
+→ Wait for first normal scan.
+→ Verify ScanCycleLog.
+→ Verify /funnel.
+→ Verify no Fast Resume path.
+→ Verify no duplicate delivery.
+→ Find a live player prop with available Underdog L5.
+→ Confirm alert displays the actual verified L5.
+→ Confirm true no-history props still display N/A.
+
+Do NOT create fake production alerts.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+📋 FINAL REPORT
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+FAST RESUME:
+
+References remaining:
+Runtime path:
+Tests:
+Status:
+
+L5:
+
+Root cause:
+Data source:
+Fallback path:
+Player ID fix:
+Stat type fix:
+Tests:
+Live verification:
+
+FULL SUITE:
+Passing:
+Pre-existing failures:
+New failures:
+
+BOT:
+Startup:
+9 jobs:
+First scan:
+Funnel:
+Dedup:
+L5 live check:
+
+RULESET:
+
+🧊 V3.5 FROZEN
+📡 OBSERVE MODE
+
+If Replit credits/restrictions prevent execution, STOP exactly where blocked and report it.
+
+Do NOT claim completion unless the work was actually verified.
+
+After successful verification, STOP making changes and let the bot collect production data.

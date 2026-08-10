@@ -63,13 +63,16 @@ class TestColdStartGateSource:
             "_cold_start_done must be a bool — True means cold-start is done"
         )
 
-    def test_cold_start_path_skipped_in_fast_resume(self):
-        """Cold-start rescore path must be skipped when _fast_resume is True."""
+    def test_cold_start_path_always_rescores_on_restart(self):
+        """Fast Resume removed — cold-start path scores all props on every restart."""
         src = self._me_src()
-        # The cold_start path gate must check _fast_resume
-        assert "is_cold_start and not _fast_resume" in src, (
-            "Cold-start rescore path must be gated by 'not _fast_resume' "
-            "to enable fast restart-resume"
+        # Fast Resume removed: must not check _fast_resume
+        assert "_fast_resume" not in src, (
+            "Fast Resume removed: _fast_resume must NOT appear in underdog_job source"
+        )
+        # Cold-start gate must be plain (no fast-resume bypass)
+        assert "is_cold_start and not _fast_resume" not in src, (
+            "Fast Resume removed: old 'not _fast_resume' guard must be gone"
         )
 
     def test_cold_start_lc_rejection_label(self):
@@ -251,20 +254,24 @@ class TestColdStartQualification:
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestRestartResumeCheckpoint:
-    """Checkpoint system must persist scan timestamps and enable fast-resume decisions."""
+    """Checkpoint system persists scan timestamps for health monitoring.
 
-    def test_fast_resume_flag_exists_in_market_engine(self):
-        import market_engine as me
-        assert hasattr(me, "_fast_resume"), "_fast_resume flag must exist in market_engine"
-        assert isinstance(me._fast_resume, bool), "_fast_resume must be a bool"
+    Fast Resume has been removed — checkpoints are still recorded for health
+    visibility but no longer influence the startup execution path.
+    """
 
-    def test_fast_resume_threshold_exists(self):
+    def test_fast_resume_flag_removed_from_market_engine(self):
+        """Fast Resume removed — _fast_resume must NOT exist in market_engine."""
         import market_engine as me
-        assert hasattr(me, "_FAST_RESUME_THRESHOLD_MINUTES"), (
-            "_FAST_RESUME_THRESHOLD_MINUTES must be defined"
+        assert not hasattr(me, "_fast_resume"), (
+            "_fast_resume flag must be removed — Fast Resume is no longer supported"
         )
-        assert me._FAST_RESUME_THRESHOLD_MINUTES > 0, (
-            "_FAST_RESUME_THRESHOLD_MINUTES must be positive"
+
+    def test_fast_resume_threshold_removed(self):
+        """Fast Resume removed — _FAST_RESUME_THRESHOLD_MINUTES must NOT exist."""
+        import market_engine as me
+        assert not hasattr(me, "_FAST_RESUME_THRESHOLD_MINUTES"), (
+            "_FAST_RESUME_THRESHOLD_MINUTES must be removed — Fast Resume is no longer supported"
         )
 
     def test_health_tracker_has_record_scan_checkpoint(self):
@@ -314,33 +321,6 @@ class TestRestartResumeCheckpoint:
         finally:
             tmp_path.unlink(missing_ok=True)
 
-    def test_recent_checkpoint_yields_fast_resume(self):
-        """Checkpoint < threshold → fast-resume decision."""
-        import market_engine as me
-        threshold = me._FAST_RESUME_THRESHOLD_MINUTES
-        # A checkpoint 1 minute old is well within any reasonable threshold
-        checkpoint_age_min = 1.0
-        assert checkpoint_age_min < threshold, (
-            f"Test checkpoint ({checkpoint_age_min} min) must be < threshold ({threshold} min)"
-        )
-        # Simulate the decision logic from _init_state_from_db
-        fast_resume = checkpoint_age_min < threshold
-        assert fast_resume is True
-
-    def test_stale_checkpoint_yields_full_rescore(self):
-        """Checkpoint older than threshold → full cold-start rescore."""
-        import market_engine as me
-        threshold = me._FAST_RESUME_THRESHOLD_MINUTES
-        stale_age_min = threshold + 60  # well beyond threshold
-        fast_resume = stale_age_min < threshold
-        assert fast_resume is False
-
-    def test_missing_checkpoint_yields_full_rescore(self):
-        """No checkpoint → full cold-start rescore (not fast resume)."""
-        checkpoint_age = None
-        fast_resume = (checkpoint_age is not None and checkpoint_age < 30)
-        assert fast_resume is False
-
     def test_checkpoint_recorded_in_underdog_job_source(self):
         """market_engine must call record_scan_checkpoint() after each successful scan."""
         import inspect, market_engine as me
@@ -349,23 +329,20 @@ class TestRestartResumeCheckpoint:
             "underdog_job must call record_scan_checkpoint() to persist scan progress"
         )
 
-    def test_fast_resume_checked_in_init_state_from_db(self):
-        """_init_state_from_db must check checkpoint age and set _fast_resume."""
+    def test_fast_resume_not_in_init_state_from_db(self):
+        """Fast Resume removed — _init_state_from_db must NOT reference _fast_resume."""
         import inspect, market_engine as me
         src = inspect.getsource(me._init_state_from_db)
-        assert "_fast_resume" in src, (
-            "_init_state_from_db must set the _fast_resume flag based on checkpoint age"
-        )
-        assert "get_scan_checkpoint_age_minutes" in src, (
-            "_init_state_from_db must call get_scan_checkpoint_age_minutes()"
+        assert "_fast_resume" not in src, (
+            "_init_state_from_db must NOT set _fast_resume — Fast Resume is removed"
         )
 
-    def test_fast_resume_skips_cold_start_rescore(self):
-        """Cold-start rescore path must be skipped when _fast_resume is True."""
+    def test_fast_resume_not_in_underdog_job(self):
+        """Fast Resume removed — underdog_job must NOT reference _fast_resume."""
         import inspect, market_engine as me
         src = inspect.getsource(me.underdog_job)
-        assert "not _fast_resume" in src, (
-            "Cold-start rescore path must include 'not _fast_resume' guard"
+        assert "_fast_resume" not in src, (
+            "underdog_job must NOT reference _fast_resume — Fast Resume is removed"
         )
 
 
@@ -594,13 +571,12 @@ class TestV34RegressionGuard:
         assert hasattr(me, "_format_95_priority_alert")
         assert callable(me._format_95_priority_alert)
 
-    def test_fast_resume_flag_default_false(self):
-        """_fast_resume starts False — never permanently True unless checkpoint recent."""
+    def test_fast_resume_flag_removed(self):
+        """Fast Resume removed — _fast_resume must NOT exist as a module attribute."""
         import market_engine as me
-        # On a fresh import (test environment), _fast_resume should be False
-        # (the test bot doesn't have a health.json with a recent checkpoint)
-        # We just check it's a bool — it could be True if tests set a checkpoint
-        assert isinstance(me._fast_resume, bool), "_fast_resume must be a bool"
+        assert not hasattr(me, "_fast_resume"), (
+            "_fast_resume must be removed from market_engine — Fast Resume is no longer supported"
+        )
 
     def test_mlb_nfl_under_tier2_rule_in_source(self):
         """MLB/NFL UNDER blocked at all alert paths — Tier 2 rule must remain."""
