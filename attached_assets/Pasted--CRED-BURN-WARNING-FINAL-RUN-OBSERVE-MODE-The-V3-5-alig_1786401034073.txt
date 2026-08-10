@@ -1,0 +1,146 @@
+🔥 CRED BURN WARNING — FINAL RUN / OBSERVE MODE
+
+The V3.5 alignment audit is complete.
+
+The bot is now:
+
+🟢 VERIFIED
+🟢 RUNNING
+🟢 V3.5 ALIGNED
+🧊 RULESET FROZEN
+
+Do NOT make any more acceptance-rule changes.
+
+Do NOT refactor working logic.
+
+Do NOT create another diagnostic pass.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+📡 RUN-AND-COLLECT MODE
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Let the bot run continuously and collect real production data.
+
+Monitor normally:
+
+• Underdog scans
+• Line movements
+• New props
+• Re-entry props
+• Removed/reappeared props
+• S/A actionable candidates
+• B/C watchlist candidates
+• Telegram delivery
+• Alert timestamps
+• ScanCycleLog
+• PropLineHistory
+• PropCandidateLog
+• CLV seeds
+• CLV harvest
+• Scheduler health
+• Restart/recovery behavior
+
+Do NOT intervene just because a scan produces 0 alerts.
+
+Zero alerts can be a valid result.
+
+We need enough real market movement to evaluate the frozen system.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+📊 DATA COLLECTION
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Allow the bot to collect enough data to evaluate:
+
+• alert frequency
+• S/A distribution
+• sport distribution
+• OVER vs UNDER distribution
+• MLB UNDER market distribution
+• Tier 1 vs Tier 2 performance
+• BQ distribution
+• confidence distribution
+• L5 availability
+• line-movement frequency
+• re-entry frequency
+• stale-line incidents
+• alert-to-current-line accuracy
+• false positives
+• missed opportunities
+• CLV performance
+
+Do NOT tune thresholds based on one or two alerts.
+
+Do NOT change rules based on isolated examples.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🚨 ONLY INTERVENE FOR REAL FAILURES
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Only stop and fix something if there is an actual technical defect such as:
+
+❌ crash
+❌ restart loop
+❌ scheduler failure
+❌ Underdog polling failure
+❌ stale process
+❌ database write failure
+❌ silent pipeline failure
+❌ Telegram delivery failure
+❌ stale alert line
+❌ duplicate alert
+❌ missed re-entry
+❌ incorrect frozen-rule enforcement
+❌ incorrect confidence/tier display
+❌ incorrect BQ display
+❌ CLV pipeline failure
+
+If something fails, fix the specific bug without changing the frozen ruleset.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🧊 RULESET REMAINS FROZEN
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Do NOT modify:
+
+• Tier 1 / Tier 2 definitions
+• S/A/B/C thresholds
+• Confidence thresholds
+• BQ thresholds
+• MLB UNDER whitelist
+• NFL direction rules
+• Strong Bet logic
+• Strong Under logic
+• L5 fallback rules
+• continuous monitoring architecture
+
+Those rules are final.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+⏳ OBSERVATION PERIOD
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Let the bot accumulate real production data before making further judgments.
+
+Do not optimize from a tiny sample.
+
+When enough data has accumulated, we can review:
+
+📈 What is alerting
+📉 What is being rejected
+🎯 Which tiers are producing actionable plays
+💎 BQ vs actual results
+📊 Confidence calibration
+📈 CLV
+⚾ MLB
+🏈 NFL
+🏆 Tier 1 sports
+
+Until then:
+
+RUN.
+MONITOR.
+COLLECT.
+DO NOT TUNE.
+
+🟢 Sharp Money AI Bot v3.5 — RUNNING IN OBSERVE MODE.
