@@ -1611,6 +1611,22 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             if lbl:
                 gt_str = f"⏰ {lbl}  ·  "
 
+        # ── Delivery status ───────────────────────────────────────────────────
+        # PropLineHistory.first_alert_sent_at is set when the prop was actually
+        # broadcast to Telegram.  Props without it are scored S/A candidates that
+        # are tracked but have not yet been delivered (pending dedup, timing, etc.).
+        _alert_ts = getattr(plh, "first_alert_sent_at", None)
+        if _alert_ts is not None:
+            try:
+                from zoneinfo import ZoneInfo as _ZIp
+                _ad = _alert_ts.replace(tzinfo=_ZIp("UTC")).astimezone(_ZIp("America/New_York"))
+                _at_str = _ad.strftime("%-I:%M %p ET %b %-d")
+            except Exception:
+                _at_str = str(_alert_ts)[:16]
+            _delivery_label = f"📤 Delivered: {_at_str}"
+        else:
+            _delivery_label = "⏳ Candidate — not yet delivered via Telegram"
+
         # ── Build entry ───────────────────────────────────────────────────────
         entry_lines: list[str] = [
             "━━━━━━━━━━━━━━━━━━",
@@ -1622,6 +1638,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             f"🎯 Pick: <b>{pick_label}</b>",
             f"Confidence: {conf}/100  {stars}",
             f"Tier: {tier} {tier_icon}{move_str}",
+            f"<i>{_delivery_label}</i>",
         ]
 
         # ── Evidence block ────────────────────────────────────────────────────
@@ -3389,7 +3406,7 @@ async def cmd_refinement(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/funnel — Edge transparency: how many candidates passed/failed each qualification gate."""
+    """/funnel — Full pipeline: scanned → filtered → scored → qualified → delivered."""
     if not _check_allowed(update):
         await update.message.reply_text("⛔ Unauthorized.")
         return
@@ -3404,7 +3421,14 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             except ValueError:
                 pass
 
-        summary   = await _db.get_funnel_summary(since_hours=since_h)
+        # Fetch scan pipeline summary (non-fatal: new method may not exist on old schema)
+        scan_summary: dict = {}
+        try:
+            scan_summary = await _db.get_scan_cycle_summary(since_hours=since_h)
+        except Exception as _scl_exc:
+            logger.debug("cmd_funnel: scan_cycle_summary unavailable: %s", _scl_exc)
+        summary = await _db.get_funnel_summary(since_hours=since_h)
+
         counts    = summary.get("counts", {})
         top_rej   = summary.get("top_rejections", [])
 
@@ -3429,15 +3453,59 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 return f"{v:.2f}%"
             return f"{v:.1f}%"
 
-        qual_rate = _fmt_rate(accepted, total)
-
         _thick = "━" * 18
         lines: list[str] = [
             _thick,
-            "🔭 <b>Prop Candidate Funnel</b>",
+            "📡 <b>Scan Pipeline</b>",
+            _thick,
+        ]
+
+        # ── Section 1: Scan Pipeline (from ScanCycleLog) ─────────────────────────────
+        sc_cycles = scan_summary.get("cycles", 0)
+        if sc_cycles > 0:
+            sc_fetched   = scan_summary.get("fetched", 0)
+            sc_removed   = scan_summary.get("removed", 0)
+            sc_futures   = scan_summary.get("futures", 0)
+            sc_active    = scan_summary.get("active", 0)
+            sc_unchanged = scan_summary.get("unchanged", 0)
+            sc_new       = scan_summary.get("new_props", 0)
+            sc_lc        = scan_summary.get("line_changed", 0)
+            sc_analyzed  = scan_summary.get("analyzed", 0)
+            sc_qualified = scan_summary.get("qualified", 0)
+            sc_delivered = scan_summary.get("alert_delivered", 0)
+            _avg_mins    = (since_h * 60) // max(sc_cycles, 1)
+            lines += [
+                "",
+                f"<i>Last {since_h}h  ·  {sc_cycles} scans  (~{_avg_mins}min each)</i>",
+                "",
+                f"📥 Fetched from Underdog:       <b>{sc_fetched:,}</b>",
+                f"🚫 Removed from feed:           <b>{sc_removed:,}</b>",
+                f"🔮 Futures/awards skipped:      <b>{sc_futures:,}</b>",
+                f"👁 Active props monitored:       <b>{sc_active:,}</b>",
+                f"   └─ Unchanged (stable lines): <b>{sc_unchanged:,}</b>",
+                f"   └─ New first-appearance:     <b>{sc_new:,}</b>",
+                f"   └─ Line moved (re-scored):   <b>{sc_lc:,}</b>",
+                "",
+                f"🔬 Scored this period:          <b>{sc_analyzed:,}</b>",
+                f"✅ Qualified for alert:         <b>{sc_qualified:,}</b>",
+                f"📤 Delivered to Telegram:       <b>{sc_delivered:,}</b>",
+            ]
+        else:
+            lines += [
+                "",
+                f"<i>Last {since_h}h  ·  No scan cycles recorded yet.</i>",
+                "<i>Scan cycle data accumulates once the bot restarts with this update.</i>",
+            ]
+
+        # ── Section 2: Candidate Funnel (from PropCandidateLog) ──────────────────────
+        qual_rate = _fmt_rate(accepted, total)
+        lines += [
+            "",
+            _thick,
+            "🔭 <b>Candidate Funnel</b>",
             _thick,
             "",
-            f"<i>Last {since_h}h  ·  Use /funnel 48 for longer window</i>",
+            f"<i>Scored props only — not all {scan_summary.get('active', 0) or '~4,600'} monitored</i>",
             "",
             f"📥 Evaluated (new/changed): <b>{total}</b>",
             f"✅ Qualified (S/A/B-tier):  <b>{accepted}</b>",
@@ -3447,12 +3515,9 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             "",
             f"📊 Qualification rate: <b>{qual_rate}</b>",
             "",
-            "<i>ℹ️ Evaluated = props that were newly seen or had a</i>",
-            "<i>   line change this period (not all monitored props).</i>",
-            "<i>   Restarts re-score all props, inflating older windows.</i>",
-            "<i>   Delivered alerts go through additional gates</i>",
-            "<i>   (direction, BQ, conf, dedup, live-game).</i>",
-            "<i>   Use /alerts to see Telegram-delivered picks.</i>",
+            "<i>Qualified props go through additional gates before delivery:</i>",
+            "<i>(direction, BQ, conf, dedup, live-game).</i>",
+            "<i>Use /alerts to see Telegram-delivered picks.</i>",
         ]
 
         # Per-sport breakdown
@@ -3468,7 +3533,8 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 "─" * 36,
             ]
             for row in by_sport:
-                sp    = (row.get("sport") or "?")[:11]
+                # Escape dynamic sport name to prevent HTML parse errors
+                sp    = _html.escape((row.get("sport") or "?")[:11])
                 sc    = row.get("scanned",   0)
                 acc   = row.get("accepted",  0)
                 watch = row.get("watchlist", 0)
@@ -3493,10 +3559,14 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             for r in top_rej:
                 sc   = f"{r.get('score_total', 0):.0f}" if r.get("score_total") is not None else "?"
                 tier = r.get("score_tier") or "?"
-                rej  = r.get("rejection_reason") or "?"
+                # Escape all dynamic strings to prevent HTML parse errors
+                pname = _html.escape(str(r.get("player_name") or "?"))
+                stype = _html.escape(str(r.get("stat_type")   or "?"))
+                sport = _html.escape(str(r.get("sport")       or "?"))
+                rej   = _html.escape(str(r.get("rejection_reason") or "?"))
                 lines.append(
-                    f"• <b>{r.get('player_name', '?')}</b> "
-                    f"— {r.get('stat_type', '?')} ({r.get('sport', '?')})\n"
+                    f"• <b>{pname}</b> "
+                    f"— {stype} ({sport})\n"
                     f"  {sc}/100 [{tier}]  <i>{rej}</i>"
                 )
         else:

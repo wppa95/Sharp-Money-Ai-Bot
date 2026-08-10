@@ -299,6 +299,7 @@ class TestCmdFunnelSportBreakdown:
                 {"sport": "MLB", "scanned": 5, "accepted": 0, "watchlist": 0, "rejected": 4, "removed": 1},
             ],
         })
+        mock_db.get_scan_cycle_summary = AsyncMock(return_value={"cycles": 0})
         with patch("commands._db", mock_db):
             await cmd_funnel(update, ctx)
         msg = update.message.reply_text.call_args[0][0]
@@ -318,6 +319,7 @@ class TestCmdFunnelSportBreakdown:
             "top_rejections": [],
             "by_sport": [],
         })
+        mock_db.get_scan_cycle_summary = AsyncMock(return_value={"cycles": 0})
         with patch("commands._db", mock_db):
             await cmd_funnel(update, ctx)
         msg = update.message.reply_text.call_args[0][0]

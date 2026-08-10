@@ -1187,6 +1187,24 @@ class AlertDelivery:
                 f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 + message
             )
+
+        # Freshness timestamp — helps users know how old the line is before placing.
+        # This is especially important when the bot alerts at poll T and the user
+        # acts at T+N minutes when the market may have already moved.
+        # Only appended to actionable picks (not removals, not market-move-only alerts).
+        if message and not removed and not market_move_only:
+            try:
+                from zoneinfo import ZoneInfo as _ZI
+                from datetime import datetime as _now_dt
+                _now_et = _now_dt.utcnow().replace(tzinfo=_ZI("UTC")).astimezone(
+                    _ZI("America/New_York")
+                )
+                _ts_str = _now_et.strftime("%-I:%M %p ET")
+            except Exception:
+                from datetime import datetime as _now_dt
+                _ts_str = _now_dt.utcnow().strftime("%H:%M UTC")
+            message += f"\n\n<i>⏱ Line as of {_ts_str} — verify on Underdog before placing</i>"
+
         counts     = await broadcast_alert(self._bot, self._chat_ids, message)
         alert_sent = counts["sent"] > 0
 

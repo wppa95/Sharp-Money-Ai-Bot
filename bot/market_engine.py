@@ -1134,6 +1134,8 @@ async def underdog_job(context) -> None:
     _n_new_prop_sent:      int       = 0   # immediate new-prop alerts delivered
     _n_cold_start_scored: int       = 0   # props scored during the one-time cold-start pass
     _n_standing_sent:      int       = 0   # standing opportunity alerts delivered (4A)
+    _n_unchanged_skipped: int       = 0   # props with unchanged lines — stable, no re-score needed
+    _n_lc_sent:            int       = 0   # line-change alerts delivered this cycle
     _cold_start_records:  list       = []  # records buffered for bulk save at end of cold-start
     _cs_before_tiers:     dict       = {}  # tier counts under old calibration (before)
     _cs_after_tiers:      dict       = {}  # tier counts under new calibration (after)
@@ -1316,8 +1318,10 @@ async def underdog_job(context) -> None:
                                 "Qualified" if decision.recommendation != "PASS" else "Rejected"
                             ),
                         )
-                    except Exception:
-                        pass  # never block alert flow
+                    except Exception as _pol_exc:
+                        logger.warning(
+                            "underdog_job: log_prop_opportunity [new-prop] failed: %s", _pol_exc
+                        )
 
                 # ── 95+ S-tier priority override [new-prop path] ─────────────────
                 # Bet Quality (decision.confidence) ≥ 95 AND decision tier == "S":
@@ -1680,8 +1684,10 @@ async def underdog_job(context) -> None:
                                     "Qualified" if decision.recommendation != "PASS" else "Rejected"
                                 ),
                             )
-                        except Exception:
-                            pass  # never block alert flow
+                        except Exception as _pol_exc:
+                            logger.warning(
+                                "underdog_job: log_prop_opportunity [lc] failed: %s", _pol_exc
+                            )
                     elif score.tier == "PASS":
                         # P4: Log PASS-scored props even without a directional decision
                         # so all evaluated props are tracked in prop_opportunity_log.
@@ -1700,8 +1706,10 @@ async def underdog_job(context) -> None:
                                 provider       = "Underdog",
                                 watchlist_state = "Rejected",
                             )
-                        except Exception:
-                            pass  # never block alert flow
+                        except Exception as _pol_exc:
+                            logger.warning(
+                                "underdog_job: log_prop_opportunity [lc-pass] failed: %s", _pol_exc
+                            )
                     _n_scored += 1
                     _tier_counts[score.tier] = _tier_counts.get(score.tier, 0) + 1
 
@@ -1851,6 +1859,11 @@ async def underdog_job(context) -> None:
                     )
                     if is_reentry_qualified:
                         _n_qualified += 1
+                        # Re-entry props must reach Telegram as new-prop alerts.
+                        # should_alert defaults to False for non-lc paths; setting
+                        # it True here causes the main delivery block to fire with
+                        # new_prop=True (timing filter bypassed, full scoring applied).
+                        should_alert = True
 
                 # Qualify for alert delivery.
                 # Removal notices: only Telegram-alert for three conditions.
@@ -2135,13 +2148,17 @@ async def underdog_job(context) -> None:
             # Queue lifecycle transitions — applied after bridge so PropLineHistory rows exist
             if ud_result.sent and not is_removed:
                 _lifecycle_alerted.append((player, snap.sport or "UNKNOWN", stat_type))
+                _n_lc_sent += 1
                 # Mark as Telegram actionable pick for performance tracking (not removals).
                 try:
                     _lc_ext_id = getattr(snap, "external_id", None) or getattr(snap, "id", None) or ""
                     await db.mark_opportunity_alert_sent(_lc_ext_id, stat_type)
                     _lc_stored = "YES"
-                except Exception:
+                except Exception as _mark_exc:
                     _lc_stored = "NO (mark failed)"
+                    logger.warning(
+                        "underdog_job: mark_opportunity_alert_sent [lc] failed: %s", _mark_exc
+                    )
                 logger.info(
                     "🎯 PICK CREATED | Player: %s | Sport: %s | Market: %s"
                     " | Line: %.1f | Direction: %s | Tier: %s | Confidence: %d"
@@ -2191,6 +2208,7 @@ async def underdog_job(context) -> None:
                     _alert_outcome = "cold_start_scored"
                 else:
                     _alert_outcome = "skipped"
+                    _n_unchanged_skipped += 1  # stable line — no re-score needed this cycle
             elif ud_result.sent:
                 _alert_outcome = "removal_sent" if is_removed else "sent"
             elif ud_result.filtered:
@@ -2371,8 +2389,10 @@ async def underdog_job(context) -> None:
                             "Qualified" if _sdec.recommendation != "PASS" else "Rejected"
                         ),
                     )
-                except Exception:
-                    pass  # never block alert flow
+                except Exception as _pol_exc:
+                    logger.warning(
+                        "underdog_job: log_prop_opportunity [standing] failed: %s", _pol_exc
+                    )
                 # ── 95+ S-tier priority override [standing path] ─────────────
                 # Bet Quality (_sdec.confidence) ≥ 95 AND decision tier == "S":
                 # bypasses secondary/historical gates but still enforces:
@@ -2521,8 +2541,12 @@ async def underdog_job(context) -> None:
                         _s_ext_id = getattr(_ssnap, "external_id", None) or getattr(_ssnap, "id", None) or ""
                         await db.mark_opportunity_alert_sent(_s_ext_id, _st)
                         _s_stored = "YES"
-                    except Exception:
+                    except Exception as _mark_exc:
                         _s_stored = "NO (mark failed)"
+                        logger.warning(
+                            "underdog_job: mark_opportunity_alert_sent [standing] failed: %s",
+                            _mark_exc,
+                        )
                     logger.info(
                         "🎯 PICK CREATED | Player: %s | Sport: %s | Market: %s"
                         " | Line: %.1f | Direction: %s | Tier: %s | Confidence: %d"
@@ -2783,6 +2807,28 @@ async def underdog_job(context) -> None:
                 # OS allocator before the next scan cycle.  Without this, the allocator
                 # holds freed memory as its own pool, which looks like growth in RSS.
                 gc.collect()
+
+        # ── Scan cycle log — full pipeline evidence ──────────────────────────────────
+        # Non-fatal: a write failure must not abort the cycle or mask real exceptions.
+        # Proves that all ~4,600 active props are monitored each poll (not just scored ones).
+        try:
+            if db:
+                await db.log_scan_cycle(
+                    scan_ts         = now,
+                    fetched         = _n_ud_snaps_this_cycle,
+                    removed         = _n_removed,
+                    futures         = sum(_sport_futures.values()),
+                    active          = sum(_sport_raw.values()),
+                    unchanged       = _n_unchanged_skipped,
+                    new_props       = _n_new_prop,
+                    line_changed    = _n_scored,
+                    cold_start      = _n_cold_start_scored,
+                    analyzed        = _n_new_prop + _n_scored + _n_cold_start_scored,
+                    qualified       = _n_qualified,
+                    alert_delivered = _n_new_prop_sent + _n_lc_sent + _n_standing_sent,
+                )
+        except Exception as _scl_exc:
+            logger.debug("underdog_job: scan_cycle_log write skipped: %s", _scl_exc)
 
     except Exception as _job_exc:
         logger.exception("underdog_job: processing error: %s", _job_exc)

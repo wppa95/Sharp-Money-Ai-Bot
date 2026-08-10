@@ -1,0 +1,248 @@
+🚨🔥 CREDIBILITY / CRED-BURNING ISSUE — TOP PRIORITY
+
+The bot is currently producing behavior that can cause us to make a bet using stale, incorrect, or missing market information.
+
+Example: the bot alerted Jonathan Aranda Hits OVER 0.5, but when we went to place it, Underdog was already at 1.5.
+
+That is a credibility-breaking issue.
+
+If the bot says a prop is 0.5 and the actual current market is 1.5, the alert is not actionable and can cause a bad entry.
+
+Likewise, if the bot is supposed to continuously monitor ~4,600+ active props but is effectively only evaluating a few dozen per hour because of the current known_keys behavior, we can miss meaningful line movements entirely.
+
+Accuracy and freshness are more important than alert volume.
+
+Do not optimize around making the funnel numbers look good.
+
+The bot’s fundamental contract is:
+
+CURRENT MARKET → CURRENT LINE → CURRENT SCORE → CURRENT ALERT
+
+Never:
+
+OLD MARKET → OLD LINE → OLD SCORE → ALERT
+
+Fix the underlying data-flow problems so the bot can be trusted before relying on its alerts for actual entries.
+
+Now proceed with the complete diagnose → fix → test → restart → verify pass below.
+
+━━━━━━━━━━━━━━━━━━━━━━
+🔴 1. CONTINUOUSLY MONITOR EVERY ACTIVE PROP
+━━━━━━━━━━━━━━━━━━━━━━
+
+The bot must inspect the COMPLETE active Underdog prop pool on EVERY poll.
+
+Current behavior appears to be:
+
+FETCH ~4,600–4,800 props
+→ known_keys gate
+→ only a handful get evaluated
+
+That is NOT acceptable as a monitoring architecture.
+
+known_keys may be used to avoid unnecessary re-scoring, but it MUST NOT prevent continuous monitoring.
+
+Required behavior:
+
+EVERY POLL:
+
+1. Fetch entire current Underdog feed.
+2. Normalize every active prop.
+3. Compare every active prop against its previous stored state.
+4. Detect new props, line changes, removals, and reappearances.
+5. Unchanged props remain monitored but do not need to be re-scored.
+6. Changed props MUST be scored using the CURRENT line.
+7. Persist the CURRENT state after processing.
+
+If:
+
+Poll 1 → Aranda Hits 0.5
+Poll 2 → Aranda Hits 0.5
+Poll 3 → Aranda Hits 1.5
+
+then Poll 3 MUST detect 0.5 → 1.5 and score 1.5.
+
+━━━━━━━━━━━━━━━━━━━━━━
+🔴 2. FIX STALE-LINE ALERTS
+━━━━━━━━━━━━━━━━━━━━━━
+
+Before ANY alert is delivered:
+
+CURRENT UNDERDOG LINE > STORED OLD LINE > QUEUED CANDIDATE
+
+If a newer snapshot has already been observed, an older queued candidate MUST be invalidated.
+
+Ensure async processing cannot deliver a stale candidate after a newer line has arrived.
+
+The alert payload must always contain the latest known line.
+
+Specifically investigate and fix the Jonathan Aranda 0.5 → 1.5 incident.
+
+━━━━━━━━━━━━━━━━━━━━━━
+🔴 3. FIX ARANDA / DUPLICATE DEDUP
+━━━━━━━━━━━━━━━━━━━━━━
+
+Preserve the existing PLH fallback fix, but make alert lifecycle persistence reliable.
+
+Exact duplicate:
+
+same player + market + line + direction
+
+must not alert twice.
+
+A legitimate line movement may create a new alert.
+
+Do not solve this by broadly disabling alerts.
+
+Failed persistence must no longer be silently swallowed.
+
+━━━━━━━━━━━━━━━━━━━━━━
+🔴 4. FIX TIER-1 ALERT DISAPPEARANCE
+━━━━━━━━━━━━━━━━━━━━━━
+
+Earlier we received many Tier-1 sports alerts.
+
+Now we can see S/A-tier Tier-1 opportunities but almost no alerts.
+
+Trace recent candidates through:
+
+fetch
+→ monitor
+→ comparison
+→ scoring
+→ tier
+→ direction
+→ BQ
+→ confidence
+→ Tier-1 gate
+→ dedup
+→ live-game gate
+→ delivery
+
+If a legitimate candidate is incorrectly rejected, FIX THE BUG.
+
+Do NOT lower thresholds.
+
+━━━━━━━━━━━━━━━━━━━━━━
+🔴 5. FIX /FUNNEL
+━━━━━━━━━━━━━━━━━━━━━━
+
+/funnel intermittently returns:
+
+⚠️ Could not load funnel data.
+
+We also saw:
+
+“Can’t parse entities: unsupported start tag at byte offset 2036”
+
+Fix both the DB/runtime issue and Telegram HTML escaping.
+
+Repeatedly test:
+
+/funnel 1
+/funnel 3
+/funnel 6
+/funnel 12
+/funnel 24
+/funnel 48
+
+━━━━━━━━━━━━━━━━━━━━━━
+🔴 6. FIX FUNNEL ACCOUNTING
+━━━━━━━━━━━━━━━━━━━━━━
+
+The funnel must distinguish:
+
+Raw fetched
+Normalized
+Removed
+Futures
+Active
+Compared
+Unchanged
+New
+Line changed
+Scored
+PCL written
+Qualified
+Alert attempted
+Alert delivered
+
+Do not simply rename “Scanned” to “Evaluated” and consider the problem solved.
+
+We need evidence that the FULL active pool is actually being monitored every poll.
+
+━━━━━━━━━━━━━━━━━━━━━━
+🔴 7. FIX /PICKS /STATS /ALERTS INCONSISTENCY
+━━━━━━━━━━━━━━━━━━━━━━
+
+Currently /picks shows stored actionable records while:
+
+/picks stats → 0 today’s actionable picks
+/alerts → no alerts in 24h
+Stored picks → 18 pending
+
+These commands need consistent lifecycle definitions.
+
+Do not delete the 18 records.
+
+Fix the state/reporting logic so stale historical records aren’t presented as current actionable opportunities.
+
+━━━━━━━━━━━━━━━━━━━━━━
+🔴 8. PRESERVE MODEL STANDARDS
+━━━━━━━━━━━━━━━━━━━━━━
+
+DO NOT change:
+
+• scoring formulas
+• S/A/B thresholds
+• Tier-1 requirements
+• MLB minimum tier
+• BQ thresholds
+• confidence thresholds
+• dedup standards
+• line movement threshold
+• pregame-only behavior
+
+We are fixing implementation/data-flow bugs, not lowering standards.
+
+━━━━━━━━━━━━━━━━━━━━━━
+🔴 9. IMPLEMENT EVERYTHING IN THIS SAME PASS
+━━━━━━━━━━━━━━━━━━━━━━
+
+Do NOT give me another diagnosis-only report.
+
+Execute:
+
+1. Diagnose.
+2. Fix.
+3. Add regression tests.
+4. Run full test suite.
+5. Fix test failures.
+6. Restart bot.
+7. Verify health.
+8. Run multiple Underdog polls.
+9. Verify full active pool is compared every cycle.
+10. Verify line movement detection.
+11. Verify stale candidates cannot alert.
+12. Verify dedup survives restart.
+13. Verify /funnel repeatedly.
+14. Verify /picks, /picks stats, and /alerts agree.
+15. Verify Tier-1 S/A candidates can legitimately reach delivery.
+
+Final response must include:
+
+• Root causes
+• Fixes implemented
+• Files changed
+• Tests passed
+• Runtime status
+• Post-fix polling evidence
+• Any remaining issue
+
+🔥 DO NOT JUST DIAGNOSE. FIX IT IN THIS PASS.
+
+🔥 THE BOT MUST MONITOR THE WHOLE ACTIVE PROP POOL CONTINUOUSLY.
+
+🔥 THE BOT MUST NEVER ALERT ON A LINE THAT IS ALREADY KNOWN TO BE STALE.
+
+🔥 CREDIBILITY/FRESHNESS COMES BEFORE ALERT VOLUME.

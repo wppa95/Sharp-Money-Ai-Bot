@@ -93,14 +93,19 @@ _HIGH_FLOOR_STATS: frozenset[str] = frozenset({
     "Rebounds",
     "Points + Rebounds + Assists",
     "Pts+Rebs+Asts",
+    "Pts + Rebs + Asts",      # Underdog uses spaces around "+" — exact match needed
     "PRA",
     "Assists",
     "Pass Completions",
     "Receiving Yards",
     "Rushing Yards",
     "Passing Yards",
-    # Half-game variants — same aggregate nature as their full-game counterparts;
-    # multi-component lines dampen single-event variance (e.g. 1H PRA ≈ full-game PRA).
+    # Combination stats — multi-component lines dampen single-game variance
+    "Points + Assists",
+    "Points + Rebounds",
+    "Pts + Ast",
+    "Pts + Reb",
+    # Half-game variants — same aggregate nature as their full-game counterparts
     "1H Points",
     "1H Rebounds",
     "1H Assists",
@@ -109,6 +114,10 @@ _HIGH_FLOOR_STATS: frozenset[str] = frozenset({
     # traditional sports cumulative lines (e.g. "Kills on Maps 1+2" ≈ "Points" in NBA)
     "Kills on Maps 1+2",
     "Assists on Maps 1+2",
+    "Headshots on Maps 1+2",
+    "Fantasy Points on Maps 1+2",
+    "Fantasy Points in Games 1+2",  # DOTA multi-game aggregate
+    "Kills in Games 1+2",           # DOTA multi-game aggregate
     # Per-game esports equivalents — single-game kill/assist lines for CoD/esports;
     # comparable reliability to the Maps 1+2 equivalents already in this set.
     "Kills on Game 1",

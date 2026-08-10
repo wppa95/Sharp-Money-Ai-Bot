@@ -455,6 +455,42 @@ class PropCandidateLog(Base):
     snapshot_external_id = Column(String(64),  nullable=True, index=True)
 
 
+# ── Scan Cycle Log ────────────────────────────────────────────────────────────
+
+class ScanCycleLog(Base):
+    """
+    Per-scan-cycle pipeline metrics written at the end of every underdog_job run.
+
+    Provides evidence that the FULL active prop pool is monitored every poll,
+    and shows exactly where the funnel narrows from raw feed to alert delivery.
+
+    stage order:
+      fetched → removed → futures → active (non-removed, non-futures)
+      active → unchanged (stable lines, skipped) + new + line_changed + cold_start
+      new + line_changed + cold_start → analyzed (scored)
+      analyzed → qualified (passed alert gates) → alert_delivered (Telegram sent)
+    """
+    __tablename__ = "scan_cycle_log"
+
+    id              = Column(Integer,  primary_key=True, autoincrement=True)
+    scan_ts         = Column(DateTime, nullable=False, index=True, default=datetime.utcnow)
+    # Stage 1 — raw feed
+    fetched         = Column(Integer,  nullable=False, default=0)  # snapshots from Underdog API
+    # Stage 2 — active filter
+    removed         = Column(Integer,  nullable=False, default=0)  # [REMOVED] markers in feed
+    futures         = Column(Integer,  nullable=False, default=0)  # futures/awards skipped
+    active          = Column(Integer,  nullable=False, default=0)  # non-removed, non-futures
+    # Stage 3 — known_keys gate
+    unchanged       = Column(Integer,  nullable=False, default=0)  # stable line → skipped (no re-score)
+    new_props       = Column(Integer,  nullable=False, default=0)  # first appearance
+    line_changed    = Column(Integer,  nullable=False, default=0)  # line moved ≥ MIN_LINE_CHANGE
+    cold_start      = Column(Integer,  nullable=False, default=0)  # scored during cold-start pass
+    # Stage 4+ — scoring & delivery
+    analyzed        = Column(Integer,  nullable=False, default=0)  # total scored this cycle
+    qualified       = Column(Integer,  nullable=False, default=0)  # passed all alert gates
+    alert_delivered = Column(Integer,  nullable=False, default=0)  # successfully sent to Telegram
+
+
 # ── Player Risk / Block System ─────────────────────────────────────────────────
 
 class PlayerRiskRecord(Base):
@@ -2782,6 +2818,83 @@ class Database:
                 "log_prop_candidate_batch: %d/%d rows failed", failed, inserted + failed
             )
         return inserted
+
+    async def log_scan_cycle(
+        self,
+        scan_ts: "datetime",
+        fetched: int = 0,
+        removed: int = 0,
+        futures: int = 0,
+        active: int = 0,
+        unchanged: int = 0,
+        new_props: int = 0,
+        line_changed: int = 0,
+        cold_start: int = 0,
+        analyzed: int = 0,
+        qualified: int = 0,
+        alert_delivered: int = 0,
+    ) -> None:
+        """Write one scan-cycle summary row. Non-fatal on failure."""
+        async with self.session() as s:
+            s.add(ScanCycleLog(
+                scan_ts         = scan_ts,
+                fetched         = fetched,
+                removed         = removed,
+                futures         = futures,
+                active          = active,
+                unchanged       = unchanged,
+                new_props       = new_props,
+                line_changed    = line_changed,
+                cold_start      = cold_start,
+                analyzed        = analyzed,
+                qualified       = qualified,
+                alert_delivered = alert_delivered,
+            ))
+            await s.commit()
+
+    async def get_scan_cycle_summary(self, since_hours: int = 24) -> dict:
+        """Aggregate ScanCycleLog for the full pipeline view in /funnel.
+
+        Returns a dict with cumulative pipeline counts over the requested window,
+        plus cycles (number of scan cycles recorded).
+        """
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(hours=since_hours)
+        async with self.session() as s:
+            result = await s.execute(
+                select(
+                    func.count(ScanCycleLog.id).label("cycles"),
+                    func.sum(ScanCycleLog.fetched).label("fetched"),
+                    func.sum(ScanCycleLog.removed).label("removed"),
+                    func.sum(ScanCycleLog.futures).label("futures"),
+                    func.sum(ScanCycleLog.active).label("active"),
+                    func.sum(ScanCycleLog.unchanged).label("unchanged"),
+                    func.sum(ScanCycleLog.new_props).label("new_props"),
+                    func.sum(ScanCycleLog.line_changed).label("line_changed"),
+                    func.sum(ScanCycleLog.cold_start).label("cold_start"),
+                    func.sum(ScanCycleLog.analyzed).label("analyzed"),
+                    func.sum(ScanCycleLog.qualified).label("qualified"),
+                    func.sum(ScanCycleLog.alert_delivered).label("alert_delivered"),
+                )
+                .where(ScanCycleLog.scan_ts >= cutoff)
+            )
+            row = result.one_or_none()
+            if row is None or (row.cycles or 0) == 0:
+                return {"cycles": 0}
+            return {
+                "cycles":           row.cycles or 0,
+                "fetched":          row.fetched or 0,
+                "removed":          row.removed or 0,
+                "futures":          row.futures or 0,
+                "active":           row.active or 0,
+                "unchanged":        row.unchanged or 0,
+                "new_props":        row.new_props or 0,
+                "line_changed":     row.line_changed or 0,
+                "cold_start":       row.cold_start or 0,
+                "analyzed":         row.analyzed or 0,
+                "qualified":        row.qualified or 0,
+                "alert_delivered":  row.alert_delivered or 0,
+            }
 
     async def get_funnel_summary(self, since_hours: int = 24) -> dict:
         """
