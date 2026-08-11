@@ -1,0 +1,236 @@
+🚨 FINAL V3.5 TECHNICAL PASS — STALE UNDERDOG ALERT + CONFIG VERIFICATION
+
+⚠️ CREDENTIALS FIRST:
+If Replit credentials/account restrictions prevent execution, DO NOT change code or partially implement anything. Stop and report exactly what is blocked. Once credentials/access are available, resume this exact task from the beginning.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🧊 V3.5 RULESET IS FROZEN
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Do NOT tune or redesign:
+
+• Tier definitions
+• Confidence thresholds
+• BQ thresholds
+• MLB UNDER whitelist
+• NFL direction rules
+• Tier 1 / Tier 2 rules
+• Strong Bet / Strong Under logic
+• Scoring model
+• Qualification rules
+• Dedup architecture
+• 120-second Underdog polling
+• Fast Resume removal
+
+Allowed changes ONLY:
+• Technical bugs
+• Data freshness
+• Provider/API behavior
+• Stability
+• Performance
+• Monitoring/telemetry
+• Regression tests
+• Alert formatting
+• Data-quality issues
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🚨 ISSUE #1 — STALE UNDERDOG ALERT
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Observed production example:
+
+Kyren Williams · NFL · Rush Yards
+Alert line: 57.5
+Pick: OVER
+Confidence: 95
+BQ: 95
+
+But when checked directly on Underdog shortly afterward:
+
+Current line: 59.5
+
+The bot therefore delivered an actionable alert using a stale line.
+
+We need to diagnose and fix this WITHOUT changing the V3.5 decision model.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🔎 STEP 1 — TRACE BEFORE PATCHING
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Trace an actionable Underdog prop end-to-end:
+
+Underdog API response
+→ raw provider data
+→ parsed prop
+→ normalized prop
+→ Underdog snapshot
+→ PropLineHistory
+→ scoring
+→ qualification
+→ priority override
+→ alert construction
+→ Telegram delivery
+
+Determine exactly how an older line can reach Telegram.
+
+Inspect:
+
+1. Provider fetch timestamp
+2. Provider response timestamp, if available
+3. Snapshot timestamp
+4. PropLineHistory timestamp
+5. Line used for scoring
+6. Line stored on the qualified candidate
+7. Line used by the alert formatter
+8. Time between fetch → score → delivery
+9. Whether alerts can queue after qualification
+10. Whether an older history/snapshot can be selected
+11. Whether 95+ priority overrides bypass normal freshness
+12. Whether the Underdog endpoint itself is returning stale data
+
+DO NOT implement a guessed freshness window.
+
+Report the actual root cause first.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🛡️ STEP 2 — PRE-DELIVERY FRESHNESS GUARD
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Once root cause is confirmed, implement the smallest architectural fix.
+
+Before ANY actionable Underdog alert is delivered:
+
+The line being sent must match the latest known Underdog line.
+
+Example:
+
+Scored line: 57.5
+Latest known line: 59.5
+
+→ BLOCK stale alert.
+
+Do NOT send 57.5.
+
+If architecture allows:
+→ refresh current prop
+→ re-score at 59.5
+→ deliver only if it still qualifies.
+
+Otherwise:
+→ invalidate stale candidate
+→ wait for next 120-second polling cycle.
+
+The guard MUST apply to:
+
+• normal new-prop alerts
+• line-change alerts
+• standing alerts
+• S-tier 95+ priority overrides
+• any other actionable Underdog delivery path
+
+A priority override must NEVER bypass line freshness.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🧪 REQUIRED REGRESSION TESTS
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Add tests for:
+
+1. Scored 57.5 / current 57.5 → allowed
+2. Scored 57.5 / current 59.5 → blocked
+3. Scored 59.5 / current 57.5 → blocked
+4. Line changes after qualification but before delivery → blocked
+5. Fresh re-score at new line → allowed
+6. New-prop path
+7. Line-change path
+8. Standing path
+9. S-tier 95+ override cannot bypass freshness
+10. Dedup still works
+11. CLV seed behavior unchanged
+12. Alert timestamp remains accurate
+
+Run targeted tests first, then FULL SUITE.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+⚙️ ISSUE #2 — VERIFY CONFIG DISPLAY VS ACTUAL GATES
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+/config currently reports:
+
+Min AI confidence: 60/100
+Min conf S-tier: 80
+Min conf A-tier: 70
+
+The frozen V3.5 implementation previously changed:
+
+UD_NON_STRICT_MIN_CONF_A: 60 → 70
+
+Do NOT change anything yet.
+
+Verify whether:
+
+• 60 is merely the global/base scoring threshold, while
+• 70 is the actual non-strict A-tier/actionable floor
+
+OR whether the production configuration is actually inconsistent with the frozen V3.5 rules.
+
+Trace config.py → market_engine.py → alert qualification → /config display.
+
+If the displayed 60 is intentional and does not weaken the V3.5 A-tier gate, leave it alone.
+
+If it is genuinely inconsistent, report it before changing it.
+
+Do NOT alter tier behavior without evidence.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+📡 VERIFY CURRENT RUNTIME
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Confirm:
+
+🟢 Underdog polling = 120 seconds
+🟢 max_instances = 1
+🟢 misfire protection remains intact
+🟢 Fast Resume references = 0
+🟢 all 9 scheduled jobs healthy
+🟢 no duplicate alert regression
+🟢 no stale actionable alert after freshness fix
+🟢 CLV pipeline still healthy
+🟢 database writes healthy
+🟢 provider health healthy
+
+Do not change polling again.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🧪 FINAL VERIFICATION
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Run:
+
+1. Targeted freshness tests
+2. Config/gate regression tests
+3. Duplicate/dedup tests
+4. CLV tests
+5. Full test suite
+
+Then restart the bot ONCE.
+
+Perform a live verification after restart.
+
+Report exactly:
+
+ROOT CAUSE:
+STALE-LINE FIX:
+CONFIG FINDING:
+FILES CHANGED:
+TESTS:
+FULL SUITE:
+FAST RESUME:
+POLL INTERVAL:
+DEDUP:
+CLV:
+BOT STARTUP:
+LIVE STATUS:
+
+🧊 FINAL RULE: V3.5 remains frozen. Technical/data-quality fixes only.
+After this pass, leave the bot running in observe mode and collect data. Do not make further tuning changes unless a genuine technical defect appears.

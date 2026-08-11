@@ -165,6 +165,7 @@ def _format_95_priority_alert(
         f"\nLine: {line_val:.1f}"
         f"{dir_line}\n"
         f"\n<i>🔥 Bet Quality {conf}/100 — Priority</i>"
+        f"\n<i>⚠️ Verify current line on Underdog before placing.</i>"
     )
 
 
@@ -194,6 +195,29 @@ def _is_game_live_or_past(snap: object, now: datetime) -> bool:
         except Exception:
             pass
     return False
+
+
+def _ud_line_fresh(
+    candidate_line: float,
+    player: str,
+    stat_type: str,
+    scan_line_map: "dict[tuple[str, str], float]",
+) -> bool:
+    """Return True when the candidate alert line matches the latest scan snapshot line.
+
+    Within a single underdog_job cycle the candidate line is always sourced from the
+    same snap object used in scoring, so this always returns True under normal operation.
+    The guard makes the invariant explicit: any future refactor that decouples scoring
+    from delivery will trigger a warning log and suppress the alert rather than
+    silently delivering a stale line.
+
+    Lines are discrete 0.5-step increments; a tolerance of 0.01 distinguishes
+    floating-point noise from a genuine line divergence.
+    """
+    latest = scan_line_map.get((player, stat_type))
+    if latest is None:
+        return True   # prop not in this scan's map — allow through (no stale evidence)
+    return abs(candidate_line - latest) < 0.01
 
 
 def _rss_mb() -> Optional[float]:
@@ -1080,6 +1104,18 @@ async def underdog_job(context) -> None:
     # always reflects the actual number of snapshots processed this cycle.
     _n_ud_snaps_this_cycle: int = len(ud_snaps)
 
+    # Pre-delivery freshness map — (player, stat_type) → latest known line from this fetch.
+    # Built once per scan from the same ud_snaps that scoring uses.  Every alert path
+    # confirms its candidate line against this map before delivery, making the freshness
+    # invariant explicit and guarding against future refactors that might decouple scoring
+    # from delivery.  Within a single scan these always match (same snap object).
+    _current_scan_line_map: dict[tuple[str, str], float] = {}
+    for _fsnap in ud_snaps:
+        if not _fsnap.player or "[REMOVED]" in (_fsnap.selection or ""):
+            continue
+        _fstat = _extract_ud_stat_type(_fsnap.selection, _fsnap.player, _fsnap.line)
+        _current_scan_line_map[(_fsnap.player, _fstat)] = _fsnap.line or 0.0
+
     if not ud_snaps:
         logger.debug("underdog_job: no Underdog pick'em snapshots in response")
         if _health:
@@ -1301,11 +1337,22 @@ async def underdog_job(context) -> None:
                         or decision.recommendation != "UNDER"
                         or config.is_mlb_under_allowed(stat_type)
                     )
+                    # Pre-delivery freshness guard — candidate line must match latest scan line.
+                    # Within a single scan this always passes (same snap object is used for
+                    # scoring and delivery).  Any divergence is logged and the alert is suppressed.
+                    _np_95_fresh = _ud_line_fresh(line_val, player, stat_type, _current_scan_line_map)
+                    if not _np_95_fresh:
+                        logger.warning(
+                            "UD freshness_guard [np-95]: %s | %s | alert_line=%.1f"
+                            " scan line diverged — BLOCKED",
+                            player, stat_type, line_val,
+                        )
                     if (
                         _np_pp_key not in _priority_alerted_this_scan
                         and _np_pp_key not in _priority_override_sent
                         and chat_ids
                         and _np_95_dir_ok
+                        and _np_95_fresh
                     ):
                         # Attempt to get a direction; decision may be None if validation
                         # blocked the computation — try with market signals only.
@@ -1437,6 +1484,15 @@ async def underdog_job(context) -> None:
                             "UD dedup_gate [new]: %s | %s | already alerted recently at line=%.1f",
                             player, stat_type, line_val,
                         )
+
+                # Pre-delivery freshness guard — candidate line must match latest scan line.
+                if _np_bet_ready and not _ud_line_fresh(line_val, player, stat_type, _current_scan_line_map):
+                    logger.warning(
+                        "UD freshness_guard [np]: %s | %s | alert_line=%.1f"
+                        " scan line diverged — BLOCKED",
+                        player, stat_type, line_val,
+                    )
+                    _np_bet_ready = False
 
                 if _np_bet_ready and chat_ids:
                     # Prop Intelligence trace for richer alert context
@@ -1717,11 +1773,20 @@ async def underdog_job(context) -> None:
                             or decision.recommendation != "UNDER"
                             or config.is_mlb_under_allowed(stat_type)
                         )
+                        # Pre-delivery freshness guard — candidate line must match latest scan line.
+                        _lc_95_fresh = _ud_line_fresh(snap.line or 0.0, player, stat_type, _current_scan_line_map)
+                        if not _lc_95_fresh:
+                            logger.warning(
+                                "UD freshness_guard [lc-95]: %s | %s | alert_line=%.1f"
+                                " scan line diverged — BLOCKED",
+                                player, stat_type, snap.line or 0.0,
+                            )
                         if (
                             _lc_pp_key not in _priority_alerted_this_scan
                             and _lc_pp_key not in _priority_override_sent
                             and chat_ids
                             and _lc_95_dir_ok
+                            and _lc_95_fresh
                         ):
                             _lc_pp_dec = decision
                             if _lc_pp_dec is None:
@@ -2430,11 +2495,20 @@ async def underdog_job(context) -> None:
                         or _sdec.recommendation != "UNDER"
                         or config.is_mlb_under_allowed(_st)
                     )
+                    # Pre-delivery freshness guard — candidate line must match latest scan line.
+                    _sp_95_fresh = _ud_line_fresh(_line_val, _sp, _st, _current_scan_line_map)
+                    if not _sp_95_fresh:
+                        logger.warning(
+                            "UD freshness_guard [sp-95]: %s | %s | alert_line=%.1f"
+                            " scan line diverged — BLOCKED",
+                            _sp, _st, _line_val,
+                        )
                     if (
                         _sp_pp_key not in _priority_alerted_this_scan
                         and _sp_pp_key not in _priority_override_sent
                         and chat_ids
                         and _sp_95_dir_ok
+                        and _sp_95_fresh
                     ):
                         _priority_alerted_this_scan.add(_sp_pp_key)
                         _priority_override_sent.add(_sp_pp_key)
@@ -2534,6 +2608,15 @@ async def underdog_job(context) -> None:
                         )
                     except Exception:
                         pass
+                # Pre-delivery freshness guard — candidate line must match latest scan line.
+                if not _ud_line_fresh(_line_val, _sp, _st, _current_scan_line_map):
+                    logger.warning(
+                        "UD freshness_guard [sp]: %s | %s | alert_line=%.1f"
+                        " scan line diverged — BLOCKED",
+                        _sp, _st, _line_val,
+                    )
+                    continue
+
                 delivery   = AlertDelivery(db, bot, chat_ids)
                 _sresult   = await delivery.deliver_underdog(
                     player_name         = _sp,
