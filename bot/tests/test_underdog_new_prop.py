@@ -176,9 +176,9 @@ async def test_low_line_new_prop_without_history_goes_to_digest():
 
     # No immediate alert — not enough history
     delivery.deliver_underdog.assert_not_called()
-    # But the record IS saved and the prop goes to digest
-    db.save_underdog_snapshot.assert_called_once()
-    record = db.save_underdog_snapshot.call_args[0][0]
+    # But the record IS saved (via bulk) and the prop goes to digest
+    db.save_underdog_snapshots_bulk.assert_called()
+    record = db.save_underdog_snapshots_bulk.call_args[0][0][0]
     assert record.alert_outcome == "new_prop_summary"
 
 
@@ -201,8 +201,8 @@ async def test_high_line_new_prop_not_immediately_alerted():
 
     # deliver_underdog should NOT be called — prop goes to cycle summary instead
     delivery.deliver_underdog.assert_not_called()
-    # But it must still be saved to DB
-    db.save_underdog_snapshot.assert_called_once()
+    # But it must still be saved to DB (via bulk)
+    db.save_underdog_snapshots_bulk.assert_called()
 
 
 @pytest.mark.asyncio
@@ -281,8 +281,8 @@ async def test_new_prop_outcome_stored_as_new_prop_sent(caplog):
     sent_result = DeliveryResult(sent=True, recipients_sent=1)
     await _run_job(snaps, db, deliver_result=sent_result, hit_rates=_make_hit_rates())
 
-    db.save_underdog_snapshot.assert_called_once()
-    record = db.save_underdog_snapshot.call_args[0][0]
+    db.save_underdog_snapshots_bulk.assert_called()
+    record = db.save_underdog_snapshots_bulk.call_args[0][0][0]
     assert record.alert_outcome == "new_prop_sent"
     assert record.alert_sent is True
 
@@ -299,8 +299,8 @@ async def test_non_immediate_new_prop_outcome_is_summary():
 
     await _run_job(snaps, db)
 
-    db.save_underdog_snapshot.assert_called_once()
-    record = db.save_underdog_snapshot.call_args[0][0]
+    db.save_underdog_snapshots_bulk.assert_called()
+    record = db.save_underdog_snapshots_bulk.call_args[0][0][0]
     assert record.alert_outcome == "new_prop_summary"
     assert record.alert_sent is False
 
@@ -362,7 +362,7 @@ async def test_new_prop_score_stored_on_record():
     sent = DeliveryResult(sent=True, recipients_sent=1)
     await _run_job(snaps, db, deliver_result=sent)
 
-    record = db.save_underdog_snapshot.call_args[0][0]
+    record = db.save_underdog_snapshots_bulk.call_args[0][0][0]
     # score_tier and score_total should be set (not None) since scoring ran
     assert record.score_tier is not None
     assert record.score_total is not None
@@ -404,8 +404,8 @@ async def test_new_props_stored_silently_no_digest():
         assert "UNDERDOG NEW PROPS" not in str(c), (
             "Cycle digest must not be broadcast — new props are stored silently"
         )
-    # Prop is still persisted in the DB
-    db.save_underdog_snapshot.assert_called_once()
+    # Prop is still persisted in the DB (via bulk save)
+    db.save_underdog_snapshots_bulk.assert_called()
 
 
 @pytest.mark.asyncio
@@ -452,8 +452,8 @@ async def test_priority_stat_high_line_goes_to_digest_not_immediate():
 
     # High line + no history → stars=0 < gate AND line > 0.5 → not immediate
     delivery.deliver_underdog.assert_not_called()
-    # Must still be batched into the digest
-    db.save_underdog_snapshot.assert_called_once()
+    # Must still be persisted in the DB (via bulk save)
+    db.save_underdog_snapshots_bulk.assert_called()
 
 
 @pytest.mark.asyncio
@@ -480,8 +480,8 @@ async def test_validation_json_stored_on_record():
 
     await _run_job(snaps, db)
 
-    db.save_underdog_snapshot.assert_called_once()
-    record = db.save_underdog_snapshot.call_args[0][0]
+    db.save_underdog_snapshots_bulk.assert_called()
+    record = db.save_underdog_snapshots_bulk.call_args[0][0][0]
     assert record.validation_json is not None
     import json
     parsed = json.loads(record.validation_json)
@@ -497,7 +497,7 @@ async def test_validation_json_stored_with_history():
 
     await _run_job(snaps, db)
 
-    record = db.save_underdog_snapshot.call_args[0][0]
+    record = db.save_underdog_snapshots_bulk.call_args[0][0][0]
     import json
     parsed = json.loads(record.validation_json)
     assert parsed["n"] == 8
@@ -515,7 +515,7 @@ async def test_half_line_non_priority_stat_goes_to_digest():
 
     # 0.5 line but "Walks" not in priority cats → not immediate
     delivery.deliver_underdog.assert_not_called()
-    db.save_underdog_snapshot.assert_called_once()
+    db.save_underdog_snapshots_bulk.assert_called()
 
 
 # ── Format function ────────────────────────────────────────────────────────────

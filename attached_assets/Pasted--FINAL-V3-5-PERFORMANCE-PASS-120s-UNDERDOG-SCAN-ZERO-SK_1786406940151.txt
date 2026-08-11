@@ -1,0 +1,221 @@
+🚨 FINAL V3.5 PERFORMANCE PASS — 120s UNDERDOG SCAN / ZERO SKIPS
+
+⚠️ CREDENTIALS FIRST:
+If Replit credentials/account restrictions prevent execution, STOP. Do not partially implement anything and do not change the ruleset. Report exactly what is blocked.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🧊 V3.5 RULESET IS FROZEN
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Do NOT change:
+
+• Tier definitions
+• Confidence thresholds
+• BQ thresholds
+• MLB UNDER whitelist
+• NFL direction rules
+• Tier 1 / Tier 2 rules
+• Strong Bet / Strong Under logic
+• Scoring model
+• Qualification gates
+• Dedup behavior
+• CLV logic
+• 120-second polling target
+
+This is a PERFORMANCE/STABILITY task only.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🚨 ISSUE — SKIPPED UNDERDOG SCANS
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Logs have shown:
+
+“skipped: Max number of running instances reached 1”
+
+Current configuration:
+
+Underdog polling: 120 seconds
+max_instances: 1
+
+We WANT to keep both.
+
+Do NOT increase max_instances.
+Do NOT create concurrent Underdog scans.
+Do NOT reduce the number of props analyzed.
+
+Goal:
+
+🎯 Keep the 120-second polling cadence while getting skipped executions as close to ZERO as realistically possible.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🔎 STEP 1 — MEASURE FIRST
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Before changing production code, measure the Underdog monitor:
+
+• Average scan duration
+• Median scan duration
+• P95 scan duration
+• Maximum scan duration
+• Number of scans exceeding 120s
+• Number of scheduler skips
+• Props fetched per scan
+• Props scored per scan
+• DB writes per scan
+• Time spent fetching
+• Time spent parsing
+• Time spent scoring
+• Time spent writing to SQLite
+• Time spent on enrichment/API calls
+
+Identify the actual bottleneck.
+
+Do NOT optimize based on guesses.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+⚡ STEP 2 — OPTIMIZE WITHOUT CHANGING BEHAVIOR
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+If the scan is exceeding 120 seconds, make only safe performance improvements.
+
+Allowed:
+
+• Remove unnecessary duplicate work
+• Reuse already-fetched data within the same scan
+• Avoid redundant database queries
+• Batch database writes where behavior remains identical
+• Avoid repeated parsing/calculation
+• Improve inefficient loops/lookups
+• Cache data safely within a single scan
+• Move non-critical work off the critical Underdog scan path if it does not alter alert behavior
+
+NOT allowed:
+
+❌ Reduce prop coverage
+❌ Skip markets
+❌ Skip sports
+❌ Lower scoring quality
+❌ Change tier rules
+❌ Change confidence/BQ thresholds
+❌ Change MLB/NFL direction rules
+❌ Change dedup windows
+❌ Change CLV logic
+❌ Disable freshness protection
+❌ Increase max_instances
+❌ Introduce concurrent Underdog scans
+
+The scan must continue monitoring the full active Underdog feed.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🧪 STEP 3 — REGRESSION TESTS
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Add/update tests proving:
+
+1. Poll interval remains 120s
+2. max_instances remains 1
+3. Full active prop feed is still monitored
+4. No sports/markets are silently removed
+5. Scoring behavior is unchanged
+6. Tier behavior is unchanged
+7. Confidence/BQ gates are unchanged
+8. MLB UNDER whitelist unchanged
+9. NFL direction rules unchanged
+10. Dedup unchanged
+11. CLV unchanged
+12. Stale-line guards remain active on all delivery paths
+13. Fast Resume remains completely removed
+14. Scheduler skips are measurable/observable
+
+Run targeted tests first, then FULL SUITE.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🔄 STEP 4 — RESTART + LIVE VERIFICATION
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+After tests pass:
+
+Restart the bot ONCE.
+
+Verify:
+
+🟢 Startup clean
+🟢 120s Underdog interval
+🟢 max_instances=1
+🟢 all 9 jobs registered
+🟢 no startup errors
+🟢 Underdog fetch healthy
+🟢 full prop feed monitored
+🟢 stale-line guard active
+🟢 dedup active
+🟢 CLV active
+🟢 Fast Resume references = 0
+
+Then observe at least several Underdog cycles.
+
+Report whether any:
+
+“Max number of running instances reached 1”
+
+events occur after the optimization.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+📋 FINAL REPORT
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Report exactly:
+
+SCAN DURATION BEFORE:
+SCAN DURATION AFTER:
+P95:
+MAX:
+SKIPPED BEFORE:
+SKIPPED AFTER:
+PROPS MONITORED:
+FILES CHANGED:
+TARGETED TESTS:
+FULL SUITE:
+FAST RESUME:
+STALE-LINE GUARD:
+DEDUP:
+CLV:
+POLL INTERVAL:
+MAX INSTANCES:
+BOT STARTUP:
+LIVE STATUS:
+
+If the scan already completes comfortably under 120 seconds and there are no meaningful skips, make NO unnecessary code changes.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🧊 FREEZE AFTER VERIFICATION
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Once this passes:
+
+🧊 FREEZE V3.5.
+
+Leave the bot running in OBSERVE MODE.
+
+No further tuning.
+
+Only intervene for genuine technical defects:
+
+• crashes
+• scheduler failures
+• provider/API failures
+• stale data
+• duplicate alerts
+• missing alerts caused by pipeline defects
+• database corruption/write failures
+• delivery failures
+• performance degradation
+
+Do NOT change betting rules or model thresholds while collecting the next live sample.
+
+Final state should be:
+
+🟢 V3.5 LIVE
+🧊 RULESET FROZEN
+📡 120s UNDERDOG MONITOR
+🔒 max_instances=1
+📊 OBSERVE MODE

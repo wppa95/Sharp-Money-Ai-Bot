@@ -1134,6 +1134,7 @@ async def underdog_job(context) -> None:
     _n_unchanged_skipped: int       = 0   # props with unchanged lines — stable, no re-score needed
     _n_lc_sent:            int       = 0   # line-change alerts delivered this cycle
     _cold_start_records:  list       = []  # records buffered for bulk save at end of cold-start
+    _incremental_records: list       = []  # incremental records batched for end-of-loop bulk save
     _cs_before_tiers:     dict       = {}  # tier counts under old calibration (before)
     _cs_after_tiers:      dict       = {}  # tier counts under new calibration (after)
     _scored_props:        list[dict] = []  # all scored props this cycle — for end-of-cycle debug log
@@ -2321,12 +2322,35 @@ async def underdog_job(context) -> None:
                 fetched_at         = now,
             )
             # Cold-start: buffer for a single bulk transaction after the loop.
-            # Incremental: commit immediately (rare, no lock-contention risk).
+            # Incremental: also buffer — bulk-saved once after the loop completes
+            # (same pattern as cold-start).  Avoids ~5 000 individual async
+            # SQLite transactions per scan which dominated scan wall-clock time.
             if is_cold_start:
                 _cold_start_records.append(record)
             else:
-                await db.save_underdog_snapshot(record)
+                _incremental_records.append(record)
     
+        # ── Bulk-save incremental snapshots ───────────────────────────────────────
+        # All current-scan snapshots have been accumulated in _incremental_records
+        # instead of being saved one-by-one inside the loop.  A single bulk INSERT
+        # (one SQLite transaction ≈ 5–15 s) replaces ~5 000 individual sessions
+        # (≈ 100–200 s).  Must run before the standing-path so has_recent_ud_alert
+        # can find current-scan alert_sent rows.
+        if _incremental_records and db:
+            # Pass a copy so that the .clear() below does not retroactively
+            # empty the list object that was handed to the mock in tests.
+            _incr_snapshot = list(_incremental_records)
+            _incremental_records.clear()
+            try:
+                await db.save_underdog_snapshots_bulk(_incr_snapshot)
+            except Exception as _bulk_exc:
+                logger.warning(
+                    "underdog_job: bulk snapshot save failed (%d records): %s",
+                    len(_incr_snapshot), _bulk_exc,
+                )
+            finally:
+                del _incr_snapshot
+
         # ── 4A: Standing opportunity scan ─────────────────────────────────────────
         # After cold-start, re-evaluate stable HIGH_FLOOR props that had no line
         # change and are not new this cycle.  Allows evidence-driven (hit-rate-
