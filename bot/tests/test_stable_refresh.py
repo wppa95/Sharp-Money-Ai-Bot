@@ -287,22 +287,6 @@ class TestGetActiveUnderdogSnapshotPerPropSQLite:
     snapshot to be returned for a prop that was subsequently removed.
     """
 
-    _loop = None
-
-    @classmethod
-    def setup_class(cls):
-        import asyncio
-        cls._loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(cls._loop)
-
-    @classmethod
-    def teardown_class(cls):
-        if cls._loop and not cls._loop.is_closed():
-            cls._loop.close()
-
-    def _run(self, coro):
-        return self.__class__._loop.run_until_complete(coro)
-
     async def _make_db(self):
         from database import Database
         db = Database(url="sqlite+aiosqlite:///:memory:")
@@ -331,25 +315,24 @@ class TestGetActiveUnderdogSnapshotPerPropSQLite:
             fetched_at  = datetime.datetime.utcnow(),
         )
 
-    def test_active_prop_appears_in_result(self):
+    @pytest.mark.asyncio
+    async def test_active_prop_appears_in_result(self):
         """A prop with latest removed=False is returned."""
-        async def _run():
-            db = await self._make_db()
-            await db.save_underdog_snapshot(self._make_record(removed=False))
-            return await db.get_active_underdog_snapshot_per_prop()
-        result = self._run(_run())
+        db = await self._make_db()
+        await db.save_underdog_snapshot(self._make_record(removed=False))
+        result = await db.get_active_underdog_snapshot_per_prop()
         assert ("Test Player", "Points") in result
 
-    def test_only_removal_record_excluded(self):
+    @pytest.mark.asyncio
+    async def test_only_removal_record_excluded(self):
         """A prop with only a removal record is absent from the result."""
-        async def _run():
-            db = await self._make_db()
-            await db.save_underdog_snapshot(self._make_record(removed=True))
-            return await db.get_active_underdog_snapshot_per_prop()
-        result = self._run(_run())
+        db = await self._make_db()
+        await db.save_underdog_snapshot(self._make_record(removed=True))
+        result = await db.get_active_underdog_snapshot_per_prop()
         assert ("Test Player", "Points") not in result
 
-    def test_older_active_then_removal_excluded(self):
+    @pytest.mark.asyncio
+    async def test_older_active_then_removal_excluded(self):
         """
         CRITICAL: A prop with an older active row (id N) followed by a newer
         removal row (id N+1) must be ABSENT — the newer removal wins.
@@ -359,31 +342,27 @@ class TestGetActiveUnderdogSnapshotPerPropSQLite:
         The new method computes MAX over all rows (= id N+1, removal) then
         filters removed=False, so the prop is correctly excluded.
         """
-        async def _run():
-            db = await self._make_db()
-            # Active row inserted first (gets lower autoincrement id)
-            await db.save_underdog_snapshot(self._make_record(removed=False))
-            # Removal row inserted second (gets higher id — the LATEST record)
-            await db.save_underdog_snapshot(self._make_record(removed=True))
-            return await db.get_active_underdog_snapshot_per_prop()
-        result = self._run(_run())
+        db = await self._make_db()
+        # Active row inserted first (gets lower autoincrement id)
+        await db.save_underdog_snapshot(self._make_record(removed=False))
+        # Removal row inserted second (gets higher id — the LATEST record)
+        await db.save_underdog_snapshot(self._make_record(removed=True))
+        result = await db.get_active_underdog_snapshot_per_prop()
         # Must be ABSENT — the latest record is a removal
         assert ("Test Player", "Points") not in result
 
-    def test_old_get_latest_returns_stale_snap_for_same_data(self):
+    @pytest.mark.asyncio
+    async def test_old_get_latest_returns_stale_snap_for_same_data(self):
         """
         Regression proof: the old get_latest_underdog_snapshot_per_prop
         incorrectly returns the stale active snapshot when latest is removal.
         Documents the known-broken behavior so the contrast is explicit.
         """
-        async def _run():
-            db = await self._make_db()
-            await db.save_underdog_snapshot(self._make_record(removed=False))
-            await db.save_underdog_snapshot(self._make_record(removed=True))
-            stale  = await db.get_latest_underdog_snapshot_per_prop()
-            active = await db.get_active_underdog_snapshot_per_prop()
-            return stale, active
-        stale, active = self._run(_run())
+        db = await self._make_db()
+        await db.save_underdog_snapshot(self._make_record(removed=False))
+        await db.save_underdog_snapshot(self._make_record(removed=True))
+        stale  = await db.get_latest_underdog_snapshot_per_prop()
+        active = await db.get_active_underdog_snapshot_per_prop()
 
         # Old method returns stale row (documented bug)
         assert ("Test Player", "Points") in stale, (
@@ -393,31 +372,25 @@ class TestGetActiveUnderdogSnapshotPerPropSQLite:
         # New method correctly excludes the prop
         assert ("Test Player", "Points") not in active
 
-    def test_mixed_pool_only_active_props_returned(self):
+    @pytest.mark.asyncio
+    async def test_mixed_pool_only_active_props_returned(self):
         """With one active and one removed prop, only the active one appears."""
-        async def _run():
-            db = await self._make_db()
-            await db.save_underdog_snapshot(
-                self._make_record(player="Active", removed=False)
-            )
-            await db.save_underdog_snapshot(
-                self._make_record(player="Gone", removed=True)
-            )
-            return await db.get_active_underdog_snapshot_per_prop()
-        result = self._run(_run())
+        db = await self._make_db()
+        await db.save_underdog_snapshot(self._make_record(player="Active", removed=False))
+        await db.save_underdog_snapshot(self._make_record(player="Gone",   removed=True))
+        result = await db.get_active_underdog_snapshot_per_prop()
         assert ("Active", "Points") in result
         assert ("Gone",   "Points") not in result
 
-    def test_re_activated_prop_returned(self):
+    @pytest.mark.asyncio
+    async def test_re_activated_prop_returned(self):
         """A prop that was removed then re-added (highest id = active) appears."""
-        async def _run():
-            db = await self._make_db()
-            await db.save_underdog_snapshot(self._make_record(removed=False, line=20.0))
-            await db.save_underdog_snapshot(self._make_record(removed=True,  line=20.0))
-            # Re-added with a new line
-            await db.save_underdog_snapshot(self._make_record(removed=False, line=22.5))
-            return await db.get_active_underdog_snapshot_per_prop()
-        result = self._run(_run())
+        db = await self._make_db()
+        await db.save_underdog_snapshot(self._make_record(removed=False, line=20.0))
+        await db.save_underdog_snapshot(self._make_record(removed=True,  line=20.0))
+        # Re-added with a new line
+        await db.save_underdog_snapshot(self._make_record(removed=False, line=22.5))
+        result = await db.get_active_underdog_snapshot_per_prop()
         assert ("Test Player", "Points") in result
         snap = result[("Test Player", "Points")]
         assert snap.line_value == 22.5
@@ -589,20 +562,6 @@ class TestStableRefreshJobE2E:
     DB I/O and scoring are mocked; only the snapshot model is real.
     """
 
-    @classmethod
-    def setup_class(cls):
-        import asyncio
-        cls._loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(cls._loop)
-
-    @classmethod
-    def teardown_class(cls):
-        if cls._loop and not cls._loop.is_closed():
-            cls._loop.close()
-
-    def _run(self, coro):
-        return self.__class__._loop.run_until_complete(coro)
-
     def _make_real_snap(
         self,
         player:  str   = "Real Player",
@@ -627,9 +586,9 @@ class TestStableRefreshJobE2E:
 
     def _make_wl_pol_row(
         self,
-        player: str  = "WL Player",
-        stat:   str  = "Points",
-        sport:  str  = "NBA",
+        player: str   = "WL Player",
+        stat:   str   = "Points",
+        sport:  str   = "NBA",
         line:   float = 20.0,
         conf:   int   = 35,
     ):
@@ -653,84 +612,74 @@ class TestStableRefreshJobE2E:
         )
         return row
 
-    def test_job_processes_real_snap_without_attribute_error(self):
+    def _make_e2e_db(self, active_pool: dict, watchlist: list | None = None):
+        db = AsyncMock()
+        db.get_active_underdog_snapshot_per_prop = AsyncMock(return_value=active_pool)
+        db.get_latest_underdog_snapshot_per_prop = AsyncMock(return_value={})
+        db.get_active_watchlist_candidates       = AsyncMock(return_value=(watchlist or []))
+        db.get_recently_alerted_prop_keys        = AsyncMock(return_value=frozenset())
+        db.has_recent_ud_alert                   = AsyncMock(return_value=False)
+        db.get_ud_prop_history                   = AsyncMock(return_value=[])
+        db.log_prop_opportunity                  = AsyncMock(return_value=None)
+        db.mark_ud_snapshot_alert_sent           = AsyncMock(return_value=None)
+        db.mark_opportunity_alert_sent           = AsyncMock(return_value=None)
+        db.seed_clv_from_ud_confirmation         = AsyncMock(return_value=None)
+        return db
+
+    @pytest.mark.asyncio
+    async def test_job_processes_real_snap_without_attribute_error(self):
         """
         _stable_refresh_job must not raise AttributeError when given a real
-        UnderdogSnapshotRecord (i.e. field access uses line_value, not line,
-        and removed, not selection).
+        UnderdogSnapshotRecord (field access must use line_value, not .line,
+        and removed, not .selection).
         """
         real_snap = self._make_real_snap()
+        db  = self._make_e2e_db({("Real Player", "Points"): real_snap})
+        # All props in bulk-alerted set → deduped immediately, no scoring needed
+        db.get_recently_alerted_prop_keys = AsyncMock(
+            return_value=frozenset({("Real Player", "Points")})
+        )
+        ctx = _make_context(db)
+        with patch("market_engine.get_health_tracker", return_value=None):
+            from market_engine import _stable_refresh_job
+            # Must not raise — specifically no AttributeError on .line or .selection
+            await _stable_refresh_job(ctx)
 
-        async def _run():
-            db = AsyncMock()
-            db.get_active_underdog_snapshot_per_prop = AsyncMock(
-                return_value={("Real Player", "Points"): real_snap}
-            )
-            db.get_active_watchlist_candidates = AsyncMock(return_value=[])
-            db.has_recent_ud_alert    = AsyncMock(return_value=True)  # dedup → skip scoring
-            db.get_ud_prop_history    = AsyncMock(return_value=[])
-            db.log_prop_opportunity   = AsyncMock(return_value=None)
-            db.mark_ud_snapshot_alert_sent = AsyncMock(return_value=None)
-            db.mark_opportunity_alert_sent = AsyncMock(return_value=None)
-            db.get_latest_underdog_snapshot_per_prop = AsyncMock(return_value={})
-
-            ctx = _make_context(db)
-            with patch("market_engine.get_health_tracker", return_value=None):
-                from market_engine import _stable_refresh_job
-                # Must not raise — specifically no AttributeError on .line or .selection
-                await _stable_refresh_job(ctx)
-
-        self._run(_run())  # raises on any exception including AttributeError
-
-    def test_job_reads_line_value_field_not_line(self):
+    @pytest.mark.asyncio
+    async def test_job_reads_line_value_field_not_line(self):
         """
         Confirm the job reads snap.line_value — if it accidentally reads snap.line
-        it would get None (MagicMock default for unset attributes on a real ORM row),
-        causing 0.0 line values to be processed instead of real values.
+        it would get None (ORM default for unset attrs), causing 0.0 line values.
         """
         real_snap = self._make_real_snap(line=27.5)
+        db  = self._make_e2e_db({("Real Player", "Points"): real_snap})
+        ctx = _make_context(db)
+        low = _make_score(total=20, tier="PASS", stars=0)
+        val = _make_validation(supported=False)
 
         line_seen: list = []
+        with (
+            patch("market_engine.get_health_tracker", return_value=None),
+            patch("market_engine._is_futures_stat",   return_value=False),
+            patch("market_engine._is_prop_deduped",   return_value=False),
+            patch("engine.ud_scoring.score_ud_prop",   return_value=low) as mock_score,
+            patch("engine.player_validator.validate_player_prop", return_value=val),
+            patch("market_engine._fetch_and_compute_hit_rates",
+                  new_callable=AsyncMock, return_value=None),
+        ):
+            from market_engine import _stable_refresh_job
+            await _stable_refresh_job(ctx)
+            if mock_score.called:
+                line_seen.append(mock_score.call_args.kwargs.get("current_line"))
 
-        async def _run():
-            db = AsyncMock()
-            db.get_active_underdog_snapshot_per_prop = AsyncMock(
-                return_value={("Real Player", "Points"): real_snap}
-            )
-            db.get_active_watchlist_candidates = AsyncMock(return_value=[])
-            db.has_recent_ud_alert    = AsyncMock(return_value=False)
-            db.get_ud_prop_history    = AsyncMock(return_value=[])
-            db.log_prop_opportunity   = AsyncMock(return_value=None)
-            db.mark_ud_snapshot_alert_sent = AsyncMock(return_value=None)
-            db.mark_opportunity_alert_sent = AsyncMock(return_value=None)
-            db.get_latest_underdog_snapshot_per_prop = AsyncMock(return_value={})
-
-            ctx  = _make_context(db)
-            low  = _make_score(total=20, tier="PASS", stars=0)
-            val  = _make_validation(supported=False)
-            with (
-                patch("market_engine.get_health_tracker", return_value=None),
-                patch("market_engine._is_futures_stat",   return_value=False),
-                patch("market_engine._is_prop_deduped",   return_value=False),
-                patch("engine.ud_scoring.score_ud_prop",   return_value=low) as mock_score,
-                patch("engine.player_validator.validate_player_prop", return_value=val),
-                patch("market_engine._fetch_and_compute_hit_rates", new_callable=AsyncMock, return_value=None),
-            ):
-                from market_engine import _stable_refresh_job
-                await _stable_refresh_job(ctx)
-                # Capture line argument passed to score_ud_prop
-                if mock_score.called:
-                    line_seen.append(mock_score.call_args.kwargs.get("current_line"))
-
-        self._run(_run())
         if line_seen:
-            # line_value=27.5 must be what was passed — not 0.0 (from None) or None
             assert line_seen[0] == 27.5, (
                 f"Expected 27.5 from snap.line_value; got {line_seen[0]!r}. "
-                "Job is likely reading snap.line (wrong field) instead of snap.line_value."
+                "Job is reading snap.line (wrong field) instead of snap.line_value."
             )
 
-    def test_watchlist_rescan_uses_line_value_not_line(self):
+    @pytest.mark.asyncio
+    async def test_watchlist_rescan_uses_line_value_not_line(self):
         """
         The watchlist rescan path must read snap.line_value for the current line.
         A real UnderdogSnapshotRecord has no .line attribute so any access to it
@@ -738,40 +687,32 @@ class TestStableRefreshJobE2E:
         """
         real_snap = self._make_real_snap(player="WL Player", stat="Points", line=20.0)
         real_wl   = self._make_wl_pol_row(player="WL Player", stat="Points")
-
-        async def _run():
-            db = AsyncMock()
-            db.get_active_underdog_snapshot_per_prop = AsyncMock(
-                return_value={("WL Player", "Points"): real_snap}
-            )
-            db.get_active_watchlist_candidates = AsyncMock(return_value=[real_wl])
-            db.has_recent_ud_alert    = AsyncMock(return_value=True)  # skip Part 1 scoring
-            db.get_ud_prop_history    = AsyncMock(return_value=[])
-            db.log_prop_opportunity   = AsyncMock(return_value=None)
-            db.mark_ud_snapshot_alert_sent = AsyncMock(return_value=None)
-            db.mark_opportunity_alert_sent = AsyncMock(return_value=None)
-            db.get_latest_underdog_snapshot_per_prop = AsyncMock(return_value={})
-
-            ctx  = _make_context(db)
-            low  = _make_score(total=22, tier="PASS", stars=0)
-            val  = _make_validation(supported=False)
-            dec  = _make_decision(rec="PASS", tier="PASS", conf=22)
-            with (
-                patch("market_engine.get_health_tracker", return_value=None),
-                patch("market_engine._is_futures_stat",   return_value=False),
-                patch("market_engine._is_prop_deduped",   return_value=False),
-                patch("engine.ud_scoring.score_ud_prop",   return_value=low),
-                patch("engine.player_validator.validate_player_prop", return_value=val),
-                patch("market_engine._fetch_and_compute_hit_rates", new_callable=AsyncMock, return_value=None),
-                patch("engine.ud_bet_decision.make_ud_bet_decision",  return_value=dec),
-                patch("market_engine._is_game_live_or_past", return_value=False),
-            ):
-                from market_engine import _stable_refresh_job
-                # Must not raise AttributeError; low score → Rejected (not Removed)
-                await _stable_refresh_job(ctx)
-                # If we get here without AttributeError the field access is correct
-
-        self._run(_run())
+        db  = self._make_e2e_db(
+            {("WL Player", "Points"): real_snap},
+            watchlist=[real_wl],
+        )
+        # All Part 1 props in bulk-alerted set so scoring is skipped for Part 1
+        db.get_recently_alerted_prop_keys = AsyncMock(
+            return_value=frozenset({("WL Player", "Points")})
+        )
+        ctx = _make_context(db)
+        low = _make_score(total=22, tier="PASS", stars=0)
+        val = _make_validation(supported=False)
+        dec = _make_decision(rec="PASS", tier="PASS", conf=22)
+        with (
+            patch("market_engine.get_health_tracker", return_value=None),
+            patch("market_engine._is_futures_stat",   return_value=False),
+            patch("market_engine._is_prop_deduped",   return_value=False),
+            patch("engine.ud_scoring.score_ud_prop",   return_value=low),
+            patch("engine.player_validator.validate_player_prop", return_value=val),
+            patch("market_engine._fetch_and_compute_hit_rates",
+                  new_callable=AsyncMock, return_value=None),
+            patch("engine.ud_bet_decision.make_ud_bet_decision",  return_value=dec),
+            patch("market_engine._is_game_live_or_past", return_value=False),
+        ):
+            from market_engine import _stable_refresh_job
+            # Must not raise AttributeError; low score → Rejected (not Removed)
+            await _stable_refresh_job(ctx)
 
 
 class TestWatchlistCursorRotation:
