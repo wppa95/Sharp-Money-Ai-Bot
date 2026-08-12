@@ -43,6 +43,7 @@
 - [V3.2 final targeted fix pass](v32-final-targeted-fix.md) — 8 issues: cold_start ACCEPTED gate; /picks strict-sport filter; /alerts PropOpportunityLog; funnel rate precision; dashboard tier % denominator; 3474 tests Aug 2026.
 - [Stale recovery display fix](stale-recovery-display.md) — /health showed 61h-old recovery as active; _RECOVERY_STALE_HOURS=6.0 gate added; last_recovery_age_hours() on HealthTracker; 3509 tests Aug 2026.
 - [V3.2 post-freeze cleanup](v32-post-freeze-cleanup.md) — /alerts wording (sent not delivered); _fmt_user_ts() 12h AM/PM; _prop_market_alerted rebuilt from DB on restart; 3563 tests Aug 2026.
+- [Stable-refresh cursor_end bug](stable-refresh-cursor-end-bug.md) — store end_cursor not next_cursor in set_stable_refresh_stats; wrapping pool made /funnel show 0.0% every cycle.
 - [V3.2 consolidated cleanup](v32-consolidated-cleanup.md) — count_actionable OVER/UNDER filter; funnel near-miss accepted-key dedup; picks tier .in_(S,A); cmd_picks conf<55 gate; /health restart-reason line removed; 3675 tests Aug 2026.
 - [V3.2 Phase 2 Core](v32-phase2-core.md) — removed eff_conf<55 loop gate (blocked CS/LOL S-tier); _render_pick_entry DB-tier fallback (proxy<30); /health prev-session+crash-detected removed; 3733 tests Aug 2026.
 - [V3.2 Final Tier 1 Fix](v32-tier1-final-fix.md) — /picks allows B-tier for Tier 1; np_immediate uses min_stars_for_sport(); PropCandidateLog Tier 1 B-tier→ACCEPTED; 3817 tests Aug 2026.

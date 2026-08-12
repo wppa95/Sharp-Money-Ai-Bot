@@ -1,0 +1,449 @@
+🚨 CRED-BURN WARNING
+
+Limited Replit AI credits. Make targeted edits only. Do not reread/rewrite the entire codebase, do not refactor unrelated code, and do not run the full test suite repeatedly. Inspect only the files/functions directly relevant to the Underdog monitoring, full-pool rotation, stable refresh, and scan pipeline. Make the smallest targeted changes possible. Run targeted tests first, then the full suite ONCE at the end.
+
+━━━━━━━━━━━━━━━━━━━━
+🎯 FULL-POOL RESCAN + CONTINUOUS MONITORING FIX
+━━━━━━━━━━━━━━━━━━━━
+
+The full-pool rescan is STILL NOT working correctly.
+
+Two consecutive /funnel 1 scans confirmed:
+
+Active pool: ~125,000 props
+
+First scan:
+- Stable pool: 9,369
+- Rescored: 8,344
+- Cursor: 0 → 0
+- Progress: 0.0%
+
+Second scan:
+- Stable pool: 9,355
+- Rescored: 8,330
+- Cursor: 0 → 0
+- Progress: 0.0%
+
+The bot is repeatedly processing the ~9k stable pool instead of continuously rotating through the entire active pool.
+
+FIX THIS ARCHITECTURE.
+
+━━━━━━━━━━━━━━━━━━━━
+1. CONTINUOUSLY SCAN FETCHED PROPS
+━━━━━━━━━━━━━━━━━━━━
+
+Every Underdog fetch must continue feeding the monitoring pipeline.
+
+Newly fetched props must be evaluated promptly rather than waiting for the full-pool rotation.
+
+This includes:
+
+- brand-new props
+- newly appearing props
+- props whose lines changed
+- props returning/appearing again in the feed
+- other newly detected active props
+
+The existing 120-second Underdog monitoring cycle must continue functioning.
+
+Do NOT replace or slow down the existing new/changed-prop detection.
+
+━━━━━━━━━━━━━━━━━━━━
+2. CONTINUOUSLY ROTATE THROUGH ALL ACTIVE PROPS
+━━━━━━━━━━━━━━━━━━━━
+
+At the same time, the bot must continuously rescan the CURRENT ACTIVE POOL.
+
+Every active prop must eventually receive another model evaluation even if:
+
+- the line has not moved
+- the prop was previously rejected
+- the prop was previously scored
+- the prop is currently stable
+- the prop was previously on the watchlist
+
+A line movement must NOT be required for a future full-pool rescan.
+
+The active pool must therefore have TWO continuous paths:
+
+PATH A — Incremental monitoring:
+Fetched/new/changed props → evaluate promptly
+
+PATH B — Full-pool rotation:
+All active props → bounded batches → eventually rescan every prop → repeat
+
+These paths must work simultaneously.
+
+Do NOT make the full-pool rotation dependent on new props or line movement.
+
+━━━━━━━━━━━━━━━━━━━━
+3. PREVIOUSLY REJECTED PROPS MUST BE RESCANNED
+━━━━━━━━━━━━━━━━━━━━
+
+Rejected props remain eligible for future rotations.
+
+Example:
+
+Scored
+→ Rejected
+→ remains active
+→ future rotation
+→ rescored
+→ can qualify
+
+Do NOT permanently exclude rejected props.
+
+A rejected prop can become valuable later because:
+
+- model inputs can change
+- validation can improve
+- historical data can update
+- market context can change
+- the prop can become more actionable even if the line itself did not move
+
+━━━━━━━━━━━━━━━━━━━━
+4. FULL-POOL ROTATION MUST BE SEPARATE FROM STABLE REFRESH
+━━━━━━━━━━━━━━━━━━━━
+
+Keep the existing Task #121 stable-refresh system intact.
+
+Stable Refresh is a smaller/faster refresh mechanism.
+
+Full-Pool Rotation is the mechanism responsible for eventual coverage of the ENTIRE active pool.
+
+Do NOT use the ~9k stable pool as a substitute for full-pool coverage.
+
+Do NOT simply increase the stable-refresh batch size and call that full-pool rotation.
+
+━━━━━━━━━━━━━━━━━━━━
+5. BOUNDED BATCH ROTATION
+━━━━━━━━━━━━━━━━━━━━
+
+Do NOT process the entire active pool at once.
+
+Process it in bounded batches:
+
+Batch 1
+→ Batch 2
+→ Batch 3
+→ ...
+→ final batch
+→ 100% coverage
+→ Rotation #2
+→ Batch 1
+→ repeat indefinitely
+
+The next batch MUST contain different active props.
+
+The rotation must continue automatically without manual intervention.
+
+━━━━━━━━━━━━━━━━━━━━
+6. ROTATION STATE MUST ACTUALLY ADVANCE
+━━━━━━━━━━━━━━━━━━━━
+
+The current:
+
+Cursor: 0 → 0
+Progress: 0.0%
+
+proves the rotation is not advancing correctly.
+
+Inspect the actual implementation and identify why.
+
+Check:
+
+- batch selection
+- rotation state
+- state persistence
+- database query
+- filtering
+- batch ordering
+- scheduler behavior
+- reset behavior
+- active-pool construction
+
+Do NOT guess.
+
+Fix the underlying problem.
+
+Persist enough rotation state so a restart does not repeatedly process the same batch.
+
+━━━━━━━━━━━━━━━━━━━━
+7. ACTIVE POOL MUST BE DYNAMIC
+━━━━━━━━━━━━━━━━━━━━
+
+The full-pool rotation must operate against the CURRENT active pool, not a frozen snapshot from one fetch.
+
+As new props enter:
+
+→ they become eligible for the rotation
+
+As props are removed:
+
+→ they leave future rotation eligibility
+
+The system must continuously reconcile the rotation against the active pool.
+
+Removed props must never be resurrected by stale rotation state.
+
+━━━━━━━━━━━━━━━━━━━━
+8. EVENTUAL FULL COVERAGE IS REQUIRED
+━━━━━━━━━━━━━━━━━━━━
+
+The requirement is NOT:
+
+"scan approximately 9k stable props every cycle."
+
+The requirement IS:
+
+"continuously monitor new/changed props AND continuously rotate through every active prop in bounded batches so every active prop is eventually rescanned."
+
+For example, if there are 125,000 active props:
+
+Rotation #1 must eventually cover all 125,000.
+
+Then Rotation #2 must begin.
+
+Then Rotation #3.
+
+And so on continuously.
+
+No active prop should be permanently skipped.
+
+━━━━━━━━━━━━━━━━━━━━
+9. HUMAN-READABLE PROGRESS
+━━━━━━━━━━━━━━━━━━━━
+
+Remove the internal cursor display.
+
+Do NOT show:
+
+Cursor: 0 → 0
+
+Instead show:
+
+Rotation: #1
+Progress: 18.4%
+Coverage: 23,500 / 125,000 active props
+
+At completion:
+
+Rotation: #1
+Progress: 100%
+Coverage: 125,000 / 125,000 active props
+
+Then:
+
+Rotation: #2
+Progress: 0%
+
+Progress must represent actual full-pool coverage.
+
+Do not confuse batch progress with rotation progress.
+
+━━━━━━━━━━━━━━━━━━━━
+10. PRIORITY ORDER
+━━━━━━━━━━━━━━━━━━━━
+
+Full-pool rotation priority:
+
+1. Tier 1 sports
+2. All other sports
+3. NFL / MLB
+
+MLB is temporarily allowed but is NOT Tier 1.
+
+NFL and MLB must still eventually be rescanned.
+
+Priority must NOT permanently starve lower-priority sports.
+
+The priority system should determine which props are processed sooner while preserving eventual full-pool coverage.
+
+━━━━━━━━━━━━━━━━━━━━
+11. NO ARTIFICIAL UNDERDOG API LIMIT
+━━━━━━━━━━━━━━━━━━━━
+
+Underdog has unlimited API calls.
+
+Do NOT add an artificial Underdog API-call limit.
+
+Batching is ONLY for controlling:
+
+- Replit CPU
+- memory
+- database workload
+- processing workload
+
+Do not add an API quota or API-call budget gate.
+
+━━━━━━━━━━━━━━━━━━━━
+12. METRICS MUST REMAIN SEPARATE
+━━━━━━━━━━━━━━━━━━━━
+
+Keep these metrics distinct:
+
+- Underdog fetched/API totals
+- active pool size
+- full-pool rotation coverage
+- stable refresh
+- watchlist refresh
+- candidate funnel
+- Telegram deliveries
+
+Local rescoring must NOT inflate:
+
+"Fetched from Underdog"
+
+A rescan is local processing, not another API fetch.
+
+━━━━━━━━━━━━━━━━━━━━
+13. ALERT PIPELINE REMAINS UNCHANGED
+━━━━━━━━━━━━━━━━━━━━
+
+A rescan does NOT automatically create an alert.
+
+Every rescanned prop must still pass all existing gates:
+
+- direction
+- AI confidence
+- Bet Quality
+- tier
+- validation
+- deduplication
+- live/pre-game rules
+- alert scope
+- Telegram delivery rules
+
+Do not create duplicate alerts simply because a prop was rescanned.
+
+━━━━━━━━━━━━━━━━━━━━
+14. REMOVED PROPS
+━━━━━━━━━━━━━━━━━━━━
+
+Only currently active props may enter future rotation batches.
+
+If Underdog removes a prop:
+
+- exclude it from future rotation batches
+- do not resurrect it from persisted state
+- preserve existing removal behavior
+
+━━━━━━━━━━━━━━━━━━━━
+15. WATCHLIST
+━━━━━━━━━━━━━━━━━━━━
+
+Keep the existing watchlist refresh.
+
+Watchlist props may also be encountered during full-pool rotation.
+
+Do not let watchlist processing prevent full-pool coverage.
+
+━━━━━━━━━━━━━━━━━━━━
+16. TEST REQUIREMENTS
+━━━━━━━━━━━━━━━━━━━━
+
+Add/update targeted tests proving:
+
+1. New fetched props are evaluated promptly.
+2. Line-moved props are evaluated promptly.
+3. Stable unchanged props eventually get rescanned.
+4. Previously rejected props eventually get rescanned.
+5. Previously scored props eventually get rescanned.
+6. Watchlist props can be encountered by the full rotation.
+7. Consecutive full-pool batches contain different props.
+8. Rotation state advances.
+9. Entire active pool can be covered.
+10. Progress reaches 100%.
+11. A new rotation automatically begins.
+12. Rotation continues indefinitely.
+13. Rotation state survives restart.
+14. New active props eventually enter the rotation.
+15. Removed props cannot be resurrected.
+16. Tier 1 sports receive priority.
+17. Lower-priority sports eventually get processed.
+18. NFL/MLB remain eligible.
+19. Batch size remains bounded.
+20. Stable Refresh remains functional.
+21. Full-Pool Rotation remains separate from Stable Refresh.
+22. Cursor is no longer displayed.
+23. Progress represents real full-pool coverage.
+24. Rescans do not inflate fetched/API totals.
+25. Rejected props can qualify on a later rotation.
+26. Existing alert deduplication remains intact.
+27. Restarting mid-rotation resumes safely.
+28. The active pool can change during a rotation without breaking coverage.
+29. The system can run incremental monitoring and full-pool rotation simultaneously.
+30. A prop does not need a line movement to enter a future full-pool rescan.
+
+━━━━━━━━━━━━━━━━━━━━
+17. IMPLEMENTATION REQUIREMENT
+━━━━━━━━━━━━━━━━━━━━
+
+Before editing, inspect the current implementation and determine EXACTLY why:
+
+Cursor: 0 → 0
+Progress: 0.0%
+
+is occurring.
+
+Identify the actual root cause.
+
+Then make targeted changes.
+
+Do NOT rewrite unrelated architecture.
+
+Do NOT remove the existing incremental monitoring path.
+
+Do NOT remove Task #121 stable refresh.
+
+Do NOT replace full-pool rotation with another small stable pool.
+
+━━━━━━━━━━━━━━━━━━━━
+18. VERIFICATION
+━━━━━━━━━━━━━━━━━━━━
+
+After implementation:
+
+1. Run targeted full-pool rotation tests.
+2. Verify consecutive batches differ.
+3. Verify rotation progress advances.
+4. Verify previously rejected props re-enter future rotations.
+5. Verify new fetched props are still processed promptly.
+6. Verify active-pool additions are incorporated.
+7. Verify removals are excluded.
+8. Verify restart persistence.
+9. Run the full test suite ONCE after all changes are complete.
+
+Report:
+
+- files changed
+- exact root cause
+- exact implementation changes
+- tests added/updated
+- targeted test results
+- full-suite result
+- confirmation that incremental monitoring remains active
+- confirmation that full-pool rotation advances
+- confirmation that 100% active-pool coverage is eventually possible
+
+Do NOT mark this complete merely because tests pass.
+
+The implementation must demonstrate that the rotation advances beyond the ~9k stable pool.
+
+━━━━━━━━━━━━━━━━━━━━
+🚫 FREEZE + RESTART
+━━━━━━━━━━━━━━━━━━━━
+
+After the fix and verification are complete:
+
+1. Freeze the implementation.
+2. Do NOT make unrelated feature changes.
+3. Do NOT perform additional refactors.
+4. Restart the Sharp Money Bot once.
+5. Verify clean startup.
+6. Verify Underdog monitoring resumes.
+7. Verify new/changed props are still being processed.
+8. Verify full-pool rotation state is preserved.
+9. Verify the first post-restart rotation batch processes.
+10. Verify rotation progress is no longer permanently stuck at 0.0%.
+11. STOP and report final status.

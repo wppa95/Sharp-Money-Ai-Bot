@@ -3802,15 +3802,14 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
 
     # ── Console log ──────────────────────────────────────────────────────────────
     _thick = "━" * 24
-    _progress = (
+    _sr_pct = (
         f"{(end_cursor / pool_size * 100):.1f}%" if pool_size > 0 else "—"
     )
     logger.info(
         "\n%s\n🔄 Stable Refresh\n%s\n"
         "Batch:              %6d\n"
-        "Cursor:     %6d → %6d\n"
         "Progress:          %s\n"
-        "Stable pool:  %6d\n"
+        "Coverage:  %s / %s active props\n"
         "🔬 Rescored:  %6d\n"
         "✅ Qualified: %6d  (sent: %d)\n"
         "👁 Watchlist: %6d\n"
@@ -3829,9 +3828,8 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         "%s",
         _thick, _thick,
         len(batch_keys),
-        cursor, next_cursor,
-        _progress,
-        pool_size,
+        _sr_pct,
+        f"{end_cursor:,}", f"{pool_size:,}",
         sr_rescored,
         sr_qualified, sr_sent,
         sr_watchlist,
@@ -3860,7 +3858,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             "pool_size":    pool_size,
             "batch_size":   len(batch_keys),
             "cursor_start": cursor,
-            "cursor_end":   next_cursor,
+            "cursor_end":   end_cursor,   # FIX: store end_cursor (actual batch end), not next_cursor (which wraps to 0)
             "sr_rescored":  sr_rescored,
             "sr_qualified": sr_qualified,
             "sr_watchlist": sr_watchlist,

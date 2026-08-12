@@ -3539,10 +3539,9 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     "🔄 <b>Stable Refresh</b>  <i>(last cycle)</i>",
                     _thick,
                     "",
-                    f"Batch size:         <b>{sr_batch:,}</b>",
-                    f"Cursor:             <b>{sr_c_start:,} → {sr_c_end:,}</b>",
                     f"Progress:           <b>{sr_progress}</b>",
-                    f"Stable pool:        <b>{sr_pool:,}</b>",
+                    f"Coverage:           <b>{sr_c_end:,} / {sr_pool:,}</b> active props",
+                    f"Batch size:         <b>{sr_batch:,}</b>",
                     f"🔬 Rescored:        <b>{sr_rescored:,}</b>",
                     f"✅ Qualified:       <b>{sr_qual:,}</b>  (sent: {sr_sent})",
                     f"👁 Watchlist:       <b>{sr_wl:,}</b>",
@@ -3561,6 +3560,35 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     f"🚫 Removed:         <b>{wl_removed:,}</b>",
                     f"⏱ Next refresh:    ~2 min",
                 ]
+            # ── Full-Pool Rescan Rotation block ──────────────────────────────────
+            try:
+                from engine.health import get_health_tracker as _get_ht2
+                _ht2 = _get_ht2()
+                if _ht2 is not None:
+                    _fpr = _ht2.get_fpr_stats()
+                    if _fpr:
+                        _fpr_pool     = _fpr.get("pool_size",        0)
+                        _fpr_covered  = _fpr.get("cursor_end",       0)
+                        _fpr_pct      = _fpr.get("pct_complete",     0.0)
+                        _fpr_rot      = _fpr.get("rotation",         1)
+                        _fpr_rescored = _fpr.get("fpr_rescored",     0)
+                        _fpr_sent     = _fpr.get("fpr_sent",         0)
+                        _fpr_done     = _fpr.get("rotation_complete", False)
+                        _fpr_status   = "✅ complete — next started" if _fpr_done else "🔄 in progress"
+                        lines += [
+                            "",
+                            _thick,
+                            "🌐 <b>Full-Pool Rescan Rotation</b>  <i>(last batch)</i>",
+                            _thick,
+                            "",
+                            f"Rotation:           <b>#{_fpr_rot}</b>  ({_fpr_status})",
+                            f"Progress:           <b>{_fpr_pct:.1f}%</b>",
+                            f"Coverage:           <b>{_fpr_covered:,} / {_fpr_pool:,}</b> active props",
+                            f"🔬 Rescored:        <b>{_fpr_rescored:,}</b>",
+                            f"📤 Sent:            <b>{_fpr_sent:,}</b>",
+                        ]
+            except Exception:
+                pass
         else:
             lines += [
                 "",
