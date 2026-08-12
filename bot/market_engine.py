@@ -3917,7 +3917,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
     • Interval:   config.FPR_INTERVAL   (default 300 s / 5 min)
     • When all props in the current pool have been covered the rotation counter
       increments and the cursor resets to 0 automatically.
-    • Removed/inactive props are excluded by get_active_underdog_snapshot_per_prop().
+    • Removed/inactive props are excluded by get_all_active_underdog_snapshots_by_line().
     • All existing alert gates (dedup, direction, BQ, tier, live-game) apply.
     """
     from engine.player_validator import validate_player_prop as _fpr_validate
@@ -3957,10 +3957,13 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
 
     try:
         # ── Fetch full active pool from DB (zero Underdog API calls) ──────────
-        # get_active_underdog_snapshot_per_prop() takes MAX(id) over ALL rows
-        # (including removals) then keeps only rows where removed=False.
-        # Removed/inactive props are therefore absent — they cannot be resurrected.
-        active_pool: dict = await db.get_active_underdog_snapshot_per_prop()
+        # get_all_active_underdog_snapshots_by_line() groups by (player_name,
+        # stat_type, line_value) so every alt-line variant for the same player+stat
+        # is a separate entry.  This returns the complete eligible active-prop
+        # universe (all ~100k+ alt-line props) rather than the ~9k unique
+        # player+stat pairs returned by get_active_underdog_snapshot_per_prop().
+        # Removed/inactive props are excluded (latest row per triplet, removed=False).
+        active_pool: dict = await db.get_all_active_underdog_snapshots_by_line()
         fpr_pool_size = len(active_pool)
         if fpr_pool_size == 0:
             if _health:
@@ -3972,9 +3975,9 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
 
         def _fpr_sort_key(item):
             """0 = high-priority (Tier 1 + other), 1 = low-priority (NFL/MLB)."""
-            (player, stat), snap = item
+            (player, stat, line), snap = item
             sport = (getattr(snap, "sport", None) or "").upper()
-            return (1 if sport in _low else 0, player, stat)
+            return (1 if sport in _low else 0, player, stat, line)
 
         sorted_items = sorted(active_pool.items(), key=_fpr_sort_key)
         pool_keys    = [k for k, _ in sorted_items]
@@ -4010,7 +4013,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
 
         # ── Score each prop in this batch ─────────────────────────────────────
         for _fpr_key in batch_keys:
-            _fpr_player, _fpr_stat = _fpr_key
+            _fpr_player, _fpr_stat, _fpr_line_val = _fpr_key
             _fpr_snap  = pool_snaps.get(_fpr_key)
             if _fpr_snap is None:
                 continue

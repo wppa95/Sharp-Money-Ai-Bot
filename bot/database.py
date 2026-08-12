@@ -2977,6 +2977,48 @@ class Database:
             rows = result.scalars().all()
         return {(r.player_name, r.stat_type): r for r in rows}
 
+    async def get_all_active_underdog_snapshots_by_line(
+        self,
+    ) -> "dict[tuple[str, str, float], UnderdogSnapshotRecord]":
+        """
+        Return the most-recent snapshot for every (player_name, stat_type, line_value)
+        triplet **where the latest snapshot for that triplet is not a removal**.
+
+        Unlike :meth:`get_active_underdog_snapshot_per_prop` which groups by
+        (player_name, stat_type) and returns only one snapshot per player+stat pair
+        (the single most-recent line), this method groups by the full
+        (player_name, stat_type, line_value) triplet.  Every alt-line variant for
+        the same player+stat combination is therefore returned as a separate entry,
+        giving the complete eligible active-prop universe.
+
+        Example: a player with Points at 24.5, 25.5 and 26.5 contributes three
+        entries in the returned dict instead of one.
+
+        Used exclusively by the full-pool rescan job so it rotates through every
+        alt-line variant.  The stable-refresh and watchlist-rescan jobs continue to
+        use :meth:`get_active_underdog_snapshot_per_prop` (one per player+stat).
+        """
+        async with self.session() as s:
+            # Step 1 — latest row id per (player, stat, line) triplet (all rows, including removals)
+            subq = (
+                select(func.max(UnderdogSnapshotRecord.id))
+                .group_by(
+                    UnderdogSnapshotRecord.player_name,
+                    UnderdogSnapshotRecord.stat_type,
+                    UnderdogSnapshotRecord.line_value,
+                )
+                .scalar_subquery()
+            )
+            # Step 2 — keep only those latest rows where removed=False
+            result = await s.execute(
+                select(UnderdogSnapshotRecord).where(
+                    UnderdogSnapshotRecord.id.in_(subq),
+                    UnderdogSnapshotRecord.removed == False,  # noqa: E712
+                )
+            )
+            rows = result.scalars().all()
+        return {(r.player_name, r.stat_type, r.line_value): r for r in rows}
+
     async def get_active_watchlist_candidates(self) -> list:
         """
         Return all PropOpportunityLog rows with watchlist_state='Watchlist'

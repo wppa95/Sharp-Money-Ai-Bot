@@ -103,7 +103,7 @@ def _make_db(
 ) -> MagicMock:
     """Return a DB mock with configurable active pool and bulk-dedup response."""
     db = MagicMock()
-    db.get_active_underdog_snapshot_per_prop = AsyncMock(return_value=pool or {})
+    db.get_all_active_underdog_snapshots_by_line = AsyncMock(return_value=pool or {})
     db.get_ud_prop_history                   = AsyncMock(return_value=[])
     db.has_recent_ud_alert                   = AsyncMock(return_value=False)
     db.get_recent_alerted_props_for_dedup    = AsyncMock(return_value=bulk_dedup or [])
@@ -258,17 +258,17 @@ class TestFPRPrioritySorting:
         _low = config.fpr_low_priority_sports
 
         def _key(item):
-            (player, stat), snap = item
+            (player, stat, line), snap = item
             sport = (getattr(snap, "sport", None) or "").upper()
-            return (1 if sport in _low else 0, player, stat)
+            return (1 if sport in _low else 0, player, stat, line)
 
         return [k for k, _ in sorted(snaps_dict.items(), key=_key)]
 
     def test_tier1_sport_sorted_before_nfl(self):
         """NBA (Tier 1) appears before NFL (low priority) — test 9."""
         pool = {
-            ("Player NFL", "Passing Yards"): _make_snap(sport="NFL"),
-            ("Player NBA", "Points"):        _make_snap(sport="NBA"),
+            ("Player NFL", "Passing Yards", 22.5): _make_snap(sport="NFL"),
+            ("Player NBA", "Points",        22.5): _make_snap(sport="NBA"),
         }
         keys = self._sorted_keys(pool)
         nba_idx = next(i for i, k in enumerate(keys) if k[0] == "Player NBA")
@@ -278,9 +278,9 @@ class TestFPRPrioritySorting:
     def test_mlb_sorted_after_other_sports(self):
         """MLB appears after non-low-priority sports — test 9."""
         pool = {
-            ("Player MLB", "Strikeouts"): _make_snap(sport="MLB"),
-            ("Player NHL", "Shots"):      _make_snap(sport="NHL"),
-            ("Player MMA", "Strikes"):    _make_snap(sport="MMA"),
+            ("Player MLB", "Strikeouts", 22.5): _make_snap(sport="MLB"),
+            ("Player NHL", "Shots",      22.5): _make_snap(sport="NHL"),
+            ("Player MMA", "Strikes",    22.5): _make_snap(sport="MMA"),
         }
         keys = self._sorted_keys(pool)
         mlb_idx = next(i for i, k in enumerate(keys) if k[0] == "Player MLB")
@@ -290,9 +290,9 @@ class TestFPRPrioritySorting:
     def test_nfl_and_mlb_both_included_in_sort(self):
         """NFL and MLB are still included in sorted output — test 10."""
         pool = {
-            ("A_NBA", "Points"):          _make_snap(sport="NBA"),
-            ("A_NFL", "Passing Yards"):   _make_snap(sport="NFL"),
-            ("A_MLB", "Strikeouts"):      _make_snap(sport="MLB"),
+            ("A_NBA", "Points",        22.5): _make_snap(sport="NBA"),
+            ("A_NFL", "Passing Yards", 22.5): _make_snap(sport="NFL"),
+            ("A_MLB", "Strikeouts",    22.5): _make_snap(sport="MLB"),
         }
         keys = self._sorted_keys(pool)
         sports_present = {k[0].split("_")[1] for k in keys}
@@ -303,17 +303,17 @@ class TestFPRPrioritySorting:
         """Every non-low-priority sport appears before every low-priority sport — test 9."""
         pool = {}
         for sport in ["NBA", "WNBA", "NHL", "MMA", "SOCCER"]:
-            pool[(f"P_{sport}", "stat")] = _make_snap(sport=sport)
+            pool[(f"P_{sport}", "stat", 22.5)] = _make_snap(sport=sport)
         for sport in ["NFL", "MLB"]:
-            pool[(f"P_{sport}", "stat")] = _make_snap(sport=sport)
+            pool[(f"P_{sport}", "stat", 22.5)] = _make_snap(sport=sport)
 
         from config import config
         _low = config.fpr_low_priority_sports
 
         def _key(item):
-            (player, stat), snap = item
+            (player, stat, line), snap = item
             sport = (getattr(snap, "sport", None) or "").upper()
-            return (1 if sport in _low else 0, player, stat)
+            return (1 if sport in _low else 0, player, stat, line)
 
         sorted_items = sorted(pool.items(), key=_key)
         # Find the index of first low-priority entry
@@ -340,7 +340,7 @@ class TestFPRJob:
     async def test_stable_props_are_rescored(self):
         """Unchanged props in the active pool are scored each cycle — test 1."""
         snap = _make_snap(player="Stable Player", sport="NBA")
-        db   = _make_db(pool={("Stable Player", "Points"): snap})
+        db   = _make_db(pool={("Stable Player", "Points", 22.5): snap})
         ctx  = _make_context(db)
         h    = _make_health(cursor=0)
 
@@ -367,7 +367,7 @@ class TestFPRJob:
         # A previously-rejected prop still has an active snapshot (just a prior
         # Rejected log).  The FPR job scores it fresh — rejection doesn't exclude it.
         snap = _make_snap(player="Rejected Player", sport="MLB")
-        db   = _make_db(pool={("Rejected Player", "Strikeouts"): snap})
+        db   = _make_db(pool={("Rejected Player", "Strikeouts", 22.5): snap})
         ctx  = _make_context(db)
         h    = _make_health(cursor=0)
 
@@ -393,8 +393,8 @@ class TestFPRJob:
     async def test_multiple_batches_cover_full_pool(self):
         """Two batches with batch_size=1 cover a 2-prop pool — test 4."""
         pool = {
-            ("Alice", "Points"):   _make_snap(player="Alice",  sport="NBA"),
-            ("Bob",   "Rebounds"): _make_snap(player="Bob",    sport="NBA"),
+            ("Alice", "Points",   22.5): _make_snap(player="Alice", sport="NBA"),
+            ("Bob",   "Rebounds", 22.5): _make_snap(player="Bob",   sport="NBA"),
         }
         db = _make_db(pool=pool)
 
@@ -442,7 +442,7 @@ class TestFPRJob:
     # ── Test 5 & 6: rotation reaches 100% and auto-increments ─────────────────
     async def test_rotation_completes_and_increments(self):
         """When cursor reaches pool end, rotation increments and cursor resets — tests 5 & 6."""
-        pool = {("Only Player", "Points"): _make_snap(sport="NBA")}
+        pool = {("Only Player", "Points", 22.5): _make_snap(sport="NBA")}
         db   = _make_db(pool=pool)
         ctx  = _make_context(db)
         h    = _make_health(cursor=0, rotation=1)
@@ -477,8 +477,8 @@ class TestFPRJob:
     async def test_fpr_job_resumes_from_persisted_cursor(self):
         """Job reads cursor from health tracker — simulates post-restart resume — test 7."""
         pool = {
-            ("P1", "Points"):   _make_snap(player="P1", sport="NBA"),
-            ("P2", "Rebounds"): _make_snap(player="P2", sport="NBA"),
+            ("P1", "Points",   22.5): _make_snap(player="P1", sport="NBA"),
+            ("P2", "Rebounds", 22.5): _make_snap(player="P2", sport="NBA"),
         }
         db  = _make_db(pool=pool)
         ctx = _make_context(db)
@@ -517,7 +517,7 @@ class TestFPRJob:
         # DB returns only active props (removals filtered by the DB method itself)
         active_snap = _make_snap(player="Active Player", sport="NBA", removed=False)
         # The removed prop is absent from the dict — DB excludes it
-        db  = _make_db(pool={("Active Player", "Points"): active_snap})
+        db  = _make_db(pool={("Active Player", "Points", 22.5): active_snap})
         ctx = _make_context(db)
         h   = _make_health(cursor=0)
 
@@ -551,7 +551,7 @@ class TestFPRJob:
     async def test_no_artificial_api_call_limit(self):
         """FPR does not apply any per-batch Underdog API cap — test 11."""
         # Build a pool of 5 props; all should be scored (no cap blocks them)
-        pool = {(f"Player{i}", "Points"): _make_snap(player=f"Player{i}", sport="NBA")
+        pool = {(f"Player{i}", "Points", 22.5): _make_snap(player=f"Player{i}", sport="NBA")
                 for i in range(5)}
         db  = _make_db(pool=pool)
         ctx = _make_context(db)
@@ -587,7 +587,7 @@ class TestFPRJob:
     async def test_batch_size_bounded_by_fpr_batch_size(self):
         """Job processes at most FPR_BATCH_SIZE props per cycle — test 12."""
         # Pool of 10, batch size 3 → only 3 processed per cycle
-        pool = {(f"P{i}", "Points"): _make_snap(player=f"P{i}", sport="NBA")
+        pool = {(f"P{i}", "Points", 22.5): _make_snap(player=f"P{i}", sport="NBA")
                 for i in range(10)}
         db  = _make_db(pool=pool)
         ctx = _make_context(db)
@@ -634,7 +634,7 @@ class TestFPRJob:
     # ── Test 13: stable refresh still works alongside FPR ─────────────────────
     async def test_stable_refresh_unaffected_by_fpr(self):
         """Running FPR does not modify stable-refresh cursor — test 13."""
-        pool = {("Player A", "Points"): _make_snap(sport="NBA")}
+        pool = {("Player A", "Points", 22.5): _make_snap(sport="NBA")}
         db   = _make_db(pool=pool)
         ctx  = _make_context(db)
         h    = _make_health(cursor=0)
@@ -666,7 +666,7 @@ class TestFPRJob:
     # ── Test 14: metrics are separate ─────────────────────────────────────────
     async def test_fpr_stats_stored_separately_from_stable_refresh(self):
         """set_fpr_stats is called; set_stable_refresh_stats is not — test 14."""
-        pool = {("Player", "Points"): _make_snap(sport="NBA")}
+        pool = {("Player", "Points", 22.5): _make_snap(sport="NBA")}
         db   = _make_db(pool=pool)
         ctx  = _make_context(db)
         h    = _make_health(cursor=0)
@@ -734,9 +734,9 @@ class TestFPRJob:
         """set_fpr_stats pct_complete equals end_cursor / pool_size × 100 — test 16."""
         # 3-prop pool, cursor=0, batch_size=1 → end_cursor=1 → 33.3%
         pool = {
-            ("P1", "Points"):   _make_snap(sport="NBA"),
-            ("P2", "Rebounds"): _make_snap(sport="NBA"),
-            ("P3", "Assists"):  _make_snap(sport="NBA"),
+            ("P1", "Points",   22.5): _make_snap(sport="NBA"),
+            ("P2", "Rebounds", 22.5): _make_snap(sport="NBA"),
+            ("P3", "Assists",  22.5): _make_snap(sport="NBA"),
         }
         db  = _make_db(pool=pool)
         ctx = _make_context(db)
@@ -784,8 +784,8 @@ class TestFPRJob:
     async def test_fpr_total_rescanned_increments_per_prop(self):
         """fpr_total_rescanned in stats equals number of props processed — test 17."""
         pool = {
-            ("Alice", "Points"):   _make_snap(sport="NBA"),
-            ("Bob",   "Rebounds"): _make_snap(sport="NBA"),
+            ("Alice", "Points",   22.5): _make_snap(sport="NBA"),
+            ("Bob",   "Rebounds", 22.5): _make_snap(sport="NBA"),
         }
         db  = _make_db(pool=pool)
         ctx = _make_context(db)
@@ -821,7 +821,7 @@ class TestFPRJob:
     async def test_fpr_respects_telegram_dedup(self):
         """When _is_prop_deduped returns True no alert is sent — test 19."""
         snap = _make_snap(player="Deduped Player", sport="NBA")
-        db   = _make_db(pool={("Deduped Player", "Points"): snap})
+        db   = _make_db(pool={("Deduped Player", "Points", 22.5): snap})
         ctx  = _make_context(db)
         h    = _make_health(cursor=0)
 
@@ -854,8 +854,8 @@ class TestFPRJob:
     async def test_nfl_mlb_eventually_processed(self):
         """NFL/MLB props appear in sorted pool and are scored — test 10."""
         pool = {
-            ("NFL Player", "Passing Yards"): _make_snap(player="NFL Player", sport="NFL"),
-            ("MLB Player", "Strikeouts"):    _make_snap(player="MLB Player", sport="MLB"),
+            ("NFL Player", "Passing Yards", 22.5): _make_snap(player="NFL Player", sport="NFL"),
+            ("MLB Player", "Strikeouts",    22.5): _make_snap(player="MLB Player", sport="MLB"),
         }
         db  = _make_db(pool=pool)
         ctx = _make_context(db)
