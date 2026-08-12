@@ -7,18 +7,8 @@ Tests for P1/P2 alert gate changes:
 
 from __future__ import annotations
 
-import asyncio
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
-
-
-# ── Shared event loop ──────────────────────────────────────────────────────────
-
-@pytest.fixture(scope="module")
-def event_loop():
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
 
 
 # ═══════════════════════════════════════════════════════════════════════════

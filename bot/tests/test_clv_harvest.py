@@ -30,22 +30,18 @@ from database import AlertCLVSeed, CLVRecord, Database
 
 # ── Shared event loop ─────────────────────────────────────────────────────────
 
-_loop = asyncio.new_event_loop()
-asyncio.set_event_loop(_loop)
 
 
-def _run(coro):
-    return _loop.run_until_complete(coro)
 
 
 # ── In-memory DB fixture ──────────────────────────────────────────────────────
 
 @pytest.fixture()
-def db():
+async def db():
     database = Database("sqlite+aiosqlite:///:memory:")
-    _run(database.init())
+    await database.init()
     yield database
-    _run(database.close())
+    await database.close()
 
 
 # ── Helper: build a seed record ───────────────────────────────────────────────
@@ -156,7 +152,7 @@ class TestHarvestLogic:
 
     # ── Seeds without game_time → immediately expired ─────────────────────────
 
-    def test_no_game_time_stale_expires(self, db):
+    async def test_no_game_time_stale_expires(self, db):
         """Seeds with game_time=None appear in pending only after stale_hours (24h)."""
         seed = _make_seed(
             source_id  = 1,
@@ -165,25 +161,25 @@ class TestHarvestLogic:
         )
         # Manually set alerted_at to 25h ago
         seed.alerted_at = self.NOW - timedelta(hours=25)
-        _run(db.save_alert_clv_seed(seed))
+        await db.save_alert_clv_seed(seed)
 
-        h, e = _run(_run_harvest_logic(db, self.NOW, self.GRACE))
+        h, e = await _run_harvest_logic(db, self.NOW, self.GRACE)
         assert h == 0
         assert e == 1
 
-    def test_no_game_time_fresh_not_expired(self, db):
+    async def test_no_game_time_fresh_not_expired(self, db):
         """Seeds with game_time=None that are fresh (< 24h) should stay pending."""
         seed = _make_seed(source_id=1, game_time=None)
         # alerted_at = utcnow() (fresh) — default in _make_seed
-        _run(db.save_alert_clv_seed(seed))
+        await db.save_alert_clv_seed(seed)
 
-        h, e = _run(_run_harvest_logic(db, self.NOW, self.GRACE))
+        h, e = await _run_harvest_logic(db, self.NOW, self.GRACE)
         assert h == 0
         assert e == 0  # not stale yet — stays pending
 
     # ── Seeds without bet_odds → expired immediately ──────────────────────────
 
-    def test_underdog_seed_no_bet_odds_expired(self, db):
+    async def test_underdog_seed_no_bet_odds_expired(self, db):
         """Underdog pick'em seeds with no bet_odds are expired — CLV% not computable."""
         seed = _make_seed(
             source_id  = 2,
@@ -191,13 +187,13 @@ class TestHarvestLogic:
             bet_odds   = None,
             game_time  = self._past_game(2),
         )
-        _run(db.save_alert_clv_seed(seed))
+        await db.save_alert_clv_seed(seed)
 
-        h, e = _run(_run_harvest_logic(db, self.NOW, self.GRACE))
+        h, e = await _run_harvest_logic(db, self.NOW, self.GRACE)
         assert e == 1
         assert h == 0
 
-    def test_underdog_seed_with_bet_odds_not_immediately_expired(self, db):
+    async def test_underdog_seed_with_bet_odds_not_immediately_expired(self, db):
         """
         UNDERDOG seeds that have bet_odds (from OddsAPI confirmation via
         seed_clv_from_ud_confirmation) must NOT be immediately expired.
@@ -209,14 +205,14 @@ class TestHarvestLogic:
             bet_odds   = -115,          # OddsAPI avg_odds populated at alert time
             game_time  = self._past_game(1),   # 1h ago, still within 4h grace
         )
-        _run(db.save_alert_clv_seed(seed))
+        await db.save_alert_clv_seed(seed)
 
-        h, e = _run(_run_harvest_logic(db, self.NOW, self.GRACE))
+        h, e = await _run_harvest_logic(db, self.NOW, self.GRACE)
         # Within grace, no closing odds → left pending (not expired, not harvested)
         assert h == 0
         assert e == 0
 
-    def test_underdog_seed_with_bet_odds_expires_after_grace(self, db):
+    async def test_underdog_seed_with_bet_odds_expires_after_grace(self, db):
         """
         UNDERDOG seed with bet_odds that passes grace period without closing
         odds must be expired normally (same as EV seeds).
@@ -227,126 +223,126 @@ class TestHarvestLogic:
             bet_odds   = -115,
             game_time  = self._past_game(5),   # 5h ago > 4h grace
         )
-        _run(db.save_alert_clv_seed(seed))
+        await db.save_alert_clv_seed(seed)
 
-        h, e = _run(_run_harvest_logic(db, self.NOW, self.GRACE))
+        h, e = await _run_harvest_logic(db, self.NOW, self.GRACE)
         assert e == 1
         assert h == 0
 
-    def test_ev_seed_no_bet_odds_expired(self, db):
+    async def test_ev_seed_no_bet_odds_expired(self, db):
         seed = _make_seed(
             source_id = 3,
             bet_odds  = None,
             game_time = self._past_game(2),
         )
-        _run(db.save_alert_clv_seed(seed))
+        await db.save_alert_clv_seed(seed)
 
-        h, e = _run(_run_harvest_logic(db, self.NOW, self.GRACE))
+        h, e = await _run_harvest_logic(db, self.NOW, self.GRACE)
         assert e == 1
 
     # ── Seeds within grace period and no closing odds → not touched ───────────
 
-    def test_within_grace_no_odds_not_expired(self, db):
+    async def test_within_grace_no_odds_not_expired(self, db):
         seed = _make_seed(
             source_id = 4,
             bet_odds  = -110,
             game_time = self._past_game(1),   # 1h ago, grace is 4h
         )
-        _run(db.save_alert_clv_seed(seed))
+        await db.save_alert_clv_seed(seed)
 
-        h, e = _run(_run_harvest_logic(db, self.NOW, self.GRACE))
+        h, e = await _run_harvest_logic(db, self.NOW, self.GRACE)
         assert h == 0
         assert e == 0  # Still within grace — left pending
 
     # ── Grace period elapsed and no closing odds → expired ────────────────────
 
-    def test_beyond_grace_no_odds_expires(self, db):
+    async def test_beyond_grace_no_odds_expires(self, db):
         seed = _make_seed(
             source_id = 5,
             bet_odds  = -110,
             game_time = self._past_game(5),   # 5h ago > 4h grace
         )
-        _run(db.save_alert_clv_seed(seed))
+        await db.save_alert_clv_seed(seed)
 
-        h, e = _run(_run_harvest_logic(db, self.NOW, self.GRACE))
+        h, e = await _run_harvest_logic(db, self.NOW, self.GRACE)
         assert e == 1
 
     # ── get_pending_clv_seeds ignores already-computed seeds ──────────────────
 
-    def test_already_computed_seeds_not_re_harvested(self, db):
+    async def test_already_computed_seeds_not_re_harvested(self, db):
         """Seeds with clv_computed=True must not appear in pending."""
         seed = _make_seed(source_id=6, game_time=self._past_game(5))
-        _run(db.save_alert_clv_seed(seed))
-        fetched = _run(db.get_clv_seed_for_source("ev_records", 6))
-        _run(db.mark_clv_seed_computed(fetched.id, 2.5))
+        await db.save_alert_clv_seed(seed)
+        fetched = await db.get_clv_seed_for_source("ev_records", 6)
+        await db.mark_clv_seed_computed(fetched.id, 2.5)
 
-        h, e = _run(_run_harvest_logic(db, self.NOW, self.GRACE))
+        h, e = await _run_harvest_logic(db, self.NOW, self.GRACE)
         assert h == 0
         assert e == 0
 
-    def test_expired_seeds_not_re_harvested(self, db):
+    async def test_expired_seeds_not_re_harvested(self, db):
         seed = _make_seed(source_id=7, game_time=self._past_game(5))
-        _run(db.save_alert_clv_seed(seed))
-        fetched = _run(db.get_clv_seed_for_source("ev_records", 7))
-        _run(db.mark_clv_seed_expired(fetched.id))
+        await db.save_alert_clv_seed(seed)
+        fetched = await db.get_clv_seed_for_source("ev_records", 7)
+        await db.mark_clv_seed_expired(fetched.id)
 
-        h, e = _run(_run_harvest_logic(db, self.NOW, self.GRACE))
+        h, e = await _run_harvest_logic(db, self.NOW, self.GRACE)
         assert h == 0
         assert e == 0
 
     # ── Multiple seeds mixed ──────────────────────────────────────────────────
 
-    def test_mixed_seeds_correct_counts(self, db):
+    async def test_mixed_seeds_correct_counts(self, db):
         """2 expired (stale/no bet_odds), 1 within grace (untouched)."""
         # Stale (game_time=None, alerted_at > 24h ago) → expire
         stale_seed = _make_seed(source_id=10, game_time=None)
         stale_seed.alerted_at = self.NOW - timedelta(hours=25)
-        _run(db.save_alert_clv_seed(stale_seed))
+        await db.save_alert_clv_seed(stale_seed)
         # UNDERDOG (no bet_odds) → expire
-        _run(db.save_alert_clv_seed(_make_seed(
+        await db.save_alert_clv_seed(_make_seed(
             source_id=11, alert_type="UNDERDOG", bet_odds=None,
             game_time=self._past_game(2),
-        )))
+        ))
         # Within grace → leave pending
-        _run(db.save_alert_clv_seed(_make_seed(
+        await db.save_alert_clv_seed(_make_seed(
             source_id=12, bet_odds=-110, game_time=self._past_game(1),
-        )))
+        ))
 
-        h, e = _run(_run_harvest_logic(db, self.NOW, self.GRACE))
+        h, e = await _run_harvest_logic(db, self.NOW, self.GRACE)
         assert e == 2
         assert h == 0
 
     # ── CLVRecord written correctly ───────────────────────────────────────────
 
-    def test_clv_record_count_before_harvest(self, db):
-        initial = _run(db.count_clv_records())
+    async def test_clv_record_count_before_harvest(self, db):
+        initial = await db.count_clv_records()
         assert initial == 0
 
     # ── Pending count methods ─────────────────────────────────────────────────
 
-    def test_count_pending_after_expire(self, db):
+    async def test_count_pending_after_expire(self, db):
         # Use a past game_time so seed appears in pending
         seed = _make_seed(source_id=20, game_time=self._past_game(5))
-        _run(db.save_alert_clv_seed(seed))
-        fetched = _run(db.get_clv_seed_for_source("ev_records", 20))
+        await db.save_alert_clv_seed(seed)
+        fetched = await db.get_clv_seed_for_source("ev_records", 20)
         assert fetched is not None
 
-        before = _run(db.count_pending_clv_seeds())
-        _run(db.mark_clv_seed_expired(fetched.id))
-        after  = _run(db.count_pending_clv_seeds())
+        before = await db.count_pending_clv_seeds()
+        await db.mark_clv_seed_expired(fetched.id)
+        after  = await db.count_pending_clv_seeds()
 
         assert before > after
 
-    def test_get_pending_filters_by_game_time(self, db):
+    async def test_get_pending_filters_by_game_time(self, db):
         """Seeds whose game_time is in the future must NOT appear in pending."""
         future_seed = _make_seed(
             source_id = 99,
             bet_odds  = -110,
             game_time = self.NOW + timedelta(hours=2),
         )
-        _run(db.save_alert_clv_seed(future_seed))
+        await db.save_alert_clv_seed(future_seed)
 
-        pending = _run(db.get_pending_clv_seeds(limit=50))
+        pending = await db.get_pending_clv_seeds(limit=50)
         assert not any(s.source_id == 99 for s in pending)
 
 
@@ -362,7 +358,7 @@ class TestHarvestComputePath:
     def _past_game(self, hours_ago: float) -> datetime:
         return datetime.utcnow() - timedelta(hours=hours_ago)
 
-    def test_compute_path_writes_clv_record(self, db):
+    async def test_compute_path_writes_clv_record(self, db):
         """
         When a seed has bet_odds and a matching OddsRecord exists (closing odds),
         the harvest logic must compute CLV% and write a CLVRecord — no crash.
@@ -378,7 +374,7 @@ class TestHarvestComputePath:
             event      = "Chiefs vs Ravens",
             selection  = "Chiefs ML",
         )
-        _run(db.save_alert_clv_seed(seed))
+        await db.save_alert_clv_seed(seed)
 
         # Create a matching OddsRecord (simulates closing-line data)
         closing = OddsRecord(
@@ -390,17 +386,17 @@ class TestHarvestComputePath:
             american_odds = -130,   # market moved from -110 → -130 (positive CLV)
             recorded_at   = datetime.utcnow(),
         )
-        _run(db.save_odds(closing))
+        await db.save_odds(closing)
 
         now   = datetime.utcnow()
         grace = timedelta(hours=4)
-        h, e  = _run(_run_harvest_logic(db, now, grace))
+        h, e  = await _run_harvest_logic(db, now, grace)
 
         assert h == 1, "CLVRecord should have been written"
         assert e == 0
-        assert _run(db.count_clv_records()) == 1
+        assert await db.count_clv_records() == 1
 
-    def test_compute_path_clv_pct_sign(self, db):
+    async def test_compute_path_clv_pct_sign(self, db):
         """
         Bet at -110, closed at -130 → market tightened → positive CLV%.
         Verifies the math survives the full pipeline end-to-end.
@@ -420,7 +416,7 @@ class TestHarvestComputePath:
             event      = "Lakers vs Celtics",
             selection  = "Lakers ML",
         )
-        _run(db.save_alert_clv_seed(seed))
+        await db.save_alert_clv_seed(seed)
 
         closing = OddsRecord(
             event         = "Lakers vs Celtics",
@@ -431,26 +427,26 @@ class TestHarvestComputePath:
             american_odds = -130,
             recorded_at   = datetime.utcnow(),
         )
-        _run(db.save_odds(closing))
+        await db.save_odds(closing)
 
-        h, e = _run(_run_harvest_logic(db, datetime.utcnow(), timedelta(hours=4)))
+        h, e = await _run_harvest_logic(db, datetime.utcnow(), timedelta(hours=4))
         assert h == 1
 
         # The seed should now be marked computed
-        fetched = _run(db.get_clv_seed_for_source("ev_records", 501))
+        fetched = await db.get_clv_seed_for_source("ev_records", 501)
         assert fetched is not None
         assert fetched.clv_computed is True
         assert fetched.clv_pct is not None
         assert fetched.clv_pct > 0
 
-    def test_compute_path_underdog_seed_with_bet_odds(self, db):
+    async def test_compute_path_underdog_seed_with_bet_odds(self, db):
         """
         UNDERDOG seed created via seed_clv_from_ud_confirmation should also
         be harvested correctly (no crash, CLVRecord written) when closing odds arrive.
         """
         from database import OddsRecord
 
-        _run(db.seed_clv_from_ud_confirmation(
+        await db.seed_clv_from_ud_confirmation(
             source_id   = 502,
             sport       = "NBA",
             stat_type   = "points",
@@ -459,7 +455,7 @@ class TestHarvestComputePath:
             game_time   = self._past_game(2),
             tier        = "S",
             avg_odds    = -115,
-        ))
+        )
 
         # Simulate a closing OddsRecord for this player prop
         closing = OddsRecord(
@@ -471,9 +467,9 @@ class TestHarvestComputePath:
             american_odds = -130,
             recorded_at   = datetime.utcnow(),
         )
-        _run(db.save_odds(closing))
+        await db.save_odds(closing)
 
-        h, e = _run(_run_harvest_logic(db, datetime.utcnow(), timedelta(hours=4)))
+        h, e = await _run_harvest_logic(db, datetime.utcnow(), timedelta(hours=4))
         assert h == 1
         assert e == 0
 
@@ -492,9 +488,9 @@ class TestSeedClvFromUdConfirmation:
     def _past_game(self, hours_ago: float) -> datetime:
         return datetime.utcnow() - timedelta(hours=hours_ago)
 
-    def test_inserts_seed_with_bet_odds(self, db):
+    async def test_inserts_seed_with_bet_odds(self, db):
         """A fresh call creates a seed with bet_odds populated."""
-        inserted = _run(db.seed_clv_from_ud_confirmation(
+        inserted = await db.seed_clv_from_ud_confirmation(
             source_id   = 200,
             sport       = "NBA",
             stat_type   = "points",
@@ -503,9 +499,9 @@ class TestSeedClvFromUdConfirmation:
             game_time   = self._past_game(1),
             tier        = "S",
             avg_odds    = -115,
-        ))
+        )
         # rowcount behaviour: True when the row is created or upgraded
-        fetched = _run(db.get_clv_seed_for_source("underdog_snapshots", 200))
+        fetched = await db.get_clv_seed_for_source("underdog_snapshots", 200)
         assert fetched is not None
         assert fetched.bet_odds == -115
         assert fetched.alert_type == "UNDERDOG"
@@ -514,7 +510,7 @@ class TestSeedClvFromUdConfirmation:
         assert "LeBron James" in fetched.selection
         assert fetched.clv_computed is False
 
-    def test_upserts_bet_odds_when_existing_seed_has_none(self, db):
+    async def test_upserts_bet_odds_when_existing_seed_has_none(self, db):
         """
         If seed_clv_from_ud_snapshots already created a seed with bet_odds=None,
         seed_clv_from_ud_confirmation upgrades it with the OddsAPI avg_odds.
@@ -535,9 +531,9 @@ class TestSeedClvFromUdConfirmation:
             alerted_at   = datetime.utcnow(),
             clv_computed = False,
         )
-        _run(db.save_alert_clv_seed(bare_seed))
+        await db.save_alert_clv_seed(bare_seed)
 
-        _run(db.seed_clv_from_ud_confirmation(
+        await db.seed_clv_from_ud_confirmation(
             source_id   = 201,
             sport       = "NBA",
             stat_type   = "rebounds",
@@ -546,19 +542,19 @@ class TestSeedClvFromUdConfirmation:
             game_time   = self._past_game(0.5),
             tier        = "A",
             avg_odds    = -108,
-        ))
+        )
 
-        fetched = _run(db.get_clv_seed_for_source("underdog_snapshots", 201))
+        fetched = await db.get_clv_seed_for_source("underdog_snapshots", 201)
         assert fetched is not None
         assert fetched.bet_odds == -108    # upgraded from None
 
-    def test_does_not_overwrite_existing_bet_odds(self, db):
+    async def test_does_not_overwrite_existing_bet_odds(self, db):
         """
         If a seed already has bet_odds (e.g. a second alert for the same snap),
         the existing bet_odds is preserved — on_conflict WHERE bet_odds IS NULL.
         """
         # First confirmation call — sets bet_odds = -110
-        _run(db.seed_clv_from_ud_confirmation(
+        await db.seed_clv_from_ud_confirmation(
             source_id   = 202,
             sport       = "MLB",
             stat_type   = "hits",
@@ -567,9 +563,9 @@ class TestSeedClvFromUdConfirmation:
             game_time   = self._past_game(1),
             tier        = "S",
             avg_odds    = -110,
-        ))
+        )
         # Second confirmation call with different odds — must NOT overwrite
-        _run(db.seed_clv_from_ud_confirmation(
+        await db.seed_clv_from_ud_confirmation(
             source_id   = 202,
             sport       = "MLB",
             stat_type   = "hits",
@@ -578,18 +574,18 @@ class TestSeedClvFromUdConfirmation:
             game_time   = self._past_game(1),
             tier        = "S",
             avg_odds    = -105,
-        ))
+        )
 
-        fetched = _run(db.get_clv_seed_for_source("underdog_snapshots", 202))
+        fetched = await db.get_clv_seed_for_source("underdog_snapshots", 202)
         assert fetched is not None
         assert fetched.bet_odds == -110    # original preserved
 
-    def test_seed_survives_harvest_guard(self, db):
+    async def test_seed_survives_harvest_guard(self, db):
         """
         A seed created by seed_clv_from_ud_confirmation must NOT be immediately
         expired by the harvest guard — it passes the `if not seed.bet_odds` check.
         """
-        _run(db.seed_clv_from_ud_confirmation(
+        await db.seed_clv_from_ud_confirmation(
             source_id   = 203,
             sport       = "NBA",
             stat_type   = "assists",
@@ -598,15 +594,15 @@ class TestSeedClvFromUdConfirmation:
             game_time   = self._past_game(1),   # past game, within grace
             tier        = "A",
             avg_odds    = -120,
-        ))
+        )
 
         now   = datetime.utcnow()
         grace = timedelta(hours=4)
-        h, e  = _run(_run_harvest_logic(db, now, grace))
+        h, e  = await _run_harvest_logic(db, now, grace)
         # 1h ago < 4h grace, no closing odds → left pending
         assert h == 0
         assert e == 0
 
-        fetched = _run(db.get_clv_seed_for_source("underdog_snapshots", 203))
+        fetched = await db.get_clv_seed_for_source("underdog_snapshots", 203)
         assert fetched is not None
         assert fetched.clv_computed is False   # still pending

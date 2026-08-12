@@ -12,21 +12,11 @@ Covers:
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timedelta
 
 import pytest
 
 from database import Database, PropOpportunityLog, PlayerGameResult
-
-
-# ── Shared event loop (aiosqlite requirement) ─────────────────────────────────
-
-@pytest.fixture(scope="module")
-def event_loop():
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
 
 
 @pytest.fixture(scope="module")

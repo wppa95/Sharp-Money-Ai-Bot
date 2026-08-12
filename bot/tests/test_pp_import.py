@@ -24,22 +24,18 @@ from database import Database, PropLineHistory
 
 # ── Shared event loop ─────────────────────────────────────────────────────────
 
-_loop = asyncio.new_event_loop()
-asyncio.set_event_loop(_loop)
 
 
-def _run(coro):
-    return _loop.run_until_complete(coro)
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 @pytest.fixture()
-def db():
+async def db():
     database = Database("sqlite+aiosqlite:///:memory:")
-    _run(database.init())
+    await database.init()
     yield database
-    _run(database.close())
+    await database.close()
 
 
 # ── Parse helper (extracted from cmd_pp_import logic) ─────────────────────────
@@ -93,7 +89,7 @@ async def _import_props(db: Database, lines: list[str]) -> list[tuple[str, str, 
 # ── Parse tests ───────────────────────────────────────────────────────────────
 
 class TestParsePPImportLine:
-    def test_basic_line(self):
+    async def test_basic_line(self):
         r = _parse_pp_import_line("LeBron James | Points | 25.5 | NBA")
         assert r["player_name"] == "LeBron James"
         assert r["stat_type"]   == "Points"
@@ -101,37 +97,37 @@ class TestParsePPImportLine:
         assert r["sport"]       == "NBA"
         assert r["removed"]     is False
 
-    def test_removed_marker(self):
+    async def test_removed_marker(self):
         r = _parse_pp_import_line("Mike Trout | Hits | 1.5 | MLB | removed")
         assert r["removed"] is True
 
-    def test_removed_case_insensitive(self):
+    async def test_removed_case_insensitive(self):
         r = _parse_pp_import_line("Mike Trout | Hits | 1.5 | MLB | REMOVED")
         assert r["removed"] is True
 
-    def test_sport_uppercased(self):
+    async def test_sport_uppercased(self):
         r = _parse_pp_import_line("LeBron | Points | 25.5 | nba")
         assert r["sport"] == "NBA"
 
-    def test_too_few_fields_returns_none(self):
+    async def test_too_few_fields_returns_none(self):
         assert _parse_pp_import_line("LeBron | Points | 25.5") is None
 
-    def test_invalid_line_value_returns_none(self):
+    async def test_invalid_line_value_returns_none(self):
         assert _parse_pp_import_line("LeBron | Points | bad | NBA") is None
 
-    def test_comma_in_line_value_stripped(self):
+    async def test_comma_in_line_value_stripped(self):
         r = _parse_pp_import_line("Patrick Mahomes | Pass Yards | 275,5 | NFL")
         assert r["line_value"] == 2755.0  # comma stripped → 2755 (not decimal sep)
 
-    def test_empty_string_returns_none(self):
+    async def test_empty_string_returns_none(self):
         assert _parse_pp_import_line("") is None
 
-    def test_whitespace_stripped(self):
+    async def test_whitespace_stripped(self):
         r = _parse_pp_import_line("  LeBron James  |  Points  |  25.5  |  NBA  ")
         assert r["player_name"] == "LeBron James"
         assert r["stat_type"]   == "Points"
 
-    def test_float_line_value(self):
+    async def test_float_line_value(self):
         r = _parse_pp_import_line("LeBron | Points | 25.5 | NBA")
         assert isinstance(r["line_value"], float)
 
@@ -139,66 +135,66 @@ class TestParsePPImportLine:
 # ── End-to-end import lifecycle tests ────────────────────────────────────────
 
 class TestPPImportLifecycle:
-    def test_single_import_added(self, db):
-        results = _run(_import_props(db, ["LeBron James | Points | 25.5 | NBA"]))
+    async def test_single_import_added(self, db):
+        results = await _import_props(db, ["LeBron James | Points | 25.5 | NBA"])
         assert len(results) == 1
         assert results[0][2] == "ADDED"
 
-    def test_second_import_same_line_unchanged(self, db):
-        _run(_import_props(db, ["LeBron James | Points | 25.5 | NBA"]))
-        results = _run(_import_props(db, ["LeBron James | Points | 25.5 | NBA"]))
+    async def test_second_import_same_line_unchanged(self, db):
+        await _import_props(db, ["LeBron James | Points | 25.5 | NBA"])
+        results = await _import_props(db, ["LeBron James | Points | 25.5 | NBA"])
         assert results[0][2] == "UNCHANGED"
 
-    def test_line_change_detected(self, db):
-        _run(_import_props(db, ["LeBron James | Points | 25.5 | NBA"]))
-        results = _run(_import_props(db, ["LeBron James | Points | 27.5 | NBA"]))
+    async def test_line_change_detected(self, db):
+        await _import_props(db, ["LeBron James | Points | 25.5 | NBA"])
+        results = await _import_props(db, ["LeBron James | Points | 27.5 | NBA"])
         assert results[0][2] == "CHANGED"
 
-    def test_removed_lifecycle(self, db):
-        _run(_import_props(db, ["Mike Trout | Hits | 1.5 | MLB"]))
-        results = _run(_import_props(db, ["Mike Trout | Hits | 1.5 | MLB | removed"]))
+    async def test_removed_lifecycle(self, db):
+        await _import_props(db, ["Mike Trout | Hits | 1.5 | MLB"])
+        results = await _import_props(db, ["Mike Trout | Hits | 1.5 | MLB | removed"])
         assert results[0][2] == "REMOVED"
 
-    def test_returned_after_removed(self, db):
-        _run(_import_props(db, ["Mike Trout | Hits | 1.5 | MLB"]))
-        _run(_import_props(db, ["Mike Trout | Hits | 1.5 | MLB | removed"]))
-        results = _run(_import_props(db, ["Mike Trout | Hits | 1.5 | MLB"]))
+    async def test_returned_after_removed(self, db):
+        await _import_props(db, ["Mike Trout | Hits | 1.5 | MLB"])
+        await _import_props(db, ["Mike Trout | Hits | 1.5 | MLB | removed"])
+        results = await _import_props(db, ["Mike Trout | Hits | 1.5 | MLB"])
         assert results[0][2] == "RETURNED"
 
-    def test_multi_prop_import(self, db):
+    async def test_multi_prop_import(self, db):
         lines = [
             "LeBron James | Points | 25.5 | NBA",
             "Mike Trout | Hits | 1.5 | MLB",
             "Patrick Mahomes | Pass Yards | 275.5 | NFL",
         ]
-        results = _run(_import_props(db, lines))
+        results = await _import_props(db, lines)
         assert len(results) == 3
         assert all(r[2] == "ADDED" for r in results)
 
-    def test_malformed_lines_skipped(self, db):
+    async def test_malformed_lines_skipped(self, db):
         lines = [
             "bad line without pipes",
             "LeBron James | Points | 25.5 | NBA",
             "only | two",
         ]
-        results = _run(_import_props(db, lines))
+        results = await _import_props(db, lines)
         assert len(results) == 1  # only the valid line
         assert results[0][2] == "ADDED"
 
-    def test_pp_does_not_pollute_underdog_history(self, db):
-        _run(_import_props(db, ["LeBron James | Points | 25.5 | NBA"]))
+    async def test_pp_does_not_pollute_underdog_history(self, db):
+        await _import_props(db, ["LeBron James | Points | 25.5 | NBA"])
 
-        pp_count = _run(db.count_prop_line_history(provider="PrizePicks"))
-        ud_count = _run(db.count_prop_line_history(provider="Underdog"))
+        pp_count = await db.count_prop_line_history(provider="PrizePicks")
+        ud_count = await db.count_prop_line_history(provider="Underdog")
         assert pp_count >= 1
         assert ud_count == 0
 
-    def test_imported_props_stored_correctly(self, db):
-        _run(_import_props(db, ["LeBron James | Points | 25.5 | NBA"]))
+    async def test_imported_props_stored_correctly(self, db):
+        await _import_props(db, ["LeBron James | Points | 25.5 | NBA"])
 
-        rows = _run(db.get_prop_line_history(
+        rows = await db.get_prop_line_history(
             "PrizePicks", "LeBron James", "NBA", "Points"
-        ))
+        )
         assert len(rows) >= 1
         row = rows[0]
         assert row.player_name == "LeBron James"
@@ -206,33 +202,33 @@ class TestPPImportLifecycle:
         assert abs(row.line_value - 25.5) < 1e-6
         assert row.provider    == "PrizePicks"
 
-    def test_line_change_stores_updated_value(self, db):
-        _run(_import_props(db, ["LeBron James | Points | 25.5 | NBA"]))
-        _run(_import_props(db, ["LeBron James | Points | 27.5 | NBA"]))
+    async def test_line_change_stores_updated_value(self, db):
+        await _import_props(db, ["LeBron James | Points | 25.5 | NBA"])
+        await _import_props(db, ["LeBron James | Points | 27.5 | NBA"])
 
-        rows = _run(db.get_prop_line_history(
+        rows = await db.get_prop_line_history(
             "PrizePicks", "LeBron James", "NBA", "Points"
-        ))
+        )
         assert len(rows) >= 1
         # Most-recent row should have the new line value
         latest = rows[0]
         assert abs(latest.line_value - 27.5) < 1e-6
 
-    def test_multiple_stats_for_same_player_isolated(self, db):
+    async def test_multiple_stats_for_same_player_isolated(self, db):
         """Points and Rebounds for LeBron should be independent lifecycle entries."""
         lines = [
             "LeBron James | Points | 25.5 | NBA",
             "LeBron James | Rebounds | 7.5 | NBA",
         ]
-        results = _run(_import_props(db, lines))
+        results = await _import_props(db, lines)
         assert all(r[2] == "ADDED" for r in results)
         assert len(results) == 2
 
-    def test_import_count_matches_expected(self, db):
+    async def test_import_count_matches_expected(self, db):
         lines = [
             "LeBron James | Points | 25.5 | NBA",
             "Mike Trout | Hits | 1.5 | MLB",
         ]
-        _run(_import_props(db, lines))
-        total = _run(db.count_prop_line_history(provider="PrizePicks"))
+        await _import_props(db, lines)
+        total = await db.count_prop_line_history(provider="PrizePicks")
         assert total == 2

@@ -363,15 +363,16 @@ class TestPrizePicksClientParsing:
 # ── Database storage ──────────────────────────────────────────────────────────
 
 class TestPrizePicksDatabase:
-    async def _make_db(self):
+    @pytest.fixture()
+    async def db(self):
         from database import Database
-        db = Database("sqlite+aiosqlite:///:memory:")
-        await db.init()
-        return db
+        _db = Database("sqlite+aiosqlite:///:memory:")
+        await _db.init()
+        yield _db
+        await _db.close()
 
-    async def test_save_and_retrieve_pp_line(self):
+    async def test_save_and_retrieve_pp_line(self, db):
         from database import PrizePicksRecord
-        db = await self._make_db()
         record = PrizePicksRecord(
             external_id="proj-001",
             player_name="LeBron James",
@@ -390,9 +391,8 @@ class TestPrizePicksDatabase:
         assert rows[0].player_name == "LeBron James"
         assert rows[0].line_value  == 25.5
 
-    async def test_save_and_retrieve_pp_edge(self):
+    async def test_save_and_retrieve_pp_edge(self, db):
         from database import PPEdgeRecord
-        db = await self._make_db()
         now = datetime.utcnow()
         edge = PPEdgeRecord(
             player_name="LeBron James",
@@ -422,9 +422,8 @@ class TestPrizePicksDatabase:
         assert rows[0].best_side   == "OVER"
         assert rows[0].alert_sent  is True
 
-    async def test_count_pp_records(self):
+    async def test_count_pp_records(self, db):
         from database import PrizePicksRecord
-        db = await self._make_db()
         for i in range(3):
             await db.save_pp_line(PrizePicksRecord(
                 external_id=f"proj-{i}",
@@ -437,9 +436,8 @@ class TestPrizePicksDatabase:
         count = await db.count_pp_records()
         assert count == 3
 
-    async def test_has_recent_pp_alert_true(self):
+    async def test_has_recent_pp_alert_true(self, db):
         from database import PPEdgeRecord
-        db = await self._make_db()
         await db.save_pp_edge(PPEdgeRecord(
             player_name="LeBron James",
             team="LAL", sport="NBA", stat_type="Points",
@@ -455,9 +453,8 @@ class TestPrizePicksDatabase:
         )
         assert is_recent is True
 
-    async def test_has_recent_pp_alert_false_different_player(self):
+    async def test_has_recent_pp_alert_false_different_player(self, db):
         from database import PPEdgeRecord
-        db = await self._make_db()
         await db.save_pp_edge(PPEdgeRecord(
             player_name="Steph Curry",
             team="GSW", sport="NBA", stat_type="Points",
@@ -473,9 +470,8 @@ class TestPrizePicksDatabase:
         )
         assert is_recent is False   # different player
 
-    async def test_has_recent_pp_alert_false_outside_window(self):
+    async def test_has_recent_pp_alert_false_outside_window(self, db):
         from database import PPEdgeRecord
-        db = await self._make_db()
         old_time = datetime.utcnow() - timedelta(seconds=7200)
         await db.save_pp_edge(PPEdgeRecord(
             player_name="LeBron James",
@@ -492,9 +488,8 @@ class TestPrizePicksDatabase:
         )
         assert is_recent is False   # outside 1-hour window
 
-    async def test_find_player_prop_odds_matches_by_name(self):
+    async def test_find_player_prop_odds_matches_by_name(self, db):
         from database import OddsRecord
-        db = await self._make_db()
         now = datetime.utcnow()
         for side, odds in [("LeBron James Over", -110), ("LeBron James Under", -110)]:
             await db.save_odds(OddsRecord(
@@ -510,9 +505,8 @@ class TestPrizePicksDatabase:
         )
         assert len(matches) == 2
 
-    async def test_find_player_prop_odds_no_match(self):
+    async def test_find_player_prop_odds_no_match(self, db):
         from database import OddsRecord
-        db = await self._make_db()
         now = datetime.utcnow()
         await db.save_odds(OddsRecord(
             sportsbook="DraftKings", sport="NBA",

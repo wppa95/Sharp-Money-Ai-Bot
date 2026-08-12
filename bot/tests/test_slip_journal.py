@@ -8,15 +8,6 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
-# ── Shared event loop ─────────────────────────────────────────────────────────
-
-@pytest.fixture(scope="module")
-def event_loop():
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
-
-
 # ═══════════════════════════════════════════════════════════════════════════
 # P9/P10 — SlipJournal and SlipJournalLeg ORM models exist
 # ═══════════════════════════════════════════════════════════════════════════
@@ -580,9 +571,8 @@ class TestDkFdDisabledState:
         assert mock_dk not in registry.enabled_connectors
         assert mock_dk not in registry.sportsbook_connectors
 
-    def test_fetch_all_skips_disabled(self):
+    async def test_fetch_all_skips_disabled(self):
         from connectors.registry import ConnectorRegistry
-        import asyncio
 
         registry = ConnectorRegistry()
         mock_dk = MagicMock()
@@ -591,8 +581,6 @@ class TestDkFdDisabledState:
         mock_dk.is_pickem = False
         registry.register(mock_dk)
 
-        loop = asyncio.new_event_loop()
-        result = loop.run_until_complete(registry.fetch_all())
-        loop.close()
+        result = await registry.fetch_all()
         assert result == []
         mock_dk.fetch.assert_not_called()

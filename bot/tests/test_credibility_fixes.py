@@ -71,14 +71,6 @@ class TestReentryDetection:
 # 2. ScanCycleLog DB table and methods
 # ══════════════════════════════════════════════════════════════════════
 
-_LOOP = None
-
-def _get_loop():
-    global _LOOP
-    if _LOOP is None or _LOOP.is_closed():
-        _LOOP = asyncio.new_event_loop()
-    return _LOOP
-
 
 class TestScanCycleLog:
     """Tests for ScanCycleLog ORM table and DB methods."""

@@ -287,11 +287,13 @@ class TestGetActiveUnderdogSnapshotPerPropSQLite:
     snapshot to be returned for a prop that was subsequently removed.
     """
 
-    async def _make_db(self):
+    @pytest.fixture()
+    async def db(self):
         from database import Database
-        db = Database(url="sqlite+aiosqlite:///:memory:")
-        await db.init()
-        return db
+        _db = Database(url="sqlite+aiosqlite:///:memory:")
+        await _db.init()
+        yield _db
+        await _db.close()
 
     def _make_record(
         self,
@@ -315,24 +317,19 @@ class TestGetActiveUnderdogSnapshotPerPropSQLite:
             fetched_at  = datetime.datetime.utcnow(),
         )
 
-    @pytest.mark.asyncio
-    async def test_active_prop_appears_in_result(self):
+    async def test_active_prop_appears_in_result(self, db):
         """A prop with latest removed=False is returned."""
-        db = await self._make_db()
         await db.save_underdog_snapshot(self._make_record(removed=False))
         result = await db.get_active_underdog_snapshot_per_prop()
         assert ("Test Player", "Points") in result
 
-    @pytest.mark.asyncio
-    async def test_only_removal_record_excluded(self):
+    async def test_only_removal_record_excluded(self, db):
         """A prop with only a removal record is absent from the result."""
-        db = await self._make_db()
         await db.save_underdog_snapshot(self._make_record(removed=True))
         result = await db.get_active_underdog_snapshot_per_prop()
         assert ("Test Player", "Points") not in result
 
-    @pytest.mark.asyncio
-    async def test_older_active_then_removal_excluded(self):
+    async def test_older_active_then_removal_excluded(self, db):
         """
         CRITICAL: A prop with an older active row (id N) followed by a newer
         removal row (id N+1) must be ABSENT — the newer removal wins.
@@ -342,7 +339,6 @@ class TestGetActiveUnderdogSnapshotPerPropSQLite:
         The new method computes MAX over all rows (= id N+1, removal) then
         filters removed=False, so the prop is correctly excluded.
         """
-        db = await self._make_db()
         # Active row inserted first (gets lower autoincrement id)
         await db.save_underdog_snapshot(self._make_record(removed=False))
         # Removal row inserted second (gets higher id — the LATEST record)
@@ -351,14 +347,12 @@ class TestGetActiveUnderdogSnapshotPerPropSQLite:
         # Must be ABSENT — the latest record is a removal
         assert ("Test Player", "Points") not in result
 
-    @pytest.mark.asyncio
-    async def test_old_get_latest_returns_stale_snap_for_same_data(self):
+    async def test_old_get_latest_returns_stale_snap_for_same_data(self, db):
         """
         Regression proof: the old get_latest_underdog_snapshot_per_prop
         incorrectly returns the stale active snapshot when latest is removal.
         Documents the known-broken behavior so the contrast is explicit.
         """
-        db = await self._make_db()
         await db.save_underdog_snapshot(self._make_record(removed=False))
         await db.save_underdog_snapshot(self._make_record(removed=True))
         stale  = await db.get_latest_underdog_snapshot_per_prop()
@@ -372,20 +366,16 @@ class TestGetActiveUnderdogSnapshotPerPropSQLite:
         # New method correctly excludes the prop
         assert ("Test Player", "Points") not in active
 
-    @pytest.mark.asyncio
-    async def test_mixed_pool_only_active_props_returned(self):
+    async def test_mixed_pool_only_active_props_returned(self, db):
         """With one active and one removed prop, only the active one appears."""
-        db = await self._make_db()
         await db.save_underdog_snapshot(self._make_record(player="Active", removed=False))
         await db.save_underdog_snapshot(self._make_record(player="Gone",   removed=True))
         result = await db.get_active_underdog_snapshot_per_prop()
         assert ("Active", "Points") in result
         assert ("Gone",   "Points") not in result
 
-    @pytest.mark.asyncio
-    async def test_re_activated_prop_returned(self):
+    async def test_re_activated_prop_returned(self, db):
         """A prop that was removed then re-added (highest id = active) appears."""
-        db = await self._make_db()
         await db.save_underdog_snapshot(self._make_record(removed=False, line=20.0))
         await db.save_underdog_snapshot(self._make_record(removed=True,  line=20.0))
         # Re-added with a new line
