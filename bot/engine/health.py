@@ -803,6 +803,47 @@ class HealthTracker:
             return "Python Exception (no detail captured)"
         return "Unknown Exit"
 
+    # ── Stable refresh cursor & stats ─────────────────────────────────────────────
+
+    def get_stable_refresh_cursor(self) -> int:
+        """Return the current rolling cursor into the sorted stable-prop pool."""
+        with self._lock:
+            return max(0, int(self._state.get("stable_refresh_cursor", 0)))
+
+    def set_stable_refresh_cursor(self, cursor: int) -> None:
+        """Persist the cursor position after a stable-refresh batch completes."""
+        with self._lock:
+            self._state["stable_refresh_cursor"] = max(0, int(cursor))
+            self._save()
+
+    def get_wl_refresh_cursor(self) -> int:
+        """Return the current rolling cursor into the FIFO-sorted watchlist candidate pool."""
+        with self._lock:
+            return max(0, int(self._state.get("wl_refresh_cursor", 0)))
+
+    def set_wl_refresh_cursor(self, cursor: int) -> None:
+        """Persist the watchlist-refresh cursor after each cycle."""
+        with self._lock:
+            self._state["wl_refresh_cursor"] = max(0, int(cursor))
+            self._save()
+
+    def get_stable_refresh_stats(self) -> dict:
+        """Return the stats dict from the most recently completed stable-refresh cycle."""
+        with self._lock:
+            return dict(self._state.get("stable_refresh_stats", {}))
+
+    def set_stable_refresh_stats(self, stats: dict) -> None:
+        """Persist stable-refresh stats from the last completed cycle."""
+        with self._lock:
+            self._state["stable_refresh_stats"]    = dict(stats)
+            self._state["last_stable_refresh"]     = _now_iso()
+            self._state["last_stable_refresh_ts"]  = _now_ts()
+            self._save()
+
+    def last_stable_refresh_str(self) -> str:
+        """Human-readable age of the last stable-refresh cycle."""
+        return _age_str(self._state.get("last_stable_refresh_ts"))
+
 
 # ── Module-level singleton ────────────────────────────────────────────────────
 

@@ -93,6 +93,7 @@ from market_engine import (
     consensus_check_job,
     clv_check_job,
     underdog_job,
+    _stable_refresh_job,
 )
 from providers import init_health_monitor
 from providers.odds_cache import init_odds_cache
@@ -290,6 +291,17 @@ async def post_init(application: Application) -> None:
             # during brief process pauses).
             job_kwargs={"max_instances": 1, "misfire_grace_time": 60},
         )
+        # Stable refresh — rolls through the full stable prop pool (10k/batch) every
+        # 2 minutes using only local DB data (zero extra Underdog API calls).
+        # Also rescans active watchlist candidates every cycle.
+        # Starts 90 s after launch to let the first underdog_job cold-start complete.
+        jq.run_repeating(
+            _stable_refresh_job,
+            interval=120,
+            first=90,
+            name="stable_refresh",
+            job_kwargs={"max_instances": 1, "misfire_grace_time": 60},
+        )
         # CLV seed job — every 15 minutes (creates AlertCLVSeed entries for alerts)
         jq.run_repeating(_clv_seed_job,        interval=900,                                first=120, name="clv_seeder")
         # CLV harvest job — every hour (processes seeds after game_time passes)
@@ -311,8 +323,8 @@ async def post_init(application: Application) -> None:
                 name="season_checker",
             )
         logger.info(
-            "Jobs scheduled — underdog: every %ds, pregame: every %ds, "
-            "season_check: every %ds, heartbeat: every 60s "
+            "Jobs scheduled — underdog: every %ds, stable_refresh: every 120s, "
+            "pregame: every %ds, season_check: every %ds, heartbeat: every 60s "
             "[player_props_fetcher disabled — PP pipeline off]",
             config.UNDERDOG_POLL_INTERVAL,
             config.PREGAME_SCAN_INTERVAL,

@@ -2456,6 +2456,36 @@ class Database:
             )
             return list(result.scalars().all())
 
+    async def get_recently_alerted_prop_keys(
+        self,
+        within_seconds: int = 86400,
+    ) -> "frozenset[tuple[str, str]]":
+        """
+        Single-query bulk alternative to has_recent_ud_alert for batch scanning.
+
+        Returns a frozenset of (player_name, stat_type) pairs for which
+        alert_sent=True was recorded within the last *within_seconds* seconds.
+
+        Used by _stable_refresh_job to pre-load the dedup set once per cycle
+        rather than issuing one query per prop, which would open tens of
+        thousands of SQLite sessions for a 10k-prop batch.
+        """
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(seconds=within_seconds)
+        async with self.session() as s:
+            result = await s.execute(
+                select(
+                    UnderdogSnapshotRecord.player_name,
+                    UnderdogSnapshotRecord.stat_type,
+                )
+                .where(
+                    UnderdogSnapshotRecord.alert_sent == True,   # noqa: E712
+                    UnderdogSnapshotRecord.fetched_at >= cutoff,
+                )
+                .distinct()
+            )
+            return frozenset((r[0], r[1]) for r in result.all())
+
     async def has_recent_ud_alert(
         self,
         player_name: str,
@@ -2910,6 +2940,67 @@ class Database:
                 "log_prop_candidate_batch: %d/%d rows failed", failed, inserted + failed
             )
         return inserted
+
+    async def get_active_underdog_snapshot_per_prop(
+        self,
+    ) -> "dict[tuple[str, str], UnderdogSnapshotRecord]":
+        """
+        Return the single most-recent snapshot for every (player_name, stat_type) pair
+        **where the latest snapshot is not a removal**.
+
+        Unlike :meth:`get_latest_underdog_snapshot_per_prop`, the MAX(id) subquery
+        runs over *all* rows (removed and non-removed alike).  This correctly excludes
+        props whose most-recent feed record is a removal marker — they are simply
+        absent from the returned dict, so the stable-refresh job never rescores them
+        and the watchlist-rescan job correctly transitions them to 'Removed'.
+
+        The old method (max over non-removed rows only) can return a stale non-removed
+        snapshot for a prop that was subsequently removed, causing false alerts.
+        """
+        async with self.session() as s:
+            # Step 1 — latest row id per prop (all rows, including removals)
+            subq = (
+                select(func.max(UnderdogSnapshotRecord.id))
+                .group_by(
+                    UnderdogSnapshotRecord.player_name,
+                    UnderdogSnapshotRecord.stat_type,
+                )
+                .scalar_subquery()
+            )
+            # Step 2 — keep only those latest rows where removed=False
+            result = await s.execute(
+                select(UnderdogSnapshotRecord).where(
+                    UnderdogSnapshotRecord.id.in_(subq),
+                    UnderdogSnapshotRecord.removed == False,  # noqa: E712
+                )
+            )
+            rows = result.scalars().all()
+        return {(r.player_name, r.stat_type): r for r in rows}
+
+    async def get_active_watchlist_candidates(self) -> list:
+        """
+        Return all PropOpportunityLog rows with watchlist_state='Watchlist'
+        and result='PENDING' (not yet graded/completed).
+
+        Used by the stable-refresh job to rescore near-miss candidates.
+        Results are ordered by id ASC (FIFO insertion order) so the stable-
+        refresh job can apply a rotating cursor over them — giving every
+        candidate a fair chance to be rescanned regardless of confidence rank.
+        Without FIFO ordering a confidence-DESC sort would permanently favour
+        high-confidence rows and starve lower-confidence ones when the watchlist
+        exceeds the per-cycle batch cap.
+        """
+        async with self.session() as s:
+            result = await s.execute(
+                select(PropOpportunityLog)
+                .where(
+                    PropOpportunityLog.watchlist_state == "Watchlist",
+                    PropOpportunityLog.result == "PENDING",
+                )
+                .order_by(PropOpportunityLog.id)   # FIFO — oldest entry first
+            )
+            rows = result.scalars().all()
+        return list(rows)
 
     async def log_scan_cycle(
         self,

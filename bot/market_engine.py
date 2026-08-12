@@ -3097,3 +3097,788 @@ async def underdog_job(context) -> None:
                 module = "market_engine",
                 error  = "bridge or lifecycle update failed",
             )
+
+
+# ── Stable Refresh Job ─────────────────────────────────────────────────────────
+# Runs every 2 minutes — separate from underdog_job — using only data already
+# stored in the local DB (zero additional Underdog API calls).
+#
+# PART 1 — Rolling stable-pool rescan:
+#   • Loads all active props from DB via get_latest_underdog_snapshot_per_prop().
+#   • Sorts them by (player, stat_type) for a stable, reproducible cursor.
+#   • Takes the next ≤10,000 props from the cursor position.
+#   • Rescores each using the existing engine + all existing alert gates.
+#   • Sends qualifying Telegram alerts through AlertDelivery.deliver_underdog().
+#   • Applies the Watchlist UNDER rule: score 30–40 with UNDER recommendation
+#     → watchlist_state='Watchlist' instead of silent rejection.
+#   • Advances the cursor; wraps to 0 at end of pool.
+#
+# PART 2 — Watchlist rescan:
+#   • Queries PropOpportunityLog rows where watchlist_state='Watchlist'.
+#   • Rescores each.  Promotion → alert; score decline → Rejected; prop gone → Removed.
+#
+# Both parts use the existing dedup, direction, BQ, conf, and live-game gates.
+# The fast path (underdog_job) is completely unaffected.
+
+_STABLE_REFRESH_BATCH_SIZE:   int = 10_000
+_STABLE_WATCHLIST_BATCH_SIZE: int = 200    # max watchlist candidates rescanned per cycle
+
+# Per-stable-refresh-cycle dedup — prevents sending 95+ priority alert more
+# than once per cycle for the same prop.  Reset each time _stable_refresh_job
+# is called (local variable within the function).
+
+
+async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
+    """
+    Rolling stable-prop rescore + watchlist rescan.  Runs every 2 minutes.
+
+    See module-level docstring above for the full design.
+    """
+    from engine.player_validator import validate_player_prop as _sr_validate
+    from engine.ud_bet_decision import make_ud_bet_decision as _sr_decide
+    from engine.ud_scoring import (
+        score_ud_prop          as _sr_score_fn,
+        compute_market_quality as _sr_cmq,
+        detect_market_pressure as _sr_dmp,
+    )
+
+    db: Database = context.bot_data.get("db")
+    bot          = context.bot
+    if db is None:
+        return
+
+    chat_ids = list(config.allowed_user_ids)
+    now      = datetime.utcnow()
+    _health  = get_health_tracker()
+
+    if _health:
+        _health.record_job_started("stable_refresh_job")
+
+    # ── Per-cycle priority dedup (resets every cycle) ─────────────────────────
+    _sr_priority_this_cycle: set = set()
+
+    # Stats for console/health
+    pool_size    = 0
+    cursor       = 0
+    next_cursor  = 0
+    end_cursor   = 0
+    batch_keys: list = []
+    sr_rescored  = 0
+    sr_qualified = 0
+    sr_watchlist = 0
+    sr_rejected  = 0
+    sr_sent      = 0
+    wl_active    = 0
+    wl_rescored  = 0
+    wl_improved  = 0
+    wl_unchanged = 0
+    wl_declined  = 0
+    wl_promoted  = 0
+    wl_removed   = 0
+
+    # ────────────────────────────────────────────────────────────────────────────
+    # PART 1 — Rolling stable-pool rescan
+    # ────────────────────────────────────────────────────────────────────────────
+    try:
+        # Fetch full active pool from DB — zero Underdog API calls.
+        # get_active_underdog_snapshot_per_prop() takes MAX(id) over ALL rows
+        # (including removals) then keeps only non-removed latest rows.
+        # This ensures props whose most-recent feed record is a removal are
+        # absent from the pool, preventing false rescores and alerts.
+        active_pool: dict = await db.get_active_underdog_snapshot_per_prop()
+        pool_keys: list   = sorted(active_pool.keys())   # stable sort → consistent cursor
+        pool_size         = len(pool_keys)
+
+        # Load cursor; wrap to current pool size so a shrinking pool never OOBs
+        cursor = _health.get_stable_refresh_cursor() if _health else 0
+        cursor = (cursor % pool_size) if pool_size > 0 else 0
+
+        # Slice batch — wraps at end of pool
+        end_cursor  = min(cursor + _STABLE_REFRESH_BATCH_SIZE, pool_size)
+        batch_keys  = pool_keys[cursor:end_cursor]
+        next_cursor = end_cursor % pool_size if pool_size > 0 else 0
+
+        # Build line-map from pool for the freshness guard.  Uses line_value —
+        # the canonical ORM field on UnderdogSnapshotRecord.  No divergence is
+        # possible here since we score from the same snapshot we just fetched.
+        _sr_line_map: dict = {
+            (pn, st): (snap.line_value or 0.0)
+            for (pn, st), snap in active_pool.items()
+        }
+
+        # ── Bulk dedup pre-load ───────────────────────────────────────────────
+        # Single DB query for the entire batch — replaces one has_recent_ud_alert
+        # query per prop (which would produce tens of thousands of sequential
+        # SQLite sessions for a 10k-prop batch).  Props in this set were already
+        # alerted within the last 24 h; skip them without further DB I/O.
+        #
+        # _sr_bulk_dedup_ok tracks whether the single bulk query SUCCEEDED (even
+        # if it returned an empty frozenset — that is a valid "nothing alerted
+        # recently" result and must NOT fall back to per-prop queries).
+        # Per-prop fallback is only used when the bulk query raises.
+        _sr_bulk_dedup_ok: bool  = False
+        _sr_db_alerted:  frozenset = frozenset()
+        try:
+            _sr_db_alerted  = await db.get_recently_alerted_prop_keys(
+                within_seconds=86400
+            )
+            _sr_bulk_dedup_ok = True
+        except Exception as _sr_bulk_exc:
+            logger.debug(
+                "stable_refresh: bulk dedup pre-load failed (%s); falling back "
+                "to per-prop has_recent_ud_alert", _sr_bulk_exc,
+            )
+
+        for (_sr_player, _sr_stat) in batch_keys:
+            _sr_snap = active_pool.get((_sr_player, _sr_stat))
+            if _sr_snap is None:
+                continue
+
+            # get_active_underdog_snapshot_per_prop() already filters removed rows;
+            # defensive guard in case a caller passes a mixed pool.
+            if getattr(_sr_snap, "removed", False):
+                continue
+
+            _sr_sport = _sr_snap.sport or "UNKNOWN"
+            if _sr_sport not in config.ud_alert_sports:
+                continue
+            if _is_futures_stat(_sr_stat):
+                continue
+
+            _sr_line = _sr_snap.line_value or 0.0
+            sr_rescored += 1
+
+            # ── In-memory dedup — skip if recently alerted this session ───────
+            if _is_prop_deduped(
+                _prop_market_alerted, _sr_player, _sr_sport, _sr_stat, _sr_line,
+                dedup_window_seconds = config.UD_ALERT_DEDUP_WINDOW,
+                min_line_change      = config.MIN_UNDERDOG_LINE_CHANGE,
+            ):
+                sr_rejected += 1
+                continue
+
+            # ── DB dedup — bulk pre-loaded; no per-prop query ────────────────
+            # _sr_bulk_dedup_ok==True means the single query succeeded (even if
+            # it returned frozenset() — that just means nothing was alerted
+            # recently).  Only when the query raised do we fall back per-prop.
+            if _sr_bulk_dedup_ok:
+                if (_sr_player, _sr_stat) in _sr_db_alerted:
+                    sr_rejected += 1
+                    continue
+            else:
+                # Bulk load raised — per-prop fallback for this cycle only
+                if await db.has_recent_ud_alert(_sr_player, _sr_stat, within_seconds=86400):
+                    sr_rejected += 1
+                    continue
+
+            # ── Score + validate ──────────────────────────────────────────────
+            _sr_hist  = await db.get_ud_prop_history(_sr_player, _sr_stat, limit=30)
+            _sr_score = _sr_score_fn(
+                player_name  = _sr_player,
+                stat_type    = _sr_stat,
+                sport        = _sr_sport,
+                current_line = _sr_line,
+                prev_line    = None,
+                history      = _sr_hist,
+            )
+            _sr_val = _sr_validate(
+                player_name  = _sr_player,
+                stat_type    = _sr_stat,
+                current_line = _sr_line,
+                history      = _sr_hist,
+                min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
+            )
+
+            # ── Watchlist UNDER rule: score 30–40 + UNDER recommendation ─────
+            # Low-scoring UNDER candidates are saved as watchlist rather than
+            # silently dropped so they can be promoted if they improve later.
+            if 30 <= _sr_score.total <= 40:
+                try:
+                    _sr_hits_wl = await _fetch_and_compute_hit_rates(
+                        db, _sr_player, _sr_sport, _sr_stat, _sr_line
+                    )
+                    _sr_dec_wl = _sr_decide(
+                        score        = _sr_score,
+                        validation   = _sr_val,
+                        current_line = _sr_line,
+                        prev_line    = None,
+                        hit_rates    = _sr_hits_wl,
+                    )
+                    if _sr_dec_wl is not None and _sr_dec_wl.recommendation == "UNDER":
+                        _sr_ext_id_wl = (
+                            getattr(_sr_snap, "external_id", None)
+                            or str(getattr(_sr_snap, "id", None) or "")
+                        )
+                        try:
+                            await db.log_prop_opportunity(
+                                external_id       = _sr_ext_id_wl,
+                                player_name       = _sr_player,
+                                team              = _sr_snap.team or "",
+                                sport             = _sr_sport,
+                                stat_type         = _sr_stat,
+                                line_value        = _sr_line,
+                                recommendation    = _sr_dec_wl.recommendation,
+                                decision_tier     = _sr_dec_wl.decision_tier,
+                                confidence        = _sr_dec_wl.confidence,
+                                game_time         = _sr_snap.game_time,
+                                provider          = "Underdog",
+                                bet_quality_score = _sr_dec_wl.confidence,
+                                reason_codes      = _compute_reason_codes(_sr_score, _sr_dec_wl),
+                                watchlist_state   = "Watchlist",
+                            )
+                        except Exception:
+                            pass
+                        sr_watchlist += 1
+                        continue
+                except Exception:
+                    pass
+                sr_rejected += 1
+                continue
+
+            # ── Normal quality gates ──────────────────────────────────────────
+            if not _sr_val.has_supporting_data:
+                sr_rejected += 1
+                continue
+            if _sr_score.stars < config.min_stars_for_sport(_sr_sport):
+                sr_rejected += 1
+                continue
+
+            _sr_hits = await _fetch_and_compute_hit_rates(
+                db, _sr_player, _sr_sport, _sr_stat, _sr_line
+            )
+            _sr_dec = _sr_decide(
+                score        = _sr_score,
+                validation   = _sr_val,
+                current_line = _sr_line,
+                prev_line    = None,
+                hit_rates    = _sr_hits,
+            )
+
+            # Log opportunity for tracking (non-fatal)
+            _sr_ext_id = (
+                getattr(_sr_snap, "external_id", None)
+                or str(getattr(_sr_snap, "id", None) or "")
+            )
+            try:
+                await db.log_prop_opportunity(
+                    external_id       = _sr_ext_id,
+                    player_name       = _sr_player,
+                    team              = _sr_snap.team or "",
+                    sport             = _sr_sport,
+                    stat_type         = _sr_stat,
+                    line_value        = _sr_line,
+                    recommendation    = (_sr_dec.recommendation if _sr_dec else "PASS"),
+                    decision_tier     = (_sr_dec.decision_tier  if _sr_dec else "PASS"),
+                    confidence        = (_sr_dec.confidence     if _sr_dec else 0),
+                    game_time         = _sr_snap.game_time,
+                    provider          = "Underdog",
+                    bet_quality_score = (_sr_dec.confidence if _sr_dec else 0),
+                    reason_codes      = _compute_reason_codes(_sr_score, _sr_dec),
+                    watchlist_state   = (
+                        "Qualified"
+                        if (_sr_dec is not None and _sr_dec.recommendation != "PASS")
+                        else "Rejected"
+                    ),
+                )
+            except Exception as _sr_pol_exc:
+                logger.debug("stable_refresh: log_prop_opportunity failed: %s", _sr_pol_exc)
+
+            # ── 95+ priority override [stable path] ───────────────────────────
+            _sr_pp_key = (_sr_player, _sr_sport, _sr_stat)
+            if (
+                _sr_dec is not None
+                and _sr_dec.confidence >= 95
+                and _sr_dec.decision_tier == "S"
+                and _sr_dec.recommendation != "PASS"
+            ):
+                _sr_dir_ok = (
+                    _sr_sport.upper() != "MLB"
+                    or _sr_dec.recommendation != "UNDER"
+                    or config.is_mlb_under_allowed(_sr_stat)
+                )
+                _sr_fresh = _ud_line_fresh(_sr_line, _sr_player, _sr_stat, _sr_line_map)
+                if (
+                    _sr_pp_key not in _sr_priority_this_cycle
+                    and _sr_pp_key not in _priority_override_sent
+                    and chat_ids
+                    and _sr_dir_ok
+                    and _sr_fresh
+                ):
+                    _sr_priority_this_cycle.add(_sr_pp_key)
+                    _priority_override_sent.add(_sr_pp_key)
+                    await broadcast_alert(
+                        bot, chat_ids,
+                        _format_95_priority_alert(
+                            _sr_player, _sr_snap, _sr_stat, _sr_score, _sr_dec, _sr_line,
+                        ),
+                    )
+                    _record_prop_alerted(
+                        _prop_market_alerted, _sr_player, _sr_sport, _sr_stat, _sr_line,
+                    )
+                    # Persist the alert-sent marker to DB so has_recent_ud_alert
+                    # (and get_recently_alerted_prop_keys) return True after a
+                    # restart, preventing the same 95+ prop from being re-alerted
+                    # in the first stable-refresh cycle after the bot comes back up.
+                    try:
+                        await db.mark_ud_snapshot_alert_sent(_sr_player, _sr_stat)
+                        _sr_ext_id_95 = (
+                            getattr(_sr_snap, "external_id", None)
+                            or str(getattr(_sr_snap, "id", None) or "")
+                        )
+                        await db.mark_opportunity_alert_sent(_sr_ext_id_95, _sr_stat)
+                    except Exception as _sr_persist_exc:
+                        logger.debug(
+                            "stable_refresh 95+: mark_alert_sent failed: %s",
+                            _sr_persist_exc,
+                        )
+                    sr_sent      += 1
+                    sr_qualified += 1
+                    logger.info(
+                        "🔥🚨 PRIORITY OVERRIDE [stable] | Player: %s | Sport: %s"
+                        " | Market: %s | Line: %.1f | Score: %d/100 | Dir: %s",
+                        _sr_player, _sr_sport, _sr_stat, _sr_line,
+                        int(_sr_score.total), _sr_dec.recommendation,
+                    )
+                continue  # skip normal gate sequence for all 95+ props
+
+            # ── Normal gate sequence ──────────────────────────────────────────
+            if _sr_dec is None or _sr_dec.recommendation == "PASS":
+                sr_rejected += 1
+                continue
+
+            _sr_min_conf = config.min_conf_for_sport_tier(_sr_sport, _sr_dec.decision_tier)
+            if _sr_dec.confidence < _sr_min_conf:
+                sr_rejected += 1
+                continue
+
+            if (
+                _sr_sport.upper() in config.ud_strict_alert_sports
+                and _sr_dec.decision_tier not in config.ud_mlb_alert_tiers
+            ):
+                sr_rejected += 1
+                continue
+
+            if (
+                _sr_sport.upper() == "MLB"
+                and _sr_dec.recommendation == "UNDER"
+                and not config.is_mlb_under_allowed(_sr_stat)
+            ):
+                sr_rejected += 1
+                continue
+
+            if _is_game_live_or_past(_sr_snap, now):
+                sr_rejected += 1
+                continue
+
+            if not _ud_line_fresh(_sr_line, _sr_player, _sr_stat, _sr_line_map):
+                sr_rejected += 1
+                continue
+
+            # ── All gates passed — deliver ────────────────────────────────────
+            sr_qualified += 1
+            _sr_mq = _sr_cmq(_sr_stat, _sr_line, _sr_score)
+            _sr_mp = _sr_dmp(None, _sr_hist)
+
+            _sr_intel_trace: Optional[dict] = None
+            if _sr_hist:
+                try:
+                    _sr_intel       = _compute_intel(
+                        _sr_player, _sr_sport, _sr_stat, _sr_line, _sr_hist
+                    )
+                    _sr_intel_trace = _sr_intel.intelligence_trace
+                except Exception:
+                    pass
+
+            _sr_odds_confirm: Optional[dict] = None
+            if _sr_dec.decision_tier in ("S", "A") and _sr_dec.recommendation != "PASS":
+                try:
+                    _sr_odds_confirm = await _get_odds_api_confirmation(
+                        _sr_sport, _sr_player, _sr_stat, _sr_dec.recommendation, _sr_line,
+                    )
+                except Exception:
+                    pass
+
+            _sr_delivery = AlertDelivery(db, bot, chat_ids)
+            _sr_result   = await _sr_delivery.deliver_underdog(
+                player_name         = _sr_player,
+                team                = _sr_snap.team or "",
+                sport               = _sr_sport,
+                stat_type           = _sr_stat,
+                old_line            = _sr_line,
+                new_line            = _sr_line,
+                game_time           = _sr_snap.game_time,
+                score               = _sr_score,
+                validation          = _sr_val,
+                decision            = _sr_dec,
+                market_quality      = _sr_mq,
+                market_pressure     = _sr_mp,
+                standing            = True,
+                intelligence_trace  = _sr_intel_trace,
+                market_confirmation = _sr_odds_confirm,
+                high_priority       = (
+                    80 <= _sr_dec.confidence < 95
+                    and _sr_dec.decision_tier == "S"
+                    and _sr_dec.recommendation != "PASS"
+                ),
+            )
+            if _sr_result.sent:
+                sr_sent += 1
+                _record_prop_alerted(
+                    _prop_market_alerted, _sr_player, _sr_sport, _sr_stat, _sr_line,
+                )
+                try:
+                    await db.mark_ud_snapshot_alert_sent(_sr_player, _sr_stat)
+                    await db.mark_opportunity_alert_sent(_sr_ext_id, _sr_stat)
+                except Exception as _sr_mark_exc:
+                    logger.debug(
+                        "stable_refresh: mark_alert_sent failed: %s", _sr_mark_exc,
+                    )
+                # CLV seed for S/A picks
+                if (
+                    _sr_odds_confirm is not None
+                    and _sr_odds_confirm.get("avg_odds") is not None
+                ):
+                    try:
+                        await db.seed_clv_from_ud_confirmation(
+                            source_id   = int(getattr(_sr_snap, "id", 0) or 0),
+                            sport       = _sr_sport,
+                            stat_type   = _sr_stat,
+                            player_name = _sr_player,
+                            line        = _sr_line,
+                            game_time   = _sr_snap.game_time,
+                            tier        = _sr_dec.decision_tier,
+                            avg_odds    = _sr_odds_confirm["avg_odds"],
+                        )
+                    except Exception:
+                        pass
+                logger.info(
+                    "🎯 STABLE PICK | Player: %s | Sport: %s | Market: %s"
+                    " | Line: %.1f | Dir: %s | Tier: %s | Score: %d/100",
+                    _sr_player, _sr_sport, _sr_stat, _sr_line,
+                    _sr_dec.recommendation, _sr_score.tier, int(_sr_score.total),
+                )
+            else:
+                # deliver_underdog returned not-sent (rate-limited, disabled sport, etc.)
+                sr_rejected  += 1
+                sr_qualified -= 1
+
+        # Advance cursor — persisted to health.json so it survives restarts
+        if _health:
+            _health.set_stable_refresh_cursor(next_cursor)
+
+    except Exception as _sr_exc:
+        logger.exception("stable_refresh_job [part1]: error: %s", _sr_exc)
+        # Reset counters so the console log shows zeros rather than partial data
+        sr_rescored = sr_qualified = sr_watchlist = sr_rejected = sr_sent = 0
+        if _health:
+            _health.record_job_fail("stable_refresh_job", str(_sr_exc))
+
+    # ────────────────────────────────────────────────────────────────────────────
+    # PART 2 — Watchlist rescan
+    # ────────────────────────────────────────────────────────────────────────────
+    try:
+        _wl_all       = await db.get_active_watchlist_candidates()  # FIFO order (id ASC)
+        wl_active     = len(_wl_all)
+
+        # Rotating cursor — ensures every watchlist entry is eventually rescanned
+        # even when the watchlist exceeds the per-cycle batch cap.
+        # FIFO ordering (id ASC in get_active_watchlist_candidates) guarantees
+        # that advancing the cursor each cycle gives every entry a fair turn.
+        _wl_cursor     = _health.get_wl_refresh_cursor() if _health else 0
+        _wl_cursor     = (_wl_cursor % wl_active) if wl_active > 0 else 0
+        _wl_end        = min(_wl_cursor + _STABLE_WATCHLIST_BATCH_SIZE, wl_active)
+        wl_candidates  = _wl_all[_wl_cursor:_wl_end]
+        _wl_next_cursor = _wl_end % wl_active if wl_active > 0 else 0
+
+        # If part 1 failed (active_pool wasn't set), re-fetch using the same
+        # correct method: MAX(id) over ALL rows then filter removed=False.
+        # Never use get_latest_underdog_snapshot_per_prop here — that method's
+        # MAX-over-non-removed semantics can return a stale active snapshot for
+        # a prop whose latest feed record is a removal, causing false promotions.
+        try:
+            _wl_pool = active_pool  # type: ignore[used-before-def]
+        except NameError:
+            _wl_pool = await db.get_active_underdog_snapshot_per_prop()
+        try:
+            _wl_line_map = _sr_line_map  # type: ignore[used-before-def]
+        except NameError:
+            _wl_line_map = {
+                (pn, st): (s.line_value or 0.0) for (pn, st), s in _wl_pool.items()
+            }
+
+        from engine.ud_scoring import score_ud_prop as _wl_score_fn  # alias
+        from engine.player_validator import validate_player_prop as _wl_validate
+        from engine.ud_bet_decision import make_ud_bet_decision as _wl_decide
+
+        for _wl_row in wl_candidates:
+            _wl_player = _wl_row.player_name  or ""
+            _wl_stat   = _wl_row.stat_type    or ""
+            _wl_sport  = _wl_row.sport        or "UNKNOWN"
+            _wl_line   = float(_wl_row.line_value or 0.0)
+            _wl_ext_id = _wl_row.external_id  or ""
+            _wl_conf   = int(_wl_row.confidence or 0)
+
+            # Check if prop is still in the active pool
+            _wl_snap = _wl_pool.get((_wl_player, _wl_stat))
+            if _wl_snap is None:
+                # Prop removed from Underdog → mark Removed
+                try:
+                    await db.log_prop_opportunity(
+                        external_id       = _wl_ext_id,
+                        player_name       = _wl_player,
+                        team              = getattr(_wl_row, "team", "") or "",
+                        sport             = _wl_sport,
+                        stat_type         = _wl_stat,
+                        line_value        = _wl_line,
+                        recommendation    = getattr(_wl_row, "recommendation", "PASS"),
+                        decision_tier     = getattr(_wl_row, "decision_tier",  "PASS"),
+                        confidence        = _wl_conf,
+                        game_time         = getattr(_wl_row, "game_time", None),
+                        provider          = "Underdog",
+                        bet_quality_score = _wl_conf,
+                        watchlist_state   = "Removed",
+                    )
+                except Exception:
+                    pass
+                wl_removed  += 1
+                wl_rescored += 1
+                continue
+
+            wl_rescored     += 1
+            # line_value is the canonical ORM field on UnderdogSnapshotRecord
+            _wl_cur_line     = _wl_snap.line_value or 0.0
+
+            try:
+                _wl_hist  = await db.get_ud_prop_history(_wl_player, _wl_stat, limit=30)
+                _wl_score = _wl_score_fn(
+                    player_name  = _wl_player,
+                    stat_type    = _wl_stat,
+                    sport        = _wl_sport,
+                    current_line = _wl_cur_line,
+                    prev_line    = None,
+                    history      = _wl_hist,
+                )
+                _wl_cur_total = float(_wl_score.total)
+
+                # Track improvement vs previous confidence
+                if _wl_cur_total > _wl_conf + 3:
+                    wl_improved  += 1
+                elif _wl_cur_total < _wl_conf - 3:
+                    wl_declined  += 1
+                else:
+                    wl_unchanged += 1
+
+                _wl_val = _wl_validate(
+                    player_name  = _wl_player,
+                    stat_type    = _wl_stat,
+                    current_line = _wl_cur_line,
+                    history      = _wl_hist,
+                    min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
+                )
+                _wl_hits = await _fetch_and_compute_hit_rates(
+                    db, _wl_player, _wl_sport, _wl_stat, _wl_cur_line,
+                )
+                _wl_dec = _wl_decide(
+                    score        = _wl_score,
+                    validation   = _wl_val,
+                    current_line = _wl_cur_line,
+                    prev_line    = None,
+                    hit_rates    = _wl_hits,
+                )
+
+                # Check if the candidate now passes the full alert gate
+                _wl_qualifies = (
+                    _wl_dec is not None
+                    and _wl_dec.recommendation != "PASS"
+                    and _wl_val.has_supporting_data
+                    and _wl_score.stars >= config.min_stars_for_sport(_wl_sport)
+                    and _wl_dec.confidence >= config.min_conf_for_sport_tier(
+                        _wl_sport, _wl_dec.decision_tier
+                    )
+                    and not _is_game_live_or_past(_wl_snap, now)
+                    and not _is_prop_deduped(
+                        _prop_market_alerted, _wl_player, _wl_sport, _wl_stat, _wl_cur_line,
+                        dedup_window_seconds = config.UD_ALERT_DEDUP_WINDOW,
+                        min_line_change      = config.MIN_UNDERDOG_LINE_CHANGE,
+                    )
+                    and not await db.has_recent_ud_alert(
+                        _wl_player, _wl_stat, within_seconds=86400,
+                    )
+                )
+                if _wl_qualifies and _wl_sport.upper() in config.ud_strict_alert_sports:
+                    if _wl_dec.decision_tier not in config.ud_mlb_alert_tiers:
+                        _wl_qualifies = False
+                if _wl_qualifies and _wl_sport.upper() == "MLB":
+                    if (
+                        _wl_dec.recommendation == "UNDER"
+                        and not config.is_mlb_under_allowed(_wl_stat)
+                    ):
+                        _wl_qualifies = False
+
+                if _wl_qualifies and chat_ids:
+                    # Promote — deliver alert through normal path
+                    _wl_mq       = _sr_cmq(_wl_stat, _wl_cur_line, _wl_score)
+                    _wl_mp       = _sr_dmp(None, _wl_hist)
+                    _wl_delivery = AlertDelivery(db, bot, chat_ids)
+                    _wl_result   = await _wl_delivery.deliver_underdog(
+                        player_name    = _wl_player,
+                        team           = _wl_snap.team or "",
+                        sport          = _wl_sport,
+                        stat_type      = _wl_stat,
+                        old_line       = _wl_cur_line,
+                        new_line       = _wl_cur_line,
+                        game_time      = _wl_snap.game_time,
+                        score          = _wl_score,
+                        validation     = _wl_val,
+                        decision       = _wl_dec,
+                        market_quality = _wl_mq,
+                        market_pressure= _wl_mp,
+                        standing       = True,
+                    )
+                    if _wl_result.sent:
+                        wl_promoted += 1
+                        _record_prop_alerted(
+                            _prop_market_alerted,
+                            _wl_player, _wl_sport, _wl_stat, _wl_cur_line,
+                        )
+                        try:
+                            await db.log_prop_opportunity(
+                                external_id       = _wl_ext_id,
+                                player_name       = _wl_player,
+                                team              = _wl_snap.team or "",
+                                sport             = _wl_sport,
+                                stat_type         = _wl_stat,
+                                line_value        = _wl_cur_line,
+                                recommendation    = _wl_dec.recommendation,
+                                decision_tier     = _wl_dec.decision_tier,
+                                confidence        = _wl_dec.confidence,
+                                game_time         = _wl_snap.game_time,
+                                provider          = "Underdog",
+                                bet_quality_score = _wl_dec.confidence,
+                                watchlist_state   = "Qualified",
+                            )
+                            await db.mark_ud_snapshot_alert_sent(_wl_player, _wl_stat)
+                            await db.mark_opportunity_alert_sent(_wl_ext_id, _wl_stat)
+                        except Exception:
+                            pass
+                        logger.info(
+                            "🔥 WATCHLIST PROMOTED | %s | %s | %s"
+                            " | Line: %.1f | Tier: %s | Score: %d/100",
+                            _wl_player, _wl_sport, _wl_stat,
+                            _wl_cur_line, _wl_score.tier, int(_wl_score.total),
+                        )
+
+                elif _wl_cur_total < 30:
+                    # Score fell below the watchlist floor → demote to Rejected
+                    try:
+                        await db.log_prop_opportunity(
+                            external_id       = _wl_ext_id,
+                            player_name       = _wl_player,
+                            team              = getattr(_wl_row, "team", "") or "",
+                            sport             = _wl_sport,
+                            stat_type         = _wl_stat,
+                            line_value        = _wl_cur_line,
+                            recommendation    = (_wl_dec.recommendation if _wl_dec else "PASS"),
+                            decision_tier     = (_wl_dec.decision_tier  if _wl_dec else "PASS"),
+                            confidence        = (_wl_dec.confidence     if _wl_dec else 0),
+                            game_time         = _wl_snap.game_time,
+                            provider          = "Underdog",
+                            bet_quality_score = (_wl_dec.confidence if _wl_dec else 0),
+                            watchlist_state   = "Rejected",
+                        )
+                    except Exception:
+                        pass
+
+            except Exception as _wl_row_exc:
+                logger.debug(
+                    "stable_refresh [watchlist]: %s/%s: %s",
+                    _wl_player, _wl_stat, _wl_row_exc,
+                )
+
+    except Exception as _wl_all_exc:
+        logger.exception(
+            "stable_refresh_job [part2/watchlist]: error: %s", _wl_all_exc,
+        )
+
+    # ── Console log ──────────────────────────────────────────────────────────────
+    _thick = "━" * 24
+    _progress = (
+        f"{(end_cursor / pool_size * 100):.1f}%" if pool_size > 0 else "—"
+    )
+    logger.info(
+        "\n%s\n🔄 Stable Refresh\n%s\n"
+        "Batch:              %6d\n"
+        "Cursor:     %6d → %6d\n"
+        "Progress:          %s\n"
+        "Stable pool:  %6d\n"
+        "🔬 Rescored:  %6d\n"
+        "✅ Qualified: %6d  (sent: %d)\n"
+        "👁 Watchlist: %6d\n"
+        "❌ Rejected:  %6d\n"
+        "%s\n"
+        "👁 Watchlist Refresh\n"
+        "%s\n"
+        "Active watchlist:  %6d\n"
+        "Re-scored:         %6d\n"
+        "⬆️  Improved:       %6d\n"
+        "➡️  Unchanged:      %6d\n"
+        "⬇️  Declined:       %6d\n"
+        "🔥 Promoted:       %6d\n"
+        "🚫 Removed:        %6d\n"
+        "⏱ Next refresh:   ~2 min\n"
+        "%s",
+        _thick, _thick,
+        len(batch_keys),
+        cursor, next_cursor,
+        _progress,
+        pool_size,
+        sr_rescored,
+        sr_qualified, sr_sent,
+        sr_watchlist,
+        sr_rejected,
+        _thick, _thick,
+        wl_active,
+        wl_rescored,
+        wl_improved,
+        wl_unchanged,
+        wl_declined,
+        wl_promoted,
+        wl_removed,
+        _thick,
+    )
+
+    # ── Persist cursors to health sidecar ────────────────────────────────────────
+    if _health:
+        try:
+            _health.set_wl_refresh_cursor(_wl_next_cursor)  # type: ignore[used-before-def]
+        except (NameError, Exception):
+            pass  # Part 2 may not have set _wl_next_cursor if it raised early
+
+    # ── Persist stats to health sidecar ──────────────────────────────────────────
+    if _health:
+        _health.set_stable_refresh_stats({
+            "pool_size":    pool_size,
+            "batch_size":   len(batch_keys),
+            "cursor_start": cursor,
+            "cursor_end":   next_cursor,
+            "sr_rescored":  sr_rescored,
+            "sr_qualified": sr_qualified,
+            "sr_watchlist": sr_watchlist,
+            "sr_rejected":  sr_rejected,
+            "sr_sent":      sr_sent,
+            "wl_active":    wl_active,
+            "wl_rescored":  wl_rescored,
+            "wl_improved":  wl_improved,
+            "wl_unchanged": wl_unchanged,
+            "wl_declined":  wl_declined,
+            "wl_promoted":  wl_promoted,
+            "wl_removed":   wl_removed,
+        })
+        _health.record_job_run("stable_refresh_job")
+
+    logger.info(
+        "stable_refresh_job: pool=%d batch=%d rescored=%d qualified=%d sent=%d "
+        "watchlist=%d wl_active=%d wl_promoted=%d",
+        pool_size, len(batch_keys), sr_rescored, sr_qualified, sr_sent,
+        sr_watchlist, wl_active, wl_promoted,
+    )

@@ -3461,6 +3461,16 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         ]
 
         # ── Section 1: Scan Pipeline (from ScanCycleLog) ─────────────────────────────
+        # Stable refresh stats from health sidecar (non-fatal if unavailable)
+        sr_stats: dict = {}
+        try:
+            from engine.health import get_health_tracker as _get_ht
+            _ht = _get_ht()
+            if _ht is not None:
+                sr_stats = _ht.get_stable_refresh_stats()
+        except Exception:
+            pass
+
         sc_cycles = scan_summary.get("cycles", 0)
         if sc_cycles > 0:
             sc_fetched   = scan_summary.get("fetched", 0)
@@ -3475,6 +3485,9 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             sc_qualified = scan_summary.get("qualified", 0)
             sc_delivered = scan_summary.get("alert_delivered", 0)
             _avg_mins    = (since_h * 60) // max(sc_cycles, 1)
+            # Stable refresh scored count from health sidecar
+            sr_rescored  = sr_stats.get("sr_rescored", 0)
+            sc_total_scored = sc_analyzed + sr_rescored
             # Note: sc_analyzed = sc_new + sc_lc + sc_cold (all scored paths).
             # sc_cold = cold-start re-scored (first cycle after restart, every active prop).
             lines += [
@@ -3492,11 +3505,62 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 f"   └─ Line moved (re-scored):      <b>{sc_lc:,}</b>",
                 f"   └─ Cold-start re-scanned:       <b>{sc_cold:,}</b>",
                 "",
-                f"🔬 Scored this period:             <b>{sc_analyzed:,}</b>",
-                f"   <i>(= new + line-moved + cold-start)</i>",
+                f"🔬 Scored this period:             <b>{sc_total_scored:,}</b>",
+                f"   ├─ New:                         <b>{sc_new:,}</b>",
+                f"   ├─ Line moved:                  <b>{sc_lc:,}</b>",
+                f"   ├─ Cold-start:                  <b>{sc_cold:,}</b>",
+                f"   └─ Stable refresh:              <b>{sr_rescored:,}</b>",
                 f"✅ Qualified for alert:            <b>{sc_qualified:,}</b>",
                 f"📤 Delivered to Telegram:          <b>{sc_delivered:,}</b>",
             ]
+            # ── Stable Refresh block ──────────────────────────────────────────
+            if sr_stats:
+                sr_pool      = sr_stats.get("pool_size",    0)
+                sr_batch     = sr_stats.get("batch_size",   0)
+                sr_c_start   = sr_stats.get("cursor_start", 0)
+                sr_c_end     = sr_stats.get("cursor_end",   0)
+                sr_progress  = (
+                    f"{(sr_c_end / sr_pool * 100):.1f}%" if sr_pool > 0 else "—"
+                )
+                sr_qual      = sr_stats.get("sr_qualified", 0)
+                sr_sent      = sr_stats.get("sr_sent",      0)
+                sr_wl        = sr_stats.get("sr_watchlist", 0)
+                sr_rej       = sr_stats.get("sr_rejected",  0)
+                wl_active    = sr_stats.get("wl_active",    0)
+                wl_rescored  = sr_stats.get("wl_rescored",  0)
+                wl_improved  = sr_stats.get("wl_improved",  0)
+                wl_unchanged = sr_stats.get("wl_unchanged", 0)
+                wl_declined  = sr_stats.get("wl_declined",  0)
+                wl_promoted  = sr_stats.get("wl_promoted",  0)
+                wl_removed   = sr_stats.get("wl_removed",   0)
+                lines += [
+                    "",
+                    _thick,
+                    "🔄 <b>Stable Refresh</b>  <i>(last cycle)</i>",
+                    _thick,
+                    "",
+                    f"Batch size:         <b>{sr_batch:,}</b>",
+                    f"Cursor:             <b>{sr_c_start:,} → {sr_c_end:,}</b>",
+                    f"Progress:           <b>{sr_progress}</b>",
+                    f"Stable pool:        <b>{sr_pool:,}</b>",
+                    f"🔬 Rescored:        <b>{sr_rescored:,}</b>",
+                    f"✅ Qualified:       <b>{sr_qual:,}</b>  (sent: {sr_sent})",
+                    f"👁 Watchlist:       <b>{sr_wl:,}</b>",
+                    f"❌ Rejected:        <b>{sr_rej:,}</b>",
+                    "",
+                    _thick,
+                    "👁 <b>Watchlist Refresh</b>  <i>(last cycle)</i>",
+                    _thick,
+                    "",
+                    f"Active watchlist:   <b>{wl_active:,}</b>",
+                    f"Re-scored:          <b>{wl_rescored:,}</b>",
+                    f"⬆️  Improved:        <b>{wl_improved:,}</b>",
+                    f"➡️  Unchanged:       <b>{wl_unchanged:,}</b>",
+                    f"⬇️  Declined:        <b>{wl_declined:,}</b>",
+                    f"🔥 Promoted:        <b>{wl_promoted:,}</b>",
+                    f"🚫 Removed:         <b>{wl_removed:,}</b>",
+                    f"⏱ Next refresh:    ~2 min",
+                ]
         else:
             lines += [
                 "",
