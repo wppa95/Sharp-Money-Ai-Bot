@@ -31,7 +31,8 @@ from database import Database, UnderdogSnapshotRecord
 async def db():
     database = Database("sqlite+aiosqlite:///:memory:")
     await database.init()
-    return database
+    yield database
+    await database.close()
 
 
 def _snap(

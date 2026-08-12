@@ -1,0 +1,149 @@
+Do not burn unnecessary credits.
+
+This is a single, focused task. Only implement the Full-Pool Rescan Rotation described below first.
+
+Do not rewrite entire files.
+Do not refactor unrelated code.
+Do not add extra features.
+Do not fix other warnings, tests, or tasks until the Full-Pool Rescan Rotation is fully complete and working.
+
+Inspect the current code first, then make the smallest possible set of targeted changes for the Full-Pool Rescan Rotation only.
+
+After the Full-Pool Rescan Rotation is fully implemented, tested, and confirmed working, then you may fix any remaining warnings.
+
+---
+
+STOP.
+
+Do not touch any more warning fixes, test cleanups, or Task #125 until the Full-Pool Rescan Rotation is done.
+
+The Full-Pool Rescan Rotation is the only active task right now. Implement it now using the exact requirements below.
+
+No more deferring. No more side work. Start the Full-Pool Rescan Rotation implementation immediately.
+
+---
+
+Before making any edits, inspect the current implementation and identify the smallest safe set of targeted changes needed for the full-pool rescan rotation.
+
+Do NOT rewrite entire files if targeted edits are sufficient.
+
+Do NOT make speculative refactors.
+Do NOT modify unrelated architecture.
+Do NOT add unrelated features.
+Do NOT repeatedly reread or rewrite the same files.
+
+Implement Full-Pool Rescan Rotation for Sharp Money Bot
+
+We need a continuous full-pool rescan system that guarantees every active prop eventually gets rescanned. The current active Underdog pool is ~2.2M+ props.
+
+### Core Requirements
+
+- Every active prop must eventually be rescanned — including stable/unchanged props, previously rejected props, previously scored props, near-misses, watchlist props, and props whose lines have not moved.
+- A previous rejection must NEVER permanently exclude a prop from future evaluation.
+- Process the pool in bounded batches only. Do NOT try to process all 2.2M props at once.
+- When 100% of the current active pool has been covered, automatically start the next rotation.
+- Persist enough rotation state so the bot can safely resume after a restart (do not reset to zero on every restart).
+- Continue indefinitely while the bot is running.
+
+### Priority Order (scheduling only)
+
+1. Tier 1 sports + All other sports (equal priority)
+2. NFL / MLB (lowest priority)
+
+Tier 1 sports and all other sports share the same priority level. NFL and MLB must still eventually be rescanned — they just get lowest priority. Do not remove any sports from monitoring. This is only a scheduling priority.
+
+### Keep Task #121 completely intact
+
+Do NOT remove or break the existing Task #121 stable-refresh system.
+
+Keep:
+- 120-second stable refresh
+- stable batch processing
+- watchlist refresh
+- persisted alert deduplication
+- removal handling
+- alert_sent persistence
+- bulk deduplication
+- existing Telegram gates
+
+There must now be two separate systems:
+
+1. Stable Refresh (existing) – small recurring refresh for watchlist / recent props
+2. Full-Pool Rotation (new) – covers the entire ~2.2M+ active pool in batches, including rejected and unchanged props
+
+Do not combine their metrics.
+
+### Progress Display Rules
+
+Show human-readable progress only. NEVER display internal cursor values or database IDs.
+
+Good example:
+Rotation: #1
+Progress: 18.4%
+Coverage: 412,000 / 2,240,000 active props
+Priority: Tier 1 + Other sports
+
+When a rotation finishes:
+Rotation #1: 100% complete
+then automatically begin
+Rotation #2: 0% complete
+
+Progress must reflect actual full-pool coverage, not the stable-refresh batch.
+
+API totals must NOT be shown in the display.
+
+### Important Constraints
+
+- Full-pool rescan SHOULD inflate the “Fetched from Underdog” and API totals for each prop that is rescanned.
+- Keep these metrics tracked: API/fetch totals, active pool size, full-pool rescan coverage, stable refresh, candidate funnel, Telegram alerts.
+- Removed / inactive props must NEVER be resurrected. Only currently active props may enter the rotation (use the same removal-safe logic already used in Task #121).
+- A rescanned prop must still pass the normal scoring, direction, confidence, Bet Quality, tier, validation, live/pre-game, and Telegram deduplication gates. Do not auto-alert just because it was rescanned.
+- No artificial Underdog API-call limit or budget. Batching exists only to control CPU / memory / DB load.
+- Batch size must stay bounded.
+
+### Rescan Fairness
+
+Higher priority must not starve lower-priority sports. Every active prop must eventually get rescanned.
+
+### Tests Required
+
+Add/update tests that prove all of the following:
+
+1. Stable unchanged props eventually get rescanned
+2. Previously rejected props eventually get rescanned
+3. Previously scored props eventually get rescanned
+4. Multiple batches can cover the entire active pool
+5. Rotation reaches 100%
+6. A new rotation automatically begins after 100%
+7. Rotation state persists across restart
+8. Removed props cannot be resurrected
+9. Tier 1 + other sports receive higher priority than NFL/MLB
+10. NFL/MLB still eventually get processed
+11. No artificial Underdog API-call limit is introduced
+12. Batch size remains bounded
+13. Existing Task #121 stable refresh still works
+14. Stable-refresh and full-pool metrics remain separate
+15. Internal cursor values are not displayed
+16. Progress represents actual full-pool coverage
+17. Rescanning DOES inflate API/fetched totals for each prop
+18. Rejected props can become candidates again on a later rotation
+19. Rescans do not bypass existing Telegram deduplication
+20. API totals are NOT shown in the display
+
+### Validation
+
+After implementation:
+- Run the targeted tests
+- Run the full test suite
+- Confirm zero new failures
+- Confirm no new aiosqlite / event-loop warnings
+- Verify the rotation can continue indefinitely
+- Verify it survives a bot restart
+- Verify Telegram / status output shows clean progress without exposing internal cursors
+- Verify API totals are NOT shown in the display
+- Verify API totals still increase internally with rescans
+
+Report the files changed, tests added/updated, full-suite result, and any warnings.
+
+**FREEZE STATUS: Sharp Money Bot v3.5**
+This is a locked improvement for v3.5. Do not introduce unrelated changes, refactors, or scope creep. Keep the implementation tightly scoped to the requirements above.

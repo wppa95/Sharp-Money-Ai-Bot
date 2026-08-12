@@ -305,6 +305,15 @@ class Config:
     # NBA and NFL are now Tier 1 priority sports — enabled by default.
     ALERT_DISABLED_SPORTS_RAW: str = os.environ.get("ALERT_DISABLED_SPORTS", "")
 
+    # ── Full-Pool Rescan (FPR) ────────────────────────────────────────────────
+    # How many active props to score per FPR batch.  Bounded to control CPU/memory.
+    FPR_BATCH_SIZE: int = int(os.environ.get("FPR_BATCH_SIZE", "10000"))
+    # Seconds between FPR batches.  Default 300 (5 minutes).
+    FPR_INTERVAL: int = int(os.environ.get("FPR_INTERVAL", "300"))
+    # Sports placed at the end of each rotation (lowest scheduling priority).
+    # They are always rescanned — just last.  Override via FPR_LOW_PRIORITY_SPORTS env var.
+    FPR_LOW_PRIORITY_SPORTS_RAW: str = os.environ.get("FPR_LOW_PRIORITY_SPORTS", "NFL,MLB")
+
     # ── Learning / model update flag ──────────────────────────────────────────
     # When True, learning rollups are surfaced in /rollups output and future
     # weight-adjustment logic is enabled.  Default False — off until validated.
@@ -349,6 +358,12 @@ class Config:
     def ud_tier1_sports(self) -> frozenset[str]:
         """Tier 1 priority sports — pass S/A/B/C tier alerts without restrictions."""
         return frozenset(s.strip() for s in self.UD_TIER1_SPORTS_RAW.split(",") if s.strip())
+
+    @property
+    def fpr_low_priority_sports(self) -> frozenset[str]:
+        """Sports placed at the end of each FPR rotation (lowest scheduling priority).
+        They are always eventually rescanned — just after Tier 1 and all other sports."""
+        return frozenset(s.strip().upper() for s in self.FPR_LOW_PRIORITY_SPORTS_RAW.split(",") if s.strip())
 
     @property
     def ud_mlb_alert_tiers(self) -> frozenset[str]:

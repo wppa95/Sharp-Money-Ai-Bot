@@ -3882,3 +3882,334 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         pool_size, len(batch_keys), sr_rescored, sr_qualified, sr_sent,
         sr_watchlist, wl_active, wl_promoted,
     )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# FULL-POOL RESCAN ROTATION
+# ──────────────────────────────────────────────────────────────────────────────
+#
+# Independently covers the entire active Underdog prop pool in bounded batches,
+# guaranteeing every prop (stable, rejected, near-miss, watchlist, unchanged)
+# is eventually rescored.  Completely separate from the stable-refresh job —
+# uses its own cursor, rotation counter, and stats keys in health.json.
+#
+# Priority order (scheduling only — not an alert filter):
+#   1. Tier 1 sports + all other non-low-priority sports (sorted alphabetically)
+#   2. NFL / MLB (lowest scheduling priority — always rescanned, just last)
+#
+# No prop is permanently excluded.  A previous Rejected result does not
+# prevent rescoring in a later rotation; the prop must pass the normal
+# scoring, direction, confidence, BQ, tier, live/pre-game, and Telegram
+# deduplication gates before an alert is delivered.
+#
+# Rotation state (persisted in health.json via HealthTracker):
+#   fpr_cursor   — current position in the priority-sorted pool
+#   fpr_rotation — 1-based rotation number; auto-increments at 100% coverage
+#   fpr_stats    — metrics from the last completed cycle
+#
+# Progress display (human-readable; internal cursor values are never shown):
+#   Rotation: #1 | Progress: 18.4% | Coverage: 412,000 / 2,240,000 active props
+
+
+async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
+    """
+    Full-Pool Rescan Rotation: covers the entire active prop pool in batches.
+
+    • Batch size: config.FPR_BATCH_SIZE (default 10,000)
+    • Interval:   config.FPR_INTERVAL   (default 300 s / 5 min)
+    • When all props in the current pool have been covered the rotation counter
+      increments and the cursor resets to 0 automatically.
+    • Removed/inactive props are excluded by get_active_underdog_snapshot_per_prop().
+    • All existing alert gates (dedup, direction, BQ, tier, live-game) apply.
+    """
+    from engine.player_validator import validate_player_prop as _fpr_validate
+    from engine.ud_bet_decision import make_ud_bet_decision as _fpr_decide
+    from engine.ud_scoring import (
+        score_ud_prop          as _fpr_score_fn,
+        compute_market_quality as _fpr_cmq,
+        detect_market_pressure as _fpr_dmp,
+    )
+
+    db: Database = context.bot_data.get("db")
+    bot          = context.bot
+    if db is None:
+        return
+
+    chat_ids = list(config.allowed_user_ids)
+    now      = datetime.utcnow()
+    _health  = get_health_tracker()
+
+    if _health:
+        _health.record_job_started("full_pool_rescan_job")
+
+    # ── Mutable cycle stats ───────────────────────────────────────────────────
+    fpr_pool_size       = 0
+    fpr_cursor          = 0
+    fpr_end_cursor      = 0
+    fpr_next_cursor     = 0
+    fpr_rotation        = 1
+    fpr_batch_size      = 0
+    fpr_rescored        = 0
+    fpr_qualified       = 0
+    fpr_sent            = 0
+    fpr_rejected        = 0
+    fpr_watchlist       = 0
+    fpr_total_rescanned = 0
+    rotation_complete   = False
+
+    try:
+        # ── Fetch full active pool from DB (zero Underdog API calls) ──────────
+        # get_active_underdog_snapshot_per_prop() takes MAX(id) over ALL rows
+        # (including removals) then keeps only rows where removed=False.
+        # Removed/inactive props are therefore absent — they cannot be resurrected.
+        active_pool: dict = await db.get_active_underdog_snapshot_per_prop()
+        fpr_pool_size = len(active_pool)
+        if fpr_pool_size == 0:
+            if _health:
+                _health.record_job_run("full_pool_rescan_job")
+            return
+
+        # ── Priority sort: Tier 1 + other sports first, low-priority last ─────
+        _low = config.fpr_low_priority_sports  # frozenset of sport codes (upper-case)
+
+        def _fpr_sort_key(item):
+            """0 = high-priority (Tier 1 + other), 1 = low-priority (NFL/MLB)."""
+            (player, stat), snap = item
+            sport = (getattr(snap, "sport", None) or "").upper()
+            return (1 if sport in _low else 0, player, stat)
+
+        sorted_items = sorted(active_pool.items(), key=_fpr_sort_key)
+        pool_keys    = [k for k, _ in sorted_items]
+        pool_snaps   = {k: v for k, v in sorted_items}
+
+        # ── Load and clamp cursor ─────────────────────────────────────────────
+        fpr_rotation = _health.get_fpr_rotation() if _health else 1
+        fpr_cursor   = _health.get_fpr_cursor()   if _health else 0
+        fpr_cursor   = fpr_cursor % fpr_pool_size  # safe if pool shrank
+
+        # ── Slice batch ───────────────────────────────────────────────────────
+        fpr_end_cursor  = min(fpr_cursor + config.FPR_BATCH_SIZE, fpr_pool_size)
+        batch_keys      = pool_keys[fpr_cursor:fpr_end_cursor]
+        fpr_batch_size  = len(batch_keys)
+        fpr_next_cursor = fpr_end_cursor % fpr_pool_size  # wraps to 0 at pool end
+
+        # Rotation completes when the batch reaches the last prop in the pool
+        if fpr_end_cursor >= fpr_pool_size:
+            rotation_complete = True
+
+        # ── Bulk dedup pre-load (one DB query for the whole batch) ────────────
+        _fpr_bulk_ok    = True
+        _fpr_bulk_dedup: frozenset = frozenset()
+        try:
+            _fpr_recent = await db.get_recent_alerted_props_for_dedup(
+                within_seconds=int(config.UD_ALERT_DEDUP_WINDOW),
+            )
+            _fpr_bulk_dedup = frozenset(
+                (r.player_name, r.stat_type) for r in (_fpr_recent or [])
+            )
+        except Exception:
+            _fpr_bulk_ok = False
+
+        # ── Score each prop in this batch ─────────────────────────────────────
+        for _fpr_key in batch_keys:
+            _fpr_player, _fpr_stat = _fpr_key
+            _fpr_snap  = pool_snaps.get(_fpr_key)
+            if _fpr_snap is None:
+                continue
+
+            _fpr_sport  = (getattr(_fpr_snap, "sport", None) or "UNKNOWN").upper()
+            _fpr_line   = float(_fpr_snap.line_value or 0.0)
+
+            # Bulk dedup pre-check: skip props alerted very recently
+            if _fpr_bulk_ok and (_fpr_player, _fpr_stat) in _fpr_bulk_dedup:
+                fpr_rescored        += 1
+                fpr_total_rescanned += 1
+                continue
+
+            try:
+                _fpr_hist  = await db.get_ud_prop_history(_fpr_player, _fpr_stat, limit=30)
+
+                # Rescanning DOES count toward API/fetch totals per requirement
+                fpr_total_rescanned += 1
+
+                _fpr_score = _fpr_score_fn(
+                    player_name  = _fpr_player,
+                    stat_type    = _fpr_stat,
+                    sport        = _fpr_sport,
+                    current_line = _fpr_line,
+                    prev_line    = None,
+                    history      = _fpr_hist,
+                )
+
+                # Track props in watchlist score range
+                if (
+                    _fpr_score is not None
+                    and 30 <= float(_fpr_score.total) <= 40
+                ):
+                    fpr_watchlist += 1
+
+                _fpr_val = _fpr_validate(
+                    player_name  = _fpr_player,
+                    stat_type    = _fpr_stat,
+                    current_line = _fpr_line,
+                    history      = _fpr_hist,
+                    min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
+                )
+                _fpr_hits = await _fetch_and_compute_hit_rates(
+                    db, _fpr_player, _fpr_sport, _fpr_stat, _fpr_line,
+                )
+                _fpr_dec = _fpr_decide(
+                    score        = _fpr_score,
+                    validation   = _fpr_val,
+                    current_line = _fpr_line,
+                    prev_line    = None,
+                    hit_rates    = _fpr_hits,
+                )
+
+                # ── Full alert gate (identical to stable-refresh path) ─────────
+                _fpr_qualifies = (
+                    _fpr_dec is not None
+                    and _fpr_dec.recommendation != "PASS"
+                    and _fpr_val.has_supporting_data
+                    and _fpr_score.stars >= config.min_stars_for_sport(_fpr_sport)
+                    and _fpr_dec.confidence >= config.min_conf_for_sport_tier(
+                        _fpr_sport, _fpr_dec.decision_tier
+                    )
+                    and not _is_game_live_or_past(_fpr_snap, now)
+                    and not _is_prop_deduped(
+                        _prop_market_alerted,
+                        _fpr_player, _fpr_sport, _fpr_stat, _fpr_line,
+                        dedup_window_seconds=config.UD_ALERT_DEDUP_WINDOW,
+                        min_line_change=config.MIN_UNDERDOG_LINE_CHANGE,
+                    )
+                    and not await db.has_recent_ud_alert(
+                        _fpr_player, _fpr_stat, within_seconds=86400,
+                    )
+                )
+                # Strict-sport additional gates
+                if _fpr_qualifies and _fpr_sport in config.ud_strict_alert_sports:
+                    if _fpr_dec.decision_tier not in config.ud_mlb_alert_tiers:
+                        _fpr_qualifies = False
+                if _fpr_qualifies and _fpr_sport == "MLB":
+                    if (
+                        _fpr_dec.recommendation == "UNDER"
+                        and not config.is_mlb_under_allowed(_fpr_stat)
+                    ):
+                        _fpr_qualifies = False
+
+                if _fpr_qualifies and chat_ids:
+                    _fpr_mq       = _fpr_cmq(_fpr_stat, _fpr_line, _fpr_score)
+                    _fpr_mp       = _fpr_dmp(None, _fpr_hist)
+                    _fpr_delivery = AlertDelivery(db, bot, chat_ids)
+                    _fpr_result   = await _fpr_delivery.deliver_underdog(
+                        player_name     = _fpr_player,
+                        team            = getattr(_fpr_snap, "team", "") or "",
+                        sport           = _fpr_sport,
+                        stat_type       = _fpr_stat,
+                        old_line        = _fpr_line,
+                        new_line        = _fpr_line,
+                        game_time       = _fpr_snap.game_time,
+                        score           = _fpr_score,
+                        validation      = _fpr_val,
+                        decision        = _fpr_dec,
+                        market_quality  = _fpr_mq,
+                        market_pressure = _fpr_mp,
+                        standing        = True,
+                    )
+                    if _fpr_result.sent:
+                        fpr_sent      += 1
+                        fpr_qualified += 1
+                        _record_prop_alerted(
+                            _prop_market_alerted,
+                            _fpr_player, _fpr_sport, _fpr_stat, _fpr_line,
+                        )
+                    else:
+                        fpr_rejected += 1
+                elif not _fpr_qualifies:
+                    fpr_rejected += 1
+
+                fpr_rescored += 1
+
+            except Exception as _fpr_row_exc:
+                logger.debug(
+                    "full_pool_rescan: %s/%s: %s",
+                    _fpr_player, _fpr_stat, _fpr_row_exc,
+                )
+                fpr_rescored        += 1
+                fpr_total_rescanned += 1
+
+        # ── Advance cursor; increment rotation when pool is fully covered ──────
+        if rotation_complete:
+            fpr_rotation = fpr_rotation + 1
+            fpr_next_cursor = 0
+            if _health:
+                _health.set_fpr_rotation(fpr_rotation)
+                logger.info(
+                    "full_pool_rescan: rotation #%d complete — starting rotation #%d",
+                    fpr_rotation - 1, fpr_rotation,
+                )
+
+        if _health:
+            _health.set_fpr_cursor(fpr_next_cursor)
+
+    except Exception as _fpr_exc:
+        logger.exception("full_pool_rescan_job: error: %s", _fpr_exc)
+        if _health:
+            _health.record_job_fail("full_pool_rescan_job", str(_fpr_exc))
+        return
+
+    # ── Console log (human-readable — internal cursor values never shown) ─────
+    _thick = "━" * 24
+    _display_rotation = fpr_rotation - 1 if rotation_complete else fpr_rotation
+    _pct = (
+        f"{(fpr_end_cursor / fpr_pool_size * 100):.1f}%"
+        if fpr_pool_size > 0 else "—"
+    )
+    _low_names = " / ".join(sorted(config.fpr_low_priority_sports)) or "none"
+    _status_tag = "✅ COMPLETE → rotation #%d started" % fpr_rotation if rotation_complete else "🔄 in progress"
+    logger.info(
+        "\n%s\n🌐 Full-Pool Rescan\n%s\n"
+        "Rotation:  #%d  (%s)\n"
+        "Progress:  %s\n"
+        "Coverage:  %s / %s active props\n"
+        "Priority:  Tier 1 + Other → %s (last)\n"
+        "Batch:     %6d\n"
+        "🔬 Rescored:   %6d\n"
+        "✅ Sent:       %6d\n"
+        "❌ Rejected:   %6d\n"
+        "%s",
+        _thick, _thick,
+        _display_rotation, _status_tag,
+        _pct,
+        f"{fpr_end_cursor:,}", f"{fpr_pool_size:,}",
+        _low_names,
+        fpr_batch_size,
+        fpr_rescored,
+        fpr_sent,
+        fpr_rejected,
+        _thick,
+    )
+
+    # ── Persist stats to health sidecar ──────────────────────────────────────
+    if _health:
+        _health.set_fpr_stats({
+            "rotation":             _display_rotation,
+            "pool_size":            fpr_pool_size,
+            "cursor_start":         fpr_cursor,
+            "cursor_end":           fpr_end_cursor,
+            "batch_size":           fpr_batch_size,
+            "pct_complete":         round(fpr_end_cursor / fpr_pool_size * 100, 1)
+                                    if fpr_pool_size else 0.0,
+            "fpr_rescored":         fpr_rescored,
+            "fpr_qualified":        fpr_qualified,
+            "fpr_sent":             fpr_sent,
+            "fpr_rejected":         fpr_rejected,
+            "fpr_total_rescanned":  fpr_total_rescanned,
+            "rotation_complete":    rotation_complete,
+        })
+        _health.record_job_run("full_pool_rescan_job")
+
+    logger.info(
+        "full_pool_rescan_job: rotation=#%d pool=%d batch=%d rescored=%d sent=%d",
+        _display_rotation, fpr_pool_size, fpr_batch_size, fpr_rescored, fpr_sent,
+    )

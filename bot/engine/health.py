@@ -844,6 +844,43 @@ class HealthTracker:
         """Human-readable age of the last stable-refresh cycle."""
         return _age_str(self._state.get("last_stable_refresh_ts"))
 
+    # ── Full-Pool Rescan (FPR) cursor, rotation & stats ───────────────────────────
+
+    def get_fpr_cursor(self) -> int:
+        """Return the current FPR cursor into the priority-sorted active pool."""
+        with self._lock:
+            return max(0, int(self._state.get("fpr_cursor", 0)))
+
+    def set_fpr_cursor(self, cursor: int) -> None:
+        """Persist the FPR cursor after each batch."""
+        with self._lock:
+            self._state["fpr_cursor"] = max(0, int(cursor))
+            self._save()
+
+    def get_fpr_rotation(self) -> int:
+        """Return the current FPR rotation number (1-based)."""
+        with self._lock:
+            return max(1, int(self._state.get("fpr_rotation", 1)))
+
+    def set_fpr_rotation(self, rotation: int) -> None:
+        """Persist the rotation number."""
+        with self._lock:
+            self._state["fpr_rotation"] = max(1, int(rotation))
+            self._save()
+
+    def get_fpr_stats(self) -> dict:
+        """Return stats dict from the most recently completed FPR cycle."""
+        with self._lock:
+            return dict(self._state.get("fpr_stats", {}))
+
+    def set_fpr_stats(self, stats: dict) -> None:
+        """Persist FPR stats from the last completed cycle."""
+        with self._lock:
+            self._state["fpr_stats"] = dict(stats)
+            self._state["last_fpr_run"] = _now_iso()
+            self._state["last_fpr_run_ts"] = _now_ts()
+            self._save()
+
 
 # ── Module-level singleton ────────────────────────────────────────────────────
 
