@@ -36,6 +36,29 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _actionable_mq_allows_delivery(
+    *,
+    removed: bool,
+    new_prop: bool,
+    market_move_only: bool,
+    decision: Optional[object],
+    market_quality: Optional[object],
+) -> tuple[bool, Optional[str]]:
+    """Return whether a Telegram actionable-pick alert may be delivered."""
+    if removed or new_prop or market_move_only:
+        return True, None
+
+    _direction = (getattr(decision, "recommendation", "") or "").upper()
+    if _direction not in {"OVER", "UNDER"}:
+        return True, None
+
+    _mq_label = str(getattr(market_quality, "label", "") or "").upper()
+    if _mq_label in {"HIGH", "STRONG", "ELITE"}:
+        return True, None
+
+    return False, f"mq_not_actionable:{_mq_label or 'NONE'}"
+
+
 # ── Known sharp / respected sportsbooks ───────────────────────────────────────
 
 #: Default sharp book list — override via SHARP_BOOKS env var (comma-separated).
@@ -1131,6 +1154,23 @@ class AlertDelivery:
                 )
                 logger.info("Underdog alert capped: %s | %s | %s", player_name, stat_type, reason)
                 return DeliveryResult(sent=False, filtered=True, filtered_reason=reason)
+
+        _mq_allowed, _mq_reason = _actionable_mq_allows_delivery(
+            removed=removed,
+            new_prop=new_prop,
+            market_move_only=market_move_only,
+            decision=decision,
+            market_quality=market_quality,
+        )
+        if not _mq_allowed:
+            logger.debug(
+                "Underdog actionable MQ-blocked: %s | %s | sport=%s | mq=%s",
+                player_name,
+                stat_type,
+                sport,
+                getattr(market_quality, "label", None),
+            )
+            return DeliveryResult(sent=False, filtered=True, filtered_reason=_mq_reason)
 
         # 3a. Global Telegram rate limiter
         # Removals and market-move-only alerts bypass the limiter — they are

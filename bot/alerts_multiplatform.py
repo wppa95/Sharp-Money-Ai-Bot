@@ -795,7 +795,7 @@ def format_underdog_change_alert(
             _bq_int = int(conf)
             pick_line += f"   ·   Bet Quality <code>{_bq_int}/100</code>  {_bq_stars(_bq_int)}"
             _priority_lbl = _bq_priority_label(_bq_int, direction=rec, sport=sport)
-            if _priority_lbl:
+            if _priority_lbl and _priority_lbl != "👀 WATCHLIST ONLY":
                 pick_line += f"   ·   {_priority_lbl}"
         # STRONG UNDER signal — Tier 1 sports only (not MLB/NFL).
         # Fires when: UNDER direction + confidence ≥ 30 AND BQ (decision.confidence) ≥ 70.
