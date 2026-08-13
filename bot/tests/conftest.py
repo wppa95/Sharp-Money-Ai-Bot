@@ -8,12 +8,15 @@ import pytest
 @pytest.fixture(autouse=True)
 def reset_telegram_rate_limiter():
     """
-    Reset the global Telegram rate-limiter singleton before every test.
+    Reset global singletons before every test:
 
-    The limiter is a process-wide singleton whose sliding-window state
-    persists across tests that call deliver_underdog().  Without this
-    reset, tests running after delivery-heavy tests see a full window
-    and get rate-limited, causing spurious failures.
+    1. Telegram rate-limiter — process-wide sliding window; stale state
+       from delivery-heavy tests causes spurious rate-limit failures.
+
+    2. _prop_market_alerted (delivery dedup dict) — module-level dict;
+       entries from one test bleed into the next and cause
+       _try_claim_delivery_slot() to return False, blocking delivery
+       and causing lifecycle / alert-sent assertions to fail.
 
     This fixture is autouse=True so it applies to every test without
     any decorator required.
@@ -21,6 +24,11 @@ def reset_telegram_rate_limiter():
     try:
         import engine.telegram_rate_limiter as _rl_mod
         _rl_mod.reset_limiter()
+    except Exception:
+        pass
+    try:
+        import market_engine as _me
+        _me._prop_market_alerted.clear()
     except Exception:
         pass
     yield

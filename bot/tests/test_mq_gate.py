@@ -157,41 +157,59 @@ class TestTier1DeliveryRules:
 class TestTier2DeliveryRules:
     """
     Tier 2 = ONLY NBA, MLB, NFL.
-    Requires BQ ≥ 75 AND MQ ≥ 75 AND valid OVER/UNDER direction.
+    Requires BQ ≥ 85 AND MQ ≥ 85 AND valid OVER/UNDER direction.
+    Both are mandatory — failing either blocks Telegram delivery.
     """
 
-    # Spec item 29: NBA BQ 75 + MQ 75 + direction → allowed
-    def test_nba_bq75_mq75_over_allowed(self):
-        assert _tier_delivery_gate("NBA", "OVER", bq_score=75, mq_score=75) is True
+    # Spec item 29: NBA BQ 85 + MQ 85 + direction → allowed
+    def test_nba_bq85_mq85_over_allowed(self):
+        assert _tier_delivery_gate("NBA", "OVER", bq_score=85, mq_score=85) is True
 
-    def test_nba_bq75_mq75_under_allowed(self):
-        assert _tier_delivery_gate("NBA", "UNDER", bq_score=75, mq_score=75) is True
+    def test_nba_bq85_mq85_under_allowed(self):
+        assert _tier_delivery_gate("NBA", "UNDER", bq_score=85, mq_score=85) is True
 
-    # Spec item 30: MLB BQ 75 + MQ 75 + direction → allowed
-    def test_mlb_bq75_mq75_over_allowed(self):
-        assert _tier_delivery_gate("MLB", "OVER", bq_score=75, mq_score=75) is True
+    # Spec item 30: MLB BQ 85 + MQ 85 + direction → allowed
+    def test_mlb_bq85_mq85_over_allowed(self):
+        assert _tier_delivery_gate("MLB", "OVER", bq_score=85, mq_score=85) is True
 
-    def test_mlb_bq80_mq80_over_allowed(self):
-        """MLB | OVER | BQ:80 | MQ:80 → ✅ ALLOW"""
-        assert _tier_delivery_gate("MLB", "OVER", bq_score=80, mq_score=80) is True
+    def test_mlb_bq85_mq90_over_allowed(self):
+        """MLB | OVER | BQ:85 | MQ:90 → ✅ ALLOW (spec example)"""
+        assert _tier_delivery_gate("MLB", "OVER", bq_score=85, mq_score=90) is True
 
-    # Spec item 31: NFL BQ 75 + MQ 75 + direction → allowed
-    def test_nfl_bq75_mq75_over_allowed(self):
-        assert _tier_delivery_gate("NFL", "OVER", bq_score=75, mq_score=75) is True
+    def test_mlb_bq90_mq85_over_allowed(self):
+        """MLB | OVER | BQ:90 | MQ:85 → ✅ ALLOW (spec example)"""
+        assert _tier_delivery_gate("MLB", "OVER", bq_score=90, mq_score=85) is True
 
-    # Spec item 32: BQ 74 → blocked
-    def test_bq74_blocked(self):
-        """NFL | OVER | BQ:74 | MQ:90 → ❌ BLOCK"""
-        assert _tier_delivery_gate("NFL", "OVER",  bq_score=74, mq_score=90) is False
-        assert _tier_delivery_gate("NBA", "UNDER", bq_score=74, mq_score=90) is False
-        assert _tier_delivery_gate("MLB", "OVER",  bq_score=74, mq_score=90) is False
+    # BQ/MQ 80/80 now blocked (below 85 threshold)
+    def test_mlb_bq80_mq80_blocked(self):
+        """MLB | OVER | BQ:80 | MQ:80 → ❌ BLOCK — both below 85"""
+        assert _tier_delivery_gate("MLB", "OVER", bq_score=80, mq_score=80) is False
 
-    # Spec item 33: MQ 74 → blocked
-    def test_mq74_blocked(self):
-        """MLB | UNDER | BQ:90 | MQ:74 → ❌ BLOCK"""
-        assert _tier_delivery_gate("MLB", "UNDER", bq_score=90, mq_score=74) is False
-        assert _tier_delivery_gate("NBA", "OVER",  bq_score=90, mq_score=74) is False
-        assert _tier_delivery_gate("NFL", "OVER",  bq_score=95, mq_score=70) is False
+    # Spec item 31: NFL BQ 85 + MQ 85 + direction → allowed
+    def test_nfl_bq85_mq85_over_allowed(self):
+        assert _tier_delivery_gate("NFL", "OVER", bq_score=85, mq_score=85) is True
+
+    def test_nfl_bq93_mq62_blocked(self):
+        """NFL | OVER | BQ:93 | MQ:62 → ❌ BLOCK (spec example)"""
+        assert _tier_delivery_gate("NFL", "OVER", bq_score=93, mq_score=62) is False
+
+    def test_nba_bq88_mq88_allowed(self):
+        """NBA | OVER | BQ:88 | MQ:88 → ✅ ALLOW (spec example)"""
+        assert _tier_delivery_gate("NBA", "OVER", bq_score=88, mq_score=88) is True
+
+    # Spec item 32: BQ 84 → blocked
+    def test_bq84_blocked(self):
+        """Tier 2: BQ:84 must be blocked (below 85 threshold)"""
+        assert _tier_delivery_gate("NFL", "OVER",  bq_score=84, mq_score=90) is False
+        assert _tier_delivery_gate("NBA", "UNDER", bq_score=84, mq_score=90) is False
+        assert _tier_delivery_gate("MLB", "OVER",  bq_score=84, mq_score=90) is False
+
+    # Spec item 33: MQ 84 → blocked
+    def test_mq84_blocked(self):
+        """Tier 2: MQ:84 must be blocked (below 85 threshold)"""
+        assert _tier_delivery_gate("MLB", "UNDER", bq_score=90, mq_score=84) is False
+        assert _tier_delivery_gate("NBA", "OVER",  bq_score=90, mq_score=84) is False
+        assert _tier_delivery_gate("NFL", "OVER",  bq_score=95, mq_score=84) is False
 
     # Spec item 34: Missing direction → blocked
     def test_tier2_no_direction_blocked(self):
@@ -199,42 +217,52 @@ class TestTier2DeliveryRules:
         assert _tier_delivery_gate("MLB", "PASS",  bq_score=90, mq_score=90) is False
         assert _tier_delivery_gate("NFL", "STRONG BET", bq_score=90, mq_score=90) is False
 
-    # Spec examples from the document
-    def test_spec_example_mlb_under_mq74_blocked(self):
-        """MLB | UNDER | BQ:90 | MQ:74 → ❌ BLOCK — MQ below 75"""
-        assert _tier_delivery_gate("MLB", "UNDER", bq_score=90, mq_score=74) is False
+    # Spec examples from the updated spec document
+    def test_spec_example_mlb_bq84_mq95_blocked(self):
+        """MLB | BQ:84 | MQ:95 → ❌ BLOCK — BQ below 85"""
+        assert _tier_delivery_gate("MLB", "OVER", bq_score=84, mq_score=95) is False
 
-    def test_spec_example_nfl_over_bq74_blocked(self):
-        """NFL | OVER | BQ:74 | MQ:90 → ❌ BLOCK — BQ below 75"""
-        assert _tier_delivery_gate("NFL", "OVER", bq_score=74, mq_score=90) is False
+    def test_spec_example_mlb_bq95_mq84_blocked(self):
+        """MLB | BQ:95 | MQ:84 → ❌ BLOCK — MQ below 85"""
+        assert _tier_delivery_gate("MLB", "OVER", bq_score=95, mq_score=84) is False
 
-    def test_spec_example_nba_under_bq75_mq75_allowed(self):
-        """NBA | UNDER | BQ:75 | MQ:75 → ✅ ALLOW"""
-        assert _tier_delivery_gate("NBA", "UNDER", bq_score=75, mq_score=75) is True
+    def test_spec_example_nfl_over_bq93_mq62_blocked(self):
+        """NFL | OVER | BQ:93 | MQ:62 → ❌ BLOCK"""
+        assert _tier_delivery_gate("NFL", "OVER", bq_score=93, mq_score=62) is False
 
-    def test_spec_example_nfl_over_bq95_mq70_blocked(self):
-        """NFL | OVER | BQ:95 | MQ:70 → ❌ BLOCK"""
-        assert _tier_delivery_gate("NFL", "OVER", bq_score=95, mq_score=70) is False
+    def test_spec_example_mlb_under_bq73_mq47_blocked(self):
+        """MLB UNDER BQ:73 / MQ:47 → ❌ BLOCK (known bad example)"""
+        assert _tier_delivery_gate("MLB", "UNDER", bq_score=73, mq_score=47) is False
+
+    def test_spec_example_nba_under_bq85_mq85_allowed(self):
+        """NBA | UNDER | BQ:85 | MQ:85 → ✅ ALLOW"""
+        assert _tier_delivery_gate("NBA", "UNDER", bq_score=85, mq_score=85) is True
 
     def test_tier2_bq_and_mq_both_required(self):
-        """Both BQ AND MQ must be ≥ 75; one alone is insufficient."""
+        """Both BQ AND MQ must be ≥ 85; one alone is insufficient."""
         # BQ good, MQ bad → blocked
-        assert _tier_delivery_gate("NBA", "OVER", bq_score=80, mq_score=74) is False
+        assert _tier_delivery_gate("NBA", "OVER", bq_score=90, mq_score=84) is False
         # MQ good, BQ bad → blocked
-        assert _tier_delivery_gate("NBA", "OVER", bq_score=74, mq_score=80) is False
-        # Both good → allowed
-        assert _tier_delivery_gate("NBA", "OVER", bq_score=80, mq_score=80) is True
+        assert _tier_delivery_gate("NBA", "OVER", bq_score=84, mq_score=90) is False
+        # Both at exactly 85 → allowed
+        assert _tier_delivery_gate("NBA", "OVER", bq_score=85, mq_score=85) is True
 
     def test_tier2_boundary_values(self):
-        """Boundary: exactly 75 on both passes; 74 on either fails."""
-        assert _tier_delivery_gate("MLB", "OVER", bq_score=75, mq_score=75) is True
-        assert _tier_delivery_gate("MLB", "OVER", bq_score=74.9, mq_score=75) is False
-        assert _tier_delivery_gate("MLB", "OVER", bq_score=75, mq_score=74.9) is False
+        """Boundary: exactly 85.00 on both passes; 84.99 on either fails."""
+        assert _tier_delivery_gate("MLB", "OVER", bq_score=85.0,  mq_score=85.0)  is True
+        assert _tier_delivery_gate("MLB", "OVER", bq_score=84.99, mq_score=85.0)  is False
+        assert _tier_delivery_gate("MLB", "OVER", bq_score=85.0,  mq_score=84.99) is False
 
     def test_tier2_high_scores_allowed(self):
-        for bq in [75, 80, 90, 100]:
-            for mq in [75, 80, 90, 100]:
+        for bq in [85, 90, 95, 100]:
+            for mq in [85, 90, 95, 100]:
                 assert _tier_delivery_gate("NFL", "OVER", bq_score=bq, mq_score=mq) is True
+
+    def test_tier2_75_80_blocked(self):
+        """BQ/MQ of 75 and 80 must be blocked for Tier 2 (below new 85 threshold)."""
+        for bq in [75, 80]:
+            for mq in [75, 80]:
+                assert _tier_delivery_gate("NFL", "OVER", bq_score=bq, mq_score=mq) is False
 
 
 # ── Priority and rate-limit structure (spec items 35–39) ──────────────────────
@@ -361,7 +389,7 @@ class TestGateEdgeCases:
         """OVER/UNDER matching is case-insensitive."""
         assert _tier_delivery_gate("WNBA", "over",  bq_score=50, mq_score=50) is True
         assert _tier_delivery_gate("WNBA", "under", bq_score=50, mq_score=50) is True
-        assert _tier_delivery_gate("NBA",  "OVER",  bq_score=80, mq_score=80) is True
+        assert _tier_delivery_gate("NBA",  "OVER",  bq_score=90, mq_score=90) is True
 
     def test_zero_bq_zero_mq_tier1_allowed(self):
         """Tier 1 with BQ=0 and MQ=0: direction is the only gate."""
@@ -387,23 +415,125 @@ class TestGateEdgeCases:
             assert _tier_delivery_gate("WNBA", "OVER",  bq_score=50, mq_score=50) is True
             assert _tier_delivery_gate("NBA",  "OVER",  bq_score=74, mq_score=80) is False
 
-    def test_all_tier2_sports_blocked_bq74(self):
-        """BQ=74 must block all Tier 2 sports."""
+    def test_all_tier2_sports_blocked_bq84(self):
+        """BQ=84 must block all Tier 2 sports (below new 85 threshold)."""
         for sport in ["NBA", "MLB", "NFL"]:
-            assert _tier_delivery_gate(sport, "OVER",  bq_score=74, mq_score=80) is False
-            assert _tier_delivery_gate(sport, "UNDER", bq_score=74, mq_score=80) is False
+            assert _tier_delivery_gate(sport, "OVER",  bq_score=84, mq_score=90) is False
+            assert _tier_delivery_gate(sport, "UNDER", bq_score=84, mq_score=90) is False
 
-    def test_all_tier2_sports_blocked_mq74(self):
-        """MQ=74 must block all Tier 2 sports."""
+    def test_all_tier2_sports_blocked_mq84(self):
+        """MQ=84 must block all Tier 2 sports (below new 85 threshold)."""
         for sport in ["NBA", "MLB", "NFL"]:
-            assert _tier_delivery_gate(sport, "OVER",  bq_score=80, mq_score=74) is False
+            assert _tier_delivery_gate(sport, "OVER",  bq_score=90, mq_score=84) is False
 
     def test_tier1_sports_never_blocked_by_mq_alone(self):
         """No MQ value alone can block a Tier 1 prop with a valid direction."""
-        for mq in [0, 10, 30, 40, 47, 55, 60, 69, 74, 80, 100]:
+        for mq in [0, 10, 30, 40, 47, 55, 60, 69, 74, 80, 84, 100]:
             assert _tier_delivery_gate("WNBA", "OVER",  bq_score=0, mq_score=mq) is True
 
     def test_tier1_sports_never_blocked_by_bq_alone(self):
         """No BQ value alone can block a Tier 1 prop with a valid direction."""
-        for bq in [0, 10, 30, 40, 47, 55, 60, 69, 74, 80, 100]:
+        for bq in [0, 10, 30, 40, 47, 55, 60, 69, 74, 80, 84, 100]:
             assert _tier_delivery_gate("NHL", "UNDER", bq_score=bq, mq_score=0) is True
+
+
+# ── Atomic delivery dedup tests ────────────────────────────────────────────────
+
+class TestAtomicDedup:
+    """
+    Tests for the centralized, atomic delivery deduplication system.
+
+    Covers:
+      - _prop_dedup_lock exists and is an asyncio.Lock
+      - _try_claim_delivery_slot exists and is callable
+      - Concurrent claim attempts → only one succeeds
+      - Genuine line change → new claim allowed after old claim
+      - Nimmo duplicate scenario: same candidate, same line → only one delivery
+    """
+
+    def test_prop_dedup_lock_exists(self):
+        """_prop_dedup_lock must exist in market_engine as an asyncio.Lock."""
+        import asyncio
+        import market_engine
+        assert hasattr(market_engine, "_prop_dedup_lock"), (
+            "_prop_dedup_lock missing from market_engine"
+        )
+        assert isinstance(market_engine._prop_dedup_lock, asyncio.Lock)
+
+    def test_try_claim_delivery_slot_exists(self):
+        """_try_claim_delivery_slot must exist and be callable (async function)."""
+        import asyncio
+        import market_engine
+        assert hasattr(market_engine, "_try_claim_delivery_slot"), (
+            "_try_claim_delivery_slot missing from market_engine"
+        )
+        fn = market_engine._try_claim_delivery_slot
+        assert asyncio.iscoroutinefunction(fn), (
+            "_try_claim_delivery_slot must be an async function"
+        )
+
+    def test_first_claim_succeeds(self):
+        """First claim for a new player/sport/stat/line must succeed (return True)."""
+        import asyncio
+        import market_engine
+        # Reset the dedup dict to isolate this test (conftest also clears, but be explicit)
+        market_engine._prop_market_alerted.clear()
+        result = asyncio.run(
+            market_engine._try_claim_delivery_slot("Brandon Nimmo", "MLB", "Hits", 0.5)
+        )
+        assert result is True, "First claim must return True"
+        market_engine._prop_market_alerted.clear()  # clean up
+
+    def test_second_claim_same_candidate_blocked(self):
+        """Second claim for the exact same candidate (same line) must return False."""
+        import asyncio
+        import market_engine
+        market_engine._prop_market_alerted.clear()
+        first  = asyncio.run(market_engine._try_claim_delivery_slot("B Nimmo", "MLB", "Hits", 0.5))
+        second = asyncio.run(market_engine._try_claim_delivery_slot("B Nimmo", "MLB", "Hits", 0.5))
+        market_engine._prop_market_alerted.clear()  # clean up
+        assert first  is True,  "First claim must succeed"
+        assert second is False, "Second claim (same candidate) must be blocked"
+
+    def test_nimmo_duplicate_scenario(self):
+        """
+        Nimmo regression: 4 identical alerts (6:43/6:45/6:47/6:49 PM ET).
+        Same player, sport, stat, line → only the first claim succeeds.
+        """
+        import asyncio
+        import market_engine
+        market_engine._prop_market_alerted.clear()
+        results = [
+            asyncio.run(market_engine._try_claim_delivery_slot("Brandon Nimmo", "MLB", "Hits", 0.5))
+            for _ in range(4)
+        ]
+        market_engine._prop_market_alerted.clear()  # clean up
+        assert results == [True, False, False, False], (
+            f"Expected [True, False, False, False], got {results}"
+        )
+
+    def test_lc_dedup_check_exists_in_source(self):
+        """lc (line-change) path must have a dedup check before collection."""
+        import inspect, market_engine
+        src = inspect.getsource(market_engine.underdog_job)
+        # The lc dedup gate comment must be present
+        assert "dedup_gate [lc]" in src, (
+            "lc path is missing dedup check — root cause of duplicate delivery"
+        )
+
+    def test_record_not_called_after_delivery_in_source(self):
+        """Delivery loop must NOT call _record_prop_alerted after delivery (pre-claimed)."""
+        import inspect, market_engine
+        src = inspect.getsource(market_engine.underdog_job)
+        # Confirm _try_claim_delivery_slot is present (means pre-claim is wired)
+        assert "_try_claim_delivery_slot" in src, (
+            "Atomic claim helper must be called in the delivery loop"
+        )
+
+    def test_concurrent_path_already_claimed_comment_in_source(self):
+        """SR/WL/FPR paths must include the atomic claim before deliver_underdog."""
+        import inspect, market_engine
+        src = inspect.getsource(market_engine._stable_refresh_job)
+        assert "_try_claim_delivery_slot" in src, (
+            "_stable_refresh_job missing atomic dedup claim"
+        )

@@ -312,9 +312,9 @@ class TestLifecycleTransitionsAfterBridge:
         from engine.player_results import PlayerHitRates, WindowStats
 
         # Large line move (4 units) → A/S tier expected
-        # Sport is NBA (non-strict, in ud_alert_sports) so MLB/NFL BQ gate does not apply;
-        # this test verifies lifecycle transitions, not MLB-specific delivery rules.
-        snap = _make_snap("Player A", "Total Bases", line=7.0, sport="NBA")
+        # Sport is NHL (Tier 1, no BQ/MQ gate) so the Tier-2 gate does not apply;
+        # this test verifies lifecycle transitions, not sport-specific delivery rules.
+        snap = _make_snap("Player A", "Total Bases", line=7.0, sport="NHL")
         history = [
             _make_db_record(
                 "Player A", "Total Bases",
@@ -617,9 +617,9 @@ class TestJobHealthTracking:
         from engine.player_results import PlayerHitRates, WindowStats
 
         # Set up a qualifying prop so lifecycle updates are triggered.
-        # Sport is NBA (non-strict, in ud_alert_sports) so MLB/NFL BQ gate does not apply;
-        # this test verifies job health tracking, not MLB-specific delivery rules.
-        snap = _make_snap("Player A", "Total Bases", line=7.0, sport="NBA")
+        # Sport is NHL (Tier 1, no BQ/MQ gate) so the Tier-2 gate does not apply;
+        # this test verifies job health tracking, not sport-specific delivery rules.
+        snap = _make_snap("Player A", "Total Bases", line=7.0, sport="NHL")
         history = [
             _make_db_record(
                 "Player A", "Total Bases",

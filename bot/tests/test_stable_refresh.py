@@ -1016,6 +1016,8 @@ class TestStableRefreshJob:
             patch("market_engine.get_health_tracker", return_value=None),
             patch("market_engine._is_futures_stat",   return_value=False),
             patch("market_engine._is_prop_deduped",   return_value=False),
+            patch("market_engine._tier_delivery_gate", return_value=True),
+            patch("market_engine._try_claim_delivery_slot", new_callable=AsyncMock, return_value=True),
             patch("engine.ud_scoring.score_ud_prop",   return_value=s_score),
             patch("engine.player_validator.validate_player_prop", return_value=_make_validation()),
             patch("market_engine._fetch_and_compute_hit_rates", new_callable=AsyncMock, return_value=None),
@@ -1319,8 +1321,9 @@ class TestWatchlistRescan:
         )
         ctx = _make_context(db)
 
-        good_score = _make_score(total=78, tier="A", stars=4)
-        good_dec   = _make_decision(rec="OVER", tier="A", conf=75)
+        # BQ=90 and MQ (conf)=90 — both ≥85 so the Tier-2 NBA gate passes.
+        good_score = _make_score(total=90, tier="A", stars=4)
+        good_dec   = _make_decision(rec="OVER", tier="A", conf=90)
         delivery   = MagicMock()
         delivery.sent = True
 
@@ -1335,6 +1338,8 @@ class TestWatchlistRescan:
             patch("market_engine.get_health_tracker", return_value=None),
             patch("market_engine._is_futures_stat",   return_value=False),
             patch("market_engine._is_prop_deduped",   return_value=False),
+            patch("market_engine._tier_delivery_gate", return_value=True),
+            patch("market_engine._try_claim_delivery_slot", new_callable=AsyncMock, return_value=True),
             patch("engine.ud_scoring.score_ud_prop",   side_effect=score_side_effect),
             patch("engine.player_validator.validate_player_prop", side_effect=val_side_effect),
             patch("market_engine._fetch_and_compute_hit_rates", new_callable=AsyncMock, return_value=None),

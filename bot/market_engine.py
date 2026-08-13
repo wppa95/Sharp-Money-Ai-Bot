@@ -30,6 +30,7 @@ Pick'em isolation:
 
 from __future__ import annotations
 
+import asyncio
 import gc
 import logging
 from datetime import datetime, timedelta
@@ -325,6 +326,13 @@ async def _init_state_from_db(db: "Database") -> None:
 # A significant line movement always fires, even within the window.
 # Intentionally module-level: persists across cycles, resets on bot restart.
 _prop_market_alerted: dict = {}
+
+# ── Delivery dedup concurrency lock ───────────────────────────────────────────
+# asyncio.Lock that makes the dedup check+record pair atomic across concurrent
+# jobs (underdog_job delivery loop, stable_refresh_job, watchlist_job, fpr_job).
+# Without this lock, two jobs can both pass _is_prop_deduped before either
+# calls _record_prop_alerted, resulting in duplicate Telegram deliveries.
+_prop_dedup_lock: asyncio.Lock = asyncio.Lock()
 
 # ── Futures / season-long market filter ───────────────────────────────────────
 # These stat types are season-aggregate or award markets, NOT single-game props.
@@ -961,19 +969,56 @@ def _tier_delivery_gate(
     Tier 1 rules (analysis-first):
         • Valid OVER or UNDER direction is required.
         • BQ and MQ are ranking signals only — NOT hard blockers.
+        • Do NOT reject Tier 1 for BQ < 85 or MQ < 85.
 
     Tier 2 rules (stricter):
         • Valid OVER or UNDER direction is required.
-        • BQ ≥ 75 is required.
-        • MQ ≥ 75 is required.
+        • BQ ≥ 85 is required.
+        • MQ ≥ 85 is required.
+        • BOTH are mandatory — failing either blocks Telegram delivery.
 
     Returns True if the candidate may proceed to delivery; False to block.
     """
     if direction.upper() not in ("OVER", "UNDER"):
         return False
     if _is_tier2_sport(sport):
-        return bq_score >= 75.0 and mq_score >= 75.0
+        return bq_score >= 85.0 and mq_score >= 85.0
     return True  # Tier 1: valid direction is the only mandatory numeric filter
+
+
+async def _try_claim_delivery_slot(
+    player: str,
+    sport: str,
+    stat: str,
+    line: float,
+) -> bool:
+    """Atomically check the dedup dict and claim the delivery slot if available.
+
+    Must be called under the asyncio event loop (i.e. with ``await``).
+
+    Returns True  → slot claimed; caller should proceed with delivery.
+    Returns False → another path already claimed this candidate; skip delivery.
+
+    The claim is recorded in ``_prop_market_alerted`` BEFORE the actual
+    ``deliver_underdog`` call so that a concurrent job (SR / WL / FPR / delivery
+    queue) checking the same candidate during network I/O cannot also pass the
+    dedup check and cause a duplicate Telegram alert.
+
+    If delivery subsequently fails (rate-limited, Telegram error, etc.) the
+    claim intentionally remains — the prop is treated as "recently attempted"
+    and will not be retried within the dedup window.  This prevents a flurry
+    of retry attempts when the rate-limiter is saturated.
+    """
+    async with _prop_dedup_lock:
+        if _is_prop_deduped(
+            _prop_market_alerted, player, sport, stat, line,
+            dedup_window_seconds=config.UD_ALERT_DEDUP_WINDOW,
+            min_line_change=config.MIN_UNDERDOG_LINE_CHANGE,
+        ):
+            return False
+        # Pre-claim: record immediately so concurrent paths see it as alerted.
+        _record_prop_alerted(_prop_market_alerted, player, sport, stat, line)
+        return True
 
 
 def _cand_priority(c: dict) -> float:
@@ -2097,6 +2142,26 @@ async def underdog_job(context) -> None:
                             config.UD_FLIP_COOLDOWN,
                         )
 
+                # Dedup gate [lc] — prevents re-delivery when the same candidate
+                # was recently alerted (e.g. by a concurrent SR/FPR job or the
+                # previous scan cycle) without a meaningful line movement.
+                # Mirrors the identical check in the new-prop path.
+                if should_alert and not is_removed:
+                    if _is_prop_deduped(
+                        _prop_market_alerted,
+                        player,
+                        snap.sport or "UNKNOWN",
+                        stat_type,
+                        snap.line or 0.0,
+                        dedup_window_seconds=config.UD_ALERT_DEDUP_WINDOW,
+                        min_line_change=config.MIN_UNDERDOG_LINE_CHANGE,
+                    ):
+                        should_alert = False
+                        logger.debug(
+                            "UD dedup_gate [lc]: %s | %s | already alerted recently at line=%.1f",
+                            player, stat_type, snap.line or 0.0,
+                        )
+
                 if should_alert and chat_ids:
                     # Prop Intelligence trace for richer alert context
                     # ud_history may be unbound in removal-only paths (no scoring was run)
@@ -2624,6 +2689,22 @@ async def underdog_job(context) -> None:
                     )
                     continue
 
+                # ── Atomic dedup claim ─────────────────────────────────────────────────
+                # Check and record under _prop_dedup_lock in one operation so a
+                # concurrent SR/WL/FPR job cannot also pass the dedup check and
+                # deliver the same candidate (root cause of the Nimmo duplicates).
+                # The pre-claim is recorded BEFORE deliver_underdog so other jobs
+                # see it immediately during the network I/O of the Telegram send.
+                if not await _try_claim_delivery_slot(
+                    _dq_player, _dq_sport, _dq_st, _dq_line_val,
+                ):
+                    _n_dq_deferred += 1
+                    _dq_deferred_log.append(
+                        f"{_dq_player}/{_dq_st}"
+                        f" [sport={_dq_sport}]: concurrent path already claimed delivery slot"
+                    )
+                    continue
+
                 _dq_delivery  = AlertDelivery(db, bot, chat_ids)
                 _dq_result    = await _dq_delivery.deliver_underdog(
                     player_name         = _dq_player,
@@ -2656,26 +2737,16 @@ async def underdog_job(context) -> None:
                     # Each path is handled inline so source-inspection tests can
                     # locate _record_prop_alerted and _lifecycle_alerted.append
                     # relative to the per-path counter landmark.
+                    # _record_prop_alerted is NOT called here — it was already
+                    # recorded by _try_claim_delivery_slot before the send.
                     if _dq_path == "new":
                         _n_new_prop_sent += 1
-                        _record_prop_alerted(
-                            _prop_market_alerted,
-                            _dq_player, _dq_sport, _dq_st, _dq_line_val,
-                        )
                         _lifecycle_alerted.append((_dq_player, _dq_sport, _dq_st))
                     elif _dq_path == "lc":
                         _n_lc_sent += 1
-                        _record_prop_alerted(
-                            _prop_market_alerted,
-                            _dq_player, _dq_sport, _dq_st, _dq_line_val,
-                        )
                         _lifecycle_alerted.append((_dq_player, _dq_sport, _dq_st))
                     elif _dq_path == "standing":
                         _n_standing_sent += 1
-                        _record_prop_alerted(
-                            _prop_market_alerted,
-                            _dq_player, _dq_sport, _dq_st, _dq_line_val,
-                        )
                         _sp = _dq_player  # standing-path alias (mirrors outer loop)
                         _lifecycle_alerted.append((_sp, _dq_sport, _dq_st))
                     # Performance tracking — path-specific for log clarity
@@ -3498,6 +3569,17 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 except Exception:
                     pass
 
+            # ── Atomic dedup claim [stable-refresh] ──────────────────────────────
+            # Claim before delivery so the delivery-queue path cannot also send.
+            if not await _try_claim_delivery_slot(_sr_player, _sr_sport, _sr_stat, _sr_line):
+                sr_rejected  += 1
+                sr_qualified -= 1
+                logger.debug(
+                    "UD dedup_claim [sr]: %s | %s | concurrent path already claimed",
+                    _sr_player, _sr_stat,
+                )
+                continue
+
             _sr_delivery = AlertDelivery(db, bot, chat_ids)
             _sr_result   = await _sr_delivery.deliver_underdog(
                 player_name         = _sr_player,
@@ -3518,9 +3600,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             )
             if _sr_result.sent:
                 sr_sent += 1
-                _record_prop_alerted(
-                    _prop_market_alerted, _sr_player, _sr_sport, _sr_stat, _sr_line,
-                )
+                # _record_prop_alerted already called by _try_claim_delivery_slot.
                 try:
                     await db.mark_ud_snapshot_alert_sent(_sr_player, _sr_stat)
                     await db.mark_opportunity_alert_sent(_sr_ext_id, _sr_stat)
@@ -3726,6 +3806,16 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                             _wl_player, _wl_stat, _wl_sport, _wl_bq_score, _wl_mq_score, _wl_dec.recommendation,
                         )
                     if _wl_mq_ok:
+                     # ── Atomic dedup claim [watchlist] ────────────────────────
+                     if not await _try_claim_delivery_slot(
+                         _wl_player, _wl_sport, _wl_stat, _wl_cur_line,
+                     ):
+                         logger.debug(
+                             "UD dedup_claim [wl]: %s | %s | concurrent path already claimed",
+                             _wl_player, _wl_stat,
+                         )
+                         _wl_mq_ok = False
+                    if _wl_mq_ok:
                      _wl_delivery = AlertDelivery(db, bot, chat_ids)
                      _wl_result   = await _wl_delivery.deliver_underdog(
                         player_name    = _wl_player,
@@ -3744,10 +3834,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     )
                     if _wl_mq_ok and _wl_result.sent:
                         wl_promoted += 1
-                        _record_prop_alerted(
-                            _prop_market_alerted,
-                            _wl_player, _wl_sport, _wl_stat, _wl_cur_line,
-                        )
+                        # _record_prop_alerted already called by _try_claim_delivery_slot.
                         try:
                             await db.log_prop_opportunity(
                                 external_id       = _wl_ext_id,
@@ -4117,6 +4204,17 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                             _fpr_player, _fpr_stat, _fpr_sport, _fpr_bq_score, _fpr_mq_score, _fpr_dec.recommendation,
                         )
                     if _fpr_mq_ok:
+                     # ── Atomic dedup claim [full-pool-rescan] ─────────────────
+                     if not await _try_claim_delivery_slot(
+                         _fpr_player, _fpr_sport, _fpr_stat, _fpr_line,
+                     ):
+                         fpr_rejected += 1
+                         logger.debug(
+                             "UD dedup_claim [fpr]: %s | %s | concurrent path already claimed",
+                             _fpr_player, _fpr_stat,
+                         )
+                         _fpr_mq_ok = False
+                    if _fpr_mq_ok:
                      _fpr_delivery = AlertDelivery(db, bot, chat_ids)
                      _fpr_result   = await _fpr_delivery.deliver_underdog(
                         player_name     = _fpr_player,
@@ -4136,10 +4234,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     if _fpr_mq_ok and _fpr_result.sent:
                         fpr_sent      += 1
                         fpr_qualified += 1
-                        _record_prop_alerted(
-                            _prop_market_alerted,
-                            _fpr_player, _fpr_sport, _fpr_stat, _fpr_line,
-                        )
+                        # _record_prop_alerted already called by _try_claim_delivery_slot.
                     elif _fpr_mq_ok:
                         # deliver_underdog returned not-sent (rate-limited, etc.)
                         fpr_rejected += 1

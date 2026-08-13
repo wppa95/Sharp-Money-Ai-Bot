@@ -1535,15 +1535,15 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             continue
         # Tier-aware delivery gate — apply same rules as Telegram delivery.
         # Tier 1 (non-NBA/MLB/NFL): only direction matters (already checked above).
-        # Tier 2 (NBA/MLB/NFL): BQ ≥ 75 AND MQ ≥ 75.
+        # Tier 2 (NBA/MLB/NFL): BQ ≥ 85 AND MQ ≥ 85 — BOTH mandatory.
         # NULL scores pass through conservatively (not yet rescored this cycle).
         _plh_sport = getattr(plh, "sport", "") or ""
         _plh_mq    = getattr(plh, "market_quality_score", None)
         _plh_bq    = getattr(plh, "score_total", None)
         if _plh_sport.upper() in {"NBA", "MLB", "NFL"}:
             # Tier 2: enforce both gates when scores are available.
-            _t2_mq_ok = (_plh_mq is None) or (float(_plh_mq) >= 75.0)
-            _t2_bq_ok = (_plh_bq is None) or (float(_plh_bq) >= 75.0)
+            _t2_mq_ok = (_plh_mq is None) or (float(_plh_mq) >= 85.0)
+            _t2_bq_ok = (_plh_bq is None) or (float(_plh_bq) >= 85.0)
             if not (_t2_mq_ok and _t2_bq_ok):
                 logger.debug(
                     "cmd_picks: skipping %s/%s — Tier-2 gate (bq=%s mq=%s dir=%s)",
@@ -2190,7 +2190,7 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             continue
         # Tier-aware delivery gate — same rules as Telegram delivery.
-        # Tier 2 (NBA/MLB/NFL): BQ ≥ 75 AND MQ ≥ 75.
+        # Tier 2 (NBA/MLB/NFL): BQ ≥ 85 AND MQ ≥ 85 — BOTH mandatory.
         # Tier 1: direction already checked above; no BQ/MQ numeric gate.
         _slip_sport = (getattr(_cand, "sport", "") or "").upper()
         if _slip_sport in {"NBA", "MLB", "NFL"}:
@@ -2203,8 +2203,8 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             _slip_mq = getattr(_slip_plh, "market_quality_score", None) if _slip_plh else None
             _slip_bq = getattr(_slip_plh, "score_total",          None) if _slip_plh else None
-            _s2_mq_ok = (_slip_mq is None) or (float(_slip_mq) >= 75.0)
-            _s2_bq_ok = (_slip_bq is None) or (float(_slip_bq) >= 75.0)
+            _s2_mq_ok = (_slip_mq is None) or (float(_slip_mq) >= 85.0)
+            _s2_bq_ok = (_slip_bq is None) or (float(_slip_bq) >= 85.0)
             if not (_s2_mq_ok and _s2_bq_ok):
                 _slip_ineligible += 1
                 logger.debug(

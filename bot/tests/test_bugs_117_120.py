@@ -185,19 +185,26 @@ class TestBug118NewPropDedup:
         )
 
     def test_source_code_new_prop_records_after_delivery(self):
-        """market_engine.py new-prop path must call _record_prop_alerted after sent=True."""
+        """market_engine.py new-prop path must use _try_claim_delivery_slot (atomic pre-claim)
+        near the delivery loop, rather than a post-delivery _record_prop_alerted call.
+        """
         import os
         base = os.path.dirname(os.path.dirname(__file__))
         with open(os.path.join(base, "market_engine.py")) as f:
             src = f.read()
-        # _record_prop_alerted must appear inside the `if ud_result.sent:` block
-        # (between `_n_new_prop_sent += 1` and `_lifecycle_alerted.append`)
+        # _try_claim_delivery_slot performs the dedup record atomically before delivery;
+        # it must be present in the source (wired in delivery loop).
+        assert "_try_claim_delivery_slot" in src, (
+            "_try_claim_delivery_slot missing from market_engine.py — "
+            "atomic dedup pre-claim not wired in delivery loop"
+        )
+        # Confirm the old pattern (post-delivery record) is NOT inside the sent=True block
         idx = src.find("_n_new_prop_sent += 1")
-        assert idx != -1
-        snippet = src[idx: idx + 900]
-        assert "_record_prop_alerted" in snippet, (
-            "_record_prop_alerted missing from new-prop sent=True block — "
-            "dedup dict not updated after delivery"
+        assert idx != -1, "_n_new_prop_sent += 1 counter not found in market_engine.py"
+        snippet = src[idx: idx + 500]
+        assert "_record_prop_alerted" not in snippet, (
+            "_record_prop_alerted still present inside new-prop sent=True block — "
+            "should be removed; dedup is now pre-claimed by _try_claim_delivery_slot"
         )
 
 

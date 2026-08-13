@@ -49,10 +49,10 @@ def _make_hit_rates(over_rate: float = 0.80):
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _snap(player: str, stat: str, line: float = 2.5, *, removed: bool = False,
-          sport: str = "NBA") -> MagicMock:
-    """Build a snapshot mock.  Default sport=NBA (not in ud_strict_alert_sports)
-    so generic new-prop delivery tests are not affected by the MLB/NFL BQ≥95 gate.
-    Pass sport='MLB' explicitly when testing MLB-specific gate behavior."""
+          sport: str = "NHL") -> MagicMock:
+    """Build a snapshot mock.  Default sport=NHL (Tier 1, no BQ/MQ gate)
+    so generic new-prop delivery tests are not affected by the Tier-2 BQ≥85 gate.
+    Pass sport='MLB' or sport='NBA' explicitly when testing Tier-2 gate behavior."""
     s = MagicMock()
     s.sportsbook = "Underdog"
     s.player     = player

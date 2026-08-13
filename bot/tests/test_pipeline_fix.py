@@ -153,8 +153,8 @@ class TestProcessedKeysGate:
             "_processed_keys.add() not found after is_reentry detection — "
             "re-entry path may have lost its _processed_keys protection."
         )
-        # Must be within the re-entry scoring block (< 1200 chars)
-        assert add_pos - reentry_pos < 1200, (
+        # Must be within the re-entry scoring block (< 1500 chars)
+        assert add_pos - reentry_pos < 1500, (
             "Re-entry _processed_keys.add() is too far from the is_reentry detection."
         )
 

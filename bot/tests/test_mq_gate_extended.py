@@ -46,7 +46,7 @@ def _make_plh(
 
 
 def _apply_picks_mq_filter(plhs: list) -> list:
-    """Apply the same Tier-aware filter used in cmd_picks."""
+    """Apply the same Tier-aware filter used in cmd_picks. Threshold: BQ ≥ 85 AND MQ ≥ 85."""
     passing = []
     for plh in plhs:
         _eff_rec = plh.bet_recommendation
@@ -56,8 +56,8 @@ def _apply_picks_mq_filter(plhs: list) -> list:
         _plh_mq    = getattr(plh, "market_quality_score", None)
         _plh_bq    = getattr(plh, "score_total", None)
         if _plh_sport in {"NBA", "MLB", "NFL"}:
-            _t2_mq_ok = (_plh_mq is None) or (float(_plh_mq) >= 75.0)
-            _t2_bq_ok = (_plh_bq is None) or (float(_plh_bq) >= 75.0)
+            _t2_mq_ok = (_plh_mq is None) or (float(_plh_mq) >= 85.0)
+            _t2_bq_ok = (_plh_bq is None) or (float(_plh_bq) >= 85.0)
             if not (_t2_mq_ok and _t2_bq_ok):
                 continue
         passing.append(plh)
@@ -65,7 +65,7 @@ def _apply_picks_mq_filter(plhs: list) -> list:
 
 
 def _apply_slip_filter(candidates: list, plhs: list) -> list:
-    """Apply the same Tier-aware filter used in cmd_slip."""
+    """Apply the same Tier-aware filter used in cmd_slip. Threshold: BQ ≥ 85 AND MQ ≥ 85."""
     eligible = []
     for cand in candidates:
         _slip_sport = (getattr(cand, "sport", "") or "").upper()
@@ -76,8 +76,8 @@ def _apply_slip_filter(candidates: list, plhs: list) -> list:
             )
             _slip_mq = getattr(_slip_plh, "market_quality_score", None) if _slip_plh else None
             _slip_bq = getattr(_slip_plh, "score_total",           None) if _slip_plh else None
-            _s2_mq_ok = (_slip_mq is None) or (float(_slip_mq) >= 75.0)
-            _s2_bq_ok = (_slip_bq is None) or (float(_slip_bq) >= 75.0)
+            _s2_mq_ok = (_slip_mq is None) or (float(_slip_mq) >= 85.0)
+            _s2_bq_ok = (_slip_bq is None) or (float(_slip_bq) >= 85.0)
             if not (_s2_mq_ok and _s2_bq_ok):
                 continue
         eligible.append(cand)
@@ -101,9 +101,13 @@ class TestMainScanPathsTierGate:
         """New-prop path: Tier 2 (NBA) with BQ=74 must be blocked."""
         assert _tier_delivery_gate("NBA", "OVER", bq_score=74, mq_score=80) is False
 
-    def test_new_prop_tier2_both_75_allowed(self):
-        """New-prop path: Tier 2 (MLB) with BQ=75 and MQ=75 must be allowed."""
-        assert _tier_delivery_gate("MLB", "OVER", bq_score=75, mq_score=75) is True
+    def test_new_prop_tier2_both_85_allowed(self):
+        """New-prop path: Tier 2 (MLB) with BQ=85 and MQ=85 must be allowed."""
+        assert _tier_delivery_gate("MLB", "OVER", bq_score=85, mq_score=85) is True
+
+    def test_new_prop_tier2_bq75_mq75_now_blocked(self):
+        """New-prop path: Tier 2 (MLB) with BQ=75 and MQ=75 must now be BLOCKED (threshold raised to 85)."""
+        assert _tier_delivery_gate("MLB", "OVER", bq_score=75, mq_score=75) is False
 
     def test_lc_tier1_mq_dead_zone_allowed(self):
         """Line-change path: Tier 1 with MQ=55 (dead zone) must be allowed."""
@@ -118,10 +122,10 @@ class TestMainScanPathsTierGate:
         assert _tier_delivery_gate("TENNIS", "OVER", bq_score=0, mq_score=0) is True
 
     def test_standing_tier2_requires_both_gates(self):
-        """Standing path: Tier 2 (NBA) must fail when only one of BQ/MQ ≥ 75."""
-        assert _tier_delivery_gate("NBA", "OVER", bq_score=75, mq_score=74) is False
-        assert _tier_delivery_gate("NBA", "OVER", bq_score=74, mq_score=75) is False
-        assert _tier_delivery_gate("NBA", "OVER", bq_score=75, mq_score=75) is True
+        """Standing path: Tier 2 (NBA) must fail when only one of BQ/MQ ≥ 85."""
+        assert _tier_delivery_gate("NBA", "OVER", bq_score=85, mq_score=84) is False
+        assert _tier_delivery_gate("NBA", "OVER", bq_score=84, mq_score=85) is False
+        assert _tier_delivery_gate("NBA", "OVER", bq_score=85, mq_score=85) is True
 
 
 # ── 43–46. SR / WL / FPR paths ────────────────────────────────────────────────
@@ -140,9 +144,13 @@ class TestIndirectScanPathsTierGate:
         """Stable-refresh: Tier 2 (NBA) with BQ=74 must be blocked."""
         assert _tier_delivery_gate("NBA", "OVER", bq_score=74, mq_score=80) is False
 
-    def test_sr_tier2_both_75_allowed(self):
-        """Stable-refresh: Tier 2 (NBA) with BQ=75 and MQ=75 must be allowed."""
-        assert _tier_delivery_gate("NBA", "OVER", bq_score=75, mq_score=75) is True
+    def test_sr_tier2_both_85_allowed(self):
+        """Stable-refresh: Tier 2 (NBA) with BQ=85 and MQ=85 must be allowed."""
+        assert _tier_delivery_gate("NBA", "OVER", bq_score=85, mq_score=85) is True
+
+    def test_sr_tier2_bq75_mq75_blocked(self):
+        """Stable-refresh: Tier 2 (NBA) with BQ=75/MQ=75 must now be BLOCKED (threshold is 85)."""
+        assert _tier_delivery_gate("NBA", "OVER", bq_score=75, mq_score=75) is False
 
     def test_wl_tier1_mq_dead_zone_allowed(self):
         """Watchlist: Tier 1 with MQ=47 must be allowed (no dead-zone rule for T1)."""
@@ -157,19 +165,20 @@ class TestIndirectScanPathsTierGate:
         assert _tier_delivery_gate("MMA", "OVER", bq_score=0, mq_score=0) is True
 
     def test_fpr_tier2_bq_and_mq_both_required(self):
-        """Full-pool-rescan: Tier 2 (NFL) must require both BQ AND MQ ≥ 75."""
-        assert _tier_delivery_gate("NFL", "OVER", bq_score=80, mq_score=74) is False
-        assert _tier_delivery_gate("NFL", "OVER", bq_score=74, mq_score=80) is False
-        assert _tier_delivery_gate("NFL", "OVER", bq_score=75, mq_score=75) is True
+        """Full-pool-rescan: Tier 2 (NFL) must require both BQ AND MQ ≥ 85."""
+        assert _tier_delivery_gate("NFL", "OVER", bq_score=90, mq_score=84) is False
+        assert _tier_delivery_gate("NFL", "OVER", bq_score=84, mq_score=90) is False
+        assert _tier_delivery_gate("NFL", "OVER", bq_score=85, mq_score=85) is True
 
     def test_all_paths_use_same_gate_function(self):
         """All paths call _tier_delivery_gate — results are deterministic."""
         inputs = [
-            ("WNBA", "OVER",  50, 47, True),   # Tier 1 — MQ dead zone allowed
-            ("NBA",  "OVER",  74, 80, False),   # Tier 2 — BQ gate
-            ("MLB",  "UNDER", 90, 74, False),   # Tier 2 — MQ gate
-            ("CS2",  "UNDER", 60, 55, True),    # Tier 1 — MQ dead zone allowed
-            ("NFL",  "OVER",  75, 75, True),    # Tier 2 — passes
+            ("WNBA", "OVER",  50, 47, True),   # Tier 1 — no BQ/MQ gate
+            ("NBA",  "OVER",  84, 90, False),   # Tier 2 — BQ gate (84 < 85)
+            ("MLB",  "UNDER", 90, 84, False),   # Tier 2 — MQ gate (84 < 85)
+            ("CS2",  "UNDER", 60, 55, True),    # Tier 1 — no BQ/MQ gate
+            ("NFL",  "OVER",  85, 85, True),    # Tier 2 — passes (85 ≥ 85)
+            ("MLB",  "OVER",  75, 75, False),   # Tier 2 — old threshold blocked (75 < 85)
         ]
         for sport, direction, bq, mq, expected in inputs:
             assert _tier_delivery_gate(sport, direction, bq, mq) is expected, (
@@ -204,7 +213,7 @@ class TestDirectDeliveryPath:
 # ── /picks tier-aware filter ───────────────────────────────────────────────────
 
 class TestPicksTierFilter:
-    """Tier-aware /picks filtering: Tier 2 requires BQ ≥ 75 AND MQ ≥ 75."""
+    """Tier-aware /picks filtering: Tier 2 requires BQ ≥ 85 AND MQ ≥ 85."""
 
     def test_tier1_low_mq_passes_picks(self):
         """Tier 1 with MQ=47 must appear in /picks (no MQ gate on T1)."""
@@ -216,19 +225,24 @@ class TestPicksTierFilter:
         plh = _make_plh("Player B", "NHL", market_quality_score=80, score_total=40, bet_recommendation="UNDER")
         assert _apply_picks_mq_filter([plh]) == [plh]
 
-    def test_tier2_bq74_excluded_from_picks(self):
-        """Tier 2 (MLB) with BQ=74 must be excluded from /picks."""
-        plh = _make_plh("Pitcher A", "MLB", market_quality_score=80, score_total=74, bet_recommendation="OVER")
+    def test_tier2_bq84_excluded_from_picks(self):
+        """Tier 2 (MLB) with BQ=84 must be excluded from /picks (below 85 threshold)."""
+        plh = _make_plh("Pitcher A", "MLB", market_quality_score=90, score_total=84, bet_recommendation="OVER")
         assert _apply_picks_mq_filter([plh]) == []
 
-    def test_tier2_mq74_excluded_from_picks(self):
-        """Tier 2 (NBA) with MQ=74 must be excluded from /picks."""
-        plh = _make_plh("Baller A", "NBA", market_quality_score=74, score_total=80, bet_recommendation="OVER")
+    def test_tier2_mq84_excluded_from_picks(self):
+        """Tier 2 (NBA) with MQ=84 must be excluded from /picks (below 85 threshold)."""
+        plh = _make_plh("Baller A", "NBA", market_quality_score=84, score_total=90, bet_recommendation="OVER")
         assert _apply_picks_mq_filter([plh]) == []
 
-    def test_tier2_both_75_allowed_in_picks(self):
-        """Tier 2 (NFL) with BQ=75 and MQ=75 must appear in /picks."""
-        plh = _make_plh("QB A", "NFL", market_quality_score=75, score_total=75.0, bet_recommendation="OVER")
+    def test_tier2_bq75_mq75_blocked_in_picks(self):
+        """Tier 2 (MLB) with BQ=75/MQ=75 must now be BLOCKED (threshold raised from 75 to 85)."""
+        plh = _make_plh("Old Player", "MLB", market_quality_score=75, score_total=75.0, bet_recommendation="OVER")
+        assert _apply_picks_mq_filter([plh]) == []
+
+    def test_tier2_both_85_allowed_in_picks(self):
+        """Tier 2 (NFL) with BQ=85 and MQ=85 must appear in /picks."""
+        plh = _make_plh("QB A", "NFL", market_quality_score=85, score_total=85.0, bet_recommendation="OVER")
         assert _apply_picks_mq_filter([plh]) == [plh]
 
     def test_tier2_null_scores_pass_conservatively(self):
@@ -239,8 +253,8 @@ class TestPicksTierFilter:
     def test_mixed_picks_only_valid_pass(self):
         """Mixed Tier 1/2 list: only eligible props pass."""
         t1_ok  = _make_plh("P1", "WNBA", market_quality_score=47,  score_total=50,   bet_recommendation="OVER")
-        t2_ok  = _make_plh("P2", "NBA",  market_quality_score=80,  score_total=80.0, bet_recommendation="OVER")
-        t2_bad = _make_plh("P3", "MLB",  market_quality_score=74,  score_total=80.0, bet_recommendation="OVER")
+        t2_ok  = _make_plh("P2", "NBA",  market_quality_score=90,  score_total=90.0, bet_recommendation="OVER")
+        t2_bad = _make_plh("P3", "MLB",  market_quality_score=84,  score_total=90.0, bet_recommendation="OVER")
         result = _apply_picks_mq_filter([t1_ok, t2_ok, t2_bad])
         assert t1_ok  in result
         assert t2_ok  in result
@@ -255,7 +269,7 @@ class TestPicksTierFilter:
 # ── /slip tier-aware filter ────────────────────────────────────────────────────
 
 class TestSlipTierFilter:
-    """Tier-aware /slip filtering: Tier 2 requires BQ ≥ 75 AND MQ ≥ 75."""
+    """Tier-aware /slip filtering: Tier 2 requires BQ ≥ 85 AND MQ ≥ 85."""
 
     def _make_cand(self, player_name, stat_type, best_side, sport):
         return types.SimpleNamespace(
@@ -271,22 +285,28 @@ class TestSlipTierFilter:
         plh  = _make_plh("P1", "WNBA", stat_type="Points", market_quality_score=47, score_total=60)
         assert _apply_slip_filter([cand], [plh]) == [cand]
 
-    def test_tier2_bq74_excluded_from_slip(self):
-        """Tier 2 candidate with BQ=74 must be excluded from /slip."""
+    def test_tier2_bq84_excluded_from_slip(self):
+        """Tier 2 candidate with BQ=84 must be excluded from /slip (below 85 threshold)."""
         cand = self._make_cand("P2", "Hits", "OVER", "MLB")
-        plh  = _make_plh("P2", "MLB", stat_type="Hits", market_quality_score=80, score_total=74.0)
+        plh  = _make_plh("P2", "MLB", stat_type="Hits", market_quality_score=90, score_total=84.0)
         assert _apply_slip_filter([cand], [plh]) == []
 
-    def test_tier2_mq74_excluded_from_slip(self):
-        """Tier 2 candidate with MQ=74 must be excluded from /slip."""
+    def test_tier2_mq84_excluded_from_slip(self):
+        """Tier 2 candidate with MQ=84 must be excluded from /slip (below 85 threshold)."""
         cand = self._make_cand("P3", "Points", "OVER", "NBA")
-        plh  = _make_plh("P3", "NBA", stat_type="Points", market_quality_score=74, score_total=80.0)
+        plh  = _make_plh("P3", "NBA", stat_type="Points", market_quality_score=84, score_total=90.0)
         assert _apply_slip_filter([cand], [plh]) == []
 
-    def test_tier2_both_75_allowed_in_slip(self):
-        """Tier 2 candidate with BQ=75 and MQ=75 must be eligible for /slip."""
+    def test_tier2_bq75_mq75_blocked_in_slip(self):
+        """Tier 2 candidate with BQ=75/MQ=75 must now be BLOCKED (threshold raised to 85)."""
+        cand = self._make_cand("P6", "Passing Yards", "OVER", "NFL")
+        plh  = _make_plh("P6", "NFL", stat_type="Passing Yards", market_quality_score=75, score_total=75.0)
+        assert _apply_slip_filter([cand], [plh]) == []
+
+    def test_tier2_both_85_allowed_in_slip(self):
+        """Tier 2 candidate with BQ=85 and MQ=85 must be eligible for /slip."""
         cand = self._make_cand("P4", "Passing Yards", "OVER", "NFL")
-        plh  = _make_plh("P4", "NFL", stat_type="Passing Yards", market_quality_score=75, score_total=75.0)
+        plh  = _make_plh("P4", "NFL", stat_type="Passing Yards", market_quality_score=85, score_total=85.0)
         assert _apply_slip_filter([cand], [plh]) == [cand]
 
     def test_tier2_null_scores_pass_conservatively_in_slip(self):
