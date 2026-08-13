@@ -842,6 +842,10 @@ async def consensus_check_job(context) -> None:
         if cr is None:
             continue
 
+        # ── Tier 2 Telegram block (temporary) ────────────────────────────────────
+        if _is_tier2_sport(ineff.sport):
+            logger.debug("consensus_check_job: Tier 2 block — sport=%s ineff=%s", ineff.sport, ineff.selection)
+            continue
         message = format_inefficiency_alert(ineff, cr)
         await broadcast_alert(bot, chat_ids, message)
         logger.info(
@@ -899,6 +903,10 @@ async def consensus_check_job(context) -> None:
         open_odds    = first_snap.get("open_odds", 0)
         current_odds = first_snap.get("current_odds", 0)
 
+        # ── Tier 2 Telegram block (temporary) ────────────────────────────────────
+        if _is_tier2_sport(sport):
+            logger.debug("consensus_check_job: Tier 2 block — sport=%s steam=%s", sport, selection)
+            continue
         message = format_steam_multibook_alert(
             event           = event,
             selection       = selection,
@@ -1139,6 +1147,10 @@ async def clv_check_job(context) -> None:
             if already:
                 continue
 
+            # ── Tier 2 Telegram block (temporary) ────────────────────────────────
+            if _is_tier2_sport(snap.sport):
+                logger.debug("clv_check_job: Tier 2 block — sport=%s clv=%s", snap.sport, opp.selection)
+                continue
             message = format_clv_opportunity_alert(opp)
             await broadcast_alert(bot, chat_ids, message)
             logger.info(

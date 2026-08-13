@@ -561,6 +561,13 @@ def format_start_message() -> str:
     ])
 
 
+# ── Tier 2 Telegram block (temporary) ────────────────────────────────────────
+# Sports in this set are monitored, scored, and stored normally, but Telegram
+# delivery is suppressed.  Module-level so tests can patch it when verifying
+# sport-specific formatting independent of the delivery block.
+_TIER2_SPORTS_BLOCK: frozenset[str] = frozenset({"NBA", "MLB", "NFL"})
+
+
 # ── Low-level Telegram senders ────────────────────────────────────────────────
 
 async def send_alert(
@@ -1095,6 +1102,19 @@ class AlertDelivery:
             format_market_move_detected,
         )
         from engine.timing import is_game_alertable
+
+        # ── FINAL Tier 2 Telegram backstop (temporary) ───────────────────────────
+        # NBA / MLB / NFL props continue to be scanned, scored, and stored, but
+        # Telegram delivery is suppressed here — the final delivery boundary.
+        # This guard runs unconditionally regardless of which call site reached
+        # deliver_underdog(), so no bypass path can circumvent it.
+        if sport.upper() in _TIER2_SPORTS_BLOCK:
+            logger.debug(
+                "deliver_underdog: Tier 2 Telegram block — sport=%s player=%s stat=%s",
+                sport, player_name, stat_type,
+            )
+            return DeliveryResult(sent=False, filtered=True,
+                                  filtered_reason=f"Tier 2 sport blocked (temporary): {sport}")
 
         # 0 & 1. Normalize + scope check
         norm_obj = normalize_underdog(player_name, stat_type, sport, is_removed=removed)

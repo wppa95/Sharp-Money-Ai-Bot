@@ -608,6 +608,7 @@ async def test_new_prop_bypasses_timing_filter():
         patch("alerts.broadcast_alert", new_callable=AsyncMock,
               return_value={"sent": 1, "failed": 0}),
         patch("engine.timing.is_game_alertable", side_effect=_timing),
+        patch("alerts._TIER2_SPORTS_BLOCK", frozenset()),  # bypass Tier 2 block to test timing logic
     ):
         result = await delivery.deliver_underdog(
             "Aaron Judge", "NYY", "MLB", "Home Runs",

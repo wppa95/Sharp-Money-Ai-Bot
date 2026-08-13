@@ -719,6 +719,11 @@ async def run_player_prop_market_cycle(
             continue
 
         try:
+            # ── Tier 2 Telegram block (temporary) ────────────────────────────────
+            _T2 = frozenset({"NBA", "MLB", "NFL"})
+            if sport.upper() in _T2:
+                logger.debug("player_prop_market: Tier 2 block — sport=%s player=%s", sport, player)
+                continue
             message = format_player_prop_market_alert(comp)
             counts  = await broadcast_alert(bot, chat_ids, message)
             if counts.get("sent", 0) > 0:

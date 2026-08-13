@@ -205,9 +205,11 @@ async def test_underdog_blocked_when_daily_cap_configured_and_reached():
         delivery = _make_delivery(db)
 
         from alert_scope_filter import FilterResult
+        import alerts as alerts_mod
         with (
             patch("alert_scope_filter.check", return_value=FilterResult(allowed=True)),
             patch("engine.timing.is_game_alertable", return_value=(True, "")),
+            patch.object(alerts_mod, "_TIER2_SPORTS_BLOCK", frozenset()),
         ):
             result = await delivery.deliver_underdog(
                 "Test Player", "TeamA", "NBA", "Points",
@@ -229,6 +231,7 @@ async def test_underdog_cap_disabled_when_limit_is_zero():
         db = _make_db(ud_today=9999)  # enormous count — must not block
         delivery = _make_delivery(db)
 
+        import alerts as alerts_mod
         from alert_scope_filter import FilterResult
         with (
             patch("alert_scope_filter.check", return_value=FilterResult(allowed=True)),
@@ -236,6 +239,7 @@ async def test_underdog_cap_disabled_when_limit_is_zero():
             patch("alerts.broadcast_alert", new_callable=AsyncMock,
                   return_value={"sent": 1, "failed": 0}),
             patch("engine.timing.is_game_alertable", return_value=(True, "")),
+            patch.object(alerts_mod, "_TIER2_SPORTS_BLOCK", frozenset()),
         ):
             result = await delivery.deliver_underdog(
                 "Test Player", "TeamA", "NBA", "Points",
@@ -250,6 +254,7 @@ async def test_underdog_cap_disabled_when_limit_is_zero():
 @pytest.mark.asyncio
 async def test_underdog_allowed_when_under_cap():
     """Underdog alert fires when count is below a configured daily cap."""
+    import alerts as alerts_mod
     db = _make_db(ud_today=0)
     delivery = _make_delivery(db)
 
@@ -260,6 +265,7 @@ async def test_underdog_allowed_when_under_cap():
         patch("alerts.broadcast_alert", new_callable=AsyncMock,
               return_value={"sent": 1, "failed": 0}),
         patch("engine.timing.is_game_alertable", return_value=(True, "")),
+        patch.object(alerts_mod, "_TIER2_SPORTS_BLOCK", frozenset()),
     ):
         result = await delivery.deliver_underdog(
             "Test Player", "TeamA", "NBA", "Points",

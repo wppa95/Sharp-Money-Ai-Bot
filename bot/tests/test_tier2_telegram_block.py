@@ -5,14 +5,16 @@ Regression tests for the temporary Tier 2 Telegram delivery block.
 
 Spec:
   - NBA / MLB / NFL props are scanned, scored, stored, and ranked normally.
-  - Telegram delivery is SUPPRESSED for those sports.
+  - Telegram delivery is SUPPRESSED for those sports via:
+      (a) _is_tier2_sport guard at all 4 deliver_underdog() call sites
+      (b) FINAL backstop inside deliver_underdog() in alerts.py
+      (c) Guards on every direct broadcast_alert() call with a sport field
   - All other (Tier 1) sports are delivered as before.
-  - The block must cover every deliver_underdog() path:
-      delivery queue, stable refresh, watchlist, full-pool rescan.
   - No 8/2 cap restored, no BQ/MQ thresholds changed, no scanning reduced.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 import pytest
@@ -141,91 +143,249 @@ class TestIsTier2Sport:
         assert me._is_tier2_sport(None) is False
 
 
-# ── Source-code audit: every deliver_underdog path has the block ───────────────
+# ── Unit: deliver_underdog() final backstop in alerts.py ─────────────────────
+
+class TestDeliverUnderdogBackstop:
+    """
+    deliver_underdog() must return sent=False for any Tier 2 sport,
+    regardless of which call site invoked it.
+    """
+
+    def _make_delivery(self):
+        from alerts import AlertDelivery, DeliveryResult
+        db  = MagicMock()
+        db.count_today_underdog_alerts = AsyncMock(return_value=0)
+        bot = MagicMock()
+        return AlertDelivery(db=db, bot=bot, chat_ids=[12345])
+
+    @pytest.mark.asyncio
+    async def test_nba_sport_returns_not_sent(self):
+        """Direct deliver_underdog() call with sport='NBA' must return sent=False."""
+        delivery = self._make_delivery()
+        result = await delivery.deliver_underdog(
+            player_name="LeBron James", team="LAL", sport="NBA",
+            stat_type="Points", old_line=20.0, new_line=21.5,
+        )
+        assert result.sent is False
+        assert "NBA" in result.filtered_reason or "Tier 2" in result.filtered_reason
+
+    @pytest.mark.asyncio
+    async def test_mlb_sport_returns_not_sent(self):
+        """Direct deliver_underdog() call with sport='MLB' must return sent=False."""
+        delivery = self._make_delivery()
+        result = await delivery.deliver_underdog(
+            player_name="Aaron Judge", team="NYY", sport="MLB",
+            stat_type="Home Runs", old_line=0.5, new_line=0.5,
+        )
+        assert result.sent is False
+
+    @pytest.mark.asyncio
+    async def test_nfl_sport_returns_not_sent(self):
+        """Direct deliver_underdog() call with sport='NFL' must return sent=False."""
+        delivery = self._make_delivery()
+        result = await delivery.deliver_underdog(
+            player_name="Patrick Mahomes", team="KC", sport="NFL",
+            stat_type="Passing Yards", old_line=250.5, new_line=255.5,
+        )
+        assert result.sent is False
+
+    @pytest.mark.asyncio
+    async def test_nba_lowercase_returns_not_sent(self):
+        """Lowercase sport='nba' must also be blocked."""
+        delivery = self._make_delivery()
+        result = await delivery.deliver_underdog(
+            player_name="Test Player", team="TM", sport="nba",
+            stat_type="Points", old_line=20.0, new_line=20.0,
+        )
+        assert result.sent is False
+
+    def test_tier1_nhl_not_blocked_by_constant(self):
+        """Sport='NHL' must NOT be in the _TIER2_SPORTS_BLOCK constant."""
+        import alerts as alerts_mod
+        assert "NHL" not in alerts_mod._TIER2_SPORTS_BLOCK
+        assert "WNBA" not in alerts_mod._TIER2_SPORTS_BLOCK
+        assert "Soccer" not in alerts_mod._TIER2_SPORTS_BLOCK
+
+    def test_tier2_constant_contains_correct_sports(self):
+        """_TIER2_SPORTS_BLOCK must contain exactly NBA, MLB, NFL."""
+        import alerts as alerts_mod
+        assert alerts_mod._TIER2_SPORTS_BLOCK == frozenset({"NBA", "MLB", "NFL"})
+
+    @pytest.mark.asyncio
+    async def test_backstop_prevents_send_message_for_nba(self):
+        """bot.send_message must never be called for NBA even when all other gates pass."""
+        from alerts import AlertDelivery
+        db  = MagicMock()
+        db.count_today_underdog_alerts = AsyncMock(return_value=0)
+        bot = MagicMock()
+        bot.send_message = AsyncMock()
+        delivery = AlertDelivery(db=db, bot=bot, chat_ids=[12345])
+        await delivery.deliver_underdog(
+            player_name="Test Player", team="TM", sport="NBA",
+            stat_type="Points", old_line=20.0, new_line=21.5,
+        )
+        bot.send_message.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_backstop_prevents_send_message_for_mlb(self):
+        """bot.send_message must never be called for MLB."""
+        from alerts import AlertDelivery
+        db  = MagicMock()
+        db.count_today_underdog_alerts = AsyncMock(return_value=0)
+        bot = MagicMock()
+        bot.send_message = AsyncMock()
+        delivery = AlertDelivery(db=db, bot=bot, chat_ids=[12345])
+        await delivery.deliver_underdog(
+            player_name="Test Player", team="TM", sport="MLB",
+            stat_type="Hits", old_line=0.5, new_line=0.5,
+        )
+        bot.send_message.assert_not_called()
+
+
+# ── Source-code audit: every deliver_underdog path has the guard ───────────────
 
 class TestSourceAudit:
     """
-    Verify each deliver_underdog() call site is preceded by a Tier 2 block
-    comment in the market_engine source.
+    Verify:
+      1. alerts.py has the final backstop inside deliver_underdog()
+      2. market_engine.py: all 4 deliver_underdog() call sites have the guard
+      3. market_engine.py: all direct broadcast_alert() calls with sport have the guard
+      4. engine/player_prop_market.py: direct broadcast_alert() call has the guard
     """
 
-    def _src(self) -> str:
+    def _me_src(self) -> str:
         import pathlib
         return (pathlib.Path(__file__).parent.parent / "market_engine.py").read_text()
 
+    def _alerts_src(self) -> str:
+        import pathlib
+        return (pathlib.Path(__file__).parent.parent / "alerts.py").read_text()
+
+    def _ppm_src(self) -> str:
+        import pathlib
+        return (pathlib.Path(__file__).parent.parent / "engine" / "player_prop_market.py").read_text()
+
     def _assert_guard_before(self, src: str, anchor: str, label: str,
+                              marker: str = "_is_tier2_sport",
                               window: int = 1500) -> None:
-        """Assert _is_tier2_sport guard call appears before anchor within `window` chars."""
         idx = src.find(anchor)
-        assert idx != -1, (
-            f"{label}: anchor '{anchor}' not found in market_engine.py"
-        )
+        assert idx != -1, f"{label}: anchor '{anchor}' not found"
         window_src = src[max(0, idx - window): idx]
-        assert "_is_tier2_sport" in window_src, (
-            f"{label}: _is_tier2_sport guard not found within {window} chars "
-            f"before '{anchor}' — this delivery path may bypass the Tier 2 block."
+        assert marker in window_src, (
+            f"{label}: '{marker}' not found within {window} chars before '{anchor}'"
         )
+
+    # ── alerts.py final backstop ─────────────────────────────────────────────
+
+    def test_alerts_py_has_final_backstop(self):
+        """alerts.py deliver_underdog() must contain the Tier 2 final backstop."""
+        src = self._alerts_src()
+        assert "FINAL Tier 2 Telegram backstop" in src or "T2_BLOCK" in src, (
+            "alerts.py deliver_underdog() is missing the final Tier 2 backstop block."
+        )
+
+    def test_alerts_py_backstop_uses_sport_param(self):
+        """The backstop must gate on the sport parameter."""
+        src = self._alerts_src()
+        # Check that NBA/MLB/NFL are explicitly listed in the backstop set
+        assert '"NBA"' in src and '"MLB"' in src and '"NFL"' in src
+
+    def test_alerts_py_backstop_returns_delivery_result(self):
+        """The backstop must return a DeliveryResult (not raise)."""
+        src = self._alerts_src()
+        assert "filtered_reason" in src and "Tier 2 sport blocked" in src
+
+    # ── market_engine.py deliver_underdog call sites ────────────────────────
 
     def test_delivery_queue_path_has_block(self):
-        src = self._src()
-        self._assert_guard_before(
-            src,
-            "await _dq_delivery.deliver_underdog(",
-            "delivery-queue",
-        )
+        src = self._me_src()
+        self._assert_guard_before(src, "await _dq_delivery.deliver_underdog(", "delivery-queue")
 
     def test_stable_refresh_path_has_block(self):
-        src = self._src()
-        self._assert_guard_before(
-            src,
-            "await _sr_delivery.deliver_underdog(",
-            "stable-refresh",
-        )
+        src = self._me_src()
+        self._assert_guard_before(src, "await _sr_delivery.deliver_underdog(", "stable-refresh")
 
     def test_watchlist_path_has_block(self):
-        src = self._src()
-        self._assert_guard_before(
-            src,
-            "await _wl_delivery.deliver_underdog(",
-            "watchlist",
-        )
+        src = self._me_src()
+        self._assert_guard_before(src, "await _wl_delivery.deliver_underdog(", "watchlist")
 
     def test_fpr_path_has_block(self):
-        src = self._src()
+        src = self._me_src()
+        self._assert_guard_before(src, "await _fpr_delivery.deliver_underdog(", "fpr")
+
+    # ── market_engine.py direct broadcast_alert() call sites ────────────────
+
+    def test_inefficiency_broadcast_has_tier2_block(self):
+        """format_inefficiency_alert broadcast must be preceded by Tier 2 guard."""
+        src = self._me_src()
         self._assert_guard_before(
-            src,
-            "await _fpr_delivery.deliver_underdog(",
-            "full-pool-rescan",
+            src, "format_inefficiency_alert(ineff, cr)", "inefficiency-broadcast",
+            marker="Tier 2 Telegram block",
         )
 
-    def test_block_uses_is_tier2_sport_helper(self):
-        """_is_tier2_sport must appear in the engine at least 4 times (one per path)."""
-        src = self._src()
-        count = src.count("_is_tier2_sport")
-        assert count >= 4, (
-            f"Expected _is_tier2_sport() to appear ≥4 times in market_engine.py; found {count}"
+    def test_steam_broadcast_has_tier2_block(self):
+        """format_steam_multibook_alert broadcast must be preceded by Tier 2 guard."""
+        src = self._me_src()
+        self._assert_guard_before(
+            src, "format_steam_multibook_alert(", "steam-broadcast",
+            marker="Tier 2 Telegram block",
         )
+
+    def test_clv_broadcast_has_tier2_block(self):
+        """format_clv_opportunity_alert broadcast must be preceded by Tier 2 guard."""
+        src = self._me_src()
+        self._assert_guard_before(
+            src, "format_clv_opportunity_alert(opp)", "clv-broadcast",
+            marker="Tier 2 Telegram block",
+        )
+
+    # ── engine/player_prop_market.py ────────────────────────────────────────
+
+    def test_player_prop_market_broadcast_has_tier2_block(self):
+        """player_prop_market broadcast_alert must be preceded by Tier 2 guard."""
+        src = self._ppm_src()
+        self._assert_guard_before(
+            src, "await broadcast_alert(bot, chat_ids, message)", "player-prop-market",
+            marker="Tier 2 Telegram block",
+            window=400,
+        )
+
+    # ── Counts ───────────────────────────────────────────────────────────────
+
+    def test_block_uses_is_tier2_sport_helper_4_times(self):
+        """_is_tier2_sport must appear ≥4 times in market_engine.py."""
+        src = self._me_src()
+        count = src.count("_is_tier2_sport")
+        assert count >= 4, f"Expected ≥4 occurrences; found {count}"
 
     def test_block_comment_count_matches_delivery_paths(self):
-        """There must be at least 4 Tier 2 block comments (one per delivery path)."""
-        src = self._src()
+        """There must be ≥4 'Tier 2 Telegram block' markers in market_engine.py."""
+        src = self._me_src()
         count = src.count("Tier 2 Telegram block")
-        assert count >= 4, (
-            f"Expected ≥4 'Tier 2 Telegram block' comments; found {count}"
+        assert count >= 4, f"Expected ≥4 block markers; found {count}"
+
+    def test_all_deliver_underdog_calls_counted(self):
+        """Exactly 4 named deliver_underdog() await calls in market_engine.py."""
+        src = self._me_src()
+        calls = (
+            src.count("await _dq_delivery.deliver_underdog(")
+            + src.count("await _sr_delivery.deliver_underdog(")
+            + src.count("await _wl_delivery.deliver_underdog(")
+            + src.count("await _fpr_delivery.deliver_underdog(")
         )
+        assert calls == 4, f"Expected exactly 4; found {calls}"
 
 
-# ── Integration: delivery blocked for Tier 2 ─────────────────────────────────
+# ── Integration: delivery blocked for Tier 2 via underdog_job ────────────────
 
 class TestTier2DeliveryBlocked:
     """
-    Run underdog_job with qualifying-looking Tier 2 props and assert
-    deliver_underdog is NEVER called. Props must still be stored.
+    Run underdog_job with Tier 2 props; deliver_underdog must never be called.
+    Props must still be stored (scanning/storage unchanged).
     """
 
     @pytest.mark.asyncio
     async def test_nba_prop_blocked(self):
-        """NBA: deliver_underdog must not be called, but bulk storage must happen."""
         db = _make_db()
         delivery = await _run_job([_snap(sport="NBA")], db)
         delivery.deliver_underdog.assert_not_called()
@@ -233,14 +393,12 @@ class TestTier2DeliveryBlocked:
 
     @pytest.mark.asyncio
     async def test_mlb_prop_blocked(self):
-        """MLB: deliver_underdog must not be called."""
         db = _make_db()
         delivery = await _run_job([_snap(sport="MLB", stat="Hits", line=0.5)], db)
         delivery.deliver_underdog.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_nfl_prop_blocked(self):
-        """NFL: deliver_underdog must not be called."""
         db = _make_db()
         delivery = await _run_job(
             [_snap(sport="NFL", stat="Passing Yards", line=225.5)], db
@@ -249,21 +407,18 @@ class TestTier2DeliveryBlocked:
 
     @pytest.mark.asyncio
     async def test_nba_lowercase_blocked(self):
-        """Lowercase 'nba' must also be blocked."""
         db = _make_db()
         delivery = await _run_job([_snap(sport="nba")], db)
         delivery.deliver_underdog.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_tier2_prop_still_stored(self):
-        """Tier 2 prop must still be saved to DB (monitoring unchanged)."""
         db = _make_db()
         await _run_job([_snap(sport="NBA")], db)
         db.save_underdog_snapshots_bulk.assert_called()
 
     @pytest.mark.asyncio
     async def test_multiple_tier2_all_blocked(self):
-        """Multiple Tier 2 props across NBA/MLB/NFL — none reach Telegram."""
         db = _make_db()
         snaps = [
             _snap("LeBron James",    "Points",        20.5, sport="NBA"),
@@ -274,105 +429,90 @@ class TestTier2DeliveryBlocked:
         delivery.deliver_underdog.assert_not_called()
 
 
-# ── Tier 1 sports: delivery helper returns False (not blocked) ────────────────
+# ── Tier 1 sports not blocked ─────────────────────────────────────────────────
 
 class TestTier1DeliveryUnchanged:
-    """
-    Tier 1 props (non-NBA/MLB/NFL) must NOT be blocked by _is_tier2_sport.
-    We verify the helper, since the full integration delivery depends on scoring.
-    """
-
-    def test_nhl_not_blocked(self):
-        assert me._is_tier2_sport("NHL") is False
-
-    def test_wnba_not_blocked(self):
-        assert me._is_tier2_sport("WNBA") is False
-
-    def test_soccer_not_blocked(self):
-        assert me._is_tier2_sport("Soccer") is False
-
-    def test_tennis_not_blocked(self):
-        assert me._is_tier2_sport("Tennis") is False
-
-    def test_cs2_not_blocked(self):
-        assert me._is_tier2_sport("CS2") is False
-
-    def test_esports_not_blocked(self):
-        assert me._is_tier2_sport("LOL") is False
-
-    def test_dota_not_blocked(self):
-        assert me._is_tier2_sport("DOTA") is False
+    def test_nhl_not_blocked(self):       assert me._is_tier2_sport("NHL")   is False
+    def test_wnba_not_blocked(self):      assert me._is_tier2_sport("WNBA")  is False
+    def test_soccer_not_blocked(self):    assert me._is_tier2_sport("Soccer")is False
+    def test_tennis_not_blocked(self):    assert me._is_tier2_sport("Tennis")is False
+    def test_cs2_not_blocked(self):       assert me._is_tier2_sport("CS2")   is False
+    def test_lol_not_blocked(self):       assert me._is_tier2_sport("LOL")   is False
+    def test_dota_not_blocked(self):      assert me._is_tier2_sport("DOTA")  is False
 
 
-# ── Source: scanning / scoring / storage not removed ──────────────────────────
+# ── Scanning / scoring / storage code paths unchanged ────────────────────────
 
 class TestScanningUnchanged:
-    """Verify scanning, scoring, and storage code paths are intact."""
-
     def _src(self) -> str:
         import pathlib
         return (pathlib.Path(__file__).parent.parent / "market_engine.py").read_text()
 
     def test_score_ud_prop_still_called(self):
-        src = self._src()
-        assert "score_ud_prop" in src
+        assert "score_ud_prop" in self._src()
 
     def test_validate_player_prop_still_called(self):
-        src = self._src()
-        assert "validate_player_prop" in src
+        assert "validate_player_prop" in self._src()
 
     def test_make_ud_bet_decision_still_called(self):
-        src = self._src()
-        assert "make_ud_bet_decision" in src
+        assert "make_ud_bet_decision" in self._src()
 
     def test_save_underdog_snapshots_bulk_still_called(self):
-        src = self._src()
-        assert "save_underdog_snapshots_bulk" in src
+        assert "save_underdog_snapshots_bulk" in self._src()
 
     def test_stable_refresh_job_still_present(self):
-        src = self._src()
-        assert "_stable_refresh_job" in src
+        assert "_stable_refresh_job" in self._src()
 
     def test_watchlist_processing_still_present(self):
-        src = self._src()
-        assert "_wl_qualifies" in src
+        assert "_wl_qualifies" in self._src()
 
     def test_fpr_still_present(self):
-        src = self._src()
-        assert "_full_pool_rescan_job" in src
+        assert "_full_pool_rescan_job" in self._src()
 
     def test_tier2_sports_set_unchanged(self):
         """_TIER2_SPORTS must still contain exactly NBA, MLB, NFL."""
         assert me._TIER2_SPORTS == frozenset({"NBA", "MLB", "NFL"})
 
 
-# ── No bypass paths ───────────────────────────────────────────────────────────
+# ── Restart / recovery cannot replay Tier 2 alerts ───────────────────────────
 
-class TestNoBypasses:
-    """Confirm the expected number of deliver_underdog call sites."""
+class TestRestartRecovery:
+    """
+    Verify that the final backstop in deliver_underdog() catches any replay
+    that might occur after a bot restart (e.g., stable refresh re-evaluating
+    a previously alerted Tier 2 prop).
+    """
 
-    def _src(self) -> str:
-        import pathlib
-        return (pathlib.Path(__file__).parent.parent / "market_engine.py").read_text()
-
-    def test_all_deliver_underdog_calls_counted(self):
-        """There must be exactly 4 deliver_underdog() await calls in market_engine.py."""
-        src = self._src()
-        calls = (
-            src.count("await _dq_delivery.deliver_underdog(")
-            + src.count("await _sr_delivery.deliver_underdog(")
-            + src.count("await _wl_delivery.deliver_underdog(")
-            + src.count("await _fpr_delivery.deliver_underdog(")
+    @pytest.mark.asyncio
+    async def test_restart_nba_replay_blocked(self):
+        """An NBA prop re-evaluated after restart must still be blocked."""
+        from alerts import AlertDelivery
+        db  = MagicMock()
+        db.count_today_underdog_alerts = AsyncMock(return_value=0)
+        bot = MagicMock()
+        bot.send_message = AsyncMock()
+        delivery = AlertDelivery(db=db, bot=bot, chat_ids=[12345])
+        # Simulate a prop that would have been alerted before restart
+        result = await delivery.deliver_underdog(
+            player_name="Replay Player", team="TM", sport="NBA",
+            stat_type="Points", old_line=20.0, new_line=20.0,
+            new_prop=False, standing=True,
         )
-        assert calls == 4, (
-            f"Expected exactly 4 deliver_underdog() await calls in market_engine.py, "
-            f"found {calls}. A new path may have been added without a Tier 2 block."
-        )
+        assert result.sent is False
+        bot.send_message.assert_not_called()
 
-    def test_tier2_block_count_matches_delivery_paths(self):
-        """Number of Tier 2 block comments must be ≥ 4 (one per delivery path)."""
-        src = self._src()
-        block_count = src.count("Tier 2 Telegram block")
-        assert block_count >= 4, (
-            f"Expected ≥4 Tier 2 block markers, found {block_count}."
+    @pytest.mark.asyncio
+    async def test_restart_mlb_replay_blocked(self):
+        """An MLB prop re-evaluated after restart must still be blocked."""
+        from alerts import AlertDelivery
+        db  = MagicMock()
+        db.count_today_underdog_alerts = AsyncMock(return_value=0)
+        bot = MagicMock()
+        bot.send_message = AsyncMock()
+        delivery = AlertDelivery(db=db, bot=bot, chat_ids=[12345])
+        result = await delivery.deliver_underdog(
+            player_name="Replay Player", team="TM", sport="MLB",
+            stat_type="Hits", old_line=0.5, new_line=0.5,
         )
+        assert result.sent is False
+        bot.send_message.assert_not_called()

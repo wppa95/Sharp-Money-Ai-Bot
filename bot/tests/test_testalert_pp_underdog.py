@@ -337,15 +337,15 @@ class TestDeliverUnderdog:
 
     @pytest.mark.asyncio
     async def test_underdog_scope_always_passes(self):
-        """Underdog source is never filtered by AlertScopeFilter."""
+        """Underdog source is never filtered by AlertScopeFilter (use Tier 1 sport)."""
         delivery = self._delivery()
         result   = await delivery.deliver_underdog(
-            player_name = "Saquon Barkley",
-            team        = "PHI",
-            sport       = "NFL",
-            stat_type   = "Rushing Yards",
-            old_line    = 85.5,
-            new_line    = 89.5,
+            player_name = "Connor McDavid",
+            team        = "EDM",
+            sport       = "NHL",
+            stat_type   = "Points",
+            old_line    = 0.5,
+            new_line    = 1.5,
         )
         assert not result.filtered
 
@@ -361,21 +361,21 @@ class TestDeliverUnderdog:
         mock_bot.send_message = AsyncMock(side_effect=capture)
         delivery = AlertDelivery(_make_db_mock(), mock_bot, [1])
         await delivery.deliver_underdog(
-            player_name = "Saquon Barkley",
-            team        = "PHI",
-            sport       = "NFL",
-            stat_type   = "Rushing Yards",
-            old_line    = 85.5,
-            new_line    = 89.5,
+            player_name = "Connor McDavid",
+            team        = "EDM",
+            sport       = "NHL",
+            stat_type   = "Points",
+            old_line    = 0.5,
+            new_line    = 1.5,
         )
 
         assert sent_messages
         msg = sent_messages[0]
-        assert "Saquon Barkley" in msg
-        assert "85.5" in msg
-        assert "89.5" in msg
+        assert "Connor McDavid" in msg
+        assert "0.5" in msg
+        assert "1.5" in msg
         # New format: direction shown via Move amount; header is 🎯 ACTIONABLE BET PICK
-        assert "ACTIONABLE BET PICK" in msg or "+4.0" in msg
+        assert "ACTIONABLE BET PICK" in msg or "+1.0" in msg
 
     @pytest.mark.asyncio
     async def test_line_change_lower_broadcast(self):
@@ -389,20 +389,20 @@ class TestDeliverUnderdog:
         mock_bot.send_message = AsyncMock(side_effect=capture)
         delivery = AlertDelivery(_make_db_mock(), mock_bot, [1])
         await delivery.deliver_underdog(
-            player_name = "Travis Kelce",
-            team        = "KC",
-            sport       = "NFL",
-            stat_type   = "Receiving Yards",
-            old_line    = 72.5,
-            new_line    = 68.5,
+            player_name = "Nathan MacKinnon",
+            team        = "COL",
+            sport       = "NHL",
+            stat_type   = "Shots on Goal",
+            old_line    = 3.5,
+            new_line    = 2.5,
         )
 
         msg = sent_messages[0]
-        assert "Travis Kelce" in msg
-        assert "72.5" in msg
-        assert "68.5" in msg
+        assert "Nathan MacKinnon" in msg
+        assert "3.5" in msg
+        assert "2.5" in msg
         # New format: direction shown via Move amount; header is 🎯 ACTIONABLE BET PICK
-        assert "ACTIONABLE BET PICK" in msg or "-4.0" in msg
+        assert "ACTIONABLE BET PICK" in msg or "-1.0" in msg
 
     @pytest.mark.asyncio
     async def test_removed_prop_formatting(self):
@@ -416,29 +416,29 @@ class TestDeliverUnderdog:
         mock_bot.send_message = AsyncMock(side_effect=capture)
         delivery = AlertDelivery(_make_db_mock(), mock_bot, [1])
         await delivery.deliver_underdog(
-            player_name = "Davante Adams",
-            team        = "NYJ",
-            sport       = "NFL",
-            stat_type   = "Receiving Yards",
-            old_line    = 60.5,
-            new_line    = 60.5,   # same — irrelevant for removed
+            player_name = "Auston Matthews",
+            team        = "TOR",
+            sport       = "NHL",
+            stat_type   = "Goals",
+            old_line    = 0.5,
+            new_line    = 0.5,   # same — irrelevant for removed
             removed     = True,
         )
 
         msg = sent_messages[0]
-        assert "Davante Adams" in msg
+        assert "Auston Matthews" in msg
         assert "REMOVED" in msg or "🚫" in msg
 
     @pytest.mark.asyncio
     async def test_result_sent_true_on_success(self):
         delivery = self._delivery()
         result   = await delivery.deliver_underdog(
-            player_name = "Saquon Barkley",
-            team        = "PHI",
-            sport       = "NFL",
-            stat_type   = "Rushing Yards",
-            old_line    = 85.5,
-            new_line    = 89.5,
+            player_name = "Connor McDavid",
+            team        = "EDM",
+            sport       = "NHL",
+            stat_type   = "Points",
+            old_line    = 0.5,
+            new_line    = 1.5,
         )
         assert result.sent is True
 
@@ -446,12 +446,12 @@ class TestDeliverUnderdog:
     async def test_result_sent_false_no_chat_ids(self):
         delivery = self._delivery(chat_ids=[])
         result   = await delivery.deliver_underdog(
-            player_name = "Saquon Barkley",
-            team        = "PHI",
-            sport       = "NFL",
-            stat_type   = "Rushing Yards",
-            old_line    = 85.5,
-            new_line    = 89.5,
+            player_name = "Connor McDavid",
+            team        = "EDM",
+            sport       = "NHL",
+            stat_type   = "Points",
+            old_line    = 0.5,
+            new_line    = 1.5,
         )
         assert result.sent is False
 
@@ -461,12 +461,12 @@ class TestDeliverUnderdog:
         mock_bot.send_message = AsyncMock(return_value=MagicMock())
         delivery = AlertDelivery(_make_db_mock(), mock_bot, [1, 2, 3])
         result   = await delivery.deliver_underdog(
-            player_name = "Saquon Barkley",
-            team        = "PHI",
-            sport       = "NFL",
-            stat_type   = "Rushing Yards",
-            old_line    = 85.5,
-            new_line    = 89.5,
+            player_name = "Connor McDavid",
+            team        = "EDM",
+            sport       = "NHL",
+            stat_type   = "Points",
+            old_line    = 0.5,
+            new_line    = 1.5,
         )
         assert result.recipients_sent   == 3
         assert result.recipients_failed == 0
@@ -487,22 +487,23 @@ class TestDeliverUnderdog:
         # Use a game time 60 min in the future so the timing filter allows it
         game_ts  = datetime.utcnow() + timedelta(hours=1)
         await delivery.deliver_underdog(
-            player_name = "Saquon Barkley",
-            team        = "PHI",
-            sport       = "NFL",
-            stat_type   = "Rushing Yards",
-            old_line    = 85.5,
-            new_line    = 89.5,
+            player_name = "Connor McDavid",
+            team        = "EDM",
+            sport       = "NHL",
+            stat_type   = "Points",
+            old_line    = 0.5,
+            new_line    = 1.5,
             game_time   = game_ts,
         )
 
         assert sent_messages, "Expected alert to be sent with future game_time"
         msg = sent_messages[0]
-        assert "Saquon Barkley" in msg
+        assert "Connor McDavid" in msg
 
     @pytest.mark.asyncio
     async def test_underdog_sport_icon_nfl(self):
-        """NFL alerts should include the football emoji."""
+        """NFL format includes the football emoji — patch Tier 2 block to test formatting."""
+        import alerts as alerts_mod
         sent_messages: list[str] = []
 
         async def capture(chat_id, text, **kwargs):
@@ -512,19 +513,21 @@ class TestDeliverUnderdog:
         mock_bot = MagicMock()
         mock_bot.send_message = AsyncMock(side_effect=capture)
         delivery = AlertDelivery(_make_db_mock(), mock_bot, [1])
-        await delivery.deliver_underdog(
-            player_name = "Saquon Barkley",
-            team        = "PHI",
-            sport       = "NFL",
-            stat_type   = "Rushing Yards",
-            old_line    = 85.5,
-            new_line    = 89.5,
-        )
+        with patch.object(alerts_mod, "_TIER2_SPORTS_BLOCK", frozenset()):
+            await delivery.deliver_underdog(
+                player_name = "Saquon Barkley",
+                team        = "PHI",
+                sport       = "NFL",
+                stat_type   = "Rushing Yards",
+                old_line    = 85.5,
+                new_line    = 89.5,
+            )
         assert "🏈" in sent_messages[0]
 
     @pytest.mark.asyncio
     async def test_underdog_sport_icon_nba(self):
-        """NBA alerts should include the basketball emoji."""
+        """NBA format includes the basketball emoji — patch Tier 2 block to test formatting."""
+        import alerts as alerts_mod
         sent_messages: list[str] = []
 
         async def capture(chat_id, text, **kwargs):
@@ -534,14 +537,15 @@ class TestDeliverUnderdog:
         mock_bot = MagicMock()
         mock_bot.send_message = AsyncMock(side_effect=capture)
         delivery = AlertDelivery(_make_db_mock(), mock_bot, [1])
-        await delivery.deliver_underdog(
-            player_name = "Anthony Edwards",
-            team        = "MIN",
-            sport       = "NBA",
-            stat_type   = "Points",
-            old_line    = 26.5,
-            new_line    = 28.5,
-        )
+        with patch.object(alerts_mod, "_TIER2_SPORTS_BLOCK", frozenset()):
+            await delivery.deliver_underdog(
+                player_name = "Anthony Edwards",
+                team        = "MIN",
+                sport       = "NBA",
+                stat_type   = "Points",
+                old_line    = 26.5,
+                new_line    = 28.5,
+            )
         assert "🏀" in sent_messages[0]
 
     @pytest.mark.asyncio
@@ -551,12 +555,12 @@ class TestDeliverUnderdog:
         mock_bot.send_message = AsyncMock(side_effect=TelegramError("blocked"))
         delivery = AlertDelivery(_make_db_mock(), mock_bot, [1])
         result   = await delivery.deliver_underdog(
-            player_name = "Saquon Barkley",
-            team        = "PHI",
-            sport       = "NFL",
-            stat_type   = "Rushing Yards",
-            old_line    = 85.5,
-            new_line    = 89.5,
+            player_name = "Connor McDavid",
+            team        = "EDM",
+            sport       = "NHL",
+            stat_type   = "Points",
+            old_line    = 0.5,
+            new_line    = 1.5,
         )
         assert result.sent is False
         assert result.recipients_failed == 1

@@ -1,0 +1,126 @@
+Tier 2 Telegram Block Is Still Being Bypassed
+
+The Tier 2 Telegram block is NOT working in production.
+
+I am still receiving MLB and NFL Telegram alerts after the reported 4,627-test fix and restart.
+
+Required rule
+
+Tier 2 sports = ONLY: NBA, MLB, NFL
+
+For now:
+
+* NBA → NO Telegram alerts
+* MLB → NO Telegram alerts
+* NFL → NO Telegram alerts
+* Tier 2 props must STILL be:
+    * fetched
+    * monitored
+    * scored
+    * stored
+    * included in internal tracking/funnel data
+* Only Telegram delivery is blocked.
+
+Tier 1 = every supported sport EXCEPT NBA, MLB, NFL.
+
+Tier 1 Telegram delivery remains enabled.
+
+Critical investigation
+
+Do NOT assume the four deliver_underdog() guards prove the system is fixed.
+
+Trace EVERY possible Telegram/alert delivery route, including:
+
+* deliver_underdog()
+* direct Telegram send functions
+* AlertDelivery methods
+* _delivery_queue
+* stable-refresh
+* watchlist
+* full-pool rescan/FPR
+* new-prop
+* line-change
+* standing
+* any immediate/NP path
+* any queued/background delivery callback
+* any retry/recovery delivery
+* any startup/replay delivery
+* any command-generated alert
+* any alternate provider/connector path
+
+Search the entire codebase for every call that can ultimately send a Telegram message.
+
+Add one FINAL global backstop
+
+Regardless of which path produced the candidate, immediately before any Telegram alert is actually sent, enforce:
+
+if _is_tier2_sport(sport):
+    # record/track normally, but NEVER send Telegram
+    return / skip delivery
+
+This must be a single final delivery-layer safety net, not just collection-point guards.
+
+The final Telegram sender must never be capable of sending an NBA/MLB/NFL prop.
+
+Important
+
+Do NOT disable Tier 2 scanning.
+
+Do NOT remove Tier 2 data.
+
+Do NOT change the Tier 1 rules.
+
+Do NOT solve this by changing the scoring thresholds.
+
+The problem is specifically:
+
+Tier 2 props are still reaching Telegram despite the Tier 2 delivery block.
+
+Regression tests required
+
+Add tests proving:
+
+* NBA candidate → zero Telegram sends
+* MLB candidate → zero Telegram sends
+* NFL candidate → zero Telegram sends
+* Tier 1 candidate → Telegram delivery still works
+* Tier 2 candidate through every known delivery path → zero Telegram sends
+* Direct invocation of the final Telegram delivery function with NBA/MLB/NFL → zero Telegram sends
+* Tier 2 data is still saved/scored/monitored
+* Restart/recovery cannot replay Tier 2 alerts
+* Retry queues cannot deliver Tier 2 alerts
+
+Also add a source-code audit that finds every Telegram delivery entry point and verifies the Tier 2 guard exists at the final delivery boundary.
+
+Production verification
+
+After the fix:
+
+1. Run the full test suite.
+2. Report the exact passing count.
+3. Restart the bot.
+4. Confirm the running process loaded the new code.
+5. Monitor actual production delivery.
+6. Confirm that MLB/NFL/NBA continue appearing in internal scan/funnel data but produce 0 Telegram alerts.
+
+Do not report this as fixed until the final delivery boundary is verified and production confirms zero Tier 2 Telegram alerts.
+
+Completion Checklist
+
+* Every Telegram delivery path identified
+* Final Telegram delivery backstop added
+* NBA blocked from Telegram
+* MLB blocked from Telegram
+* NFL blocked from Telegram
+* Tier 1 alerts still allowed
+* Tier 2 scanning preserved
+* Tier 2 scoring preserved
+* Tier 2 DB/storage preserved
+* Retry/recovery paths blocked
+* Duplicate/replay paths blocked
+* Regression tests added
+* Full test suite passes
+* Bot restarted with new code
+* Production verified with zero Tier 2 Telegram alerts
+
+Final requirement: Do not stop at “4 guards exist.” Find the actual path that is still producing the MLB/NFL Telegram messages.
