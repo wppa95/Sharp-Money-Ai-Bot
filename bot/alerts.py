@@ -1251,6 +1251,50 @@ class AlertDelivery:
                 _ts_str = _now_dt.utcnow().strftime("%H:%M UTC")
             message += f"\n\n<i>⏱ Line as of {_ts_str} — verify on Underdog before placing</i>"
 
+        # Final duplicate guard (delivery-stage): suppress only identical picks
+        # for the same player/stat/line/direction within the UD dedup window.
+        # Uses existing DB-backed Underdog alert persistence.
+        if not removed and not market_move_only:
+            _direction = (getattr(decision, "recommendation", "") or "").upper()
+            if _direction in {"OVER", "UNDER"}:
+                if await self._db.has_recent_ud_alert(
+                    player_name,
+                    stat_type,
+                    within_seconds=config.UD_ALERT_DEDUP_WINDOW,
+                ):
+                    _recent = await self._db.get_ud_prop_history(
+                        player_name,
+                        stat_type,
+                        limit=20,
+                    )
+                    _now_utc = datetime.utcnow()
+                    for _snap in _recent:
+                        if not bool(getattr(_snap, "alert_sent", False)):
+                            continue
+                        _fetched_at = getattr(_snap, "fetched_at", None)
+                        if _fetched_at is None:
+                            continue
+                        _age_s = (_now_utc - _fetched_at).total_seconds()
+                        if _age_s >= config.UD_ALERT_DEDUP_WINDOW:
+                            continue
+                        _line_same = (
+                            abs(float(getattr(_snap, "line_value", 0.0)) - float(new_line))
+                            < config.MIN_UNDERDOG_LINE_CHANGE
+                        )
+                        _dir_same = (
+                            (getattr(_snap, "bet_recommendation", "") or "").upper()
+                            == _direction
+                        )
+                        if _line_same and _dir_same:
+                            logger.debug(
+                                "Underdog alert deduped at delivery: %s | %s | line=%.3f | dir=%s",
+                                player_name,
+                                stat_type,
+                                new_line,
+                                _direction,
+                            )
+                            return DeliveryResult(sent=False, deduped=True)
+
         counts     = await broadcast_alert(self._bot, self._chat_ids, message)
         alert_sent = counts["sent"] > 0
 
@@ -1262,6 +1306,10 @@ class AlertDelivery:
                 _get_rl2().record_sent()
             except Exception:
                 pass  # rate limiter is advisory — never block a sent alert
+            try:
+                await self._db.mark_ud_snapshot_alert_sent(player_name, stat_type)
+            except Exception:
+                pass  # persistence is best effort here; upstream jobs may also mark
 
         result = DeliveryResult(
             sent             = alert_sent,
