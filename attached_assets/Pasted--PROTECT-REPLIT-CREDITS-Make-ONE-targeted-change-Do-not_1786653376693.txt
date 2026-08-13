@@ -1,0 +1,126 @@
+🚨 PROTECT REPLIT CREDITS
+
+Make ONE targeted change. Do not troubleshoot GitHub or make unrelated changes.
+
+PROP DELIVERY DISTRIBUTION
+
+Set the normal prop feed/delivery window to a maximum of:
+
+10 props every 5 minutes
+
+TARGET DISTRIBUTION
+
+For each 5-minute delivery window:
+
+8 Tier 1 props
+2 Tier 2 props
+
+So the target is:
+
+80% Tier 1 / 20% Tier 2
+
+TIER 1 — PRIMARY
+
+* WNBA
+* NHL
+* Soccer
+* Tennis
+* CS2
+* Dota 2
+* League of Legends
+* Table Tennis
+* Badminton
+* KBO
+* NPB
+* Any other supported sport that is NOT NBA, MLB, or NFL
+
+TIER 2 — SECONDARY
+
+ONLY:
+
+* NBA
+* MLB
+* NFL
+
+IMPORTANT DISTRIBUTION RULE
+
+The 8/2 split is the target maximum allocation, not a requirement to send bad bets.
+
+For every 5-minute window:
+
+* Up to 8 qualified Tier 1 props
+* Up to 2 qualified Tier 2 props
+* Maximum 10 total
+
+If fewer than 8 qualified Tier 1 props exist, do NOT fill the empty slots with weak Tier 1 or extra Tier 2 props.
+
+If fewer than 2 qualified Tier 2 props exist, leave those slots empty.
+
+Never lower qualification standards just to reach 10.
+
+RANKING WITHIN EACH GROUP
+
+Rank Tier 1 candidates against other Tier 1 candidates.
+
+Rank Tier 2 candidates against other Tier 2 candidates.
+
+Use the existing:
+
+* S/A/B/C tier
+* confidence
+* Bet Quality
+* Market Quality
+* data sufficiency
+* freshness
+* movement
+* stability
+* existing qualification gates
+
+Do not create a competing scoring system.
+
+EXISTING FLOOD PROTECTION
+
+The existing 5-alerts/5-minutes protection must be updated to support the new maximum:
+
+10 total props / 5 minutes
+
+while maintaining deduplication and all existing safety gates.
+
+Do not allow duplicate alerts to consume slots.
+
+TARGET
+
+Every normal 5-minute window should look approximately like:
+
+🟢 8 Tier 1
+🔵 2 Tier 2
+
+Never:
+
+🔵 8 MLB/NFL
+🟢 2 Tier 1
+
+The purpose is to make Tier 1 the clear majority of the feed while still keeping NBA/MLB/NFL represented.
+
+PRESERVE
+
+Do not change:
+
+* Market Quality rules
+* 70–100 MQ standard actionable range
+* 40–69 MQ PASS/dead zone
+* under-40 MQ UNDER evaluation
+* live-game protection
+* freshness
+* deduplication
+* cold-start
+* stable-prop rescoring
+* existing qualification logic
+
+Do not make weak props actionable simply to fill the 8/2 allocation.
+
+Perform a focused verification after the change.
+
+Do NOT run the full test suite unless required.
+
+Report exactly what was changed and the focused test result.

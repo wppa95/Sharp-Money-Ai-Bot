@@ -932,6 +932,16 @@ _DELIVERY_TIER_BASE: dict[str, float] = {
     "S": 10000.0, "A": 5000.0, "B": 1000.0, "C": 200.0, "PASS": 0.0,
 }
 
+# Sports that are Tier 2 (major sports — secondary delivery priority).
+# Tier 1 = every supported sport NOT in this set.
+# This is the canonical source of truth: do NOT expand it.
+_TIER2_SPORTS: frozenset[str] = frozenset({"NBA", "MLB", "NFL"})
+
+# Per-window delivery caps for each sport tier.
+# Overridable via env vars to match TG_TIER1_MAX_PER_WINDOW / TG_TIER2_MAX_PER_WINDOW.
+_DQ_TIER1_CAP: int = int(__import__("os").environ.get("TG_TIER1_MAX_PER_WINDOW", "8"))
+_DQ_TIER2_CAP: int = int(__import__("os").environ.get("TG_TIER2_MAX_PER_WINDOW", "2"))
+
 
 def _cand_priority(c: dict) -> float:
     """Raw priority score for a delivery candidate (higher = deliver first)."""
@@ -946,24 +956,46 @@ def _cand_priority(c: dict) -> float:
 
 def _apply_delivery_diversification(queue: list) -> list:
     """
-    Sort candidates by priority then apply a soft group penalty so a single
-    (sport, stat_type) pair cannot monopolise all available rate-limit slots.
-    High-BQ duplicates can still outrank weaker unique picks — the penalty is
-    soft (−300 for the 2nd in a group, −600 for the 3rd+), not a hard cap.
+    Split candidates into Tier 1 (non-NBA/MLB/NFL) and Tier 2 (NBA/MLB/NFL) groups,
+    rank within each group by priority with a soft diversification penalty, then
+    interleave so Tier 1 candidates always precede Tier 2 candidates in the final
+    delivery order.
+
+    The delivery loop enforces the per-tier hard caps (_DQ_TIER1_CAP / _DQ_TIER2_CAP)
+    by skipping candidates once a group's budget is exhausted.  This function only
+    determines the within-group ordering; it does not truncate the queue.
+
+    Soft group penalty: −300 for the 2nd candidate in the same (sport, stat_type)
+    pair, −600 for the 3rd+.  High-BQ duplicates can still outrank weaker unique
+    picks — the penalty is not a hard cap.
     """
-    queue.sort(key=_cand_priority, reverse=True)
-    group_hits: dict = {}
-    for c in queue:
-        key = (c.get("sport", ""), c.get("stat_type", ""))
-        n = group_hits.get(key, 0)
-        c["_group_rank"] = n
-        group_hits[key] = n + 1
+    def _rank_group(group: list) -> list:
+        """Sort a single tier group by raw priority, then re-sort with soft penalty."""
+        group.sort(key=_cand_priority, reverse=True)
+        group_hits: dict = {}
+        for c in group:
+            key = (c.get("sport", ""), c.get("stat_type", ""))
+            n = group_hits.get(key, 0)
+            c["_group_rank"] = n
+            group_hits[key] = n + 1
+        group.sort(
+            key=lambda c: _cand_priority(c) - 300.0 * min(c.get("_group_rank", 0), 2),
+            reverse=True,
+        )
+        return group
 
-    def _penalized(c: dict) -> float:
-        penalty = 300.0 * min(c.get("_group_rank", 0), 2)
-        return _cand_priority(c) - penalty
+    # Split by sport tier — Tier 2 = NBA/MLB/NFL only, everything else is Tier 1.
+    t1 = [c for c in queue if (c.get("sport") or "").upper() not in _TIER2_SPORTS]
+    t2 = [c for c in queue if (c.get("sport") or "").upper() in _TIER2_SPORTS]
 
-    queue.sort(key=_penalized, reverse=True)
+    # Rank within each tier independently.
+    _rank_group(t1)
+    _rank_group(t2)
+
+    # Tier 1 first, then Tier 2 — delivery loop enforces the per-tier hard cap.
+    result = t1 + t2
+    queue.clear()
+    queue.extend(result)
     return queue
 
 
@@ -2469,6 +2501,8 @@ async def underdog_job(context) -> None:
             _apply_delivery_diversification(_delivery_queue)
             _n_dq_deferred   = 0
             _dq_deferred_log: list[str] = []
+            _dq_t1_delivered = 0   # Tier 1 (non-NBA/MLB/NFL) slots used this window
+            _dq_t2_delivered = 0   # Tier 2 (NBA/MLB/NFL) slots used this window
             for _dq in _delivery_queue:
                 _dq_player    = _dq["player"]
                 _dq_snap      = _dq["snap"]
@@ -2488,6 +2522,23 @@ async def underdog_job(context) -> None:
                 _dq_prev      = _dq.get("prev_line")
                 _dq_is_reent  = _dq.get("is_reentry", False)
                 _dq_is_new    = (_dq_path == "new" or _dq_is_reent)
+                _dq_is_t1     = (_dq_sport or "").upper() not in _TIER2_SPORTS
+
+                # ── Per-tier delivery cap (8 Tier 1 / 2 Tier 2 per window) ────
+                if _dq_is_t1 and _dq_t1_delivered >= _DQ_TIER1_CAP:
+                    _n_dq_deferred += 1
+                    _dq_deferred_log.append(
+                        f"{_dq_player}/{_dq_st} [tier={_dq.get('tier','?')}"
+                        f" t1-cap={_DQ_TIER1_CAP}]: Tier-1 window full"
+                    )
+                    continue
+                if not _dq_is_t1 and _dq_t2_delivered >= _DQ_TIER2_CAP:
+                    _n_dq_deferred += 1
+                    _dq_deferred_log.append(
+                        f"{_dq_player}/{_dq_st} [tier={_dq.get('tier','?')}"
+                        f" t2-cap={_DQ_TIER2_CAP}]: Tier-2 window full"
+                    )
+                    continue
 
                 _dq_delivery  = AlertDelivery(db, bot, chat_ids)
                 _dq_result    = await _dq_delivery.deliver_underdog(
@@ -2585,16 +2636,24 @@ async def underdog_job(context) -> None:
                     _mfa_key = f"{_dq_player}__{_dq_st}"
                     if _mfa_key not in _MARKET_FIRST_ALERT:
                         _MARKET_FIRST_ALERT[_mfa_key] = now
+                    # Per-tier slot accounting (8 Tier 1 / 2 Tier 2 per window)
+                    if _dq_is_t1:
+                        _dq_t1_delivered += 1
+                    else:
+                        _dq_t2_delivered += 1
                     logger.info(
                         "🎯 PICK CREATED | Player: %s | Sport: %s | Market: %s"
                         " | Line: %.1f | Direction: %s | Tier: %s | Confidence: %d"
-                        " | Quality: %s | Telegram: SENT | Path: %s",
+                        " | Quality: %s | Telegram: SENT | Path: %s"
+                        " | SlotT1: %d/%d  SlotT2: %d/%d",
                         _dq_player, _dq_sport, _dq_st, _dq_line_val,
                         _dq_dec.recommendation if _dq_dec else "UNKNOWN",
                         _dq_score.tier if _dq_score else "UNKNOWN",
                         _dq_score.total if _dq_score else 0,
                         getattr(_dq_score, "bet_quality_label", "—") if _dq_score else "—",
                         _dq_path,
+                        _dq_t1_delivered, _DQ_TIER1_CAP,
+                        _dq_t2_delivered, _DQ_TIER2_CAP,
                     )
                 else:
                     _n_dq_deferred += 1

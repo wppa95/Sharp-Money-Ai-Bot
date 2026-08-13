@@ -298,11 +298,16 @@ class Config:
     # Rolling window length in seconds (default 5 minutes).
     TG_RATE_WINDOW_SECONDS: int = int(os.environ.get("TG_RATE_WINDOW_SECONDS", "300"))
     # Max actionable alerts per window (Layer 1 budget).
-    TG_RATE_MAX_PER_WINDOW: int = int(os.environ.get("TG_RATE_MAX_PER_WINDOW", "5"))
+    # Raised from 5 → 10 to support the 8 Tier-1 + 2 Tier-2 target distribution.
+    TG_RATE_MAX_PER_WINDOW: int = int(os.environ.get("TG_RATE_MAX_PER_WINDOW", "10"))
+    # Per-tier caps applied by the ranked delivery queue (before the rate limiter).
+    # Tier 1 = every sport EXCEPT NBA/MLB/NFL.  Tier 2 = NBA, MLB, NFL only.
+    TG_TIER1_MAX_PER_WINDOW: int = int(os.environ.get("TG_TIER1_MAX_PER_WINDOW", "8"))
+    TG_TIER2_MAX_PER_WINDOW: int = int(os.environ.get("TG_TIER2_MAX_PER_WINDOW", "2"))
     # Alert count inside the window that triggers emergency flood protection.
-    # Should be ≥ TG_RATE_MAX_PER_WINDOW (meaningful-change bypasses can push
-    # the count slightly above the budget before the brake engages).
-    TG_FLOOD_THRESHOLD: int = int(os.environ.get("TG_FLOOD_THRESHOLD", "10"))
+    # Raised from 10 → 20 to match the new 10-alert budget (meaningful-change
+    # bypasses can push the count slightly above the budget before the brake engages).
+    TG_FLOOD_THRESHOLD: int = int(os.environ.get("TG_FLOOD_THRESHOLD", "20"))
     # Seconds to stay in flood-protection mode once engaged.
     TG_FLOOD_PROTECTION_DURATION: int = int(
         os.environ.get("TG_FLOOD_PROTECTION_DURATION", "600")
