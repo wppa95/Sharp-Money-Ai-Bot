@@ -2689,6 +2689,12 @@ async def underdog_job(context) -> None:
                     )
                     continue
 
+                # ── Tier 2 Telegram block (temporary) ────────────────────────────────────
+                # NBA / MLB / NFL props are scanned, scored, stored, and ranked normally
+                # but Telegram delivery is suppressed until this block is removed.
+                if _is_tier2_sport(_dq_sport):
+                    continue
+
                 # ── Atomic dedup claim ─────────────────────────────────────────────────
                 # Check and record under _prop_dedup_lock in one operation so a
                 # concurrent SR/WL/FPR job cannot also pass the dedup check and
@@ -3569,6 +3575,12 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 except Exception:
                     pass
 
+            # ── Tier 2 Telegram block (temporary) ────────────────────────────────
+            # NBA / MLB / NFL props remain in the active pool and are rescored
+            # every cycle — only Telegram delivery is suppressed.
+            if _is_tier2_sport(_sr_sport):
+                continue
+
             # ── Atomic dedup claim [stable-refresh] ──────────────────────────────
             # Claim before delivery so the delivery-queue path cannot also send.
             if not await _try_claim_delivery_slot(_sr_player, _sr_sport, _sr_stat, _sr_line):
@@ -3805,6 +3817,9 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                             "UD tier_gate [watchlist]: %s | %s | sport=%s bq=%.0f mq=%.0f dir=%s — blocked",
                             _wl_player, _wl_stat, _wl_sport, _wl_bq_score, _wl_mq_score, _wl_dec.recommendation,
                         )
+                    # ── Tier 2 Telegram block (temporary) ─────────────────────
+                    if _wl_mq_ok and _is_tier2_sport(_wl_sport):
+                        _wl_mq_ok = False  # scored/stored — no Telegram for Tier 2
                     if _wl_mq_ok:
                      # ── Atomic dedup claim [watchlist] ────────────────────────
                      if not await _try_claim_delivery_slot(
@@ -4203,6 +4218,9 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                             "UD tier_gate [fpr]: %s | %s | sport=%s bq=%.0f mq=%.0f dir=%s — blocked",
                             _fpr_player, _fpr_stat, _fpr_sport, _fpr_bq_score, _fpr_mq_score, _fpr_dec.recommendation,
                         )
+                    # ── Tier 2 Telegram block (temporary) ─────────────────────
+                    if _fpr_mq_ok and _is_tier2_sport(_fpr_sport):
+                        _fpr_mq_ok = False  # scored/stored — no Telegram for Tier 2
                     if _fpr_mq_ok:
                      # ── Atomic dedup claim [full-pool-rescan] ─────────────────
                      if not await _try_claim_delivery_slot(

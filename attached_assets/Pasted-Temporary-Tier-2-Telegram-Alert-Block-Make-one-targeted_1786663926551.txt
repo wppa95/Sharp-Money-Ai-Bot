@@ -1,0 +1,158 @@
+Temporary Tier 2 Telegram Alert Block
+
+Make one targeted change to the Sharp Money Bot:
+
+Tier 2 Telegram alerts — TEMPORARILY DISABLED
+
+Tier 2 sports are ONLY:
+
+* NBA
+* MLB
+* NFL
+
+For now, ZERO Tier 2 props may reach Telegram.
+
+This is a temporary delivery-only block.
+
+Keep everything else running
+
+DO NOT disable or remove:
+
+* Underdog fetching
+* Active prop monitoring
+* Continuous scanning
+* Stable refresh
+* Full-pool rescoring
+* New-prop detection
+* Line-change detection
+* Standing scans
+* Watchlist processing
+* FPR/full-pool rescan
+* Prop scoring
+* BQ calculation
+* MQ calculation
+* Tier classification
+* Database storage/history
+* /picks
+* /slip
+* Tier 2 data collection
+
+We still want the bot to monitor and store Tier 2 data normally.
+
+The only change is:
+
+Tier 2 (NBA / MLB / NFL)
+        ↓
+SCANNED ✅
+SCORED ✅
+STORED ✅
+RANKED ✅
+TELEGRAM DELIVERY ❌ BLOCKED
+
+Tier 1 remains unchanged
+
+Tier 1 = every supported sport EXCEPT NBA, MLB, and NFL.
+
+Tier 1 Telegram behavior should remain exactly as it currently works.
+
+Do not add BQ/MQ blockers to Tier 1.
+
+Implement one canonical delivery check
+
+Create/use a single helper such as:
+
+_TIER2_SPORTS = frozenset({"NBA", "MLB", "NFL"})
+def _is_tier2_sport(sport: str) -> bool:
+    return (sport or "").upper() in _TIER2_SPORTS
+
+Then immediately before every Telegram delivery, enforce:
+
+if _is_tier2_sport(sport):
+    # Keep the prop monitored/scored/stored.
+    # Do NOT send Telegram.
+    continue
+
+Do NOT permanently delete or reject the prop from the monitoring pipeline.
+
+IMPORTANT — audit every Telegram delivery path
+
+Search the entire repository for:
+
+deliver_underdog(
+
+Every path capable of sending an Underdog Telegram alert must respect the Tier 2 block.
+
+Check at minimum:
+
+* new-prop
+* line-change
+* standing
+* delivery queue
+* stable refresh
+* watchlist
+* FPR/full-pool rescan
+* immediate/re-evaluation paths
+* retry/recovery paths
+* any other direct delivery path
+
+There must be zero bypasses.
+
+Do NOT change these
+
+Do NOT:
+
+* change Tier 1 classification
+* change Tier 2 classification
+* change BQ thresholds
+* change MQ thresholds
+* change the 10-alert rate limit
+* restore the 8/2 system
+* reduce scanning frequency
+* reduce the monitored prop pool
+* delete Tier 2 data
+* remove Tier 2 scoring
+* remove Tier 2 database history
+
+This is strictly:
+
+“Scan Tier 2 normally, but send ZERO Tier 2 Telegram alerts.”
+
+Add regression tests
+
+At minimum test:
+
+NBA valid prop → scanned/scored but Telegram blocked
+MLB valid prop → scanned/scored but Telegram blocked
+NFL valid prop → scanned/scored but Telegram blocked
+Tier 1 valid prop → Telegram delivery remains possible
+
+Also test every delivery path so there is no Tier 2 bypass.
+
+Completion checklist
+
+* NBA Telegram alerts blocked
+* MLB Telegram alerts blocked
+* NFL Telegram alerts blocked
+* Tier 1 Telegram alerts unchanged
+* Tier 2 scanning unchanged
+* Tier 2 scoring unchanged
+* Tier 2 database storage unchanged
+* /picks and /slip data remain available
+* Every deliver_underdog() path respects the block
+* No 8/2 cap restored
+* 10-alert global rate limit unchanged
+* Regression tests added
+* Full test suite passes
+* No syntax/runtime errors
+* Restart bot after deployment
+
+Final verification
+
+Before reporting completion, explicitly prove:
+
+1. An NBA prop cannot reach Telegram.
+2. An MLB prop cannot reach Telegram.
+3. An NFL prop cannot reach Telegram.
+4. A Tier 1 prop can still reach Telegram.
+5. Tier 2 props continue being scanned and scored.
+6. No Telegram delivery path bypasses the Tier 2 block.
