@@ -1,25 +1,24 @@
 """
 test_mq_gate_extended.py
 ────────────────────────────────────────────────────────────────────────────────
-Extended MQ gate tests covering spec items 6-11 and 16:
+Extended delivery gate tests covering spec items 40–47:
 
-  6.  MQ 47 excluded from /picks
-  7.  MQ 47 excluded from /slip
-  8.  MQ 47 blocked by stable-refresh path
-  9.  MQ 47 blocked by watchlist path
- 10.  MQ 47 blocked by full-pool-rescan (FPR) path
- 11.  Every direct Telegram path respects MQ (structural / code-review assertion)
- 16.  Delivery accounting discrepancy explained: SR/WL/FPR send separately
+  40. New-prop follows tier rules.
+  41. Line-change follows tier rules.
+  42. Standing follows tier rules.
+  43. Stable-refresh follows tier rules.
+  44. Watchlist follows tier rules.
+  45. FPR follows tier rules.
+  46. Full-pool rescan follows tier rules.
+  47. Direct Telegram delivery follows tier rules.
 
-These tests use minimal mocking to keep credit usage low.
-Full integration tests are out of scope; we verify gate correctness + filter logic.
+Also covers /picks and /slip tier-aware filter behaviour.
 """
 
 from __future__ import annotations
-
 import types
 import pytest
-from market_engine import _mq_passes_delivery_gate
+from market_engine import _tier_delivery_gate, _is_tier2_sport, _TIER2_SPORTS
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -30,143 +29,235 @@ def _make_plh(
     stat_type: str = "Total Bases",
     bet_recommendation: str = "OVER",
     market_quality_score: int | None = None,
+    score_total: float | None = None,
     score_tier: str = "A",
 ):
-    """Return a minimal PropLineHistory-compatible namespace object."""
     return types.SimpleNamespace(
         player_name          = player_name,
         sport                = sport,
         stat_type            = stat_type,
         bet_recommendation   = bet_recommendation,
         market_quality_score = market_quality_score,
+        score_total          = score_total,
         score_tier           = score_tier,
         line_value           = 1.5,
         fetched_at           = None,
     )
 
 
-def _apply_picks_mq_filter(plhs: list, recs: dict | None = None) -> list:
-    """
-    Apply the same MQ filter logic used in cmd_picks.
-    Returns the subset of plhs that would pass the filter.
-    """
+def _apply_picks_mq_filter(plhs: list) -> list:
+    """Apply the same Tier-aware filter used in cmd_picks."""
     passing = []
     for plh in plhs:
         _eff_rec = plh.bet_recommendation
-        if recs:
-            _live_r = recs.get((plh.player_name, plh.sport, plh.stat_type))
-            if _live_r is not None:
-                _eff_rec = _live_r
         if _eff_rec not in ("OVER", "UNDER"):
             continue
-        _plh_mq = getattr(plh, "market_quality_score", None)
-        if _plh_mq is not None and not _mq_passes_delivery_gate(float(_plh_mq), _eff_rec):
-            continue
+        _plh_sport = (getattr(plh, "sport", "") or "").upper()
+        _plh_mq    = getattr(plh, "market_quality_score", None)
+        _plh_bq    = getattr(plh, "score_total", None)
+        if _plh_sport in {"NBA", "MLB", "NFL"}:
+            _t2_mq_ok = (_plh_mq is None) or (float(_plh_mq) >= 75.0)
+            _t2_bq_ok = (_plh_bq is None) or (float(_plh_bq) >= 75.0)
+            if not (_t2_mq_ok and _t2_bq_ok):
+                continue
         passing.append(plh)
     return passing
 
 
-def _apply_slip_mq_filter(candidates: list, plhs: list) -> list:
-    """
-    Apply the same MQ filter logic used in cmd_slip's eligibility gate.
-    Returns the subset of candidates that would pass the filter.
-    """
+def _apply_slip_filter(candidates: list, plhs: list) -> list:
+    """Apply the same Tier-aware filter used in cmd_slip."""
     eligible = []
     for cand in candidates:
-        # Resolve MQ from the matched PLH
-        _slip_plh = next(
-            (p for p in plhs if p.player_name == cand.player_name and p.stat_type == cand.stat_type),
-            None,
-        )
-        _slip_mq = getattr(_slip_plh, "market_quality_score", None) if _slip_plh else None
-        if _slip_mq is not None and not _mq_passes_delivery_gate(float(_slip_mq), cand.best_side or ""):
-            continue
+        _slip_sport = (getattr(cand, "sport", "") or "").upper()
+        if _slip_sport in {"NBA", "MLB", "NFL"}:
+            _slip_plh = next(
+                (p for p in plhs if p.player_name == cand.player_name
+                 and p.stat_type == cand.stat_type), None,
+            )
+            _slip_mq = getattr(_slip_plh, "market_quality_score", None) if _slip_plh else None
+            _slip_bq = getattr(_slip_plh, "score_total",           None) if _slip_plh else None
+            _s2_mq_ok = (_slip_mq is None) or (float(_slip_mq) >= 75.0)
+            _s2_bq_ok = (_slip_bq is None) or (float(_slip_bq) >= 75.0)
+            if not (_s2_mq_ok and _s2_bq_ok):
+                continue
         eligible.append(cand)
     return eligible
 
 
-# ── 6. /picks MQ filter tests ─────────────────────────────────────────────────
+# ── 40–42. Main-scan paths use tier gate ──────────────────────────────────────
 
-class TestPicksMQFilter:
-    """Spec item 6: MQ 47 must not appear in /picks as actionable."""
+class TestMainScanPathsTierGate:
+    """
+    Spec items 40–42: New-prop, LC, and standing paths must apply tier rules.
+    These paths all call _tier_delivery_gate before appending to _delivery_queue.
+    We verify the gate function returns correct results for the inputs each path uses.
+    """
 
-    def test_mq47_over_excluded_from_picks(self):
-        """A PLH with MQ=47 OVER must not pass the /picks filter."""
-        plh = _make_plh(market_quality_score=47, bet_recommendation="OVER")
-        result = _apply_picks_mq_filter([plh])
-        assert plh not in result, "MQ=47 OVER must be excluded from /picks"
+    def test_new_prop_tier1_low_mq_allowed(self):
+        """New-prop path: Tier 1 with MQ=47 (old dead zone) must be allowed."""
+        assert _tier_delivery_gate("WNBA", "OVER", bq_score=70, mq_score=47) is True
 
-    def test_mq47_under_excluded_from_picks(self):
-        """A PLH with MQ=47 UNDER must not pass the /picks filter (dead zone)."""
-        plh = _make_plh(market_quality_score=47, bet_recommendation="UNDER")
-        result = _apply_picks_mq_filter([plh])
-        assert plh not in result, "MQ=47 UNDER must be excluded from /picks (dead zone)"
+    def test_new_prop_tier2_bq74_blocked(self):
+        """New-prop path: Tier 2 (NBA) with BQ=74 must be blocked."""
+        assert _tier_delivery_gate("NBA", "OVER", bq_score=74, mq_score=80) is False
 
-    def test_mq69_excluded_from_picks(self):
-        """PLH with MQ=69 is top of dead zone — must be excluded."""
-        plh = _make_plh(market_quality_score=69, bet_recommendation="OVER")
-        result = _apply_picks_mq_filter([plh])
-        assert plh not in result
+    def test_new_prop_tier2_both_75_allowed(self):
+        """New-prop path: Tier 2 (MLB) with BQ=75 and MQ=75 must be allowed."""
+        assert _tier_delivery_gate("MLB", "OVER", bq_score=75, mq_score=75) is True
 
-    def test_mq70_allowed_in_picks(self):
-        """PLH with MQ=70 is just outside dead zone — must pass."""
-        plh = _make_plh(market_quality_score=70, bet_recommendation="OVER")
-        result = _apply_picks_mq_filter([plh])
-        assert plh in result
+    def test_lc_tier1_mq_dead_zone_allowed(self):
+        """Line-change path: Tier 1 with MQ=55 (dead zone) must be allowed."""
+        assert _tier_delivery_gate("CS2", "UNDER", bq_score=60, mq_score=55) is True
 
-    def test_mq_none_passes_picks_conservatively(self):
-        """PLH with market_quality_score=None (not yet computed) passes through."""
-        plh = _make_plh(market_quality_score=None, bet_recommendation="OVER")
-        result = _apply_picks_mq_filter([plh])
-        assert plh in result, "NULL MQ must not block a pick (conservative pass-through)"
+    def test_lc_tier2_mq74_blocked(self):
+        """Line-change path: Tier 2 (NFL) with MQ=74 must be blocked."""
+        assert _tier_delivery_gate("NFL", "OVER", bq_score=80, mq_score=74) is False
 
-    def test_mixed_picks_only_valid_mq_pass(self):
-        """Only MQ≥70 props (or NULL) pass the filter; dead-zone props are excluded."""
-        good    = _make_plh("Player A", market_quality_score=80,  bet_recommendation="OVER")
-        bad     = _make_plh("Player B", market_quality_score=47,  bet_recommendation="OVER")
-        unknown = _make_plh("Player C", market_quality_score=None, bet_recommendation="UNDER")
-        result  = _apply_picks_mq_filter([good, bad, unknown])
-        assert good    in result
-        assert bad     not in result
-        assert unknown in result
+    def test_standing_tier1_any_mq_allowed(self):
+        """Standing path: Tier 1 with MQ=0 must be allowed (direction is the gate)."""
+        assert _tier_delivery_gate("TENNIS", "OVER", bq_score=0, mq_score=0) is True
 
-    def test_mq40_excluded_over(self):
-        """MQ=40 is the bottom of the dead zone — OVER must be excluded."""
-        plh = _make_plh(market_quality_score=40, bet_recommendation="OVER")
+    def test_standing_tier2_requires_both_gates(self):
+        """Standing path: Tier 2 (NBA) must fail when only one of BQ/MQ ≥ 75."""
+        assert _tier_delivery_gate("NBA", "OVER", bq_score=75, mq_score=74) is False
+        assert _tier_delivery_gate("NBA", "OVER", bq_score=74, mq_score=75) is False
+        assert _tier_delivery_gate("NBA", "OVER", bq_score=75, mq_score=75) is True
+
+
+# ── 43–46. SR / WL / FPR paths ────────────────────────────────────────────────
+
+class TestIndirectScanPathsTierGate:
+    """
+    Spec items 43–46: Stable-refresh, watchlist, FPR paths must apply tier rules.
+    These paths call _tier_delivery_gate directly (not through the delivery queue).
+    """
+
+    def test_sr_tier1_low_bq_low_mq_allowed(self):
+        """Stable-refresh: Tier 1 with BQ=40, MQ=40 must be allowed."""
+        assert _tier_delivery_gate("DOTA2", "OVER", bq_score=40, mq_score=40) is True
+
+    def test_sr_tier2_bq74_blocked(self):
+        """Stable-refresh: Tier 2 (NBA) with BQ=74 must be blocked."""
+        assert _tier_delivery_gate("NBA", "OVER", bq_score=74, mq_score=80) is False
+
+    def test_sr_tier2_both_75_allowed(self):
+        """Stable-refresh: Tier 2 (NBA) with BQ=75 and MQ=75 must be allowed."""
+        assert _tier_delivery_gate("NBA", "OVER", bq_score=75, mq_score=75) is True
+
+    def test_wl_tier1_mq_dead_zone_allowed(self):
+        """Watchlist: Tier 1 with MQ=47 must be allowed (no dead-zone rule for T1)."""
+        assert _tier_delivery_gate("WNBA", "UNDER", bq_score=50, mq_score=47) is True
+
+    def test_wl_tier2_mq74_blocked(self):
+        """Watchlist: Tier 2 (MLB) with MQ=74 must be blocked."""
+        assert _tier_delivery_gate("MLB", "UNDER", bq_score=90, mq_score=74) is False
+
+    def test_fpr_tier1_zero_mq_allowed(self):
+        """Full-pool-rescan: Tier 1 with MQ=0 must be allowed."""
+        assert _tier_delivery_gate("MMA", "OVER", bq_score=0, mq_score=0) is True
+
+    def test_fpr_tier2_bq_and_mq_both_required(self):
+        """Full-pool-rescan: Tier 2 (NFL) must require both BQ AND MQ ≥ 75."""
+        assert _tier_delivery_gate("NFL", "OVER", bq_score=80, mq_score=74) is False
+        assert _tier_delivery_gate("NFL", "OVER", bq_score=74, mq_score=80) is False
+        assert _tier_delivery_gate("NFL", "OVER", bq_score=75, mq_score=75) is True
+
+    def test_all_paths_use_same_gate_function(self):
+        """All paths call _tier_delivery_gate — results are deterministic."""
+        inputs = [
+            ("WNBA", "OVER",  50, 47, True),   # Tier 1 — MQ dead zone allowed
+            ("NBA",  "OVER",  74, 80, False),   # Tier 2 — BQ gate
+            ("MLB",  "UNDER", 90, 74, False),   # Tier 2 — MQ gate
+            ("CS2",  "UNDER", 60, 55, True),    # Tier 1 — MQ dead zone allowed
+            ("NFL",  "OVER",  75, 75, True),    # Tier 2 — passes
+        ]
+        for sport, direction, bq, mq, expected in inputs:
+            assert _tier_delivery_gate(sport, direction, bq, mq) is expected, (
+                f"_tier_delivery_gate({sport!r}, {direction!r}, bq={bq}, mq={mq}) != {expected}"
+            )
+
+
+# ── 47. Direct Telegram delivery path ──────────────────────────────────────────
+
+class TestDirectDeliveryPath:
+    """Spec item 47: Direct deliver_underdog() calls must also follow tier rules."""
+
+    def test_gate_blocks_tier2_before_delivery(self):
+        """Tier 2 props that fail the gate must never reach deliver_underdog()."""
+        assert _tier_delivery_gate("NBA", "OVER", bq_score=74, mq_score=80) is False
+
+    def test_gate_allows_tier1_before_delivery(self):
+        """Tier 1 props with valid direction must reach deliver_underdog()."""
+        assert _tier_delivery_gate("WNBA", "OVER", bq_score=50, mq_score=47) is True
+
+    def test_gate_importable_from_market_engine(self):
+        """_tier_delivery_gate must be importable by every delivery path."""
+        from market_engine import _tier_delivery_gate as _gate
+        assert callable(_gate)
+
+    def test_is_tier2_importable_from_market_engine(self):
+        """_is_tier2_sport must be importable for path classification."""
+        from market_engine import _is_tier2_sport as _t2
+        assert callable(_t2)
+
+
+# ── /picks tier-aware filter ───────────────────────────────────────────────────
+
+class TestPicksTierFilter:
+    """Tier-aware /picks filtering: Tier 2 requires BQ ≥ 75 AND MQ ≥ 75."""
+
+    def test_tier1_low_mq_passes_picks(self):
+        """Tier 1 with MQ=47 must appear in /picks (no MQ gate on T1)."""
+        plh = _make_plh("Player A", "WNBA", market_quality_score=47, score_total=60, bet_recommendation="OVER")
+        assert _apply_picks_mq_filter([plh]) == [plh]
+
+    def test_tier1_low_bq_passes_picks(self):
+        """Tier 1 with BQ=40 must appear in /picks (no BQ gate on T1)."""
+        plh = _make_plh("Player B", "NHL", market_quality_score=80, score_total=40, bet_recommendation="UNDER")
+        assert _apply_picks_mq_filter([plh]) == [plh]
+
+    def test_tier2_bq74_excluded_from_picks(self):
+        """Tier 2 (MLB) with BQ=74 must be excluded from /picks."""
+        plh = _make_plh("Pitcher A", "MLB", market_quality_score=80, score_total=74, bet_recommendation="OVER")
         assert _apply_picks_mq_filter([plh]) == []
 
-    def test_mq40_excluded_under(self):
-        """MQ=40 is dead zone — UNDER must also be excluded."""
-        plh = _make_plh(market_quality_score=40, bet_recommendation="UNDER")
+    def test_tier2_mq74_excluded_from_picks(self):
+        """Tier 2 (NBA) with MQ=74 must be excluded from /picks."""
+        plh = _make_plh("Baller A", "NBA", market_quality_score=74, score_total=80, bet_recommendation="OVER")
         assert _apply_picks_mq_filter([plh]) == []
 
-    def test_mq39_under_passes_picks(self):
-        """MQ=39 UNDER is below the dead zone and UNDER-valid — must pass."""
-        plh = _make_plh(market_quality_score=39, bet_recommendation="UNDER")
-        assert _apply_picks_mq_filter([plh]) != []
+    def test_tier2_both_75_allowed_in_picks(self):
+        """Tier 2 (NFL) with BQ=75 and MQ=75 must appear in /picks."""
+        plh = _make_plh("QB A", "NFL", market_quality_score=75, score_total=75.0, bet_recommendation="OVER")
+        assert _apply_picks_mq_filter([plh]) == [plh]
 
-    def test_mq39_over_excluded_picks(self):
-        """MQ=39 OVER is below dead zone — OVER blocked, so excluded."""
-        plh = _make_plh(market_quality_score=39, bet_recommendation="OVER")
+    def test_tier2_null_scores_pass_conservatively(self):
+        """Tier 2 with NULL BQ and NULL MQ passes conservatively."""
+        plh = _make_plh("Unknown NBA", "NBA", market_quality_score=None, score_total=None, bet_recommendation="OVER")
+        assert _apply_picks_mq_filter([plh]) == [plh]
+
+    def test_mixed_picks_only_valid_pass(self):
+        """Mixed Tier 1/2 list: only eligible props pass."""
+        t1_ok  = _make_plh("P1", "WNBA", market_quality_score=47,  score_total=50,   bet_recommendation="OVER")
+        t2_ok  = _make_plh("P2", "NBA",  market_quality_score=80,  score_total=80.0, bet_recommendation="OVER")
+        t2_bad = _make_plh("P3", "MLB",  market_quality_score=74,  score_total=80.0, bet_recommendation="OVER")
+        result = _apply_picks_mq_filter([t1_ok, t2_ok, t2_bad])
+        assert t1_ok  in result
+        assert t2_ok  in result
+        assert t2_bad not in result
+
+    def test_no_direction_excluded(self):
+        """Props with no valid direction are excluded before the tier gate."""
+        plh = _make_plh("P4", "WNBA", market_quality_score=80, score_total=80.0, bet_recommendation="PASS")
         assert _apply_picks_mq_filter([plh]) == []
 
-    def test_mq85_over_passes_picks(self):
-        """High MQ OVER prop must pass all gates."""
-        plh = _make_plh(market_quality_score=85, bet_recommendation="OVER")
-        assert len(_apply_picks_mq_filter([plh])) == 1
 
-    def test_mq100_under_passes_picks(self):
-        """Maximum MQ UNDER prop must pass."""
-        plh = _make_plh(market_quality_score=100, bet_recommendation="UNDER")
-        assert len(_apply_picks_mq_filter([plh])) == 1
+# ── /slip tier-aware filter ────────────────────────────────────────────────────
 
+class TestSlipTierFilter:
+    """Tier-aware /slip filtering: Tier 2 requires BQ ≥ 75 AND MQ ≥ 75."""
 
-# ── 7. /slip MQ filter tests ──────────────────────────────────────────────────
-
-class TestSlipMQFilter:
-    """Spec item 7: MQ 47 must not appear in /slip as actionable."""
-
-    def _make_cand(self, player_name, stat_type, best_side, sport="MLB"):
+    def _make_cand(self, player_name, stat_type, best_side, sport):
         return types.SimpleNamespace(
             player_name = player_name,
             stat_type   = stat_type,
@@ -174,184 +265,69 @@ class TestSlipMQFilter:
             sport       = sport,
         )
 
-    def test_mq47_excluded_from_slip(self):
-        """A slip candidate whose PLH has MQ=47 must be excluded."""
-        cand = self._make_cand("Player A", "Total Bases", "OVER")
-        plh  = _make_plh("Player A", stat_type="Total Bases",
-                         bet_recommendation="OVER", market_quality_score=47)
-        result = _apply_slip_mq_filter([cand], [plh])
-        assert cand not in result
+    def test_tier1_low_mq_allowed_in_slip(self):
+        """Tier 1 candidate with low MQ must be eligible for /slip."""
+        cand = self._make_cand("P1", "Points", "OVER", "WNBA")
+        plh  = _make_plh("P1", "WNBA", stat_type="Points", market_quality_score=47, score_total=60)
+        assert _apply_slip_filter([cand], [plh]) == [cand]
 
-    def test_mq70_allowed_in_slip(self):
-        """A slip candidate whose PLH has MQ=70 must be allowed."""
-        cand = self._make_cand("Player B", "Hits", "OVER")
-        plh  = _make_plh("Player B", stat_type="Hits",
-                         bet_recommendation="OVER", market_quality_score=70)
-        result = _apply_slip_mq_filter([cand], [plh])
-        assert cand in result
+    def test_tier2_bq74_excluded_from_slip(self):
+        """Tier 2 candidate with BQ=74 must be excluded from /slip."""
+        cand = self._make_cand("P2", "Hits", "OVER", "MLB")
+        plh  = _make_plh("P2", "MLB", stat_type="Hits", market_quality_score=80, score_total=74.0)
+        assert _apply_slip_filter([cand], [plh]) == []
 
-    def test_mq_none_passes_slip(self):
-        """Candidate with NULL MQ passes conservatively (not yet scored)."""
-        cand = self._make_cand("Player C", "Earned Runs Allowed", "OVER")
-        plh  = _make_plh("Player C", stat_type="Earned Runs Allowed",
-                         bet_recommendation="OVER", market_quality_score=None)
-        result = _apply_slip_mq_filter([cand], [plh])
-        assert cand in result
+    def test_tier2_mq74_excluded_from_slip(self):
+        """Tier 2 candidate with MQ=74 must be excluded from /slip."""
+        cand = self._make_cand("P3", "Points", "OVER", "NBA")
+        plh  = _make_plh("P3", "NBA", stat_type="Points", market_quality_score=74, score_total=80.0)
+        assert _apply_slip_filter([cand], [plh]) == []
 
-    def test_multiple_candidates_slip_filter(self):
-        """Only valid-MQ candidates survive the slip filter."""
-        cand_ok  = self._make_cand("Good Player", "Hits", "OVER")
-        cand_bad = self._make_cand("Bad Player",  "Stolen Bases", "OVER")
-        plh_ok   = _make_plh("Good Player", stat_type="Hits",
-                              bet_recommendation="OVER", market_quality_score=80)
-        plh_bad  = _make_plh("Bad Player", stat_type="Stolen Bases",
-                              bet_recommendation="OVER", market_quality_score=55)
-        result = _apply_slip_mq_filter([cand_ok, cand_bad], [plh_ok, plh_bad])
-        assert cand_ok  in result
-        assert cand_bad not in result
+    def test_tier2_both_75_allowed_in_slip(self):
+        """Tier 2 candidate with BQ=75 and MQ=75 must be eligible for /slip."""
+        cand = self._make_cand("P4", "Passing Yards", "OVER", "NFL")
+        plh  = _make_plh("P4", "NFL", stat_type="Passing Yards", market_quality_score=75, score_total=75.0)
+        assert _apply_slip_filter([cand], [plh]) == [cand]
+
+    def test_tier2_null_scores_pass_conservatively_in_slip(self):
+        """Tier 2 with NULL scores passes conservatively in /slip."""
+        cand = self._make_cand("P5", "Rebounds", "UNDER", "NBA")
+        plh  = _make_plh("P5", "NBA", stat_type="Rebounds", market_quality_score=None, score_total=None)
+        assert _apply_slip_filter([cand], [plh]) == [cand]
 
 
-# ── 8-10. SR/WL/FPR gate verification ────────────────────────────────────────
+# ── Structural checks ──────────────────────────────────────────────────────────
 
-class TestSRWLFPRGates:
-    """
-    Spec items 8-10: MQ 47 must be blocked by stable-refresh, watchlist, and FPR.
+class TestStructuralChecks:
+    """Confirm the structural changes required by the spec."""
 
-    These tests verify the gate function's correctness for the inputs those paths use,
-    and verify the gate function is defined at module scope (accessible to all paths).
-    Full end-to-end job integration tests require the full DB + bot context and are
-    excluded to protect Replit credits; gate function correctness is sufficient proof.
-    """
-
-    def test_sr_path_mq47_over_blocked(self):
-        """stable-refresh computes MQ then calls _mq_passes_delivery_gate.
-        MQ=47 OVER must return False — the gate would trigger continue."""
-        assert _mq_passes_delivery_gate(47.0, "OVER") is False
-
-    def test_sr_path_mq47_under_blocked(self):
-        """stable-refresh: MQ=47 UNDER must return False (dead zone)."""
-        assert _mq_passes_delivery_gate(47.0, "UNDER") is False
-
-    def test_sr_path_mq70_allowed(self):
-        """stable-refresh: MQ=70 OVER must be allowed."""
-        assert _mq_passes_delivery_gate(70.0, "OVER") is True
-
-    def test_wl_path_mq47_over_blocked(self):
-        """watchlist: MQ=47 OVER must return False — _wl_mq_ok=False."""
-        assert _mq_passes_delivery_gate(47.0, "OVER") is False
-
-    def test_wl_path_mq47_under_blocked(self):
-        """watchlist: MQ=47 UNDER must return False (dead zone)."""
-        assert _mq_passes_delivery_gate(47.0, "UNDER") is False
-
-    def test_wl_path_mq39_under_allowed(self):
-        """watchlist: MQ=39 UNDER is below dead zone — must be allowed."""
-        assert _mq_passes_delivery_gate(39.0, "UNDER") is True
-
-    def test_fpr_path_mq47_over_blocked(self):
-        """full-pool-rescan: MQ=47 OVER must return False."""
-        assert _mq_passes_delivery_gate(47.0, "OVER") is False
-
-    def test_fpr_path_mq47_under_blocked(self):
-        """full-pool-rescan: MQ=47 UNDER must return False (dead zone)."""
-        assert _mq_passes_delivery_gate(47.0, "UNDER") is False
-
-    def test_fpr_path_mq80_under_allowed(self):
-        """full-pool-rescan: MQ=80 UNDER must be allowed."""
-        assert _mq_passes_delivery_gate(80.0, "UNDER") is True
-
-    def test_gate_function_importable_from_market_engine(self):
-        """_mq_passes_delivery_gate must be importable from market_engine."""
-        from market_engine import _mq_passes_delivery_gate as _gate
-        assert callable(_gate)
-
-    def test_gate_is_deterministic(self):
-        """Gate function must be pure/deterministic for same inputs."""
-        for _ in range(10):
-            assert _mq_passes_delivery_gate(47.0, "OVER") is False
-            assert _mq_passes_delivery_gate(70.0, "OVER") is True
-
-
-# ── 11. Every direct Telegram path has gate function callable ─────────────────
-
-class TestAllPathsUseGate:
-    """
-    Spec item 11: Every direct Telegram path respects MQ.
-
-    Verifies the gate function is defined and callable for ALL argument
-    combinations used by the 6 delivery paths (new, lc, standing, sr, wl, fpr).
-    The gate function is the single source of truth — all paths call it.
-    """
-
-    ALL_DIRECTIONS = ["OVER", "UNDER", "PASS", "", "STRONG BET"]
-    DEAD_ZONE_MQS  = [40, 47, 55, 60, 69]
-    HIGH_MQS       = [70, 75, 80, 90, 100]
-    LOW_MQS        = [0, 10, 20, 30, 39]
-
-    def test_dead_zone_always_blocks_all_directions(self):
-        """Every dead-zone MQ blocks every direction string."""
-        for mq in self.DEAD_ZONE_MQS:
-            for direction in self.ALL_DIRECTIONS:
-                assert _mq_passes_delivery_gate(float(mq), direction) is False, (
-                    f"MQ={mq} dir={direction!r} should be blocked"
+    def test_old_dead_zone_rule_gone_for_tier1(self):
+        """Old dead-zone rule (MQ 40–69 blocked all sports) no longer applies to Tier 1."""
+        for mq in [40, 47, 55, 60, 69]:
+            for sport in ["WNBA", "NHL", "TENNIS", "CS2", "DOTA2", "LOL", "VAL", "MMA"]:
+                assert _tier_delivery_gate(sport, "OVER",  bq_score=0, mq_score=mq) is True, (
+                    f"Tier 1 sport={sport} MQ={mq} must NOT be blocked"
                 )
+                assert _tier_delivery_gate(sport, "UNDER", bq_score=0, mq_score=mq) is True
 
-    def test_high_mq_always_allows_over_and_under(self):
-        """Every MQ ≥70 allows both OVER and UNDER."""
-        for mq in self.HIGH_MQS:
-            assert _mq_passes_delivery_gate(float(mq), "OVER")  is True
-            assert _mq_passes_delivery_gate(float(mq), "UNDER") is True
+    def test_tier2_is_exactly_nba_mlb_nfl(self):
+        """_TIER2_SPORTS must contain exactly NBA, MLB, NFL and nothing else."""
+        assert _TIER2_SPORTS == frozenset({"NBA", "MLB", "NFL"})
 
-    def test_low_mq_only_allows_under(self):
-        """Every sub-40 MQ allows UNDER but blocks OVER and empty directions."""
-        for mq in self.LOW_MQS:
-            assert _mq_passes_delivery_gate(float(mq), "UNDER") is True
-            assert _mq_passes_delivery_gate(float(mq), "OVER")  is False
-            assert _mq_passes_delivery_gate(float(mq), "")      is False
-            assert _mq_passes_delivery_gate(float(mq), "PASS")  is False
+    def test_tier1_definition_is_complement(self):
+        """Tier 1 = all supported sports not in TIER2_SPORTS."""
+        tier1_samples = [
+            "WNBA", "NHL", "TENNIS", "SOCCER", "FIFA",
+            "CS2", "DOTA2", "LOL", "VAL", "MMA",
+            "BADMINTON", "TABLE TENNIS", "RACING",
+            "CFB", "CFL", "KBO", "NPB", "CRICKET",
+        ]
+        for sport in tier1_samples:
+            assert not _is_tier2_sport(sport), f"{sport} should be Tier 1"
 
-
-# ── 16. Funnel discrepancy explanation ────────────────────────────────────────
-
-class TestFunnelAccountingDesign:
-    """
-    Spec item 16: Delivery accounting must match actual Telegram sends.
-
-    The funnel's 'alert_delivered' counter is NOT a global Telegram counter.
-    It only counts deliveries from the main scan's ranked delivery queue (new-prop,
-    line-change, standing paths). stable-refresh, watchlist, and FPR are separate
-    job functions with their own counters (sr_sent, wl_promoted, fpr_sent) that are
-    NOT included in alert_delivered.
-
-    This is the root cause of "funnel shows 4 but user sees more notifications":
-    the SR/WL/FPR deliveries are real Telegram sends not reflected in the funnel.
-
-    These tests document and enforce the design contract.
-    """
-
-    def test_main_scan_delivery_caps_apply(self):
-        """Main scan caps: Tier 1 = 8, Tier 2 = 2, total = 10."""
-        from market_engine import _DQ_TIER1_CAP, _DQ_TIER2_CAP
-        assert _DQ_TIER1_CAP == 8
-        assert _DQ_TIER2_CAP == 2
-        assert _DQ_TIER1_CAP + _DQ_TIER2_CAP == 10
-
-    def test_sr_wl_fpr_are_separate_delivery_paths(self):
-        """
-        stable_refresh_job, watchlist scan, and full_pool_rescan_job are defined
-        in market_engine as separate async functions — not part of underdog_job's
-        delivery queue. This is structural evidence that their send counts are separate.
-        """
-        import market_engine as _me
-        assert hasattr(_me, "_stable_refresh_job") or hasattr(_me, "underdog_job"), (
-            "market_engine must contain the scan jobs"
-        )
-
-    def test_mq_gate_is_the_single_source_of_truth(self):
-        """_mq_passes_delivery_gate is a single function called by all paths."""
-        from market_engine import _mq_passes_delivery_gate
-        # Same function, same result regardless of caller
-        assert _mq_passes_delivery_gate(47.0, "OVER")  is False
-        assert _mq_passes_delivery_gate(47.0, "UNDER") is False
-        assert _mq_passes_delivery_gate(70.0, "OVER")  is True
-        assert _mq_passes_delivery_gate(70.0, "UNDER") is True
+    def test_no_dead_zone_constant_in_module(self):
+        """No dead-zone constant should remain in market_engine."""
+        import market_engine
+        assert not hasattr(market_engine, "_mq_passes_delivery_gate")
+        assert not hasattr(market_engine, "_DQ_TIER1_CAP")
+        assert not hasattr(market_engine, "_DQ_TIER2_CAP")

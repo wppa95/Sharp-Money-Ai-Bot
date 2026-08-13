@@ -1533,18 +1533,24 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 plh.player_name, plh.stat_type,
             )
             continue
-        # MQ hard gate — exclude dead-zone (40–69) props and sub-40 OVER props.
-        # market_quality_score is stored by the scan loop and is NULL for props not yet rescored.
-        # NULL passes through (conservative: don't hide data we can't verify).
-        _plh_mq = getattr(plh, "market_quality_score", None)
-        if _plh_mq is not None:
-            from market_engine import _mq_passes_delivery_gate as _picks_mq_gate
-            if not _picks_mq_gate(float(_plh_mq), _eff_rec):
+        # Tier-aware delivery gate — apply same rules as Telegram delivery.
+        # Tier 1 (non-NBA/MLB/NFL): only direction matters (already checked above).
+        # Tier 2 (NBA/MLB/NFL): BQ ≥ 75 AND MQ ≥ 75.
+        # NULL scores pass through conservatively (not yet rescored this cycle).
+        _plh_sport = getattr(plh, "sport", "") or ""
+        _plh_mq    = getattr(plh, "market_quality_score", None)
+        _plh_bq    = getattr(plh, "score_total", None)
+        if _plh_sport.upper() in {"NBA", "MLB", "NFL"}:
+            # Tier 2: enforce both gates when scores are available.
+            _t2_mq_ok = (_plh_mq is None) or (float(_plh_mq) >= 75.0)
+            _t2_bq_ok = (_plh_bq is None) or (float(_plh_bq) >= 75.0)
+            if not (_t2_mq_ok and _t2_bq_ok):
                 logger.debug(
-                    "cmd_picks: skipping %s/%s — MQ gate (mq=%d dir=%s)",
-                    plh.player_name, plh.stat_type, _plh_mq, _eff_rec,
+                    "cmd_picks: skipping %s/%s — Tier-2 gate (bq=%s mq=%s dir=%s)",
+                    plh.player_name, plh.stat_type, _plh_bq, _plh_mq, _eff_rec,
                 )
                 continue
+        # Tier 1: no BQ/MQ numeric gate — direction already verified above.
         # Note: no secondary confidence gate here.  The DB query already requires
         # score_tier in ("S","A") — all props reaching this loop have been scored
         # above the A-tier confidence floor by the engine.  A secondary gate using
@@ -2183,27 +2189,27 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 _cand.player_name, _cand.stat_type,
             )
             continue
-        # MQ hard gate — same standard as Telegram delivery.
-        _slip_mq = getattr(_cand, "market_quality_score", None) or getattr(
-            getattr(_cand, "_plh", None), "market_quality_score", None
-        )
-        if _slip_mq is None:
-            # PropPickAdapter wraps PropLineHistory — look through adapter to PLH record
+        # Tier-aware delivery gate — same rules as Telegram delivery.
+        # Tier 2 (NBA/MLB/NFL): BQ ≥ 75 AND MQ ≥ 75.
+        # Tier 1: direction already checked above; no BQ/MQ numeric gate.
+        _slip_sport = (getattr(_cand, "sport", "") or "").upper()
+        if _slip_sport in {"NBA", "MLB", "NFL"}:
+            # Look up PLH for stored MQ and BQ scores.
             _slip_plh = next(
-                (plh for plh in ud_props if
-                 plh.player_name == _cand.player_name
-                 and plh.stat_type == _cand.stat_type),
+                (p for p in ud_props if
+                 p.player_name == _cand.player_name
+                 and p.stat_type == _cand.stat_type),
                 None,
             )
-            if _slip_plh is not None:
-                _slip_mq = getattr(_slip_plh, "market_quality_score", None)
-        if _slip_mq is not None:
-            from market_engine import _mq_passes_delivery_gate as _slip_mq_gate
-            if not _slip_mq_gate(float(_slip_mq), _cand.best_side or ""):
+            _slip_mq = getattr(_slip_plh, "market_quality_score", None) if _slip_plh else None
+            _slip_bq = getattr(_slip_plh, "score_total",          None) if _slip_plh else None
+            _s2_mq_ok = (_slip_mq is None) or (float(_slip_mq) >= 75.0)
+            _s2_bq_ok = (_slip_bq is None) or (float(_slip_bq) >= 75.0)
+            if not (_s2_mq_ok and _s2_bq_ok):
                 _slip_ineligible += 1
                 logger.debug(
-                    "cmd_slip: excluding %s/%s — MQ gate (mq=%d dir=%s)",
-                    _cand.player_name, _cand.stat_type, _slip_mq, _cand.best_side,
+                    "cmd_slip: excluding %s/%s — Tier-2 gate (bq=%s mq=%s dir=%s)",
+                    _cand.player_name, _cand.stat_type, _slip_bq, _slip_mq, _cand.best_side,
                 )
                 continue
         _candidates_eligible.append(_cand)

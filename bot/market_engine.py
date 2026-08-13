@@ -933,38 +933,47 @@ _DELIVERY_TIER_BASE: dict[str, float] = {
 }
 
 
-def _mq_passes_delivery_gate(mq_score: float, direction: str) -> bool:
-    """
-    Hard Market Quality gate applied before any candidate enters the delivery
-    queue or reaches Telegram.
-
-    Rules (source: V3.2 spec):
-      MQ 70–100  — eligible for OVER or UNDER.
-      MQ 40–69   — DEAD ZONE: never actionable regardless of direction, tier,
-                   Bet Quality, confidence, or line movement.
-      MQ 31–39   — UNDER evaluation only; OVER blocked.
-      MQ 0–30    — Strong UNDER signal; OVER blocked.
-
-    Returns True if the candidate MAY proceed to delivery; False to block it.
-    """
-    if 40.0 <= mq_score < 70.0:
-        # Dead zone — no actionable bets, period.
-        return False
-    if mq_score < 40.0 and direction.upper() not in ("UNDER",):
-        # Sub-40 MQ is reserved for UNDER evaluation only.
-        return False
-    return True
-
-
 # Sports that are Tier 2 (major sports — secondary delivery priority).
-# Tier 1 = every supported sport NOT in this set.
-# This is the canonical source of truth: do NOT expand it.
+# Tier 1 = EVERY supported sport NOT in this set (WNBA, NHL, Tennis, Soccer,
+# CS2, Dota 2, LoL, VAL, MMA, Badminton, Table Tennis, Racing, CFB, CFL, KBO,
+# NPB, and every other supported non-NBA/MLB/NFL sport).
+# This is the CANONICAL source of truth — do NOT expand it.
 _TIER2_SPORTS: frozenset[str] = frozenset({"NBA", "MLB", "NFL"})
 
-# Per-window delivery caps for each sport tier.
-# Overridable via env vars to match TG_TIER1_MAX_PER_WINDOW / TG_TIER2_MAX_PER_WINDOW.
-_DQ_TIER1_CAP: int = int(__import__("os").environ.get("TG_TIER1_MAX_PER_WINDOW", "8"))
-_DQ_TIER2_CAP: int = int(__import__("os").environ.get("TG_TIER2_MAX_PER_WINDOW", "2"))
+
+def _is_tier2_sport(sport: str) -> bool:
+    """Return True iff sport is Tier 2 (NBA, MLB, or NFL only)."""
+    return (sport or "").upper() in _TIER2_SPORTS
+
+
+def _tier_delivery_gate(
+    sport: str,
+    direction: str,
+    bq_score: float,
+    mq_score: float,
+) -> bool:
+    """
+    Canonical delivery eligibility gate used by ALL Telegram delivery paths.
+
+    Tier 1 = every supported sport except NBA, MLB, NFL.
+    Tier 2 = ONLY NBA, MLB, NFL.
+
+    Tier 1 rules (analysis-first):
+        • Valid OVER or UNDER direction is required.
+        • BQ and MQ are ranking signals only — NOT hard blockers.
+
+    Tier 2 rules (stricter):
+        • Valid OVER or UNDER direction is required.
+        • BQ ≥ 75 is required.
+        • MQ ≥ 75 is required.
+
+    Returns True if the candidate may proceed to delivery; False to block.
+    """
+    if direction.upper() not in ("OVER", "UNDER"):
+        return False
+    if _is_tier2_sport(sport):
+        return bq_score >= 75.0 and mq_score >= 75.0
+    return True  # Tier 1: valid direction is the only mandatory numeric filter
 
 
 def _cand_priority(c: dict) -> float:
@@ -985,9 +994,8 @@ def _apply_delivery_diversification(queue: list) -> list:
     interleave so Tier 1 candidates always precede Tier 2 candidates in the final
     delivery order.
 
-    The delivery loop enforces the per-tier hard caps (_DQ_TIER1_CAP / _DQ_TIER2_CAP)
-    by skipping candidates once a group's budget is exhausted.  This function only
-    determines the within-group ordering; it does not truncate the queue.
+    The delivery loop applies the total-window cap (10 per 5 minutes) via the
+    rate limiter; this function only determines the within-group ordering.
 
     Soft group penalty: −300 for the 2nd candidate in the same (sport, stat_type)
     pair, −600 for the 3rd+.  High-BQ duplicates can still outrank weaker unique
@@ -1301,9 +1309,9 @@ async def underdog_job(context) -> None:
     # priority order after the standing scan finishes.  Ranked delivery ensures the
     # best picks get rate-limit slots first when more qualify than the window allows.
     _delivery_queue:     list[dict]                 = []
-    # Market quality scores for every scored prop — bulk-written to PropLineHistory at
-    # end of scan cycle so /picks and /slip can gate out dead-zone (MQ 40–69) props.
-    # Key: (player, sport, stat_type) → mq_score int (0–100).
+    # Scoring data for every scored prop — bulk-written to PropLineHistory at end of
+    # scan cycle so /picks and /slip can apply tier-aware delivery gates.
+    # Key: (player, sport, stat_type) → (mq_score: int, bq_score: float).
     _plh_mq_scores:      dict                       = {}
     # Per-sport pipeline stage counters — emitted in debug summary (#7 diagnostics)
     _sport_raw:           dict[str, int] = {}  # daily props: non-removed, non-futures
@@ -1408,7 +1416,10 @@ async def underdog_job(context) -> None:
                 )
                 market_quality  = compute_market_quality(stat_type, line_val, score)
                 market_pressure = detect_market_pressure(None, np_history)
-                _plh_mq_scores[(player, snap.sport or "UNKNOWN", stat_type)] = market_quality.score
+                _plh_mq_scores[(player, snap.sport or "UNKNOWN", stat_type)] = (
+                    int(getattr(market_quality, "score", 0)),
+                    float(score.total if score else 0),
+                )
                 _processed_keys.add((player, stat_type))
                 # Validation: require min supporting history before any immediate alert.
                 # Props with zero history (first appearance) always go to digest.
@@ -1607,16 +1618,19 @@ async def underdog_job(context) -> None:
                             )
                         except Exception:
                             pass
-                    # ── MQ hard gate [new-prop] ─────────────────────────────
-                    # MQ 40–69 = dead zone: never actionable regardless of tier or BQ.
-                    # Sub-40 MQ is reserved for UNDER evaluation only.
+                    # ── Tier delivery gate [new-prop] ────────────────────────
+                    # Tier 1 (all except NBA/MLB/NFL): direction only.
+                    # Tier 2 (NBA/MLB/NFL): BQ ≥ 75 AND MQ ≥ 75 AND direction.
                     _np_mq_score  = float(getattr(market_quality, "score", 0) if market_quality else 0)
+                    _np_bq_score  = float(score.total if score else 0)
                     _np_direction = decision.recommendation if decision else ""
-                    _np_mq_ok     = _mq_passes_delivery_gate(_np_mq_score, _np_direction)
-                    if not _np_mq_ok:
+                    _np_gate_ok   = _tier_delivery_gate(
+                        snap.sport or "UNKNOWN", _np_direction, _np_bq_score, _np_mq_score,
+                    )
+                    if not _np_gate_ok:
                         logger.debug(
-                            "UD mq_gate [new]: %s | %s | mq=%.0f dir=%s — blocked",
-                            player, stat_type, _np_mq_score, _np_direction,
+                            "UD tier_gate [new]: %s | %s | sport=%s bq=%.0f mq=%.0f dir=%s — blocked",
+                            player, stat_type, snap.sport, _np_bq_score, _np_mq_score, _np_direction,
                         )
                     else:
                         # Collect into ranked delivery queue — all candidates compete for
@@ -1728,7 +1742,10 @@ async def underdog_job(context) -> None:
                     _lc_magnitude   = abs(snap.line - prev_line) if (snap.line is not None and prev_line is not None) else None
                     market_quality  = compute_market_quality(stat_type, snap.line or 0.0, score)
                     market_pressure = detect_market_pressure(_lc_magnitude, ud_history)
-                    _plh_mq_scores[(player, snap.sport or "UNKNOWN", stat_type)] = market_quality.score
+                    _plh_mq_scores[(player, snap.sport or "UNKNOWN", stat_type)] = (
+                        int(getattr(market_quality, "score", 0)),
+                        float(score.total if score else 0),
+                    )
                     # NOTE: _processed_keys is NOT set here for every line-change.
                     # It is only set when should_alert=True (actual alert eligible),
                     # so that qualified props with sub-threshold line movement
@@ -1883,7 +1900,10 @@ async def underdog_job(context) -> None:
                     )
                     market_quality  = compute_market_quality(stat_type, snap.line or 0.0, score)
                     market_pressure = detect_market_pressure(None, ud_history)
-                    _plh_mq_scores[(player, snap.sport or "UNKNOWN", stat_type)] = market_quality.score
+                    _plh_mq_scores[(player, snap.sport or "UNKNOWN", stat_type)] = (
+                        int(getattr(market_quality, "score", 0)),
+                        float(score.total if score else 0),
+                    )
                     _processed_keys.add((player, stat_type))
                     validation = validate_player_prop(
                         player_name  = player,
@@ -2109,14 +2129,17 @@ async def underdog_job(context) -> None:
                     # Non-removals: collect into ranked delivery queue.
                     # Removals are not Telegram-alerted (suppressed per doc #2/#3) —
                     # lifecycle tracking is applied via _lifecycle_removed separately.
-                    # ── MQ hard gate [lc] ───────────────────────────────────────
+                    # ── Tier delivery gate [lc] ─────────────────────────────────
                     _lc_mq_score  = float(getattr(market_quality, "score", 0) if market_quality else 0)
+                    _lc_bq_score  = float(score.total if score else 0)
                     _lc_direction = decision.recommendation if decision else ""
-                    if not is_removed and not _mq_passes_delivery_gate(_lc_mq_score, _lc_direction):
+                    if not is_removed and not _tier_delivery_gate(
+                        snap.sport or "UNKNOWN", _lc_direction, _lc_bq_score, _lc_mq_score,
+                    ):
                         should_alert = False
                         logger.debug(
-                            "UD mq_gate [lc]: %s | %s | mq=%.0f dir=%s — blocked",
-                            player, stat_type, _lc_mq_score, _lc_direction,
+                            "UD tier_gate [lc]: %s | %s | sport=%s bq=%.0f mq=%.0f dir=%s — blocked",
+                            player, stat_type, snap.sport, _lc_bq_score, _lc_mq_score, _lc_direction,
                         )
                     if not is_removed and should_alert:
                         _lc_mag_abs  = (
@@ -2491,13 +2514,14 @@ async def underdog_job(context) -> None:
                     )
                     continue
 
-                # ── MQ hard gate [standing] ─────────────────────────────
+                # ── Tier delivery gate [standing] ────────────────────────
                 _s_mq_score  = float(getattr(_smq, "score", 0) if _smq else 0)
+                _s_bq_score  = float(_sscore.total if _sscore else 0)
                 _s_direction = _sdec.recommendation if _sdec else ""
-                if not _mq_passes_delivery_gate(_s_mq_score, _s_direction):
+                if not _tier_delivery_gate(_ssport, _s_direction, _s_bq_score, _s_mq_score):
                     logger.debug(
-                        "UD mq_gate [standing]: %s | %s | mq=%.0f dir=%s — blocked",
-                        _sp, _st, _s_mq_score, _s_direction,
+                        "UD tier_gate [standing]: %s | %s | sport=%s bq=%.0f mq=%.0f dir=%s — blocked",
+                        _sp, _st, _ssport, _s_bq_score, _s_mq_score, _s_direction,
                     )
                     continue
 
@@ -2563,8 +2587,6 @@ async def underdog_job(context) -> None:
             _apply_delivery_diversification(_delivery_queue)
             _n_dq_deferred   = 0
             _dq_deferred_log: list[str] = []
-            _dq_t1_delivered = 0   # Tier 1 (non-NBA/MLB/NFL) slots used this window
-            _dq_t2_delivered = 0   # Tier 2 (NBA/MLB/NFL) slots used this window
             for _dq in _delivery_queue:
                 _dq_player    = _dq["player"]
                 _dq_snap      = _dq["snap"]
@@ -2584,34 +2606,21 @@ async def underdog_job(context) -> None:
                 _dq_prev      = _dq.get("prev_line")
                 _dq_is_reent  = _dq.get("is_reentry", False)
                 _dq_is_new    = (_dq_path == "new" or _dq_is_reent)
-                _dq_is_t1     = (_dq_sport or "").upper() not in _TIER2_SPORTS
+                _dq_is_t1     = not _is_tier2_sport(_dq_sport)
 
-                # ── Per-tier delivery cap (8 Tier 1 / 2 Tier 2 per window) ────
-                if _dq_is_t1 and _dq_t1_delivered >= _DQ_TIER1_CAP:
-                    _n_dq_deferred += 1
-                    _dq_deferred_log.append(
-                        f"{_dq_player}/{_dq_st} [tier={_dq.get('tier','?')}"
-                        f" t1-cap={_DQ_TIER1_CAP}]: Tier-1 window full"
-                    )
-                    continue
-                if not _dq_is_t1 and _dq_t2_delivered >= _DQ_TIER2_CAP:
-                    _n_dq_deferred += 1
-                    _dq_deferred_log.append(
-                        f"{_dq_player}/{_dq_st} [tier={_dq.get('tier','?')}"
-                        f" t2-cap={_DQ_TIER2_CAP}]: Tier-2 window full"
-                    )
-                    continue
-
-                # ── MQ backstop (delivery loop) ───────────────────────────────
-                # Belt-and-suspenders: any candidate that slipped through
-                # the collection-point gate is stopped here before Telegram.
+                # ── Tier delivery gate backstop ───────────────────────────────
+                # Belt-and-suspenders: any candidate that slipped through the
+                # collection-point gate is caught here before Telegram.
+                # Tier 1: direction only.  Tier 2: BQ ≥ 75 AND MQ ≥ 75.
                 _dq_mq_score  = float(getattr(_dq_mq, "score", 0) if _dq_mq else _dq.get("mq", 0))
+                _dq_bq_score  = float(_dq.get("bq", 0))
                 _dq_direction = _dq_dec.recommendation if _dq_dec else ""
-                if not _mq_passes_delivery_gate(_dq_mq_score, _dq_direction):
+                if not _tier_delivery_gate(_dq_sport, _dq_direction, _dq_bq_score, _dq_mq_score):
                     _n_dq_deferred += 1
                     _dq_deferred_log.append(
                         f"{_dq_player}/{_dq_st}"
-                        f" [mq={_dq_mq_score:.0f} dir={_dq_direction}]: MQ gate (backstop)"
+                        f" [sport={_dq_sport} bq={_dq_bq_score:.0f}"
+                        f" mq={_dq_mq_score:.0f} dir={_dq_direction}]: tier gate (backstop)"
                     )
                     continue
 
@@ -2711,24 +2720,17 @@ async def underdog_job(context) -> None:
                     _mfa_key = f"{_dq_player}__{_dq_st}"
                     if _mfa_key not in _MARKET_FIRST_ALERT:
                         _MARKET_FIRST_ALERT[_mfa_key] = now
-                    # Per-tier slot accounting (8 Tier 1 / 2 Tier 2 per window)
-                    if _dq_is_t1:
-                        _dq_t1_delivered += 1
-                    else:
-                        _dq_t2_delivered += 1
                     logger.info(
                         "🎯 PICK CREATED | Player: %s | Sport: %s | Market: %s"
                         " | Line: %.1f | Direction: %s | Tier: %s | Confidence: %d"
-                        " | Quality: %s | Telegram: SENT | Path: %s"
-                        " | SlotT1: %d/%d  SlotT2: %d/%d",
+                        " | Quality: %s | Telegram: SENT | Path: %s | T1: %s",
                         _dq_player, _dq_sport, _dq_st, _dq_line_val,
                         _dq_dec.recommendation if _dq_dec else "UNKNOWN",
                         _dq_score.tier if _dq_score else "UNKNOWN",
                         _dq_score.total if _dq_score else 0,
                         getattr(_dq_score, "bet_quality_label", "—") if _dq_score else "—",
                         _dq_path,
-                        _dq_t1_delivered, _DQ_TIER1_CAP,
-                        _dq_t2_delivered, _DQ_TIER2_CAP,
+                        "yes" if _dq_is_t1 else "no",
                     )
                 else:
                     _n_dq_deferred += 1
@@ -3465,14 +3467,15 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             _sr_mq = _sr_cmq(_sr_stat, _sr_line, _sr_score)
             _sr_mp = _sr_dmp(None, _sr_hist)
 
-            # ── MQ hard gate [stable-refresh] ────────────────────────────────
+            # ── Tier delivery gate [stable-refresh] ──────────────────────────
             _sr_mq_score = float(getattr(_sr_mq, "score", 0) if _sr_mq else 0)
-            if not _mq_passes_delivery_gate(_sr_mq_score, _sr_dec.recommendation):
+            _sr_bq_score = float(_sr_score.total if _sr_score else 0)
+            if not _tier_delivery_gate(_sr_sport, _sr_dec.recommendation, _sr_bq_score, _sr_mq_score):
                 sr_rejected  += 1
                 sr_qualified -= 1
                 logger.debug(
-                    "UD mq_gate [sr]: %s | %s | mq=%.0f dir=%s — blocked",
-                    _sr_player, _sr_stat, _sr_mq_score, _sr_dec.recommendation,
+                    "UD tier_gate [sr]: %s | %s | sport=%s bq=%.0f mq=%.0f dir=%s — blocked",
+                    _sr_player, _sr_stat, _sr_sport, _sr_bq_score, _sr_mq_score, _sr_dec.recommendation,
                 )
                 continue
 
@@ -3711,13 +3714,16 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     # Promote — deliver alert through normal path
                     _wl_mq       = _sr_cmq(_wl_stat, _wl_cur_line, _wl_score)
                     _wl_mp       = _sr_dmp(None, _wl_hist)
-                    # ── MQ hard gate [watchlist] ─────────────────────────────
+                    # ── Tier delivery gate [watchlist] ───────────────────────
                     _wl_mq_score = float(getattr(_wl_mq, "score", 0) if _wl_mq else 0)
-                    _wl_mq_ok    = _mq_passes_delivery_gate(_wl_mq_score, _wl_dec.recommendation)
+                    _wl_bq_score = float(_wl_score.total if _wl_score else 0)
+                    _wl_mq_ok    = _tier_delivery_gate(
+                        _wl_sport, _wl_dec.recommendation, _wl_bq_score, _wl_mq_score,
+                    )
                     if not _wl_mq_ok:
                         logger.debug(
-                            "UD mq_gate [watchlist]: %s | %s | mq=%.0f dir=%s — blocked",
-                            _wl_player, _wl_stat, _wl_mq_score, _wl_dec.recommendation,
+                            "UD tier_gate [watchlist]: %s | %s | sport=%s bq=%.0f mq=%.0f dir=%s — blocked",
+                            _wl_player, _wl_stat, _wl_sport, _wl_bq_score, _wl_mq_score, _wl_dec.recommendation,
                         )
                     if _wl_mq_ok:
                      _wl_delivery = AlertDelivery(db, bot, chat_ids)
@@ -4098,14 +4104,17 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 if _fpr_qualifies and chat_ids:
                     _fpr_mq       = _fpr_cmq(_fpr_stat, _fpr_line, _fpr_score)
                     _fpr_mp       = _fpr_dmp(None, _fpr_hist)
-                    # ── MQ hard gate [full-pool-rescan] ──────────────────────
+                    # ── Tier delivery gate [full-pool-rescan] ────────────────
                     _fpr_mq_score = float(getattr(_fpr_mq, "score", 0) if _fpr_mq else 0)
-                    _fpr_mq_ok    = _mq_passes_delivery_gate(_fpr_mq_score, _fpr_dec.recommendation)
+                    _fpr_bq_score = float(_fpr_score.total if _fpr_score else 0)
+                    _fpr_mq_ok    = _tier_delivery_gate(
+                        _fpr_sport, _fpr_dec.recommendation, _fpr_bq_score, _fpr_mq_score,
+                    )
                     if not _fpr_mq_ok:
                         fpr_rejected += 1
                         logger.debug(
-                            "UD mq_gate [fpr]: %s | %s | mq=%.0f dir=%s — blocked",
-                            _fpr_player, _fpr_stat, _fpr_mq_score, _fpr_dec.recommendation,
+                            "UD tier_gate [fpr]: %s | %s | sport=%s bq=%.0f mq=%.0f dir=%s — blocked",
+                            _fpr_player, _fpr_stat, _fpr_sport, _fpr_bq_score, _fpr_mq_score, _fpr_dec.recommendation,
                         )
                     if _fpr_mq_ok:
                      _fpr_delivery = AlertDelivery(db, bot, chat_ids)

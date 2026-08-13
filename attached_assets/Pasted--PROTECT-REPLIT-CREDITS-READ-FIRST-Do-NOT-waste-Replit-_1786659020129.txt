@@ -1,0 +1,609 @@
+🚨 PROTECT REPLIT CREDITS — READ FIRST
+
+Do NOT waste Replit credits on broad exploration, unrelated refactors, or unnecessary rewrites.
+
+This is a targeted delivery-rule change. Inspect the existing implementation, make the minimum required edits, run focused tests, and report exactly what changed.
+
+DO NOT RESTART THE BOT UNTIL THE CHANGES ARE TESTED AND REPORTED.
+
+⸻
+
+🎯 FINAL SPORT TIER SYSTEM
+
+🔴 TIER 1 — PRIMARY / HIGHEST PRIORITY
+
+EXACT DEFINITION
+
+Tier 1 = EVERY supported sport EXCEPT NBA, MLB, and NFL.
+
+This includes:
+
+* WNBA
+* NHL
+* Tennis
+* Soccer / FIFA
+* CS2 / Counter-Strike
+* Dota 2
+* League of Legends / LoL
+* VALORANT / VAL
+* MMA
+* Badminton
+* Table Tennis
+* Racing
+* CFB
+* CFL
+* KBO
+* NPB
+* and EVERY OTHER SUPPORTED SPORT THAT IS NOT NBA, MLB, OR NFL
+
+Do not interpret Tier 1 as only WNBA, NHL, Tennis, etc.
+
+The exact rule is:
+
+ALL SUPPORTED SPORTS − {NBA, MLB, NFL} = TIER 1
+
+Tier 1 is the primary priority tier.
+
+⸻
+
+🟡 TIER 2 — SECONDARY
+
+EXACT DEFINITION
+
+Tier 2 = ONLY:
+
+* NBA
+* MLB
+* NFL
+
+No other sport is Tier 2.
+
+Therefore:
+
+* NBA → Tier 2
+* MLB → Tier 2
+* NFL → Tier 2
+* WNBA → Tier 1
+* NHL → Tier 1
+* Tennis → Tier 1
+* Soccer/FIFA → Tier 1
+* CS2 → Tier 1
+* Dota 2 → Tier 1
+* LoL → Tier 1
+* VAL → Tier 1
+* MMA → Tier 1
+* Badminton → Tier 1
+* Table Tennis → Tier 1
+* Racing → Tier 1
+* CFB → Tier 1
+* CFL → Tier 1
+* KBO → Tier 1
+* NPB → Tier 1
+* Every other supported non-NBA/MLB/NFL sport → Tier 1
+
+⸻
+
+1. ONE CANONICAL SPORT CLASSIFIER
+
+There must be ONE source of truth for the tier classification.
+
+Conceptually:
+
+if sport in {"NBA", "MLB", "NFL"}:
+    tier = TIER_2
+else:
+    tier = TIER_1
+
+Every module must use this same definition.
+
+This applies to:
+
+* scoring
+* ranking
+* delivery queue
+* Telegram
+* /picks
+* /slip
+* stable refresh
+* watchlist
+* FPR
+* full-pool rescan
+* funnel reporting
+* future delivery paths
+
+⸻
+
+2. TIER 1 DELIVERY RULE
+
+🔴 TIER 1 = EVERY SUPPORTED SPORT EXCEPT NBA, MLB, NFL
+
+For Tier 1 sports, everything is allowed as long as the prop has:
+
+1. Valid direction
+
+The model must have a real:
+
+* OVER
+* or UNDER
+
+direction.
+
+No direction = ❌ no Telegram.
+
+2. Strong analysis
+
+The existing analysis/qualification system must determine that the prop is a legitimate actionable pick.
+
+Do NOT impose a separate numerical BQ or MQ hard gate on Tier 1.
+
+IMPORTANT
+
+For Tier 1:
+
+BQ and MQ are NOT standalone blockers.
+
+A Tier 1 prop can still be sent if:
+
+* BQ is below 75
+* MQ is below 75
+* MQ is below 40
+* MQ is 40–69
+* BQ and MQ are uneven
+
+as long as the existing analysis says the pick is strong/actionable and it has a valid OVER/UNDER direction.
+
+Do NOT assume that a weaker individual metric automatically means the overall pick is bad.
+
+A strong Tier 1 UNDER can have lower MQ.
+
+A strong Tier 1 OVER can have lower BQ.
+
+The overall analysis matters.
+
+⸻
+
+3. TIER 2 DELIVERY RULE
+
+🟡 TIER 2 = ONLY NBA, MLB, NFL
+
+NBA, MLB, and NFL remain fully monitored.
+
+They must continue to be:
+
+* fetched
+* scanned
+* scored
+* rescored
+* historically tracked
+* stored
+* available internally
+
+But Telegram delivery is stricter.
+
+Tier 2 Telegram requirements:
+
+BQ ≥ 75
+
+AND
+
+MQ ≥ 75
+
+AND
+
+Valid OVER/UNDER direction
+
+All three are required.
+
+If BQ is 74 → ❌ BLOCK
+
+If MQ is 74 → ❌ BLOCK
+
+If there is no direction → ❌ BLOCK
+
+If BQ = 75 and MQ = 75 → ✅ ALLOW
+
+⸻
+
+4. EXAMPLES
+
+🔴 TIER 1 EXAMPLES
+
+Remember:
+
+Tier 1 = every supported sport except NBA, MLB, NFL.
+
+WNBA
+
+Direction: OVER
+BQ: 68
+MQ: 42
+Analysis: Strong/actionable
+
+→ ✅ ALLOW
+
+Tennis
+
+Direction: UNDER
+BQ: 61
+MQ: 38
+Analysis: Strong/actionable
+
+→ ✅ ALLOW
+
+CS2
+
+Direction: OVER
+BQ: 72
+MQ: 55
+Analysis: Strong/actionable
+
+→ ✅ ALLOW
+
+Dota 2
+
+Direction: UNDER
+BQ: 50
+MQ: 31
+Analysis: Strong/actionable
+
+→ ✅ ALLOW
+
+NHL
+
+No direction
+BQ: 90
+MQ: 90
+
+→ ❌ BLOCK — no direction
+
+The point is that Tier 1 is analysis-first, not BQ/MQ-number-first.
+
+⸻
+
+5. TIER 2 EXAMPLES
+
+Remember:
+
+Tier 2 = ONLY NBA, MLB, NFL.
+
+MLB
+
+Direction: OVER
+BQ: 80
+MQ: 80
+
+→ ✅ ALLOW
+
+MLB
+
+Direction: UNDER
+BQ: 90
+MQ: 74
+
+→ ❌ BLOCK — MQ below 75
+
+NFL
+
+Direction: OVER
+BQ: 74
+MQ: 90
+
+→ ❌ BLOCK — BQ below 75
+
+NBA
+
+Direction: UNDER
+BQ: 75
+MQ: 75
+
+→ ✅ ALLOW
+
+NFL
+
+Direction: OVER
+BQ: 95
+MQ: 70
+
+→ ❌ BLOCK
+
+⸻
+
+6. TIER 1 PRIORITY
+
+🔴 TIER 1 = EVERY SUPPORTED SPORT EXCEPT NBA/MLB/NFL
+
+Tier 1 is the primary priority.
+
+🟡 TIER 2 = ONLY NBA/MLB/NFL
+
+Tier 2 is secondary.
+
+When eligible candidates compete for Telegram capacity:
+
+Tier 1 > Tier 2
+
+Rank Tier 1 candidates ahead of Tier 2 candidates.
+
+Do not allow a flood of NBA/MLB/NFL candidates to crowd out otherwise-qualified Tier 1 sports.
+
+⸻
+
+7. REMOVE THE 8/2 SYSTEM COMPLETELY
+
+The previous:
+
+8 Tier 1 + 2 Tier 2
+
+system is no longer wanted.
+
+Remove/revert all 8/2-specific logic.
+
+Remove/revert:
+
+* TG_TIER1_MAX_PER_WINDOW
+* TG_TIER2_MAX_PER_WINDOW
+* _DQ_TIER1_CAP
+* _DQ_TIER2_CAP
+* _dq_t1_delivered
+* _dq_t2_delivered
+* Tier-specific reserved slots
+* Tier-specific delivery quotas
+* Any hard 8/2 enforcement
+
+There must be NO fixed Tier 1/Tier 2 delivery ratio.
+
+⸻
+
+8. KEEP THE TOTAL TELEGRAM RATE LIMIT
+
+Keep:
+
+10 total Telegram alerts per 5-minute window.
+
+This is the overall limit.
+
+It is NOT:
+
+* 8 Tier 1 + 2 Tier 2
+* 5 Tier 1 + 5 Tier 2
+* any other fixed ratio
+
+It is simply:
+
+10 total eligible alerts / 5 minutes.
+
+Tier 1 priority determines which eligible candidates get preference when the window is full.
+
+⸻
+
+9. MARKET QUALITY
+
+Do NOT rewrite the MQ calculation itself.
+
+For Tier 2:
+
+MQ ≥75 = allowed
+
+MQ <75 = blocked
+
+For Tier 1:
+
+MQ is informational/ranking data, NOT a hard blocker.
+
+Do not globally apply the old 40–69 MQ dead-zone rule to Tier 1.
+
+A Tier 1 prop with MQ 32 can still be a valid strong UNDER.
+
+A Tier 1 prop with MQ 55 can still be a valid strong OVER.
+
+The existing analysis/qualification determines whether it is actionable.
+
+⸻
+
+10. BQ
+
+Do NOT rewrite BQ calculation.
+
+For Tier 1:
+
+BQ is informational/ranking data, NOT a hard blocker.
+
+For Tier 2:
+
+BQ ≥75 is mandatory for Telegram.
+
+⸻
+
+11. CONTINUOUS MONITORING
+
+Do NOT stop scanning Tier 2.
+
+Do NOT remove Tier 2 from the data pipeline.
+
+Continue monitoring:
+
+Tier 1
+
+EVERY supported sport except NBA, MLB, NFL
+
+and:
+
+Tier 2
+
+ONLY NBA, MLB, NFL
+
+All props should continue being:
+
+* fetched
+* monitored
+* rescored
+* stored
+* historically tracked
+
+The stricter Tier 2 rules apply to Telegram delivery, not internal monitoring.
+
+⸻
+
+12. ALL TELEGRAM DELIVERY PATHS
+
+The correct tier-specific delivery rules must apply to every Telegram path:
+
+* new-prop
+* line-change
+* standing
+* ranked delivery queue
+* stable-refresh
+* watchlist
+* FPR
+* full-pool rescan
+* direct deliver_underdog() calls
+* any future Telegram delivery path
+
+There must be no bypass.
+
+Tier 1 paths
+
+Tier 1 = every supported sport except NBA/MLB/NFL
+
+Require:
+
+* valid OVER/UNDER direction
+* strong/actionable existing analysis
+
+No standalone BQ/MQ numerical blocker.
+
+Tier 2 paths
+
+Tier 2 = ONLY NBA/MLB/NFL
+
+Require:
+
+* valid OVER/UNDER direction
+* BQ ≥75
+* MQ ≥75
+
+⸻
+
+13. /PICKS AND /SLIP
+
+Do not delete or stop storing lower-quality props.
+
+Internal data should continue to exist.
+
+Apply the appropriate tier rules consistently when determining actionable/display eligibility.
+
+Do not accidentally apply Tier 2’s BQ/MQ thresholds to Tier 1.
+
+⸻
+
+14. DO NOT CHANGE THE CORE SCORING MODELS
+
+Do NOT rewrite:
+
+* BQ calculation
+* MQ calculation
+* confidence calculation
+* EV calculation
+* historical scoring
+* player statistics
+* market calculations
+
+This is a delivery eligibility and prioritization change, not a scoring-model rewrite.
+
+⸻
+
+15. FOCUSED TESTS
+
+Do NOT run the entire 4,000+ test suite unless specifically requested.
+
+Run focused tests covering:
+
+Sport classification
+
+1. NBA → Tier 2
+2. MLB → Tier 2
+3. NFL → Tier 2
+4. WNBA → Tier 1
+5. NHL → Tier 1
+6. Tennis → Tier 1
+7. Soccer/FIFA → Tier 1
+8. CS2 → Tier 1
+9. Dota 2 → Tier 1
+10. LoL → Tier 1
+11. VAL → Tier 1
+12. MMA → Tier 1
+13. Badminton → Tier 1
+14. Table Tennis → Tier 1
+15. Racing → Tier 1
+16. CFB → Tier 1
+17. CFL → Tier 1
+18. KBO → Tier 1
+19. NPB → Tier 1
+20. Any supported sport other than NBA/MLB/NFL → Tier 1
+
+Tier 1 delivery
+
+21. Tier 1 with valid OVER + strong analysis → allowed
+22. Tier 1 with valid UNDER + strong analysis → allowed
+23. Tier 1 BQ below 75 does NOT automatically block
+24. Tier 1 MQ below 75 does NOT automatically block
+25. Tier 1 MQ below 40 does NOT automatically block
+26. Tier 1 MQ 40–69 does NOT automatically block
+27. Tier 1 with no direction → blocked
+28. Tier 1 without strong/actionable analysis → blocked
+
+Tier 2 delivery
+
+29. NBA BQ 75 + MQ 75 + direction → allowed
+30. MLB BQ 75 + MQ 75 + direction → allowed
+31. NFL BQ 75 + MQ 75 + direction → allowed
+32. BQ 74 → blocked
+33. MQ 74 → blocked
+34. Missing direction → blocked
+
+Priority
+
+35. Tier 1 ranks ahead of Tier 2.
+
+Rate limit
+
+36. 10 total Telegram alerts / 5 minutes remains.
+37. No 8/2 allocation remains.
+38. No Tier 1 slot counter remains.
+39. No Tier 2 slot counter remains.
+
+Delivery paths
+
+40. New-prop follows tier rules.
+41. Line-change follows tier rules.
+42. Standing follows tier rules.
+43. Stable-refresh follows tier rules.
+44. Watchlist follows tier rules.
+45. FPR follows tier rules.
+46. Full-pool rescan follows tier rules.
+47. Direct Telegram delivery follows tier rules.
+
+⸻
+
+16. REQUIRED REPORT
+
+After making the changes, report:
+
+* exact files changed
+* exact functions changed
+* canonical sport-tier classifier location
+* confirmation that Tier 1 = EVERY supported sport except NBA/MLB/NFL
+* confirmation that Tier 2 = ONLY NBA/MLB/NFL
+* confirmation Tier 1 is primary priority
+* confirmation Tier 1 requires direction + strong/actionable analysis
+* confirmation Tier 1 has NO standalone BQ/MQ numerical blocker
+* confirmation Tier 2 requires BQ ≥75
+* confirmation Tier 2 requires MQ ≥75
+* confirmation 8/2 is completely removed
+* confirmation 10 total Telegram alerts / 5 minutes remains
+* focused test results
+* whether a restart is required
+
+DO NOT RESTART THE BOT YET.
+
+Make the code changes, run the focused tests, and report back first.
