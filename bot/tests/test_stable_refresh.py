@@ -51,6 +51,8 @@ def _make_snap(
 
 
 def _make_score(total: int = 72, tier: str = "A", stars: int = 4) -> MagicMock:
+    from engine.ud_scoring import PropDifficultyClass
+
     score = MagicMock()
     score.total        = total
     score.tier         = tier
@@ -61,6 +63,7 @@ def _make_score(total: int = 72, tier: str = "A", stars: int = 4) -> MagicMock:
     score.avg_vs_line  = 12
     score.consistency  = 10
     score.stability    = 10
+    score.difficulty   = PropDifficultyClass.STANDARD
     score.variance_penalty = 0
     score.bet_quality_label = "STANDARD BET"
     return score

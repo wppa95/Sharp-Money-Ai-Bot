@@ -149,8 +149,8 @@ async def _run_job(snapshots, db, *, deliver_result=None, hit_rates=None):
 
 @pytest.mark.asyncio
 async def test_low_line_new_prop_triggers_alert(caplog):
-    """A new prop with 0.5 line + supporting history + real OVER pick triggers an immediate alert."""
-    snaps = [_snap("Aaron Judge", "Home Runs", 0.5)]
+    """A new high-floor 0.5-line prop with supporting history + real OVER pick triggers an immediate alert."""
+    snaps = [_snap("Jalen Brunson", "Points", 0.5)]
     db = _make_db(known_keys=set(), prop_history=_fake_history(6))
 
     with caplog.at_level(logging.INFO, logger="market_engine"):
@@ -275,7 +275,7 @@ async def test_removal_never_treated_as_new():
 async def test_new_prop_outcome_stored_as_new_prop_sent(caplog):
     """When a new-prop alert is sent, alert_outcome='new_prop_sent' in the DB record."""
     from alerts import DeliveryResult
-    snaps = [_snap("Aaron Judge", "Home Runs", 0.5)]
+    snaps = [_snap("Jalen Brunson", "Points", 0.5)]
     db = _make_db(known_keys=set(), prop_history=_fake_history(6))
 
     sent_result = DeliveryResult(sent=True, recipients_sent=1)
@@ -330,13 +330,13 @@ async def test_summary_line_includes_new_counts(caplog):
 async def test_new_prop_sent_increments_new_sent_counter(caplog):
     """new_sent counter equals number of immediate new-prop alerts delivered.
 
-    Both props are priority stats at 0.5 AND have sufficient history → both
+    Both props are priority high-floor stats at 0.5 AND have sufficient history → both
     trigger immediate alerts.
     """
-    # "Home Runs" and "Strikeouts" are both in UD_PRIORITY_STAT_CATEGORIES
+    # "Points" and "Rebounds" are both in UD_PRIORITY_STAT_CATEGORIES
     snaps = [
-        _snap("Player A", "Strikeouts", 0.5),
-        _snap("Player B", "Home Runs",  0.5),
+        _snap("Player A", "Points",   0.5),
+        _snap("Player B", "Rebounds", 0.5),
     ]
     # Provide history so validation gate passes for both props
     db = _make_db(known_keys=set(), prop_history=_fake_history(6))
@@ -458,8 +458,8 @@ async def test_priority_stat_high_line_goes_to_digest_not_immediate():
 
 @pytest.mark.asyncio
 async def test_priority_stat_at_half_line_triggers_immediate_alert():
-    """A priority stat AT 0.5 line + history + real OVER pick triggers an immediate alert."""
-    snaps = [_snap("Aaron Judge", "Home Runs", 0.5)]
+    """A priority high-floor stat at 0.5 line + history + real OVER pick triggers an immediate alert."""
+    snaps = [_snap("Jalen Brunson", "Points", 0.5)]
     db = _make_db(known_keys=set(), prop_history=_fake_history(6))
 
     from alerts import DeliveryResult
