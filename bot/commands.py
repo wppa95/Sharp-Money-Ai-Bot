@@ -1533,6 +1533,18 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 plh.player_name, plh.stat_type,
             )
             continue
+        # MQ hard gate — exclude dead-zone (40–69) props and sub-40 OVER props.
+        # market_quality_score is stored by the scan loop and is NULL for props not yet rescored.
+        # NULL passes through (conservative: don't hide data we can't verify).
+        _plh_mq = getattr(plh, "market_quality_score", None)
+        if _plh_mq is not None:
+            from market_engine import _mq_passes_delivery_gate as _picks_mq_gate
+            if not _picks_mq_gate(float(_plh_mq), _eff_rec):
+                logger.debug(
+                    "cmd_picks: skipping %s/%s — MQ gate (mq=%d dir=%s)",
+                    plh.player_name, plh.stat_type, _plh_mq, _eff_rec,
+                )
+                continue
         # Note: no secondary confidence gate here.  The DB query already requires
         # score_tier in ("S","A") — all props reaching this loop have been scored
         # above the A-tier confidence floor by the engine.  A secondary gate using
@@ -2171,6 +2183,29 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 _cand.player_name, _cand.stat_type,
             )
             continue
+        # MQ hard gate — same standard as Telegram delivery.
+        _slip_mq = getattr(_cand, "market_quality_score", None) or getattr(
+            getattr(_cand, "_plh", None), "market_quality_score", None
+        )
+        if _slip_mq is None:
+            # PropPickAdapter wraps PropLineHistory — look through adapter to PLH record
+            _slip_plh = next(
+                (plh for plh in ud_props if
+                 plh.player_name == _cand.player_name
+                 and plh.stat_type == _cand.stat_type),
+                None,
+            )
+            if _slip_plh is not None:
+                _slip_mq = getattr(_slip_plh, "market_quality_score", None)
+        if _slip_mq is not None:
+            from market_engine import _mq_passes_delivery_gate as _slip_mq_gate
+            if not _slip_mq_gate(float(_slip_mq), _cand.best_side or ""):
+                _slip_ineligible += 1
+                logger.debug(
+                    "cmd_slip: excluding %s/%s — MQ gate (mq=%d dir=%s)",
+                    _cand.player_name, _cand.stat_type, _slip_mq, _cand.best_side,
+                )
+                continue
         _candidates_eligible.append(_cand)
     if _slip_ineligible:
         logger.info(

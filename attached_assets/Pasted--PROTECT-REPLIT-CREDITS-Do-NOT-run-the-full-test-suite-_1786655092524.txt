@@ -1,0 +1,205 @@
+🚨 PROTECT REPLIT CREDITS
+
+Do NOT run the full test suite. Do NOT touch GitHub. Do NOT make unrelated changes.
+
+We have identified two explicit remaining tasks that need to be handled as part of the same fix:
+
+1. Prevent MQ 40–69 props from appearing in /picks and /slip as actionable
+2. Stop MQ 40–69 props from reaching Telegram through stable-refresh, watchlist, and FPR paths
+
+These must use the SAME existing MQ gate. Do not create competing MQ logic.
+
+CURRENT FUNNEL EVIDENCE
+
+Funnel 1 currently reports:
+
+* 54,075 active props
+* 9,295 scored
+* 27 qualified
+* 4 delivered to Telegram
+
+Stable Refresh:
+
+* 658 rescored
+* 4 qualified
+* 4 sent
+* 1 watchlist
+
+However, the actual Telegram feed has produced multiple MLB/NFL notifications, including repeated MQ 47 props.
+
+Examples:
+
+* MLB Total Bases — MQ 47
+* MLB Earned Runs Allowed — MQ 47
+
+These should never have been actionable.
+
+MQ HARD RULE
+
+Use the existing _mq_passes_delivery_gate() helper everywhere.
+
+Required behavior:
+
+OVER
+
+* MQ 70–100 → allowed
+* MQ <70 → blocked
+
+UNDER
+
+* MQ 0–30 → allowed
+* MQ 31–39 → allowed for UNDER evaluation
+* MQ 40–69 → blocked
+
+Therefore:
+
+MQ 40–69 = NO ACTIONABLE BET
+
+MQ 47 must NOT:
+
+* appear as actionable in /picks
+* appear as actionable in /slip
+* reach Telegram
+* consume an 8/2 delivery slot
+* be labeled STRONG BET
+* be labeled ACTIONABLE
+
+Bet Quality must NOT override MQ.
+
+REMAINING DIRECT PATHS
+
+The MQ gate must protect ALL paths capable of producing a user-facing pick:
+
+* new-prop
+* line-change
+* standing
+* stable-refresh
+* watchlist
+* FPR
+* any direct deliver_underdog() call
+* any direct Telegram send path
+
+Do a complete search for these paths before modifying them.
+
+FUNNEL 1 DISCREPANCY
+
+The funnel says only 4 delivered to Telegram, while the user is receiving substantially more notifications.
+
+Determine why.
+
+For every Telegram-capable path, identify:
+
+* whether it increments the Telegram delivery counter
+* whether it uses the ranked delivery queue
+* whether it uses the MQ gate
+* whether it uses the 8/2 cap
+* whether it can send directly
+
+The actual user-facing notification count must agree with the delivery accounting.
+
+TIER DISTRIBUTION
+
+After qualification and MQ gating:
+
+TIER 1 — PRIMARY
+
+* WNBA
+* NHL
+* Soccer
+* Tennis
+* CS2
+* Dota 2
+* League of Legends
+* Table Tennis
+* Badminton
+* KBO
+* NPB
+* any other supported sport except NBA/MLB/NFL
+
+TIER 2 — SECONDARY
+
+* NBA
+* MLB
+* NFL
+
+Maximum per 5-minute delivery window:
+
+8 Tier 1
+
+2 Tier 2
+
+10 total
+
+These are MAXIMUMS, not quotas.
+
+Never fill empty slots with weak candidates.
+
+/picks AND /slip
+
+The same actionable qualification rules must apply to /picks and /slip.
+
+MQ 40–69 candidates may exist internally for monitoring/research if needed, but they must NOT be presented as actionable bets.
+
+A candidate failing the MQ gate must be clearly excluded from the actionable pool.
+
+REQUIRED PIPELINE
+
+The intended order is:
+
+Candidate evaluation
+
+→ MQ gate
+
+→ direction/BQ/confidence/other qualification
+
+→ deduplication
+
+→ Tier 1/Tier 2 classification
+
+→ ranking
+
+→ 8/2 delivery allocation
+
+→ Telegram
+
+And /picks and /slip must use the same actionable qualification standard.
+
+No downstream path may bypass the MQ gate.
+
+FOCUSED TESTS ONLY
+
+Add/run focused regression tests proving:
+
+1. MQ 47 OVER blocked
+2. MQ 47 UNDER blocked
+3. MQ 69 blocked
+4. MQ 70 allowed
+5. MQ 39 UNDER allowed
+6. MQ 47 excluded from /picks
+7. MQ 47 excluded from /slip
+8. MQ 47 blocked by stable-refresh
+9. MQ 47 blocked by watchlist
+10. MQ 47 blocked by FPR
+11. Every direct Telegram path respects MQ
+12. Tier 2 cannot exceed 2 / 5 minutes
+13. Tier 1 cannot exceed 8 / 5 minutes
+14. Total cannot exceed 10 / 5 minutes
+15. Empty slots remain empty
+16. Delivery accounting matches actual Telegram sends
+
+Do NOT run the full test suite unless one of these focused tests requires it.
+
+FINAL REPORT
+
+Tell me:
+
+* exact bypass(es) found
+* exact files/functions changed
+* how /picks and /slip were fixed
+* how stable-refresh/watchlist/FPR were fixed
+* whether every Telegram path now uses the same MQ gate
+* why Funnel 1 showed 4 deliveries while more notifications were received
+* focused test count/result
+* whether one restart is required
+
+Do not restart until the fix is confirmed.

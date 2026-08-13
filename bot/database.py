@@ -272,8 +272,11 @@ class PropLineHistory(Base):
     # NULL = not yet scored.  S / A / B = qualifying.  PASS = excluded from picks.
     score_tier         = Column(String(8), nullable=True)
     # Bet direction synced from UnderdogSnapshotRecord — OVER | UNDER | PASS | NULL
-    bet_recommendation = Column(String(8), nullable=True)
-    bet_confidence     = Column(Integer,   nullable=True)
+    bet_recommendation   = Column(String(8), nullable=True)
+    bet_confidence       = Column(Integer,   nullable=True)
+    # Market quality score (0–100) stored at scoring time; NULL = not yet computed.
+    # Used to filter dead-zone (MQ 40–69) props from /picks and /slip.
+    market_quality_score = Column(Integer,   nullable=True)
 
 
 class AlertCLVSeed(Base):
@@ -626,6 +629,7 @@ class Database:
         await self._migrate_prop_opportunity_log_v2()
         await self._migrate_prop_opportunity_log_v3()
         await self._migrate_prop_opportunity_log_v4()
+        await self._migrate_prop_line_history_v4()
         # player_risk_records is created by create_all (new table); no column migration needed
         logger.info("Database initialised at %s", self._url)
 
@@ -1409,6 +1413,49 @@ class Database:
                     pass  # column already exists — safe to ignore
 
     # ── Provider-agnostic prop line history ──────────────────────────────────
+
+    async def update_ud_props_mq_scores_bulk(
+        self,
+        mq_map: "dict[tuple[str, str, str], int]",
+    ) -> None:
+        """
+        Update market_quality_score on the most-recent PropLineHistory row for each
+        (player_name, sport, stat_type) entry in mq_map.
+
+        Called once per scan cycle after computing MQ for all scored props.
+        Non-fatal — write failures are logged and silently skipped.
+        """
+        if not mq_map:
+            return
+        try:
+            async with self.session() as s:
+                for (pn, sp, st), mq_score in mq_map.items():
+                    try:
+                        result = await s.execute(
+                            select(func.max(PropLineHistory.id))
+                            .where(
+                                PropLineHistory.provider    == "Underdog",
+                                PropLineHistory.player_name == pn,
+                                PropLineHistory.sport       == sp,
+                                PropLineHistory.stat_type   == st,
+                                PropLineHistory.removed.isnot(True),
+                            )
+                        )
+                        row_id = result.scalar_one_or_none()
+                        if row_id is not None:
+                            await s.execute(
+                                sa_update(PropLineHistory)
+                                .where(PropLineHistory.id == row_id)
+                                .values(market_quality_score=mq_score)
+                            )
+                    except Exception as _row_exc:
+                        logger.debug(
+                            "update_ud_props_mq_scores_bulk: %s/%s/%s error: %s",
+                            pn, sp, st, _row_exc,
+                        )
+                await s.commit()
+        except Exception as _bulk_exc:
+            logger.debug("update_ud_props_mq_scores_bulk: session error: %s", _bulk_exc)
 
     async def save_prop_line_history(self, record: "PropLineHistory") -> "PropLineHistory":
         """Store one normalized PlayerProp snapshot from any provider."""
@@ -2731,6 +2778,17 @@ class Database:
                     "ALTER TABLE prop_line_history ADD COLUMN score_tier TEXT"
                 ))
                 logger.info("_migrate_prop_line_history_v3: added score_tier column")
+            except Exception:
+                pass  # already exists
+
+    async def _migrate_prop_line_history_v4(self) -> None:
+        """Add market_quality_score column to prop_line_history (idempotent)."""
+        async with self._engine.begin() as conn:
+            try:
+                await conn.execute(text(
+                    "ALTER TABLE prop_line_history ADD COLUMN market_quality_score INTEGER"
+                ))
+                logger.info("_migrate_prop_line_history_v4: added market_quality_score column")
             except Exception:
                 pass  # already exists
 

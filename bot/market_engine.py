@@ -1301,6 +1301,10 @@ async def underdog_job(context) -> None:
     # priority order after the standing scan finishes.  Ranked delivery ensures the
     # best picks get rate-limit slots first when more qualify than the window allows.
     _delivery_queue:     list[dict]                 = []
+    # Market quality scores for every scored prop — bulk-written to PropLineHistory at
+    # end of scan cycle so /picks and /slip can gate out dead-zone (MQ 40–69) props.
+    # Key: (player, sport, stat_type) → mq_score int (0–100).
+    _plh_mq_scores:      dict                       = {}
     # Per-sport pipeline stage counters — emitted in debug summary (#7 diagnostics)
     _sport_raw:           dict[str, int] = {}  # daily props: non-removed, non-futures
     _sport_futures:       dict[str, int] = {}  # season-long/futures props (tracked, not scored)
@@ -1404,6 +1408,7 @@ async def underdog_job(context) -> None:
                 )
                 market_quality  = compute_market_quality(stat_type, line_val, score)
                 market_pressure = detect_market_pressure(None, np_history)
+                _plh_mq_scores[(player, snap.sport or "UNKNOWN", stat_type)] = market_quality.score
                 _processed_keys.add((player, stat_type))
                 # Validation: require min supporting history before any immediate alert.
                 # Props with zero history (first appearance) always go to digest.
@@ -1723,6 +1728,7 @@ async def underdog_job(context) -> None:
                     _lc_magnitude   = abs(snap.line - prev_line) if (snap.line is not None and prev_line is not None) else None
                     market_quality  = compute_market_quality(stat_type, snap.line or 0.0, score)
                     market_pressure = detect_market_pressure(_lc_magnitude, ud_history)
+                    _plh_mq_scores[(player, snap.sport or "UNKNOWN", stat_type)] = market_quality.score
                     # NOTE: _processed_keys is NOT set here for every line-change.
                     # It is only set when should_alert=True (actual alert eligible),
                     # so that qualified props with sub-threshold line movement
@@ -1877,6 +1883,7 @@ async def underdog_job(context) -> None:
                     )
                     market_quality  = compute_market_quality(stat_type, snap.line or 0.0, score)
                     market_pressure = detect_market_pressure(None, ud_history)
+                    _plh_mq_scores[(player, snap.sport or "UNKNOWN", stat_type)] = market_quality.score
                     _processed_keys.add((player, stat_type))
                     validation = validate_player_prop(
                         player_name  = player,
@@ -2981,6 +2988,14 @@ async def underdog_job(context) -> None:
                 # holds freed memory as its own pool, which looks like growth in RSS.
                 gc.collect()
 
+        # ── Bulk MQ score write — update PropLineHistory for /picks and /slip filtering ──
+        # Non-fatal: write failure must never abort the cycle.
+        if _plh_mq_scores and db:
+            try:
+                await db.update_ud_props_mq_scores_bulk(_plh_mq_scores)
+            except Exception as _mq_bulk_exc:
+                logger.debug("underdog_job: mq_scores bulk write failed: %s", _mq_bulk_exc)
+
         # ── Scan cycle log — full pipeline evidence ──────────────────────────────────
         # Non-fatal: a write failure must not abort the cycle or mask real exceptions.
         # Proves that all ~4,600 active props are monitored each poll (not just scored ones).
@@ -3450,6 +3465,17 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             _sr_mq = _sr_cmq(_sr_stat, _sr_line, _sr_score)
             _sr_mp = _sr_dmp(None, _sr_hist)
 
+            # ── MQ hard gate [stable-refresh] ────────────────────────────────
+            _sr_mq_score = float(getattr(_sr_mq, "score", 0) if _sr_mq else 0)
+            if not _mq_passes_delivery_gate(_sr_mq_score, _sr_dec.recommendation):
+                sr_rejected  += 1
+                sr_qualified -= 1
+                logger.debug(
+                    "UD mq_gate [sr]: %s | %s | mq=%.0f dir=%s — blocked",
+                    _sr_player, _sr_stat, _sr_mq_score, _sr_dec.recommendation,
+                )
+                continue
+
             _sr_intel_trace: Optional[dict] = None
             if _sr_hist:
                 try:
@@ -3685,8 +3711,17 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     # Promote — deliver alert through normal path
                     _wl_mq       = _sr_cmq(_wl_stat, _wl_cur_line, _wl_score)
                     _wl_mp       = _sr_dmp(None, _wl_hist)
-                    _wl_delivery = AlertDelivery(db, bot, chat_ids)
-                    _wl_result   = await _wl_delivery.deliver_underdog(
+                    # ── MQ hard gate [watchlist] ─────────────────────────────
+                    _wl_mq_score = float(getattr(_wl_mq, "score", 0) if _wl_mq else 0)
+                    _wl_mq_ok    = _mq_passes_delivery_gate(_wl_mq_score, _wl_dec.recommendation)
+                    if not _wl_mq_ok:
+                        logger.debug(
+                            "UD mq_gate [watchlist]: %s | %s | mq=%.0f dir=%s — blocked",
+                            _wl_player, _wl_stat, _wl_mq_score, _wl_dec.recommendation,
+                        )
+                    if _wl_mq_ok:
+                     _wl_delivery = AlertDelivery(db, bot, chat_ids)
+                     _wl_result   = await _wl_delivery.deliver_underdog(
                         player_name    = _wl_player,
                         team           = _wl_snap.team or "",
                         sport          = _wl_sport,
@@ -3701,7 +3736,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         market_pressure= _wl_mp,
                         standing       = True,
                     )
-                    if _wl_result.sent:
+                    if _wl_mq_ok and _wl_result.sent:
                         wl_promoted += 1
                         _record_prop_alerted(
                             _prop_market_alerted,
@@ -4063,8 +4098,18 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 if _fpr_qualifies and chat_ids:
                     _fpr_mq       = _fpr_cmq(_fpr_stat, _fpr_line, _fpr_score)
                     _fpr_mp       = _fpr_dmp(None, _fpr_hist)
-                    _fpr_delivery = AlertDelivery(db, bot, chat_ids)
-                    _fpr_result   = await _fpr_delivery.deliver_underdog(
+                    # ── MQ hard gate [full-pool-rescan] ──────────────────────
+                    _fpr_mq_score = float(getattr(_fpr_mq, "score", 0) if _fpr_mq else 0)
+                    _fpr_mq_ok    = _mq_passes_delivery_gate(_fpr_mq_score, _fpr_dec.recommendation)
+                    if not _fpr_mq_ok:
+                        fpr_rejected += 1
+                        logger.debug(
+                            "UD mq_gate [fpr]: %s | %s | mq=%.0f dir=%s — blocked",
+                            _fpr_player, _fpr_stat, _fpr_mq_score, _fpr_dec.recommendation,
+                        )
+                    if _fpr_mq_ok:
+                     _fpr_delivery = AlertDelivery(db, bot, chat_ids)
+                     _fpr_result   = await _fpr_delivery.deliver_underdog(
                         player_name     = _fpr_player,
                         team            = getattr(_fpr_snap, "team", "") or "",
                         sport           = _fpr_sport,
@@ -4079,14 +4124,15 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         market_pressure = _fpr_mp,
                         standing        = True,
                     )
-                    if _fpr_result.sent:
+                    if _fpr_mq_ok and _fpr_result.sent:
                         fpr_sent      += 1
                         fpr_qualified += 1
                         _record_prop_alerted(
                             _prop_market_alerted,
                             _fpr_player, _fpr_sport, _fpr_stat, _fpr_line,
                         )
-                    else:
+                    elif _fpr_mq_ok:
+                        # deliver_underdog returned not-sent (rate-limited, etc.)
                         fpr_rejected += 1
                 elif not _fpr_qualifies:
                     fpr_rejected += 1
