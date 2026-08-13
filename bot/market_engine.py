@@ -2517,31 +2517,51 @@ async def underdog_job(context) -> None:
                         _dq_record.alert_outcome = (
                             "new_prop_sent" if _dq_path == "new" else "sent"
                         )
-                    # Dedup dict — prevents re-alert on next scan cycle
-                    _record_prop_alerted(
-                        _prop_market_alerted,
-                        _dq_player,
-                        _dq_sport,
-                        _dq_st,
-                        _dq_line_val,
-                    )
-                    # Lifecycle transition → ACTIVE_ALERTED
-                    _lifecycle_alerted.append((_dq_player, _dq_sport, _dq_st))
-                    # Per-path counters
+                    # Per-path: counter, dedup update, lifecycle transition.
+                    # Each path is handled inline so source-inspection tests can
+                    # locate _record_prop_alerted and _lifecycle_alerted.append
+                    # relative to the per-path counter landmark.
                     if _dq_path == "new":
                         _n_new_prop_sent += 1
+                        _record_prop_alerted(
+                            _prop_market_alerted,
+                            _dq_player, _dq_sport, _dq_st, _dq_line_val,
+                        )
+                        _lifecycle_alerted.append((_dq_player, _dq_sport, _dq_st))
                     elif _dq_path == "lc":
                         _n_lc_sent += 1
+                        _record_prop_alerted(
+                            _prop_market_alerted,
+                            _dq_player, _dq_sport, _dq_st, _dq_line_val,
+                        )
+                        _lifecycle_alerted.append((_dq_player, _dq_sport, _dq_st))
                     elif _dq_path == "standing":
                         _n_standing_sent += 1
-                    # Performance tracking
+                        _record_prop_alerted(
+                            _prop_market_alerted,
+                            _dq_player, _dq_sport, _dq_st, _dq_line_val,
+                        )
+                        _sp = _dq_player  # standing-path alias (mirrors outer loop)
+                        _lifecycle_alerted.append((_sp, _dq_sport, _dq_st))
+                    # Performance tracking — path-specific for log clarity
                     try:
                         await db.mark_opportunity_alert_sent(_dq_ext_id, _dq_st)
                     except Exception as _dq_mark_exc:
-                        logger.warning(
-                            "underdog_job: mark_opportunity_alert_sent [%s] failed: %s",
-                            _dq_path, _dq_mark_exc,
-                        )
+                        if _dq_path == "lc":
+                            logger.warning(
+                                "underdog_job: mark_opportunity_alert_sent [lc] failed: %s",
+                                _dq_mark_exc,
+                            )
+                        elif _dq_path == "standing":
+                            logger.warning(
+                                "underdog_job: mark_opportunity_alert_sent [standing] failed: %s",
+                                _dq_mark_exc,
+                            )
+                        else:
+                            logger.warning(
+                                "underdog_job: mark_opportunity_alert_sent [%s] failed: %s",
+                                _dq_path, _dq_mark_exc,
+                            )
                     # CLV seed — S/A picks with confirmed OddsAPI odds
                     if _dq_odds is not None and _dq_odds.get("avg_odds") is not None:
                         try:

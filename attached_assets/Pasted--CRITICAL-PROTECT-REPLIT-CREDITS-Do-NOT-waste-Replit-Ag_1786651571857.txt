@@ -1,0 +1,421 @@
+🚨 CRITICAL — PROTECT REPLIT CREDITS
+
+Do NOT waste Replit Agent credits.
+
+* Perform ONE comprehensive repair pass.
+* Do not ask me for multiple small prompts.
+* Do not stop after fixing one error.
+* Do not make unnecessary exploratory changes.
+* Batch related fixes together.
+* Inspect the relevant code and tests before editing.
+* Run tests efficiently and avoid redundant runs.
+* Do not make unrelated changes.
+
+Goal: fix all current problems in one pass while preserving the existing V3.2 architecture and rules.
+
+⸻
+
+Sharp Money Bot V3.2 — Full Repair Pass
+
+Perform ONE comprehensive repair pass on the current Sharp Money Bot codebase.
+
+1. FIX ALL CURRENT TEST FAILURES
+
+Inspect the current codebase and test suite, identify all current failures, and fix the underlying implementation problems.
+
+Do NOT delete, weaken, skip, or rewrite tests simply to make them pass.
+
+Known/current issues include:
+
+* Bug #118 new-prop dedup registration.
+* Credential-burning protection / missing-file/path failures.
+* Silent error logging / warning behavior.
+* Phase 2 lifecycle new-prop append behavior.
+* Phase 2 lifecycle standing-path append behavior.
+* Lifecycle variable correctness.
+* Any other failures currently present.
+
+Do not stop after fixing the first failure. Complete the full repair pass.
+
+2. STOP TELEGRAM SPAM / WRONG PROPS
+
+The bot is currently sending too many alerts and showing props that should not be actionable.
+
+Fix the qualification and delivery pipeline so:
+
+* PASS candidates never become actionable Telegram alerts.
+* Watchlist/rejected candidates never become actionable alerts.
+* Only properly qualified opportunities reach Telegram.
+* Only pre-game opportunities can become actionable alerts.
+* Live/started games remain blocked.
+* Freshness validation remains enforced.
+* Deduplication works after successful delivery.
+* Delivery ranking/rate limiting remains intact.
+* Duplicate alert paths are prevented.
+* Existing qualification gates are not bypassed to increase alert volume.
+* /picks and /slip do not fill with stale, removed, or unqualified props.
+* Removed props automatically leave active pick pools.
+* Stable props can still be re-evaluated even without new line movement.
+
+3. FIX BUG #118 — NEW-PROP DEDUP
+
+The current failing test is:
+
+TestBug118NewPropDedup::test_source_code_new_prop_records_after_delivery
+
+The successful new-prop delivery path must call:
+
+_record_prop_alerted(...)
+
+after the alert is successfully delivered.
+
+The dedup state must correctly record:
+
+* player
+* sport
+* stat type
+* line
+
+after successful delivery.
+
+This prevents the same new prop from being re-alerted on the next scan.
+
+Fix the actual implementation. Do NOT fake or remove the test.
+
+4. FIX LIFECYCLE / DELIVERY STATUS
+
+Correctly distinguish:
+
+* evaluated opportunity
+* qualified candidate
+* actionable pick
+* delivered alert
+* rejected/PASS
+* watchlist
+* removed/stale prop
+
+Successful alerts must update the correct lifecycle state.
+
+Do not create duplicate lifecycle records.
+
+Delivery status must reflect actual delivery, not merely evaluation.
+
+5. SPORT HIERARCHY — PRIMARY VS MAJOR SPORTS
+
+🟢 TIER 1 — PRIMARY PROP POOL
+
+Tier 1 = EVERY SUPPORTED SPORT EXCEPT NBA, MLB, AND NFL.
+
+Examples include:
+
+* WNBA
+* NHL
+* Soccer
+* Tennis
+* CS2
+* Dota 2
+* League of Legends
+* And any other sport the bot supports that is not NBA, MLB, or NFL.
+
+Do NOT hard-code a finite Tier 1 list.
+
+The source-of-truth rule should be:
+
+TIER_2_SPORTS = {"nba", "mlb", "nfl"}
+
+TIER_1 = every supported sport NOT in TIER_2_SPORTS
+
+This means if a new sport is added later, it automatically becomes Tier 1 unless explicitly moved into Tier 2.
+
+Tier 1 is the bot’s main prop-hunting pool.
+
+Tier 1 opportunities receive priority in:
+
+* monitoring
+* scoring
+* ranking
+* /picks
+* /slip
+* Telegram actionable alerts
+
+🔵 TIER 2 — MAJOR SPORTS
+
+Tier 2 consists ONLY of:
+
+* NBA
+* MLB
+* NFL
+
+These are major sports and should still be monitored and evaluated, but they are secondary to Tier 1 props.
+
+When a comparable Tier 1 opportunity and Tier 2 opportunity are available, Tier 1 receives priority.
+
+Tier 2 should not dominate /picks, /slip, or Telegram simply because there are more available props.
+
+TIER 1 QUALIFICATION
+
+Tier 1 uses the normal S/A/B/C qualification framework, along with:
+
+* Market Quality
+* data sufficiency
+* freshness
+* deduplication
+* live-game protection
+* all other existing qualification gates
+
+TIER 2 QUALIFICATION
+
+NBA/MLB/NFL are stricter for actionable alerts.
+
+* Default actionable threshold = S-tier only.
+* A/B/C Tier 2 candidates remain watchlist/non-actionable unless an existing explicit sport-specific rule says otherwise.
+* Tier 2 must still pass Market Quality and every other qualification gate.
+
+CRITICAL DIFFERENCE
+
+Sport Tier ≠ Bet Tier.
+
+Sport Tier determines priority and the strictness of the qualification rules.
+
+S/A/B/C determines the quality/qualification of the individual prop.
+
+Market Quality is a separate hard gate.
+
+Examples:
+
+* Tier 1 + S-tier + qualifying MQ = highest priority
+* Tier 1 + A-tier + qualifying MQ = strong candidate
+* Tier 2 + S-tier + qualifying MQ = valid secondary candidate
+* Tier 2 + A-tier = normally watchlist/non-actionable
+* Any sport + MQ 40–69 = PASS
+* Under-40 MQ = remains available for strong UNDER evaluation
+
+6. MLB-SPECIFIC RULES
+
+* MLB actionable alerts = S-tier only.
+* MLB OVER = allowed when fully qualified.
+* MLB UNDER = allowed only when the existing MLB UNDER whitelist permits that market.
+* Preserve is_mlb_under_allowed().
+* Do not remove or broaden the MLB UNDER whitelist.
+
+7. NFL-SPECIFIC RULES
+
+* NFL actionable alerts = S-tier only.
+* NFL OVER = allowed when fully qualified.
+* NFL UNDER = follow the existing NFL-specific rules.
+* Do not incorrectly apply the MLB UNDER whitelist to NFL.
+
+8. NBA-SPECIFIC RULES
+
+NBA is Tier 2 because it is one of the three major sports.
+
+* NBA remains monitored.
+* NBA remains secondary to Tier 1 sports.
+* Preserve existing NBA-specific qualification/stat rules.
+* Do not automatically treat NBA like Tier 1 simply because it has a large prop pool.
+* Apply the stricter Tier 2 actionable requirements unless an existing explicit NBA rule overrides them.
+
+9. SYNC NEW TIER THRESHOLDS FROM GITHUB
+
+Inspect the current GitHub version/history of the Sharp Money Bot before modifying tier-scoring logic.
+
+GitHub is the source of truth for the new tier thresholds already added there.
+
+Bring those newer tier thresholds into the current Replit codebase.
+
+Requirements:
+
+* Do not invent or estimate threshold values.
+* Do not overwrite newer GitHub thresholds with older local values.
+* Preserve the Tier 1/Tier 2 sport hierarchy above.
+* Preserve Tier 2 major-sport restrictions.
+* Bring over related scoring changes required for the new thresholds to function correctly.
+* Verify related tests.
+* Report the exact threshold changes in the final report.
+
+10. MARKET QUALITY — HARD ACTIONABLE GATE
+
+Sync the newest Market Quality implementation from GitHub as part of this same repair pass.
+
+GitHub is the source of truth for the newest Market Quality implementation.
+
+STANDARD / OVER PLAYS
+
+* 70–100 MQ: Eligible for actionable consideration.
+* 40–69 MQ: PASS / NOT actionable.
+* Below 40 MQ: Keep available for strong UNDER evaluation.
+
+STRONG UNDER PLAYS
+
+* 0–30 MQ: Strong UNDER signal.
+* 31–39 MQ: Still eligible for UNDER evaluation.
+* 40–69 MQ: PASS / NOT actionable.
+* 70–100 MQ: Not a strong UNDER signal.
+
+CRITICAL MQ RULE
+
+40–69 MQ is the dead zone.
+
+Do NOT send a 40–69 MQ prop as an actionable bet regardless of:
+
+* confidence
+* S/A/B/C tier
+* EV
+* line movement
+* historical activity
+* steam
+* other supporting signals
+
+Keep the under-40 MQ range available for UNDER evaluation.
+
+Apply MQ consistently to:
+
+* Telegram alerts
+* /picks
+* /slip
+* actionable qualification
+* ranking/filtering
+
+Do not invent additional MQ ranges or thresholds.
+
+11. PRESERVE V3.2 FIXES
+
+Do NOT regress or remove:
+
+* _HIGH_FLOOR_STATS expansion.
+* Basketball half-game variants:
+    * 1H Points
+    * 1H Rebounds
+    * 1H Assists
+    * 1H Pts + Rebs + Asts
+* CoD per-game variants:
+    * Kills on Game 1
+    * Kills on Game 2
+    * Assists on Game 1
+    * Assists on Game 2
+* Existing HFS stats including:
+    * Hits
+    * Points
+    * Kills on Maps 1+2
+    * Points + Rebounds + Assists
+* score_tier=None fallback to score_total.
+* Explicit B/PASS tiers must NOT be promoted by fallback.
+* Global temporary cold-start.
+* Cold-start must block actionable alerts during initialization.
+* Cold-start must end after the bulk-save cycle.
+* Fast Resume remains removed.
+* Tier 1 sufficient-data validation.
+* UD_VALIDATION_MIN_SAMPLES.
+* MLB/NFL strict S-tier gating.
+* MLB UNDER whitelist.
+* Existing freshness gate.
+* Existing live-game gate.
+* Existing deduplication.
+* Existing minimum line-change threshold.
+* Existing delivery queue/ranking.
+* Existing S/A thresholds where not superseded by the newer GitHub thresholds.
+* /restarts remains removed.
+
+12. ACTIVE PICK POOL CLEANUP
+
+Fix active/current /picks and /slip behavior so:
+
+* Removed props disappear from active pools.
+* Stale props disappear.
+* Delivered props are deduplicated.
+* Unqualified props cannot populate actionable pools.
+* Stable props are periodically re-scored even without line movement.
+* New/changed props continue using incremental monitoring.
+* Full-pool candidate re-scoring remains available through the existing periodic/batched mechanism.
+* No duplicate candidates are created.
+* Tier 1 opportunities are prioritized over Tier 2 opportunities.
+
+13. HEALTH / STALE DIAGNOSTIC CLEANUP
+
+Preserve corrected health timestamp parsing.
+
+Correctly handle:
+
+YYYY-MM-DD HH:MM:SS UTC
+
+and UTC/Z timestamps.
+
+Old errors must be classified as stale rather than displayed as current failures.
+
+Do not restore /restarts.
+
+14. COLD-START / STABILITY
+
+Preserve the existing temporary global cold-start.
+
+It must:
+
+* initialize correctly
+* prevent premature alerts
+* bulk-save required state
+* end correctly
+* not permanently block valid opportunities
+
+Do not reintroduce Fast Resume.
+
+15. DO NOT OVERCORRECT
+
+Do NOT redesign the bot.
+
+Do NOT loosen scoring or alert thresholds merely to generate more picks.
+
+Do NOT remove freshness, deduplication, lifecycle, Market Quality, or live-game protections.
+
+Do NOT create competing implementations of existing gates.
+
+Do NOT modify unrelated modules.
+
+Do NOT change working behavior unless required to fix a demonstrated bug or to sync the newer GitHub implementation.
+
+Preserve the existing architecture and source-of-truth configuration.
+
+16. FINAL VERIFICATION
+
+After completing the repair:
+
+1. Run the targeted V3.2 tests.
+2. Run tests/test_bugs_117_120.py.
+3. Run the complete pytest suite.
+4. Confirm market_engine.py compiles.
+5. Verify Bug #118 passes.
+6. Verify lifecycle tests pass.
+7. Verify credential-burning protection tests pass.
+8. Verify PASS/watchlist candidates cannot reach Telegram delivery.
+9. Verify removed/stale props cannot remain in /picks or /slip.
+10. Verify successful new-prop delivery updates _record_prop_alerted.
+11. Verify Tier 1 includes every supported sport except NBA/MLB/NFL.
+12. Verify NBA/MLB/NFL are the only Tier 2 sports.
+13. Verify Tier 1 receives priority over Tier 2.
+14. Verify the newer GitHub tier thresholds are present.
+15. Verify the newer GitHub Market Quality implementation is present.
+16. Verify 40–69 MQ cannot become actionable.
+17. Verify under-40 MQ remains available for strong UNDER evaluation.
+18. Verify cold-start does not permanently block valid props.
+19. Verify live games cannot produce actionable alerts.
+20. Check for duplicate alert/delivery paths.
+
+Do not stop after the first successful test. Complete the entire repair pass.
+
+17. FINAL REPORT
+
+When finished, report:
+
+* Files changed
+* Bugs fixed
+* GitHub changes synced
+* New tier thresholds synced
+* Market Quality changes synced
+* Tier 1/Tier 2 implementation changes
+* Tests before vs. after
+* Final total passing/failed tests
+* Any remaining failures
+* Any manual verification still required
+
+Do not make unrelated changes.
+
+Do not ask me for another series of small fixes. Complete the entire repair pass in one operation while protecting Replit credits.
