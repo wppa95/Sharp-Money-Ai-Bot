@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import types
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 
 import pytest
 
@@ -1313,6 +1313,8 @@ class TestWatchlistRescan:
         - score_ud_prop returns a high score on the second call (Part 2 rescan).
         - make_ud_bet_decision is only called once (Part 2) and returns OVER/A/75.
         """
+        import market_engine as me
+
         snap   = _make_snap(player="WL Player", stat="Points", sport="NBA", line=20.0)
         wl_row = self._make_wl_row()
         db     = _build_minimal_db(
@@ -1326,6 +1328,12 @@ class TestWatchlistRescan:
         good_dec   = _make_decision(rec="OVER", tier="A", conf=75)
         delivery   = MagicMock()
         delivery.sent = True
+        from engine.ud_scoring import MarketQuality, MarketQualityLabel
+        good_mq = MarketQuality(
+            label=MarketQualityLabel.HIGH,
+            score=78,
+            reasons=("High-floor stat (Points)",),
+        )
 
         # Part 1 call → score=20 (validation fails → reject, no decision call)
         # Part 2 call → good_score (qualifies → deliver_underdog)
@@ -1343,8 +1351,10 @@ class TestWatchlistRescan:
             patch("market_engine._fetch_and_compute_hit_rates", new_callable=AsyncMock, return_value=None),
             # make_ud_bet_decision only reached in Part 2
             patch("engine.ud_bet_decision.make_ud_bet_decision",  return_value=good_dec),
+            patch("engine.ud_scoring.compute_market_quality", return_value=good_mq),
             patch("market_engine._is_game_live_or_past", return_value=False),
             patch("market_engine._ud_line_fresh",     return_value=True),
+            patch.object(type(me.config), "allowed_user_ids", new_callable=PropertyMock, return_value={123}),
             patch("market_engine.AlertDelivery") as mock_ad,
             patch("market_engine._get_odds_api_confirmation", new_callable=AsyncMock, return_value=None),
         ):

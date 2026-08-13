@@ -21,10 +21,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 os.environ.setdefault("TELEGRAM_TOKEN", "test:token")
 
 import logging
+from contextlib import ExitStack
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, patch, call, PropertyMock
 
 import market_engine as me
+from engine.ud_scoring import MarketQuality, MarketQualityLabel, PropDifficultyClass
 
 
 # ── Hit-rate helper (required for new-prop decision gate) ─────────────────────
@@ -82,6 +84,47 @@ def _fake_history(n: int = 6, line: float = 0.5) -> list:
     return records
 
 
+def _make_score(total: int = 78, tier: str = "A", stars: int = 4) -> MagicMock:
+    score = MagicMock()
+    score.total = total
+    score.tier = tier
+    score.stars = stars
+    score.n_history = 20
+    score.move_velocity = 10
+    score.historical_activity = 15
+    score.avg_vs_line = 12
+    score.consistency = 10
+    score.stability = 10
+    score.difficulty = PropDifficultyClass.HIGH_FLOOR
+    score.variance_penalty = 0
+    score.bet_quality_label = "STANDARD BET"
+    return score
+
+
+def _make_validation(supported: bool = True) -> MagicMock:
+    val = MagicMock()
+    val.has_supporting_data = supported
+    val.reason = "ok" if supported else "insufficient_history"
+    return val
+
+
+def _make_decision(rec: str = "OVER", tier: str = "A", conf: int = 75) -> MagicMock:
+    dec = MagicMock()
+    dec.recommendation = rec
+    dec.decision_tier = tier
+    dec.confidence = conf
+    dec.reason = "edge_detected"
+    return dec
+
+
+def _make_market_quality(label: str = "HIGH") -> MarketQuality:
+    return MarketQuality(
+        label=MarketQualityLabel(label),
+        score=78,
+        reasons=("High-floor stat (Points)",),
+    )
+
+
 def _make_db(
     known_keys: set | None = None,
     recent_dict: dict | None = None,
@@ -108,7 +151,17 @@ def _make_context(db: MagicMock) -> MagicMock:
     return ctx
 
 
-async def _run_job(snapshots, db, *, deliver_result=None, hit_rates=None):
+async def _run_job(
+    snapshots,
+    db,
+    *,
+    deliver_result=None,
+    hit_rates=None,
+    score=None,
+    validation=None,
+    decision=None,
+    market_quality=None,
+):
     """Run underdog_job under full mocking.
 
     Pass *hit_rates* to patch ``_fetch_and_compute_hit_rates`` so the decision
@@ -125,24 +178,34 @@ async def _run_job(snapshots, db, *, deliver_result=None, hit_rates=None):
 
     hit_rates_mock = AsyncMock(return_value=hit_rates)
 
-    with patch.object(me, "_registry", registry):
-        with patch.object(me, "_cold_start_done", True):
-            # Reset per-test: _prop_market_alerted is module-level and persists across
-            # tests in the same process.  A fresh dict prevents the dedup gate (#118)
-            # from suppressing alerts in tests that follow a test that recorded an alert.
-            with patch.object(me, "_prop_market_alerted", {}):
-                with patch("market_engine._fetch_and_compute_hit_rates", hit_rates_mock):
-                    with patch("market_engine.AlertDelivery") as mock_cls:
-                        mock_delivery = MagicMock()
-                        mock_delivery.deliver_underdog = AsyncMock(return_value=deliver_result)
-                        mock_cls.return_value = mock_delivery
-                        # The cycle digest is dispatched via broadcast_alert directly (not through
-                        # AlertDelivery), so we patch it here to prevent real Telegram calls.
-                        with patch("alerts.broadcast_alert",
-                                   new_callable=AsyncMock,
-                                   return_value={"sent": 1, "failed": 0}):
-                            await me.underdog_job(ctx)
-                        return mock_delivery
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(me, "_registry", registry))
+        stack.enter_context(patch.object(me, "_cold_start_done", True))
+        stack.enter_context(patch.object(type(me.config), "allowed_user_ids", new_callable=PropertyMock, return_value={123}))
+        # Reset per-test: _prop_market_alerted is module-level and persists across
+        # tests in the same process.  A fresh dict prevents the dedup gate (#118)
+        # from suppressing alerts in tests that follow a test that recorded an alert.
+        stack.enter_context(patch.object(me, "_prop_market_alerted", {}))
+        stack.enter_context(patch("market_engine._fetch_and_compute_hit_rates", hit_rates_mock))
+        if score is not None:
+            stack.enter_context(patch("engine.ud_scoring.score_ud_prop", return_value=score))
+        if validation is not None:
+            stack.enter_context(patch("engine.player_validator.validate_player_prop", return_value=validation))
+        if decision is not None:
+            stack.enter_context(patch("engine.ud_bet_decision.make_ud_bet_decision", return_value=decision))
+        if market_quality is not None:
+            stack.enter_context(patch("engine.ud_scoring.compute_market_quality", return_value=market_quality))
+        with patch("market_engine.AlertDelivery") as mock_cls:
+            mock_delivery = MagicMock()
+            mock_delivery.deliver_underdog = AsyncMock(return_value=deliver_result)
+            mock_cls.return_value = mock_delivery
+            # The cycle digest is dispatched via broadcast_alert directly (not through
+            # AlertDelivery), so we patch it here to prevent real Telegram calls.
+            with patch("alerts.broadcast_alert",
+                       new_callable=AsyncMock,
+                       return_value={"sent": 1, "failed": 0}):
+                await me.underdog_job(ctx)
+            return mock_delivery
 
 
 # ── New-prop detection ─────────────────────────────────────────────────────────
@@ -154,7 +217,15 @@ async def test_low_line_new_prop_triggers_alert(caplog):
     db = _make_db(known_keys=set(), prop_history=_fake_history(6))
 
     with caplog.at_level(logging.INFO, logger="market_engine"):
-        delivery = await _run_job(snaps, db, hit_rates=_make_hit_rates())
+        delivery = await _run_job(
+            snaps,
+            db,
+            hit_rates=_make_hit_rates(),
+            score=_make_score(),
+            validation=_make_validation(),
+            decision=_make_decision(),
+            market_quality=_make_market_quality(),
+        )
 
     delivery.deliver_underdog.assert_called_once()
     _, kwargs = delivery.deliver_underdog.call_args
@@ -279,7 +350,16 @@ async def test_new_prop_outcome_stored_as_new_prop_sent(caplog):
     db = _make_db(known_keys=set(), prop_history=_fake_history(6))
 
     sent_result = DeliveryResult(sent=True, recipients_sent=1)
-    await _run_job(snaps, db, deliver_result=sent_result, hit_rates=_make_hit_rates())
+    await _run_job(
+        snaps,
+        db,
+        deliver_result=sent_result,
+        hit_rates=_make_hit_rates(),
+        score=_make_score(),
+        validation=_make_validation(),
+        decision=_make_decision(),
+        market_quality=_make_market_quality(),
+    )
 
     db.save_underdog_snapshots_bulk.assert_called()
     record = db.save_underdog_snapshots_bulk.call_args[0][0][0]
@@ -345,7 +425,16 @@ async def test_new_prop_sent_increments_new_sent_counter(caplog):
     sent = DeliveryResult(sent=True, recipients_sent=1)
 
     with caplog.at_level(logging.INFO, logger="market_engine"):
-        await _run_job(snaps, db, deliver_result=sent, hit_rates=_make_hit_rates())
+        await _run_job(
+            snaps,
+            db,
+            deliver_result=sent,
+            hit_rates=_make_hit_rates(),
+            score=_make_score(),
+            validation=_make_validation(),
+            decision=_make_decision(),
+            market_quality=_make_market_quality(),
+        )
 
     summary = next(r.message for r in caplog.records if "fetched=" in r.message)
     assert "new=2" in summary
@@ -465,7 +554,16 @@ async def test_priority_stat_at_half_line_triggers_immediate_alert():
     from alerts import DeliveryResult
     sent = DeliveryResult(sent=True, recipients_sent=1)
 
-    delivery = await _run_job(snaps, db, deliver_result=sent, hit_rates=_make_hit_rates())
+    delivery = await _run_job(
+        snaps,
+        db,
+        deliver_result=sent,
+        hit_rates=_make_hit_rates(),
+        score=_make_score(),
+        validation=_make_validation(),
+        decision=_make_decision(),
+        market_quality=_make_market_quality(),
+    )
 
     delivery.deliver_underdog.assert_called_once()
     _, kwargs = delivery.deliver_underdog.call_args
