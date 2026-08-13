@@ -1,0 +1,155 @@
+🚨 PROTECT REPLIT CREDITS — EMERGENCY TARGETED FIX
+
+The bot was restarted after the previous changes, but the live Telegram feed is STILL wrong.
+
+I am being spammed with mostly MLB and NFL props, and props with Market Quality 47/100 are being sent as STRONG BET / ACTIONABLE.
+
+Examples just delivered:
+
+* NFL AJ Barner — MQ 47 — STRONG BET
+* MLB Andruw Monasterio — MQ 47 — ACTIONABLE
+* MLB Adam Frazier — MQ 47 — STRONG BET
+* MLB Adrian Del Castillo — MQ 47 — STRONG BET
+
+This means the running delivery path is bypassing the rules we just implemented.
+
+DO NOT ADD ANOTHER BLIND PATCH
+
+First trace ONE of these actual MQ=47 alerts through the live code path:
+
+candidate → qualification → MQ calculation → delivery queue → tier allocation → Telegram delivery.
+
+Identify exactly where it bypasses the rules.
+
+Then make the smallest correct fix.
+
+HARD RULE #1 — MARKET QUALITY
+
+These are mandatory:
+
+OVER: MQ 70–100 only
+
+STRONG UNDER: MQ 30/100 or lower
+
+MQ 40–69: NO ACTIONABLE BET
+
+MQ 47 must NEVER:
+
+* be actionable
+* be labeled STRONG BET
+* enter the actionable delivery queue
+* consume an 8/2 slot
+* reach Telegram as an actionable pick
+
+Bet Quality MUST NOT override Market Quality.
+
+HARD RULE #2 — SPORT DISTRIBUTION
+
+Tier 1:
+
+* WNBA
+* NHL
+* Soccer
+* Tennis
+* CS2
+* Dota 2
+* League of Legends
+* Table Tennis
+* Badminton
+* KBO
+* NPB
+* Any other supported sport that is NOT NBA, MLB, or NFL
+
+Tier 2 ONLY:
+
+* NBA
+* MLB
+* NFL
+
+After qualification:
+
+MAX 8 Tier 1 / 5 minutes
+
+MAX 2 Tier 2 / 5 minutes
+
+MAX 10 TOTAL / 5 minutes
+
+This is an allocation MAXIMUM, NOT a quota.
+
+Never send weak picks just to fill a slot.
+
+PRIORITY ORDER
+
+The actual pipeline must be:
+
+1. Qualification
+
+2. Market Quality gate
+
+3. Tier 1 / Tier 2 classification
+
+4. Rank qualified candidates within their tier
+
+5. Apply 8/2 delivery caps
+
+6. Telegram delivery
+
+A candidate that fails step 2 must NEVER reach step 5.
+
+CRITICAL
+
+The previous implementation claimed to add:
+
+* TG_RATE_MAX_PER_WINDOW = 10
+* TG_TIER1_MAX_PER_WINDOW = 8
+* TG_TIER2_MAX_PER_WINDOW = 2
+* _TIER2_SPORTS = {"NBA", "MLB", "NFL"}
+* tier counters in the delivery loop
+
+But the live behavior proves that either:
+
+1. another delivery path bypasses this queue,
+2. MQ gating happens after delivery selection,
+3. a direct/standing/new-prop path bypasses the gate,
+4. the running workflow is loading a different function/module,
+5. or the displayed MQ value is not the value used by qualification.
+
+Determine which one is happening.
+
+DO NOT
+
+* Do not touch GitHub.
+* Do not troubleshoot GitHub.
+* Do not reset/revert.
+* Do not rewrite the ranking system.
+* Do not loosen qualification.
+* Do not change Bet Quality.
+* Do not change MQ scoring.
+* Do not create another delivery system.
+* Do not run the full 4,447-test suite unless necessary.
+
+Run ONLY focused regression tests for the actual bypass you find.
+
+SUCCESS CRITERIA
+
+Before declaring this fixed, prove with focused tests that:
+
+1. MQ 47 cannot reach actionable delivery.
+2. MQ 47 cannot consume a Tier 1/Tier 2 slot.
+3. A qualified Tier 1 candidate can be selected ahead of a comparable Tier 2 candidate.
+4. Tier 2 cannot exceed 2 deliveries in a 5-minute window.
+5. Tier 1 cannot exceed 8 deliveries in a 5-minute window.
+6. Total deliveries cannot exceed 10 in a 5-minute window.
+7. Empty slots remain empty when qualified candidates are unavailable.
+8. All three scan paths use the same qualification/delivery rules.
+
+Then report:
+
+* exact bypass found
+* exact file/function changed
+* exact fix
+* focused tests
+* final result
+* whether a restart is required
+
+Do not restart the bot until the fix is confirmed.

@@ -932,6 +932,30 @@ _DELIVERY_TIER_BASE: dict[str, float] = {
     "S": 10000.0, "A": 5000.0, "B": 1000.0, "C": 200.0, "PASS": 0.0,
 }
 
+
+def _mq_passes_delivery_gate(mq_score: float, direction: str) -> bool:
+    """
+    Hard Market Quality gate applied before any candidate enters the delivery
+    queue or reaches Telegram.
+
+    Rules (source: V3.2 spec):
+      MQ 70–100  — eligible for OVER or UNDER.
+      MQ 40–69   — DEAD ZONE: never actionable regardless of direction, tier,
+                   Bet Quality, confidence, or line movement.
+      MQ 31–39   — UNDER evaluation only; OVER blocked.
+      MQ 0–30    — Strong UNDER signal; OVER blocked.
+
+    Returns True if the candidate MAY proceed to delivery; False to block it.
+    """
+    if 40.0 <= mq_score < 70.0:
+        # Dead zone — no actionable bets, period.
+        return False
+    if mq_score < 40.0 and direction.upper() not in ("UNDER",):
+        # Sub-40 MQ is reserved for UNDER evaluation only.
+        return False
+    return True
+
+
 # Sports that are Tier 2 (major sports — secondary delivery priority).
 # Tier 1 = every supported sport NOT in this set.
 # This is the canonical source of truth: do NOT expand it.
@@ -1578,38 +1602,50 @@ async def underdog_job(context) -> None:
                             )
                         except Exception:
                             pass
-                    # Collect into ranked delivery queue — all candidates compete for
-                    # rate-limit slots after the standing scan.  This ensures the
-                    # best picks across all three paths get first access to slots.
-                    _np_ext_id = getattr(snap, "external_id", None) or getattr(snap, "id", None) or ""
-                    _delivery_queue.append({
-                        "path":               "new",
-                        "player":             player,
-                        "snap":               snap,
-                        "stat_type":          stat_type,
-                        "line_val":           line_val,
-                        "prev_line":          None,
-                        "score":              score,
-                        "decision":           decision,
-                        "validation":         validation,
-                        "market_quality":     market_quality,
-                        "market_pressure":    market_pressure,
-                        "intel_trace":        _np_intel_trace,
-                        "odds_confirm":       _np_odds_confirm,
-                        "is_reentry":         False,
-                        "ext_id":             _np_ext_id,
-                        "record":             None,   # linked after record construction
-                        "sport":              snap.sport or "UNKNOWN",
-                        "tier":               decision.decision_tier if decision else "B",
-                        "conf":               float(decision.confidence if decision else 0),
-                        "bq":                 float(score.total if score else 0),
-                        "mq":                 float(getattr(market_quality, "score", 0) if market_quality else 0),
-                        "is_meaningful_change": False,  # new props have no prev line
-                        "is_tier1":           (snap.sport or "UNKNOWN") in config.ud_tier1_sports,
-                        "_sent":              False,
-                    })
-                    _dq_collected = True
-                    # ud_result stays DeliveryResult(sent=False) — delivery happens below.
+                    # ── MQ hard gate [new-prop] ─────────────────────────────
+                    # MQ 40–69 = dead zone: never actionable regardless of tier or BQ.
+                    # Sub-40 MQ is reserved for UNDER evaluation only.
+                    _np_mq_score  = float(getattr(market_quality, "score", 0) if market_quality else 0)
+                    _np_direction = decision.recommendation if decision else ""
+                    _np_mq_ok     = _mq_passes_delivery_gate(_np_mq_score, _np_direction)
+                    if not _np_mq_ok:
+                        logger.debug(
+                            "UD mq_gate [new]: %s | %s | mq=%.0f dir=%s — blocked",
+                            player, stat_type, _np_mq_score, _np_direction,
+                        )
+                    else:
+                        # Collect into ranked delivery queue — all candidates compete for
+                        # rate-limit slots after the standing scan.  This ensures the
+                        # best picks across all three paths get first access to slots.
+                        _np_ext_id = getattr(snap, "external_id", None) or getattr(snap, "id", None) or ""
+                        _delivery_queue.append({
+                            "path":               "new",
+                            "player":             player,
+                            "snap":               snap,
+                            "stat_type":          stat_type,
+                            "line_val":           line_val,
+                            "prev_line":          None,
+                            "score":              score,
+                            "decision":           decision,
+                            "validation":         validation,
+                            "market_quality":     market_quality,
+                            "market_pressure":    market_pressure,
+                            "intel_trace":        _np_intel_trace,
+                            "odds_confirm":       _np_odds_confirm,
+                            "is_reentry":         False,
+                            "ext_id":             _np_ext_id,
+                            "record":             None,   # linked after record construction
+                            "sport":              snap.sport or "UNKNOWN",
+                            "tier":               decision.decision_tier if decision else "B",
+                            "conf":               float(decision.confidence if decision else 0),
+                            "bq":                 float(score.total if score else 0),
+                            "mq":                 float(getattr(market_quality, "score", 0) if market_quality else 0),
+                            "is_meaningful_change": False,  # new props have no prev line
+                            "is_tier1":           (snap.sport or "UNKNOWN") in config.ud_tier1_sports,
+                            "_sent":              False,
+                        })
+                        _dq_collected = True
+                        # ud_result stays DeliveryResult(sent=False) — delivery happens below.
                 # ── Debug tracking (new-prop) ─────────────────────────────────────
                 if score is not None:
                     if _np_bet_ready:
@@ -2066,7 +2102,16 @@ async def underdog_job(context) -> None:
                     # Non-removals: collect into ranked delivery queue.
                     # Removals are not Telegram-alerted (suppressed per doc #2/#3) —
                     # lifecycle tracking is applied via _lifecycle_removed separately.
-                    if not is_removed:
+                    # ── MQ hard gate [lc] ───────────────────────────────────────
+                    _lc_mq_score  = float(getattr(market_quality, "score", 0) if market_quality else 0)
+                    _lc_direction = decision.recommendation if decision else ""
+                    if not is_removed and not _mq_passes_delivery_gate(_lc_mq_score, _lc_direction):
+                        should_alert = False
+                        logger.debug(
+                            "UD mq_gate [lc]: %s | %s | mq=%.0f dir=%s — blocked",
+                            player, stat_type, _lc_mq_score, _lc_direction,
+                        )
+                    if not is_removed and should_alert:
                         _lc_mag_abs  = (
                             abs((snap.line or 0.0) - (prev_line or 0.0))
                             if prev_line is not None else 0.0
@@ -2439,6 +2484,16 @@ async def underdog_job(context) -> None:
                     )
                     continue
 
+                # ── MQ hard gate [standing] ─────────────────────────────
+                _s_mq_score  = float(getattr(_smq, "score", 0) if _smq else 0)
+                _s_direction = _sdec.recommendation if _sdec else ""
+                if not _mq_passes_delivery_gate(_s_mq_score, _s_direction):
+                    logger.debug(
+                        "UD mq_gate [standing]: %s | %s | mq=%.0f dir=%s — blocked",
+                        _sp, _st, _s_mq_score, _s_direction,
+                    )
+                    continue
+
                 # Collect into delivery queue for ranked delivery below.
                 _s_ext_id_q = getattr(_ssnap, "external_id", None) or getattr(_ssnap, "id", None) or ""
                 _delivery_queue.append({
@@ -2537,6 +2592,19 @@ async def underdog_job(context) -> None:
                     _dq_deferred_log.append(
                         f"{_dq_player}/{_dq_st} [tier={_dq.get('tier','?')}"
                         f" t2-cap={_DQ_TIER2_CAP}]: Tier-2 window full"
+                    )
+                    continue
+
+                # ── MQ backstop (delivery loop) ───────────────────────────────
+                # Belt-and-suspenders: any candidate that slipped through
+                # the collection-point gate is stopped here before Telegram.
+                _dq_mq_score  = float(getattr(_dq_mq, "score", 0) if _dq_mq else _dq.get("mq", 0))
+                _dq_direction = _dq_dec.recommendation if _dq_dec else ""
+                if not _mq_passes_delivery_gate(_dq_mq_score, _dq_direction):
+                    _n_dq_deferred += 1
+                    _dq_deferred_log.append(
+                        f"{_dq_player}/{_dq_st}"
+                        f" [mq={_dq_mq_score:.0f} dir={_dq_direction}]: MQ gate (backstop)"
                     )
                     continue
 
