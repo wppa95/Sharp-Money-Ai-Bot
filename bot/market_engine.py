@@ -1551,6 +1551,19 @@ async def underdog_job(context) -> None:
                     and decision.recommendation != "PASS"
                     and (snap.sport or "UNKNOWN") in config.ud_alert_sports
                 )
+                if _np_bet_ready:
+                    _np_mq_allowed, _np_mq_reason = _mq_allows_action(decision, market_quality)
+                    if not _np_mq_allowed:
+                        _np_bet_ready = False
+                        logger.debug(
+                            "UD mq_gate [new]: %s | %s | mq=%s tier=%s rec=%s blocked (%s)",
+                            player,
+                            stat_type,
+                            getattr(market_quality, "label", None),
+                            getattr(decision, "decision_tier", None),
+                            getattr(decision, "recommendation", None),
+                            _np_mq_reason,
+                        )
                 # Per-tier confidence gate — sport-conditional: MLB/NFL use strict thresholds;
                 # all other sports use relaxed thresholds to surface more opportunities (#2).
                 if _np_bet_ready and decision is not None:
@@ -2484,6 +2497,18 @@ async def underdog_job(context) -> None:
                     continue
 
                 _smq = _cmq(_st, _line_val, _sscore)
+                _smq_allowed, _smq_reason = _mq_allows_action(_sdec, _smq)
+                if not _smq_allowed:
+                    logger.debug(
+                        "UD mq_gate [standing]: %s | %s | mq=%s tier=%s rec=%s blocked (%s)",
+                        _sp,
+                        _st,
+                        getattr(_smq, "label", None),
+                        getattr(_sdec, "decision_tier", None),
+                        getattr(_sdec, "recommendation", None),
+                        _smq_reason,
+                    )
+                    continue
                 _smp = _dmp(None, _shist)
                 # Prop Intelligence trace for standing alerts
                 _s_intel_trace: Optional[dict] = None
