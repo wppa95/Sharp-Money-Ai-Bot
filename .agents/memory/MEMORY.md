@@ -68,3 +68,4 @@
 - [Telegram rate limiter](telegram-rate-limiter.md) — engine/telegram_rate_limiter.py singleton; 5 alerts/5min window + flood brake; hook in deliver_underdog step 3a; conftest autouse resets singleton between tests.
 - [Ranked delivery queue](delivery-queue.md) — all 3 scan paths collect into _delivery_queue; ranked by tier+conf+bq+mq+bonuses; per-path counters BEFORE callbacks; _sp alias in standing branch; path-specific warning strings; 4447 tests Aug 2026.
 - [MQ hard gate](mq-gate.md) — _mq_passes_delivery_gate() blocks MQ 40-69 (dead zone) always; sub-40 OVER blocked; applied at all 3 collection points AND delivery loop backstop; 8/2 Tier1/Tier2 split uses _TIER2_SPORTS={"NBA","MLB","NFL"}.
+- [Atomic delivery dedup lock](atomic-dedup-lock.md) — _try_claim_delivery_slot() pre-claims dedup slot under asyncio.Lock before any deliver_underdog; threshold 85 for Tier 2 BQ+MQ; lc-path needs dedup gate at collection; conftest clears _prop_market_alerted between tests.
