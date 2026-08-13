@@ -790,10 +790,13 @@ class DeliveryResult:
     filtered: bool = False
     filtered_reason: str = ""
     deduped: bool = False
+    rate_limited: bool = False   # True when blocked by global Telegram rate limiter
     recipients_sent: int = 0
     recipients_failed: int = 0
 
     def __str__(self) -> str:
+        if self.rate_limited:
+            return f"rate-limited({self.filtered_reason})"
         if self.filtered:
             return f"filtered({self.filtered_reason})"
         if self.deduped:
@@ -1129,6 +1132,42 @@ class AlertDelivery:
                 logger.info("Underdog alert capped: %s | %s | %s", player_name, stat_type, reason)
                 return DeliveryResult(sent=False, filtered=True, filtered_reason=reason)
 
+        # 3a. Global Telegram rate limiter
+        # Removals and market-move-only alerts bypass the limiter — they are
+        # cleanup/internal signals, not spammable actionable picks.
+        if not removed and not market_move_only:
+            from engine.telegram_rate_limiter import get_rate_limiter as _get_rl
+            _rl = _get_rl()
+            _rl_tier = getattr(decision, "decision_tier", "B") if decision else "B"
+            _rl_conf = float(getattr(decision, "confidence", 50)) if decision else 50.0
+            _rl_bq   = float(getattr(score, "total", 0)) if score else 0.0
+            # A "meaningful change" bypasses the per-window budget for S/A-tier.
+            # Criteria: new prop (brand new opportunity) OR big line move (≥ 2× min).
+            _is_meaningful = (
+                new_prop
+                or abs(new_line - old_line) >= config.MIN_UNDERDOG_LINE_CHANGE * 2.0
+            )
+            _rl_result = _rl.check(
+                tier=_rl_tier,
+                confidence=_rl_conf,
+                bq=_rl_bq,
+                is_meaningful_change=_is_meaningful,
+            )
+            if not _rl_result.allowed:
+                logger.info(
+                    "Underdog alert rate-limited: %s | %s | %s | tier=%s — %s "
+                    "(window %d/%d)",
+                    player_name, stat_type, sport, _rl_tier,
+                    _rl_result.reason,
+                    _rl_result.window_count, _rl_result.window_max,
+                )
+                return DeliveryResult(
+                    sent=False,
+                    rate_limited=True,
+                    filtered=True,
+                    filtered_reason=_rl_result.reason,
+                )
+
         # 4. Format
         # S-tier gate: Market Quality < 80 or Confidence < 80 → cap decision tier to A.
         # Guards against BQ-only S-tier labels when MQ or confidence doesn't support it.
@@ -1214,6 +1253,15 @@ class AlertDelivery:
 
         counts     = await broadcast_alert(self._bot, self._chat_ids, message)
         alert_sent = counts["sent"] > 0
+
+        # Record successful send in the global rate limiter (skip for removals/market-move-only
+        # since they bypassed the limiter gate above).
+        if alert_sent and not removed and not market_move_only:
+            try:
+                from engine.telegram_rate_limiter import get_rate_limiter as _get_rl2
+                _get_rl2().record_sent()
+            except Exception:
+                pass  # rate limiter is advisory — never block a sent alert
 
         result = DeliveryResult(
             sent             = alert_sent,

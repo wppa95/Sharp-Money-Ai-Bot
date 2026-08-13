@@ -65,3 +65,4 @@
 - [Stable refresh + watchlist job](stable-refresh-job.md) — _stable_refresh_job runs every 120s; bulk dedup uses _sr_bulk_dedup_ok bool (empty frozenset = success, NOT fallback); watchlist uses FIFO cursor (id ASC) with set_wl_refresh_cursor; 4403 tests passing Aug 2026.
 - [V1.3 freeze](v13-freeze-policy.md) — V1.3 is frozen as of Aug 2026; only bug fixes, stability, performance, data-correctness, and provider/connectivity fixes allowed; no new features or architectural changes.
 - [Spec fix pass Aug 2026](spec-fix-pass-aug2026.md) — 95+ override removed; max_instances=2 + _ud_full_scan_running fast-fetch guard; star floor gates removed from delivery; S/A/B all actionable; unified alert format only.
+- [Telegram rate limiter](telegram-rate-limiter.md) — engine/telegram_rate_limiter.py singleton; 5 alerts/5min window + flood brake; hook in deliver_underdog step 3a; conftest autouse resets singleton between tests.
