@@ -1,0 +1,615 @@
+SHARP MONEY BOT — CURRENT FIX PASS
+DO NOT CHANGE ANYTHING ELSE OUTSIDE THESE ITEMS.
+
+We need to make the following fixes based on the latest Scan Pipeline behavior and debugging.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+1. SCAN / RESCAN PERFORMANCE
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+A) KEEP NEW-PROP POLLING RUNNING EVERY 2 MINUTES
+
+The bot MUST continue polling Underdog every 2 minutes for:
+- New first-appearance props
+- Removed props
+- Line changes / moved props
+
+Do NOT allow the full-pool rescan or stable-refresh workload to block or delay the 2-minute new-prop polling.
+
+Recent log:
+
+Execution of job "underdog_monitor" skipped:
+maximum number of running instances reached (1)
+
+This means the 2-minute monitor job is taking longer than its interval and APScheduler is skipping the next run.
+
+FIX THIS PROPERLY.
+
+Requirements:
+- Do not simply increase the interval.
+- Keep the intended ~2-minute polling cadence.
+- Prevent a long-running scoring cycle from causing the next polling cycle to be skipped.
+- Separate lightweight feed polling/fetching from expensive scoring/rescoring where necessary.
+- New props must be detected promptly while scoring/rescoring is occurring.
+- Do not create duplicate concurrent full scans.
+- Preserve database integrity.
+- Avoid duplicate prop records.
+
+Priority:
+
+NEW/CHANGED PROP DETECTION EVERY ~2 MINUTES
+↓
+QUEUE / PROCESS SCORING WITHOUT BLOCKING THE NEXT FETCH
+
+
+B) FULL-POOL RESCAN
+
+Change the full-pool rescan refresh target from 15 minutes to 5 minutes.
+
+IMPORTANT:
+
+The full-pool rescan does NOT mean rescoring every 80k–130k+ currently active props every 5 minutes.
+
+Recent examples:
+
+Active props: 129,370
+Full-pool rotation pool: ~15,265
+Coverage: 10,000 / 15,265
+
+The bot is currently fetching/monitoring a huge number of active props, but the actual full-pool scoring rotation is much smaller.
+
+Make sure:
+
+- "Active props monitored" = all currently available props being tracked.
+- "Full-pool rescan rotation" = the intended scoring/rescoring candidate pool.
+- The full-pool candidate pool is processed in batches.
+- Do NOT repeatedly rescore the entire active feed every 5 minutes.
+- Do NOT accidentally treat the entire active feed as the full-pool scoring queue.
+- Keep the rotation batched.
+- Prevent the rotation from getting stuck.
+- Start a new rotation after the previous rotation completes.
+
+
+C) FULL-POOL ROTATION MUST NOT GET STUCK
+
+The logs repeatedly showed:
+
+Rotation #5
+Progress 67.0%
+Coverage 10,000 / 14,924
+
+and:
+
+Rotation #6
+Progress 65.5%
+Coverage 10,000 / 15,265
+
+Make sure the rotation state advances correctly after every batch.
+
+Track:
+- current rotation
+- current batch offset/cursor
+- total pool size
+- batch size
+- completion state
+- next rotation
+
+If a batch/job fails or times out:
+- recover from the last valid cursor
+- do not reset the entire rotation
+- do not leave the rotation permanently stuck
+
+A completed rotation must automatically begin the next rotation.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+2. STABLE REFRESH — KEEP IT
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+DO NOT REMOVE STABLE REFRESH.
+
+Keep stable refresh because it serves a different purpose from the full-pool rescan.
+
+Stable refresh should continue periodically rescoring the smaller stable/active candidate pool.
+
+However:
+
+- It must not block 2-minute new-prop polling.
+- It must not block line-movement detection.
+- It must not prevent the full-pool rotation from progressing.
+- It must not create duplicate concurrent stable-refresh jobs.
+
+Recent log:
+
+stable_refresh_job:
+pool=10671
+batch=10000
+rescored=9039
+qualified=0
+
+Make sure stable-refresh cursor/batch handling is correct and does not appear stuck at 93–100%.
+
+KEEP THE FUNCTIONALITY.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+3. WATCHLIST — KEEP FUNCTIONALITY, REMOVE DISPLAY
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+KEEP watchlist functionality internally.
+
+Do NOT remove:
+- watchlist creation
+- watchlist scoring
+- near-miss tracking
+- promotion logic
+- watchlist state
+
+BUT REMOVE THE WATCHLIST REFRESH DISPLAY FROM THE SCAN PIPELINE OUTPUT.
+
+Do NOT display:
+
+👁 Watchlist Refresh (last cycle)
+
+Active watchlist:
+Re-scored:
+Improved:
+Unchanged:
+Declined:
+Promoted:
+Removed:
+Next refresh:
+
+The watchlist can still operate internally.
+
+Keep the Candidate Funnel Watchlist/near-miss count unless it is specifically part of the removed Watchlist Refresh display.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+4. ACTIONABLE BET PICKS ONLY
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Remove the separate:
+
+🔥 S-TIER HIGH PRIORITY
+
+priority/header system.
+
+I do NOT want a separate S-tier priority alert section anymore.
+
+Keep the normal:
+
+🎯 ACTIONABLE BET PICK
+
+format.
+
+Every delivered pick should simply be an ACTIONABLE BET PICK with its correct grade/tier.
+
+Do NOT create a separate "S-TIER HIGH PRIORITY" category based solely on score.
+
+S-tier should still be the highest grade, but it should not have a separate priority-alert display.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+5. GRADING — DO NOT MAKE THE GATE TOO STRICT
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+The goal is NOT to eliminate good bets.
+
+The goal is to grade props correctly.
+
+Market Quality, Confidence, and Bet Quality must work TOGETHER when determining the final grade.
+
+Do NOT let one metric by itself incorrectly force an S-tier grade.
+
+A) CONFIDENCE
+
+- Confidence below 60/100 cannot be S-tier.
+- Confidence 60/100 or higher can qualify for A or S depending on the other factors.
+- A true S-tier requires Confidence >= 80/100.
+
+B) MARKET QUALITY
+
+- Market Quality below 80/100 cannot be S-tier.
+- Market Quality >= 80/100 is required for S-tier.
+- Market Quality around 60/100 can still contribute to an A/B/Strong Under classification when the other metrics support it.
+- Do NOT allow Market Quality 60/100 to display as S-tier.
+
+C) BET QUALITY
+
+Bet Quality must participate in the final grade.
+
+Do NOT use:
+
+BQ alone = S-tier
+
+Instead evaluate:
+
+Market Quality
++
+Confidence
++
+Bet Quality
++
+direction/edge
++
+sport/market rules
+
+together.
+
+Example bug:
+
+Bet Quality: 85/100
+Market Quality: 62/100
+
+The bot labeled the prop S-tier.
+
+That is incorrect.
+
+Market Quality 62/100 must prevent S-tier.
+
+However, DO NOT simply reject the prop.
+
+Give it the appropriate lower grade if the total evidence supports it.
+
+The goal is correct grading, NOT an unnecessarily strict gate.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+6. STRONG UNDER LOGIC — 30/100 THRESHOLD
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+We need to preserve the ability to identify strong UNDER candidates.
+
+A low confidence/BQ score can be meaningful for an UNDER when the directional model explicitly identifies the prop as a strong-under candidate.
+
+IMPORTANT:
+
+A prop that reaches the model's Strong Under threshold of 30/100 or better for the relevant UNDER-candidate/directional score must not automatically remain PASS simply because its overall composite score is low or because of cold-start.
+
+If the directional model identifies it as a legitimate STRONG UNDER candidate:
+
+30/100 or better
++
+valid UNDER directional signal
+
+→ STRONG UNDER CANDIDATE
+
+Do NOT treat every low score as Strong Under.
+
+The system must distinguish:
+
+- Low overall score with no valid directional signal
+  → PASS
+
+- Strong Under directional signal at the configured threshold
+  → STRONG UNDER candidate
+
+The 30/100 threshold applies specifically to the Under-candidate/directional logic.
+
+Do not accidentally reverse this logic for OVER picks.
+
+The bot should preserve the UNDER signal and then send the candidate through the normal grading/actionability logic.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+7. COLD-START PROBLEM
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+The bot is currently producing a very large number of:
+
+cold_start
+
+results.
+
+Examples:
+
+DOTA — Fantasy Points in Games 1+2
+25/100 PASS
+vel=0/25
+act=2/25
+avg=0/20
+con=8/15
+sta=15/15
+→ cold_start
+
+Similar examples:
+
+OmaR — Fantasy Points in Games 1+2
+Ademola Lookman — Assists
+Giuliano Simeone — Assists
+Isaac Romero — Assists
+
+The problem is that cold-start is dominating the evaluated pool and causing legitimate candidates to sit around 25/100 PASS.
+
+Do NOT simply alert every cold-start prop.
+
+Instead:
+
+- Keep cold-start protection.
+- Continue collecting enough history to score the prop properly.
+- Do not allow cold-start to permanently suppress props.
+- Once sufficient observations/history exist, transition the prop into normal scoring.
+- Make sure cold-start props are not repeatedly classified as cold_start forever.
+- Make the cold-start lifecycle explicit and reliable.
+
+Also investigate why cold-start rescans can be tens of thousands while stable refresh rescans are only hundreds.
+
+Make sure these are not duplicating the same work unnecessarily.
+
+A cold-start prop should eventually graduate into normal scoring.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+8. TIER RULES — FIX THE BLOCKING LOGIC
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+The tier system must NOT block valid A or B props.
+
+Both Tier 1 and Tier 2 use the SAME grade-to-action rules.
+
+TIER 1:
+- S = ACTIONABLE
+- A = ACTIONABLE
+- B = ACTIONABLE
+- C = WATCHLIST
+
+TIER 2:
+- S = ACTIONABLE
+- A = ACTIONABLE
+- B = ACTIONABLE
+- C = WATCHLIST
+
+IMPORTANT:
+
+There is NO "Tier 1 requires S-tier" rule.
+
+There is NO "Tier 2 requires S-tier" rule.
+
+A valid Tier-1 A-tier prop MUST NOT be blocked because it is not S-tier.
+
+A valid Tier-1 B-tier prop MUST remain ACTIONABLE.
+
+A valid Tier-2 A-tier prop MUST remain ACTIONABLE.
+
+A valid Tier-2 B-tier prop MUST remain ACTIONABLE.
+
+C-tier is the cutoff:
+
+C → WATCHLIST
+B or better → ACTIONABLE
+
+Tier 1 vs Tier 2 should affect PRIORITY/RANKING, NOT whether A/B props are allowed to be actionable.
+
+Examples:
+
+VAL — A-tier
+→ ACTIONABLE
+
+MLB — A-tier
+→ ACTIONABLE
+
+NFL — B-tier
+→ ACTIONABLE
+
+Tier-2 sport — B-tier
+→ ACTIONABLE
+
+Any C-tier prop
+→ WATCHLIST
+
+Remove/fix logic such as:
+
+strict_tier_blocked
+sport_blocked
+minimum=S
+MLB min=S
+NFL min=S
+
+when those rules are being used to block legitimate A/B candidates.
+
+The final decision should be based on the actual grade and the existing gates, not an incorrect minimum-S requirement.
+
+Tier priority should only determine which actionable candidates are prioritized/ranked when there are competing picks.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+9. TIER PRIORITY
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Continue prioritizing Tier-1 sports in the candidate funnel and actionable picks.
+
+Tier-1 candidates should be evaluated/delivered before lower-priority sports when competing candidates exist.
+
+Do not allow lower-priority sports to crowd out stronger Tier-1 opportunities.
+
+But DO NOT make the grading gate artificially strict just to lower volume.
+
+Priority should affect ranking/selection, not incorrectly downgrade or block valid grades.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+10. NO FALSE S-TIER LABELS
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Recent example:
+
+Adrian Houser — Strikeouts
+S-Tier
+Bet Quality 85
+Market Quality 80
+
+Adrian Houser — Earned Runs Allowed
+S-Tier
+Bet Quality 85
+Market Quality 80
+
+Adrian Houser — Hits Allowed
+S-Tier
+Bet Quality 85
+Market Quality 62
+
+The third one is the important bug.
+
+Market Quality 62 should NOT be S-tier.
+
+It should receive the correct lower grade based on the combined grading model.
+
+Do NOT simply reject it.
+
+Correct grading > aggressive filtering.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+11. SCAN PIPELINE DISPLAY
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+KEEP:
+
+📡 Scan Pipeline
+📡 Full Monitoring Pipeline
+Candidate Funnel
+Sport Funnel Breakdown
+Near-Misses
+Full-Pool Rescan Rotation
+Stable Refresh
+
+REMOVE ONLY:
+
+👁 Watchlist Refresh (last cycle)
+
+Also remove:
+
+🔥 S-TIER HIGH PRIORITY
+
+Keep:
+
+🎯 ACTIONABLE BET PICK
+
+alerts.
+
+The normal ACTIONABLE BET PICK should show the correct grade/tier inside the pick.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+12. HEALTH SERVER WARNING
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+We also saw:
+
+Health server failed to start (non-fatal):
+[Errno 98] error while attempting to bind on address
+('0.0.0.0', 8080):
+address already in use
+
+Fix this so the health server does not attempt to start twice.
+
+Likely causes:
+- duplicate startup
+- restart without releasing previous server
+- multiple process initialization
+- health server created from more than one code path
+
+Make startup idempotent.
+
+If port 8080 is already owned by the bot's existing health server, detect/reuse the existing server rather than throwing a warning.
+
+Do NOT start multiple health servers.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+13. APSCHEDULER CONCURRENCY
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Review all related jobs for overlapping execution.
+
+We need:
+
+- underdog_monitor: polling every ~2 minutes
+- full-pool rescan: 5-minute cadence/rotation target
+- stable refresh: keep functionality
+- watchlist refresh: keep functionality internally
+
+But jobs must not block each other.
+
+Use proper concurrency controls / separate async tasks / worker queues where appropriate.
+
+Do NOT solve this by allowing unlimited duplicate jobs.
+
+There should be:
+
+- one active feed poller
+- controlled scoring workers
+- one full-pool rotation state
+- one stable-refresh worker
+- one watchlist worker
+
+The feed poller must remain responsive.
+
+The scoring workload must not prevent the next feed poll.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+14. IMPORTANT VALIDATION
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+After implementing, run the existing test suite.
+
+Then specifically verify:
+
+1. New props are fetched approximately every 2 minutes.
+2. A slow scoring cycle does NOT cause:
+   "maximum number of running instances reached (1)"
+3. Full-pool rescan target is 5 minutes instead of 15 minutes.
+4. Full-pool rotation advances beyond 67% and eventually completes.
+5. Full-pool rotation starts the next rotation after completion.
+6. Stable refresh continues working.
+7. Stable refresh does not get stuck at 93–100%.
+8. Watchlist still works internally.
+9. Watchlist Refresh display is removed.
+10. S-Tier Priority display is removed.
+11. Normal ACTIONABLE BET PICK remains.
+12. Confidence <60 cannot be S-tier.
+13. Confidence >=80 is required for true S-tier.
+14. Market Quality <80 cannot be S-tier.
+15. Market Quality >=80 is required for true S-tier.
+16. Bet Quality, Confidence, and Market Quality are evaluated together.
+17. Valid Tier-1 A-tier props are NOT blocked by minimum-S logic.
+18. Valid Tier-1 B-tier props remain ACTIONABLE.
+19. Valid Tier-2 A-tier props remain ACTIONABLE.
+20. Valid Tier-2 B-tier props remain ACTIONABLE.
+21. C-tier props go to WATCHLIST.
+22. Tier 1 vs Tier 2 affects priority/ranking, not A/B actionability.
+23. A valid 30/100-or-better Strong Under directional candidate is not incorrectly discarded as PASS.
+24. Low scores without a valid UNDER directional signal remain PASS.
+25. Cold-start props transition into normal scoring after sufficient history.
+26. The same cold-start props are not unnecessarily rescored forever.
+27. Active feed size is NOT treated as the full-pool scoring batch.
+28. Full-pool rescans remain batched and efficient.
+29. Health server does not initialize twice.
+30. No duplicate concurrent monitor/scoring jobs.
+31. Existing tests continue passing.
+
+DO NOT make unrelated architecture changes.
+
+This is a targeted bug/performance/grading correction pass.
+
+PRIMARY GOAL:
+
+FAST NEW-PROP DETECTION
++
+CORRECT GRADING
++
+VALID TIER-1/TIER-2 ACTIONABLE PICKS
++
+STABLE RESCAN/REFRESH ROTATION
++
+NO FALSE S-TIER LABELS
++
+CORRECT STRONG-UNDER DETECTION
++
+NO BLOCKING BETWEEN PIPELINE JOBS
+
+Do not remove good candidate detection simply to lower the number of alerts.
+
+We want the bot to grade opportunities correctly and then let the existing gates/ranking determine what gets delivered.

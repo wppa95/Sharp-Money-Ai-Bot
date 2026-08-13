@@ -210,80 +210,70 @@ class TestPriorityOverrideSent:
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestSourceCodeOverridePaths:
-    """Verify the 95+ override is wired into all three alert paths via source inspection."""
+    """Verify that the 95+ priority override paths have been removed.
+
+    Per spec all alerts now route through the unified 🎯 ACTIONABLE BET PICK
+    format via AlertDelivery.deliver_underdog().  The separate broadcast_alert
+    override paths (new-prop, lc, standing) have been removed.
+    """
 
     def _src(self) -> str:
         import market_engine as me
         return inspect.getsource(me)
 
-    def test_95_threshold_present_in_source(self):
-        """Bet Quality confidence >= 95 threshold must appear in market_engine source."""
+    def test_95_override_paths_removed(self):
+        """PRIORITY OVERRIDE log labels must not appear — separate paths are gone."""
         src = self._src()
-        assert "decision.confidence >= 95" in src or "_sdec.confidence >= 95" in src, (
-            "95-point Bet Quality threshold not found in market_engine source"
+        for label in ("PRIORITY OVERRIDE [new]", "PRIORITY OVERRIDE [lc]", "PRIORITY OVERRIDE [standing]"):
+            assert label not in src, (
+                f"'{label}' was re-added to market_engine — the 95+ override "
+                "broadcast_alert paths are removed; props use deliver_underdog()."
+            )
+
+    def test_lc_95_sent_removed(self):
+        """_lc_95_sent flag must be removed — lc path no longer has a separate 95+ branch."""
+        src = self._src()
+        assert "_lc_95_sent" not in src, (
+            "_lc_95_sent was re-added — this flag belonged to the removed lc 95+ override path"
         )
 
-    def test_format_95_priority_alert_called_in_source(self):
-        """_format_95_priority_alert must be called (not just defined)."""
+    def test_priority_alerted_this_scan_removed(self):
+        """_priority_alerted_this_scan per-scan set must be gone — 95+ override removed."""
         src = self._src()
-        calls = src.count("_format_95_priority_alert(")
-        # Should be called at least 3 times (np, lc, standing paths) + defined once
-        assert calls >= 3, (
-            f"_format_95_priority_alert called {calls}x — expected ≥ 3 (one per alert path)"
+        assert "_priority_alerted_this_scan" not in src, (
+            "_priority_alerted_this_scan re-added — remove it; it belonged to the 95+ override path"
         )
 
-    def test_priority_override_sent_checked_in_source(self):
-        """_priority_override_sent must be used as a guard in the override logic."""
+    def test_ud_full_scan_running_flag_present(self):
+        """_ud_full_scan_running module flag must exist for fast-fetch concurrency guard."""
         src = self._src()
-        assert "_priority_override_sent" in src, (
-            "_priority_override_sent not referenced in market_engine"
-        )
-        assert "_priority_override_sent.add(" in src, (
-            "Override key must be recorded to _priority_override_sent after sending"
+        assert "_ud_full_scan_running" in src, (
+            "_ud_full_scan_running missing — fast-fetch concurrency guard not implemented"
         )
 
-    def test_priority_alerted_this_scan_defined_in_source(self):
-        """Per-scan set must be defined inside underdog_job."""
+    def test_skip_normal_gate_comment_removed(self):
+        """Comment about skipping normal gate for 95+ must be gone."""
         src = self._src()
-        assert "_priority_alerted_this_scan" in src, (
-            "_priority_alerted_this_scan not found in market_engine"
-        )
-        assert "_priority_alerted_this_scan.add(" in src
-
-    def test_lc_95_sent_flag_present(self):
-        """_lc_95_sent flag must be defined and used to suppress lc normal gates."""
-        src = self._src()
-        assert "_lc_95_sent" in src, "_lc_95_sent flag not found in market_engine"
-
-    def test_broadcast_alert_called_for_override(self):
-        """The 95+ override must send via broadcast_alert (not deliver_underdog)."""
-        src = self._src()
-        # The override calls broadcast_alert directly with _format_95_priority_alert
-        assert "PRIORITY OVERRIDE [new]" in src
-        assert "PRIORITY OVERRIDE [lc]" in src
-        assert "PRIORITY OVERRIDE [standing]" in src
-
-    def test_standing_path_uses_continue_for_95_plus(self):
-        """Standing path must `continue` to skip remaining gates after 95+ override."""
-        src = self._src()
-        # The continue must appear after the 95+ override block in the standing loop
-        # Verify it's present and positioned after the override comment
-        assert "skip normal gate sequence for all 95+ props" in src, (
-            "Standing path continue guard comment not found"
+        assert "skip normal gate sequence for all 95+ props" not in src, (
+            "Stale 95+ gate-skip comment re-added — remove it"
         )
 
-    def test_np_immediate_forced_false_for_95_plus(self):
-        """np_immediate must be forced to False for 95+ props in new-prop path."""
-        src = self._src()
-        assert "95+ always uses the override path" in src, (
-            "np_immediate=False guard for 95+ not found in new-prop path"
+    def test_format_95_priority_alert_defined_but_not_called_in_loop(self):
+        """_format_95_priority_alert may still be defined (dead code) but must
+        no longer be called from inside underdog_job's main prop loop."""
+        import market_engine as me
+        fn_src = inspect.getsource(me.underdog_job)
+        assert "_format_95_priority_alert(" not in fn_src, (
+            "_format_95_priority_alert is called inside underdog_job — "
+            "it should be dead code only; remove the call."
         )
 
-    def test_should_alert_forced_false_for_95_plus(self):
-        """should_alert must be forced to False when _lc_95_sent=True."""
-        src = self._src()
-        assert "if _lc_95_sent:" in src and "should_alert = False" in src, (
-            "should_alert=False guard for _lc_95_sent not found in lc path"
+    def test_normal_delivery_path_uses_deliver_underdog(self):
+        """All delivery paths must use deliver_underdog (not direct broadcast_alert)."""
+        import market_engine as me
+        src = inspect.getsource(me.underdog_job)
+        assert "delivery.deliver_underdog(" in src, (
+            "deliver_underdog missing from underdog_job — normal delivery path broken"
         )
 
 
@@ -310,48 +300,45 @@ class TestHighPriorityParam:
         )
 
     def test_high_priority_header_in_alerts_source(self):
-        """alerts.py must prepend a 🔥 header when high_priority=True."""
+        """alerts.py deliver_underdog must accept high_priority and apply S-tier cap.
+
+        The separate 🔥 S-TIER HIGH PRIORITY header has been removed per spec.
+        S-tier is capped to A-tier display when MQ < 80 or confidence < 80.
+        """
         import alerts as al
         src = inspect.getsource(al.AlertDelivery.deliver_underdog)
-        assert "high_priority" in src
-        assert "🔥" in src, "🔥 emoji must appear in deliver_underdog for high_priority header"
-        assert "S-TIER HIGH PRIORITY" in src
+        assert "high_priority" in src, "high_priority param still referenced in deliver_underdog"
+        # The old "S-TIER HIGH PRIORITY" separate header is gone
+        assert "S-TIER HIGH PRIORITY" not in src, (
+            "S-TIER HIGH PRIORITY header was re-added to deliver_underdog — "
+            "per spec all alerts use the unified ACTIONABLE BET PICK format"
+        )
 
-    def test_high_priority_in_market_engine_np_call(self):
-        """market_engine must pass high_priority to deliver_underdog in new-prop path."""
+    def test_high_priority_not_in_market_engine_np_call(self):
+        """market_engine underdog_job must NOT pass high_priority to deliver_underdog —
+        the separate S-tier HIGH PRIORITY header path was removed per spec."""
         import market_engine as me
         src = inspect.getsource(me.underdog_job)
-        # Look for high_priority= kwarg near the new-prop deliver_underdog call
-        assert "high_priority" in src, (
-            "high_priority kwarg not passed to deliver_underdog in market_engine"
-        )
-        # Count occurrences — should appear 3x (np, lc, standing paths)
-        count = src.count("high_priority")
-        assert count >= 3, (
-            f"high_priority appears {count}x in underdog_job — expected ≥ 3"
+        # high_priority= kwarg was used by the 80-94 BQ header path; now removed
+        assert "high_priority=True" not in src, (
+            "high_priority=True is still being passed in underdog_job — "
+            "the 80-94 BQ high-priority header path was removed per spec"
         )
 
-    def test_high_priority_condition_80_to_94(self):
-        """high_priority condition must check 80 <= decision.confidence < 95 AND decision_tier == 'S'.
+    def test_high_priority_condition_80_94_removed_from_engine(self):
+        """The 80-94 BQ range check for high_priority must be gone from underdog_job.
 
-        V3.4 final: 4★ floor is BQ ≥ 80 (HIGH PRIORITY); 95+ uses V3.3 override path.
+        V3.4 removed the separate high-priority header; S-tier quality is now shown
+        inside the unified ACTIONABLE BET PICK format via the _CappedDecision wrapper.
         """
         import market_engine as me
         src = inspect.getsource(me.underdog_job)
-        assert "80 <= decision.confidence < 95" in src or "80 <= _sdec.confidence < 95" in src, (
-            "80-94 Bet Quality range check not found in high_priority condition — V3.4 requires 80 as floor"
-        )
-        # Old 85/90 thresholds must not remain as the high_priority floor
-        assert "85 <= decision.confidence < 95" not in src, (
-            "Old 85 <= threshold still present — V3.4 sets 80 as the high_priority floor"
-        )
-        assert "90 <= decision.confidence < 95" not in src and "90 <= _sdec.confidence < 95" not in src, (
-            "Old 90 <= threshold still present — V3.4 sets 80 as the high_priority floor"
-        )
-        assert "decision.decision_tier == \"S\"" in src or "decision.decision_tier == 'S'" in src or \
-               "_sdec.decision_tier == \"S\"" in src or "_sdec.decision_tier == 'S'" in src, (
-            "S decision-tier check not found in high_priority condition"
-        )
+        for pattern in ("80 <= decision.confidence < 95", "80 <= _sdec.confidence < 95",
+                         "85 <= decision.confidence < 95", "90 <= decision.confidence < 95"):
+            assert pattern not in src, (
+                f"'{pattern}' found in underdog_job — the 80-94 BQ high-priority "
+                "condition was removed per spec"
+            )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -500,15 +487,19 @@ class TestDeduplicationLogic:
         session_set: set = set()
         assert self._would_send(key_b, scan_set, session_set)
 
-    def test_scan_set_fresh_each_scan(self):
-        """Per-scan set must be empty at the start of each scan cycle.
-        Verified by checking it's defined inside underdog_job (not module-level)."""
+    def test_ud_full_scan_running_prevents_concurrent_heavy_scans(self):
+        """_ud_full_scan_running module flag ensures only one full scan runs at a time.
+        The old _priority_alerted_this_scan per-scan set has been removed per spec.
+        """
         import inspect, market_engine as me
-        src = inspect.getsource(me.underdog_job)
-        # _priority_alerted_this_scan must be initialized inside the function
-        assert "_priority_alerted_this_scan: set = set()" in src or \
-               "_priority_alerted_this_scan = set()" in src, (
-            "_priority_alerted_this_scan must be initialized inside underdog_job"
+        src_module = inspect.getsource(me)
+        # Per-scan set is gone
+        assert "_priority_alerted_this_scan" not in src_module, (
+            "_priority_alerted_this_scan re-added — remove it; use _ud_full_scan_running instead"
+        )
+        # New fast-fetch concurrency guard
+        assert "_ud_full_scan_running" in src_module, (
+            "_ud_full_scan_running missing — fast-fetch concurrency guard not implemented"
         )
 
     def test_session_set_is_module_level(self):
@@ -545,16 +536,18 @@ class TestExistingPipelineUnchanged:
             "deliver_underdog must still be used for normal alert path"
         )
 
-    def test_broadcast_alert_for_override_only(self):
-        """broadcast_alert in underdog_job is used only for the 95+ override path.
-        The normal path uses delivery.deliver_underdog (which calls broadcast_alert internally).
-        Verify by counting direct broadcast_alert calls vs deliver_underdog calls.
+    def test_no_direct_broadcast_alert_in_underdog_job(self):
+        """Direct broadcast_alert calls from within the 95+ override paths have been
+        removed from underdog_job per spec. All alerts now go through deliver_underdog.
         """
         import inspect, market_engine as me
         src = inspect.getsource(me.underdog_job)
+        # Count direct broadcast_alert calls — the override paths are gone so count should be 0
+        # (deliver_underdog calls broadcast_alert internally, which is fine)
         direct_bc = src.count("await broadcast_alert(")
-        assert direct_bc >= 3, (
-            f"Expected ≥ 3 direct broadcast_alert calls (one per override path), got {direct_bc}"
+        assert direct_bc == 0, (
+            f"Expected 0 direct broadcast_alert calls in underdog_job (override paths removed), "
+            f"got {direct_bc}. Use deliver_underdog for all alerts."
         )
 
     def test_high_priority_false_by_default_in_alerts(self):
@@ -571,12 +564,29 @@ class TestExistingPipelineUnchanged:
         assert config.UD_MIN_CONF_A <= 100, "UD_MIN_CONF_A still exists"
         assert config.UD_STRICT_SPORT_MIN_BET_QUALITY <= 100, "BQ gate still exists"
 
-    def test_normal_gate_sequence_still_active_for_89(self):
-        """For 89/100 S-tier, np_immediate logic still applies (score.stars gate)."""
+    def test_normal_gate_sequence_still_active_for_all_tiers(self):
+        """All S/A/B tiers go through the normal is_qualified gate sequence.
+
+        The separate high-priority (80-94 BQ) and override (95+ BQ) broadcast paths
+        have been removed. The min_stars_for_sport gate has also been removed from
+        delivery paths — S/A/B are all actionable without a star floor.
+        """
         import inspect, market_engine as me
         src = inspect.getsource(me.underdog_job)
-        # The stars gate must still be present in the normal path
-        assert "min_stars_for_sport" in src, "Stars gate must still be active"
+        # All props go through deliver_underdog now
+        assert "delivery.deliver_underdog(" in src, "deliver_underdog missing from underdog_job"
+        # min_stars_for_sport must NOT appear as a delivery gate (it was removed per spec)
+        # Note: it may appear in inline comments explaining historical context — that's fine.
+        fn_src = inspect.getsource(me.underdog_job)
+        # Count non-comment occurrences: lines that reference it without a # prefix
+        gate_lines = [
+            ln for ln in fn_src.splitlines()
+            if "min_stars_for_sport" in ln and not ln.lstrip().startswith("#")
+        ]
+        assert len(gate_lines) == 0, (
+            f"min_stars_for_sport used as a gate in underdog_job (not just a comment): "
+            f"{gate_lines[:3]}"
+        )
 
     def test_delivery_result_structure_unchanged(self):
         """DeliveryResult structure must be unchanged."""
@@ -823,12 +833,19 @@ class TestV33SportDirectionPolicy:
 
     # ── Sport Direction source check ─────────────────────────────────────────
     def test_mlb_nfl_direction_check_in_source(self):
-        """95+ override paths must block MLB/NFL UNDER (Tier 2: OVER only)."""
+        """MLB/NFL UNDER must be blocked via is_qualified / _lc_mlb_ok.
+        The separate 95+ override direction vars (_np/lc/sp_95_dir_ok) are removed.
+        """
         import inspect, market_engine as me
         src = inspect.getsource(me.underdog_job)
-        assert "_np_95_dir_ok" in src, "_np_95_dir_ok missing — MLB/NFL UNDER may fire via new-prop 95+ override"
-        assert "_lc_95_dir_ok" in src, "_lc_95_dir_ok missing — MLB/NFL UNDER may fire via lc 95+ override"
-        assert "_sp_95_dir_ok" in src, "_sp_95_dir_ok missing — MLB/NFL UNDER may fire via standing 95+ override"
+        # Old per-path override direction gates are gone
+        for var in ("_np_95_dir_ok", "_lc_95_dir_ok", "_sp_95_dir_ok"):
+            assert var not in src, (
+                f"{var} was re-added — the 95+ override paths are removed; "
+                "MLB UNDER is gated at is_qualified (_lc_mlb_ok) level."
+            )
+        # MLB UNDER whitelist gate must still exist in the lc path
+        assert "_lc_mlb_ok" in src, "_lc_mlb_ok missing — MLB UNDER whitelist gate not in lc path"
 
 
 # ═══════════════════════════════════════════════════════════════════════════

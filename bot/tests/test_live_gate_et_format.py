@@ -302,12 +302,18 @@ class TestStrictSportBQConfig:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestSchedulerMaxInstances:
-    """Verify underdog_monitor is scheduled with explicit max_instances=1."""
+    """Verify underdog_monitor is scheduled with explicit max_instances=2.
+
+    max_instances=2 allows a second underdog_job to start while the first full
+    scan is still scoring. The _ud_full_scan_running flag inside the job ensures
+    the second instance runs a fast new-prop fetch only and returns immediately.
+    """
 
     def test_underdog_job_kwargs_max_instances(self):
         """
-        main.py must schedule underdog_monitor with max_instances=1 explicitly
-        so APScheduler never runs two scans concurrently.
+        main.py must schedule underdog_monitor with max_instances=2 explicitly.
+        This lets a fast fetch run at the 2-min cadence even when the primary
+        full scan takes longer than the interval.
         """
         import ast
         import pathlib
@@ -338,7 +344,7 @@ class TestSchedulerMaxInstances:
             assert jk_kw is not None, (
                 "underdog_monitor run_repeating() must have a job_kwargs= argument"
             )
-            # job_kwargs must be a dict literal containing max_instances: 1
+            # job_kwargs must be a dict literal containing max_instances: 2
             assert isinstance(jk_kw.value, ast.Dict), "job_kwargs must be a dict literal"
             keys = [getattr(k, "s", None) or getattr(k, "value", None)
                     for k in jk_kw.value.keys]
@@ -348,7 +354,9 @@ class TestSchedulerMaxInstances:
             max_idx = keys.index("max_instances")
             max_val_node = jk_kw.value.values[max_idx]
             max_val = getattr(max_val_node, "n", None) or getattr(max_val_node, "value", None)
-            assert max_val == 1, f"max_instances must be 1, got {max_val}"
+            assert max_val == 2, (
+                f"max_instances must be 2 (fast-fetch overlap design), got {max_val}"
+            )
             found = True
             break
 

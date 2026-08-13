@@ -188,21 +188,24 @@ class TestBQStrongLabel:
 
 class TestSTierPriorityDisplay:
 
-    def test_19_s_tier_priority_header_present(self):
-        """19. S-tier actionable pick must display S-TIER HIGH PRIORITY."""
-        src = inspect.getsource(__import__("alerts"))
-        assert "S-TIER HIGH PRIORITY" in src
+    def test_19_s_tier_priority_header_removed(self):
+        """19. Separate S-TIER HIGH PRIORITY header must NOT exist — spec removed it.
 
-    def test_20_s_tier_priority_no_score_in_header(self):
-        """20. S-tier priority header must NOT include '/100' raw score (removed per spec)."""
+        Actionable picks should use the unified 🎯 ACTIONABLE BET PICK format only.
+        The S-tier grade is displayed inside the alert body, not as a separate header.
+        """
         src = inspect.getsource(__import__("alerts"))
-        # The high_priority block must NOT embed _hp_score/100 in the header
-        idx = src.find("S-TIER HIGH PRIORITY")
-        assert idx != -1
-        snippet = src[idx: idx + 80]
-        assert "/100" not in snippet, (
-            f"'/100' found in S-TIER HIGH PRIORITY header — spec says remove raw score.\n"
-            f"Snippet: {snippet!r}"
+        assert "S-TIER HIGH PRIORITY" not in src, (
+            "Separate S-TIER HIGH PRIORITY header was re-added to alerts.py. "
+            "Per spec it must be removed — use unified 🎯 ACTIONABLE BET PICK format."
+        )
+
+    def test_20_actionable_bet_pick_format_present(self):
+        """20. Unified 🎯 ACTIONABLE BET PICK format must exist in alerts_multiplatform."""
+        src = inspect.getsource(__import__("alerts_multiplatform"))
+        assert "ACTIONABLE BET PICK" in src or "🎯" in src, (
+            "🎯 ACTIONABLE BET PICK format missing from alerts_multiplatform — "
+            "this is the single user-facing alert format."
         )
 
 

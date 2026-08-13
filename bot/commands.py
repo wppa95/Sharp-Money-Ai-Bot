@@ -3546,19 +3546,6 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     f"✅ Qualified:       <b>{sr_qual:,}</b>  (sent: {sr_sent})",
                     f"👁 Watchlist:       <b>{sr_wl:,}</b>",
                     f"❌ Rejected:        <b>{sr_rej:,}</b>",
-                    "",
-                    _thick,
-                    "👁 <b>Watchlist Refresh</b>  <i>(last cycle)</i>",
-                    _thick,
-                    "",
-                    f"Active watchlist:   <b>{wl_active:,}</b>",
-                    f"Re-scored:          <b>{wl_rescored:,}</b>",
-                    f"⬆️  Improved:        <b>{wl_improved:,}</b>",
-                    f"➡️  Unchanged:       <b>{wl_unchanged:,}</b>",
-                    f"⬇️  Declined:        <b>{wl_declined:,}</b>",
-                    f"🔥 Promoted:        <b>{wl_promoted:,}</b>",
-                    f"🚫 Removed:         <b>{wl_removed:,}</b>",
-                    f"⏱ Next refresh:    ~2 min",
                 ]
             # ── Full-Pool Rescan Rotation block ──────────────────────────────────
             try:

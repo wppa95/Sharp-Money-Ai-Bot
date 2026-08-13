@@ -107,6 +107,13 @@ _MARKET_FIRST_ALERT_TTL_H: int = 24
 # Prevents the same exceptional prop from firing the override repeatedly.
 _priority_override_sent: set = set()
 
+# ── Underdog full-scan concurrency guard ──────────────────────────────────────
+# Set to True while underdog_job is executing a full scan (fetch + score + deliver).
+# A second instance (via max_instances=2) that finds this flag set will run only the
+# fast new-prop detection path and return immediately, keeping the 2-minute polling
+# cadence alive without duplicating the heavy scoring work.
+_ud_full_scan_running: bool = False
+
 
 def _bq_stars(bq: int) -> str:
     """V3.4 star display string computed from Bet Quality (decision.confidence).
@@ -1074,6 +1081,42 @@ async def underdog_job(context) -> None:
     if is_cold_start:
         await _init_state_from_db(db)
 
+    # ── Concurrency guard — fast new-prop path when full scan is already running ──
+    # max_instances=2 allows a second underdog_job to start while the first is still
+    # scoring.  If the primary scan is active, the secondary instance only fetches +
+    # detects new props (fast, ~2–5 s) and returns immediately so the 2-min cadence
+    # is preserved without duplicating heavy scoring work.
+    global _ud_full_scan_running
+    if _ud_full_scan_running:
+        logger.info("underdog_job: full scan in progress — running fast new-prop fetch only")
+        try:
+            _fp_snaps = await _registry.fetch_pickem()
+            if _fp_snaps:
+                _fp_ud = [s for s in _fp_snaps if s.sportsbook == "Underdog"]
+                _fp_known = await db.get_known_underdog_prop_keys()
+                _fp_new_count = sum(
+                    1 for s in _fp_ud
+                    if "[REMOVED]" not in (s.selection or "")
+                    and (
+                        s.player or "",
+                        _extract_ud_stat_type(s.selection, s.player, s.line),
+                    ) not in _fp_known
+                )
+                if _fp_new_count:
+                    logger.info(
+                        "underdog_job [fast-fetch]: %d new props detected — "
+                        "will be processed when primary scan completes",
+                        _fp_new_count,
+                    )
+            if _health:
+                _health.record_provider_fetch("Underdog")
+                _health.record_job_run("underdog_job")
+        except Exception as _fp_exc:
+            logger.warning("underdog_job [fast-fetch]: error: %s", _fp_exc)
+        return
+
+    _ud_full_scan_running = True
+
     # Memory baseline — log current RSS before the heavy scan to diagnose OOM kills.
     # Uses VmRSS (/proc/self/status) which reflects actual live RSS rather than the
     # all-time high-water mark returned by resource.ru_maxrss.
@@ -1086,6 +1129,7 @@ async def underdog_job(context) -> None:
             _health.record_provider_error("Underdog", str(_fetch_exc))
             _health.record_job_fail("underdog_job", str(_fetch_exc))
         logger.exception("underdog_job: fetch_pickem failed: %s", _fetch_exc)
+        _ud_full_scan_running = False
         return
 
     if not snapshots:
@@ -1093,6 +1137,7 @@ async def underdog_job(context) -> None:
         if _health:
             _health.record_provider_fetch("Underdog")
             _health.record_job_run("underdog_job")   # empty response = successful run
+        _ud_full_scan_running = False
         return
 
     if _health:
@@ -1151,9 +1196,6 @@ async def underdog_job(context) -> None:
     _sport_futures:       dict[str, int] = {}  # season-long/futures props (tracked, not scored)
     _sport_move_detected: dict[str, int] = {}  # significant line moves (≥MIN_LINE_CHANGE)
     _sport_gated:         dict[str, int] = {}  # passed full scoring gate (actionable)
-    # Per-scan set: prevents the 95+ priority override from firing more than once
-    # for the same (player, sport, stat_type) within a single scan cycle.
-    _priority_alerted_this_scan: set = set()
 
     try:
         # Two DB round-trips before the loop — both O(unique props), no LIMIT.
@@ -1233,7 +1275,6 @@ async def underdog_job(context) -> None:
             hit_rates:          Optional[object]      = None    # PlayerHitRates or None
             market_quality:     Optional[object]      = None    # MarketQuality — display context
             market_pressure:    Optional[object]      = None    # MarketPressureFlag — warning only
-            _lc_95_sent:        bool                  = False   # 95+ override already sent via lc path
     
             if is_new_prop:
                 # ── New-prop path ────────────────────────────────────────────────
@@ -1273,7 +1314,7 @@ async def underdog_job(context) -> None:
                 np_immediate = (
                     (line_val <= config.UD_NEW_PROP_IMMEDIATE_LINE_THRESHOLD
                      and stat_type in config.UD_PRIORITY_STAT_CATEGORIES)
-                    or score.stars >= config.min_stars_for_sport(snap.sport or "")
+                    or score.stars >= config.UD_NON_STRICT_MIN_STARS
                 )
                 # Validation gate: block if insufficient player history
                 if np_immediate and not validation.has_supporting_data:
@@ -1320,77 +1361,6 @@ async def underdog_job(context) -> None:
                     except Exception as _pol_exc:
                         logger.warning(
                             "underdog_job: log_prop_opportunity [new-prop] failed: %s", _pol_exc
-                        )
-
-                # ── 95+ S-tier priority override [new-prop path] ─────────────────
-                # Bet Quality (decision.confidence) ≥ 95 AND decision tier == "S":
-                # bypasses secondary/historical gates but still enforces:
-                #   1. Tier 2 UNDER block — MLB/NFL UNDER is always watchlist, not actionable
-                #   2. Confidence Gate (implicitly met: conf ≥ 95 ≥ any min_conf)
-                #   3. Existing dedup / reversal protection
-                _np_pp_key = (player, snap.sport or "UNKNOWN", stat_type)
-                if decision is not None and decision.confidence >= 95 and decision.decision_tier == "S" and decision.recommendation != "PASS":
-                    np_immediate = False  # 95+ always uses the override path
-                    _np_95_sport = (snap.sport or "").upper()
-                    # NFL UNDER: allowed. MLB UNDER: whitelist only. MLB/NFL OVER: always allowed.
-                    _np_95_dir_ok = (
-                        _np_95_sport != "MLB"
-                        or decision.recommendation != "UNDER"
-                        or config.is_mlb_under_allowed(stat_type)
-                    )
-                    # Pre-delivery freshness guard — candidate line must match latest scan line.
-                    # Within a single scan this always passes (same snap object is used for
-                    # scoring and delivery).  Any divergence is logged and the alert is suppressed.
-                    _np_95_fresh = _ud_line_fresh(line_val, player, stat_type, _current_scan_line_map)
-                    if not _np_95_fresh:
-                        logger.warning(
-                            "UD freshness_guard [np-95]: %s | %s | alert_line=%.1f"
-                            " scan line diverged — BLOCKED",
-                            player, stat_type, line_val,
-                        )
-                    if (
-                        _np_pp_key not in _priority_alerted_this_scan
-                        and _np_pp_key not in _priority_override_sent
-                        and chat_ids
-                        and _np_95_dir_ok
-                        and _np_95_fresh
-                    ):
-                        # Attempt to get a direction; decision may be None if validation
-                        # blocked the computation — try with market signals only.
-                        _np_pp_dec = decision
-                        if _np_pp_dec is None:
-                            try:
-                                _np_pp_dec = make_ud_bet_decision(
-                                    score        = score,
-                                    validation   = validation,
-                                    current_line = line_val,
-                                    prev_line    = None,
-                                    hit_rates    = None,
-                                )
-                            except Exception:
-                                _np_pp_dec = None
-                        _priority_alerted_this_scan.add(_np_pp_key)
-                        _priority_override_sent.add(_np_pp_key)
-                        await broadcast_alert(
-                            bot, chat_ids,
-                            _format_95_priority_alert(player, snap, stat_type, score, _np_pp_dec, line_val),
-                        )
-                        _record_prop_alerted(
-                            _prop_market_alerted, player, snap.sport or "UNKNOWN", stat_type, line_val
-                        )
-                        _lifecycle_alerted.append((player, snap.sport or "UNKNOWN", stat_type))
-                        # Mark snapshot alert_sent so has_recent_ud_alert returns True in
-                        # future scan cycles (prevents cross-cycle standing-path duplicates).
-                        try:
-                            await db.mark_ud_snapshot_alert_sent(player, stat_type)
-                        except Exception as _msa_exc:
-                            logger.debug("mark_ud_snapshot_alert_sent [np-95] failed: %s", _msa_exc)
-                        logger.info(
-                            "🔥🚨 PRIORITY OVERRIDE [new] | Player: %s | Sport: %s"
-                            " | Market: %s | Line: %.1f | Score: %d/100 | Dir: %s",
-                            player, snap.sport or "UNKNOWN", stat_type, line_val,
-                            int(score.total),
-                            (_np_pp_dec.recommendation if _np_pp_dec is not None else "UNKNOWN"),
                         )
 
                 # Always add to the cycle batch — even blocked props appear in digest
@@ -1538,12 +1508,6 @@ async def underdog_job(context) -> None:
                         market_pressure     = market_pressure,
                         intelligence_trace  = _np_intel_trace,
                         market_confirmation = _np_odds_confirm,
-                        high_priority       = (
-                            decision is not None
-                            and 80 <= decision.confidence < 95  # 95+ uses override path; 80-94 (4★+) gets label
-                            and decision.decision_tier == "S"
-                            and decision.recommendation != "PASS"
-                        ),
                     )
                     if ud_result.sent:
                         _n_new_prop_sent += 1
@@ -1758,76 +1722,6 @@ async def underdog_job(context) -> None:
                     _n_scored += 1
                     _tier_counts[score.tier] = _tier_counts.get(score.tier, 0) + 1
 
-                    # ── 95+ S-tier priority override [lc path] ───────────────────
-                    # Bet Quality (decision.confidence) ≥ 95 AND decision tier == "S":
-                    # bypasses secondary/historical gates but still enforces:
-                    #   1. Tier 2 UNDER block — MLB/NFL UNDER is always watchlist, not actionable
-                    #   2. Confidence + Quality gates implicitly met at BQ ≥ 95
-                    #   3. Existing dedup / reversal protection
-                    _lc_pp_key = (player, snap.sport or "UNKNOWN", stat_type)
-                    if decision is not None and decision.confidence >= 95 and decision.decision_tier == "S" and decision.recommendation != "PASS":
-                        _lc_95_sent = True  # block normal lc gate sequence
-                        _lc_95_sport = (snap.sport or "").upper()
-                        # NFL UNDER: allowed. MLB UNDER: whitelist only. OVER: always allowed.
-                        _lc_95_dir_ok = (
-                            _lc_95_sport != "MLB"
-                            or decision.recommendation != "UNDER"
-                            or config.is_mlb_under_allowed(stat_type)
-                        )
-                        # Pre-delivery freshness guard — candidate line must match latest scan line.
-                        _lc_95_fresh = _ud_line_fresh(snap.line or 0.0, player, stat_type, _current_scan_line_map)
-                        if not _lc_95_fresh:
-                            logger.warning(
-                                "UD freshness_guard [lc-95]: %s | %s | alert_line=%.1f"
-                                " scan line diverged — BLOCKED",
-                                player, stat_type, snap.line or 0.0,
-                            )
-                        if (
-                            _lc_pp_key not in _priority_alerted_this_scan
-                            and _lc_pp_key not in _priority_override_sent
-                            and chat_ids
-                            and _lc_95_dir_ok
-                            and _lc_95_fresh
-                        ):
-                            _lc_pp_dec = decision
-                            if _lc_pp_dec is None:
-                                try:
-                                    _lc_pp_dec = make_ud_bet_decision(
-                                        score        = score,
-                                        validation   = validation,
-                                        current_line = snap.line or 0.0,
-                                        prev_line    = prev_line,
-                                        hit_rates    = hit_rates,
-                                    )
-                                except Exception:
-                                    _lc_pp_dec = None
-                            _priority_alerted_this_scan.add(_lc_pp_key)
-                            _priority_override_sent.add(_lc_pp_key)
-                            await broadcast_alert(
-                                bot, chat_ids,
-                                _format_95_priority_alert(
-                                    player, snap, stat_type, score, _lc_pp_dec, snap.line or 0.0
-                                ),
-                            )
-                            _record_prop_alerted(
-                                _prop_market_alerted, player, snap.sport or "UNKNOWN",
-                                stat_type, snap.line or 0.0,
-                            )
-                            _lifecycle_alerted.append((player, snap.sport or "UNKNOWN", stat_type))
-                            # Mark snapshot alert_sent so has_recent_ud_alert returns True in
-                            # future scan cycles (prevents cross-cycle standing-path duplicates).
-                            try:
-                                await db.mark_ud_snapshot_alert_sent(player, stat_type)
-                            except Exception as _msa_exc:
-                                logger.debug("mark_ud_snapshot_alert_sent [lc-95] failed: %s", _msa_exc)
-                            logger.info(
-                                "🔥🚨 PRIORITY OVERRIDE [lc] | Player: %s | Sport: %s"
-                                " | Market: %s | Line: %.1f | Score: %d/100 | Dir: %s",
-                                player, snap.sport or "UNKNOWN", stat_type, snap.line or 0.0,
-                                int(score.total),
-                                (_lc_pp_dec.recommendation if _lc_pp_dec is not None else "UNKNOWN"),
-                            )
-
                     logger.debug(
                         "UD score: %s | %s | %s (tier=%s stars=%d n=%d has_data=%s)",
                         player, stat_type, score.total, score.tier, score.stars,
@@ -1952,24 +1846,16 @@ async def underdog_job(context) -> None:
                         or decision.recommendation != "UNDER"
                         or config.is_mlb_under_allowed(stat_type)
                     )
-                    # Strict-sport tier gate (MLB + NFL) — S/A tier required for alerts.
-                    # Direction filtering is handled by _lc_mlb_ok above (MLB) or omitted (NFL).
-                    _lc_strict_tier_ok = (
-                        _lc_sport_up not in config.ud_strict_alert_sports
-                        or decision is None
-                        or decision.decision_tier in config.ud_mlb_alert_tiers
-                    )
+                    # Tier gate: B or better → actionable (S/A/B); C → watchlist.
+                    # Tier 1 vs Tier 2 affects priority/ranking, not A/B actionability.
                     is_qualified = (
                         not is_cold_start
                         and score is not None
-                        # Sport-conditional star floor: strict for MLB/NFL, relaxed for others (#2)
-                        and score.stars >= config.min_stars_for_sport(snap.sport or "")
                         and decision is not None
                         and decision.recommendation != "PASS"
                         and decision.decision_tier in ("S", "A", "B", "C")
                         and (snap.sport or "UNKNOWN") in config.ud_alert_sports
                         and _lc_mlb_ok
-                        and _lc_strict_tier_ok
                     )
                     if is_qualified and not is_reentry_qualified:
                         _n_qualified += 1
@@ -1979,15 +1865,6 @@ async def underdog_job(context) -> None:
                             _lc_rej = "cold_start"
                         elif is_qualified:
                             _lc_rej = "qualified"
-                        elif score.stars < config.min_stars_for_sport(snap.sport or ""):
-                            # Use the sport-aware star floor so Tier 1 sports (2★ min) are
-                            # not incorrectly labelled as "below_threshold" when the actual
-                            # rejection reason is something else (e.g. decision_pass).
-                            _lc_min_stars = config.min_stars_for_sport(snap.sport or "")
-                            _lc_rej = (
-                                f"below_threshold"
-                                f" ({score.stars}★ < {_lc_min_stars}★)"
-                            )
                         elif decision is None:
                             _lc_rej = "no_decision (PASS tier)"
                         elif decision.recommendation == "PASS":
@@ -2009,8 +1886,6 @@ async def underdog_job(context) -> None:
                             )
                         elif (snap.sport or "UNKNOWN") not in config.ud_alert_sports:
                             _lc_rej = f"sport_blocked ({snap.sport})"
-                        elif not _lc_strict_tier_ok:
-                            _lc_rej = f"strict_tier_blocked ({decision.decision_tier}, {_lc_sport_up} min=S)"
                         elif not _lc_mlb_ok:
                             if decision.recommendation == "UNDER":
                                 _lc_rej = f"mlb_under_blocked ({decision.decision_tier})"
@@ -2054,14 +1929,6 @@ async def underdog_job(context) -> None:
                     and prev_line is not None
                     and abs(snap.line - prev_line) >= config.MIN_UNDERDOG_LINE_CHANGE
                 ))
-                # 95+ override already sent for this prop via the lc scoring block above.
-                # Force should_alert=False so the normal gate sequence does not also fire.
-                # Also add to _processed_keys so the standing path cannot re-evaluate and
-                # send a duplicate alert in the same scan cycle.
-                if _lc_95_sent:
-                    should_alert = False
-                    _processed_keys.add((player, stat_type))
-    
                 # Per-tier confidence gate for directional picks (not removals)
                 if should_alert and not is_removed and decision is not None and decision.recommendation != "PASS":
                     _lc_min_conf = {
@@ -2185,13 +2052,6 @@ async def underdog_job(context) -> None:
                         removal_reason      = _removal_reason,
                         intelligence_trace  = _lc_intel_trace,
                         market_confirmation = _lc_odds_confirm,
-                        high_priority       = (
-                            decision is not None
-                            and not is_removed
-                            and 80 <= decision.confidence < 95  # 95+ uses override path; 80-94 (4★+) gets label
-                            and decision.decision_tier == "S"
-                            and decision.recommendation != "PASS"
-                        ),
                     )
                     if ud_result.filtered:
                         logger.debug(
@@ -2407,7 +2267,9 @@ async def underdog_job(context) -> None:
                         _prev_eff_tier = "S"
                     elif _prev.score_total >= 65:
                         _prev_eff_tier = "A"
-                if _prev_eff_tier not in ("A", "S"):
+                    elif _prev.score_total >= 50:
+                        _prev_eff_tier = "B"
+                if _prev_eff_tier not in ("A", "S", "B"):
                     continue
     
                 _standing_candidates.append((_snap, _sp, _st, _sport, _prev))
@@ -2465,9 +2327,6 @@ async def underdog_job(context) -> None:
                         _sp, _st, _ssport, getattr(_sval, "n_games", 0),
                     )
                     continue
-                # Sport-conditional star floor: strict for MLB/NFL, relaxed for others (#2)
-                if _sscore.stars < config.min_stars_for_sport(_ssport):
-                    continue
     
                 _shits = await _fetch_and_compute_hit_rates(
                     db, _sp, _ssport, _st, _line_val
@@ -2503,59 +2362,6 @@ async def underdog_job(context) -> None:
                     logger.warning(
                         "underdog_job: log_prop_opportunity [standing] failed: %s", _pol_exc
                     )
-                # ── 95+ S-tier priority override [standing path] ─────────────
-                # Bet Quality (_sdec.confidence) ≥ 95 AND decision tier == "S":
-                # bypasses secondary/historical gates but still enforces:
-                #   1. Sport Direction — MLB/NFL OVER-only; UNDER always blocked
-                #   2. Confidence + Quality gates implicitly met at BQ ≥ 95
-                #   3. Existing dedup / reversal protection
-                # `continue` skips remaining gates for all 95+ props (sent or not).
-                _sp_pp_key = (_sp, _ssport, _st)
-                if _sdec is not None and _sdec.confidence >= 95 and _sdec.decision_tier == "S" and _sdec.recommendation != "PASS":
-                    # Tier 2: MLB/NFL UNDER is NEVER actionable regardless of BQ or tier.
-                    # NFL UNDER: allowed. MLB UNDER: whitelist only. OVER: always allowed.
-                    _sp_95_dir_ok = (
-                        _ssport.upper() != "MLB"
-                        or _sdec.recommendation != "UNDER"
-                        or config.is_mlb_under_allowed(_st)
-                    )
-                    # Pre-delivery freshness guard — candidate line must match latest scan line.
-                    _sp_95_fresh = _ud_line_fresh(_line_val, _sp, _st, _current_scan_line_map)
-                    if not _sp_95_fresh:
-                        logger.warning(
-                            "UD freshness_guard [sp-95]: %s | %s | alert_line=%.1f"
-                            " scan line diverged — BLOCKED",
-                            _sp, _st, _line_val,
-                        )
-                    if (
-                        _sp_pp_key not in _priority_alerted_this_scan
-                        and _sp_pp_key not in _priority_override_sent
-                        and chat_ids
-                        and _sp_95_dir_ok
-                        and _sp_95_fresh
-                    ):
-                        _priority_alerted_this_scan.add(_sp_pp_key)
-                        _priority_override_sent.add(_sp_pp_key)
-                        await broadcast_alert(
-                            bot, chat_ids,
-                            _format_95_priority_alert(_sp, _ssnap, _st, _sscore, _sdec, _line_val),
-                        )
-                        _record_prop_alerted(_prop_market_alerted, _sp, _ssport, _st, _line_val)
-                        _n_standing_sent += 1
-                        _lifecycle_alerted.append((_sp, _ssport, _st))
-                        # Mark snapshot alert_sent so has_recent_ud_alert returns True in
-                        # future scan cycles (prevents cross-cycle duplicates).
-                        try:
-                            await db.mark_ud_snapshot_alert_sent(_sp, _st)
-                        except Exception as _msa_exc:
-                            logger.debug("mark_ud_snapshot_alert_sent [sp-95] failed: %s", _msa_exc)
-                        logger.info(
-                            "🔥🚨 PRIORITY OVERRIDE [standing] | Player: %s | Sport: %s"
-                            " | Market: %s | Line: %.1f | Score: %d/100 | Dir: %s",
-                            _sp, _ssport, _st, _line_val, int(_sscore.total),
-                            (_sdec.recommendation if _sdec is not None else "UNKNOWN"),
-                        )
-                    continue  # skip normal gate sequence for all 95+ props
 
                 if _sdec is None or _sdec.recommendation == "PASS":
                     logger.debug(
@@ -2658,12 +2464,6 @@ async def underdog_job(context) -> None:
                     standing            = True,
                     intelligence_trace  = _s_intel_trace,
                     market_confirmation = _s_odds_confirm,
-                    high_priority       = (
-                        _sdec is not None
-                        and 80 <= _sdec.confidence < 95  # 95+ uses override path; 80-94 (4★+) gets label
-                        and _sdec.decision_tier == "S"
-                        and _sdec.recommendation != "PASS"
-                    ),
                 )
                 if _sresult.sent:
                     _n_standing_sent += 1
@@ -3075,6 +2875,9 @@ async def underdog_job(context) -> None:
             len(_MARKET_FIRST_ALERT), len(_prop_market_alerted),
         )
 
+    # Clear the full-scan concurrency guard so future scheduled instances run full scans.
+    _ud_full_scan_running = False
+
     # Record job outcome — failure if any persistence stage raised.
     if _health:
         if _persistence_ok:
@@ -3153,9 +2956,6 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
 
     if _health:
         _health.record_job_started("stable_refresh_job")
-
-    # ── Per-cycle priority dedup (resets every cycle) ─────────────────────────
-    _sr_priority_this_cycle: set = set()
 
     # Stats for console/health
     pool_size    = 0
@@ -3339,9 +3139,6 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             if not _sr_val.has_supporting_data:
                 sr_rejected += 1
                 continue
-            if _sr_score.stars < config.min_stars_for_sport(_sr_sport):
-                sr_rejected += 1
-                continue
 
             _sr_hits = await _fetch_and_compute_hit_rates(
                 db, _sr_player, _sr_sport, _sr_stat, _sr_line
@@ -3382,64 +3179,6 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 )
             except Exception as _sr_pol_exc:
                 logger.debug("stable_refresh: log_prop_opportunity failed: %s", _sr_pol_exc)
-
-            # ── 95+ priority override [stable path] ───────────────────────────
-            _sr_pp_key = (_sr_player, _sr_sport, _sr_stat)
-            if (
-                _sr_dec is not None
-                and _sr_dec.confidence >= 95
-                and _sr_dec.decision_tier == "S"
-                and _sr_dec.recommendation != "PASS"
-            ):
-                _sr_dir_ok = (
-                    _sr_sport.upper() != "MLB"
-                    or _sr_dec.recommendation != "UNDER"
-                    or config.is_mlb_under_allowed(_sr_stat)
-                )
-                _sr_fresh = _ud_line_fresh(_sr_line, _sr_player, _sr_stat, _sr_line_map)
-                if (
-                    _sr_pp_key not in _sr_priority_this_cycle
-                    and _sr_pp_key not in _priority_override_sent
-                    and chat_ids
-                    and _sr_dir_ok
-                    and _sr_fresh
-                ):
-                    _sr_priority_this_cycle.add(_sr_pp_key)
-                    _priority_override_sent.add(_sr_pp_key)
-                    await broadcast_alert(
-                        bot, chat_ids,
-                        _format_95_priority_alert(
-                            _sr_player, _sr_snap, _sr_stat, _sr_score, _sr_dec, _sr_line,
-                        ),
-                    )
-                    _record_prop_alerted(
-                        _prop_market_alerted, _sr_player, _sr_sport, _sr_stat, _sr_line,
-                    )
-                    # Persist the alert-sent marker to DB so has_recent_ud_alert
-                    # (and get_recently_alerted_prop_keys) return True after a
-                    # restart, preventing the same 95+ prop from being re-alerted
-                    # in the first stable-refresh cycle after the bot comes back up.
-                    try:
-                        await db.mark_ud_snapshot_alert_sent(_sr_player, _sr_stat)
-                        _sr_ext_id_95 = (
-                            getattr(_sr_snap, "external_id", None)
-                            or str(getattr(_sr_snap, "id", None) or "")
-                        )
-                        await db.mark_opportunity_alert_sent(_sr_ext_id_95, _sr_stat)
-                    except Exception as _sr_persist_exc:
-                        logger.debug(
-                            "stable_refresh 95+: mark_alert_sent failed: %s",
-                            _sr_persist_exc,
-                        )
-                    sr_sent      += 1
-                    sr_qualified += 1
-                    logger.info(
-                        "🔥🚨 PRIORITY OVERRIDE [stable] | Player: %s | Sport: %s"
-                        " | Market: %s | Line: %.1f | Score: %d/100 | Dir: %s",
-                        _sr_player, _sr_sport, _sr_stat, _sr_line,
-                        int(_sr_score.total), _sr_dec.recommendation,
-                    )
-                continue  # skip normal gate sequence for all 95+ props
 
             # ── Normal gate sequence ──────────────────────────────────────────
             if _sr_dec is None or _sr_dec.recommendation == "PASS":
@@ -3515,11 +3254,6 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 standing            = True,
                 intelligence_trace  = _sr_intel_trace,
                 market_confirmation = _sr_odds_confirm,
-                high_priority       = (
-                    80 <= _sr_dec.confidence < 95
-                    and _sr_dec.decision_tier == "S"
-                    and _sr_dec.recommendation != "PASS"
-                ),
             )
             if _sr_result.sent:
                 sr_sent += 1
@@ -4072,7 +3806,6 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     _fpr_dec is not None
                     and _fpr_dec.recommendation != "PASS"
                     and _fpr_val.has_supporting_data
-                    and _fpr_score.stars >= config.min_stars_for_sport(_fpr_sport)
                     and _fpr_dec.confidence >= config.min_conf_for_sport_tier(
                         _fpr_sport, _fpr_dec.decision_tier
                     )
@@ -4087,10 +3820,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         _fpr_player, _fpr_stat, within_seconds=86400,
                     )
                 )
-                # Strict-sport additional gates
-                if _fpr_qualifies and _fpr_sport in config.ud_strict_alert_sports:
-                    if _fpr_dec.decision_tier not in config.ud_mlb_alert_tiers:
-                        _fpr_qualifies = False
+                # MLB UNDER direction gate (whitelist markets only)
                 if _fpr_qualifies and _fpr_sport == "MLB":
                     if (
                         _fpr_dec.recommendation == "UNDER"

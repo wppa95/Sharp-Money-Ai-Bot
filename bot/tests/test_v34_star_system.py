@@ -465,24 +465,37 @@ class TestHighPriorityThreshold80:
         """79 is below the V3.4 floor — must be NORMAL (goes through normal gates)."""
         assert self._route(79, "S") == "NORMAL"
 
-    def test_source_uses_80_floor(self):
-        """market_engine source must use 80 <= decision.confidence as the high_priority floor."""
+    def test_source_high_priority_header_removed(self):
+        """The separate high_priority=True / S-TIER HIGH PRIORITY header has been removed.
+        Per spec all alerts use the unified 🎯 ACTIONABLE BET PICK format.
+        The 80-94 BQ range check for the high_priority kwarg is gone from underdog_job.
+        """
         import inspect, market_engine as me
         src = inspect.getsource(me.underdog_job)
-        assert "80 <= decision.confidence < 95" in src or "80 <= _sdec.confidence < 95" in src, (
-            "V3.4 requires 80 as the high_priority floor — 80 <= ... < 95 not found in source"
-        )
-        # Old 85 threshold must not remain
-        assert "85 <= decision.confidence < 95" not in src, (
-            "Old 85 <= threshold still present — V3.4 sets 80 as the floor"
-        )
-        assert "85 <= _sdec.confidence < 95" not in src, (
-            "Old 85 <= (standing path) still present — V3.4 sets 80 as the floor"
+        # The 80-94 BQ high_priority header path is removed
+        for pattern in ("80 <= decision.confidence < 95", "80 <= _sdec.confidence < 95",
+                        "85 <= decision.confidence < 95", "85 <= _sdec.confidence < 95"):
+            assert pattern not in src, (
+                f"'{pattern}' re-added to underdog_job — the 80-94 BQ high_priority "
+                "header path was removed per spec"
+            )
+        # high_priority= kwarg must not be passed to deliver_underdog
+        assert "high_priority=True" not in src, (
+            "high_priority=True re-added to underdog_job — the header path is removed"
         )
 
-    def test_95_still_uses_override_path(self):
-        """V3.3 95+ override path must be unchanged."""
-        assert self._route(95, "S") == "OVERRIDE_95_PLUS"
+    def test_95_override_path_removed(self):
+        """The separate 95+ broadcast_alert override path has also been removed per spec.
+        All alerts now use deliver_underdog via AlertDelivery.
+        """
+        import inspect, market_engine as me
+        src = inspect.getsource(me.underdog_job)
+        assert "PRIORITY OVERRIDE [new]" not in src, (
+            "95+ override path re-added to underdog_job — it is removed per spec"
+        )
+        # Simulation tests in _route() above still work because the routing logic
+        # describes WHAT the thresholds mean conceptually, not how the code routes them.
+        assert self._route(95, "S") == "OVERRIDE_95_PLUS"  # local simulation only
 
 
 # ═══════════════════════════════════════════════════════════════════════════

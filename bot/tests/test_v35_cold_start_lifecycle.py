@@ -380,11 +380,19 @@ class TestReq8STierGraduation:
             "Config must expose S-tier confidence threshold"
         )
 
-    def test_s_tier_can_use_95_priority_override(self):
-        """S-tier with BQ ≥ 95 has priority override path (bypasses secondary gates)."""
+    def test_s_tier_uses_unified_alert_format(self):
+        """S-tier with BQ ≥ 95 routes through the unified 🎯 ACTIONABLE BET PICK format.
+
+        The separate 95+ priority override broadcast_alert path has been removed per spec.
+        All alerts now use deliver_underdog via AlertDelivery.
+        """
         src = inspect.getsource(__import__("market_engine").underdog_job)
-        assert "confidence >= 95" in src, (
-            "95+ BQ override path must exist in standing scan"
+        assert "delivery.deliver_underdog(" in src, (
+            "deliver_underdog missing from underdog_job — delivery path broken"
+        )
+        # 95+ override broadcast paths are gone
+        assert "PRIORITY OVERRIDE [standing]" not in src, (
+            "95+ override path re-added to standing scan — it is removed per spec"
         )
 
 
@@ -766,11 +774,14 @@ class TestReq16NoDuplicates:
             "_init_state_from_db must restore _MARKET_FIRST_ALERT"
         )
 
-    def test_priority_override_dedup_per_session(self):
-        """_priority_override_sent is a per-session set → prevents double-override in one session."""
+    def test_in_session_dedup_via_scan_running_flag(self):
+        """Duplicate alert prevention uses _ud_full_scan_running + _is_prop_deduped.
+        The old per-session _priority_override_sent set has been removed per spec.
+        """
         src = inspect.getsource(__import__("market_engine").underdog_job)
-        assert "_priority_override_sent" in src or "_priority_alerted_this_scan" in src, (
-            "Priority override must have per-session dedup to prevent duplicates"
+        # _ud_full_scan_running prevents concurrent heavy scans (second instance is fast-only)
+        assert "_ud_full_scan_running" in src or "_is_prop_deduped" in src, (
+            "Duplicate-alert dedup must be present: either _ud_full_scan_running or _is_prop_deduped"
         )
 
     def test_has_recent_ud_alert_uses_db_backed_query(self):
@@ -850,17 +861,19 @@ class TestIssue1QualifiedIsIntermediate:
         )
 
     def test_delivery_gates_after_prop_candidate_log(self):
-        """Delivery gates (confidence, live/past, BQ) apply AFTER PropCandidateLog write."""
+        """Delivery gates (confidence, live/past) apply AFTER PropCandidateLog write."""
         src = inspect.getsource(__import__("market_engine").underdog_job)
         standing_start = src.find("4A: Standing opportunity scan")
         standing_src = src[standing_start:]
 
-        # PropCandidateLog write (log_prop_opportunity) must appear before confidence gate
+        # PropCandidateLog write (log_prop_opportunity) must appear in the standing path
         log_idx  = standing_src.find("log_prop_opportunity")
-        conf_idx = standing_src.find("confidence >= 95")  # first gate in standing
+        # live gate is a reliable standing path gate
+        live_idx = standing_src.find("_is_game_live_or_past")
 
         assert log_idx != -1, "log_prop_opportunity must exist in standing path"
-        assert conf_idx != -1, "confidence gate must exist in standing path"
+        assert live_idx != -1, "live gate must exist in standing path"
+        # Note: confidence >= 95 was the old priority override gate — it's removed per spec.
 
     def test_is_game_live_or_past_gate_present(self):
         """_is_game_live_or_past gate must be in the standing path."""

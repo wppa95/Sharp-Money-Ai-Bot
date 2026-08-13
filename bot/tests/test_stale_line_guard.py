@@ -107,11 +107,12 @@ class TestFreshnessGuardPresent:
             "_current_scan_line_map not found in underdog_job — freshness map missing"
         )
 
-    def test_12_guard_in_np_95_path(self):
-        """NP 95+ priority override must call _ud_line_fresh."""
+    def test_12_np_95_override_path_removed(self):
+        """The separate NP 95+ priority override path has been removed per spec.
+        _np_95_fresh was a guard for the broadcast_alert path; it's gone."""
         src = self._src()
-        assert "_np_95_fresh" in src, (
-            "_np_95_fresh not found in underdog_job — NP 95+ freshness guard missing"
+        assert "_np_95_fresh" not in src, (
+            "_np_95_fresh re-added to underdog_job — the 95+ override NP path is removed"
         )
 
     def test_13_guard_in_np_normal_path(self):
@@ -121,18 +122,18 @@ class TestFreshnessGuardPresent:
             "_ud_line_fresh not found in NP normal path of underdog_job"
         )
 
-    def test_14_guard_in_lc_95_path(self):
-        """LC 95+ priority override must call _ud_line_fresh."""
+    def test_14_lc_95_override_path_removed(self):
+        """The separate LC 95+ priority override path has been removed per spec."""
         src = self._src()
-        assert "_lc_95_fresh" in src, (
-            "_lc_95_fresh not found in underdog_job — LC 95+ freshness guard missing"
+        assert "_lc_95_fresh" not in src, (
+            "_lc_95_fresh re-added to underdog_job — the 95+ override LC path is removed"
         )
 
-    def test_15_guard_in_sp_95_path(self):
-        """SP 95+ priority override must call _ud_line_fresh."""
+    def test_15_sp_95_override_path_removed(self):
+        """The separate SP 95+ priority override path has been removed per spec."""
         src = self._src()
-        assert "_sp_95_fresh" in src, (
-            "_sp_95_fresh not found in underdog_job — SP 95+ freshness guard missing"
+        assert "_sp_95_fresh" not in src, (
+            "_sp_95_fresh re-added to underdog_job — the 95+ override SP path is removed"
         )
 
     def test_16_guard_in_sp_normal_path(self):
@@ -142,13 +143,14 @@ class TestFreshnessGuardPresent:
             "_ud_line_fresh not found in SP normal path of underdog_job"
         )
 
-    def test_17_95_override_alert_includes_verify_disclaimer(self):
-        """_format_95_priority_alert must include a 'verify' disclaimer."""
+    def test_17_95_override_not_called_in_underdog_job(self):
+        """_format_95_priority_alert must NOT be called inside underdog_job.
+        The 95+ override paths have been removed; it is now dead code only."""
         import market_engine
-        src = inspect.getsource(market_engine._format_95_priority_alert)
-        assert "erify" in src, (
-            "'Verify' disclaimer missing from _format_95_priority_alert — "
-            "priority alerts must remind users to confirm line before placing"
+        src = inspect.getsource(market_engine.underdog_job)
+        assert "_format_95_priority_alert(" not in src, (
+            "_format_95_priority_alert is called inside underdog_job — "
+            "the 95+ override paths are removed per spec"
         )
 
     def test_18_freshness_guard_blocks_np_bet_ready(self):

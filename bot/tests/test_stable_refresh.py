@@ -990,15 +990,14 @@ class TestStableRefreshJob:
         db.log_prop_opportunity.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_95_priority_persists_alert_sent_to_db(self):
+    async def test_s_tier_alert_persists_alert_sent_to_db(self):
         """
-        After broadcasting a 95+ priority stable alert, mark_ud_snapshot_alert_sent
-        must be called so that get_recently_alerted_prop_keys() returns this prop
-        in the next cycle (preventing re-alert after a bot restart).
+        After delivering a stable S-tier alert via the normal deliver_underdog path,
+        mark_ud_snapshot_alert_sent must be called so that get_recently_alerted_prop_keys()
+        returns this prop in the next cycle (preventing re-alert after a bot restart).
 
-        Regression: earlier the stable 95+ path only updated in-memory sets
-        (_priority_override_sent, _prop_market_alerted) without persisting to DB.
-        After restart those sets are empty, and the same prop could fire again.
+        Note: the separate 95+ priority override broadcast_alert path has been removed per
+        spec. All stable refresh alerts now flow through deliver_underdog.
         """
         snap = _make_snap(player="Priority Player", stat="Points", sport="NBA")
         db   = _build_minimal_db(
@@ -1010,6 +1009,9 @@ class TestStableRefreshJob:
         s_score = _make_score(total=97, tier="S", stars=5)
         s_dec   = _make_decision(rec="OVER", tier="S", conf=97)
 
+        delivery      = MagicMock()
+        delivery.sent = True   # simulate successful Telegram send
+
         with (
             patch("market_engine.get_health_tracker", return_value=None),
             patch("market_engine._is_futures_stat",   return_value=False),
@@ -1019,14 +1021,16 @@ class TestStableRefreshJob:
             patch("market_engine._fetch_and_compute_hit_rates", new_callable=AsyncMock, return_value=None),
             patch("engine.ud_bet_decision.make_ud_bet_decision",  return_value=s_dec),
             patch("market_engine._ud_line_fresh",     return_value=True),
-            patch("market_engine._format_95_priority_alert", return_value="🔥 priority alert"),
-            patch("market_engine.broadcast_alert",    new_callable=AsyncMock),
-            patch("market_engine._priority_override_sent", new=set()),
+            patch("market_engine._is_game_live_or_past", return_value=False),
+            patch("market_engine._get_odds_api_confirmation", new_callable=AsyncMock, return_value=None),
+            patch("market_engine.AlertDelivery") as mock_ad,
         ):
+            mock_ad.return_value.deliver_underdog = AsyncMock(return_value=delivery)
             from market_engine import _stable_refresh_job
             await _stable_refresh_job(ctx)
 
-        # DB persistence must be called — this is what survives a restart
+        # DB persistence must be called — mark_ud_snapshot_alert_sent is called from
+        # inside stable_refresh_job after a successful deliver_underdog send
         db.mark_ud_snapshot_alert_sent.assert_called_once_with(
             "Priority Player", "Points"
         )

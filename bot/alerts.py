@@ -1130,6 +1130,24 @@ class AlertDelivery:
                 return DeliveryResult(sent=False, filtered=True, filtered_reason=reason)
 
         # 4. Format
+        # S-tier gate: Market Quality < 80 or Confidence < 80 → cap decision tier to A.
+        # Guards against BQ-only S-tier labels when MQ or confidence doesn't support it.
+        if decision is not None and getattr(decision, "decision_tier", None) == "S":
+            _mq_score = (
+                getattr(market_quality, "score", None)
+                if market_quality is not None else None
+            )
+            _bq_conf = getattr(decision, "confidence", 0)
+            if (_mq_score is not None and _mq_score < 80) or _bq_conf < 80:
+                class _CappedDecision:
+                    """Thin wrapper that reports A-tier while preserving all other attrs."""
+                    decision_tier = "A"
+                    def __init__(self, orig):
+                        self._orig = orig
+                    def __getattr__(self, name):
+                        return getattr(self._orig, name)
+                decision = _CappedDecision(decision)
+
         if market_move_only:
             message = format_market_move_detected(
                 player_name, team, sport, stat_type,
@@ -1177,16 +1195,6 @@ class AlertDelivery:
             )
 
         # 5. Broadcast
-        # 85–94/100 S-tier priority (4★+): prepend a priority header to the formatted message.
-        # The header is prepended AFTER formatting so the existing alert body is unchanged.
-        # 95+/100 props use the V3.3 override path (broadcast_alert directly) and never reach here.
-        if high_priority and message and not removed:
-            message = (
-                f"🔥 <b>S-TIER HIGH PRIORITY</b>\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                + message
-            )
-
         # Freshness timestamp — helps users know how old the line is before placing.
         # This is especially important when the bot alerts at poll T and the user
         # acts at T+N minutes when the market may have already moved.

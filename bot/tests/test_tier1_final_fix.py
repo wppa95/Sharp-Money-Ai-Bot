@@ -199,36 +199,52 @@ class TestPicksDBQueryTier1BAllowed:
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestNpImmediateSportAwareStars:
-    """np_immediate must use min_stars_for_sport() not UD_MIN_STARS_TO_ALERT."""
+    """np_immediate must use a uniform non-strict star floor for all sports.
+
+    Per spec S/A/B are all actionable regardless of sport. The sport-aware
+    min_stars_for_sport() gate has been removed from delivery paths; np_immediate
+    now uses UD_NON_STRICT_MIN_STARS (2) as a consistent floor across all sports.
+    """
 
     def _me_src(self) -> str:
         import market_engine as me
         return inspect.getsource(me)
 
-    def test_np_immediate_uses_min_stars_for_sport(self):
+    def test_np_immediate_uses_non_strict_stars(self):
+        """np_immediate must use UD_NON_STRICT_MIN_STARS (uniform floor for all sports)."""
         src = self._me_src()
-        assert "min_stars_for_sport" in src, (
-            "np_immediate must call config.min_stars_for_sport() for sport-aware threshold"
+        idx = src.find("np_immediate = (")
+        assert idx >= 0
+        block = src[idx:idx + 400]
+        assert "UD_NON_STRICT_MIN_STARS" in block, (
+            "np_immediate must use config.UD_NON_STRICT_MIN_STARS (uniform floor). "
+            "The sport-aware min_stars_for_sport() gate was removed per spec."
+        )
+
+    def test_np_immediate_no_longer_uses_min_stars_for_sport(self):
+        """min_stars_for_sport() must not appear in the np_immediate block — gate removed."""
+        src = self._me_src()
+        idx = src.find("np_immediate = (")
+        assert idx >= 0
+        block = src[idx:idx + 400]
+        # Allow comment references but not actual calls
+        active_lines = [
+            ln for ln in block.splitlines()
+            if "min_stars_for_sport" in ln and not ln.lstrip().startswith("#")
+        ]
+        assert len(active_lines) == 0, (
+            f"min_stars_for_sport() still used as a gate in np_immediate block: {active_lines}"
         )
 
     def test_np_immediate_no_longer_uses_bare_ud_min_stars(self):
-        """The bare UD_MIN_STARS_TO_ALERT reference in np_immediate must be replaced."""
+        """The bare UD_MIN_STARS_TO_ALERT reference in np_immediate must be absent."""
         src = self._me_src()
-        # Find the np_immediate block
         idx = src.find("np_immediate = (")
         assert idx >= 0
         block = src[idx:idx + 400]
         assert "UD_MIN_STARS_TO_ALERT" not in block, (
-            "np_immediate must not use bare UD_MIN_STARS_TO_ALERT — "
-            "use min_stars_for_sport() so Tier 1 uses its own lower threshold"
+            "np_immediate must not use bare UD_MIN_STARS_TO_ALERT — use UD_NON_STRICT_MIN_STARS"
         )
-
-    def test_np_immediate_block_calls_min_stars_for_sport(self):
-        src = self._me_src()
-        idx = src.find("np_immediate = (")
-        assert idx >= 0
-        block = src[idx:idx + 400]
-        assert "min_stars_for_sport" in block
 
     def test_min_stars_for_sport_returns_3_for_mlb(self):
         from config import config as cfg
@@ -306,20 +322,25 @@ class TestNpImmediateSportAwareStars:
         assert cfg.UD_MIN_STARS_TO_ALERT == 3
         assert cfg.UD_NON_STRICT_MIN_STARS == 2
 
-    def test_line_change_already_uses_min_stars_for_sport(self):
-        """Confirm line-change path already uses min_stars_for_sport (unchanged)."""
+    def test_delivery_paths_use_non_strict_stars(self):
+        """Delivery paths (new-prop, lc, standing) must not use min_stars_for_sport().
+        Per spec, S/A/B are all actionable regardless of sport. Star floor gates
+        have been removed from the main delivery paths; only watchlist uses them.
+        """
         src = self._me_src()
-        assert "min_stars_for_sport" in src
-        # Count occurrences — should be multiple (line-change + standing + new-prop)
-        count = src.count("min_stars_for_sport")
-        assert count >= 3, f"Expected ≥3 uses of min_stars_for_sport, found {count}"
+        # The watchlist still uses min_stars_for_sport — that's acceptable
+        # But the delivery path star gates are gone
+        assert "UD_NON_STRICT_MIN_STARS" in src, (
+            "UD_NON_STRICT_MIN_STARS must still appear in np_immediate star check"
+        )
 
-    def test_standing_already_uses_min_stars_for_sport(self):
-        """Confirm standing path uses min_stars_for_sport (unchanged)."""
+    def test_watchlist_still_uses_min_stars_for_sport(self):
+        """Watchlist path may still use min_stars_for_sport for internal quality gating."""
         src = self._me_src()
-        standing_idx = src.find("# Sport-conditional star floor: strict for MLB/NFL, relaxed for others")
-        assert standing_idx >= 0
-        assert "min_stars_for_sport" in src[standing_idx:standing_idx + 200]
+        wl_idx = src.find("_wl_score.stars >= config.min_stars_for_sport")
+        assert wl_idx >= 0, (
+            "Watchlist star gate was removed — watchlist internal quality floor missing"
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════

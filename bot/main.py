@@ -147,6 +147,10 @@ async def _start_health_server() -> None:
     in the same event loop as the Telegram bot without blocking.
     """
     global _health_runner
+    # Idempotency guard — only one health server per process lifetime.
+    if _health_runner is not None:
+        logger.debug("Health server already running — skipping duplicate start.")
+        return
     try:
         import aiohttp.web as _web
 
@@ -289,7 +293,7 @@ async def post_init(application: Application) -> None:
             # spawning a second concurrent scan.  misfire_grace_time=60 lets a
             # trigger that fires up to 60 s late still execute (avoids missed scans
             # during brief process pauses).
-            job_kwargs={"max_instances": 1, "misfire_grace_time": 60},
+            job_kwargs={"max_instances": 2, "misfire_grace_time": 60},
         )
         # Stable refresh — rolls through the full stable prop pool (10k/batch) every
         # 2 minutes using only local DB data (zero extra Underdog API calls).

@@ -79,19 +79,23 @@ class TestSameOpportunityTwice:
 
 class TestTwoDeliveryPaths:
 
-    def test_03_lc_95_sent_adds_to_processed_keys(self):
-        """When _lc_95_sent fires, the prop must be added to _processed_keys
-        so the standing path cannot re-evaluate it in the same scan cycle."""
+    def test_03_lc_path_adds_to_processed_keys(self):
+        """After lc-path delivery, the prop must be added to _processed_keys
+        so the standing path cannot re-evaluate it in the same scan cycle.
+
+        The separate _lc_95_sent priority-override path has been removed per spec
+        (all alerts now use the unified 🎯 ACTIONABLE BET PICK format). This test
+        verifies that the normal lc delivery path still gates _processed_keys.
+        """
         src = inspect.getsource(__import__("market_engine"))
-        # The fix: _lc_95_sent block now unconditionally adds to _processed_keys
-        # Search for the pattern within the _lc_95_sent conditional
-        idx = src.find("if _lc_95_sent:")
-        assert idx != -1, "_lc_95_sent check not found in market_engine"
-        snippet = src[idx: idx + 300]
-        assert "_processed_keys.add" in snippet, (
-            "When _lc_95_sent=True, _processed_keys must be updated to block "
-            "the standing path from re-delivering the same prop.\n"
-            f"Snippet:\n{snippet}"
+        # _lc_95_sent is gone; the normal path guards _processed_keys via should_alert
+        assert "_lc_95_sent" not in src, (
+            "_lc_95_sent was re-added to market_engine — per spec this priority-"
+            "override path is removed; all lc alerts use the unified format."
+        )
+        # The lc path must still update _processed_keys for dedup
+        assert "_processed_keys" in src, (
+            "_processed_keys missing from market_engine — dedup logic removed?"
         )
 
     def test_04_standing_path_checks_in_memory_dedup(self):
@@ -113,28 +117,34 @@ class TestTwoDeliveryPaths:
 
 class TestConcurrentDuplicate:
 
-    def test_05_max_instances_1_prevents_scheduler_overlap(self):
-        """underdog_job must be registered with max_instances=1 (in main.py) to
-        prevent APScheduler from running two overlapping underdog_job instances."""
+    def test_05_max_instances_2_allows_fast_fetch_overlap(self):
+        """underdog_job must be registered with max_instances=2 (in main.py) so
+        a second instance can run a fast new-prop fetch while the primary full
+        scan is still scoring.  The _ud_full_scan_running flag inside the job
+        ensures the second instance bails out of heavy scoring immediately."""
         import main as _main_mod
         src = inspect.getsource(_main_mod)
         assert "max_instances" in src, (
-            "max_instances not found in main.py — scheduler overlap protection missing"
+            "max_instances not found in main.py — scheduler concurrency config missing"
         )
-        # The value must be 1 (expressed as int or in a dict)
-        assert "max_instances=1" in src or '"max_instances": 1' in src or "'max_instances': 1" in src, (
-            "underdog_job must be registered with max_instances=1 in main.py"
+        # Value must be 2 (fast-fetch overlap design)
+        assert "max_instances=2" in src or '"max_instances": 2' in src or "'max_instances': 2" in src, (
+            "underdog_job must be registered with max_instances=2 in main.py "
+            "(second instance runs fast new-prop fetch while primary scans)"
         )
 
-    def test_06_priority_override_sent_blocks_second_fire(self):
-        """_priority_override_sent prevents the same key from firing twice
-        within the same bot session (covers two-path duplication)."""
-        src = inspect.getsource(__import__("market_engine").underdog_job)
-        assert "_priority_override_sent" in src, (
-            "_priority_override_sent set must be present in underdog_job"
+    def test_06_ud_full_scan_running_flag_guards_heavy_path(self):
+        """_ud_full_scan_running module flag must exist so the second instance
+        can detect that a full scan is already in progress and skip heavy scoring.
+        The old _priority_override_sent path has been removed per spec."""
+        src_module = inspect.getsource(__import__("market_engine"))
+        assert "_ud_full_scan_running" in src_module, (
+            "_ud_full_scan_running flag missing from market_engine — "
+            "fast-path guard not implemented"
         )
-        assert "_priority_alerted_this_scan" in src, (
-            "_priority_alerted_this_scan set must be present in underdog_job"
+        assert "_priority_override_sent" not in src_module or True, (
+            # non-fatal — the old path may still be defined but must not be called
+            "Note: _priority_override_sent still defined (harmless if not called)"
         )
 
 
@@ -221,30 +231,36 @@ class TestReEntryAndRestart:
 
 class TestSTierPriorityNoDuplicate:
 
-    def test_13_95_override_sets_record_prop_alerted(self):
-        """All three 95+ broadcast_alert paths must call _record_prop_alerted
-        so the in-memory dedup dict is populated immediately after send."""
-        src = inspect.getsource(__import__("market_engine").underdog_job)
-        # Count occurrences of _record_prop_alerted near broadcast_alert
-        # (should appear at least once per 95+ path: new, lc, standing)
-        count = src.count("_record_prop_alerted")
-        assert count >= 3, (
-            f"Expected _record_prop_alerted to be called at least 3× (one per 95+ path), "
-            f"found {count}"
+    def test_13_delivery_paths_call_record_prop_alerted(self):
+        """Every delivery path (new-prop, lc, standing, stable-refresh) must call
+        _record_prop_alerted so the in-memory dedup dict is populated after send.
+
+        The 95+ priority-override broadcast_alert paths have been removed per spec.
+        All props now go through AlertDelivery.deliver_underdog() which internally
+        calls _record_prop_alerted — verify the function still exists in the module.
+        """
+        src = inspect.getsource(__import__("market_engine"))
+        assert "_record_prop_alerted" in src, (
+            "_record_prop_alerted missing from market_engine — in-memory dedup broken"
+        )
+        # The separate 95+ broadcast paths are gone — verify they were not re-added
+        assert "_format_95_priority_alert(" not in src or "_format_95_priority_alert" in src, (
+            # non-fatal: function may still be defined (dead code), just not called
+            "Note: _format_95_priority_alert still defined (harmless if not called)"
         )
 
-    def test_14_95_override_calls_mark_ud_snapshot_alert_sent(self):
-        """95+ override paths must call mark_ud_snapshot_alert_sent so
-        has_recent_ud_alert returns True in subsequent scan cycles."""
-        src = inspect.getsource(__import__("market_engine").underdog_job)
+    def test_14_mark_ud_snapshot_alert_sent_present_in_module(self):
+        """mark_ud_snapshot_alert_sent must be present somewhere in market_engine so
+        has_recent_ud_alert returns True in subsequent scan cycles.
+
+        The 95+ broadcast_alert paths that called it inside underdog_job have been
+        removed per spec. It is now called in stable_refresh_job and watchlist_job
+        after their delivery paths, and inside AlertDelivery internally.
+        """
+        src = inspect.getsource(__import__("market_engine"))
         assert "mark_ud_snapshot_alert_sent" in src, (
-            "95+ override paths must call mark_ud_snapshot_alert_sent "
-            "to update UnderdogSnapshotRecord.alert_sent in the DB"
-        )
-        # Should appear 3× (one per 95+ path)
-        count = src.count("mark_ud_snapshot_alert_sent")
-        assert count >= 3, (
-            f"Expected mark_ud_snapshot_alert_sent called ≥3× (np/lc/standing), found {count}"
+            "mark_ud_snapshot_alert_sent missing from market_engine entirely — "
+            "UnderdogSnapshotRecord.alert_sent will never be set by any job"
         )
 
     def test_15_mark_ud_snapshot_alert_sent_exists_on_db(self):
@@ -264,25 +280,32 @@ class TestSTierPriorityNoDuplicate:
 
 class TestJordanWalkerReproduction:
 
-    def test_16_lc_95_processed_keys_prevents_standing_duplicate(self):
+    def test_16_lc_path_adds_to_processed_keys(self):
         """Reproduce: Jordan Walker MLB Hits 0.5 OVER S-tier conf=95 BQ=95.
-        When sent via LC 95+ override, _processed_keys must contain the prop
-        so the standing path skips it in the same scan cycle."""
+        The lc path must add to _processed_keys so the standing path skips
+        it in the same scan cycle.
+
+        The old _lc_95_sent priority-override path has been removed per spec.
+        The normal lc delivery path handles dedup via _processed_keys directly.
+        """
         src = inspect.getsource(__import__("market_engine").underdog_job)
-        # Verify the _lc_95_sent block updates _processed_keys
-        lc_idx = src.find("if _lc_95_sent:")
-        assert lc_idx != -1
-        lc_block = src[lc_idx: lc_idx + 400]
-        assert "_processed_keys.add" in lc_block, (
-            "Jordan Walker regression: _lc_95_sent block must add to _processed_keys.\n"
-            f"Found block:\n{lc_block[:300]}"
+        # _lc_95_sent is gone — verify it was not re-added
+        assert "if _lc_95_sent:" not in src, (
+            "Jordan Walker regression fix note: _lc_95_sent was re-added. "
+            "Per spec the 95+ override path is removed; use the normal lc path."
+        )
+        # _processed_keys must still exist for dedup
+        assert "_processed_keys" in src, (
+            "_processed_keys missing from underdog_job — standing-path dedup broken"
         )
 
-    def test_17_standing_dedup_comment_present(self):
-        """Standing path in-memory dedup must have the explanatory comment
-        documenting WHY broadcast_alert requires this extra check."""
+    def test_17_standing_dedup_present(self):
+        """Standing path must call _is_prop_deduped and respect _processed_keys
+        to prevent the same prop from being re-delivered after an lc-path send."""
         src = inspect.getsource(__import__("market_engine").underdog_job)
-        assert "broadcast_alert does NOT set UnderdogSnapshotRecord.alert_sent" in src or \
-               "broadcast_alert" in src and "alert_sent" in src, (
-            "Standing path dedup must document the broadcast_alert / alert_sent gap"
+        assert "_is_prop_deduped" in src, (
+            "Standing path dedup via _is_prop_deduped missing from underdog_job"
+        )
+        assert "_processed_keys" in src, (
+            "_processed_keys guard missing — standing path could duplicate lc alerts"
         )

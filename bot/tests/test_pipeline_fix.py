@@ -193,14 +193,17 @@ class TestStandingPathGatesIntact:
         )
 
     def test_score_tier_gate_still_in_standing_path(self):
-        """Standing path must still require prior A/S tier snapshot (or derived equivalent)."""
+        """Standing path must still require prior S/A/B tier snapshot (or derived equivalent).
+
+        The gate was extended from ("A","S") to ("A","S","B") so B-tier candidates
+        can enter the standing path when score_total ≥ 50, consistent with the spec
+        change making S/A/B all actionable.
+        """
         src = self._get_engine_source()
-        # The gate now uses _prev_eff_tier (derived from score_tier or score_total fallback)
-        # to handle no-change snapshots stored with score_tier=NULL while still enforcing
-        # the A/S quality floor.  Verify the effective-tier check is present.
-        assert '_prev_eff_tier not in ("A", "S")' in src, (
-            "Effective-tier gate removed from standing path — "
-            "could allow low-quality props into standing alerts."
+        # The gate now uses _prev_eff_tier including B-tier
+        assert '_prev_eff_tier not in ("A", "S", "B")' in src, (
+            "Effective-tier gate missing or too narrow in standing path — "
+            "must block tiers below B (S/A/B are all actionable)."
         )
 
     def test_24h_dedup_still_in_standing_path(self):

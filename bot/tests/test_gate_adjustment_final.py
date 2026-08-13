@@ -200,11 +200,20 @@ class TestAllPathsHaveGate:
     def test_strict_tier_gate_standing(self, src):
         assert "sport_tier_gate [standing]" in src
 
-    def test_lc_strict_tier_ok_var(self, src):
-        assert "_lc_strict_tier_ok" in src
+    def test_lc_strict_tier_ok_removed(self, src):
+        """_lc_strict_tier_ok was removed per spec — S/A/B all route through the
+        unified ACTIONABLE BET PICK format; strict-tier MLB/NFL S-only gate lifted."""
+        assert "_lc_strict_tier_ok" not in src, (
+            "_lc_strict_tier_ok was re-added to market_engine — per spec this gate "
+            "is removed; S/A/B tiers are all actionable in the lc path."
+        )
 
-    def test_strict_tier_blocked_rejection_label(self, src):
-        assert "strict_tier_blocked" in src
+    def test_strict_tier_blocked_label_removed(self, src):
+        """strict_tier_blocked rejection label must be removed along with the gate."""
+        assert "strict_tier_blocked" not in src, (
+            "strict_tier_blocked label re-added — remove it together with "
+            "the _lc_strict_tier_ok gate."
+        )
 
     def test_mlb_under_gate_new_path(self, src):
         """mlb_under_gate [new] must block MLB/NFL UNDER in new-prop path."""
@@ -234,15 +243,17 @@ class TestAllPathsHaveGate:
     def test_bq_gate_removed_from_standing_path(self, src):
         assert "bq_gate [standing]" not in src
 
-    def test_np_95_dir_ok_present(self, src):
-        """_np_95_dir_ok must gate MLB/NFL UNDER out of 95+ override path."""
-        assert "_np_95_dir_ok" in src, "_np_95_dir_ok missing — Tier 2 UNDER may fire via 95+ override"
-
-    def test_lc_95_dir_ok_present(self, src):
-        assert "_lc_95_dir_ok" in src, "_lc_95_dir_ok missing — Tier 2 UNDER may fire via lc 95+ override"
-
-    def test_sp_95_dir_ok_present(self, src):
-        assert "_sp_95_dir_ok" in src, "_sp_95_dir_ok missing — Tier 2 UNDER may fire via standing 95+ override"
+    def test_95_dir_ok_paths_removed(self, src):
+        """The 95+ priority-override broadcast_alert paths have been removed per spec.
+        Verify the separate direction gates (_np/lc/sp_95_dir_ok) are gone —
+        all props now flow through the unified ACTIONABLE BET PICK format which
+        applies the MLB UNDER whitelist gate consistently across all delivery paths.
+        """
+        for var in ("_np_95_dir_ok", "_lc_95_dir_ok", "_sp_95_dir_ok"):
+            assert var not in src, (
+                f"{var} was re-added to market_engine — the 95+ override paths are "
+                "removed per spec; MLB UNDER is gated at the is_qualified level."
+            )
 
     def test_no_fast_resume_in_lc_qualified_gate(self, src):
         """Fast Resume is removed — is_qualified gate must use plain `not is_cold_start`."""

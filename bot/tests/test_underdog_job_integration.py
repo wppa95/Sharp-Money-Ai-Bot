@@ -130,18 +130,19 @@ async def _run_job(snapshots, db, *, deliver_result=None, health: "HealthTracker
 
     with patch.object(me, "_registry", registry):
         with patch.object(me, "_cold_start_done", True):
-            with patch("market_engine.AlertDelivery") as mock_cls:
-                mock_delivery = MagicMock()
-                mock_delivery.deliver_underdog = AsyncMock(return_value=deliver_result)
-                mock_cls.return_value = mock_delivery
-                with patch("alerts.broadcast_alert",
-                           new_callable=AsyncMock,
-                           return_value={"sent": 1, "failed": 0}), \
-                     patch("market_engine.broadcast_alert",
-                           new_callable=AsyncMock,
-                           return_value={"sent": 1, "failed": 0}):
-                    with patch("market_engine.get_health_tracker", return_value=health):
-                        await me.underdog_job(ctx)
+            with patch.object(me, "_ud_full_scan_running", False):
+                with patch("market_engine.AlertDelivery") as mock_cls:
+                    mock_delivery = MagicMock()
+                    mock_delivery.deliver_underdog = AsyncMock(return_value=deliver_result)
+                    mock_cls.return_value = mock_delivery
+                    with patch("alerts.broadcast_alert",
+                               new_callable=AsyncMock,
+                               return_value={"sent": 1, "failed": 0}), \
+                         patch("market_engine.broadcast_alert",
+                               new_callable=AsyncMock,
+                               return_value={"sent": 1, "failed": 0}):
+                        with patch("market_engine.get_health_tracker", return_value=health):
+                            await me.underdog_job(ctx)
 
     return mock_delivery
 
@@ -492,8 +493,9 @@ class TestJobHealthTracking:
 
         with patch.object(me, "_registry", registry):
             with patch.object(me, "_cold_start_done", True):
-                with patch("market_engine.get_health_tracker", return_value=health):
-                    await me.underdog_job(ctx)
+                with patch.object(me, "_ud_full_scan_running", False):
+                    with patch("market_engine.get_health_tracker", return_value=health):
+                        await me.underdog_job(ctx)
 
         info = health.get_job_info("underdog_job")
         assert info.get("run_count", 0) >= 1, "record_job_run not called for empty response"
@@ -515,8 +517,9 @@ class TestJobHealthTracking:
 
         with patch.object(me, "_registry", registry):
             with patch.object(me, "_cold_start_done", True):
-                with patch("market_engine.get_health_tracker", return_value=health):
-                    await me.underdog_job(ctx)
+                with patch.object(me, "_ud_full_scan_running", False):
+                    with patch("market_engine.get_health_tracker", return_value=health):
+                        await me.underdog_job(ctx)
 
         info = health.get_job_info("underdog_job")
         assert info.get("run_count", 0) >= 1, "record_job_run not called when all snaps are non-Underdog"
@@ -547,8 +550,9 @@ class TestJobHealthTracking:
 
         with patch.object(me, "_registry", registry):
             with patch.object(me, "_cold_start_done", True):
-                with patch("market_engine.get_health_tracker", return_value=health):
-                    await me.underdog_job(ctx)
+                with patch.object(me, "_ud_full_scan_running", False):
+                    with patch("market_engine.get_health_tracker", return_value=health):
+                        await me.underdog_job(ctx)
 
         info = health.get_job_info("underdog_job")
         assert info.get("fail_count", 0) >= 1, "record_job_fail not called after fetch exception"
@@ -574,8 +578,9 @@ class TestJobHealthTracking:
 
         with patch.object(me, "_registry", registry):
             with patch.object(me, "_cold_start_done", True):
-                with patch("market_engine.get_health_tracker", return_value=health):
-                    await me.underdog_job(ctx)
+                with patch.object(me, "_ud_full_scan_running", False):
+                    with patch("market_engine.get_health_tracker", return_value=health):
+                        await me.underdog_job(ctx)
 
         info = health.get_job_info("underdog_job")
         assert info.get("fail_count", 0) >= 1, (
