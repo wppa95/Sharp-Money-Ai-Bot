@@ -1,0 +1,47 @@
+CONTINUE THE IMPLEMENTATION NOW — DO NOT STOP.
+
+The Telegram spam problem is still happening, so this delivery-prioritization fix is urgent.
+
+You were already in Build mode and had started implementing the queue. The previous account-restriction message interrupted you, but do NOT abandon the work.
+
+First inspect the CURRENT workspace state and determine exactly which edits from the delivery-prioritization implementation were already applied. DO NOT duplicate or overwrite completed work.
+
+Then FINISH the implementation:
+
+1. ALL qualified actionable candidates must be collected first.
+2. DO NOT immediately send each qualified candidate to Telegram from the individual scan paths.
+3. After candidate collection, rank the candidates.
+4. Deliver only the highest-priority candidates through the existing Telegram rate limiter.
+5. Priority order:
+   S > A > B
+   Then use Bet Quality, Confidence, Market Quality, and meaningful edge/change signals to rank candidates within the same tier.
+6. The existing Telegram flood protection MUST remain active:
+   - 5 alerts maximum per rolling 5-minute window
+   - flood protection remains intact
+   - no bypass that can recreate the spam
+7. If 30/50/100 candidates qualify during a scan, Telegram MUST NOT receive all of them. Only the best candidates allowed by the rate limiter should be delivered.
+8. Deferred candidates must NOT be deleted. They must remain available through the existing /picks/database system.
+9. Prevent duplicate delivery when the same candidate is encountered through multiple scan paths.
+10. Preserve all existing grading rules. DO NOT tighten the grading gates.
+11. Preserve:
+   - Tier 1 S/A/B actionable, C watchlist
+   - Tier 2 S/A/B actionable, C watchlist
+   - Stable refresh
+   - Internal watchlist
+   - 5-minute full-pool rescan
+   - Tier 1 sport prioritization
+   - unified ACTIONABLE BET PICK format
+   - removal of the old S-TIER HIGH PRIORITY / 95+ override system
+
+IMPORTANT:
+The previous implementation appears partially applied. Before editing, inspect git/current file state and continue from what is actually present.
+
+After implementation:
+- run syntax/compile checks
+- run the FULL test suite
+- fix failures caused by this change
+- DO NOT restart the bot until tests pass
+
+If the Replit account restriction prevents ANY code execution or file modification, tell me immediately that execution is blocked. Otherwise, continue implementing the fix now.
+
+Do not just give me a plan. BUILD THE FIX.

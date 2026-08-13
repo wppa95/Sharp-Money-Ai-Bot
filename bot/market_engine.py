@@ -926,6 +926,47 @@ async def consensus_check_job(context) -> None:
         ))
 
 
+# ── Delivery priority helpers (used by underdog_job ranked-delivery phase) ────
+
+_DELIVERY_TIER_BASE: dict[str, float] = {
+    "S": 10000.0, "A": 5000.0, "B": 1000.0, "C": 200.0, "PASS": 0.0,
+}
+
+
+def _cand_priority(c: dict) -> float:
+    """Raw priority score for a delivery candidate (higher = deliver first)."""
+    base = _DELIVERY_TIER_BASE.get(c.get("tier", "PASS"), 0.0)
+    conf = float(c.get("conf") or 0)
+    bq   = float(c.get("bq")   or 0)
+    mq   = float(c.get("mq")   or 0)
+    t1   = 500.0 if c.get("is_tier1") else 0.0
+    mc   = 200.0 if c.get("is_meaningful_change") else 0.0
+    return base + conf * 0.5 + bq * 0.3 + mq * 0.2 + t1 + mc
+
+
+def _apply_delivery_diversification(queue: list) -> list:
+    """
+    Sort candidates by priority then apply a soft group penalty so a single
+    (sport, stat_type) pair cannot monopolise all available rate-limit slots.
+    High-BQ duplicates can still outrank weaker unique picks — the penalty is
+    soft (−300 for the 2nd in a group, −600 for the 3rd+), not a hard cap.
+    """
+    queue.sort(key=_cand_priority, reverse=True)
+    group_hits: dict = {}
+    for c in queue:
+        key = (c.get("sport", ""), c.get("stat_type", ""))
+        n = group_hits.get(key, 0)
+        c["_group_rank"] = n
+        group_hits[key] = n + 1
+
+    def _penalized(c: dict) -> float:
+        penalty = 300.0 * min(c.get("_group_rank", 0), 2)
+        return _cand_priority(c) - penalty
+
+    queue.sort(key=_penalized, reverse=True)
+    return queue
+
+
 # ── CLV opportunity check job ──────────────────────────────────────────────────
 
 async def clv_check_job(context) -> None:
@@ -1199,6 +1240,11 @@ async def underdog_job(context) -> None:
     # PropLineHistory rows exist before we try to update them.
     _lifecycle_alerted:  list[tuple[str, str, str]] = []   # (player, sport, stat_type) → ACTIVE_ALERTED
     _lifecycle_removed:  list[tuple[str, str, str]] = []   # (player, sport, stat_type) → REMOVED
+    # Delivery queue — candidates from all three alert paths (new-prop, line-change,
+    # standing) collected during the scan loops and delivered together in ranked
+    # priority order after the standing scan finishes.  Ranked delivery ensures the
+    # best picks get rate-limit slots first when more qualify than the window allows.
+    _delivery_queue:     list[dict]                 = []
     # Per-sport pipeline stage counters — emitted in debug summary (#7 diagnostics)
     _sport_raw:           dict[str, int] = {}  # daily props: non-removed, non-futures
     _sport_futures:       dict[str, int] = {}  # season-long/futures props (tracked, not scored)
@@ -1283,6 +1329,7 @@ async def underdog_job(context) -> None:
             hit_rates:          Optional[object]      = None    # PlayerHitRates or None
             market_quality:     Optional[object]      = None    # MarketQuality — display context
             market_pressure:    Optional[object]      = None    # MarketPressureFlag — warning only
+            _dq_collected:      bool                  = False   # True when this snap is queued for ranked delivery
     
             if is_new_prop:
                 # ── New-prop path ────────────────────────────────────────────────
@@ -1499,86 +1546,38 @@ async def underdog_job(context) -> None:
                             )
                         except Exception:
                             pass
-                    delivery  = AlertDelivery(db, bot, chat_ids)
-                    ud_result = await delivery.deliver_underdog(
-                        player_name         = player,
-                        team                = snap.team or "",
-                        sport               = snap.sport,
-                        stat_type           = stat_type,
-                        old_line            = line_val,
-                        new_line            = line_val,
-                        game_time           = snap.game_time,
-                        score               = score,
-                        new_prop            = True,
-                        validation          = validation,
-                        decision            = decision,
-                        market_quality      = market_quality,
-                        market_pressure     = market_pressure,
-                        intelligence_trace  = _np_intel_trace,
-                        market_confirmation = _np_odds_confirm,
-                    )
-                    if ud_result.sent:
-                        _n_new_prop_sent += 1
-                        # Record in dedup dict so next scan cycle does not re-alert (#118).
-                        _record_prop_alerted(
-                            _prop_market_alerted,
-                            player,
-                            snap.sport or "UNKNOWN",
-                            stat_type,
-                            line_val,
-                        )
-                        # Queue lifecycle transition → ACTIVE_ALERTED (applied after bridge).
-                        # Previously missing from the new-prop path; the line-change path
-                        # always had this, but new-prop picks were never surfaced in /alerts.
-                        _lifecycle_alerted.append((player, snap.sport or "UNKNOWN", stat_type))
-                        # Mark as Telegram actionable pick so performance tracking
-                        # separates alerted picks from all evaluated props.
-                        try:
-                            _np_ext_id = getattr(snap, "external_id", None) or getattr(snap, "id", None) or ""
-                            await db.mark_opportunity_alert_sent(_np_ext_id, stat_type)
-                            _np_stored = "YES"
-                        except Exception:
-                            _np_stored = "NO (mark failed)"
-                        # Seed CLV record with OddsAPI avg_odds so S/A pick performance
-                        # is tracked when closing-line data becomes available.
-                        if (_np_odds_confirm is not None
-                                and _np_odds_confirm.get("avg_odds") is not None):
-                            try:
-                                _np_snap_id = int(getattr(snap, "id", 0) or 0)
-                                await db.seed_clv_from_ud_confirmation(
-                                    source_id   = _np_snap_id,
-                                    sport       = snap.sport or "",
-                                    stat_type   = stat_type,
-                                    player_name = player,
-                                    line        = line_val,
-                                    game_time   = snap.game_time,
-                                    tier        = decision.decision_tier if decision else "",
-                                    avg_odds    = _np_odds_confirm["avg_odds"],
-                                )
-                            except Exception as _clv_exc:
-                                logger.debug(
-                                    "seed_clv_from_ud_confirmation [new-prop] failed: %s | %s — %s",
-                                    player, stat_type, _clv_exc,
-                                )
-                        logger.info(
-                            "🎯 PICK CREATED | Player: %s | Sport: %s | Market: %s"
-                            " | Line: %.1f | Direction: %s | Tier: %s | Confidence: %d"
-                            " | Quality: %s | Telegram: SENT | Stored: %s",
-                            player,
-                            snap.sport or "UNKNOWN",
-                            stat_type,
-                            line_val,
-                            decision.recommendation if decision else "UNKNOWN",
-                            score.tier if score else "UNKNOWN",
-                            score.total if score else 0,
-                            getattr(score, "bet_quality_label", "—") if score else "—",
-                            _np_stored,
-                        )
-                    elif ud_result.filtered:
-                        logger.debug(
-                            "Underdog new-prop filtered: %s | %s | %s",
-                            player, stat_type, ud_result.filtered_reason,
-                        )
+                    # Collect into ranked delivery queue — all candidates compete for
+                    # rate-limit slots after the standing scan.  This ensures the
+                    # best picks across all three paths get first access to slots.
+                    _np_ext_id = getattr(snap, "external_id", None) or getattr(snap, "id", None) or ""
+                    _delivery_queue.append({
+                        "path":               "new",
+                        "player":             player,
+                        "snap":               snap,
+                        "stat_type":          stat_type,
+                        "line_val":           line_val,
+                        "prev_line":          None,
+                        "score":              score,
+                        "decision":           decision,
+                        "validation":         validation,
+                        "market_quality":     market_quality,
+                        "market_pressure":    market_pressure,
+                        "intel_trace":        _np_intel_trace,
+                        "odds_confirm":       _np_odds_confirm,
+                        "is_reentry":         False,
+                        "ext_id":             _np_ext_id,
+                        "record":             None,   # linked after record construction
+                        "sport":              snap.sport or "UNKNOWN",
+                        "tier":               decision.decision_tier if decision else "B",
+                        "conf":               float(decision.confidence if decision else 0),
+                        "bq":                 float(score.total if score else 0),
+                        "mq":                 float(getattr(market_quality, "score", 0) if market_quality else 0),
+                        "is_meaningful_change": False,  # new props have no prev line
+                        "is_tier1":           (snap.sport or "UNKNOWN") in config.ud_tier1_sports,
+                        "_sent":              False,
+                    })
+                    _dq_collected = True
+                    # ud_result stays DeliveryResult(sent=False) — delivery happens below.
                 # ── Debug tracking (new-prop) ─────────────────────────────────────
                 if score is not None:
                     if _np_bet_ready:
@@ -2032,91 +2031,51 @@ async def underdog_job(context) -> None:
                             )
                         except Exception:
                             pass
-                    delivery  = AlertDelivery(db, bot, chat_ids)
-                    # Derive removal reason from game-time context
-                    _removal_reason: Optional[str] = None
-                    if is_removed:
-                        from datetime import datetime as _dtnow
-                        _now_utc = _dtnow.utcnow()
-                        if snap.game_time and snap.game_time.replace(tzinfo=None) < _now_utc:
-                            _removal_reason = "Game started / market closed"
-                        else:
-                            _removal_reason = "Market no longer available from provider"
-                    ud_result = await delivery.deliver_underdog(
-                        player_name         = player,
-                        team                = snap.team or "",
-                        sport               = snap.sport,
-                        stat_type           = stat_type,
-                        old_line            = prev_line or (snap.line or 0.0),
-                        new_line            = snap.line or 0.0,
-                        game_time           = snap.game_time,
-                        score               = score,
-                        removed             = is_removed,
-                        new_prop            = is_reentry_qualified and not is_removed,
-                        validation          = validation,
-                        decision            = decision,
-                        market_quality      = market_quality,
-                        market_pressure     = market_pressure,
-                        removal_reason      = _removal_reason,
-                        intelligence_trace  = _lc_intel_trace,
-                        market_confirmation = _lc_odds_confirm,
-                    )
-                    if ud_result.filtered:
-                        logger.debug(
-                            "Underdog alert filtered: %s | %s | %s",
-                            player, stat_type, ud_result.filtered_reason,
+                    # Non-removals: collect into ranked delivery queue.
+                    # Removals are not Telegram-alerted (suppressed per doc #2/#3) —
+                    # lifecycle tracking is applied via _lifecycle_removed separately.
+                    if not is_removed:
+                        _lc_mag_abs  = (
+                            abs((snap.line or 0.0) - (prev_line or 0.0))
+                            if prev_line is not None else 0.0
                         )
+                        _lc_is_mc    = (
+                            _lc_mag_abs >= 2 * config.MIN_UNDERDOG_LINE_CHANGE
+                            or bool(is_reentry_qualified)
+                        )
+                        _lc_ext_id_q = getattr(snap, "external_id", None) or getattr(snap, "id", None) or ""
+                        _delivery_queue.append({
+                            "path":               "lc",
+                            "player":             player,
+                            "snap":               snap,
+                            "stat_type":          stat_type,
+                            "line_val":           snap.line or 0.0,
+                            "prev_line":          prev_line,
+                            "score":              score,
+                            "decision":           decision,
+                            "validation":         validation,
+                            "market_quality":     market_quality,
+                            "market_pressure":    market_pressure,
+                            "intel_trace":        _lc_intel_trace,
+                            "odds_confirm":       _lc_odds_confirm,
+                            "is_reentry":         bool(is_reentry_qualified),
+                            "ext_id":             _lc_ext_id_q,
+                            "record":             None,   # linked after record construction
+                            "sport":              snap.sport or "UNKNOWN",
+                            "tier":               decision.decision_tier if decision else "B",
+                            "conf":               float(decision.confidence if decision else 0),
+                            "bq":                 float(score.total if score else 0),
+                            "mq":                 float(getattr(market_quality, "score", 0) if market_quality else 0),
+                            "is_meaningful_change": _lc_is_mc,
+                            "is_tier1":           (snap.sport or "UNKNOWN") in config.ud_tier1_sports,
+                            "_sent":              False,
+                        })
+                        _dq_collected = True
+                    # ud_result stays DeliveryResult(sent=False) — delivery happens below.
     
-            # Queue lifecycle transitions — applied after bridge so PropLineHistory rows exist
-            if ud_result.sent and not is_removed:
-                _lifecycle_alerted.append((player, snap.sport or "UNKNOWN", stat_type))
-                _n_lc_sent += 1
-                # Mark as Telegram actionable pick for performance tracking (not removals).
-                try:
-                    _lc_ext_id = getattr(snap, "external_id", None) or getattr(snap, "id", None) or ""
-                    await db.mark_opportunity_alert_sent(_lc_ext_id, stat_type)
-                    _lc_stored = "YES"
-                except Exception as _mark_exc:
-                    _lc_stored = "NO (mark failed)"
-                    logger.warning(
-                        "underdog_job: mark_opportunity_alert_sent [lc] failed: %s", _mark_exc
-                    )
-                # Seed CLV record with OddsAPI avg_odds so S/A pick performance
-                # is tracked when closing-line data becomes available.
-                if (_lc_odds_confirm is not None
-                        and _lc_odds_confirm.get("avg_odds") is not None):
-                    try:
-                        _lc_snap_id = int(getattr(snap, "id", 0) or 0)
-                        await db.seed_clv_from_ud_confirmation(
-                            source_id   = _lc_snap_id,
-                            sport       = snap.sport or "",
-                            stat_type   = stat_type,
-                            player_name = player,
-                            line        = snap.line or 0.0,
-                            game_time   = snap.game_time,
-                            tier        = decision.decision_tier if decision else "",
-                            avg_odds    = _lc_odds_confirm["avg_odds"],
-                        )
-                    except Exception as _clv_exc:
-                        logger.debug(
-                            "seed_clv_from_ud_confirmation [lc] failed: %s | %s — %s",
-                            player, stat_type, _clv_exc,
-                        )
-                logger.info(
-                    "🎯 PICK CREATED | Player: %s | Sport: %s | Market: %s"
-                    " | Line: %.1f | Direction: %s | Tier: %s | Confidence: %d"
-                    " | Quality: %s | Telegram: SENT | Stored: %s",
-                    player,
-                    snap.sport or "UNKNOWN",
-                    stat_type,
-                    snap.line or 0.0,
-                    decision.recommendation if decision else "UNKNOWN",
-                    score.tier if score else "UNKNOWN",
-                    score.total if score else 0,
-                    getattr(score, "bet_quality_label", "—") if score else "—",
-                    _lc_stored,
-                )
-            # Removals: track lifecycle independently of alert sent status (no Telegram alert)
+            # Post-send callbacks (dedup, lifecycle, CLV, marks) for non-removal props
+            # are handled in the ranked delivery phase below.
+            # Removals: track lifecycle independently (no Telegram alert).
             if is_removed and prev_record is not None:
                 _lifecycle_removed.append((player, snap.sport or "UNKNOWN", stat_type))
                 # Log market availability window (detection → removal) for model improvement
@@ -2128,16 +2087,17 @@ async def underdog_job(context) -> None:
                         player, stat_type, _win_mins,
                     )
                     del _MARKET_FIRST_ALERT[_mfa_key]
-            # Record first alert time for market availability window tracking
-            if ud_result.sent:
-                _mfa_key = f"{player}__{stat_type}"
-                if _mfa_key not in _MARKET_FIRST_ALERT:
-                    _MARKET_FIRST_ALERT[_mfa_key] = now
-    
-            # Resolve alert_outcome for historical analysis
+            # Market first-alert time for delivered (non-removal) props is recorded
+            # in the ranked delivery phase below after successful broadcast.
+
+            # Resolve alert_outcome for historical analysis.
+            # Queued candidates: "new_prop_queued"/"queued" initially — the delivery
+            # phase updates the record to "new_prop_sent"/"sent" if delivered.
             if is_new_prop:
-                if ud_result.sent:
-                    _alert_outcome: Optional[str] = "new_prop_sent"
+                if _dq_collected:
+                    _alert_outcome: Optional[str] = "new_prop_queued"
+                elif ud_result.sent:
+                    _alert_outcome = "new_prop_sent"
                 elif ud_result.filtered:
                     _alert_outcome = f"new_prop_filtered:{ud_result.filtered_reason}"[:64]
                 elif np_immediate:
@@ -2152,6 +2112,8 @@ async def underdog_job(context) -> None:
                 else:
                     _alert_outcome = "skipped"
                     _n_unchanged_skipped += 1  # stable line — no re-score needed this cycle
+            elif _dq_collected:
+                _alert_outcome = "queued"
             elif ud_result.sent:
                 _alert_outcome = "removal_sent" if is_removed else "sent"
             elif ud_result.filtered:
@@ -2197,27 +2159,17 @@ async def underdog_job(context) -> None:
                 _cold_start_records.append(record)
             else:
                 _incremental_records.append(record)
-    
-        # ── Bulk-save incremental snapshots ───────────────────────────────────────
-        # All current-scan snapshots have been accumulated in _incremental_records
-        # instead of being saved one-by-one inside the loop.  A single bulk INSERT
-        # (one SQLite transaction ≈ 5–15 s) replaces ~5 000 individual sessions
-        # (≈ 100–200 s).  Must run before the standing-path so has_recent_ud_alert
-        # can find current-scan alert_sent rows.
-        if _incremental_records and db:
-            # Pass a copy so that the .clear() below does not retroactively
-            # empty the list object that was handed to the mock in tests.
-            _incr_snapshot = list(_incremental_records)
-            _incremental_records.clear()
-            try:
-                await db.save_underdog_snapshots_bulk(_incr_snapshot)
-            except Exception as _bulk_exc:
-                logger.warning(
-                    "underdog_job: bulk snapshot save failed (%d records): %s",
-                    len(_incr_snapshot), _bulk_exc,
-                )
-            finally:
-                del _incr_snapshot
+                # Link this snapshot record into the delivery queue candidate so the
+                # ranked delivery phase can update alert_sent=True before bulk-save.
+                if _dq_collected and _delivery_queue:
+                    for _dq_ref in reversed(_delivery_queue):
+                        if (_dq_ref.get("player") == player
+                                and _dq_ref.get("stat_type") == stat_type
+                                and _dq_ref.get("record") is None):
+                            _dq_ref["record"] = record
+                            break
+        # (Incremental bulk-save is performed AFTER the ranked delivery phase so that
+        #  alert_sent=True is reflected in the saved records for delivered candidates.)
 
         # ── 4A: Standing opportunity scan ─────────────────────────────────────────
         # After cold-start, re-evaluate stable HIGH_FLOOR props that had no line
@@ -2455,77 +2407,35 @@ async def underdog_job(context) -> None:
                     )
                     continue
 
-                delivery   = AlertDelivery(db, bot, chat_ids)
-                _sresult   = await delivery.deliver_underdog(
-                    player_name         = _sp,
-                    team                = _ssnap.team or "",
-                    sport               = _ssnap.sport,
-                    stat_type           = _st,
-                    old_line            = _line_val,
-                    new_line            = _line_val,
-                    game_time           = _ssnap.game_time,
-                    score               = _sscore,
-                    validation          = _sval,
-                    decision            = _sdec,
-                    market_quality      = _smq,
-                    market_pressure     = _smp,
-                    standing            = True,
-                    intelligence_trace  = _s_intel_trace,
-                    market_confirmation = _s_odds_confirm,
-                )
-                if _sresult.sent:
-                    _n_standing_sent += 1
-                    # Queue lifecycle transition → ACTIVE_ALERTED (applied after bridge).
-                    # Previously missing from the standing path; stable S/A-tier props
-                    # that fire here were never surfaced in /alerts.
-                    _lifecycle_alerted.append((_sp, _ssport, _st))
-                    # Mark as Telegram actionable pick for performance tracking.
-                    try:
-                        _s_ext_id = getattr(_ssnap, "external_id", None) or getattr(_ssnap, "id", None) or ""
-                        await db.mark_opportunity_alert_sent(_s_ext_id, _st)
-                        _s_stored = "YES"
-                    except Exception as _mark_exc:
-                        _s_stored = "NO (mark failed)"
-                        logger.warning(
-                            "underdog_job: mark_opportunity_alert_sent [standing] failed: %s",
-                            _mark_exc,
-                        )
-                    # Seed CLV record with OddsAPI avg_odds so S/A pick performance
-                    # is tracked when closing-line data becomes available.
-                    if (_s_odds_confirm is not None
-                            and _s_odds_confirm.get("avg_odds") is not None):
-                        try:
-                            _s_snap_id = int(getattr(_ssnap, "id", 0) or 0)
-                            await db.seed_clv_from_ud_confirmation(
-                                source_id   = _s_snap_id,
-                                sport       = _ssport,
-                                stat_type   = _st,
-                                player_name = _sp,
-                                line        = _line_val,
-                                game_time   = _ssnap.game_time,
-                                tier        = _sdec.decision_tier if _sdec else "",
-                                avg_odds    = _s_odds_confirm["avg_odds"],
-                            )
-                        except Exception as _clv_exc:
-                            logger.debug(
-                                "seed_clv_from_ud_confirmation [standing] failed: %s | %s — %s",
-                                _sp, _st, _clv_exc,
-                            )
-                    logger.info(
-                        "🎯 PICK CREATED | Player: %s | Sport: %s | Market: %s"
-                        " | Line: %.1f | Direction: %s | Tier: %s | Confidence: %d"
-                        " | Quality: %s | Telegram: SENT | Stored: %s",
-                        _sp,
-                        _ssport,
-                        _st,
-                        _line_val,
-                        _sdec.recommendation if _sdec else "UNKNOWN",
-                        _sscore.tier if _sscore else "UNKNOWN",
-                        _sscore.total if _sscore else 0,
-                        getattr(_sscore, "bet_quality_label", "—") if _sscore else "—",
-                        _s_stored,
-                    )
-    
+                # Collect into delivery queue for ranked delivery below.
+                _s_ext_id_q = getattr(_ssnap, "external_id", None) or getattr(_ssnap, "id", None) or ""
+                _delivery_queue.append({
+                    "path":               "standing",
+                    "player":             _sp,
+                    "snap":               _ssnap,
+                    "stat_type":          _st,
+                    "line_val":           _line_val,
+                    "prev_line":          None,
+                    "score":              _sscore,
+                    "decision":           _sdec,
+                    "validation":         _sval,
+                    "market_quality":     _smq,
+                    "market_pressure":    _smp,
+                    "intel_trace":        _s_intel_trace,
+                    "odds_confirm":       _s_odds_confirm,
+                    "is_reentry":         False,
+                    "ext_id":             _s_ext_id_q,
+                    "record":             None,   # standing path has no new snapshot record
+                    "sport":              _ssport,
+                    "tier":               _sdec.decision_tier if _sdec else "B",
+                    "conf":               float(_sdec.confidence if _sdec else 0),
+                    "bq":                 float(_sscore.total if _sscore else 0),
+                    "mq":                 float(getattr(_smq, "score", 0) if _smq else 0),
+                    "is_meaningful_change": False,  # standing = stable line
+                    "is_tier1":           _ssport in config.ud_tier1_sports,
+                    "_sent":              False,
+                })
+
             if _n_standing_sent:
                 logger.info("underdog_job: standing opportunities fired — sent=%d", _n_standing_sent)
     
@@ -2549,7 +2459,167 @@ async def underdog_job(context) -> None:
                 "Telegram only fires on qualified alerts)",
                 len(_new_props_batch),
             )
-    
+
+        # ── Ranked delivery phase ──────────────────────────────────────────────────
+        # All qualified candidates from new-prop, line-change, and standing paths
+        # compete for rate-limit slots in priority order.  Higher-quality picks get
+        # first access; no candidate is hard-rejected — lower-priority ones are deferred
+        # and remain available in /picks and the DB.
+        if _delivery_queue and chat_ids:
+            _apply_delivery_diversification(_delivery_queue)
+            _n_dq_deferred   = 0
+            _dq_deferred_log: list[str] = []
+            for _dq in _delivery_queue:
+                _dq_player    = _dq["player"]
+                _dq_snap      = _dq["snap"]
+                _dq_st        = _dq["stat_type"]
+                _dq_path      = _dq["path"]
+                _dq_score     = _dq["score"]
+                _dq_dec       = _dq["decision"]
+                _dq_val       = _dq["validation"]
+                _dq_mq        = _dq["market_quality"]
+                _dq_mp        = _dq["market_pressure"]
+                _dq_intel     = _dq["intel_trace"]
+                _dq_odds      = _dq["odds_confirm"]
+                _dq_record    = _dq.get("record")
+                _dq_ext_id    = _dq["ext_id"]
+                _dq_sport     = _dq["sport"]
+                _dq_line_val  = _dq["line_val"]
+                _dq_prev      = _dq.get("prev_line")
+                _dq_is_reent  = _dq.get("is_reentry", False)
+                _dq_is_new    = (_dq_path == "new" or _dq_is_reent)
+
+                _dq_delivery  = AlertDelivery(db, bot, chat_ids)
+                _dq_result    = await _dq_delivery.deliver_underdog(
+                    player_name         = _dq_player,
+                    team                = _dq_snap.team or "",
+                    sport               = _dq_snap.sport,
+                    stat_type           = _dq_st,
+                    old_line            = _dq_prev or _dq_line_val,
+                    new_line            = _dq_line_val,
+                    game_time           = _dq_snap.game_time,
+                    score               = _dq_score,
+                    new_prop            = _dq_is_new,
+                    validation          = _dq_val,
+                    decision            = _dq_dec,
+                    market_quality      = _dq_mq,
+                    market_pressure     = _dq_mp,
+                    intelligence_trace  = _dq_intel,
+                    market_confirmation = _dq_odds,
+                    standing            = (_dq_path == "standing"),
+                )
+
+                if _dq_result.sent:
+                    _dq["_sent"] = True
+                    # Update snapshot record fields before bulk-save
+                    if _dq_record is not None:
+                        _dq_record.alert_sent    = True
+                        _dq_record.alert_outcome = (
+                            "new_prop_sent" if _dq_path == "new" else "sent"
+                        )
+                    # Dedup dict — prevents re-alert on next scan cycle
+                    _record_prop_alerted(
+                        _prop_market_alerted,
+                        _dq_player,
+                        _dq_sport,
+                        _dq_st,
+                        _dq_line_val,
+                    )
+                    # Lifecycle transition → ACTIVE_ALERTED
+                    _lifecycle_alerted.append((_dq_player, _dq_sport, _dq_st))
+                    # Per-path counters
+                    if _dq_path == "new":
+                        _n_new_prop_sent += 1
+                    elif _dq_path == "lc":
+                        _n_lc_sent += 1
+                    elif _dq_path == "standing":
+                        _n_standing_sent += 1
+                    # Performance tracking
+                    try:
+                        await db.mark_opportunity_alert_sent(_dq_ext_id, _dq_st)
+                    except Exception as _dq_mark_exc:
+                        logger.warning(
+                            "underdog_job: mark_opportunity_alert_sent [%s] failed: %s",
+                            _dq_path, _dq_mark_exc,
+                        )
+                    # CLV seed — S/A picks with confirmed OddsAPI odds
+                    if _dq_odds is not None and _dq_odds.get("avg_odds") is not None:
+                        try:
+                            _dq_snap_id = int(getattr(_dq_snap, "id", 0) or 0)
+                            await db.seed_clv_from_ud_confirmation(
+                                source_id   = _dq_snap_id,
+                                sport       = _dq_sport,
+                                stat_type   = _dq_st,
+                                player_name = _dq_player,
+                                line        = _dq_line_val,
+                                game_time   = _dq_snap.game_time,
+                                tier        = _dq_dec.decision_tier if _dq_dec else "",
+                                avg_odds    = _dq_odds["avg_odds"],
+                            )
+                        except Exception as _dq_clv_exc:
+                            logger.debug(
+                                "seed_clv_from_ud_confirmation [%s] failed: %s | %s — %s",
+                                _dq_path, _dq_player, _dq_st, _dq_clv_exc,
+                            )
+                    # Market first-alert time tracking
+                    _mfa_key = f"{_dq_player}__{_dq_st}"
+                    if _mfa_key not in _MARKET_FIRST_ALERT:
+                        _MARKET_FIRST_ALERT[_mfa_key] = now
+                    logger.info(
+                        "🎯 PICK CREATED | Player: %s | Sport: %s | Market: %s"
+                        " | Line: %.1f | Direction: %s | Tier: %s | Confidence: %d"
+                        " | Quality: %s | Telegram: SENT | Path: %s",
+                        _dq_player, _dq_sport, _dq_st, _dq_line_val,
+                        _dq_dec.recommendation if _dq_dec else "UNKNOWN",
+                        _dq_score.tier if _dq_score else "UNKNOWN",
+                        _dq_score.total if _dq_score else 0,
+                        getattr(_dq_score, "bet_quality_label", "—") if _dq_score else "—",
+                        _dq_path,
+                    )
+                else:
+                    _n_dq_deferred += 1
+                    _dq_deferred_log.append(
+                        f"{_dq_player}/{_dq_st} [tier={_dq.get('tier','?')}"
+                        f" bq={_dq.get('bq',0):.0f} path={_dq_path}]:"
+                        f" {_dq_result.reason}"
+                    )
+
+            if _n_dq_deferred:
+                _dq_sent_log = [
+                    f"{c['player']}/{c['stat_type']}"
+                    f" [{c.get('tier','?')} bq={c.get('bq',0):.0f}]"
+                    for c in _delivery_queue if c.get("_sent")
+                ]
+                logger.warning(
+                    "underdog_job: ranked delivery — %d/%d sent, %d deferred\n"
+                    "  Selected: %s\n"
+                    "  Deferred: %s",
+                    len(_delivery_queue) - _n_dq_deferred,
+                    len(_delivery_queue),
+                    _n_dq_deferred,
+                    ", ".join(_dq_sent_log) or "none",
+                    "; ".join(_dq_deferred_log[:10]),
+                )
+
+        # ── Bulk-save incremental snapshots ───────────────────────────────────────
+        # Runs AFTER the ranked delivery phase so that alert_sent=True is persisted
+        # for props that were just delivered.  The incremental records have their
+        # alert_sent / alert_outcome fields updated in-place by the delivery phase.
+        if _incremental_records and db:
+            # Pass a copy so that the .clear() below does not retroactively
+            # empty the list object that was handed to the mock in tests.
+            _incr_snapshot = list(_incremental_records)
+            _incremental_records.clear()
+            try:
+                await db.save_underdog_snapshots_bulk(_incr_snapshot)
+            except Exception as _bulk_exc:
+                logger.warning(
+                    "underdog_job: bulk snapshot save failed (%d records): %s",
+                    len(_incr_snapshot), _bulk_exc,
+                )
+            finally:
+                del _incr_snapshot
+
         # ── Cold-start bulk save + latch — runs once after the prop loop ──────────
         if is_cold_start:
             if _cold_start_records:
