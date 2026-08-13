@@ -1,0 +1,142 @@
+NEXT TARGET — IMPROVE TELEGRAM SELECTION, NOT GRADING
+
+The flood is now controlled — I received exactly 5 alerts instead of ~50.
+
+DO NOT change the grading model or qualification thresholds.
+
+I want the Telegram delivery queue to select the BEST actionable opportunities when the 5-alert window is limited.
+
+Current example:
+The bot sent 3 MLB Runs UNDER 0.5 props in the same delivery window, all A-tier / BQ 85 / Market Quality 47.
+
+Those may still be valid actionable picks, so DO NOT reject or downgrade them.
+
+Instead, improve DELIVERY PRIORITIZATION.
+
+1. KEEP ALL QUALIFIED PICKS
+
+S/A/B actionable candidates must remain in the actionable database and /picks.
+
+Telegram selection is separate from grading.
+
+2. RANK THE DELIVERY QUEUE
+
+When more candidates are available than the Telegram rate limit allows, rank candidates using:
+
+Primary:
+- Tier: S > A > B
+
+Then within the same tier:
+- Confidence
+- Bet Quality
+- Market Quality
+- Directional edge
+- Recent meaningful line movement
+- Tier 1 sport priority
+
+3. ADD LIGHT DIVERSIFICATION
+
+Do not allow the delivery queue to unnecessarily consume the entire alert budget with nearly identical opportunities when stronger alternatives are waiting.
+
+Prefer some diversification across:
+- sport
+- market type
+- player
+
+Example:
+If 10 A-tier candidates are waiting and 5 are nearly identical MLB Runs UNDER 0.5 props, don't automatically send all 5 if stronger/different opportunities are available.
+
+IMPORTANT:
+This is NOT a hard exclusion.
+
+Do NOT create a rule such as:
+"Only one player per market."
+
+Do NOT discard valid candidates.
+
+This should be a SOFT delivery-priority factor only.
+
+4. DO NOT OVERRIDE STRONG PICKS
+
+A very strong candidate should still be delivered even if it comes from the same sport/market as another candidate.
+
+For example:
+A 93 BQ candidate should generally outrank an 85 BQ candidate.
+
+5. KEEP THE CURRENT RATE LIMIT
+
+Keep:
+TG_RATE_MAX_PER_WINDOW = 5
+TG_RATE_WINDOW_SECONDS = 300
+TG_FLOOD_THRESHOLD = 10
+TG_FLOOD_PROTECTION_DURATION = 600
+
+Do not increase the alert volume yet.
+
+6. ADD DELIVERY QUEUE LOGGING
+
+When candidates are deferred, log why the selected candidates ranked above them.
+
+Example:
+
+Telegram Delivery Queue
+-----------------------
+Available actionable: 18
+Selected: 5
+Deferred: 13
+
+Selected:
+1. A.J. Brown — A — BQ 93
+2. ...
+3. ...
+
+Deferred:
+- Candidate X — ranked below selected candidate
+- Candidate Y — duplicate/near-identical market cluster
+- Candidate Z — lower tier/quality
+
+7. IMPORTANT — DO NOT TOUCH GRADING
+
+The grading rules remain:
+
+Tier 1:
+S/A/B actionable
+C = watchlist
+
+Tier 2:
+S/A/B actionable
+C = watchlist
+
+BQ + Confidence + Market Quality work together.
+
+Market Quality 80+ is required for S-tier.
+
+60 confidence can qualify for S/A according to the existing grading logic, but do not create an artificial gate just to reduce alerts.
+
+Low BQ + low confidence can still identify a strong UNDER candidate when the directional model supports it.
+
+8. TESTS
+
+Add tests proving:
+
+- 5-alert global limit still works
+- highest-quality candidates are prioritized
+- S outranks A, A outranks B
+- higher BQ/Confidence/MQ wins within a tier
+- Tier 1 gets appropriate priority
+- soft diversification works
+- strong same-market candidates are NOT automatically rejected
+- deferred candidates remain in /picks
+- no grading changes occur
+- no flood protection regressions
+
+Run the full test suite.
+
+Report:
+- files changed
+- delivery ranking formula
+- diversification logic
+- tests passed
+- bot status
+
+DO NOT make unrelated changes.
