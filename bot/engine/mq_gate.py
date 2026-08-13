@@ -16,6 +16,11 @@ _WINDOW_FIELDS = (
     ("season", "season_games", "season_hit_rate"),
 )
 
+_MQ_DIRECTIONAL_REASONS = (
+    ("HIGH-FLOOR STAT", {"OVER": "support", "UNDER": "contradict"}),
+    ("HIGH-VARIANCE MARKET", {"OVER": "contradict", "UNDER": "support"}),
+)
+
 
 def _normalize_mq_label(market_quality: Optional[object]) -> Optional[str]:
     raw = getattr(market_quality, "label", market_quality)
@@ -37,6 +42,35 @@ def _iter_windows(decision: object):
         yield name, games, hit_rate
 
 
+def _mq_directional_stance(
+    decision: object,
+    market_quality: object,
+) -> str:
+    direction = (getattr(decision, "recommendation", "") or "").upper()
+    if direction not in _DIRECTION_SUPPORT:
+        return "neutral"
+
+    reasons = getattr(market_quality, "reasons", ()) or ()
+    normalized_reasons = [str(reason).strip().upper() for reason in reasons if reason is not None]
+
+    supported = False
+    contradicted = False
+    for reason_text in normalized_reasons:
+        for prefix, outcomes in _MQ_DIRECTIONAL_REASONS:
+            if reason_text.startswith(prefix):
+                stance = outcomes[direction]
+                if stance == "support":
+                    supported = True
+                elif stance == "contradict":
+                    contradicted = True
+
+    if contradicted:
+        return "contradict"
+    if supported:
+        return "support"
+    return "neutral"
+
+
 def mq_allows_action(
     decision: Optional[object],
     market_quality: Optional[object],
@@ -53,14 +87,23 @@ def mq_allows_action(
         return True, None
     if label in {"ELITE", "HIGH", "STRONG"}:
         return True, None
+    directional_stance = _mq_directional_stance(decision, market_quality)
     if label == "MEDIUM":
-        return False, "MEDIUM_MQ_hard_block"
+        if directional_stance == "support":
+            return True, None
+        if directional_stance == "contradict":
+            return False, "MEDIUM_MQ_contradicted"
+        return False, "MEDIUM_MQ_neutral_block"
     if label != "LOW":
         return True, None
 
     bet_quality = getattr(decision, "confidence", None)
     if not isinstance(bet_quality, (int, float)) or bet_quality <= 80:
         return False, "LOW_MQ_BQ_must_be_gt_80"
+    if directional_stance == "contradict":
+        return False, "LOW_MQ_contradicted"
+    if directional_stance != "support":
+        return False, "LOW_MQ_neutral_block"
 
     support_cfg = _DIRECTION_SUPPORT[direction]
     support_count = 0

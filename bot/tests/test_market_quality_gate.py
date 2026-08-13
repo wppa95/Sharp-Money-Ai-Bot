@@ -29,9 +29,9 @@ def _mk_decision(
     return d
 
 
-def _mk_mq(label_str, score=50):
+def _mk_mq(label_str, score=50, reasons=("test",)):
     label = label_str if label_str == "STRONG" else MarketQualityLabel(label_str)
-    return MarketQuality(label=label, score=score, reasons=("test",))
+    return MarketQuality(label=label, score=score, reasons=reasons)
 
 
 # ELITE / HIGH / STRONG always allow
@@ -45,14 +45,53 @@ def test_high_elite_allow():
         assert reason is None
 
 
-# MEDIUM is a hard block
-def test_medium_mq_hard_blocked():
+# MEDIUM + High-variance + UNDER → allowed
+def test_medium_high_variance_supports_under():
+    d = _mk_decision("A", "UNDER", l5=(5, 0.40), l10=(10, 0.39))
+    d.confidence = 95
+    mq = _mk_mq("MEDIUM", reasons=("High-variance market (Home Runs)",))
+    allowed, reason = _mq_allows_action(d, mq)
+    assert allowed is True
+    assert reason is None
+
+
+# MEDIUM + High-variance + OVER → blocked
+def test_medium_high_variance_blocks_over():
     d = _mk_decision("A", "OVER", l5=(5, 0.80), l10=(10, 0.80))
     d.confidence = 95
-    mq = _mk_mq("MEDIUM")
+    mq = _mk_mq("MEDIUM", reasons=("High-variance market (Home Runs)",))
     allowed, reason = _mq_allows_action(d, mq)
     assert not allowed
-    assert reason == "MEDIUM_MQ_hard_block"
+    assert reason == "MEDIUM_MQ_contradicted"
+
+
+# MEDIUM + High-floor + OVER → allowed
+def test_medium_high_floor_supports_over():
+    d = _mk_decision("A", "OVER", l5=(5, 0.80), l10=(10, 0.80))
+    d.confidence = 95
+    mq = _mk_mq("MEDIUM", reasons=("High-floor stat (Points)",))
+    allowed, reason = _mq_allows_action(d, mq)
+    assert allowed is True
+    assert reason is None
+
+
+# MEDIUM + High-floor + UNDER → blocked
+def test_medium_high_floor_blocks_under():
+    d = _mk_decision("A", "UNDER", l5=(5, 0.20), l10=(10, 0.30))
+    d.confidence = 95
+    mq = _mk_mq("MEDIUM", reasons=("High-floor stat (Points)",))
+    allowed, reason = _mq_allows_action(d, mq)
+    assert not allowed
+    assert reason == "MEDIUM_MQ_contradicted"
+
+
+def test_medium_neutral_blocked():
+    d = _mk_decision("A", "OVER", l5=(5, 0.80), l10=(10, 0.80))
+    d.confidence = 95
+    mq = _mk_mq("MEDIUM", reasons=("Active market",))
+    allowed, reason = _mq_allows_action(d, mq)
+    assert not allowed
+    assert reason == "MEDIUM_MQ_neutral_block"
 
 
 def test_low_bq_lte_80_blocked():
@@ -68,24 +107,24 @@ def test_low_bq_gt_80_insufficient_directional_evidence_blocked():
     d = _mk_decision("A", "OVER", l5=(5, 0.62), l10=(10, 0.61))
     d.confidence = 81
     d.l10_hit_rate = 0.55
-    mq = _mk_mq("LOW")
+    mq = _mk_mq("LOW", reasons=("High-floor stat (Points)",))
     allowed, reason = _mq_allows_action(d, mq)
     assert not allowed
     assert reason == "LOW_MQ_needs_2_supporting_windows"
 
 
-def test_low_two_qualifying_directional_windows_allowed_over():
+def test_low_bq_gt_80_supporting_evidence_and_directional_support_allowed():
     d = _mk_decision("A", "OVER", l5=(5, 0.60), l10=(10, 0.61), season=(20, 0.58))
     d.confidence = 81
-    mq = _mk_mq("LOW")
+    mq = _mk_mq("LOW", reasons=("High-floor stat (Points)",))
     allowed, _ = _mq_allows_action(d, mq)
     assert allowed
  
 
-def test_low_two_qualifying_directional_windows_allowed_under():
+def test_low_under_symmetry_allowed_with_supporting_directional_mq():
     d = _mk_decision("A", "UNDER", l5=(5, 0.40), l10=(10, 0.39), season=(20, 0.42))
     d.confidence = 82
-    mq = _mk_mq("LOW")
+    mq = _mk_mq("LOW", reasons=("High-variance market (Home Runs)",))
     allowed, _ = _mq_allows_action(d, mq)
     assert allowed
 
@@ -100,16 +139,16 @@ def test_mq_none_preserves_behavior():
 def test_low_requires_recent_support_window():
     d = _mk_decision("A", "OVER", l5=(4, 0.75), l10=(4, 0.75), l20=(20, 0.65), season=(30, 0.62))
     d.confidence = 84
-    mq = _mk_mq("LOW")
+    mq = _mk_mq("LOW", reasons=("High-floor stat (Points)",))
     allowed, reason = _mq_allows_action(d, mq)
     assert not allowed
     assert reason == "LOW_MQ_needs_recent_support"
 
 
-def test_low_contradicted_blocked():
+def test_low_bq_gt_80_supporting_evidence_contradictory_mq_blocked():
     d = _mk_decision("A", "OVER", l5=(5, 0.62), l10=(10, 0.61), season=(20, 0.40))
     d.confidence = 85
-    mq = _mk_mq("LOW")
+    mq = _mk_mq("LOW", reasons=("High-variance market (Home Runs)",))
     allowed, reason = _mq_allows_action(d, mq)
     assert not allowed
     assert reason == "LOW_MQ_contradicted"
@@ -118,10 +157,19 @@ def test_low_contradicted_blocked():
 def test_low_donovan_style_under_case_remains_eligible():
     d = _mk_decision("A", "UNDER", l5=(5, 0.00), l10=(10, 0.30), season=(24, 0.38))
     d.confidence = 95
-    mq = _mk_mq("LOW")
+    mq = _mk_mq("LOW", reasons=("High-variance market (Home Runs)",))
     allowed, reason = _mq_allows_action(d, mq)
     assert allowed is True
     assert reason is None
+
+
+def test_low_neutral_blocked():
+    d = _mk_decision("A", "OVER", l5=(5, 0.60), l10=(10, 0.61), season=(20, 0.58))
+    d.confidence = 84
+    mq = _mk_mq("LOW", reasons=("Active market",))
+    allowed, reason = _mq_allows_action(d, mq)
+    assert allowed is False
+    assert reason == "LOW_MQ_neutral_block"
 
 
 @pytest.mark.parametrize("label", ["ELITE", "HIGH"])
@@ -156,16 +204,28 @@ def test_actionable_delivery_mq_gate_allows_aliases(label):
     assert reason is None
 
 
-def test_actionable_delivery_mq_gate_blocks_medium():
+def test_actionable_delivery_mq_gate_allows_directional_medium():
     allowed, reason = _actionable_mq_allows_delivery(
         removed=False,
         new_prop=False,
         market_move_only=False,
         decision=types.SimpleNamespace(recommendation="OVER", confidence=95),
-        market_quality=_mk_mq("MEDIUM"),
+        market_quality=_mk_mq("MEDIUM", reasons=("High-floor stat (Points)",)),
+    )
+    assert allowed is True
+    assert reason is None
+
+
+def test_actionable_delivery_mq_gate_blocks_neutral_medium():
+    allowed, reason = _actionable_mq_allows_delivery(
+        removed=False,
+        new_prop=False,
+        market_move_only=False,
+        decision=types.SimpleNamespace(recommendation="OVER", confidence=95),
+        market_quality=_mk_mq("MEDIUM", reasons=("Active market",)),
     )
     assert allowed is False
-    assert reason == "MEDIUM_MQ_hard_block"
+    assert reason == "MEDIUM_MQ_neutral_block"
 
 
 @pytest.mark.asyncio
@@ -185,12 +245,12 @@ async def test_deliver_underdog_blocks_medium_mq_actionable_delivery():
             new_line=25.5,
             score=types.SimpleNamespace(tier="A", stars=4, total=78),
             decision=_mk_decision("A", "OVER"),
-            market_quality=_mk_mq("MEDIUM"),
+            market_quality=_mk_mq("MEDIUM", reasons=("Active market",)),
         )
 
     assert result.sent is False
     assert result.filtered is True
-    assert result.filtered_reason == "MEDIUM_MQ_hard_block"
+    assert result.filtered_reason == "MEDIUM_MQ_neutral_block"
     mock_broadcast.assert_not_called()
 
 
