@@ -27,6 +27,7 @@ from telegram.constants import ParseMode
 from telegram.error import TelegramError
 
 from config import config
+from engine.mq_gate import mq_allows_action
 from engine.score_validation import clamp_score
 from models import EVOpportunity, Recommendation, SteamAlert
 
@@ -48,15 +49,7 @@ def _actionable_mq_allows_delivery(
     if removed or new_prop or market_move_only:
         return True, None
 
-    _direction = (getattr(decision, "recommendation", "") or "").upper()
-    if _direction not in {"OVER", "UNDER"}:
-        return True, None
-
-    _mq_label = str(getattr(market_quality, "label", "") or "").upper()
-    if _mq_label in {"HIGH", "STRONG", "ELITE"}:
-        return True, None
-
-    return False, f"mq_not_actionable:{_mq_label or 'NONE'}"
+    return mq_allows_action(decision, market_quality)
 
 
 # ── Known sharp / respected sportsbooks ───────────────────────────────────────

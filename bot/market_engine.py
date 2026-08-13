@@ -37,6 +37,7 @@ from typing import Optional
 
 from config import config
 from engine.health import get_health_tracker
+from engine.mq_gate import mq_allows_action
 from engine.prop_intelligence import compute_prop_intelligence as _compute_intel
 from engine.player_prop_market import _is_prop_deduped, _record_prop_alerted
 from engine.score_validation import clamp_score
@@ -184,109 +185,7 @@ import typing
 
 
 def _mq_allows_action(decision: Optional[object], market_quality: Optional[object]) -> tuple[bool, typing.Optional[str]]:
-    """
-    Targeted Market Quality gate for final actionable qualification.
-
-    Returns (allowed: bool, reason: Optional[str]).
-
-    Rules (per spec):
-      - ELITE / HIGH : always allow
-      - MEDIUM: A-tier requires >=2 supporting windows (games>=5) with
-                OVER hit_rate >=0.55 or UNDER hit_rate <=0.45
-      - LOW: S-tier always allow; B-tier preserved; A-tier allowed only when
-             >=2 *strong* supporting windows (games>=5) with OVER hit_rate>=0.60
-             or UNDER hit_rate<=0.40. Otherwise block.
-
-    Uses only existing UDBetDecision fields (l5/l10/l20/l30/season games + hit_rate).
-    """
-    if market_quality is None or decision is None:
-        return True, None
-    mq_label = getattr(market_quality, "label", None)
-    # Normalize enum
-    try:
-        if isinstance(mq_label, MarketQualityLabel):
-            label = mq_label
-        else:
-            label = MarketQualityLabel(str(mq_label))
-    except Exception:
-        return True, None
-
-    tier = getattr(decision, "decision_tier", None)
-    rec = getattr(decision, "recommendation", None)
-
-    # ELITE / HIGH: no gating
-    if label in (MarketQualityLabel.ELITE, MarketQualityLabel.HIGH):
-        return True, None
-
-    # MEDIUM: A-tier requires 2 supporting windows at relaxed thresholds
-    if label == MarketQualityLabel.MEDIUM:
-        if tier == "A":
-            support = 0
-            for games, hit in (
-                (getattr(decision, "l5_games", None), getattr(decision, "l5_hit_rate", None)),
-                (getattr(decision, "l10_games", None), getattr(decision, "l10_hit_rate", None)),
-                (getattr(decision, "l20_games", None), getattr(decision, "l20_hit_rate", None)),
-                (getattr(decision, "l30_games", None), getattr(decision, "l30_hit_rate", None)),
-                (getattr(decision, "season_games", None), getattr(decision, "season_hit_rate", None)),
-            ):
-                if games is None or hit is None:
-                    continue
-                if games < 5:
-                    continue
-                if rec == "OVER" and hit >= 0.55:
-                    support += 1
-                elif rec == "UNDER" and hit <= 0.45:
-                    support += 1
-            if support >= 2:
-                return True, None
-            return False, "MEDIUM_MQ_A_needs_2_supporting_windows"
-        return True, None
-
-    # LOW: S-tier allowed; B-tier preserved; A-tier allowed only with >=2 *strong* supports
-    if label == MarketQualityLabel.LOW:
-        if tier == "S":
-            return True, None
-        if tier == "B":
-            return True, None
-        if tier == "A":
-            support = 0
-            for games, hit in (
-                (getattr(decision, "l5_games", None), getattr(decision, "l5_hit_rate", None)),
-                (getattr(decision, "l10_games", None), getattr(decision, "l10_hit_rate", None)),
-                (getattr(decision, "l20_games", None), getattr(decision, "l20_hit_rate", None)),
-                (getattr(decision, "l30_games", None), getattr(decision, "l30_hit_rate", None)),
-                (getattr(decision, "season_games", None), getattr(decision, "season_hit_rate", None)),
-            ):
-                if games is None or hit is None:
-                    continue
-                if games < 5:
-                    continue
-                if rec == "OVER" and hit >= 0.60:
-                    support += 1
-                elif rec == "UNDER" and hit <= 0.40:
-                    support += 1
-            if support >= 2:
-                # Also ensure no strong contradicting window exists (reuse decision fields)
-                for w_games, w_hit in (
-                    (getattr(decision, "l5_games", None), getattr(decision, "l5_hit_rate", None)),
-                    (getattr(decision, "l10_games", None), getattr(decision, "l10_hit_rate", None)),
-                    (getattr(decision, "l20_games", None), getattr(decision, "l20_hit_rate", None)),
-                    (getattr(decision, "l30_games", None), getattr(decision, "l30_hit_rate", None)),
-                    (getattr(decision, "season_games", None), getattr(decision, "season_hit_rate", None)),
-                ):
-                    if w_games is None or w_hit is None:
-                        continue
-                    if w_games < 5:
-                        continue
-                    if rec == "OVER" and w_hit <= 0.40:
-                        return False, "LOW_MQ_A_contradicted"
-                    if rec == "UNDER" and w_hit >= 0.60:
-                        return False, "LOW_MQ_A_contradicted"
-                return True, None
-            return False, "LOW_MQ_A_needs_2_strong_supporting_windows"
-        return True, None
-
-    return True, None
+    return mq_allows_action(decision, market_quality)
 
 def _is_game_live_or_past(snap: object, now: datetime) -> bool:
     """Return True when actionable alerts for this snap must be suppressed.
@@ -1551,19 +1450,6 @@ async def underdog_job(context) -> None:
                     and decision.recommendation != "PASS"
                     and (snap.sport or "UNKNOWN") in config.ud_alert_sports
                 )
-                if _np_bet_ready:
-                    _np_mq_allowed, _np_mq_reason = _mq_allows_action(decision, market_quality)
-                    if not _np_mq_allowed:
-                        _np_bet_ready = False
-                        logger.debug(
-                            "UD mq_gate [new]: %s | %s | mq=%s tier=%s rec=%s blocked (%s)",
-                            player,
-                            stat_type,
-                            getattr(market_quality, "label", None),
-                            getattr(decision, "decision_tier", None),
-                            getattr(decision, "recommendation", None),
-                            _np_mq_reason,
-                        )
                 # Per-tier confidence gate — sport-conditional: MLB/NFL use strict thresholds;
                 # all other sports use relaxed thresholds to surface more opportunities (#2).
                 if _np_bet_ready and decision is not None:
@@ -1615,6 +1501,19 @@ async def underdog_job(context) -> None:
                         logger.debug(
                             "UD live_gate [new]: %s | %s | game started/live, alert blocked",
                             player, stat_type,
+                        )
+                if _np_bet_ready:
+                    _np_mq_allowed, _np_mq_reason = _mq_allows_action(decision, market_quality)
+                    if not _np_mq_allowed:
+                        _np_bet_ready = False
+                        logger.debug(
+                            "UD mq_gate [new]: %s | %s | mq=%s tier=%s rec=%s blocked (%s)",
+                            player,
+                            stat_type,
+                            getattr(market_quality, "label", None),
+                            getattr(decision, "decision_tier", None),
+                            getattr(decision, "recommendation", None),
+                            _np_mq_reason,
                         )
 
                 # Dedup gate (#118) — suppress if same player/sport/stat/line was alerted
