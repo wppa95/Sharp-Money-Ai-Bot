@@ -30,7 +30,7 @@ def _mk_decision(
 
 
 def _mk_mq(label_str, score=50):
-    label = MarketQualityLabel(label_str)
+    label = label_str if label_str == "STRONG" else MarketQualityLabel(label_str)
     return MarketQuality(label=label, score=score, reasons=("test",))
 
 
@@ -190,7 +190,7 @@ async def test_deliver_underdog_blocks_medium_mq_actionable_delivery():
 
     assert result.sent is False
     assert result.filtered is True
-    assert result.filtered_reason == "mq_not_actionable:MEDIUM"
+    assert result.filtered_reason == "MEDIUM_MQ_hard_block"
     mock_broadcast.assert_not_called()
 
 
