@@ -17,11 +17,16 @@ def _make_db(
     pp_today: int = 0,
     ud_today: int = 0,
     has_recent_pp: bool = False,
+    has_recent_ud: bool = False,
+    ud_history: list | None = None,
 ) -> AsyncMock:
     db = AsyncMock()
     db.count_today_pp_alerts = AsyncMock(return_value=pp_today)
     db.count_today_underdog_alerts = AsyncMock(return_value=ud_today)
     db.has_recent_pp_alert = AsyncMock(return_value=has_recent_pp)
+    db.has_recent_ud_alert = AsyncMock(return_value=has_recent_ud)
+    db.get_ud_prop_history = AsyncMock(return_value=ud_history or [])
+    db.mark_ud_snapshot_alert_sent = AsyncMock(return_value=None)
     return db
 
 
@@ -268,6 +273,80 @@ async def test_underdog_allowed_when_under_cap():
         )
 
     assert result.sent is True
+
+
+@pytest.mark.asyncio
+async def test_underdog_delivery_dedups_identical_line_and_direction():
+    """Final delivery guard suppresses duplicate same-line same-direction alerts."""
+    recent = MagicMock()
+    recent.alert_sent = True
+    recent.fetched_at = datetime.utcnow()
+    recent.line_value = 26.0
+    recent.bet_recommendation = "OVER"
+
+    db = _make_db(
+        ud_today=0,
+        has_recent_ud=True,
+        ud_history=[recent],
+    )
+    delivery = _make_delivery(db)
+    decision = MagicMock(recommendation="OVER", decision_tier="A", confidence=78)
+
+    from alert_scope_filter import FilterResult
+    with (
+        patch("alert_scope_filter.check", return_value=FilterResult(allowed=True)),
+        patch("alerts_multiplatform.format_underdog_change_alert", return_value="<msg>"),
+        patch("alerts.broadcast_alert", new_callable=AsyncMock,
+              return_value={"sent": 1, "failed": 0}) as mock_broadcast,
+        patch("engine.timing.is_game_alertable", return_value=(True, "")),
+    ):
+        result = await delivery.deliver_underdog(
+            "Test Player", "TeamA", "NBA", "Points",
+            25.5, 26.0,
+            game_time=None,
+            decision=decision,
+        )
+
+    assert result.sent is False
+    assert result.deduped is True
+    mock_broadcast.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_underdog_delivery_allows_changed_line_same_direction():
+    """Changed-line alert must pass final dedup guard even when direction matches."""
+    recent = MagicMock()
+    recent.alert_sent = True
+    recent.fetched_at = datetime.utcnow()
+    recent.line_value = 26.0
+    recent.bet_recommendation = "OVER"
+
+    db = _make_db(
+        ud_today=0,
+        has_recent_ud=True,
+        ud_history=[recent],
+    )
+    delivery = _make_delivery(db)
+    decision = MagicMock(recommendation="OVER", decision_tier="A", confidence=78)
+
+    from alert_scope_filter import FilterResult
+    with (
+        patch("alert_scope_filter.check", return_value=FilterResult(allowed=True)),
+        patch("alerts_multiplatform.format_underdog_change_alert", return_value="<msg>"),
+        patch("alerts.broadcast_alert", new_callable=AsyncMock,
+              return_value={"sent": 1, "failed": 0}) as mock_broadcast,
+        patch("engine.timing.is_game_alertable", return_value=(True, "")),
+    ):
+        result = await delivery.deliver_underdog(
+            "Test Player", "TeamA", "NBA", "Points",
+            25.5, 27.0,  # meaningful move: +1.0
+            game_time=None,
+            decision=decision,
+        )
+
+    assert result.sent is True
+    assert result.deduped is False
+    mock_broadcast.assert_called_once()
 
 
 # ── deliver_underdog: timing filter ──────────────────────────────────────────
