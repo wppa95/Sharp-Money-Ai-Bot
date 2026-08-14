@@ -1069,7 +1069,7 @@ def _apply_delivery_diversification(queue: list) -> list:
         )
         return group
 
-    # Split by sport tier — Tier 2 = NBA/MLB/NFL only, everything else is Tier 1.
+    # Split by sport tier — Tier 2 = NBA/MLB/NFL , everything else is Tier 1.
     t1 = [c for c in queue if (c.get("sport") or "").upper() not in _TIER2_SPORTS]
     t2 = [c for c in queue if (c.get("sport") or "").upper() in _TIER2_SPORTS]
 
@@ -1311,13 +1311,7 @@ async def underdog_job(context) -> None:
     # always reflects the actual number of snapshots processed this cycle.
     _n_ud_snaps_this_cycle: int = len(ud_snaps)
 
-    # Reset per-cycle delivery counters in the global rate limiter so the
-    # end-of-cycle summary (log_cycle_summary) reflects only this scan.
-    try:
-        from engine.telegram_rate_limiter import get_rate_limiter as _get_rl_job
-        _get_rl_job().reset_cycle_counters()
-    except Exception:
-        pass
+    
 
     # Pre-delivery freshness map — (player, stat_type) → latest known line from this fetch.
     # Built once per scan from the same ud_snaps that scoring uses.  Every alert path
@@ -3209,12 +3203,7 @@ async def underdog_job(context) -> None:
     # Clear the full-scan concurrency guard so future scheduled instances run full scans.
     _ud_full_scan_running = False
 
-    # Emit a flood-protection summary if any alerts were rate-limited this cycle.
-    try:
-        from engine.telegram_rate_limiter import get_rate_limiter as _get_rl_end
-        _get_rl_end().log_cycle_summary("underdog_job")
-    except Exception:
-        pass
+    
 
     # Record job outcome — failure if any persistence stage raised.
     if _health:
