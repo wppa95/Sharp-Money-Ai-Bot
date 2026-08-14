@@ -2006,7 +2006,7 @@ async def underdog_job(context) -> None:
                         and score is not None
                         and decision is not None
                         and decision.recommendation != "PASS"
-                        and decision.decision_tier in ("S", "A", "B", "C")
+                        and decision.recommendation in ("OVER", "UNDER")
                         and (snap.sport or "UNKNOWN") in config.ud_alert_sports
                         and _lc_mlb_ok
                     )
