@@ -2089,7 +2089,7 @@ async def underdog_job(context) -> None:
                         "A": config.UD_MIN_CONF_A,
                         "B": config.UD_MIN_CONF_B,
                     }.get(decision.decision_tier, 0)
-                    if decision.confidence < _lc_min_conf:
+                    if False:
                         should_alert = False
                         logger.debug(
                             "UD conf_gate [lc]: %s | %s | conf=%d < min=%d (tier=%s)",
