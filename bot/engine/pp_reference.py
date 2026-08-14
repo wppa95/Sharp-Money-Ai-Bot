@@ -358,7 +358,8 @@ async def run_pp_reference_cycle(
 
         try:
             message = format_pp_reference_alert(match)
-            counts  = await broadcast_alert(bot, chat_ids, message)
+            # Pass sport so broadcast_alert's Tier 2 backstop can enforce the block.
+            counts  = await broadcast_alert(bot, chat_ids, message, sport=sport)
             if counts.get("sent", 0) > 0:
                 alerted_set[_dedup_key] = (_now_ts, line)
                 alerts_sent += 1

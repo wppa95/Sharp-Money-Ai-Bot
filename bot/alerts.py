@@ -596,11 +596,27 @@ async def broadcast_alert(
     bot: Bot,
     chat_ids: list[Union[int, str]],
     message: str,
+    *,
+    sport: Optional[str] = None,
 ) -> dict[str, int]:
     """
     Broadcast an alert to multiple chat IDs.
     Returns {"sent": n, "failed": m}.
+
+    When ``sport`` is provided, the Tier 2 Telegram block is enforced here
+    as the lowest possible delivery boundary — even if an upstream gate was
+    accidentally omitted.  This is a safety net; upstream callers should
+    also have their own guards.
     """
+    # ── AUTHORITATIVE Tier 2 Telegram backstop ────────────────────────────────
+    # This is the FINAL gate before bot.send_message().  Even if every upstream
+    # guard fails, a Tier 2 sport can never reach the actual Telegram API call.
+    if sport and sport.upper() in _TIER2_SPORTS_BLOCK:
+        logger.info(
+            "broadcast_alert: Tier 2 Telegram blocked — sport=%s  (no message sent)", sport
+        )
+        return {"sent": 0, "failed": 0}
+
     sent = failed = 0
     for cid in chat_ids:
         if await send_alert(bot, cid, message):
@@ -951,8 +967,9 @@ class AlertDelivery:
         risk_factors = compute_steam_risk_factors(alert)
         message = format_steam_alert(alert, sharp_books=sharp_books, risk_factors=risk_factors)
 
-        # 4. Send
-        counts = await broadcast_alert(self._bot, self._chat_ids, message)
+        # 4. Send  (sport kwarg enforces the Tier 2 backstop in broadcast_alert)
+        _steam_sport = getattr(alert, "sport", None)
+        counts = await broadcast_alert(self._bot, self._chat_ids, message, sport=_steam_sport)
         alert_sent = counts["sent"] > 0
 
         # 5. Log
@@ -988,6 +1005,18 @@ class AlertDelivery:
         No DB-level dedup is applied here — dedup is handled upstream in
         _prizepicks_job by checking for recent PPEdgeRecords in the DB.
         """
+        # ── Tier 2 Telegram block (PP path) ─────────────────────────────────────
+        _pp_sport = getattr(getattr(opp, "pp_line", None), "sport", None) or ""
+        if _pp_sport.upper() in _TIER2_SPORTS_BLOCK:
+            logger.info(
+                "deliver_pp: Tier 2 Telegram blocked — sport=%s player=%s stat=%s",
+                _pp_sport,
+                getattr(getattr(opp, "pp_line", None), "player_name", "?"),
+                getattr(getattr(opp, "pp_line", None), "stat_type", "?"),
+            )
+            return DeliveryResult(sent=False, filtered=True,
+                                  filtered_reason=f"Tier 2 sport blocked (temporary): {_pp_sport}")
+
         from alert_normalizer import normalize_pp
         from alert_scope_filter import check
         from engine.timing import is_game_alertable
@@ -1094,6 +1123,19 @@ class AlertDelivery:
              - default               → format_underdog_change_alert   (🎯 BET PICK)
           5. Broadcast to all registered chat IDs.
         """
+        # ── FIRST: Tier 2 Telegram backstop — runs before any import or logic ────
+        # Must be the very first executable statement so no code path can bypass it.
+        # NBA / MLB / NFL props are scanned, scored, and stored normally, but
+        # Telegram delivery is suppressed here — the authoritative delivery boundary.
+        # A second backstop lives in broadcast_alert() for additional defense-in-depth.
+        if (sport or "").upper() in _TIER2_SPORTS_BLOCK:
+            logger.info(
+                "deliver_underdog: Tier 2 Telegram blocked — sport=%s player=%s stat=%s",
+                sport, player_name, stat_type,
+            )
+            return DeliveryResult(sent=False, filtered=True,
+                                  filtered_reason=f"Tier 2 sport blocked (temporary): {sport}")
+
         from alert_normalizer import normalize_underdog
         from alert_scope_filter import check
         from alerts_multiplatform import (
@@ -1102,19 +1144,6 @@ class AlertDelivery:
             format_market_move_detected,
         )
         from engine.timing import is_game_alertable
-
-        # ── FINAL Tier 2 Telegram backstop (temporary) ───────────────────────────
-        # NBA / MLB / NFL props continue to be scanned, scored, and stored, but
-        # Telegram delivery is suppressed here — the final delivery boundary.
-        # This guard runs unconditionally regardless of which call site reached
-        # deliver_underdog(), so no bypass path can circumvent it.
-        if sport.upper() in _TIER2_SPORTS_BLOCK:
-            logger.debug(
-                "deliver_underdog: Tier 2 Telegram block — sport=%s player=%s stat=%s",
-                sport, player_name, stat_type,
-            )
-            return DeliveryResult(sent=False, filtered=True,
-                                  filtered_reason=f"Tier 2 sport blocked (temporary): {sport}")
 
         # 0 & 1. Normalize + scope check
         norm_obj = normalize_underdog(player_name, stat_type, sport, is_removed=removed)
@@ -1271,7 +1300,7 @@ class AlertDelivery:
                 _ts_str = _now_dt.utcnow().strftime("%H:%M UTC")
             message += f"\n\n<i>⏱ Line as of {_ts_str} — verify on Underdog before placing</i>"
 
-        counts     = await broadcast_alert(self._bot, self._chat_ids, message)
+        counts     = await broadcast_alert(self._bot, self._chat_ids, message, sport=sport)
         alert_sent = counts["sent"] > 0
 
         # Record successful send in the global rate limiter (skip for removals/market-move-only
