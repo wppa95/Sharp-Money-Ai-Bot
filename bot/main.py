@@ -325,6 +325,7 @@ async def post_init(application: Application) -> None:
         jq.run_repeating(_clv_harvest_job,          interval=3600,  first=300,  name="clv_harvester")
         # Opportunity grader — every 6 hours (grades completed prop opportunities)
         jq.run_repeating(_grade_opportunities_job,  interval=21600, first=3600, name="opportunity_grader")
+        jq.run_repeating(_player_history_collector_job, interval=900, first=180, name="player_history_collector", job_kwargs={"max_instances": 1, "misfire_grace_time": 120})
         # API budget check — every 15 minutes
         jq.run_repeating(_budget_check_job,    interval=900,                                first=900, name="budget_checker")
         # PropLineHistory prune — once per day (keeps last 14 days)
@@ -509,6 +510,60 @@ async def post_shutdown(application: Application) -> None:
 
 # ── Heartbeat job ─────────────────────────────────────────────────────────────
 
+async def _player_history_collector_job(context) -> None:
+    """Every 15 min: fetch real game results for recent Underdog props."""
+    db = context.bot_data.get("db")
+    if not db:
+        return
+    ht = get_health_tracker()
+    if ht:
+        ht.record_job_started("_player_history_collector_job")
+    try:
+        from providers.player_stats import PlayerStatsProvider
+        provider = PlayerStatsProvider()
+        snaps = await db.get_recent_underdog_snapshots(limit=800)
+        seen = set()
+        targets = []
+        for s in snaps:
+            if getattr(s, "removed", False):
+                continue
+            key = (
+                (s.player_name or "").strip(),
+                (s.sport or "UNKNOWN").upper(),
+                (s.stat_type or "").lower().strip(),
+            )
+            if not key[0] or not key[2] or key in seen:
+                continue
+            seen.add(key)
+            targets.append(key)
+            if len(targets) >= 30:
+                break
+        ok = 0
+        rows = 0
+        for player, sport, stat in targets:
+            try:
+                raw = await provider.fetch_results(player, sport, stat)
+                for r in raw:
+                    await db.upsert_player_result(r)
+                if raw:
+                    ok += 1
+                    rows += len(raw)
+            except Exception as exc:
+                logger.debug(
+                    "_player_history_collector_job: %s/%s/%s failed: %s",
+                    player, sport, stat, exc,
+                )
+        if ok or targets:
+            logger.info(
+                "_player_history_collector_job: targets=%d players_ok=%d rows=%d",
+                len(targets), ok, rows,
+            )
+        if ht:
+            ht.record_job_run("_player_history_collector_job")
+    except Exception as exc:
+        logger.exception("_player_history_collector_job: %s", exc)
+        if ht:
+            ht.record_job_fail("_player_history_collector_job", str(exc))
 async def _grade_opportunities_job(context) -> None:
     """
     Every 6 hours: grade completed prop opportunities from stored game results.

@@ -1474,12 +1474,26 @@ async def underdog_job(context) -> None:
                 _processed_keys.add((player, stat_type))
                 # Validation: require min supporting history before any immediate alert.
                 # Props with zero history (first appearance) always go to digest.
+                _hist_snap = None
+                try:
+                    from providers.player_history import get_player_history_provider
+                    _hist_snap = await get_player_history_provider().get_snapshot(
+                        db,
+                        player,
+                        snap.sport or "UNKNOWN",
+                        stat_type,
+                        line_val,
+                        ud_history=np_history,
+                    )
+                except Exception:
+                    _hist_snap = None
                 validation = validate_player_prop(
                     player_name  = player,
                     stat_type    = stat_type,
                     current_line = line_val,
                     history      = np_history,
                     min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
+                    history_snap = _hist_snap,
                 )
                 # Immediate criteria — sport-aware:
                 #   - 0.5 line AND supported betting category (all sports)
@@ -1782,14 +1796,20 @@ async def underdog_job(context) -> None:
                 if not is_removed and line_changed and prev_line is not None:
                     # Load limit=30 to cover L30 validation window as well as scoring
                     ud_history = await db.get_ud_prop_history(player, stat_type, limit=30)
-                    score = score_ud_prop(
-                        player_name  = player,
-                        stat_type    = stat_type,
-                        sport        = snap.sport or "UNKNOWN",
-                        current_line = snap.line or 0.0,
-                        prev_line    = prev_line,
-                        history      = ud_history,
-                    )
+
+                    _hist_snap = None
+                    try:
+                        from providers.player_history import get_player_history_provider
+                        _hist_snap = await get_player_history_provider().get_snapshot(
+                            db,
+                            player,
+                            snap.sport or "UNKNOWN",
+                            stat_type,
+                            snap.line or 0.0,
+                            ud_history=ud_history,
+                        )
+                    except Exception:
+                        _hist_snap = None
                     _lc_magnitude   = abs(snap.line - prev_line) if (snap.line is not None and prev_line is not None) else None
                     market_quality  = compute_market_quality(stat_type, snap.line or 0.0, score)
                     market_pressure = detect_market_pressure(_lc_magnitude, ud_history)
@@ -1808,6 +1828,7 @@ async def underdog_job(context) -> None:
                         current_line = snap.line or 0.0,
                         history      = ud_history,
                         min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
+                        history_snap = _hist_snap,
                     )
                     # Fetch real game results — required before any directional pick
                     hit_rates = None
@@ -1885,6 +1906,19 @@ async def underdog_job(context) -> None:
                     # would hammer the stats API; they are populated lazily on the
                     # first qualifying incremental event.  No alerts are sent.
                     ud_history = await db.get_ud_prop_history(player, stat_type, limit=30)
+                    _hist_snap = None
+                    try:
+                        from providers.player_history import get_player_history_provider
+                        _hist_snap = await get_player_history_provider().get_snapshot(
+                            db,
+                            player,
+                            snap.sport or "UNKNOWN",
+                            stat_type,
+                            snap.line or 0.0,
+                            ud_history=ud_history,
+                        )
+                    except Exception:
+                        _hist_snap = None
                     score = score_ud_prop(
                         player_name        = player,
                         stat_type          = stat_type,
@@ -1941,6 +1975,19 @@ async def underdog_job(context) -> None:
                         player, stat_type, snap.sport or "UNKNOWN", snap.line or 0.0,
                     )
                     ud_history = await db.get_ud_prop_history(player, stat_type, limit=30)
+                    _hist_snap = None
+                    try:
+                        from providers.player_history import get_player_history_provider
+                        _hist_snap = await get_player_history_provider().get_snapshot(
+                            db,
+                            player,
+                            snap.sport or "UNKNOWN",
+                            stat_type,
+                            snap.line or 0.0,
+                            ud_history=ud_history,
+                        )
+                    except Exception:
+                        _hist_snap = None
                     score = score_ud_prop(
                         player_name  = player,
                         stat_type    = stat_type,
@@ -1962,6 +2009,7 @@ async def underdog_job(context) -> None:
                         current_line = snap.line or 0.0,
                         history      = ud_history,
                         min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
+                        history_snap = _hist_snap,
                     )
                     is_reentry_qualified = (
                         score is not None
