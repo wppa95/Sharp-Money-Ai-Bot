@@ -1811,6 +1811,14 @@ async def underdog_job(context) -> None:
                     except Exception:
                         _hist_snap = None
                     _lc_magnitude   = abs(snap.line - prev_line) if (snap.line is not None and prev_line is not None) else None
+                    score = score_ud_prop(
+                        player_name  = player,
+                        stat_type    = stat_type,
+                        sport        = snap.sport or "UNKNOWN",
+                        current_line = snap.line or 0.0,
+                        prev_line    = prev_line,
+                        history      = ud_history,
+                    )
                     market_quality  = compute_market_quality(stat_type, snap.line or 0.0, score)
                     market_pressure = detect_market_pressure(_lc_magnitude, ud_history)
                     _plh_mq_scores[(player, snap.sport or "UNKNOWN", stat_type)] = (
