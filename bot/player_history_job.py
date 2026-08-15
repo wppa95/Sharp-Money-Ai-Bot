@@ -22,21 +22,39 @@ async def player_history_collector_job(context) -> None:
         from providers.player_stats import PlayerStatsProvider
 
         provider = PlayerStatsProvider()
-        targets = []
-        seen = set()
-        try:
-            active = await db.get_active_underdog_snapshot_per_prop()
-            for (player, stat), s in list(active.items())[:40]:
-                sport = (getattr(s, "sport", None) or "UNKNOWN").upper()
-                key = (player.strip(), sport, (stat or "").lower().strip())
-                if key[0] and key[2] and key not in seen:
-                    seen.add(key)
-                    targets.append(key)
-        except Exception as exc:
-            logger.warning(
-                "player_history_collector_job: active snapshot load failed: %s",
-                exc,
-            )
+            targets = []
+            seen = set()
+            try:
+                active = await db.get_active_underdog_snapshot_per_prop()
+                for (player, stat), s in list(active.items())[:40]:
+                    sport = (getattr(s, "sport", None) or "UNKNOWN").upper()
+                    key = (player.strip(), sport, (stat or "").lower().strip())
+                    if key[0] and key[2] and key not in seen:
+                        seen.add(key)
+                        targets.append(key)
+            except Exception as exc:
+                logger.warning(
+                    "player_history_collector_job: active snapshot load failed: %s",
+                    exc,
+                )
+            if not targets:
+                try:
+                    plh = await db.get_latest_props_for_provider("Underdog", since_hours=48)
+                    for s in plh[:40]:
+                        sport = (getattr(s, "sport", None) or "UNKNOWN").upper()
+                        key = (
+                            (s.player_name or "").strip(),
+                            sport,
+                            (s.stat_type or "").lower().strip(),
+                        )
+                        if key[0] and key[2] and key not in seen:
+                            seen.add(key)
+                            targets.append(key)
+                except Exception as exc:
+                    logger.warning(
+                        "player_history_collector_job: prop_line_history fallback failed: %s",
+                        exc,
+                    )
         logger.info("player_history_collector_job: targets=%d", len(targets))
         ok = 0
         rows = 0
