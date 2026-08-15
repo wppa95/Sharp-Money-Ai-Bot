@@ -44,4 +44,22 @@ async def player_history_collector_job(context) -> None:
             try:
                 raw = await provider.fetch_results(player, sport, stat)
                 for r in raw:
-                    await db.upsert
+                    await db.upsert_player_result(r)
+                if raw:
+                    ok += 1
+                    rows += len(raw)
+            except Exception as exc:
+                logger.debug(
+                    "player_history_collector_job: %s/%s/%s failed: %s",
+                    player, sport, stat, exc,
+                )
+        logger.info(
+            "player_history_collector_job: done players_ok=%d rows=%d",
+            ok, rows,
+        )
+        if ht:
+            ht.record_job_run("player_history_collector_job")
+    except Exception as exc:
+        logger.exception("player_history_collector_job: %s", exc)
+        if ht:
+            ht.record_job_fail("player_history_collector_job", str(exc))
