@@ -2816,12 +2816,20 @@ async def underdog_job(context) -> None:
                         "yes" if _dq_is_t1 else "no",
                     )
                 else:
+                    _release_prop_delivery_claim(
+                        _prop_market_alerted,
+                        _dq_player,
+                        _dq_sport,
+                        _dq_st,
+                        _dq_line_val,
+                    )
                     _n_dq_deferred += 1
                     _dq_deferred_log.append(
-                        f"{_dq_player}/{_dq_st} [tier={_dq.get('tier','?')}"
+                        f"{_dq_player}/{_dq_st} [tier={_dq.get('tier', '?')}]"
                         f" bq={_dq.get('bq',0):.0f} path={_dq_path}]:"
-                        f" {_dq_result.reason}"
+                        f"{_dq_result.reason}"
                     )
+                                    
 
             if _n_dq_deferred:
                 _dq_sent_log = [

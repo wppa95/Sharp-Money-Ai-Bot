@@ -586,7 +586,21 @@ def _record_prop_alerted(
         line,
     )
 
+def _release_prop_delivery_claim(
+    alerted_set: dict,
+    player: str,
+    sport: str,
+    stat_type: str,
+    line: float,
+) -> None:
+    """Release a pre-delivery dedup claim when Telegram delivery fails."""
+    key = (player, sport, stat_type)
+    current = alerted_set.get(key)
 
+    if current is not None:
+        _last_ts, _last_line = current
+        if abs(float(_last_line) - float(line)) < 1e-9:
+            alerted_set.pop(key, None)
 async def run_player_prop_market_cycle(
     *,
     db:            Any,
