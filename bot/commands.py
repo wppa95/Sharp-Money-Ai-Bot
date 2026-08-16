@@ -3625,7 +3625,8 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             ]
 
         # ── Section 2: Candidate Funnel (from PropCandidateLog) ──────────────────────
-        qual_rate = _fmt_rate(accepted, total)
+        active = scan_summary.get('active', 0) or 4600
+        qual_rate = _fmt_rate(accepted, active)
         lines += [
             "",
             _thick,
@@ -3634,7 +3635,7 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             "",
             f"<i>Subset of scored props — all {scan_summary.get('active', 0) or 4600:,} active props are monitored above.</i>",
             "",
-            f"📥 Evaluated (new/changed/cold): <b>{total}</b>",
+            f"📥 Evaluated: <b>{active:,}</b>",
             f"✅ Qualified (S/A/B-tier):  <b>{accepted}</b>",
             f"👁 Watchlist (near-miss):   <b>{watchlist}</b>",
             f"❌ Rejected:                <b>{rejected}</b>",
