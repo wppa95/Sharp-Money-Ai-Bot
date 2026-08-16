@@ -808,21 +808,33 @@ def format_underdog_change_alert(
                 and int(conf) >= 70):
             strong_under_line = "🔥 <b>STRONG UNDER</b>  <i>(BQ ≥ 70 — verify line on Underdog before placing)</i>"
 
-    # Short edge line with L5 — always shown; falls back to N/A when no history available.
-    edge_line = ""
-    if not removed:
-        l5 = getattr(decision, "l5_hit_rate", None) if decision is not None else None
-        l5g = getattr(decision, "l5_games", None) if decision is not None else None
-        reason = (getattr(decision, "reason", None) or "").strip() if decision is not None else ""
-        bits = []
-        if l5 is not None and l5g:
-            bits.append(f"L5 {l5:.0%} ({l5g}g)")
-        else:
-            bits.append("L5: N/A — no history available")
-        if reason:
-            # keep reason short
-            bits.append(reason.split("•")[0].strip()[:80])
-        edge_line = "📊 <b>Edge:</b>  " + "  ·  ".join(bits)
+        # Full hit-history breakdown — show every available window on actionable alerts.
+        edge_line = ""
+        if not removed:
+            reason = (
+                (getattr(decision, "reason", None) or "").strip()
+                if decision is not None else ""
+            )
+
+            _history_windows = [
+                ("L5", getattr(decision, "l5_hit_rate", None), getattr(decision, "l5_games", None)),
+                ("L10", getattr(decision, "l10_hit_rate", None), getattr(decision, "l10_games", None)),
+                ("L20", getattr(decision, "l20_hit_rate", None), getattr(decision, "l20_games", None)),
+                ("L30", getattr(decision, "l30_hit_rate", None), getattr(decision, "l30_games", None)),
+                ("Season", getattr(decision, "season_hit_rate", None), getattr(decision, "season_games", None)),
+            ]
+
+            history_bits = []
+            for _label, _rate, _games in _history_windows:
+                if _rate is not None and _games:
+                    history_bits.append(f"{_label}: {_rate:.0%} ({_games}g)")
+                else:
+                    history_bits.append(f"{_label}: N/A")
+
+            edge_line = "📊 <b>Hit History:</b>  " + "  ·  ".join(history_bits)
+
+            if reason:
+                edge_line += f"\n📌 <b>Reason:</b>  {reason.split('•')[0].strip()[:120]}"
 
     # Market quality one-liner
     mq_line = ""
