@@ -1529,6 +1529,7 @@ async def underdog_job(context) -> None:
                         current_line = line_val,
                         prev_line    = None,
                         hit_rates    = hit_rates,
+                        sport        = snap.sport or "",
                     )
                     # Log every evaluated opportunity (PLAY or PASS) for tracking
                     try:
@@ -1853,6 +1854,7 @@ async def underdog_job(context) -> None:
                             current_line = snap.line or 0.0,
                             prev_line    = prev_line,
                             hit_rates    = hit_rates,
+                            sport        = snap.sport or "",
                         )
                         # Log every evaluated opportunity (PLAY or PASS) for tracking
                         try:
@@ -1955,6 +1957,7 @@ async def underdog_job(context) -> None:
                         current_line = snap.line or 0.0,
                         prev_line    = None,
                         hit_rates    = None,  # no game history at cold-start
+                        sport        = snap.sport or "",
                     )
                     # ── Before/after tier comparison for the completion log ───────
                     _legacy_act   = _score_historical_activity_legacy(ud_history)
@@ -2534,6 +2537,7 @@ async def underdog_job(context) -> None:
                     current_line = _line_val,
                     prev_line    = None,
                     hit_rates    = _shits,
+                    sport        = _ssport,
                 )
                 # Log every evaluated opportunity (PLAY or PASS) for tracking
                 try:
@@ -3497,6 +3501,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         current_line = _sr_line,
                         prev_line    = None,
                         hit_rates    = _sr_hits_wl,
+                        sport        = _sr_sport,
                     )
                     if _sr_dec_wl is not None and _sr_dec_wl.recommendation == "UNDER":
                         _sr_ext_id_wl = (
@@ -3543,6 +3548,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 current_line = _sr_line,
                 prev_line    = None,
                 hit_rates    = _sr_hits,
+                sport        = _sr_sport,
             )
 
             # Log opportunity for tracking (non-fatal)
@@ -3839,6 +3845,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     current_line = _wl_cur_line,
                     prev_line    = None,
                     hit_rates    = _wl_hits,
+                    sport        = _wl_sport,
                 )
 
                 # Check if the candidate now passes the full alert gate
@@ -4242,6 +4249,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     current_line = _fpr_line,
                     prev_line    = None,
                     hit_rates    = _fpr_hits,
+                    sport        = _fpr_sport,
                 )
 
                 # ── Full alert gate (identical to stable-refresh path) ─────────

@@ -14,13 +14,25 @@ _API_CALL_TARGET = 250
 # Their alert pipeline follows separate Tier-2 rules.
 _TIER2_SPORTS = frozenset({"MLB", "NBA", "NFL"})
 
+# Sports for which PlayerStatsProvider.fetch_results() has a working data
+# path.  Unsupported sports (LOL, VALORANT/VAL, PGA/GOLF, MMA, TT,
+# BADMINTON, FIFA) would always return [] — filtering them avoids wasting
+# API-call budget on sports that can never produce DB rows.
+_SUPPORTED_HISTORY_SPORTS = frozenset({
+    "WNBA", "NHL", "CS", "DOTA", "TENNIS",
+    "NCAAF", "CFB",   # CFB is the Underdog identifier for NCAAF
+    "MLS", "NCAAB",
+    "SOCCER",         # Requires FOOTBALL_DATA_API_KEY; returns [] gracefully without it
+})
+
 
 async def player_history_collector_job(context) -> None:
     """Fetch real game results for active Tier-1 Underdog props.
 
-    Selects all Tier-1 (non-MLB/NBA/NFL) players from the active snapshot,
-    then calls PlayerStatsProvider.fetch_results() for up to _API_CALL_TARGET
-    of them per cycle.  Player count is unlimited — only API calls are capped.
+    Selects all Tier-1 (non-MLB/NBA/NFL) players from the active snapshot
+    whose sport has a working PlayerStatsProvider data path, then calls
+    fetch_results() for up to _API_CALL_TARGET of them per cycle.
+    Player count is unlimited — only API calls are capped.
     """
     from engine.health import get_health_tracker
 
@@ -46,6 +58,8 @@ async def player_history_collector_job(context) -> None:
                 sport = (getattr(s, "sport", None) or "UNKNOWN").upper()
                 if sport in _TIER2_SPORTS:
                     continue  # Tier 2 — skip
+                if sport not in _SUPPORTED_HISTORY_SPORTS:
+                    continue  # No provider data path — skip to avoid wasting API calls
                 key = (player.strip(), sport, (stat or "").lower().strip())
                 if key[0] and key[2] and key not in seen:
                     seen.add(key)
@@ -64,6 +78,8 @@ async def player_history_collector_job(context) -> None:
                     sport = (getattr(s, "sport", None) or "UNKNOWN").upper()
                     if sport in _TIER2_SPORTS:
                         continue  # Tier 2 — skip
+                    if sport not in _SUPPORTED_HISTORY_SPORTS:
+                        continue  # No provider data path — skip
                     key = (
                         (s.player_name or "").strip(),
                         sport,

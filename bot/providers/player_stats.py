@@ -302,6 +302,7 @@ _ESPN_ROUTE: dict[str, tuple[str, str]] = {
     "MLB":    ("baseball",       "mlb"),   # fallback only — prefer MLB Stats API
     "NCAAB":  ("basketball",     "mens-college-basketball"),
     "NCAAF":  ("football",       "college-football"),
+    "CFB":    ("football",       "college-football"),   # Underdog identifier for NCAAF
     "MLS":    ("soccer",         "usa.1"),
 }
 

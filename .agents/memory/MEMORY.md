@@ -73,3 +73,4 @@
 - [Scope filter config access bug](scope-filter-config-bug.md) — `import config; config.x` hits MODULE not instance; always use `config.config.x`; _poll_odds_job iterates ud_tier1_sports not active_sports; 4641 tests Aug 2026.
 - [Confidence thresholds Aug 2026](conf-threshold-aug2026.md) — UD_MIN_CONF_S=85, UD_MIN_CONF_A=75, UD_NON_STRICT_MIN_CONF_A=75 (raised from 80/70/70).
 - [Player history job spec](player-history-spec.md) — Tier-1 only (filter MLB/NBA/NFL), unlimited player count, 250 API-call cap per 2-min cycle; never add player-count slice to target-build loop.
+- [Tier-1 direction gate (Weak direction fix)](tier1-direction-gate.md) — sport= param on make_ud_bet_decision; Tier-1 uses _B_RATE_TIER1=0.55, Tier-2/empty uses _B_RATE=0.60; all 8 call sites pass sport=.

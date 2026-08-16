@@ -3610,10 +3610,25 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             except Exception:
                 pass
         else:
+            # No completed scan cycles yet — show job status from HealthTracker
+            _scan_status = "awaiting first scan cycle"
+            try:
+                from engine.health import get_health_tracker as _get_ht_no
+                _ht_no = _get_ht_no()
+                if _ht_no is not None:
+                    _uj = _ht_no.get_job_info("underdog_job")
+                    if _uj.get("last_run_ts"):
+                        # Job completed at least once but no ScanCycleLog exists —
+                        # log write may have failed silently
+                        _scan_status = "scan completed but log not recorded (check bot logs)"
+                    elif _uj.get("started_at") or _uj.get("last_fail_ts"):
+                        _scan_status = "⏳ first scan in progress (cold-start may take 5–15 min)"
+            except Exception:
+                pass
             lines += [
                 "",
-                f"<i>Last {since_h}h  ·  No scan cycles recorded yet.</i>",
-                "<i>Scan cycle data accumulates once the bot restarts with this update.</i>",
+                f"<i>Last {since_h}h  ·  {_scan_status}.</i>",
+                "<i>Scan cycle metrics appear here once the first scan completes.</i>",
             ]
 
         # ── Section 2: Candidate Funnel (from PropCandidateLog) ──────────────────────
@@ -3628,7 +3643,7 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             f"<i>Subset of scored props — all {scan_summary.get('active', 0) or 4600:,} active props are monitored above.</i>",
             "",
             f"📥 Evaluated: <b>{active:,}</b>",
-            f"Qualified (decision + quality gates): <b>{accepted}</b>"
+            f"✅ Qualified (decision + quality gates): <b>{accepted}</b>",
             f"👁 Watchlist (near-miss):   <b>{watchlist}</b>",
             f"❌ Rejected:                <b>{rejected}</b>",
             f"🚫 Removed:                 <b>{removed}</b>",

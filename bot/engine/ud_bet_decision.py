@@ -47,6 +47,16 @@ _S_RATE:  float = 0.65
 _A_RATE:  float = 0.62
 _B_RATE:  float = 0.60
 
+# Tier-1 (non-MLB/NBA/NFL) uses a relaxed direction threshold so that
+# "Weak" directional props (rate 0.55–0.60) still reach the scoring
+# pipeline.  They must pass all downstream quality/confidence/delivery
+# gates — only the initial PASS-vs-direction gate is relaxed.
+_B_RATE_TIER1: float = 0.55
+
+# Sports that follow the stricter Tier-2 direction rules (_B_RATE = 0.60).
+# Everything else is Tier-1 and uses _B_RATE_TIER1 = 0.55.
+_TIER2_SPORTS_DEC: frozenset = frozenset({"MLB", "NBA", "NFL"})
+
 # A window is "contradicting" an OVER pick if its rate < this value
 _CONTRA_FLOOR: float = 0.40
 # A window is "contradicting" an UNDER pick if its rate > this value
@@ -226,6 +236,7 @@ def make_ud_bet_decision(
     current_line: float,
     prev_line:    Optional[float] = None,
     hit_rates:    "Optional[PlayerHitRates]" = None,
+    sport:        str = "",
 ) -> UDBetDecision:
     """
     Evaluate OVER / UNDER / PASS for a qualified Underdog prop.
@@ -321,16 +332,22 @@ def make_ud_bet_decision(
 
     rate = primary.hit_rate
 
-    # ── Gate 3: must cross B-tier threshold in primary window ─────────────────
-    if rate >= _B_RATE:
+    # ── Gate 3: must cross direction threshold in primary window ─────────────
+    # Tier-1 sports use a relaxed threshold (_B_RATE_TIER1 = 0.55) so that
+    # "Weak" directional props can reach the scoring / delivery pipeline.
+    # Tier-2 (MLB/NBA/NFL) keeps the stricter _B_RATE = 0.60.
+    # Empty sport ("") keeps old Tier-2 behavior for backward compatibility.
+    _is_tier1 = bool(sport) and sport.upper() not in _TIER2_SPORTS_DEC
+    _b = _B_RATE_TIER1 if _is_tier1 else _B_RATE
+    if rate >= _b:
         direction = "OVER"
-    elif rate <= (1.0 - _B_RATE):
+    elif rate <= (1.0 - _b):
         direction = "UNDER"
     else:
         return UDBetDecision.make_pass(
             reason             = (
                 f"Hit rate {rate:.0%} is inconclusive — "
-                f"no clear directional edge (need ≥{_B_RATE:.0%} or ≤{1-_B_RATE:.0%})"
+                f"no clear directional edge (need ≥{_b:.0%} or ≤{1-_b:.0%})"
             ),
             hit_rates          = hit_rates,
             avg_vs_line_pct    = avg_vs_line_pct,

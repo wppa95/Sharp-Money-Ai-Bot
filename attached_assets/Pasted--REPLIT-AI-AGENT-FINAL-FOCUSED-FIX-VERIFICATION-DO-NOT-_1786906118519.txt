@@ -1,0 +1,266 @@
+🚨 REPLIT AI AGENT — FINAL FOCUSED FIX + VERIFICATION
+
+DO NOT waste Agent credits.
+
+• Do not redesign/refactor.
+• Do not change unrelated functionality.
+• Do not repeat previous audits.
+• Inspect the existing implementation first.
+• Make only minimal, compatible fixes for real defects.
+• Do not rewrite working systems.
+
+━━━━━━━━━━━━━━━━━━
+🎯 1. FIRST-SCAN FUNNEL VISIBILITY
+━━━━━━━━━━━━━━━━━━
+
+After startup, /funnel initially showed:
+
+“No scan cycles recorded yet.”
+
+for ~15 minutes while data was already being collected.
+
+Fix ONLY the funnel/reporting initialization so:
+
+Bot starts → first completed UD scan → /funnel immediately displays that scan → subsequent scans update normally at the existing 2-minute cadence.
+
+Do not fabricate missing data.
+
+━━━━━━━━━━━━━━━━━━
+🔭 2. CANDIDATE FUNNEL BREAKDOWN
+━━━━━━━━━━━━━━━━━━
+
+Give Candidate Funnel the same useful operational detail as Scan Pipeline.
+
+Show existing metrics for:
+
+• Evaluated
+• Qualified
+• Watchlist / near-miss
+• Rejected
+• Removed
+• Qualification rate
+• New
+• Line moved
+• Cold-start
+• Stable refresh
+• Delivered
+
+Where existing rejection/gate reasons are available, show the breakdown so we can see where props are actually being filtered.
+
+Do not invent metrics.
+
+━━━━━━━━━━━━━━━━━━
+🔄 3. STABLE REFRESH BREAKDOWN
+━━━━━━━━━━━━━━━━━━
+
+Give Stable Refresh a proper operational breakdown:
+
+• Progress
+• Coverage / total
+• Batch size
+• Rescored
+• Qualified
+• Watchlist
+• Rejected
+• Removed
+• Sent
+
+Use only existing recorded metrics/data.
+
+━━━━━━━━━━━━━━━━━━
+📊 4. NO-DECISION / PASS INVESTIGATION
+━━━━━━━━━━━━━━━━━━
+
+Many active props show:
+
+No Decision / PASS
+
+Determine why.
+
+Where existing data supports it, distinguish between:
+
+• No historical data available yet
+• Insufficient historical sample
+• Stat/market mapping mismatch
+• Validation blocked
+• Data exists but scoring/decision rules produced PASS
+• Other existing gate/reason
+
+Do NOT change scoring just to create decisions.
+
+The goal is visibility into why a prop has no decision.
+
+━━━━━━━━━━━━━━━━━━
+🐶 5. PLAYER HISTORY — DIAGNOSE + MINIMAL FIX
+━━━━━━━━━━━━━━━━━━
+
+Current runtime shows:
+
+tier1_targets=1655 calling_up_to=250
+done players_ok=0 rows=0
+
+The bot has been running ~30 minutes.
+
+Determine why the latest Player History cycle produced 0 successful players and 0 stored rows.
+
+Verify:
+
+• How many cycles have run since startup.
+• Whether previous cycles also show players_ok=0 rows=0.
+• Whether PlayerStatsProvider.fetch_results() is actually being called.
+• What is causing calls to return zero usable results.
+• Whether successful results reach db.upsert_player_result().
+• Whether new player_game_results rows exist.
+• Whether the 250-call limit is functioning correctly.
+
+Then, ONLY if a real defect is found, apply the smallest compatible fix.
+
+Do NOT:
+
+• Rewrite Player History.
+• Redesign the provider.
+• Change architecture.
+• Remove functionality.
+• Reduce the unlimited player target.
+• Change the 250 API-call limit.
+• Change the 120-second cadence.
+• Change Tier 1 / Tier 2 rules.
+• Make speculative improvements.
+
+Unlimited player target remains unlimited.
+
+Tier 2 = MLB, NBA, NFL.
+
+Tier 1 = every other supported sport.
+
+Player History remains:
+
+• Tier-1 only
+• Unlimited player target
+• Maximum 250 PlayerStatsProvider API calls per 120-second cycle
+• 120-second cadence
+• max_instances=1
+
+Unlimited targets must NOT mean unlimited execution time or allow Player History to block the Underdog monitor.
+
+━━━━━━━━━━━━━━━━━━
+📚 6. EVIDENCE CONSISTENCY
+━━━━━━━━━━━━━━━━━━
+
+Verify that:
+
+• Active props
+• Rejected props
+• Watchlist props
+• Actionable picks
+
+all obtain historical/player evidence from the same existing evidence source/path used by /picks.
+
+/picks is the reference implementation.
+
+Confirm:
+
+Player History → existing DB/history storage → existing evidence calculation → /picks + relevant prop states.
+
+Do NOT create a second evidence pipeline, duplicate caches, or duplicate data sources.
+
+If any prop state uses a stale, empty, bypassed, or different evidence path, make the smallest compatible fix so it uses the same existing evidence source as /picks.
+
+━━━━━━━━━━━━━━━━━━
+🎯 7. TIER-1 DIRECTION GATE
+━━━━━━━━━━━━━━━━━━
+
+We want more Tier-1 opportunities to reach the existing evaluation pipeline.
+
+For Tier-1 sports only:
+
+• Elite direction → allow
+• Strong direction → allow
+• Weak direction → allow
+• Neutral / no direction → existing Pass/Reject behavior
+
+Do NOT make Weak direction a hard blocker.
+
+The purpose is to allow more Tier-1 props to be scanned, evaluated, and scored instead of being prematurely rejected because the direction is classified as Weak.
+
+Do NOT change the existing scoring model.
+
+Do NOT automatically make Weak props actionable.
+
+They must still go through the existing scoring, quality, confidence, qualification, deduplication, and delivery process.
+
+Do NOT bypass technical/data-integrity validation.
+
+Do NOT change Tier-2 behavior.
+
+This change should increase the number of Tier-1 props reaching evaluation while preserving the existing quality controls.
+
+━━━━━━━━━━━━━━━━━━
+🚫 8. PRESERVE EVERYTHING ELSE
+━━━━━━━━━━━━━━━━━━
+
+Do NOT change:
+
+• Tier 1 / Tier 2 definitions
+• Underdog monitoring cadence
+• Player History cadence
+• PlayerStats API limit
+• Full-pool rescan
+• Stable refresh behavior
+• Scoring
+• Qualification gates except the specific Tier-1 direction-strength change above
+• UNDER rules
+• Alert delivery
+• Deduplication
+• Database persistence
+• Existing scheduler architecture
+• Existing provider architecture
+
+This is a focused:
+
+reporting/visibility fix + Player History diagnosis/minimal repair + evidence consistency verification + Tier-1 direction-gate adjustment.
+
+━━━━━━━━━━━━━━━━━━
+🧪 9. VERIFY ACTUAL BEHAVIOR
+━━━━━━━━━━━━━━━━━━
+
+After fixes:
+
+1. Run directly affected tests.
+2. Restart the bot.
+3. Confirm the first completed UD scan appears immediately in /funnel.
+4. Confirm subsequent scans update normally at ~2-minute cadence.
+5. Confirm Candidate Funnel has the detailed breakdown.
+6. Confirm Stable Refresh has the detailed breakdown.
+7. Confirm PASS/no-decision props expose their existing reason where available.
+8. Confirm Player History actually produces successful results and database rows.
+9. Confirm Player History remains Tier-1 only, unlimited targets, max 250 API calls per 120-second cycle.
+10. Confirm Player History does not block or interfere with UD monitoring.
+11. Confirm active/rejected/watchlist/actionable props use the same evidence source as /picks.
+12. Confirm Tier-1 Weak-direction props can reach the existing evaluation/scoring pipeline.
+13. Confirm Neutral/no-direction behavior remains appropriately blocked.
+14. Confirm Tier-2 behavior is unchanged.
+15. Confirm no unrelated functionality changed.
+
+Do not claim completion until behavior is actually verified.
+
+Do NOT push or deploy yet.
+
+━━━━━━━━━━━━━━━━━━
+🔒 10. FINAL ONE-COMMIT HANDOFF
+━━━━━━━━━━━━━━━━━━
+
+ONLY AFTER ALL FIXES AND VERIFICATION ARE COMPLETE:
+
+• Put ALL changes from this task into ONE commit.
+• Do not leave multiple new commits for this task.
+• Do not include unrelated/untracked files.
+• Verify the working tree is clean.
+• Verify exactly ONE new commit contains the completed changes.
+• Then STOP.
+
+Do NOT push or deploy.
+
+After you stop, I will handle the GitHub force-push and Railway redeploy.
+
+Do not give me the final result until every item above is completed and verified.
