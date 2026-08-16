@@ -3144,15 +3144,7 @@ async def underdog_job(context) -> None:
                 await db.update_ud_props_mq_scores_bulk(_plh_mq_scores)
             except Exception as _mq_bulk_exc:
                 logger.debug("underdog_job: mq_scores bulk write failed: %s", _mq_bulk_exc)
-        logger.exception("underdog_job: processing error: %s", _job_exc)
-        if _health:
-            _health.record_job_fail("underdog_job", str(_job_exc))
-            _health.record_pipeline_fail(
-                stage  = "prop_scoring",
-                module = "market_engine.underdog_job",
-                error  = str(_job_exc),
-            )
-        return
+        
     # ── Scan cycle log — full pipeline evidence ──────────────────────────────────
         # Non-fatal: a write failure must not abort the cycle or mask real exceptions.
         # Proves that all ~4,600 active props are monitored each poll (not just scored ones).
@@ -3176,7 +3168,16 @@ async def underdog_job(context) -> None:
             logger.debug("underdog_job: scan_cycle_log write skipped: %s", _scl_exc)
 
     except Exception as _job_exc:
-        
+            logger.exception("underdog_job: processing error: %s", _job_exc)
+            if _health:
+                _health.record_job_fail("underdog_job", str(_job_exc))
+                _health.record_pipeline_fail(
+                    stage="prop_scoring",
+                    module="market_engine.underdog_job",
+                    error=str(_job_exc),
+                )
+            return
+
     # ── Bridge to PropLineHistory (lifecycle tracking) ─────────────────────────
     # Must run AFTER the main try block so snapshots exist in UnderdogSnapshotRecord.
     # A bridge failure is surfaced as a job failure so /health can alert on it.
