@@ -3627,7 +3627,7 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             f"<i>Subset of scored props — all {scan_summary.get('active', 0) or 4600:,} active props are monitored above.</i>",
             "",
             f"📥 Evaluated: <b>{active:,}</b>",
-            f"✅ Qualified (S/A/B-tier):  <b>{accepted}</b>",
+            f"Qualified (decision + quality gates): <b>{accepted}</b>"
             f"👁 Watchlist (near-miss):   <b>{watchlist}</b>",
             f"❌ Rejected:                <b>{rejected}</b>",
             f"🚫 Removed:                 <b>{removed}</b>",

@@ -280,7 +280,7 @@ def make_ud_bet_decision(
             _mkt_dir = "OVER" if avg_vs_line_pct > 0 else "UNDER"
 
         if _mkt_dir is not None:
-            _mkt_conf = min(int(score.total * 0.90), 85)  # capped — no game history
+            _mkt_conf = int(score.total)  # market-only confidence follows the composite score
             _move_dir = "down" if _mkt_dir == "OVER" else "up"
             return UDBetDecision.make_pick(
                 recommendation    = _mkt_dir,

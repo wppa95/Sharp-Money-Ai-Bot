@@ -1840,7 +1840,10 @@ async def underdog_job(context) -> None:
                     )
                     # Fetch real game results — required before any directional pick
                     hit_rates = None
-                    if validation.has_supporting_data and score.tier != "PASS":
+                    if (
+                            validation.has_supporting_data
+                            and (snap.sport or "UNKNOWN") in config.ud_alert_sports
+                        ):
                         hit_rates = await _fetch_and_compute_hit_rates(
                             db, player, snap.sport or "UNKNOWN", stat_type, snap.line or 0.0
                         )
@@ -2055,7 +2058,7 @@ async def underdog_job(context) -> None:
                         or decision.recommendation != "UNDER"
                         or config.is_mlb_under_allowed(stat_type)
                     )
-                    # Tier gate: B or better → actionable (S/A/B); C → watchlist.
+                    # Qualification gate: use the decision engine and actual alert gates.
                     # Tier 1 vs Tier 2 affects priority/ranking, not A/B actionability.
                     is_qualified = (
                         not is_cold_start
