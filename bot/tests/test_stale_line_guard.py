@@ -226,32 +226,32 @@ class TestConfigGates:
         import config as cfg
         assert cfg.config.MIN_AI_CONFIDENCE == 60
 
-    def test_31_ud_min_conf_a_is_70(self):
-        """UD_MIN_CONF_A default is 70 — the actual A-tier delivery gate."""
+    def test_31_ud_min_conf_a_is_75(self):
+        """UD_MIN_CONF_A default is 75 — the actual A-tier delivery gate."""
         import config as cfg
-        assert cfg.config.UD_MIN_CONF_A == 70
+        assert cfg.config.UD_MIN_CONF_A == 75
 
     def test_32_a_tier_gate_exceeds_global_baseline(self):
-        """A-tier delivery gate (70) is strictly higher than global baseline (60)."""
+        """A-tier delivery gate (75) is strictly higher than global baseline (60)."""
         import config as cfg
         assert cfg.config.UD_MIN_CONF_A > cfg.config.MIN_AI_CONFIDENCE, (
             "A-tier delivery gate must exceed the global scoring baseline — "
-            "60 is display-only; 70 is the real actionable floor"
+            "60 is display-only; 75 is the real actionable floor"
         )
 
-    def test_33_non_strict_a_tier_also_70(self):
-        """UD_NON_STRICT_MIN_CONF_A is also 70 — same actionable floor for all sports."""
+    def test_33_non_strict_a_tier_also_75(self):
+        """UD_NON_STRICT_MIN_CONF_A is also 75 — same actionable floor for all sports."""
         import config as cfg
-        assert cfg.config.UD_NON_STRICT_MIN_CONF_A == 70
+        assert cfg.config.UD_NON_STRICT_MIN_CONF_A == 75
 
-    def test_34_min_conf_for_sport_returns_70_for_nba_a(self):
-        """min_conf_for_sport_tier('NBA', 'A') returns 70 (Tier 1 non-strict)."""
+    def test_34_min_conf_for_sport_returns_75_for_nba_a(self):
+        """min_conf_for_sport_tier('NBA', 'A') returns 75 (NBA is Tier 2 — strict floor)."""
         import config as cfg
         result = cfg.config.min_conf_for_sport_tier("NBA", "A")
-        assert result == 70, f"Expected 70 for NBA/A, got {result}"
+        assert result == 75, f"Expected 75 for NBA/A, got {result}"
 
-    def test_35_min_conf_for_sport_returns_80_for_s(self):
-        """min_conf_for_sport_tier('NBA', 'S') returns 80."""
+    def test_35_min_conf_for_sport_returns_85_for_s(self):
+        """min_conf_for_sport_tier('NBA', 'S') returns 85."""
         import config as cfg
         result = cfg.config.min_conf_for_sport_tier("NBA", "S")
-        assert result == 80, f"Expected 80 for NBA/S, got {result}"
+        assert result == 85, f"Expected 85 for NBA/S, got {result}"

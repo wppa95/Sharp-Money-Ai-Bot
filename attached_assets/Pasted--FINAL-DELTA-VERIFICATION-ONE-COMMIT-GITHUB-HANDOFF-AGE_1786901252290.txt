@@ -1,0 +1,213 @@
+🔒 FINAL DELTA VERIFICATION + ONE-COMMIT GITHUB HANDOFF
+
+🚨 AGENT CREDIT WARNING
+
+Use the minimum Agent credits necessary.
+
+* Inspect only what changed since the last verified baseline.
+* Do not repeat previous audits.
+* Do not redesign, refactor unrelated code, or explore unnecessarily.
+* Preserve all existing functionality.
+* Fix only real defects directly related to this final change.
+* Do not create multiple Agent tasks for the same work.
+* Do not deploy or publish from Replit.
+
+⸻
+
+1. ONLY NEW SPEC TO VERIFY
+
+The latest change is Player History only.
+
+SPORT TIERS
+
+Tier 2 = MLB, NBA, NFL
+
+Tier 1 = EVERY OTHER SUPPORTED SPORT
+
+Player History must:
+
+* Run for Tier 1 only.
+* Have an UNLIMITED player target.
+* Have NO 100-player cap.
+* Have NO 500-player cap.
+* Make up to 250 ACTUAL PlayerStats API calls per 2-minute cycle.
+* Use the existing 120-second cadence.
+* Keep max_instances=1.
+* Preserve existing scheduler behavior.
+* Preserve the existing PlayerStats → database → evidence pipeline.
+
+CRITICAL DISTINCTION
+
+250 = API-CALL LIMIT, NOT PLAYER-COUNT LIMIT.
+
+Do not cap the number of players being targeted.
+
+Verify the actual provider-call loop is what limits calls to 250 per cycle.
+
+Do not change the existing Underdog prop-monitoring API budget.
+
+⸻
+
+2. REGRESSION CHECK — ONLY AFFECTED AREAS
+
+DO NOT RE-AUDIT THE ENTIRE APPLICATION.
+
+Only confirm that the Player History change did not accidentally alter:
+
+* Tier-1/Tier-2 classification
+* Underdog monitoring
+* Full-pool rescan
+* Candidate Funnel
+* Qualification gates
+* UNDER evaluation
+* /picks evidence
+* Cache behavior
+* Existing scheduler behavior
+
+If these are unchanged and already part of the verified baseline, LEAVE THEM ALONE.
+
+Do not spend Agent credits re-investigating them.
+
+⸻
+
+3. TEST VERIFICATION
+
+Previous verified baseline:
+
+4,641 passed / 0 failed / 1 pre-existing warning
+
+Do this efficiently:
+
+1. Run only relevant Player History tests first.
+2. If those pass, run the FULL TEST SUITE ONCE.
+3. If the full suite passes, stop testing.
+
+If a failure is directly caused by this final Player History change, fix it.
+
+If a failure is unrelated to this change, do not rewrite unrelated production code.
+
+Do not repeatedly rerun a green suite.
+
+⸻
+
+4. FINAL STOP CONDITION
+
+If all of these are confirmed:
+
+* Tier 1 only
+* Tier 2 = MLB/NBA/NFL
+* Unlimited player target
+* No 100-player cap
+* No 500-player cap
+* 250 actual PlayerStats API calls per 2-minute cycle
+* Existing 120-second cadence preserved
+* Existing behavior preserved
+* Relevant tests pass
+* Full test suite passes
+
+Then:
+
+STOP ALL CODE WORK.
+
+Do not perform another audit.
+
+Do not search for additional improvements.
+
+Do not refactor.
+
+Do not create another Agent task.
+
+Do not modify anything else.
+
+⸻
+
+5. ONE FINAL GITHUB COMMIT
+
+After all code changes are complete and the full test suite is green:
+
+CREATE ONE FINAL COMMIT CONTAINING ALL CHANGES MADE DURING THIS TASK.
+
+Do not split this task into multiple final commits.
+
+Do not make another code change after the final commit.
+
+The goal is:
+
+ALL COMPLETED CHANGES → ONE GITHUB COMMIT → ONE COMMIT SHA
+
+Choose a clear, accurate commit message based on the actual changes completed. The commit-message text does not need to be predetermined.
+
+⸻
+
+6. PUSH TO GITHUB — FINAL ACTION
+
+After the single final commit is created, push it to the existing GitHub remote and branch.
+
+Working directory:
+
+cd ~/workspace
+
+GitHub remote
+
+subrepl-0v5amlnl
+
+Target branch
+
+main
+
+The intended final workflow is:
+
+git add <ALL FILES CHANGED BY THIS TASK>
+
+git commit -m "<CLEAR COMMIT MESSAGE BASED ON ACTUAL CHANGES>"
+
+git push subrepl-0v5amlnl main
+
+IMPORTANT
+
+* subrepl-0v5amlnl is the Git remote.
+* main is the branch to push to.
+* Do not confuse the remote name with the branch name.
+* Do not blindly use a partial file list if other files were legitimately changed during this task.
+* The single commit must contain every legitimate change made during this task.
+* Do not create additional commits afterward.
+* Do not force-push by default.
+* Preserve existing main history.
+* Only force-push if absolutely required by the existing Git state, and verify the target first.
+* Do not overwrite unrelated work.
+* Do not deploy or publish anything.
+
+After pushing, verify that remote main points to the final commit.
+
+⸻
+
+FINAL RESPONSE
+
+Only after verification and the GitHub push are complete, report:
+
+VERIFICATION
+
+* Player History status
+* Tier-1/Tier-2 behavior
+* Unlimited player-target confirmation
+* Actual PlayerStats API-call behavior
+* Relevant test result
+* Full test result
+
+GITHUB
+
+* Remote: subrepl-0v5amlnl
+* Branch: main
+* Final commit SHA
+* Push status
+* Confirmation that ALL CHANGES FROM THIS TASK ARE CONTAINED IN THE ONE FINAL COMMIT
+
+If everything is clean:
+
+✅ FINAL DELTA VERIFIED
+✅ ONE-COMMIT GITHUB PUSH COMPLETE
+🔒 FRAMEWORK FROZEN
+
+Then STOP.
+
+Do not make any further changes.

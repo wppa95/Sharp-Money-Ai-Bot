@@ -185,6 +185,14 @@ class TestMockOppIntegrity:
 # ---------------------------------------------------------------------------
 
 class TestDeliverPp:
+    # Patch _TIER2_SPORTS_BLOCK so the NBA test fixture sport does not hit the
+    # Tier-2 Telegram delivery block — these tests exercise cap/scope/timing
+    # logic, not the sport-tier filter.
+    @pytest.fixture(autouse=True)
+    def _unblock_tier2(self):
+        with patch("alerts._TIER2_SPORTS_BLOCK", frozenset()):
+            yield
+
     @pytest.mark.asyncio
     async def test_pp_scope_always_passes(self):
         """PrizePicks source is never filtered by AlertScopeFilter."""
@@ -329,6 +337,14 @@ class TestDeliverPp:
 # ---------------------------------------------------------------------------
 
 class TestDeliverUnderdog:
+    # Patch _TIER2_SPORTS_BLOCK so tests that use NFL/NBA sport can exercise the
+    # formatting pipeline — these tests verify delivery behavior, not the sport-tier
+    # filter. NHL tests are unaffected (NHL was already unblocked).
+    @pytest.fixture(autouse=True)
+    def _unblock_tier2(self):
+        with patch("alerts._TIER2_SPORTS_BLOCK", frozenset()):
+            yield
+
     def _delivery(self, chat_ids=None):
         mock_bot = MagicMock()
         mock_bot.send_message = AsyncMock(return_value=MagicMock())

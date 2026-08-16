@@ -222,9 +222,8 @@ class TestTier1Actionability:
         assert d.confidence >= config.UD_MIN_CONF_S
 
     def test_tier1_a_tier_70_actionable(self):
-        """#14: Tier 1 A-tier at EXACTLY 70/100 → actionable."""
-        conf = 70
-        # Non-strict min conf A = 70; conf ≥ 70 → passes gate
+        """#14: Tier 1 A-tier at the current threshold (75/100) → actionable."""
+        conf = config.UD_NON_STRICT_MIN_CONF_A  # 75 — updated from 70
         assert conf >= config.UD_NON_STRICT_MIN_CONF_A
 
     def test_tier1_a_tier_69_watchlist(self):
@@ -233,13 +232,13 @@ class TestTier1Actionability:
         assert conf < config.UD_NON_STRICT_MIN_CONF_A
 
     def test_tier1_a_tier_71_actionable(self):
-        """#16: Tier 1 A-tier at 71/100 → actionable."""
-        conf = 71
+        """#16: Tier 1 A-tier at threshold+1 → actionable."""
+        conf = config.UD_NON_STRICT_MIN_CONF_A + 1  # 76 — threshold+1
         assert conf >= config.UD_NON_STRICT_MIN_CONF_A
 
     def test_tier1_a_tier_cutoff_is_exactly_70(self):
-        """Tier 1 A-tier threshold is exactly 70, not 69 or 71."""
-        assert config.UD_NON_STRICT_MIN_CONF_A == 70
+        """Tier 1 A-tier threshold is currently 75 (raised from 70)."""
+        assert config.UD_NON_STRICT_MIN_CONF_A == 75
 
     def test_tier1_sports_are_not_strict(self):
         """Tier 1 sports must not be in the strict sports set."""
@@ -464,21 +463,21 @@ class TestPipelineContinuity:
 
 class TestConfigBoundaries:
     def test_s_tier_conf_minimum_is_80(self):
-        """S-tier minimum confidence is 80."""
-        assert config.UD_MIN_CONF_S == 80
+        """S-tier minimum confidence is 85 (raised from 80)."""
+        assert config.UD_MIN_CONF_S == 85
 
     def test_strict_a_tier_conf_minimum_is_70(self):
-        """Strict sport (MLB/NFL) A-tier minimum confidence is 70."""
-        assert config.UD_MIN_CONF_A == 70
+        """Strict sport (MLB/NBA/NFL) A-tier minimum confidence is 75 (raised from 70)."""
+        assert config.UD_MIN_CONF_A == 75
 
     def test_non_strict_a_tier_minimum_is_70(self):
-        """Non-strict (Tier 1) A-tier minimum confidence is exactly 70."""
-        assert config.UD_NON_STRICT_MIN_CONF_A == 70
+        """Non-strict (Tier 1) A-tier minimum confidence is 75 (raised from 70)."""
+        assert config.UD_NON_STRICT_MIN_CONF_A == 75
 
     def test_min_conf_for_sport_tier_nba_a_returns_70(self):
-        """NBA A-tier confidence floor is 70."""
+        """NBA A-tier confidence floor is 75 (NBA is Tier 2 — strict floor applies)."""
         result = config.min_conf_for_sport_tier("NBA", "A")
-        assert result == 70
+        assert result == 75
 
     def test_min_conf_for_sport_tier_mlb_a_returns_70(self):
         """MLB A-tier confidence floor is 70 (strict floor)."""

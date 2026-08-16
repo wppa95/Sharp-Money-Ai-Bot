@@ -326,7 +326,7 @@ async def post_init(application: Application) -> None:
         # Opportunity grader — every 6 hours (grades completed prop opportunities)
         jq.run_repeating(_grade_opportunities_job,  interval=21600, first=3600, name="opportunity_grader")
         from player_history_job import player_history_collector_job
-        jq.run_repeating(player_history_collector_job, interval=300, first=60, name="player_history_collector", job_kwargs={"max_instances": 1, "misfire_grace_time": 120})
+        jq.run_repeating(player_history_collector_job, interval=120, first=60, name="player_history_collector", job_kwargs={"max_instances": 1, "misfire_grace_time": 120})
         # API budget check — every 15 minutes
         jq.run_repeating(_budget_check_job,    interval=900,                                first=900, name="budget_checker")
         # PropLineHistory prune — once per day (keeps last 14 days)
@@ -664,7 +664,7 @@ async def _poll_odds_job(context) -> None:
 
     # ── 1. Fetch odds for every active sport ──────────────────────────────────
     all_lines: list[OddsLine] = []
-    for sport_str in config.active_sports:
+    for sport_str in config.ud_tier1_sports:
         try:
             sport = Sport(sport_str)
         except ValueError:
@@ -688,9 +688,10 @@ async def _poll_odds_job(context) -> None:
         return
 
     # ── 1b. Early scope filter — drop lines that can never be delivered ────────
-    # Only MLB Moneyline / MLB Totals can pass the AlertScopeFilter for DK/FD EV
-    # alerts.  Filtering here avoids writing out-of-scope rows to odds_records
-    # and running EV analysis on data that will always be blocked at delivery.
+    # Only Tier 1 sports (all supported sports except MLB/NBA/NFL) pass the
+    # AlertScopeFilter EV pipeline.  Filtering here avoids writing out-of-scope
+    # rows to odds_records and running EV analysis on data that will always be
+    # blocked at delivery.
     before_filter = len(all_lines)
     all_lines = [l for l in all_lines if is_ev_line_in_scope(l.sport, l.market_type)]
     dropped = before_filter - len(all_lines)

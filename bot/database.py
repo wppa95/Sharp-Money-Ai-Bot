@@ -907,17 +907,19 @@ class Database:
                     PropLineHistory.provider   == "Underdog",
                     PropLineHistory.fetched_at >= cutoff,
                     PropLineHistory.removed.isnot(True),
-                    # Tier-aware score_tier filter — mirrors the actual alert policy:
-                    #   Tier 2 (MLB/NFL): S and A only (strict).
-                    #   Tier 1 (all others): S, A, and B allowed — the alert engine
-                    #     permits B-tier props for non-MLB/NFL sports.
-                    # NULL/unscored and PASS-tier rows are excluded for all sports.
+                    # Tier-aware score_tier filter:
+                    #   Tier 1 (WNBA/CS/TENNIS/DOTA/LOL/VALORANT/TT/BADMINTON/GOLF/
+                    #            NCAAF/MMA/SOCCER and all non-Tier2 sports):
+                    #     ANY scored prop is eligible — S/A/B/PASS all allowed.
+                    #     The tier label is not a hard gate for Tier 1.
+                    #   Tier 2 (MLB/NBA/NFL): S and A only (strict delivery policy).
+                    # NULL/unscored rows are excluded for all sports.
                     or_(
-                        PropLineHistory.score_tier.in_(["S", "A"]),
                         and_(
-                            PropLineHistory.score_tier == "B",
-                            PropLineHistory.sport.notin_(["MLB", "NFL"]),
+                            PropLineHistory.sport.notin_(["MLB", "NBA", "NFL"]),
+                            PropLineHistory.score_tier.isnot(None),
                         ),
+                        PropLineHistory.score_tier.in_(["S", "A"]),
                     ),
                 )
                 .group_by(

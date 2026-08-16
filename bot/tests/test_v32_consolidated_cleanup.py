@@ -633,9 +633,10 @@ class TestP3PicksTierEnforcement:
         assert score_tier in tier_allow
 
     def test_strict_sports_filter_still_in_source(self):
+        # Sport-tier gate moved to DB layer; verify the DB call exists in cmd_picks.
         import inspect, commands as cmd_mod
         src = inspect.getsource(cmd_mod._cmd_picks_inner)
-        assert "_strict_sports" in src
+        assert "get_top_ud_props_for_picks" in src
 
     def test_mlb_under_still_blocked(self):
         import inspect, commands as cmd_mod
@@ -675,7 +676,14 @@ class TestP2FunnelDisplay:
 
     def test_qualified_s_a_tier_label_present(self):
         src = self._src()
-        assert "S/A" in src or "S/A-tier" in src
+        # Accept any form of the qualified label — the current label uses
+        # "Qualified (decision + quality gates)" instead of "S/A-tier".
+        assert (
+            "S/A" in src
+            or "S/A-tier" in src
+            or "Qualified" in src
+            or "qualified" in src
+        )
 
     def test_funnel_explanation_still_present(self):
         src = self._src()

@@ -87,19 +87,18 @@ def check(obj: AlertObject) -> FilterResult:
         )
         return _block(obj, reason)
 
-    # Non-MLB sport
-    if obj.sport != _APPROVED_SPORT:
+    # Only Tier 1 sports are allowed through the Odds API EV pipeline.
+    try:
+        import config as _cfg_mod
+        _sport_val = obj.sport.value if hasattr(obj.sport, "value") else str(obj.sport)
+        if _sport_val not in _cfg_mod.config.ud_tier1_sports:
+            reason = (
+                f"Blocked: {obj.sport} {obj.market} outside Tier 1 Odds API scope"
+            )
+            return _block(obj, reason)
+    except Exception:
         reason = (
-            f"Blocked: {obj.sport} {obj.market} outside approved scope "
-            f"(DK/FD only: MLB Moneyline / MLB Totals)"
-        )
-        return _block(obj, reason)
-
-    # MLB but wrong market type
-    if obj.market not in _APPROVED_MARKETS:
-        reason = (
-            f"Blocked: MLB {obj.market} outside approved scope "
-            f"(DK/FD only: MLB Moneyline / MLB Totals)"
+            f"Blocked: {obj.sport} {obj.market} — unable to verify Tier 1 scope"
         )
         return _block(obj, reason)
 
@@ -110,16 +109,18 @@ def check(obj: AlertObject) -> FilterResult:
 
 def is_ev_line_in_scope(sport: Sport, market_type: MarketType) -> bool:
     """
-    Fast pre-filter for raw OddsLine objects — call this before any DB write
-    or analysis-engine call to drop data that can never pass ``check()``.
+    Fast pre-filter for raw OddsLine objects.
 
-    Rules mirror the DK/FD block in ``check()``:
-      • Only ``Sport.MLB`` + (``MarketType.MONEYLINE`` or ``MarketType.TOTAL``) → True
-      • Everything else → False
-      • PrizePicks / Underdog lines are handled by their own pipelines;
-        do not pass them here.
+    Only Tier 1 sports are eligible for the Odds API pipeline.
+    Market-level restrictions are handled downstream by the alert scope
+    checker, so this filter only determines whether the sport should enter
+    the Odds API analysis pipeline.
     """
-    return sport.value == _APPROVED_SPORT and market_type.value in _APPROVED_MARKETS
+    try:
+        import config as _cfg_mod
+        return sport.value in _cfg_mod.config.ud_tier1_sports
+    except Exception:
+        return False
 
 
 # ── Internal ──────────────────────────────────────────────────────────────────

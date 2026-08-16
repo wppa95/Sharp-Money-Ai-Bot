@@ -37,8 +37,9 @@ class TestSportPriorityConfig:
     # ── ud_tier1_sports ────────────────────────────────────────────────────────
 
     def test_tier1_sports_contains_all_required(self):
+        # NBA and NFL are Tier-2 (not in ud_tier1_sports).
         c = self._cfg()
-        required = {"NBA", "WNBA", "CS", "TENNIS", "DOTA", "NFL", "MMA", "GOLF", "NCAAF", "SOCCER"}
+        required = {"WNBA", "CS", "TENNIS", "DOTA", "MMA", "GOLF", "NCAAF", "SOCCER"}
         for sport in required:
             assert sport in c.ud_tier1_sports, f"{sport} missing from Tier 1 sports"
 

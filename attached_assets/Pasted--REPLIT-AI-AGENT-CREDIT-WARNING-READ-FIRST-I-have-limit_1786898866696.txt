@@ -1,0 +1,692 @@
+🚨🚨 REPLIT AI AGENT CREDIT WARNING — READ FIRST 🚨🚨
+
+I have limited Replit AI Agent credits remaining.
+
+DO NOT waste Agent credits.
+
+• Do NOT redesign, refactor, retire, remove, disable, replace, or rewrite working functionality.
+• Do NOT create new architecture unless absolutely required to repair an existing defect.
+• Inspect the existing framework first.
+• Make only the smallest compatible fixes.
+• Preserve everything already working.
+• Do NOT make speculative changes.
+• Do NOT change credentials.
+• Do NOT run unnecessary exploration/tasks.
+• Only change something when it is directly required by the requirements below.
+
+This is the FINAL verification/repair pass.
+
+━━━━━━━━━━━━━━━━━━
+🚨 IMPORTANT — CURRENT TIER CONTRACT
+━━━━━━━━━━━━━━━━━━
+
+DO NOT MISINTERPRET THE SPORT TIERS.
+
+Tier 2 = MLB, NBA, NFL
+
+Tier 1 = EVERY OTHER SPORT CURRENTLY SUPPORTED BY THE EXISTING FRAMEWORK.
+
+Examples of Tier 1 include:
+WNBA, CS, TENNIS, DOTA, LOL, VALORANT, TT, BADMINTON, GOLF/PGA, NCAAF/CFB, MMA, SOCCER/FIFA, NHL, and any other sport already supported by the existing framework that is not MLB, NBA, or NFL.
+
+Do NOT invent unsupported sports.
+
+Do NOT change the tier definitions.
+
+Do NOT revert the system to MLB-only.
+
+Do NOT treat NHL as Tier 2.
+
+Use the existing sport enum/internal identifiers and mappings.
+
+━━━━━━━━━━━━━━━━━━
+🚨 FINAL STOP-AND-VERIFY RULE
+━━━━━━━━━━━━━━━━━━
+
+DO NOT give me a final result until EVERYTHING below has been inspected, fixed where necessary, tested, and verified.
+
+If one item is incomplete, DO NOT claim the audit is complete.
+
+Do not freeze until every checklist item is confirmed.
+
+Do not push, deploy, publish, or commit anything unless I explicitly authorize it after reviewing your final report.
+
+━━━━━━━━━━━━━━━━━━
+
+1. PLAYER HISTORY PIPELINE
+    ━━━━━━━━━━━━━━━━━━
+
+Verify the existing player-history framework:
+
+• Target limit = 100
+• Fallback target limit = 100
+• Cadence = 120 seconds / 2 minutes
+• max_instances = 1
+• Existing misfire_grace_time remains intact
+• Existing PlayerStatsProvider remains the source
+• Existing database/upsert path remains intact
+• Historical data can reach scoring/actionability
+• No duplicate collection loops
+• No unnecessary API calls
+• No broken sport/stat/player normalization
+
+Do NOT increase the target back to 1,000.
+
+━━━━━━━━━━━━━━━━━━
+2. ODDS API — TIER 1 / TIER 2 SCOPE
+━━━━━━━━━━━━━━━━━━
+
+Audit EVERY existing Odds API path:
+
+• Odds polling
+• Steam checking
+• Season/market checks
+• Usage tracking
+• Pacing
+• Budget protection
+• Caching
+• Analysis-engine calls
+• Alert scope filtering
+• All existing Odds API consumers
+
+Required behavior:
+
+Tier 1 = every supported sport except MLB/NBA/NFL.
+
+Tier 2 = MLB/NBA/NFL.
+
+Verify that Tier-1 sports are allowed through the intended Odds API path.
+
+Verify that Tier-2 restrictions remain intact.
+
+Do NOT accidentally make everything MLB-only.
+
+Do NOT create a new provider architecture.
+
+━━━━━━━━━━━━━━━━━━
+3. ALERT SCOPE FILTER
+━━━━━━━━━━━━━━━━━━
+
+Verify:
+
+• is_ev_line_in_scope()
+• check()
+• All callers
+• Related tests
+• Sport enum handling
+• String/enum comparisons
+• Existing fallback behavior
+
+Make sure the previously discovered configuration-instance bug is actually fixed.
+
+Make sure Tier-1 sports are not silently blocked.
+
+Make sure Tier-2 sports are not incorrectly allowed through the Tier-1 Odds API path.
+
+Make sure Underdog and PrizePicks prop pipelines are not accidentally affected by Odds API scope logic.
+
+━━━━━━━━━━━━━━━━━━
+4. PLAYER PROP ACTIONABILITY PIPELINE
+━━━━━━━━━━━━━━━━━━
+
+Verify the complete existing path:
+
+Underdog props
+→ Active Pool
+→ Pool Snapshot
+→ Eligible for Rescan
+→ Rescanned / rescanned out of full pool
+→ Scored
+→ Qualified
+→ Watchlist
+→ Rejected
+→ Delivered
+
+Confirm that props are not disappearing between stages.
+
+Confirm that the displayed numbers represent the actual pipeline.
+
+━━━━━━━━━━━━━━━━━━
+5. FULL-POOL RESCAN
+━━━━━━━━━━━━━━━━━━
+
+Verify that the full-pool rescan actually processes the full active pool over its rotation.
+
+The display must clearly show:
+
+Rescanned / total active pool
+
+For example:
+
+25,759 / 102,748
+
+or:
+
+45,927 / 150,372
+
+Do NOT only display new props and line movements as if those represent the complete rescan coverage.
+
+The system must distinguish:
+
+• New props
+• Line movements
+• Stable refresh
+• Cold-start rescans
+• Full-pool rescans
+
+Once every active prop has been processed through the full-pool rotation, verify that active props continue being rescanned rather than becoming permanently ignored.
+
+The system must continue monitoring:
+
+• Active props
+• Previously rejected props
+• Watchlist props
+• Stable props
+
+Use the existing stable/full-pool framework.
+
+Do NOT create a new monitoring architecture.
+
+━━━━━━━━━━━━━━━━━━
+6. SCAN PIPELINE DISPLAY
+━━━━━━━━━━━━━━━━━━
+
+Verify that “Scored this period” is not misleading.
+
+It must provide a detailed breakdown showing how much of the FULL active pool has actually been rescanned/scored.
+
+Example:
+
+Scored this period:
+25,759 / 102,748
+
+If the active pool changes:
+
+45,927 / 150,372
+
+The display should distinguish the total active pool from:
+
+• New
+• Line moved
+• Cold-start
+• Stable refresh
+• Full-pool rescan
+
+Do not make the numbers appear larger/smaller through duplicated counting or hidden filters.
+
+━━━━━━━━━━━━━━━━━━
+7. CANDIDATE FUNNEL
+━━━━━━━━━━━━━━━━━━
+
+The Candidate Funnel must show the FULL candidate pipeline, not an incomplete subset.
+
+Conceptually:
+
+Active Pool
+→ Pool Snapshot
+→ Eligible for Rescan
+→ Rescanned / rescanned out of full pool
+→ Scored
+→ Qualified
+→ Watchlist
+→ Rejected
+→ Delivered
+
+Verify that each displayed count corresponds to the actual underlying stage.
+
+Do not label a subset as the complete funnel.
+
+Verify that qualification, watchlist, rejection, removal, and delivery counts reconcile logically.
+
+━━━━━━━━━━━━━━━━━━
+8. QUALIFICATION GATE — CHECK WHETHER TOO STRICT
+━━━━━━━━━━━━━━━━━━
+
+This is a REQUIRED investigation.
+
+Do NOT assume the qualification gate is correct simply because tests pass.
+
+Analyze the existing:
+
+• Decision gate
+• Bet Quality gate
+• Confidence gate
+• Tier gate
+• Direction gate
+• Dedup gate
+• Live-game gate
+• Any additional qualification filters
+
+Determine whether the combined decision + quality gates are unintentionally too strict and suppressing legitimate Tier-1 candidates.
+
+Compare:
+
+• Props entering scoring
+• Props reaching decision
+• Props qualifying
+• Props reaching delivery
+
+Determine exactly where the suppression occurs.
+
+Do NOT loosen the gate blindly.
+
+If the gate is intentionally strict, explain why.
+
+If there is an unintended restriction, fix only the specific existing restriction causing it.
+
+━━━━━━━━━━━━━━━━━━
+9. TIER / UNDER CANDIDATE LOGIC
+━━━━━━━━━━━━━━━━━━
+
+Verify the existing S/A/B/C framework.
+
+Important:
+
+1-star / low-rated props must still be capable of becoming strong UNDER candidates when the existing evidence supports an UNDER.
+
+Do NOT automatically reject a weak OVER-quality prop if the underlying evidence indicates a potentially strong UNDER candidate.
+
+Verify that weak props are rejected appropriately when they are genuinely weak in both directions.
+
+Verify that the system does not prematurely discard information needed to evaluate the opposite direction.
+
+Preserve all existing UNDER restrictions and tier rules.
+
+Do NOT redesign the scoring model.
+
+━━━━━━━━━━━━━━━━━━
+10. ACTIONABLE PICKS EVIDENCE
+━━━━━━━━━━━━━━━━━━
+
+Verify why /picks displays historical evidence while actionable Telegram candidates may not.
+
+Actionable player-prop picks must use the SAME underlying evidence source that /picks already uses.
+
+IMPORTANT:
+
+Do NOT make /picks the source.
+
+Instead, identify the existing underlying provider/database/service that supplies /picks with:
+
+• L5
+• L10
+• L20
+• L30
+• Season
+• Averages
+• Hit rates / percentages
+• Other existing historical evidence
+
+Then make actionable bet-pick output use that same underlying evidence source.
+
+Do NOT duplicate the evidence system.
+
+Do NOT create a second history provider.
+
+The goal is consistency between the evidence already available to the framework and the actionable pick output.
+
+━━━━━━━━━━━━━━━━━━
+11. CACHE WARNING / HIT-RATE CACHE
+━━━━━━━━━━━━━━━━━━
+
+We repeatedly see:
+
+market_engine - _fetch_and_compute_hit_rates:
+result cache hit 5000 entries - clearing
+
+Audit this behavior.
+
+Determine:
+
+• What this cache contains
+• Why it reaches 5,000 entries
+• Why it is cleared
+• Whether clearing it discards historical evidence needed for picks
+• Whether the data can be safely recomputed
+• Whether the cache is actually protecting memory
+• Whether repeated clearing is expected
+• Whether it is causing the observed funnel/pick suppression
+• Whether the cache is unnecessarily limiting useful historical data
+
+Do NOT simply remove the cache.
+
+Do NOT simply increase the limit.
+
+Determine whether the current behavior is correct within the existing architecture.
+
+If the cache is causing a real functional problem, make the smallest compatible fix.
+
+━━━━━━━━━━━━━━━━━━
+12. MEMORY / RESOURCE BEHAVIOR
+━━━━━━━━━━━━━━━━━━
+
+We saw:
+
+market_engine - underdog_job:
+memory VmRSS before=322.9 MB after=323.0 MB delta=+0.0
+
+Verify whether this is normal.
+
+Determine whether:
+
+• Memory is stable
+• Objects are accumulating
+• Cache clearing is working
+• Active prop storage is bounded
+• Full-pool rescans are leaking memory
+• Repeated scans are creating duplicate objects
+• The system is silently suppressing data to protect memory
+
+Do NOT optimize blindly.
+
+Only fix a real resource defect.
+
+━━━━━━━━━━━━━━━━━━
+13. SUPPRESSED FUNNEL INVESTIGATION
+━━━━━━━━━━━━━━━━━━
+
+Compare the current funnel against the earlier larger funnel.
+
+We observed a major change such as:
+
+Earlier:
+290,159 active props
+11,119 scored
+6,154 new
+73 line moved
+12 qualified
+
+Later:
+179,607 active props
+5,727 scored
+523 new
+160 line moved
+35 qualified
+
+Determine why the monitored/scored/evaluated numbers changed.
+
+Specifically investigate:
+
+• API/provider limits
+• Any 100-call/API-call limit
+• Pagination
+• Cursor handling
+• Batch limits
+• Cache limits
+• Active-pool truncation
+• Sport filtering
+• Tier filtering
+• Stable refresh batch size
+• Full-pool rotation
+• Database query limits
+• Deduplication
+• Memory safeguards
+• Rate limiting
+• Budget protection
+• Any hidden max-results/max-items setting
+
+We previously suspected the 100 API-call limit may be suppressing the pool.
+
+For this verification experiment:
+
+REMOVE THE LIMIT THAT IS ARTIFICIALLY SUPPRESSING THE PROP/API SCAN, if such a limit exists and was introduced as part of this framework.
+
+Do NOT remove legitimate provider/rate-limit safety mechanisms.
+
+The goal is to determine whether the artificial 100-call restriction is responsible for the suppressed numbers.
+
+Do not permanently redesign API usage.
+
+━━━━━━━━━━━━━━━━━━
+14. SPORT FUNNEL VERIFICATION
+━━━━━━━━━━━━━━━━━━
+
+Verify that the sport funnel correctly reflects the Tier 1/Tier 2 contract.
+
+Tier 2:
+
+MLB
+NBA
+NFL
+
+Tier 1:
+
+Every other sport supported by the existing framework.
+
+Make sure the funnel is not accidentally treating Tier 2 as Tier 1 or vice versa.
+
+Make sure a Tier-2 sport cannot inflate the Tier-1 Odds API funnel.
+
+Make sure Tier-1 sports are not suppressed because of old MLB-only assumptions.
+
+━━━━━━━━━━━━━━━━━━
+15. SCHEDULER / JOB AUDIT
+━━━━━━━━━━━━━━━━━━
+
+Verify all touched/interacting jobs:
+
+• Player history collector
+• Underdog monitor
+• Opportunity grader
+• Odds polling
+• Steam checking
+• Season checker
+• Budget checker
+• Stable refresh
+• Full-pool rescan
+• Any related monitoring jobs
+
+Confirm:
+
+• No duplicate jobs
+• No overlapping collectors
+• max_instances=1 where intended
+• 120-second player-history cadence
+• No accidental cadence changes elsewhere
+• No stale scheduler registration
+• Bot remains stable when Replit UI is closed
+
+━━━━━━━━━━━━━━━━━━
+16. TEST SUITE
+━━━━━━━━━━━━━━━━━━
+
+Current reported result:
+
+4,641 tests passing
+69 previous failures resolved
+
+Do NOT stop at this number.
+
+Run:
+
+1. Syntax/compile checks
+2. Player-history tests
+3. Odds API tests
+4. Scope-filter tests
+5. Sport enum/mapping tests
+6. Scoring tests
+7. Actionability tests
+8. Candidate funnel tests
+9. Stable/full-pool rescan tests
+10. Cache tests
+11. Scheduler tests
+12. Evidence/history tests
+13. Telegram delivery tests
+14. FULL test suite
+
+If anything fails:
+
+• Determine whether it is a real production defect or genuinely stale test.
+• Fix the real defect.
+• Update only tests that contradict the explicitly intended current framework.
+• Re-run affected tests.
+• Re-run the FULL suite.
+
+Do NOT change production behavior merely to make tests pass.
+
+━━━━━━━━━━━━━━━━━━
+17. TEST-CHANGE AUDIT
+━━━━━━━━━━━━━━━━━━
+
+Review every test changed during this session.
+
+For every modified test, verify:
+
+• Was the old assertion genuinely stale?
+• Does the new assertion reflect the intended Tier 1/Tier 2 contract?
+• Does it test the correct production behavior?
+• Was production code changed only where a real bug existed?
+
+Pay particular attention to any tests changed from MLB to WNBA or another sport.
+
+Do not assume every changed test was correct simply because the suite is green.
+
+━━━━━━━━━━━━━━━━━━
+18. STRICT CHANGE CONTROL
+━━━━━━━━━━━━━━━━━━
+
+DO NOT:
+
+• redesign
+• refactor unrelated systems
+• retire functionality
+• remove providers
+• remove jobs
+• remove commands
+• remove integrations
+• remove data sources
+• replace working architecture
+• change credentials
+• alter unrelated betting rules
+• change unrelated scoring behavior
+• create speculative improvements
+
+If something appears obsolete, leave it alone unless its removal was explicitly requested.
+
+Only repair defects or inconsistencies directly related to this audit.
+
+━━━━━━━━━━━━━━━━━━
+19. FINAL VERIFICATION CHECKLIST
+━━━━━━━━━━━━━━━━━━
+
+DO NOT give me the final result until every box below is verified:
+
+☐ Player-history target = 100
+☐ Player-history fallback = 100
+☐ Player-history cadence = 120 seconds
+☐ Player-history max_instances = 1
+☐ PlayerStatsProvider path verified
+☐ Database/upsert path verified
+☐ Tier 2 confirmed = MLB/NBA/NFL
+☐ Tier 1 confirmed = every other supported sport
+☐ Odds API Tier-1 scope verified
+☐ Tier-2 Odds API restrictions verified
+☐ Alert scope filter verified
+☐ Sport enum/mappings verified
+☐ Underdog pipeline unaffected
+☐ PrizePicks pipeline unaffected
+☐ Full active pool is actually rescanned
+☐ Full-pool progress displays rescanned/total
+☐ Stable props continue to be rescanned
+☐ Rejected props continue to be evaluated
+☐ Watchlist props continue to be evaluated
+☐ Candidate Funnel represents the full pipeline
+☐ Full-pool rescan represents the full pipeline
+☐ Qualification gate analyzed for excessive strictness
+☐ UNDER candidate path verified
+☐ Weak OVER props aren’t prematurely destroying valid UNDER evaluation
+☐ Actionable picks use the existing underlying evidence source
+☐ /picks evidence source identified and shared correctly
+☐ Hit-rate cache behavior investigated
+☐ 5,000-entry cache clearing investigated
+☐ Memory behavior investigated
+☐ 100-call/API restriction investigated
+☐ Artificial scan suppression removed if confirmed
+☐ Legitimate API/rate safety preserved
+☐ Sport funnel verified
+☐ Scheduler verified
+☐ Duplicate jobs ruled out
+☐ Runtime stability verified
+☐ All affected tests pass
+☐ FULL test suite passes
+☐ All modified tests reviewed
+☐ No unrelated functionality changed
+☐ No framework functionality retired
+☐ No framework functionality removed
+☐ No framework functionality disabled
+☐ No speculative architecture introduced
+☐ No credentials changed
+
+━━━━━━━━━━━━━━━━━━
+20. FINAL REPORT — REQUIRED BEFORE FREEZE
+━━━━━━━━━━━━━━━━━━
+
+Before freezing, report ALL of the following:
+
+• Files changed
+• Functions changed
+• Production bugs fixed
+• Tests changed
+• Why each changed test was stale
+• Full test-suite result
+• Exact passed count
+• Exact failed count
+• Remaining warnings
+• Remaining issues
+• Current active-pool size
+• Current full-pool rescan coverage
+• Current qualification rate
+• Where suppression was occurring, if found
+• Whether the qualification gate was too strict
+• Whether the cache was suppressing useful data
+• Whether the 100-call restriction was suppressing the scan
+• Confirmation that Tier 1/Tier 2 behavior is correct
+• Confirmation that actionable picks can access the same underlying evidence source as /picks
+• Confirmation that no existing framework functionality was retired, removed, disabled, or replaced
+
+DO NOT say “complete” if any checklist item is unresolved.
+
+━━━━━━━━━━━━━━━━━━
+🔒 FINAL FREEZE — LAST STEP ONLY
+━━━━━━━━━━━━━━━━━━
+
+DO NOT FREEZE BEFORE THE COMPLETE AUDIT ABOVE IS FINISHED.
+
+Only freeze after:
+
+• Every checklist item is verified
+• Every required fix is completed
+• Affected tests pass
+• FULL test suite passes
+• Runtime behavior is verified
+• Tier 1/Tier 2 behavior is verified
+• Full-pool scanning is verified
+• Candidate funnel is verified
+• Qualification gates are verified
+• Evidence pipeline is verified
+• Cache behavior is verified
+• Scan suppression is investigated
+• No critical errors remain
+• No unrelated functionality was changed
+• No existing functionality was retired, removed, disabled, or replaced
+
+THEN AND ONLY THEN:
+
+🔒 FREEZE THE CURRENT VERIFIED FRAMEWORK STATE.
+
+After the freeze:
+
+• Do not redesign anything.
+• Do not retire anything.
+• Do not remove existing functionality.
+• Do not disable existing functionality.
+• Do not make speculative architecture changes.
+• Treat this verified implementation as the new baseline.
+• Future changes must be explicit and incremental.
+• Preserve the verified behavior unless I specifically authorize a change.
+
+The freeze is the LAST action.
+
+DO NOT freeze first.
+DO NOT report completion before verification.
+DO NOT stop because tests are green if runtime behavior has not been verified.

@@ -92,8 +92,10 @@ async def test_s_tier_bypasses_daily_cap():
 
     # Patch scope + timing + broadcast so only the cap logic is under test
     # Patch at source — these are imported dynamically inside deliver_pp
+    # Also patch _TIER2_SPORTS_BLOCK so NBA sport doesn't hit the Tier-2 delivery block.
     from alert_scope_filter import FilterResult
     with (
+        patch("alerts._TIER2_SPORTS_BLOCK", frozenset()),
         patch("alert_scope_filter.check", return_value=FilterResult(allowed=True)),
         patch("alerts.format_pp_alert", return_value="<msg>"),
         patch("alerts.broadcast_alert", new_callable=AsyncMock,
@@ -117,6 +119,7 @@ async def test_a_tier_blocked_when_cap_reached():
 
     from alert_scope_filter import FilterResult
     with (
+        patch("alerts._TIER2_SPORTS_BLOCK", frozenset()),
         patch("alert_scope_filter.check", return_value=FilterResult(allowed=True)),
         patch("engine.timing.is_game_alertable", return_value=(True, "")),
     ):
@@ -138,6 +141,7 @@ async def test_b_tier_blocked_when_cap_reached():
 
     from alert_scope_filter import FilterResult
     with (
+        patch("alerts._TIER2_SPORTS_BLOCK", frozenset()),
         patch("alert_scope_filter.check", return_value=FilterResult(allowed=True)),
         patch("engine.timing.is_game_alertable", return_value=(True, "")),
     ):
@@ -157,6 +161,7 @@ async def test_a_tier_allowed_when_under_cap():
 
     from alert_scope_filter import FilterResult
     with (
+        patch("alerts._TIER2_SPORTS_BLOCK", frozenset()),
         patch("alert_scope_filter.check", return_value=FilterResult(allowed=True)),
         patch("alerts.format_pp_alert", return_value="<msg>"),
         patch("alerts.broadcast_alert", new_callable=AsyncMock,
@@ -180,6 +185,7 @@ async def test_pp_timing_filter_blocks_in_progress_game():
 
     from alert_scope_filter import FilterResult
     with (
+        patch("alerts._TIER2_SPORTS_BLOCK", frozenset()),
         patch("alert_scope_filter.check", return_value=FilterResult(allowed=True)),
         patch("engine.timing.is_game_alertable",
               return_value=(False, "🔴 Game already in progress")),
@@ -362,6 +368,7 @@ async def test_s_tier_does_not_consume_ab_cap():
 
     from alert_scope_filter import FilterResult
     with (
+        patch("alerts._TIER2_SPORTS_BLOCK", frozenset()),
         patch("alert_scope_filter.check", return_value=FilterResult(allowed=True)),
         patch("alerts.format_pp_alert", return_value="<msg>"),
         patch("alerts.broadcast_alert", new_callable=AsyncMock,

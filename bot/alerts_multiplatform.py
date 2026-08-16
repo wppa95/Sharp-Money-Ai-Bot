@@ -786,6 +786,7 @@ def format_underdog_change_alert(
 
     pick_line = ""
     strong_under_line = ""
+    edge_line = ""
     if rec in ("OVER", "UNDER") and not removed:
         pick_emoji = "🟢" if rec == "OVER" else "🔴"
         pick_line = f"📌 <b>PICK:</b>  {pick_emoji} <b>{rec} {new_line:.1f}</b>"
@@ -809,7 +810,6 @@ def format_underdog_change_alert(
             strong_under_line = "🔥 <b>STRONG UNDER</b>  <i>(BQ ≥ 70 — verify line on Underdog before placing)</i>"
 
         # Full hit-history breakdown — show every available window on actionable alerts.
-        edge_line = ""
         if not removed:
             reason = (
                 (getattr(decision, "reason", None) or "").strip()
@@ -826,7 +826,7 @@ def format_underdog_change_alert(
 
             history_bits = []
             for _label, _rate, _games in _history_windows:
-                if _rate is not None and _games:
+                if _rate is not None and _games and isinstance(_rate, (int, float)):
                     history_bits.append(f"{_label}: {_rate:.0%} ({_games}g)")
                 else:
                     history_bits.append(f"{_label}: N/A")

@@ -109,10 +109,10 @@ OPP_BEST_ODDS  = +115   # best available Raiders line
 OPENING_ODDS   = -130   # Chiefs line before steam
 CURRENT_ODDS   = -155   # Chiefs line after steam
 
-SPORT     = Sport.MLB
+SPORT     = Sport.WNBA   # Tier-1 sport — passes Odds API scope filter
 MKT_TYPE  = MarketType.MONEYLINE
-EVENT     = "New York Yankees @ Boston Red Sox"
-SELECTION = "New York Yankees"
+EVENT     = "Las Vegas Aces @ New York Liberty"
+SELECTION = "Las Vegas Aces"
 BOOK      = "DraftKings"
 
 STEAM_BOOKS = ["Pinnacle", "Circa Sports", "DraftKings", "FanDuel", "BetMGM"]
@@ -505,11 +505,11 @@ class TestAlertFormatting:
 
     def test_ev_alert_contains_sport(self, engine):
         msg = format_ev_alert(self._full_opp(engine))
-        assert "MLB" in msg
+        assert "WNBA" in msg
 
     def test_ev_alert_contains_event(self, engine):
         msg = format_ev_alert(self._full_opp(engine))
-        assert "Red Sox" in msg
+        assert "Las Vegas" in msg
 
     def test_ev_alert_contains_player(self, engine):
         msg = format_ev_alert(self._full_opp(engine))
@@ -583,8 +583,8 @@ class TestAlertFormatting:
         msg = format_steam_alert(alert)
 
         assert "SHARP MONEY ALERT" in msg             # alert type
-        assert "MLB" in msg                           # sport / league
-        assert "Red Sox" in msg                       # event
+        assert "WNBA" in msg                          # sport / league
+        assert "Las Vegas" in msg                     # event
         assert "Moneyline" in msg                     # market
         assert SELECTION in msg                       # selection
         assert str(OPENING_ODDS) in msg               # opening odds
@@ -638,8 +638,8 @@ class TestAlertDeliveryFiltering:
         ev_result = EVCalculator.build_ev_result("Home", fair, -110)
         return EVOpportunity(
             ev_result=ev_result, steam_alert=None,
-            sport=Sport.MLB, market_type=MarketType.MONEYLINE,
-            event="Chicago Cubs @ St. Louis Cardinals", player=None, line=None,
+            sport=Sport.WNBA, market_type=MarketType.MONEYLINE,
+            event="Chicago Sky @ Minnesota Lynx", player=None, line=None,
             best_odds=-110, best_book="DraftKings",
             fair_probability=0.5, expected_value=-2.3,
             steam_score=0, ai_confidence=30,
@@ -764,7 +764,7 @@ class TestAlertDeliveryEndToEnd:
         await delivery.deliver_ev(opp)
 
         rec = (await db.get_recent_ev(limit=1))[0]
-        assert rec.sport == "MLB"
+        assert rec.sport == "WNBA"
         assert rec.market_type == "Moneyline"
         assert rec.fair_probability > 0
         assert rec.steam_score > 0
@@ -807,8 +807,8 @@ class TestAlertDeliveryEndToEnd:
             books_moved=STEAM_BOOKS,
         )
         text = format_steam_alert(alert)
-        assert "MLB" in text
-        assert "Red Sox" in text       # event
+        assert "WNBA" in text
+        assert "Las Vegas" in text     # event
         assert "Moneyline" in text     # market
         assert SELECTION in text       # selection
         assert "70" in text            # steam score

@@ -29,9 +29,10 @@ from config import Config, config
 
 
 EXPECTED_DEFAULT_SPORTS = [
-    # Only sports whose alerts can currently be delivered (see alert_scope_filter.py).
-    # Expand this list when delivery scope is widened for additional sports.
-    "MLB",
+    # Underdog scanner scope (not Odds API Sport enum values).
+    # These are the default Underdog sports scanned for prop alerts.
+    # Tier-1 Odds API scope is governed by UD_TIER1_SPORTS_RAW separately.
+    "TENNIS", "WNBA", "CS", "LOL", "VAL", "DOTA", "PGA", "FIFA", "CFB",
 ]
 
 # Verified Odds API sport keys (documented at the-odds-api.com)
@@ -54,9 +55,11 @@ EXPECTED_KEYS = {
 }
 
 
+_EXPECTED_ENUM_SPORTS = ["MLB", "NBA", "NFL", "WNBA", "NHL"]
+
 class TestSportEnum:
     def test_all_default_sports_parse(self):
-        for value in EXPECTED_DEFAULT_SPORTS:
+        for value in _EXPECTED_ENUM_SPORTS:
             assert Sport(value).value == value
 
     def test_legacy_values_still_exist(self):
@@ -70,7 +73,7 @@ class TestSportEnum:
 
 class TestAnalysisEngineMapping:
     def test_every_default_sport_has_odds_api_key(self):
-        for value in EXPECTED_DEFAULT_SPORTS:
+        for value in _EXPECTED_ENUM_SPORTS:
             sport = Sport(value)
             assert sport in _SPORT_TO_ODDS_API_KEY, f"missing key for {value}"
 
@@ -86,13 +89,17 @@ class TestActiveSportsConfig:
     def test_default_includes_all_expected_sports(self):
         assert config.active_sports == EXPECTED_DEFAULT_SPORTS
 
-    def test_every_default_active_sport_is_valid_enum(self):
+    def test_every_default_active_sport_is_non_empty_string(self):
+        # active_sports contains Underdog scanner identifiers (TENNIS, CS, etc.)
+        # which are NOT Sport enum values — they use a different string namespace.
         for value in config.active_sports:
-            Sport(value)  # must not raise
+            assert isinstance(value, str) and len(value) > 0
 
-    def test_every_default_active_sport_has_analysis_engine_mapping(self):
+    def test_no_tier2_sport_in_active_sports_default(self):
+        # Tier-2 sports (MLB/NBA/NFL) must not appear in the Underdog scanner default.
+        tier2 = {"MLB", "NBA", "NFL"}
         for value in config.active_sports:
-            assert Sport(value) in _SPORT_TO_ODDS_API_KEY
+            assert value not in tier2, f"Tier-2 sport {value!r} in active_sports default"
 
     def test_env_var_override_still_works(self):
         c = Config(ACTIVE_SPORTS_RAW="NFL, NBA ,MLB")

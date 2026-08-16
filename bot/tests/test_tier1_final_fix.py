@@ -557,11 +557,11 @@ class TestTierPolicyUnchanged:
 
     def test_ud_min_conf_s_unchanged(self):
         from config import config as cfg
-        assert cfg.UD_MIN_CONF_S == 80
+        assert cfg.UD_MIN_CONF_S == 85
 
     def test_ud_min_conf_a_unchanged(self):
         from config import config as cfg
-        assert cfg.UD_MIN_CONF_A == 70
+        assert cfg.UD_MIN_CONF_A == 75
 
     def test_ud_min_conf_b_unchanged(self):
         from config import config as cfg
@@ -571,7 +571,7 @@ class TestTierPolicyUnchanged:
         from config import config as cfg
         # Per Final Prop Acceptance Spec: Tier 1 A-tier cutoff is 70.
         # 70 = actionable, 69 = watchlist.  Updated from prior 60 default.
-        assert cfg.UD_NON_STRICT_MIN_CONF_A == 70
+        assert cfg.UD_NON_STRICT_MIN_CONF_A == 75
 
     def test_ud_non_strict_min_conf_b_unchanged(self):
         from config import config as cfg
@@ -600,16 +600,16 @@ class TestTierPolicyUnchanged:
 
     def test_min_conf_for_sport_tier_mlb_s(self):
         from config import config as cfg
-        assert cfg.min_conf_for_sport_tier("MLB", "S") == 80
+        assert cfg.min_conf_for_sport_tier("MLB", "S") == 85
 
     def test_min_conf_for_sport_tier_mlb_a(self):
         from config import config as cfg
-        assert cfg.min_conf_for_sport_tier("MLB", "A") == 70
+        assert cfg.min_conf_for_sport_tier("MLB", "A") == 75
 
     def test_min_conf_for_sport_tier_cs_a(self):
         from config import config as cfg
         # Per spec: Tier 1 A-tier cutoff is 70 (was 60).
-        assert cfg.min_conf_for_sport_tier("CS", "A") == 70
+        assert cfg.min_conf_for_sport_tier("CS", "A") == 75
 
     def test_min_conf_for_sport_tier_cs_b(self):
         from config import config as cfg
@@ -665,9 +665,11 @@ class TestPriorPassesIntact:
         assert "get_recent_alerted_props_for_dedup" in src
 
     def test_strict_sports_display_filter_in_picks(self):
+        # The sport-tier gate moved to the DB layer (get_top_ud_props_for_picks).
+        # Verify that cmd_picks calls the DB function that enforces the gate.
         import commands as cmd_mod
         src = inspect.getsource(cmd_mod._cmd_picks_inner)
-        assert "_strict_sports" in src
+        assert "get_top_ud_props_for_picks" in src
 
     def test_mlb_under_blocked_in_picks_display(self):
         import commands as cmd_mod
@@ -675,11 +677,12 @@ class TestPriorPassesIntact:
         assert "MLB" in src and "UNDER" in src
 
     def test_score_tier_in_s_a_only_for_strict_display(self):
-        """Display loop must still enforce S-tier-only for MLB/NFL."""
-        import commands as cmd_mod
-        src = inspect.getsource(cmd_mod._cmd_picks_inner)
-        assert "_strict_sports" in src
-        assert '"S"' in src
+        """Strict gate (S/A only for MLB/NBA/NFL) must exist in the DB query layer."""
+        import database as db_mod
+        db_src = inspect.getsource(db_mod.Database.get_top_ud_props_for_picks)
+        # New contract: notin_ separates Tier-1 from Tier-2; Tier-2 uses score_tier.in_
+        assert "notin_" in db_src
+        assert "score_tier" in db_src
 
     def test_funnel_near_miss_accepted_key_dedup_intact(self):
         import database as db_mod

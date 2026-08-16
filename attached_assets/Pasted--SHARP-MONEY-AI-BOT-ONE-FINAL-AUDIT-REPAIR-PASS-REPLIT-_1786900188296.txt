@@ -1,0 +1,388 @@
+🚨 SHARP MONEY AI BOT — ONE FINAL AUDIT / REPAIR PASS
+
+🚨 REPLIT AI AGENT CREDIT WARNING
+
+Limited Agent credits. Do not waste credits.
+
+* Inspect existing code first.
+* Make only targeted, minimal fixes.
+* No redesign, unrelated refactoring, speculative changes, or new architecture.
+* Do not remove, retire, disable, replace, or rewrite working functionality.
+* Preserve existing commands, providers, jobs, data sources, integrations, scoring, and betting rules.
+* Do not repeatedly run unnecessary exploration.
+* Complete the entire task before reporting results.
+
+⸻
+
+1. SPORT TIERS — DEFINITIVE RULE
+
+🔴 TIER 2
+
+MLB, NBA, NFL
+
+🟢 TIER 1
+
+Every other supported sport.
+
+Examples:
+
+WNBA, NHL, CS, TENNIS, DOTA, LOL, VALORANT, TT, BADMINTON, GOLF/PGA, NCAAF/CFB, MMA, SOCCER/FIFA.
+
+Do not call MLB Tier 1.
+
+Do not revert to MLB-only behavior.
+
+Use the existing Sport enum/mappings.
+
+⸻
+
+2. PLAYER-HISTORY API COLLECTION
+
+For Tier 1 only:
+
+* Player target = UNLIMITED
+* No 100-player limit.
+* No 500-player limit.
+* No arbitrary player-count cap.
+* Maximize the number of players collected.
+* Target 250 PlayerStats API calls per 2-minute cycle.
+* Cadence = 120 seconds.
+* max_instances=1.
+* Preserve existing misfire_grace_time.
+
+Important: 250 is an API-call target, NOT a player-count target and NOT a global Underdog prop-scan limit.
+
+The collector should maximize Tier-1 player coverage within the 250-call / 2-minute budget.
+
+Verify:
+
+Player selection → PlayerStatsProvider → historical results → database/upsert → scoring/actionability.
+
+Do not create duplicate collection loops or unnecessary API calls.
+
+⸻
+
+3. ODDS API / TIER SCOPE
+
+Audit every existing Odds API consumer:
+
+* Polling
+* Steam
+* Season/market checks
+* Usage tracking
+* Pacing
+* Budget protection
+* Caching
+* Analysis calls
+* Scope filtering
+
+Required:
+
+* Tier 1 → Odds API path allowed
+* Tier 2 = MLB/NBA/NFL → Tier-1 Odds API EV/steam path blocked
+
+Do not remove or redesign the existing Odds API framework.
+
+Underdog and PrizePicks pipelines must remain unaffected.
+
+Verify is_ev_line_in_scope(), check(), callers, and enum/string handling.
+
+⸻
+
+4. FULL ACTIVE-POOL RESCAN
+
+The bot must scan the entire active Underdog pool, not only new/changed props.
+
+Display rescan progress as:
+
+rescanned / total active
+
+Examples:
+
+25,759 / 102,748
+
+45,927 / 150,372
+
+This must represent actual full-pool coverage.
+
+After completing the pool, continue rotating through:
+
+* Active props
+* Stable props
+* Previously rejected props
+* Watchlist props
+* New props
+* Line-moved props
+* Previously scored props
+
+Do not permanently ignore a prop simply because it was previously rejected or unchanged.
+
+⸻
+
+5. FULL CANDIDATE FUNNEL
+
+The Candidate Funnel must show the full pipeline, not just a subset of new/changed props.
+
+Conceptually:
+
+Active Pool
+→ Pool Snapshot
+→ Eligible for Rescan
+→ Rescanned / Rescanned Out of Full Pool
+→ Scored
+→ Qualified
+→ Watchlist
+→ Rejected
+→ Delivered
+
+Counts must be accurate and internally consistent.
+
+The Full-Pool Rescan section must similarly show:
+
+* Rotation
+* Pool size
+* Eligible
+* Rescanned / total
+* Scored
+* Qualified
+* Watchlist
+* Rejected
+* Delivered
+
+⸻
+
+6. QUALIFICATION GATE AUDIT
+
+Determine whether the decision + quality gates are too strict.
+
+Audit:
+
+* Direction
+* Bet Quality
+* Market Quality
+* Confidence
+* Tier requirements
+* S/A/B/C scoring
+* Historical-data requirements
+* Player-history requirements
+* Dedup
+* Live-game filtering
+* Hidden/backstop restrictions
+
+Determine whether legitimate Tier-1 candidates are being incorrectly suppressed.
+
+Do not blindly loosen gates.
+
+Fix only an actual unintended restriction and make the smallest compatible change.
+
+⸻
+
+7. UNDER CANDIDATE LOGIC
+
+A weak OVER prop may still represent a strong UNDER.
+
+Verify:
+
+* Weak OVER quality does not automatically eliminate UNDER evaluation.
+* 1-star props can still be evaluated as UNDER candidates.
+* UNDER is evaluated independently using existing evidence.
+* Existing UNDER scoring/watchlist rules remain intact.
+* Truly weak props with no valid OVER or UNDER case are still rejected.
+
+Do not make every 1-star prop actionable.
+
+⸻
+
+8. ACTIONABLE PICK EVIDENCE
+
+Find the existing underlying evidence source used by /picks.
+
+Do NOT make /picks the source of truth.
+
+Actionable picks must use that same underlying source/function/database path.
+
+Do not duplicate the evidence system.
+
+Verify actionable evidence can include the existing:
+
+* L5
+* L10
+* L20
+* L30
+* Season
+* Hit rate vs line
+* Average vs line
+
+⸻
+
+9. CACHE / MEMORY / SCAN SUPPRESSION
+
+Investigate:
+
+_fetch_and_compute_hit_rates: result cache hit 5000 entries - clearing
+
+Confirm cache clearing:
+
+* Does not delete historical DB data.
+* Does not suppress valid picks.
+* Allows fresh evidence retrieval.
+* Does not create unnecessary API/database storms.
+
+Investigate memory messages such as:
+
+VmRSS before=322.9 MB after=323.0 MB
+
+Confirm no progressive leak or uncontrolled accumulation.
+
+Also investigate the previously suspected 100 API-call restriction.
+
+Required:
+
+* No artificial 100-call restriction on Tier-1 PlayerStats.
+* Tier-1 PlayerStats target = 250 API calls / 2 minutes.
+* Tier-1 player count = unlimited.
+* No global 250-call cap on Underdog prop scanning.
+
+If current funnel counts are lower than earlier scans, determine the actual reason instead of assuming suppression.
+
+Trace:
+
+Underdog feed → active pool → snapshot → rescan eligibility → rescan → scoring → funnel → qualification → delivery
+
+⸻
+
+10. TESTING
+
+Run:
+
+1. Syntax/compile checks
+2. Player-history/provider tests
+3. Evidence/hit-rate tests
+4. Underdog monitoring/rescan tests
+5. Funnel tests
+6. Tier/scope tests
+7. Qualification/actionability tests
+8. Alert/delivery tests
+9. FULL test suite
+
+For failures:
+
+* Real production bug → fix it.
+* Stale test contradicting intentional behavior → update it.
+* Mapping/config issue → correct it.
+
+Do not change production behavior simply to make stale tests pass.
+
+After fixes, rerun affected tests and then the full suite again.
+
+⸻
+
+11. REGRESSION / PRESERVATION
+
+Verify these remain intact:
+
+* Tier rules
+* MLB/NBA/NFL Tier-2 restrictions
+* Tier-1 behavior
+* UNDER rules
+* S/A/B/C scoring
+* Stable-prop re-evaluation
+* Full-pool rotation
+* Deduplication
+* Alert delivery
+* /picks
+* /slip
+* /funnel
+* /alerts
+* Player history
+* Historical database
+* Provider routing
+* Scheduler
+* Existing commands
+* Existing integrations
+
+Do not change unrelated betting behavior.
+
+⸻
+
+12. FINAL COMPLETION CHECKLIST
+
+DO NOT REPORT RESULTS UNTIL EVERY ITEM IS VERIFIED.
+
+* Tier 2 = MLB/NBA/NFL
+* Tier 1 = every other supported sport
+* Tier-1 PlayerStats player target = unlimited
+* Tier-1 PlayerStats = 250 API calls / 2 minutes
+* No 100/500 player cap
+* 120-second cadence
+* max_instances=1
+* Existing misfire grace preserved
+* PlayerStats → DB → scoring path verified
+* No duplicate collector
+* No accidental API-call suppression
+* Full active pool rescans
+* Continuous pool rotation
+* Rescan progress shows rescanned/total
+* Full Candidate Funnel verified
+* Full-Pool Rescan Funnel verified
+* Qualification gate audited for excessive strictness
+* UNDER candidates independently evaluated
+* 1-star props can become UNDER candidates
+* Actionable evidence uses same underlying source as /picks
+* Hit-rate cache behavior verified
+* Historical data never deleted by cache clearing
+* Memory behavior verified
+* Funnel suppression investigated
+* Tier-1/Tier-2 scope verified
+* All affected tests pass
+* Full test suite passes
+* No unrelated functionality removed/disabled/retired
+* No credentials changed
+* No speculative architecture added
+
+⸻
+
+13. REQUIRED FINAL REPORT
+
+Only after the entire checklist is complete, report:
+
+* Files changed
+* Functions changed
+* Exact fixes
+* Tests changed and why
+* Tier-1/Tier-2 verification
+* PlayerStats API verification
+* Full-pool rescan verification
+* Candidate Funnel verification
+* Qualification-gate assessment
+* UNDER assessment
+* Evidence-source verification
+* Cache/memory verification
+* Scan-suppression findings
+* Full test-suite result
+* Passed count
+* Failed count
+* Warnings
+* Remaining issues
+
+DO NOT commit, push, force-push, deploy, or publish.
+
+Give me verification results first.
+
+⸻
+
+🔒 FINAL FREEZE — LAST STEP ONLY
+
+Only after everything above is complete, verified, and green:
+
+FREEZE THE CURRENT VERIFIED FRAMEWORK STATE.
+
+After freezing:
+
+* No redesign.
+* No retirement/removal of functionality.
+* No speculative architecture changes.
+* Future changes must be explicit and incremental.
+* Preserve the verified baseline unless I specifically authorize a change.
+
+THE FREEZE MUST BE THE FINAL STEP — NEVER BEFORE VERIFICATION.

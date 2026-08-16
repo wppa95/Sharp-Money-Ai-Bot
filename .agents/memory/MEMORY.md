@@ -70,3 +70,6 @@
 - [MQ hard gate](mq-gate.md) — _mq_passes_delivery_gate() blocks MQ 40-69 (dead zone) always; sub-40 OVER blocked; applied at all 3 collection points AND delivery loop backstop; 8/2 Tier1/Tier2 split uses _TIER2_SPORTS={"NBA","MLB","NFL"}.
 - [Atomic delivery dedup lock](atomic-dedup-lock.md) — _try_claim_delivery_slot() pre-claims dedup slot under asyncio.Lock before any deliver_underdog; threshold 85 for Tier 2 BQ+MQ; lc-path needs dedup gate at collection; conftest clears _prop_market_alerted between tests.
 - [Tier 2 delivery backstop](tier2-delivery-backstop.md) — call-site guards insufficient; broadcast_alert() bypasses deliver_underdog; final backstop inside deliver_underdog() + per-site guards; alerts._TIER2_SPORTS_BLOCK patchable constant.
+- [Scope filter config access bug](scope-filter-config-bug.md) — `import config; config.x` hits MODULE not instance; always use `config.config.x`; _poll_odds_job iterates ud_tier1_sports not active_sports; 4641 tests Aug 2026.
+- [Confidence thresholds Aug 2026](conf-threshold-aug2026.md) — UD_MIN_CONF_S=85, UD_MIN_CONF_A=75, UD_NON_STRICT_MIN_CONF_A=75 (raised from 80/70/70).
+- [Player history job spec](player-history-spec.md) — Tier-1 only (filter MLB/NBA/NFL), unlimited player count, 250 API-call cap per 2-min cycle; never add player-count slice to target-build loop.

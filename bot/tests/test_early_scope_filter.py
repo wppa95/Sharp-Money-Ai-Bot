@@ -30,11 +30,13 @@ from models import MarketType, Sport
 class TestIsEvLineInScope:
     """Unit tests for the cheap line-level pre-filter predicate."""
 
-    def test_mlb_moneyline_passes(self):
-        assert is_ev_line_in_scope(Sport.MLB, MarketType.MONEYLINE) is True
+    def test_mlb_moneyline_blocked(self):
+        # MLB is Tier 2 — blocked from the Odds API EV pipeline.
+        assert is_ev_line_in_scope(Sport.MLB, MarketType.MONEYLINE) is False
 
-    def test_mlb_total_passes(self):
-        assert is_ev_line_in_scope(Sport.MLB, MarketType.TOTAL) is True
+    def test_mlb_total_blocked(self):
+        # MLB is Tier 2 — blocked from the Odds API EV pipeline.
+        assert is_ev_line_in_scope(Sport.MLB, MarketType.TOTAL) is False
 
     def test_mlb_spread_blocked(self):
         assert is_ev_line_in_scope(Sport.MLB, MarketType.SPREAD) is False
@@ -43,18 +45,28 @@ class TestIsEvLineInScope:
         assert is_ev_line_in_scope(Sport.MLB, MarketType.PLAYER_PROP) is False
 
     @pytest.mark.parametrize("sport", [
-        Sport.NBA, Sport.NFL, Sport.NHL, Sport.NCAAF, Sport.NCAAB,
-        Sport.UFC, Sport.WNBA, Sport.EPL, Sport.MLS, Sport.LA_LIGA,
+        # Tier 2 sports — always blocked from Odds API EV pipeline.
+        Sport.NBA, Sport.NFL, Sport.MLB,
+        # These Sport enum values don't appear in ud_tier1_sports (different key format).
+        Sport.NCAAB, Sport.EPL, Sport.MLS, Sport.LA_LIGA,
         Sport.SERIE_A, Sport.BUNDESLIGA, Sport.LIGUE_1, Sport.UCL,
     ])
-    def test_non_mlb_moneyline_blocked(self, sport):
+    def test_tier2_and_unmapped_moneyline_blocked(self, sport):
         assert is_ev_line_in_scope(sport, MarketType.MONEYLINE) is False
 
     @pytest.mark.parametrize("sport", [
-        Sport.NBA, Sport.NFL, Sport.NHL, Sport.NCAAF,
+        # Tier-2 sports blocked from Odds API.
+        Sport.NBA, Sport.NFL, Sport.MLB,
     ])
-    def test_non_mlb_total_blocked(self, sport):
+    def test_tier2_total_blocked(self, sport):
         assert is_ev_line_in_scope(sport, MarketType.TOTAL) is False
+
+    @pytest.mark.parametrize("sport", [
+        # Tier-1 sports that map to ud_tier1_sports identifiers — should pass.
+        Sport.WNBA, Sport.NHL,
+    ])
+    def test_tier1_sport_passes_scope(self, sport):
+        assert is_ev_line_in_scope(sport, MarketType.MONEYLINE) is True
 
 
 # ── _poll_odds_job early filter ────────────────────────────────────────────────
@@ -77,22 +89,23 @@ async def test_poll_odds_job_drops_out_of_scope_lines():
     """Out-of-scope lines must not be passed to save_odds or analyze_line."""
     import main as main_mod
 
-    mlb_ml = _make_odds_line(Sport.MLB, MarketType.MONEYLINE)
-    nhl_ml = _make_odds_line(Sport.NHL, MarketType.MONEYLINE)
-    nba_spread = _make_odds_line(Sport.NBA, MarketType.SPREAD)
+    wnba_ml = _make_odds_line(Sport.WNBA, MarketType.MONEYLINE)   # Tier-1 — passes
+    mlb_ml  = _make_odds_line(Sport.MLB,  MarketType.MONEYLINE)   # Tier-2 — blocked
+    nba_spread = _make_odds_line(Sport.NBA, MarketType.SPREAD)     # Tier-2 + wrong market
 
     mock_db = MagicMock()
     mock_db.save_odds = AsyncMock()
 
     mock_engine = MagicMock()
-    mock_engine.fetch_live_odds = AsyncMock(return_value=[mlb_ml, nhl_ml, nba_spread])
+    mock_engine.fetch_live_odds = AsyncMock(return_value=[wnba_ml, mlb_ml, nba_spread])
     mock_engine.analyze_line = MagicMock(return_value=MagicMock())
 
     mock_delivery = MagicMock()
     mock_delivery.deliver_ev = AsyncMock()
 
     mock_cfg = MagicMock()
-    mock_cfg.active_sports = ["MLB"]
+    mock_cfg.active_sports = ["WNBA"]     # used by other paths
+    mock_cfg.ud_tier1_sports = ["WNBA"]   # _poll_odds_job iterates this
     mock_cfg.allowed_user_ids = []
 
     with patch.object(main_mod, "_db", mock_db), \
@@ -102,7 +115,7 @@ async def test_poll_odds_job_drops_out_of_scope_lines():
          patch("main.AlertDelivery", return_value=mock_delivery):
         await main_mod._poll_odds_job(MagicMock())
 
-    # save_odds should only be called for the MLB Moneyline line
+    # save_odds should only be called for the WNBA Moneyline line (Tier-1 passes)
     saved_market_types = [
         c.args[0].market_type if c.args else c.kwargs.get("record").market_type
         for c in mock_db.save_odds.call_args_list
@@ -111,7 +124,7 @@ async def test_poll_odds_job_drops_out_of_scope_lines():
     assert mock_db.save_odds.call_count == 1
 
     # analyze_line must not be called with out-of-scope inputs
-    # (the market_groups loop only sees the filtered line — NHL/NBA never reach it)
+    # (the market_groups loop only sees the filtered line — MLB/NBA never reach it)
     for c in mock_engine.analyze_line.call_args_list:
         kwargs = c.kwargs if c.kwargs else {}
         args   = c.args

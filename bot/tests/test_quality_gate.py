@@ -20,15 +20,15 @@ import pytest
 # ── Config defaults ───────────────────────────────────────────────────────────
 
 def test_config_ud_min_conf_s_default():
-    # Raised from 75 → 80: S-tier alerts require stronger evidence.
+    # Current S-tier confidence threshold (raised from 80 → 85).
     from config import config
-    assert config.UD_MIN_CONF_S == 80
+    assert config.UD_MIN_CONF_S == 85
 
 
 def test_config_ud_min_conf_a_default():
-    # Raised from 65 → 70: A-tier alerts require stronger evidence.
+    # Current A-tier confidence threshold (raised from 70 → 75).
     from config import config
-    assert config.UD_MIN_CONF_A == 70
+    assert config.UD_MIN_CONF_A == 75
 
 
 def test_config_ud_min_conf_b_default():
@@ -65,7 +65,7 @@ def _passes_gate(tier: str, confidence: int) -> bool:
 
 
 def test_gate_s_tier_above_threshold_passes():
-    assert _passes_gate("S", 80)
+    assert _passes_gate("S", 85)
 
 
 def test_gate_s_tier_at_threshold_passes():
@@ -79,7 +79,7 @@ def test_gate_s_tier_below_threshold_blocked():
 
 
 def test_gate_a_tier_above_threshold_passes():
-    assert _passes_gate("A", 70)
+    assert _passes_gate("A", 75)
 
 
 def test_gate_a_tier_at_threshold_passes():

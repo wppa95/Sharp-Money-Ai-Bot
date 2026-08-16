@@ -1123,7 +1123,7 @@ class AlertDelivery:
              - default               → format_underdog_change_alert   (🎯 BET PICK)
           5. Broadcast to all registered chat IDs.
         """
-        # ── FIRST: Tier 2 Telegram backstop — runs before any import or logic ────
+        # ── FINAL Tier 2 Telegram backstop — runs before any import or logic ────
         # Must be the very first executable statement so no code path can bypass it.
         # NBA / MLB / NFL props are scanned, scored, and stored normally, but
         # Telegram delivery is suppressed here — the authoritative delivery boundary.

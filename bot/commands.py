@@ -2180,9 +2180,10 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 _cand.player_name, _cand.stat_type,
             )
             continue
-        # Tier-aware delivery gate — same rules as Telegram delivery.
-        # Tier 2 (NBA/MLB/NFL): BQ ≥ 85 AND MQ ≥ 85 — BOTH mandatory.
-        # Tier 1: direction already checked above; no BQ/MQ numeric gate.
+        # Tier-aware delivery gate — mirrors the existing alert-delivery policy.
+        # Tier 2 (MLB/NBA/NFL): BQ ≥ 85 AND MQ ≥ 85 — BOTH mandatory.
+        # Tier 1 (WNBA/CS/TENNIS/DOTA/LOL/VALORANT/TT/BADMINTON/GOLF/NCAAF/MMA/SOCCER):
+        #   direction check above is sufficient; no additional BQ/MQ numeric gate.
         _slip_sport = (getattr(_cand, "sport", "") or "").upper()
         if _slip_sport in {"NBA", "MLB", "NFL"}:
             # Look up PLH for stored MQ and BQ scores.

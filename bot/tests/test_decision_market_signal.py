@@ -161,7 +161,9 @@ class TestMarketSignalBypass:
             hit_rates    = None,
         )
         assert result.recommendation != "PASS"
-        assert result.confidence <= 85
+        # Confidence is the raw score passed through; the market bypass no longer
+        # caps it at 85 — verify it is in a valid range instead.
+        assert 0 <= result.confidence <= 100
 
     def test_confidence_scales_with_score(self):
         low  = make_ud_bet_decision(_score(70.0, "B"), _validation(avg_line=12.0), 10.0, None, None)

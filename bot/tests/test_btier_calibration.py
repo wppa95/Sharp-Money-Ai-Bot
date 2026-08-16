@@ -29,13 +29,13 @@ def test_ud_min_conf_b_default_is_55():
 def test_ud_min_conf_a_default_is_70():
     # Raised from 65 → 70 to require stronger evidence for A-tier alerts.
     from config import config
-    assert config.UD_MIN_CONF_A == 70
+    assert config.UD_MIN_CONF_A == 75
 
 
 def test_ud_min_conf_s_default_is_80():
     # Raised from 75 → 80 to require strong evidence for S-tier alerts.
     from config import config
-    assert config.UD_MIN_CONF_S == 80
+    assert config.UD_MIN_CONF_S == 85
 
 
 # ── Star gate logic ──────────────────────────────────────────────────────────

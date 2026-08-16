@@ -169,11 +169,11 @@ class TestPicksStrictSportFilter:
         assert passed
 
     def test_strict_sport_filter_code_in_cmd_picks(self):
-        """The strict-sport filter must exist in _cmd_picks_inner."""
+        """The strict-sport gate must be enforced via the DB query call in _cmd_picks_inner."""
         import inspect
         src = inspect.getsource(cmd_mod._cmd_picks_inner)
-        assert "ud_strict_alert_sports" in src
-        assert "score_tier" in src
+        # Gate moved to DB layer — verify cmd_picks calls the DB function that enforces it.
+        assert "get_top_ud_props_for_picks" in src
 
 
 # ─────────────────────────────────────────────────────────────────────────────

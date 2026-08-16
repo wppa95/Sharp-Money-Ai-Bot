@@ -236,7 +236,7 @@ class Config:
     # Override via UD_TIER1_SPORTS env var (comma-separated sport codes).
     UD_TIER1_SPORTS_RAW: str = os.environ.get(
         "UD_TIER1_SPORTS",
-        "NBA,WNBA,CS,TENNIS,DOTA,LOL,VALORANT,TT,BADMINTON,GOLF,NFL,NCAAF,MMA,SOCCER",
+        "WNBA,NHL,CS,TENNIS,DOTA,LOL,VALORANT,TT,BADMINTON,GOLF,NCAAF,MMA,SOCCER",
     )
 
     # MLB alert gate — MLB and NFL (Tier 2) only send Telegram alerts when the

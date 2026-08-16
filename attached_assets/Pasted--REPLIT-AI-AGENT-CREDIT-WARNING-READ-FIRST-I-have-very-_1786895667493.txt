@@ -1,0 +1,871 @@
+🚨🚨 REPLIT AI AGENT CREDIT WARNING — READ FIRST 🚨🚨
+
+I have very limited Replit AI Agent credits remaining.
+
+DO NOT waste Agent credits.
+
+I need ONE focused repair/audit pass using the existing framework.
+
+⚠️ CREDIT RULE: Inspect first. Smallest compatible fix only. No redesign, unrelated refactor, retirement, removal, disabling, replacement, or speculative changes. Preserve existing functionality.
+
+━━━━━━━━━━━━━━━━━━
+
+1. PLAYER HISTORY
+
+━━━━━━━━━━━━━━━━━━
+
+⚠️ CREDIT RULE: Inspect first. Smallest compatible fix only. No redesign, unrelated refactor, retirement, removal, disabling, replacement, or speculative changes. Preserve existing functionality.
+
+We changed the player-history collector:
+
+• Primary target limit: 100
+• Fallback target limit: 100
+• Cadence: 120 seconds / 2 minutes
+• max_instances=1
+• Existing misfire_grace_time must remain intact.
+
+Verify:
+
+• Active Underdog props load correctly.
+• Fallback works correctly.
+• Player names, sports, and stat types normalize correctly.
+• Existing PlayerStatsProvider is used.
+• Existing DB/upsert path is used.
+• Valid historical data reaches the existing scoring/actionability pipeline.
+• No duplicate collection loops or unnecessary API calls were introduced.
+• Do not increase the target back to 1,000.
+
+━━━━━━━━━━━━━━━━━━
+
+2. ODDS API — TIER 1 ONLY
+
+━━━━━━━━━━━━━━━━━━
+
+⚠️ CREDIT RULE: Inspect first. Smallest compatible fix only. No redesign, unrelated refactor, retirement, removal, disabling, replacement, or speculative changes. Preserve existing functionality.
+
+We intentionally changed the Odds API pipeline so that only Tier 1 sports use the Odds API.
+
+Do NOT revert this to MLB-only.
+
+Audit every existing Odds API path:
+
+• Odds polling
+• Steam checking
+• Season/market checks
+• Usage tracking
+• Pacing
+• Budget protection
+• Caching
+• Existing analysis-engine calls
+• Every other existing Odds API consumer
+
+Preserve the existing framework.
+
+Do not create a new provider architecture.
+
+━━━━━━━━━━━━━━━━━━
+
+3. SPORT TIERS — VERIFY EXACTLY
+
+━━━━━━━━━━━━━━━━━━
+
+⚠️ CREDIT RULE: Inspect first. Smallest compatible fix only. No redesign, unrelated refactor, retirement, removal, disabling, replacement, or speculative changes. Preserve existing functionality.
+
+TIER 1
+
+The intended Tier 1 sports are:
+
+• NBA
+• WNBA
+• CS
+• TENNIS
+• DOTA
+• LOL
+• VALORANT
+• TT
+• BADMINTON
+• GOLF
+• NFL
+• NCAAF
+• MMA
+• SOCCER
+
+Verify these against the actual existing Sport enum and analysis mappings.
+
+If the framework uses a different internal identifier, use the existing identifier correctly.
+
+Do not invent unnecessary aliases or redesign the sport system.
+
+TIER 2
+
+Tier 2 includes sports that are not part of the Tier-1 Odds API/actionable scope.
+
+Examples currently relevant:
+
+• MLB
+• Any other sport explicitly classified as Tier 2 by the existing framework/configuration
+
+Do not assume a sport is Tier 1 merely because it appears in the feed.
+
+Tier classification must come from the existing framework configuration/mapping.
+
+Tier 1 and Tier 2 behavior must agree across:
+
+• Config
+• Sport enum
+• Scope filters
+• Analysis mappings
+• Scoring/actionability
+• Tests
+• Telegram delivery
+
+━━━━━━━━━━━━━━━━━━
+
+4. CRITICAL TIER-2 ACTIONABILITY CHECK
+
+━━━━━━━━━━━━━━━━━━
+
+⚠️ CREDIT RULE: Inspect first. Smallest compatible fix only. No redesign, unrelated refactor, retirement, removal, disabling, replacement, or speculative changes. Preserve existing functionality.
+
+THIS IS A HARD REQUIREMENT.
+
+MLB is Tier 2 under the current framework.
+
+Therefore, the audit is NOT complete if MLB, NFL, or any other Tier-2 sport can incorrectly enter the actionable-pick or Telegram-delivery path.
+
+Verify:
+
+Prop → Scope → Scoring → Decision → Qualification → Actionable Pick → Telegram
+
+Prove that Tier-2 sports cannot bypass the intended Tier-2 restrictions and become actionable/deliverable.
+
+Do not solve this by:
+
+• Removing Tier-2 data
+• Removing Tier-2 monitoring
+• Removing Tier-2 watchlists
+• Removing existing Tier-2 rules
+• Redesigning the tier system
+• Disabling existing framework functionality
+
+Preserve legitimate Tier-2 monitoring/watchlist/blocking behavior.
+
+The current funnel is suspicious because MLB is producing qualified/actionable candidates while Tier-1 sports are producing zero actionable picks.
+
+Determine the actual cause.
+
+Check whether:
+
+• Tier-1/Tier-2 scope filtering is wrong.
+• Qualification gates incorrectly reject Tier-1 props.
+• Sport mappings are incorrect.
+• Decision/quality gates are too strict.
+• MLB is bypassing a gate it should not bypass.
+• A stale MLB-only condition remains somewhere.
+• Tier classification is calculated incorrectly.
+• A later pipeline stage is overriding the intended tier restriction.
+
+Do not declare the audit complete until this is verified with tests and confirmed in actual pipeline behavior.
+
+━━━━━━━━━━━━━━━━━━
+
+5. ALERT SCOPE FILTER
+
+━━━━━━━━━━━━━━━━━━
+
+⚠️ CREDIT RULE: Inspect first. Smallest compatible fix only. No redesign, unrelated refactor, retirement, removal, disabling, replacement, or speculative changes. Preserve existing functionality.
+
+Audit:
+
+• is_ev_line_in_scope()
+• check()
+• All callers
+• Related tests
+
+The old MLB-only early OddsLine restriction must no longer incorrectly block Tier-1 Odds API lines.
+
+Verify:
+
+• Tier-1 Odds API lines pass correctly.
+• Tier-2 lines remain restricted according to existing rules.
+• Underdog remains on its existing prop pipeline.
+• PrizePicks remains on its existing prop pipeline.
+• Odds API scope filtering does not accidentally affect Underdog/PrizePicks.
+• No duplicate/unreachable returns exist.
+• No syntax/indentation issues exist.
+• Existing unrelated alert filtering remains intact.
+
+Fix within the existing framework.
+
+━━━━━━━━━━━━━━━━━━
+
+6. CURRENT TEST FAILURES
+
+━━━━━━━━━━━━━━━━━━
+
+⚠️ CREDIT RULE: Inspect first. Smallest compatible fix only. No redesign, unrelated refactor, retirement, removal, disabling, replacement, or speculative changes. Preserve existing functionality.
+
+Latest short test:
+
+9 failed, 31 passed
+
+Failures included:
+
+• test_mlb_moneyline_passes
+• test_mlb_total_passes
+• _poll_odds_job scope-filter tests
+• _steam_check_job scope tests
+• Active sports configuration tests
+• TENNIS enum/mapping failures
+
+Determine whether each failure is:
+
+1. Real implementation bug
+2. Stale test contradicting the intended Tier-1 change
+3. Configuration/enum/mapping inconsistency
+
+Do NOT simply revert intended behavior to make tests green.
+
+Only update tests when genuinely stale because of explicitly intended changes.
+
+━━━━━━━━━━━━━━━━━━
+
+7. FULL PLAYER-HISTORY → ACTIONABILITY PIPELINE
+
+━━━━━━━━━━━━━━━━━━
+
+⚠️ CREDIT RULE: Inspect first. Smallest compatible fix only. No redesign, unrelated refactor, retirement, removal, disabling, replacement, or speculative changes. Preserve existing functionality.
+
+Verify:
+
+Underdog props
+→ Active/stable pool
+→ Player history
+→ Historical stats
+→ Scoring
+→ Confidence
+→ Tier
+→ Decision
+→ Qualification
+→ Telegram delivery
+
+Check:
+
+• Missing history gates
+• Incorrect sport mappings
+• Incorrect stat normalization
+• Stale filters
+• Incorrect tier restrictions
+• Broken DB writes
+• Broken provider routing
+• Accidental rejection of valid Tier-1 props
+
+Preserve existing scoring/tier framework.
+
+━━━━━━━━━━━━━━━━━━
+
+8. QUALIFICATION GATE — DETERMINE IF TOO STRICT
+
+━━━━━━━━━━━━━━━━━━
+
+⚠️ CREDIT RULE: Inspect first. Smallest compatible fix only. No redesign, unrelated refactor, retirement, removal, disabling, replacement, or speculative changes. Preserve existing functionality.
+
+Audit the Decision + Quality Gates.
+
+Current display shows Tier-1 sports being heavily rejected while MLB is producing qualified candidates.
+
+Determine whether the qualification pipeline is suppressing valid Tier-1 props.
+
+Audit:
+
+• Direction
+• Bet Quality
+• Confidence
+• Tier
+• Decision
+• Dedup
+• Live-game gate
+• Any other existing qualification gate
+
+Determine exactly where valid Tier-1 candidates are being lost.
+
+Do not blindly loosen gates.
+
+Only change a gate if the audit proves the implementation is incorrectly rejecting valid candidates according to the existing framework.
+
+The goal is to fix incorrect suppression, not lower standards.
+
+━━━━━━━━━━━━━━━━━━
+
+9. 1-STAR / UNDER CANDIDATE BEHAVIOR
+
+━━━━━━━━━━━━━━━━━━
+
+⚠️ CREDIT RULE: Inspect first. Smallest compatible fix only. No redesign, unrelated refactor, retirement, removal, disabling, replacement, or speculative changes. Preserve existing functionality.
+
+Verify the existing framework can correctly identify strong UNDER candidates.
+
+A 1-star prop must not automatically be treated as useless if its evidence supports a strong UNDER candidate.
+
+Likewise:
+
+• Weak props should be rejected quickly when appropriate.
+• A weak OVER signal may still contain useful evidence for an UNDER candidate.
+• Do not automatically discard a prop before checking whether the opposite direction has legitimate support.
+• Existing UNDER rules must remain intact.
+• Do not redesign scoring.
+
+The system should evaluate whether a prop is a strong candidate in the correct direction rather than assuming every low-quality OVER signal is simply rejection.
+
+━━━━━━━━━━━━━━━━━━
+
+10. STABLE PROPS / FULL-POOL RESCAN
+
+━━━━━━━━━━━━━━━━━━
+
+⚠️ CREDIT RULE: Inspect first. Smallest compatible fix only. No redesign, unrelated refactor, retirement, removal, disabling, replacement, or speculative changes. Preserve existing functionality.
+
+The bot must not rely only on:
+
+• New props
+• Line movements
+
+Verify the existing stable/full-pool reevaluation:
+
+• Full active pool monitored.
+• Stable props rescored.
+• New props rescored.
+• Line-moved props rescored.
+• Watchlist/rejected candidates continue being reevaluated according to existing rules.
+• Full-pool rescan actually represents the full active pool.
+
+After every active prop has been scanned, continue active monitoring/re-evaluation according to the existing framework.
+
+Do not create duplicate scanning loops.
+
+━━━━━━━━━━━━━━━━━━
+
+11. SCAN PIPELINE DISPLAY
+
+━━━━━━━━━━━━━━━━━━
+
+⚠️ CREDIT RULE: Inspect first. Smallest compatible fix only. No redesign, unrelated refactor, retirement, removal, disabling, replacement, or speculative changes. Preserve existing functionality.
+
+Scored this period must clearly show how much of the full active pool has actually been rescanned.
+
+Examples:
+
+25,759 / 102,748
+
+or:
+
+45,927 / 150,372
+
+Meaning:
+
+rescanned / total active props
+
+Display actual counters for:
+
+• New
+• Line moved
+• Cold-start
+• Stable refresh
+• Full-pool rescan
+• Total rescanned
+• Total active pool
+
+Do not only display new props/line movements.
+
+Do not fabricate numbers.
+
+━━━━━━━━━━━━━━━━━━
+
+12. FULL CANDIDATE FUNNEL
+
+━━━━━━━━━━━━━━━━━━
+
+⚠️ CREDIT RULE: Inspect first. Smallest compatible fix only. No redesign, unrelated refactor, retirement, removal, disabling, replacement, or speculative changes. Preserve existing functionality.
+
+Candidate Funnel must show the full pipeline.
+
+Conceptually:
+
+Active Pool
+→ Pool Snapshot
+→ Eligible for Rescan
+→ Rescanned / rescanned out of full pool
+→ Scored
+→ Qualified
+→ Watchlist
+→ Rejected
+→ Delivered
+
+Use actual framework counters/state transitions.
+
+Numbers must be logically consistent.
+
+Do not invent statistics.
+
+━━━━━━━━━━━━━━━━━━
+
+13. FULL-POOL RESCAN PIPELINE
+
+━━━━━━━━━━━━━━━━━━
+
+⚠️ CREDIT RULE: Inspect first. Smallest compatible fix only. No redesign, unrelated refactor, retirement, removal, disabling, replacement, or speculative changes. Preserve existing functionality.
+
+If full-pool rescan goes through all active props, display the full rescan pipeline:
+
+• Total active pool
+• Eligible for rescan
+• Rescanned
+• Remaining
+• Scored
+• Qualified
+• Watchlist
+• Rejected
+• Delivered
+
+Example:
+
+Rescanned: 25,759 / 102,748
+
+Complete:
+
+Rescanned: 102,748 / 102,748
+
+Then continue monitoring/re-evaluating using the existing cadence.
+
+Do not create competing rescan architecture.
+
+━━━━━━━━━━━━━━━━━━
+
+14. SUPPRESSED NUMBERS — INVESTIGATE
+
+━━━━━━━━━━━━━━━━━━
+
+⚠️ CREDIT RULE: Inspect first. Smallest compatible fix only. No redesign, unrelated refactor, retirement, removal, disabling, replacement, or speculative changes. Preserve existing functionality.
+
+Compare current funnel against earlier funnel.
+
+Earlier:
+
+290,159 active props
+6,154 new
+73 line moved
+11,119 scored
+
+Current:
+
+179,607 active props
+523 new
+160 line moved
+5,727 scored
+
+Investigate the drop.
+
+Potential causes:
+
+• Temporary player-history target limit
+• 100 API-call/testing limit
+• Rescan batching
+• Candidate filtering
+• Scope filtering
+• Cache behavior
+• Pool state
+• Scheduler behavior
+• API/provider behavior
+• Incorrect counters
+• Other existing framework logic
+
+Do not assume the cause. Verify it.
+
+━━━━━━━━━━━━━━━━━━
+
+15. TEMPORARY PLAYER-HISTORY LIMIT
+
+━━━━━━━━━━━━━━━━━━
+
+⚠️ CREDIT RULE: Inspect first. Smallest compatible fix only. No redesign, unrelated refactor, retirement, removal, disabling, replacement, or speculative changes. Preserve existing functionality.
+
+We temporarily set player-history target to 100 for testing.
+
+For this audit:
+
+Remove the temporary 100 testing restriction so we can observe actual full behavior and determine whether it is suppressing the pipeline.
+
+Do not permanently increase it to 1,000.
+
+Do not redesign API budgeting.
+
+━━━━━━━━━━━━━━━━━━
+
+16. HIT-RATE CACHE CLEARING
+
+━━━━━━━━━━━━━━━━━━
+
+⚠️ CREDIT RULE: Inspect first. Smallest compatible fix only. No redesign, unrelated refactor, retirement, removal, disabling, replacement, or speculative changes. Preserve existing functionality.
+
+We repeatedly saw:
+
+_fetch_and_compute_hit_rates: result cache hit 5000 entries - clearing
+
+Audit:
+
+• Why cache reaches 5,000.
+• Why it clears.
+• Whether clearing is expected safety behavior.
+• Whether required history/stat data is lost.
+• Whether only computed results are cleared while persistent history remains intact.
+• Whether the limit suppresses scoring/actionability.
+• Whether unnecessary recomputation occurs.
+• Whether memory protection works correctly.
+• Why the clearing repeats so frequently.
+
+Do NOT simply remove cache clearing.
+
+Do not delete historical/statistical data.
+
+If the 5,000-entry limit causes legitimate scoring suppression, fix the underlying issue within the existing framework.
+
+━━━━━━━━━━━━━━━━━━
+
+17. MEMORY DIAGNOSTIC
+
+━━━━━━━━━━━━━━━━━━
+
+⚠️ CREDIT RULE: Inspect first. Smallest compatible fix only. No redesign, unrelated refactor, retirement, removal, disabling, replacement, or speculative changes. Preserve existing functionality.
+
+We saw:
+
+underdog_job: memory VmRSS before=322.9 MB after=323.0 MB delta=+0.0
+
+Treat this as diagnostic unless a real memory problem is found.
+
+Do not make unrelated memory architecture changes.
+
+Verify cache/history behavior is not unnecessarily causing memory growth.
+
+━━━━━━━━━━━━━━━━━━
+
+18. EVIDENCE FOR ACTIONABLE PICKS
+
+━━━━━━━━━━━━━━━━━━
+
+⚠️ CREDIT RULE: Inspect first. Smallest compatible fix only. No redesign, unrelated refactor, retirement, removal, disabling, replacement, or speculative changes. Preserve existing functionality.
+
+/picks currently displays detailed evidence:
+
+• L5
+• L10
+• L20
+• L30
+• Season
+• Hit rate
+• Average
+• Current-line comparison
+
+Actionable picks do not consistently show this evidence.
+
+Fix this.
+
+Actionable bet picks must use the same underlying evidence source that /picks uses.
+
+IMPORTANT:
+
+/picks itself must NOT become the source of truth.
+
+Identify the existing underlying provider/module/data source that /picks uses for evidence.
+
+Use that same existing source for actionable-pick evidence.
+
+Do not duplicate the evidence system.
+
+━━━━━━━━━━━━━━━━━━
+
+19. EXISTING BETTING RULES — PRESERVE
+
+━━━━━━━━━━━━━━━━━━
+
+⚠️ CREDIT RULE: Inspect first. Smallest compatible fix only. No redesign, unrelated refactor, retirement, removal, disabling, replacement, or speculative changes. Preserve existing functionality.
+
+Do NOT change unrelated betting rules.
+
+Preserve:
+
+• Tier 1 behavior
+• Tier 2 behavior
+• MLB restrictions
+• NFL restrictions
+• UNDER rules
+• S/A/B/C scoring
+• Stable-prop reevaluation
+• Existing pool behavior
+• Existing alert delivery
+• Existing deduplication
+• Existing monitoring
+• Existing provider architecture
+• Existing commands
+• Existing integrations
+
+Only fix regressions/inconsistencies directly related to this session.
+
+━━━━━━━━━━━━━━━━━━
+
+20. SCHEDULER / CADENCE AUDIT
+
+━━━━━━━━━━━━━━━━━━
+
+⚠️ CREDIT RULE: Inspect first. Smallest compatible fix only. No redesign, unrelated refactor, retirement, removal, disabling, replacement, or speculative changes. Preserve existing functionality.
+
+Verify:
+
+• Player history collector → 120 seconds
+• max_instances=1
+• Existing misfire grace
+• Opportunity grader
+• Odds polling
+• Steam checking
+• Season checker
+• Budget checker
+• Stable refresh
+• Full-pool rescan
+• Existing monitoring
+
+Ensure no duplicate jobs/overlapping collectors.
+
+Do not change unrelated cadences.
+
+━━━━━━━━━━━━━━━━━━
+
+21. API / CREDENTIAL SAFETY
+
+━━━━━━━━━━━━━━━━━━
+
+⚠️ CREDIT RULE: Inspect first. Smallest compatible fix only. No redesign, unrelated refactor, retirement, removal, disabling, replacement, or speculative changes. Preserve existing functionality.
+
+Do NOT change, expose, rotate, replace, or remove credentials.
+
+Do not make unnecessary API calls.
+
+Respect existing API budget/pacing architecture except for the explicitly requested temporary removal of the 100 testing restriction.
+
+━━━━━━━━━━━━━━━━━━
+
+22. REGRESSION AUDIT
+
+━━━━━━━━━━━━━━━━━━
+
+⚠️ CREDIT RULE: Inspect first. Smallest compatible fix only. No redesign, unrelated refactor, retirement, removal, disabling, replacement, or speculative changes. Preserve existing functionality.
+
+Inspect all relevant existing areas:
+
+• bot/main.py
+• bot/config.py
+• bot/player_history_job.py
+• bot/providers/player_stats.py
+• bot/alert_scope_filter.py
+• bot/providers/usage_tracker.py
+• Analysis modules
+• Scoring/ranking modules
+• Scheduler/job registration
+• Odds API provider/engine
+• Market engine
+• Candidate funnel
+• Full-pool rescan
+• Stable refresh
+• Evidence/statistics pipeline
+• Affected tests
+
+Search for stale configuration/comments/documentation directly contradicting intended changes.
+
+Do not rewrite unrelated documentation.
+
+━━━━━━━━━━━━━━━━━━
+
+23. TESTING — DO NOT STOP EARLY
+
+━━━━━━━━━━━━━━━━━━
+
+⚠️ CREDIT RULE: Inspect first. Smallest compatible fix only. No redesign, unrelated refactor, retirement, removal, disabling, replacement, or speculative changes. Preserve existing functionality.
+
+Run:
+
+1. Syntax/compile checks.
+2. Directly affected unit tests.
+3. Player-history tests.
+4. Odds API/config/scope tests.
+5. Sport mapping tests.
+6. Scoring/actionability tests.
+7. Candidate funnel/rescan tests if present.
+8. Evidence/statistics tests if present.
+9. Cache/history tests if present.
+10. FULL TEST SUITE.
+
+If anything fails:
+
+• Determine actual cause.
+• Fix using existing framework.
+• Re-run affected tests.
+• Re-run FULL test suite.
+
+Do not stop after the known 9 failures.
+
+Final state must be verified, not assumed.
+
+━━━━━━━━━━━━━━━━━━
+
+24. STRICT COMPLETION CHECKLIST
+
+━━━━━━━━━━━━━━━━━━
+
+⚠️ CREDIT RULE: Inspect first. Smallest compatible fix only. No redesign, unrelated refactor, retirement, removal, disabling, replacement, or speculative changes. Preserve existing functionality.
+
+DO NOT give me final results until EVERY item below is completed and verified.
+
+☐ Player-history limit/cadence verified
+☐ Temporary 100 testing restriction handled
+☐ max_instances=1 verified
+☐ Misfire grace preserved
+☐ PlayerStatsProvider verified
+☐ DB/upsert path verified
+☐ Tier 1 sports verified against actual enum/mappings
+☐ Tier 2 classification verified
+☐ Odds API Tier-1-only scope verified
+☐ Old MLB-only restriction removed where appropriate
+☐ Tier-2 actionable/delivery path blocked correctly
+☐ MLB cannot incorrectly become actionable
+☐ Tier-1 props are not incorrectly suppressed
+☐ Qualification gate audited for excessive strictness
+☐ Decision + quality gates verified
+☐ UNDER candidate behavior verified
+☐ 1-star props can support valid UNDER candidates
+☐ Weak candidates rejected appropriately
+☐ Stable refresh verified
+☐ Full-pool rescan verified
+☐ Full active-pool rescanning verified
+☐ Continuous monitoring after full scan verified
+☐ Rescan counters verified
+☐ Candidate Funnel verified
+☐ Full-Pool Rescan Funnel verified
+☐ Current-vs-earlier suppression investigated
+☐ 5,000-entry hit-rate cache clearing investigated
+☐ Required historical data confirmed safe
+☐ Memory diagnostic reviewed
+☐ Actionable-pick evidence source identified
+☐ Actionable picks use same underlying evidence source as /picks
+☐ No duplicate evidence architecture created
+☐ Existing betting rules preserved
+☐ Existing commands preserved
+☐ Existing integrations preserved
+☐ No duplicate scheduler jobs
+☐ Syntax checks pass
+☐ Affected tests pass
+☐ Full test suite passes
+☐ No critical errors remain
+☐ No existing functionality retired
+☐ No existing functionality removed
+☐ No existing functionality disabled
+☐ No unrelated architecture changed
+☐ Final implementation reviewed against EVERY requirement
+
+If even ONE checklist item is incomplete, DO NOT report the work as complete.
+
+━━━━━━━━━━━━━━━━━━
+
+25. FINAL REPORT — BEFORE FREEZE
+
+━━━━━━━━━━━━━━━━━━
+
+⚠️ CREDIT RULE: Inspect first. Smallest compatible fix only. No redesign, unrelated refactor, retirement, removal, disabling, replacement, or speculative changes. Preserve existing functionality.
+
+Before freezing, report:
+
+• Files changed
+• Functions changed
+• What was fixed
+• Tests updated and why
+• Full test-suite result
+• Passed count
+• Failed count
+• Remaining warnings/issues
+• Tier-1/Tier-2 verification
+• Confirmation Tier-2 cannot incorrectly become actionable
+• Qualification-gate audit result
+• Full-pool rescan result
+• Candidate Funnel result
+• Evidence-source result
+• Cache-clearing result
+• Confirmation historical/statistical data required for picks was preserved
+• Confirmation no existing functionality was retired/removed/disabled
+• Confirmation no unrelated architecture changed
+
+DO NOT push or deploy yet.
+
+━━━━━━━━━━━━━━━━━━
+
+26. NO GITHUB PUSH YET
+
+━━━━━━━━━━━━━━━━━━
+
+⚠️ CREDIT RULE: Inspect first. Smallest compatible fix only. No redesign, unrelated refactor, retirement, removal, disabling, replacement, or speculative changes. Preserve existing functionality.
+
+Do NOT:
+
+• Commit
+• Force-push
+• Push to GitHub
+• Deploy
+• Publish
+
+until final verification is complete.
+
+I will review the verified state before any GitHub push.
+
+━━━━━━━━━━━━━━━━━━
+
+27. FINAL FREEZE — LAST STEP ONLY
+
+━━━━━━━━━━━━━━━━━━
+
+⚠️ CREDIT RULE: Inspect first. Smallest compatible fix only. No redesign, unrelated refactor, retirement, removal, disabling, replacement, or speculative changes. Preserve existing functionality.
+
+DO NOT FREEZE THE CODE BEFORE ALL VERIFICATION IS COMPLETE.
+
+Only after:
+
+☐ Every requirement completed
+☐ Every checklist item passes
+☐ Affected tests pass
+☐ Full test suite passes
+☐ No critical errors remain
+☐ Tier 1/Tier 2 behavior verified
+☐ Tier-2 actionable path blocked correctly
+☐ Tier-1 candidates not incorrectly suppressed
+☐ Player-history cadence/limits verified
+☐ Full-pool rescan verified
+☐ Candidate Funnel verified
+☐ Evidence pipeline verified
+☐ Cache behavior verified
+☐ Existing framework functionality confirmed intact
+☐ No unrelated functionality removed/retired/disabled
+☐ Final state reviewed against entire checklist
+
+THEN, AND ONLY THEN:
+
+🔒 FREEZE THE CURRENT VERIFIED FRAMEWORK STATE.
+
+After freeze:
+
+• Do not redesign.
+• Do not retire anything.
+• Do not remove existing functionality.
+• Do not make speculative architecture changes.
+• Treat the verified implementation as the new baseline.
+• Future changes must be explicit and incremental.
+• Preserve current verified behavior unless I specifically authorize a change.
+
+THE FREEZE IS THE LAST STEP — NOT THE FIRST.
+
+Do not give me incomplete results. Do not report completion while any checklist item remains unverified.

@@ -239,6 +239,8 @@ class TestBug119FunnelAndStatusCounters:
             "Qualified candidates" in src
             or "Qualified (S/A-tier)" in src
             or "Qualified (S/A/B-tier)" in src
+            or "Qualified (decision" in src
+            or "Qualified for alert" in src
         ), (
             "No 'Qualified' label variant found in commands.py — "
             "funnel qualified-count label is missing"

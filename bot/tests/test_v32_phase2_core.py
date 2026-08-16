@@ -118,10 +118,10 @@ class TestP1EsportsTierOnePicksNotBlocked:
         assert '"OVER"' in src and '"UNDER"' in src
 
     def test_strict_sports_filter_still_active(self):
-        """MLB/NFL strict-sport S-tier requirement is unchanged."""
+        """Tier-2 (MLB/NBA/NFL) strict gate enforced via DB layer — verify call exists."""
         import commands as cmd_mod
         src = inspect.getsource(cmd_mod._cmd_picks_inner)
-        assert "_strict_sports" in src
+        assert "get_top_ud_props_for_picks" in src
 
     def test_mlb_under_still_blocked(self):
         import commands as cmd_mod
@@ -325,10 +325,13 @@ class TestP3PicksDisplayQuality:
         assert "_is_season_future" in src
 
     def test_strict_sports_s_tier_gate_intact(self):
+        # Tier-2 gate (S/A for MLB/NBA/NFL) enforced at DB query level.
         import commands as cmd_mod
+        import database as db_mod
         src = inspect.getsource(cmd_mod._cmd_picks_inner)
-        assert "_strict_sports" in src
-        assert "score_tier" in src or '"S"' in src
+        db_src = inspect.getsource(db_mod.Database.get_top_ud_props_for_picks)
+        assert "get_top_ud_props_for_picks" in src  # gate enforced via DB call
+        assert "score_tier" in db_src               # DB query filters on score_tier
 
     def test_no_low_conf_prop_would_pass_db_gate(self):
         """A prop with NULL score_tier cannot appear — the DB gate blocks it."""

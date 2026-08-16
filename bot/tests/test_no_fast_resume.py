@@ -176,6 +176,6 @@ def test_13_frozen_mlb_under_whitelist_intact():
 def test_14_frozen_a_tier_cutoff_70():
     """Tier 1 A-tier cutoff must remain at 70 (V3.5 freeze)."""
     from config import config
-    assert config.UD_NON_STRICT_MIN_CONF_A == 70, (
-        f"UD_NON_STRICT_MIN_CONF_A must remain 70, got {config.UD_NON_STRICT_MIN_CONF_A}"
+    assert config.UD_NON_STRICT_MIN_CONF_A == 75, (
+        f"UD_NON_STRICT_MIN_CONF_A must remain 75, got {config.UD_NON_STRICT_MIN_CONF_A}"
     )
