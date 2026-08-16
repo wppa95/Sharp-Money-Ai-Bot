@@ -266,7 +266,9 @@ class Config:
     # Monthly Odds API request cap.  The Odds API free tier allows 500
     # requests/month.  Set to 0 to disable budget enforcement entirely.
     # Telegram warnings fire at 75 %, 90 %, and 100 % of this value.
-    ODDS_API_MONTHLY_BUDGET: int = int(os.environ.get("ODDS_API_MONTHLY_BUDGET", "500"))
+    ODDS_API_MONTHLY_BUDGET: int = int(
+        os.environ.get("ODDS_API_MONTHLY_BUDGET", "20000")
+    )
 
     # ── Alert limits ─────────────────────────────────────────────────────────
     # Maximum PrizePicks A/B-tier alerts sent per calendar day (UTC).
@@ -298,7 +300,7 @@ class Config:
     # Rolling window length in seconds (default 5 minutes).
     TG_RATE_WINDOW_SECONDS: int = int(os.environ.get("TG_RATE_WINDOW_SECONDS", "300"))
     # Max actionable alerts per window (Layer 1 budget).
-    # Raised from 5 → 10 to support the 8 Tier-1 + 2 Tier-2 target distribution.
+
     TG_RATE_MAX_PER_WINDOW: int = int(os.environ.get("TG_RATE_MAX_PER_WINDOW", "10"))
     # Per-tier caps applied by the ranked delivery queue (before the rate limiter).
     # Tier 1 = every sport EXCEPT NBA/MLB/NFL.  Tier 2 = NBA, MLB, NFL only.
@@ -316,13 +318,13 @@ class Config:
     # ── Per-tier confidence minimums ─────────────────────────────────────────
     # Alerts for each tier only fire when decision.confidence ≥ the minimum
     # for that tier.  Set all to 0 to disable (score-tier gate still applies).
-    UD_MIN_CONF_S: int = int(os.environ.get("UD_MIN_CONF_S", "80"))
-    UD_MIN_CONF_A: int = int(os.environ.get("UD_MIN_CONF_A", "70"))
+    UD_MIN_CONF_S: int = int(os.environ.get("UD_MIN_CONF_S", "85"))
+    UD_MIN_CONF_A: int = int(os.environ.get("UD_MIN_CONF_A", "75"))
     UD_MIN_CONF_B: int = int(os.environ.get("UD_MIN_CONF_B", "55"))
     # Relaxed A/B confidence floors for non-strict sports (all except MLB/NFL).
     # Allows the pipeline to surface more legitimate non-MLB/NFL A and B picks
     # during stress-testing while leaving MLB/NFL thresholds untouched.
-    UD_NON_STRICT_MIN_CONF_A: int = int(os.environ.get("UD_NON_STRICT_MIN_CONF_A", "70"))
+    UD_NON_STRICT_MIN_CONF_A: int = int(os.environ.get("UD_NON_STRICT_MIN_CONF_A", "75"))
     UD_NON_STRICT_MIN_CONF_B: int = int(os.environ.get("UD_NON_STRICT_MIN_CONF_B", "45"))
     # Minimum bet_quality_score (= decision.confidence) for strict sports (MLB/NFL).
     # A strict-sport pick must pass BOTH S-tier classification AND this BQ floor.
@@ -338,7 +340,9 @@ class Config:
     # Data collection, scoring, and DB writes continue for all suppressed sports.
     # Set ALERT_DISABLED_SPORTS="" to re-enable all sports (current default).
     # Set ALERT_DISABLED_SPORTS="NFL,NBA" to suppress specific sports.
-    # NBA and NFL are now Tier 1 priority sports — enabled by default.
+    # NBA, NFL, and MLB are Tier 2 sports.
+    # They are currently outside the active Tier 1 betting focus and may be
+    # temporarily suppressed from Telegram alerts.
     ALERT_DISABLED_SPORTS_RAW: str = os.environ.get("ALERT_DISABLED_SPORTS", "")
 
     # ── Full-Pool Rescan (FPR) ────────────────────────────────────────────────
