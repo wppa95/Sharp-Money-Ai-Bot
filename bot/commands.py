@@ -1321,16 +1321,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     ud_props = await _db.get_top_ud_props_for_picks(limit=limit * 3, since_hours=_since_hours)
     ud_props = [p for p in ud_props if not _is_season_future(p.stat_type)]
 
-    # Enforce strict-sport tier policy — mirrors the actual alert delivery pipeline.
-    # MLB and NFL require S-tier; A/B-tier props for those sports are never alerted
-    # so they must not appear in an "Actionable Picks" display either.
-    from config import config as _picks_cfg
-    _strict_sports = {s.upper() for s in _picks_cfg.ud_strict_alert_sports}
-    ud_props = [
-        p for p in ud_props
-        if (p.sport or "").upper() not in _strict_sports
-        or (p.score_tier or "") == "S"
-    ]
+    
 
     if sport_filter:
         ud_props = [p for p in ud_props if p.sport.upper() == sport_filter]
