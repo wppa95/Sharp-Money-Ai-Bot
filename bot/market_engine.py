@@ -1919,19 +1919,8 @@ async def underdog_job(context) -> None:
                     # would hammer the stats API; they are populated lazily on the
                     # first qualifying incremental event.  No alerts are sent.
                     ud_history = await db.get_ud_prop_history(player, stat_type, limit=30)
-                    _hist_snap = None
-                    try:
-                        from providers.player_history import get_player_history_provider
-                        _hist_snap = await get_player_history_provider().get_snapshot(
-                            db,
-                            player,
-                            snap.sport or "UNKNOWN",
-                            stat_type,
-                            snap.line or 0.0,
-                            ud_history=ud_history,
-                        )
-                    except Exception:
-                        _hist_snap = None
+                    _hist_snap = None  # cold-start: no per-prop PlayerStatsProvider fetch
+
                     score = score_ud_prop(
                         player_name        = player,
                         stat_type          = stat_type,
