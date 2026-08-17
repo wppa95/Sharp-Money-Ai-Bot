@@ -558,8 +558,8 @@ class PlayerStatsProvider:
         if athlete_id is None:
             return []
 
-        url  = (
-            f"https://site.api.espn.com/apis/site/v2/sports"
+        url = (
+            f"https://site.web.api.espn.com/apis/common/v3/sports"
             f"/{sport_slug}/{league_slug}/athletes/{athlete_id}/gamelog"
         )
         data = await self._get_json(url)
@@ -634,40 +634,53 @@ class PlayerStatsProvider:
                     opponent     = opp,
                     source       = "espn_gamelog",
                 ))
-        else:
-            # Flat mode: one category block covers all stats
-            if not categories:
-                return []
-            # Try to find the right stat map
-            stat_map = _get_stat_map(sport)
-            target_labels = stat_map.get(stat_lower) if stat_map else None
-            if target_labels is None:
-                logger.debug("ESPN %s: no mapping for stat %r", sport, stat_lower)
-                return []
+            else:
+                    # Flat sports (WNBA, NBA, CFB, etc.) — adapted for new common/v3 structure
+                    stat_map = _get_stat_map(sport)
+                    target_labels = stat_map.get(stat_lower) if stat_map else None
+                    if target_labels is None:
+                        logger.debug("ESPN %s: no mapping for stat %r", sport, stat_lower)
+                        return []
 
-            # Use first category's labels (flat structure)
-            flat_labels = categories[0].get("labels") or [] if categories else []
+                    labels = data.get("labels") or []
 
-            for event_id, event in events_obj.items():
-                if str(event_id) not in regular_ids:
-                    continue
-                flat_stats = event.get("stats") or []
-                val = _sum_espn_labels(flat_labels, flat_stats, target_labels, stat_lower)
-                if val is None:
-                    continue
-                gd = _event_game_date(event)
-                if not gd:
-                    continue
-                opp = _event_opponent(event)
-                results.append(RawGameResult(
-                    player_name  = player_name,
-                    sport        = sport,
-                    stat_type    = stat_lower,
-                    game_date    = gd,
-                    actual_value = val,
-                    opponent     = opp,
-                    source       = "espn_gamelog",
-                ))
+                    for st in season_types:
+                        display = (st.get("displayName") or "").lower()
+                        if "preseason" in display or "postseason" in display or "playoff" in display:
+                            continue
+
+                        for cat in (st.get("categories") or []):
+                            for ev in (cat.get("events") or []):
+                                event_id = str(ev.get("eventId") or "")
+                                if regular_ids and event_id not in regular_ids:
+                                    continue
+
+                                flat_stats = ev.get("stats") or []
+                                val = _sum_espn_labels(
+                                    labels,
+                                    flat_stats,
+                                    target_labels,
+                                    stat_lower,
+                                )
+                                if val is None:
+                                    continue
+
+                                meta = events_obj.get(event_id) or {}
+                                gd = _event_game_date(meta) or _parse_date(meta.get("gameDate"))
+                                if not gd:
+                                    continue
+
+                                opp = _event_opponent(meta)
+
+                                results.append(RawGameResult(
+                                    player_name=player_name,
+                                    sport=sport,
+                                    stat_type=stat_lower,
+                                    game_date=gd,
+                                    actual_value=val,
+                                    opponent=opp,
+                                    source="espn_gamelog",
+                                ))
 
         logger.debug(
             "ESPN %s: %s / %s → %d game results",
@@ -676,48 +689,61 @@ class PlayerStatsProvider:
         return results
 
     async def _espn_athlete_id(
-        self,
-        player_name: str,
-        sport: str,
-        sport_slug: str,
-        league_slug: str,
-    ) -> Optional[int]:
-        cache_key = (_normalize(player_name), sport_slug, league_slug)
-        if cache_key in self._id_cache:
-            return self._id_cache[cache_key]
+            self,
+            player_name: str,
+            sport: str,
+            sport_slug: str,
+            league_slug: str,
+        ) -> Optional[int]:
+            cache_key = (_normalize(player_name), sport_slug, league_slug)
+            if cache_key in self._id_cache:
+                return self._id_cache[cache_key]
 
-        url = (
-            f"https://site.api.espn.com/apis/site/v2/sports"
-            f"/{sport_slug}/{league_slug}/athletes"
-            f"?searchTerm={quote_plus(player_name)}&limit=5&active=true"
-        )
-        data = await self._get_json(url)
-        aid: Optional[int] = None
+            url = (
+                "https://site.api.espn.com/apis/common/v3/search"
+                f"?query={quote_plus(player_name)}&limit=8&type=player"
+            )
+            data = await self._get_json(url)
+            aid: Optional[int] = None
 
-        if data:
-            items = (data.get("items") or data.get("athletes") or [])
-            for item in items:
-                full_name = (
-                    item.get("displayName")
-                    or item.get("fullName")
-                    or item.get("name", "")
-                )
-                if _names_match(full_name, player_name):
+            if data:
+                for item in (data.get("items") or []):
+                    full_name = (
+                        item.get("displayName")
+                        or item.get("fullName")
+                        or item.get("name", "")
+                    )
+                    if not _names_match(full_name, player_name):
+                        continue
+
+                    item_league = (item.get("league") or "").lower()
+                    item_sport = (item.get("sport") or "").lower()
+
+                    if (
+                        item_league
+                        and item_league != league_slug.lower()
+                        and item_sport != sport_slug.lower()
+                    ):
+                        continue
+
                     raw_id = item.get("id")
                     if raw_id is not None:
                         try:
                             aid = int(raw_id)
+                            break
                         except (TypeError, ValueError):
                             pass
-                    break
 
-        if aid is None:
-            logger.debug(
-                "ESPN: athlete ID not found for %r (%s/%s)",
-                player_name, sport_slug, league_slug,
-            )
-        self._id_cache[cache_key] = aid
-        return aid
+            if aid is None:
+                logger.debug(
+                    "ESPN: athlete ID not found for %r (%s/%s)",
+                    player_name,
+                    sport_slug,
+                    league_slug,
+                )
+
+            self._id_cache[cache_key] = aid
+            return aid
 
     # ── Soccer: multi-league ESPN search ─────────────────────────────────────
 
