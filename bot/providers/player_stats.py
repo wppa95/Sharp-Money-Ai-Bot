@@ -634,8 +634,10 @@ class PlayerStatsProvider:
                     opponent     = opp,
                     source       = "espn_gamelog",
                 ))
-            else:
-                    # Flat sports (WNBA, NBA, CFB, etc.) — adapted for new common/v3 structure
+                return results
+
+                if not is_nfl:
+                            # Flat sports (WNBA, NBA, CFB, etc.) — adapted for new common/v3 structure
                     stat_map = _get_stat_map(sport)
                     target_labels = stat_map.get(stat_lower) if stat_map else None
                     if target_labels is None:
