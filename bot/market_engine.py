@@ -1251,32 +1251,12 @@ async def underdog_job(context) -> None:
     # is preserved without duplicating heavy scoring work.
     global _ud_full_scan_running
     if _ud_full_scan_running:
-        logger.info("underdog_job: full scan in progress — running fast new-prop fetch only")
-        try:
-            _fp_snaps = await _registry.fetch_pickem()
-            if _fp_snaps:
-                _fp_ud = [s for s in _fp_snaps if s.sportsbook == "Underdog"]
-                _fp_known = await db.get_known_underdog_prop_keys()
-                _fp_new_count = sum(
-                    1 for s in _fp_ud
-                    if "[REMOVED]" not in (s.selection or "")
-                    and (
-                        s.player or "",
-                        _extract_ud_stat_type(s.selection, s.player, s.line),
-                    ) not in _fp_known
-                )
-                if _fp_new_count:
-                    logger.info(
-                        "underdog_job [fast-fetch]: %d new props detected — "
-                        "will be processed when primary scan completes",
-                        _fp_new_count,
-                    )
+            logger.info(
+                "underdog_job: full scan in progress — deferring overlapping trigger"
+            )
             if _health:
-                _health.record_provider_fetch("Underdog")
                 _health.record_job_run("underdog_job")
-        except Exception as _fp_exc:
-            logger.warning("underdog_job [fast-fetch]: error: %s", _fp_exc)
-        return
+            return
 
     _ud_full_scan_running = True
 

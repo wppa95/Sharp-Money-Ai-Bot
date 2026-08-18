@@ -5,7 +5,7 @@ Verifies that the performance fix (bulk snapshot save instead of per-prop indivi
 saves) does not alter any V3.5-frozen behaviour.  14 regression items:
 
  1. Poll interval configured to 120 s
- 2. max_instances=1 enforced on underdog_monitor job
+ 2. max_instances=2 enforced on underdog_monitor job
  3. Full active prop feed is monitored each cycle (no sports/markets silently dropped)
  4. No sports removed from UD_ALERT_SPORTS
  5. Scoring model unchanged — compute_market_quality is still called
