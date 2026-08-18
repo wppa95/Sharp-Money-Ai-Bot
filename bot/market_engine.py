@@ -505,6 +505,7 @@ async def _fetch_and_compute_hit_rates(
     sport: str,
     stat_type: str,
     current_line: float,
+    allow_remote: bool = True,
 ) -> "Optional[object]":
     """
     Fetch fresh game results (at most once per calendar day per player/stat),
@@ -514,12 +515,12 @@ async def _fetch_and_compute_hit_rates(
     """
     from engine.player_results import compute_hit_rates
 
-    provider  = _get_player_stats_provider()
     today     = datetime.utcnow().date().isoformat()
     cache_key = (player_name, sport, stat_type.lower().strip(), today)
 
     try:
-        if cache_key not in _player_result_fetch_cache:
+        if allow_remote and cache_key not in _player_result_fetch_cache:
+            provider = _get_player_stats_provider()
             # Guard against unbounded growth: clear the whole set when it exceeds the
             # ceiling.  The date component in each key means old entries are already
             # bypassed by logic; this just frees the memory they occupy.
@@ -3482,7 +3483,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             if 30 <= _sr_score.total <= 40:
                 try:
                     _sr_hits_wl = await _fetch_and_compute_hit_rates(
-                        db, _sr_player, _sr_sport, _sr_stat, _sr_line
+                        db, _sr_player, _sr_sport, _sr_stat, _sr_line, allow_remote=False
                     )
                     _sr_dec_wl = _sr_decide(
                         score        = _sr_score,
@@ -3529,7 +3530,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 continue
 
             _sr_hits = await _fetch_and_compute_hit_rates(
-                db, _sr_player, _sr_sport, _sr_stat, _sr_line
+                db, _sr_player, _sr_sport, _sr_stat, _sr_line, allow_remote=False
             )
             _sr_dec = _sr_decide(
                 score        = _sr_score,
@@ -3826,7 +3827,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
                 )
                 _wl_hits = await _fetch_and_compute_hit_rates(
-                    db, _wl_player, _wl_sport, _wl_stat, _wl_cur_line,
+                    db, _wl_player, _wl_sport, _wl_stat, _wl_cur_line, allow_remote=False,
                 )
                 _wl_dec = _wl_decide(
                     score        = _wl_score,
@@ -4230,7 +4231,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
                 )
                 _fpr_hits = await _fetch_and_compute_hit_rates(
-                    db, _fpr_player, _fpr_sport, _fpr_stat, _fpr_line,
+                    db, _fpr_player, _fpr_sport, _fpr_stat, _fpr_line, allow_remote=False,
                 )
                 _fpr_dec = _fpr_decide(
                     score        = _fpr_score,

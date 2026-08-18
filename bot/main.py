@@ -301,7 +301,7 @@ async def post_init(application: Application) -> None:
         # Starts 90 s after launch to let the first underdog_job cold-start complete.
         jq.run_repeating(
             _stable_refresh_job,
-            interval=120,
+            interval=240,
             first=90,
             name="stable_refresh",
             job_kwargs={"max_instances": 1, "misfire_grace_time": 60},
@@ -326,7 +326,7 @@ async def post_init(application: Application) -> None:
         # Opportunity grader — every 6 hours (grades completed prop opportunities)
         jq.run_repeating(_grade_opportunities_job,  interval=21600, first=3600, name="opportunity_grader")
         from player_history_job import player_history_collector_job
-        jq.run_repeating(player_history_collector_job, interval=120, first=60, name="player_history_collector", job_kwargs={"max_instances": 1, "misfire_grace_time": 120})
+        jq.run_repeating(player_history_collector_job, interval=240, first=60, name="player_history_collector", job_kwargs={"max_instances": 1, "misfire_grace_time": 120})
         # API budget check — every 15 minutes
         jq.run_repeating(_budget_check_job,    interval=900,                                first=900, name="budget_checker")
         # PropLineHistory prune — once per day (keeps last 14 days)
@@ -342,7 +342,7 @@ async def post_init(application: Application) -> None:
                 name="season_checker",
             )
         logger.info(
-            "Jobs scheduled — underdog: every %ds, stable_refresh: every 120s, "
+            "Jobs scheduled — underdog: every %ds, stable_refresh: every 240s, "
             "pregame: every %ds, season_check: every %ds, heartbeat: every 60s "
             "[player_props_fetcher disabled — PP pipeline off]",
             config.UNDERDOG_POLL_INTERVAL,

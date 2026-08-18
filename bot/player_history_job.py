@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 # Maximum PlayerStats API calls per 2-minute cycle.
 # Player count is unlimited — the full Tier-1 active pool is targeted.
 # This cap limits API spend per cycle, not the number of players tracked.
-_API_CALL_TARGET = 250
+_API_CALL_TARGET = 1000
 
 # Tier-2 sports are excluded from player-history collection.
 # Their alert pipeline follows separate Tier-2 rules.
