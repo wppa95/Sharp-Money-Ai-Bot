@@ -115,6 +115,10 @@ class TestIsTier2Sport:
     def test_nfl_is_tier2(self):
         assert me._is_tier2_sport("NFL") is True
 
+    @pytest.mark.parametrize("sport", ["NCAA", "NCAAF", "CFB"])
+    def test_college_football_aliases_are_suppressed(self, sport):
+        assert me._is_tier2_sport(sport) is True
+
     def test_nba_lowercase_is_tier2(self):
         assert me._is_tier2_sport("nba") is True
 
@@ -189,6 +193,16 @@ class TestDeliverUnderdogBackstop:
         )
         assert result.sent is False
 
+    @pytest.mark.parametrize("sport", ["NCAA", "NCAAF", "CFB"])
+    @pytest.mark.asyncio
+    async def test_college_football_alias_returns_not_sent(self, sport):
+        delivery = self._make_delivery()
+        result = await delivery.deliver_underdog(
+            player_name="College Player", team="COL", sport=sport,
+            stat_type="Passing Yards", old_line=250.5, new_line=255.5,
+        )
+        assert result.sent is False
+
     @pytest.mark.asyncio
     async def test_nba_lowercase_returns_not_sent(self):
         """Lowercase sport='nba' must also be blocked."""
@@ -207,9 +221,11 @@ class TestDeliverUnderdogBackstop:
         assert "Soccer" not in alerts_mod._TIER2_SPORTS_BLOCK
 
     def test_tier2_constant_contains_correct_sports(self):
-        """_TIER2_SPORTS_BLOCK must contain exactly NBA, MLB, NFL."""
+        """Existing blocks remain, with college-football aliases added."""
         import alerts as alerts_mod
-        assert alerts_mod._TIER2_SPORTS_BLOCK == frozenset({"NBA", "MLB", "NFL"})
+        assert alerts_mod._TIER2_SPORTS_BLOCK == frozenset({
+            "NBA", "MLB", "NFL", "NCAA", "NCAAF", "CFB",
+        })
 
     @pytest.mark.asyncio
     async def test_backstop_prevents_send_message_for_nba(self):
@@ -470,8 +486,10 @@ class TestScanningUnchanged:
         assert "_full_pool_rescan_job" in self._src()
 
     def test_tier2_sports_set_unchanged(self):
-        """_TIER2_SPORTS must still contain exactly NBA, MLB, NFL."""
-        assert me._TIER2_SPORTS == frozenset({"NBA", "MLB", "NFL"})
+        """Existing Tier 2 sports remain, with football aliases suppressed."""
+        assert me._TIER2_SPORTS == frozenset({
+            "NBA", "MLB", "NFL", "NCAA", "NCAAF", "CFB",
+        })
 
 
 # ── Restart / recovery cannot replay Tier 2 alerts ───────────────────────────

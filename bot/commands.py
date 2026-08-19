@@ -26,6 +26,7 @@ from alerts import (
     format_probability,
     format_ev,
     EMOJI,
+    is_telegram_suppressed_sport,
 )
 from config import config
 from database import Database
@@ -1319,7 +1320,11 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     # ── 1. Underdog props ─────────────────────────────────────────────────────
     logger.info("cmd_picks: fetching UD props (limit=%d sport=%s)", limit * 3, sport_filter)
     ud_props = await _db.get_top_ud_props_for_picks(limit=limit * 3, since_hours=_since_hours)
-    ud_props = [p for p in ud_props if not _is_season_future(p.stat_type)]
+    ud_props = [
+        p for p in ud_props
+        if not _is_season_future(p.stat_type)
+        and not is_telegram_suppressed_sport(p.sport)
+    ]
 
     
 
@@ -2108,7 +2113,11 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # ── 1. Fetch Underdog props (same pool as /picks) ─────────────────────────
     ud_props = await _db.get_top_ud_props_for_picks(limit=30, since_hours=6)
     # Display filter: hide season-long futures (stored & tracked as normal).
-    ud_props = [p for p in ud_props if not _is_season_future(p.stat_type)]
+    ud_props = [
+        p for p in ud_props
+        if not _is_season_future(p.stat_type)
+        and not is_telegram_suppressed_sport(p.sport)
+    ]
     if not ud_props:
         await update.message.reply_text(
             "🎯 <b>Sharp Money Prop Slip</b>\n\n"
@@ -2406,6 +2415,8 @@ async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             lines.append(f"  <i>{len(alerted_opps)} shown (last 24h)</i>")
             lines.append("")
             for r in alerted_opps:
+                if is_telegram_suppressed_sport(getattr(r, "sport", None)):
+                    continue
                 _lv   = float(getattr(r, "line_value", 0) or 0)
                 _ts   = getattr(r, "alert_sent_at", None)
                 _ts_str = _fmt_user_ts(_ts)

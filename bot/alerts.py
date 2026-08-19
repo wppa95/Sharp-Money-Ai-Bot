@@ -565,7 +565,14 @@ def format_start_message() -> str:
 # Sports in this set are monitored, scored, and stored normally, but Telegram
 # delivery is suppressed.  Module-level so tests can patch it when verifying
 # sport-specific formatting independent of the delivery block.
-_TIER2_SPORTS_BLOCK: frozenset[str] = frozenset({"NBA", "MLB", "NFL"})
+_TIER2_SPORTS_BLOCK: frozenset[str] = frozenset({
+    "NBA", "MLB", "NFL", "NCAA", "NCAAF", "CFB",
+})
+
+
+def is_telegram_suppressed_sport(sport: Optional[str]) -> bool:
+    """Return whether a sport is monitored but must not reach Telegram."""
+    return (sport or "").upper() in _TIER2_SPORTS_BLOCK
 
 
 # ── Low-level Telegram senders ────────────────────────────────────────────────
@@ -611,7 +618,7 @@ async def broadcast_alert(
     # ── AUTHORITATIVE Tier 2 Telegram backstop ────────────────────────────────
     # This is the FINAL gate before bot.send_message().  Even if every upstream
     # guard fails, a Tier 2 sport can never reach the actual Telegram API call.
-    if sport and sport.upper() in _TIER2_SPORTS_BLOCK:
+    if is_telegram_suppressed_sport(sport):
         logger.info(
             "broadcast_alert: Tier 2 Telegram blocked — sport=%s  (no message sent)", sport
         )
@@ -1007,7 +1014,7 @@ class AlertDelivery:
         """
         # ── Tier 2 Telegram block (PP path) ─────────────────────────────────────
         _pp_sport = getattr(getattr(opp, "pp_line", None), "sport", None) or ""
-        if _pp_sport.upper() in _TIER2_SPORTS_BLOCK:
+        if is_telegram_suppressed_sport(_pp_sport):
             logger.info(
                 "deliver_pp: Tier 2 Telegram blocked — sport=%s player=%s stat=%s",
                 _pp_sport,
@@ -1128,7 +1135,7 @@ class AlertDelivery:
         # NBA / MLB / NFL props are scanned, scored, and stored normally, but
         # Telegram delivery is suppressed here — the authoritative delivery boundary.
         # A second backstop lives in broadcast_alert() for additional defense-in-depth.
-        if (sport or "").upper() in _TIER2_SPORTS_BLOCK:
+        if is_telegram_suppressed_sport(sport):
             logger.info(
                 "deliver_underdog: Tier 2 Telegram blocked — sport=%s player=%s stat=%s",
                 sport, player_name, stat_type,

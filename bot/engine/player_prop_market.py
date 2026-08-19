@@ -734,8 +734,8 @@ async def run_player_prop_market_cycle(
 
         try:
             # ── Tier 2 Telegram block (temporary) ────────────────────────────────
-            _T2 = frozenset({"NBA", "MLB", "NFL"})
-            if sport.upper() in _T2:
+            from alerts import is_telegram_suppressed_sport
+            if is_telegram_suppressed_sport(sport):
                 logger.debug("player_prop_market: Tier 2 block — sport=%s player=%s", sport, player)
                 continue
             message = format_player_prop_market_alert(comp)

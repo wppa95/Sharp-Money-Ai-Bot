@@ -955,11 +955,13 @@ _DELIVERY_TIER_BASE: dict[str, float] = {
 # CS2, Dota 2, LoL, VAL, MMA, Badminton, Table Tennis, Racing, CFB, CFL, KBO,
 # NPB, and every other supported non-NBA/MLB/NFL sport).
 # This is the CANONICAL source of truth — do NOT expand it.
-_TIER2_SPORTS: frozenset[str] = frozenset({"NBA", "MLB", "NFL"})
+_TIER2_SPORTS: frozenset[str] = frozenset({
+    "NBA", "MLB", "NFL", "NCAA", "NCAAF", "CFB",
+})
 
 
 def _is_tier2_sport(sport: str) -> bool:
-    """Return True iff sport is Tier 2 (NBA, MLB, or NFL only)."""
+    """Return True iff Telegram delivery is suppressed for this sport."""
     return (sport or "").upper() in _TIER2_SPORTS
 
 

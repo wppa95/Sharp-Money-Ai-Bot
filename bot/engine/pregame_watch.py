@@ -403,13 +403,14 @@ class PregameWatchEngine:
         from alerts import broadcast_alert
 
         for key, entry in targets:
-            # Alert suppression — controlled by ALERT_DISABLED_SPORTS env var (default: NFL,NBA).
+            # Telegram suppression does not affect monitoring or watch state.
             try:
-                from config import config as _cfg
-                _disabled = _cfg.alert_disabled_sports
+                from alerts import is_telegram_suppressed_sport
             except Exception:
-                _disabled = {"NFL", "NBA"}
-            if entry.sport.upper() in _disabled:
+                is_telegram_suppressed_sport = lambda _sport: (
+                    (_sport or "").upper() in {"NBA", "MLB", "NFL", "NCAA", "NCAAF", "CFB"}
+                )
+            if is_telegram_suppressed_sport(entry.sport):
                 continue
 
             player, stat, _ = key
