@@ -1,0 +1,354 @@
+🔴 CONTINUE TASK #137 — INSTRUMENTATION ONLY
+
+The instrumentation is in place and the bot has restarted successfully.
+
+Do NOT optimize anything yet.
+
+We need the actual provider-level measurements before deciding what to change.
+
+⸻
+
+1. KEEP THE CURRENT SYSTEM EXACTLY AS-IS
+
+Do NOT change:
+
+* Underdog cadence = 120 seconds
+* Stable Refresh = 240 seconds
+* FPR = 300 seconds
+* Underdog max_instances=1
+* Stable Refresh max_instances=1
+* FPR max_instances=1
+* Current batch sizes
+* Current concurrency
+* Current monitoring/rotation architecture
+* Existing scoring behavior
+* Existing evidence behavior
+* Existing provider behavior
+* Telegram delivery rules
+
+Do NOT fix unrelated stale tests unless they are required to validate the instrumentation itself.
+
+This task is measurement only.
+
+⸻
+
+2. LET THE CURRENT CYCLE FINISH NATURALLY
+
+The current Underdog cycle is already running.
+
+Do NOT:
+
+* Interrupt it
+* Restart it again
+* Reduce the batch
+* Increase the batch
+* Change scheduling
+* Bypass evidence
+* Disable providers
+* Add caching
+* Add retries
+* Remove provider calls
+
+Let the existing cycle finish naturally.
+
+Then collect the required measurements from subsequent normal post-restore cycles.
+
+⸻
+
+3. OPEN DOTA IS A SPECIFIC INVESTIGATION TARGET
+
+The console is showing a lot of repeated Dota player-name warnings, such as player-name lookup failures.
+
+This is now a priority measurement target.
+
+Do NOT assume OpenDota is the bottleneck.
+
+Measure it.
+
+For every Underdog cycle, capture:
+
+OpenDota
+
+* Total OpenDota requests
+* Successful OpenDota requests
+* Failed OpenDota requests
+* "player name not found" count
+* Other OpenDota errors
+* Retry count
+* Duplicate player lookups
+* Unique players requested
+* Total OpenDota latency
+* Average latency
+* Median latency
+* Maximum latency
+* Percentage of total cycle time
+* Whether calls are sequential or concurrent
+* Number of props that triggered OpenDota enrichment
+
+Most importantly:
+
+Determine whether the same unresolved Dota players are being looked up repeatedly.
+
+Do NOT fix this yet.
+
+We need to know whether the warnings represent:
+
+* harmless logging
+* excessive provider calls
+* duplicate lookups
+* failed lookups being retried
+* failed lookups consuming substantial wall-clock time
+
+⸻
+
+4. MEASURE EVERY OTHER PROVIDER THE SAME WAY
+
+Do not focus only on OpenDota.
+
+For every external provider involved in the scoring/evidence path, capture:
+
+* Provider name
+* Request count
+* Success count
+* Failure count
+* Retry count
+* Duplicate requests
+* Unique entities requested
+* Total latency
+* Average latency
+* Median latency
+* Maximum latency
+* Percentage of total cycle
+* Number of props triggering the provider
+
+This should identify whether OpenDota is actually the dominant provider bottleneck or whether another provider is responsible.
+
+⸻
+
+5. ISOLATE THE SCORING/EVIDENCE BLOCK
+
+The previous instrumentation showed:
+
+Scoring + evidence = ~84.75% of normal Underdog cycle time.
+
+Now break that block down further.
+
+Measure separately:
+
+A. Core scoring
+
+* BQ calculation
+* Confidence
+* Market Quality
+* Movement intelligence
+* Projection/current-line value
+* Sharp Confidence
+
+B. Evidence processing
+
+* Evidence lookup
+* Evidence normalization
+* Evidence completeness
+* Historical evidence assembly
+
+C. Provider enrichment
+
+Break down by provider.
+
+D. Database work
+
+Measure:
+
+* Reads
+* Writes
+* Opportunity persistence
+* Intelligence payload persistence
+* Grading/tracking persistence
+* Snapshot persistence
+
+Do not add per-prop database timing records.
+
+Use aggregated timers.
+
+⸻
+
+6. MEASURE DUPLICATE WORK
+
+Specifically determine whether the same work is being performed repeatedly within a single cycle.
+
+Look for:
+
+* Same player requested multiple times
+* Same provider lookup repeated
+* Same evidence lookup repeated
+* Same database lookup repeated
+* Same scoring operation repeated
+* Same Dota player lookup repeated
+
+Do not add caching yet.
+
+Just measure the duplication.
+
+⸻
+
+7. MEASURE JOB INTERACTION
+
+For every Underdog cycle, record whether these jobs overlap:
+
+* Underdog monitor
+* Stable Refresh
+* FPR
+* Player History
+
+Record:
+
+* Overlap start
+* Overlap end
+* Duration of overlap
+* Which jobs were active simultaneously
+
+We need to determine whether the long scoring/evidence stage is being amplified by shared runtime/provider/database contention.
+
+⸻
+
+8. REQUIRED NORMAL-CYCLE SAMPLE
+
+After cold-start is complete, collect at least:
+
+* 3 completed normal Underdog cycles
+* 2 Stable Refresh cycles
+* 1 FPR cycle
+
+For each normal Underdog cycle report:
+
+Metric	Required
+Cycle ID	Yes
+Start	Yes
+End	Yes
+Total duration	Yes
+Props	Yes
+Batch size	Yes
+Props/sec	Yes
+Scoring duration	Yes
+Evidence duration	Yes
+Provider duration	Yes
+DB duration	Yes
+Ranking/delivery duration	Yes
+Final bookkeeping	Yes
+
+⸻
+
+9. FINAL BOTTLENECK REPORT
+
+After the measurements are complete, report:
+
+Underdog
+
+* Cycle 1
+* Cycle 2
+* Cycle 3
+* Average
+* Median
+* Slowest
+* Average props
+* Average props/sec
+
+Stage breakdown
+
+For each stage:
+
+* Duration
+* Percentage of total cycle
+
+Provider breakdown
+
+For each provider:
+
+* Requests
+* Failures
+* Retries
+* Duplicate lookups
+* Total latency
+* Percentage of cycle
+
+OpenDota specifically
+
+Clearly state:
+
+OpenDota accounts for X% of the normal cycle time.
+
+or
+
+OpenDota accounts for only X seconds / X% of the normal cycle and is not the primary bottleneck.
+
+Do not guess.
+
+⸻
+
+10. IMPORTANT — NO OPTIMIZATION YET
+
+Do NOT implement any optimization after finding a bottleneck.
+
+Once the measurements are complete:
+
+1. Identify the measured bottleneck.
+2. Explain why it is the bottleneck.
+3. Propose the smallest targeted optimization.
+4. STOP.
+
+I will review the proposed optimization before any runtime behavior is changed.
+
+⸻
+
+11. PRESERVE ALL RECENT WORK
+
+Do NOT regress:
+
+* Tier 1 delivery gate
+* Tier 2 behavior
+* BQ/MQ thresholds
+* /picks intelligence
+* Sharp Confidence
+* Evidence completeness
+* Current-line value
+* Movement intelligence
+* CLV
+* Grading
+* Calibration
+* Continuous rotation
+* Stable Refresh
+* FPR
+* Active-pool behavior
+* Existing Telegram safety/dedup rules
+
+⸻
+
+🔴 FINAL RULE
+
+Instrumentation only.
+
+No optimization.
+
+No scheduler changes.
+
+No cadence changes.
+
+No batch-size changes.
+
+No concurrency changes.
+
+No provider changes.
+
+No caching.
+
+No bypassing evidence.
+
+No architecture changes.
+
+Collect the actual provider-level and stage-level timing data first.
+
+Especially investigate the repeated Dota/OpenDota player-name warnings.
+
+Then report the measured bottleneck and proposed smallest fix.
+
+Do not implement the fix until I approve it.
