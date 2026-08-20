@@ -1,0 +1,286 @@
+🔴 NEXT STEP — ISOLATE THE SCORING/EVIDENCE BOTTLENECK
+
+The diagnostic results are accepted.
+
+We now have enough evidence to confirm:
+
+* Normal Underdog monitoring is not sustainable within 120 seconds.
+* The dominant measured block is Scoring + Evidence.
+* Average Scoring + Evidence: ~362.4s
+* ~84.75% of normal-cycle time.
+* Fetch/parse and active-pool construction are negligible.
+* Ranking/delivery and bookkeeping are secondary.
+* Cycle 4 reached ~797s in Scoring + Evidence.
+
+Do NOT optimize the block yet.
+
+We need to isolate exactly what inside that block is consuming the time.
+
+⸻
+
+1. NO RUNTIME BEHAVIOR CHANGES
+
+Keep exactly:
+
+* Underdog = 120s
+* Stable Refresh = 240s
+* FPR = 300s
+* max_instances=1
+* Current batch sizing
+* Current rotation
+* Current evidence behavior
+* Current scoring behavior
+* Current delivery rules
+
+Do NOT:
+
+* Increase concurrency
+* Change cadence
+* Reduce the monitored pool
+* Skip evidence
+* Disable providers
+* Remove scoring
+* Add caching yet
+* Move stages yet
+* Change batch sizes
+
+Instrumentation only.
+
+⸻
+
+2. SPLIT THE CURRENT SCORING/EVIDENCE TIMER
+
+The current combined timer must be broken into these existing operations where applicable:
+
+A. Core scoring computation
+
+Measure:
+
+* BQ calculation
+* Confidence calculation
+* Market Quality
+* Movement intelligence
+* Sharp Confidence
+* Current-line value/projection
+* Sport-aware scoring
+* Ranking inputs
+
+B. Evidence discovery
+
+Measure:
+
+* Determine which evidence is available
+* Existing evidence lookup
+* Existing historical-data lookup
+* Existing player-history lookup
+
+C. External provider enrichment
+
+Measure separately:
+
+* ESPN
+* MLB Stats
+* NHL
+* OpenDota
+* JeffSackmann
+* Sleeper
+* PandaScore if configured
+* Any other provider actually invoked
+
+Do NOT add providers.
+
+D. Evidence processing
+
+Measure:
+
+* Response parsing
+* Normalization
+* Evidence aggregation
+* Completeness calculation
+
+E. Database reads
+
+Measure existing database reads associated with:
+
+* Evidence
+* Player history
+* Snapshots
+* Opportunity data
+* Existing intelligence data
+
+F. Database writes / persistence
+
+Measure:
+
+* Opportunity log writes
+* Intelligence payload writes
+* Snapshot writes
+* Grading/tracking writes
+* Any bulk persistence occurring during this stage
+
+⸻
+
+3. IMPORTANT — DO NOT ADD PER-PROP DATABASE TIMERS
+
+The instrumentation must remain lightweight.
+
+Do NOT create a database timing row for every prop.
+
+Use aggregated counters/timers such as:
+
+* Number of provider calls
+* Total provider latency
+* Number of DB queries
+* Total DB-read time
+* Total DB-write time
+* Number of evidence operations
+* Total evidence-processing time
+
+⸻
+
+4. CAPTURE COUNTS
+
+For each normal Underdog cycle, report:
+
+* Props processed
+* Props with evidence enrichment
+* Props without enrichment
+* Provider calls by provider
+* Evidence lookups
+* Database reads
+* Database writes
+* Scoring operations
+
+This will tell us whether the expensive stage is caused by:
+
+volume, provider latency, database work, or CPU/scoring computation.
+
+⸻
+
+5. CAPTURE JOB OVERLAP
+
+Continue recording whether:
+
+* Player History
+* Stable Refresh
+* FPR
+
+are active during the scoring/evidence stage.
+
+We already know Cycle 4 had significant overlap.
+
+We need to determine whether overlap correlates with the extreme 797-second scoring/evidence duration.
+
+⸻
+
+6. COLLECT AT LEAST 3 NORMAL CYCLES
+
+Do not use the cold-start cycle.
+
+Use post-restore recurring cycles only.
+
+For each cycle provide:
+
+Cycle
+
+* Duration
+* Props
+* Props/sec
+
+Scoring
+
+* Core scoring duration
+* Operations/count
+
+Evidence
+
+* Evidence lookup duration
+* Evidence processing duration
+* Provider duration
+* Provider call counts
+
+Database
+
+* Read duration
+* Write duration
+* Query counts
+
+Job overlap
+
+* Player History
+* Stable Refresh
+* FPR
+
+⸻
+
+7. FINAL DIAGNOSIS
+
+After the measurements, explicitly identify which category is responsible for most of the ~362-second average:
+
+1. Core scoring computation
+2. Evidence lookup
+3. External provider enrichment
+4. Evidence processing
+5. Database reads
+6. Database writes
+7. Runtime contention from other jobs
+8. Combination of the above
+
+Give percentages where measurable.
+
+⸻
+
+8. THEN STOP
+
+Do NOT implement an optimization yet.
+
+Once the bottleneck is isolated, report:
+
+Measured bottleneck
+
+Evidence supporting that conclusion
+
+Smallest safe optimization
+
+Expected impact
+
+Risk to current monitoring behavior
+
+Then wait for approval before changing the runtime behavior.
+
+⸻
+
+9. PRESERVE EVERYTHING ALREADY WORKING
+
+Do NOT regress:
+
+* Continuous rotation
+* New-prop priority
+* Line-mover priority
+* Stable Refresh
+* FPR
+* BQ
+* Market Quality
+* Sharp Confidence
+* Current-line value
+* Evidence completeness
+* CLV
+* Grading
+* Calibration
+* Tier 1 delivery rules
+* Tier 2 delivery rules
+* /picks
+* /slip
+* Existing database persistence
+
+⸻
+
+🔴 FINAL RULE
+
+Instrumentation only.
+
+The current evidence proves the bottleneck is inside Scoring + Evidence.
+
+Now determine exactly which component is responsible before changing anything.
+
+Do not optimize based on the combined 84.75% number alone.
