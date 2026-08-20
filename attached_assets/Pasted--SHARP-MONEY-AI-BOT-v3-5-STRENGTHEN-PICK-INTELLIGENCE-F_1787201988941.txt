@@ -1,0 +1,924 @@
+🔥 SHARP MONEY AI BOT v3.5 — STRENGTHEN PICK INTELLIGENCE + FINAL TIER 1 TELEGRAM GATE
+
+We are NOT trying to make the bot faster.
+
+The current monitoring system is working the way I want it:
+
+* ~2-minute Underdog monitoring cadence
+* Continuous rotation
+* ~5K–6K props per rotation batch
+* Growing active pool
+* New props prioritized
+* Line movers prioritized
+* Stable Refresh working
+* Full-Pool Rotation working
+* Multiple sports being monitored
+* Telegram delivery working
+
+DO NOT redesign, speed up, or replace that system.
+
+The goal now is to make the bot stronger and smarter at deciding which props are actually worth playing, while applying one final correction to the Tier 1 Telegram delivery gate only.
+
+⸻
+
+1. DO NOT CHANGE THE MONITORING ENGINE
+
+Preserve the current implementation.
+
+Do NOT:
+
+* Increase monitoring speed
+* Increase concurrency
+* Change the ~2-minute cadence
+* Change max_instances=1
+* Redesign rotation
+* Change current batch architecture
+* Remove Stable Refresh
+* Remove Full-Pool Rotation
+* Reintroduce a fixed 500 cap
+* Rewrite unrelated systems
+* Change unrelated Telegram formatting
+* Change existing betting rules unless specifically required below
+
+The monitoring engine is already in a good place.
+
+Improve the intelligence downstream of monitoring.
+
+⸻
+
+2. MAKE THE BOT LEARN FROM EVERY RESULT
+
+Build a real feedback loop from the evaluated prop universe.
+
+Do NOT restrict learning only to Telegram-delivered picks.
+
+Where applicable, track outcomes for:
+
+* PLAY
+* PASS
+* Watchlist
+* Actionable picks
+* Telegram picks
+* Line-movement signals
+* Underlying evaluated props
+
+When an event resolves, persist:
+
+* Player
+* Sport
+* Market
+* Line
+* Direction
+* Timestamp
+* Actual result
+* Hit
+* Miss
+* Push
+* Closing line
+* CLV
+* Model score
+* BQ
+* Confidence
+* Evidence quality
+* Evidence completeness
+* Classification
+* Decision state
+
+The purpose is to determine which signals actually predict successful outcomes.
+
+Do not create a separate grading system if existing grading infrastructure can be extended.
+
+⸻
+
+3. KEEP ONE CORE FRAMEWORK BUT MAKE IT SPORT-AWARE
+
+Do NOT create separate prediction systems.
+
+Keep one canonical evaluation framework.
+
+Allow feature weighting and evidence interpretation to be sport-aware where the existing architecture/data supports it.
+
+WNBA Points
+
+Consider available:
+
+* Minutes
+* L5/L10/L20/L30
+* Usage
+* Recent scoring
+* Role
+* Matchup
+* Line movement
+* Historical line performance
+
+MLB
+
+Consider available:
+
+* Pitcher/batter matchup
+* Strikeout rate
+* Handedness
+* Pitch mix
+* Recent workload
+* L5/L10/L30
+* Season splits
+* Line movement
+
+NFL
+
+Consider available:
+
+* Snap share
+* Routes
+* Targets
+* Usage
+* Matchup
+* Recent production
+* Season production
+* Line movement
+
+CS/CS2
+
+Consider available:
+
+* Map history
+* Player role
+* Opponent
+* Map pool
+* Recent performance
+* Player statistics
+* Line movement
+* PandaScore enrichment when configured
+
+Tennis
+
+Consider available:
+
+* Surface
+* Opponent
+* Recent form
+* Match history
+* Relevant player statistics
+* Line movement
+
+Do not invent unavailable evidence.
+
+Use existing provider/evidence infrastructure wherever possible.
+
+⸻
+
+4. MAKE LINE MOVEMENT MORE INTELLIGENT
+
+Do not treat every line movement as equally meaningful.
+
+Analyze:
+
+Direction
+
+Did the market move toward OVER or UNDER?
+
+Magnitude
+
+How large was the move?
+
+Velocity
+
+How quickly did it move?
+
+Persistence
+
+Did the new line remain?
+
+Reversal
+
+Did the line subsequently move back?
+
+Context
+
+When available, identify whether movement appears related to:
+
+* Injury/news
+* Role/minutes
+* Starting status
+* Matchup
+* Market adjustment
+* Possible overreaction
+* Other available contextual information
+
+Example:
+
+4.5 → 9.5
+
+must be recognized as materially different from:
+
+10.5 → 11.0
+
+The objective is to identify meaningful market information, not simply detect that a number changed.
+
+⸻
+
+5. ADD CURRENT-LINE VALUE ANALYSIS
+
+This is one of the most important upgrades.
+
+The bot must distinguish:
+
+“The line moved.”
+
+from:
+
+“The current line still has value.”
+
+Where sufficient data exists, estimate an internal model projection/fair line.
+
+Example:
+
+Model projection: 6.8
+
+Current Underdog line: 9.5
+
+Model edge: +2.7
+
+That should influence the decision.
+
+The model should answer:
+
+“Is the current line still mispriced?”
+
+not simply:
+
+“Did the line move?”
+
+Do not chase a move after the value disappears.
+
+If projection/fair-line data is unavailable, explicitly record it as unavailable.
+
+⸻
+
+6. ADD EVIDENCE COMPLETENESS
+
+Missing evidence must NOT be treated the same as strong evidence.
+
+Calculate an internal evidence-completeness measurement using only evidence actually available.
+
+Consider:
+
+* L2
+* L5
+* L10
+* L20
+* L30
+* H2H
+* Season
+* Season splits
+* Player gamelog
+* Matchup
+* Role/minutes
+* Provider evidence
+* Line-history evidence
+
+Example:
+
+Candidate A:
+
+BQ 77
+MQ 90
+L5/L10/L30/Season = unavailable
+
+Candidate B:
+
+BQ 77
+MQ 90
+L5/L10/L30/Season = populated
+
+These must not receive identical evidence-confidence treatment.
+
+Do not fabricate missing evidence.
+
+Explicitly record unavailable evidence and account for it in confidence/value assessment.
+
+⸻
+
+7. KEEP BQ AND ADD SHARP CONFIDENCE
+
+Do NOT replace Bet Quality.
+
+Keep:
+
+Bet Quality (BQ)
+
+Add:
+
+Sharp Confidence
+
+Sharp Confidence should represent confidence that the current opportunity itself is strong, not simply that the market moved.
+
+Potential inputs:
+
+* Line movement quality
+* Historical edge
+* Current-line value
+* Evidence quality/completeness
+* Market quality
+* Consistency
+* Context/news
+* Historical performance of similar signals
+
+Use existing architecture where possible.
+
+Do not blindly apply example percentages as final weights.
+
+Determine sensible weighting from the existing implementation and available data.
+
+⸻
+
+8. SEPARATE MOVEMENT CONFIDENCE FROM BET CONFIDENCE
+
+The bot must understand:
+
+Market signal:
+
+“The market moved toward UNDER.”
+
+versus:
+
+Bet recommendation:
+
+“UNDER the current line remains valuable.”
+
+Strong movement does NOT automatically mean the current line is still a good bet.
+
+The downstream decision should conceptually follow:
+
+Movement → Evidence → Projection → Current-Line Value → Final Recommendation
+
+⸻
+
+9. CALIBRATE BQ AND SHARP CONFIDENCE USING REAL RESULTS
+
+Once sufficient results accumulate, analyze historical performance by:
+
+* BQ range
+* Sharp Confidence range
+* Sport
+* Market
+* OVER vs UNDER
+* Line movement magnitude
+* Line movement direction
+* Evidence completeness
+* Current-line edge
+* Tier
+* Market quality
+* Similar historical situations
+
+Determine from actual results:
+
+* Which BQ ranges perform best?
+* Which sports produce strongest signals?
+* Which movement sizes are predictive?
+* Does OVER or UNDER perform better in specific markets?
+* Does missing evidence reduce accuracy?
+* Which evidence combinations are most predictive?
+* Does current-line edge correlate with better outcomes?
+
+Do not assume the answers.
+
+Let persisted results determine them.
+
+⸻
+
+10. USE CLV AS A SEPARATE PERFORMANCE SIGNAL
+
+Continue using the existing CLV infrastructure.
+
+Track:
+
+* Original detected line
+* Recommendation line
+* Closing line
+* Direction
+* CLV
+* Result
+
+Evaluate separately:
+
+Prediction accuracy
+
+Did the recommended side win?
+
+Line quality
+
+Was the original line better than the eventual closing line?
+
+Market timing
+
+Did the bot identify meaningful movement before the market moved?
+
+This is important because Sharp Money is about identifying valuable opportunities and market information—not simply picking winners after the move already happened.
+
+⸻
+
+11. IMPROVE /PICKS
+
+Do not unnecessarily redesign /picks.
+
+Strengthen the information it already provides.
+
+Where sufficient data exists, a pick should be capable of showing:
+
+🔥 WNBA — UNDER 14.5
+
+BQ: 82/100
+Sharp Confidence: 91/100
+
+Model Projection: 11.4
+Current Line: 14.5
+Model Edge: +3.1
+
+Line Movement: +4.0
+
+Evidence: 94% complete
+
+Historical Support:
+
+* L5
+* L10
+* L20
+* L30
+* Season
+* Matchup
+
+Market Quality: Strong
+
+Final Model Grade: ELITE
+
+These are examples only.
+
+Never fabricate numbers.
+
+If a metric is unavailable, clearly show it as unavailable.
+
+⸻
+
+12. IMPROVE /SLIP
+
+Keep the existing slip-building architecture.
+
+When selecting between candidates, prioritize:
+
+1. Current-line value
+2. Sharp Confidence
+3. Evidence quality
+4. Historical performance
+5. BQ
+6. Line movement quality
+7. Existing correlation/safety rules
+8. Existing sport/team/player restrictions
+
+Do not simply choose the highest BQ.
+
+A slightly lower BQ prop with substantially better evidence and current-line value may be the stronger selection.
+
+⸻
+
+13. FINAL TIER 1 TELEGRAM GATE — IMPORTANT
+
+This section applies ONLY to Tier 1.
+
+Do NOT apply this BQ/MQ labeling/gate change to Tier 2.
+
+Tier 1 Definition
+
+Tier 1 = every sport other than MLB, NFL, and NBA.
+
+For Tier 1 Telegram delivery, ALL of the following must be satisfied:
+
+1. Direction
+
+The prop must have a:
+
+* Strong OVER
+* Strong UNDER
+* Elite OVER
+* Elite UNDER
+
+direction.
+
+2. Bet Quality
+
+For Tier 1:
+
+* 70–84 = 🟢 STRONG
+* 85–100+ = 💎 ELITE
+* <70 = does not qualify for Telegram
+
+Therefore:
+
+BQ 77 = STRONG
+
+BQ 85 = ELITE
+
+Never label 77/100 as Elite.
+
+3. Market Quality
+
+For Tier 1:
+
+* 70–84 = 🟢 STRONG
+* 85–100+ = 💎 ELITE
+* <70 = does not qualify for Telegram
+
+Therefore:
+
+MQ 77 = STRONG
+
+MQ 85 = ELITE
+
+Never label 77/100 as Elite.
+
+4. Evidence
+
+Strong supporting evidence is required.
+
+Do not fabricate unavailable evidence.
+
+5. Safety
+
+Existing protections must remain:
+
+* Dedup
+* Live-game protections
+* Existing safety conditions
+* Existing actionable conditions
+
+Tier 1 DOES NOT require:
+
+* S-tier
+* A-tier
+* B-tier
+* C-tier
+
+The 40–69 threshold/block must remain removed for Tier 1 underlying evaluation.
+
+A Tier 1 prop in the 40–69 range may still be:
+
+* Evaluated
+* Rescored
+* Evidence-enriched
+* Tracked
+* Used for learning
+* Included in historical analysis
+* Included in calibration
+* Included in PLAY/PASS/Watchlist analysis
+
+It simply cannot reach Telegram until it satisfies the Tier 1 Telegram gate.
+
+⸻
+
+14. DO NOT CHANGE THE EXISTING TIER 2 RULES
+
+Tier 2 remains exactly as currently implemented.
+
+Tier 2 = ONLY:
+
+* MLB
+* NFL
+* NBA
+
+Preserve the existing Tier 2 blocker.
+
+Do NOT apply the new Tier 1-only BQ/MQ threshold interpretation as a replacement for Tier 2 logic.
+
+Do NOT weaken Tier 2.
+
+Do NOT remove its existing requirements.
+
+Do NOT introduce S/A/B/C gates if they have already been removed from the canonical Tier 2 delivery logic.
+
+⸻
+
+15. DO NOT LET NEW INTELLIGENCE BLOCK UNDERLYING EVALUATION
+
+This is critical.
+
+The bot must continue evaluating:
+
+* S
+* A
+* B
+* C
+* PASS
+* Cold-start
+
+The new intelligence should improve ranking and recommendation quality.
+
+It must NOT become another hidden evaluation gate.
+
+All classifications remain available for:
+
+* Evaluation
+* Rescoring
+* Evidence
+* Tracking
+* Historical analysis
+* Hit/miss analysis
+* Calibration
+
+⸻
+
+16. CREATE A REAL SIGNAL LEARNING LOOP
+
+Conceptually:
+
+Prop detected
+
+↓
+
+Line movement
+
+↓
+
+Historical evidence
+
+↓
+
+Market quality
+
+↓
+
+Model projection
+
+↓
+
+Current-line value
+
+↓
+
+Evidence completeness
+
+↓
+
+Sharp Confidence
+
+↓
+
+BQ
+
+↓
+
+Existing Tier 1/Tier 2 rules
+
+↓
+
+Actionable recommendation
+
+↓
+
+Result
+
+↓
+
+CLV
+
+↓
+
+Calibration
+
+↓
+
+Future model improvement
+
+Use existing infrastructure wherever possible.
+
+Do not create duplicate scoring, evidence, grading, or calibration systems.
+
+⸻
+
+17. DO NOT OVERFIT
+
+Do not immediately change scoring thresholds based on a tiny number of results.
+
+Require meaningful samples before automatically changing weights or thresholds.
+
+Track sample size alongside performance.
+
+Example:
+
+WNBA UNDER — 78%
+Sample: 47
+
+is more meaningful than simply:
+
+WNBA UNDER — 78%
+
+Distinguish between:
+
+* Insufficient sample
+* Preliminary signal
+* Meaningful historical signal
+
+Use conservative calibration.
+
+⸻
+
+18. IMPROVE PERFORMANCE REPORTING
+
+Eventually /performance should be capable of breaking performance down by:
+
+* Sport
+* Market
+* Direction
+* Tier
+* BQ range
+* Sharp Confidence range
+* Line movement range
+* Evidence completeness
+* Model edge
+* CLV
+
+Example only:
+
+WNBA
+OVER: 18–10 = 64.3%
+UNDER: 22–8 = 73.3%
+
+BQ 70–74
+41–39 = 51.3%
+
+BQ 75–79
+38–22 = 63.3%
+
+BQ 80+
+29–12 = 70.7%
+
+Strong current-line edge
+67.8%
+
+Weak current-line edge
+51.2%
+
+Do not fabricate results.
+
+⸻
+
+19. PRESERVE THE CURRENT SUCCESSFUL PIPELINE
+
+The current system has demonstrated:
+
+* ~2-minute monitoring
+* Continuous rotation
+* Growing active pool
+* New prop detection
+* Line movement detection
+* Stable Refresh
+* Full-Pool Rotation
+* Multiple sports
+* Telegram alerts
+* PropLineHistory accumulation
+
+Do not disturb those components.
+
+The goal is:
+
+SAME MONITORING ENGINE
+
+but:
+
+STRONGER INTELLIGENCE
+
+⸻
+
+20. IMPLEMENTATION RULE
+
+Before changing anything:
+
+1. Inspect the current implementation.
+2. Identify where existing BQ, confidence, market quality, projection, line history, evidence, grading, CLV, /picks, and /slip logic already live.
+3. Reuse existing infrastructure.
+4. Make the smallest targeted changes.
+5. Do not create duplicate systems.
+6. Do not create duplicate scoring pipelines.
+7. Do not create duplicate evidence systems.
+8. Do not create duplicate grading systems.
+9. Do not create duplicate calibration systems.
+10. Do not change unrelated behavior.
+
+Task #135 already established the downstream intelligence implementation. Continue from the current implementation rather than rebuilding it.
+
+Also preserve the existing completed work:
+
+* Unified cadence
+* Player-history/evidence foundation
+* Player-history collector/provider fix
+* Scheduler/skipped-instance work
+* Adaptive batching
+* Clean restart behavior
+* Continuous rotation
+* Stable Refresh
+* Full-Pool Rotation
+
+Do not redo or regress those systems.
+
+⸻
+
+21. REQUIRED VERIFICATION
+
+After implementation, verify the running bot, not just tests.
+
+Confirm:
+
+Monitoring
+
+* ~2-minute cadence remains intact
+* Rotation remains intact
+* Batch behavior remains intact
+* Stable Refresh remains intact
+* Full-Pool Rotation remains intact
+* New props remain prioritized
+* Line movers remain prioritized
+* Tier 1 remains prioritized appropriately
+* Tier 2 remains monitored
+* No concurrency increase
+* max_instances=1 remains intact
+
+Intelligence
+
+* Existing BQ remains available
+* Sharp Confidence is calculated when sufficient data exists
+* Current-line value is calculated when possible
+* Evidence completeness is tracked
+* Missing evidence is not fabricated
+* Line movement quality is analyzed
+* Movement direction is preserved
+* Movement magnitude is preserved
+* Velocity/persistence/reversal are preserved where available
+* Historical outcomes feed calibration
+* CLV continues accumulating
+
+Tier 1 Telegram
+
+Verify:
+
+* Strong/Elite direction required
+* BQ 70–84 = Strong
+* BQ 85–100+ = Elite
+* MQ 70–84 = Strong
+* MQ 85–100+ = Elite
+* Strong evidence required
+* Existing safety conditions required
+* No S/A/B/C requirement
+* 40–69 remains available for underlying Tier 1 evaluation
+* 40–69 does NOT reach Telegram without satisfying the actual Telegram gate
+
+Tier 2 Telegram
+
+Verify existing Tier 2 rules remain unchanged.
+
+Do not accidentally apply the new Tier 1 gate to Tier 2.
+
+Reporting
+
+* /picks can expose stronger intelligence where data exists
+* /slip can use stronger intelligence
+* /performance can eventually expose the new metrics
+* Grading remains persistent
+* PLAY/PASS/Watchlist outcomes remain trackable
+* CLV remains persistent
+* No duplicate scoring/evidence/grading systems were created
+
+⸻
+
+🔴 FINAL INSTRUCTION
+
+Do not make the bot faster.
+
+Do not redesign the monitoring system.
+
+Do not rewrite unrelated code.
+
+The current monitoring engine is good.
+
+Make Sharp Money AI Bot v3.5 stronger at:
+
+* Identifying value
+* Interpreting line movement
+* Using evidence
+* Ranking opportunities
+* Measuring current-line value
+* Separating movement confidence from bet confidence
+* Learning from results
+* Calibrating itself
+* Validating its predictions
+* Improving the quality of Telegram alerts
+
+MOST IMPORTANT
+
+The new BQ/MQ 70+ Telegram gate applies ONLY to Tier 1.
+
+Do not change Tier 2 rules.
+
+Use the existing infrastructure wherever possible.
+
+Make the smallest targeted changes necessary.
+
+Do not create a checkpoint/task completion based only on tests. Live-verify the running bot after implementation.
