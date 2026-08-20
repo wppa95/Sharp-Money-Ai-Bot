@@ -1297,6 +1297,15 @@ async def underdog_job(context) -> None:
 
     chat_ids = list(config.allowed_user_ids)
     now      = datetime.utcnow()
+    global _cycle_sequence
+    _cycle_sequence += 1
+    _cycle_timing = _CycleTiming(_cycle_sequence)
+    _job_activity_start("underdog")
+    _cycle_timing.start("state_restore")
+    logger.info(
+        "underdog_cycle_started: cycle_id=%d cold_start=%s active_jobs=%s",
+        _cycle_sequence, is_cold_start, sorted(_active_job_names()),
+    )
 
     _health = get_health_tracker()
     if _health:
@@ -1338,6 +1347,8 @@ async def underdog_job(context) -> None:
     # On first run: restore module-level state from DB (market availability tracking)
     if is_cold_start:
         await _init_state_from_db(db)
+    _cycle_timing.finish("state_restore")
+    _cycle_timing.start("fetch_parse")
 
     # ── Concurrency guard — fast new-prop path when full scan is already running ──
     # max_instances=2 allows a second underdog_job to start while the first is still
@@ -1367,11 +1378,20 @@ async def underdog_job(context) -> None:
             _health.record_provider_error("Underdog", str(_fetch_exc))
             _health.record_job_fail("underdog_job", str(_fetch_exc))
         logger.exception("underdog_job: fetch_pickem failed: %s", _fetch_exc)
+        _cycle_timing.finish("fetch_parse")
+        logger.info("underdog_cycle_timing: %s", _cycle_timing.summary(0, 0))
+        _job_activity_end("underdog")
         _ud_full_scan_running = False
         return
 
+    _cycle_timing.finish("fetch_parse")
+    _cycle_timing.start("active_pool")
+
     if not snapshots:
         logger.debug("underdog_job: no pick'em snapshots")
+        _cycle_timing.finish("active_pool")
+        logger.info("underdog_cycle_timing: %s", _cycle_timing.summary(0, 0))
+        _job_activity_end("underdog")
         if _health:
             _health.record_provider_fetch("Underdog")
             _health.record_job_run("underdog_job")   # empty response = successful run
@@ -1403,6 +1423,9 @@ async def underdog_job(context) -> None:
 
     if not ud_snaps:
         logger.debug("underdog_job: no Underdog pick'em snapshots in response")
+        _cycle_timing.finish("active_pool")
+        logger.info("underdog_cycle_timing: %s", _cycle_timing.summary(0, 0))
+        _job_activity_end("underdog")
         if _health:
             _health.record_job_run("underdog_job")
         return
@@ -1445,6 +1468,8 @@ async def underdog_job(context) -> None:
     _sport_futures:       dict[str, int] = {}  # season-long/futures props (tracked, not scored)
     _sport_move_detected: dict[str, int] = {}  # significant line moves (≥MIN_LINE_CHANGE)
     _sport_gated:         dict[str, int] = {}  # passed full scoring gate (actionable)
+    _cycle_timing.finish("active_pool")
+    _cycle_timing.start("scoring_evidence")
 
     try:
         # Two DB round-trips before the loop — both O(unique props), no LIMIT.
@@ -2493,6 +2518,8 @@ async def underdog_job(context) -> None:
                                 and _dq_ref.get("record") is None):
                             _dq_ref["record"] = record
                             break
+        _cycle_timing.finish("scoring_evidence")
+        _cycle_timing.start("priority_selection")
         # (Incremental bulk-save is performed AFTER the ranked delivery phase so that
         #  alert_sent=True is reflected in the saved records for delivered candidates.)
 
@@ -3020,6 +3047,8 @@ async def underdog_job(context) -> None:
                     "; ".join(_dq_deferred_log[:10]),
                 )
 
+        _cycle_timing.finish("priority_selection")
+        _cycle_timing.start("ranking_delivery")
         # ── Bulk-save incremental snapshots ───────────────────────────────────────
         # Runs AFTER the ranked delivery phase so that alert_sent=True is persisted
         # for props that were just delivered.  The incremental records have their
@@ -3071,6 +3100,8 @@ async def underdog_job(context) -> None:
                     _cs_after_tiers.get("PASS", 0),
                 )
     
+        _cycle_timing.finish("ranking_delivery")
+        _cycle_timing.start("final_bookkeeping")
         # ── Persist scan checkpoint ────────────────────────────────────────────────
         # Written after every successful scan for health monitoring.
         # Non-fatal if health tracker is missing.
@@ -3407,6 +3438,15 @@ async def underdog_job(context) -> None:
                 module = "market_engine",
                 error  = "bridge or lifecycle update failed",
             )
+    _cycle_timing.finish("final_bookkeeping")
+    logger.info(
+        "underdog_cycle_timing: %s",
+        _cycle_timing.summary(
+            _n_ud_snaps_this_cycle if "_n_ud_snaps_this_cycle" in dir() else 0,
+            _n_ud_snaps_this_cycle if "_n_ud_snaps_this_cycle" in dir() else 0,
+        ),
+    )
+    _job_activity_end("underdog")
 
 
 # ── Stable Refresh Job ─────────────────────────────────────────────────────────
@@ -3456,6 +3496,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
     bot          = context.bot
     if db is None:
         return
+    _job_activity_start("stable_refresh")
 
     chat_ids = list(config.allowed_user_ids)
     now      = datetime.utcnow()
@@ -4181,6 +4222,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         pool_size, len(batch_keys), sr_rescored, sr_qualified, sr_sent,
         sr_watchlist, wl_active, wl_promoted,
     )
+    _job_activity_end("stable_refresh")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -4233,6 +4275,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
     bot          = context.bot
     if db is None:
         return
+    _job_activity_start("fpr")
 
     chat_ids = list(config.allowed_user_ids)
     now      = datetime.utcnow()
@@ -4540,3 +4583,4 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         "full_pool_rescan_job: rotation=#%d pool=%d batch=%d rescored=%d sent=%d",
         _display_rotation, fpr_pool_size, fpr_batch_size, fpr_rescored, fpr_sent,
     )
+    _job_activity_end("fpr")

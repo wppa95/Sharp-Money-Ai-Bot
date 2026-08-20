@@ -74,3 +74,4 @@
 - [Confidence thresholds Aug 2026](conf-threshold-aug2026.md) — UD_MIN_CONF_S=85, UD_MIN_CONF_A=75, UD_NON_STRICT_MIN_CONF_A=75 (raised from 80/70/70).
 - [Player history job spec](player-history-spec.md) — Tier-1 only (filter MLB/NBA/NFL), unlimited player count, 250 API-call cap per 2-min cycle; never add player-count slice to target-build loop.
 - [Tier-1 direction gate (Weak direction fix)](tier1-direction-gate.md) — sport= param on make_ud_bet_decision; Tier-1 uses _B_RATE_TIER1=0.55, Tier-2/empty uses _B_RATE=0.60; all 8 call sites pass sport=.
+- [Cold-start scheduler stall](cold-start-scheduler-stall.md) — live cold-start Underdog cycles can remain in DB state restoration for many minutes while player-history/FPR work overlaps; measure restore separately before optimizing.

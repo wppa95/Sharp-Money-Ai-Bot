@@ -40,6 +40,13 @@ async def player_history_collector_job(context) -> None:
     if not db:
         logger.warning("player_history_collector_job: db not ready")
         return
+    _activity_end = None
+    try:
+        from market_engine import _job_activity_start, _job_activity_end
+        _job_activity_start("player_history")
+        _activity_end = _job_activity_end
+    except ImportError:
+        pass
     ht = get_health_tracker()
     if ht:
         ht.record_job_started("player_history_collector_job")
@@ -123,7 +130,11 @@ async def player_history_collector_job(context) -> None:
         )
         if ht:
             ht.record_job_run("player_history_collector_job")
+        if _activity_end:
+            _activity_end("player_history")
     except Exception as exc:
         logger.exception("player_history_collector_job: %s", exc)
         if ht:
             ht.record_job_fail("player_history_collector_job", str(exc))
+        if _activity_end:
+            _activity_end("player_history")
