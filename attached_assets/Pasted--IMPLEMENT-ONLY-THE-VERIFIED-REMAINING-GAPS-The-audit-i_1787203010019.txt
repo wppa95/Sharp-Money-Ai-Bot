@@ -1,0 +1,420 @@
+🔴 IMPLEMENT ONLY THE VERIFIED REMAINING GAPS
+
+The audit is accepted, with the following clarification:
+
+Do NOT change the existing monitoring engine or redesign the Tier system.
+
+The Tier 1/Tier 2 distinction below is the canonical product rule for this task.
+
+⸻
+
+1. CANONICAL TIER 1 / TIER 2 SPORT MAPPING
+
+🔵 TIER 2 — EXISTING CORE SPORTS
+
+Tier 2 is the existing higher-restriction group.
+
+It includes:
+
+MLB
+
+* MLB
+* Baseball aliases currently mapped to MLB
+
+NFL / Football
+
+* NFL
+* NCAA
+* NCAAF
+* CFB
+* Existing football aliases currently mapped to the Tier 2 football group
+
+NBA
+
+* NBA
+
+IMPORTANT: Keep all existing Tier 2 aliases currently configured in the bot.
+
+Do NOT remove NCAA/NCAAF/CFB from Tier 2.
+
+Do NOT change the existing Tier 2 classification or suppression behavior.
+
+⸻
+
+2. 🟢 TIER 1 — ALL OTHER SPORTS
+
+Tier 1 is every active sport that is NOT currently classified as Tier 2.
+
+Examples include:
+
+Basketball
+
+* WNBA
+* Any other non-NBA basketball league
+
+Esports
+
+* CS
+* CS2
+* LOL
+* VAL
+* VALORANT
+* DOTA
+* DOTA2
+* League
+* Other esports currently supported
+
+Baseball outside MLB
+
+* NPB
+* KBO
+* Other non-MLB baseball leagues
+
+Hockey
+
+* NHL
+* Other hockey leagues
+
+Tennis
+
+* TENNIS
+* ATP
+* WTA
+* Other supported tennis competitions
+
+Soccer / Football outside the existing Tier 2 football group
+
+* SOCCER
+* FIFA
+* EPL
+* Other soccer leagues
+
+Golf
+
+* PGA
+* GOLF
+
+Combat Sports
+
+* MMA
+* BOXING
+
+Other active sports
+
+* AFL
+* AFLW
+* TT
+* BADMINTON
+* MATCH
+* MOTORCYCLE
+* and every other active sport that is not classified into the existing Tier 2 group.
+
+CRITICAL RULE
+
+Do NOT maintain a manually duplicated Tier 1 list if the existing architecture already has a canonical sport registry.
+
+Prefer:
+
+Tier 1 = active sport − Tier 2 sports
+
+This prevents newly supported sports from accidentally being omitted from Tier 1.
+
+⸻
+
+3. TIER 1 TELEGRAM DELIVERY GATE
+
+Apply this gate ONLY to Tier 1.
+
+A Tier 1 Telegram actionable pick requires ALL of:
+
+Direction
+
+* Strong OVER
+* Strong UNDER
+* Elite OVER
+* Elite UNDER
+
+BQ
+
+* 70–84 = STRONG
+* 85–100+ = ELITE
+* Below 70 = not Telegram eligible
+
+MQ
+
+* 70–84 = STRONG
+* 85–100+ = ELITE
+* Below 70 = not Telegram eligible
+
+Evidence
+
+Strong supporting evidence is required.
+
+Safety
+
+Existing:
+
+* Dedup
+* Live-game protection
+* Actionable conditions
+* Safety protections
+
+must remain intact.
+
+NO S/A/B/C REQUIREMENT
+
+Tier 1 Telegram must NOT require:
+
+* S-tier
+* A-tier
+* B-tier
+* C-tier
+
+⸻
+
+4. TIER 1 40–69 RULE
+
+The old 40–69 block must remain removed from underlying Tier 1 evaluation.
+
+A Tier 1 prop scoring 40–69 can still be:
+
+* Evaluated
+* Rescored
+* Evidence-enriched
+* Tracked
+* Graded
+* Included in PLAY/PASS analysis
+* Included in historical analysis
+* Included in calibration
+
+It simply cannot reach Telegram unless it later satisfies the actual Tier 1 delivery requirements.
+
+Do not turn the Telegram gate into an evaluation gate.
+
+⸻
+
+5. TIER 2 MUST NOT USE THE NEW TIER 1 GATE
+
+Do NOT apply the Tier 1 BQ/MQ/evidence gate to Tier 2.
+
+Keep the existing Tier 2 blocker exactly as currently implemented.
+
+Tier 2 remains subject to its existing:
+
+* Direction requirements
+* Confidence requirements
+* BQ
+* MQ
+* Evidence
+* Dedup
+* Live-game
+* Safety
+* Other existing Tier 2 protections
+
+Do not weaken Tier 2.
+
+Do not introduce S/A/B/C requirements unless they already exist in the current canonical Tier 2 implementation.
+
+⸻
+
+6. CORRECT BQ/MQ LABEL THRESHOLDS
+
+The canonical labels must be:
+
+BQ
+
+* 70–84 = STRONG
+* 85–100+ = ELITE
+
+MQ
+
+* 70–84 = STRONG
+* 85–100+ = ELITE
+
+Therefore:
+
+77/100 = STRONG
+
+It must NOT display as Elite.
+
+Do not change the underlying numeric score.
+
+Only correct the label threshold.
+
+⸻
+
+7. COMPLETE /PICKS INTELLIGENCE DISPLAY
+
+Extend the existing /picks command without redesigning it.
+
+Where actual data exists, show:
+
+* BQ
+* Sharp Confidence
+* Model Projection
+* Current Line
+* Model Edge / Current-Line Value
+* Line Movement
+* Movement Quality
+* Evidence Completeness
+* Available historical evidence
+* Market Quality
+* Final Model Grade
+
+Never fabricate missing values.
+
+Unavailable data must explicitly say:
+
+unavailable
+
+Use the existing Task #135 downstream intelligence payload.
+
+Do NOT create another scoring or intelligence system.
+
+⸻
+
+8. RESOLVE MAX_INSTANCES CAREFULLY
+
+The audit found:
+
+* Underdog monitor = max_instances=2
+* Stable Refresh = max_instances=1
+* FPR = max_instances=2
+
+Required operating configuration:
+
+max_instances=1
+
+Make the smallest targeted configuration change necessary.
+
+Do NOT:
+
+* Increase concurrency
+* Redesign the scheduler
+* Change the ~2-minute cadence
+* Change the batch architecture
+
+Then live-verify:
+
+* No overlapping monitoring jobs
+* Underdog remains approximately 2 minutes
+* Stable Refresh remains intact
+* FPR remains intact
+* No avoidable skipped instances
+
+If a real scheduling conflict appears, stop and report it instead of redesigning the scheduler.
+
+⸻
+
+9. PRESERVE EVERYTHING ALREADY WORKING
+
+Do NOT change:
+
+* Underdog monitoring engine
+* Continuous rotation
+* New-prop priority
+* Line-mover priority
+* Stable Refresh
+* FPR
+* Active pool
+* Player-history collector
+* Existing evidence foundation
+* BQ infrastructure
+* CLV
+* Grading
+* Calibration
+* Existing Tier 2 architecture
+
+No speed optimization.
+
+No unrelated refactor.
+
+⸻
+
+10. REQUIRED LIVE VERIFICATION
+
+After implementation, run the actual bot.
+
+Verify:
+
+Sport Classification
+
+* MLB → Tier 2
+* NFL → Tier 2
+* NBA → Tier 2
+* NCAA → Tier 2
+* NCAAF → Tier 2
+* CFB → Tier 2
+* WNBA → Tier 1
+* CS/CS2 → Tier 1
+* LOL → Tier 1
+* VAL/VALORANT → Tier 1
+* DOTA/DOTA2 → Tier 1
+* Tennis → Tier 1
+* NPB → Tier 1
+* KBO → Tier 1
+* NHL → Tier 1
+* Soccer/FIFA/EPL → Tier 1
+* PGA/GOLF → Tier 1
+* MMA → Tier 1
+* Boxing → Tier 1
+* AFL/AFLW → Tier 1
+* TT → Tier 1
+* Badminton → Tier 1
+* Any other active sport not mapped to Tier 2 → Tier 1
+
+Tier 1 Delivery
+
+Verify:
+
+* BQ 70–84 = Strong
+* BQ 85+ = Elite
+* MQ 70–84 = Strong
+* MQ 85+ = Elite
+* Strong/Elite direction
+* Strong evidence
+* Safety conditions
+* No S/A/B/C requirement
+* 40–69 remains evaluable underneath
+
+Tier 2
+
+Verify the existing Tier 2 blocker remains unchanged.
+
+Scheduler
+
+Verify:
+
+* max_instances=1
+* No overlap
+* ~2-minute monitoring
+* Stable Refresh intact
+* FPR intact
+
+/picks
+
+Verify the new intelligence fields appear when actual data exists.
+
+⸻
+
+11. FINAL REPORT
+
+Before claiming completion, report:
+
+1. What was already implemented.
+2. What was missing.
+3. What was changed.
+4. Exact Tier 1/Tier 2 classification verified.
+5. Tier 1 gate verified.
+6. Tier 2 blocker verified.
+7. BQ/MQ thresholds verified.
+8. /picks verified.
+9. Scheduler verified.
+10. Live runtime verification results.
+11. Any remaining limitations.
+
+Do not mark complete based only on tests.
+
+Do not create another checkpoint until the running bot has been verified.
+
+Only make the smallest targeted changes required above.
