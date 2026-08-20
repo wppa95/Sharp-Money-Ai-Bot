@@ -39,6 +39,7 @@ from typing import Optional
 from config import config
 from engine.health import get_health_tracker
 from engine.prop_intelligence import compute_prop_intelligence as _compute_intel
+from engine.downstream_intelligence import build_downstream_payload as _build_downstream_intel
 from engine.player_prop_market import _is_prop_deduped, _record_prop_alerted
 from engine.score_validation import clamp_score
 from database import (
@@ -1533,6 +1534,18 @@ async def underdog_job(context) -> None:
                             watchlist_state   = (
                                 "Qualified" if decision.recommendation != "PASS" else "Rejected"
                             ),
+                            downstream_intelligence = _build_downstream_intel(
+                                line_delta=getattr(snap, "line_delta", None),
+                                evidence={
+                                    "historical": getattr(validation, "to_dict", lambda: {})(),
+                                    "market": getattr(decision, "evidence", None)
+                                    or getattr(decision, "bet_evidence", None),
+                                },
+                                line=line_val,
+                                bet_quality=getattr(score, "total", None),
+                                bet_confidence=decision.confidence,
+                                market_quality=getattr(score, "market_quality", None),
+                            ),
                         )
                     except Exception as _pol_exc:
                         logger.warning(
@@ -2529,6 +2542,18 @@ async def underdog_job(context) -> None:
                         reason_codes      = _compute_reason_codes(_sscore, _sdec),
                         watchlist_state   = (
                             "Qualified" if _sdec.recommendation != "PASS" else "Rejected"
+                        ),
+                        downstream_intelligence = _build_downstream_intel(
+                            line_delta=getattr(_ssnap, "line_delta", None),
+                            evidence={
+                                "historical": getattr(_sval, "to_dict", lambda: {})(),
+                                "market": getattr(_sdec, "evidence", None)
+                                or getattr(_sdec, "bet_evidence", None),
+                            },
+                            line=_line_val,
+                            bet_quality=getattr(_sscore, "total", None),
+                            bet_confidence=_sdec.confidence,
+                            market_quality=getattr(_sscore, "market_quality", None),
                         ),
                     )
                 except Exception as _pol_exc:

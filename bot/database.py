@@ -410,6 +410,11 @@ class PropOpportunityLog(Base):
     watchlist_state    = Column(String(16),  nullable=True)               # Qualified|Watchlist|Rejected|Removed
     settlement_source  = Column(String(64),  nullable=True)               # "auto_grade"|"manual"|None
     manual_opinion     = Column(String(8),   nullable=True)               # "OVER"|"UNDER"|"PASS"|None
+    # Downstream intelligence — additive and never used as a delivery gate.
+    downstream_intelligence_json = Column(Text, nullable=True)
+    evidence_completeness        = Column(Integer, nullable=True)
+    sharp_confidence             = Column(Integer, nullable=True)
+    sharp_confidence_components  = Column(Text, nullable=True)
     # Telegram actionable pick tracking — set True only when the 🎯 ACTIONABLE BET PICK
     # alert was successfully delivered to Telegram.  Props that were evaluated but not
     # sent (PASS, blocked, filtered, market-move-only) remain False.
@@ -631,6 +636,7 @@ class Database:
         await self._migrate_prop_opportunity_log_v2()
         await self._migrate_prop_opportunity_log_v3()
         await self._migrate_prop_opportunity_log_v4()
+        await self._migrate_prop_opportunity_log_v5()
         await self._migrate_prop_line_history_v4()
         await self._migrate_prop_line_history_v5()
         # player_risk_records is created by create_all (new table); no column migration needed
@@ -2878,6 +2884,21 @@ class Database:
                     pass  # column already exists
         logger.info("_migrate_prop_opportunity_log_v4: Telegram pick tracking columns ensured")
 
+    async def _migrate_prop_opportunity_log_v5(self) -> None:
+        """Add downstream intelligence summaries (idempotent)."""
+        async with self._engine.begin() as conn:
+            for col_sql in [
+                "ALTER TABLE prop_opportunity_log ADD COLUMN downstream_intelligence_json TEXT",
+                "ALTER TABLE prop_opportunity_log ADD COLUMN evidence_completeness INTEGER",
+                "ALTER TABLE prop_opportunity_log ADD COLUMN sharp_confidence INTEGER",
+                "ALTER TABLE prop_opportunity_log ADD COLUMN sharp_confidence_components TEXT",
+            ]:
+                try:
+                    await conn.execute(text(col_sql))
+                except Exception:
+                    pass
+        logger.info("_migrate_prop_opportunity_log_v5: downstream intelligence columns ensured")
+
     async def log_prop_opportunity(
         self,
         *,
@@ -2901,6 +2922,7 @@ class Database:
         qualification_path: "Optional[list]" = None,   # gates passed, JSON-encoded
         reason_codes:       "Optional[list]" = None,   # structured codes, JSON-encoded
         watchlist_state:    "Optional[str]"  = None,   # Qualified|Watchlist|Rejected|Removed
+        downstream_intelligence: "Optional[dict]" = None,
     ) -> None:
         """
         Upsert a prop opportunity at evaluation time (PLAY or PASS).
@@ -2923,6 +2945,28 @@ class Database:
         ).hexdigest()[:16]
         _qpath = _json.dumps(qualification_path) if qualification_path else None
         _rcodes = _json.dumps(reason_codes) if reason_codes else None
+        if downstream_intelligence is None:
+            from engine.downstream_intelligence import build_downstream_payload
+            downstream_intelligence = build_downstream_payload(
+                evidence={},
+                bet_quality=bet_quality_score,
+                bet_confidence=confidence,
+                sample_size=0,
+            )
+        _intel_json = (
+            _json.dumps(downstream_intelligence, separators=(",", ":"))
+            if downstream_intelligence else None
+        )
+        _intel_completeness = (
+            (downstream_intelligence.get("evidence_completeness") or {}).get("score")
+            if downstream_intelligence else None
+        )
+        _sharp = (downstream_intelligence or {}).get("sharp_confidence") or {}
+        _sharp_confidence = _sharp.get("score") if downstream_intelligence else None
+        _sharp_components = (
+            _json.dumps(_sharp.get("components") or {}, separators=(",", ":"))
+            if downstream_intelligence else None
+        )
         stmt = (
             _sqlite_insert(PropOpportunityLog)
             .values(
@@ -2949,6 +2993,10 @@ class Database:
                 qualification_path = _qpath,
                 reason_codes       = _rcodes,
                 watchlist_state    = watchlist_state,
+                downstream_intelligence_json = _intel_json,
+                evidence_completeness = _intel_completeness,
+                sharp_confidence = _sharp_confidence,
+                sharp_confidence_components = _sharp_components,
             )
             .on_conflict_do_update(
                 index_elements = ["external_id", "stat_type"],
@@ -2966,6 +3014,10 @@ class Database:
                     "qualification_path": _qpath,
                     "reason_codes":       _rcodes,
                     "watchlist_state":    watchlist_state,
+                    "downstream_intelligence_json": _intel_json,
+                    "evidence_completeness": _intel_completeness,
+                    "sharp_confidence": _sharp_confidence,
+                    "sharp_confidence_components": _sharp_components,
                 }
             )
         )
@@ -3736,6 +3788,16 @@ class Database:
             )
             total_graded = total_row.scalar() or 0
 
+            intel_row = await s.execute(
+                select(
+                    func.count(PropOpportunityLog.id),
+                    func.avg(PropOpportunityLog.sharp_confidence),
+                    func.avg(PropOpportunityLog.evidence_completeness),
+                    func.count(PropOpportunityLog.sharp_confidence),
+                ).where(graded_filter, play_filter)
+            )
+            _intel_n, _avg_sharp, _avg_evidence, _sharp_n = intel_row.one()
+
         return {
             "by_tier":      by_tier,
             "by_sport":     by_sport,
@@ -3743,6 +3805,14 @@ class Database:
             "by_error_type": by_error_type,
             "player_trend": player_trend,
             "total_graded": total_graded,
+            "intelligence": {
+                "sample_size": int(_intel_n or 0),
+                "sharp_confidence_avg": round(float(_avg_sharp), 1) if _avg_sharp is not None else None,
+                "evidence_completeness_avg": round(float(_avg_evidence), 1) if _avg_evidence is not None else None,
+                "sharp_confidence_samples": int(_sharp_n or 0),
+                "calibration_minimum": 5,
+                "calibrated": int(_intel_n or 0) >= 5,
+            },
         }
 
     async def get_game_result_for_grading(

@@ -490,6 +490,7 @@ async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         rollups = await db.get_learning_rollups()
         tg_perf = await db.get_telegram_pick_performance()
         total   = rollups.get("total_graded", 0)
+        intel   = rollups.get("intelligence", {})
 
         # ── 🎯 Telegram actionable picks block (always shown first) ───────────
         tg_lines = ["📊 <b>Learning Rollups</b>", "", "🎯 <b>TELEGRAM ACTIONABLE PICKS</b>"]
@@ -507,6 +508,15 @@ async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             if tg_perf["graded"] > 0:
                 tg_lines.append(f"  Hit Rate: <b>{tg_hr}%</b>")
         tg_lines.append("")
+        if intel.get("sample_size", 0):
+            _cal = "calibrated sample" if intel.get("calibrated") else "descriptive only (<5)"
+            tg_lines.extend([
+                "🧠 <b>Sharp Confidence</b>",
+                f"  Avg: <b>{intel.get('sharp_confidence_avg') if intel.get('sharp_confidence_avg') is not None else '—'}/100</b>"
+                f"  · Evidence: {intel.get('evidence_completeness_avg') if intel.get('evidence_completeness_avg') is not None else '—'}%",
+                f"  Sample: {intel.get('sample_size', 0)}  · <i>{_cal}</i>",
+                "",
+            ])
 
         if total == 0:
             tg_lines.append("<i>No overall graded plays yet — results are graded after game_time passes.</i>")
@@ -1035,19 +1045,51 @@ async def cmd_performance(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         from engine.ranking import RankingTier, RankingDecision
 
         records = await _db.get_ev_records_with_results(limit=500, include_pending=False)
+        _ud_rollups = await _db.get_learning_rollups()
 
         if not records:
-            await update.message.reply_text(
-                "📊 <b>Performance History</b>\n\n"
-                "<i>No resolved actionable picks yet.  Win/loss results are recorded automatically"
-                " once an event's final score is available.</i>",
-                parse_mode="HTML",
-            )
+            _total = _ud_rollups.get("total_graded", 0)
+            if _total:
+                _intel = _ud_rollups.get("intelligence", {})
+                _sport_rows = _ud_rollups.get("by_sport", {})
+                _lines = [
+                    "📊 <b>Performance History</b>",
+                    "",
+                    "🎯 <b>Underdog graded opportunities</b>",
+                    f"Resolved plays: <b>{_total}</b>",
+                ]
+                for _sport, _row in sorted(_sport_rows.items()):
+                    _lines.append(
+                        f"  {_sport}: {_row['W']}W-{_row['L']}L-{_row['P']}P "
+                        f"({_row.get('win_pct', 0.0):.1f}%)"
+                    )
+                if _intel.get("sharp_confidence_avg") is not None:
+                    _lines.append(
+                        f"\nSharp Confidence avg: <b>{_intel['sharp_confidence_avg']}/100</b>"
+                        f"  · sample {_intel.get('sample_size', 0)}"
+                    )
+                _lines.append("\n<i>CLV and legacy sportsbook records appear when available.</i>")
+                await update.message.reply_text("\n".join(_lines), parse_mode="HTML")
+            else:
+                await update.message.reply_text(
+                    "📊 <b>Performance History</b>\n\n"
+                    "<i>No resolved actionable picks yet.  Win/loss results are recorded automatically"
+                    " once an event's final score is available.</i>",
+                    parse_mode="HTML",
+                )
             return
 
         engine = BacktestEngine()
         report = engine.run(records)
         msg = report.to_telegram()
+        _intel = _ud_rollups.get("intelligence", {})
+        if _ud_rollups.get("total_graded", 0):
+            msg += (
+                "\n\n🎯 <b>Underdog downstream sample</b>"
+                f"\n  Graded: {_ud_rollups['total_graded']}"
+                f"  · Sharp Confidence avg: "
+                f"{_intel.get('sharp_confidence_avg') if _intel.get('sharp_confidence_avg') is not None else '—'}/100"
+            )
         await update.message.reply_text(msg, parse_mode="HTML")
 
     except Exception as exc:
@@ -1304,6 +1346,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             sport_filter = arg.upper()
 
     from engine.timing import format_game_time_label as _fmt_gt
+    from engine.downstream_intelligence import compute_sharp_confidence as _sharp_conf
     from engine.player_prop_market import (
         build_player_prop_market_comparison,
         PROVIDER_EMOJI as _PROV_EMOJI,
@@ -1822,6 +1865,15 @@ def _render_slip_section(
                 delta = best_line - opening
                 move_note = f"  {'▲' if delta > 0 else '▼'}{abs(delta):.1f}"
 
+        _move_conf = None
+        if has_adapters:
+            _move_conf = min(100.0, abs(float(getattr(comp, "movement", 0) or 0)) * 25.0) if comp else None
+        _sharp = _sharp_conf(
+            bet_confidence=r.confidence,
+            movement_confidence=_move_conf,
+            sample_size=0,
+        )
+
         gt = getattr(r, "game_time", None)
         gt_label = f"  ⏰ {_fmt_gt(gt)}" if gt is not None and _fmt_gt(gt) else ""
 
@@ -1860,6 +1912,7 @@ def _render_slip_section(
             f"  <b>Leg {i}</b>  {tier_icon} {r.tier or '—'}  {stars_str}\n"
             f"    <b>{r.player_name}</b> · {r.stat_type}\n"
             f"    {r.best_side} {line_str}  ·  conf {conf_label}"
+            f"  ·  sharp {_sharp.score}/100"
             f"{move_note}{gt_label}"
             f"{provider_row}"
             f"{_dec_leg}"
