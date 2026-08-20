@@ -1,0 +1,485 @@
+🔴 TASK #135 AUDIT — DO NOT CREATE/ACCEPT ANOTHER CHECKPOINT YET
+
+We reviewed the completed Task #135 response against the latest Sharp Money AI Bot v3.5 specification.
+
+Task #135 appears to have implemented much of the downstream intelligence foundation, but several requirements from the latest specification were not explicitly verified.
+
+Do NOT assume they are complete.
+
+Do NOT redesign anything. Do NOT make the bot faster. Do NOT touch the stable monitoring engine.
+
+Before making changes, inspect the current implementation and verify the exact state.
+
+⸻
+
+1. PRESERVE EVERYTHING ALREADY WORKING
+
+Do NOT change:
+
+* ~2-minute Underdog cadence
+* max_instances=1
+* Continuous rotation
+* New-prop priority
+* Line-mover priority
+* Stable Refresh
+* Full-Pool Rotation / FPR
+* Current batch architecture
+* Current active-pool behavior
+* Scheduler
+* Clean restart behavior
+* Player-history collector
+* Existing evidence foundation
+* Existing grading infrastructure
+* Existing CLV infrastructure
+* Existing Telegram formatting unless specifically required below
+
+Task #135 already claims these were preserved.
+
+Do not redo completed work.
+
+⸻
+
+2. FIRST AUDIT — DO NOT CHANGE CODE YET
+
+Before modifying anything, verify whether the following already exist in the current implementation.
+
+Report each item as:
+
+* ✅ Implemented and wired
+* ⚠️ Partially implemented
+* ❌ Missing
+
+Specifically audit:
+
+Intelligence
+
+* Movement direction
+* Movement magnitude
+* Movement velocity
+* Movement persistence
+* Movement reversal
+* Movement context
+* Evidence completeness
+* Missing-evidence handling
+* Current-line value
+* Model/fair projection
+* BQ
+* Sharp Confidence
+* Market Quality
+* Historical outcome feedback
+* CLV
+* Sample-size awareness
+
+Learning
+
+* PLAY outcome tracking
+* PASS outcome tracking
+* Watchlist outcome tracking
+* Actionable outcome tracking
+* Evaluated-prop outcome tracking
+* Historical grading
+* Calibration
+* CLV learning
+* Sport-aware analysis
+
+User-facing
+
+* /picks
+* /slip
+* /performance
+* /grade
+* /stats
+* /calibration
+* /rollups
+
+Do not create duplicate systems.
+
+⸻
+
+3. FIX THE /PICKS GAP
+
+The previous Task #135 response specifically said:
+
+“The only remaining item from the attachment is exposing the new per-pick intelligence details directly in /picks”
+
+Our latest specification still requires this.
+
+Do NOT redesign /picks.
+
+Extend the existing output so that when data exists, a pick can expose:
+
+* BQ
+* Sharp Confidence
+* Model Projection
+* Current Line
+* Model Edge / Current-Line Value
+* Line Movement
+* Movement quality where available
+* Evidence Completeness
+* Available historical evidence
+* Market Quality
+* Final Model Grade
+
+Example structure:
+
+🔥 WNBA — UNDER 14.5
+
+BQ: 82/100
+Sharp Confidence: 91/100
+
+Model Projection: 11.4
+Current Line: 14.5
+Model Edge: +3.1
+
+Line Movement: +4.0
+Evidence: 94% complete
+
+Historical Support:
+
+* L5
+* L10
+* L20
+* L30
+* Season
+* Matchup
+
+Market Quality: STRONG
+
+Final Model Grade: ELITE
+
+Never fabricate values.
+
+If unavailable, explicitly show unavailable.
+
+⸻
+
+4. IMPLEMENT THE TIER 1 TELEGRAM GATE
+
+This is the most important missing requirement.
+
+This applies ONLY to Tier 1.
+
+Tier 1
+
+Tier 1 = every sport other than:
+
+* MLB
+* NFL
+* NBA
+
+For a Tier 1 Telegram actionable pick, require ALL of:
+
+Direction
+
+* Strong OVER
+* Strong UNDER
+* Elite OVER
+* Elite UNDER
+
+BQ
+
+* 70–84 = STRONG
+* 85–100+ = ELITE
+* <70 = not Telegram eligible
+
+MQ
+
+* 70–84 = STRONG
+* 85–100+ = ELITE
+* <70 = not Telegram eligible
+
+Evidence
+
+Strong supporting evidence required.
+
+Safety
+
+Existing safety protections required:
+
+* Dedup
+* Live-game protection
+* Existing actionable conditions
+* Existing safety conditions
+
+IMPORTANT
+
+Tier 1 Telegram does NOT require:
+
+* S-tier
+* A-tier
+* B-tier
+* C-tier
+
+Do not reintroduce classification gates.
+
+⸻
+
+5. REMOVE THE TIER 1 40–69 BLOCK
+
+The existing 40–69 threshold/block must remain removed from Tier 1 underlying evaluation.
+
+A Tier 1 prop scoring 40–69 must still be allowed to:
+
+* Enter evaluation
+* Be rescored
+* Receive evidence
+* Be tracked
+* Be graded
+* Be included in historical analysis
+* Be included in PLAY/PASS/Watchlist analysis
+* Feed calibration
+
+However:
+
+A 40–69 Tier 1 prop must NOT reach Telegram unless it eventually satisfies the actual Tier 1 Telegram requirements.
+
+Do not confuse underlying evaluation with Telegram delivery.
+
+⸻
+
+6. DO NOT CHANGE TIER 2
+
+Tier 2 is ONLY:
+
+* MLB
+* NFL
+* NBA
+
+The existing Tier 2 blocker must remain intact.
+
+Do NOT apply the new Tier 1 BQ/MQ gate to Tier 2.
+
+Do NOT weaken Tier 2.
+
+Do NOT introduce S/A/B/C gates if they were already removed from canonical Tier 2 delivery.
+
+Explicitly verify the current Tier 2 delivery logic before making changes.
+
+⸻
+
+7. VERIFY BQ/MQ LABELING
+
+Current examples such as:
+
+MarketQualityLabel.ELITE 77/100
+
+are incorrect under the latest rules.
+
+The canonical labels must be:
+
+BQ
+
+* 70–84 = STRONG
+* 85–100+ = ELITE
+
+MQ
+
+* 70–84 = STRONG
+* 85–100+ = ELITE
+
+Therefore:
+
+77/100 = STRONG
+
+not Elite.
+
+Update labeling wherever applicable to the Tier 1 Telegram intelligence/reporting path.
+
+Do not fabricate or alter the underlying numeric score.
+
+⸻
+
+8. VERIFY THE LEARNING LOOP
+
+Confirm that outcome data can flow through:
+
+Prop
+
+↓
+
+Movement
+
+↓
+
+Evidence
+
+↓
+
+Projection
+
+↓
+
+Current-Line Value
+
+↓
+
+Evidence Completeness
+
+↓
+
+Sharp Confidence
+
+↓
+
+BQ
+
+↓
+
+Decision
+
+↓
+
+PLAY/PASS/Watchlist/Actionable
+
+↓
+
+Result
+
+↓
+
+Grading
+
+↓
+
+CLV
+
+↓
+
+Calibration
+
+↓
+
+Historical learning
+
+Do not create another grading or calibration system.
+
+Use the existing persistence infrastructure.
+
+⸻
+
+9. VERIFY PASS / PLAY / WATCHLIST OUTCOMES
+
+Do not restrict learning to Telegram alerts.
+
+Confirm that when results become available, the system can evaluate historical outcomes for:
+
+* PLAY
+* PASS
+* Watchlist
+* Actionable
+* Telegram-delivered
+* Underlying evaluated props
+
+Confirm the relevant metrics remain persisted after re-evaluation.
+
+⸻
+
+10. VERIFY SAMPLE-SIZE AWARENESS
+
+Do not allow tiny samples to automatically rewrite model thresholds.
+
+Historical reporting should show sample size.
+
+Distinguish:
+
+* Insufficient sample
+* Preliminary signal
+* Meaningful sample
+
+Do not automatically overfit the model to a handful of results.
+
+⸻
+
+11. REQUIRED LIVE VERIFICATION
+
+Do not report completion based only on tests.
+
+After any required implementation changes:
+
+Monitoring
+
+Verify:
+
+* ~2-minute cadence remains intact
+* No concurrency increase
+* max_instances=1
+* Rotation remains intact
+* Stable Refresh remains intact
+* FPR remains intact
+
+Tier 1
+
+Verify with representative candidates:
+
+* BQ 70–84 → STRONG
+* BQ 85+ → ELITE
+* MQ 70–84 → STRONG
+* MQ 85+ → ELITE
+* Strong/Elite direction required
+* Strong evidence required
+* Safety conditions required
+* No S/A/B/C requirement
+* 40–69 remains evaluable underneath the Telegram gate
+
+Tier 2
+
+Verify:
+
+* MLB/NFL/NBA only
+* Existing blocker remains
+* Tier 1 gate was not accidentally applied
+
+Intelligence
+
+Verify:
+
+* Sharp Confidence
+* Current-line value
+* Projection
+* Evidence completeness
+* Movement context
+* BQ
+* MQ
+* CLV
+
+User-facing
+
+Verify:
+
+* /picks
+* /slip
+* /performance
+
+show the new intelligence where sufficient data exists.
+
+⸻
+
+12. IMPORTANT — DO NOT MARK COMPLETE YET
+
+Do NOT close or mark the work complete merely because:
+
+* Tests pass
+* Task #135 is complete
+* Migration succeeds
+* Restart succeeds
+
+We need the actual running bot verified against the latest specification.
+
+If something is already implemented, leave it alone and verify it.
+
+Only make targeted changes for genuine gaps.
+
+⸻
+
+🔴 FINAL REQUIREMENT
+
+Before reporting completion, provide a concise audit showing:
+
+1. What was already implemented.
+2. What was missing.
+3. What was changed.
+4. What was live-verified.
+5. What remains unavailable/unverified.
+6. Confirmation that monitoring-engine behavior was not changed.
+
+Do not create another checkpoint until this audit is complete and the remaining requirements are live-verified.
