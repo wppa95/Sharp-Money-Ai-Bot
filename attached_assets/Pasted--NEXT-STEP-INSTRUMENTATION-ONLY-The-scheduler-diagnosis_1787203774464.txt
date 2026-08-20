@@ -1,0 +1,295 @@
+🔴 NEXT STEP — INSTRUMENTATION ONLY
+
+The scheduler diagnosis is accepted.
+
+Do NOT optimize anything yet.
+
+Do NOT change scheduler settings.
+
+Do NOT change cadence.
+
+Do NOT change batch sizes.
+
+Do NOT change concurrency.
+
+We need actual stage-level timing data before deciding what to optimize.
+
+⸻
+
+1. KEEP CURRENT SETTINGS EXACTLY AS THEY ARE
+
+Preserve:
+
+* Underdog cadence = 120 seconds
+* Stable Refresh = 240 seconds
+* FPR = 300 seconds
+* Underdog max_instances = 1
+* Stable Refresh max_instances = 1
+* FPR max_instances = 1
+
+Do NOT increase concurrency.
+
+Do NOT change the monitoring engine.
+
+⸻
+
+2. ADD ONLY STAGE TIMING INSTRUMENTATION
+
+Add lightweight timing instrumentation around the existing Underdog monitoring cycle.
+
+Do NOT change the actual work being performed.
+
+For each Underdog cycle, record:
+
+Stage 1 — Fetch / Parse
+
+Measure:
+
+* Provider request
+* Response handling
+* Feed parsing
+
+Stage 2 — Active Pool
+
+Measure:
+
+* Active-pool construction
+* Deduplication
+* Pool filtering
+
+Stage 3 — Priority Selection
+
+Measure:
+
+* New props
+* Line movers
+* Urgent movement
+* Tier prioritization
+* Rotation selection
+
+Stage 4 — Scoring
+
+Measure:
+
+* BQ
+* Confidence
+* Market Quality
+* Downstream intelligence
+* Projection/current-line value
+* Sharp Confidence
+
+Stage 5 — Evidence / Provider Enrichment
+
+Measure:
+
+* Player history
+* L2/L5/L10/L20/L30
+* Season data
+* Matchup
+* Provider lookups
+* Any external enrichment
+
+Only measure what actually runs.
+
+Do NOT add new evidence providers.
+
+Stage 6 — Opportunity Persistence
+
+Measure:
+
+* Opportunity-log writes
+* Intelligence payload writes
+* Grading/tracking writes
+* Snapshot writes
+
+Stage 7 — Ranking / Delivery Preparation
+
+Measure:
+
+* Qualification
+* Ranking
+* Dedup
+* Telegram preparation
+
+Do NOT change delivery rules.
+
+Stage 8 — Final Bookkeeping
+
+Measure:
+
+* Funnel metrics
+* Dashboard metrics
+* Health state
+* Cycle completion
+
+⸻
+
+3. RECORD TOTAL CYCLE TIME
+
+Every completed Underdog cycle should expose:
+
+* Cycle ID
+* Start time
+* End time
+* Total duration
+* Props processed
+* Props/sec
+* Batch size
+
+Also record each stage’s:
+
+* Start time
+* End time
+* Duration
+
+⸻
+
+4. DO NOT MAKE THE INSTRUMENTATION EXPENSIVE
+
+The timing system must be lightweight.
+
+Do NOT:
+
+* Add a database write for every individual prop
+* Add network requests
+* Add new provider calls
+* Add new scoring passes
+* Add duplicate evidence work
+* Add duplicate database queries
+
+Prefer aggregated timing per stage.
+
+⸻
+
+5. ALSO CAPTURE JOB INTERACTION
+
+For each cycle, record whether these jobs were active at the same time:
+
+* Underdog
+* Stable Refresh
+* FPR
+* Player-history collector
+
+We need to determine whether overlapping workload is materially contributing to the long runtime.
+
+Do not change their scheduling.
+
+Only observe.
+
+⸻
+
+6. RUN MULTIPLE REAL CYCLES
+
+After instrumentation is implemented:
+
+Do not immediately claim completion.
+
+Let the actual running bot execute enough cycles to collect meaningful measurements.
+
+Ideally capture:
+
+* At least 3 completed Underdog cycles
+* At least 2 Stable Refresh cycles
+* At least 1 FPR cycle
+
+If the Underdog scan continues exceeding 120 seconds, record the actual duration rather than treating it as a test failure.
+
+⸻
+
+7. REPORT THE MEASURED BOTTLENECK
+
+After observation, report:
+
+Underdog
+
+* Cycle 1 duration
+* Cycle 2 duration
+* Cycle 3 duration
+* Average
+* Median
+* Slowest
+* Props processed
+* Props/sec
+
+Stage Breakdown
+
+For each stage:
+
+* Duration
+* Percentage of total cycle
+
+Identify the top bottleneck(s).
+
+Job Interaction
+
+Report whether:
+
+* Stable Refresh
+* FPR
+* Player-history
+
+materially overlap with the slow Underdog cycles.
+
+⸻
+
+8. ONLY THEN CHOOSE AN OPTIMIZATION
+
+After the measurements are collected, propose the smallest targeted optimization.
+
+Possible examples, ONLY if measurements justify them:
+
+* Reduce redundant database work
+* Batch an existing persistence operation
+* Avoid duplicate provider requests
+* Cache an already-existing lookup
+* Move non-critical enrichment out of the critical scan path
+* Optimize an expensive existing query
+* Improve an existing scoring loop
+
+Do NOT automatically choose any of these.
+
+The measured bottleneck must determine the fix.
+
+⸻
+
+9. PRESERVE ALL RECENT WORK
+
+Do NOT regress:
+
+* Tier 1 delivery gate
+* Tier 2 behavior
+* BQ/MQ labels
+* /picks intelligence
+* Sharp Confidence
+* Evidence completeness
+* Current-line value
+* Movement intelligence
+* CLV
+* Grading
+* Calibration
+* Continuous rotation
+* Stable Refresh
+* FPR
+* Existing active-pool behavior
+
+⸻
+
+🔴 FINAL RULE
+
+Instrumentation only.
+
+No optimization yet.
+
+No scheduler changes.
+
+No cadence changes.
+
+No batch-size changes.
+
+No concurrency changes.
+
+No architecture changes.
+
+Collect real stage-level timing data from the running bot first.
+
+Then report the bottleneck and proposed smallest fix before implementing anything else.

@@ -33,6 +33,7 @@ from __future__ import annotations
 import asyncio
 import gc
 import logging
+import time
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -63,6 +64,68 @@ from alerts_multiplatform import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class _CycleTiming:
+    """In-memory aggregated timing for one monitoring cycle."""
+
+    def __init__(self, cycle_id: int) -> None:
+        self.cycle_id = cycle_id
+        self.started_at = datetime.utcnow()
+        self.started_mono = time.monotonic()
+        self._open: dict[str, tuple[datetime, float]] = {}
+        self.stages: dict[str, dict] = {}
+
+    def start(self, name: str) -> None:
+        self._open[name] = (datetime.utcnow(), time.monotonic())
+
+    def finish(self, name: str) -> None:
+        opened = self._open.pop(name, None)
+        if opened is None:
+            return
+        start_at, start_mono = opened
+        end_at = datetime.utcnow()
+        self.stages[name] = {
+            "start": start_at.isoformat(timespec="milliseconds") + "Z",
+            "end": end_at.isoformat(timespec="milliseconds") + "Z",
+            "seconds": round(max(0.0, time.monotonic() - start_mono), 3),
+        }
+
+    def finish_open(self) -> None:
+        for name in list(self._open):
+            self.finish(name)
+
+    def summary(self, props: int, batch_size: int) -> dict:
+        self.finish_open()
+        ended_at = datetime.utcnow()
+        total = max(0.0, time.monotonic() - self.started_mono)
+        return {
+            "cycle_id": self.cycle_id,
+            "start": self.started_at.isoformat(timespec="milliseconds") + "Z",
+            "end": ended_at.isoformat(timespec="milliseconds") + "Z",
+            "seconds": round(total, 3),
+            "props": int(props),
+            "props_per_sec": round(props / total, 3) if total else 0.0,
+            "batch_size": int(batch_size),
+            "stages": self.stages,
+            "active_jobs": sorted(_active_job_names()),
+        }
+
+
+_cycle_sequence = 0
+_active_jobs: dict[str, float] = {}
+
+
+def _job_activity_start(name: str) -> None:
+    _active_jobs[name] = time.monotonic()
+
+
+def _job_activity_end(name: str) -> None:
+    _active_jobs.pop(name, None)
+
+
+def _active_job_names() -> set[str]:
+    return set(_active_jobs)
 
 # Module-level registry — set by init_market_engine()
 _registry: Optional[ConnectorRegistry] = None
