@@ -1,0 +1,251 @@
+🔴 TASK #138 — FINISH THE MEASUREMENT WINDOW BEFORE ANY OPTIMIZATION
+
+Continue from the current implementation and instrumentation.
+
+Do NOT optimize anything yet.
+
+The purpose of this task is to identify exactly what is causing the long Underdog scoring/evidence runtime.
+
+1. PRESERVE CURRENT SETTINGS
+
+Do not change:
+
+* Underdog cadence: 120 seconds
+* Stable Refresh: 240 seconds
+* FPR: 300 seconds
+* Underdog max_instances=1
+* Stable Refresh max_instances=1
+* FPR max_instances=1
+* Current batch sizes
+* Current concurrency
+* Current monitoring/rotation behavior
+
+Do not change delivery rules or scoring logic.
+
+2. ISOLATE THE SCORING/EVIDENCE BOTTLENECK
+
+The previous measurement showed:
+
+* Fetch/parse: negligible
+* Active pool: negligible
+* Scoring + evidence: ~84.75% of normal-cycle time
+* Ranking/delivery: secondary
+* Final bookkeeping: secondary
+
+Now break the Scoring + Evidence stage into measurable components.
+
+For each completed Underdog cycle, aggregate:
+
+Core scoring
+
+* Number of props scored
+* Total scoring time
+* Average time per prop
+
+Evidence
+
+* Number of props requiring evidence
+* Number of evidence lookups
+* Total evidence-processing time
+* Average evidence time per prop
+
+Provider calls
+
+For every existing provider actually called, record:
+
+* Provider name
+* Call count
+* Successful calls
+* Failed calls
+* Total latency
+* Average latency
+* Maximum latency
+* Timeout/retry count if already available
+
+Especially isolate OpenDota/Dota player-name lookups.
+
+The console is currently showing a very large number of Dota player-name warnings.
+
+Determine:
+
+* How many OpenDota calls occur per cycle
+* How many return a player-name miss
+* Total OpenDota time
+* Average OpenDota latency
+* Maximum OpenDota latency
+* Whether those calls occur inside the Underdog scoring/evidence critical path
+* Whether repeated calls are being made for the same player
+
+Do NOT remove, cache, bypass, or change those calls yet.
+
+We only need measurements.
+
+3. DATABASE TIMING
+
+Break database work into:
+
+* Reads
+* Writes
+* Opportunity persistence
+* Intelligence payload persistence
+* Snapshot persistence
+* Grading/tracking persistence
+
+Record aggregate duration and operation counts.
+
+Do not add per-prop database logging.
+
+4. ENRICHMENT COUNTS
+
+Record:
+
+* Props entering scoring
+* Props entering evidence
+* Props receiving player-history enrichment
+* Props receiving provider enrichment
+* Props skipped because evidence is unavailable
+* Props receiving complete evidence
+* Props receiving partial evidence
+
+Do not change how evidence is obtained.
+
+5. JOB INTERACTION
+
+For every Underdog cycle record whether the following overlapped it:
+
+* Player History
+* Stable Refresh
+* FPR
+
+Include overlap start/end times where available.
+
+The goal is to determine whether shared runtime/provider/database contention materially increases Underdog duration.
+
+6. REQUIRED LIVE SAMPLE
+
+Do not claim completion after one cycle.
+
+Collect, if naturally possible:
+
+* At least 3 completed normal post-restore Underdog cycles
+* At least 2 Stable Refresh cycles
+* At least 1 FPR cycle
+
+If the current Underdog cycle exceeds 120 seconds, that is measurement data, not a failure to hide.
+
+Do not interrupt the cycle merely to obtain another sample.
+
+7. IMPORTANT — NO OPTIMIZATION
+
+Do NOT:
+
+* Add caching
+* Remove OpenDota calls
+* Reduce provider calls
+* Change evidence requirements
+* Reduce scoring work
+* Change batch size
+* Change cadence
+* Change concurrency
+* Move evidence out of the scan
+* Change scheduler settings
+* Redesign the monitoring engine
+
+Until the measurements identify the actual bottleneck.
+
+8. FINAL REPORT REQUIRED
+
+When the sample is complete, report:
+
+Underdog
+
+* Cycle duration for each sample
+* Props processed
+* Props/sec
+* Average
+* Median
+* Slowest
+
+Scoring
+
+* Total scoring time
+* Props scored
+* Average scoring time/prop
+
+Evidence
+
+* Total evidence time
+* Evidence lookups
+* Average evidence time/lookup
+
+Provider breakdown
+
+For each provider:
+
+* Calls
+* Successes
+* Failures
+* Total latency
+* Average latency
+* Max latency
+* Miss/warning count
+
+OpenDota specifically
+
+* Total calls
+* Player-name misses
+* Total latency
+* Average latency
+* Max latency
+* Percentage of scoring/evidence runtime
+* Whether it is actually a dominant bottleneck
+
+Database
+
+* Read time
+* Write time
+* Persistence time
+* Operation counts
+
+Job overlap
+
+* Player History overlap
+* Stable Refresh overlap
+* FPR overlap
+
+9. THEN PROPOSE THE SMALLEST FIX
+
+Only after the measurements are complete:
+
+1. Identify the measured bottleneck.
+2. Explain exactly why it is the bottleneck.
+3. Propose the smallest targeted optimization.
+4. Do not implement that optimization yet.
+
+Wait for approval before changing runtime behavior.
+
+🔴 FINAL RULE
+
+Measurement only.
+
+No optimization.
+
+No scheduler changes.
+
+No cadence changes.
+
+No batch-size changes.
+
+No concurrency changes.
+
+No evidence-rule changes.
+
+No provider removal.
+
+No caching.
+
+No architecture changes.
+
+The next objective is to determine whether the large number of Dota/OpenDota player-name warnings is actually responsible for the long scan time, or merely noisy console output.
+
+Do not guess. Measure it.
