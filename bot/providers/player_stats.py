@@ -329,6 +329,7 @@ class PlayerStatsProvider:
         player_name: str,
         sport: str,
         stat_type: str,
+        instrumentation=None,
     ) -> list[RawGameResult]:
         """
         Fetch recent game results for *player_name* × *stat_type* in *sport*.

@@ -34,6 +34,7 @@ import asyncio
 import gc
 import logging
 import time
+from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -75,9 +76,20 @@ class _CycleTiming:
         self.started_mono = time.monotonic()
         self._open: dict[str, tuple[datetime, float]] = {}
         self.stages: dict[str, dict] = {}
+        self.metrics: dict = {
+            "counts": defaultdict(int),
+            "timers": defaultdict(float),
+            "providers": {},
+            "database": {},
+        }
+        self._overlap_start: set[str] = set()
+        self._overlap_during: set[str] = set()
 
     def start(self, name: str) -> None:
         self._open[name] = (datetime.utcnow(), time.monotonic())
+        if name == "scoring_evidence":
+            self._overlap_start = _active_job_names() - {"underdog"}
+            self._overlap_during.update(self._overlap_start)
 
     def finish(self, name: str) -> None:
         opened = self._open.pop(name, None)
@@ -90,6 +102,54 @@ class _CycleTiming:
             "end": end_at.isoformat(timespec="milliseconds") + "Z",
             "seconds": round(max(0.0, time.monotonic() - start_mono), 3),
         }
+        if name == "scoring_evidence":
+            self._overlap_during.update(_active_job_names() - {"underdog"})
+
+    def count(self, name: str, amount: int = 1) -> None:
+        self.metrics["counts"][name] += int(amount)
+
+    def duration(self, name: str, seconds: float) -> None:
+        self.metrics["timers"][name] += max(0.0, float(seconds))
+
+    def provider(self, name: str, seconds: float) -> None:
+        entry = self.metrics["providers"].setdefault(
+            name, {"calls": 0, "seconds": 0.0}
+        )
+        entry["calls"] += 1
+        entry["seconds"] += max(0.0, float(seconds))
+
+    def database(self, kind: str, operation: str, seconds: float) -> None:
+        entry = self.metrics["database"].setdefault(
+            operation, {"kind": kind, "calls": 0, "seconds": 0.0}
+        )
+        entry["calls"] += 1
+        entry["seconds"] += max(0.0, float(seconds))
+        self.count(f"database_{kind}_operations")
+        self.duration(f"database_{kind}", seconds)
+
+    async def await_operation(self, category: str, operation: str, awaitable):
+        started = time.monotonic()
+        self.count(f"{category}_operations")
+        try:
+            return await awaitable
+        finally:
+            elapsed = time.monotonic() - started
+            self.duration(category, elapsed)
+
+    async def await_db(self, kind: str, operation: str, awaitable):
+        started = time.monotonic()
+        try:
+            return await awaitable
+        finally:
+            self.database(kind, operation, time.monotonic() - started)
+
+    def sync_operation(self, category: str, operation: str, func, *args, **kwargs):
+        started = time.monotonic()
+        self.count(f"{category}_operations")
+        try:
+            return func(*args, **kwargs)
+        finally:
+            self.duration(category, time.monotonic() - started)
 
     def finish_open(self) -> None:
         for name in list(self._open):
@@ -109,6 +169,29 @@ class _CycleTiming:
             "batch_size": int(batch_size),
             "stages": self.stages,
             "active_jobs": sorted(_active_job_names()),
+            "diagnostics": {
+                "counts": dict(self.metrics["counts"]),
+                "timers": {
+                    key: round(value, 3)
+                    for key, value in self.metrics["timers"].items()
+                },
+                "providers": {
+                    key: {
+                        "calls": value["calls"],
+                        "seconds": round(value["seconds"], 3),
+                    }
+                    for key, value in self.metrics["providers"].items()
+                },
+                "database": {
+                    key: {
+                        "kind": value["kind"],
+                        "calls": value["calls"],
+                        "seconds": round(value["seconds"], 3),
+                    }
+                    for key, value in self.metrics["database"].items()
+                },
+                "scoring_overlap": sorted(self._overlap_during),
+            },
         }
 
 
@@ -152,6 +235,19 @@ _player_result_fetch_cache: set = set()
 # accumulate in memory.  Clear the entire set once it grows past this ceiling so
 # the next cycle re-fetches fresh data — a safe, cheap reset at ~300 s cadence.
 _PLAYER_RESULT_CACHE_MAX = 5_000
+
+
+def _player_provider_label(sport: str) -> str:
+    """Best-effort provider attribution for the existing player-stats routes."""
+    labels = {
+        "MLB": "MLB Stats API",
+        "NHL": "NHL",
+        "CS": "PandaScore",
+        "DOTA": "OpenDota",
+        "TENNIS": "JeffSackmann",
+        "SOCCER": "Soccer provider",
+    }
+    return labels.get((sport or "").upper(), "ESPN")
 
 # Set to True after the first complete Underdog prop scan.  The first cycle
 # scores every active prop (cold-start mode); subsequent cycles use incremental
@@ -570,6 +666,7 @@ async def _fetch_and_compute_hit_rates(
     stat_type: str,
     current_line: float,
     allow_remote: bool = True,
+    cycle_timing: Optional[_CycleTiming] = None,
 ) -> "Optional[object]":
     """
     Fetch fresh game results (at most once per calendar day per player/stat),
@@ -594,9 +691,31 @@ async def _fetch_and_compute_hit_rates(
                     len(_player_result_fetch_cache),
                 )
                 _player_result_fetch_cache.clear()
-            raw_results = await provider.fetch_results(player_name, sport, stat_type)
+            _provider_started = time.monotonic()
+            if cycle_timing is not None:
+                raw_results = await provider.fetch_results(
+                    player_name,
+                    sport,
+                    stat_type,
+                    instrumentation=cycle_timing,
+                )
+            else:
+                raw_results = await provider.fetch_results(
+                    player_name, sport, stat_type
+                )
+            if cycle_timing is not None:
+                cycle_timing.provider(
+                    _player_provider_label(sport),
+                    time.monotonic() - _provider_started,
+                )
+                cycle_timing.count("provider_enrichment_props")
             for r in raw_results:
-                await db.upsert_player_result(r)
+                if cycle_timing is not None:
+                    await cycle_timing.await_db(
+                        "write", "upsert_player_result", db.upsert_player_result(r)
+                    )
+                else:
+                    await db.upsert_player_result(r)
             _player_result_fetch_cache.add(cache_key)
             if raw_results:
                 logger.debug(
@@ -604,10 +723,33 @@ async def _fetch_and_compute_hit_rates(
                     len(raw_results), player_name, stat_type,
                 )
 
-        db_results = await db.get_player_results(player_name, sport, stat_type, limit=30)
+        if cycle_timing is not None:
+            db_results = await cycle_timing.await_db(
+                "read",
+                "get_player_results",
+                db.get_player_results(player_name, sport, stat_type, limit=30),
+            )
+        else:
+            db_results = await db.get_player_results(player_name, sport, stat_type, limit=30)
+        if cycle_timing is not None:
+            cycle_timing.count("evidence_lookups")
         if not db_results:
+            if cycle_timing is not None:
+                cycle_timing.count("props_without_evidence")
             return None
+        _evidence_processing_started = time.monotonic()
         result = compute_hit_rates(db_results, current_line)
+        if cycle_timing is not None:
+            cycle_timing.duration(
+                "evidence_processing",
+                time.monotonic() - _evidence_processing_started,
+            )
+            if getattr(result, "has_real_data", False) or getattr(
+                result, "has_proxy_data", False
+            ):
+                cycle_timing.count("props_with_evidence")
+            else:
+                cycle_timing.count("props_without_evidence")
         # Defensive guard: compute_hit_rates must return PlayerHitRates, never a list.
         # If it somehow does, log a warning and return None so the caller falls back to PASS.
         if not hasattr(result, "has_real_data"):
@@ -1476,9 +1618,17 @@ async def underdog_job(context) -> None:
         # 1. Most-recent non-removed snapshot per (player, stat) for line-change detection.
         # 2. All ever-seen (player, stat) keys (incl. removed) to detect first appearances.
         recent_by_key: dict[tuple[str, str], UnderdogSnapshotRecord] = (
-            await db.get_latest_underdog_snapshot_per_prop()
+            await _cycle_timing.await_db(
+                "read",
+                "get_latest_underdog_snapshot_per_prop",
+                db.get_latest_underdog_snapshot_per_prop(),
+            )
         )
-        known_keys: set[tuple[str, str]] = await db.get_known_underdog_prop_keys()
+        known_keys: set[tuple[str, str]] = await _cycle_timing.await_db(
+            "read",
+            "get_known_underdog_prop_keys",
+            db.get_known_underdog_prop_keys(),
+        )
     
         for snap in ud_snaps:
             is_removed = "[REMOVED]" in snap.selection
@@ -1547,6 +1697,7 @@ async def underdog_job(context) -> None:
             validation:         Optional[object]      = None    # PlayerPropValidation or None
             decision:           Optional[object]      = None    # UDBetDecision or None
             hit_rates:          Optional[object]      = None    # PlayerHitRates or None
+            _hist_snap:         Optional[object]      = None    # evidence snapshot
             market_quality:     Optional[object]      = None    # MarketQuality — display context
             market_pressure:    Optional[object]      = None    # MarketPressureFlag — warning only
             _dq_collected:      bool                  = False   # True when this snap is queued for ranked delivery
@@ -1557,8 +1708,12 @@ async def underdog_job(context) -> None:
                 line_val = snap.line or 0.0
                 # Load history even for new props — needed for validation gate.
                 # Truly first-ever props return empty list → validation blocks alert.
-                np_history = await db.get_ud_prop_history(player, stat_type, limit=30)
-                score = score_ud_prop(
+                np_history = await _cycle_timing.await_db(
+                    "read",
+                    "get_ud_prop_history",
+                    db.get_ud_prop_history(player, stat_type, limit=30),
+                )
+                score = _cycle_timing.sync_operation("core_scoring", "score_ud_prop", score_ud_prop,
                     player_name  = player,
                     stat_type    = stat_type,
                     sport        = snap.sport or "UNKNOWN",
@@ -1585,6 +1740,7 @@ async def underdog_job(context) -> None:
                         stat_type,
                         line_val,
                         ud_history=np_history,
+                        instrumentation=_cycle_timing,
                     )
                 except Exception:
                     _hist_snap = None
@@ -1622,7 +1778,8 @@ async def underdog_job(context) -> None:
                 hit_rates = None
                 if validation.has_supporting_data and (score.tier != "PASS" or np_immediate):
                     hit_rates = await _fetch_and_compute_hit_rates(
-                        db, player, snap.sport or "UNKNOWN", stat_type, line_val
+                        db, player, snap.sport or "UNKNOWN", stat_type, line_val,
+                        cycle_timing=_cycle_timing,
                     )
                     decision = make_ud_bet_decision(
                         score        = score,
@@ -1913,7 +2070,11 @@ async def underdog_job(context) -> None:
                 # Removal notices bypass scoring and always qualify.
                 if not is_removed and line_changed and prev_line is not None:
                     # Load limit=30 to cover L30 validation window as well as scoring
-                    ud_history = await db.get_ud_prop_history(player, stat_type, limit=30)
+                    ud_history = await _cycle_timing.await_db(
+                        "read",
+                        "get_ud_prop_history",
+                        db.get_ud_prop_history(player, stat_type, limit=30),
+                    )
 
                     _hist_snap = None
                     try:
@@ -1925,11 +2086,12 @@ async def underdog_job(context) -> None:
                             stat_type,
                             snap.line or 0.0,
                             ud_history=ud_history,
+                            instrumentation=_cycle_timing,
                         )
                     except Exception:
                         _hist_snap = None
                     _lc_magnitude   = abs(snap.line - prev_line) if (snap.line is not None and prev_line is not None) else None
-                    score = score_ud_prop(
+                    score = _cycle_timing.sync_operation("core_scoring", "score_ud_prop", score_ud_prop,
                         player_name  = player,
                         stat_type    = stat_type,
                         sport        = snap.sport or "UNKNOWN",
@@ -1963,7 +2125,8 @@ async def underdog_job(context) -> None:
                             and (snap.sport or "UNKNOWN") in config.ud_alert_sports
                         ):
                         hit_rates = await _fetch_and_compute_hit_rates(
-                            db, player, snap.sport or "UNKNOWN", stat_type, snap.line or 0.0
+                            db, player, snap.sport or "UNKNOWN", stat_type, snap.line or 0.0,
+                            cycle_timing=_cycle_timing,
                         )
                         decision = make_ud_bet_decision(
                             score        = score,
@@ -1975,7 +2138,10 @@ async def underdog_job(context) -> None:
                         )
                         # Log every evaluated opportunity (PLAY or PASS) for tracking
                         try:
-                            await db.log_prop_opportunity(
+                            await _cycle_timing.await_db(
+                                "write",
+                                "log_prop_opportunity",
+                                db.log_prop_opportunity(
                                 external_id       = getattr(snap, "external_id", None) or getattr(snap, "id", None) or "",
                                 player_name       = player,
                                 team              = snap.team or "",
@@ -1992,6 +2158,7 @@ async def underdog_job(context) -> None:
                                 watchlist_state   = (
                                     "Qualified" if decision.recommendation != "PASS" else "Rejected"
                                 ),
+                                ),
                             )
                         except Exception as _pol_exc:
                             logger.warning(
@@ -2001,7 +2168,10 @@ async def underdog_job(context) -> None:
                         # P4: Log PASS-scored props even without a directional decision
                         # so all evaluated props are tracked in prop_opportunity_log.
                         try:
-                            await db.log_prop_opportunity(
+                            await _cycle_timing.await_db(
+                                "write",
+                                "log_prop_opportunity",
+                                db.log_prop_opportunity(
                                 external_id    = getattr(snap, "external_id", None) or getattr(snap, "id", None) or "",
                                 player_name    = player,
                                 team           = snap.team or "",
@@ -2014,6 +2184,7 @@ async def underdog_job(context) -> None:
                                 game_time      = snap.game_time,
                                 provider       = "Underdog",
                                 watchlist_state = "Rejected",
+                                ),
                             )
                         except Exception as _pol_exc:
                             logger.warning(
@@ -2035,10 +2206,14 @@ async def underdog_job(context) -> None:
                     # intentionally skipped — fetching them for ~1000 props on boot
                     # would hammer the stats API; they are populated lazily on the
                     # first qualifying incremental event.  No alerts are sent.
-                    ud_history = await db.get_ud_prop_history(player, stat_type, limit=30)
+                    ud_history = await _cycle_timing.await_db(
+                        "read",
+                        "get_ud_prop_history",
+                        db.get_ud_prop_history(player, stat_type, limit=30),
+                    )
                     _hist_snap = None  # cold-start: no per-prop PlayerStatsProvider fetch
 
-                    score = score_ud_prop(
+                    score = _cycle_timing.sync_operation("core_scoring", "score_ud_prop", score_ud_prop,
                         player_name        = player,
                         stat_type          = stat_type,
                         sport              = snap.sport or "UNKNOWN",
@@ -2105,10 +2280,11 @@ async def underdog_job(context) -> None:
                             stat_type,
                             snap.line or 0.0,
                             ud_history=ud_history,
+                            instrumentation=_cycle_timing,
                         )
                     except Exception:
                         _hist_snap = None
-                    score = score_ud_prop(
+                    score = _cycle_timing.sync_operation("core_scoring", "score_ud_prop", score_ud_prop,
                         player_name  = player,
                         stat_type    = stat_type,
                         sport        = snap.sport or "UNKNOWN",
@@ -2617,8 +2793,12 @@ async def underdog_job(context) -> None:
                     )
                     continue
 
-                _shist = await db.get_ud_prop_history(_sp, _st, limit=30)
-                _sscore = score_ud_prop(
+                _shist = await _cycle_timing.await_db(
+                    "read",
+                    "get_ud_prop_history",
+                    db.get_ud_prop_history(_sp, _st, limit=30),
+                )
+                _sscore = _cycle_timing.sync_operation("core_scoring", "score_ud_prop", score_ud_prop,
                     player_name  = _sp,
                     stat_type    = _st,
                     sport        = _ssport,
@@ -2641,7 +2821,8 @@ async def underdog_job(context) -> None:
                     continue
     
                 _shits = await _fetch_and_compute_hit_rates(
-                    db, _sp, _ssport, _st, _line_val
+                    db, _sp, _ssport, _st, _line_val,
+                    cycle_timing=_cycle_timing,
                 )
                 _sdec = make_ud_bet_decision(
                     score        = _sscore,
@@ -3059,7 +3240,11 @@ async def underdog_job(context) -> None:
             _incr_snapshot = list(_incremental_records)
             _incremental_records.clear()
             try:
-                await db.save_underdog_snapshots_bulk(_incr_snapshot)
+                await _cycle_timing.await_db(
+                    "write",
+                    "save_underdog_snapshots_bulk",
+                    db.save_underdog_snapshots_bulk(_incr_snapshot),
+                )
             except Exception as _bulk_exc:
                 logger.warning(
                     "underdog_job: bulk snapshot save failed (%d records): %s",
@@ -3077,7 +3262,11 @@ async def underdog_job(context) -> None:
                 _cs_total = len(_cold_start_records)
                 for _cs_i in range(0, _cs_total, _CS_CHUNK):
                     _cs_batch = _cold_start_records[_cs_i: _cs_i + _CS_CHUNK]
-                    await db.save_underdog_snapshots_bulk(_cs_batch)
+                    await _cycle_timing.await_db(
+                        "write",
+                        "save_underdog_snapshots_bulk",
+                        db.save_underdog_snapshots_bulk(_cs_batch),
+                    )
                     del _cs_batch  # release this batch immediately
                 _cold_start_records.clear()  # release full list
                 logger.info(
@@ -3258,12 +3447,20 @@ async def underdog_job(context) -> None:
                     })
                     # Flush chunk to DB and release memory
                     if len(_cand_rows) >= _CAND_CHUNK:
-                        await db.log_prop_candidate_batch(_cand_rows)
+                        await _cycle_timing.await_db(
+                            "write",
+                            "log_prop_candidate_batch",
+                            db.log_prop_candidate_batch(_cand_rows),
+                        )
                         _cand_total += len(_cand_rows)
                         _cand_rows = []
                 # Flush remaining rows
                 if _cand_rows:
-                    await db.log_prop_candidate_batch(_cand_rows)
+                    await _cycle_timing.await_db(
+                        "write",
+                        "log_prop_candidate_batch",
+                        db.log_prop_candidate_batch(_cand_rows),
+                    )
                     _cand_total += len(_cand_rows)
                     _cand_rows = []
                 if _cand_total:
@@ -3288,7 +3485,11 @@ async def underdog_job(context) -> None:
         # Non-fatal: write failure must never abort the cycle.
         if _plh_mq_scores and db:
             try:
-                await db.update_ud_props_mq_scores_bulk(_plh_mq_scores)
+                await _cycle_timing.await_db(
+                    "write",
+                    "update_ud_props_mq_scores_bulk",
+                    db.update_ud_props_mq_scores_bulk(_plh_mq_scores),
+                )
             except Exception as _mq_bulk_exc:
                 logger.debug("underdog_job: mq_scores bulk write failed: %s", _mq_bulk_exc)
         
@@ -3297,19 +3498,23 @@ async def underdog_job(context) -> None:
         # Proves that all ~4,600 active props are monitored each poll (not just scored ones).
         try:
             if db:
-                await db.log_scan_cycle(
-                    scan_ts         = now,
-                    fetched         = _n_ud_snaps_this_cycle,
-                    removed         = _n_removed,
-                    futures         = sum(_sport_futures.values()),
-                    active          = sum(_sport_raw.values()),
-                    unchanged       = _n_unchanged_skipped,
-                    new_props       = _n_new_prop,
-                    line_changed    = _n_scored,
-                    cold_start      = _n_cold_start_scored,
-                    analyzed        = _n_new_prop + _n_scored + _n_cold_start_scored,
-                    qualified       = _n_qualified,
-                    alert_delivered = _n_new_prop_sent + _n_lc_sent + _n_standing_sent,
+                await _cycle_timing.await_db(
+                    "write",
+                    "log_scan_cycle",
+                    db.log_scan_cycle(
+                        scan_ts         = now,
+                        fetched         = _n_ud_snaps_this_cycle,
+                        removed         = _n_removed,
+                        futures         = sum(_sport_futures.values()),
+                        active          = sum(_sport_raw.values()),
+                        unchanged       = _n_unchanged_skipped,
+                        new_props       = _n_new_prop,
+                        line_changed    = _n_scored,
+                        cold_start      = _n_cold_start_scored,
+                        analyzed        = _n_new_prop + _n_scored + _n_cold_start_scored,
+                        qualified       = _n_qualified,
+                        alert_delivered = _n_new_prop_sent + _n_lc_sent + _n_standing_sent,
+                    ),
                 )
         except Exception as _scl_exc:
             logger.debug("underdog_job: scan_cycle_log write skipped: %s", _scl_exc)

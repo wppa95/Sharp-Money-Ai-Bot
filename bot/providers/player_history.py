@@ -136,16 +136,32 @@ class PlayerHistoryProvider:
         ud_history: Optional["list[UnderdogSnapshotRecord]"] = None,
         min_samples: int = 5,
         force_refresh: bool = False,
+        instrumentation=None,
     ) -> PlayerHistorySnapshot:
         sport_u = (sport or "UNKNOWN").upper()
         stat_l = stat_type.lower().strip()
 
         await self._ensure_real_results(
-            db, player_name, sport_u, stat_type, force_refresh=force_refresh
+            db,
+            player_name,
+            sport_u,
+            stat_type,
+            force_refresh=force_refresh,
+            instrumentation=instrumentation,
         )
-        db_results = await db.get_player_results(
-            player_name, sport_u, stat_type, limit=40
-        )
+        if instrumentation is not None:
+            db_results = await instrumentation.await_db(
+                "read",
+                "get_player_results_for_history",
+                db.get_player_results(player_name, sport_u, stat_type, limit=40),
+            )
+        else:
+            db_results = await db.get_player_results(
+                player_name, sport_u, stat_type, limit=40
+            )
+        if instrumentation is not None:
+            instrumentation.count("evidence_lookups")
+            _processing_started = __import__("time").monotonic()
 
         real_records = [
             PlayerHistoryRecord(
@@ -184,7 +200,7 @@ class PlayerHistoryProvider:
             proxy_l20 = _proxy_move_rate(ud_history[:20])
             proxy_l30 = _proxy_move_rate(ud_history[:30])
 
-        return PlayerHistorySnapshot(
+        result = PlayerHistorySnapshot(
             player_name=player_name,
             sport=sport_u,
             stat_type=stat_l,
@@ -199,9 +215,26 @@ class PlayerHistoryProvider:
             total_proxy_snaps=proxy_n,
             records=real_records,
         )
+        if instrumentation is not None:
+            instrumentation.duration(
+                "evidence_processing",
+                __import__("time").monotonic() - _processing_started,
+            )
+            if result.has_real_data or result.has_proxy_data:
+                instrumentation.count("props_with_evidence")
+            else:
+                instrumentation.count("props_without_evidence")
+        return result
 
     async def _ensure_real_results(
-        self, db, player_name, sport, stat_type, *, force_refresh=False
+        self,
+        db,
+        player_name,
+        sport,
+        stat_type,
+        *,
+        force_refresh=False,
+        instrumentation=None,
     ) -> None:
         today = datetime.utcnow().date().isoformat()
         key = (player_name, sport, stat_type.lower().strip(), today)
@@ -211,9 +244,32 @@ class PlayerHistoryProvider:
             self._fetch_cache.clear()
         try:
             from providers.player_stats import PlayerStatsProvider
-            raw = await PlayerStatsProvider().fetch_results(player_name, sport, stat_type)
+            _provider_started = __import__("time").monotonic()
+            if instrumentation is not None:
+                raw = await PlayerStatsProvider().fetch_results(
+                    player_name,
+                    sport,
+                    stat_type,
+                    instrumentation=instrumentation,
+                )
+            else:
+                raw = await PlayerStatsProvider().fetch_results(
+                    player_name, sport, stat_type
+                )
+            if instrumentation is not None:
+                instrumentation.provider(
+                    f"PlayerStatsProvider/{sport.upper()}",
+                    __import__("time").monotonic() - _provider_started,
+                )
+                instrumentation.count("provider_enrichment_props")
             for r in raw:
-                await db.upsert_player_result(r)
+                if instrumentation is not None:
+                    await instrumentation.await_db(
+                        "write", "upsert_player_result_for_history",
+                        db.upsert_player_result(r),
+                    )
+                else:
+                    await db.upsert_player_result(r)
             self._fetch_cache.add(key)
             if raw:
                 logger.debug(
