@@ -1,0 +1,244 @@
+🔴 STOP — DIAGNOSE THE LIVE SCHEDULER CONFLICT FIRST
+
+Do NOT make another implementation change yet.
+
+The previous implementation correctly changed all three jobs to:
+
+max_instances=1
+
+However, live verification exposed a real conflict:
+
+Underdog monitor interval = 2 minutes
+Previous scan was still running when the next 2-minute trigger fired
+APScheduler skipped the next execution because max_instances=1
+
+The logged event was:
+
+Execution of job "underdog_monitor ... interval[0:02:00]" skipped: maximum number of running instances reached (1)
+
+This must be resolved without weakening the requirements.
+
+⸻
+
+1. DO NOT INCREASE CONCURRENCY
+
+Do NOT:
+
+* Change max_instances back to 2
+* Allow overlapping Underdog scans
+* Create parallel competing monitoring jobs
+* Redesign the scheduler
+* Add another monitoring cadence
+* Change Stable Refresh architecture
+* Change FPR architecture
+
+Keep:
+
+max_instances=1
+
+⸻
+
+2. DIAGNOSE WHY THE SCAN EXCEEDS 2 MINUTES
+
+Perform a READ-ONLY runtime/performance investigation first.
+
+Determine the actual duration of recent completed Underdog cycles.
+
+Break the cycle down by:
+
+* Underdog fetch duration
+* Feed parsing duration
+* Active-pool construction
+* New-prop processing
+* Line-movement processing
+* Tier prioritization
+* Stable Refresh interaction
+* FPR interaction
+* Scoring duration
+* Evidence enrichment duration
+* Database reads
+* Database writes
+* Opportunity persistence
+* Grading/tracking work
+* Any other significant stage
+
+Identify the exact bottleneck(s).
+
+Do not guess.
+
+⸻
+
+3. DETERMINE THE ACTUAL SUSTAINABLE CADENCE
+
+Use measured runtime data.
+
+Answer:
+
+1. What is the average Underdog cycle duration?
+2. What is the median?
+3. What is the slowest recent cycle?
+4. How many cycles exceeded 120 seconds?
+5. How many cycles exceeded 180 seconds?
+6. How many exceeded 240 seconds?
+7. What stage consumes the most time?
+8. Is the slowdown caused by the size of the current 5K–6K rotation batch?
+9. Is evidence/provider enrichment the bottleneck?
+10. Is database persistence the bottleneck?
+
+⸻
+
+4. DO NOT LOWER THE INTELLIGENCE REQUIREMENTS
+
+Do NOT solve this by:
+
+* Skipping evaluation
+* Skipping evidence
+* Skipping persistence
+* Removing PLAY/PASS tracking
+* Removing Stable Refresh
+* Removing FPR
+* Reducing the active pool
+* Reintroducing a fixed 500-prop limit
+* Removing sports
+* Reducing Tier 1 coverage
+* Reducing Tier 2 monitoring
+* Removing learning data
+
+The intelligence work that was just implemented must remain intact.
+
+⸻
+
+5. CHECK WHETHER THE 2-MINUTE TARGET IS ACTUALLY ACHIEVABLE
+
+We need to distinguish:
+
+Case A — The scan can be optimized to finish under 120 seconds
+
+If the bottleneck can be removed with a small targeted optimization, identify it and propose the smallest fix.
+
+Do NOT implement until the bottleneck and proposed fix are clearly identified.
+
+Case B — The current workload inherently requires more than 120 seconds
+
+If the existing 5K–6K batch genuinely requires more than 120 seconds even after reasonable targeted optimization, report that honestly.
+
+Do NOT hide the problem by increasing concurrency.
+
+⸻
+
+6. IMPORTANT: DO NOT CHANGE THE 2-MINUTE CADENCE YET
+
+Keep the current schedule at:
+
+120 seconds
+
+until the diagnosis is complete.
+
+Do not silently change it to 3, 4, or 5 minutes.
+
+We need measured evidence first.
+
+⸻
+
+7. CHECK INTERACTION BETWEEN JOBS
+
+Also determine whether these jobs are contributing to the conflict:
+
+* Underdog monitor — 2 min
+* Stable Refresh — 4 min
+* FPR — 5 min
+
+Check whether they compete for:
+
+* Database connections
+* CPU
+* Memory
+* Provider requests
+* Locks
+* Shared caches
+* Shared tables
+* Event loop/runtime resources
+
+Do NOT redesign them.
+
+Just identify whether they materially contribute to Underdog scan duration.
+
+⸻
+
+8. REQUIRED REPORT BEFORE ANY MORE CODE CHANGES
+
+Return a concise diagnostic report containing:
+
+Runtime
+
+* Average scan duration
+* Median scan duration
+* Max scan duration
+* Number of skipped instances
+* Number of completed cycles observed
+
+Bottleneck
+
+Identify the top 1–3 actual bottlenecks with measured durations.
+
+Capacity
+
+Current sustainable props/sec.
+
+Current batch size.
+
+Estimated maximum sustainable batch size while maintaining the existing intelligence pipeline.
+
+Scheduler
+
+Confirm:
+
+* Underdog max_instances=1
+* Stable Refresh max_instances=1
+* FPR max_instances=1
+* No overlapping jobs
+
+Recommendation
+
+Give the smallest possible fix to eliminate avoidable skipped cycles.
+
+Do not implement the recommendation yet.
+
+⸻
+
+9. PRESERVE THE SUCCESSFUL CHANGES
+
+The following changes have already passed focused tests and should remain:
+
+* Tier 1 Telegram gate
+* Tier 1 BQ/MQ requirements
+* Correct BQ labels
+* Correct MQ labels
+* Tier 2 classification
+* Tier 2 existing behavior
+* /picks intelligence payload
+* Sharp Confidence
+* Evidence completeness
+* Current-line value
+* Movement quality
+* Existing CLV
+* Existing grading
+* Task #135 downstream intelligence
+
+Do not revert them.
+
+⸻
+
+🔴 FINAL RULE
+
+Diagnosis first. Code changes second.
+
+Do not increase concurrency.
+
+Do not redesign the scheduler.
+
+Do not change the 2-minute cadence yet.
+
+Find out exactly why the scan is exceeding 120 seconds and whether that can be fixed with a small targeted optimization.
+
+Then report the measured bottleneck and proposed fix before changing anything else.
