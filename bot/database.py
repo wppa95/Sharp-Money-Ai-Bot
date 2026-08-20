@@ -1029,6 +1029,51 @@ class Database:
             for r in rows
         }
 
+    async def get_latest_downstream_intelligence(
+        self,
+        player_stat_triples: "list[tuple[str, str, str]]",
+        since_hours: int = 72,
+    ) -> "dict[tuple[str, str, str], dict]":
+        """Return the newest persisted downstream payload for each prop."""
+        if not player_stat_triples:
+            return {}
+        import json as _json
+        from datetime import timedelta
+
+        wanted = {
+            (str(player).lower(), str(sport).upper(), str(stat).lower())
+            for player, sport, stat in player_stat_triples
+        }
+        cutoff = datetime.utcnow() - timedelta(hours=since_hours)
+        async with self.session() as s:
+            result = await s.execute(
+                select(PropOpportunityLog)
+                .where(
+                    PropOpportunityLog.detected_at >= cutoff,
+                    PropOpportunityLog.downstream_intelligence_json.isnot(None),
+                )
+                .order_by(desc(PropOpportunityLog.detected_at))
+                .limit(2000)
+            )
+            rows = list(result.scalars().all())
+
+        out: dict[tuple[str, str, str], dict] = {}
+        for row in rows:
+            key = (
+                str(row.player_name).lower(),
+                str(row.sport).upper(),
+                str(row.stat_type).lower(),
+            )
+            if key not in wanted or key in out:
+                continue
+            try:
+                payload = _json.loads(row.downstream_intelligence_json)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(payload, dict):
+                out[key] = payload
+        return out
+
     async def get_all_ud_lines_for_prop(
         self,
         player_name: str,

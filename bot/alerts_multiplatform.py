@@ -423,7 +423,7 @@ def _format_market_quality_block(market_quality: Optional[object]) -> str:
     label_str  = label.value if hasattr(label, "value") else str(label)
     filled     = round(score / 10)
     bar        = "█" * filled + "░" * (10 - filled)
-    icon       = {"ELITE": "🥇", "HIGH": "🥈", "MEDIUM": "🥉", "LOW": "⚠️"}.get(label_str, "📊")
+    icon       = {"ELITE": "🥇", "STRONG": "🥈", "HIGH": "🥈", "MEDIUM": "🥉", "LOW": "⚠️"}.get(label_str, "📊")
     reason_str = "  •  ".join(reasons) if reasons else "Standard market"
     return (
         f"\n\n{icon} <b>Market Quality:</b>  {label_str}  "

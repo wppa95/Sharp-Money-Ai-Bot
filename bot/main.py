@@ -293,7 +293,7 @@ async def post_init(application: Application) -> None:
             # spawning a second concurrent scan.  misfire_grace_time=60 lets a
             # trigger that fires up to 60 s late still execute (avoids missed scans
             # during brief process pauses).
-            job_kwargs={"max_instances": 2, "misfire_grace_time": 60},
+            job_kwargs={"max_instances": 1, "misfire_grace_time": 60},
         )
         # Stable refresh — rolls through the full stable prop pool (10k/batch) every
         # 2 minutes using only local DB data (zero extra Underdog API calls).
@@ -317,7 +317,7 @@ async def post_init(application: Application) -> None:
             interval=config.FPR_INTERVAL,
             first=150,
             name="full_pool_rescan",
-            job_kwargs={"max_instances": 2, "misfire_grace_time": 120},
+            job_kwargs={"max_instances": 1, "misfire_grace_time": 120},
         )
         # CLV seed job — every 15 minutes (creates AlertCLVSeed entries for alerts)
         jq.run_repeating(_clv_seed_job,        interval=900,                                first=120, name="clv_seeder")

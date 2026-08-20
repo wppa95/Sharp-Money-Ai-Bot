@@ -94,8 +94,8 @@ class TestMainScanPathsTierGate:
     """
 
     def test_new_prop_tier1_low_mq_allowed(self):
-        """New-prop path: Tier 1 with MQ=47 (old dead zone) must be allowed."""
-        assert _tier_delivery_gate("WNBA", "OVER", bq_score=70, mq_score=47) is True
+        """New-prop path: Tier 1 with MQ=47 is not Telegram eligible."""
+        assert _tier_delivery_gate("WNBA", "OVER", bq_score=70, mq_score=47, evidence_available=True) is False
 
     def test_new_prop_tier2_bq74_blocked(self):
         """New-prop path: Tier 2 (NBA) with BQ=74 must be blocked."""
@@ -110,16 +110,16 @@ class TestMainScanPathsTierGate:
         assert _tier_delivery_gate("MLB", "OVER", bq_score=75, mq_score=75) is False
 
     def test_lc_tier1_mq_dead_zone_allowed(self):
-        """Line-change path: Tier 1 with MQ=55 (dead zone) must be allowed."""
-        assert _tier_delivery_gate("CS2", "UNDER", bq_score=60, mq_score=55) is True
+        """Line-change path: Tier 1 with MQ=55 is not Telegram eligible."""
+        assert _tier_delivery_gate("CS2", "UNDER", bq_score=70, mq_score=55, evidence_available=True) is False
 
     def test_lc_tier2_mq74_blocked(self):
         """Line-change path: Tier 2 (NFL) with MQ=74 must be blocked."""
         assert _tier_delivery_gate("NFL", "OVER", bq_score=80, mq_score=74) is False
 
     def test_standing_tier1_any_mq_allowed(self):
-        """Standing path: Tier 1 with MQ=0 must be allowed (direction is the gate)."""
-        assert _tier_delivery_gate("TENNIS", "OVER", bq_score=0, mq_score=0) is True
+        """Standing path: Tier 1 with MQ=0 is not Telegram eligible."""
+        assert _tier_delivery_gate("TENNIS", "OVER", bq_score=0, mq_score=0, evidence_available=True) is False
 
     def test_standing_tier2_requires_both_gates(self):
         """Standing path: Tier 2 (NBA) must fail when only one of BQ/MQ ≥ 85."""
@@ -137,8 +137,8 @@ class TestIndirectScanPathsTierGate:
     """
 
     def test_sr_tier1_low_bq_low_mq_allowed(self):
-        """Stable-refresh: Tier 1 with BQ=40, MQ=40 must be allowed."""
-        assert _tier_delivery_gate("DOTA2", "OVER", bq_score=40, mq_score=40) is True
+        """Stable-refresh: Tier 1 with BQ=40, MQ=40 is not Telegram eligible."""
+        assert _tier_delivery_gate("DOTA2", "OVER", bq_score=40, mq_score=40, evidence_available=True) is False
 
     def test_sr_tier2_bq74_blocked(self):
         """Stable-refresh: Tier 2 (NBA) with BQ=74 must be blocked."""
@@ -153,16 +153,16 @@ class TestIndirectScanPathsTierGate:
         assert _tier_delivery_gate("NBA", "OVER", bq_score=75, mq_score=75) is False
 
     def test_wl_tier1_mq_dead_zone_allowed(self):
-        """Watchlist: Tier 1 with MQ=47 must be allowed (no dead-zone rule for T1)."""
-        assert _tier_delivery_gate("WNBA", "UNDER", bq_score=50, mq_score=47) is True
+        """Watchlist: Tier 1 with MQ=47 is not Telegram eligible."""
+        assert _tier_delivery_gate("WNBA", "UNDER", bq_score=70, mq_score=47, evidence_available=True) is False
 
     def test_wl_tier2_mq74_blocked(self):
         """Watchlist: Tier 2 (MLB) with MQ=74 must be blocked."""
         assert _tier_delivery_gate("MLB", "UNDER", bq_score=90, mq_score=74) is False
 
     def test_fpr_tier1_zero_mq_allowed(self):
-        """Full-pool-rescan: Tier 1 with MQ=0 must be allowed."""
-        assert _tier_delivery_gate("MMA", "OVER", bq_score=0, mq_score=0) is True
+        """Full-pool-rescan: Tier 1 with MQ=0 is not Telegram eligible."""
+        assert _tier_delivery_gate("MMA", "OVER", bq_score=0, mq_score=0, evidence_available=True) is False
 
     def test_fpr_tier2_bq_and_mq_both_required(self):
         """Full-pool-rescan: Tier 2 (NFL) must require both BQ AND MQ ≥ 85."""
@@ -173,15 +173,15 @@ class TestIndirectScanPathsTierGate:
     def test_all_paths_use_same_gate_function(self):
         """All paths call _tier_delivery_gate — results are deterministic."""
         inputs = [
-            ("WNBA", "OVER",  50, 47, True),   # Tier 1 — no BQ/MQ gate
+            ("WNBA", "OVER",  70, 70, True),   # Tier 1 — thresholds + evidence
             ("NBA",  "OVER",  84, 90, False),   # Tier 2 — BQ gate (84 < 85)
             ("MLB",  "UNDER", 90, 84, False),   # Tier 2 — MQ gate (84 < 85)
-            ("CS2",  "UNDER", 60, 55, True),    # Tier 1 — no BQ/MQ gate
+            ("CS2",  "UNDER", 70, 70, True),    # Tier 1 — thresholds + evidence
             ("NFL",  "OVER",  85, 85, True),    # Tier 2 — passes (85 ≥ 85)
             ("MLB",  "OVER",  75, 75, False),   # Tier 2 — old threshold blocked (75 < 85)
         ]
         for sport, direction, bq, mq, expected in inputs:
-            assert _tier_delivery_gate(sport, direction, bq, mq) is expected, (
+            assert _tier_delivery_gate(sport, direction, bq, mq, sport not in {"NBA", "MLB", "NFL"}) is expected, (
                 f"_tier_delivery_gate({sport!r}, {direction!r}, bq={bq}, mq={mq}) != {expected}"
             )
 
@@ -196,8 +196,8 @@ class TestDirectDeliveryPath:
         assert _tier_delivery_gate("NBA", "OVER", bq_score=74, mq_score=80) is False
 
     def test_gate_allows_tier1_before_delivery(self):
-        """Tier 1 props with valid direction must reach deliver_underdog()."""
-        assert _tier_delivery_gate("WNBA", "OVER", bq_score=50, mq_score=47) is True
+        """Tier 1 props meeting the delivery gate may reach deliver_underdog()."""
+        assert _tier_delivery_gate("WNBA", "OVER", bq_score=70, mq_score=70, evidence_available=True) is True
 
     def test_gate_importable_from_market_engine(self):
         """_tier_delivery_gate must be importable by every delivery path."""
@@ -322,17 +322,15 @@ class TestStructuralChecks:
     """Confirm the structural changes required by the spec."""
 
     def test_old_dead_zone_rule_gone_for_tier1(self):
-        """Old dead-zone rule (MQ 40–69 blocked all sports) no longer applies to Tier 1."""
+        """Tier 1 now requires both scores to reach 70 plus evidence."""
         for mq in [40, 47, 55, 60, 69]:
             for sport in ["WNBA", "NHL", "TENNIS", "CS2", "DOTA2", "LOL", "VAL", "MMA"]:
-                assert _tier_delivery_gate(sport, "OVER",  bq_score=0, mq_score=mq) is True, (
-                    f"Tier 1 sport={sport} MQ={mq} must NOT be blocked"
-                )
-                assert _tier_delivery_gate(sport, "UNDER", bq_score=0, mq_score=mq) is True
+                assert not _tier_delivery_gate(sport, "OVER", bq_score=70, mq_score=mq, evidence_available=True)
+                assert not _tier_delivery_gate(sport, "UNDER", bq_score=70, mq_score=mq, evidence_available=True)
 
     def test_tier2_is_exactly_nba_mlb_nfl(self):
-        """_TIER2_SPORTS must contain exactly NBA, MLB, NFL and nothing else."""
-        assert _TIER2_SPORTS == frozenset({"NBA", "MLB", "NFL"})
+        """Existing football aliases remain part of Tier 2."""
+        assert _TIER2_SPORTS == frozenset({"NBA", "MLB", "NFL", "NCAA", "NCAAF", "CFB"})
 
     def test_tier1_definition_is_complement(self):
         """Tier 1 = all supported sports not in TIER2_SPORTS."""
@@ -340,7 +338,7 @@ class TestStructuralChecks:
             "WNBA", "NHL", "TENNIS", "SOCCER", "FIFA",
             "CS2", "DOTA2", "LOL", "VAL", "MMA",
             "BADMINTON", "TABLE TENNIS", "RACING",
-            "CFB", "CFL", "KBO", "NPB", "CRICKET",
+            "CFL", "KBO", "NPB", "CRICKET",
         ]
         for sport in tier1_samples:
             assert not _is_tier2_sport(sport), f"{sport} should be Tier 1"

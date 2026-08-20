@@ -966,11 +966,39 @@ def _is_tier2_sport(sport: str) -> bool:
     return (sport or "").upper() in _TIER2_SPORTS
 
 
+def _has_strong_delivery_evidence(
+    *,
+    score: object = None,
+    validation: object = None,
+    decision: object = None,
+    intelligence_trace: object = None,
+) -> bool:
+    """Return whether existing scoring/validation data supports delivery.
+
+    This is deliberately a delivery-only check.  It does not change scoring,
+    persistence, grading, or whether a prop is evaluated.
+    """
+    if bool(getattr(validation, "has_supporting_data", False)):
+        return True
+    if int(getattr(score, "n_history", 0) or 0) >= 5:
+        return True
+    for obj in (decision, intelligence_trace):
+        if isinstance(obj, dict) and any(value not in (None, {}, [], "") for value in obj.values()):
+            return True
+        if obj is not None:
+            for attr in ("evidence", "bet_evidence", "intelligence_trace"):
+                value = getattr(obj, attr, None)
+                if value not in (None, {}, [], ""):
+                    return True
+    return False
+
+
 def _tier_delivery_gate(
     sport: str,
     direction: str,
     bq_score: float,
     mq_score: float,
+    evidence_available: bool = False,
 ) -> bool:
     """
     Canonical delivery eligibility gate used by ALL Telegram delivery paths.
@@ -978,10 +1006,11 @@ def _tier_delivery_gate(
     Tier 1 = every supported sport except NBA, MLB, NFL.
     Tier 2 = ONLY NBA, MLB, NFL.
 
-    Tier 1 rules (analysis-first):
+    Tier 1 rules:
         • Valid OVER or UNDER direction is required.
-        • BQ and MQ are ranking signals only — NOT hard blockers.
-        • Do NOT reject Tier 1 for BQ < 85 or MQ < 85.
+        • BQ and MQ must both be at least 70.
+        • Existing supporting evidence is required.
+        • No S/A/B/C tier requirement is imposed.
 
     Tier 2 rules (stricter):
         • Valid OVER or UNDER direction is required.
@@ -991,11 +1020,11 @@ def _tier_delivery_gate(
 
     Returns True if the candidate may proceed to delivery; False to block.
     """
-    if direction.upper() not in ("OVER", "UNDER"):
+    if (direction or "").upper() not in ("OVER", "UNDER"):
         return False
     if _is_tier2_sport(sport):
         return bq_score >= 85.0 and mq_score >= 85.0
-    return True  # Tier 1: valid direction is the only mandatory numeric filter
+    return bq_score >= 70.0 and mq_score >= 70.0 and bool(evidence_available)
 
 
 async def _try_claim_delivery_slot(
@@ -1688,6 +1717,10 @@ async def underdog_job(context) -> None:
                     _np_direction = decision.recommendation if decision else ""
                     _np_gate_ok   = _tier_delivery_gate(
                         snap.sport or "UNKNOWN", _np_direction, _np_bq_score, _np_mq_score,
+                        _has_strong_delivery_evidence(
+                            score=score, validation=validation, decision=decision,
+                            intelligence_trace=_np_intel_trace,
+                        ),
                     )
                     if not _np_gate_ok:
                         logger.debug(
@@ -2253,6 +2286,10 @@ async def underdog_job(context) -> None:
                     _lc_direction = decision.recommendation if decision else ""
                     if not is_removed and not _tier_delivery_gate(
                         snap.sport or "UNKNOWN", _lc_direction, _lc_bq_score, _lc_mq_score,
+                        _has_strong_delivery_evidence(
+                            score=score, validation=validation, decision=decision,
+                            intelligence_trace=_lc_intel_trace,
+                        ),
                     ):
                         should_alert = False
                         logger.debug(
@@ -2649,7 +2686,13 @@ async def underdog_job(context) -> None:
                 _s_mq_score  = float(getattr(_smq, "score", 0) if _smq else 0)
                 _s_bq_score  = float(_sscore.total if _sscore else 0)
                 _s_direction = _sdec.recommendation if _sdec else ""
-                if not _tier_delivery_gate(_ssport, _s_direction, _s_bq_score, _s_mq_score):
+                if not _tier_delivery_gate(
+                    _ssport, _s_direction, _s_bq_score, _s_mq_score,
+                    _has_strong_delivery_evidence(
+                        score=_sscore, validation=_sval, decision=_sdec,
+                        intelligence_trace=_s_intel_trace,
+                    ),
+                ):
                     logger.debug(
                         "UD tier_gate [standing]: %s | %s | sport=%s bq=%.0f mq=%.0f dir=%s — blocked",
                         _sp, _st, _ssport, _s_bq_score, _s_mq_score, _s_direction,
@@ -2746,7 +2789,13 @@ async def underdog_job(context) -> None:
                 _dq_mq_score  = float(getattr(_dq_mq, "score", 0) if _dq_mq else _dq.get("mq", 0))
                 _dq_bq_score  = float(_dq.get("bq", 0))
                 _dq_direction = _dq_dec.recommendation if _dq_dec else ""
-                if not _tier_delivery_gate(_dq_sport, _dq_direction, _dq_bq_score, _dq_mq_score):
+                if not _tier_delivery_gate(
+                    _dq_sport, _dq_direction, _dq_bq_score, _dq_mq_score,
+                    _has_strong_delivery_evidence(
+                        score=_dq_score, validation=_dq_val, decision=_dq_dec,
+                        intelligence_trace=_dq_intel,
+                    ),
+                ):
                     _n_dq_deferred += 1
                     _dq_deferred_log.append(
                         f"{_dq_player}/{_dq_st}"
@@ -3618,7 +3667,12 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             # ── Tier delivery gate [stable-refresh] ──────────────────────────
             _sr_mq_score = float(getattr(_sr_mq, "score", 0) if _sr_mq else 0)
             _sr_bq_score = float(_sr_score.total if _sr_score else 0)
-            if not _tier_delivery_gate(_sr_sport, _sr_dec.recommendation, _sr_bq_score, _sr_mq_score):
+            if not _tier_delivery_gate(
+                _sr_sport, _sr_dec.recommendation, _sr_bq_score, _sr_mq_score,
+                _has_strong_delivery_evidence(
+                    score=_sr_score, intelligence_trace=getattr(_sr_dec, "evidence", None),
+                ),
+            ):
                 sr_rejected  += 1
                 sr_qualified -= 1
                 logger.debug(
@@ -3883,6 +3937,9 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     _wl_bq_score = float(_wl_score.total if _wl_score else 0)
                     _wl_mq_ok    = _tier_delivery_gate(
                         _wl_sport, _wl_dec.recommendation, _wl_bq_score, _wl_mq_score,
+                        _has_strong_delivery_evidence(
+                            score=_wl_score, intelligence_trace=getattr(_wl_dec, "evidence", None),
+                        ),
                     )
                     if not _wl_mq_ok:
                         logger.debug(
@@ -4284,6 +4341,9 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     _fpr_bq_score = float(_fpr_score.total if _fpr_score else 0)
                     _fpr_mq_ok    = _tier_delivery_gate(
                         _fpr_sport, _fpr_dec.recommendation, _fpr_bq_score, _fpr_mq_score,
+                        _has_strong_delivery_evidence(
+                            score=_fpr_score, intelligence_trace=getattr(_fpr_dec, "evidence", None),
+                        ),
                     )
                     if not _fpr_mq_ok:
                         fpr_rejected += 1

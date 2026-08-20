@@ -552,7 +552,8 @@ def _score_drift_velocity(opening_line: float, current_line: float) -> int:
 class MarketQualityLabel(str, enum.Enum):
     """Four-tier label for how efficient / soft a pick'em market is."""
     ELITE  = "ELITE"   # Deep, reliable, high-floor market
-    HIGH   = "HIGH"    # Strong market characteristics
+    STRONG = "STRONG"  # Strong market characteristics
+    HIGH   = "STRONG"  # Backward-compatible alias for older display/tests
     MEDIUM = "MEDIUM"  # Standard pick'em market
     LOW    = "LOW"     # High-variance, illiquid, or thin-history market
 
@@ -603,7 +604,7 @@ def compute_market_quality(
       Sample depth    0–20   n≥30→20, n≥20→16, n≥10→10, n≥5→5, else 0
       Stability       0–25   stability component (0–15), scaled to 0–25
 
-    Label mapping:  ELITE ≥75  |  HIGH ≥55  |  MEDIUM ≥35  |  LOW <35
+    Label mapping:  ELITE ≥85  |  STRONG ≥70  |  MEDIUM ≥35  |  LOW <35
 
     Parameters
     ----------
@@ -662,8 +663,8 @@ def compute_market_quality(
 
     total = min(100, type_pts + activity_pts + sample_pts + stability_pts)
 
-    if   total >= 75: label = MarketQualityLabel.ELITE
-    elif total >= 55: label = MarketQualityLabel.HIGH
+    if   total >= 85: label = MarketQualityLabel.ELITE
+    elif total >= 70: label = MarketQualityLabel.STRONG
     elif total >= 35: label = MarketQualityLabel.MEDIUM
     else:             label = MarketQualityLabel.LOW
 

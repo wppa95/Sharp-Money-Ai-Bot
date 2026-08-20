@@ -7,6 +7,7 @@ Each handler is a standalone async function registered with the Application.
 from __future__ import annotations
 
 import html as _html
+import json as _json
 import logging
 import time
 from datetime import datetime, timezone
@@ -1521,6 +1522,15 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     ]
     logger.info("cmd_picks: recs=%d, alt-line queries done", len(_rec_map))
 
+    try:
+        _intel_map = await _db.get_latest_downstream_intelligence(
+            [(plh.player_name, plh.sport, plh.stat_type) for plh, _ in picks],
+            since_hours=72,
+        )
+    except Exception as _intel_exc:
+        logger.warning("cmd_picks: downstream intelligence lookup failed: %s", _intel_exc)
+        _intel_map = {}
+
     # ── 5. Format ─────────────────────────────────────────────────────────────
     def _tier_from_conf(c: int) -> str:
         if c >= 85: return "S"
@@ -1697,6 +1707,57 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             f"Tier: {tier} {tier_icon}{move_str}",
             f"<i>{_delivery_label}</i>",
         ]
+
+        # Persisted Task #135 downstream intelligence.  Do not derive a model
+        # projection, movement quality, or historical category when it is absent.
+        _intel = _intel_map.get(
+            (str(plh.player_name).lower(), str(plh.sport).upper(), str(plh.stat_type).lower()),
+            {},
+        )
+        _value = _intel.get("value") if isinstance(_intel, dict) else {}
+        _movement = _intel.get("movement") if isinstance(_intel, dict) else {}
+        _evidence = _intel.get("evidence") if isinstance(_intel, dict) else {}
+        _complete = _intel.get("evidence_completeness") if isinstance(_intel, dict) else {}
+        _sharp = _intel.get("sharp_confidence") if isinstance(_intel, dict) else {}
+
+        def _shown(value: object, suffix: str = "") -> str:
+            return "unavailable" if value is None else f"{value}{suffix}"
+
+        _bq = getattr(plh, "score_total", None)
+        _mq = getattr(plh, "market_quality_score", None)
+        _bq_label = (
+            "ELITE" if float(_bq) >= 85 else "STRONG" if float(_bq) >= 70 else "BELOW STRONG"
+        ) if _bq is not None else "unavailable"
+        _mq_label = (
+            "ELITE" if float(_mq) >= 85 else "STRONG" if float(_mq) >= 70 else "BELOW STRONG"
+        ) if _mq is not None else "unavailable"
+        _projection = _value.get("projection") if isinstance(_value, dict) else None
+        _edge = _value.get("edge") if isinstance(_value, dict) else None
+        _movement_quality = "unavailable"
+        if isinstance(_movement, dict) and _movement.get("available"):
+            _mag = _movement.get("magnitude")
+            _persist = _movement.get("persistence")
+            if _mag is not None and _persist is not None:
+                _movement_quality = f"{_movement.get('direction', 'UNKNOWN')} · {_mag} · {_persist}% persistent"
+            elif _mag is not None:
+                _movement_quality = f"{_movement.get('direction', 'UNKNOWN')} · {_mag}"
+        _historical = _evidence.get("historical") if isinstance(_evidence, dict) else None
+        _grade = getattr(plh, "score_tier", None)
+        entry_lines.extend([
+            "",
+            "🧠 <b>Downstream Intelligence</b>",
+            f"  BQ: {_shown(_bq, '/100')} · {_bq_label}",
+            f"  Sharp Confidence: {_shown(_sharp.get('score') if isinstance(_sharp, dict) else None, '/100')}",
+            f"  Model Projection: {_shown(_projection)}",
+            f"  Current Line: {_shown(ud_v)}",
+            f"  Model Edge / Current-Line Value: {_shown(_edge)}",
+            f"  Line Movement: {_shown(_movement.get('direction') if isinstance(_movement, dict) and _movement.get('available') else None)}",
+            f"  Movement Quality: {_movement_quality}",
+            f"  Evidence Completeness: {_shown(_complete.get('score') if isinstance(_complete, dict) else None, '/100')}",
+            f"  Historical Evidence: {_shown(_json.dumps(_historical, separators=(',', ':')) if _historical else None)}",
+            f"  Market Quality: {_shown(_mq, '/100')} · {_mq_label}",
+            f"  Final Model Grade: {_shown(_grade)}",
+        ])
 
         # ── Evidence block ────────────────────────────────────────────────────
         hr, _opp = _hit_rates[flat_idx]
