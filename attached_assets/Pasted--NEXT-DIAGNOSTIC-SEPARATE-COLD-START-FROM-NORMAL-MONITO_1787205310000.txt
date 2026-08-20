@@ -1,0 +1,233 @@
+🔴 NEXT DIAGNOSTIC — SEPARATE COLD-START FROM NORMAL MONITORING
+
+The instrumentation result is accepted.
+
+The first cycle revealed:
+
+* Cycle started: 05:38:42 UTC
+* State restoration completed: 05:47:32 UTC
+* State restoration duration: approximately 530 seconds
+* 6,421 projections were parsed immediately afterward
+* No completed Underdog cycle timing record exists yet
+
+This means we currently cannot conclude that the normal Underdog monitoring scan is taking 8–9 minutes.
+
+The cold-start/state-restoration stall must be separated from the recurring monitoring workload.
+
+⸻
+
+1. DO NOT OPTIMIZE ANYTHING YET
+
+Keep everything exactly as currently configured:
+
+* Underdog = 120 seconds
+* Stable Refresh = 240 seconds
+* FPR = 300 seconds
+* max_instances=1
+* Existing batch sizes
+* Existing rotation
+* Existing monitoring engine
+
+No scheduler changes.
+
+No concurrency changes.
+
+No batch changes.
+
+No architecture changes.
+
+⸻
+
+2. LET THE CURRENT CYCLE FINISH
+
+Allow the currently running instrumented Underdog cycle to complete naturally.
+
+Do not restart it.
+
+Do not interrupt it.
+
+Capture the complete timing record once available.
+
+We specifically need:
+
+* Total cycle duration
+* State restoration duration
+* Fetch/parse duration
+* Pool duration
+* Evaluation/scoring duration
+* Evidence duration
+* Priority-selection duration
+* Ranking/delivery duration
+* Persistence duration
+* Final bookkeeping duration
+* Props processed
+* Batch size
+* Props/sec
+
+⸻
+
+3. SEPARATE THESE TWO METRICS
+
+Report:
+
+Cold-start cycle
+
+Total:
+
+state restoration + normal scan
+
+AND separately:
+
+Normal monitoring workload
+
+Total:
+
+fetch → parse → pool → evaluation → persistence → delivery → bookkeeping
+
+Do NOT combine them when determining whether the normal 120-second cadence is sustainable.
+
+⸻
+
+4. IMPORTANT: TEST A NORMAL POST-RESTORE CYCLE
+
+After the current cold-start cycle finishes, allow the bot to continue running normally.
+
+We need at least 3 completed recurring Underdog cycles after state restoration has already completed.
+
+These should be measured independently.
+
+For each:
+
+* Cycle ID
+* Start
+* End
+* Total duration
+* Props
+* Batch size
+* Props/sec
+* Stage timings
+
+⸻
+
+5. DETERMINE WHETHER STATE RESTORATION IS A SEPARATE ISSUE
+
+The 530-second restoration time is significant.
+
+Do not fix it yet unless explicitly instructed.
+
+Instead determine:
+
+1. What exactly is being restored?
+2. How much state is being restored?
+3. How many records/items are involved?
+4. Why does it require approximately 530 seconds?
+5. Does this happen only after restart?
+6. Does it happen on every restart?
+7. Does normal monitoring remain fast after restoration completes?
+
+Do not change the restoration mechanism yet.
+
+⸻
+
+6. CHECK THE JOB INTERACTION
+
+Continue recording whether these overlap:
+
+* Underdog
+* Stable Refresh
+* FPR
+* Player History
+
+But distinguish:
+
+During cold-start restoration
+
+from
+
+During normal recurring monitoring
+
+We need to know whether the 530-second restore is itself being slowed by the other jobs.
+
+⸻
+
+7. REQUIRED OUTPUT
+
+Once enough normal cycles have completed, report:
+
+Cold Start
+
+* Restore duration
+* Records/items restored
+* Jobs overlapping restore
+* Number of skipped triggers during restore
+
+Normal Underdog Monitoring
+
+Cycle 1:
+
+* Duration
+* Props
+* Props/sec
+
+Cycle 2:
+
+* Duration
+* Props
+* Props/sec
+
+Cycle 3:
+
+* Duration
+* Props
+* Props/sec
+
+Then:
+
+* Average
+* Median
+* Slowest
+
+Stage Breakdown
+
+For the normal cycles:
+
+* Fetch/parse
+* Pool
+* Evaluation/scoring
+* Evidence
+* Priority
+* Persistence
+* Ranking/delivery
+* Bookkeeping
+
+Show duration and percentage of total.
+
+Final Diagnosis
+
+Clearly answer:
+
+Is the normal Underdog scan itself capable of completing within 120 seconds?
+
+If yes, the 530-second startup restoration is a separate problem.
+
+If no, identify the actual normal-scan bottleneck.
+
+⸻
+
+8. DO NOT CLAIM COMPLETION YET
+
+We still need real completed recurring-cycle data.
+
+Do not optimize anything until we have it.
+
+Do not change:
+
+* Scheduler
+* Cadence
+* Concurrency
+* Batch size
+* Rotation
+* Stable Refresh
+* FPR
+
+The only goal right now is to obtain clean measurements separating cold-start restoration from normal monitoring performance.
