@@ -250,9 +250,13 @@ def _player_provider_label(sport: str) -> str:
     return labels.get((sport or "").upper(), "ESPN")
 
 # Set to True after the first complete Underdog prop scan.  The first cycle
-# scores every active prop (cold-start mode); subsequent cycles use incremental
+# uses the controlled cold-start target; subsequent cycles use incremental
 # scoring (new props and line-change events only).
 _cold_start_done: bool = False
+# Controlled cold-start experiment: persisted active props are restored and remain
+# available to Stable Refresh/FPR, but are not re-scored in the one-time startup
+# pass. New props and actual line changes continue through their normal paths.
+_COLD_START_RESCAN_TARGET: int = 0
 
 # ── Market availability tracking ─────────────────────────────────────────────
 # Maps "player__stat_type" → datetime of first alert (bet pick).
@@ -2199,10 +2203,11 @@ async def underdog_job(context) -> None:
                         score.n_history, validation.has_supporting_data,
                     )
     
-                elif not is_removed and is_cold_start:
+                elif not is_removed and is_cold_start and _COLD_START_RESCAN_TARGET > 0:
                     # ── Cold-start path ───────────────────────────────────────────
-                    # First cycle only: score every active prop so the DB has fresh
-                    # tier / stars / validation data from startup.  hit_rates are
+                    # First cycle only: score the configured cold-start target so the
+                    # DB has fresh tier / stars / validation data from startup.
+                    # hit_rates are
                     # intentionally skipped — fetching them for ~1000 props on boot
                     # would hammer the stats API; they are populated lazily on the
                     # first qualifying incremental event.  No alerts are sent.

@@ -1,0 +1,109 @@
+🔴 TARGETED CHANGE — COLD-START SCAN = 0 PROPS
+
+We are ready to test the cold-start hypothesis.
+
+Make ONLY this change:
+
+1. Cold-start behavior
+
+On every clean restart:
+
+* Cold-start scan target = 0 props
+* Do NOT process the existing persisted active pool through the cold-start scoring/evidence pipeline.
+* /funnel should show:
+
+Cold-start re-scanned: 0
+
+Do NOT delete, clear, or modify historical database data.
+
+2. Preserve everything else
+
+Do NOT change:
+
+* Underdog cadence: 120 seconds
+* Stable Refresh: 240 seconds
+* FPR: 300 seconds
+* max_instances=1
+* Adaptive batching
+* Full-pool rotation
+* Stable Refresh
+* New-prop detection
+* Line-movement detection
+* Tier 1 / Tier 2 classification
+* Scoring
+* Evidence
+* Telegram delivery rules
+* Hit/miss tracking
+* Dashboard
+* /funnel
+* Database persistence
+* Historical data
+
+Existing persisted props must still be available to the normal Stable Refresh/FPR/full-pool rotation mechanisms.
+
+3. Important distinction
+
+Do NOT remove the cold-start infrastructure entirely.
+
+We are testing whether processing 0 props during startup eliminates the massive startup workload caused by the persistent Replit database.
+
+The existing historical database must remain intact.
+
+4. Regression protection
+
+Verify that:
+
+* A restart does NOT process thousands of persisted props as cold-start.
+* New props are still detected normally.
+* Line movers are still detected normally.
+* Existing props remain available to Stable Refresh/FPR/full-pool rotation.
+* Historical evidence remains available.
+* No scoring or Telegram rules change.
+
+Run focused tests after the change.
+
+5. LIVE VERIFICATION — REQUIRED
+
+After implementation:
+
+1. Restart the running Replit bot once.
+2. Confirm /funnel reports:
+    * Cold-start re-scanned: 0
+3. Confirm the first normal Underdog monitoring cycle starts.
+4. Confirm the cycle completes.
+5. Record:
+    * Cycle duration
+    * Props fetched
+    * Active props
+    * New props
+    * Line movers
+    * Cold-start = 0
+    * Stable Refresh
+    * FPR
+    * Props/sec
+6. Observe at least 3 consecutive normal Underdog cycles.
+7. Report whether the bot returns to approximately the Railway behavior of ~2-minute cycles.
+
+🔴 DO NOT
+
+Do NOT:
+
+* Increase concurrency
+* Change max_instances
+* Change cadence
+* Change batch sizes
+* Optimize the database yet
+* Delete historical data
+* Clear the database
+* Rewrite the monitoring engine
+* Change scoring
+* Change Telegram rules
+* Change unrelated behavior
+
+This is a controlled experiment.
+
+The only variable being changed is:
+
+Cold-start scan: thousands of persisted props → 0 props.
+
+Do not create a checkpoint until the live test is complete and the results are reported.
