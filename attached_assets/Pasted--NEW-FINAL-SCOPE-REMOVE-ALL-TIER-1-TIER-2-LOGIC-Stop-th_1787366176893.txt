@@ -1,0 +1,143 @@
+🔴 NEW FINAL SCOPE — REMOVE ALL TIER 1 / TIER 2 LOGIC
+
+Stop the previous Tier 1/Tier 2 task.
+
+Do NOT continue the database optimization task.
+
+Do NOT create a checkpoint.
+
+Make only the smallest targeted changes necessary for this new scope.
+
+1. REMOVE TIER 1 / TIER 2 FROM THE SYSTEM
+
+There should be NO Tier 1 or Tier 2 classification used by the monitoring/evaluation pipeline.
+
+Do not classify sports into tiers.
+
+Do not use Tier 1/Tier 2 as an evaluation gate.
+
+Every available sport must be treated equally for underlying monitoring.
+
+This includes MLB, NFL, NBA, WNBA, NHL, NPB, KBO, CFB, CFL, FIFA, Tennis, PGA, CS, LOL, DOTA, VAL, MMA, Boxing, AFL, AFLW, and every other supported sport.
+
+2. ALLOW EVERYTHING THROUGH UNDERLYING EVALUATION
+
+Every available prop/stat should remain eligible for:
+
+* Fetching
+* Monitoring
+* New-prop detection
+* Line-movement detection
+* Rescoring
+* Evidence enrichment
+* Historical tracking
+* Hit/miss tracking
+* Candidate evaluation
+* Stable Refresh
+* Full-Pool/FPR rotation
+* Dashboard/funnel accounting
+
+There must be NO S/A/B/C/PASS classification gate preventing a prop from being evaluated or tracked.
+
+S/A/B/C/PASS may remain as scoring/display classifications if already used, but they must NOT stop the underlying evaluation pipeline.
+
+3. TELEGRAM IS THE ONLY STRICT QUALIFICATION GATE
+
+Only Telegram delivery is restricted.
+
+A prop may reach Telegram ONLY IF ALL conditions are true:
+
+* S-tier
+* BQ >= 80/100
+* MQ is explicitly ELITE
+* Direction is explicitly OVER or UNDER
+* Existing safety protections pass
+* Existing live-game protections pass
+* Existing deduplication/validity protections pass
+
+If ANY one condition fails, do NOT send the Telegram alert.
+
+Do NOT use Tier 1 or Tier 2 anywhere in this decision.
+
+Do NOT allow A-tier, B-tier, C-tier, or PASS props to Telegram.
+
+Do NOT allow non-OVER/UNDER markets to Telegram.
+
+Do NOT loosen the MQ requirement.
+
+4. ANTI-SPAM TELEGRAM PROTECTION
+
+Keep the existing Telegram anti-duplicate protections and make sure they apply consistently across every delivery path.
+
+The same qualifying prop must NOT repeatedly generate duplicate Telegram alerts simply because it is rescored during subsequent monitoring cycles.
+
+A qualifying prop should only send again when the existing alert/dedup rules determine that it is legitimately a new actionable alert.
+
+Prevent duplicate delivery across:
+
+* Main monitoring
+* Stable Refresh
+* FPR/full-pool rotation
+* Watchlist/actionable delivery
+* /picks
+* /slip
+* Any other Telegram actionable-delivery path
+
+Do NOT create multiple competing anti-spam systems.
+
+Use the existing canonical dedup/alert state where possible.
+
+5. DO NOT CHANGE UNRELATED BEHAVIOR
+
+Do NOT:
+
+* Change scoring formulas
+* Change evidence logic
+* Change player-history collection
+* Change database schema
+* Delete historical data
+* Change scheduler cadence
+* Increase concurrency
+* Change max_instances
+* Redesign the architecture
+* Change unrelated Telegram formatting
+* Reintroduce Tier 1/Tier 2 rules
+* Continue the abandoned database optimization
+
+Keep:
+
+120-second cadence
+
+and:
+
+max_instances=1
+
+6. REQUIRED VERIFICATION
+
+After implementation:
+
+Run focused tests.
+
+Then restart the bot once to load the change.
+
+Verify the running bot.
+
+Confirm:
+
+* No Tier 1/Tier 2 gate remains in Telegram delivery.
+* All sports can enter underlying evaluation.
+* All classifications can continue through evaluation.
+* Only S-tier + BQ >=80 + ELITE MQ + OVER/UNDER can reach Telegram.
+* A/B/C/PASS cannot reach Telegram.
+* Non-OVER/UNDER cannot reach Telegram.
+* Duplicate qualifying props are suppressed by the existing anti-spam/dedup protection.
+* Repeated rescoring does not spam Telegram.
+* Historical data remains intact.
+* Scheduler remains 120 seconds with max_instances=1.
+* No unrelated systems were changed.
+
+Do NOT report completion based only on tests.
+
+Live verification is required.
+
+Do NOT create a checkpoint until the running bot has been verified.
