@@ -3476,6 +3476,7 @@ class Database:
                        GAME_INTERRUPTED outcomes (stored in void_reason column).
         """
         from sqlalchemy import update as _sa_update
+        from engine.identity import display_player_name
         values: dict = {
             "result":       result,
             "actual_value": actual_value,
@@ -3486,6 +3487,39 @@ class Database:
         if void_reason is not None:
             values["void_reason"] = str(void_reason)[:64]
         async with self.session() as s:
+            # Preserve completed prop outcomes as the bot's own historical
+            # evidence.  Provider rows remain authoritative when one already
+            # exists for the same player × sport × stat × date.
+            evidence_result = str(result or "").upper()
+            if evidence_result in {"HIT", "MISS", "PUSH"}:
+                opp_row = await s.get(PropOpportunityLog, opp_id)
+                if opp_row is not None:
+                    player_name = display_player_name(opp_row.player_name)
+                    sport = (opp_row.sport or "").upper().strip()
+                    stat_type = (opp_row.stat_type or "").lower().strip()
+                    evidence_date = (
+                        opp_row.game_time.strftime("%Y-%m-%d")
+                        if opp_row.game_time
+                        else datetime.utcnow().strftime("%Y-%m-%d")
+                    )
+                    existing = await s.execute(
+                        select(PlayerGameResult).where(
+                            PlayerGameResult.player_name == player_name,
+                            PlayerGameResult.sport == sport,
+                            PlayerGameResult.stat_type == stat_type,
+                            PlayerGameResult.game_date == evidence_date,
+                        )
+                    )
+                    if existing.scalar_one_or_none() is None:
+                        s.add(PlayerGameResult(
+                            player_name=player_name,
+                            sport=sport,
+                            stat_type=stat_type,
+                            game_date=evidence_date,
+                            opponent=opp_row.team or None,
+                            actual_value=actual_value,
+                            source="graded_prop",
+                        ))
             await s.execute(
                 _sa_update(PropOpportunityLog)
                 .where(PropOpportunityLog.id == opp_id)
