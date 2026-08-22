@@ -1220,6 +1220,7 @@ def _tier_delivery_gate(
     bq_score: float,
     mq_score: float,
     evidence_available: bool = False,
+    score_tier: str | None = None,
 ) -> bool:
     """
     Canonical delivery eligibility gate used by ALL Telegram delivery paths.
@@ -1242,7 +1243,12 @@ def _tier_delivery_gate(
         return False
     if _is_tier2_sport(sport):
         return bq_score >= 85.0 and mq_score >= 85.0
-    return bq_score >= 80.0 and mq_score >= 85.0 and bool(evidence_available)
+    return (
+        score_tier == "S"
+        and bq_score >= 80.0
+        and mq_score >= 85.0
+        and bool(evidence_available)
+    )
 
 
 async def _try_claim_delivery_slot(
@@ -1992,6 +1998,7 @@ async def underdog_job(context) -> None:
                             score=score, validation=validation, decision=decision,
                             intelligence_trace=_np_intel_trace,
                         ),
+                        score_tier=getattr(decision, "decision_tier", None),
                     )
                     if not _np_gate_ok:
                         logger.debug(
@@ -2581,6 +2588,7 @@ async def underdog_job(context) -> None:
                             score=score, validation=validation, decision=decision,
                             intelligence_trace=_lc_intel_trace,
                         ),
+                        score_tier=getattr(decision, "decision_tier", None),
                     ):
                         should_alert = False
                         logger.debug(
@@ -2996,6 +3004,7 @@ async def underdog_job(context) -> None:
                         score=_sscore, validation=_sval, decision=_sdec,
                         intelligence_trace=_s_intel_trace,
                     ),
+                    score_tier=getattr(_sdec, "decision_tier", None),
                 ):
                     logger.debug(
                         "UD tier_gate [standing]: %s | %s | sport=%s bq=%.0f mq=%.0f dir=%s — blocked",
@@ -3099,6 +3108,7 @@ async def underdog_job(context) -> None:
                         score=_dq_score, validation=_dq_val, decision=_dq_dec,
                         intelligence_trace=_dq_intel,
                     ),
+                    score_tier=getattr(_dq_dec, "decision_tier", None),
                 ):
                     _n_dq_deferred += 1
                     _dq_deferred_log.append(
@@ -4014,6 +4024,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 _has_strong_delivery_evidence(
                     score=_sr_score, intelligence_trace=getattr(_sr_dec, "evidence", None),
                 ),
+                score_tier=getattr(_sr_dec, "decision_tier", None),
             ):
                 sr_rejected  += 1
                 sr_qualified -= 1
@@ -4282,6 +4293,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         _has_strong_delivery_evidence(
                             score=_wl_score, intelligence_trace=getattr(_wl_dec, "evidence", None),
                         ),
+                        score_tier=getattr(_wl_dec, "decision_tier", None),
                     )
                     if not _wl_mq_ok:
                         logger.debug(
@@ -4688,6 +4700,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         _has_strong_delivery_evidence(
                             score=_fpr_score, intelligence_trace=getattr(_fpr_dec, "evidence", None),
                         ),
+                        score_tier=getattr(_fpr_dec, "decision_tier", None),
                     )
                     if not _fpr_mq_ok:
                         fpr_rejected += 1
