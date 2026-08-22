@@ -1754,8 +1754,9 @@ async def underdog_job(context) -> None:
                     float(score.total if score else 0),
                 )
                 _processed_keys.add((player, stat_type))
-                # Validation: require min supporting history before any immediate alert.
-                # Props with zero history (first appearance) always go to digest.
+                # Validation is evidence context for evaluation and delivery.
+                # First-seen props must still be evaluated and tracked; the
+                # canonical Telegram gate below decides whether they can be sent.
                 _hist_snap = None
                 try:
                     from providers.player_history import get_player_history_provider
@@ -1778,7 +1779,7 @@ async def underdog_job(context) -> None:
                     min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
                     history_snap = _hist_snap,
                 )
-                # Immediate criteria — sport-aware:
+                # Immediate criteria — sport-neutral:
                 #   - 0.5 line AND supported betting category (all sports)
                 #   - OR score reaches the sport-specific quality threshold:
                 #       Tier 2 (MLB/NFL) → UD_MIN_STARS_TO_ALERT (default 3)
@@ -1791,18 +1792,19 @@ async def underdog_job(context) -> None:
                      and stat_type in config.UD_PRIORITY_STAT_CATEGORIES)
                     or score.stars >= config.UD_NON_STRICT_MIN_STARS
                 )
-                # Validation gate: block if insufficient player history
+                # Do not block evaluation when evidence is missing.  The
+                # validation result remains attached to the opportunity, while
+                # the delivery gate requires evidence before Telegram.
                 if np_immediate and not validation.has_supporting_data:
-                    np_immediate = False
                     logger.debug(
-                        "UD new-prop validation blocked: %s | %s | %s",
+                        "UD new-prop has no supporting evidence yet: %s | %s | %s",
                         player, stat_type, validation.reason,
                     )
                 # Fetch real game results — required before any directional pick.
                 # Also fetch for np_immediate props (e.g. 0.5-line priority stats)
                 # even when they score PASS tier (no prev_line → low movement score).
                 hit_rates = None
-                if validation.has_supporting_data and (score.tier != "PASS" or np_immediate):
+                if score.tier != "PASS" or np_immediate:
                     hit_rates = await _fetch_and_compute_hit_rates(
                         db, player, snap.sport or "UNKNOWN", stat_type, line_val,
                         cycle_timing=_cycle_timing,
@@ -2039,10 +2041,7 @@ async def underdog_job(context) -> None:
                             "filtered" if ud_result.filtered else "new_prop_failed"
                         )
                     elif not np_immediate:
-                        _np_rej = (
-                            "validation_blocked" if not validation.has_supporting_data
-                            else "not_immediate"
-                        )
+                        _np_rej = "not_immediate"
                     elif decision is None:
                         _np_rej = "no_decision"
                     elif decision.recommendation == "PASS":
