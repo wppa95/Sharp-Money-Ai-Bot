@@ -245,7 +245,7 @@ class UnderdogConnector(BaseConnector):
         """Parse Underdog API v1 JSON into UnderdogProjection objects.
 
         v1 shape differences from the old v3 endpoint:
-          - ``appearance_stat`` is nested inside ``line["over_under"]``, not on
+          - ``appearance_stat`` is nested inside ``line[\"over_under\"]``, not on
             the line directly.
           - Player-to-appearance linking goes through a top-level ``appearances``
             array; ``appearance_stat.appearance_id`` → ``appearances[].id``.
@@ -298,10 +298,17 @@ class UnderdogConnector(BaseConnector):
                 match_id  = str(app.get("match_id", ""))
 
                 p_data      = players.get(player_id, {})
-                player_name = (
-                    f"{p_data.get('first_name', '')} {p_data.get('last_name', '')}".strip()
-                    or "Unknown Player"
-                )
+                # Coerce null first/last names to empty strings so JSON null
+                # never renders as the literal text "None" in player names
+                # (e.g. first_name=null, last_name="Rahel" → "Rahel", not "None Rahel").
+                _first = p_data.get("first_name")
+                _last  = p_data.get("last_name")
+                _first = "" if _first is None else str(_first).strip()
+                _last  = "" if _last  is None else str(_last).strip()
+                player_name = f"{_first} {_last}".strip() or "Unknown Player"
+                # Strip any residual "None " prefix from upstream/cached payloads
+                if player_name.startswith("None "):
+                    player_name = player_name[5:].strip() or "Unknown Player"
                 # v1 players carry team_id (UUID string) — no nested team dict
                 team  = p_data.get("team_id", "")
                 sport = p_data.get("sport_id", "Unknown").upper()
