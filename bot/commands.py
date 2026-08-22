@@ -3808,30 +3808,6 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         else:
             lines += ["", "<i>Sport breakdown accumulates as the bot scans props.</i>"]
 
-        if top_rej:
-            lines += [
-                "",
-                "─" * 16,
-                "",
-                "📋 <b>Near-Misses (highest-scoring rejected)</b>",
-                "",
-            ]
-            for r in top_rej:
-                sc   = f"{r.get('score_total', 0):.0f}" if r.get("score_total") is not None else "?"
-                tier = r.get("score_tier") or "?"
-                # Escape all dynamic strings to prevent HTML parse errors
-                pname = _html.escape(str(r.get("player_name") or "?"))
-                stype = _html.escape(str(r.get("stat_type")   or "?"))
-                sport = _html.escape(str(r.get("sport")       or "?"))
-                rej   = _html.escape(str(r.get("rejection_reason") or "?"))
-                lines.append(
-                    f"• <b>{pname}</b> "
-                    f"— {stype} ({sport})\n"
-                    f"  {sc}/100 [{tier}]  <i>{rej}</i>"
-                )
-        else:
-            lines += ["", "<i>No rejected candidates recorded yet — data accumulates as the bot runs.</i>"]
-
         lines.append(f"\n{_thick}")
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
