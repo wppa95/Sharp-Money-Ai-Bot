@@ -140,6 +140,10 @@ class PlayerHistoryProvider:
     ) -> PlayerHistorySnapshot:
         sport_u = (sport or "UNKNOWN").upper()
         stat_l = stat_type.lower().strip()
+        # Protect against residual "None " prefixes from older Underdog payloads
+        # (first_name=null previously rendered as literal "None").
+        if isinstance(player_name, str) and player_name.startswith("None "):
+            player_name = player_name[5:].strip() or player_name
 
         await self._ensure_real_results(
             db,
