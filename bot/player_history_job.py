@@ -1,4 +1,4 @@
-"""Background job: collect real player game results for Tier-1 sports."""
+"""Background job: collect real player game results for supported sports."""
 from __future__ import annotations
 
 import logging
@@ -10,15 +10,12 @@ logger = logging.getLogger(__name__)
 # This cap limits API spend per cycle, not the number of players tracked.
 _API_CALL_TARGET = 1000
 
-# Tier-2 sports are excluded from player-history collection.
-# Their alert pipeline follows separate Tier-2 rules.
-_TIER2_SPORTS = frozenset({"MLB", "NBA", "NFL"})
-
 # Sports for which PlayerStatsProvider.fetch_results() has a working data
 # path.  Unsupported sports (LOL, VALORANT/VAL, PGA/GOLF, MMA, TT,
 # BADMINTON, FIFA) would always return [] — filtering them avoids wasting
 # API-call budget on sports that can never produce DB rows.
 _SUPPORTED_HISTORY_SPORTS = frozenset({
+    "MLB", "NBA", "NFL",
     "WNBA", "NHL", "CS", "DOTA", "TENNIS",
     "NCAAF", "CFB",   # CFB is the Underdog identifier for NCAAF
     "MLS", "NCAAB",
@@ -27,11 +24,11 @@ _SUPPORTED_HISTORY_SPORTS = frozenset({
 
 
 async def player_history_collector_job(context) -> None:
-    """Fetch real game results for active Tier-1 Underdog props.
+    """Fetch real game results for active Underdog props with providers.
 
-    Selects all Tier-1 (non-MLB/NBA/NFL) players from the active snapshot
-    whose sport has a working PlayerStatsProvider data path, then calls
-    fetch_results() for up to _API_CALL_TARGET of them per cycle.
+    Selects all active players whose sport has a working
+    PlayerStatsProvider data path, then calls fetch_results() for up to
+    _API_CALL_TARGET of them per cycle.
     Player count is unlimited — only API calls are capped.
     """
     from engine.health import get_health_tracker
@@ -63,8 +60,6 @@ async def player_history_collector_job(context) -> None:
             active = await db.get_active_underdog_snapshot_per_prop()
             for (player, stat), s in active.items():
                 sport = (getattr(s, "sport", None) or "UNKNOWN").upper()
-                if sport in _TIER2_SPORTS:
-                    continue  # Tier 2 — skip
                 if sport not in _SUPPORTED_HISTORY_SPORTS:
                     continue  # No provider data path — skip to avoid wasting API calls
                 key = (player.strip(), sport, (stat or "").lower().strip())
@@ -83,8 +78,6 @@ async def player_history_collector_job(context) -> None:
                 plh = await db.get_latest_props_for_provider("Underdog", since_hours=48)
                 for s in plh:
                     sport = (getattr(s, "sport", None) or "UNKNOWN").upper()
-                    if sport in _TIER2_SPORTS:
-                        continue  # Tier 2 — skip
                     if sport not in _SUPPORTED_HISTORY_SPORTS:
                         continue  # No provider data path — skip
                     key = (
@@ -102,7 +95,7 @@ async def player_history_collector_job(context) -> None:
                 )
 
         logger.info(
-            "player_history_collector_job: tier1_targets=%d calling_up_to=%d",
+            "player_history_collector_job: provider_targets=%d calling_up_to=%d",
             len(targets),
             min(len(targets), _API_CALL_TARGET),
         )

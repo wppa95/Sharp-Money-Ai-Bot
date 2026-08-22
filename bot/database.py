@@ -2749,7 +2749,8 @@ class Database:
         If a row already exists for (player_name, sport, stat_type, game_date)
         the actual_value and opponent are refreshed; no duplicate is created.
         """
-        player_name  = raw.player_name
+        from engine.identity import display_player_name
+        player_name  = display_player_name(getattr(raw, "player_name", None))
         sport        = raw.sport
         stat_type    = raw.stat_type.lower().strip()
         game_date    = raw.game_date

@@ -10,11 +10,20 @@ from engine.identity import (
     CanonicalPlayer,
     CanonicalEvent,
     CanonicalMarket,
+    display_player_name,
     normalize_player_name,
     normalize_stat,
     player_key,
     event_key,
 )
+
+
+def test_display_player_name_handles_nullable_provider_parts():
+    assert display_player_name(first_name=None, last_name="Judge") == "Judge"
+    assert display_player_name(first_name="Aaron", last_name=None) == "Aaron"
+    assert display_player_name(first_name=None, last_name=None) == "Unknown Player"
+    assert display_player_name(raw_name="None Aaron Judge") == "Aaron Judge"
+    assert display_player_name(raw_name="José Altuve") == "José Altuve"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

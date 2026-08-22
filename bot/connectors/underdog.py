@@ -298,9 +298,10 @@ class UnderdogConnector(BaseConnector):
                 match_id  = str(app.get("match_id", ""))
 
                 p_data      = players.get(player_id, {})
-                player_name = (
-                    f"{p_data.get('first_name', '')} {p_data.get('last_name', '')}".strip()
-                    or "Unknown Player"
+                from engine.identity import display_player_name
+                player_name = display_player_name(
+                    first_name=p_data.get("first_name"),
+                    last_name=p_data.get("last_name"),
                 )
                 # v1 players carry team_id (UUID string) — no nested team dict
                 team  = p_data.get("team_id", "")

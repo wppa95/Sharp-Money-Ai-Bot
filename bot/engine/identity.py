@@ -69,6 +69,34 @@ class CanonicalEvent:
 # Normalisation functions
 # ─────────────────────────────────────────────────────────────────────────────
 
+def display_player_name(
+    raw_name: Optional[str] = None,
+    *,
+    first_name: Optional[str] = None,
+    last_name: Optional[str] = None,
+) -> str:
+    """Return the best available human-readable player name.
+
+    Provider payloads are inconsistent: some send a combined name while
+    others send nullable first/last fields.  Keep legitimate source spelling,
+    but never expose Python's ``None`` placeholder to downstream systems.
+    """
+    def _part(value: Optional[str]) -> str:
+        if value is None:
+            return ""
+        value = str(value).strip()
+        return "" if value.lower() == "none" else value
+
+    first = _part(first_name)
+    last = _part(last_name)
+    if first or last:
+        return " ".join(part for part in (first, last) if part)
+
+    combined = _part(raw_name)
+    combined = re.sub(r"^none(?:\s+|$)", "", combined, flags=re.IGNORECASE).strip()
+    return combined or "Unknown Player"
+
+
 def normalize_player_name(raw: str) -> str:
     """Return a stable lowercase key for a player name.
 
@@ -87,6 +115,9 @@ def normalize_player_name(raw: str) -> str:
         normalize_player_name("A.J. Brown")     → "aj_brown"
         normalize_player_name("D'Angelo Russell")→ "dangelo_russell"
     """
+    if raw is None or not str(raw).strip():
+        return ""
+    raw = display_player_name(raw)
     if not raw:
         return ""
     # 1. Strip accents via NFD decomposition
