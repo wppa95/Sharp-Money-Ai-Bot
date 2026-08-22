@@ -1,4 +1,4 @@
-"""Background job: collect real player game results for Tier-1 sports."""
+"""Background job: collect real player game results for sports with providers."""
 from __future__ import annotations
 
 import logging
@@ -6,35 +6,42 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Maximum PlayerStats API calls per 2-minute cycle.
-# Player count is unlimited — the full Tier-1 active pool is targeted.
+# Player count is unlimited — the full active pool is targeted.
 # This cap limits API spend per cycle, not the number of players tracked.
 _API_CALL_TARGET = 1000
 
-# Sports excluded from background player-history collection.
-# MLB/NBA remain excluded here (on-demand enrichment still available).
-# NFL is intentionally included so ESPN/Sleeper history is collected
-# into the existing PlayerResult path for L5/L10/L20/L30/Season.
-_TIER2_SPORTS = frozenset({"MLB", "NBA"})
-
-# Sports for which PlayerStatsProvider.fetch_results() has a working data
-# path.  Unsupported sports (LOL, VALORANT/VAL, PGA/GOLF, MMA, TT,
-# BADMINTON, FIFA) would always return [] — filtering them avoids wasting
-# API-call budget on sports that can never produce DB rows.
+# Sports for which PlayerStatsProvider.fetch_results() has a legitimate
+# machine-readable data path.  Collection is based on provider capability,
+# not old Tier-1/Tier-2 delivery classification.
+#
+# Supported (real gamelog/history providers exist):
+#   MLB, NBA, NFL, WNBA, NHL, NCAAF/CFB, NCAAB, MLS, TENNIS, CS, DOTA, SOCCER
+#
+# Unsupported (no legitimate provider — do not invent one):
+#   LOL, VAL/VALORANT, PGA/GOLF, MMA, BOXING, TT, BADMINTON, FIFA,
+#   CRICKET, RUGBY, AFL, AFLW, KBO, NPB, CFL
 _SUPPORTED_HISTORY_SPORTS = frozenset({
-    "WNBA", "NHL", "CS", "DOTA", "TENNIS",
-    "NCAAF", "CFB",   # CFB is the Underdog identifier for NCAAF
-    "MLS", "NCAAB",
-    "SOCCER",         # Requires FOOTBALL_DATA_API_KEY; returns [] gracefully without it
-    "NFL",            # ESPN gamelog + optional Sleeper supplement
+    "MLB",            # MLB Stats API
+    "NBA",            # ESPN
+    "NFL",            # ESPN + optional Sleeper
+    "WNBA",           # ESPN
+    "NHL",            # NHL public API
+    "NCAAF", "CFB",   # ESPN (CFB = Underdog id for NCAAF)
+    "NCAAB",          # ESPN
+    "MLS",            # ESPN
+    "TENNIS",         # JeffSackmann CSV
+    "CS",             # PandaScore (key optional)
+    "DOTA",           # OpenDota
+    "SOCCER",         # football-data.org (key optional)
 })
 
 
 async def player_history_collector_job(context) -> None:
-    """Fetch real game results for active Tier-1 Underdog props.
+    """Fetch real game results for active Underdog props with providers.
 
     Selects players from the active snapshot whose sport has a working
-    PlayerStatsProvider data path (including NFL), then calls
-    fetch_results() for up to _API_CALL_TARGET of them per cycle.
+    PlayerStatsProvider data path, then calls fetch_results() for up to
+    _API_CALL_TARGET of them per cycle.
     Player count is unlimited — only API calls are capped.
     """
     from engine.health import get_health_tracker
@@ -66,10 +73,8 @@ async def player_history_collector_job(context) -> None:
             active = await db.get_active_underdog_snapshot_per_prop()
             for (player, stat), s in active.items():
                 sport = (getattr(s, "sport", None) or "UNKNOWN").upper()
-                if sport in _TIER2_SPORTS:
-                    continue  # MLB/NBA — skip background collection
                 if sport not in _SUPPORTED_HISTORY_SPORTS:
-                    continue  # No provider data path — skip to avoid wasting API calls
+                    continue  # No legitimate provider — skip (do not invent evidence)
                 key = (player.strip(), sport, (stat or "").lower().strip())
                 if key[0] and key[2] and key not in seen:
                     seen.add(key)
@@ -86,10 +91,8 @@ async def player_history_collector_job(context) -> None:
                 plh = await db.get_latest_props_for_provider("Underdog", since_hours=48)
                 for s in plh:
                     sport = (getattr(s, "sport", None) or "UNKNOWN").upper()
-                    if sport in _TIER2_SPORTS:
-                        continue
                     if sport not in _SUPPORTED_HISTORY_SPORTS:
-                        continue
+                        continue  # No legitimate provider
                     key = (
                         (s.player_name or "").strip(),
                         sport,
