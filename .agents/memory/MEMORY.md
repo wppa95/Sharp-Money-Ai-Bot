@@ -76,4 +76,4 @@
 - [Tier-1 direction gate (Weak direction fix)](tier1-direction-gate.md) — sport= param on make_ud_bet_decision; Tier-1 uses _B_RATE_TIER1=0.55, Tier-2/empty uses _B_RATE=0.60; all 8 call sites pass sport=.
 - [Cold-start scheduler stall](cold-start-scheduler-stall.md) — live cold-start Underdog cycles can remain in DB state restoration for many minutes while player-history/FPR work overlaps; measure restore separately before optimizing.
 - [Monitoring baseline August 2026](monitoring-baseline-aug2026.md) — three post-restore cycles show database pool reads dominate; OpenDota needs more samples before provider optimization.
-- [Strict Tier 1 Telegram policy](strict-tier1-telegram.md) — only NFL/NBA are Tier 2; all other sports, including MLB, require S + BQ≥80 + ELITE MQ + OVER/UNDER for Telegram.
+- [Sport-neutral Telegram policy](strict-tier1-telegram.md) — all sports share monitoring; Telegram alone requires S + BQ≥80 + ELITE MQ + OVER/UNDER.

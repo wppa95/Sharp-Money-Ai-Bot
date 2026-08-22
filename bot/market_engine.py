@@ -1177,14 +1177,11 @@ _DELIVERY_TIER_BASE: dict[str, float] = {
 # Sports that are Tier 2.  Tier 1 is every supported sport not in this set.
 # New non-NFL/non-NBA sports automatically remain Tier 1.
 # This is the CANONICAL source of truth — do NOT expand it.
-_TIER2_SPORTS: frozenset[str] = frozenset({
-    "NBA", "NFL",
-})
+_TIER2_SPORTS: frozenset[str] = frozenset()
 
 
 def _is_tier2_sport(sport: str) -> bool:
-    """Return True iff Telegram delivery is suppressed for this sport."""
-    return (sport or "").upper() in _TIER2_SPORTS
+    return False
 
 
 def _has_strong_delivery_evidence(
@@ -1241,8 +1238,6 @@ def _tier_delivery_gate(
     """
     if (direction or "").upper() not in ("OVER", "UNDER"):
         return False
-    if _is_tier2_sport(sport):
-        return bq_score >= 85.0 and mq_score >= 85.0
     return (
         score_tier == "S"
         and bq_score >= 80.0
@@ -1292,9 +1287,8 @@ def _cand_priority(c: dict) -> float:
     conf = float(c.get("conf") or 0)
     bq   = float(c.get("bq")   or 0)
     mq   = float(c.get("mq")   or 0)
-    t1   = 500.0 if c.get("is_tier1") else 0.0
     mc   = 200.0 if c.get("is_meaningful_change") else 0.0
-    return base + conf * 0.5 + bq * 0.3 + mq * 0.2 + t1 + mc
+    return base + conf * 0.5 + bq * 0.3 + mq * 0.2 + mc
 
 
 def _apply_delivery_diversification(queue: list) -> list:

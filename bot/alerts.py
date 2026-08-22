@@ -565,14 +565,9 @@ def format_start_message() -> str:
 # Sports in this set are monitored, scored, and stored normally, but Telegram
 # delivery is suppressed.  Module-level so tests can patch it when verifying
 # sport-specific formatting independent of the delivery block.
-_TIER2_SPORTS_BLOCK: frozenset[str] = frozenset({
-    "NBA", "NFL",
-})
-
-
 def is_telegram_suppressed_sport(sport: Optional[str]) -> bool:
-    """Return whether a sport is monitored but must not reach Telegram."""
-    return (sport or "").upper() in _TIER2_SPORTS_BLOCK
+    """Compatibility hook retained; no sport is suppressed by classification."""
+    return False
 
 
 # ── Low-level Telegram senders ────────────────────────────────────────────────
@@ -615,15 +610,6 @@ async def broadcast_alert(
     accidentally omitted.  This is a safety net; upstream callers should
     also have their own guards.
     """
-    # ── AUTHORITATIVE Tier 2 Telegram backstop ────────────────────────────────
-    # This is the FINAL gate before bot.send_message().  Even if every upstream
-    # guard fails, a Tier 2 sport can never reach the actual Telegram API call.
-    if is_telegram_suppressed_sport(sport):
-        logger.info(
-            "broadcast_alert: Tier 2 Telegram blocked — sport=%s  (no message sent)", sport
-        )
-        return {"sent": 0, "failed": 0}
-
     sent = failed = 0
     for cid in chat_ids:
         if await send_alert(bot, cid, message):
@@ -1188,31 +1174,23 @@ class AlertDelivery:
                 logger.info("Underdog alert capped: %s | %s | %s", player_name, stat_type, reason)
                 return DeliveryResult(sent=False, filtered=True, filtered_reason=reason)
 
-        # Canonical Tier 1 Telegram gate. Tier 1 is every supported sport
-        # except NFL/NBA; evaluation and persistence happen before this point.
-        # This is delivery-only and deliberately does not affect removals or
-        # internal market-move notifications.
+        # Canonical Telegram qualification gate. Sport is intentionally not
+        # part of this decision; all supported sports are treated equally.
         if not removed and not market_move_only:
-            _sport_up = (sport or "").upper()
-            if _sport_up not in {"NFL", "NBA"}:
-                _tier = getattr(decision, "decision_tier", None)
-                _bq = float(getattr(score, "total", 0) or 0)
-                _mq_label_obj = getattr(market_quality, "label", None)
-                _mq_label = getattr(_mq_label_obj, "value", _mq_label_obj)
-                _direction = str(
-                    getattr(decision, "recommendation", "") or ""
-                ).upper()
-                if (
-                    _tier != "S"
-                    or _bq < 80.0
-                    or _mq_label != "ELITE"
-                    or _direction not in {"OVER", "UNDER"}
-                ):
-                    return DeliveryResult(
-                        sent=False,
-                        filtered=True,
-                        filtered_reason="Tier 1 strict Telegram gate",
-                    )
+            _tier = getattr(decision, "decision_tier", None)
+            _bq = float(getattr(score, "total", 0) or 0)
+            _mq_label_obj = getattr(market_quality, "label", None)
+            _mq_label = getattr(_mq_label_obj, "value", _mq_label_obj)
+            _direction = str(getattr(decision, "recommendation", "") or "").upper()
+            if (
+                _tier != "S" or _bq < 80.0
+                or _mq_label != "ELITE"
+                or _direction not in {"OVER", "UNDER"}
+            ):
+                return DeliveryResult(
+                    sent=False, filtered=True,
+                    filtered_reason="Strict Telegram qualification gate",
+                )
 
 
         # 4. Format

@@ -455,13 +455,11 @@ class Config:
         are restricted to S-tier only by default (UD_MLB_MIN_TIER=S) so alerts
         stay actionable rather than flooding the channel.
         """
-        return frozenset({"NBA", "NFL"})
+        return frozenset()
 
     def min_stars_for_sport(self, sport: str) -> int:
         """Stars floor — strict (UD_MIN_STARS_TO_ALERT) for MLB/NFL,
         relaxed (UD_NON_STRICT_MIN_STARS) for all other sports."""
-        if sport.upper() in self.ud_strict_alert_sports:
-            return self.UD_MIN_STARS_TO_ALERT
         return self.UD_NON_STRICT_MIN_STARS
 
     def min_conf_for_sport_tier(self, sport: str, tier: str) -> int:
@@ -471,13 +469,12 @@ class Config:
         A and B use relaxed thresholds for non-strict (non-MLB/NFL) sports
         so the pipeline can surface more opportunities during stress-testing.
         """
-        strict = sport.upper() in self.ud_strict_alert_sports
         if tier == "S":
             return self.UD_MIN_CONF_S
         if tier == "A":
-            return self.UD_MIN_CONF_A if strict else self.UD_NON_STRICT_MIN_CONF_A
+            return self.UD_NON_STRICT_MIN_CONF_A
         if tier == "B":
-            return self.UD_MIN_CONF_B if strict else self.UD_NON_STRICT_MIN_CONF_B
+            return self.UD_NON_STRICT_MIN_CONF_B
         return 0
 
     @property

@@ -51,11 +51,6 @@ _B_RATE:  float = 0.60
 # "Weak" directional props (rate 0.55–0.60) still reach the scoring
 # pipeline.  They must pass all downstream quality/confidence/delivery
 # gates — only the initial PASS-vs-direction gate is relaxed.
-_B_RATE_TIER1: float = 0.55
-
-# Sports that follow the stricter Tier-2 direction rules (_B_RATE = 0.60).
-# Everything else is Tier-1 and uses _B_RATE_TIER1 = 0.55.
-_TIER2_SPORTS_DEC: frozenset = frozenset({"NBA", "NFL"})
 
 # A window is "contradicting" an OVER pick if its rate < this value
 _CONTRA_FLOOR: float = 0.40
@@ -337,8 +332,7 @@ def make_ud_bet_decision(
     # "Weak" directional props can reach the scoring / delivery pipeline.
     # Tier-2 (MLB/NBA/NFL) keeps the stricter _B_RATE = 0.60.
     # Empty sport ("") keeps old Tier-2 behavior for backward compatibility.
-    _is_tier1 = bool(sport) and sport.upper() not in _TIER2_SPORTS_DEC
-    _b = _B_RATE_TIER1 if _is_tier1 else _B_RATE
+    _b = _B_RATE
     if rate >= _b:
         direction = "OVER"
     elif rate <= (1.0 - _b):
