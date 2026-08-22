@@ -1,0 +1,225 @@
+STOP WAITING — ANALYZE AND FIX THE ACTUAL BOTTLENECK
+
+The current instrumented Underdog cycle has now been running for approximately 2+ hours without emitting the completion timing record.
+
+Do NOT keep waiting indefinitely for this same cycle.
+
+Do NOT restart repeatedly.
+
+Do NOT create a checkpoint.
+
+The previous live measurements already established that the cold-start scoring target of 0 did not solve the long-running cycle.
+
+What we know
+
+The zero-target cold-start change is already implemented.
+
+The current behavior is still:
+
+* max_instances=1
+* Underdog cadence = 120 seconds
+* Stable Refresh = 240 seconds
+* FPR = 300 seconds
+* No concurrency increase
+* No cadence change
+* No fixed 500 cap
+* No intentional provider bypass
+
+The previous Task #138 measurements established:
+
+* Database reads: 5,609.7s across 3 cycles
+* Database writes: 673.8s
+* get_known_underdog_prop_keys was extremely expensive
+* get_latest_underdog_snapshot_per_prop was also extremely expensive
+* Pure scoring CPU was negligible
+* Scoring/evidence wall time was overwhelmingly database wait time
+
+Most importantly:
+
+Cycle 2
+
+* 7,216 props
+* 2,305.7s total
+* 2,172.5s scoring/evidence
+* 1,141.9s known-property-key lookup
+* 944.1s latest-snapshot lookup
+
+Cycle 3
+
+* 7,228 props
+* 2,468.4s total
+* 2,290.7s scoring/evidence
+* 1,692.2s known-property-key lookup
+* 570.1s latest-snapshot lookup
+
+The current zero-cold-start experiment has now also demonstrated that disabling the persisted cold-start scoring branch does not remove the long-running startup workload.
+
+⸻
+
+REQUIRED ACTION
+
+Do NOT make another instrumentation-only pass.
+
+Do NOT simply wait for the current cycle indefinitely.
+
+Instead:
+
+1. Stop/terminate the currently hung diagnostic process cleanly.
+
+Do not corrupt historical data.
+
+Do not delete database records.
+
+Do not alter the scheduler configuration.
+
+2. Analyze the actual database bottleneck.
+
+Specifically inspect:
+
+* get_known_underdog_prop_keys
+* get_latest_underdog_snapshot_per_prop
+* Any queries/materialization immediately surrounding them
+* Query plans
+* Index usage
+* GROUP BY behavior
+* DISTINCT behavior
+* ORDER BY behavior
+* Full-table scans
+* Large result materialization
+* Repeated database calls
+* N+1 patterns
+* Whether the same pool/key data is being rebuilt unnecessarily
+
+Use the existing database architecture.
+
+Do NOT redesign the system.
+
+3. Determine why Replit behaves radically differently from Railway.
+
+Railway currently demonstrates:
+
+* ~2-minute Underdog cycles
+* 29 scans/hour
+* 526 scans over 18 hours
+* ~3.75M active props monitored
+* Cold-start = 0
+* Full-pool rotation continuously advancing
+
+Replit has repeatedly demonstrated:
+
+* Extremely long Underdog cycles
+* Scheduler skips because max_instances=1
+* Thousands of seconds spent waiting on database reads
+* Persistent database state causing the cold-start/pool path to behave differently
+
+The goal is to identify the actual architectural/database difference causing this.
+
+4. IMPORTANT — DO NOT “FIX” THIS BY SETTING max_instances=0 OR INCREASING CONCURRENCY.
+
+max_instances=1 must remain.
+
+Do NOT allow overlapping Underdog scans.
+
+The correct solution is to make the existing scan complete within the intended cadence.
+
+5. Compare the Railway and Replit data paths.
+
+Railway has no persistent database and therefore effectively starts with an empty historical state after restart.
+
+Replit has persistent historical data.
+
+Determine whether the Replit database contains a massive underdog_snapshots history that is causing the pool queries to repeatedly scan/materialize an unnecessarily large dataset.
+
+Do NOT delete historical data.
+
+Do NOT truncate tables.
+
+Do NOT remove historical records.
+
+Find a query/index/path optimization that allows historical data to remain while current active-pool queries operate efficiently.
+
+6. Make the smallest targeted optimization justified by the measurements.
+
+Priority:
+
+1. Query/index optimization
+2. Reduce repeated full-pool materialization
+3. Reuse data already available inside the current cycle where safe
+4. Eliminate unnecessary repeated database reads
+
+Do NOT:
+
+* redesign architecture
+* change scoring formulas
+* change betting rules
+* change Telegram formatting
+* change cadence
+* increase concurrency
+* add arbitrary batch caps
+* delete historical data
+* bypass evidence
+* disable player-history functionality
+
+7. Preserve the cold-start target of 0.
+
+Keep:
+
+_COLD_START_RESCAN_TARGET = 0
+
+The controlled cold-start experiment has already shown that this alone is insufficient.
+
+Do not revert it.
+
+⸻
+
+LIVE VERIFICATION REQUIRED
+
+After the targeted database optimization:
+
+1. Start the bot once.
+2. Confirm clean startup.
+3. Confirm cold-start rescanned props = 0.
+4. Run the first Underdog cycle.
+5. Record:
+    * total duration
+    * active props
+    * new props
+    * line movers
+    * cold-start count
+    * known-key lookup duration
+    * latest-snapshot lookup duration
+    * database read time
+    * database write time
+    * scoring/evidence time
+    * total props/sec
+6. Run at least 3 consecutive normal Underdog cycles.
+7. Confirm the cycles are actually completing instead of being skipped.
+8. Confirm /funnel updates after each completed cycle.
+9. Confirm Stable Refresh and FPR continue functioning.
+10. Confirm historical data remains intact.
+
+Success target
+
+The goal remains approximately:
+
+120-second Underdog cycle
+
+with sustainable operation in the 2–4 minute range if necessary.
+
+Do NOT claim success if the cycle is still taking 10+ minutes.
+
+Do NOT claim success based only on tests.
+
+We need actual completed live cycles.
+
+⸻
+
+FINAL RULE
+
+Do not create a checkpoint until the live optimization has been verified across multiple completed cycles.
+
+If the database optimization is insufficient, measure the remaining bottleneck and continue with the smallest targeted fix.
+
+Do not stop at “tests passed.”
+
+We need the running bot to actually recover.
