@@ -1,0 +1,83 @@
+The final sport-neutral implementation is loaded.
+
+Do NOT make any more code changes yet.
+
+Do NOT create a checkpoint.
+
+Perform a READ-ONLY live verification of the running bot.
+
+Verify from the actual running process and recent logs:
+
+Underlying evaluation
+
+Confirm props from all supported sports can continue through:
+
+* Evaluation
+* Scoring
+* Rescoring
+* Evidence
+* Historical tracking
+* Hit/miss tracking
+* Stable Refresh
+* FPR/full-pool rotation
+
+Confirm there is no remaining sport-based Tier 1/Tier 2 restriction anywhere in the underlying pipeline.
+
+S/A/B/C/PASS must remain scoring/display classifications only.
+
+Telegram gate
+
+Confirm the canonical Telegram gate requires ALL of:
+
+* S-tier
+* BQ >= 80/100
+* Explicit ELITE MQ
+* Explicit OVER or UNDER direction
+* Existing safety protections
+* Existing live-game protections
+* Existing deduplication/validity protections
+
+Confirm that props failing ANY ONE of those conditions are blocked from Telegram.
+
+Specifically verify that:
+
+* A-tier is blocked
+* B-tier is blocked
+* C-tier is blocked
+* PASS is blocked
+* BQ < 80 is blocked
+* Non-ELITE MQ is blocked
+* Non-OVER/UNDER direction is blocked
+
+Anti-spam
+
+Inspect recent Telegram delivery behavior and verify that repeated rescoring of the same qualifying prop does NOT create duplicate Telegram alerts.
+
+Confirm the existing dedup/alert state is suppressing repeated deliveries across all applicable delivery paths.
+
+If there have been no qualifying live props yet, do NOT manufacture an alert just to test it. Report that the live condition has not occurred.
+
+Scheduler
+
+Confirm:
+
+* 120-second monitoring cadence remains
+* max_instances=1 remains
+* No overlapping Underdog instances are created
+* No scheduler settings were changed
+
+Important
+
+Do NOT:
+
+* Restart the bot
+* Modify code
+* Modify the database
+* Change scheduler settings
+* Change scoring
+* Change delivery rules
+* Create a checkpoint
+
+Report actual live findings.
+
+If something cannot be verified from live data, explicitly identify it as unverified rather than assuming it passed.
