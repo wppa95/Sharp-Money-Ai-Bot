@@ -3,7 +3,8 @@ providers/player_history.py — Normalized PlayerHistoryProvider (hybrid).
 
 Priority:
 1. Real game results (PlayerGameResult via PlayerStatsProvider)
-2. Underdog line-move proxy (fallback)
+2. Prop-graded history (bot's own graded PropOpportunityLog outcomes)
+3. Underdog line-move proxy (fallback — never counted as player-game evidence)
 
 Public API:
   PlayerHistoryRecord, HistoryWindow, PlayerHistorySnapshot
@@ -140,23 +141,16 @@ class PlayerHistoryProvider:
     ) -> PlayerHistorySnapshot:
         sport_u = (sport or "UNKNOWN").upper()
         stat_l = stat_type.lower().strip()
-        # Protect against residual "None " prefixes from older Underdog payloads
-        # (first_name=null previously rendered as literal "None").
         if isinstance(player_name, str) and player_name.startswith("None "):
             player_name = player_name[5:].strip() or player_name
 
         await self._ensure_real_results(
-            db,
-            player_name,
-            sport_u,
-            stat_type,
-            force_refresh=force_refresh,
-            instrumentation=instrumentation,
+            db, player_name, sport_u, stat_type,
+            force_refresh=force_refresh, instrumentation=instrumentation,
         )
         if instrumentation is not None:
             db_results = await instrumentation.await_db(
-                "read",
-                "get_player_results_for_history",
+                "read", "get_player_results_for_history",
                 db.get_player_results(player_name, sport_u, stat_type, limit=40),
             )
         else:
@@ -181,6 +175,38 @@ class PlayerHistoryProvider:
             )
             for r in db_results
         ]
+        # Supplement with prop-graded history for dates not already covered by
+        # provider player-game rows. Does NOT replace provider data.
+        try:
+            from engine.graded_history import get_graded_prop_results as _get_graded
+            graded_rows = await _get_graded(
+                db, player_name, sport_u, stat_type, limit=40
+            )
+            existing_dates = {r.date for r in real_records}
+            for g in graded_rows:
+                gdate = None
+                if getattr(g, "game_time", None) is not None:
+                    gdate = g.game_time.strftime("%Y-%m-%d")
+                elif getattr(g, "graded_at", None) is not None:
+                    gdate = g.graded_at.strftime("%Y-%m-%d")
+                if not gdate or gdate in existing_dates:
+                    continue
+                if g.actual_value is None:
+                    continue
+                real_records.append(PlayerHistoryRecord(
+                    player=player_name,
+                    sport=sport_u,
+                    stat=stat_l,
+                    game_id=gdate,
+                    date=gdate,
+                    opponent=None,
+                    value=float(g.actual_value),
+                    is_h2h=False,
+                    source="graded_prop",
+                ))
+                existing_dates.add(gdate)
+        except Exception:
+            pass
         real_records.sort(key=lambda x: x.date, reverse=True)
 
         l5 = _window_from_values(real_records[:5], current_line)
@@ -231,14 +257,8 @@ class PlayerHistoryProvider:
         return result
 
     async def _ensure_real_results(
-        self,
-        db,
-        player_name,
-        sport,
-        stat_type,
-        *,
-        force_refresh=False,
-        instrumentation=None,
+        self, db, player_name, sport, stat_type, *,
+        force_refresh=False, instrumentation=None,
     ) -> None:
         today = datetime.utcnow().date().isoformat()
         key = (player_name, sport, stat_type.lower().strip(), today)
@@ -251,10 +271,7 @@ class PlayerHistoryProvider:
             _provider_started = __import__("time").monotonic()
             if instrumentation is not None:
                 raw = await PlayerStatsProvider().fetch_results(
-                    player_name,
-                    sport,
-                    stat_type,
-                    instrumentation=instrumentation,
+                    player_name, sport, stat_type, instrumentation=instrumentation,
                 )
             else:
                 raw = await PlayerStatsProvider().fetch_results(
