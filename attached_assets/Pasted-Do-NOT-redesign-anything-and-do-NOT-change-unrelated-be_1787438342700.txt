@@ -1,0 +1,145 @@
+Do NOT redesign anything and do NOT change unrelated behavior.
+
+1. GLOBAL PLAYER IDENTITY
+
+Implement/retain:
+
+* Null first name → use last name
+* Null last name → use first name
+* Both null → Unknown Player
+* Strip any residual "None " prefix
+* Preserve legitimate player names exactly
+
+This must work across all sports and all Underdog player-prop ingestion/history paths.
+
+2. GLOBAL PLAYER-PROP EVIDENCE
+
+Implement the provider-backed evidence system for every sport where a legitimate provider exists.
+
+Supported provider paths:
+
+* MLB → MLB Stats API
+* NBA → ESPN
+* NFL → ESPN + optional Sleeper
+* WNBA → ESPN
+* NHL → NHL public API
+* CFB/NCAAF → ESPN
+* NCAAB → ESPN
+* MLS → ESPN
+* Tennis → JeffSackmann
+* CS → PandaScore when API key is available
+* DOTA → OpenDota
+* Soccer → football-data.org when API key is available
+
+Do NOT fabricate evidence for sports without legitimate providers.
+
+Sports without legitimate providers remain in continuous monitoring but may have N/A evidence until legitimate results become available.
+
+3. BUILD THE BOT’S OWN PLAYER-PROP EVIDENCE OVER TIME
+
+Implement the approved graded-prop evidence lifecycle.
+
+When an evaluated prop eventually gets a real result, preserve that result as historical evidence so the bot can build its own evidence database over time.
+
+Support:
+
+* HIT
+* MISS
+* PUSH
+* actual result/value
+* player
+* sport
+* stat/market
+* date/timestamp
+
+Use player × sport × stat matching.
+
+Prevent:
+
+* duplicate dates
+* cross-player contamination
+* fabricated results
+
+Provider game data should remain preferred when provider data exists for the same game/date.
+
+4. PROGRESSIVE HISTORY WINDOWS
+
+Use accumulated real provider + graded-prop results to progressively build:
+
+* L5
+* L10
+* L20
+* L30
+* Season
+
+Behavior:
+
+* 0 real samples → N/A
+* insufficient samples → partial history where appropriate
+* enough results → progressively populate larger windows
+* 30+ real results → full L5/L10/L20/L30/Season history
+
+Do NOT convert missing evidence into fake 0% values.
+
+5. COLD-START PROPS
+
+Cold-start props must remain in the normal continuous monitoring pool.
+
+They should:
+
+* continue getting evaluated
+* continue getting rescored
+* continue rotating through the full active pool
+* accumulate evidence as results become available
+
+Do NOT remove them from monitoring simply because they currently have N/A history.
+
+6. PERSISTENCE
+
+Evidence must survive:
+
+* bot restarts
+* monitoring cycles
+* full-pool rotations
+
+Use the existing database infrastructure.
+
+Do NOT create a second incompatible evidence system.
+
+7. PRESERVE EVERYTHING ELSE
+
+Do NOT change:
+
+* monitoring cadence
+* max_instances=1
+* full-pool rotation
+* Stable Refresh
+* FPR
+* adaptive batching
+* scoring formulas
+* scheduler behavior
+* Watchlist/Near-Miss behavior
+* UNDER + BQ >= 30 sensitivity
+* database schema unless absolutely required
+* Telegram delivery rules
+* Discord delivery rules
+* PrizePicks
+* PickFinder
+* #line-movements
+
+Do NOT touch unrelated functionality.
+
+8. VALIDATION
+
+After applying the updates:
+
+* Run the relevant evidence/identity/graded-history tests.
+* Verify the existing 33 focused tests remain passing or identify any legitimate test-count change.
+* Verify provider-backed sports can populate real history.
+* Verify graded prop outcomes feed future history.
+* Verify cold-start props remain in continuous monitoring.
+* Verify no fabricated evidence is generated.
+
+Do not deploy or restart Railway as part of this request.
+
+Stop after the updates and validation are complete and report exactly what was changed and what was verified.
