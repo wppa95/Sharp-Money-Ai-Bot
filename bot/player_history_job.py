@@ -10,9 +10,11 @@ logger = logging.getLogger(__name__)
 # This cap limits API spend per cycle, not the number of players tracked.
 _API_CALL_TARGET = 1000
 
-# Tier-2 sports are excluded from player-history collection.
-# Their alert pipeline follows separate Tier-2 rules.
-_TIER2_SPORTS = frozenset({"MLB", "NBA", "NFL"})
+# Sports excluded from background player-history collection.
+# MLB/NBA remain excluded here (on-demand enrichment still available).
+# NFL is intentionally included so ESPN/Sleeper history is collected
+# into the existing PlayerResult path for L5/L10/L20/L30/Season.
+_TIER2_SPORTS = frozenset({"MLB", "NBA"})
 
 # Sports for which PlayerStatsProvider.fetch_results() has a working data
 # path.  Unsupported sports (LOL, VALORANT/VAL, PGA/GOLF, MMA, TT,
@@ -23,14 +25,15 @@ _SUPPORTED_HISTORY_SPORTS = frozenset({
     "NCAAF", "CFB",   # CFB is the Underdog identifier for NCAAF
     "MLS", "NCAAB",
     "SOCCER",         # Requires FOOTBALL_DATA_API_KEY; returns [] gracefully without it
+    "NFL",            # ESPN gamelog + optional Sleeper supplement
 })
 
 
 async def player_history_collector_job(context) -> None:
     """Fetch real game results for active Tier-1 Underdog props.
 
-    Selects all Tier-1 (non-MLB/NBA/NFL) players from the active snapshot
-    whose sport has a working PlayerStatsProvider data path, then calls
+    Selects players from the active snapshot whose sport has a working
+    PlayerStatsProvider data path (including NFL), then calls
     fetch_results() for up to _API_CALL_TARGET of them per cycle.
     Player count is unlimited — only API calls are capped.
     """
@@ -58,13 +61,13 @@ async def player_history_collector_job(context) -> None:
         targets: list[tuple[str, str, str]] = []
         seen: set[tuple[str, str, str]] = set()
 
-        # ── Primary path: active snapshot (full Tier-1 pool, no player cap) ──
+        # ── Primary path: active snapshot (full pool, no player cap) ──
         try:
             active = await db.get_active_underdog_snapshot_per_prop()
             for (player, stat), s in active.items():
                 sport = (getattr(s, "sport", None) or "UNKNOWN").upper()
                 if sport in _TIER2_SPORTS:
-                    continue  # Tier 2 — skip
+                    continue  # MLB/NBA — skip background collection
                 if sport not in _SUPPORTED_HISTORY_SPORTS:
                     continue  # No provider data path — skip to avoid wasting API calls
                 key = (player.strip(), sport, (stat or "").lower().strip())
@@ -84,9 +87,9 @@ async def player_history_collector_job(context) -> None:
                 for s in plh:
                     sport = (getattr(s, "sport", None) or "UNKNOWN").upper()
                     if sport in _TIER2_SPORTS:
-                        continue  # Tier 2 — skip
+                        continue
                     if sport not in _SUPPORTED_HISTORY_SPORTS:
-                        continue  # No provider data path — skip
+                        continue
                     key = (
                         (s.player_name or "").strip(),
                         sport,
@@ -102,7 +105,7 @@ async def player_history_collector_job(context) -> None:
                 )
 
         logger.info(
-            "player_history_collector_job: tier1_targets=%d calling_up_to=%d",
+            "player_history_collector_job: targets=%d calling_up_to=%d",
             len(targets),
             min(len(targets), _API_CALL_TARGET),
         )
