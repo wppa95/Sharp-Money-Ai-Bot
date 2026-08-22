@@ -216,6 +216,14 @@ async def post_init(application: Application) -> None:
     _health_monitor.register("OddsAPI")
     _health_monitor.register("Underdog")
     logger.info("Provider health monitor initialised (OddsAPI + Underdog)")
+    if config.discord_configured:
+        logger.info(
+            "Discord delivery configured (guild=%s, channel=%s)",
+            config.DISCORD_GUILD_ID,
+            config.DISCORD_CHANNEL_ID,
+        )
+    else:
+        logger.info("Discord delivery not configured (required variables absent)")
 
     init_odds_cache(ttl_seconds=config.ODDS_API_CACHE_TTL)
     logger.info("Odds API shared cache initialised (TTL=%ds)", config.ODDS_API_CACHE_TTL)

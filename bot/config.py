@@ -46,6 +46,18 @@ class Config:
     # pandascore.co — set PANDASCORE_API_KEY env var to activate CS2 alerts.
     # CS2 props gracefully return [] without this key (decision engine PASS).
     PANDASCORE_API_KEY: str = os.environ.get("PANDASCORE_API_KEY", "")
+    # Optional Discord delivery for the same actionable alerts sent to Telegram.
+    DISCORD_BOT_TOKEN: str = os.environ.get("DISCORD_BOT_TOKEN", "")
+    DISCORD_GUILD_ID: str = os.environ.get("DISCORD_GUILD_ID", "")
+    DISCORD_CHANNEL_ID: str = os.environ.get("DISCORD_CHANNEL_ID", "")
+
+    @property
+    def discord_configured(self) -> bool:
+        return bool(
+            self.DISCORD_BOT_TOKEN
+            and self.DISCORD_GUILD_ID
+            and self.DISCORD_CHANNEL_ID
+        )
 
     # ── PrizePicks monitoring ─────────────────────────────────────────────────
     # Leagues to monitor (comma-separated PrizePicks league names).

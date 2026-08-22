@@ -18,6 +18,8 @@ immediately scannable on a mobile screen.
 from __future__ import annotations
 
 import logging
+import re
+from html import unescape
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional, Union
@@ -617,6 +619,44 @@ async def broadcast_alert(
         else:
             failed += 1
     return {"sent": sent, "failed": failed}
+
+
+async def send_discord_alert(message: str) -> bool:
+    """Send an actionable alert to the configured Discord channel.
+
+    Discord is a best-effort companion channel.  It deliberately has no
+    qualification logic of its own: callers invoke it only after the
+    canonical Telegram gate has passed.
+    """
+    if not config.discord_configured:
+        return False
+
+    content = unescape(re.sub(r"<[^>]+>", "", message)).strip()
+    if len(content) > 2000:
+        content = content[:1997] + "..."
+
+    try:
+        import aiohttp
+
+        url = f"https://discord.com/api/v10/channels/{config.DISCORD_CHANNEL_ID}/messages"
+        headers = {"Authorization": f"Bot {config.DISCORD_BOT_TOKEN}"}
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                url,
+                headers=headers,
+                json={"content": content},
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as response:
+                if response.status not in (200, 201):
+                    logger.warning(
+                        "Discord alert failed: HTTP %s",
+                        response.status,
+                    )
+                    return False
+        return True
+    except Exception as exc:  # Discord must never affect the monitoring cycle.
+        logger.warning("Discord alert failed (non-fatal): %s", exc)
+        return False
 
 
 # ── PrizePicks alert formatting ───────────────────────────────────────────────
@@ -1277,6 +1317,9 @@ class AlertDelivery:
             message += f"\n\n<i>⏱ Line as of {_ts_str} — verify on Underdog before placing</i>"
 
         counts     = await broadcast_alert(self._bot, self._chat_ids, message, sport=sport)
+        discord_sent = False
+        if not removed and not market_move_only:
+            discord_sent = await send_discord_alert(message)
         alert_sent = counts["sent"] > 0
 
         
@@ -1298,8 +1341,9 @@ class AlertDelivery:
         )
         log_fn = logger.info if alert_sent else logger.warning
         log_fn(
-            "Underdog alert: %s | %s | %s | %s%s → %s",
+            "Underdog alert: %s | %s | %s | %s%s → %s (discord=%s)",
             player_name, stat_type, sport, event_str, score_tag, result,
+            discord_sent,
         )
         return result
 
