@@ -222,6 +222,12 @@ async def post_init(application: Application) -> None:
             config.DISCORD_GUILD_ID,
             config.DISCORD_CHANNEL_ID,
         )
+        try:
+            from discord_commands import start_discord_commands
+            start_discord_commands()
+            logger.info("Discord command interface started")
+        except Exception as exc:
+            logger.warning("Discord command interface failed to start (non-fatal): %s", exc)
     else:
         logger.info("Discord delivery not configured (required variables absent)")
 
@@ -498,6 +504,11 @@ async def _send_startup_notification(bot, chat_ids: list[int], ht) -> None:
 
 async def post_shutdown(application: Application) -> None:
     """Runs once after polling stops, before the process exits."""
+    try:
+        from discord_commands import stop_discord_commands
+        await stop_discord_commands()
+    except Exception as exc:
+        logger.warning("Discord command interface shutdown failed (non-fatal): %s", exc)
     # Record clean shutdown BEFORE closing DB so the sidecar is written
     # even if DB close raises.  This covers SIGTERM, SIGINT, and programmatic
     # stops.  SIGKILL / hard crashes skip this; the atexit fallback handles
