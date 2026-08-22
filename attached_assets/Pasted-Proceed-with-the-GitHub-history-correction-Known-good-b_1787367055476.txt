@@ -1,0 +1,67 @@
+Proceed with the GitHub history correction.
+
+Known-good base:
+ed50bfd3350754bf17228ce912457c803feafd85
+
+Current known-good Replit/local HEAD:
+bc27ab6d012b0e304df2e0e38c8e9fe366580fc8
+
+The five commits after ed50bfd on GitHub main are known-bad and must NOT remain in the main branch history:
+
+821f891bdd39e7a050043319efd131b1788fbfbc
+cee708dcd56c00d26a972bfaa69a7a55ae726867
+b24321b0b4e8684c9baf98e1cfb7f553ccfce1de
+fd7666b2a9276442d0254ae57fe4bf599b44979a
+4b4c2545b0e55c5c8dbe08af40eff037e96f31a4
+
+Before changing main:
+
+1. Create a backup branch/reference pointing to the CURRENT GitHub main so the five bad commits remain recoverable if needed.
+2. Verify the backup reference was created successfully.
+3. Verify local main is still exactly bc27ab6.
+4. Verify the working tree is clean.
+
+Then:
+
+5. Move GitHub main to bc27ab6.
+6. Force-update ONLY GitHub main because the remote history intentionally contains the five known-bad commits.
+7. Do NOT merge or cherry-pick the five bad commits.
+8. Do NOT modify any application files.
+9. Do NOT restart the bot.
+10. Do NOT modify the database.
+11. Do NOT create a checkpoint.
+
+Afterward verify:
+
+* GitHub main HEAD = bc27ab6d012b0e304df2e0e38c8e9fe366580fc8
+* main contains the current Replit implementation.
+* The five bad commits are no longer reachable from main.
+* The backup reference still preserves the previous remote main.
+* Working tree remains clean.
+
+Report:
+
+* Backup branch/reference name
+* Final GitHub main SHA
+* Push result
+* Confirmation that the five bad commits were removed from main
+* Confirmation that bc27ab6 is now the GitHub main HEAD
+
+🔒 FREEZE v3.6
+
+After the GitHub history correction is successfully verified, FREEZE THE PROJECT AT v3.6.
+
+Do NOT make any additional code changes.
+Do NOT refactor.
+Do NOT optimize.
+Do NOT change scoring.
+Do NOT change Telegram rules.
+Do NOT change database logic.
+Do NOT change scheduler behavior.
+Do NOT change monitoring behavior.
+Do NOT restart the bot.
+Do NOT create additional features.
+
+The verified bc27ab6 state is the v3.6 baseline.
+
+Any future changes must be explicitly requested as a new post-v3.6 task.
