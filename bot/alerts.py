@@ -566,7 +566,7 @@ def format_start_message() -> str:
 # delivery is suppressed.  Module-level so tests can patch it when verifying
 # sport-specific formatting independent of the delivery block.
 _TIER2_SPORTS_BLOCK: frozenset[str] = frozenset({
-    "NBA", "MLB", "NFL", "NCAA", "NCAAF", "CFB",
+    "NBA", "NFL",
 })
 
 
@@ -1188,7 +1188,32 @@ class AlertDelivery:
                 logger.info("Underdog alert capped: %s | %s | %s", player_name, stat_type, reason)
                 return DeliveryResult(sent=False, filtered=True, filtered_reason=reason)
 
-        
+        # Canonical Tier 1 Telegram gate. Tier 1 is every supported sport
+        # except NFL/NBA; evaluation and persistence happen before this point.
+        # This is delivery-only and deliberately does not affect removals or
+        # internal market-move notifications.
+        if not removed and not market_move_only:
+            _sport_up = (sport or "").upper()
+            if _sport_up not in {"NFL", "NBA"}:
+                _tier = getattr(decision, "decision_tier", None)
+                _bq = float(getattr(score, "total", 0) or 0)
+                _mq_label_obj = getattr(market_quality, "label", None)
+                _mq_label = getattr(_mq_label_obj, "value", _mq_label_obj)
+                _direction = str(
+                    getattr(decision, "recommendation", "") or ""
+                ).upper()
+                if (
+                    _tier != "S"
+                    or _bq < 80.0
+                    or _mq_label != "ELITE"
+                    or _direction not in {"OVER", "UNDER"}
+                ):
+                    return DeliveryResult(
+                        sent=False,
+                        filtered=True,
+                        filtered_reason="Tier 1 strict Telegram gate",
+                    )
+
 
         # 4. Format
         # S-tier gate: Market Quality < 80 or Confidence < 80 → cap decision tier to A.

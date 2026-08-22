@@ -1,0 +1,178 @@
+🔴 STRICT TIER 1 RULES — IMPLEMENT ONLY THIS SCOPE
+
+Stop the current/last task and do NOT resume from it.
+
+Implement this as the new active task.
+
+Do not make unrelated changes. Do not redesign or refactor the bot. Make only the smallest targeted changes necessary.
+
+1. TIER 1 SPORT DEFINITION
+
+Move MLB into Tier 1.
+
+Tier 1 includes all non-football sports currently supported by the bot, including:
+
+* MLB
+* NBA
+* WNBA
+* NHL
+* NPB
+* KBO
+* Tennis
+* FIFA
+* PGA
+* CS
+* VAL
+* LOL
+* DOTA
+* MMA
+* Boxing
+* BKFC
+* AFLW
+* Racing
+* Motorcycle
+* and every other currently supported non-football sport/league/event type.
+
+All available player/stat prop markets for these Tier 1 sports remain available for evaluation.
+
+Do not remove or restrict available stat props.
+
+2. NO TIER 1 EVALUATION BLOCKS
+
+There must be NO classification gate preventing a Tier 1 prop from being evaluated.
+
+Tier 1 props must continue through the normal pipeline regardless of whether the displayed classification is:
+
+* S
+* A
+* B
+* C
+* PASS
+* Cold-start
+* Any other displayed classification
+
+These classifications must not block underlying evaluation, rescoring, evidence processing, tracking, or historical analysis.
+
+There is no PASS-tier exclusion from the underlying Tier 1 pipeline.
+
+3. STRICT TELEGRAM ALERT RULE
+
+The following is the ONLY condition under which a Tier 1 prop may reach Telegram:
+
+Tier 1 Telegram = ALL conditions required
+
+* S-Tier
+* Market Quality = ELITE
+* Bet Quality >= 80/100
+* OVER or UNDER direction
+* Valid actionable prop
+* Existing safety protections
+* Existing deduplication protections
+* Existing live-game protections
+
+Every condition is mandatory.
+
+If any one of these conditions fails, the prop must NOT reach Telegram.
+
+Therefore:
+
+* A-Tier → no Telegram
+* B-Tier → no Telegram
+* C-Tier → no Telegram
+* PASS → no Telegram
+* Cold-start PASS → no Telegram
+* MQ below ELITE → no Telegram
+* BQ below 80 → no Telegram
+* No direction → no Telegram
+* Any non-OVER/UNDER market → no Telegram
+
+4. OVER/UNDER ONLY
+
+Telegram Tier 1 alerts may contain ONLY player/stat props with an explicit OVER or UNDER direction.
+
+Do not send:
+
+* Moneylines
+* Spreads
+* Team bets
+* Game totals
+* Draw/winner markets
+* Non-directional props
+* Any other market without an explicit OVER/UNDER player-prop direction
+
+All available Tier 1 player/stat prop markets may still be evaluated internally.
+
+Only OVER/UNDER selections satisfying the strict S-Tier + ELITE MQ + BQ 80+ requirements can be delivered.
+
+5. DO NOT CHANGE AVAILABLE PROP DATA
+
+Keep all existing Tier 1 statistical props available for:
+
+* Evaluation
+* Rescoring
+* Evidence
+* Historical analysis
+* Hit/miss tracking
+* Ranking
+* Watchlist analysis
+* Full-pool rotation
+
+Do not filter the underlying Tier 1 pool simply because a prop cannot currently qualify for Telegram.
+
+The restriction applies specifically to Telegram delivery, not to underlying monitoring/evaluation.
+
+6. APPLY THE RULE CANONICALLY
+
+Make this the single canonical Tier 1 Telegram delivery rule.
+
+Apply it consistently to every Tier 1 Telegram delivery path, including:
+
+* Main monitoring alerts
+* Stable Refresh alerts
+* FPR/full-pool alerts
+* Watchlist/actionable delivery
+* /picks
+* /slip
+* Any other path capable of producing a Telegram actionable alert
+
+Do not create competing versions of the rule.
+
+7. PRESERVE EXISTING SYSTEM BEHAVIOR
+
+Do NOT change:
+
+* Scheduler cadence
+* max_instances
+* Database behavior
+* Cold-start behavior
+* Evidence providers
+* Scoring formulas
+* Full-pool rotation
+* Stable Refresh
+* FPR
+* Historical data
+* Player-history collection
+* Hit/miss tracking
+* Unrelated Telegram formatting
+
+Only implement the strict Tier 1 classification/delivery changes above.
+
+8. REQUIRED VERIFICATION
+
+Before stopping the task, verify with tests and live/runtime inspection that:
+
+* MLB is treated as Tier 1.
+* All listed non-football Tier 1 sports are recognized correctly.
+* No Tier 1 classification blocks underlying evaluation.
+* PASS does not stop Tier 1 evaluation.
+* A/B/C do not stop Tier 1 evaluation.
+* Cold-start does not stop Tier 1 evaluation.
+* Only S-Tier Tier 1 props can qualify for Telegram.
+* MQ must be ELITE.
+* BQ must be 80/100 or higher.
+* OVER and UNDER are the only Telegram directions permitted.
+* Any failed condition prevents Telegram delivery.
+* All available Tier 1 stat props remain available internally.
+* Existing safety/dedup/live-game protections remain intact.
+
+Do not create a checkpoint until the implementation and verification are complete.

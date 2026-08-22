@@ -451,11 +451,11 @@ class Config:
         allowed to generate Telegram alerts.  All other sports follow the normal
         S/A/B/C tier rules.
 
-        Currently: MLB and NFL.  Both sports generate very high prop volume and
+        Currently: NFL and NBA.  Both sports generate very high prop volume and
         are restricted to S-tier only by default (UD_MLB_MIN_TIER=S) so alerts
         stay actionable rather than flooding the channel.
         """
-        return frozenset({"MLB", "NFL"})
+        return frozenset({"NBA", "NFL"})
 
     def min_stars_for_sport(self, sport: str) -> int:
         """Stars floor — strict (UD_MIN_STARS_TO_ALERT) for MLB/NFL,

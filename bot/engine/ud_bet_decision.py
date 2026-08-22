@@ -55,7 +55,7 @@ _B_RATE_TIER1: float = 0.55
 
 # Sports that follow the stricter Tier-2 direction rules (_B_RATE = 0.60).
 # Everything else is Tier-1 and uses _B_RATE_TIER1 = 0.55.
-_TIER2_SPORTS_DEC: frozenset = frozenset({"MLB", "NBA", "NFL"})
+_TIER2_SPORTS_DEC: frozenset = frozenset({"NBA", "NFL"})
 
 # A window is "contradicting" an OVER pick if its rate < this value
 _CONTRA_FLOOR: float = 0.40

@@ -1,0 +1,221 @@
+🔴 STRICT TIER 1 TELEGRAM RULE — DO NOT MISINTERPRET
+
+Continue from the current implementation.
+
+Make only the targeted changes below. Do not redesign, refactor, or change unrelated behavior.
+
+1. TIER DEFINITIONS — EXACT
+
+🟢 TIER 1 = EVERY SPORT BELOW
+
+MLB is Tier 1.
+
+The complete Tier 1 list is:
+
+* MLB
+* CS / CS2
+* FIFA
+* Tennis
+* CFB / NCAAF
+* PGA
+* LOL / League of Legends
+* WNBA
+* MMA
+* DOTA / Dota 2
+* VAL / VALORANT
+* NPB
+* KBO
+* NHL
+* Boxing
+* BKFC
+* AFL
+* AFLW
+* CFL
+* Racing
+* Motorcycle
+* Basketball
+* League
+* Match
+* Outlaws
+* and EVERY other sport that is not NFL or NBA
+
+🔵 TIER 2 = ONLY
+
+* NFL
+* NBA
+
+This is the exact rule.
+
+Do not classify MLB as Tier 2.
+
+Do not classify any non-NFL/non-NBA sport as Tier 2.
+
+If a new sport appears that is not NFL or NBA, it must automatically be treated as Tier 1.
+
+⸻
+
+2. STRICT TIER 1 TELEGRAM GATE
+
+This is a hard AND gate for EVERY Tier 1 prop, including MLB.
+
+A Tier 1 prop may reach Telegram ONLY when ALL of these are true:
+
+✅ Required
+
+1. S-Tier
+2. Bet Quality (BQ) ≥ 80/100
+3. Market Quality (MQ) = ELITE
+4. Direction = OVER or UNDER
+5. Existing deduplication protections pass
+6. Existing live-game protections pass
+7. Existing safety protections pass
+
+If ANY ONE condition fails → DO NOT SEND TO TELEGRAM.
+
+⸻
+
+3. TIER 1 TELEGRAM BLOCK CONDITIONS
+
+The following must NEVER reach Telegram:
+
+* A-Tier ❌
+* B-Tier ❌
+* C-Tier ❌
+* PASS ❌
+* Cold-start PASS ❌
+* BQ 79 or lower ❌
+* MQ anything below ELITE ❌
+* Missing MQ ❌
+* Missing BQ ❌
+* No direction ❌
+* Any direction other than OVER/UNDER ❌
+* Failed deduplication ❌
+* Failed live-game protection ❌
+* Failed safety protection ❌
+
+There are no exceptions to the Tier 1 Telegram gate.
+
+⸻
+
+4. OVER / UNDER ONLY
+
+For all Tier 1 sports, Telegram actionable picks are limited strictly to:
+
+* 🔼 OVER
+* 🔽 UNDER
+
+No other direction, market type, or actionable-pick type may bypass this rule.
+
+Apply this consistently to:
+
+* Main monitoring delivery
+* Stable Refresh delivery
+* FPR/full-pool delivery
+* Watchlist/actionable delivery
+* /picks
+* /slip
+* Any other Telegram actionable-pick path
+
+Use the existing canonical delivery gate rather than creating competing rule systems.
+
+⸻
+
+5. IMPORTANT — DO NOT GATE UNDERLYING EVALUATION
+
+The S-tier/BQ/MQ/OVER-UNDER requirements are Telegram delivery requirements only.
+
+Do NOT prevent Tier 1 props from being:
+
+* monitored
+* evaluated
+* rescored
+* evidence-enriched
+* tracked
+* included in historical analysis
+* included in hit/miss tracking
+* retained in the funnel
+
+A/B/C/PASS remain valid underlying evaluation/display classifications.
+
+A Tier 1 A/B/C/PASS prop can continue through the pipeline, but it cannot reach Telegram unless it ultimately satisfies the strict Tier 1 Telegram gate.
+
+⸻
+
+6. PRESERVE EVERYTHING ELSE
+
+Do NOT change:
+
+* 120-second monitoring cadence
+* max_instances=1
+* cold-start implementation
+* database behavior
+* scoring formulas
+* evidence collection
+* player history
+* Stable Refresh
+* FPR/full-pool rotation
+* adaptive batching
+* provider behavior
+* historical data
+* unrelated Telegram formatting
+* unrelated betting rules
+
+Make the smallest targeted change possible.
+
+⸻
+
+7. REQUIRED VERIFICATION
+
+Before reporting completion:
+
+Tier classification
+
+* MLB is Tier 1
+* CS/CS2 is Tier 1
+* FIFA is Tier 1
+* Tennis is Tier 1
+* CFB/NCAAF is Tier 1
+* PGA is Tier 1
+* LOL/League of Legends is Tier 1
+* WNBA is Tier 1
+* MMA is Tier 1
+* DOTA/Dota 2 is Tier 1
+* VAL/VALORANT is Tier 1
+* NPB is Tier 1
+* KBO is Tier 1
+* NHL is Tier 1
+* Boxing is Tier 1
+* BKFC is Tier 1
+* AFL is Tier 1
+* AFLW is Tier 1
+* CFL is Tier 1
+* Racing is Tier 1
+* Motorcycle is Tier 1
+* Basketball is Tier 1
+* League is Tier 1
+* Match is Tier 1
+* Outlaws is Tier 1
+* Every other non-NFL/non-NBA sport automatically becomes Tier 1
+* NFL is Tier 2
+* NBA is Tier 2
+
+Telegram gate
+
+* Tier 1 requires S-Tier
+* Tier 1 requires BQ ≥ 80
+* Tier 1 requires MQ = ELITE
+* Tier 1 requires OVER or UNDER
+* Tier 1 requires existing dedup/live-game/safety protections
+* No A/B/C/PASS Tier 1 prop can reach Telegram
+* No BQ <80 Tier 1 prop can reach Telegram
+* No non-ELITE MQ Tier 1 prop can reach Telegram
+* No non-OVER/UNDER Tier 1 prop can reach Telegram
+* The rule applies to every Telegram delivery path
+
+Final
+
+* Underlying evaluation remains unrestricted by S/A/B/C
+* No unrelated behavior changed
+* No checkpoint created
+
+Do not create a checkpoint until the change is verified.

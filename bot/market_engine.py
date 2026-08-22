@@ -1174,13 +1174,11 @@ _DELIVERY_TIER_BASE: dict[str, float] = {
 }
 
 
-# Sports that are Tier 2 (major sports — secondary delivery priority).
-# Tier 1 = EVERY supported sport NOT in this set (WNBA, NHL, Tennis, Soccer,
-# CS2, Dota 2, LoL, VAL, MMA, Badminton, Table Tennis, Racing, CFB, CFL, KBO,
-# NPB, and every other supported non-NBA/MLB/NFL sport).
+# Sports that are Tier 2.  Tier 1 is every supported sport not in this set.
+# New non-NFL/non-NBA sports automatically remain Tier 1.
 # This is the CANONICAL source of truth — do NOT expand it.
 _TIER2_SPORTS: frozenset[str] = frozenset({
-    "NBA", "MLB", "NFL", "NCAA", "NCAAF", "CFB",
+    "NBA", "NFL",
 })
 
 
@@ -1231,15 +1229,12 @@ def _tier_delivery_gate(
 
     Tier 1 rules:
         • Valid OVER or UNDER direction is required.
-        • BQ and MQ must both be at least 70.
-        • Existing supporting evidence is required.
-        • No S/A/B/C tier requirement is imposed.
+        • S-tier, BQ ≥ 80, and ELITE MQ are required.
+        • Only OVER/UNDER directions are valid.
 
     Tier 2 rules (stricter):
         • Valid OVER or UNDER direction is required.
-        • BQ ≥ 85 is required.
-        • MQ ≥ 85 is required.
-        • BOTH are mandatory — failing either blocks Telegram delivery.
+        • Existing Tier 2 behavior is preserved.
 
     Returns True if the candidate may proceed to delivery; False to block.
     """
@@ -1247,7 +1242,7 @@ def _tier_delivery_gate(
         return False
     if _is_tier2_sport(sport):
         return bq_score >= 85.0 and mq_score >= 85.0
-    return bq_score >= 70.0 and mq_score >= 70.0 and bool(evidence_available)
+    return bq_score >= 80.0 and mq_score >= 85.0 and bool(evidence_available)
 
 
 async def _try_claim_delivery_slot(
