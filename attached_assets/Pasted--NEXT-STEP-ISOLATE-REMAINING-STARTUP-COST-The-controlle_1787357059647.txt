@@ -1,0 +1,179 @@
+🔴 NEXT STEP — ISOLATE REMAINING STARTUP COST
+
+The controlled cold-start experiment is complete enough to establish one fact:
+
+Setting cold-start rescan target = 0 did NOT return Replit to the Railway-style ~2-minute behavior.
+
+The first post-restart Underdog cycle remained active for more than 20 minutes.
+
+Do NOT make another optimization yet.
+
+Do NOT change scheduler settings, cadence, batch size, concurrency, scoring, evidence, or delivery behavior.
+
+1. PRESERVE THE CURRENT STATE
+
+Keep:
+
+* Cold-start rescan target = 0
+* Underdog cadence = 120 seconds
+* Stable Refresh = 240 seconds
+* FPR = 300 seconds
+* max_instances=1
+* Existing database
+* Existing historical data
+* Existing new-prop processing
+* Existing line-movement processing
+* Existing Stable Refresh/FPR behavior
+
+Do not revert the zero cold-start change.
+
+2. INSTRUMENT ONLY THE REMAINING PATH
+
+We need to determine exactly where the >20-minute runtime is occurring now that persisted-pool cold-start scoring is disabled.
+
+Add lightweight aggregated timing around:
+
+A. Known-prop-key database lookup
+
+Measure:
+
+get_known_underdog_prop_keys
+
+Record:
+
+* Start
+* End
+* Duration
+* Number of keys returned
+
+B. Latest-snapshot database lookup
+
+Measure:
+
+get_latest_underdog_snapshot_per_prop
+
+Record:
+
+* Start
+* End
+* Duration
+* Number of props/snapshots returned
+
+C. Active-pool construction
+
+Measure:
+
+* Database reads
+* Deduplication
+* Filtering
+* Active-pool construction
+* Number of active props
+
+D. New-prop path
+
+Measure:
+
+* Number of new props
+* Processing duration
+* Database reads
+* Database writes
+
+E. Line-movement path
+
+Measure:
+
+* Number of line movers
+* Processing duration
+* Database reads
+* Database writes
+
+F. Persistence after the scan
+
+Measure aggregated:
+
+* Snapshot writes
+* Opportunity writes
+* Grading/tracking writes
+* Funnel/current-run writes
+
+3. IMPORTANT
+
+Do NOT:
+
+* Add provider calls
+* Add database queries
+* Add per-prop timing writes
+* Add new evidence work
+* Add new scoring passes
+* Add caching
+* Add indexes
+* Change SQL
+* Change query behavior
+* Change scheduler behavior
+* Change batch sizes
+* Change concurrency
+
+This is measurement only.
+
+4. LIVE TEST
+
+Do NOT restart repeatedly.
+
+Use the current running bot if possible.
+
+If a restart is required to load instrumentation, restart only once.
+
+Then capture the next completed Underdog cycle.
+
+Record:
+
+* Total duration
+* Props fetched
+* Active props
+* Cold-start props = 0
+* New props
+* Line movers
+* get_known_underdog_prop_keys duration
+* get_latest_underdog_snapshot_per_prop duration
+* Active-pool duration
+* New-prop duration
+* Line-movement duration
+* Persistence duration
+
+5. MAIN QUESTION
+
+We need to answer:
+
+With cold-start = 0, what is consuming the remaining 20+ minutes?
+
+Specifically determine whether the dominant cost is:
+
+1. Known-key database lookup
+2. Latest-snapshot lookup
+3. Active-pool construction
+4. New-prop processing
+5. Line-movement processing
+6. Persistence
+7. Something else
+
+Do not guess.
+
+🔴 FINAL RULE
+
+Instrumentation only.
+
+No optimization yet.
+
+No scheduler changes.
+
+No cadence changes.
+
+No batch-size changes.
+
+No concurrency changes.
+
+No database optimization yet.
+
+Once the measurements are collected, report the exact bottleneck and propose the smallest targeted fix before implementing it.
+
+Do not create a checkpoint.

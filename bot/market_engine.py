@@ -126,6 +126,20 @@ class _CycleTiming:
         entry["seconds"] += max(0.0, float(seconds))
         self.count(f"database_{kind}_operations")
         self.duration(f"database_{kind}", seconds)
+        if kind == "write":
+            operation_lower = operation.lower()
+            if "snapshot" in operation_lower:
+                self.count("persistence_snapshot_writes")
+                self.duration("persistence_snapshot", seconds)
+            elif "opportunity" in operation_lower or "candidate" in operation_lower:
+                self.count("persistence_opportunity_writes")
+                self.duration("persistence_opportunity", seconds)
+            elif any(token in operation_lower for token in ("grade", "tracking", "lifecycle", "mq_score")):
+                self.count("persistence_grading_tracking_writes")
+                self.duration("persistence_grading_tracking", seconds)
+            elif any(token in operation_lower for token in ("scan_cycle", "funnel", "current_run", "run_log")):
+                self.count("persistence_funnel_run_writes")
+                self.duration("persistence_funnel_run", seconds)
 
     async def await_operation(self, category: str, operation: str, awaitable):
         started = time.monotonic()
@@ -1548,6 +1562,8 @@ async def underdog_job(context) -> None:
         _health.record_provider_fetch("Underdog")
 
     ud_snaps = [s for s in snapshots if s.sportsbook == "Underdog"]
+    _cycle_timing.count("active_pool_fetched", len(snapshots))
+    _cycle_timing.count("active_pool_sportsbook_filtered", len(snapshots) - len(ud_snaps))
     # Capture count before the list is cleared later for memory recovery.
     # record_underdog_scan() at end-of-cycle reads this variable so it
     # always reflects the actual number of snapshots processed this cycle.
@@ -1575,6 +1591,8 @@ async def underdog_job(context) -> None:
         if _health:
             _health.record_job_run("underdog_job")
         return
+
+    _cycle_timing.count("active_pool_props", len(ud_snaps))
 
     # Summary counters — emitted as a single INFO line after the loop
     _n_scored:        int       = 0
@@ -1628,11 +1646,13 @@ async def underdog_job(context) -> None:
                 db.get_latest_underdog_snapshot_per_prop(),
             )
         )
+        _cycle_timing.count("latest_snapshot_props_returned", len(recent_by_key))
         known_keys: set[tuple[str, str]] = await _cycle_timing.await_db(
             "read",
             "get_known_underdog_prop_keys",
             db.get_known_underdog_prop_keys(),
         )
+        _cycle_timing.count("known_prop_keys_returned", len(known_keys))
     
         for snap in ud_snaps:
             is_removed = "[REMOVED]" in snap.selection
@@ -1667,6 +1687,13 @@ async def underdog_job(context) -> None:
                 if prev_record.line_value != snap.line:
                     line_changed = True
                     prev_line    = prev_record.line_value
+
+            _path_kind = (
+                "new_prop" if is_new_prop
+                else "line_movement" if not is_removed and line_changed
+                else None
+            )
+            _path_started = time.monotonic() if _path_kind else None
 
             # Stage 3 — movement detected: significant line move, non-cold-start
             if (
@@ -2607,6 +2634,12 @@ async def underdog_job(context) -> None:
             # Post-send callbacks (dedup, lifecycle, CLV, marks) for non-removal props
             # are handled in the ranked delivery phase below.
             # Removals: track lifecycle independently (no Telegram alert).
+            if _path_kind and _path_started is not None:
+                _cycle_timing.count(f"{_path_kind}_props")
+                _cycle_timing.duration(
+                    f"{_path_kind}_processing",
+                    time.monotonic() - _path_started,
+                )
             if is_removed and prev_record is not None:
                 _lifecycle_removed.append((player, snap.sport or "UNKNOWN", stat_type))
                 # Log market availability window (detection → removal) for model improvement
