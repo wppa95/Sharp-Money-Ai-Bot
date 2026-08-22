@@ -87,6 +87,12 @@ def _fmt_user_ts(dt: Optional[datetime]) -> str:
 
 def _check_allowed(update: Update) -> bool:
     """Return True if the user is in the allowed list (or if the list is empty)."""
+    if getattr(update, "source", None) == "discord":
+        allowed_discord = config.discord_allowed_user_ids
+        if not allowed_discord:
+            return True
+        user_id = update.effective_user.id if update.effective_user else None
+        return user_id in allowed_discord
     allowed = config.allowed_user_ids
     if not allowed:
         return True

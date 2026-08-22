@@ -50,6 +50,9 @@ class Config:
     DISCORD_BOT_TOKEN: str = os.environ.get("DISCORD_BOT_TOKEN", "")
     DISCORD_GUILD_ID: str = os.environ.get("DISCORD_GUILD_ID", "")
     DISCORD_CHANNEL_ID: str = os.environ.get("DISCORD_CHANNEL_ID", "")
+    # Optional Discord user allowlist. An empty list permits members of the
+    # configured guild/channel, while still keeping the listener scoped.
+    DISCORD_ALLOWED_USER_IDS_RAW: str = os.environ.get("DISCORD_ALLOWED_USER_IDS", "")
 
     @property
     def discord_configured(self) -> bool:
@@ -58,6 +61,14 @@ class Config:
             and self.DISCORD_GUILD_ID
             and self.DISCORD_CHANNEL_ID
         )
+
+    @property
+    def discord_allowed_user_ids(self) -> set[int]:
+        return {
+            int(uid.strip())
+            for uid in self.DISCORD_ALLOWED_USER_IDS_RAW.split(",")
+            if uid.strip().isdigit()
+        }
 
     # ── PrizePicks monitoring ─────────────────────────────────────────────────
     # Leagues to monitor (comma-separated PrizePicks league names).
