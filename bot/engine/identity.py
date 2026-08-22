@@ -89,6 +89,9 @@ def normalize_player_name(raw: str) -> str:
     """
     if not raw:
         return ""
+    # Strip residual "None " prefix from older Underdog null-name payloads
+    if isinstance(raw, str) and raw.startswith("None "):
+        raw = raw[5:].strip() or raw
     # 1. Strip accents via NFD decomposition
     decomposed    = unicodedata.normalize("NFD", raw)
     without_marks = "".join(ch for ch in decomposed if unicodedata.category(ch) != "Mn")

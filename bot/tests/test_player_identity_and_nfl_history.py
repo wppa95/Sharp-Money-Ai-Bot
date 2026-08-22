@@ -1,14 +1,13 @@
-"""Focused tests: Underdog null-name normalization + NFL history collection."""
+"""Focused tests: Underdog null-name normalization + NFL/MLB/NBA history collection."""
 from __future__ import annotations
 
 import pytest
 
 from connectors.underdog import UnderdogConnector
-from player_history_job import _SUPPORTED_HISTORY_SPORTS, _TIER2_SPORTS
+from player_history_job import _SUPPORTED_HISTORY_SPORTS
 
 
 def _minimal_payload(*, first_name, last_name, sport_id="LOL", display_stat="Kills"):
-    """Build the smallest Underdog v1 payload that exercises name parsing."""
     return {
         "players": [
             {
@@ -82,15 +81,12 @@ class TestPlayerNameNormalization:
 
 
 class TestNFLHistoryCollection:
-    def test_nfl_not_in_tier2_skip(self):
-        assert "NFL" not in _TIER2_SPORTS
-
-    def test_mlb_nba_still_skipped(self):
-        assert "MLB" in _TIER2_SPORTS
-        assert "NBA" in _TIER2_SPORTS
-
     def test_nfl_in_supported_history_sports(self):
         assert "NFL" in _SUPPORTED_HISTORY_SPORTS
+
+    def test_mlb_nba_in_supported_history_sports(self):
+        assert "MLB" in _SUPPORTED_HISTORY_SPORTS
+        assert "NBA" in _SUPPORTED_HISTORY_SPORTS
 
     def test_receiving_yards_stat_map_exists(self):
         from providers.player_stats import _NFL_STAT_MAP
