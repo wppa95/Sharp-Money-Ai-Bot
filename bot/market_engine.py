@@ -4505,6 +4505,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
     fpr_sent            = 0
     fpr_not_delivered   = 0
     fpr_total_rescanned = 0
+    fpr_by_sport        = {}
     rotation_complete   = False
 
     try:
@@ -4706,6 +4707,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     fpr_not_delivered += 1
 
                 fpr_rescored += 1
+                fpr_by_sport[_fpr_sport] = fpr_by_sport.get(_fpr_sport, 0) + 1
 
             except Exception as _fpr_row_exc:
                 logger.debug(
@@ -4714,6 +4716,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 )
                 fpr_rescored        += 1
                 fpr_total_rescanned += 1
+                fpr_by_sport[_fpr_sport] = fpr_by_sport.get(_fpr_sport, 0) + 1
 
         # ── Advance cursor; increment rotation when pool is fully covered ──────
         if rotation_complete:
@@ -4780,6 +4783,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             "fpr_sent":             fpr_sent,
             "fpr_not_delivered":    fpr_not_delivered,
             "fpr_total_rescanned":  fpr_total_rescanned,
+            "fpr_by_sport":         dict(fpr_by_sport),
             "rotation_complete":    rotation_complete,
         })
         _health.record_job_run("full_pool_rescan_job")

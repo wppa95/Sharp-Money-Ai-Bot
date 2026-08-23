@@ -3493,7 +3493,6 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         summary = await _db.get_funnel_summary(since_hours=since_h)
 
         tracked   = int(summary.get("tracked", 0) or 0)
-        by_sport  = summary.get("by_sport", [])
 
         def _fmt_rate(num: int, denom: int) -> str:
             """Format a small percentage with enough precision to stay non-zero."""
@@ -3539,6 +3538,23 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 fpr_stats = _ht_fpr.get_fpr_stats()
         except Exception:
             pass
+        # The Sport Funnel must represent actual current FPR processing.
+        # PropCandidateLog is a separate candidate/evidence stream and does
+        # not receive FPR rows, so it cannot be the source for this metric.
+        _fpr_by_sport = fpr_stats.get("fpr_by_sport", {})
+        by_sport = (
+            [
+                {"sport": sport, "tracked": count}
+                for sport, count in sorted(
+                    _fpr_by_sport.items(), key=lambda item: (-item[1], item[0])
+                )
+            ]
+            if _fpr_by_sport
+            # Compatibility fallback for pre-reporting health state. Once an
+            # FPR batch has emitted fpr_by_sport, PropCandidateLog is never
+            # used for this breakdown.
+            else (summary.get("by_sport", []) if not fpr_stats else [])
+        )
 
         sc_cycles = scan_summary.get("cycles", 0)
         if sc_cycles > 0:

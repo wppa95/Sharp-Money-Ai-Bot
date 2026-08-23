@@ -1,0 +1,118 @@
+🔴 SURGICAL FIX — SPORT FUNNEL REPORTING ONLY
+
+Do NOT modify the working FPR/full-pool rotation, cursor, batch size, scoring pipeline, delivery gates, database schema, scheduler, or any other production behavior.
+
+The current FPR rotation is working correctly and must be treated as PROTECTED.
+
+Problem
+
+/funnel currently gets the Sport Funnel Breakdown from PropCandidateLog.
+
+That is the wrong reporting source for current full-pool/FPR activity.
+
+It causes the funnel to show tiny numbers such as:
+
+* WNBA 87
+* MLB 64
+* NFL 37
+* CS 7
+* VAL 4
+* CFL 1
+
+even though the FPR is actually processing thousands of props across many sports.
+
+The latest verified FPR batch processed 10,000 props across 11 sports, including:
+
+* LOL: 2,351
+* CS: 2,278
+* FIFA: 2,071
+* MLB: 1,553
+* DOTA: 788
+* CFB: 391
+* ESPORTS: 244
+* KBO: 171
+* CFL: 108
+* BASKETBALL: 39
+* DGPT: 6
+
+Required change
+
+Change ONLY the Sport Funnel Breakdown reporting source so it reflects actual current-run FPR/full-pool rescanning activity.
+
+The breakdown must be based on the same canonical FPR scoring/tracking activity that proves a prop was actually processed during the current monitoring run.
+
+It must:
+
+1. Count props when they actually enter FPR/full-pool rescoring.
+2. Include unchanged/stable-line props.
+3. Include previously seen props.
+4. Include line-moved props.
+5. Include new props when they are actually scored.
+6. Include every sport represented in the FPR batch.
+7. Reflect the current run/time window rather than lifetime historical totals.
+8. Continue updating as each FPR batch completes.
+9. Avoid using PropCandidateLog as the sole source for this breakdown.
+10. Make the displayed sport totals reconcile with actual FPR rescored activity.
+
+Critical invariant
+
+If FPR says:
+
+Rescored: 10,000
+
+then the Sport Funnel Breakdown should sum to approximately 10,000 FPR-scored props for that reporting window, subject only to clearly documented overlap/deduplication rules.
+
+The funnel must NOT show ~200 while FPR actually processed 10,000.
+
+Do NOT change
+
+* FPR cursor
+* FPR rotation logic
+* FPR batch size
+* Canonical active pool
+* Full-pool selection
+* Sport ordering
+* Rescan frequency
+* Scheduler
+* max_instances=1
+* Scoring
+* Evidence
+* Hit/miss tracking
+* Telegram delivery
+* Moneyline behavior
+* Qualification/delivery gates
+* Database schema unless absolutely unavoidable
+* Existing FPR persistence behavior
+* Existing continuous rescanning behavior
+
+Do not “fix” this by changing FPR.
+
+The FPR implementation is working. Fix the reporting source only.
+
+Verification
+
+After the surgical change:
+
+* Run the relevant funnel/reporting tests.
+* Add/update only the minimum test coverage necessary to prove the Sport Funnel uses actual FPR/current-run scoring activity.
+* Confirm a multi-sport FPR batch produces corresponding multi-sport funnel counts.
+* Confirm unchanged props appear in the sport breakdown when they are rescanned.
+* Confirm the funnel totals reconcile with the actual FPR rescored count.
+* Run the full test suite.
+* Run compilation and git diff --check.
+* Restart the local bot workflow only if required to load the reporting change.
+* Do NOT deploy to Railway.
+* Do NOT create a checkpoint.
+
+Final requirement
+
+Report exactly:
+
+1. What reporting source was changed.
+2. Why PropCandidateLog was incorrect for this metric.
+3. The current-run sport totals observed after the fix.
+4. FPR rescored total vs Sport Funnel total.
+5. Tests passed.
+6. Confirmation that FPR rotation/cursor/batch behavior was not changed.
+
+This is a reporting-only surgical fix. Do not touch the working FPR rotation.

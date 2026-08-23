@@ -820,6 +820,36 @@ class TestFPRJob:
             f"Expected 2 rescanned, got {captured.get('fpr_total_rescanned')}"
         )
 
+    async def test_fpr_stats_include_actual_sport_distribution(self):
+        """Sport reporting follows rows processed by FPR, not PropCandidateLog."""
+        pool = {
+            ("Alice", "Points", 22.5): _make_snap(player="Alice", sport="NBA"),
+            ("Bob", "Kills",  15.5): _make_snap(player="Bob", sport="CS"),
+            ("Cara", "Goals",   1.5): _make_snap(player="Cara", sport="FIFA"),
+        }
+        db = _make_db(pool=pool)
+        ctx = _make_context(db)
+        h = _make_health(cursor=0)
+        captured = {}
+        h.set_fpr_stats = lambda stats: captured.update(stats)
+
+        from market_engine import _full_pool_rescan_job
+
+        with (
+            patch("market_engine.get_health_tracker", return_value=h),
+            patch("market_engine._fetch_and_compute_hit_rates", new=AsyncMock(return_value=None)),
+            patch("market_engine._is_game_live_or_past", return_value=False),
+            patch("engine.ud_scoring.score_ud_prop", return_value=_make_score()),
+            patch("engine.player_validator.validate_player_prop", return_value=_make_validation()),
+            patch("engine.ud_bet_decision.make_ud_bet_decision", return_value=_make_decision()),
+            patch("engine.ud_scoring.compute_market_quality", return_value=MagicMock()),
+            patch("engine.ud_scoring.detect_market_pressure", return_value=MagicMock()),
+        ):
+            await _full_pool_rescan_job(ctx)
+
+        assert captured["fpr_by_sport"] == {"CS": 1, "FIFA": 1, "NBA": 1}
+        assert sum(captured["fpr_by_sport"].values()) == captured["fpr_rescored"] == 3
+
     # ── Test 19: rescans do not bypass Telegram deduplication ─────────────────
     async def test_fpr_respects_telegram_dedup(self):
         """When _is_prop_deduped returns True no alert is sent — test 19."""
