@@ -3527,6 +3527,18 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 sr_stats = _ht.get_stable_refresh_stats()
         except Exception:
             pass
+        # FPR stats describe the current canonical active by-line universe.
+        # Keep this separate from ScanCycleLog.active, which is a cumulative
+        # per-scan observation count and must not be presented as the current
+        # active-pool denominator.
+        fpr_stats: dict = {}
+        try:
+            from engine.health import get_health_tracker as _get_ht_fpr
+            _ht_fpr = _get_ht_fpr()
+            if _ht_fpr is not None:
+                fpr_stats = _ht_fpr.get_fpr_stats()
+        except Exception:
+            pass
 
         sc_cycles = scan_summary.get("cycles", 0)
         if sc_cycles > 0:
@@ -3543,7 +3555,8 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             _avg_mins    = (since_h * 60) // max(sc_cycles, 1)
             # Stable refresh scored count from health sidecar
             sr_rescored  = sr_stats.get("sr_rescored", 0)
-            sc_total_scored = sc_analyzed + sr_rescored
+            fpr_rescored = fpr_stats.get("fpr_rescored", 0)
+            sc_total_scored = sc_analyzed + sr_rescored + fpr_rescored
             # Note: sc_analyzed = sc_new + sc_lc + sc_cold (all scored paths).
             # sc_cold = cold-start re-scored (first cycle after restart, every active prop).
             lines += [
@@ -3555,7 +3568,7 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 f"📥 Fetched from Underdog:          <b>{sc_fetched:,}</b>",
                 f"🚫 Removed from feed:              <b>{sc_removed:,}</b>",
                 f"🔮 Futures/awards skipped:         <b>{sc_futures:,}</b>",
-                f"👁 Active props monitored:          <b>{sc_active:,}</b>",
+                f"👁 Active props observed (scan total): <b>{sc_active:,}</b>",
                 f"   └─ Unchanged (stable lines):    <b>{sc_unchanged:,}</b>",
                 f"   └─ New first-appearance:        <b>{sc_new:,}</b>",
                 f"   └─ Line moved (re-scored):      <b>{sc_lc:,}</b>",
@@ -3566,6 +3579,7 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 f"   ├─ Line moved:                  <b>{sc_lc:,}</b>",
                 f"   ├─ Cold-start:                  <b>{sc_cold:,}</b>",
                 f"   └─ Stable refresh:              <b>{sr_rescored:,}</b>",
+                f"   └─ Full-pool rotation:           <b>{fpr_rescored:,}</b>",
                 f"🎯 Strong actionable candidates:   <b>{sc_delivered:,}</b>",
                 f"📤 Delivered to Telegram:          <b>{sc_delivered:,}</b>",
             ]
@@ -3596,31 +3610,27 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 ]
             # ── Full-Pool Rescan Rotation block ──────────────────────────────────
             try:
-                from engine.health import get_health_tracker as _get_ht2
-                _ht2 = _get_ht2()
-                if _ht2 is not None:
-                    _fpr = _ht2.get_fpr_stats()
-                    if _fpr:
-                        _fpr_pool     = _fpr.get("pool_size",        0)
-                        _fpr_covered  = _fpr.get("cursor_end",       0)
-                        _fpr_pct      = _fpr.get("pct_complete",     0.0)
-                        _fpr_rot      = _fpr.get("rotation",         1)
-                        _fpr_rescored = _fpr.get("fpr_rescored",     0)
-                        _fpr_sent     = _fpr.get("fpr_sent",         0)
-                        _fpr_done     = _fpr.get("rotation_complete", False)
-                        _fpr_status   = "✅ complete — next started" if _fpr_done else "🔄 in progress"
-                        lines += [
-                            "",
-                            _thick,
-                            "🌐 <b>Full-Pool Rescan Rotation</b>  <i>(last batch)</i>",
-                            _thick,
-                            "",
-                            f"Rotation:           <b>#{_fpr_rot}</b>  ({_fpr_status})",
-                            f"Progress:           <b>{_fpr_pct:.1f}%</b>",
-                            f"Coverage:           <b>{_fpr_covered:,} / {_fpr_pool:,}</b> active props",
-                            f"🔬 Rescored:        <b>{_fpr_rescored:,}</b>",
-                            f"📤 Sent:            <b>{_fpr_sent:,}</b>",
-                        ]
+                if fpr_stats:
+                    _fpr_pool     = fpr_stats.get("pool_size",        0)
+                    _fpr_covered  = fpr_stats.get("cursor_end",       0)
+                    _fpr_pct      = fpr_stats.get("pct_complete",     0.0)
+                    _fpr_rot      = fpr_stats.get("rotation",         1)
+                    _fpr_rescored = fpr_stats.get("fpr_rescored",     0)
+                    _fpr_sent     = fpr_stats.get("fpr_sent",         0)
+                    _fpr_done     = fpr_stats.get("rotation_complete", False)
+                    _fpr_status   = "✅ complete — next started" if _fpr_done else "🔄 in progress"
+                    lines += [
+                        "",
+                        _thick,
+                        "🌐 <b>Full-Pool Rescan Rotation</b>  <i>(last batch)</i>",
+                        _thick,
+                        "",
+                        f"Rotation:           <b>#{_fpr_rot}</b>  ({_fpr_status})",
+                        f"Progress:           <b>{_fpr_pct:.1f}%</b>",
+                        f"Coverage:           <b>{_fpr_covered:,} / {_fpr_pool:,}</b> active props",
+                        f"🔬 Rescored:        <b>{_fpr_rescored:,}</b>",
+                        f"📤 Sent:            <b>{_fpr_sent:,}</b>",
+                    ]
             except Exception:
                 pass
         else:

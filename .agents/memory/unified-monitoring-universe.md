@@ -19,3 +19,16 @@ coverage, movement, rescoring, and delivery independently from alert gates.
 FPR must never apply delivery deduplication before scoring. Recently delivered
 props still need history, evaluation, and tracking work; dedup belongs only at
 the alert-delivery gate.
+
+ScanCycleLog.active is a cumulative per-scan observation total, not the current
+active-universe size. Funnel coverage denominators must come from the FPR
+canonical active by-line pool, and FPR rescored counts must be included in the
+period scoring total.
+
+**Why:** Summing active rows across repeated scans made the funnel compare a
+cumulative observation count with one current FPR batch/pool and falsely imply
+that unchanged props were never rescored.
+
+**How to apply:** Label scan totals as observations, display FPR coverage as
+covered/current canonical pool, and aggregate scoring across live, stable
+refresh, and FPR paths.
