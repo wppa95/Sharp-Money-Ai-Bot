@@ -1,0 +1,159 @@
+Continue from the current Task #141 implementation and existing checkpoint.
+
+We now need to update the remaining 40 failing tests so the entire relevant test suite reflects the current Sharp Money AI Bot v3.6 framework.
+
+Do NOT revert current behavior to satisfy older tests.
+
+Do NOT create a new checkpoint yet.
+
+Do NOT restart or deploy Railway.
+
+OBJECTIVE
+
+Audit all 40 remaining failures from the full test suite.
+
+For every failure:
+
+1. Determine whether the test expects obsolete v3.5 behavior.
+2. If obsolete, update the test to assert the current v3.6 behavior.
+3. If the application code is genuinely inconsistent with v3.6, make the smallest targeted code correction.
+4. Do not weaken, skip, delete, or hide tests merely to make the suite green.
+
+v3.6 RULES
+
+The test suite must reflect the current framework:
+
+* No Tier 1 / Tier 2 framework.
+* No S/A/B/C monitoring or evaluation gates.
+* No Watchlist classification.
+* No Near-Miss classification.
+* No PASS classification as a monitoring/reporting state.
+* Every prop snapshot remains continuously monitored.
+* Every snapshot remains persisted and gradeable.
+* Former Watchlist/Near-Miss/PASS props remain in the active rotation.
+* Full-pool rotation remains continuous.
+* Stable Refresh and FPR remain part of the unified monitoring model.
+* New props and meaningful line movers retain priority.
+* No prop is permanently excluded because of a prior classification.
+* Graded HIT/MISS/PUSH outcomes build durable evidence over time.
+* Provider evidence remains preferred when available.
+* Graded evidence supplements provider evidence without duplicating dates.
+* Cold-start props remain monitorable and progressively develop evidence.
+* Unsupported sports must never receive fabricated evidence.
+* UNDER + BQ >= 30 retains the existing Strong UNDER Signal implication.
+* BQ < 30 must not trigger that implication.
+* OVER behavior remains unchanged.
+* /dashboard Recently Tracked Props uses persistent tracking data.
+* /dashboard Recently Tracked Props covers ALL sports.
+* /dashboard Recently Tracked Props uses the one-hour window.
+* /funnel and dashboard reporting reflect the current unified model.
+* Scheduler cadence, adaptive batching, max_instances, scoring formulas, provider integrations, and delivery protections remain unchanged unless a failing test proves the current implementation violates v3.6.
+
+SPECIFIC LEGACY AREAS ALREADY IDENTIFIED
+
+Update outdated tests involving:
+
+Tier framework
+
+Replace assertions expecting:
+
+* _TIER2_SPORTS_BLOCK
+* Tier 1
+* Tier 2
+* MLB/NFL/NBA tier restrictions
+* Tier-based delivery/configuration
+* S/A/B/C qualification gates
+
+with assertions matching the unified v3.6 model.
+
+UNDER blocker
+
+Update old tests that expect the previous tier-based UNDER behavior.
+
+The current rule is:
+
+UNDER + BQ >= 30 → existing Strong UNDER Signal implication.
+
+Do not introduce any tier dependency.
+
+Delivery/configuration
+
+Update legacy tests that expect retired tier-based delivery behavior.
+
+Do not change the actual current delivery protections simply to satisfy old tests.
+
+Repository/path tests
+
+Update tests using obsolete assumptions such as:
+
+* outdated open("commands.py") paths
+* old repository-relative file locations
+* obsolete module layouts
+
+Use the current project structure.
+
+Alert freshness / delivery queue
+
+Audit these carefully.
+
+Do NOT blindly rewrite them.
+
+Determine whether the current v3.6 behavior intentionally changed the expected semantics. If the production behavior is correct under v3.6, update the test. If production behavior is actually broken, make the smallest targeted fix.
+
+IMPORTANT
+
+The 40 failures must be classified individually.
+
+At the end report:
+
+* Total failures before
+* Number converted from obsolete v3.5 expectations
+* Number requiring actual production-code fixes
+* Number remaining unrelated/pre-existing
+* Total tests passing afterward
+
+Do not claim success merely because the test count increased.
+
+VALIDATION
+
+Run:
+
+* All 40 previously failing tests.
+* Task #141 focused suite.
+* Identity tests.
+* Global evidence tests.
+* Graded-prop lifecycle tests.
+* Rolling L5/L10/L20/L30/Season tests.
+* Snapshot persistence/tracking tests.
+* Rotation/Stable Refresh/FPR tests.
+* Dashboard/recent-tracking tests.
+* UNDER + BQ >= 30 tests.
+* Python compilation.
+* git diff --check.
+* Full bot/tests suite.
+
+The final test suite should represent v3.6, not a mixture of v3.5 and v3.6 assumptions.
+
+PROTECTED SYSTEMS
+
+Do NOT change:
+
+* Railway deployment
+* Railway configuration
+* scheduler cadence
+* max_instances
+* adaptive batching
+* scoring formulas
+* BQ/MQ calculations
+* evidence provider architecture
+* graded-history architecture
+* database schema
+* Telegram formatting
+* Discord formatting
+* clean-restart behavior
+
+unless a specific failing test demonstrates a genuine v3.6 regression.
+
+Do not create a new checkpoint.
+
+When finished, stop and provide the complete 40-failure audit and test results.
