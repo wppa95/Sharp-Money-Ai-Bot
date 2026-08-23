@@ -3457,6 +3457,8 @@ class Database:
                 }
             _sport_map[sp]["scanned"] += row.n
             key = row.gate_decision.lower() if row.gate_decision else "unknown"
+            if key == "watchlist":
+                key = "rejected"
             if key in _sport_map[sp]:
                 _sport_map[sp][key] += row.n
         by_sport = sorted(_sport_map.values(), key=lambda d: d["scanned"], reverse=True)

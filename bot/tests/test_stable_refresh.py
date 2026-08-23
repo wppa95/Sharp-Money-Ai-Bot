@@ -457,10 +457,8 @@ class TestStableRefreshRemovalSemantics:
             c for c in calls
             if c.kwargs.get("watchlist_state") == "Removed"
         ]
-        assert len(removed_calls) >= 1, (
-            "Expected log_prop_opportunity(watchlist_state='Removed') for a prop "
-            "whose latest Underdog snapshot is a removal"
-        )
+        assert removed_calls == []
+        assert db.get_active_watchlist_candidates.await_count == 0
 
     @pytest.mark.asyncio
     async def test_method_used_is_get_active_not_get_latest(self):
@@ -533,10 +531,8 @@ class TestStableRefreshRemovalSemantics:
             c for c in calls
             if c.kwargs.get("watchlist_state") == "Removed"
         ]
-        assert len(removed_calls) >= 1, (
-            "Watchlist candidate must be marked 'Removed' even when Part 1 failed "
-            "and Part 2 falls back to get_active_underdog_snapshot_per_prop"
-        )
+        assert removed_calls == []
+        assert db.get_active_watchlist_candidates.await_count == 0
 
 
 # ── End-to-end job tests using real UnderdogSnapshotRecord rows ────────────────
@@ -806,17 +802,14 @@ class TestWatchlistCursorRotation:
                 from market_engine import _stable_refresh_job
                 await _stable_refresh_job(ctx)
 
-        # Cycle 1: cursor starts at 0 → processes items 0–199 → cursor becomes 200
+        # The retired Watchlist queue is not rotated; the unified active pool
+        # is the only Stable Refresh rotation.
         await _run_cycle(ht)
-        assert ht.get_wl_refresh_cursor() == 200, (
-            f"Expected wl_cursor=200 after cycle 1, got {ht.get_wl_refresh_cursor()}"
-        )
+        assert ht.get_wl_refresh_cursor() == 0
 
-        # Cycle 2: cursor at 200 → processes items 200–299 → wraps to 0
+        # A second run still does not process legacy Watchlist rows.
         await _run_cycle(ht)
-        assert ht.get_wl_refresh_cursor() == 0, (
-            f"Expected wl_cursor=0 after cycle 2 (wrapped), got {ht.get_wl_refresh_cursor()}"
-        )
+        assert ht.get_wl_refresh_cursor() == 0
 
     def test_health_tracker_wl_cursor_get_set_roundtrip(self, tmp_path):
         """HealthTracker.get/set_wl_refresh_cursor persist across reloads."""
@@ -1101,9 +1094,7 @@ class TestStableRefreshJob:
             c for c in calls
             if c.kwargs.get("watchlist_state") == "Watchlist"
         ]
-        assert len(wl_calls) >= 1, (
-            "Expected at least one log_prop_opportunity(watchlist_state='Watchlist') call"
-        )
+        assert wl_calls == []
 
     @pytest.mark.asyncio
     async def test_watchlist_under_rule_not_triggered_for_over(self):
@@ -1300,7 +1291,8 @@ class TestWatchlistRescan:
             c for c in calls
             if c.kwargs.get("watchlist_state") == "Removed"
         ]
-        assert len(removed_calls) >= 1
+        assert removed_calls == []
+        assert db.get_active_watchlist_candidates.await_count == 0
 
     @pytest.mark.asyncio
     async def test_watchlist_promotion_sends_alert_when_qualifies(self):
@@ -1356,8 +1348,8 @@ class TestWatchlistRescan:
             from market_engine import _stable_refresh_job
             await _stable_refresh_job(ctx)
 
-        # deliver_underdog should have been called for the watchlist promotion
-        mock_ad.return_value.deliver_underdog.assert_called()
+        # Legacy Watchlist rows do not receive a separate promotion pass.
+        mock_ad.return_value.deliver_underdog.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_declined_watchlist_candidate_marked_rejected(self):
@@ -1392,4 +1384,4 @@ class TestWatchlistRescan:
             c for c in calls
             if c.kwargs.get("watchlist_state") == "Rejected"
         ]
-        assert len(rej_calls) >= 1
+        assert rej_calls == []
