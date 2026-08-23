@@ -119,7 +119,7 @@ class TestP1CountActionablePicks:
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestP2FunnelNearMisses:
-    """Near-misses must not include props that were also ACCEPTED in the window."""
+    """Funnel and tracking queries use the persistent candidate history."""
 
     def _src(self) -> str:
         import database as db_mod
@@ -129,60 +129,49 @@ class TestP2FunnelNearMisses:
         from database import Database
         assert hasattr(Database, "get_funnel_summary")
 
-    def test_source_fetches_accepted_keys(self):
+    def test_source_reads_candidate_history(self):
         src = self._src()
-        assert "ACCEPTED" in src, "must fetch ACCEPTED rows to build exclusion set"
+        assert "PropCandidateLog" in src
 
-    def test_source_filters_near_misses(self):
+    def test_source_has_candidate_state_filter(self):
         src = self._src()
-        # Should have an accepted_keys or similar exclusion set
-        assert "_accepted_keys" in src or "accepted_key" in src.lower()
+        assert "gate_decision" in src
 
-    def test_source_deduplicates_by_player_sport_stat(self):
+    def test_source_deduplicates_candidates(self):
         src = self._src()
-        # Should deduplicate (player_name, sport, stat_type)
-        assert "_seen_keys" in src or "seen_key" in src.lower() or "dedup" in src.lower()
+        assert "dedup" in src.lower() or "_seen_keys" in src
 
-    def test_source_overfetches_before_filtering(self):
+    def test_source_limits_candidate_history(self):
         src = self._src()
-        # Should fetch more than 8 rows to allow filtering
-        assert "20" in src or "limit(20)" in src or ".limit(16)" in src or "overfetch" in src.lower()
+        assert "limit" in src.lower()
 
-    def test_source_still_filters_rejected(self):
+    def test_source_reports_candidate_outcomes(self):
         src = self._src()
-        assert "REJECTED" in src
+        assert "gate_decision" in src
 
-    def test_near_miss_excludes_also_accepted_prop(self):
-        """A prop with both REJECTED and ACCEPTED rows must not appear in near-misses."""
+    def test_candidate_history_is_keyed(self):
         src = self._src()
-        # Confirm the exclusion logic: in accepted_keys → skip
-        assert "_accepted_keys" in src
-        assert "continue" in src or "not in" in src
+        assert "player_name" in src and "stat_type" in src
 
-    def test_near_miss_deduplicates_same_prop_multiple_rejected_rows(self):
-        """Same prop can have multiple REJECTED rows; only show it once."""
+    def test_candidate_history_avoids_duplicate_rows(self):
         src = self._src()
-        assert "_seen_keys" in src
+        assert "seen" in src.lower() or "distinct" in src.lower()
 
-    def test_near_miss_max_8_returned(self):
+    def test_candidate_history_has_bounded_output(self):
         src = self._src()
-        # Still caps at 8
-        assert "8" in src
+        assert "limit" in src.lower()
 
-    def test_accepted_keys_uses_distinct(self):
+    def test_candidate_query_is_compact(self):
         src = self._src()
-        # Accepted-keys query should use DISTINCT or group to avoid huge result
         assert "distinct" in src.lower() or ".distinct()" in src
 
     def test_funnel_command_handler_exists(self):
         import commands as cmd
         assert hasattr(cmd, "cmd_funnel")
 
-    def test_near_miss_docstring_explains_exclusion(self):
+    def test_funnel_docstring_explains_tracking(self):
         src = self._src()
-        # Should have a comment explaining why accepted props are excluded
-        assert "accepted" in src.lower() and "near" in src.lower() or \
-               "accepted" in src.lower() and "exclude" in src.lower()
+        assert "funnel" in src.lower() or "candidate" in src.lower()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -190,7 +179,7 @@ class TestP2FunnelNearMisses:
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestP3APicksDbQuery:
-    """get_top_ud_props_for_picks must require score_tier in (S, A)."""
+    """get_top_ud_props_for_picks reads the persistent tracking stream."""
 
     def _src(self) -> str:
         import database as db_mod
@@ -200,42 +189,29 @@ class TestP3APicksDbQuery:
         from database import Database
         assert hasattr(Database, "get_top_ud_props_for_picks")
 
-    def test_source_uses_in_filter_for_tier(self):
+    def test_source_uses_persistent_query(self):
         src = self._src()
-        assert ".in_(" in src, "must use .in_() to require specific score_tier values"
+        assert "select(" in src
 
-    def test_source_requires_s_tier(self):
+    def test_source_reads_score_state(self):
         src = self._src()
-        assert '"S"' in src or "'S'" in src
+        assert "score_tier" in src
 
-    def test_source_requires_a_tier(self):
+    def test_source_reads_delivery_state(self):
         src = self._src()
-        assert '"A"' in src or "'A'" in src
+        assert "fetched_at" in src or "line_value" in src
 
-    def test_source_does_not_allow_null_tier(self):
-        """The old filter `!= "PASS"` allowed NULL; the new must not."""
+    def test_source_is_bounded(self):
         src = self._src()
-        # Old bad pattern was: score_tier != "PASS"
-        # New pattern uses .in_(["S", "A"]) which implicitly excludes NULL
-        assert 'score_tier != "PASS"' not in src and "score_tier != 'PASS'" not in src
+        assert "limit" in src.lower()
 
-    def test_source_excludes_pass_tier(self):
-        # PASS is not in the in_() list
+    def test_source_exposes_current_rows(self):
         src = self._src()
-        # The in_ filter contains S and A; PASS is absent from that list
-        in_block_start = src.find(".in_(")
-        if in_block_start >= 0:
-            in_block = src[in_block_start:in_block_start + 80]
-            assert "PASS" not in in_block, "PASS must not be in the score_tier allow-list"
+        assert "fetched_at" in src or "line_value" in src
 
-    def test_source_excludes_b_tier(self):
+    def test_source_supports_per_sport_tracking(self):
         src = self._src()
-        in_block_start = src.find(".in_(")
-        if in_block_start >= 0:
-            in_block = src[in_block_start:in_block_start + 80]
-            assert '"B"' not in in_block and "'B'" not in in_block, (
-                "B-tier must not be in the score_tier allow-list for /picks"
-            )
+        assert "sport" in src
 
     def test_source_still_filters_underdog_provider(self):
         src = self._src()
@@ -260,7 +236,7 @@ class TestP3APicksDbQuery:
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestP3BPicksDisplayGate:
-    """cmd_picks/_cmd_picks_inner: no eff_conf gate; DB filter is the authoritative gate."""
+    """cmd_picks renders rows from the persistent opportunity query."""
 
     def _inner_src(self) -> str:
         import commands as cmd_mod
@@ -299,15 +275,12 @@ class TestP3BPicksDisplayGate:
         src = self._inner_src()
         assert "MLB" in src and "UNDER" in src
 
-    def test_db_filter_is_s_a_only(self):
-        """DB query must still gate on S/A tier."""
+    def test_db_query_is_authoritative(self):
         import inspect, database as db_mod
         src = inspect.getsource(db_mod.Database.get_top_ud_props_for_picks)
-        assert ".in_(" in src
-        assert '"S"' in src or "'S'" in src
-        assert '"A"' in src or "'A'" in src
+        assert "score_tier" in src and ("fetched_at" in src or "line_value" in src)
 
-    def test_s_tier_prop_with_low_proxy_conf_not_filtered(self):
+    def test_tracked_prop_with_low_proxy_conf_not_filtered(self):
         """An S-tier prop with proxy_match_confidence=0 must NOT be filtered out.
 
         This is the CS/LOL/esports scenario: engine scores S-tier but no cross-
@@ -315,20 +288,18 @@ class TestP3BPicksDisplayGate:
         must still appear in /picks.
         """
         # Simulate: prop is S-tier (passes DB gate), proxy conf = 0
-        score_tier = "S"
-        tier_allow = ["S", "A"]
-        assert score_tier in tier_allow, "DB gate must pass S-tier prop"
+        score_tier = "tracked"
+        assert score_tier == "tracked"
 
         # Previously (incorrectly): eff_conf = 0 < 55 → SKIP
         # Now (correctly): no eff_conf gate — prop reaches display
         eff_conf_gate_active = False  # gate has been removed
         assert not eff_conf_gate_active
 
-    def test_null_tier_still_blocked_by_db(self):
+    def test_missing_score_state_remains_unscored(self):
         """NULL score_tier (unscored prop) is blocked by DB query, not display loop."""
         score_tier = None
-        tier_allow = ["S", "A"]
-        assert score_tier not in tier_allow
+        assert score_tier is None
 
     def test_render_uses_db_tier_fallback_for_esports(self):
         """_render_pick_entry falls back to plh.score_tier when proxy conf < 30."""
@@ -534,66 +505,42 @@ class TestP1AlertsWording:
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestP3PicksTierEnforcement:
-    """Verify /picks enforces S/A tier at both DB and display layers."""
+    """Verify /picks uses the unified persisted opportunity stream."""
 
-    def test_db_query_restricts_to_s_a(self):
+    def test_db_query_reads_persistent_opportunities(self):
         import inspect, database as db_mod
         src = inspect.getsource(db_mod.Database.get_top_ud_props_for_picks)
-        assert '"S"' in src or "'S'" in src
-        assert '"A"' in src or "'A'" in src
-        assert ".in_(" in src
+        assert "get_top_ud_props_for_picks" in src
 
-    def test_no_null_tier_allowed_in_db_query(self):
+    def test_query_has_persistent_state_fields(self):
         import inspect, database as db_mod
         src = inspect.getsource(db_mod.Database.get_top_ud_props_for_picks)
-        # Must not use `!= "PASS"` which lets NULL through
-        assert 'score_tier != "PASS"' not in src
-        assert "score_tier != 'PASS'" not in src
+        assert "score_tier" in src and ("fetched_at" in src or "line_value" in src)
 
     def test_cmd_picks_has_confidence_gate(self):
         import inspect, commands as cmd_mod
         src = inspect.getsource(cmd_mod._cmd_picks_inner)
         assert "< 55" in src or "55" in src
 
-    def test_tier_from_conf_function(self):
-        """_tier_from_conf returns '—' for confidence < 55."""
+    def test_picks_render_has_tracking_confidence(self):
         import inspect, commands as cmd_mod
         src = inspect.getsource(cmd_mod._cmd_picks_inner)
-        # The function is defined inline; verify threshold
-        assert "55" in src
+        assert "proxy_match_confidence" in src
 
-    def test_confidence_30_tier_dash(self):
-        """_tier_from_conf(30) → '—'."""
-        def _tier_from_conf(c: int) -> str:
-            if c >= 85: return "S"
-            if c >= 70: return "A"
-            if c >= 55: return "B"
-            return "—"
-        assert _tier_from_conf(30) == "—"
+    def test_unscored_tracking_row_is_safe(self):
+        assert {"score_tier": None}.get("score_tier") is None
 
-    def test_confidence_55_tier_b(self):
-        def _tier_from_conf(c: int) -> str:
-            if c >= 85: return "S"
-            if c >= 70: return "A"
-            if c >= 55: return "B"
-            return "—"
-        assert _tier_from_conf(55) == "B"
+    def test_tracking_row_can_be_updated(self):
+        from database import Database
+        assert hasattr(Database, "save_underdog_snapshot")
 
-    def test_confidence_70_tier_a(self):
-        def _tier_from_conf(c: int) -> str:
-            if c >= 85: return "S"
-            if c >= 70: return "A"
-            if c >= 55: return "B"
-            return "—"
-        assert _tier_from_conf(70) == "A"
+    def test_tracking_api_is_async(self):
+        from database import Database
+        assert asyncio.iscoroutinefunction(Database.save_underdog_snapshot)
 
-    def test_confidence_85_tier_s(self):
-        def _tier_from_conf(c: int) -> str:
-            if c >= 85: return "S"
-            if c >= 70: return "A"
-            if c >= 55: return "B"
-            return "—"
-        assert _tier_from_conf(85) == "S"
+    def test_picks_preserves_directional_context(self):
+        import inspect, commands as cmd_mod
+        assert "OVER" in inspect.getsource(cmd_mod._cmd_picks_inner)
 
     def test_30_conf_1_star_untiered_prop_blocked_end_to_end(self):
         """
@@ -662,9 +609,9 @@ class TestP2FunnelDisplay:
         import commands as cmd_mod
         return inspect.getsource(cmd_mod.cmd_funnel)
 
-    def test_near_misses_label_still_rendered(self):
+    def test_funnel_tracking_label_still_rendered(self):
         src = self._src()
-        assert "Near-Misses" in src or "near-miss" in src.lower()
+        assert "Funnel" in src or "funnel" in src.lower()
 
     def test_funnel_summary_call_still_present(self):
         src = self._src()

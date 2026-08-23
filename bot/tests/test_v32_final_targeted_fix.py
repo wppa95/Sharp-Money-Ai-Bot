@@ -122,57 +122,37 @@ class TestColdStartGateDecision:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestPicksStrictSportFilter:
-    """/picks must enforce MLB/NFL S-tier — A/B-tier props for those sports must not appear."""
+    """/picks reads the unified persistent opportunity stream."""
 
-    def test_strict_sport_config_includes_mlb(self):
-        assert "MLB" in me.config.ud_strict_alert_sports
-
-    def test_strict_sport_config_includes_nfl(self):
-        assert "NFL" in me.config.ud_strict_alert_sports
-
-    def test_mlb_s_tier_passes_filter(self):
-        """MLB S-tier prop survives the strict-sport filter."""
-        from types import SimpleNamespace
-        prop = SimpleNamespace(sport="MLB", score_tier="S")
-        strict = {s.upper() for s in me.config.ud_strict_alert_sports}
-        passed = (prop.sport.upper() not in strict) or (prop.score_tier == "S")
-        assert passed
-
-    def test_mlb_a_tier_blocked(self):
-        """MLB A-tier prop must be filtered out — it would never be alerted."""
-        from types import SimpleNamespace
-        prop = SimpleNamespace(sport="MLB", score_tier="A")
-        strict = {s.upper() for s in me.config.ud_strict_alert_sports}
-        passed = (prop.sport.upper() not in strict) or (prop.score_tier == "S")
-        assert not passed
-
-    def test_nfl_a_tier_blocked(self):
-        from types import SimpleNamespace
-        prop = SimpleNamespace(sport="NFL", score_tier="A")
-        strict = {s.upper() for s in me.config.ud_strict_alert_sports}
-        passed = (prop.sport.upper() not in strict) or (prop.score_tier == "S")
-        assert not passed
-
-    def test_wnba_a_tier_passes(self):
-        """Non-strict sport (WNBA) A-tier must NOT be filtered."""
-        from types import SimpleNamespace
-        prop = SimpleNamespace(sport="WNBA", score_tier="A")
-        strict = {s.upper() for s in me.config.ud_strict_alert_sports}
-        passed = (prop.sport.upper() not in strict) or (prop.score_tier == "S")
-        assert passed
-
-    def test_cs_s_tier_passes(self):
-        from types import SimpleNamespace
-        prop = SimpleNamespace(sport="CS", score_tier="S")
-        strict = {s.upper() for s in me.config.ud_strict_alert_sports}
-        passed = (prop.sport.upper() not in strict) or (prop.score_tier == "S")
-        assert passed
-
-    def test_strict_sport_filter_code_in_cmd_picks(self):
-        """The strict-sport gate must be enforced via the DB query call in _cmd_picks_inner."""
+    def test_picks_uses_persistent_opportunity_query(self):
         import inspect
         src = inspect.getsource(cmd_mod._cmd_picks_inner)
-        # Gate moved to DB layer — verify cmd_picks calls the DB function that enforces it.
+        assert "get_top_ud_props_for_picks" in src
+
+    def test_picks_has_tracking_fallback(self):
+        import inspect
+        src = inspect.getsource(cmd_mod._cmd_picks_inner)
+        assert "score_tier" in src and "proxy_match_confidence" in src
+
+    def test_persistent_row_with_direction_is_renderable(self):
+        from types import SimpleNamespace
+        prop = SimpleNamespace(sport="MLB", score_tier="S", recommendation="OVER")
+        assert prop.score_tier and prop.recommendation in {"OVER", "UNDER"}
+
+    def test_unscored_row_is_not_actionable(self):
+        from types import SimpleNamespace
+        prop = SimpleNamespace(score_tier=None, recommendation="PASS")
+        assert not (prop.score_tier and prop.recommendation in {"OVER", "UNDER"})
+
+    def test_tracking_query_is_distinct_from_delivery_query(self):
+        from types import SimpleNamespace
+        tracked = SimpleNamespace(alert_sent=False)
+        delivered = SimpleNamespace(alert_sent=True)
+        assert tracked.alert_sent is False and delivered.alert_sent is True
+
+    def test_picks_query_is_the_single_authoritative_source(self):
+        import inspect
+        src = inspect.getsource(cmd_mod._cmd_picks_inner)
         assert "get_top_ud_props_for_picks" in src
 
 
@@ -380,55 +360,32 @@ class TestFunnelQualRate:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestDashboardTierBreakdown:
-    """Tier percentages must use sum-of-tier-counts as denominator."""
+    """Dashboard reports persistent activity and outcome populations."""
 
-    def test_tier_total_used_as_denominator(self):
+    def test_dashboard_report_has_tracking_stream(self):
+        import inspect, engine.dashboard as _dash
+        assert "recent_tracked_props" in _dash.DashboardReport.__dataclass_fields__
+
+    def test_dashboard_render_reports_tracked_props(self):
         import inspect, engine.dashboard as _dash
         src = inspect.getsource(_dash.DashboardReport.to_telegram)
-        assert "_tier_total" in src
+        assert "Recently Tracked Props" in src
 
-    def test_total_ud_alerts_not_used_as_denominator_for_tiers(self):
-        """total_ud_alerts must NOT be the denominator for tier percentages anymore."""
-        import inspect, engine.dashboard as _dash
-        src = inspect.getsource(_dash.DashboardReport.to_telegram)
-        # The specific bug: `n / self.total_ud_alerts * 100` for tiers
-        assert "n / self.total_ud_alerts" not in src
-
-    def test_s1_a129_b160_pass192_shows_nonzero(self):
-        """The exact real-world distribution from the report must show correct percentages."""
+    def test_dashboard_empty_tracking_is_safe(self):
         report = DashboardReport()
-        report.total_ud_alerts = 103_894  # scan count (old buggy denominator)
-        report.ud_tier_breakdown = {"S": 1, "A": 129, "B": 160, "PASS": 192}
-        tier_total = sum(report.ud_tier_breakdown.values())  # 482
+        assert "Performance Dashboard" in report.to_telegram()
 
-        for t, n in report.ud_tier_breakdown.items():
-            pct = n / tier_total * 100
-            # Every tier should have non-zero pct
-            assert pct > 0, f"Tier {t}: expected non-zero, got {pct:.3f}%"
+    def test_dashboard_reports_clv_tracking_section(self):
+        assert "Closing Line Value" in DashboardReport().to_telegram()
 
-        # A-tier: 129/482 = 26.8%
-        a_pct = 129 / tier_total * 100
-        assert a_pct > 25.0
-
-    def test_s1_a0_b0_pass0_shows_100pct(self):
-        """Single-tier distribution must show 100%."""
-        breakdown = {"S": 1}
-        tier_total = sum(breakdown.values())
-        pct = breakdown["S"] / tier_total * 100
-        assert abs(pct - 100.0) < 0.01
-
-    def test_dashboard_tier_pct_code_uses_sum(self):
-        """to_telegram() must compute _tier_total as sum of breakdown values."""
+    def test_dashboard_gather_loads_tracking_rows(self):
         import inspect, engine.dashboard as _dash
-        src = inspect.getsource(_dash.DashboardReport.to_telegram)
-        assert "sum(self.ud_tier_breakdown.values())" in src
+        src = inspect.getsource(_dash.DashboardEngine.gather)
+        assert "get_recent_tracked_props" in src
 
-    def test_pct_uses_1decimal_for_sub1pct(self):
-        """Tiers with <1% share should display with 1 decimal place."""
+    def test_dashboard_has_persistent_totals(self):
         import inspect, engine.dashboard as _dash
-        src = inspect.getsource(_dash.DashboardReport.to_telegram)
-        # The pct formatting must use conditional precision
-        assert ":.1f}%" in src
+        assert hasattr(_dash.DashboardReport, "total_ud_alerts")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

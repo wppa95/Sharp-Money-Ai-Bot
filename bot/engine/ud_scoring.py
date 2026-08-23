@@ -557,6 +557,18 @@ class MarketQualityLabel(str, enum.Enum):
     MEDIUM = "MEDIUM"  # Standard pick'em market
     LOW    = "LOW"     # High-variance, illiquid, or thin-history market
 
+    @classmethod
+    def _missing_(cls, value):
+        """Accept the former HIGH spelling while retaining v3.6 semantics.
+
+        v3.6 renamed HIGH to STRONG, but callers may still deserialize the
+        older label.  Treating it as the STRONG member keeps persisted/fixture
+        values readable without introducing a second display category.
+        """
+        if isinstance(value, str) and value.upper() == "HIGH":
+            return cls.STRONG
+        return None
+
 
 @dataclass(frozen=True)
 class MarketQuality:

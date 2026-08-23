@@ -1,10 +1,10 @@
 """
 Regression tests for bugs #117 – #120.
 
-#117 — MLB/NFL BQ gate too low (was 85, raised to 95)
+#117 — legacy strict-sport BQ gate retired; unified delivery quality remains
 #118 — Duplicate new-prop alerts (dedup gate missing from new-prop path)
 #119 — Funnel "Accepted (alerted)" vs /status "Alerts sent" mismatch
-#120 — Tier 1 non-MLB/NFL delivery gates verified correct (no MLB/NFL leak)
+#120 — legacy Tier 1/Tier 2 delivery split retired
 """
 
 from __future__ import annotations
@@ -39,50 +39,39 @@ def _cfg(**overrides):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 class TestBug117BQGate:
-    """MLB/NFL require S-tier AND BQ ≥ 95 to reach Telegram."""
+    """Unified delivery quality no longer branches on sport."""
 
-    def test_default_bq_threshold_is_95(self):
-        """Default UD_STRICT_SPORT_MIN_BET_QUALITY must be 95 (not 85)."""
+    def test_unified_confidence_floors_are_configured(self):
+        """The active quality floors are configured once for every sport."""
         c = _cfg()
-        assert c.UD_STRICT_SPORT_MIN_BET_QUALITY == 95
+        assert c.UD_MIN_CONF_S == 85
+        assert c.UD_MIN_CONF_A == 75
+        assert c.UD_MIN_CONF_B == 55
 
-    def test_bq_95_passes_mlb_gate(self):
-        """BQ=95 exactly meets the threshold → not blocked."""
+    def test_active_confidence_floor_is_sport_independent(self):
+        """No sport receives a special confidence floor."""
         c = _cfg()
-        assert 95 >= c.UD_STRICT_SPORT_MIN_BET_QUALITY
-
-    def test_bq_94_fails_mlb_gate(self):
-        """BQ=94 is below the threshold → blocked."""
-        c = _cfg()
-        assert 94 < c.UD_STRICT_SPORT_MIN_BET_QUALITY
-
-    def test_bq_85_now_fails_mlb_gate(self):
-        """BQ=85 (old threshold) must now be blocked by the raised gate."""
-        c = _cfg()
-        # 85 < 95 → blocked
-        assert 85 < c.UD_STRICT_SPORT_MIN_BET_QUALITY
+        assert c.min_conf_for_sport_tier("MLB", "S") == c.min_conf_for_sport_tier("NBA", "S")
+        assert c.min_conf_for_sport_tier("MLB", "A") == c.min_conf_for_sport_tier("NBA", "A")
+        assert c.min_conf_for_sport_tier("MLB", "B") == c.min_conf_for_sport_tier("NBA", "B")
 
     def test_bq_gate_not_applied_to_nba(self):
-        """Non-strict sports (NBA) are NOT subject to the BQ gate."""
+        """NBA is not subject to a retired sport-specific BQ gate."""
         c = _cfg()
         assert "NBA" not in c.ud_strict_alert_sports
 
-    def test_bq_gate_applies_to_mlb_and_nfl_only(self):
-        """Only MLB and NFL are in ud_strict_alert_sports."""
+    def test_no_sports_use_a_strict_bq_gate(self):
+        """v3.6 applies delivery quality uniformly rather than by sport."""
         c = _cfg()
-        assert "MLB" in c.ud_strict_alert_sports
-        assert "NFL" in c.ud_strict_alert_sports
-        assert "NBA" not in c.ud_strict_alert_sports
-        assert "BASKETBALL" not in c.ud_strict_alert_sports
-        assert "TENNIS" not in c.ud_strict_alert_sports
+        assert c.ud_strict_alert_sports == frozenset()
 
-    def test_bq_threshold_env_override(self):
-        """UD_STRICT_SPORT_MIN_BET_QUALITY can be overridden via environment."""
+    def test_legacy_quality_setting_remains_configurable(self):
+        """The legacy setting is harmless and remains backwards-compatible."""
         c = _cfg(UD_STRICT_SPORT_MIN_BET_QUALITY=90)
         assert c.UD_STRICT_SPORT_MIN_BET_QUALITY == 90
 
-    def test_source_code_bq_gate_comment_updated(self):
-        """Config source must reference the 95 threshold in comments (not 85)."""
+    def test_source_code_documents_legacy_setting(self):
+        """The retired setting remains documented rather than silently removed."""
         import os
         base = os.path.dirname(os.path.dirname(__file__))
         with open(os.path.join(base, "config.py")) as f:
@@ -298,13 +287,13 @@ class TestBug119FunnelAndStatusCounters:
 # #120 — Tier 1 non-MLB/NFL delivery gates
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-class TestBug120Tier1DeliveryGates:
-    """Confirm MLB/NFL strict rules are NOT applied to Tier 1 sports."""
+class TestBug120UnifiedDeliveryGates:
+    """Confirm retired sport tiers do not alter unified delivery behavior."""
 
-    def test_strict_alert_sports_contains_only_mlb_and_nfl(self):
-        """ud_strict_alert_sports must be exactly {MLB, NFL}."""
+    def test_strict_alert_sports_is_empty(self):
+        """No sports are assigned a strict-sport delivery rule."""
         c = _cfg()
-        assert c.ud_strict_alert_sports == frozenset({"MLB", "NFL"})
+        assert c.ud_strict_alert_sports == frozenset()
 
     def test_nba_not_in_strict_sports(self):
         c = _cfg()
@@ -326,16 +315,14 @@ class TestBug120Tier1DeliveryGates:
         c = _cfg()
         assert "LOL" not in c.ud_strict_alert_sports
 
-    def test_source_code_bq_gate_checks_strict_sports_set(self):
-        """BQ gate in market_engine.py must use ud_strict_alert_sports to guard MLB/NFL."""
+    def test_source_code_marks_bq_gate_as_removed(self):
+        """No active strict-sport BQ gate is required by the delivery paths."""
         import os
         base = os.path.dirname(os.path.dirname(__file__))
         with open(os.path.join(base, "market_engine.py")) as f:
             src = f.read()
-        # All three BQ gate blocks (new/line-change/standing) use ud_strict_alert_sports
-        assert src.count("ud_strict_alert_sports") >= 3, (
-            "ud_strict_alert_sports appears fewer than 3 times — "
-            "one of the delivery paths may not be guarding the BQ gate correctly"
+        assert "BQ gate removed" in src, (
+            "market_engine.py must document that the obsolete BQ gate was removed"
         )
 
     def test_source_code_bq_gate_removed(self):
@@ -353,14 +340,10 @@ class TestBug120Tier1DeliveryGates:
             "BQ gate removal comment not found — confirm all three paths removed the gate"
         )
 
-    def test_tier1_min_stars_is_lower_than_tier2(self):
-        """Non-strict sports require fewer stars than MLB/NFL strict gate."""
+    def test_star_floor_is_unified_across_sports(self):
+        """Star qualification does not vary by a retired sport tier."""
         c = _cfg()
-        tier1_stars = c.min_stars_for_sport("NBA")
-        tier2_stars = c.min_stars_for_sport("MLB")
-        assert tier1_stars <= tier2_stars, (
-            "Tier 1 stars floor must not exceed Tier 2 stars floor"
-        )
+        assert c.min_stars_for_sport("NBA") == c.min_stars_for_sport("MLB")
 
     def test_decision_pass_blocks_any_sport(self):
         """PASS recommendation blocks delivery for ALL sports including Tier 1."""
@@ -369,12 +352,9 @@ class TestBug120Tier1DeliveryGates:
         _np_bet_ready = recommendation != "PASS"
         assert not _np_bet_ready, "PASS recommendation must block delivery for all sports"
 
-    def test_non_mlb_s_tier_allowed_by_conf_gate(self):
-        """Non-strict sport can pass confidence gate with lower threshold than MLB/NFL."""
+    def test_s_tier_confidence_floor_is_unified(self):
+        """S-tier confidence is the same for every sport."""
         c = _cfg()
-        # NBA S-tier confidence floor should be lower than MLB/NFL S-tier floor
         nba_s_conf = c.min_conf_for_sport_tier("NBA", "S")
         mlb_s_conf = c.min_conf_for_sport_tier("MLB", "S")
-        assert nba_s_conf <= mlb_s_conf, (
-            "NBA S-tier confidence floor must not exceed MLB S-tier floor"
-        )
+        assert nba_s_conf == mlb_s_conf

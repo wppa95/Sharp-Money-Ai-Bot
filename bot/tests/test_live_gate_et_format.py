@@ -4,9 +4,9 @@ test_live_gate_et_format.py
 Tests for:
   - _is_game_live_or_past()  (Priority #5 — game-live hard gate)
   - _format_game_time_et()   (Priority #7 — readable ET time format)
-  - Config helper methods: min_stars_for_sport, min_conf_for_sport_tier  (#2)
+  - Config helper methods: unified star/confidence floors
   - Explicit scheduler max_instances configuration  (#18)
-  - MLB/NFL BQ ≥ 85 gate  (#1)
+  - Legacy BQ setting remains configurable, without a strict-sport gate
 
 Alex Bregman regression: game already live for 30 min → alert must be blocked.
 """
@@ -192,13 +192,13 @@ class TestConfigHelperMethods:
 
     # ── min_stars_for_sport ───────────────────────────────────────────────────
 
-    def test_mlb_uses_strict_stars(self):
+    def test_mlb_uses_unified_relaxed_stars(self):
         c = self._cfg()
-        assert c.min_stars_for_sport("MLB") == c.UD_MIN_STARS_TO_ALERT
+        assert c.min_stars_for_sport("MLB") == c.UD_NON_STRICT_MIN_STARS
 
-    def test_nfl_uses_strict_stars(self):
+    def test_nfl_uses_unified_relaxed_stars(self):
         c = self._cfg()
-        assert c.min_stars_for_sport("NFL") == c.UD_MIN_STARS_TO_ALERT
+        assert c.min_stars_for_sport("NFL") == c.UD_NON_STRICT_MIN_STARS
 
     def test_other_sport_uses_relaxed_stars(self):
         c = self._cfg()
@@ -234,14 +234,13 @@ class TestConfigHelperMethods:
         c = self._cfg()
         cs_a = c.min_conf_for_sport_tier("CS", "A")
         assert cs_a == c.UD_NON_STRICT_MIN_CONF_A
-        # Per spec: Tier 1 A-tier threshold is 70 (same as strict A-tier floor).
-        # The "relaxed" label is preserved for Tier 1 (they bypass BQ and star gates
-        # that strict sports apply), but the numeric conf floor is now aligned at 70.
+        # Non-strict is the active unified floor in v3.6; no sport-specific
+        # BQ/star gate is applied.
         assert cs_a <= c.UD_MIN_CONF_A
 
-    def test_b_tier_strict_for_nfl(self):
+    def test_b_tier_uses_unified_non_strict_floor(self):
         c = self._cfg()
-        assert c.min_conf_for_sport_tier("NFL", "B") == c.UD_MIN_CONF_B
+        assert c.min_conf_for_sport_tier("NFL", "B") == c.UD_NON_STRICT_MIN_CONF_B
 
     def test_b_tier_relaxed_for_tennis(self):
         c = self._cfg()
@@ -259,8 +258,8 @@ class TestConfigHelperMethods:
 # MLB/NFL Bet Quality ≥ 85 gate  — Priority #1
 # ─────────────────────────────────────────────────────────────────────────────
 
-class TestStrictSportBQConfig:
-    """Tests for UD_STRICT_SPORT_MIN_BET_QUALITY default and property."""
+class TestLegacyBQConfig:
+    """Tests for the backwards-compatible legacy BQ setting."""
 
     def _cfg(self, **overrides):
         import config as cfg_mod
@@ -269,32 +268,30 @@ class TestStrictSportBQConfig:
             setattr(c, k, v)
         return c
 
-    def test_default_bq_is_95(self):
-        """Default MLB/NFL BQ threshold is 95 (raised from 85 — fix #117)."""
+    def test_default_legacy_bq_setting_is_95(self):
+        """The retired setting retains its v3.5 default for compatibility."""
         c = self._cfg()
         assert c.UD_STRICT_SPORT_MIN_BET_QUALITY == 95
 
-    def test_bq_94_would_be_below_threshold(self):
-        """BQ=94 < 95 → should be blocked by gate logic."""
+    def test_legacy_bq_setting_preserves_numeric_threshold(self):
+        """The compatibility setting still exposes a positive numeric floor."""
         c = self._cfg()
-        assert 94 < c.UD_STRICT_SPORT_MIN_BET_QUALITY
+        assert c.UD_STRICT_SPORT_MIN_BET_QUALITY > 0
 
-    def test_bq_95_meets_threshold(self):
-        """BQ=95 == 95 → should be allowed by gate logic."""
+    def test_legacy_bq_setting_is_not_a_delivery_framework(self):
+        """No sport is selected for special handling by the setting."""
         c = self._cfg()
-        assert 95 >= c.UD_STRICT_SPORT_MIN_BET_QUALITY
+        assert c.ud_strict_alert_sports == frozenset()
 
-    def test_bq_threshold_configurable(self):
-        """UD_STRICT_SPORT_MIN_BET_QUALITY can be overridden."""
+    def test_legacy_bq_threshold_configurable(self):
+        """The compatibility setting can still be overridden."""
         c = self._cfg(UD_STRICT_SPORT_MIN_BET_QUALITY=90)
         assert c.UD_STRICT_SPORT_MIN_BET_QUALITY == 90
 
-    def test_mlb_and_nfl_in_strict_sports(self):
-        """Only MLB and NFL are subject to the BQ gate."""
+    def test_no_sports_in_strict_sports(self):
+        """v3.6 has no strict-sport BQ gate."""
         c = self._cfg()
-        assert "MLB" in c.ud_strict_alert_sports
-        assert "NFL" in c.ud_strict_alert_sports
-        assert "NBA" not in c.ud_strict_alert_sports
+        assert c.ud_strict_alert_sports == frozenset()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -302,11 +299,9 @@ class TestStrictSportBQConfig:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestSchedulerMaxInstances:
-    """Verify underdog_monitor is scheduled with explicit max_instances=2.
+    """Verify underdog_monitor has explicit single-instance protection.
 
-    max_instances=2 allows a second underdog_job to start while the first full
-    scan is still scoring. The _ud_full_scan_running flag inside the job ensures
-    the second instance runs a fast new-prop fetch only and returns immediately.
+    max_instances=1 prevents overlapping full scans and duplicate deliveries.
     """
 
     def test_underdog_job_kwargs_max_instances(self):
@@ -354,8 +349,8 @@ class TestSchedulerMaxInstances:
             max_idx = keys.index("max_instances")
             max_val_node = jk_kw.value.values[max_idx]
             max_val = getattr(max_val_node, "n", None) or getattr(max_val_node, "value", None)
-            assert max_val == 2, (
-                f"max_instances must be 2 (fast-fetch overlap design), got {max_val}"
+            assert max_val == 1, (
+                f"max_instances must be 1 (single-scan protection), got {max_val}"
             )
             found = True
             break

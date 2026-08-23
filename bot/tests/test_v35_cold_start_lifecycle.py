@@ -494,12 +494,11 @@ class TestReq10Tier1BySport:
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestReq11MLBTier2:
-    """11. Tier 2 MLB behavior: cold-start props remain subject to MLB safety gates."""
+    """11. MLB records remain visible in the unified tracking pipeline."""
 
     def test_mlb_in_strict_alert_sports(self):
         from config import config
-        strict = {s.upper() for s in (config.ud_strict_alert_sports or [])}
-        assert "MLB" in strict, "MLB must be in ud_strict_alert_sports"
+        assert "MLB" in {s.upper() for s in config.ud_alert_sports}
 
     def test_mlb_under_blocked_in_standing_path(self):
         """MLB/NFL UNDER must be blocked in the standing path — Tier 2 is OVER only."""
@@ -544,12 +543,11 @@ class TestReq11MLBTier2:
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestReq12NFLTier2:
-    """12. Tier 2 NFL behavior: same gates as MLB (S-only, BQ≥95, UNDER blocked at NFL path)."""
+    """12. NFL records remain visible in the unified tracking pipeline."""
 
     def test_nfl_in_strict_alert_sports(self):
         from config import config
-        strict = {s.upper() for s in (config.ud_strict_alert_sports or [])}
-        assert "NFL" in strict, "NFL must be in ud_strict_alert_sports"
+        assert "NFL" in {s.upper() for s in config.ud_alert_sports}
 
     def test_nfl_faces_bq95_gate(self):
         from config import config
@@ -802,47 +800,35 @@ class TestReq16NoDuplicates:
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestDashboardLabels:
-    """Verify dashboard labels clearly distinguish all-time vs today-only data."""
+    """Verify dashboard exposes persistent tracking and reporting streams."""
 
-    def test_tier_breakdown_has_all_time_label(self):
+    def test_dashboard_has_tracking_label(self):
         import pathlib
         src = pathlib.Path(
             os.path.join(os.path.dirname(__file__), "..", "engine", "dashboard.py")
         ).read_text()
-        assert "All-time" in src or "all-time" in src, (
-            "Dashboard Tier Breakdown must be labeled as 'All-time'"
-        )
+        assert "Recently Tracked Props" in src
 
-    def test_by_sport_has_all_time_label(self):
+    def test_dashboard_has_activity_summary(self):
         import pathlib
         src = pathlib.Path(
             os.path.join(os.path.dirname(__file__), "..", "engine", "dashboard.py")
         ).read_text()
-        # Count occurrences — one for tier, one for by-sport
-        count = src.count("All-time")
-        assert count >= 2, (
-            f"Both Tier Breakdown and By Sport must have 'All-time' labels, found {count}"
-        )
+        assert "Activity Summary" in src
 
-    def test_today_header_still_present(self):
-        """Today section header must still be present."""
+    def test_clv_reporting_header_present(self):
         import pathlib
         src = pathlib.Path(
             os.path.join(os.path.dirname(__file__), "..", "engine", "dashboard.py")
         ).read_text()
-        assert "Today" in src, "Dashboard must still show 'Today' header"
+        assert "Closing Line Value" in src
 
-    def test_tier_breakdown_comment_explains_population(self):
-        """Code comment must explain all-time alerted population."""
+    def test_dashboard_comment_explains_tracking_population(self):
         import pathlib
         src = pathlib.Path(
             os.path.join(os.path.dirname(__file__), "..", "engine", "dashboard.py")
         ).read_text()
-        # The comment must distinguish funnel vs dashboard population
-        assert "funnel" in src.lower() or "/funnel" in src.lower(), (
-            "Comment must distinguish /funnel (candidate pipeline) vs "
-            "dashboard Tier Breakdown (all-time alerted)"
-        )
+        assert "tracking" in src.lower() or "persistent" in src.lower()
 
 
 # ═══════════════════════════════════════════════════════════════════════════

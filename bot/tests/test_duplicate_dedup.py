@@ -117,20 +117,20 @@ class TestTwoDeliveryPaths:
 
 class TestConcurrentDuplicate:
 
-    def test_05_max_instances_2_allows_fast_fetch_overlap(self):
-        """underdog_job must be registered with max_instances=2 (in main.py) so
-        a second instance can run a fast new-prop fetch while the primary full
-        scan is still scoring.  The _ud_full_scan_running flag inside the job
-        ensures the second instance bails out of heavy scoring immediately."""
+    def test_05_max_instances_1_prevents_overlapping_full_scans(self):
+        """v3.6 underdog_job is registered with max_instances=1 in main.py.
+
+        The _ud_full_scan_running flag remains a defensive in-job guard, while
+        APScheduler prevents overlapping full scans at the scheduler level.
+        """
         import main as _main_mod
         src = inspect.getsource(_main_mod)
         assert "max_instances" in src, (
             "max_instances not found in main.py — scheduler concurrency config missing"
         )
-        # Value must be 2 (fast-fetch overlap design)
-        assert "max_instances=2" in src or '"max_instances": 2' in src or "'max_instances': 2" in src, (
-            "underdog_job must be registered with max_instances=2 in main.py "
-            "(second instance runs fast new-prop fetch while primary scans)"
+        # v3.6 uses a single scheduler instance for the full scan.
+        assert '"max_instances": 1' in src or "'max_instances': 1" in src, (
+            "underdog_job must be registered with max_instances=1 in main.py"
         )
 
     def test_06_ud_full_scan_running_flag_guards_heavy_path(self):

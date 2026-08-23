@@ -8,7 +8,7 @@ paths, then ranks and delivers them in priority order after the standing scan.
 
 Priority formula:
   _DELIVERY_TIER_BASE (S=10000 A=5000 B=1000 C=200) + conf*0.5 + bq*0.3 + mq*0.2
-  + 500 if is_tier1 + 200 if is_meaningful_change
+  + 200 if is_meaningful_change (sport-tier bonus retired)
 
 Soft diversification:
   Candidates in the same (sport, stat_type) group receive a penalty:
@@ -19,7 +19,7 @@ Scenarios tested:
   2. Single B-tier candidate is delivered.
   3. S-tier beats A-tier in same group (higher raw score).
   4. Diversification penalty allows weaker unique pick to beat 2nd same-group pick.
-  5. is_tier1 bonus is applied.
+   5. legacy is_tier1 metadata does not change priority.
   6. is_meaningful_change bonus is applied.
   7. Empty queue → no delivery.
   8. Three candidates from three paths are ranked and prioritised correctly.
@@ -84,10 +84,10 @@ class TestCandPriority:
         p = _make_cand(tier="PASS", conf=0, bq=0, mq=0, is_tier1=False)
         assert _cand_priority(p) == 0.0
 
-    def test_tier1_bonus_applied(self):
+    def test_legacy_tier1_metadata_does_not_change_priority(self):
         with_t1    = _make_cand(is_tier1=True,  tier="B", conf=0, bq=0, mq=0)
         without_t1 = _make_cand(is_tier1=False, tier="B", conf=0, bq=0, mq=0)
-        assert _cand_priority(with_t1) - _cand_priority(without_t1) == 500.0
+        assert _cand_priority(with_t1) == _cand_priority(without_t1)
 
     def test_meaningful_change_bonus_applied(self):
         with_mc    = _make_cand(is_meaningful_change=True,  tier="B", conf=0, bq=0, mq=0)

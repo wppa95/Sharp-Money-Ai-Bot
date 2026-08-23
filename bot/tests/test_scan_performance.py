@@ -76,26 +76,22 @@ def test_poll_interval_default_120s():
     ), "UNDERDOG_POLL_INTERVAL default must be '120'"
 
 
-# ── 2. max_instances=2 (fast-fetch overlap design) ───────────────────────────
+# ── 2. max_instances=1 (single full-scan design) ─────────────────────────────
 
 
-def test_max_instances_2_in_underdog_monitor():
-    """underdog_monitor job must declare max_instances=2 (configured in main.py).
-
-    max_instances=2 allows a second underdog_job instance to start while the
-    primary full scan is still scoring. The _ud_full_scan_running module flag
-    gates the second instance to a fast new-prop fetch only.
-    """
+def test_max_instances_1_in_underdog_monitor():
+    """v3.6 underdog_monitor allows only one full scan at a time."""
     src = _src("main.py")
-    assert '"max_instances": 2' in src or "'max_instances': 2" in src, \
-        "max_instances=2 must be present in main.py job_kwargs (fast-fetch design)"
+    assert '"max_instances": 1' in src or "'max_instances': 1" in src, \
+        "max_instances=1 must be present in main.py"
 
 
-def test_max_instances_not_raised_above_2():
-    """max_instances must not be set above 2 (only primary + fast-fetch needed)."""
+def test_max_instances_not_raised_above_1():
+    """The underdog monitor must not permit overlapping scans."""
     src = _src("main.py")
-    for bad in ('"max_instances": 3', '"max_instances": 4', "'max_instances': 3"):
-        assert bad not in src, f"Found forbidden {bad} in main.py — max 2 allowed"
+    for bad in ('"max_instances": 2', '"max_instances": 3', '"max_instances": 4',
+                "'max_instances': 2", "'max_instances': 3"):
+        assert bad not in src, f"Found forbidden {bad} in main.py — max 1 allowed"
 
 
 # ── 3. Full prop feed monitored ───────────────────────────────────────────────
@@ -317,16 +313,15 @@ def test_misfire_grace_time_set():
         "misfire_grace_time not found in main.py — scheduler skips will be silently dropped"
 
 
-def test_max_instances_2_with_scan_running_flag():
-    """max_instances=2 in job_kwargs allows fast-fetch overlap; the
-    _ud_full_scan_running flag in market_engine prevents duplicate heavy scans."""
+def test_max_instances_1_with_scan_running_flag():
+    """max_instances=1 and the in-job flag prevent duplicate heavy scans."""
     import market_engine as me
     src = _src("main.py")
     assert "max_instances" in src, \
         "max_instances not present in main.py — concurrent instance config missing"
-    # Confirm it is exactly 2
-    assert '"max_instances": 2' in src or "'max_instances': 2" in src, \
-        "max_instances must be 2 (fast-fetch overlap design)"
+    # Confirm it is exactly 1
+    assert '"max_instances": 1' in src or "'max_instances': 1" in src, \
+        "max_instances must be 1 in v3.6"
     # The flag must guard the heavy path
     import inspect
     me_src = inspect.getsource(me)

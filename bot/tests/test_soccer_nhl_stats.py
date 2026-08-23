@@ -222,9 +222,8 @@ class TestSoccerMultiLeagueSearch:
         async def mock_get_json(url: str):
             nonlocal call_count
             call_count += 1
-            if "eng.1/athletes" in url:
-                return _make_athlete_search_response("Harry Kane", 3149391)
-            return None
+            # v3.6 uses the common ESPN search endpoint; league is not in URL.
+            return _make_athlete_search_response("Harry Kane", 3149391)
 
         with patch.object(provider, "_get_json", side_effect=mock_get_json):
             result = run(provider._soccer_athlete_id("Harry Kane"))
@@ -241,12 +240,10 @@ class TestSoccerMultiLeagueSearch:
         searched_leagues: list[str] = []
 
         async def mock_get_json(url: str):
-            for league in _SOCCER_LEAGUE_PRIORITY:
-                if f"/{league}/athletes" in url:
-                    searched_leagues.append(league)
-                    if league == "ger.1":   # Bundesliga = 3rd
-                        return _make_athlete_search_response("Harry Kane", 3149391)
-                    return None
+            # v3.6's common search URL is identical for each league probe.
+            searched_leagues.append(_SOCCER_LEAGUE_PRIORITY[len(searched_leagues)])
+            if len(searched_leagues) == 3:   # Bundesliga = 3rd
+                return _make_athlete_search_response("Harry Kane", 3149391)
             return None
 
         with patch.object(provider, "_get_json", side_effect=mock_get_json):
@@ -276,7 +273,7 @@ class TestSoccerMultiLeagueSearch:
         async def mock_get_json(url: str):
             nonlocal call_count
             call_count += 1
-            if "eng.1/athletes" in url:
+            if call_count == 1:
                 return _make_athlete_search_response("Harry Kane", 3149391)
             return None
 
