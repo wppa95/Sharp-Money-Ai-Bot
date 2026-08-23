@@ -265,8 +265,8 @@ class TestBug119FunnelAndStatusCounters:
             src = f.read()
         idx = src.find("def get_funnel_summary")
         assert idx != -1
-        fn_src = src[idx: idx + 500]
-        assert "tracked" in fn_src
+        fn_src = src[idx: idx + 1500]
+        assert "PropCandidateLog" in fn_src and "tracked" in fn_src
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
