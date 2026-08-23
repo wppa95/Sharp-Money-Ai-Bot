@@ -39,7 +39,8 @@ def test_no_sport_tier_classifier_remains():
 
 class TestUnifiedPathsAndPersistence:
     @pytest.fixture(scope="class")
-    def src(self) -> str:
+    @classmethod
+    def src(cls) -> str:
         return inspect.getsource(me)
 
     def test_delivery_paths_use_one_canonical_gate(self, src):
