@@ -1,0 +1,180 @@
+Continue from the current implementation.
+
+Make ONLY the following targeted changes. Do not redo the already-completed identity, provider-evidence, or graded-prop evidence work.
+
+1. REMOVE WATCHLIST AND PASS COMPLETELY
+
+Remove Watchlist / Near-Miss and PASS as classifications/statuses from the current monitoring model.
+
+They must NOT be:
+
+* Generated
+* Assigned
+* Used as evaluation gates
+* Used as rotation exclusions
+* Counted
+* Displayed
+
+Remove them from:
+
+* /funnel
+* /dashboard
+* Stable Refresh output
+* FPR/full-pool rotation output
+* Sport Funnel Breakdown
+* Any qualification/classification status
+
+Do NOT replace them with tiers.
+
+There is NO Tier 1 / Tier 2 system.
+
+There is NO S/A/B/C qualification gate.
+
+The unified monitoring/evaluation model remains the source of truth.
+
+Props formerly classified as Watchlist/Near-Miss/PASS must remain normal active props and continue through the same monitoring lifecycle.
+
+2. EVERY SNAPSHOT MUST REMAIN TRACKED, GRADED, AND STORED
+
+This is critical.
+
+Every prop snapshot that enters the monitoring system must remain part of the persistent historical record.
+
+Regardless of whether the prop is:
+
+* New
+* Previously seen
+* Stable
+* Line moved
+* Rejected
+* Previously evaluated
+* Not actionable
+* Missing provider evidence
+* Cold-start
+* Former Watchlist/Near-Miss
+* Former PASS
+
+it must still:
+
+* Be tracked
+* Be persisted
+* Be eligible for grading when the result becomes available
+* Have its outcome recorded as HIT/MISS/PUSH where applicable
+* Contribute to historical analysis
+* Contribute to the progressive graded-prop evidence lifecycle
+* Remain available for future rescoring and evaluation
+
+Do NOT discard snapshots simply because they did not qualify.
+
+Do NOT make Telegram delivery the requirement for tracking or grading.
+
+The historical prop universe must be independent of actionable delivery.
+
+Preserve the existing provider-vs-graded-evidence distinction:
+
+* Real provider results remain preferred.
+* Graded prop outcomes supplement missing history.
+* No fabricated evidence.
+* No duplicate dates.
+* No cross-player/stat contamination.
+
+3. /dashboard RECENTLY TRACKED PROPS
+
+Update /dashboard so the Recently Tracked Props section refreshes on an hourly basis.
+
+It must represent the most recently tracked prop snapshots/outcomes from the persistent database, not only Telegram-delivered picks.
+
+The hourly Recently Tracked Props view must include ALL SPORTS, not just NFL.
+
+Do not hard-code NFL as the dashboard sport filter.
+
+Include every sport that has tracked prop data available.
+
+The dashboard should update from the same persistent tracking/evidence data used by the monitoring system.
+
+4. DO NOT CHANGE UNRELATED SYSTEMS
+
+Do NOT change:
+
+* Scoring formulas
+* BQ/MQ calculations
+* Confidence calculations
+* Evidence providers
+* Graded-prop evidence lifecycle
+* Player identity handling
+* Scheduler cadence
+* max_instances
+* Adaptive batching
+* Provider integrations
+* Database schema unless absolutely necessary
+* Telegram rules
+* Discord rules
+* Clean-restart behavior
+* Existing FPR behavior except removing obsolete Watchlist/PASS classification
+* Existing Stable Refresh behavior except removing obsolete Watchlist/PASS classification
+
+Do not redesign the architecture.
+
+Make the smallest targeted change necessary.
+
+5. VERIFY BEFORE CHECKPOINT
+
+Run focused tests proving:
+
+* No Watchlist/Near-Miss classification is generated.
+* No PASS classification is generated.
+* No Tier 1/Tier 2 logic exists.
+* No S/A/B/C monitoring/evaluation gate exists.
+* Former Watchlist/Near-Miss/PASS props remain in rotation.
+* Every monitored snapshot is persisted.
+* Non-actionable/rejected props remain tracked.
+* Every eligible tracked prop can eventually be graded.
+* HIT/MISS/PUSH outcomes persist.
+* Graded outcomes continue feeding rolling player history.
+* /dashboard Recently Tracked Props includes multiple sports, not only NFL.
+* Recently Tracked Props uses the latest hourly tracking data.
+* Existing identity/evidence/graded-history tests remain green.
+* No unrelated behavior was changed.
+
+Do NOT report completion based only on compilation.
+
+6. RAILWAY SAFETY
+
+Do NOT restart Railway.
+
+Do NOT deploy Railway.
+
+Do NOT change the live deployment.
+
+Do NOT modify unrelated deployment configuration.
+
+7. FINAL FREEZE
+
+After all requirements above are implemented and fully verified:
+
+1. STOP making further code changes.
+2. Do NOT restart Railway.
+3. Do NOT deploy Railway.
+4. Do NOT modify unrelated systems.
+5. Do NOT add new features or classifications.
+6. Create the checkpoint only after every required verification passes.
+7. The checkpoint must represent this exact completed state.
+8. After creating the checkpoint, FREEZE the project at this state and wait for further instructions.
+
+Do not create the checkpoint before all required verification is complete.
+
+Report exactly:
+
+* What files changed
+* What behavior changed
+* What tests were run
+* Test results
+* Confirmation that Watchlist/Near-Miss is gone
+* Confirmation that PASS is gone
+* Confirmation that no tier system was introduced
+* Confirmation that every snapshot remains tracked/stored/gradable
+* Confirmation that /dashboard Recently Tracked Props covers all sports and refreshes hourly
+* Confirmation that Railway was not restarted or deployed
+* Checkpoint ID/name after it is created
+
+Then STOP.
