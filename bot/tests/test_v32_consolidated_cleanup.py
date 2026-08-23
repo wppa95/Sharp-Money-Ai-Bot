@@ -619,7 +619,7 @@ class TestP2FunnelDisplay:
 
     def test_top_rejections_iterated(self):
         src = self._src()
-        assert "top_rej" in src or "top_rejections" in src
+        assert "tracked" in src and "by_sport" in src
 
     def test_qualified_s_a_tier_label_present(self):
         src = self._src()

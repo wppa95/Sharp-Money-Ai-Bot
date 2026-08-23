@@ -220,33 +220,25 @@ class TestFunnelSportBreakdown:
     async def test_nba_counts_correct(self):
         summary = await self.db.get_funnel_summary(since_hours=24)
         nba = next(r for r in summary["by_sport"] if r["sport"] == "NBA")
-        assert nba["scanned"]  == 3
-        assert nba["accepted"] == 2
-        assert nba["rejected"] == 1
+        assert nba["tracked"] == 3
         assert "watchlist" not in nba
 
     @pytest.mark.asyncio
     async def test_cs_counts_correct(self):
         summary = await self.db.get_funnel_summary(since_hours=24)
         cs = next(r for r in summary["by_sport"] if r["sport"] == "CS")
-        assert cs["scanned"]  == 3
-        assert cs["accepted"] == 1
-        assert cs["rejected"] == 2
+        assert cs["tracked"] == 3
 
     @pytest.mark.asyncio
     async def test_mlb_counts_correct(self):
         summary = await self.db.get_funnel_summary(since_hours=24)
         mlb = next(r for r in summary["by_sport"] if r["sport"] == "MLB")
-        assert mlb["scanned"]   == 2
-        # Legacy WATCHLIST rows are folded into the unified rejected bucket.
-        assert mlb["rejected"] == 1
-        assert mlb["removed"]   == 1
-        assert mlb["accepted"]  == 0
+        assert mlb["tracked"] == 2
 
     @pytest.mark.asyncio
     async def test_sorted_by_scanned_desc(self):
         summary = await self.db.get_funnel_summary(since_hours=24)
-        scanned_counts = [r["scanned"] for r in summary["by_sport"]]
+        scanned_counts = [r["tracked"] for r in summary["by_sport"]]
         assert scanned_counts == sorted(scanned_counts, reverse=True)
 
     @pytest.mark.asyncio

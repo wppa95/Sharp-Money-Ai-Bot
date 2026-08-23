@@ -520,18 +520,14 @@ class TestStableRefreshRemovalSemantics:
             from market_engine import _stable_refresh_job
             await _stable_refresh_job(ctx)
 
-        # Part 2 fallback must have called the correct method a second time
-        assert db.get_active_underdog_snapshot_per_prop.call_count == 2
+        # The retired secondary queue must not trigger a second pool fetch.
+        assert db.get_active_underdog_snapshot_per_prop.call_count == 1
         # get_latest must NEVER be used — even as a fallback
         db.get_latest_underdog_snapshot_per_prop.assert_not_called()
 
-        # With an empty fallback pool the watchlist candidate is 'Removed'
+        # Legacy watchlist rows do not control the canonical active rotation.
         calls = db.log_prop_opportunity.call_args_list
-        removed_calls = [
-            c for c in calls
-            if c.kwargs.get("watchlist_state") == "Removed"
-        ]
-        assert removed_calls == []
+        assert all(c.kwargs.get("watchlist_state") is None for c in calls)
         assert db.get_active_watchlist_candidates.await_count == 0
 
 
@@ -1130,8 +1126,8 @@ class TestStableRefreshJob:
         assert len(wl_calls) == 0
 
     @pytest.mark.asyncio
-    async def test_qualifying_prop_logged_as_qualified(self):
-        """A prop that passes all gates is logged as 'Qualified'."""
+    async def test_qualifying_prop_logged_without_classification(self):
+        """A rescored prop is logged without a retired monitoring class."""
         snap = _make_snap()
         db   = _build_minimal_db(
             active_pool={("Test Player", "Points"): snap},
@@ -1162,11 +1158,8 @@ class TestStableRefreshJob:
             await _stable_refresh_job(ctx)
 
         calls = db.log_prop_opportunity.call_args_list
-        qual_calls = [
-            c for c in calls
-            if c.kwargs.get("watchlist_state") == "Qualified"
-        ]
-        assert len(qual_calls) >= 1
+        assert len(calls) >= 1
+        assert all(c.kwargs.get("watchlist_state") is None for c in calls)
 
     @pytest.mark.asyncio
     async def test_empty_pool_completes_without_error(self):

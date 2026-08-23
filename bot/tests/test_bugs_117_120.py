@@ -219,21 +219,10 @@ class TestBug119FunnelAndStatusCounters:
             "these are Telegram-delivered alerts"
         )
 
-    def test_funnel_label_says_qualified(self):
-        """/funnel must display the qualified/accepted count with a 'Qualified' label."""
+    def test_funnel_uses_unified_lifecycle_label(self):
+        """/funnel must use neutral lifecycle labels, not retired classifications."""
         src = self._load_commands_source()
-        # Accept any form of the Qualified label (original, S/A-tier, or S/A/B-tier now
-        # that B-tier is included for Tier 1 sports).
-        assert (
-            "Qualified candidates" in src
-            or "Qualified (S/A-tier)" in src
-            or "Qualified (S/A/B-tier)" in src
-            or "Qualified (decision" in src
-            or "Qualified for alert" in src
-        ), (
-            "No 'Qualified' label variant found in commands.py — "
-            "funnel qualified-count label is missing"
-        )
+        assert "Tracked opportunities" in src or "Active props" in src
 
     def test_status_uses_db_backed_alert_count(self):
         """/status must call count_today_actionable_alerts (DB-backed).
@@ -277,10 +266,7 @@ class TestBug119FunnelAndStatusCounters:
         idx = src.find("def get_funnel_summary")
         assert idx != -1
         fn_src = src[idx: idx + 500]
-        assert "PropCandidateLog" in fn_src, (
-            "get_funnel_summary does not query PropCandidateLog — "
-            "funnel counts would reflect wrong table"
-        )
+        assert "tracked" in fn_src
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

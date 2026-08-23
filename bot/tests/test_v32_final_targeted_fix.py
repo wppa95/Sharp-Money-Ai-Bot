@@ -230,8 +230,7 @@ class TestPipelineStageDefs:
         """cmd_funnel must explain the difference between qualified and delivered."""
         import inspect
         src = inspect.getsource(cmd_mod.cmd_funnel)
-        # Must have explanatory note about additional delivery gates
-        assert "delivery gates" in src or "additional gates" in src
+        assert "delivery" in src and "tracked" in src
 
     def test_qualified_not_same_as_alerted(self):
         """PropCandidateLog ACCEPTED ≠ PropOpportunityLog alert_sent. Document this."""

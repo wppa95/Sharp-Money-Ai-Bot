@@ -3321,7 +3321,8 @@ class Database:
 
     async def get_funnel_summary(self, since_hours: int = 24) -> dict:
         """
-        Aggregate the unified active-prop monitoring stream for /funnel.
+        Aggregate the unified active-prop monitoring stream from
+        PropCandidateLog for /funnel.
 
         Every candidate row is monitored data.  Alert delivery is reported
         separately and never changes the monitoring status of a prop.
@@ -3345,7 +3346,7 @@ class Database:
                 )
                 .where(PropCandidateLog.scan_ts >= cutoff)
                 .group_by(PropCandidateLog.sport)
-                .order_by(PropCandidateLog.sport)
+                .order_by(func.count(PropCandidateLog.id).desc())
             )
             by_sport = [
                 {

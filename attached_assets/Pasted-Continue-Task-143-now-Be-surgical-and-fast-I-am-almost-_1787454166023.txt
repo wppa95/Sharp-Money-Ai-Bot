@@ -1,0 +1,99 @@
+Continue Task #143 now. Be surgical and fast — I am almost out of Replit credits.
+
+Do NOT create another task.
+
+Do NOT redesign anything.
+
+Do NOT touch Railway.
+
+Do NOT create a checkpoint.
+
+The production-side v3.6 unified monitoring cleanup is already implemented. The full suite is currently:
+
+4,543 passed, 11 failed
+
+These 11 failures are reported as legacy tests still asserting the retired classification framework.
+
+OBJECTIVE
+
+Migrate ONLY those remaining 11 tests to the current v3.6 framework.
+
+Do NOT restore any retired behavior just to make tests pass.
+
+Remove/update obsolete assertions for:
+
+* Qualified
+* Rejected
+* Pass
+* Watchlist
+* Near-Miss
+* Removed classification
+* Tier 1
+* Tier 2
+* S/A/B/C
+* Old tier breakdowns
+* Old funnel classification counters
+
+Replace them with assertions that match the current unified monitoring model:
+
+* Every active prop remains continuously scannable.
+* Every active prop remains in the canonical monitoring universe.
+* Every snapshot remains tracked/persisted/gradeable.
+* Full-pool rotation remains the sole bounded rotation owner.
+* Stable Refresh does not create a competing rotation.
+* Evaluation outcome never removes a prop from future scanning.
+* Reporting uses tracked/rescored/movement/actionable/delivered lifecycle metrics.
+* No legacy classification becomes a monitoring gate.
+
+IMPORTANT
+
+Do NOT change:
+
+* scoring
+* BQ/MQ
+* confidence
+* scheduler
+* max_instances
+* adaptive batching
+* provider architecture
+* evidence
+* graded-history
+* database schema
+* moneyline behavior
+* Strong-only moneyline alerting
+* OVER/UNDER behavior
+* Telegram
+* Discord
+* clean restart
+
+Do not make production changes unless a genuine v3.6 regression is exposed by one of these 11 tests.
+
+VERIFICATION
+
+Run the 11 failing tests after migration.
+
+Then immediately run the complete bot/tests suite.
+
+Also run:
+
+* Python compilation
+* git diff --check
+
+Target:
+
+0 failed / 0 errors.
+
+Do not delete, skip, xfail, weaken, or hide any test.
+
+If any failure remains, fix/migrate it rather than stopping and proposing another task.
+
+Final response must give me only:
+
+1. What was changed.
+2. Final test count.
+3. Whether compilation passed.
+4. Whether git diff --check passed.
+5. Confirmation that Railway was untouched.
+6. Confirmation that no checkpoint was created.
+
+Move quickly and stay strictly within this scope.

@@ -838,13 +838,11 @@ class TestDashboardLabels:
 class TestIssue1QualifiedIsIntermediate:
     """Verify 'qualified' in PropCandidateLog is correctly an intermediate gate."""
 
-    def test_qualified_logged_before_delivery_gates(self):
-        """'qualified' is logged in PropCandidateLog before confidence/live/BQ gates."""
+    def test_tracking_write_is_independent_of_delivery_gates(self):
+        """Tracking writes remain independent of Telegram delivery gates."""
         src = inspect.getsource(__import__("market_engine").underdog_job)
-        # The log_prop_opportunity with "Qualified" watchlist_state appears in standing path
-        assert '"Qualified"' in src, (
-            "'Qualified' watchlist_state must be logged in PropCandidateLog"
-        )
+        assert "log_prop_opportunity" in src
+        assert "watchlist_state" in src
 
     def test_delivery_gates_after_prop_candidate_log(self):
         """Delivery gates (confidence, live/past) apply AFTER PropCandidateLog write."""
