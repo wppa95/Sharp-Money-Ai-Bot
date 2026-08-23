@@ -50,18 +50,9 @@ def _derive_standing_tier(score_tier, score_total) -> str | None:
 
 def _strict_gates_allow(sport: str, decision_tier: str, bq: int = 0, direction: str = "OVER") -> bool:
     """
-    Mirrors the strict-sport gates in the standing path:
-      1. Tier gate: strict sports (MLB/NFL) must be in ud_mlb_alert_tiers (default {"S"})
-      2. Direction gate: Tier 2 (MLB/NFL) UNDER is ALWAYS blocked
-    BQ gate removed per spec; accepted but unused.
+    V3.6 unified monitoring gate: every sport and direction remains eligible.
     """
     cfg = me.config
-    su = sport.upper()
-    if su in cfg.ud_strict_alert_sports:
-        if decision_tier not in cfg.ud_mlb_alert_tiers:
-            return False
-        if direction == "UNDER":
-            return False  # Tier 2: UNDER is always watchlist
     return True
 
 
@@ -183,32 +174,29 @@ class TestDedupProtectionPresent:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestMLBNFLTierGate:
-    """MLB and NFL: S+OVER actionable; A/B/C watchlist; S+UNDER watchlist (Tier 2)."""
+    """MLB and NFL: S+OVER actionable; A/B/C monitoring_record; S+UNDER monitoring_record (Tier 2)."""
 
     def test_mlb_s_over_allowed(self):
         """S-tier OVER is the ONLY actionable MLB pick."""
         assert _strict_gates_allow("MLB", "S", direction="OVER")
 
-    def test_mlb_s_under_blocked(self):
-        """S-tier UNDER is watchlist — Tier 2 is OVER only."""
-        assert not _strict_gates_allow("MLB", "S", direction="UNDER")
+    def test_mlb_s_under_remains_monitored(self):
+        assert _strict_gates_allow("MLB", "S", direction="UNDER")
 
-    def test_mlb_a_tier_blocked(self):
-        """A-tier MLB is watchlist only (not actionable)."""
-        assert not _strict_gates_allow("MLB", "A")
+    def test_mlb_a_tier_remains_monitored(self):
+        assert _strict_gates_allow("MLB", "A")
 
-    def test_mlb_b_tier_blocked(self):
-        assert not _strict_gates_allow("MLB", "B")
+    def test_mlb_b_tier_remains_monitored(self):
+        assert _strict_gates_allow("MLB", "B")
 
-    def test_nfl_a_tier_blocked(self):
-        """A-tier NFL is watchlist only."""
-        assert not _strict_gates_allow("NFL", "A")
+    def test_nfl_a_tier_remains_monitored(self):
+        assert _strict_gates_allow("NFL", "A")
 
     def test_nfl_s_tier_over_passes(self):
         assert _strict_gates_allow("MLB", "S", direction="OVER")
 
-    def test_nfl_s_tier_under_blocked(self):
-        assert not _strict_gates_allow("NFL", "S", direction="UNDER")
+    def test_nfl_s_tier_under_remains_monitored(self):
+        assert _strict_gates_allow("NFL", "S", direction="UNDER")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -226,16 +214,14 @@ class TestMLBNFLBQGate:
         """BQ gate removed — S+OVER NFL allowed regardless of BQ."""
         assert _strict_gates_allow("NFL", "S", 70, direction="OVER")
 
-    def test_mlb_s_under_always_blocked(self):
-        """S+UNDER MLB always blocked regardless of BQ — Tier 2 is OVER only."""
-        assert not _strict_gates_allow("MLB", "S", 100, direction="UNDER")
+    def test_mlb_s_under_monitored_regardless_of_bq(self):
+        assert _strict_gates_allow("MLB", "S", 100, direction="UNDER")
 
-    def test_mlb_a_tier_blocked_regardless_of_bq(self):
-        """A-tier MLB is watchlist only regardless of BQ."""
-        assert not _strict_gates_allow("MLB", "A", 100)
+    def test_mlb_a_tier_monitored_regardless_of_bq(self):
+        assert _strict_gates_allow("MLB", "A", 100)
 
-    def test_mlb_b_tier_blocked_regardless_of_bq(self):
-        assert not _strict_gates_allow("MLB", "B", 100)
+    def test_mlb_b_tier_monitored_regardless_of_bq(self):
+        assert _strict_gates_allow("MLB", "B", 100)
 
     def test_bq_threshold_config_value_still_defined(self):
         """Config value still defined (for reference); BQ gate not enforced at delivery."""

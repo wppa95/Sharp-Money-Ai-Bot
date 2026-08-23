@@ -103,27 +103,27 @@ async def _run_job(snaps, db, *, deliver_result=None) -> MagicMock:
 
 # ── Unit: _is_tier2_sport ──────────────────────────────────────────────────────
 
-class TestIsTier2Sport:
-    """_is_tier2_sport must correctly classify Tier 1 vs Tier 2."""
+class TestUnifiedSportMonitoring:
+    """The v3.6 monitor does not classify sports into delivery tiers."""
 
     def test_nba_is_tier2(self):
-        assert me._is_tier2_sport("NBA") is True
+        assert me._is_tier2_sport("NBA") is False
 
     def test_mlb_is_tier2(self):
-        assert me._is_tier2_sport("MLB") is True
+        assert me._is_tier2_sport("MLB") is False
 
     def test_nfl_is_tier2(self):
-        assert me._is_tier2_sport("NFL") is True
+        assert me._is_tier2_sport("NFL") is False
 
     @pytest.mark.parametrize("sport", ["NCAA", "NCAAF", "CFB"])
     def test_college_football_aliases_are_suppressed(self, sport):
-        assert me._is_tier2_sport(sport) is True
+        assert me._is_tier2_sport(sport) is False
 
     def test_nba_lowercase_is_tier2(self):
-        assert me._is_tier2_sport("nba") is True
+        assert me._is_tier2_sport("nba") is False
 
     def test_mlb_mixed_case_is_tier2(self):
-        assert me._is_tier2_sport("MlB") is True
+        assert me._is_tier2_sport("MlB") is False
 
     def test_nhl_is_tier1(self):
         assert me._is_tier2_sport("NHL") is False
@@ -149,10 +149,9 @@ class TestIsTier2Sport:
 
 # ── Unit: deliver_underdog() final backstop in alerts.py ─────────────────────
 
-class TestDeliverUnderdogBackstop:
+class TestDeliverUnderdogMonitoring:
     """
-    deliver_underdog() must return sent=False for any Tier 2 sport,
-    regardless of which call site invoked it.
+    deliver_underdog() monitors every sport through the same path.
     """
 
     def _make_delivery(self):
@@ -160,6 +159,7 @@ class TestDeliverUnderdogBackstop:
         db  = MagicMock()
         db.count_today_underdog_alerts = AsyncMock(return_value=0)
         bot = MagicMock()
+        bot.send_message = AsyncMock()
         return AlertDelivery(db=db, bot=bot, chat_ids=[12345])
 
     @pytest.mark.asyncio
@@ -170,8 +170,7 @@ class TestDeliverUnderdogBackstop:
             player_name="LeBron James", team="LAL", sport="NBA",
             stat_type="Points", old_line=20.0, new_line=21.5,
         )
-        assert result.sent is False
-        assert "NBA" in result.filtered_reason or "Tier 2" in result.filtered_reason
+        assert result.sent is True
 
     @pytest.mark.asyncio
     async def test_mlb_sport_returns_not_sent(self):
@@ -181,7 +180,7 @@ class TestDeliverUnderdogBackstop:
             player_name="Aaron Judge", team="NYY", sport="MLB",
             stat_type="Home Runs", old_line=0.5, new_line=0.5,
         )
-        assert result.sent is False
+        assert result.sent is True
 
     @pytest.mark.asyncio
     async def test_nfl_sport_returns_not_sent(self):
@@ -191,7 +190,7 @@ class TestDeliverUnderdogBackstop:
             player_name="Patrick Mahomes", team="KC", sport="NFL",
             stat_type="Passing Yards", old_line=250.5, new_line=255.5,
         )
-        assert result.sent is False
+        assert result.sent is True
 
     @pytest.mark.parametrize("sport", ["NCAA", "NCAAF", "CFB"])
     @pytest.mark.asyncio
@@ -201,7 +200,7 @@ class TestDeliverUnderdogBackstop:
             player_name="College Player", team="COL", sport=sport,
             stat_type="Passing Yards", old_line=250.5, new_line=255.5,
         )
-        assert result.sent is False
+        assert result.sent is True
 
     @pytest.mark.asyncio
     async def test_nba_lowercase_returns_not_sent(self):
@@ -211,21 +210,20 @@ class TestDeliverUnderdogBackstop:
             player_name="Test Player", team="TM", sport="nba",
             stat_type="Points", old_line=20.0, new_line=20.0,
         )
-        assert result.sent is False
+        assert result.sent is True
 
     def test_tier1_nhl_not_blocked_by_constant(self):
         """Sport='NHL' must NOT be in the _TIER2_SPORTS_BLOCK constant."""
         import alerts as alerts_mod
-        assert "NHL" not in alerts_mod._TIER2_SPORTS_BLOCK
-        assert "WNBA" not in alerts_mod._TIER2_SPORTS_BLOCK
-        assert "Soccer" not in alerts_mod._TIER2_SPORTS_BLOCK
+        assert not alerts_mod.is_telegram_suppressed_sport("NHL")
+        assert not alerts_mod.is_telegram_suppressed_sport("WNBA")
+        assert not alerts_mod.is_telegram_suppressed_sport("Soccer")
 
     def test_tier2_constant_contains_correct_sports(self):
         """Existing blocks remain, with college-football aliases added."""
         import alerts as alerts_mod
-        assert alerts_mod._TIER2_SPORTS_BLOCK == frozenset({
-            "NBA", "MLB", "NFL", "NCAA", "NCAAF", "CFB",
-        })
+        for sport in ("NBA", "MLB", "NFL", "NCAA", "NCAAF", "CFB"):
+            assert not alerts_mod.is_telegram_suppressed_sport(sport)
 
     @pytest.mark.asyncio
     async def test_backstop_prevents_send_message_for_nba(self):
@@ -240,7 +238,7 @@ class TestDeliverUnderdogBackstop:
             player_name="Test Player", team="TM", sport="NBA",
             stat_type="Points", old_line=20.0, new_line=21.5,
         )
-        bot.send_message.assert_not_called()
+        bot.send_message.assert_called()
 
     @pytest.mark.asyncio
     async def test_backstop_prevents_send_message_for_mlb(self):
@@ -255,7 +253,7 @@ class TestDeliverUnderdogBackstop:
             player_name="Test Player", team="TM", sport="MLB",
             stat_type="Hits", old_line=0.5, new_line=0.5,
         )
-        bot.send_message.assert_not_called()
+        bot.send_message.assert_called()
 
 
 # ── Source-code audit: every deliver_underdog path has the guard ───────────────
@@ -321,9 +319,9 @@ class TestSourceAudit:
         src = self._me_src()
         self._assert_guard_before(src, "await _sr_delivery.deliver_underdog(", "stable-refresh")
 
-    def test_watchlist_path_has_block(self):
+    def test_monitoring_refresh_path_has_delivery_guard(self):
         src = self._me_src()
-        self._assert_guard_before(src, "await _wl_delivery.deliver_underdog(", "watchlist")
+        self._assert_guard_before(src, "await _wl_delivery.deliver_underdog(", "monitoring_record")
 
     def test_fpr_path_has_block(self):
         src = self._me_src()
@@ -404,14 +402,14 @@ class TestTier2DeliveryBlocked:
     async def test_nba_prop_blocked(self):
         db = _make_db()
         delivery = await _run_job([_snap(sport="NBA")], db)
-        delivery.deliver_underdog.assert_not_called()
+        db.save_underdog_snapshots_bulk.assert_called()
         db.save_underdog_snapshots_bulk.assert_called()
 
     @pytest.mark.asyncio
     async def test_mlb_prop_blocked(self):
         db = _make_db()
         delivery = await _run_job([_snap(sport="MLB", stat="Hits", line=0.5)], db)
-        delivery.deliver_underdog.assert_not_called()
+        db.save_underdog_snapshots_bulk.assert_called()
 
     @pytest.mark.asyncio
     async def test_nfl_prop_blocked(self):
@@ -419,13 +417,13 @@ class TestTier2DeliveryBlocked:
         delivery = await _run_job(
             [_snap(sport="NFL", stat="Passing Yards", line=225.5)], db
         )
-        delivery.deliver_underdog.assert_not_called()
+        db.save_underdog_snapshots_bulk.assert_called()
 
     @pytest.mark.asyncio
     async def test_nba_lowercase_blocked(self):
         db = _make_db()
         delivery = await _run_job([_snap(sport="nba")], db)
-        delivery.deliver_underdog.assert_not_called()
+        db.save_underdog_snapshots_bulk.assert_called()
 
     @pytest.mark.asyncio
     async def test_tier2_prop_still_stored(self):
@@ -442,7 +440,7 @@ class TestTier2DeliveryBlocked:
             _snap("Patrick Mahomes", "Passing Yards", 250.5, sport="NFL"),
         ]
         delivery = await _run_job(snaps, db)
-        delivery.deliver_underdog.assert_not_called()
+        db.save_underdog_snapshots_bulk.assert_called()
 
 
 # ── Tier 1 sports not blocked ─────────────────────────────────────────────────
@@ -479,7 +477,7 @@ class TestScanningUnchanged:
     def test_stable_refresh_job_still_present(self):
         assert "_stable_refresh_job" in self._src()
 
-    def test_watchlist_processing_still_present(self):
+    def test_monitoring_processing_still_present(self):
         assert "_wl_qualifies" in self._src()
 
     def test_fpr_still_present(self):
@@ -487,9 +485,7 @@ class TestScanningUnchanged:
 
     def test_tier2_sports_set_unchanged(self):
         """Existing Tier 2 sports remain, with football aliases suppressed."""
-        assert me._TIER2_SPORTS == frozenset({
-            "NBA", "MLB", "NFL", "NCAA", "NCAAF", "CFB",
-        })
+        assert me._TIER2_SPORTS == frozenset()
 
 
 # ── Restart / recovery cannot replay Tier 2 alerts ───────────────────────────
@@ -516,8 +512,8 @@ class TestRestartRecovery:
             stat_type="Points", old_line=20.0, new_line=20.0,
             new_prop=False, standing=True,
         )
-        assert result.sent is False
-        bot.send_message.assert_not_called()
+        assert result.sent is True
+        bot.send_message.assert_called()
 
     @pytest.mark.asyncio
     async def test_restart_mlb_replay_blocked(self):
@@ -532,5 +528,5 @@ class TestRestartRecovery:
             player_name="Replay Player", team="TM", sport="MLB",
             stat_type="Hits", old_line=0.5, new_line=0.5,
         )
-        assert result.sent is False
-        bot.send_message.assert_not_called()
+        assert result.sent is True
+        bot.send_message.assert_called()

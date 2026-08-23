@@ -1,11 +1,15 @@
-"""Regression tests for canonical Tier 1/Tier 2 delivery policy."""
+"""Regression tests for the v3.6 unified monitoring delivery gate.
+
+The gate is a delivery-quality gate, not a sport/tier classifier.  Evaluation
+and persistence continue for every sport and decision tier; only a candidate
+with a valid direction, strong BQ/MQ, and evidence is deliverable.
+"""
 
 from __future__ import annotations
 
 import pytest
 
 from market_engine import (
-    _TIER2_SPORTS,
     _apply_delivery_diversification,
     _cand_priority,
     _is_tier2_sport,
@@ -13,72 +17,54 @@ from market_engine import (
 )
 
 
-@pytest.mark.parametrize("sport", ["NBA", "MLB", "NFL", "NCAA", "NCAAF", "CFB"])
-def test_existing_core_sports_are_tier2(sport):
-    assert _is_tier2_sport(sport)
-
-
-@pytest.mark.parametrize(
-    "sport",
-    [
-        "WNBA", "CS", "CS2", "LOL", "VAL", "VALORANT", "DOTA", "DOTA2",
-        "TENNIS", "ATP", "WTA", "NPB", "KBO", "NHL", "SOCCER", "FIFA",
-        "EPL", "PGA", "GOLF", "MMA", "BOXING", "AFL", "AFLW", "TT",
-        "BADMINTON", "MATCH", "MOTORCYCLE", "UNKNOWN",
-    ],
-)
-def test_every_other_sport_is_tier1(sport):
-    assert not _is_tier2_sport(sport)
-
-
-def test_tier2_alias_set_is_preserved():
-    assert _TIER2_SPORTS == frozenset({"NBA", "MLB", "NFL", "NCAA", "NCAAF", "CFB"})
+@pytest.mark.parametrize("sport", ["NBA", "MLB", "NFL", "NCAA", "WNBA", "CS2", "UNKNOWN"])
+def test_all_sports_share_one_delivery_policy(sport):
+    """Sport never changes eligibility in the unified monitoring pool."""
+    assert _is_tier2_sport(sport) is False
+    assert _tier_delivery_gate(sport, "OVER", 80, 85, True, "S") is True
+    assert _tier_delivery_gate(sport, "UNDER", 80, 85, True, "S") is True
 
 
 @pytest.mark.parametrize("direction", ["OVER", "UNDER", "over", "under"])
-def test_tier1_requires_strong_scores_and_evidence(direction):
-    assert _tier_delivery_gate("WNBA", direction, 70, 70, True)
-    assert _tier_delivery_gate("CS2", direction, 84, 84, True)
-    assert _tier_delivery_gate("NHL", direction, 85, 85, True)
+def test_both_directions_are_eligible(direction):
+    assert _tier_delivery_gate("MLB", direction, 80, 85, True, "S") is True
+
+
+@pytest.mark.parametrize("direction", ["PASS", "", "PUSH", "sideways"])
+def test_invalid_direction_is_rejected(direction):
+    assert _tier_delivery_gate("NBA", direction, 100, 100, True, "S") is False
 
 
 @pytest.mark.parametrize(
     "bq,mq,evidence",
-    [(69, 90, True), (90, 69, True), (90, 90, False), (0, 0, True)],
+    [(79, 100, True), (80, 84, True), (80, 85, False), (0, 0, True)],
 )
-def test_tier1_blocks_below_threshold_or_without_evidence(bq, mq, evidence):
-    assert not _tier_delivery_gate("WNBA", "OVER", bq, mq, evidence)
+def test_hard_quality_gate_blocks_weak_candidates(bq, mq, evidence):
+    """The intentional v3.6 hard gate requires BQ, MQ, and evidence."""
+    assert _tier_delivery_gate("SOCCER", "OVER", bq, mq, evidence, "S") is False
 
 
-def test_tier1_does_not_require_score_tier():
-    # The gate has no S/A/B/C argument or requirement.
-    assert _tier_delivery_gate("TENNIS", "UNDER", 70, 70, True)
-
-
-def test_tier1_low_scores_remain_evaluable_but_not_deliverable():
-    # This is a delivery assertion only; evaluation persistence is handled
-    # underneath the gate by the existing scan paths.
-    assert not _tier_delivery_gate("DOTA2", "OVER", 40, 69, True)
-
-
-@pytest.mark.parametrize("sport", ["NBA", "MLB", "NFL", "NCAA", "NCAAF", "CFB"])
-def test_tier2_behavior_is_unchanged(sport):
-    assert _tier_delivery_gate(sport, "OVER", 85, 85, False)
-    assert not _tier_delivery_gate(sport, "OVER", 84, 85, False)
-    assert not _tier_delivery_gate(sport, "OVER", 85, 84, False)
-    assert not _tier_delivery_gate(sport, "PASS", 100, 100, False)
+def test_score_tier_remains_a_delivery_quality_signal():
+    assert _tier_delivery_gate("TENNIS", "UNDER", 80, 85, True, "A") is False
+    assert _tier_delivery_gate("TENNIS", "UNDER", 80, 85, True, "S") is True
 
 
 def test_gate_is_deterministic():
-    args = ("WNBA", "OVER", 75, 75, True)
+    args = ("WNBA", "OVER", 80, 85, True, "S")
     assert _tier_delivery_gate(*args) is True
     assert _tier_delivery_gate(*args) is True
 
 
-def test_priority_and_diversification_helpers_remain_available():
-    base = {
-        "tier": "B", "conf": 60, "bq": 60, "mq": 60,
-        "is_tier1": False, "is_meaningful_change": False,
+def test_priority_helpers_cover_all_decision_tiers():
+    values = {
+        tier: _cand_priority({
+            "tier": tier, "conf": 80, "bq": 80, "mq": 85,
+            "is_tier1": False, "is_meaningful_change": False,
+        })
+        for tier in ("S", "A", "B", "C")
     }
-    assert _cand_priority(dict(base, is_tier1=True)) - _cand_priority(base) == pytest.approx(500.0)
+    assert values["S"] > values["A"] > values["B"] > values["C"]
+
+
+def test_delivery_diversification_helper_remains_available():
     assert callable(_apply_delivery_diversification)

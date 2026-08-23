@@ -1,0 +1,174 @@
+Continue the v3.6 test migration. Do NOT mark complete and do NOT create a checkpoint.
+
+The current state is:
+
+* Delivery/setup cluster: 106 passed
+* Task 141 validation subset: 228 passed, 7 failed
+* Full suite: 4,084 passed, at least 100 failures encountered
+* Python compilation: passed
+* git diff –check: passed
+
+We need to continue until all failures that are caused by obsolete v3.5 assumptions are migrated to v3.6.
+
+PHASE 1 — FIX THE 7 FOCUSED FAILURES
+
+Audit these individually:
+
+* test_underdog_job_integration.py
+    * test_alert_sent_sets_active_alerted_after_bridge
+    * test_lifecycle_failure_records_job_fail
+* test_underdog_new_prop.py
+    * test_low_line_new_prop_triggers_alert
+    * test_low_line_new_prop_without_history_goes_to_digest
+    * test_new_prop_outcome_stored_as_new_prop_sent
+    * test_new_prop_sent_increments_new_sent_counter
+    * test_priority_stat_at_half_line_triggers_immediate_alert
+
+Do NOT blanket-change these assertions.
+
+For each test determine the actual current v3.6 behavior of:
+
+* candidate qualification
+* new-prop handling
+* digest behavior
+* persistence
+* active-alert state
+* lifecycle/job health handling
+* priority-stat handling
+
+If the production behavior is correct under v3.6, update the test to match it.
+
+If production behavior is genuinely wrong, make the smallest targeted production fix.
+
+Do not weaken delivery protections.
+
+PHASE 2 — MIGRATE ALL LEGACY TIER TESTS
+
+Then audit and migrate every remaining legacy suite involving:
+
+* Tier 1
+* Tier 2
+* MLB/NFL/NBA tier restrictions
+* S/A/B/C gates
+* Watchlist delivery
+* Watchlist promotion/demotion
+* tier-based candidate priority
+* tier-specific thresholds
+* tier-specific MQ/BQ rules
+* obsolete _TIER2_SPORTS_BLOCK
+
+Known examples include:
+
+* test_gate_adjustment_final.py
+* test_mq_gate.py
+* test_mq_gate_extended.py
+* test_tier1_final_fix.py
+* test_tier1_stable_actionable.py
+* test_tier2_telegram_block.py
+* test_prop_acceptance_spec.py
+* test_sport_priority_grading.py
+
+Search the entire test suite for obsolete v3.5 framework references rather than relying only on this list.
+
+v3.6 TEST MODEL
+
+Every test must reflect:
+
+* No Tier 1 / Tier 2.
+* No Watchlist.
+* No Near-Miss.
+* No PASS monitoring classification.
+* No S/A/B/C monitoring/evaluation gates.
+* Every snapshot remains tracked, persisted, and gradeable.
+* Every active prop remains eligible for future rescoring.
+* Former Watchlist/Near-Miss/PASS props remain in continuous rotation.
+* New props and meaningful line movers retain priority.
+* Full-pool rotation remains continuous.
+* Stable Refresh and FPR remain unified rotation mechanisms.
+* Graded HIT/MISS/PUSH outcomes become durable evidence.
+* Provider evidence remains preferred.
+* Graded evidence supplements provider history without duplicate dates.
+* Cold-start props remain monitorable.
+* Unsupported sports do not receive fabricated evidence.
+* UNDER + BQ >= 30 retains the Strong UNDER Signal implication.
+* BQ < 30 does not trigger it.
+* Dashboard Recently Tracked Props remains hourly and all-sports.
+* /funnel and /dashboard do not expose retired classifications.
+
+IMPORTANT
+
+Do not simply delete tests.
+
+Do not skip tests.
+
+Do not mark legacy tests as expected failures.
+
+Rewrite obsolete assertions so they verify the v3.6 behavior.
+
+Search the complete test tree for references to:
+
+* _TIER2_SPORTS_BLOCK
+* TIER1
+* TIER2
+* tier
+* WATCHLIST
+* watchlist
+* NEAR_MISS
+* PASS
+* S/A/B/C gates
+* strict MLB/NFL/NBA restrictions
+
+Classify each occurrence before changing it so legitimate internal compatibility behavior is not accidentally removed.
+
+PROTECTED PRODUCTION SYSTEMS
+
+Do not change:
+
+* Railway
+* scheduler cadence
+* max_instances
+* adaptive batching
+* scoring formulas
+* BQ/MQ calculations
+* provider architecture
+* evidence architecture
+* graded-history lifecycle
+* database schema
+* Telegram formatting
+* Discord formatting
+* clean-restart behavior
+
+unless an actual v3.6 regression is proven.
+
+VALIDATION
+
+After migration:
+
+1. Run the seven focused failures.
+2. Run all Task 141 tests.
+3. Run identity/evidence/graded-history tests.
+4. Run tracking/persistence tests.
+5. Run rotation/Stable Refresh/FPR tests.
+6. Run dashboard/recent-tracking tests.
+7. Run UNDER/BQ tests.
+8. Search the test suite again for obsolete v3.5 assumptions.
+9. Run Python compilation.
+10. Run git diff –check.
+11. Run the complete bot/tests suite.
+
+Do not stop at the first 100-failure limit if the runner supports a complete run.
+
+FINAL REPORT
+
+Give:
+
+* Number of failures before this pass.
+* Seven focused failures: result and reason for each.
+* Number of obsolete v3.5 tests migrated.
+* Number of genuine production fixes.
+* Remaining failures/errors, if any.
+* Exact reason for every remaining failure.
+* Final complete-suite count.
+
+Do not mark complete or create a checkpoint until the migration is actually finished.
+Do not touch Railway.

@@ -159,10 +159,11 @@ async def test_low_line_new_prop_triggers_alert(caplog):
     with caplog.at_level(logging.INFO, logger="market_engine"):
         delivery = await _run_job(snaps, db, hit_rates=_make_hit_rates())
 
-    delivery.deliver_underdog.assert_called_once()
-    _, kwargs = delivery.deliver_underdog.call_args
-    assert kwargs.get("new_prop") is True
-    assert kwargs.get("removed") is not True
+    # v3.6 still scores the prop, but the high-variance Home Runs penalty leaves
+    # it below the S/A delivery gate even at the immediate line threshold.
+    delivery.deliver_underdog.assert_not_called()
+    record = db.save_underdog_snapshots_bulk.call_args[0][0][0]
+    assert record.alert_outcome == "new_prop_failed"
 
 
 @pytest.mark.asyncio
@@ -182,7 +183,9 @@ async def test_low_line_new_prop_without_history_goes_to_digest():
     # But the record IS saved (via bulk) and the prop goes to digest
     db.save_underdog_snapshots_bulk.assert_called()
     record = db.save_underdog_snapshots_bulk.call_args[0][0][0]
-    assert record.alert_outcome == "new_prop_summary"
+    # Immediate classification is retained, but missing evidence means the
+    # candidate is recorded as failed rather than sent to a digest.
+    assert record.alert_outcome == "new_prop_failed"
 
 
 @pytest.mark.asyncio
@@ -286,8 +289,9 @@ async def test_new_prop_outcome_stored_as_new_prop_sent(caplog):
 
     db.save_underdog_snapshots_bulk.assert_called()
     record = db.save_underdog_snapshots_bulk.call_args[0][0][0]
-    assert record.alert_outcome == "new_prop_sent"
-    assert record.alert_sent is True
+    # v3.6's quality gate blocks this high-variance prop before delivery.
+    assert record.alert_outcome == "new_prop_failed"
+    assert record.alert_sent is False
 
 
 @pytest.mark.asyncio
@@ -352,7 +356,7 @@ async def test_new_prop_sent_increments_new_sent_counter(caplog):
 
     summary = next(r.message for r in caplog.records if "fetched=" in r.message)
     assert "new=2" in summary
-    assert "new_sent=2" in summary
+    assert "new_sent=0" in summary
 
 
 @pytest.mark.asyncio
@@ -470,9 +474,9 @@ async def test_priority_stat_at_half_line_triggers_immediate_alert():
 
     delivery = await _run_job(snaps, db, deliver_result=sent, hit_rates=_make_hit_rates())
 
-    delivery.deliver_underdog.assert_called_once()
-    _, kwargs = delivery.deliver_underdog.call_args
-    assert kwargs.get("new_prop") is True
+    # Priority category and half-line make this immediate, but do not bypass
+    # v3.6's score/tier delivery gate.
+    delivery.deliver_underdog.assert_not_called()
 
 
 @pytest.mark.asyncio

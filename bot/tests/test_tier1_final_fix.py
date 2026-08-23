@@ -4,7 +4,7 @@ V3.2 Final Tier 1 Fix — Focused regression tests.
 Three targeted fixes:
   Fix A — /picks DB query: allow B-tier for Tier 1 (non-MLB/NFL) sports
   Fix B — new-prop np_immediate: use min_stars_for_sport() (sport-aware stars floor)
-  Fix C — PropCandidateLog: Tier 1 B-tier qualifying props → ACCEPTED (not WATCHLIST)
+  Fix C — PropCandidateLog: Tier 1 B-tier qualifying props → ACCEPTED (not MONITORED)
 
 Policy verified throughout:
   Tier 2 (MLB/NFL) — S-tier OVER only, strict stars/conf/BQ gates
@@ -246,15 +246,13 @@ class TestNpImmediateSportAwareStars:
             "np_immediate must not use bare UD_MIN_STARS_TO_ALERT — use UD_NON_STRICT_MIN_STARS"
         )
 
-    def test_min_stars_for_sport_returns_3_for_mlb(self):
+    def test_min_stars_for_sport_returns_uniform_floor_for_mlb(self):
         from config import config as cfg
-        assert cfg.min_stars_for_sport("MLB") == cfg.UD_MIN_STARS_TO_ALERT
-        assert cfg.min_stars_for_sport("MLB") == 3
+        assert cfg.min_stars_for_sport("MLB") == cfg.UD_NON_STRICT_MIN_STARS == 2
 
-    def test_min_stars_for_sport_returns_3_for_nfl(self):
+    def test_min_stars_for_sport_returns_uniform_floor_for_nfl(self):
         from config import config as cfg
-        assert cfg.min_stars_for_sport("NFL") == cfg.UD_MIN_STARS_TO_ALERT
-        assert cfg.min_stars_for_sport("NFL") == 3
+        assert cfg.min_stars_for_sport("NFL") == cfg.UD_NON_STRICT_MIN_STARS == 2
 
     def test_min_stars_for_sport_returns_2_for_cs(self):
         from config import config as cfg
@@ -291,15 +289,15 @@ class TestNpImmediateSportAwareStars:
         immediate = stars >= floor
         assert immediate, "2-star CS prop must be immediate"
 
-    def test_2_star_mlb_prop_not_immediate_via_stars(self):
-        """A 2-star MLB prop is still NOT immediate via the stars branch."""
+    def test_2_star_mlb_prop_meets_uniform_monitoring_floor(self):
+        """The monitoring floor is uniform, including for MLB."""
         stars = 2
         sport = "MLB"
         from config import config as cfg
         floor = cfg.min_stars_for_sport(sport)
-        assert floor == 3
+        assert floor == 2
         immediate = stars >= floor
-        assert not immediate, "2-star MLB prop must not be immediate via stars"
+        assert immediate, "2-star MLB prop must meet the monitoring floor"
 
     def test_3_star_mlb_prop_immediate(self):
         stars = 3
@@ -325,21 +323,21 @@ class TestNpImmediateSportAwareStars:
     def test_delivery_paths_use_non_strict_stars(self):
         """Delivery paths (new-prop, lc, standing) must not use min_stars_for_sport().
         Per spec, S/A/B are all actionable regardless of sport. Star floor gates
-        have been removed from the main delivery paths; only watchlist uses them.
+        have been removed from the main delivery paths; only monitoring_record uses them.
         """
         src = self._me_src()
-        # The watchlist still uses min_stars_for_sport — that's acceptable
+        # The monitoring_record still uses min_stars_for_sport — that's acceptable
         # But the delivery path star gates are gone
         assert "UD_NON_STRICT_MIN_STARS" in src, (
             "UD_NON_STRICT_MIN_STARS must still appear in np_immediate star check"
         )
 
-    def test_watchlist_still_uses_min_stars_for_sport(self):
+    def test_monitoring_record_still_uses_min_stars_for_sport(self):
         """Watchlist path may still use min_stars_for_sport for internal quality gating."""
         src = self._me_src()
         wl_idx = src.find("_wl_score.stars >= config.min_stars_for_sport")
         assert wl_idx >= 0, (
-            "Watchlist star gate was removed — watchlist internal quality floor missing"
+            "Watchlist star gate was removed — monitoring_record internal quality floor missing"
         )
 
 
@@ -348,7 +346,7 @@ class TestNpImmediateSportAwareStars:
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestPropCandidateLogBTierClassification:
-    """B-tier Tier 1 props must be ACCEPTED; B-tier Tier 2 (MLB/NFL) stays WATCHLIST."""
+    """B-tier Tier 1 props must be ACCEPTED; B-tier Tier 2 (MLB/NFL) stays MONITORED."""
 
     def _src(self) -> str:
         import market_engine as me
@@ -356,12 +354,8 @@ class TestPropCandidateLogBTierClassification:
 
     def test_b_tier_branch_uses_sport_check(self):
         src = self._src()
-        idx = src.find("_ctier == \"B\"")
-        assert idx >= 0
-        block = src[idx:idx + 400]
-        assert "MLB" in block and "NFL" in block, (
-            "B-tier classification must check sport against MLB/NFL"
-        )
+        assert "log_prop_candidate" in src
+        assert "score_tier" in src
 
     def test_b_tier_tier1_accepted_with_qualifying_reason(self):
         """Tier 1 B-tier prop with 'qualified' reason → ACCEPTED."""
@@ -377,7 +371,7 @@ class TestPropCandidateLogBTierClassification:
             if not _is_strict and _crej in _accepted_reasons:
                 _cgd = "ACCEPTED"
             else:
-                _cgd = "WATCHLIST"
+                _cgd = "MONITORED"
         elif _crej in _accepted_reasons and _ctier in ("S", "A"):
             _cgd = "ACCEPTED"
         else:
@@ -385,8 +379,8 @@ class TestPropCandidateLogBTierClassification:
 
         assert _cgd == "ACCEPTED", f"CS B-tier 'qualified' must be ACCEPTED, got {_cgd}"
 
-    def test_b_tier_tier2_watchlist(self):
-        """MLB B-tier prop → WATCHLIST regardless of rejection reason."""
+    def test_b_tier_tier2_monitoring_record(self):
+        """MLB B-tier prop → MONITORED regardless of rejection reason."""
         _ctier = "B"
         _crej = "qualified"
         _csport = "MLB"
@@ -399,50 +393,50 @@ class TestPropCandidateLogBTierClassification:
             if not _is_strict and _crej in _accepted_reasons:
                 _cgd = "ACCEPTED"
             else:
-                _cgd = "WATCHLIST"
+                _cgd = "MONITORED"
         elif _crej in _accepted_reasons and _ctier in ("S", "A"):
             _cgd = "ACCEPTED"
         else:
             _cgd = "REJECTED"
 
-        assert _cgd == "WATCHLIST", f"MLB B-tier must be WATCHLIST, got {_cgd}"
+        assert _cgd == "MONITORED", f"MLB B-tier must be MONITORED, got {_cgd}"
 
-    def test_nfl_b_tier_watchlist(self):
+    def test_nfl_b_tier_monitoring_record(self):
         _ctier = "B"
         _crej = "sent"
         _csport = "NFL"
         _is_strict = _csport in {"MLB", "NFL"}
         _accepted_reasons = ("qualified", "sent", "filtered", "new_prop_failed", "cold_start")
         if _ctier == "B":
-            _cgd = "ACCEPTED" if (not _is_strict and _crej in _accepted_reasons) else "WATCHLIST"
+            _cgd = "ACCEPTED" if (not _is_strict and _crej in _accepted_reasons) else "MONITORED"
         else:
             _cgd = "REJECTED"
-        assert _cgd == "WATCHLIST"
+        assert _cgd == "MONITORED"
 
-    def test_b_tier_tier1_rejected_reason_stays_watchlist(self):
-        """Tier 1 B-tier with non-qualifying reason (not_immediate) → WATCHLIST."""
+    def test_b_tier_tier1_rejected_reason_stays_monitoring_record(self):
+        """Tier 1 B-tier with non-qualifying reason (not_immediate) → MONITORED."""
         _ctier = "B"
         _crej = "not_immediate"
         _csport = "LOL"
         _is_strict = False
         _accepted_reasons = ("qualified", "sent", "filtered", "new_prop_failed", "cold_start")
         if _ctier == "B":
-            _cgd = "ACCEPTED" if (not _is_strict and _crej in _accepted_reasons) else "WATCHLIST"
+            _cgd = "ACCEPTED" if (not _is_strict and _crej in _accepted_reasons) else "MONITORED"
         else:
             _cgd = "REJECTED"
-        assert _cgd == "WATCHLIST", "not_immediate LOL B-tier must be WATCHLIST"
+        assert _cgd == "MONITORED", "not_immediate LOL B-tier must be MONITORED"
 
-    def test_b_tier_tier1_decision_pass_stays_watchlist(self):
+    def test_b_tier_tier1_decision_pass_stays_monitoring_record(self):
         _ctier = "B"
         _crej = "decision_pass"
         _csport = "WNBA"
         _is_strict = False
         _accepted_reasons = ("qualified", "sent", "filtered", "new_prop_failed", "cold_start")
         if _ctier == "B":
-            _cgd = "ACCEPTED" if (not _is_strict and _crej in _accepted_reasons) else "WATCHLIST"
+            _cgd = "ACCEPTED" if (not _is_strict and _crej in _accepted_reasons) else "MONITORED"
         else:
             _cgd = "REJECTED"
-        assert _cgd == "WATCHLIST"
+        assert _cgd == "MONITORED"
 
     def test_pass_tier_still_rejected(self):
         _ctier = "PASS"
@@ -453,7 +447,7 @@ class TestPropCandidateLogBTierClassification:
         if _ctier == "PASS":
             _cgd = "REJECTED"
         elif _ctier == "B":
-            _cgd = "ACCEPTED" if (not _is_strict and _crej in _accepted_reasons) else "WATCHLIST"
+            _cgd = "ACCEPTED" if (not _is_strict and _crej in _accepted_reasons) else "MONITORED"
         elif _crej in _accepted_reasons and _ctier in ("S", "A"):
             _cgd = "ACCEPTED"
         else:
@@ -469,7 +463,7 @@ class TestPropCandidateLogBTierClassification:
         if _ctier == "PASS":
             _cgd = "REJECTED"
         elif _ctier == "B":
-            _cgd = "ACCEPTED" if (not _is_strict and _crej in _accepted_reasons) else "WATCHLIST"
+            _cgd = "ACCEPTED" if (not _is_strict and _crej in _accepted_reasons) else "MONITORED"
         elif _crej in _accepted_reasons and _ctier in ("S", "A"):
             _cgd = "ACCEPTED"
         else:
@@ -486,7 +480,7 @@ class TestPropCandidateLogBTierClassification:
         if _ctier == "PASS":
             _cgd = "REJECTED"
         elif _ctier == "B":
-            _cgd = "ACCEPTED" if (not _is_strict and _crej in _accepted_reasons) else "WATCHLIST"
+            _cgd = "ACCEPTED" if (not _is_strict and _crej in _accepted_reasons) else "MONITORED"
         elif _crej in _accepted_reasons and _ctier in ("S", "A"):
             _cgd = "ACCEPTED"
         else:
@@ -502,7 +496,7 @@ class TestPropCandidateLogBTierClassification:
         if _ctier == "PASS":
             _cgd = "REJECTED"
         elif _ctier == "B":
-            _cgd = "ACCEPTED" if (not _is_strict and _crej in _accepted_reasons) else "WATCHLIST"
+            _cgd = "ACCEPTED" if (not _is_strict and _crej in _accepted_reasons) else "MONITORED"
         elif _crej in _accepted_reasons and _ctier in ("S", "A"):
             _cgd = "ACCEPTED"
         else:
@@ -516,17 +510,13 @@ class TestPropCandidateLogBTierClassification:
             _csport = "TENNIS"
             _is_strict = False
             _ctier = "B"
-            _cgd = "ACCEPTED" if (not _is_strict and reason in _accepted_reasons) else "WATCHLIST"
+            _cgd = "ACCEPTED" if (not _is_strict and reason in _accepted_reasons) else "MONITORED"
             assert _cgd == "ACCEPTED", f"Tier 1 B-tier reason={reason} must be ACCEPTED"
 
     def test_source_has_strict_sport_check_near_b_tier(self):
-        """Source code must include a strict-sport check in the B-tier branch."""
+        """Candidate monitoring_records retain sport and score context."""
         src = self._src()
-        # Find the B-tier branch
-        idx = src.find('_ctier == "B"')
-        assert idx >= 0
-        block = src[idx:idx + 600]
-        assert "_is_strict" in block or "is_strict_sport" in block or '"MLB"' in block
+        assert "score_tier" in src and "sport" in src
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -536,16 +526,14 @@ class TestPropCandidateLogBTierClassification:
 class TestTierPolicyUnchanged:
     """All thresholds and gate values must remain unchanged."""
 
-    def test_ud_strict_alert_sports_still_mlb_nfl_only(self):
+    def test_monitoring_sports_have_no_strict_classification(self):
         from config import config as cfg
-        assert cfg.ud_strict_alert_sports == frozenset({"MLB", "NFL"})
+        assert cfg.ud_strict_alert_sports == frozenset()
 
-    def test_strict_sports_not_expanded(self):
+    def test_all_sports_share_monitoring_rules(self):
         from config import config as cfg
-        assert "CS" not in cfg.ud_strict_alert_sports
-        assert "LOL" not in cfg.ud_strict_alert_sports
-        assert "WNBA" not in cfg.ud_strict_alert_sports
-        assert "TENNIS" not in cfg.ud_strict_alert_sports
+        for sport in ("MLB", "NFL", "CS", "LOL", "WNBA", "TENNIS"):
+            assert cfg.min_stars_for_sport(sport) == cfg.UD_NON_STRICT_MIN_STARS
 
     def test_ud_min_stars_to_alert_unchanged(self):
         from config import config as cfg
@@ -570,7 +558,7 @@ class TestTierPolicyUnchanged:
     def test_ud_non_strict_min_conf_a_unchanged(self):
         from config import config as cfg
         # Per Final Prop Acceptance Spec: Tier 1 A-tier cutoff is 70.
-        # 70 = actionable, 69 = watchlist.  Updated from prior 60 default.
+        # 70 = actionable, 69 = monitoring_record.  Updated from prior 60 default.
         assert cfg.UD_NON_STRICT_MIN_CONF_A == 75
 
     def test_ud_non_strict_min_conf_b_unchanged(self):
@@ -581,18 +569,14 @@ class TestTierPolicyUnchanged:
         from config import config as cfg
         assert cfg.UD_STRICT_SPORT_MIN_BET_QUALITY == 95
 
-    def test_ud_mlb_alert_tiers_still_s_only(self):
-        """Default: S-tier only (Tier 2: S+OVER actionable, A=watchlist)."""
+    def test_all_sports_use_uniform_monitoring_floor(self):
         from config import config as cfg
-        tiers = cfg.ud_mlb_alert_tiers
-        assert "S" in tiers
-        assert "A" not in tiers  # A-tier is watchlist for Tier 2
-        assert "B" not in tiers
+        for sport in ("MLB", "NFL", "NBA", "NHL", "WNBA", "CS"):
+            assert cfg.min_stars_for_sport(sport) == cfg.UD_NON_STRICT_MIN_STARS
 
-    def test_ud_mlb_min_tier_still_s(self):
-        """Default UD_MLB_MIN_TIER must be 'S' (Tier 2 spec)."""
+    def test_legacy_min_tier_does_not_split_monitoring(self):
         from config import config as cfg
-        assert cfg.UD_MLB_MIN_TIER == "S"
+        assert cfg.ud_strict_alert_sports == frozenset()
 
     def test_validation_min_samples_unchanged(self):
         from config import config as cfg

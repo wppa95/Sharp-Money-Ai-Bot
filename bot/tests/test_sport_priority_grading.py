@@ -59,63 +59,38 @@ class TestSportPriorityConfig:
         c.UD_TIER1_SPORTS_RAW = "NBA,WNBA"
         assert c.ud_tier1_sports == frozenset({"NBA", "WNBA"})
 
-    # ── ud_mlb_alert_tiers ─────────────────────────────────────────────────────
+    # ── Unified monitoring thresholds ─────────────────────────────────────────
 
-    def test_mlb_alert_tiers_default_s_only(self):
-        """Default: MLB alerts on S-tier only (Tier 2: S+OVER actionable, A=watchlist)."""
+    def test_mlb_monitoring_uses_uniform_stars_floor(self):
         c = self._cfg()
-        tiers = c.ud_mlb_alert_tiers
-        assert "S" in tiers
-        assert "A" not in tiers  # A-tier is watchlist for Tier 2
-        assert "B" not in tiers
+        assert c.min_stars_for_sport("MLB") == c.UD_NON_STRICT_MIN_STARS
 
-    def test_mlb_alert_tiers_a_includes_s(self):
-        """UD_MLB_MIN_TIER=A → S and A allowed."""
+    def test_monitoring_floor_is_independent_of_legacy_tier_setting(self):
         c = self._cfg(UD_MLB_MIN_TIER="A")
-        tiers = c.ud_mlb_alert_tiers
-        assert "S" in tiers
-        assert "A" in tiers
-        assert "B" not in tiers
+        assert c.min_stars_for_sport("MLB") == c.UD_NON_STRICT_MIN_STARS
 
-    def test_mlb_alert_tiers_b_includes_all(self):
-        """UD_MLB_MIN_TIER=B → S, A, B all allowed."""
+    def test_nfl_monitoring_uses_uniform_stars_floor(self):
         c = self._cfg(UD_MLB_MIN_TIER="B")
-        tiers = c.ud_mlb_alert_tiers
-        assert "S" in tiers
-        assert "A" in tiers
-        assert "B" in tiers
+        assert c.min_stars_for_sport("NFL") == c.UD_NON_STRICT_MIN_STARS
 
-    def test_mlb_alert_tiers_empty_disables_restriction(self):
-        """UD_MLB_MIN_TIER="" → no restriction (all tiers)."""
+    def test_empty_configuration_keeps_monitoring_enabled(self):
         c = self._cfg(UD_MLB_MIN_TIER="")
-        tiers = c.ud_mlb_alert_tiers
-        assert "S" in tiers
-        assert "A" in tiers
-        assert "B" in tiers
-        assert "C" in tiers
+        assert c.ud_strict_alert_sports == frozenset()
 
-    def test_mlb_alert_tiers_invalid_value_disables_restriction(self):
-        """Unknown UD_MLB_MIN_TIER value → no restriction (fail-open)."""
+    def test_invalid_legacy_tier_setting_does_not_disable_monitoring(self):
         c = self._cfg(UD_MLB_MIN_TIER="X")
-        tiers = c.ud_mlb_alert_tiers
-        # Should contain all known tiers (no restriction)
-        assert "S" in tiers
-        assert "A" in tiers
+        assert c.ud_strict_alert_sports == frozenset()
 
-    def test_mlb_alert_tiers_case_insensitive(self):
-        """Lowercase input is accepted."""
+    def test_monitoring_is_case_independent_of_legacy_setting(self):
         c = self._cfg(UD_MLB_MIN_TIER="a")
-        tiers = c.ud_mlb_alert_tiers
-        assert "S" in tiers
-        assert "A" in tiers
+        assert c.min_stars_for_sport("MLB") == c.UD_NON_STRICT_MIN_STARS
 
     # ── ud_strict_alert_sports ────────────────────────────────────────────────
 
-    def test_strict_alert_sports_contains_mlb_and_nfl(self):
-        """MLB and NFL must both be in ud_strict_alert_sports."""
+    def test_all_sports_share_monitoring_stream(self):
+        """No sport is excluded by a legacy strict-classification set."""
         c = self._cfg()
-        assert "MLB" in c.ud_strict_alert_sports
-        assert "NFL" in c.ud_strict_alert_sports
+        assert c.ud_strict_alert_sports == frozenset()
 
     def test_strict_alert_sports_does_not_include_other_sports(self):
         """Spot-check that non-strict sports are not in ud_strict_alert_sports."""
@@ -125,21 +100,19 @@ class TestSportPriorityConfig:
                 f"{sport} should not be in ud_strict_alert_sports"
             )
 
-    def test_nfl_blocked_at_a_tier_by_default(self):
-        """Default UD_MLB_MIN_TIER=S → NFL A-tier is NOT actionable (Tier 2 watchlist)."""
+    def test_nfl_a_tier_remains_monitored_by_default(self):
+        """NFL A-tier remains available to unified monitoring."""
         c = self._cfg()
-        assert "NFL" in c.ud_strict_alert_sports
-        assert "A" not in c.ud_mlb_alert_tiers
+        assert "NFL" not in c.ud_strict_alert_sports
+        assert c.min_stars_for_sport("NFL") == c.UD_NON_STRICT_MIN_STARS
 
-    def test_nfl_blocked_at_b_tier_by_default(self):
-        """Default UD_MLB_MIN_TIER=S → NFL B-tier must not be in allowed tiers."""
+    def test_nfl_b_tier_remains_monitored_by_default(self):
         c = self._cfg()
-        assert "B" not in c.ud_mlb_alert_tiers
+        assert c.min_stars_for_sport("NFL") == c.UD_NON_STRICT_MIN_STARS
 
-    def test_nfl_s_tier_allowed_by_default(self):
-        """Default UD_MLB_MIN_TIER=S → NFL S-tier IS in the allowed set."""
+    def test_nfl_s_tier_remains_monitored_by_default(self):
         c = self._cfg()
-        assert "S" in c.ud_mlb_alert_tiers
+        assert c.min_stars_for_sport("NFL") == c.UD_NON_STRICT_MIN_STARS
 
     # ── ALERT_DISABLED_SPORTS default ─────────────────────────────────────────
 
@@ -357,7 +330,7 @@ class TestMLBGateLogic:
         assert "S" in c.ud_mlb_alert_tiers
 
     def test_mlb_a_tier_blocked_by_default_gate(self):
-        """Default UD_MLB_MIN_TIER=S → A-tier is NOT in allowed tiers (Tier 2 watchlist)."""
+        """Default UD_MLB_MIN_TIER=S → A-tier is NOT in allowed tiers (Tier 2 monitoring_record)."""
         c = self._cfg("S")
         assert "A" not in c.ud_mlb_alert_tiers
 

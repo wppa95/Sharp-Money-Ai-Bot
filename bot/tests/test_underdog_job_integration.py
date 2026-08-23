@@ -318,10 +318,12 @@ class TestLifecycleTransitionsAfterBridge:
         # Large line move (4 units) → A/S tier expected
         # Sport is NHL (Tier 1, no BQ/MQ gate) so the Tier-2 gate does not apply;
         # this test verifies lifecycle transitions, not sport-specific delivery rules.
-        snap = _make_snap("Player A", "Total Bases", line=7.0, sport="NHL")
+        # "Points" avoids the v3.6 high-variance penalty applied to Total Bases,
+        # allowing this fixture to reach the A-tier delivery gate.
+        snap = _make_snap("Player A", "Points", line=7.0, sport="NHL")
         history = [
             _make_db_record(
-                "Player A", "Total Bases",
+                "Player A", "Points",
                 line_value=3.0 + 0.2 * i,
                 line_moved=(i > 0),
                 prev_line=3.0 + 0.2 * (i - 1) if i > 0 else None,
@@ -329,7 +331,7 @@ class TestLifecycleTransitionsAfterBridge:
             for i in range(20)
         ]
         db = _make_db(
-            recent_records=[_make_db_record("Player A", "Total Bases", 3.0)],
+            recent_records=[_make_db_record("Player A", "Points", 3.0)],
             prop_history=history,
         )
 
@@ -338,7 +340,7 @@ class TestLifecycleTransitionsAfterBridge:
             return WindowStats(games=n, over_count=oc, under_count=n - oc, hit_rate=r, average=8.0)
 
         fake_hit_rates = PlayerHitRates(
-            player_name="Player A", stat_type="total bases", current_line=7.0,
+            player_name="Player A", stat_type="points", current_line=7.0,
             l5=_win(5, 0.80), l10=_win(10, 0.80),
             l20=_win(20, 0.75), l30=_win(30, 0.70),
             season=_win(50, 0.70), h2h=None,
@@ -364,13 +366,16 @@ class TestLifecycleTransitionsAfterBridge:
 
         with patch("market_engine._fetch_and_compute_hit_rates",
                    new=AsyncMock(return_value=fake_hit_rates)):
+            # Isolate lifecycle ordering from the independent v3.6 delivery
+            # evidence gate; the fixture already supplies a qualifying S-tier.
+            with patch("market_engine._tier_delivery_gate", return_value=True):
             # Patch allowed_user_ids so chat_ids is non-empty and delivery fires
-            with patch.object(me.config.__class__, "allowed_user_ids",
-                              new_callable=lambda: property(lambda self: {99999})):
-                await _run_job(
-                    [snap], db,
-                    deliver_result=DeliveryResult(sent=True, recipients_sent=1),
-                )
+                with patch.object(me.config.__class__, "allowed_user_ids",
+                                  new_callable=lambda: property(lambda self: {99999})):
+                    await _run_job(
+                        [snap], db,
+                        deliver_result=DeliveryResult(sent=True, recipients_sent=1),
+                    )
 
         # Bridge must have run
         assert "bridge" in call_order, (
@@ -623,17 +628,17 @@ class TestJobHealthTracking:
         # Set up a qualifying prop so lifecycle updates are triggered.
         # Sport is NHL (Tier 1, no BQ/MQ gate) so the Tier-2 gate does not apply;
         # this test verifies job health tracking, not sport-specific delivery rules.
-        snap = _make_snap("Player A", "Total Bases", line=7.0, sport="NHL")
+        snap = _make_snap("Player A", "Points", line=7.0, sport="NHL")
         history = [
             _make_db_record(
-                "Player A", "Total Bases",
+                "Player A", "Points",
                 line_value=3.0 + 0.2 * i,
                 line_moved=(i > 0),
             )
             for i in range(20)
         ]
         db = _make_db(
-            recent_records=[_make_db_record("Player A", "Total Bases", 3.0)],
+            recent_records=[_make_db_record("Player A", "Points", 3.0)],
             prop_history=history,
         )
         # Make every lifecycle update fail
@@ -646,7 +651,7 @@ class TestJobHealthTracking:
             return WindowStats(games=n, over_count=oc, under_count=n - oc, hit_rate=r, average=8.0)
 
         fake_hit_rates = PlayerHitRates(
-            player_name="Player A", stat_type="total bases", current_line=7.0,
+            player_name="Player A", stat_type="points", current_line=7.0,
             l5=_win(5, 0.80), l10=_win(10, 0.80),
             l20=_win(20, 0.75), l30=_win(30, 0.70),
             season=_win(50, 0.70), h2h=None,
@@ -657,13 +662,14 @@ class TestJobHealthTracking:
 
         with patch("market_engine._fetch_and_compute_hit_rates",
                    new=AsyncMock(return_value=fake_hit_rates)):
-            with patch.object(me.config.__class__, "allowed_user_ids",
-                              new_callable=lambda: property(lambda self: {99999})):
-                await _run_job(
-                    [snap], db,
-                    deliver_result=DeliveryResult(sent=True, recipients_sent=1),
-                    health=health,
-                )
+            with patch("market_engine._tier_delivery_gate", return_value=True):
+                with patch.object(me.config.__class__, "allowed_user_ids",
+                                  new_callable=lambda: property(lambda self: {99999})):
+                    await _run_job(
+                        [snap], db,
+                        deliver_result=DeliveryResult(sent=True, recipients_sent=1),
+                        health=health,
+                    )
 
         info = health.get_job_info("underdog_job")
         assert info.get("fail_count", 0) >= 1, (

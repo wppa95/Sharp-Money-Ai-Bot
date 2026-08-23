@@ -4,7 +4,7 @@ Regression tests for the Final Prop Acceptance Spec.
 Tests all 27 boundaries specified in the spec document:
 
 Tier 2 (MLB + NFL):
-  - S/A tier = actionable; B/C = watchlist
+  - S/A tier = actionable; B/C = monitoring_record
   - Both OVER and UNDER allowed
   - MLB UNDER restricted to whitelist markets
   - NFL UNDER fully allowed (no market restriction)
@@ -12,8 +12,8 @@ Tier 2 (MLB + NFL):
 Tier 1 (all other sports):
   - S tier = actionable + priority
   - A-tier 70/100 = actionable
-  - A-tier 69/100 = watchlist
-  - B/C = watchlist
+  - A-tier 69/100 = monitoring_record
+  - B/C = monitoring_record
 
 Strong UNDER signal:
   - Tier 1 UNDER + confidence ≥ 30 + BQ ≥ 70 → 🔥 STRONG UNDER label
@@ -198,14 +198,14 @@ class TestNFLUnder:
             is_blocked = ("NFL" == "MLB" and not config.is_mlb_under_allowed(market))
             assert not is_blocked, f"NFL UNDER {market} should never be blocked"
 
-    def test_nfl_b_tier_watchlist(self):
-        """#11: NFL B-tier → watchlist (not actionable)."""
+    def test_nfl_b_tier_monitoring_record(self):
+        """#11: NFL B-tier → monitoring_record (not actionable)."""
         d = _decision("B", 55, "OVER")
-        # B-tier is not in {"S", "A"} — watchlist only
+        # B-tier is not in {"S", "A"} — monitoring_record only
         assert d.decision_tier not in ("S", "A")
 
-    def test_nfl_c_tier_watchlist(self):
-        """#12: NFL C-tier → watchlist (not actionable)."""
+    def test_nfl_c_tier_monitoring_record(self):
+        """#12: NFL C-tier → monitoring_record (not actionable)."""
         d = _decision("C", 40, "OVER")
         assert d.decision_tier not in ("S", "A")
 
@@ -226,8 +226,8 @@ class TestTier1Actionability:
         conf = config.UD_NON_STRICT_MIN_CONF_A  # 75 — updated from 70
         assert conf >= config.UD_NON_STRICT_MIN_CONF_A
 
-    def test_tier1_a_tier_69_watchlist(self):
-        """#15: Tier 1 A-tier at 69/100 → watchlist (does NOT pass gate)."""
+    def test_tier1_a_tier_69_monitoring_record(self):
+        """#15: Tier 1 A-tier at 69/100 → monitoring_record (does NOT pass gate)."""
         conf = 69
         assert conf < config.UD_NON_STRICT_MIN_CONF_A
 
@@ -246,10 +246,11 @@ class TestTier1Actionability:
             assert sport not in config.ud_strict_alert_sports, \
                 f"{sport} should be Tier 1 (not strict)"
 
-    def test_mlb_nfl_are_strict(self):
-        """MLB and NFL must be in the strict sports set (Tier 2)."""
-        assert "MLB" in config.ud_strict_alert_sports
-        assert "NFL" in config.ud_strict_alert_sports
+    def test_mlb_nfl_use_unified_monitoring(self):
+        """MLB and NFL participate in the same monitoring stream."""
+        assert config.ud_strict_alert_sports == frozenset()
+        assert config.min_stars_for_sport("MLB") == config.UD_NON_STRICT_MIN_STARS
+        assert config.min_stars_for_sport("NFL") == config.UD_NON_STRICT_MIN_STARS
 
 
 # ─── 5. Strong UNDER signal ───────────────────────────────────────────────────
