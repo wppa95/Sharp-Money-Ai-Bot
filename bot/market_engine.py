@@ -4477,9 +4477,9 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
 # is eventually rescored.  Completely separate from the stable-refresh job —
 # uses its own cursor, rotation counter, and stats keys in health.json.
 #
-# Priority order (scheduling only — not an alert filter):
-#   1. Tier 1 sports + all other non-low-priority sports (sorted alphabetically)
-#   2. NFL / MLB (lowest scheduling priority — always rescanned, just last)
+# Rotation order is deterministic and unified across all sports.  New or
+# meaningful movers are handled by the live scan paths; this job covers the
+# remaining active pool without sport-tier priority.
 #
 # No prop is permanently excluded.  A previous Rejected result does not
 # prevent rescoring in a later rotation; the prop must pass the normal
@@ -4557,14 +4557,11 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 _health.record_job_run("full_pool_rescan_job")
             return
 
-        # ── Priority sort: Tier 1 + other sports first, low-priority last ─────
-        _low = config.fpr_low_priority_sports  # frozenset of sport codes (upper-case)
-
         def _fpr_sort_key(item):
-            """0 = high-priority (Tier 1 + other), 1 = low-priority (NFL/MLB)."""
+            """Stable ordering for the unified full-pool rotation."""
             (player, stat, line), snap = item
             sport = (getattr(snap, "sport", None) or "").upper()
-            return (1 if sport in _low else 0, player, stat, line)
+            return (sport, player, stat, line)
 
         sorted_items = sorted(active_pool.items(), key=_fpr_sort_key)
         pool_keys    = [k for k, _ in sorted_items]
@@ -4779,14 +4776,13 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         f"{(fpr_end_cursor / fpr_pool_size * 100):.1f}%"
         if fpr_pool_size > 0 else "—"
     )
-    _low_names = " / ".join(sorted(config.fpr_low_priority_sports)) or "none"
     _status_tag = "✅ COMPLETE → rotation #%d started" % fpr_rotation if rotation_complete else "🔄 in progress"
     logger.info(
         "\n%s\n🌐 Full-Pool Rescan\n%s\n"
         "Rotation:  #%d  (%s)\n"
         "Progress:  %s\n"
         "Coverage:  %s / %s active props\n"
-        "Priority:  Tier 1 + Other → %s (last)\n"
+        "Priority:  Unified active-prop rotation\n"
         "Batch:     %6d\n"
         "🔬 Rescored:   %6d\n"
         "✅ Sent:       %6d\n"
@@ -4796,7 +4792,6 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         _display_rotation, _status_tag,
         _pct,
         f"{fpr_end_cursor:,}", f"{fpr_pool_size:,}",
-        _low_names,
         fpr_batch_size,
         fpr_rescored,
         fpr_sent,

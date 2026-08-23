@@ -1,0 +1,129 @@
+FIX WATCHLIST ROTATION — NO TIERS
+
+Continue from the current implementation.
+
+The player identity, global player-prop evidence, and graded-prop evidence lifecycle updates are already implemented and working. Do not redo or regress those changes.
+
+Make only the targeted change below.
+
+REQUIRED CHANGE
+
+1. Watchlist props MUST remain in continuous rotation
+
+A prop being placed on:
+
+* Watchlist
+* Near-Miss
+* Rejected
+* PASS
+* Cold-start
+* Previously evaluated
+
+must NOT remove it from the active monitoring rotation.
+
+Watchlist is a classification/status for the funnel and display only. It must not become a scheduling or rotation exclusion.
+
+Watchlist props must continue to:
+
+* Be rescanned
+* Be rescored
+* Receive updated line snapshots
+* Detect subsequent line movement
+* Receive evidence enrichment when available
+* Participate in graded-prop evidence accumulation
+* Remain eligible for future evaluation
+* Re-enter actionable qualification if conditions improve
+
+2. REMOVE ANY WATCHLIST ROTATION EXCLUSION
+
+Audit the full monitoring/rotation path for logic equivalent to:
+
+* excluding watchlist props from the active pool
+* skipping watchlist props during FPR/full-pool rotation
+* preventing watchlist props from being selected for Stable Refresh
+* marking watchlist props as permanently completed
+* using watchlist status as a scan/evaluation gate
+* removing watchlist props after a near-miss decision
+
+Remove only the exclusion behavior.
+
+Do not remove the Watchlist display/status itself.
+
+3. NO TIER SYSTEM
+
+Important: DO NOT REINTRODUCE Tier 1 / Tier 2.
+
+The tier framework has been removed.
+
+Do not add or restore:
+
+* Tier 1
+* Tier 2
+* Tier 1 priority
+* Tier 2 blockers
+* MLB/NFL/NBA tier rules
+* Any S/A/B/C qualification requirement
+
+Likewise, S/A/B/C classifications must not become underlying monitoring or evaluation gates.
+
+The system should operate from the current unified monitoring/evaluation model.
+
+4. ROTATION PRIORITY
+
+Preserve the existing priority behavior:
+
+1. New props
+2. Meaningful line movers
+3. Urgent/actionable movement
+4. Remaining active props
+5. Watchlist/near-miss props remain part of the remaining active pool
+
+The key requirement is that nothing in Watchlist status prevents a prop from eventually receiving another scan.
+
+Once the active pool has been covered, the rotation starts again and watchlist props are included.
+
+5. DO NOT CHANGE UNRELATED SYSTEMS
+
+Do NOT change:
+
+* scoring formulas
+* confidence calculations
+* BQ/MQ calculations
+* scheduler cadence
+* max_instances
+* adaptive batching
+* provider integrations
+* evidence providers
+* graded-history lifecycle
+* database schema
+* Telegram formatting
+* Discord formatting
+* delivery rules
+* clean-restart behavior
+* Stable Refresh behavior except removing a Watchlist exclusion
+* FPR behavior except removing a Watchlist exclusion
+
+Do not redesign the architecture.
+
+6. VERIFY BEFORE REPORTING COMPLETE
+
+Run focused tests proving:
+
+* Watchlist props remain in the active rotation.
+* A watchlisted prop can be selected again on a later rotation.
+* A near-miss can be rescored.
+* A rejected prop can be rescored.
+* A PASS can be rescored.
+* A cold-start prop remains monitorable.
+* Full-pool rotation does not permanently skip Watchlist props.
+* No Tier 1/Tier 2 logic was reintroduced.
+* No S/A/B/C gate was reintroduced.
+* Existing identity/evidence/graded-history tests still pass.
+
+Do not restart Railway.
+
+Do not deploy Railway.
+
+Do not create a checkpoint.
+
+Make the smallest targeted change necessary and report exactly what changed and what was verified.
