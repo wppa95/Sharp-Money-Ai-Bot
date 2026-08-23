@@ -48,10 +48,15 @@ class UnderdogProjection:
     team:        str
     sport:       str
     stat_type:   str
-    line_value:  float
+    line_value:  Optional[float]
     game_id:     str = ""
     game_time:   Optional[datetime] = None
     fetched_at:  datetime = field(default_factory=datetime.utcnow)
+    odds: int = 0
+    market_type: str = "Pick'em"
+    is_moneyline: bool = False
+    selection: str = ""
+    event: str = ""
 
 
 class UnderdogConnector(BaseConnector):
@@ -105,31 +110,45 @@ class UnderdogConnector(BaseConnector):
             opening_line = prev.line_value if prev else proj.line_value
 
             # Detect line movement
-            line_moved = (prev is not None and abs(proj.line_value - prev.line_value) >= 0.01)
+            line_moved = (
+                prev is not None and (
+                    (proj.line_value is not None and prev.line_value is not None
+                     and abs(proj.line_value - prev.line_value) >= 0.01)
+                    or (proj.is_moneyline and proj.odds != prev.odds)
+                )
+            )
 
             notes = ""
             if line_moved and prev:
-                direction = "up" if proj.line_value > prev.line_value else "down"
-                notes = f"line_moved:{prev.line_value:.1f}→{proj.line_value:.1f}:{direction}"
+                if proj.is_moneyline:
+                    direction = "up" if proj.odds > prev.odds else "down"
+                    notes = f"odds_moved:{prev.odds}→{proj.odds}:{direction}"
+                else:
+                    direction = "up" if proj.line_value > prev.line_value else "down"
+                    notes = f"line_moved:{prev.line_value:.1f}→{proj.line_value:.1f}:{direction}"
 
-            sel = f"{proj.player_name} {proj.stat_type} {proj.line_value}"
+            sel = proj.selection or f"{proj.player_name} {proj.stat_type} {proj.line_value}"
 
             snaps = MarketSnapshot(
                 sportsbook   = _BOOK_TITLE,
                 sport        = proj.sport,
                 league       = proj.sport,
-                event        = proj.game_id or f"{proj.sport} game",
-                market_type  = "Pick'em",
+                event        = proj.event or proj.game_id or f"{proj.sport} game",
+                market_type  = proj.market_type,
                 selection    = sel,
-                odds         = 0,   # no odds on pick'em
+                odds         = proj.odds,
                 timestamp    = now,
                 player       = proj.player_name,
                 team         = proj.team,
-            line         = proj.line_value,
+            line         = None if proj.is_moneyline else proj.line_value,
             game_time    = proj.game_time,
-            opening_odds = None,  # pick'em has no American odds
+             opening_odds = (
+                 prev.odds if proj.is_moneyline and prev else
+                 (proj.odds if proj.is_moneyline else None)
+             ),
             external_id  = proj.external_id,
             is_pickem    = True,
+             is_moneyline  = proj.is_moneyline,
             )
             # Stash notes for downstream consumers via a convention attr
             object.__setattr__(snaps, "_notes", notes) if False else None
@@ -143,26 +162,28 @@ class UnderdogConnector(BaseConnector):
             old = self._previous.pop(rid, None)
             if old:
                 logger.debug(
-                    "Underdog prop REMOVED: %s %s %.1f",
-                    old.player_name, old.stat_type, old.line_value,
+                    "Underdog market REMOVED: %s %s %s",
+                    old.player_name or old.team, old.stat_type,
+                    old.line_value if old.line_value is not None else old.odds,
                 )
-                sel = f"{old.player_name} {old.stat_type} {old.line_value}"
+                sel = old.selection or f"{old.player_name} {old.stat_type} {old.line_value}"
                 snapshots.append(MarketSnapshot(
                     sportsbook   = _BOOK_TITLE,
                     sport        = old.sport,
                     league       = old.sport,
-                    event        = old.game_id or f"{old.sport} game",
-                    market_type  = "Pick'em",
+                    event        = old.event or old.game_id or f"{old.sport} game",
+                     market_type  = old.market_type,
                     selection    = sel + " [REMOVED]",
-                    odds         = 0,
+                     odds         = old.odds,
                     timestamp    = now,
                     player       = old.player_name,
                     team         = old.team,
-                    line         = old.line_value,
+                     line         = None if old.is_moneyline else old.line_value,
                     game_time    = old.game_time,
                     opening_odds = None,
                     external_id  = old.external_id,
                     is_pickem    = True,
+                     is_moneyline  = old.is_moneyline,
                 ))
 
         self._last_seen = current_ids
@@ -335,6 +356,71 @@ class UnderdogConnector(BaseConnector):
             except (KeyError, TypeError, ValueError) as exc:
                 logger.debug("Underdog parse error: %s", exc)
                 continue
+
+        # Moneyline feeds have varied over time.  Only parse explicitly named
+        # moneyline containers and fields; never infer from arbitrary nested
+        # objects (which protects the v1 over_under_lines parser).
+        containers = []
+        for key in ("moneyline_lines", "moneylines", "moneyline_markets"):
+            value = data.get(key, [])
+            containers.extend(value if isinstance(value, list) else [value])
+        for game in data.get("games", []):
+            if not isinstance(game, dict):
+                continue
+            for market in game.get("markets", []):
+                if not isinstance(market, dict):
+                    continue
+                kind = str(market.get("market_type") or market.get("type") or
+                           market.get("key") or "").lower()
+                if "moneyline" in kind or kind in {"h2h", "ml"}:
+                    containers.append({**market, "_game": game})
+
+        def _first(obj, *keys):
+            for key in keys:
+                if obj.get(key) is not None:
+                    return obj[key]
+            return None
+
+        for item in containers:
+            if not isinstance(item, dict):
+                continue
+            game = item.get("_game") or {}
+            outcomes = item.get("outcomes") or item.get("selections")
+            if isinstance(outcomes, list):
+                entries = outcomes
+            else:
+                entries = [item]
+            for outcome in entries:
+                if not isinstance(outcome, dict):
+                    continue
+                odds = _first(outcome, "odds", "price", "american_odds")
+                team = _first(outcome, "team", "team_name", "name", "selection")
+                ext = _first(outcome, "id", "external_id")
+                parent_id = _first(item, "id", "external_id", "market_id")
+                event_id = _first(outcome, "event_id", "game_id", "match_id") or \
+                    _first(item, "event_id", "game_id", "match_id") or \
+                    _first(game, "id", "game_id", "match_id")
+                sport = _first(outcome, "sport", "sport_id") or \
+                    _first(item, "sport", "sport_id") or _first(game, "sport", "sport_id")
+                if team is None or sport is None:
+                    continue
+                try:
+                    odds_int = int(odds) if odds is not None else 0
+                except (TypeError, ValueError):
+                    continue
+                if isinstance(team, dict):
+                    team = _first(team, "name", "alias", "abbreviation", "id")
+                if team is None:
+                    continue
+                team = str(team)
+                stable = str(ext or f"{parent_id or event_id or 'event'}:{team}")
+                projections.append(UnderdogProjection(
+                    external_id=stable, player_name="", team=team,
+                    sport=str(sport).upper(), stat_type="Moneyline",
+                    line_value=None, game_id=str(event_id or ""),
+                    odds=odds_int, market_type="Moneyline", is_moneyline=True,
+                    selection=team, event=str(event_id or ""),
+                ))
 
         logger.debug("Underdog: parsed %d projections", len(projections))
         return projections

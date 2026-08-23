@@ -1142,6 +1142,7 @@ class AlertDelivery:
         market_move_only: bool = False,  # True → send lightweight market-move alert only
         market_confirmation: Optional[dict] = None,  # OddsAPI sportsbook confirmation data
         high_priority: bool = False,  # True for 85–94/100 S-tier (4★+) → prepend 🔥 header
+        is_moneyline: bool = False,
     ) -> "DeliveryResult":
         """
         Full Underdog prop alert pipeline:
@@ -1168,6 +1169,24 @@ class AlertDelivery:
             )
             return DeliveryResult(sent=False, filtered=True,
                                   filtered_reason=f"Tier 2 sport blocked (temporary): {sport}")
+
+        # Moneylines are retained and scored for monitoring, but only an
+        # explicitly Strong-moneyline designation may reach Telegram. Keep this
+        # before normal new/removal/movement-only exceptions so none bypass it.
+        _strong_moneyline = False
+        if is_moneyline or stat_type.strip().lower() == "moneyline":
+            _strength = str(
+                getattr(decision, "moneyline_strength", "")
+                or getattr(decision, "strength", "")
+                or getattr(decision, "recommendation", "")
+                or ""
+            ).strip().upper().replace(" ", "_")
+            if _strength not in {"STRONG", "STRONG_BET"}:
+                return DeliveryResult(
+                    sent=False, filtered=True,
+                    filtered_reason="Moneyline requires Strong qualification",
+                )
+            _strong_moneyline = True
 
         from alert_normalizer import normalize_underdog
         from alert_scope_filter import check
@@ -1216,7 +1235,12 @@ class AlertDelivery:
 
         # Canonical Telegram qualification gate. Sport is intentionally not
         # part of this decision; all supported sports are treated equally.
-        if decision is not None and not removed and not market_move_only:
+        if (
+            decision is not None
+            and not removed
+            and not market_move_only
+            and not _strong_moneyline
+        ):
             _tier = getattr(decision, "decision_tier", None)
             _bq = float(getattr(score, "total", 0) or 0)
             _mq_label_obj = getattr(market_quality, "label", None)

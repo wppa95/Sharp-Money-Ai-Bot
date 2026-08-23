@@ -58,6 +58,9 @@ class MarketSnapshot:
     opening_odds: Optional[int] = None        # set on first sight
     external_id:  Optional[str] = None
     is_pickem:    bool = False
+    # Explicit marker for pick'em moneyline markets.  Kept additive so all
+    # existing over/under snapshots retain their historical shape.
+    is_moneyline: bool = False
 
     @property
     def market_key(self) -> tuple[str, str, str, str]:

@@ -350,6 +350,50 @@ class TestDeliverUnderdog:
         assert not result.filtered
 
     @pytest.mark.asyncio
+    async def test_non_strong_moneyline_is_filtered_before_formatting(self):
+        delivery = self._delivery()
+        result = await delivery.deliver_underdog(
+            player_name="Kansas City Chiefs",
+            team="KC",
+            sport="NFL",
+            stat_type="Moneyline",
+            old_line=0,
+            new_line=0,
+            is_moneyline=True,
+        )
+        assert result.filtered is True
+        assert result.sent is False
+        delivery._bot.send_message.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_strong_moneyline_can_be_delivered(self, monkeypatch):
+        delivery = self._delivery()
+        decision = MagicMock(
+            moneyline_strength="STRONG",
+            recommendation="STRONG",
+            decision_tier=None,
+            confidence=95,
+        )
+        score = MagicMock(total=95, tier="S", stars=5)
+        monkeypatch.setattr(
+            "alerts.broadcast_alert",
+            AsyncMock(return_value={"sent": 1, "failed": 0}),
+        )
+        monkeypatch.setattr("alerts.send_discord_alert", AsyncMock(return_value=False))
+        result = await delivery.deliver_underdog(
+            player_name="Kansas City Chiefs",
+            team="KC",
+            sport="NFL",
+            stat_type="Moneyline",
+            old_line=0,
+            new_line=0,
+            is_moneyline=True,
+            decision=decision,
+            score=score,
+        )
+        assert result.sent is True
+
+    @pytest.mark.asyncio
     async def test_line_change_higher_broadcast(self):
         sent_messages: list[str] = []
 

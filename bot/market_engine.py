@@ -1557,6 +1557,27 @@ async def underdog_job(context) -> None:
         _health.record_provider_fetch("Underdog")
 
     ud_snaps = [s for s in snapshots if s.sportsbook == "Underdog"]
+    # Moneylines share the pick'em feed but not the player-prop scoring model.
+    # Persist them in the existing canonical snapshot history so odds rotation
+    # removals remain observable, then keep them out of over/under scoring.
+    ud_moneylines = [
+        s for s in ud_snaps
+        if getattr(s, "is_moneyline", False) is True
+    ]
+    if ud_moneylines:
+        for _ml in ud_moneylines:
+            await _cycle_timing.await_db(
+                "write",
+                "save_market_snapshot_underdog_moneyline",
+                db.save_market_snapshot(MarketSnapshotRecord(
+                    sportsbook=_ml.sportsbook, sport=_ml.sport, league=_ml.league,
+                    event=_ml.event, market_type="Moneyline", selection=_ml.selection,
+                    player=None, team=_ml.team, line=None, odds=_ml.odds,
+                    opening_odds=_ml.opening_odds, is_pickem=True,
+                    game_time=_ml.game_time, recorded_at=datetime.utcnow(),
+                )),
+            )
+        ud_snaps = [s for s in ud_snaps if s not in ud_moneylines]
     _cycle_timing.count("active_pool_fetched", len(snapshots))
     _cycle_timing.count("active_pool_sportsbook_filtered", len(snapshots) - len(ud_snaps))
     # Capture count before the list is cleared later for memory recovery.

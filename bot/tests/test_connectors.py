@@ -132,6 +132,29 @@ UNDERDOG_API_RESPONSE = {
     ],
 }
 
+UNDERDOG_MONEYLINE_RESPONSE = {
+    "moneyline_lines": [
+        {
+            "id": "ml-nfl-001",
+            "sport_id": "nfl",
+            "event_id": "game-nfl-001",
+            "outcomes": [
+                {"id": "out-nfl-kc", "team_name": "Kansas City Chiefs", "price": -125},
+                {"id": "out-nfl-lv", "team_name": "Las Vegas Raiders", "price": 105},
+            ],
+        },
+        {
+            "id": "ml-mlb-001",
+            "sport": "MLB",
+            "game_id": "game-mlb-001",
+            "outcomes": [
+                {"team": "Los Angeles Dodgers", "american_odds": -145},
+                {"team": "New York Mets", "american_odds": 125},
+            ],
+        },
+    ],
+}
+
 
 # ── MarketSnapshot model ──────────────────────────────────────────────────────
 
@@ -273,6 +296,46 @@ class TestUnderdogConnector:
         prev = c._previous.get(new_proj.external_id)
         assert prev is not None
         assert abs(new_proj.line_value - prev.line_value) > 0.01
+
+    def test_parse_moneylines_across_sports(self):
+        c = UnderdogConnector()
+        projs = c._parse(UNDERDOG_MONEYLINE_RESPONSE)
+        assert len(projs) == 4
+        assert {p.sport for p in projs} == {"NFL", "MLB"}
+        assert all(p.is_moneyline for p in projs)
+        assert all(p.market_type == "Moneyline" for p in projs)
+        assert all(p.line_value is None for p in projs)
+        assert {p.team for p in projs} == {
+            "Kansas City Chiefs", "Las Vegas Raiders",
+            "Los Angeles Dodgers", "New York Mets",
+        }
+
+    @pytest.mark.asyncio
+    async def test_moneyline_odds_movement_is_detected(self):
+        c = UnderdogConnector()
+        first = c._parse(UNDERDOG_MONEYLINE_RESPONSE)
+        c._previous = {p.external_id: p for p in first}
+        changed = {
+            **UNDERDOG_MONEYLINE_RESPONSE,
+            "moneyline_lines": [
+                {
+                    **UNDERDOG_MONEYLINE_RESPONSE["moneyline_lines"][0],
+                    "outcomes": [
+                        {"id": "out-nfl-kc", "team_name": "Kansas City Chiefs", "price": -155},
+                        {"id": "out-nfl-lv", "team_name": "Las Vegas Raiders", "price": 135},
+                    ],
+                },
+            ],
+        }
+        c._fetch_projections = AsyncMock(return_value=c._parse(changed))
+        snapshots = await c.fetch()
+        chiefs = next(s for s in snapshots if s.team == "Kansas City Chiefs")
+        assert chiefs.is_moneyline is True
+        assert chiefs.market_type == "Moneyline"
+        assert chiefs.line is None
+        assert chiefs.odds == -155
+        assert chiefs.opening_odds == -125
+        assert chiefs.odds_change == -30
 
     @pytest.mark.asyncio
     async def test_disabled_connector_returns_empty(self):
