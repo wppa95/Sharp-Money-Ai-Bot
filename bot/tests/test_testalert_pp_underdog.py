@@ -185,14 +185,6 @@ class TestMockOppIntegrity:
 # ---------------------------------------------------------------------------
 
 class TestDeliverPp:
-    # Patch _TIER2_SPORTS_BLOCK so the NBA test fixture sport does not hit the
-    # Tier-2 Telegram delivery block — these tests exercise cap/scope/timing
-    # logic, not the sport-tier filter.
-    @pytest.fixture(autouse=True)
-    def _unblock_tier2(self):
-        with patch("alerts._TIER2_SPORTS_BLOCK", frozenset()):
-            yield
-
     @pytest.mark.asyncio
     async def test_pp_scope_always_passes(self):
         """PrizePicks source is never filtered by AlertScopeFilter."""
@@ -337,14 +329,6 @@ class TestDeliverPp:
 # ---------------------------------------------------------------------------
 
 class TestDeliverUnderdog:
-    # Patch _TIER2_SPORTS_BLOCK so tests that use NFL/NBA sport can exercise the
-    # formatting pipeline — these tests verify delivery behavior, not the sport-tier
-    # filter. NHL tests are unaffected (NHL was already unblocked).
-    @pytest.fixture(autouse=True)
-    def _unblock_tier2(self):
-        with patch("alerts._TIER2_SPORTS_BLOCK", frozenset()):
-            yield
-
     def _delivery(self, chat_ids=None):
         mock_bot = MagicMock()
         mock_bot.send_message = AsyncMock(return_value=MagicMock())
@@ -519,7 +503,6 @@ class TestDeliverUnderdog:
     @pytest.mark.asyncio
     async def test_underdog_sport_icon_nfl(self):
         """NFL format includes the football emoji — patch Tier 2 block to test formatting."""
-        import alerts as alerts_mod
         sent_messages: list[str] = []
 
         async def capture(chat_id, text, **kwargs):
@@ -529,21 +512,19 @@ class TestDeliverUnderdog:
         mock_bot = MagicMock()
         mock_bot.send_message = AsyncMock(side_effect=capture)
         delivery = AlertDelivery(_make_db_mock(), mock_bot, [1])
-        with patch.object(alerts_mod, "_TIER2_SPORTS_BLOCK", frozenset()):
-            await delivery.deliver_underdog(
-                player_name = "Saquon Barkley",
-                team        = "PHI",
-                sport       = "NFL",
-                stat_type   = "Rushing Yards",
-                old_line    = 85.5,
-                new_line    = 89.5,
-            )
+        await delivery.deliver_underdog(
+            player_name = "Saquon Barkley",
+            team        = "PHI",
+            sport       = "NFL",
+            stat_type   = "Rushing Yards",
+            old_line    = 85.5,
+            new_line    = 89.5,
+        )
         assert "🏈" in sent_messages[0]
 
     @pytest.mark.asyncio
     async def test_underdog_sport_icon_nba(self):
         """NBA format includes the basketball emoji — patch Tier 2 block to test formatting."""
-        import alerts as alerts_mod
         sent_messages: list[str] = []
 
         async def capture(chat_id, text, **kwargs):
@@ -553,15 +534,14 @@ class TestDeliverUnderdog:
         mock_bot = MagicMock()
         mock_bot.send_message = AsyncMock(side_effect=capture)
         delivery = AlertDelivery(_make_db_mock(), mock_bot, [1])
-        with patch.object(alerts_mod, "_TIER2_SPORTS_BLOCK", frozenset()):
-            await delivery.deliver_underdog(
-                player_name = "Anthony Edwards",
-                team        = "MIN",
-                sport       = "NBA",
-                stat_type   = "Points",
-                old_line    = 26.5,
-                new_line    = 28.5,
-            )
+        await delivery.deliver_underdog(
+            player_name = "Anthony Edwards",
+            team        = "MIN",
+            sport       = "NBA",
+            stat_type   = "Points",
+            old_line    = 26.5,
+            new_line    = 28.5,
+        )
         assert "🏀" in sent_messages[0]
 
     @pytest.mark.asyncio

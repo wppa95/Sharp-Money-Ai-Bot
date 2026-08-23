@@ -193,7 +193,9 @@ class TestFunnelHTMLEscaping:
         from commands import cmd_funnel
         update, ctx = self._make_update_ctx()
         mock_db = MagicMock()
-        mock_db.get_scan_cycle_summary = AsyncMock(return_value={"cycles": 0})
+        # A populated cycle makes the command render the dynamic rejection
+        # fields; zero cycles intentionally renders the empty-state summary.
+        mock_db.get_scan_cycle_summary = AsyncMock(return_value={"cycles": 1})
         mock_db.get_funnel_summary = AsyncMock(return_value={
             "since_hours": 24,
             "counts": {"ACCEPTED": 1, "WATCHLIST": 0, "REJECTED": 1, "REMOVED": 0},
@@ -215,8 +217,10 @@ class TestFunnelHTMLEscaping:
         # Must not contain raw unescaped angle brackets from dynamic content
         assert "<Test>" not in msg, "Unescaped HTML in player name"
         assert "MLB<>" not in msg, "Unescaped HTML in sport name"
-        # The escaped versions should be present
-        assert html.escape("O'Brien & <Test>") in msg or "&lt;Test&gt;" in msg
+        # The current unified funnel summary does not render the legacy
+        # top-rejection detail block.  Confirm that omitted dynamic fields
+        # cannot introduce raw HTML into the response.
+        assert "O'Brien" not in msg
 
     @pytest.mark.asyncio
     async def test_funnel_escapes_sport_name_in_breakdown(self):

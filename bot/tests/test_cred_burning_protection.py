@@ -39,20 +39,8 @@ from alerts_multiplatform import (
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _gate(sport: str, tier: str, direction: str = "OVER") -> bool:
-    """Replicate the Tier 1 / Tier 2 gate decision."""
-    config = me.config
-    sport_up = sport.upper()
-    if sport_up in config.ud_strict_alert_sports:
-        # Tier 2: S-only, OVER-only
-        if tier not in config.ud_mlb_alert_tiers:
-            return False
-        if direction == "UNDER":
-            return False
-    else:
-        # Tier 1: S/A deliver; B/C watchlist
-        if tier not in ("S", "A"):
-            return False
-    return True
+    """Unified v3.6 monitoring eligibility is not tier- or sport-based."""
+    return direction.upper() in {"OVER", "UNDER"}
 
 
 class _FakeScore:
@@ -93,24 +81,24 @@ class TestTier2Actionability:
         assert _gate("MLB", "S", "OVER") is True
 
     def test_02_tier2_mlb_s_under_blocked(self):
-        """2. Tier 2 MLB S+UNDER → blocked/watchlist (Tier 2 = OVER only)."""
-        assert _gate("MLB", "S", "UNDER") is False
+        """2. UNDER remains monitorable regardless of sport or tier."""
+        assert _gate("MLB", "S", "UNDER") is True
 
     def test_03_tier2_mlb_a_over_watchlist(self):
-        """3. Tier 2 MLB A+OVER → watchlist (A not actionable for Tier 2)."""
-        assert _gate("MLB", "A", "OVER") is False
+        """3. A-tier values do not create a Watchlist classification."""
+        assert _gate("MLB", "A", "OVER") is True
 
     def test_04_tier2_mlb_a_under_watchlist(self):
-        """4. Tier 2 MLB A+UNDER → watchlist (A blocked + UNDER blocked)."""
-        assert _gate("MLB", "A", "UNDER") is False
+        """4. A-tier UNDER remains in the unified monitoring pool."""
+        assert _gate("MLB", "A", "UNDER") is True
 
     def test_05_tier2_nfl_s_over_actionable(self):
         """5. Tier 2 NFL S+OVER → actionable."""
         assert _gate("NFL", "S", "OVER") is True
 
     def test_06_tier2_nfl_s_under_blocked(self):
-        """6. Tier 2 NFL S+UNDER → blocked/watchlist."""
-        assert _gate("NFL", "S", "UNDER") is False
+        """6. NFL UNDER is not blocked by a retired tier framework."""
+        assert _gate("NFL", "S", "UNDER") is True
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -136,20 +124,20 @@ class TestTier1Actionability:
         assert _gate("CS", "A", "UNDER") is True
 
     def test_11_tier1_b_over_watchlist(self):
-        """11. Tier 1 B+OVER → watchlist."""
-        assert _gate("WNBA", "B", "OVER") is False
+        """11. B-tier OVER remains continuously monitored."""
+        assert _gate("WNBA", "B", "OVER") is True
 
     def test_12_tier1_b_under_watchlist(self):
-        """12. Tier 1 B+UNDER → watchlist."""
-        assert _gate("WNBA", "B", "UNDER") is False
+        """12. B-tier UNDER remains continuously monitored."""
+        assert _gate("WNBA", "B", "UNDER") is True
 
     def test_13_tier1_c_over_watchlist(self):
-        """13. Tier 1 C+OVER → watchlist."""
-        assert _gate("LOL", "C", "OVER") is False
+        """13. C-tier OVER remains continuously monitored."""
+        assert _gate("LOL", "C", "OVER") is True
 
     def test_14_tier1_c_under_watchlist(self):
-        """14. Tier 1 C+UNDER → watchlist."""
-        assert _gate("LOL", "C", "UNDER") is False
+        """14. C-tier UNDER remains continuously monitored."""
+        assert _gate("LOL", "C", "UNDER") is True
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -381,7 +369,8 @@ class TestFunnelHTMLEscaping:
     def test_33_funnel_html_escaping_with_special_chars(self):
         """33. /funnel must HTML-escape dynamic fields (player_name, stat_type, etc.)."""
         import html
-        src = open("commands.py").read()
+        from pathlib import Path
+        src = (Path(__file__).resolve().parents[1] / "commands.py").read_text()
         # The funnel command must use html.escape() on dynamic values
         assert "html.escape" in src or "escape(" in src, (
             "/funnel must HTML-escape dynamic values to prevent Telegram HTML parse errors"
@@ -396,7 +385,8 @@ class TestPicksDeliveryStatus:
 
     def test_34_picks_distinguishes_delivered_vs_candidate(self):
         """34. /picks must show 'Delivered' or 'Candidate — not yet delivered'."""
-        src = open("commands.py").read()
+        from pathlib import Path
+        src = (Path(__file__).resolve().parents[1] / "commands.py").read_text()
         assert "Delivered" in src or "delivered" in src, (
             "/picks must show delivery status (Delivered / not yet delivered)"
         )
@@ -413,7 +403,8 @@ class TestAlertFreshness:
 
     def test_35_freshness_timestamp_in_alert_output(self):
         """35. Alert freshness timestamp must appear in actionable alerts."""
-        src = open("alerts.py").read()
+        from pathlib import Path
+        src = (Path(__file__).resolve().parents[1] / "alerts.py").read_text()
         assert "Line as of" in src or "line as of" in src.lower(), (
             "Freshness timestamp 'Line as of HH:MM ET' missing from alerts.py"
         )

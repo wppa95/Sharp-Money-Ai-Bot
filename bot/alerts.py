@@ -1216,7 +1216,7 @@ class AlertDelivery:
 
         # Canonical Telegram qualification gate. Sport is intentionally not
         # part of this decision; all supported sports are treated equally.
-        if not removed and not market_move_only:
+        if decision is not None and not removed and not market_move_only:
             _tier = getattr(decision, "decision_tier", None)
             _bq = float(getattr(score, "total", 0) or 0)
             _mq_label_obj = getattr(market_quality, "label", None)

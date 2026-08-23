@@ -95,7 +95,6 @@ async def test_s_tier_bypasses_daily_cap():
     # Also patch _TIER2_SPORTS_BLOCK so NBA sport doesn't hit the Tier-2 delivery block.
     from alert_scope_filter import FilterResult
     with (
-        patch("alerts._TIER2_SPORTS_BLOCK", frozenset()),
         patch("alert_scope_filter.check", return_value=FilterResult(allowed=True)),
         patch("alerts.format_pp_alert", return_value="<msg>"),
         patch("alerts.broadcast_alert", new_callable=AsyncMock,
@@ -119,7 +118,6 @@ async def test_a_tier_blocked_when_cap_reached():
 
     from alert_scope_filter import FilterResult
     with (
-        patch("alerts._TIER2_SPORTS_BLOCK", frozenset()),
         patch("alert_scope_filter.check", return_value=FilterResult(allowed=True)),
         patch("engine.timing.is_game_alertable", return_value=(True, "")),
     ):
@@ -141,7 +139,6 @@ async def test_b_tier_blocked_when_cap_reached():
 
     from alert_scope_filter import FilterResult
     with (
-        patch("alerts._TIER2_SPORTS_BLOCK", frozenset()),
         patch("alert_scope_filter.check", return_value=FilterResult(allowed=True)),
         patch("engine.timing.is_game_alertable", return_value=(True, "")),
     ):
@@ -161,7 +158,6 @@ async def test_a_tier_allowed_when_under_cap():
 
     from alert_scope_filter import FilterResult
     with (
-        patch("alerts._TIER2_SPORTS_BLOCK", frozenset()),
         patch("alert_scope_filter.check", return_value=FilterResult(allowed=True)),
         patch("alerts.format_pp_alert", return_value="<msg>"),
         patch("alerts.broadcast_alert", new_callable=AsyncMock,
@@ -185,7 +181,6 @@ async def test_pp_timing_filter_blocks_in_progress_game():
 
     from alert_scope_filter import FilterResult
     with (
-        patch("alerts._TIER2_SPORTS_BLOCK", frozenset()),
         patch("alert_scope_filter.check", return_value=FilterResult(allowed=True)),
         patch("engine.timing.is_game_alertable",
               return_value=(False, "🔴 Game already in progress")),
@@ -215,7 +210,6 @@ async def test_underdog_blocked_when_daily_cap_configured_and_reached():
         with (
             patch("alert_scope_filter.check", return_value=FilterResult(allowed=True)),
             patch("engine.timing.is_game_alertable", return_value=(True, "")),
-            patch.object(alerts_mod, "_TIER2_SPORTS_BLOCK", frozenset()),
         ):
             result = await delivery.deliver_underdog(
                 "Test Player", "TeamA", "NBA", "Points",
@@ -245,7 +239,6 @@ async def test_underdog_cap_disabled_when_limit_is_zero():
             patch("alerts.broadcast_alert", new_callable=AsyncMock,
                   return_value={"sent": 1, "failed": 0}),
             patch("engine.timing.is_game_alertable", return_value=(True, "")),
-            patch.object(alerts_mod, "_TIER2_SPORTS_BLOCK", frozenset()),
         ):
             result = await delivery.deliver_underdog(
                 "Test Player", "TeamA", "NBA", "Points",
@@ -271,7 +264,6 @@ async def test_underdog_allowed_when_under_cap():
         patch("alerts.broadcast_alert", new_callable=AsyncMock,
               return_value={"sent": 1, "failed": 0}),
         patch("engine.timing.is_game_alertable", return_value=(True, "")),
-        patch.object(alerts_mod, "_TIER2_SPORTS_BLOCK", frozenset()),
     ):
         result = await delivery.deliver_underdog(
             "Test Player", "TeamA", "NBA", "Points",
@@ -368,7 +360,6 @@ async def test_s_tier_does_not_consume_ab_cap():
 
     from alert_scope_filter import FilterResult
     with (
-        patch("alerts._TIER2_SPORTS_BLOCK", frozenset()),
         patch("alert_scope_filter.check", return_value=FilterResult(allowed=True)),
         patch("alerts.format_pp_alert", return_value="<msg>"),
         patch("alerts.broadcast_alert", new_callable=AsyncMock,
