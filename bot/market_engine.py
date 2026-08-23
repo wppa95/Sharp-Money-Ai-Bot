@@ -3443,19 +3443,7 @@ async def underdog_job(context) -> None:
                     _accepted_rejections = (
                         "qualified", "sent", "filtered", "new_prop_failed", "cold_start"
                     )
-                    if _ctier == "PASS":
-                        _cgd = "REJECTED"
-                    elif _ctier == "B":
-                        # Tier 1 (non-MLB/NFL): B-tier props are ACCEPTED when they
-                        # have a legitimate qualifying reason — mirrors the alert engine
-                        # which allows S/A/B/C for non-strict sports.
-                        # Tier 2 (MLB/NFL): B-tier is WATCHLIST (strict sports never
-                        # alert at B-tier so they should not appear as ACCEPTED).
-                        if not _is_strict_sport and _crej in _accepted_rejections:
-                            _cgd = "ACCEPTED"
-                        else:
-                            _cgd = "WATCHLIST"
-                    elif _crej in _accepted_rejections and _ctier in ("S", "A"):
+                    if _crej in _accepted_rejections:
                         # "qualified"       — is_qualified=True (S/A tier, passed scoring gate, eligible for alert)
                         # "sent"            — new-prop path: alert delivered to Telegram
                         # "filtered"        — new-prop path: reached delivery, filtered by dedup/reversal
@@ -3881,7 +3869,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             # ── Watchlist UNDER rule: score 30–40 + UNDER recommendation ─────
             # Low-scoring UNDER candidates are saved as watchlist rather than
             # silently dropped so they can be promoted if they improve later.
-            if 30 <= _sr_score.total <= 40:
+            if False and 30 <= _sr_score.total <= 40:
                 try:
                     _sr_hits_wl = await _fetch_and_compute_hit_rates(
                         db, _sr_player, _sr_sport, _sr_stat, _sr_line, allow_remote=False
@@ -4135,7 +4123,10 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
     # PART 2 — Watchlist rescan
     # ────────────────────────────────────────────────────────────────────────────
     try:
-        _wl_all       = await db.get_active_watchlist_candidates()  # FIFO order (id ASC)
+        # The active pool above is the single unified rotation.  Do not run a
+        # separate Watchlist/Near-Miss queue; legacy rows remain readable for
+        # grading, but never control rescoring or rotation.
+        _wl_all       = []
         wl_active     = len(_wl_all)
 
         # Rotating cursor — ensures every watchlist entry is eventually rescanned
@@ -4397,18 +4388,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         "Coverage:  %s / %s active props\n"
         "🔬 Rescored:  %6d\n"
         "✅ Qualified: %6d  (sent: %d)\n"
-        "👁 Watchlist: %6d\n"
         "❌ Rejected:  %6d\n"
-        "%s\n"
-        "👁 Watchlist Refresh\n"
-        "%s\n"
-        "Active watchlist:  %6d\n"
-        "Re-scored:         %6d\n"
-        "⬆️  Improved:       %6d\n"
-        "➡️  Unchanged:      %6d\n"
-        "⬇️  Declined:       %6d\n"
-        "🔥 Promoted:       %6d\n"
-        "🚫 Removed:        %6d\n"
         "⏱ Next refresh:   ~2 min\n"
         "%s",
         _thick, _thick,
@@ -4417,16 +4397,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         f"{end_cursor:,}", f"{pool_size:,}",
         sr_rescored,
         sr_qualified, sr_sent,
-        sr_watchlist,
         sr_rejected,
-        _thick, _thick,
-        wl_active,
-        wl_rescored,
-        wl_improved,
-        wl_unchanged,
-        wl_declined,
-        wl_promoted,
-        wl_removed,
         _thick,
     )
 
@@ -4460,10 +4431,8 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         _health.record_job_run("stable_refresh_job")
 
     logger.info(
-        "stable_refresh_job: pool=%d batch=%d rescored=%d qualified=%d sent=%d "
-        "watchlist=%d wl_active=%d wl_promoted=%d",
+        "stable_refresh_job: pool=%d batch=%d rescored=%d qualified=%d sent=%d",
         pool_size, len(batch_keys), sr_rescored, sr_qualified, sr_sent,
-        sr_watchlist, wl_active, wl_promoted,
     )
     _job_activity_end("stable_refresh")
 
@@ -4625,13 +4594,6 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     prev_line    = None,
                     history      = _fpr_hist,
                 )
-
-                # Track props in watchlist score range
-                if (
-                    _fpr_score is not None
-                    and 30 <= float(_fpr_score.total) <= 40
-                ):
-                    fpr_watchlist += 1
 
                 _fpr_val = _fpr_validate(
                     player_name  = _fpr_player,

@@ -1567,7 +1567,11 @@ class Database:
     async def get_latest_props_for_provider(
         self, provider: str, since_hours: int = 6
     ) -> "list[PropLineHistory]":
-        """Return the most-recent snapshot for each (player, stat) from a provider."""
+        """Return the latest persistent snapshot for each provider prop.
+
+        This is tracking data rather than delivery history, so it is not
+        filtered by alert state, score, recommendation, or sport.
+        """
         from datetime import timedelta
         cutoff = datetime.utcnow() - timedelta(hours=since_hours)
         async with self.session() as s:
@@ -1585,7 +1589,37 @@ class Database:
                 .scalar_subquery()
             )
             result = await s.execute(
-                select(PropLineHistory).where(PropLineHistory.id.in_(subq))
+                select(PropLineHistory)
+                .where(PropLineHistory.id.in_(subq))
+                .order_by(desc(PropLineHistory.fetched_at))
+            )
+            return list(result.scalars().all())
+
+    async def get_recent_tracked_props(
+        self, provider: str = "Underdog", since_hours: int = 1, limit: int = 100
+    ) -> "list[PropLineHistory]":
+        """Return latest-per-prop persistent tracking rows across all sports."""
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(hours=since_hours)
+        async with self.session() as s:
+            subq = (
+                select(func.max(PropLineHistory.id))
+                .where(
+                    PropLineHistory.provider == provider,
+                    PropLineHistory.fetched_at >= cutoff,
+                )
+                .group_by(
+                    PropLineHistory.player_name,
+                    PropLineHistory.sport,
+                    PropLineHistory.stat_type,
+                )
+                .scalar_subquery()
+            )
+            result = await s.execute(
+                select(PropLineHistory)
+                .where(PropLineHistory.id.in_(subq))
+                .order_by(desc(PropLineHistory.fetched_at))
+                .limit(limit)
             )
             return list(result.scalars().all())
 
@@ -2989,6 +3023,10 @@ class Database:
         rec_id = hashlib.sha256(
             f"{external_id}:{stat_type}".encode()
         ).hexdigest()[:16]
+        # Legacy scan paths may still pass these values, but they are no
+        # longer valid monitoring classifications.
+        if watchlist_state in {"Watchlist", "Near-Miss", "NearMiss"}:
+            watchlist_state = None
         _qpath = _json.dumps(qualification_path) if qualification_path else None
         _rcodes = _json.dumps(reason_codes) if reason_codes else None
         if downstream_intelligence is None:
@@ -3331,7 +3369,12 @@ class Database:
                 .where(PropCandidateLog.scan_ts >= cutoff)
                 .group_by(PropCandidateLog.gate_decision)
             )
-            counts = {r.gate_decision: r.n for r in cnt_rows.all()}
+            counts = {}
+            for r in cnt_rows.all():
+                # Legacy rows are folded into the unified rejected bucket.
+                # The retired label must not leak into command/report output.
+                key = "REJECTED" if r.gate_decision == "WATCHLIST" else r.gate_decision
+                counts[key] = counts.get(key, 0) + r.n
 
             # 2. Recent rejections — highest score first so near-misses surface first.
             # Props that were ACCEPTED at any point in the window are excluded: the
@@ -3409,7 +3452,6 @@ class Database:
                     "sport":     sp,
                     "scanned":   0,
                     "accepted":  0,
-                    "watchlist": 0,
                     "rejected":  0,
                     "removed":   0,
                 }

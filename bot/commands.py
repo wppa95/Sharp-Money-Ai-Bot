@@ -2476,9 +2476,13 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
         # ── Recent Underdog props tracked ─────────────────────────────────────
         pm_lines.append("")
-        pm_lines.append("<b>🔔 Recently Tracked Props</b>  <i>(last 6 h)</i>")
+        pm_lines.append("<b>🔔 Recently Tracked Props</b>  <i>(last hour · all sports)</i>")
         try:
-            recent_props = await _db.get_latest_props_for_provider("Underdog", since_hours=6)
+            # Read the persistent tracking stream, not delivered-alert history.
+            # This keeps rejected, non-actionable, and multi-sport props visible.
+            recent_props = await _db.get_recent_tracked_props(
+                "Underdog", since_hours=1, limit=100
+            )
             if recent_props:
                 for _r in recent_props[:5]:
                     _lc = getattr(_r, "lifecycle_state", None) or "—"
@@ -3597,10 +3601,9 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         top_rej   = summary.get("top_rejections", [])
 
         accepted  = counts.get("ACCEPTED",  0)
-        watchlist = counts.get("WATCHLIST", 0)
         rejected  = counts.get("REJECTED",  0)
         removed   = counts.get("REMOVED",   0)
-        total     = accepted + watchlist + rejected + removed
+        total     = accepted + rejected + removed
 
         def _fmt_rate(num: int, denom: int) -> str:
             """Format a small percentage with enough precision to stay non-zero."""
@@ -3688,15 +3691,7 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 )
                 sr_qual      = sr_stats.get("sr_qualified", 0)
                 sr_sent      = sr_stats.get("sr_sent",      0)
-                sr_wl        = sr_stats.get("sr_watchlist", 0)
                 sr_rej       = sr_stats.get("sr_rejected",  0)
-                wl_active    = sr_stats.get("wl_active",    0)
-                wl_rescored  = sr_stats.get("wl_rescored",  0)
-                wl_improved  = sr_stats.get("wl_improved",  0)
-                wl_unchanged = sr_stats.get("wl_unchanged", 0)
-                wl_declined  = sr_stats.get("wl_declined",  0)
-                wl_promoted  = sr_stats.get("wl_promoted",  0)
-                wl_removed   = sr_stats.get("wl_removed",   0)
                 lines += [
                     "",
                     _thick,
@@ -3708,7 +3703,6 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     f"Batch size:         <b>{sr_batch:,}</b>",
                     f"🔬 Rescored:        <b>{sr_rescored:,}</b>",
                     f"✅ Qualified:       <b>{sr_qual:,}</b>  (sent: {sr_sent})",
-                    f"👁 Watchlist:       <b>{sr_wl:,}</b>",
                     f"❌ Rejected:        <b>{sr_rej:,}</b>",
                 ]
             # ── Full-Pool Rescan Rotation block ──────────────────────────────────
@@ -3775,7 +3769,6 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             "",
             f"📥 Evaluated: <b>{active:,}</b>",
             f"✅ Qualified (decision + quality gates): <b>{accepted}</b>",
-            f"👁 Watchlist (near-miss):   <b>{watchlist}</b>",
             f"❌ Rejected:                <b>{rejected}</b>",
             f"🚫 Removed:                 <b>{removed}</b>",
             "",
@@ -3795,20 +3788,19 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 "",
                 "⚽ <b>Sport Funnel Breakdown</b>",
                 "",
-                f"{'Sport':<12} {'Scan':>4} {'Acc':>4} {'Watch':>5} {'Rej':>4} {'Rm':>3}",
-                "─" * 36,
+                f"{'Sport':<12} {'Scan':>4} {'Acc':>4} {'Rej':>4} {'Rm':>3}",
+                "─" * 30,
             ]
             for row in by_sport:
                 # Escape dynamic sport name to prevent HTML parse errors
                 sp    = _html.escape((row.get("sport") or "?")[:11])
                 sc    = row.get("scanned",   0)
                 acc   = row.get("accepted",  0)
-                watch = row.get("watchlist", 0)
                 rej   = row.get("rejected",  0)
                 rm    = row.get("removed",   0)
                 pass_pct = _fmt_rate(acc, sc)
                 lines.append(
-                    f"<code>{sp:<12} {sc:>4} {acc:>4} {watch:>5} {rej:>4} {rm:>3}</code>"
+                    f"<code>{sp:<12} {sc:>4} {acc:>4} {rej:>4} {rm:>3}</code>"
                     f"  <i>{pass_pct}</i>"
                 )
         else:

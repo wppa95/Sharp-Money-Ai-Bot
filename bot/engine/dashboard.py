@@ -133,6 +133,8 @@ class DashboardReport:
     # ── Today's counts ────────────────────────────────────────────────────────
     today_ud_alerts:    int = 0
     today_pp_alerts:    int = 0
+    # Persistent monitoring stream, intentionally independent of delivery.
+    recent_tracked_props: list = field(default_factory=list)
 
     # ── EV performance ────────────────────────────────────────────────────────
     avg_ev_pct:         Optional[float] = None   # avg expected_value from ev_records
@@ -196,6 +198,15 @@ class DashboardReport:
             "",
         ]
 
+        if self.recent_tracked_props:
+            parts.append("🔔 <b>Recently Tracked Props</b>  <i>(last hour · all sports)</i>")
+            for prop in self.recent_tracked_props[:5]:
+                parts.append(
+                    f"  <b>{prop['player_name']}</b>  {prop['stat_type']} "
+                    f"<code>{prop['line_value']:.1f}</code> · <i>{prop['sport']}</i>"
+                )
+            parts.append("")
+
         # ── CLV performance ───────────────────────────────────────────────────
         parts.append("💎 <b>Closing Line Value</b>")
         if self.total_clv_records > 0:
@@ -211,35 +222,6 @@ class DashboardReport:
         if self.clv_seeds_pending > 0:
             parts.append(f"  Pending:   <code>{self.clv_seeds_pending}</code> seeds awaiting close")
         parts.append("")
-
-        # ── Underdog tier breakdown ───────────────────────────────────────────
-        # All-time cumulative performance: counts every alerted Underdog snapshot
-        # since first run.  Use /funnel for today's candidate qualification pipeline
-        # and /alerts for Telegram-delivered picks in the last 24h.
-        if self.total_ud_alerts > 0:
-            parts.append("🐶 <b>Tier Breakdown</b>  <i>(All-time alerted)</i>")
-            tier_order = ["S", "A", "B", "C", "PASS"]
-            tier_emojis = {"S": "🔥", "A": "🟢", "B": "🟡", "C": "▪️", "PASS": "⚪"}
-            # Use the sum of tier counts as the denominator — total_ud_alerts counts
-            # ALL UnderdogSnapshotRecord rows (scanned), not just the alerted subset.
-            # The tier breakdown only covers alerted snapshots, so dividing by the
-            # scan total produces near-zero percentages for every tier.
-            _tier_total = sum(self.ud_tier_breakdown.values()) or 1
-            for t in tier_order:
-                n = self.ud_tier_breakdown.get(t, 0)
-                if n:
-                    pct = n / _tier_total * 100
-                    pct_str = (
-                        f"{pct:.1f}%" if pct < 1.0
-                        else f"{pct:.0f}%"
-                    )
-                    parts.append(
-                        f"  {tier_emojis.get(t, '⚪')} {t:<4} "
-                        f"<code>{n:>4}</code>  ({pct_str})"
-                    )
-            if self.ud_avg_score is not None:
-                parts.append(f"  Avg score: <code>{self.ud_avg_score:.0f}/100</code>")
-            parts.append("")
 
         # ── By sport ──────────────────────────────────────────────────────────
         # All-time cumulative alert distribution across EV + Underdog + PrizePicks.
@@ -355,6 +337,21 @@ class DashboardEngine:
 
         # Run all independent queries (best-effort)
         await cls._gather_totals(db, report)
+        try:
+            rows = await db.get_recent_tracked_props(
+                "Underdog", since_hours=1, limit=100
+            )
+            report.recent_tracked_props = [
+                {
+                    "player_name": row.player_name,
+                    "stat_type": row.stat_type,
+                    "line_value": float(row.line_value),
+                    "sport": row.sport,
+                }
+                for row in rows
+            ]
+        except Exception:
+            report.recent_tracked_props = []
         await cls._gather_ev_performance(db, report)
         await cls._gather_clv_performance(db, report)
         await cls._gather_ud_breakdown(db, report)
