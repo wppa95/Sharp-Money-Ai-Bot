@@ -1,0 +1,119 @@
+Add one final targeted v3.6 feature: restore Underdog moneyline monitoring.
+
+Continue from the current clean v3.6 implementation.
+
+The current v3.6 test suite is green at 4,550 passed, 0 failed, 0 errors. Do not regress that state.
+
+REQUIRED CHANGE
+
+Underdog currently has moneyline markets available across all supported sports.
+
+Restore Underdog moneyline ingestion and monitoring across the supported sports.
+
+Moneyline props must:
+
+* Be fetched from Underdog when available.
+* Be persisted/tracked through the existing monitoring pipeline.
+* Receive the normal current v3.6 evaluation/scoring treatment.
+* Remain part of the normal continuous monitoring/rotation.
+* Receive line snapshots and subsequent movement tracking.
+* Participate in the existing evidence/tracking/grading lifecycle where applicable.
+
+ALERT REQUIREMENT
+
+I ONLY want Telegram alerts for Strong moneyline signals.
+
+A moneyline may be monitored, scored, stored, rescored, and tracked without producing an alert.
+
+Telegram delivery for Underdog moneylines must require the existing Strong moneyline designation.
+
+Do NOT alert on:
+
+* weak moneylines
+* ordinary moneylines
+* Watchlist
+* Near-Miss
+* PASS
+* S/A/B/C
+* Tier 1
+* Tier 2
+
+Do NOT introduce any tier system.
+
+Do NOT create a separate parallel moneyline scoring framework if the existing scoring system can be reused.
+
+Use the existing canonical evaluation/delivery architecture.
+
+IMPORTANT v3.6 RULES
+
+Do NOT reintroduce:
+
+* Tier 1
+* Tier 2
+* S/A/B/C gates
+* Watchlist
+* Near-Miss
+* PASS monitoring classifications
+
+Every moneyline snapshot should remain tracked and gradeable regardless of whether it qualifies for an alert.
+
+A moneyline that is not Strong should remain in the monitoring universe and continue through future rotations.
+
+PROTECTED SYSTEMS
+
+Do NOT change:
+
+* scheduler cadence
+* max_instances
+* adaptive batching
+* continuous rotation
+* Stable Refresh
+* FPR
+* player identity
+* global evidence
+* graded-prop evidence lifecycle
+* hit/miss tracking
+* database schema
+* Telegram formatting
+* Discord behavior
+* existing Underdog prop/over-under behavior
+* clean restart
+* dashboard behavior
+
+unless a narrowly required integration change is necessary for moneyline support.
+
+Do not redesign the architecture.
+
+TESTING
+
+Add focused tests proving:
+
+1. Underdog moneylines are ingested.
+2. Moneylines from multiple supported sports are accepted.
+3. Moneyline snapshots persist.
+4. Moneyline movement can be rescored.
+5. Non-Strong moneylines do NOT generate Telegram alerts.
+6. Strong moneylines CAN generate Telegram alerts when all existing safety/dedup protections pass.
+7. Non-Strong moneylines remain in continuous monitoring.
+8. No Tier 1/Tier 2 logic is introduced.
+9. No Watchlist/Near-Miss/PASS classification is introduced.
+10. Existing over/under prop behavior remains unchanged.
+11. Existing identity/evidence/grading tests remain green.
+
+Then run:
+
+* Focused moneyline tests
+* Underdog connector tests
+* Rotation tests
+* Delivery tests
+* Evidence/grading tests
+* Dashboard tests
+* Full bot/tests suite
+* Python compilation
+* git diff --check
+
+Do NOT restart Railway.
+Do NOT deploy Railway.
+Do NOT create a checkpoint yet.
+
+When finished, report exactly what changed and the final test results.
