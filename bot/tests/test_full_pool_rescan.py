@@ -359,7 +359,10 @@ class TestFPRJob:
         ):
             await _full_pool_rescan_job(ctx)
 
+        # Selection must enter the real evaluation pipeline even when the
+        # prop was already delivered recently.
         db.get_ud_prop_history.assert_awaited()
+        db.log_prop_opportunity.assert_awaited()
 
     # ── Test 2 & 3 & 18: rejected / scored props get rescanned ───────────────
     async def test_rejected_props_eventually_rescanned(self):

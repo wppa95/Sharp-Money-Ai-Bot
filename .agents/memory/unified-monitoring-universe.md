@@ -15,3 +15,7 @@ with the actual feed.
 **How to apply:** Keep the live feed responsible for new/moved/removed data,
 use the canonical by-line active pool for bounded rescans, and report tracked
 coverage, movement, rescoring, and delivery independently from alert gates.
+
+FPR must never apply delivery deduplication before scoring. Recently delivered
+props still need history, evaluation, and tracking work; dedup belongs only at
+the alert-delivery gate.

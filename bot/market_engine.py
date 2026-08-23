@@ -4547,19 +4547,6 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         if fpr_end_cursor >= fpr_pool_size:
             rotation_complete = True
 
-        # ── Bulk dedup pre-load (one DB query for the whole batch) ────────────
-        _fpr_bulk_ok    = True
-        _fpr_bulk_dedup: frozenset = frozenset()
-        try:
-            _fpr_recent = await db.get_recent_alerted_props_for_dedup(
-                within_seconds=int(config.UD_ALERT_DEDUP_WINDOW),
-            )
-            _fpr_bulk_dedup = frozenset(
-                (r.player_name, r.stat_type) for r in (_fpr_recent or [])
-            )
-        except Exception:
-            _fpr_bulk_ok = False
-
         # ── Score each prop in this batch ─────────────────────────────────────
         for _fpr_key in batch_keys:
             _fpr_player, _fpr_stat, _fpr_line_val = _fpr_key
@@ -4569,12 +4556,6 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
 
             _fpr_sport  = (getattr(_fpr_snap, "sport", None) or "UNKNOWN").upper()
             _fpr_line   = float(_fpr_snap.line_value or 0.0)
-
-            # Bulk dedup pre-check: skip props alerted very recently
-            if _fpr_bulk_ok and (_fpr_player, _fpr_stat) in _fpr_bulk_dedup:
-                fpr_rescored        += 1
-                fpr_total_rescanned += 1
-                continue
 
             try:
                 _fpr_hist  = await db.get_ud_prop_history(_fpr_player, _fpr_stat, limit=30)
