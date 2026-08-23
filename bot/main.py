@@ -309,22 +309,8 @@ async def post_init(application: Application) -> None:
             # during brief process pauses).
             job_kwargs={"max_instances": 1, "misfire_grace_time": 60},
         )
-        # Stable refresh — rolls through the full stable prop pool (10k/batch) every
-        # 2 minutes using only local DB data (zero extra Underdog API calls).
-        # Also rescans active watchlist candidates every cycle.
-        # Starts 90 s after launch to let the first underdog_job cold-start complete.
-        jq.run_repeating(
-            _stable_refresh_job,
-            interval=240,
-            first=90,
-            name="stable_refresh",
-            job_kwargs={"max_instances": 1, "misfire_grace_time": 60},
-        )
-        # Full-Pool Rescan Rotation — covers the entire active prop pool in bounded
-        # batches, guaranteeing every prop (stable, rejected, near-miss, watchlist)
-        # is eventually rescored.  Priority: Tier 1 + other sports first, NFL/MLB last.
-        # Uses its own cursor and rotation counter — completely separate from the
-        # stable-refresh job.  Starts 150 s after launch.
+        # Full-Pool Rescan Rotation is the sole bounded background rotation.
+        # It consumes the canonical active (player, stat, line) universe.
         from market_engine import _full_pool_rescan_job
         jq.run_repeating(
             _full_pool_rescan_job,

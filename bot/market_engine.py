@@ -1854,9 +1854,7 @@ async def underdog_job(context) -> None:
                             provider          = "Underdog",
                             bet_quality_score = decision.confidence,
                             reason_codes      = _compute_reason_codes(score, decision),
-                            watchlist_state   = (
-                                "Qualified" if decision.recommendation != "PASS" else "Rejected"
-                            ),
+                            watchlist_state   = None,
                             downstream_intelligence = _build_downstream_intel(
                                 line_delta=getattr(snap, "line_delta", None),
                                 evidence={
@@ -2202,9 +2200,7 @@ async def underdog_job(context) -> None:
                                 provider          = "Underdog",
                                 bet_quality_score = decision.confidence,
                                 reason_codes      = _compute_reason_codes(score, decision),
-                                watchlist_state   = (
-                                    "Qualified" if decision.recommendation != "PASS" else "Rejected"
-                                ),
+                                watchlist_state   = None,
                                 ),
                             )
                         except Exception as _pol_exc:
@@ -2230,7 +2226,7 @@ async def underdog_job(context) -> None:
                                 confidence     = 0,
                                 game_time      = snap.game_time,
                                 provider       = "Underdog",
-                                watchlist_state = "Rejected",
+                                watchlist_state = None,
                                 ),
                             )
                         except Exception as _pol_exc:
@@ -2903,9 +2899,7 @@ async def underdog_job(context) -> None:
                         provider          = "Underdog",
                         bet_quality_score = _sdec.confidence,
                         reason_codes      = _compute_reason_codes(_sscore, _sdec),
-                        watchlist_state   = (
-                            "Qualified" if _sdec.recommendation != "PASS" else "Rejected"
-                        ),
+                        watchlist_state   = None,
                         downstream_intelligence = _build_downstream_intel(
                             line_delta=getattr(_ssnap, "line_delta", None),
                             evidence={
@@ -3762,17 +3756,9 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
     end_cursor   = 0
     batch_keys: list = []
     sr_rescored  = 0
-    sr_qualified = 0
-    sr_watchlist = 0
-    sr_rejected  = 0
+    sr_actionable = 0
+    sr_not_delivered = 0
     sr_sent      = 0
-    wl_active    = 0
-    wl_rescored  = 0
-    wl_improved  = 0
-    wl_unchanged = 0
-    wl_declined  = 0
-    wl_promoted  = 0
-    wl_removed   = 0
 
     # ────────────────────────────────────────────────────────────────────────────
     # PART 1 — Rolling stable-pool rescan
@@ -3783,8 +3769,23 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         # (including removals) then keeps only non-removed latest rows.
         # This ensures props whose most-recent feed record is a removal are
         # absent from the pool, preventing false rescores and alerts.
-        active_pool: dict = await db.get_active_underdog_snapshot_per_prop()
-        pool_keys: list   = sorted(active_pool.keys())   # stable sort → consistent cursor
+        active_pool: dict = await db.get_all_active_underdog_snapshots_by_line()
+        # Keep direct callers with older test/database doubles functional
+        # while production always uses the canonical by-line universe.
+        if not isinstance(active_pool, dict):
+            active_pool = await db.get_active_underdog_snapshot_per_prop()
+        if active_pool and all(len(key) == 2 for key in active_pool):
+            active_pool = {
+                (player, stat, float(getattr(snap, "line_value", 0.0) or 0.0)): snap
+                for (player, stat), snap in active_pool.items()
+            }
+        pool_keys: list   = sorted(
+            active_pool,
+            key=lambda key: (
+                (getattr(active_pool[key], "sport", None) or "").upper(),
+                key[0], key[1], key[2],
+            ),
+        )
         pool_size         = len(pool_keys)
 
         # Load cursor; wrap to current pool size so a shrinking pool never OOBs
@@ -3800,8 +3801,8 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         # the canonical ORM field on UnderdogSnapshotRecord.  No divergence is
         # possible here since we score from the same snapshot we just fetched.
         _sr_line_map: dict = {
-            (pn, st): (snap.line_value or 0.0)
-            for (pn, st), snap in active_pool.items()
+            (snap.player_name, snap.stat_type): (snap.line_value or 0.0)
+            for snap in active_pool.values()
         }
 
         # ── Bulk dedup pre-load ───────────────────────────────────────────────
@@ -3827,8 +3828,8 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 "to per-prop has_recent_ud_alert", _sr_bulk_exc,
             )
 
-        for (_sr_player, _sr_stat) in batch_keys:
-            _sr_snap = active_pool.get((_sr_player, _sr_stat))
+        for (_sr_player, _sr_stat, _sr_pool_line) in batch_keys:
+            _sr_snap = active_pool.get((_sr_player, _sr_stat, _sr_pool_line))
             if _sr_snap is None:
                 continue
 
@@ -3852,7 +3853,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 dedup_window_seconds = config.UD_ALERT_DEDUP_WINDOW,
                 min_line_change      = config.MIN_UNDERDOG_LINE_CHANGE,
             ):
-                sr_rejected += 1
+                sr_not_delivered += 1
                 continue
 
             # ── DB dedup — bulk pre-loaded; no per-prop query ────────────────
@@ -3861,12 +3862,12 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             # recently).  Only when the query raised do we fall back per-prop.
             if _sr_bulk_dedup_ok:
                 if (_sr_player, _sr_stat) in _sr_db_alerted:
-                    sr_rejected += 1
+                    sr_not_delivered += 1
                     continue
             else:
                 # Bulk load raised — per-prop fallback for this cycle only
                 if await db.has_recent_ud_alert(_sr_player, _sr_stat, within_seconds=86400):
-                    sr_rejected += 1
+                    sr_not_delivered += 1
                     continue
 
             # ── Score + validate ──────────────────────────────────────────────
@@ -3923,20 +3924,20 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                                 provider          = "Underdog",
                                 bet_quality_score = _sr_dec_wl.confidence,
                                 reason_codes      = _compute_reason_codes(_sr_score, _sr_dec_wl),
-                                watchlist_state   = "Watchlist",
+                                watchlist_state   = None,
                             )
                         except Exception:
                             pass
-                        sr_watchlist += 1
+                        sr_not_delivered += 1
                         continue
                 except Exception:
                     pass
-                sr_rejected += 1
+                sr_not_delivered += 1
                 continue
 
             # ── Normal quality gates ──────────────────────────────────────────
             if not _sr_val.has_supporting_data:
-                sr_rejected += 1
+                sr_not_delivered += 1
                 continue
 
             _sr_hits = await _fetch_and_compute_hit_rates(
@@ -3971,30 +3972,26 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     provider          = "Underdog",
                     bet_quality_score = (_sr_dec.confidence if _sr_dec else 0),
                     reason_codes      = _compute_reason_codes(_sr_score, _sr_dec),
-                    watchlist_state   = (
-                        "Qualified"
-                        if (_sr_dec is not None and _sr_dec.recommendation != "PASS")
-                        else "Rejected"
-                    ),
+                    watchlist_state   = None,
                 )
             except Exception as _sr_pol_exc:
                 logger.debug("stable_refresh: log_prop_opportunity failed: %s", _sr_pol_exc)
 
             # ── Normal gate sequence ──────────────────────────────────────────
             if _sr_dec is None or _sr_dec.recommendation == "PASS":
-                sr_rejected += 1
+                sr_not_delivered += 1
                 continue
 
             _sr_min_conf = config.min_conf_for_sport_tier(_sr_sport, _sr_dec.decision_tier)
             if _sr_dec.confidence < _sr_min_conf:
-                sr_rejected += 1
+                sr_not_delivered += 1
                 continue
 
             if (
                 _sr_sport.upper() in config.ud_strict_alert_sports
                 and _sr_dec.decision_tier not in config.ud_mlb_alert_tiers
             ):
-                sr_rejected += 1
+                sr_not_delivered += 1
                 continue
 
             if (
@@ -4002,19 +3999,19 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 and _sr_dec.recommendation == "UNDER"
                 and not config.is_mlb_under_allowed(_sr_stat)
             ):
-                sr_rejected += 1
+                sr_not_delivered += 1
                 continue
 
             if _is_game_live_or_past(_sr_snap, now):
-                sr_rejected += 1
+                sr_not_delivered += 1
                 continue
 
             if not _ud_line_fresh(_sr_line, _sr_player, _sr_stat, _sr_line_map):
-                sr_rejected += 1
+                sr_not_delivered += 1
                 continue
 
             # ── All gates passed — deliver ────────────────────────────────────
-            sr_qualified += 1
+            sr_actionable += 1
             _sr_mq = _sr_cmq(_sr_stat, _sr_line, _sr_score)
             _sr_mp = _sr_dmp(None, _sr_hist)
 
@@ -4028,8 +4025,8 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 ),
                 score_tier=getattr(_sr_dec, "decision_tier", None),
             ):
-                sr_rejected  += 1
-                sr_qualified -= 1
+                sr_not_delivered += 1
+                sr_actionable -= 1
                 logger.debug(
                     "UD tier_gate [sr]: %s | %s | sport=%s bq=%.0f mq=%.0f dir=%s — blocked",
                     _sr_player, _sr_stat, _sr_sport, _sr_bq_score, _sr_mq_score, _sr_dec.recommendation,
@@ -4064,8 +4061,8 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             # ── Atomic dedup claim [stable-refresh] ──────────────────────────────
             # Claim before delivery so the delivery-queue path cannot also send.
             if not await _try_claim_delivery_slot(_sr_player, _sr_sport, _sr_stat, _sr_line):
-                sr_rejected  += 1
-                sr_qualified -= 1
+                sr_not_delivered += 1
+                sr_actionable -= 1
                 logger.debug(
                     "UD dedup_claim [sr]: %s | %s | concurrent path already claimed",
                     _sr_player, _sr_stat,
@@ -4126,8 +4123,8 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 )
             else:
                 # deliver_underdog returned not-sent (rate-limited, disabled sport, etc.)
-                sr_rejected  += 1
-                sr_qualified -= 1
+                sr_not_delivered += 1
+                sr_actionable -= 1
 
         # Advance cursor — persisted to health.json so it survives restarts
         if _health:
@@ -4136,7 +4133,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
     except Exception as _sr_exc:
         logger.exception("stable_refresh_job [part1]: error: %s", _sr_exc)
         # Reset counters so the console log shows zeros rather than partial data
-        sr_rescored = sr_qualified = sr_watchlist = sr_rejected = sr_sent = 0
+        sr_rescored = sr_actionable = sr_not_delivered = sr_sent = 0
         if _health:
             _health.record_job_fail("stable_refresh_job", str(_sr_exc))
 
@@ -4165,16 +4162,8 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         # Never use get_latest_underdog_snapshot_per_prop here — that method's
         # MAX-over-non-removed semantics can return a stale active snapshot for
         # a prop whose latest feed record is a removal, causing false promotions.
-        try:
-            _wl_pool = active_pool  # type: ignore[used-before-def]
-        except NameError:
-            _wl_pool = await db.get_active_underdog_snapshot_per_prop()
-        try:
-            _wl_line_map = _sr_line_map  # type: ignore[used-before-def]
-        except NameError:
-            _wl_line_map = {
-                (pn, st): (s.line_value or 0.0) for (pn, st), s in _wl_pool.items()
-            }
+        _wl_pool = {}
+        _wl_line_map = {}
 
         from engine.ud_scoring import score_ud_prop as _wl_score_fn  # alias
         from engine.player_validator import validate_player_prop as _wl_validate
@@ -4206,7 +4195,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         game_time         = getattr(_wl_row, "game_time", None),
                         provider          = "Underdog",
                         bet_quality_score = _wl_conf,
-                        watchlist_state   = "Removed",
+                        watchlist_state   = None,
                     )
                 except Exception:
                     pass
@@ -4352,7 +4341,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                                 game_time         = _wl_snap.game_time,
                                 provider          = "Underdog",
                                 bet_quality_score = _wl_dec.confidence,
-                                watchlist_state   = "Qualified",
+                                watchlist_state   = None,
                             )
                             await db.mark_ud_snapshot_alert_sent(_wl_player, _wl_stat)
                             await db.mark_opportunity_alert_sent(_wl_ext_id, _wl_stat)
@@ -4381,7 +4370,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                             game_time         = _wl_snap.game_time,
                             provider          = "Underdog",
                             bet_quality_score = (_wl_dec.confidence if _wl_dec else 0),
-                            watchlist_state   = "Rejected",
+                            watchlist_state   = None,
                         )
                     except Exception:
                         pass
@@ -4408,8 +4397,8 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         "Progress:          %s\n"
         "Coverage:  %s / %s active props\n"
         "🔬 Rescored:  %6d\n"
-        "✅ Qualified: %6d  (sent: %d)\n"
-        "❌ Rejected:  %6d\n"
+        "🎯 Actionable: %6d  (sent: %d)\n"
+        "⏸ Not delivered: %6d\n"
         "⏱ Next refresh:   ~2 min\n"
         "%s",
         _thick, _thick,
@@ -4417,17 +4406,10 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         _sr_pct,
         f"{end_cursor:,}", f"{pool_size:,}",
         sr_rescored,
-        sr_qualified, sr_sent,
-        sr_rejected,
+        sr_actionable, sr_sent,
+        sr_not_delivered,
         _thick,
     )
-
-    # ── Persist cursors to health sidecar ────────────────────────────────────────
-    if _health:
-        try:
-            _health.set_wl_refresh_cursor(_wl_next_cursor)  # type: ignore[used-before-def]
-        except (NameError, Exception):
-            pass  # Part 2 may not have set _wl_next_cursor if it raised early
 
     # ── Persist stats to health sidecar ──────────────────────────────────────────
     if _health:
@@ -4437,23 +4419,17 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             "cursor_start": cursor,
             "cursor_end":   end_cursor,   # FIX: store end_cursor (actual batch end), not next_cursor (which wraps to 0)
             "sr_rescored":  sr_rescored,
-            "sr_qualified": sr_qualified,
-            "sr_watchlist": sr_watchlist,
-            "sr_rejected":  sr_rejected,
+            "sr_actionable": sr_actionable,
+            "sr_not_delivered": sr_not_delivered,
             "sr_sent":      sr_sent,
-            "wl_active":    wl_active,
-            "wl_rescored":  wl_rescored,
-            "wl_improved":  wl_improved,
-            "wl_unchanged": wl_unchanged,
-            "wl_declined":  wl_declined,
-            "wl_promoted":  wl_promoted,
-            "wl_removed":   wl_removed,
+            # Compatibility-only counter; no secondary queue is maintained.
+            "wl_active":    0,
         })
         _health.record_job_run("stable_refresh_job")
 
     logger.info(
-        "stable_refresh_job: pool=%d batch=%d rescored=%d qualified=%d sent=%d",
-        pool_size, len(batch_keys), sr_rescored, sr_qualified, sr_sent,
+        "stable_refresh_job: pool=%d batch=%d rescored=%d actionable=%d sent=%d",
+        pool_size, len(batch_keys), sr_rescored, sr_actionable, sr_sent,
     )
     _job_activity_end("stable_refresh")
 
@@ -4525,10 +4501,9 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
     fpr_rotation        = 1
     fpr_batch_size      = 0
     fpr_rescored        = 0
-    fpr_qualified       = 0
+    fpr_actionable      = 0
     fpr_sent            = 0
-    fpr_rejected        = 0
-    fpr_watchlist       = 0
+    fpr_not_delivered   = 0
     fpr_total_rescanned = 0
     rotation_complete   = False
 
@@ -4635,6 +4610,33 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     sport        = _fpr_sport,
                 )
 
+                # Keep the canonical monitoring/evidence stream complete for
+                # every full-pool evaluation.  Include the line in the
+                # identity so alternate lines cannot overwrite one another.
+                try:
+                    _fpr_ext_id = (
+                        getattr(_fpr_snap, "external_id", None)
+                        or str(getattr(_fpr_snap, "id", None) or "")
+                    )
+                    await db.log_prop_opportunity(
+                        external_id=f"{_fpr_ext_id}:{_fpr_line:g}",
+                        player_name=_fpr_player,
+                        team=getattr(_fpr_snap, "team", "") or "",
+                        sport=_fpr_sport,
+                        stat_type=_fpr_stat,
+                        line_value=_fpr_line,
+                        recommendation=getattr(_fpr_dec, "recommendation", "PASS"),
+                        decision_tier=getattr(_fpr_dec, "decision_tier", None),
+                        confidence=getattr(_fpr_dec, "confidence", 0),
+                        game_time=getattr(_fpr_snap, "game_time", None),
+                        provider="Underdog",
+                        bet_quality_score=float(getattr(_fpr_score, "total", 0) or 0),
+                        reason_codes=_compute_reason_codes(_fpr_score, _fpr_dec),
+                        watchlist_state=None,
+                    )
+                except Exception as _fpr_log_exc:
+                    logger.debug("full_pool_rescan: opportunity log failed: %s", _fpr_log_exc)
+
                 # ── Full alert gate (identical to stable-refresh path) ─────────
                 _fpr_qualifies = (
                     _fpr_dec is not None
@@ -4676,7 +4678,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         score_tier=getattr(_fpr_dec, "decision_tier", None),
                     )
                     if not _fpr_mq_ok:
-                        fpr_rejected += 1
+                        fpr_not_delivered += 1
                         logger.debug(
                             "UD tier_gate [fpr]: %s | %s | sport=%s bq=%.0f mq=%.0f dir=%s — blocked",
                             _fpr_player, _fpr_stat, _fpr_sport, _fpr_bq_score, _fpr_mq_score, _fpr_dec.recommendation,
@@ -4689,7 +4691,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                      if not await _try_claim_delivery_slot(
                          _fpr_player, _fpr_sport, _fpr_stat, _fpr_line,
                      ):
-                         fpr_rejected += 1
+                         fpr_not_delivered += 1
                          logger.debug(
                              "UD dedup_claim [fpr]: %s | %s | concurrent path already claimed",
                              _fpr_player, _fpr_stat,
@@ -4714,13 +4716,13 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     )
                     if _fpr_mq_ok and _fpr_result.sent:
                         fpr_sent      += 1
-                        fpr_qualified += 1
+                        fpr_actionable += 1
                         # _record_prop_alerted already called by _try_claim_delivery_slot.
                     elif _fpr_mq_ok:
                         # deliver_underdog returned not-sent (rate-limited, etc.)
-                        fpr_rejected += 1
+                        fpr_not_delivered += 1
                 elif not _fpr_qualifies:
-                    fpr_rejected += 1
+                    fpr_not_delivered += 1
 
                 fpr_rescored += 1
 
@@ -4769,7 +4771,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         "Batch:     %6d\n"
         "🔬 Rescored:   %6d\n"
         "✅ Sent:       %6d\n"
-        "❌ Rejected:   %6d\n"
+        "⏸ Not delivered: %6d\n"
         "%s",
         _thick, _thick,
         _display_rotation, _status_tag,
@@ -4778,7 +4780,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         fpr_batch_size,
         fpr_rescored,
         fpr_sent,
-        fpr_rejected,
+        fpr_not_delivered,
         _thick,
     )
 
@@ -4793,9 +4795,9 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             "pct_complete":         round(fpr_end_cursor / fpr_pool_size * 100, 1)
                                     if fpr_pool_size else 0.0,
             "fpr_rescored":         fpr_rescored,
-            "fpr_qualified":        fpr_qualified,
+            "fpr_actionable":       fpr_actionable,
             "fpr_sent":             fpr_sent,
-            "fpr_rejected":         fpr_rejected,
+            "fpr_not_delivered":    fpr_not_delivered,
             "fpr_total_rescanned":  fpr_total_rescanned,
             "rotation_complete":    rotation_complete,
         })

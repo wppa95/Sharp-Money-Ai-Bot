@@ -127,6 +127,9 @@ class DashboardReport:
     total_ev_alerts:    int = 0
     total_steam_alerts: int = 0
     total_ud_alerts:    int = 0
+    # Constructor compatibility for older callers; never populated or
+    # rendered as a monitoring classification in the v3.6 dashboard.
+    ud_tier_breakdown:  dict = field(default_factory=dict, repr=False)
     total_pp_alerts:    int = 0
     total_clv_records:  int = 0
 
@@ -148,9 +151,9 @@ class DashboardReport:
     clv_beat_close_rate:Optional[float] = None   # fraction with clv_pct > 0
     clv_seeds_pending:  int = 0                  # seeds not yet harvested
 
-    # ── Underdog breakdown ────────────────────────────────────────────────────
-    ud_tier_breakdown:  dict[str, int] = field(default_factory=dict)
-    ud_avg_score:       Optional[float] = None   # avg score_total for alerted UDs
+    # ── Underdog monitoring stream ───────────────────────────────────────────
+    ud_tracked_snapshots: int = 0
+    ud_avg_score:       Optional[float] = None
 
     # ── Sport / market breakdowns ─────────────────────────────────────────────
     by_sport:           list[SportPerf]  = field(default_factory=list)
@@ -456,25 +459,13 @@ class DashboardEngine:
             from sqlalchemy import select, func
             from database import UnderdogSnapshotRecord
             async with db.session() as s:
-                # Tier breakdown for alerted snapshots only
-                res = await s.execute(
-                    select(UnderdogSnapshotRecord.score_tier, func.count())
-                    .where(
-                        UnderdogSnapshotRecord.alert_sent == True,  # noqa: E712
-                        UnderdogSnapshotRecord.score_tier.isnot(None),
-                    )
-                    .group_by(UnderdogSnapshotRecord.score_tier)
+                tracked_res = await s.execute(
+                    select(func.count(UnderdogSnapshotRecord.id))
                 )
-                for row in res.all():
-                    tier_val, cnt = row
-                    if tier_val:
-                        r.ud_tier_breakdown[tier_val] = cnt
-
-                # Avg score for alerted snapshots
+                r.ud_tracked_snapshots = int(tracked_res.scalar() or 0)
                 score_res = await s.execute(
                     select(func.avg(UnderdogSnapshotRecord.score_total))
                     .where(
-                        UnderdogSnapshotRecord.alert_sent == True,  # noqa: E712
                         UnderdogSnapshotRecord.score_total.isnot(None),
                     )
                 )

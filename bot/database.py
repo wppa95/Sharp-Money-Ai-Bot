@@ -3023,10 +3023,9 @@ class Database:
         rec_id = hashlib.sha256(
             f"{external_id}:{stat_type}".encode()
         ).hexdigest()[:16]
-        # Legacy scan paths may still pass these values, but they are no
-        # longer valid monitoring classifications.
-        if watchlist_state in {"Watchlist", "Near-Miss", "NearMiss"}:
-            watchlist_state = None
+        # The active monitoring universe has no secondary classification.
+        # Keep the nullable column only for compatibility with old databases.
+        watchlist_state = None
         _qpath = _json.dumps(qualification_path) if qualification_path else None
         _rcodes = _json.dumps(reason_codes) if reason_codes else None
         if downstream_intelligence is None:
@@ -3240,29 +3239,8 @@ class Database:
         return {(r.player_name, r.stat_type, r.line_value): r for r in rows}
 
     async def get_active_watchlist_candidates(self) -> list:
-        """
-        Return all PropOpportunityLog rows with watchlist_state='Watchlist'
-        and result='PENDING' (not yet graded/completed).
-
-        Used by the stable-refresh job to rescore near-miss candidates.
-        Results are ordered by id ASC (FIFO insertion order) so the stable-
-        refresh job can apply a rotating cursor over them — giving every
-        candidate a fair chance to be rescanned regardless of confidence rank.
-        Without FIFO ordering a confidence-DESC sort would permanently favour
-        high-confidence rows and starve lower-confidence ones when the watchlist
-        exceeds the per-cycle batch cap.
-        """
-        async with self.session() as s:
-            result = await s.execute(
-                select(PropOpportunityLog)
-                .where(
-                    PropOpportunityLog.watchlist_state == "Watchlist",
-                    PropOpportunityLog.result == "PENDING",
-                )
-                .order_by(PropOpportunityLog.id)   # FIFO — oldest entry first
-            )
-            rows = result.scalars().all()
-        return list(rows)
+        """Compatibility shim; all active props use the canonical pool."""
+        return []
 
     async def log_scan_cycle(
         self,
@@ -3343,18 +3321,45 @@ class Database:
 
     async def get_funnel_summary(self, since_hours: int = 24) -> dict:
         """
-        Aggregate PropCandidateLog gate decisions for the /funnel command.
+        Aggregate the unified active-prop monitoring stream for /funnel.
 
-        Returns:
-          {
-            "since_hours": int,
-            "counts": {"ACCEPTED": n, "WATCHLIST": n, "REJECTED": n, "REMOVED": n},
-            "top_rejections": [{"player_name", "sport", "stat_type",
-                                 "rejection_reason", "score_tier", "score_total"}],
-          }
+        Every candidate row is monitored data.  Alert delivery is reported
+        separately and never changes the monitoring status of a prop.
         """
         from datetime import timedelta
         cutoff = datetime.utcnow() - timedelta(hours=since_hours)
+
+        # The old gate-decision aggregation intentionally remains below for
+        # database compatibility with historical rows, but is no longer part
+        # of the monitoring/reporting contract.
+        async with self.session() as s:
+            total_res = await s.execute(
+                select(func.count(PropCandidateLog.id))
+                .where(PropCandidateLog.scan_ts >= cutoff)
+            )
+            tracked = int(total_res.scalar() or 0)
+            sport_res = await s.execute(
+                select(
+                    PropCandidateLog.sport,
+                    func.count(PropCandidateLog.id),
+                )
+                .where(PropCandidateLog.scan_ts >= cutoff)
+                .group_by(PropCandidateLog.sport)
+                .order_by(PropCandidateLog.sport)
+            )
+            by_sport = [
+                {
+                    "sport": sport or "UNKNOWN",
+                    "tracked": int(count or 0),
+                }
+                for sport, count in sport_res.all()
+            ]
+        return {
+            "since_hours": since_hours,
+            "tracked": tracked,
+            "by_sport": by_sport,
+            "top_rejections": [],
+        }
 
         # Run all four queries inside a single session to avoid DB lock contention
         # between separate session acquisitions (particularly during cold-start

@@ -530,7 +530,7 @@ async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await update.message.reply_text("\n".join(tg_lines), parse_mode=ParseMode.HTML)
             return
 
-        def _tier_row(k: str, v: dict) -> str:
+        def _result_row(k: str, v: dict) -> str:
             w, l, p = v.get("W", 0), v.get("L", 0), v.get("P", 0)
             pct = v.get("win_pct", 0.0)
             return f"  <b>{k}:</b>  {w}W-{l}L-{p}P  ({pct:.1f}%)"
@@ -543,21 +543,12 @@ async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             "",
         ]
 
-        # ── By tier ───────────────────────────────────────────────────────────
-        by_tier = rollups.get("by_tier", {})
-        if by_tier:
-            lines.append("<b>By Tier</b>")
-            for tier in ("S", "A", "B"):
-                if tier in by_tier:
-                    lines.append(_tier_row(tier, by_tier[tier]))
-            lines.append("")
-
         # ── By sport ──────────────────────────────────────────────────────────
         by_sport = rollups.get("by_sport", {})
         if by_sport:
             lines.append("<b>By Sport</b>")
             for sport, v in sorted(by_sport.items(), key=lambda kv: -kv[1].get("total", 0))[:6]:
-                lines.append(_tier_row(sport, v))
+                lines.append(_result_row(sport, v))
             lines.append("")
 
         # ── Top stat types ────────────────────────────────────────────────────
@@ -565,7 +556,7 @@ async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if by_stat:
             lines.append("<b>Top Prop Types</b>")
             for stat, v in list(by_stat.items())[:8]:
-                lines.append(_tier_row(stat[:28], v))
+                lines.append(_result_row(stat[:28], v))
             lines.append("")
 
         # ── Error type breakdown ──────────────────────────────────────────────
@@ -2616,40 +2607,11 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
         return
 
-    # ── Aggregate by tier ─────────────────────────────────────────────────────
-    # PropOpportunityLog uses decision_tier (not .tier); result is HIT/MISS/PUSH (not WIN/LOSS)
-    from collections import defaultdict
-    stats: dict[str, dict] = defaultdict(lambda: {"W": 0, "L": 0, "P": 0})
-
-    for r in resolved:
-        tier = getattr(r, "decision_tier", None) or "—"
-        res  = (r.result or "").upper()
-        if res == "HIT":
-            stats[tier]["W"] += 1
-        elif res == "MISS":
-            stats[tier]["L"] += 1
-        elif res in ("PUSH", "REFUND"):
-            stats[tier]["P"] += 1
-
-    overall_w = overall_l = overall_p = 0
-
-    lines.append("─ <b>By Tier</b> " + "─" * 20)
-    for tier in ("S", "A", "B", "PASS", "—"):
-        if tier not in stats:
-            continue
-        s   = stats[tier]
-        w, l, p = s["W"], s["L"], s["P"]
-        total_res = w + l + p
-        hit_rate  = w / total_res * 100 if total_res > 0 else 0.0
-        icon      = _TIER_EMOJI.get(tier, "⚪")
-        lines.append(
-            f"  {icon} <b>{tier:<4}</b>  "
-            f"{total_res} picks  W:{w}  L:{l}  P:{p}  "
-            f"→ <code>{hit_rate:.0f}%</code> hit"
-        )
-        overall_w += w
-        overall_l += l
-        overall_p += p
+    # Grading is reported for the unified tracked stream; delivery metadata
+    # does not create a separate monitoring class.
+    overall_w = sum(1 for r in resolved if (r.result or "").upper() == "HIT")
+    overall_l = sum(1 for r in resolved if (r.result or "").upper() == "MISS")
+    overall_p = sum(1 for r in resolved if (r.result or "").upper() in ("PUSH", "REFUND"))
 
     overall_res = overall_w + overall_l + overall_p
     overall_hit = overall_w / overall_res * 100 if overall_res > 0 else 0.0
@@ -2664,33 +2626,6 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         f"<i>{pending_n} picks still PENDING · results set when games finish.</i>",
     ]
 
-    # ── Best/worst tier summary (inline — no PPEdgeRecord dependency) ─────────
-    _qual = [
-        (t, s) for t, s in stats.items()
-        if t in ("S", "A", "B") and (s["W"] + s["L"] + s["P"]) >= 3
-    ]
-    if _qual:
-        best_t  = max(_qual, key=lambda x: x[1]["W"] / max(x[1]["W"] + x[1]["L"] + x[1]["P"], 1))
-        worst_t = min(_qual, key=lambda x: x[1]["W"] / max(x[1]["W"] + x[1]["L"] + x[1]["P"], 1))
-        lines.append("")
-        lines.append("─ <b>Trends</b> " + "─" * 22)
-        if best_t[0] != worst_t[0]:
-            _bhr = best_t[1]["W"] / max(best_t[1]["W"] + best_t[1]["L"] + best_t[1]["P"], 1) * 100
-            _whr = worst_t[1]["W"] / max(worst_t[1]["W"] + worst_t[1]["L"] + worst_t[1]["P"], 1) * 100
-            lines.append(
-                f"  Best tier:  {_TIER_EMOJI.get(best_t[0], '⚪')} {best_t[0]}  "
-                f"{_bhr:.0f}% hit  ({best_t[1]['W']}W / {best_t[1]['L']}L)"
-            )
-            lines.append(
-                f"  Worst tier: {_TIER_EMOJI.get(worst_t[0], '⚪')} {worst_t[0]}  "
-                f"{_whr:.0f}% hit  ({worst_t[1]['W']}W / {worst_t[1]['L']}L)"
-            )
-    elif overall_res > 0:
-        lines.append("")
-        lines.append(
-            f"<i>Trends visible after ≥ 3 resolved picks per tier "
-            f"({overall_res} resolved total so far).</i>"
-        )
 
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
@@ -2886,20 +2821,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             "<b>Pipeline (last 24 h)</b>",
         ]
 
-        # Tier breakdown from 24h edges
-        tier_counts: dict[str, int] = {}
-        for r in edges_24h:
-            t = r.tier or "PASS"
-            tier_counts[t] = tier_counts.get(t, 0) + 1
-
-        if tier_counts:
-            for tier in ("S", "A", "B", "C", "PASS"):
-                n = tier_counts.get(tier, 0)
-                if n:
-                    icon = {"S": "🔥", "A": "🟢", "B": "🟡", "C": "▪️", "PASS": "⚪"}.get(tier, "⚪")
-                    lines.append(f"  {icon} {tier}: <b>{n}</b>")
-        else:
-            lines.append("  <i>No qualified picks detected in last 24 h</i>")
+        lines.append(f"  Tracked opportunities: <b>{len(edges_24h):,}</b>")
 
         lines.append("")
         lines.append(f"<b>All-time</b>  ({total_ud:,} Underdog snapshots)")
@@ -3227,40 +3149,19 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     lines += [
         "━━━━━━━━━━━━━━━━━━",
-        "🚫 <b>PASS Analysis</b>  <i>(missed opportunity check)</i>",
-        f"  Total PASSes:       <code>{pass_total}</code>",
-        f"  Graded:             <code>{pass_graded}</code>",
+        "📚 <b>Tracked outcomes</b>",
+        f"  Total tracked:      <code>{pass_total + play_total}</code>",
+        f"  Graded:             <code>{pass_graded + play_graded}</code>",
     ]
     if pass_graded > 0:
         lines += [
-            f"  📈 Would have hit:  <code>{pass_hit}</code>  "
-            f"({_hit_rate(pass_hit, pass_graded)})  — missed opportunities",
-            f"  📉 Would have miss: <code>{pass_miss}</code>  "
-            f"({_hit_rate(pass_miss, pass_graded)})  — correct passes",
+            f"  📈 Additional outcomes: <code>{pass_graded}</code>  "
+            f"({_hit_rate(pass_graded, pass_graded)})",
             f"  ➖ Push:            <code>{pass_push}</code>",
             f"  ⏳ Pending:         <code>{pass_pending}</code>",
         ]
     else:
-        lines.append("  <i>No graded PASS results yet.</i>")
-
-    # ── By Tier ───────────────────────────────────────────────────────────────
-    if by_tier:
-        lines += ["", "━━━━━━━━━━━━━━━━━━", "<b>By Tier (PLAY correct pick rate)</b>"]
-        for tier in ("S", "A", "B"):
-            tier_data = by_tier.get(tier, {})
-            t_correct = (
-                _n(tier_data, "OVER",  "HIT")
-                + _n(tier_data, "UNDER", "MISS")
-            )
-            t_graded = sum(
-                _n(tier_data, rec, res)
-                for rec in ("OVER", "UNDER")
-                for res in ("HIT", "MISS", "PUSH")
-            )
-            if t_graded > 0:
-                lines.append(
-                    f"  <b>{tier}:</b>  {t_correct}/{t_graded}  ({_hit_rate(t_correct, t_graded)})"
-                )
+        lines.append("  <i>No graded tracked outcomes yet.</i>")
 
     # ── By Sport ──────────────────────────────────────────────────────────────
     if by_sport:
@@ -3275,16 +3176,10 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 for rec in ("OVER", "UNDER")
                 for res in ("HIT", "MISS", "PUSH")
             )
-            s_passes = (
-                _n(sport_data, "PASS", "HIT")
-                + _n(sport_data, "PASS", "MISS")
-                + _n(sport_data, "PASS", "PUSH")
-                + _n(sport_data, "PASS", "PENDING")
-            )
-            if s_graded > 0 or s_passes > 0:
+            if s_graded > 0:
                 lines.append(
-                    f"  <b>{sport}:</b>  PLAY {s_correct}/{s_graded} "
-                    f"({_hit_rate(s_correct, s_graded)})  ·  PASS {s_passes}"
+                    f"  <b>{sport}:</b>  {s_correct}/{s_graded} "
+                    f"({_hit_rate(s_correct, s_graded)})"
                 )
 
     lines += [
@@ -3597,13 +3492,8 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             logger.debug("cmd_funnel: scan_cycle_summary unavailable: %s", _scl_exc)
         summary = await _db.get_funnel_summary(since_hours=since_h)
 
-        counts    = summary.get("counts", {})
-        top_rej   = summary.get("top_rejections", [])
-
-        accepted  = counts.get("ACCEPTED",  0)
-        rejected  = counts.get("REJECTED",  0)
-        removed   = counts.get("REMOVED",   0)
-        total     = accepted + rejected + removed
+        tracked   = int(summary.get("tracked", 0) or 0)
+        by_sport  = summary.get("by_sport", [])
 
         def _fmt_rate(num: int, denom: int) -> str:
             """Format a small percentage with enough precision to stay non-zero."""
@@ -3649,7 +3539,6 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             sc_lc        = scan_summary.get("line_changed", 0)
             sc_cold      = scan_summary.get("cold_start", 0)
             sc_analyzed  = scan_summary.get("analyzed", 0)
-            sc_qualified = scan_summary.get("qualified", 0)
             sc_delivered = scan_summary.get("alert_delivered", 0)
             _avg_mins    = (since_h * 60) // max(sc_cycles, 1)
             # Stable refresh scored count from health sidecar
@@ -3677,7 +3566,7 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 f"   ├─ Line moved:                  <b>{sc_lc:,}</b>",
                 f"   ├─ Cold-start:                  <b>{sc_cold:,}</b>",
                 f"   └─ Stable refresh:              <b>{sr_rescored:,}</b>",
-                f"✅ Qualified for alert:            <b>{sc_qualified:,}</b>",
+                f"🎯 Strong actionable candidates:   <b>{sc_delivered:,}</b>",
                 f"📤 Delivered to Telegram:          <b>{sc_delivered:,}</b>",
             ]
             # ── Stable Refresh block ──────────────────────────────────────────
@@ -3689,9 +3578,9 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 sr_progress  = (
                     f"{(sr_c_end / sr_pool * 100):.1f}%" if sr_pool > 0 else "—"
                 )
-                sr_qual      = sr_stats.get("sr_qualified", 0)
+                sr_qual      = sr_stats.get("sr_actionable", 0)
                 sr_sent      = sr_stats.get("sr_sent",      0)
-                sr_rej       = sr_stats.get("sr_rejected",  0)
+                sr_rej       = sr_stats.get("sr_not_delivered",  0)
                 lines += [
                     "",
                     _thick,
@@ -3702,8 +3591,8 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     f"Coverage:           <b>{sr_c_end:,} / {sr_pool:,}</b> active props",
                     f"Batch size:         <b>{sr_batch:,}</b>",
                     f"🔬 Rescored:        <b>{sr_rescored:,}</b>",
-                    f"✅ Qualified:       <b>{sr_qual:,}</b>  (sent: {sr_sent})",
-                    f"❌ Rejected:        <b>{sr_rej:,}</b>",
+                    f"🎯 Actionable:       <b>{sr_qual:,}</b>  (sent: {sr_sent})",
+                    f"⏸ Not delivered:    <b>{sr_rej:,}</b>",
                 ]
             # ── Full-Pool Rescan Rotation block ──────────────────────────────────
             try:
@@ -3757,30 +3646,30 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             ]
 
         # ── Section 2: Candidate Funnel (from PropCandidateLog) ──────────────────────
-        active = scan_summary.get('active', 0) or 4600
-        qual_rate = _fmt_rate(accepted, active)
+        active = scan_summary.get("active", 0) or tracked
+        sc_rescored = scan_summary.get("analyzed", 0) + sr_stats.get("sr_rescored", 0)
+        sc_movers = scan_summary.get("line_changed", 0)
+        sc_delivered = scan_summary.get("alert_delivered", 0)
         lines += [
             "",
             _thick,
             "🔭 <b>Candidate Funnel</b>",
             _thick,
             "",
-            f"<i>Subset of scored props — all {scan_summary.get('active', 0) or 4600:,} active props are monitored above.</i>",
+            f"<i>All active props remain in the monitored universe; delivery is separate.</i>",
             "",
-            f"📥 Evaluated: <b>{active:,}</b>",
-            f"✅ Qualified (decision + quality gates): <b>{accepted}</b>",
-            f"❌ Rejected:                <b>{rejected}</b>",
-            f"🚫 Removed:                 <b>{removed}</b>",
+            f"📥 Active props: <b>{active:,}</b>",
+            f"🧾 Snapshots tracked: <b>{tracked:,}</b>",
+            f"🔬 Rescored: <b>{sc_rescored:,}</b>",
+            f"📈 Line movers: <b>{sc_movers:,}</b>",
+            f"📤 Delivered alerts: <b>{sc_delivered:,}</b>",
             "",
-            f"📊 Qualification rate: <b>{qual_rate}</b>",
-            "",
-            "<i>Qualified props go through additional gates before delivery:</i>",
-            "<i>(direction, BQ, conf, dedup, live-game).</i>",
+            "<i>Actionable evaluation uses the existing direction, quality, evidence,",
+            "deduplication, and live-game safeguards.</i>",
             "<i>Use /alerts to see Telegram-delivered picks.</i>",
         ]
 
         # Per-sport breakdown
-        by_sport = summary.get("by_sport", [])
         if by_sport:
             lines += [
                 "",
@@ -3788,20 +3677,15 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 "",
                 "⚽ <b>Sport Funnel Breakdown</b>",
                 "",
-                f"{'Sport':<12} {'Scan':>4} {'Acc':>4} {'Rej':>4} {'Rm':>3}",
-                "─" * 30,
+                f"{'Sport':<12} {'Tracked':>8}",
+                "─" * 23,
             ]
             for row in by_sport:
                 # Escape dynamic sport name to prevent HTML parse errors
                 sp    = _html.escape((row.get("sport") or "?")[:11])
-                sc    = row.get("scanned",   0)
-                acc   = row.get("accepted",  0)
-                rej   = row.get("rejected",  0)
-                rm    = row.get("removed",   0)
-                pass_pct = _fmt_rate(acc, sc)
+                sc    = row.get("tracked", 0)
                 lines.append(
-                    f"<code>{sp:<12} {sc:>4} {acc:>4} {rej:>4} {rm:>3}</code>"
-                    f"  <i>{pass_pct}</i>"
+                    f"<code>{sp:<12} {sc:>8}</code>"
                 )
         else:
             lines += ["", "<i>Sport breakdown accumulates as the bot scans props.</i>"]
