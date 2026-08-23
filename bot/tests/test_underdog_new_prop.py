@@ -93,6 +93,9 @@ def _make_db(
     db.count_today_underdog_alerts           = AsyncMock(return_value=0)
     db.save_underdog_snapshot                = AsyncMock()
     db.save_underdog_snapshots_bulk          = AsyncMock()
+    db.log_prop_opportunity                  = AsyncMock()
+    db.sync_underdog_snapshots_to_prop_history = AsyncMock(return_value=0)
+    db.update_prop_lifecycle_state           = AsyncMock(return_value=True)
     # Default to empty history — validation gate blocks immediate alerts without data.
     # Pass prop_history=_fake_history() in tests that expect immediate alerts to fire.
     db.get_ud_prop_history                   = AsyncMock(
