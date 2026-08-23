@@ -1,0 +1,125 @@
+🔴 URGENT — FULL-POOL ROTATION IS STILL NOT RESCORING UNCHANGED PROPS
+
+The latest live metrics prove the previous change did NOT fully implement the required behavior.
+
+Current live run:
+
+* Active props: 224,891
+* Unchanged: 224,833
+* New: 58
+* Line moved: 1,290
+* Scored: 1,348
+
+Critically:
+
+1,348 = 58 new + 1,290 line movers
+
+Therefore 0 unchanged props were actually scored/evaluated.
+
+The system is still effectively scoring only:
+
+* New props
+* Line movers
+
+The FPR display showing:
+
+7,438 / 7,438 — 100%
+
+does NOT prove full-pool rescoring if those selected props are not entering the actual scoring/evaluation/tracking pipeline.
+
+REQUIRED FIX
+
+When the full-pool rotation selects an active prop, that prop MUST go through the actual scoring/evaluation/tracking pipeline regardless of line movement.
+
+For an unchanged prop selected by FPR:
+
+1. Load its current active snapshot.
+2. Rescore it.
+3. Run the normal evaluation pipeline.
+4. Persist the new tracking/grade information.
+5. Update evidence/history where available.
+6. Keep it in the active universe.
+7. Continue the cursor rotation.
+
+The resulting metrics must therefore be capable of showing something like:
+
+* New: X
+* Line moved: X
+* Unchanged/full-pool rescored: X
+* Total scored: New + moved + unchanged/full-pool rescored
+
+CRITICAL
+
+Do NOT count a prop as “rescored” merely because FPR selected it.
+
+It must actually execute the scoring/evaluation/tracking path.
+
+The FPR rotation is only the selector. The selected prop must then be processed by the canonical scoring/evaluation pipeline.
+
+PRIORITY RULE
+
+Line movement remains a priority signal.
+
+It is NOT a rescoring requirement.
+
+Therefore:
+
+* New → priority + normal rotation
+* Line moved → priority + normal rotation
+* Unchanged → normal full-pool rotation
+* Previously evaluated → normal full-pool rotation
+* Previously delivered → normal full-pool rotation
+* Cold-start → normal full-pool rotation
+
+Every active prop must eventually be rescored.
+
+DO NOT CHANGE
+
+Do NOT change:
+
+* scoring formulas
+* BQ/MQ calculations
+* evidence architecture
+* provider integrations
+* scheduler cadence
+* max_instances
+* adaptive batching
+* clean restart
+* Telegram formatting
+* delivery rules
+* moneyline behavior
+* database schema
+
+Do NOT restore:
+
+* Watchlist
+* Near-Miss
+* PASS
+* Qualified/Rejected monitoring states
+* Tier 1/Tier 2
+* S/A/B/C evaluation gates
+
+VERIFICATION REQUIRED
+
+Create/run a focused test with an unchanged active prop.
+
+Prove that:
+
+unchanged prop → FPR selection → actual scoring → actual evaluation → persistent tracking
+
+Also prove:
+
+* Line mover gets priority.
+* New prop gets priority.
+* Unchanged prop eventually gets rescored.
+* Previously evaluated prop gets rescored again.
+* Previously delivered prop remains in rotation.
+* Full-pool rotation reaches 100%.
+* Next rotation begins.
+* Scored count is no longer mathematically equal to only New + Line Moved.
+
+Then run the relevant existing rotation, scoring, tracking, persistence, identity, evidence, dashboard, and moneyline tests.
+
+Do not create a checkpoint. Do not mark complete until the unchanged-prop path is actually verified.
+
+Report the exact root cause, exact change, and live/test verification.
