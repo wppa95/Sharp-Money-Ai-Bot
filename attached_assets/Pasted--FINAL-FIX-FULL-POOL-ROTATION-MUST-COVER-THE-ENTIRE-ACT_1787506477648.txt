@@ -1,0 +1,253 @@
+🔴 FINAL FIX — FULL-POOL ROTATION MUST COVER THE ENTIRE ACTIVE PROP UNIVERSE
+
+Continue from the current v3.6 implementation.
+
+This is the last piece. Make the smallest targeted fix possible.
+
+Do NOT redesign the architecture. Do NOT change scoring formulas, BQ/MQ, evidence, provider architecture, scheduler cadence, adaptive batching, delivery formatting, moneyline behavior, or clean-restart behavior.
+
+CURRENT LIVE PROBLEM
+
+The bot has been running only about 2h 53m.
+
+Current live funnel:
+
+* Active props monitored: 603,740
+* Unchanged: 595,779
+* New: 7,961
+* Line moved: 1,324
+* Scored: 9,285
+* FPR coverage: 7,104 / 7,104
+
+The problem is:
+
+7,961 New + 1,324 Line Moved = exactly 9,285 Scored.
+
+Therefore, zero unchanged active props are entering the actual scoring pipeline.
+
+At the same time, FPR reports:
+
+7,104 / 7,104 — 100%
+
+That is not sufficient if the FPR-selected props are not actually being rescored, evaluated, tracked, and persisted.
+
+REQUIRED CORRECTION
+
+The FPR/full-pool rotation must operate over the entire canonical active prop universe, not a smaller subset.
+
+The display must show:
+
+Coverage: 7,104 / 603,740 active props
+
+or whatever the exact current active-pool count is at runtime.
+
+It must NOT display:
+
+7,104 / 7,104
+
+if 7,104 is merely the current batch/pool subset.
+
+Core rule
+
+Every active prop must eventually be rescored.
+
+That includes:
+
+* New props
+* Line movers
+* Unchanged-line props
+* Previously evaluated props
+* Previously delivered props
+* Cold-start props
+
+Line movement is a priority signal, not a requirement for rescoring.
+
+REQUIRED PIPELINE
+
+For every FPR-selected active prop:
+
+FPR selection → history loading → scoring → evaluation → evidence/history → persistent tracking
+
+The selected prop must actually execute that pipeline.
+
+Do NOT count a prop as covered merely because the cursor selected it.
+
+Do NOT count it as rescored unless the actual scoring/evaluation/tracking work occurred.
+
+PRIORITY MODEL
+
+Priority should remain:
+
+1. New props
+2. Meaningful line movers
+3. Urgent/actionable changes
+4. Remaining active props
+5. Previously evaluated/delivered props continue rotating
+6. Unchanged props continue rotating
+
+After the cursor reaches the end of the entire active universe:
+
+start the next rotation.
+
+No active prop is permanently excluded because its line has not moved.
+
+IMPORTANT POOL DEFINITIONS
+
+Audit the exact difference between:
+
+Active props monitored
+
+and
+
+FPR rotation pool
+
+Right now:
+
+* Active universe ≈ 603,740
+* FPR pool ≈ 7,104
+
+Determine exactly why those numbers differ.
+
+If 7,104 represents only a batch, page, subset, or filtered set, fix the rotation so the cursor traverses the entire active universe.
+
+If 7,104 is supposed to be the full canonical universe, explain why the dashboard says 603,740 active props.
+
+Do not silently accept the discrepancy.
+
+The canonical active universe and FPR coverage denominator must use the correct same universe definition.
+
+DISPLAY REQUIREMENT
+
+The funnel must report actual full-pool coverage.
+
+Example:
+
+Coverage: 7,104 / 603,740 active props
+
+Then subsequent cycles should advance:
+
+14,208 / 603,740
+
+21,312 / 603,740
+
+etc., subject to the actual batch size and active-pool changes.
+
+When the entire active universe is covered:
+
+603,740 / 603,740 — 100%
+
+Then:
+
+Rotation #N complete — next started
+
+The denominator must dynamically reflect the current active universe.
+
+DO NOT RESTORE RETIRED FRAMEWORK STATES
+
+Do NOT bring back:
+
+* Watchlist
+* Near-Miss
+* PASS
+* Qualified
+* Rejected
+* Removed as monitoring classifications
+* Tier 1 / Tier 2
+* S/A/B/C evaluation gates
+
+All active props remain in the monitoring universe.
+
+Delivery is separate from monitoring.
+
+A prop can be tracked, rescored, graded, and stored without being delivered to Telegram.
+
+PRESERVE
+
+Do NOT change:
+
+* Scoring formulas
+* BQ calculations
+* MQ calculations
+* Evidence architecture
+* Player-history architecture
+* Grading/HIT/MISS/PUSH tracking
+* Database schema unless absolutely necessary
+* Underdog provider architecture
+* Moneyline behavior
+* Strong-only moneyline delivery
+* Telegram formatting
+* Scheduler cadence
+* max_instances=1
+* Adaptive batching
+* Clean restart
+* Existing delivery deduplication
+* Existing safety/live-game protections
+
+REQUIRED TESTS
+
+Add or update focused tests proving:
+
+1. The FPR denominator equals the complete active universe.
+2. An unchanged active prop is eventually selected.
+3. An unchanged prop actually reaches scoring.
+4. An unchanged prop is tracked/persisted.
+5. A line mover receives priority but continues into normal rotation.
+6. A previously delivered prop continues into normal rotation.
+7. New props enter the universe without resetting/excluding the existing pool.
+8. The cursor traverses the entire active universe.
+9. Coverage reaches 100% only after the entire active universe is processed.
+10. The next rotation starts after full coverage.
+11. Scored count can exceed New + Line moved because unchanged props are now actually scored.
+12. No Watchlist/Near-Miss/PASS/Qualified/Rejected monitoring states return.
+
+LIVE VERIFICATION
+
+After implementation:
+
+* Run the focused FPR/rotation/tracking tests.
+* Run the relevant persistence/evidence/grading tests.
+* Run dashboard/funnel tests.
+* Run the complete test suite.
+* Compile Python.
+* Run git diff --check.
+* Restart only the local bot workflow if needed for verification.
+
+Then inspect the live /funnel.
+
+The live result must demonstrate that unchanged active props are actually entering the scoring/tracking pipeline.
+
+The critical live proof is:
+
+Scored > New + Line Moved
+
+once unchanged props have begun entering the rotation.
+
+Also verify the FPR display uses:
+
+covered / total active props
+
+rather than:
+
+covered / batch-size or subset-size.
+
+FINAL RULE
+
+Do not mark complete based only on tests.
+
+Do not create another checkpoint.
+
+Do not touch Railway.
+
+Do not make unrelated changes.
+
+Find the actual pool/rotation/scoring boundary causing the discrepancy and fix only that boundary.
+
+Report:
+
+* Exact root cause
+* Exact targeted fix
+* Correct active-pool denominator
+* Focused test results
+* Full-suite result
+* Live funnel verification
+* Confirmation that unchanged props are actually being rescored
