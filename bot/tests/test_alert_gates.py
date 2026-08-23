@@ -223,7 +223,7 @@ class TestFunnelSportBreakdown:
         assert nba["scanned"]  == 3
         assert nba["accepted"] == 2
         assert nba["rejected"] == 1
-        assert nba["watchlist"] == 0
+        assert "watchlist" not in nba
 
     @pytest.mark.asyncio
     async def test_cs_counts_correct(self):
@@ -238,7 +238,8 @@ class TestFunnelSportBreakdown:
         summary = await self.db.get_funnel_summary(since_hours=24)
         mlb = next(r for r in summary["by_sport"] if r["sport"] == "MLB")
         assert mlb["scanned"]   == 2
-        assert mlb["watchlist"] == 1
+        # Legacy WATCHLIST rows are folded into the unified rejected bucket.
+        assert mlb["rejected"] == 1
         assert mlb["removed"]   == 1
         assert mlb["accepted"]  == 0
 

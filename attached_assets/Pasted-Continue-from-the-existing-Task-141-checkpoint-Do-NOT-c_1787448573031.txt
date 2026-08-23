@@ -1,0 +1,110 @@
+Continue from the existing Task #141 checkpoint.
+
+Do NOT create another checkpoint yet.
+
+Fix ONLY the remaining failures related to the Task #141 changes so the implementation can be fully verified.
+
+REQUIRED
+
+The final system must have:
+
+* No Watchlist classification.
+* No Near-Miss classification.
+* No PASS classification in the monitoring/reporting model.
+* No Tier 1 / Tier 2 system.
+* No S/A/B/C monitoring or evaluation gates.
+* Every prop snapshot remains tracked.
+* Every prop snapshot remains persisted.
+* Every eligible prop remains gradeable.
+* HIT/MISS/PUSH outcomes remain persisted.
+* Graded outcomes continue feeding rolling player evidence.
+* Former Watchlist/Near-Miss/PASS props remain in normal continuous rotation.
+* /funnel contains no Watchlist/Near-Miss/PASS reporting.
+* Stable Refresh contains no Watchlist/Near-Miss/PASS reporting or exclusion queue.
+* FPR/full-pool rotation does not exclude former Watchlist/Near-Miss/PASS props.
+* /dashboard Recently Tracked Props refreshes hourly.
+* /dashboard Recently Tracked Props includes ALL sports, not only NFL.
+
+FIX THE FAILING TESTS
+
+Audit every failing test from Task #141.
+
+If a test fails because it still expects the obsolete Watchlist/Near-Miss/PASS behavior, update that test to assert the NEW approved behavior instead.
+
+Do NOT restore the obsolete behavior just to make the test pass.
+
+Specifically verify that old tests covering:
+
+* Watchlist promotion
+* Watchlist demotion
+* Watchlist cursor rotation
+* Watchlist removal tagging
+* PASS reporting
+* Tier/classification reporting
+
+are converted to tests for the new unified monitoring model.
+
+Tests must verify that former Watchlist/Near-Miss/PASS props remain ordinary tracked/rotatable props.
+
+IMPORTANT COMPATIBILITY RULE
+
+Do not remove or alter internal scoring/delivery data unless it is actually required by the approved Task #141 behavior.
+
+Internal compatibility values may remain where needed by existing scoring/delivery code, but they must NOT become:
+
+* Monitoring gates
+* Rotation exclusions
+* Funnel classifications
+* Dashboard classifications
+* Watchlist/PASS user-facing statuses
+
+Do not change scoring formulas, BQ/MQ, confidence, delivery gates, cadence, scheduler behavior, provider integrations, evidence logic, or graded-history logic.
+
+VALIDATION
+
+Run:
+
+1. All Task #141 focused tests.
+2. Identity/evidence/graded-history tests.
+3. Dashboard/recent-tracking tests.
+4. Rotation/Stable Refresh/FPR tests.
+5. Full relevant regression suite.
+
+For every remaining failure, determine whether it is:
+
+* A genuine regression caused by Task #141 → FIX IT.
+* An obsolete test expecting retired Watchlist/PASS behavior → UPDATE THE TEST.
+* An unrelated pre-existing baseline failure → leave it unchanged and document it precisely.
+
+Do not hide, skip, or weaken tests simply to obtain a green result.
+
+Also run:
+
+* Python compilation.
+* git diff --check.
+* A final diff audit confirming no unrelated systems changed.
+
+RAILWAY
+
+Do NOT restart Railway.
+
+Do NOT deploy Railway.
+
+Do NOT change Railway configuration.
+
+Do NOT create another checkpoint until verification is complete.
+
+FINAL REQUIREMENT
+
+Only after all Task #141 requirements are implemented and the appropriate tests pass:
+
+* Report the exact remaining failures, if any.
+* Explain why each remaining failure is unrelated if it cannot be fixed within scope.
+* Confirm Watchlist/Near-Miss/PASS are removed from monitoring/reporting.
+* Confirm every snapshot remains tracked, stored, and gradeable.
+* Confirm /dashboard Recently Tracked Props is hourly and all-sports.
+* Confirm continuous rotation remains intact.
+* Confirm no tiers were reintroduced.
+* Confirm no unrelated behavior changed.
+
+Then STOP and wait for approval before creating a new checkpoint.
