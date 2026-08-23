@@ -1,0 +1,175 @@
+🔴 READ-ONLY AUDIT — SPORT FUNNEL BREAKDOWN
+
+Do NOT change code yet.
+
+Do NOT restart the bot.
+
+Do NOT deploy.
+
+Do NOT touch Railway.
+
+Do NOT create a checkpoint.
+
+The only thing I want investigated is whether the Sport Funnel Breakdown is actually representing the props being scanned/rescored.
+
+Current live output:
+
+Scored this period: 4,442
+
+* New: 41
+* Line moved: 159
+* Full-pool rotation: 4,242
+
+But Sport Funnel only shows:
+
+* WNBA: 87
+* MLB: 64
+* NFL: 37
+* CS: 7
+* VAL: 4
+* CFL: 1
+
+Total = 200
+
+That strongly suggests the Sport Funnel is only counting a subset of the actual scanning/rescoring activity.
+
+IMPORTANT
+
+I am NOT asking you to assume the scanner is broken.
+
+I want you to determine whether:
+
+A. The scanner/FPR is actually scanning all sports
+
+but the Sport Funnel reporting is only counting 200 records,
+
+OR
+
+B. The scanner/FPR itself is only scanning a small subset of sports.
+
+TRACE THE ACTUAL DATA PATH
+
+Read-only inspect:
+
+1. Canonical active Underdog pool.
+2. FPR selection.
+3. FPR batch.
+4. FPR scoring.
+5. Persistent opportunity/tracking writes.
+6. Current-run counters.
+7. Sport Funnel aggregation.
+8. /funnel rendering.
+
+For an actual FPR batch, determine:
+
+* Number of props selected.
+* Number actually scored.
+* Number actually evaluated.
+* Number persisted/tracked.
+* Number by sport.
+* Number appearing in Sport Funnel.
+
+CRITICAL TEST
+
+Take one real FPR batch and reconcile:
+
+Total FPR selected
+
+vs
+
+Total FPR scored
+
+vs
+
+Total FPR tracked
+
+vs
+
+SUM(Sport Funnel counts)
+
+These should be explainable.
+
+If FPR scored 4,242 props, I need to know exactly where those 4,242 props went.
+
+CHECK ALL SPORTS
+
+Verify that FPR has NO sport filter that unintentionally restricts the rotation.
+
+The active universe must remain all available Underdog sports.
+
+Verify current unique active counts by sport from the canonical active query.
+
+Report something like:
+
+MLB: X
+NFL: X
+CFB: X
+FIFA: X
+LOL: X
+TENNIS: X
+CS: X
+WNBA: X
+PGA: X
+VAL: X
+KBO: X
+NPB: X
+etc.
+
+Then compare those counts with the FPR batch distribution.
+
+IMPORTANT DISTINCTION
+
+Do NOT use cumulative ScanCycleLog observations for this.
+
+Do NOT use total fetched props.
+
+Do NOT use active props observed across scans.
+
+I want the actual canonical active unique prop universe by sport and the actual FPR/scoring activity by sport.
+
+UNCHANGED PROPS
+
+Verify unchanged props are still eligible for FPR.
+
+They must NOT require:
+
+* New status
+* Line movement
+* Recent movement
+* Alert eligibility
+* Delivery eligibility
+
+An unchanged active prop must eventually be selected and rescored simply because it is part of the active universe.
+
+NO RETIRED CLASSIFICATIONS
+
+Do NOT restore:
+
+* Watchlist
+* PASS
+* Rejected
+* Qualified
+* Near-Miss
+* Tier 1 / Tier 2
+* S/A/B/C monitoring gates
+
+This is strictly a scan/rotation/reporting audit.
+
+FINAL REPORT
+
+Return:
+
+1. Actual unique active props by sport.
+2. Actual FPR batch size.
+3. Actual FPR selected count.
+4. Actual FPR scored count.
+5. Actual FPR tracked count.
+6. Sport distribution of the FPR batch.
+7. Sport distribution of actual scoring.
+8. Sport distribution shown by /funnel.
+9. Exact reason the current Sport Funnel only totals 200.
+10. Definitive answer:
+
+Is the bot actually scanning/rescoring all sports, or is it only scanning a small subset?
+
+Do not modify anything until this is proven.
