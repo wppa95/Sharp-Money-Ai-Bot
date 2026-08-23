@@ -808,6 +808,11 @@ def format_underdog_change_alert(
                 and int(conf) >= 30
                 and int(conf) >= 70):
             strong_under_line = "🔥 <b>STRONG UNDER</b>  <i>(BQ ≥ 70 — verify line on Underdog before placing)</i>"
+        elif rec == "UNDER" and conf is not None and int(conf) >= 30:
+            strong_under_line = (
+                "🔴 <b>Strong UNDER Signal</b>"
+                "  <i>(BQ ≥ 30 — verify line on Underdog before placing)</i>"
+            )
 
         # Full hit-history breakdown — show every available window on actionable alerts.
         if not removed:
@@ -1035,6 +1040,11 @@ def format_underdog_new_prop_alert(
             and _np_bq is not None
             and int(_np_bq) >= 70):
         _np_strong_under = "🔥 <b>STRONG UNDER</b>  <i>(BQ ≥ 70 — verify line on Underdog before placing)</i>"
+    elif _np_rec == "UNDER" and _np_bq is not None and int(_np_bq) >= 30:
+        _np_strong_under = (
+            "🔴 <b>Strong UNDER Signal</b>"
+            "  <i>(BQ ≥ 30 — verify line on Underdog before placing)</i>"
+        )
 
     # L5 history block — always shown; falls back to N/A when no history available.
     _np_l5     = getattr(decision, "l5_hit_rate", None) if decision is not None else None

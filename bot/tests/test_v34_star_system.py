@@ -336,11 +336,22 @@ class TestStrongUnderSignal:
 
     # ── Non-trigger conditions ───────────────────────────────────────────────
     def test_under_score_31_no_signal(self):
-        """Score 31 is above the ≤30 threshold — no Strong UNDER Signal."""
-        msg = self._change_alert(rec="UNDER", score_total=31)
+        """BQ below 30 does not trigger the UNDER sensitivity implication."""
+        msg = self._change_alert(rec="UNDER", score_total=31, conf=29)
         assert "Strong UNDER Signal" not in msg, (
-            "Score 31 must NOT trigger Strong UNDER Signal (threshold is ≤ 30)"
+            "BQ 29 must NOT trigger Strong UNDER Signal (threshold is 30)"
         )
+
+    def test_under_bq_30_triggers_sensitivity_signal(self):
+        """UNDER + BQ 30 triggers the existing deeper sensitivity implication."""
+        msg = self._change_alert(rec="UNDER", score_total=60, conf=30)
+        assert "Strong UNDER Signal" in msg
+        assert "BQ ≥ 30" in msg
+
+    def test_under_bq_29_does_not_trigger_sensitivity_signal(self):
+        """BQ below 30 does not trigger the UNDER sensitivity implication."""
+        msg = self._change_alert(rec="UNDER", score_total=60, conf=29)
+        assert "Strong UNDER Signal" not in msg
 
     def test_over_score_28_no_signal(self):
         """OVER direction + low score must NOT get the UNDER signal."""
@@ -361,6 +372,11 @@ class TestStrongUnderSignal:
         assert "STRONG UNDER" in msg, (
             "format_underdog_new_prop_alert must show STRONG UNDER when Tier 1 UNDER + BQ ≥ 70"
         )
+
+    def test_new_prop_under_bq_30_triggers_sensitivity_signal(self):
+        msg = self._new_prop_alert(rec="UNDER", score_total=60, conf=30)
+        assert "Strong UNDER Signal" in msg
+        assert "BQ ≥ 30" in msg
 
     def test_new_prop_over_score_28_no_signal(self):
         msg = self._new_prop_alert(rec="OVER", score_total=28)
