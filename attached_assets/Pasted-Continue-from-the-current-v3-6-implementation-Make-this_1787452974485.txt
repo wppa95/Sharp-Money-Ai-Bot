@@ -1,0 +1,189 @@
+Continue from the current v3.6 implementation.
+
+Make this the final classification cleanup.
+
+CORE REQUIREMENT
+
+Rejected, Pass, Qualified, Watchlist, Near-Miss, and S/A/B/C classifications must NOT exist anywhere in the v3.6 monitoring framework.
+
+Do not simply hide them from /funnel.
+
+Remove their use as monitoring, evaluation, rotation, persistence, or reporting classifications.
+
+The v3.6 model must treat every active prop uniformly as part of the monitored universe.
+
+Every prop must remain available for continuous scanning
+
+Every active prop must:
+
+* Remain in the active monitoring pool.
+* Continue through every full-pool rotation.
+* Receive future snapshots.
+* Be rescored on future rotations.
+* Detect future line movement.
+* Receive evidence enrichment when available.
+* Remain tracked and persisted.
+* Remain gradeable.
+* Accumulate HIT/MISS/PUSH evidence when applicable.
+* Remain eligible for future actionable evaluation.
+
+A prop that does not produce an alert is not rejected.
+
+A prop that does produce an alert is not a different monitoring classification.
+
+The only downstream distinction should be whether the current conditions produce an actionable alert.
+
+REMOVE COMPLETELY
+
+Audit the entire codebase and remove obsolete framework references/behavior for:
+
+* Rejected
+* Pass
+* Qualified
+* Watchlist
+* Near-Miss
+* S-tier
+* A-tier
+* B-tier
+* C-tier
+* Tier 1
+* Tier 2
+
+This includes, where applicable:
+
+* monitoring decisions
+* rotation queues
+* Stable Refresh queues
+* FPR queues
+* funnel aggregation
+* dashboard reporting
+* counters
+* display labels
+* filtering
+* scheduling selection
+* persistence classification
+* evaluation gates
+* tests
+* helper functions
+* comments/documentation that describe these as current framework states
+
+Do not leave legacy classification behavior underneath a renamed label.
+
+IMPORTANT — DO NOT BREAK ALERTING
+
+Removing these classifications does NOT mean every prop should generate a Telegram alert.
+
+Keep the existing actionable-alert requirements.
+
+For example:
+
+* Props can be continuously monitored without alerting.
+* Strong moneylines can still alert according to the moneyline requirement.
+* Existing prop alert conditions remain intact.
+* Evidence, BQ/MQ, confidence, deduplication, live-game, and other existing safety mechanisms remain where they are currently required.
+
+The critical distinction is:
+
+MONITORED ≠ ALERTED
+
+but also:
+
+NOT ALERTED ≠ REJECTED
+
+CONTINUOUS ROTATION
+
+The rotation must operate only on the active prop universe.
+
+Priority remains:
+
+1. New props
+2. Meaningful line movers
+3. Urgent/actionable movement
+4. Remaining active props
+
+Then continuously repeat the rotation.
+
+Previously evaluated props must never be removed because of an evaluation outcome.
+
+Verify that the same active pool can be rescanned repeatedly across multiple rotations.
+
+FUNNEL / DASHBOARD
+
+Remove obsolete classification reporting entirely.
+
+Do not display:
+
+* Rejected
+* Pass
+* Qualified
+* Watchlist
+* Near-Miss
+* S/A/B/C
+* Tier 1
+* Tier 2
+
+Instead show actual lifecycle/monitoring metrics such as:
+
+* Active props
+* Snapshots tracked
+* New snapshots
+* Line movers
+* Rescored
+* Evidence enriched
+* Graded outcomes
+* Strong actionable candidates
+* Delivered alerts
+* Rotation/coverage progress
+
+Use existing metrics/data sources where possible. Do not create a duplicate tracking system.
+
+PROTECTED SYSTEMS
+
+Do NOT change:
+
+* scoring formulas
+* BQ/MQ calculations
+* confidence calculations
+* scheduler cadence
+* max_instances
+* adaptive batching
+* provider architecture
+* evidence architecture
+* graded-history architecture
+* database schema unless absolutely required
+* player identity
+* Underdog moneyline ingestion
+* Strong-only moneyline alerting
+* existing OVER/UNDER behavior
+* Telegram formatting
+* Discord formatting
+* clean restart
+
+Do not redesign the architecture.
+
+VERIFICATION
+
+Audit the entire current codebase for the obsolete classification framework.
+
+Then run:
+
+* Full rotation tests
+* Stable Refresh/FPR tests
+* Tracking/persistence tests
+* Evidence tests
+* Graded-history tests
+* Underdog tests
+* Moneyline tests
+* Dashboard/funnel tests
+* All affected legacy tests
+* Complete bot/tests suite
+* Python compilation
+* git diff --check
+
+The final codebase must represent one coherent v3.6 framework, with no legacy Rejected/Pass/Qualified/Watchlist/Near-Miss/tier classification model remaining.
+
+Do NOT restart Railway.
+Do NOT deploy Railway.
+Do NOT create a checkpoint until the entire change is implemented and verified.
+
+Report exactly what was removed, what was preserved, and the final test results.
