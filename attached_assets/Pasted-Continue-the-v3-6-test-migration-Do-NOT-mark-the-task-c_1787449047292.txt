@@ -1,0 +1,157 @@
+Continue the v3.6 test migration. Do NOT mark the task complete and do NOT create a checkpoint yet.
+
+The previous attempt stopped before completing the migration. The current full suite is:
+
+* 3,475 passed
+* 78 failed
+* 22 errors
+
+Do not assume the additional failures are unrelated. Audit them individually.
+
+OBJECTIVE
+
+Bring the entire relevant test suite into alignment with the current Sharp Money AI Bot v3.6 framework.
+
+For every failure/error:
+
+1. Identify the exact reason.
+2. Determine whether it expects obsolete v3.5 behavior, has a stale setup/path assumption, or exposes a real v3.6 regression.
+3. Update obsolete tests to assert v3.6 behavior.
+4. Fix genuine production regressions with the smallest targeted change.
+5. Fix stale test setup/path assumptions where necessary.
+6. Do not delete, skip, weaken, or hide tests.
+
+CURRENT v3.6 MODEL
+
+The tests must reflect:
+
+* No Tier 1 / Tier 2 system.
+* No S/A/B/C monitoring or evaluation gates.
+* No Watchlist classification.
+* No Near-Miss classification.
+* No PASS classification as a monitoring/reporting state.
+* Every snapshot remains tracked, persisted, and gradeable.
+* Former Watchlist/Near-Miss/PASS props remain in continuous rotation.
+* Full-pool rotation remains continuous.
+* New props and meaningful line movers retain priority.
+* Stable Refresh/FPR remain part of the unified monitoring model.
+* Graded HIT/MISS/PUSH outcomes build durable player evidence.
+* Provider evidence remains preferred when available.
+* Graded evidence supplements provider evidence without duplicate dates.
+* Cold-start props remain monitorable and progressively develop evidence.
+* Unsupported sports receive no fabricated evidence.
+* UNDER + BQ >= 30 produces the existing Strong UNDER Signal implication.
+* BQ 29 or lower does not trigger that implication.
+* OVER behavior remains unchanged.
+* Dashboard Recently Tracked Props uses persistent tracking data, a one-hour window, and ALL sports.
+* /funnel and dashboard reporting use the current unified model.
+
+SPECIFIC LEGACY FAILURES
+
+Audit and migrate all affected areas, including but not limited to:
+
+* test_gate_adjustment_final.py
+* test_cred_burning_protection.py
+* test_mq_gate.py
+* test_mq_gate_extended.py
+* test_prop_acceptance_spec.py
+* test_sport_priority_grading.py
+* test_tier1_final_fix.py
+* test_alert_limits.py
+* test_live_gate_et_format.py
+* test_credibility_fixes.py
+* test_testalert_pp_underdog.py
+
+Remove obsolete test dependencies on:
+
+* _TIER2_SPORTS_BLOCK
+* Tier-specific sport gates
+* Tier-specific market-quality gates
+* S/A/B/C requirements
+* Watchlist promotion/demotion/removal
+* Watchlist-based UNDER blocking
+* Tier-based candidate priority
+* Tier-specific new-prop thresholds
+
+Replace those assertions with the appropriate v3.6 unified behavior.
+
+STALE PATH / SETUP FAILURES
+
+Fix tests that reference obsolete paths such as:
+
+open("commands.py")
+
+Use the actual current repository structure.
+
+Do not modify production code merely to satisfy an obsolete test path.
+
+IMPORTANT — DO NOT BLINDLY LABEL FAILURES UNRELATED
+
+Previously identified “unrelated” failures such as:
+
+* alert quality
+* duplicate dedup
+* scan performance
+* soccer/NHL stats
+* scheduler/config
+
+must be independently diagnosed.
+
+If they are genuinely pre-existing and unrelated to v3.6, document the exact reason and evidence.
+
+If they are affected by the current v3.6 framework, update/fix them.
+
+PROTECTED SYSTEMS
+
+Do not change unless a real regression requires it:
+
+* Railway
+* Railway configuration
+* scheduler cadence
+* max_instances
+* adaptive batching
+* scoring formulas
+* BQ/MQ calculations
+* provider architecture
+* evidence architecture
+* graded-history architecture
+* database schema
+* Telegram formatting
+* Discord formatting
+* clean-restart behavior
+
+No Railway restart.
+No Railway deployment.
+No checkpoint.
+
+VALIDATION
+
+After the migration:
+
+1. Run every currently failing/erroring test.
+2. Run Task #141 focused tests.
+3. Run identity/evidence/graded-history tests.
+4. Run tracking/persistence tests.
+5. Run rotation/Stable Refresh/FPR tests.
+6. Run dashboard/recent-tracking tests.
+7. Run UNDER/BQ tests.
+8. Run Python compilation.
+9. Run git diff --check.
+10. Run the complete bot/tests suite again.
+
+The goal is for the test suite to represent one coherent v3.6 framework, not a mixture of v3.5 and v3.6 expectations.
+
+FINAL REPORT
+
+Report:
+
+* Initial failures/errors.
+* Each failure category.
+* Tests updated because their v3.5 expectations were obsolete.
+* Production fixes, if any.
+* Final passing/failing/error counts.
+* Exact remaining failures and why they remain.
+* Confirmation that no Railway action occurred.
+* Confirmation that no checkpoint was created.
+
+Do not mark complete until this work is actually finished and verified.
