@@ -326,6 +326,43 @@ class TestCmdFunnelSportBreakdown:
         assert "Candidate records tracked: <b>25,000</b>" in msg
 
     @pytest.mark.asyncio
+    async def test_funnel_breakdown_includes_scan_actionable_and_removed(self):
+        from commands import cmd_funnel
+        update, ctx = self._make_update()
+        mock_db = MagicMock()
+        mock_db.get_funnel_summary = AsyncMock(return_value={
+            "tracked": 10,
+            "by_sport": [],
+        })
+        mock_db.get_scan_cycle_summary = AsyncMock(return_value={
+            "cycles": 1,
+            "analyzed": 4,
+            "line_changed": 4,
+            "alert_delivered": 1,
+            "actionable_by_sport": {"NBA": 3, "MLB": 1},
+            "removed_by_sport": {"NBA": 2, "WNBA": 1},
+        })
+        health = MagicMock()
+        health.get_stable_refresh_stats.return_value = {}
+        health.get_fpr_stats.return_value = {
+            "pool_size": 10,
+            "fpr_by_sport": {"NBA": 8, "MLB": 2},
+        }
+        with (
+            patch("commands._db", mock_db),
+            patch("engine.health.get_health_tracker", return_value=health),
+        ):
+            await cmd_funnel(update, ctx)
+        msg = update.message.reply_text.call_args[0][0]
+        assert "Active" in msg
+        assert "Action" in msg
+        assert "Removed" in msg
+        assert "<code>NBA" in msg
+        assert "8        3        2</code>" in msg
+        assert "<code>WNBA" in msg
+        assert "0        0        1</code>" in msg
+
+    @pytest.mark.asyncio
     async def test_funnel_renders_no_breakdown_when_empty(self):
         from commands import cmd_funnel
         update, ctx = self._make_update()

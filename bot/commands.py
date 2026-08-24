@@ -3734,8 +3734,8 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 # Escape dynamic sport name to prevent HTML parse errors
                 sp    = _html.escape((row.get("sport") or "?")[:11])
                 sc    = row.get("tracked", 0)
-                    sa    = row.get("actionable", 0)
-                    sr    = row.get("removed", 0)
+                sa    = row.get("actionable", 0)
+                sr    = row.get("removed", 0)
                 lines.append(
                     f"<code>{sp:<12} {sc:>8} {sa:>8} {sr:>8}</code>"
                 )

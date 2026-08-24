@@ -5,6 +5,7 @@ Stores odds history, alerts, and EV opportunities for historical tracking.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from datetime import datetime
@@ -499,6 +500,8 @@ class ScanCycleLog(Base):
     analyzed        = Column(Integer,  nullable=False, default=0)  # total scored this cycle
     qualified       = Column(Integer,  nullable=False, default=0)  # passed all alert gates
     alert_delivered = Column(Integer,  nullable=False, default=0)  # successfully sent to Telegram
+    actionable_by_sport = Column(Text, nullable=True)  # JSON: sport -> scan-actionable count
+    removed_by_sport    = Column(Text, nullable=True)  # JSON: sport -> feed-removal count
 
 
 # ── Player Risk / Block System ─────────────────────────────────────────────────
@@ -639,6 +642,7 @@ class Database:
         await self._migrate_prop_opportunity_log_v5()
         await self._migrate_prop_line_history_v4()
         await self._migrate_prop_line_history_v5()
+        await self._migrate_scan_cycle_log_v1()
         # player_risk_records is created by create_all (new table); no column migration needed
         logger.info("Database initialised at %s", self._url)
 
@@ -3256,6 +3260,8 @@ class Database:
         analyzed: int = 0,
         qualified: int = 0,
         alert_delivered: int = 0,
+        actionable_by_sport: Optional[dict] = None,
+        removed_by_sport: Optional[dict] = None,
     ) -> None:
         """Write one scan-cycle summary row. Non-fatal on failure."""
         async with self.session() as s:
@@ -3272,8 +3278,23 @@ class Database:
                 analyzed        = analyzed,
                 qualified       = qualified,
                 alert_delivered = alert_delivered,
+                actionable_by_sport = json.dumps(actionable_by_sport or {}),
+                removed_by_sport    = json.dumps(removed_by_sport or {}),
             ))
             await s.commit()
+
+    async def _migrate_scan_cycle_log_v1(self) -> None:
+        """Add per-sport scan funnel counters to existing installations."""
+        for statement in (
+            "ALTER TABLE scan_cycle_log ADD COLUMN actionable_by_sport TEXT",
+            "ALTER TABLE scan_cycle_log ADD COLUMN removed_by_sport TEXT",
+        ):
+            try:
+                async with self._engine.begin() as conn:
+                    await conn.execute(text(statement))
+            except Exception as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    logger.debug("scan_cycle_log migration skipped: %s", exc)
 
     async def get_scan_cycle_summary(self, since_hours: int = 24) -> dict:
         """Aggregate ScanCycleLog for the full pipeline view in /funnel.
@@ -3304,6 +3325,25 @@ class Database:
             row = result.one_or_none()
             if row is None or (row.cycles or 0) == 0:
                 return {"cycles": 0}
+            actionable_by_sport: dict[str, int] = {}
+            removed_by_sport: dict[str, int] = {}
+            maps = await s.execute(select(
+                ScanCycleLog.actionable_by_sport,
+                ScanCycleLog.removed_by_sport,
+            ).where(ScanCycleLog.scan_ts >= cutoff))
+            for actionable_json, removed_json in maps.all():
+                for target, raw in (
+                    (actionable_by_sport, actionable_json),
+                    (removed_by_sport, removed_json),
+                ):
+                    try:
+                        values = json.loads(raw or "{}")
+                        if isinstance(values, dict):
+                            for sport, count in values.items():
+                                key = str(sport)
+                                target[key] = target.get(key, 0) + int(count or 0)
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        continue
             return {
                 "cycles":           row.cycles or 0,
                 "fetched":          row.fetched or 0,
@@ -3317,6 +3357,8 @@ class Database:
                 "analyzed":         row.analyzed or 0,
                 "qualified":        row.qualified or 0,
                 "alert_delivered":  row.alert_delivered or 0,
+                "actionable_by_sport": actionable_by_sport,
+                "removed_by_sport":    removed_by_sport,
             }
 
     async def get_funnel_summary(self, since_hours: int = 24) -> dict:
