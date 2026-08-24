@@ -332,13 +332,12 @@ class TestNpImmediateSportAwareStars:
             "UD_NON_STRICT_MIN_STARS must still appear in np_immediate star check"
         )
 
-    def test_monitoring_record_still_uses_min_stars_for_sport(self):
-        """Watchlist path may still use min_stars_for_sport for internal quality gating."""
+    def test_watchlist_scan_has_no_pre_delivery_star_gate(self):
+        """Watchlist props reach the canonical Telegram gate without a star blocker."""
         src = self._me_src()
         wl_idx = src.find("_wl_score.stars >= config.min_stars_for_sport")
-        assert wl_idx >= 0, (
-            "Watchlist star gate was removed — monitoring_record internal quality floor missing"
-        )
+        assert wl_idx == -1
+        assert "_wl_dec.recommendation in (\"OVER\", \"UNDER\")" in src
 
 
 # ═══════════════════════════════════════════════════════════════════════════

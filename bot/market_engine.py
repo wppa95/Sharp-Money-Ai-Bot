@@ -1979,6 +1979,12 @@ async def underdog_job(context) -> None:
                     )
                     _np_bet_ready = False
 
+                # Pre-delivery checks only prepare diagnostics. PASS/no-direction
+                # remains internal and is rescanned until it becomes a pick.
+                _np_bet_ready = (
+                    decision is not None
+                    and decision.recommendation in ("OVER", "UNDER")
+                )
                 if _np_bet_ready and chat_ids:
                     # Prop Intelligence trace for richer alert context
                     _np_intel_trace: Optional[dict] = None
@@ -2169,10 +2175,7 @@ async def underdog_job(context) -> None:
                     )
                     # Fetch real game results — required before any directional pick
                     hit_rates = None
-                    if (
-                            validation.has_supporting_data
-                            and (snap.sport or "UNKNOWN") in config.ud_alert_sports
-                        ):
+                    if not is_removed:
                         hit_rates = await _fetch_and_compute_hit_rates(
                             db, player, snap.sport or "UNKNOWN", stat_type, snap.line or 0.0,
                             cycle_timing=_cycle_timing,
@@ -2565,6 +2568,13 @@ async def underdog_job(context) -> None:
                             player, stat_type, snap.line or 0.0,
                         )
 
+                # Only the canonical Telegram delivery gate below may block a
+                # directional candidate after it has been evaluated.
+                should_alert = (
+                    not is_removed
+                    and decision is not None
+                    and decision.recommendation in ("OVER", "UNDER")
+                )
                 if should_alert and chat_ids:
                     # Prop Intelligence trace for richer alert context
                     # ud_history may be unbound in removal-only paths (no scoring was run)
@@ -3993,35 +4003,8 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 sr_not_delivered += 1
                 continue
 
-            _sr_min_conf = config.min_conf_for_sport_tier(_sr_sport, _sr_dec.decision_tier)
-            if _sr_dec.confidence < _sr_min_conf:
-                sr_not_delivered += 1
-                continue
-
-            if (
-                _sr_sport.upper() in config.ud_strict_alert_sports
-                and _sr_dec.decision_tier not in config.ud_mlb_alert_tiers
-            ):
-                sr_not_delivered += 1
-                continue
-
-            if (
-                _sr_sport.upper() == "MLB"
-                and _sr_dec.recommendation == "UNDER"
-                and not config.is_mlb_under_allowed(_sr_stat)
-            ):
-                sr_not_delivered += 1
-                continue
-
-            if _is_game_live_or_past(_sr_snap, now):
-                sr_not_delivered += 1
-                continue
-
-            if not _ud_line_fresh(_sr_line, _sr_player, _sr_stat, _sr_line_map):
-                sr_not_delivered += 1
-                continue
-
-            # ── All gates passed — deliver ────────────────────────────────────
+            # All scan-time gates are non-blocking. PASS/no-direction was
+            # handled above; directional picks proceed to the Telegram gate.
             sr_actionable += 1
             _sr_mq = _sr_cmq(_sr_stat, _sr_line, _sr_score)
             _sr_mp = _sr_dmp(None, _sr_hist)
@@ -4257,34 +4240,13 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     sport        = _wl_sport,
                 )
 
-                # Check if the candidate now passes the full alert gate
+                # Scan-time eligibility is intentionally non-blocking. Keep
+                # PASS/no-direction entries in the monitoring stream; only
+                # directional decisions reach the canonical Telegram gate.
                 _wl_qualifies = (
                     _wl_dec is not None
-                    and _wl_dec.recommendation != "PASS"
-                    and _wl_val.has_supporting_data
-                    and _wl_score.stars >= config.min_stars_for_sport(_wl_sport)
-                    and _wl_dec.confidence >= config.min_conf_for_sport_tier(
-                        _wl_sport, _wl_dec.decision_tier
-                    )
-                    and not _is_game_live_or_past(_wl_snap, now)
-                    and not _is_prop_deduped(
-                        _prop_market_alerted, _wl_player, _wl_sport, _wl_stat, _wl_cur_line,
-                        dedup_window_seconds = config.UD_ALERT_DEDUP_WINDOW,
-                        min_line_change      = config.MIN_UNDERDOG_LINE_CHANGE,
-                    )
-                    and not await db.has_recent_ud_alert(
-                        _wl_player, _wl_stat, within_seconds=86400,
-                    )
+                    and _wl_dec.recommendation in ("OVER", "UNDER")
                 )
-                if _wl_qualifies and _wl_sport.upper() in config.ud_strict_alert_sports:
-                    if _wl_dec.decision_tier not in config.ud_mlb_alert_tiers:
-                        _wl_qualifies = False
-                if _wl_qualifies and _wl_sport.upper() == "MLB":
-                    if (
-                        _wl_dec.recommendation == "UNDER"
-                        and not config.is_mlb_under_allowed(_wl_stat)
-                    ):
-                        _wl_qualifies = False
 
                 if _wl_qualifies and chat_ids:
                     # Promote — deliver alert through normal path
@@ -4630,32 +4592,12 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 except Exception as _fpr_log_exc:
                     logger.debug("full_pool_rescan: opportunity log failed: %s", _fpr_log_exc)
 
-                # ── Full alert gate (identical to stable-refresh path) ─────────
+                # Scan-time eligibility is non-blocking. PASS/no-direction
+                # remains in the monitoring stream for the next rotation.
                 _fpr_qualifies = (
                     _fpr_dec is not None
-                    and _fpr_dec.recommendation != "PASS"
-                    and _fpr_val.has_supporting_data
-                    and _fpr_dec.confidence >= config.min_conf_for_sport_tier(
-                        _fpr_sport, _fpr_dec.decision_tier
-                    )
-                    and not _is_game_live_or_past(_fpr_snap, now)
-                    and not _is_prop_deduped(
-                        _prop_market_alerted,
-                        _fpr_player, _fpr_sport, _fpr_stat, _fpr_line,
-                        dedup_window_seconds=config.UD_ALERT_DEDUP_WINDOW,
-                        min_line_change=config.MIN_UNDERDOG_LINE_CHANGE,
-                    )
-                    and not await db.has_recent_ud_alert(
-                        _fpr_player, _fpr_stat, within_seconds=86400,
-                    )
+                    and _fpr_dec.recommendation in ("OVER", "UNDER")
                 )
-                # MLB UNDER direction gate (whitelist markets only)
-                if _fpr_qualifies and _fpr_sport == "MLB":
-                    if (
-                        _fpr_dec.recommendation == "UNDER"
-                        and not config.is_mlb_under_allowed(_fpr_stat)
-                    ):
-                        _fpr_qualifies = False
 
                 if _fpr_qualifies and chat_ids:
                     _fpr_mq       = _fpr_cmq(_fpr_stat, _fpr_line, _fpr_score)
