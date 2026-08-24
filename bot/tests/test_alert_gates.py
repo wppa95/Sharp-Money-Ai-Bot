@@ -309,6 +309,7 @@ class TestCmdFunnelSportBreakdown:
         fpr_stats = MagicMock()
         fpr_stats.get_stable_refresh_stats.return_value = {"sr_rescored": 0}
         fpr_stats.get_fpr_stats.return_value = {
+            "pool_size": 6352,
             "fpr_rescored": 6352,
             "fpr_by_sport": {"MLB": 6352},
         }
