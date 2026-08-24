@@ -168,7 +168,7 @@ class TestConfirmationResultShape(unittest.TestCase):
         """avg_odds is None when books report no american_odds."""
         import market_engine as me
         lines = [_FakePlayerPropLine(
-            sportsbook="BookX", sport=None, market_key="player_hits",
+            sportsbook="DraftKings", sport=None, market_key="player_hits",
             event="Game", player_name="Aaron Judge", description="Over",
             american_odds=0, line=1.5, event_start=None,
         )]
@@ -190,7 +190,7 @@ class TestConfirmationResultShape(unittest.TestCase):
         """Result dict must never contain API key or credential fields."""
         import market_engine as me
         lines = _make_lines("Shohei Ohtani", "player_pitcher_strikeouts",
-                            "Over", 7.5, -110, ["BetMGM"])
+                            "Over", 7.5, -110, ["DraftKings"])
         engine_mock = self._make_engine_mock(lines)
 
         async def _run_test():
@@ -579,9 +579,9 @@ class TestCLVSeedingSupport(unittest.TestCase):
         """avg_odds must be the mathematical average (rounded) of all book odds."""
         import market_engine as me
         lines = [
-            _FakePlayerPropLine("BookA", None, "player_assists", "Game",
+            _FakePlayerPropLine("DraftKings", None, "player_assists", "Game",
                                 "James Harden", "Over", -110, 6.5, None),
-            _FakePlayerPropLine("BookB", None, "player_assists", "Game",
+            _FakePlayerPropLine("FanDuel", None, "player_assists", "Game",
                                 "James Harden", "Over", -120, 6.5, None),
         ]
         engine_mock = MagicMock()
@@ -720,7 +720,7 @@ class TestSurnameFuzzyMatch(unittest.TestCase):
         import market_engine as me
         lines = [
             _FakePlayerPropLine(
-                sportsbook="BetMGM", sport=None, market_key="player_hits",
+                sportsbook="FanDuel", sport=None, market_key="player_hits",
                 event="Game", player_name="Junior Caminero", description="Over",
                 american_odds=-110, line=1.5, event_start=None,
             ),
