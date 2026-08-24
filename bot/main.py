@@ -669,7 +669,16 @@ async def _poll_odds_job(context) -> None:
 
     # ── 1. Fetch odds for every active sport ──────────────────────────────────
     all_lines: list[OddsLine] = []
-    for sport_str in config.ud_tier1_sports:
+    allowed_books = set()
+    if config.DRAFTKINGS_ENABLED:
+        allowed_books.add("draftkings")
+    if config.FANDUEL_ENABLED:
+        allowed_books.add("fanduel")
+    if not allowed_books:
+        logger.debug("_poll_odds_job: no sportsbook moneyline books enabled")
+        return
+
+    for sport_str in config.active_sports:
         try:
             sport = Sport(sport_str)
         except ValueError:
@@ -685,8 +694,12 @@ async def _poll_odds_job(context) -> None:
                     sport_str, odds_key,
                 )
                 continue
-        lines = await _engine.fetch_live_odds(sport)
-        all_lines.extend(lines)
+        lines = await _engine.fetch_live_odds(sport, markets="h2h")
+        allowed_book_names = {book.replace(" ", "") for book in allowed_books}
+        all_lines.extend(
+            line for line in lines
+            if line.sportsbook.lower().replace(" ", "") in allowed_book_names
+        )
 
     if not all_lines:
         logger.debug("_poll_odds_job: no lines returned from API")

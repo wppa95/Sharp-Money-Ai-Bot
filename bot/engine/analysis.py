@@ -522,12 +522,15 @@ class AnalysisEngine:
 
     # ── Live data feed ─────────────────────────────────────────────────────────
 
-    async def fetch_live_odds(self, sport: Sport) -> list[OddsLine]:
+    async def fetch_live_odds(
+        self, sport: Sport, markets: str = "h2h,totals",
+    ) -> list[OddsLine]:
         """
         Fetch live odds from The Odds API (https://the-odds-api.com).
 
         Returns a flat list of OddsLine objects — one per outcome per book per
-        market. Markets fetched: h2h (moneyline), spreads, totals.
+        requested market. The default preserves the existing h2h/totals API;
+        sportsbook moneyline polling passes markets="h2h".
         Returns an empty list when the API key is missing or the request fails.
         """
         if not config.ODDS_API_KEY:
@@ -558,7 +561,7 @@ class AnalysisEngine:
             data: list[dict] = await cache.get_or_fetch(
                 sport_key,
                 api_key=config.ODDS_API_KEY,
-                markets="h2h,totals",
+                markets=markets,
                 regions="us",
                 odds_format="american",
             )
