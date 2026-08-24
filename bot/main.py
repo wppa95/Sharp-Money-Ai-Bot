@@ -284,7 +284,12 @@ async def post_init(application: Application) -> None:
         # ── Sportsbook polling disabled — Underdog-only mode ─────────────────
         # To re-enable sportsbook monitoring: uncomment the blocks below and
         # restart the bot.  All logic is preserved; nothing has been deleted.
-        # jq.run_repeating(_poll_odds_job,      interval=config.ODDS_POLL_INTERVAL,        first=10,  name="odds_poller")
+        jq.run_repeating(
+            _poll_odds_job,
+            interval=config.ODDS_POLL_INTERVAL,
+            first=10,
+            name="odds_poller",
+        )
         # jq.run_repeating(_steam_check_job,    interval=config.STEAM_CHECK_INTERVAL,      first=15,  name="steam_checker")
         # player_props_fetcher disabled — fetches OddsAPI player-prop markets for
         # the PrizePicks crossmatch pipeline which is currently off.  Calling
@@ -694,7 +699,7 @@ async def _poll_odds_job(context) -> None:
                     sport_str, odds_key,
                 )
                 continue
-        lines = await _engine.fetch_live_odds(sport, markets="h2h")
+        lines = await _engine.fetch_live_odds(sport, markets="h2h,totals")
         allowed_book_names = {book.replace(" ", "") for book in allowed_books}
         all_lines.extend(
             line for line in lines

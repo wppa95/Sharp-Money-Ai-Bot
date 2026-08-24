@@ -530,7 +530,7 @@ class AnalysisEngine:
 
         Returns a flat list of OddsLine objects — one per outcome per book per
         requested market. The default preserves the existing h2h/totals API;
-        sportsbook moneyline polling passes markets="h2h".
+        sportsbook moneyline/total polling passes markets="h2h,totals".
         Returns an empty list when the API key is missing or the request fails.
         """
         if not config.ODDS_API_KEY:

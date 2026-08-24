@@ -6,7 +6,7 @@ Single entry point:  check(obj: AlertObject) -> FilterResult
 Rules
 ─────
 PrizePicks / Underdog  : always allowed  (player props by definition)
-DraftKings / FanDuel   : MLB Moneyline ✓ | MLB Totals ✓ | everything else ✗
+DraftKings / FanDuel   : Moneylines and totals for active sports ✓ | other markets ✗
 SteamAlert (any book)  : always blocked  ("sportsbook sharp money alerts")
 System alerts          : always blocked  (multi-book steam, inefficiency, CLV)
 
@@ -25,21 +25,23 @@ logger = logging.getLogger(__name__)
 
 # ── Canonical scope rules ─────────────────────────────────────────────────────
 # This constant is the single source of truth for the provider priority policy.
-# Never widen the DK/FD scope without also updating the tests.
+# Keep DK/FD limited to moneylines and totals; do not widen this to spreads or props.
 #
 # Priority order: PrizePicks (PRIMARY) → Underdog (SECONDARY) → DK/FD (SUPPORTING ONLY)
 #
 SCOPE_RULES: dict[str, str] = {
     "PrizePicks": "ALWAYS PASS — player props, all sports (primary source)",
     "Underdog":   "ALWAYS PASS — player props, all sports (secondary source)",
-    "DraftKings": "MLB Moneyline (h2h) + MLB Totals only — all other sports/markets BLOCKED",
-    "FanDuel":    "MLB Moneyline (h2h) + MLB Totals only — all other sports/markets BLOCKED",
+    "DraftKings": "Moneyline (h2h) + totals for active sports only — other markets BLOCKED",
+    "FanDuel":    "Moneyline (h2h) + totals for active sports only — other markets BLOCKED",
     "System":     "ALWAYS BLOCKED — multi-book steam, CLV, inefficiency alerts excluded",
 }
 
 # ── Allowed DK / FD scope ─────────────────────────────────────────────────────
-_APPROVED_SPORT   = Sport.MLB.value
-_APPROVED_MARKETS = frozenset({MarketType.MONEYLINE.value, MarketType.TOTAL.value})
+_APPROVED_MARKETS = frozenset({
+    MarketType.MONEYLINE.value,
+    MarketType.TOTAL.value,
+})
 
 # AlertType values that are always blocked regardless of source
 _STEAM_ALERT_TYPES = frozenset({
@@ -87,15 +89,24 @@ def check(obj: AlertObject) -> FilterResult:
         )
         return _block(obj, reason)
 
-    # Only Tier 1 sports are allowed through the Odds API EV pipeline.
+    # Only moneylines for configured active sports are allowed through the
+    # sportsbook EV pipeline.
     try:
         import config as _cfg_mod
         _sport_val = obj.sport.value if hasattr(obj.sport, "value") else str(obj.sport)
-        if _sport_val not in _cfg_mod.config.ud_tier1_sports:
-            reason = (
-                f"Blocked: {obj.sport} {obj.market} outside Tier 1 Odds API scope"
-            )
+        _market_val = (
+            obj.market.value if hasattr(obj.market, "value") else str(obj.market)
+        )
+        if _market_val not in _APPROVED_MARKETS:
+            reason = f"Blocked: {obj.sport} {obj.market} — only moneylines are enabled"
             return _block(obj, reason)
+        _active_sports = getattr(_cfg_mod.config, "active_sports", None)
+        if isinstance(_active_sports, (list, tuple, set, frozenset)) and _active_sports:
+            if _sport_val not in _active_sports:
+                reason = (
+                    f"Blocked: {obj.sport} {obj.market} outside active-sport scope"
+                )
+                return _block(obj, reason)
     except Exception:
         reason = (
             f"Blocked: {obj.sport} {obj.market} — unable to verify Tier 1 scope"
@@ -111,14 +122,13 @@ def is_ev_line_in_scope(sport: Sport, market_type: MarketType) -> bool:
     """
     Fast pre-filter for raw OddsLine objects.
 
-    Only Tier 1 sports are eligible for the Odds API pipeline.
-    Market-level restrictions are handled downstream by the alert scope
-    checker, so this filter only determines whether the sport should enter
-    the Odds API analysis pipeline.
+    The caller already iterates configured active sports. This filter keeps
+    the sportsbook pipeline restricted to the explicitly enabled moneyline
+    market and does not impose the old Tier-1-only restriction.
     """
     try:
         import config as _cfg_mod
-        return sport.value in _cfg_mod.config.ud_tier1_sports
+        return market_type.value in _APPROVED_MARKETS
     except Exception:
         return False
 
