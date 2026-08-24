@@ -582,7 +582,9 @@ async def _get_odds_api_confirmation(
     Query OddsAPI player prop lines as a non-blocking market confirmation signal.
 
     Only fires for sports/stats configured in _UD_TO_ODDS_API_MARKET (NBA + MLB).
-    Uses the cached OddsApiCache — no extra quota if already fetched this cycle.
+    DraftKings and FanDuel are supporting books only; Underdog remains the
+    source of the player-prop pick and alert. Uses the cached OddsApiCache —
+    no extra quota if already fetched this cycle.
 
     Returns None when:
       • sport/stat not mapped, or _analysis_engine not initialised
@@ -614,7 +616,15 @@ async def _get_odds_api_confirmation(
     except Exception:
         return None
 
-    # Search for this player's market across all bookmakers
+    # Search only the enabled DraftKings/FanDuel lines. These are confirmation
+    # data for an Underdog prop, never a standalone sportsbook alert source.
+    allowed_books = set()
+    if getattr(config, "DRAFTKINGS_ENABLED", False):
+        allowed_books.add("draftkings")
+    if getattr(config, "FANDUEL_ENABLED", False):
+        allowed_books.add("fanduel")
+    allowed_book_names = {book.replace(" ", "") for book in allowed_books}
+
     player_lower   = player_name.lower().strip()
     direction_label = direction.strip().lower()  # "over" | "under"
 
@@ -623,6 +633,8 @@ async def _get_odds_api_confirmation(
     sportsbooks:  set[str]  = set()
 
     for pl in lines:
+        if pl.sportsbook.lower().replace(" ", "") not in allowed_book_names:
+            continue
         if pl.market_key != market_key:
             continue
         pl_name = (pl.player_name or "").lower().strip()
