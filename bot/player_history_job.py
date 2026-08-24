@@ -23,6 +23,30 @@ _SUPPORTED_HISTORY_SPORTS = frozenset({
 })
 
 
+def _fair_cycle_targets(
+    targets: list[tuple[str, str, str]],
+    limit: int,
+) -> list[tuple[str, str, str]]:
+    """Select a bounded, round-robin slice so one sport cannot monopolize a cycle."""
+    by_sport: dict[str, list[tuple[str, str, str]]] = {}
+    for target in targets:
+        by_sport.setdefault(target[1], []).append(target)
+    selected: list[tuple[str, str, str]] = []
+    while len(selected) < limit and by_sport:
+        for sport in sorted(tuple(by_sport)):
+            bucket = by_sport.get(sport)
+            if not bucket:
+                by_sport.pop(sport, None)
+                continue
+            selected.append(bucket.pop(0))
+            if len(selected) >= limit:
+                break
+        for sport in tuple(by_sport):
+            if not by_sport[sport]:
+                by_sport.pop(sport, None)
+    return selected
+
+
 async def player_history_collector_job(context) -> None:
     """Fetch real game results for active Underdog props with providers.
 
@@ -103,7 +127,12 @@ async def player_history_collector_job(context) -> None:
         # ── Fetch results — capped at _API_CALL_TARGET API calls per cycle ───
         ok = 0
         rows = 0
-        for player, sport, stat in targets[:_API_CALL_TARGET]:
+        cycle_targets = _fair_cycle_targets(targets, _API_CALL_TARGET)
+        target_counts: dict[str, int] = {}
+        ok_by_sport: dict[str, int] = {}
+        rows_by_sport: dict[str, int] = {}
+        for player, sport, stat in cycle_targets:
+            target_counts[sport] = target_counts.get(sport, 0) + 1
             try:
                 raw = await provider.fetch_results(player, sport, stat)
                 for r in raw:
@@ -111,6 +140,8 @@ async def player_history_collector_job(context) -> None:
                 if raw:
                     ok += 1
                     rows += len(raw)
+                    ok_by_sport[sport] = ok_by_sport.get(sport, 0) + 1
+                    rows_by_sport[sport] = rows_by_sport.get(sport, 0) + len(raw)
             except Exception as exc:
                 logger.debug(
                     "player_history_collector_job: %s/%s/%s failed: %s",
@@ -118,8 +149,9 @@ async def player_history_collector_job(context) -> None:
                 )
 
         logger.info(
-            "player_history_collector_job: done players_ok=%d rows=%d",
-            ok, rows,
+            "player_history_collector_job: done players_ok=%d rows=%d "
+            "targets_by_sport=%s players_ok_by_sport=%s rows_by_sport=%s",
+            ok, rows, target_counts, ok_by_sport, rows_by_sport,
         )
         if ht:
             ht.record_job_run("player_history_collector_job")
