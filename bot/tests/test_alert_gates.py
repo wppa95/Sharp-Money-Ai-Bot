@@ -292,6 +292,37 @@ class TestCmdFunnelSportBreakdown:
         assert "MLB" in msg
 
     @pytest.mark.asyncio
+    async def test_funnel_rescored_includes_fpr_batch(self):
+        from commands import cmd_funnel
+        update, ctx = self._make_update()
+        mock_db = MagicMock()
+        mock_db.get_funnel_summary = AsyncMock(return_value={
+            "tracked": 25000,
+            "by_sport": [],
+        })
+        mock_db.get_scan_cycle_summary = AsyncMock(return_value={
+            "cycles": 1,
+            "analyzed": 183,
+            "line_changed": 38,
+            "alert_delivered": 0,
+        })
+        fpr_stats = MagicMock()
+        fpr_stats.get_stable_refresh_stats.return_value = {"sr_rescored": 0}
+        fpr_stats.get_fpr_stats.return_value = {
+            "fpr_rescored": 6352,
+            "fpr_by_sport": {"MLB": 6352},
+        }
+        with (
+            patch("commands._db", mock_db),
+            patch("engine.health.get_health_tracker", return_value=fpr_stats),
+        ):
+            await cmd_funnel(update, ctx)
+        msg = update.message.reply_text.call_args[0][0]
+        assert "Scored this period:" in msg
+        assert "6,535" in msg
+        assert "Rescored: <b>6,535</b>" in msg
+
+    @pytest.mark.asyncio
     async def test_funnel_renders_no_breakdown_when_empty(self):
         from commands import cmd_funnel
         update, ctx = self._make_update()

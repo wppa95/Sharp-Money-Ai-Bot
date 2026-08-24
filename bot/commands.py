@@ -3673,7 +3673,15 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
         # ── Section 2: Candidate Funnel (from PropCandidateLog) ──────────────────────
         active = scan_summary.get("active", 0) or tracked
-        sc_rescored = scan_summary.get("analyzed", 0) + sr_stats.get("sr_rescored", 0)
+        # Include the full-pool rotation in the aggregate evaluation count.
+        # FPR evaluates unchanged and previously handled active props too; it
+        # must not disappear from the funnel merely because it is persisted in
+        # HealthTracker rather than ScanCycleLog.
+        sc_rescored = (
+            scan_summary.get("analyzed", 0)
+            + sr_stats.get("sr_rescored", 0)
+            + fpr_stats.get("fpr_rescored", 0)
+        )
         sc_movers = scan_summary.get("line_changed", 0)
         sc_delivered = scan_summary.get("alert_delivered", 0)
         lines += [
