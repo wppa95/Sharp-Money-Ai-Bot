@@ -3542,14 +3542,26 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         # PropCandidateLog is a separate candidate/evidence stream and does
         # not receive FPR rows, so it cannot be the source for this metric.
         _fpr_by_sport = fpr_stats.get("fpr_by_sport", {})
+        _scan_actionable_by_sport = scan_summary.get("actionable_by_sport", {})
+        _scan_removed_by_sport = scan_summary.get("removed_by_sport", {})
+        _breakdown_sports = set(_scan_actionable_by_sport) | set(_scan_removed_by_sport)
         by_sport = (
             [
-                {"sport": sport, "tracked": count}
-                for sport, count in sorted(
-                    _fpr_by_sport.items(), key=lambda item: (-item[1], item[0])
+                {
+                    "sport": sport,
+                    "tracked": _fpr_by_sport.get(sport, 0),
+                    "actionable": _scan_actionable_by_sport.get(sport, 0),
+                    "removed": _scan_removed_by_sport.get(sport, 0),
+                }
+                for sport in sorted(
+                    set(_fpr_by_sport) | _breakdown_sports,
+                    key=lambda sport: (
+                        -_fpr_by_sport.get(sport, 0),
+                        sport,
+                    ),
                 )
             ]
-            if _fpr_by_sport
+            if _fpr_by_sport or _breakdown_sports
             # Compatibility fallback for pre-reporting health state. Once an
             # FPR batch has emitted fpr_by_sport, PropCandidateLog is never
             # used for this breakdown.
@@ -3715,15 +3727,17 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 "",
                 "⚽ <b>Sport Funnel Breakdown</b>",
                 "",
-                f"{'Sport':<12} {'Tracked':>8}",
-                "─" * 23,
+                f"{'Sport':<12} {'Active':>8} {'Action':>8} {'Removed':>8}",
+                "─" * 39,
             ]
             for row in by_sport:
                 # Escape dynamic sport name to prevent HTML parse errors
                 sp    = _html.escape((row.get("sport") or "?")[:11])
                 sc    = row.get("tracked", 0)
+                    sa    = row.get("actionable", 0)
+                    sr    = row.get("removed", 0)
                 lines.append(
-                    f"<code>{sp:<12} {sc:>8}</code>"
+                    f"<code>{sp:<12} {sc:>8} {sa:>8} {sr:>8}</code>"
                 )
         else:
             lines += ["", "<i>Sport breakdown accumulates as the bot scans props.</i>"]

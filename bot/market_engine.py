@@ -1648,6 +1648,8 @@ async def underdog_job(context) -> None:
     _sport_futures:       dict[str, int] = {}  # season-long/futures props (tracked, not scored)
     _sport_move_detected: dict[str, int] = {}  # significant line moves (≥MIN_LINE_CHANGE)
     _sport_gated:         dict[str, int] = {}  # passed full scoring gate (actionable)
+    _sport_actionable:    dict[str, int] = {}  # scan-qualified props by sport
+    _sport_removed:       dict[str, int] = {}  # [REMOVED] feed entries by sport
     _cycle_timing.finish("active_pool")
     _cycle_timing.start("scoring_evidence")
 
@@ -1674,6 +1676,8 @@ async def underdog_job(context) -> None:
             is_removed = "[REMOVED]" in snap.selection
             if is_removed:
                 _n_removed += 1
+                _removed_sport = (snap.sport or "UNKNOWN").upper()
+                _sport_removed[_removed_sport] = _sport_removed.get(_removed_sport, 0) + 1
             player = snap.player or "Unknown"
 
             # Extract stat-type before any counters so futures are correctly separated.
@@ -2400,6 +2404,11 @@ async def underdog_job(context) -> None:
                     )
                     if is_qualified and not is_reentry_qualified:
                         _n_qualified += 1
+                    if is_qualified:
+                        _actionable_sport = (snap.sport or "UNKNOWN").upper()
+                        _sport_actionable[_actionable_sport] = (
+                            _sport_actionable.get(_actionable_sport, 0) + 1
+                        )
                     # ── Debug tracking (line-change / cold-start) ─────────────────
                     if score is not None:
                         if is_cold_start:
@@ -3553,6 +3562,8 @@ async def underdog_job(context) -> None:
                         analyzed        = _n_new_prop + _n_scored + _n_cold_start_scored,
                         qualified       = _n_qualified,
                         alert_delivered = _n_new_prop_sent + _n_lc_sent + _n_standing_sent,
+                        actionable_by_sport = _sport_actionable,
+                        removed_by_sport    = _sport_removed,
                     ),
                 )
         except Exception as _scl_exc:
