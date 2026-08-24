@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
-# Maximum PlayerStats API calls per 2-minute cycle.
-# Player count is unlimited — the full Tier-1 active pool is targeted.
-# This cap limits API spend per cycle, not the number of players tracked.
-_API_CALL_TARGET = 1000
+# The scheduler cadence remains 240 seconds. Reserve a safety margin so the
+# collector can finish cleanly before the next scheduled run (max_instances=1).
+# The provider's own request timeout bounds any individual call.
+_CYCLE_TIME_BUDGET_SECONDS = 210.0
 
 # Sports for which PlayerStatsProvider.fetch_results() has a working data
 # path.  Unsupported sports (LOL, VALORANT/VAL, PGA/GOLF, MMA, TT,
@@ -51,9 +52,9 @@ async def player_history_collector_job(context) -> None:
     """Fetch real game results for active Underdog props with providers.
 
     Selects all active players whose sport has a working
-    PlayerStatsProvider data path, then calls fetch_results() for up to
-    _API_CALL_TARGET of them per cycle.
-    Player count is unlimited — only API calls are capped.
+    PlayerStatsProvider data path, then calls fetch_results() until the
+    cadence-safe time budget is exhausted. Player count and API calls are
+    uncapped; the run duration is bounded instead.
     """
     from engine.health import get_health_tracker
 
@@ -71,7 +72,10 @@ async def player_history_collector_job(context) -> None:
     ht = get_health_tracker()
     if ht:
         ht.record_job_started("player_history_collector_job")
-    logger.info("player_history_collector_job: starting (api_call_target=%d)", _API_CALL_TARGET)
+    logger.info(
+        "player_history_collector_job: starting (time_budget=%.0fs)",
+        _CYCLE_TIME_BUDGET_SECONDS,
+    )
     try:
         from providers.player_stats import PlayerStatsProvider
 
@@ -119,19 +123,26 @@ async def player_history_collector_job(context) -> None:
                 )
 
         logger.info(
-            "player_history_collector_job: provider_targets=%d calling_up_to=%d",
+            "player_history_collector_job: provider_targets=%d "
+            "round_robin_sports=%s time_budget=%.0fs",
             len(targets),
-            min(len(targets), _API_CALL_TARGET),
+            sorted({sport for _, sport, _ in targets}),
+            _CYCLE_TIME_BUDGET_SECONDS,
         )
 
-        # ── Fetch results — capped at _API_CALL_TARGET API calls per cycle ───
+        # ── Fetch results until the cadence-safe time budget is exhausted ───
         ok = 0
         rows = 0
-        cycle_targets = _fair_cycle_targets(targets, _API_CALL_TARGET)
+        cycle_targets = _fair_cycle_targets(targets, len(targets))
         target_counts: dict[str, int] = {}
         ok_by_sport: dict[str, int] = {}
         rows_by_sport: dict[str, int] = {}
+        cycle_started = time.monotonic()
+        stopped_for_budget = False
         for player, sport, stat in cycle_targets:
+            if time.monotonic() - cycle_started >= _CYCLE_TIME_BUDGET_SECONDS:
+                stopped_for_budget = True
+                break
             target_counts[sport] = target_counts.get(sport, 0) + 1
             try:
                 raw = await provider.fetch_results(player, sport, stat)
@@ -150,8 +161,10 @@ async def player_history_collector_job(context) -> None:
 
         logger.info(
             "player_history_collector_job: done players_ok=%d rows=%d "
+            "targets_attempted=%d elapsed=%.1fs stopped_for_budget=%s "
             "targets_by_sport=%s players_ok_by_sport=%s rows_by_sport=%s",
-            ok, rows, target_counts, ok_by_sport, rows_by_sport,
+            ok, rows, sum(target_counts.values()), time.monotonic() - cycle_started,
+            stopped_for_budget, target_counts, ok_by_sport, rows_by_sport,
         )
         if ht:
             ht.record_job_run("player_history_collector_job")
