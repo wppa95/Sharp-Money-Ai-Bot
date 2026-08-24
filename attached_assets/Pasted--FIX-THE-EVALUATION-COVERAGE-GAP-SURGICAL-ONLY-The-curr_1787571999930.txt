@@ -1,0 +1,144 @@
+🔴 FIX THE EVALUATION COVERAGE GAP — SURGICAL ONLY
+
+The current live funnel shows a serious mismatch:
+
+* Active props monitored: 202,461
+* New: 145
+* Line moved: 38
+* Scored this period: 183
+* FPR latest batch: 6,352
+* FPR coverage displayed: 6,352 / 6,352
+
+The problem is simple:
+
+The bot is observing ~202k active props, but only a tiny fraction are actually entering evaluation/scoring during the monitoring period.
+
+Our required behavior is that every active prop continuously cycles through evaluation, including unchanged/stable-line props.
+
+REQUIRED BEHAVIOR
+
+Every active Underdog prop must remain in the continuous evaluation universe.
+
+This includes:
+
+* New props
+* Line-moved props
+* Unchanged props
+* Previously evaluated props
+* Previously delivered props
+* Props with no current evidence
+* Cold-start props
+
+No active prop should be excluded from evaluation simply because:
+
+* Its line did not move
+* It was previously scored
+* It was previously delivered
+* It previously failed a delivery gate
+* It has no evidence yet
+* It is not currently actionable
+
+Delivery deduplication may remain downstream, but it must never prevent evaluation/rescoring.
+
+IMPORTANT DISTINCTION
+
+Do NOT assume the 202,461 number is necessarily the canonical unique FPR pool.
+
+First reconcile the actual populations:
+
+1. Active props observed
+2. Canonical unique active (player, stat, line) pool
+3. FPR pool size
+4. FPR batch size
+5. Props actually selected by FPR
+6. Props actually entering scoring
+7. Props actually tracked/opportunity-logged
+8. Current FPR cursor
+9. Current FPR rotation
+10. Current rotation coverage
+
+Find exactly where the 202,461 → ~183 evaluation gap is occurring.
+
+FIX THE ROOT CAUSE
+
+If unchanged props are being observed but not entering the evaluation pipeline, fix that.
+
+If FPR is only traversing a subset of the canonical active universe, fix that.
+
+If the FPR denominator is incorrectly using the current batch instead of the complete canonical active pool, fix that.
+
+If the funnel is only reporting a subset while evaluation is actually occurring correctly, fix the reporting source instead.
+
+Do not guess. Trace the actual execution path and fix whichever component is responsible.
+
+PROTECTED SYSTEMS
+
+Do NOT change:
+
+* Scoring formulas
+* BQ/MQ calculations
+* Evidence providers
+* Telegram formatting
+* Telegram delivery rules
+* Underdog moneyline behavior
+* Database schema unless absolutely necessary
+* Scheduler cadence
+* max_instances=1
+* Adaptive batching
+* New-prop behavior
+* Line-movement detection
+* Existing clean-restart behavior
+* Delivery deduplication
+* Working provider integrations
+
+Do NOT redesign the architecture.
+
+Make the smallest targeted fix.
+
+REQUIRED VERIFICATION
+
+After the fix:
+
+* Run focused FPR/evaluation tests.
+* Run funnel/reporting tests.
+* Run the full suite.
+* Compile Python.
+* Run git diff --check.
+* Restart only the local bot workflow if required.
+
+Then verify the live funnel.
+
+The critical live verification is:
+
+Active props must continuously progress through evaluation even when their lines do not move.
+
+The evaluation count should no longer remain effectively equal to only:
+
+New + Line moved
+
+while hundreds of thousands of active props sit outside evaluation.
+
+Also verify that successive FPR batches advance through the entire canonical active universe, not just repeatedly report the current batch as its own universe.
+
+FINAL CONSTRAINT
+
+Do not mark complete based solely on tests.
+
+Do not create a checkpoint.
+
+Do not deploy Railway.
+
+Report:
+
+* Canonical active pool size
+* FPR pool size
+* FPR batch size
+* Cursor/rotation
+* Actual props entering scoring
+* Actual unchanged props entering scoring
+* Evaluation coverage after the fix
+* Any remaining discrepancy
+
+The goal is straightforward:
+
+Every active prop gets continuously rescanned and evaluated.
