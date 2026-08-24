@@ -268,6 +268,15 @@ def _get_soccer_provider():  # type: ignore[return]
     return _soccer_provider_instance
 
 
+def _sleeper_enabled() -> bool:
+    """Read the project config singleton without accidentally reading its module."""
+    try:
+        from config import config as _cfg
+        return bool(getattr(_cfg, "UD_SLEEPER_ENABLED", True))
+    except Exception:
+        return True
+
+
 def _merge_game_results(
     primary: "list[RawGameResult]",
     secondary: "list[RawGameResult]",
@@ -363,8 +372,11 @@ class PlayerStatsProvider:
         try:
             if sport_upper == "MLB":
                 primary = await self._fetch_mlb(player_name, stat_lower)
-                alternate = await _get_sleeper_provider().fetch_results(
-                    player_name, "MLB", stat_lower,
+                alternate = (
+                    await _get_sleeper_provider().fetch_results(
+                        player_name, "MLB", stat_lower,
+                    )
+                    if _sleeper_enabled() else []
                 )
                 return _richest_results(primary, alternate, sport="MLB")
             elif sport_upper == "NBA":
@@ -372,8 +384,11 @@ class PlayerStatsProvider:
                 primary = await self._fetch_espn(
                     player_name, "NBA", stat_lower, sport_slug, league_slug,
                 )
-                alternate = await _get_sleeper_provider().fetch_results(
-                    player_name, "NBA", stat_lower,
+                alternate = (
+                    await _get_sleeper_provider().fetch_results(
+                        player_name, "NBA", stat_lower,
+                    )
+                    if _sleeper_enabled() else []
                 )
                 return _richest_results(primary, alternate, sport="NBA")
             elif sport_upper == "NFL":
@@ -385,8 +400,7 @@ class PlayerStatsProvider:
                     player_name, "NFL", stat_lower, sport_slug, league_slug
                 )
                 try:
-                    import config as _cfg
-                    if getattr(_cfg, "UD_SLEEPER_ENABLED", True):
+                    if _sleeper_enabled():
                         sleeper_results = await _get_sleeper_provider().fetch_results(
                             player_name, "NFL", stat_lower
                         )
