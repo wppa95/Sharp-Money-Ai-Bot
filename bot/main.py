@@ -291,11 +291,14 @@ async def post_init(application: Application) -> None:
             name="odds_poller",
         )
         # jq.run_repeating(_steam_check_job,    interval=config.STEAM_CHECK_INTERVAL,      first=15,  name="steam_checker")
-        # player_props_fetcher disabled — fetches OddsAPI player-prop markets for
-        # the PrizePicks crossmatch pipeline which is currently off.  Calling
-        # it while PP is disabled causes 422 INVALID_MARKET errors on every cycle
-        # and wastes OddsAPI credits.  Re-enable when PrizePicks resumes.
-        # jq.run_repeating(_player_props_job,  interval=config.PLAYER_PROP_POLL_INTERVAL, first=60, name="player_props_fetcher")
+        # Store DK/FD player-prop markets separately from the h2h/totals EV
+        # poller. Only the enabled sportsbook books are retained.
+        jq.run_repeating(
+            _player_props_job,
+            interval=config.PLAYER_PROP_POLL_INTERVAL,
+            first=60,
+            name="player_props_fetcher",
+        )
         jq.run_repeating(_pregame_watch_job,   interval=config.PREGAME_SCAN_INTERVAL,    first=30,  name="pregame_watcher")
         # _prizepicks_job disabled — PrizePicks provider temporarily off
         # jq.run_repeating(connector_poll_job,  interval=config.CONNECTOR_POLL_INTERVAL,   first=20,  name="connector_poller")
@@ -1389,6 +1392,15 @@ async def _player_props_job(context) -> None:
 
     now = datetime.utcnow()
     total_saved = 0
+    allowed_books = set()
+    if config.DRAFTKINGS_ENABLED:
+        allowed_books.add("draftkings")
+    if config.FANDUEL_ENABLED:
+        allowed_books.add("fanduel")
+    if not allowed_books:
+        logger.debug("_player_props_job: no sportsbook player-prop books enabled")
+        return
+    allowed_book_names = {book.replace(" ", "") for book in allowed_books}
 
     for sport_str in config.player_prop_sports:
         try:
@@ -1413,6 +1425,8 @@ async def _player_props_job(context) -> None:
             continue
 
         for pl in lines:
+            if pl.sportsbook.lower().replace(" ", "") not in allowed_book_names:
+                continue
             # selection = "Player Name Over" / "Player Name Under"
             selection = f"{pl.player_name} {pl.description}".strip()
             record = OddsRecord(
