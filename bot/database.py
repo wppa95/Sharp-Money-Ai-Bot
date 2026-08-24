@@ -3009,7 +3009,10 @@ class Database:
         downstream_intelligence: "Optional[dict]" = None,
     ) -> None:
         """
-        Upsert a prop opportunity at evaluation time (PLAY or PASS).
+        Upsert a directional prop opportunity at evaluation time.
+
+        Non-directional evaluations stay in the active scan universe and are
+        intentionally not persisted as PASS/watchlist opportunities.
 
         On conflict with the same (external_id, stat_type) — i.e. the prop was
         re-evaluated in a later cycle — updates recommendation, tier, confidence,
@@ -3020,6 +3023,8 @@ class Database:
         Extended result codes accepted by grade_opportunity:
           HIT | MISS | PUSH | PENDING | VOID | CANCELLED | INJURY_VOID | GAME_INTERRUPTED
         """
+        if (recommendation or "").upper() not in ("OVER", "UNDER"):
+            return
         import hashlib
         import json as _json
         from sqlalchemy.dialects.sqlite import insert as _sqlite_insert

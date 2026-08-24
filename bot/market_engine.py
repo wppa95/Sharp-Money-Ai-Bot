@@ -1842,7 +1842,8 @@ async def underdog_job(context) -> None:
                         hit_rates    = hit_rates,
                         sport        = snap.sport or "",
                     )
-                    # Log every evaluated opportunity (PLAY or PASS) for tracking
+                    # Persist only directional opportunities. Non-directional
+                    # props remain in the active pool and are rescanned.
                     try:
                         await db.log_prop_opportunity(
                             external_id = getattr(snap, "external_id", None) or getattr(snap, "id", None) or "",
@@ -2213,32 +2214,6 @@ async def underdog_job(context) -> None:
                         except Exception as _pol_exc:
                             logger.warning(
                                 "underdog_job: log_prop_opportunity [lc] failed: %s", _pol_exc
-                            )
-                    elif score.tier == "PASS":
-                        # P4: Log PASS-scored props even without a directional decision
-                        # so all evaluated props are tracked in prop_opportunity_log.
-                        try:
-                            await _cycle_timing.await_db(
-                                "write",
-                                "log_prop_opportunity",
-                                db.log_prop_opportunity(
-                                external_id    = getattr(snap, "external_id", None) or getattr(snap, "id", None) or "",
-                                player_name    = player,
-                                team           = snap.team or "",
-                                sport          = snap.sport or "UNKNOWN",
-                                stat_type      = stat_type,
-                                line_value     = snap.line or 0.0,
-                                recommendation = "PASS",
-                                decision_tier  = "PASS",
-                                confidence     = 0,
-                                game_time      = snap.game_time,
-                                provider       = "Underdog",
-                                watchlist_state = None,
-                                ),
-                            )
-                        except Exception as _pol_exc:
-                            logger.warning(
-                                "underdog_job: log_prop_opportunity [lc-pass] failed: %s", _pol_exc
                             )
                     _n_scored += 1
                     _tier_counts[score.tier] = _tier_counts.get(score.tier, 0) + 1
