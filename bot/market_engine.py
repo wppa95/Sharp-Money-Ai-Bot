@@ -662,12 +662,20 @@ async def _get_odds_api_confirmation(
     else:
         notes = f"{num_books} book{'s' if num_books != 1 else ''} · no direct line match"
 
+    line_delta = abs(avg_line - line) if avg_line is not None else None
+    strong_confirmation = (
+        len(book_lines) >= 2
+        and line_delta is not None
+        and line_delta <= 0.5
+    )
     return {
         "num_books": num_books,
+        "directional_books": len(book_lines),
         "avg_line":  avg_line,
         "avg_odds":  avg_odds,   # American odds for this direction (CLV seeding support)
         "notes":     notes,
         "confirmed": avg_line is not None,
+        "strong_confirmation": strong_confirmation,
     }
 
 
@@ -1290,7 +1298,10 @@ def _cand_priority(c: dict) -> float:
     bq   = float(c.get("bq")   or 0)
     mq   = float(c.get("mq")   or 0)
     mc   = 200.0 if c.get("is_meaningful_change") else 0.0
-    return base + conf * 0.5 + bq * 0.3 + mq * 0.2 + mc
+    odds_bonus = 350.0 if (
+        c.get("odds_confirm") or {}
+    ).get("strong_confirmation") else 0.0
+    return base + conf * 0.5 + bq * 0.3 + mq * 0.2 + mc + odds_bonus
 
 
 def _apply_delivery_diversification(queue: list) -> list:
