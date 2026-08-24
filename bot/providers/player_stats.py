@@ -293,6 +293,27 @@ def _merge_game_results(
     return primary + extra
 
 
+def _richest_results(
+    primary: "list[RawGameResult]",
+    alternate: "list[RawGameResult]",
+    *,
+    sport: str,
+) -> "list[RawGameResult]":
+    """Use the provider result set with the most usable game records.
+
+    Provider availability varies by sport and season.  Do not assume the
+    primary route has more history; ties intentionally keep the primary
+    provider because its semantics are the canonical route for that sport.
+    """
+    if len(alternate) > len(primary):
+        logger.info(
+            "PlayerStatsProvider: using richer %s source (%d vs %d results)",
+            sport, len(alternate), len(primary),
+        )
+        return alternate
+    return primary
+
+
 # ESPN sport routing:  Underdog sport key → (sport_slug, league_slug)
 _ESPN_ROUTE: dict[str, tuple[str, str]] = {
     "NBA":    ("basketball",     "nba"),
@@ -341,7 +362,20 @@ class PlayerStatsProvider:
 
         try:
             if sport_upper == "MLB":
-                return await self._fetch_mlb(player_name, stat_lower)
+                primary = await self._fetch_mlb(player_name, stat_lower)
+                alternate = await _get_sleeper_provider().fetch_results(
+                    player_name, "MLB", stat_lower,
+                )
+                return _richest_results(primary, alternate, sport="MLB")
+            elif sport_upper == "NBA":
+                sport_slug, league_slug = _ESPN_ROUTE["NBA"]
+                primary = await self._fetch_espn(
+                    player_name, "NBA", stat_lower, sport_slug, league_slug,
+                )
+                alternate = await _get_sleeper_provider().fetch_results(
+                    player_name, "NBA", stat_lower,
+                )
+                return _richest_results(primary, alternate, sport="NBA")
             elif sport_upper == "NFL":
                 # ESPN gamelog (primary) + Sleeper historical weeks (supplement).
                 # Sleeper provides one game per NFL week, so per-week = per-game.
