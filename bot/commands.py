@@ -3672,7 +3672,11 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             ]
 
         # ── Section 2: Candidate Funnel (from PropCandidateLog) ──────────────────────
-        active = scan_summary.get("active", 0) or tracked
+        # ScanCycleLog.active is cumulative observations across all scans, not
+        # the current active universe.  Prefer the canonical FPR pool size so
+        # this section cannot imply that only the latest candidate rows are
+        # active or eligible for rescanning.
+        active = fpr_stats.get("pool_size", 0) or tracked
         # Include the full-pool rotation in the aggregate evaluation count.
         # FPR evaluates unchanged and previously handled active props too; it
         # must not disappear from the funnel merely because it is persisted in
@@ -3692,8 +3696,8 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             "",
             f"<i>All active props remain in the monitored universe; delivery is separate.</i>",
             "",
-            f"📥 Active props: <b>{active:,}</b>",
-            f"🧾 Snapshots tracked: <b>{tracked:,}</b>",
+            f"📥 Canonical active props: <b>{active:,}</b>",
+            f"🧾 Candidate records tracked: <b>{tracked:,}</b>",
             f"🔬 Rescored: <b>{sc_rescored:,}</b>",
             f"📈 Line movers: <b>{sc_movers:,}</b>",
             f"📤 Delivered alerts: <b>{sc_delivered:,}</b>",

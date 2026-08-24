@@ -321,6 +321,8 @@ class TestCmdFunnelSportBreakdown:
         assert "Scored this period:" in msg
         assert "6,535" in msg
         assert "Rescored: <b>6,535</b>" in msg
+        assert "Canonical active props: <b>6,352</b>" in msg
+        assert "Candidate records tracked: <b>25,000</b>" in msg
 
     @pytest.mark.asyncio
     async def test_funnel_renders_no_breakdown_when_empty(self):
