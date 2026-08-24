@@ -86,7 +86,8 @@ class TestLogPropOpportunity:
 
         assert count == 1  # upsert, not duplicate
 
-        # Latest values applied
+        # PASS is not a persisted evaluation and cannot overwrite the
+        # directional opportunity.
         async with db.session() as s:
             from sqlalchemy import select
             row_r = await s.execute(
@@ -97,8 +98,8 @@ class TestLogPropOpportunity:
                 )
             )
             row = row_r.scalar_one()
-        assert row.recommendation == "PASS"
-        assert row.confidence == 40
+        assert row.recommendation == "OVER"
+        assert row.confidence == 60
 
     @pytest.mark.asyncio
     async def test_different_stat_types_are_separate_rows(self, db: Database) -> None:
@@ -232,7 +233,7 @@ class TestGetGameResultForGrading:
 class TestGetTrackingSummary:
     @pytest.mark.asyncio
     async def test_summary_counts_by_recommendation(self, db: Database) -> None:
-        # Seed two OVER plays graded HIT, one PASS graded MISS
+        # Seed two OVER plays graded HIT; PASS is intentionally not persisted.
         for i, (rec, result, ext) in enumerate([
             ("OVER", "HIT",  "sum-ext-001"),
             ("OVER", "HIT",  "sum-ext-002"),
@@ -248,9 +249,9 @@ class TestGetTrackingSummary:
         summary = await db.get_tracking_summary()
         counts = summary["counts"]
 
-        # We should have at least 2 OVER HIT and 1 PASS MISS logged
+        # Only directional opportunities are tracked.
         assert counts.get("OVER", {}).get("HIT", 0) >= 2
-        assert counts.get("PASS", {}).get("MISS", 0) >= 1
+        assert counts.get("PASS", {}).get("MISS", 0) == 0
 
     @pytest.mark.asyncio
     async def test_summary_total_and_pending(self, db: Database) -> None:
@@ -301,5 +302,6 @@ class TestUpsertPreservesGrading:
         assert row.result       == "HIT"
         assert row.actual_value == 2.5
         assert row.graded_at    is not None
-        # New recommendation applied
-        assert row.recommendation == "PASS"
+        # A PASS re-evaluation is ignored rather than overwriting the
+        # directional record.
+        assert row.recommendation == "OVER"

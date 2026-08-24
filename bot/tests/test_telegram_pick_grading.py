@@ -97,12 +97,11 @@ class TestAlertSentDefault:
         assert row.alert_sent_at is None
 
     async def test_pass_recommendation_not_alert_sent(self, db):
-        """PASS props are evaluated but never sent as Telegram picks."""
+        """PASS props are not persisted as Telegram-pick candidates."""
         await _log_opp(db, external_id="ext_pass", stat_type="strikeouts",
                        recommendation="PASS")
         row = await _fetch_opp(db, "ext_pass", "strikeouts")
-        assert row is not None
-        assert not row.alert_sent
+        assert row is None
 
 
 # ─────────────────────────────────────────────────────────────────────────────

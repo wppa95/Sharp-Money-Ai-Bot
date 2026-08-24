@@ -2105,6 +2105,9 @@ async def underdog_job(context) -> None:
                         "rejection":       _np_rej,
                         "path":            "new",
                         "decision_reason": (decision.reason if decision is not None else None),
+                        "decision_recommendation": (
+                            decision.recommendation if decision is not None else "PASS"
+                        ),
                         # decision_tier is the bet-decision confidence tier (S≥85/A≥70/B≥50),
                         # distinct from score.tier (composite UDPropScore tier).
                         # MLB/NFL gate uses decision_tier; score.tier is the composite label.
@@ -2433,6 +2436,9 @@ async def underdog_job(context) -> None:
                             "rejection":       _lc_rej,
                             "path":            "cs" if is_cold_start else "lc",
                             "decision_reason": (decision.reason if decision is not None else None),
+                            "decision_recommendation": (
+                                decision.recommendation if decision is not None else "PASS"
+                            ),
                             # decision_tier is the bet-decision confidence tier (S≥85/A≥70/B≥50),
                             # distinct from score.tier (composite UDPropScore tier).
                             # MLB/NFL gate uses decision_tier; score.tier is the composite label.
@@ -3445,6 +3451,11 @@ async def underdog_job(context) -> None:
                 _cand_total = 0
                 _cand_rows: list[dict] = []
                 for _cp in _scored_props:
+                    # Weak/no-direction evaluations stay in the canonical
+                    # active pool and are rescanned; do not create a stored
+                    # PASS/watchlist/rejected candidate record for them.
+                    if _cp.get("decision_recommendation") not in ("OVER", "UNDER"):
+                        continue
                     _ctier = _cp.get("tier", "PASS")
                     _crej  = _cp.get("rejection")
                     _csport = (_cp.get("sport") or "").upper()

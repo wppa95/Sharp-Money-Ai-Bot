@@ -79,3 +79,4 @@
 - [Sport-neutral Telegram policy](strict-tier1-telegram.md) — all sports share monitoring; Telegram alone requires S + BQ≥80 + ELITE MQ + OVER/UNDER.
 - [Unified prop tracking](unified-prop-tracking.md) — persistent monitoring rows are independent of delivery; retired Watchlist/Near-Miss labels must not drive rotation or reports.
 - [Unified monitoring universe](unified-monitoring-universe.md) — every active prop line is continuously scannable; delivery eligibility never creates a rotation or tracking queue.
+- [Directional persistence policy](pass-watchlist-persistence.md) — PASS/no-direction/watchlist are transient scan results; only OVER/UNDER evaluations are persisted.
