@@ -927,7 +927,13 @@ def _sum_espn_labels(
 def _event_game_date(event: dict) -> Optional[str]:
     """Extract a YYYY-MM-DD date from an ESPN event dict."""
     game_obj = event.get("game") or {}
-    raw = game_obj.get("date") or event.get("date")
+    # The common/v3 athlete gamelog payload uses ``gameDate`` on the event
+    # metadata object; older payloads used ``game.date`` or ``date``.
+    raw = (
+        game_obj.get("date")
+        or event.get("gameDate")
+        or event.get("date")
+    )
     return _parse_date(raw)
 
 

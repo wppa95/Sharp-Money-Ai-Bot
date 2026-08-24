@@ -32,6 +32,7 @@ from providers.player_stats import (
     _NHL_GOALIE_STAT_MAP,
     _get_stat_map,
 )
+from providers.player_stats import _event_game_date
 
 # ── Shared event loop ─────────────────────────────────────────────────────────
 
@@ -40,6 +41,37 @@ _loop = asyncio.new_event_loop()
 
 def run(coro):
     return _loop.run_until_complete(coro)
+
+
+def test_espn_common_v3_game_date_field_is_parsed():
+    """WNBA common/v3 gamelogs expose gameDate on event metadata."""
+    assert _event_game_date({"gameDate": "2026-08-23T23:00:00.000+00:00"}) == "2026-08-23"
+
+
+def test_wnba_common_v3_gamelog_event_is_parsed():
+    """A valid WNBA common/v3 event reaches hit-rate computation."""
+    data = {
+        "labels": ["MIN", "PTS", "REB", "AST"],
+        "events": {
+            "401": {
+                "gameDate": "2026-08-23T23:00:00.000+00:00",
+                "opponent": {"abbreviation": "LV"},
+            }
+        },
+        "seasonTypes": [{
+            "displayName": "2026 Regular Season",
+            "categories": [{
+                "events": [{"eventId": "401", "stats": ["20", "8", "4", "2"]}],
+            }],
+        }],
+    }
+    rows = PlayerStatsProvider()._parse_espn_gamelog(
+        data, "Laura Juskaite", "WNBA", "assists"
+    )
+    assert len(rows) == 1
+    assert rows[0].actual_value == 2.0
+    assert rows[0].game_date == "2026-08-23"
+    assert rows[0].opponent == "LV"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
