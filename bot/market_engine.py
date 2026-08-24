@@ -591,6 +591,8 @@ async def _get_odds_api_confirmation(
 
     Returns dict with keys: num_books, avg_line (float|None), notes (str), confirmed (bool).
     """
+    if not getattr(config, "ODDS_API_ENABLED", True):
+        return None
     if _analysis_engine is None:
         return None
     market_key = _UD_TO_ODDS_API_MARKET.get(stat_type.lower().strip())

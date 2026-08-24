@@ -39,7 +39,8 @@ packages = ["nano"]
 
 [userenv.shared]
 ALLOWED_USER_IDS = "7245518659"
-UD_SLEEPER_ENABLED = "false"
+UD_SLEEPER_ENABLED = "true"
+ODDS_API_ENABLED = "false"
 
 [[ports]]
 localPort = 8080

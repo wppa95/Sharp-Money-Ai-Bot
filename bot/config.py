@@ -39,6 +39,11 @@ class Config:
 
     # ── External APIs ─────────────────────────────────────────────────────────
     ODDS_API_KEY: str = os.environ.get("ODDS_API_KEY", "")
+    # Disable optional sportsbook confirmation calls without removing the
+    # configured Odds API credential or affecting Underdog monitoring.
+    ODDS_API_ENABLED: bool = os.environ.get("ODDS_API_ENABLED", "true").lower() not in (
+        "false", "0", "no", "off"
+    )
     # PrizePicks uses a public API — no key required. Field reserved for future
     # authenticated endpoints.
     PRIZEPICKS_API_KEY: str = os.environ.get("PRIZEPICKS_API_KEY", "")
