@@ -1,0 +1,74 @@
+━━━━━━━━━━━━━━━━━━
+📡 Scan Pipeline
+━━━━━━━━━━━━━━━━━━
+
+Last 18h  ·  524 scans  (~2min each)
+
+📡 Full Monitoring Pipeline
+
+📥 Fetched from Underdog:          3,821,495
+🚫 Removed from feed:              13,424
+🔮 Futures/awards skipped:         46,636
+👁 Active props observed (scan total): 3,761,435
+   └─ Unchanged (stable lines):    3,751,080
+   └─ New first-appearance:        10,354
+   └─ Line moved (re-scored):      10,632
+   └─ Cold-start re-scanned:       0
+
+🔬 Scored this period:             29,524
+   ├─ New:                         10,354
+   ├─ Line moved:                  10,632
+   ├─ Cold-start:                  0
+   └─ Stable refresh:              0
+   └─ Full-pool rotation:           8,538
+🎯 Strong actionable candidates:   1
+📤 Delivered to Telegram:          1
+
+━━━━━━━━━━━━━━━━━━
+🌐 Full-Pool Rescan Rotation  (last batch)
+━━━━━━━━━━━━━━━━━━
+
+Rotation:           #210  (✅ complete — next started)
+Progress:           100.0%
+Coverage:           8,538 / 8,538 active props
+🔬 Rescored:        8,538
+📤 Sent:            0
+
+━━━━━━━━━━━━━━━━━━
+🔭 Candidate Funnel
+━━━━━━━━━━━━━━━━━━
+
+All active props remain in the monitored universe; delivery is separate.
+
+📥 Canonical active props: 8,538
+🧾 Candidate records tracked: 1,096
+🔬 Rescored: 29,524
+📈 Line movers: 10,632
+📤 Delivered alerts: 1
+
+Actionable evaluation uses the existing direction, quality, evidence,
+deduplication, and live-game safeguards.
+Use /alerts to see Telegram-delivered picks.
+
+────────────────
+
+⚽ Sport Funnel Breakdown
+
+Sport          Active   Action  Removed
+───────────────────────────────────────
+MLB              2648      148     5118
+NFL              1811       33      265
+TENNIS           1661        6     4708
+CFB              1325        0      245
+CS                454      433      294
+FIFA              276        0       83
+WNBA              171       26     2504
+PGA                60        0        0
+MMA                52        0        3
+LOL                40        0       69
+VAL                29        0       28
+DGPT               11        0        5
+KBO                 0        0       65
+NPB                 0        0       37
+
+━━━━━━━━━━━━━━━━━━
