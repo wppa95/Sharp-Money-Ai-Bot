@@ -1,0 +1,9 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "vkIN_0qZei4VaAYwbMp_R"
+uri = "file://backups/sharp-money-ai-bot-b70630e.zip"
+type = "unspecified"
+title = "Sharp Money Ai Bot backup — b70630e"
+description = "Complete ZIP archive of the tracked Replit project at HEAD b70630ee15da6f5031fb67d2e09ab41847f78c83. Verified: 592 archived files matching 592 tracked files."
