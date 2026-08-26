@@ -6,6 +6,7 @@ Each handler is a standalone async function registered with the Application.
 
 from __future__ import annotations
 
+import asyncio
 import html as _html
 import json as _json
 import logging
@@ -3206,7 +3207,12 @@ async def cmd_analyst(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     try:
-        from engine.analyst import build_analyst_narrative, format_analyst_telegram
+        from engine.analyst import build_analyst_narrative
+        from engine.agent_reach_research import (
+            build_historical_market_evidence,
+            get_agent_reach_research_service,
+            research_candidate,
+        )
         from engine.candidate import candidate_from_ud_decision
 
         # Retrieve recent alerted Underdog snapshots with bet recommendations
@@ -3225,7 +3231,12 @@ async def cmd_analyst(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             )
             return
 
-        lines: list[str] = ["🧠 <b>Recent Analyst Assessments</b>", ""]
+        lines: list[str] = [
+            "🧠 <b>Recent Analyst Assessments</b>",
+            "<i>Evidence layers: quantitative · historical/market · external research</i>",
+            "",
+        ]
+        candidate_rows: list[tuple[object, object]] = []
         for snap in alerted[:3]:
             dec_ns = __import__("types", fromlist=["SimpleNamespace"]).SimpleNamespace(
                 confidence    = getattr(snap, "bet_confidence", 70) or 70,
@@ -3259,27 +3270,69 @@ async def cmd_analyst(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                     except Exception:
                         pass
 
-                narrative = build_analyst_narrative(c)
-                c = c.with_analyst_narrative(narrative)
-
-                lines.append(
-                    f"<b>{_html.escape(snap.player_name)}</b>  ·  "
-                    f"{_html.escape(snap.sport)}  ·  "
-                    f"{_html.escape(snap.stat_type)} <code>{snap.line_value:.1f}</code>"
+                # Keep the stored quantitative/history snapshot separate from
+                # external evidence.  Research is requested only from this
+                # analyst-stage command, never from the market scan loop.
+                from dataclasses import replace
+                history_evidence = build_historical_market_evidence(c)
+                c = replace(
+                    c,
+                    decision_trace={
+                        **c.decision_trace,
+                        "historical_market_evidence": history_evidence,
+                    },
                 )
-                lines.append(
-                    f"Decision: <b>{_html.escape(dec_ns.recommendation)}</b>  "
-                    f"Tier: <b>{_html.escape(dec_ns.decision_tier)}</b>"
-                )
-                lines.append("")
-                lines.append(f"✅ {_html.escape(narrative.recommended_because[:200])}")
-                lines.append(f"⚠️ {_html.escape(narrative.risk_because[:200])}")
-                lines.append(f"🎯 <b>{_html.escape(narrative.final_recommendation[:200])}</b>")
-                lines.append("━━━━━━━━━━━━━━━━━━")
+                candidate_rows.append((snap, c))
             except Exception as exc:
                 logger.debug("cmd_analyst: skip snap %s: %s", snap.player_name, exc)
 
-        if len(lines) <= 2:
+        service = get_agent_reach_research_service()
+        researched = await asyncio.gather(
+            *(
+                research_candidate(candidate, service=service)
+                for _, candidate in candidate_rows
+            ),
+            return_exceptions=True,
+        )
+        for (snap, original), enriched in zip(candidate_rows, researched):
+            c = original
+            if isinstance(enriched, Exception):
+                logger.warning("cmd_analyst: external research failed for %s: %s", snap.player_name, enriched)
+            else:
+                c = enriched
+            narrative = build_analyst_narrative(c)
+            c = c.with_analyst_narrative(narrative)
+            research_trace = c.decision_trace.get("external_research", {})
+
+            lines.append(
+                f"<b>{_html.escape(snap.player_name)}</b>  ·  "
+                f"{_html.escape(snap.sport)}  ·  "
+                f"{_html.escape(snap.stat_type)} <code>{snap.line_value:.1f}</code>"
+            )
+            lines.append(
+                f"Decision: <b>{_html.escape(getattr(snap, 'bet_recommendation', 'PASS') or 'PASS')}</b>  "
+                f"Tier: <b>{_html.escape(getattr(snap, 'score_tier', 'B') or 'B')}</b>"
+            )
+            if isinstance(research_trace, dict):
+                result_status = research_trace.get("status")
+                if result_status:
+                    try:
+                        # Rehydrate only for the concise status formatter; the
+                        # original trace remains the persisted evidence payload.
+                        status_text = (
+                            f"External research: {result_status} "
+                            f"({len(research_trace.get('findings') or [])} finding(s))"
+                        )
+                    except Exception:
+                        status_text = f"External research: {result_status}"
+                    lines.append(f"<i>{_html.escape(status_text)}</i>")
+            lines.append("")
+            lines.append(f"✅ {_html.escape(narrative.recommended_because[:200])}")
+            lines.append(f"⚠️ {_html.escape(narrative.risk_because[:200])}")
+            lines.append(f"🎯 <b>{_html.escape(narrative.final_recommendation[:200])}</b>")
+            lines.append("━━━━━━━━━━━━━━━━━━")
+
+        if len(lines) <= 3:
             lines.append("<i>Could not build analyst assessments for recent picks.</i>")
 
         await update.message.reply_text("\n".join(lines), parse_mode="HTML")

@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Add your description here"
 requires-python = ">=3.11"
 dependencies = [
+    "agent-reach",
     "aiohttp>=3.14.3",
     "aiosqlite>=0.22.1",
     "pytest>=9.1.1",
@@ -14,3 +15,6 @@ dependencies = [
     "sqlalchemy>=2.0.51",
     "tabulate>=0.10.0",
 ]
+
+[tool.uv.sources]
+agent-reach = { url = "https://github.com/Panniantong/agent-reach/archive/main.zip" }

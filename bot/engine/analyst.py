@@ -186,9 +186,40 @@ def _build_recommended_because(candidate: "Candidate") -> str:
             if pct >= 60:
                 parts.append(f"{window.upper()} window: {w['games']} games, {pct}% hit rate.")
 
+    historical_market = trace.get("historical_market_evidence")
+    if isinstance(historical_market, dict) and historical_market.get("available"):
+        items = historical_market.get("items") or []
+        parts.append(
+            f"Historical/market evidence: {len(items)} stored evidence item(s) "
+            "were available at analyst time."
+        )
+
     # EV signal
     if "ev_pct" in trace and (trace["ev_pct"] or 0) > 0:
         parts.append(f"EV signal: +{trace['ev_pct']:.2f}% expected value.")
+
+    # External research is explicitly separate from quantitative and
+    # historical/market evidence.  Only stored findings are rendered; this
+    # pure function never performs network or tool calls.
+    external = trace.get("external_research")
+    if isinstance(external, dict):
+        status = external.get("status", "unknown")
+        findings = external.get("findings") or []
+        if findings:
+            parts.append(
+                "External evidence: " + " ".join(
+                    _external_finding_text(finding)
+                    for finding in findings[:3]
+                    if isinstance(finding, dict)
+                )
+            )
+        elif status in ("unavailable", "failed", "skipped", "partial"):
+            parts.append(
+                f"External evidence unavailable ({_external_status_reason(external)}); "
+                "the recommendation is based on quantitative and historical/market evidence."
+            )
+        elif status == "success":
+            parts.append("External evidence: Agent Reach returned no corroborating findings.")
 
     return " ".join(parts) if parts else (
         f"{candidate.decision} on {candidate.stat_type} ({candidate.line:.1f}) "
@@ -248,6 +279,12 @@ def _build_risk_because(candidate: "Candidate", risk: Optional[Any] = None) -> s
             parts.append("Recommendation: reduce stake due to portfolio correlation.")
         elif adj == "AVOID":
             parts.append("Recommendation: avoid this pick due to high portfolio risk.")
+
+    external = trace.get("external_research")
+    if isinstance(external, dict) and external.get("status") in (
+        "unavailable", "failed", "skipped"
+    ):
+        parts.append(f"External research status: {_external_status_reason(external)}.")
 
     return " ".join(parts) if parts else "Standard market risk — no additional risk flags."
 
@@ -354,6 +391,32 @@ def _build_final_recommendation(candidate: "Candidate") -> str:
         f"in {sport} at {overall}/100 confidence ({tier_str}-tier, "
         f"{candidate.risk_level.capitalize()} risk)."
     )
+
+
+def _external_finding_text(finding: dict) -> str:
+    """Format a bounded, source-labelled stored finding without inventing facts."""
+    source = str(finding.get("source", "external"))
+    title = str(finding.get("title", "")).strip()
+    summary = str(finding.get("summary", "")).strip()
+    if summary:
+        summary = summary[:240]
+    if title and summary:
+        return f"[{source}] {title}: {summary}."
+    return f"[{source}] {title or summary or 'finding'}."
+
+
+def _external_status_reason(external: dict) -> str:
+    """Return an explicit, bounded status reason from stored adapter output."""
+    skipped = external.get("skipped_reason")
+    if skipped:
+        return str(skipped)[:180]
+    failures = external.get("failures")
+    if isinstance(failures, dict) and failures:
+        source, reason = next(iter(failures.items()))
+        return f"{source}: {str(reason)[:140]}"
+    if external.get("status") == "partial":
+        return "some Agent Reach sources returned no usable findings"
+    return str(external.get("status", "unknown"))
 
 
 # ── Public entry point ─────────────────────────────────────────────────────────
