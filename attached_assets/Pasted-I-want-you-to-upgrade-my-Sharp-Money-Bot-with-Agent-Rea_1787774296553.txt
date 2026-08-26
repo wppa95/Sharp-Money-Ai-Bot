@@ -1,0 +1,551 @@
+I want you to upgrade my Sharp Money Bot with Agent Reach as a serious research/intelligence layer.
+
+USE THE REPLIT AI AGENT to do the work directly.
+
+==================================================
+IMPORTANT CONTEXT — AGENT REACH
+==================================================
+
+Agent Reach was originally set up separately through GitHub, NOT through this Replit project.
+
+Official Agent Reach repository:
+Panniantong/Agent-Reach
+
+Before implementing anything, inspect the official Agent Reach repository/documentation and understand its actual:
+
+- architecture
+- installation method
+- agent skill structure
+- CLI
+- underlying tools
+- supported sources
+- authentication requirements
+- runtime requirements
+- intended agent integration
+
+Do NOT assume Agent Reach is already installed or configured in this Replit project.
+
+Do NOT blindly copy the previous GitHub implementation.
+
+Implement the integration based on the official Agent Reach architecture/documentation.
+
+Agent Reach must be a REAL research capability, not a mock implementation or custom replacement.
+
+Verify that the resulting implementation can actually invoke Agent Reach and its supported research tools in the Replit/Railway runtime.
+
+If Agent Reach requires dependencies, binaries, environment variables, authentication, cookies, or other configuration, identify what is required and build the integration around those requirements.
+
+NEVER hardcode secrets, API keys, cookies, tokens, or credentials.
+
+==================================================
+SOURCE OF TRUTH
+==================================================
+
+The current Replit project is the CLEAN source of truth.
+
+DO NOT pull from GitHub.
+
+DO NOT overwrite the clean Replit version with GitHub.
+
+DO NOT push anything to GitHub yet.
+
+DO NOT deploy anything to Railway yet.
+
+We will review the finished Replit implementation first.
+
+==================================================
+GOAL
+==================================================
+
+I do NOT want Agent Reach to be merely an optional research feature.
+
+I want Agent Reach to become a CORE research capability of the analyst layer.
+
+The desired architecture is:
+
+ALL AVAILABLE PROP LINES
+        ↓
+NORMALIZE + TRACK
+        ↓
+HISTORICAL EVIDENCE
+        ↓
+QUANTITATIVE ANALYSIS
+        ↓
+AGENT REACH EXTERNAL RESEARCH
+        ↓
+AI ANALYST SYNTHESIS
+        ↓
+EXPLANATION / ALERT
+
+The goal is to make the bot capable of understanding the entire prop market and accumulating historical evidence over time.
+
+==================================================
+1. ALL AVAILABLE PROP LINES
+==================================================
+
+The research architecture should be capable of tracking ALL available player-prop lines from EVERY supported app/source that the bot can access.
+
+Do not limit the research system to only Underdog candidates.
+
+Where data is available, normalize every prop into a consistent structure containing at minimum:
+
+- sport
+- league
+- player
+- team
+- opponent
+- market
+- stat type
+- over/under
+- line
+- source/app/sportsbook
+- odds if available
+- timestamp
+- game/event
+- event start time
+
+The same underlying prop across different apps/books should be identifiable as the same player/market/event while retaining individual source information.
+
+Example:
+
+Player X
+REB
+Underdog 6.5
+PrizePicks 6.5
+DraftKings 6.5
+FanDuel 7.5
+
+The analyst should be able to understand that entire market picture.
+
+==================================================
+2. CONTINUOUS HISTORICAL EVIDENCE
+==================================================
+
+Every available prop should be capable of accumulating historical evidence over time.
+
+Track, where available:
+
+- opening line
+- current line
+- line movement
+- movement direction
+- movement magnitude
+- movement velocity
+- timestamps for movements
+- number of books/apps moving
+- cross-book agreement
+- player historical performance
+- L5
+- L10
+- L15
+- L20
+- L30
+- season average
+- home/away splits where available
+- opponent/matchup history where available
+- over/under hit rates
+- historical performance relative to the posted line
+- previous lines for the same player/market
+- historical movement patterns
+- closing line where available
+- closing-line movement/value where available
+
+Do NOT fabricate historical data.
+
+If evidence is unavailable, explicitly mark it unavailable.
+
+The system should accumulate this evidence over time instead of discarding it after a scan.
+
+==================================================
+3. AGENT REACH EXTERNAL INTELLIGENCE
+==================================================
+
+Agent Reach should provide the external intelligence layer for the analyst.
+
+Use the actual Agent Reach-supported tools/sources where available, including:
+
+- Web
+- X/Twitter
+- Reddit
+- YouTube
+- GitHub
+- other supported sources when relevant
+
+The analyst should research information relevant to the specific:
+
+PLAYER + SPORT + MARKET + OPPONENT + EVENT
+
+Research may include:
+
+- injuries
+- player availability
+- lineup changes
+- starting lineup news
+- minutes restrictions
+- coach comments
+- role changes
+- trades
+- call-ups
+- demotions
+- suspensions
+- weather
+- matchup information
+- beat reporter information
+- recent player/team news
+- social reports
+- other information that could materially affect the prop
+
+Do not perform generic searches that aren't relevant to the specific prop.
+
+==================================================
+4. RESEARCH STRATEGY
+==================================================
+
+There may be thousands or tens of thousands of props.
+
+Do NOT make the scan loop wait for an expensive external research request for every prop on every scan.
+
+Instead, build a scalable two-level architecture.
+
+LEVEL 1 — CONTINUOUS STRUCTURED EVIDENCE
+
+Continuously collect and maintain historical/structured evidence for ALL available props.
+
+LEVEL 2 — EXTERNAL INTELLIGENCE
+
+When a prop reaches the actual analyst/research stage, Agent Reach performs a research pass for that prop.
+
+Research prioritization may be used BEFORE a prop reaches the analyst stage based on factors such as:
+
+- significant line movement
+- rapid movement
+- multiple apps/books moving
+- unusual movement
+- strong quantitative signal
+- significant news potential
+- game proximity
+- conflicting evidence
+- high-value candidates
+- candidates approaching alert thresholds
+- candidates already being analyzed
+
+However, once a candidate actually reaches the analyst/research stage, Agent Reach research is CORE to that analyst process.
+
+==================================================
+5. ANALYST SYNTHESIS
+==================================================
+
+The analyst must combine three evidence categories:
+
+A. Quantitative evidence
+B. Historical/market evidence
+C. External intelligence
+
+The final analyst output should clearly distinguish these.
+
+For example:
+
+QUANTITATIVE:
+- confidence
+- EV
+- movement
+- quantitative signals
+
+HISTORICAL:
+- previous line behavior
+- player performance relative to line
+- historical hit rate
+- historical movement patterns
+- cross-source agreement
+
+EXTERNAL:
+- injury/news
+- lineup information
+- X/Reddit/news evidence
+- relevant source findings
+
+The analyst should explain:
+
+- what supports the prop
+- what contradicts the prop
+- what evidence is strongest
+- whether external information materially changes the analyst's interpretation
+
+==================================================
+6. CRITICAL — EXISTING ENGINE MUST REMAIN ISOLATED
+==================================================
+
+DO NOT change the existing quantitative scoring system.
+
+DO NOT change:
+
+- confidence calculations
+- scoring formulas
+- tier calculations
+- EV calculations
+- recommendation thresholds
+- Underdog scoring
+- alert gates
+- alert thresholds
+- scan scheduling
+- scan frequency
+- scan loop
+- monitoring behavior
+- existing betting logic
+
+Agent Reach research must NOT directly modify the existing quantitative score.
+
+The quantitative engine remains authoritative.
+
+The analyst interprets external evidence and provides context, but external research must not silently alter the mathematical scoring system.
+
+==================================================
+7. FAIL-SAFE BEHAVIOR
+==================================================
+
+The research layer must be production-safe.
+
+If:
+
+- Agent Reach is unavailable
+- a research source fails
+- authentication/cookies are missing
+- network access fails
+- a research provider times out
+- X/Reddit/YouTube/etc. is unavailable
+
+the bot must NOT crash.
+
+Handle failures gracefully.
+
+Do not fabricate research.
+
+Mark unavailable sources clearly.
+
+If one source fails, continue using other available sources.
+
+If the entire Agent Reach service is unavailable, the analyst should clearly indicate that external research was unavailable rather than pretending research was completed.
+
+==================================================
+8. RESEARCH STORAGE
+==================================================
+
+Keep external research separate from existing scoring data.
+
+Store research in a structured form, preferably:
+
+decision_trace["external_research"]
+
+Include useful metadata such as:
+
+- research timestamp
+- sources attempted
+- sources successfully retrieved
+- source URLs/identifiers where appropriate
+- findings
+- summaries
+- source/reliability metadata if available
+- failures/unavailable sources
+
+Do not overwrite quantitative decision fields.
+
+==================================================
+9. EXISTING AGENT REACH WORK
+==================================================
+
+Inspect the current Replit project first.
+
+If there is already any Agent Reach-related work, determine whether it is valid.
+
+Do not blindly rebuild correct components.
+
+Do not blindly copy the old GitHub implementation.
+
+Use the official Agent Reach architecture as the authority.
+
+Do NOT use:
+
+import agent_reach
+
+unless the official Agent Reach implementation specifically requires it.
+
+Use its intended agent skill/capability model and supported tools correctly.
+
+==================================================
+10. HISTORICAL PROP INTELLIGENCE
+==================================================
+
+Inspect the existing bot for any existing:
+
+- prop history
+- line history
+- player history
+- market history
+- movement tracking
+- historical performance
+- database models
+- candidate models
+
+Reuse existing infrastructure where appropriate.
+
+Do not create duplicate systems unnecessarily.
+
+The new research architecture should build on the existing bot rather than replacing working components.
+
+==================================================
+11. TESTING
+==================================================
+
+Add comprehensive tests.
+
+At minimum test:
+
+1. Prop normalization across multiple sources.
+2. Historical evidence accumulation.
+3. Line movement history.
+4. Cross-source comparison.
+5. Agent Reach invocation.
+6. Successful external research.
+7. Partial source failure.
+8. Complete Agent Reach failure.
+9. No fabricated research.
+10. Analyst synthesis.
+11. External research storage.
+12. Quantitative score remains unchanged.
+13. Confidence remains unchanged.
+14. Tier remains unchanged.
+15. Recommendation remains unchanged.
+16. Scan scheduling remains unchanged.
+17. Alert gates remain unchanged.
+18. Underdog monitoring remains unchanged.
+
+Run the FULL existing test suite.
+
+Fix only problems caused by this work.
+
+Do NOT modify unrelated pre-existing failures.
+
+==================================================
+12. PERFORMANCE
+==================================================
+
+This must be designed for production use.
+
+Do not create a situation where the scan loop waits on thousands of external research requests.
+
+Use appropriate:
+
+- caching
+- deduplication
+- research cooldowns
+- asynchronous execution where appropriate
+- prioritization
+- concurrency limits
+- timeouts
+- source-level failure isolation
+
+Historical structured evidence should be cheap to maintain.
+
+External Agent Reach research should be controlled and intelligently prioritized.
+
+IMPORTANT:
+
+Do NOT modify the existing scan loop just to accomplish this.
+
+Build the research architecture around the existing system.
+
+==================================================
+13. SECURITY
+==================================================
+
+Do not hardcode:
+
+- API keys
+- passwords
+- cookies
+- tokens
+- credentials
+- secrets
+
+Use environment variables/configuration.
+
+Do not commit secrets.
+
+If external authentication is required, tell me exactly which environment variables/configuration are needed.
+
+==================================================
+14. BEFORE MAKING CHANGES
+==================================================
+
+First inspect the repository and identify:
+
+- current analyst architecture
+- Candidate model
+- ExplanationService
+- existing historical prop storage
+- existing prop history logic
+- current Agent Reach state
+- existing agent skills
+- existing data models
+- current scan/monitoring architecture
+- existing AI integrations
+- dependency/configuration structure
+
+Then implement the cleanest architecture that fits the existing code.
+
+Do NOT rewrite working systems unnecessarily.
+
+==================================================
+15. GIT / DEPLOYMENT
+==================================================
+
+DO NOT push to GitHub yet.
+
+DO NOT deploy to Railway yet.
+
+The workflow is:
+
+CLEAN REPLIT
+↓
+IMPLEMENT
+↓
+TEST
+↓
+INSPECT DIFF
+↓
+REVIEW
+↓
+MY APPROVAL
+↓
+THEN PUSH TO GITHUB
+↓
+THEN DEPLOY TO RAILWAY
+
+Before stopping, show me:
+
+1. Exact files changed.
+2. What each change does.
+3. Test results.
+4. Full test-suite result.
+5. Any pre-existing failures separately.
+6. Confirmation scoring was untouched.
+7. Confirmation confidence/tier logic was untouched.
+8. Confirmation scan loop was untouched.
+9. Confirmation scan scheduling was untouched.
+10. Confirmation alert gates were untouched.
+11. Confirmation Underdog monitoring was untouched.
+12. Confirmation Agent Reach is actually connected to the analyst.
+13. Confirmation external research is actually being invoked.
+14. Confirmation historical evidence is being accumulated correctly.
+15. Confirmation the system can handle all supported prop sources.
+16. Performance considerations and any limits.
+17. Final git status.
+18. Final diff summary.
+
+DO NOT COMMIT OR PUSH YET.
+
+STOP after providing the review information and wait for my approval.
+
+The priority is a clean, production-safe implementation that materially improves the analyst.
+
+Do not rush the commit.
