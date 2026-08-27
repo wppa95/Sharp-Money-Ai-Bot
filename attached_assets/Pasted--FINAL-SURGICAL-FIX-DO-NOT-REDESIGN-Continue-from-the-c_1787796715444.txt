@@ -1,0 +1,445 @@
+🔴 FINAL SURGICAL FIX — DO NOT REDESIGN
+
+Continue from the current working Sharp Money Bot implementation.
+
+Do NOT rewrite the architecture. Do NOT redesign anything. Do NOT change unrelated behavior. Do NOT break the currently working FPR rotation.
+
+Make only the smallest targeted fixes necessary below.
+
+⸻
+
+1. CRITICAL — COMPLETE ACTIVE MONITORING UNIVERSE
+
+The bot must NOT treat PropLineHistory or the current ~7k FPR pool as the complete monitoring universe.
+
+Desired lifecycle:
+
+Every current Underdog prop seen by the bot → active monitoring universe → continuous batched rescanning → game starts → stop active rescanning → grade result → retain historical outcome.
+
+Requirements:
+
+* Do NOT scan hundreds of thousands simultaneously.
+* Process the universe in sustainable batches.
+* Every prop that has been seen and remains active must eventually be rescanned.
+* This includes:
+    * New props
+    * Unchanged props
+    * Line-moved props
+    * Previously evaluated props
+    * Previously alerted props
+    * Props with no historical evidence
+    * Cold-start props
+* A prop does NOT need a line movement to be rescanned.
+* A prop does NOT need a PropLineHistory row to remain eligible for monitoring.
+* Do NOT use PropLineHistory as a proxy for the entire active Underdog universe.
+* Do NOT literally rescan every historical snapshot row.
+* Historical snapshots remain historical observations.
+* The active rotation should use the complete current active/seens universe with appropriate current-prop identity/deduplication.
+
+⸻
+
+2. CONTINUOUS ROTATION
+
+Preserve the existing working FPR cursor/batch mechanism.
+
+Do NOT redesign the FPR rotation.
+
+The required correction is that its source universe represents all currently active/seens Underdog props, rather than only the subset represented by PropLineHistory.
+
+Requirements:
+
+* Batch the complete active universe.
+* Continue across batches until the entire active universe has been covered.
+* Then begin the next rotation.
+* New props entering during the process must be incorporated.
+* Unchanged props must eventually be rescored.
+* Line movers must still be rescored promptly.
+* Previously evaluated/delivered props must eventually be rescored again while still active.
+* No duplicate competing rotations.
+* Keep max_instances=1.
+* Preserve the current working cursor behavior unless a surgical source-universe correction is required.
+
+⸻
+
+3. GAME-START LIFECYCLE
+
+A prop remains in active monitoring until its associated game/event has started.
+
+Once the game starts:
+
+* Remove it from the active monitoring rotation.
+* Do NOT delete snapshots.
+* Do NOT delete scoring/evaluation history.
+* Preserve it for grading/outcome processing.
+
+After the event finishes:
+
+* Resolve the actual result.
+* Grade as HIT, MISS, or PUSH where applicable.
+* Persist the actual value/result.
+* Retain the outcome for future player × sport × stat historical evidence.
+
+Prevent cross-player contamination and duplicate grading.
+
+⸻
+
+4. HISTORICAL SNAPSHOTS
+
+Keep collecting/persisting snapshots for every monitoring cycle.
+
+Do not confuse:
+
+* Snapshot count
+* Unique active prop count
+* PropLineHistory rows
+* Scored/evaluated props
+* FPR batch coverage
+
+These are different metrics.
+
+Do not artificially collapse the entire historical snapshot population into the active monitoring universe.
+
+⸻
+
+5. HOURLY GRADING
+
+The /tracking output currently says:
+
+“Results graded every 6 h from stored game stats.”
+
+Change the grading/outcome-processing cadence to every 1 hour.
+
+Do not change grading logic itself.
+
+Verify:
+
+* Completed events are picked up hourly.
+* HIT/MISS/PUSH is persisted.
+* Actual result/value is persisted.
+* Historical performance updates.
+* Already-graded results are not duplicated.
+
+⸻
+
+6. SPORT FUNNEL
+
+Keep the current working FPR rotation.
+
+Do NOT use the old narrow PropCandidateLog population as the Sport Funnel source.
+
+The Sport Funnel must represent actual monitoring/evaluation activity from the complete active universe, including FPR rescoring.
+
+It must:
+
+* Include every sport actually processed.
+* Not artificially show only 6–9 sports because of a reporting-table limitation.
+* Include sports with activity even when they have no actionable pick.
+* Reflect the current monitoring period.
+* Reflect actual rescored/evaluated counts.
+* Not fabricate sports with zero activity.
+* Continue broadening as the full active universe rotates.
+
+Do not hardcode a sport list.
+
+⸻
+
+7. FUNNEL COUNTERS
+
+Keep the distinction between:
+
+* Fetched from Underdog
+* Historical snapshots
+* Current active universe
+* Props evaluated/scored
+* FPR rescored
+* Line movers
+* Delivered alerts
+
+Do NOT label cumulative scan observations as the current unique active universe.
+
+The funnel should clearly distinguish:
+
+Active universe = currently active props eligible for monitoring
+
+from:
+
+Snapshots = accumulated observations across scans.
+
+⸻
+
+8. /dashboard
+
+Remove the duplicate tracked-props metric from the top half of /dashboard.
+
+Keep the more useful tracked-props/activity presentation in the lower section.
+
+Do not otherwise redesign dashboard formatting.
+
+⸻
+
+9. /stats
+
+There is currently an inconsistency:
+
+/tracking shows evaluated/tracked opportunities while /stats reports:
+
+Tracked opportunities: 0
+
+Make /stats use the same authoritative tracked/evaluated opportunity source as the current monitoring/tracking system.
+
+Do not fabricate actionable picks.
+
+If there are zero resolved picks, continue showing zero resolved picks.
+
+Tracked/evaluated opportunity counts should accurately reflect the underlying system.
+
+⸻
+
+10. /tracking
+
+Keep the current tracking output, but update the grading cadence text from 6 h → 1 h.
+
+The tracker must represent the underlying evaluated/tracked prop universe, not only Telegram-delivered picks.
+
+Preserve:
+
+* Pending grading
+* Graded
+* HIT
+* MISS
+* PUSH
+* Actual results
+* By-sport results
+
+⸻
+
+11. EXISTING TELEGRAM COMMANDS
+
+We manually tested the following commands.
+
+Do NOT redesign them.
+
+Preserve their current behavior unless directly affected by the fixes above.
+
+Current observations:
+
+* /status — working
+* /dashboard — working, but duplicate tracked-props metric at top
+* /funnel — working, but reporting source needed correction
+* /picks — working
+* /slip — working
+* /alerts — working
+* /performance — working
+* /rollups — working
+* /grades — currently returns empty/no output
+* /grade — working
+* /tracking — working, but currently says grading every 6 h
+* /stats — reporting inconsistency noted
+* /analyze — working
+* /backtest — working
+
+Do not change working command behavior unnecessarily.
+
+If /grades is genuinely intended to be an alias/view but currently returns nothing, inspect it and make the smallest correction necessary. Do not fabricate results.
+
+⸻
+
+12. TELEGRAM DELIVERY RULES
+
+Do NOT change the existing canonical Tier 1/Tier 2 delivery rules.
+
+Preserve:
+
+* Tier 1 = every sport except MLB/NFL/NBA.
+* Tier 2 = MLB/NFL/NBA.
+* Tier 1 requires Strong/Elite direction + strong supporting evidence + existing safety/dedup/live-game protections.
+* Tier 2 retains the 90/100+ confidence + BQ + MQ blocker plus Strong/Elite direction and strong evidence.
+* S/A/B/C are NOT monitoring/evaluation gates.
+* Delivery dedup remains at the delivery gate.
+
+The active monitoring universe and grading changes must NOT accidentally become Telegram qualification changes.
+
+⸻
+
+13. AGENT REACH — VERIFY AND FIX ALERT DELIVERY
+
+Also verify that the Agent Reach alert path is actually functioning.
+
+The bot has been running for approximately 3 hours without receiving Agent Reach alerts, so investigate this rather than assuming zero alerts means everything is working.
+
+Trace the complete Agent Reach path:
+
+* Agent Reach detection/input
+* Opportunity/evaluation handoff
+* Qualification logic
+* Agent Reach-specific filters
+* Alert creation
+* Alert deduplication
+* Delivery queue
+* Telegram delivery
+* Cooldown/rate-limit logic
+* Failure/retry handling
+
+Determine whether the lack of alerts is:
+
+1. Correct behavior because no opportunities qualified, OR
+2. A broken/suppressed Agent Reach delivery path.
+
+If broken
+
+Make the smallest targeted fix necessary so legitimate Agent Reach alerts can reach Telegram.
+
+Do NOT:
+
+* Lower qualification thresholds just to generate alerts.
+* Fabricate alerts.
+* Bypass safety protections.
+* Bypass deduplication.
+* Bypass canonical Tier 1/Tier 2 rules.
+* Change scoring formulas.
+* Create a second alert system.
+* Change unrelated Telegram behavior.
+
+Live verification
+
+After any required fix, verify the complete path with a controlled or real eligible Agent Reach opportunity.
+
+Confirm:
+
+* Agent Reach opportunity is detected.
+* It reaches evaluation.
+* It passes the correct qualification logic when legitimately eligible.
+* Alert is created.
+* Delivery is attempted.
+* Telegram receives it.
+* Deduplication still works.
+* Ineligible opportunities remain suppressed.
+
+If no legitimate Agent Reach opportunity exists during live verification, explicitly report that limitation instead of claiming Agent Reach delivery was proven.
+
+Do not manufacture a betting alert merely to make the test pass.
+
+⸻
+
+14. DO NOT BREAK WORKING SYSTEMS
+
+Preserve:
+
+* Unified cadence
+* max_instances=1
+* Adaptive batching
+* Working FPR cursor
+* Full-pool rotation mechanism
+* Stable Refresh
+* Evidence system
+* Player-history collector
+* Snapshot persistence
+* Telegram safety/dedup/live-game protections
+* Scoring formulas
+* Historical data
+* Railway configuration
+* Existing provider behavior
+
+Do NOT:
+
+* Add arbitrary fixed caps.
+* Restore a 500-prop ceiling.
+* Increase scheduler concurrency.
+* Create another competing rotation.
+* Delete historical data.
+* Redesign the database.
+* Rewrite scoring.
+* Change Telegram formatting unnecessarily.
+
+⸻
+
+15. REQUIRED VALIDATION
+
+Before reporting completion:
+
+Active universe
+
+Verify with the actual database/live feed that:
+
+* Current active/seens universe is larger than the ~7k PropLineHistory subset when applicable.
+* Monitoring rotation uses the complete current active universe.
+* Props without line movement are selected in later batches.
+* Previously evaluated props are selected again.
+* New props enter the rotation.
+
+Rotation
+
+Verify:
+
+* Batch cursor advances.
+* Full active universe is eventually covered.
+* Next rotation begins after complete coverage.
+* No competing rotation exists.
+* max_instances=1 remains intact.
+
+Game lifecycle
+
+Verify:
+
+* Active props remain monitored until game/event start.
+* Started events leave active monitoring.
+* Historical records remain.
+* Finished events can be graded.
+
+Grading
+
+Verify:
+
+* Hourly grading cadence is configured.
+* Completed events can be graded.
+* HIT/MISS/PUSH persists.
+* Actual result persists.
+* Duplicate grading is prevented.
+
+Reporting
+
+Verify:
+
+* Sport Funnel includes all sports actually processed.
+* FPR activity appears in Sport Funnel reporting.
+* /dashboard no longer duplicates tracked props at the top.
+* /stats and /tracking use compatible authoritative metrics.
+* Snapshot totals are not mislabeled as unique active props.
+
+Agent Reach
+
+Verify:
+
+* Agent Reach detection is functioning.
+* Qualified opportunities reach the alert pipeline.
+* Telegram delivery is functioning.
+* Existing safety/deduplication rules remain intact.
+* If no eligible opportunity exists, clearly report that rather than fabricating an alert.
+
+Commands
+
+Re-run the manually tested command suite after changes.
+
+Do not report success based only on compilation or unit tests.
+
+⸻
+
+16. FINAL RULE
+
+This is a surgical correction, not a redesign.
+
+The most important requirement is:
+
+Every Underdog prop the bot has seen that is still active must remain eligible for continuous batched rescanning until the associated game starts.
+
+Then:
+
+After the game starts, stop active rescanning and preserve the prop for hourly grading and HIT/MISS/PUSH historical learning.
+
+The existing FPR mechanism should remain intact except where its source universe must be corrected to cover the complete active/seens universe.
+
+Do not create a checkpoint unless all required implementation and validation work is complete.
+
+Do not deploy Railway unless explicitly requested after validation.
+
+Do not claim Agent Reach is fixed unless the actual delivery path has been verified.
