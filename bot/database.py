@@ -4234,7 +4234,14 @@ class Database:
                 player, sport, stat, sent_at, line, provider = row
                 if sent_at is None:
                     continue
-                ts_unix = sent_at.timestamp()
+                if hasattr(sent_at, "timestamp"):
+                    ts_unix = sent_at.timestamp()
+                else:
+                    # SQLite may return DATETIME projections as ISO strings
+                    # when the query selects individual columns.
+                    ts_unix = datetime.fromisoformat(
+                        str(sent_at).replace("Z", "+00:00")
+                    ).timestamp()
                 line_f  = float(line or 0)
                 out[(
                     _dedup_player_key(player, provider),
@@ -4274,7 +4281,12 @@ class Database:
                 )
                 if key in out:
                     continue  # POL entry takes priority
-                ts_unix = sent_at.timestamp()
+                if hasattr(sent_at, "timestamp"):
+                    ts_unix = sent_at.timestamp()
+                else:
+                    ts_unix = datetime.fromisoformat(
+                        str(sent_at).replace("Z", "+00:00")
+                    ).timestamp()
                 line_f  = float(line or 0)
                 out[key] = (ts_unix, line_f)
 
