@@ -1,0 +1,205 @@
+Expand PropLine PrizePicks Coverage to All Available Sports
+
+Continue from the completed PropLine integration.
+
+The current PropLine integration successfully verified live PrizePicks NBA data, but it must NOT be limited to NBA.
+
+Make ONLY the targeted change required to expand PrizePicks coverage.
+
+1. ALL AVAILABLE PRIZEPICKS SPORTS
+
+Use the official PropLine sports endpoint to discover the sports currently available through the account/provider.
+
+Do NOT hard-code NBA as the only PrizePicks sport.
+
+For every sport that PropLine reports as available and that contains PrizePicks player-prop markets:
+
+* Poll it through the existing PropLine client.
+* Normalize the available PrizePicks player props.
+* Feed them into the existing shared confirmation/evaluation boundary.
+* Preserve sport identity exactly.
+* Continue using caching, pacing, and backoff.
+
+If a sport is unavailable from PropLine, skip it gracefully.
+
+Do NOT fabricate unsupported sports or markets.
+
+2. TIER 1 / TIER 2 IMPLICATIONS
+
+Preserve the existing canonical sport classification:
+
+Tier 2
+
+* MLB
+* NFL
+* NBA
+* CFB/NCAAF
+* Football 🏈 / American football where represented by the bot’s canonical sport identity
+
+Tier 1
+
+Every other supported sport.
+
+Examples include:
+
+* FIFA
+* Soccer
+* Tennis
+* WNBA
+* NHL
+* NPB
+* KBO
+* PGA
+* MMA
+* CS
+* LOL
+* DOTA
+* VAL
+* CFL
+* AFL
+* AFLW
+* and other non-Tier-2 sports.
+
+Do NOT create a second tier system.
+
+Use the bot’s existing canonical sport classification.
+
+3. PRIZEPICKS + UNDERDOG
+
+PrizePicks remains an additional provider alongside Underdog.
+
+Underdog remains the primary monitoring source.
+
+For matching player props, use PrizePicks observations to provide confirmation/reference information for Underdog when the identities can be matched confidently.
+
+Match using the existing safeguards:
+
+* Player
+* Sport
+* Event/game
+* Market/stat
+* Line
+* Direction
+* Freshness
+* Provider identity
+
+Ambiguous or stale matches must be rejected.
+
+Do not require a PrizePicks match for an Underdog prop to remain monitored.
+
+4. TIER IMPLICATIONS MUST NOT CREATE DELIVERY GATES
+
+The Tier 1/Tier 2 classification should inform the bot’s existing actionable evaluation rules only.
+
+Do NOT reintroduce:
+
+* S/A/B/C requirements
+* PASS
+* Watchlist/Near-Miss
+* Separate qualification systems
+* Duplicate scoring
+* Duplicate alert pipelines
+
+Preserve the current unified monitoring model.
+
+5. PROP TYPES
+
+PropLine PrizePicks integration remains restricted to:
+
+PLAYER PROPS ONLY.
+
+Do not use PropLine PrizePicks data for:
+
+* Moneylines
+* Game totals
+* Team markets
+* Other sportsbooks
+
+DraftKings/FanDuel remain the confirmation sources for sportsbook markets according to the existing provider-expansion work.
+
+6. PROP-LINE REQUEST EFFICIENCY
+
+The PropLine Free tier is limited to approximately 1,000 requests/day.
+
+Do NOT make one request per prop.
+
+Use the provider’s documented sport/market structure efficiently.
+
+Prefer:
+
+1. Discover available sports.
+2. Request supported sports at the appropriate endpoint.
+3. Filter the returned data locally for bookmakers=prizepicks and player-prop markets.
+4. Cache fresh responses.
+5. Avoid redundant requests.
+6. Respect rate limits and backoff.
+
+Maintain the existing conservative request budget.
+
+7. LIVE VERIFICATION
+
+After the change:
+
+* Verify PropLine discovers multiple available sports.
+* Verify PrizePicks observations are received for more than NBA when the provider exposes them.
+* Report exactly which sports were returned live.
+* Verify PrizePicks filtering remains strict.
+* Verify OVER/UNDER directions where supplied.
+* Verify normalized observations reach the existing confirmation boundary.
+* Verify Tier 1/Tier 2 classification is correct for the returned sports.
+* Verify Underdog remains active.
+* Verify no duplicate monitoring loop was created.
+* Verify FPR remains unchanged.
+* Verify Stable Refresh remains unchanged.
+* Verify max_instances=1 remains unchanged.
+* Verify the PropLine daily request budget remains protected.
+
+If only NBA is currently available from PropLine during the verification window, report that fact rather than fabricating additional coverage. However, the implementation must support all sports returned by the official PropLine sports discovery endpoint.
+
+8. TESTING
+
+Add focused regression coverage for:
+
+* Multi-sport discovery
+* Sport normalization
+* PrizePicks-only filtering
+* Player-prop-only filtering
+* Tier 1 classification
+* Tier 2 classification
+* CFB/NCAAF classification
+* NFL/American-football classification
+* Player/event/stat matching
+* Freshness
+* Ambiguity rejection
+* Cache behavior
+* Rate-limit protection
+* Provider failure handling
+* No duplicate scheduler
+* No NBA-only hard-code
+
+Run the full existing suite.
+
+Do not weaken existing tests.
+
+IMPORTANT
+
+Do NOT change:
+
+* Underdog monitoring behavior
+* FPR
+* Stable Refresh
+* Scoring formulas
+* Evidence system
+* Grading
+* Telegram delivery rules
+* Discord
+* OddsAPI
+* DraftKings/FanDuel confirmation
+* Scheduler cadence
+* max_instances=1
+* Database schema
+* Clean restart behavior
+
+Do NOT create a checkpoint.
+
+Report exactly what changed and exactly what was live-verified.

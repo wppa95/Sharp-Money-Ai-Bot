@@ -128,6 +128,15 @@ class PropLineFetchResult:
     from_cache: bool = False
 
 
+@dataclass(frozen=True)
+class PropLineSport:
+    """An active sport advertised by the official PropLine sports endpoint."""
+
+    official_key: str
+    canonical_key: str
+    title: str = ""
+
+
 def _clean(value: Any) -> str:
     return str(value or "").strip()
 
@@ -352,14 +361,116 @@ _CANONICAL_TO_OFFICIAL_SPORT = {
     "MLB": "baseball_mlb",
     "NBA": "basketball_nba",
     "NFL": "football_nfl",
+    "FOOTBALL": "football_nfl",
+    "NCAAF": "football_ncaaf",
+    "CFB": "football_ncaaf",
+    "NCAAB": "basketball_ncaab",
     "NHL": "hockey_nhl",
     "WNBA": "basketball_wnba",
+    "UFC": "mma_ufc",
+    "MMA": "mma_ufc",
     "TENNIS": "tennis",
+    "GOLF": "golf",
+    "PGA": "golf",
+    "EPL": "soccer_epl",
     "SOCCER": "soccer_epl",
-    "CS": "esports",
-    "DOTA": "esports",
-    "LOL": "esports",
+    "LALIGA": "soccer_la_liga",
+    "SERIEA": "soccer_serie_a",
+    "BUNDESLIGA": "soccer_bundesliga",
+    "LIGUE1": "soccer_ligue_1",
+    "MLS": "soccer_mls",
+    "UCL": "soccer_uefa_champions_league",
+    "FIFA": "soccer_fifa_world_cup",
+    "CFL": "football_cfl",
+    "AFL": "aussie_rules_afl",
 }
+
+_OFFICIAL_TO_CANONICAL_SPORT = {
+    "baseball_mlb": "MLB",
+    "basketball_nba": "NBA",
+    "football_nfl": "NFL",
+    "americanfootball_nfl": "NFL",
+    "hockey_nhl": "NHL",
+    "icehockey_nhl": "NHL",
+    "basketball_wnba": "WNBA",
+    "basketball_ncaab": "NCAAB",
+    "football_ncaaf": "NCAAF",
+    "americanfootball_ncaaf": "NCAAF",
+    "mma_ufc": "UFC",
+    "mma_mixed_martial_arts": "UFC",
+    "tennis": "TENNIS",
+    "golf": "GOLF",
+    "soccer_epl": "EPL",
+    "soccer_la_liga": "LALIGA",
+    "soccer_serie_a": "SERIEA",
+    "soccer_bundesliga": "BUNDESLIGA",
+    "soccer_ligue_1": "LIGUE1",
+    "soccer_mls": "MLS",
+    "soccer_uefa_champions_league": "UCL",
+    "soccer_fifa_world_cup": "FIFA",
+    "football_cfl": "CFL",
+    "aussie_rules_afl": "AFL",
+}
+
+
+def _canonical_discovered_sport(official_key: str, title: Any = "") -> str:
+    """Map provider sport identifiers into the bot's existing sport namespace."""
+    key = _clean(official_key).lower()
+    if key in _OFFICIAL_TO_CANONICAL_SPORT:
+        return _OFFICIAL_TO_CANONICAL_SPORT[key]
+
+    normalized_title = _clean(title).upper().replace("_", " ")
+    if normalized_title in {"AMERICAN FOOTBALL", "FOOTBALL"}:
+        return "FOOTBALL"
+    if normalized_title in {"COLLEGE FOOTBALL", "NCAAF", "CFB"}:
+        return "NCAAF"
+    if normalized_title in {"GOLF", "PGA"}:
+        return "GOLF"
+    if normalized_title in {"TENNIS", "MMA", "UFC"}:
+        return normalized_title
+    if normalized_title.startswith("FIFA"):
+        return "FIFA"
+    if normalized_title in {"ESPORTS", "CS", "CS2", "COUNTER STRIKE"}:
+        return "CS" if normalized_title != "ESPORTS" else "ESPORTS"
+    return _normalize_sport(title or official_key)
+
+
+def _official_sports_records(payload: Any) -> list[PropLineSport]:
+    """Parse active entries from the documented ``GET /v1/sports`` response."""
+    if isinstance(payload, dict):
+        for key in ("data", "sports", "results", "items"):
+            if isinstance(payload.get(key), list):
+                payload = payload[key]
+                break
+    if not isinstance(payload, list):
+        return []
+
+    records: list[PropLineSport] = []
+    seen: set[str] = set()
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        official_key = _clean(_first(item, "key", "sport_key", "id"))
+        if not official_key:
+            continue
+        available = item.get("active", item.get("available", True))
+        if available is False:
+            continue
+        canonical = _canonical_discovered_sport(
+            official_key, _first(item, "title", "name", "sport_name")
+        )
+        if not canonical or official_key.lower() in seen:
+            continue
+        seen.add(official_key.lower())
+        records.append(
+            PropLineSport(
+                official_key=official_key,
+                canonical_key=canonical,
+                title=_clean(_first(item, "title", "name", "sport_name")),
+            )
+        )
+    return records
+
 
 
 def _official_odds_records(payload: Any) -> list[dict[str, Any]]:
@@ -462,6 +573,10 @@ class PropLineClient:
         self._cache: Optional[PropLineFetchResult] = None
         self._cache_clock_at: Optional[float] = None
         self._cache_scope = ""
+        self._cache_by_scope: dict[str, PropLineFetchResult] = {}
+        self._cache_clock_by_scope: dict[str, float] = {}
+        self._sports_cache: tuple[PropLineSport, ...] = ()
+        self._sports_cache_clock_at: Optional[float] = None
         self._request_day = datetime.utcnow().date()
         self._request_count = 0
         # Stay below PropLine's documented 1,000-request daily free limit even
@@ -484,12 +599,13 @@ class PropLineClient:
             self._session = None
 
     def _cache_is_fresh(self, now: float, scope: str) -> bool:
+        cached = self._cache_by_scope.get(scope)
+        cached_at = self._cache_clock_by_scope.get(scope)
         return bool(
-            self._cache
+            cached
             and self.cache_ttl > 0
-            and self._cache_clock_at is not None
-            and self._cache_scope == scope
-            and (now - self._cache_clock_at) < self.cache_ttl
+            and cached_at is not None
+            and (now - cached_at) < self.cache_ttl
         )
 
     def _reset_daily_budget_if_needed(self) -> None:
@@ -503,7 +619,9 @@ class PropLineClient:
     ) -> tuple[str, dict[str, str], str]:
         base_url = self.api_url.rstrip("/")
         if base_url == DEFAULT_PROPLINE_API_URL:
-            official_sport = sport_key or "basketball_nba"
+            official_sport = _clean(sport_key)
+            if not official_sport:
+                raise PropLineError("PropLine sport key is required for the official odds route")
             return (
                 f"{base_url}/v1/sports/{official_sport}/odds",
                 {
@@ -518,11 +636,107 @@ class PropLineClient:
             sport_key or "__custom__",
         )
 
+    def _official_sports_request(self) -> tuple[str, dict[str, str]]:
+        return f"{self.api_url.rstrip('/')}/v1/sports", {}
+
+    async def discover_sports(self) -> list[PropLineSport]:
+        """Return active sports from PropLine without creating a polling loop."""
+        if not self.is_configured:
+            logger.info("PropLine PrizePicks provider disabled: credentials or endpoint missing")
+            return []
+        if self.api_url.rstrip("/") != DEFAULT_PROPLINE_API_URL:
+            # Custom endpoints retain the pre-discovery adapter contract.  An
+            # unauthorized host must never receive a guessed /v1/sports path.
+            return []
+
+        async with self._lock:
+            now = self._clock()
+            if (
+                self.cache_ttl > 0
+                and self._sports_cache_clock_at is not None
+                and (now - self._sports_cache_clock_at) < self.cache_ttl
+            ):
+                return list(self._sports_cache)
+            if self._request_count >= self.daily_request_limit:
+                logger.warning("PropLine daily request budget exhausted; skipping sports discovery")
+                return []
+            if now < self._backoff_until:
+                logger.warning("PropLine rate-limit backoff active; skipping sports discovery")
+                return []
+            if self._last_request_at is not None:
+                delay = self.min_request_interval - (now - self._last_request_at)
+                if delay > 0:
+                    await self._sleep(delay)
+            self._last_request_at = self._clock()
+
+            session = self._session
+            owns_local_session = session is None
+            if session is None:
+                session = aiohttp.ClientSession()
+            try:
+                self._request_count += 1
+                headers = {
+                    "Authorization": f"Bearer {self.api_key}",
+                    "X-API-Key": self.api_key,
+                    "Accept": "application/json",
+                }
+                timeout = aiohttp.ClientTimeout(total=self.timeout_seconds)
+                url, params = self._official_sports_request()
+                async with session.get(url, headers=headers, params=params, timeout=timeout) as response:
+                    if response.status == 429:
+                        retry_after = _retry_after_seconds(response)
+                        self._backoff_until = self._clock() + retry_after
+                        raise PropLineRateLimitError(
+                            f"PropLine rate limited (HTTP {response.status})",
+                            retry_after=retry_after,
+                        )
+                    if response.status in {408, 425, 502, 503, 504}:
+                        retry_after = min(900.0, max(30.0, 2.0 * self.min_request_interval))
+                        self._backoff_until = self._clock() + retry_after
+                        raise PropLineError(f"PropLine temporarily unavailable (HTTP {response.status})")
+                    if response.status >= 400:
+                        raise PropLineError(f"PropLine sports discovery failed (HTTP {response.status})")
+                    payload = await response.json(content_type=None)
+            except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                logger.warning("PropLine sports discovery failed: %s", type(exc).__name__)
+                return []
+            except PropLineRateLimitError as exc:
+                logger.warning("PropLine sports discovery rate limited; backing off for %.0fs", exc.retry_after)
+                return []
+            except PropLineError as exc:
+                logger.warning("PropLine sports discovery error: %s", exc)
+                return []
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("PropLine sports discovery response error: %s", type(exc).__name__)
+                return []
+            finally:
+                if owns_local_session:
+                    await session.close()
+
+            sports = _official_sports_records(payload)
+            self._sports_cache = tuple(sports)
+            self._sports_cache_clock_at = self._clock()
+            return list(sports)
+
+    def official_sport_for(self, canonical_sport: str) -> Optional[str]:
+        """Resolve a canonical sport, preferring the last official discovery."""
+        canonical = _normalize_sport(canonical_sport)
+        for sport in self._sports_cache:
+            if sport.canonical_key == canonical:
+                return sport.official_key
+        return _CANONICAL_TO_OFFICIAL_SPORT.get(canonical)
+
     async def fetch_prizepicks_props(
         self, *, sport_key: Optional[str] = None,
     ) -> PropLineFetchResult:
         if not self.is_configured:
             logger.info("PropLine PrizePicks provider disabled: credentials or endpoint missing")
+            return PropLineFetchResult([], datetime.utcnow(), from_cache=False)
+        if (
+            self.api_url.rstrip("/") == DEFAULT_PROPLINE_API_URL
+            and not _clean(sport_key)
+        ):
+            logger.warning("PropLine official odds request skipped: sport key is required")
             return PropLineFetchResult([], datetime.utcnow(), from_cache=False)
 
         async with self._lock:
@@ -530,9 +744,10 @@ class PropLineClient:
             url, params, scope = self._official_request(sport_key)
             now = self._clock()
             if self._cache_is_fresh(now, scope):
+                cached = self._cache_by_scope[scope]
                 return PropLineFetchResult(
-                    list(self._cache.props),
-                    self._cache.fetched_at,
+                    list(cached.props),
+                    cached.fetched_at,
                     from_cache=True,
                 )
             if self._request_count >= self.daily_request_limit:
@@ -540,9 +755,10 @@ class PropLineClient:
                 return PropLineFetchResult([], datetime.utcnow(), from_cache=False)
             if now < self._backoff_until:
                 logger.warning("PropLine rate-limit backoff active; reusing fresh cache if available")
-                if self._cache is not None and self._cache_scope == scope:
+                cached = self._cache_by_scope.get(scope)
+                if cached is not None:
                     return PropLineFetchResult(
-                        list(self._cache.props), self._cache.fetched_at, from_cache=True
+                        list(cached.props), cached.fetched_at, from_cache=True
                     )
                 return PropLineFetchResult([], datetime.utcnow(), from_cache=False)
             if self._last_request_at is not None:
@@ -609,6 +825,8 @@ class PropLineClient:
             self._cache = PropLineFetchResult(props, fetched_at, from_cache=False)
             self._cache_clock_at = self._clock()
             self._cache_scope = scope
+            self._cache_by_scope[scope] = self._cache
+            self._cache_clock_by_scope[scope] = self._cache_clock_at
             return PropLineFetchResult(list(props), fetched_at, from_cache=False)
 
 
@@ -640,10 +858,9 @@ class PropLinePrizePicksProvider(PropProviderBase):
     def sport_keys(self) -> list[str]:
         if self._sport_filter is not None:
             return sorted(self._sport_filter)
-        return [
-            "MLB", "NBA", "NFL", "NHL", "WNBA",
-            "SOCCER", "TENNIS", "CS", "DOTA", "LOL",
-        ]
+        # This is only the synchronous ABC hint.  The official bulk path uses
+        # discover_sports() and never treats this fallback as provider data.
+        return sorted(set(_CANONICAL_TO_OFFICIAL_SPORT))
 
     def is_available(self) -> bool:
         return self.client.is_configured
@@ -652,18 +869,29 @@ class PropLinePrizePicksProvider(PropProviderBase):
         if not self.is_available():
             logger.info("PropLine PrizePicks provider is disabled")
             return []
-        # Keep the abstract provider interface intact.  The engine uses the
-        # sport-scoped method below so one confirmation request costs one
-        # documented odds call rather than polling every supported sport.
-        sport_key = (
-            _CANONICAL_TO_OFFICIAL_SPORT.get(self.sport_keys[0], self.sport_keys[0])
-            if self._sport_filter
-            else "basketball_nba"
-        )
-        result = await self.client.fetch_prizepicks_props(sport_key=sport_key)
-        if self._sport_filter is None:
-            return result.props
-        return [prop for prop in result.props if prop.sport in self._sport_filter]
+        if self.client.api_url.rstrip("/") != DEFAULT_PROPLINE_API_URL:
+            # Preserve the custom authorized-endpoint contract.  Discovery is
+            # only valid on the official host; never guess a path elsewhere.
+            result = await self.client.fetch_prizepicks_props()
+            return [
+                prop for prop in result.props
+                if self._sport_filter is None or prop.sport in self._sport_filter
+            ]
+
+        discovered = await self.client.discover_sports()
+        if self._sport_filter is not None:
+            discovered = [
+                sport for sport in discovered
+                if sport.canonical_key in self._sport_filter
+            ]
+
+        props: list[PlayerProp] = []
+        for sport in discovered:
+            result = await self.client.fetch_prizepicks_props(
+                sport_key=sport.official_key
+            )
+            props.extend(result.props)
+        return props
 
     async def fetch_props_for_sport(self, sport: str) -> list[PlayerProp]:
         """Fetch only one canonical sport for confirmation freshness and quota safety."""
@@ -673,9 +901,13 @@ class PropLinePrizePicksProvider(PropProviderBase):
         canonical_sport = _normalize_sport(sport)
         if self._sport_filter is not None and canonical_sport not in self._sport_filter:
             return []
-        official_sport = _CANONICAL_TO_OFFICIAL_SPORT.get(
-            canonical_sport, canonical_sport.lower()
-        )
+        official_sport = self.client.official_sport_for(canonical_sport)
+        if not official_sport:
+            logger.debug(
+                "PropLine sport unavailable or unsupported; skipping %s",
+                canonical_sport,
+            )
+            return []
         result = await self.client.fetch_prizepicks_props(sport_key=official_sport)
         return [prop for prop in result.props if prop.sport == canonical_sport]
 
