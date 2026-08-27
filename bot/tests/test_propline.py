@@ -230,3 +230,46 @@ def test_player_prop_extra_metadata_is_optional_for_existing_providers():
     )
     assert prop.direction == ""
     assert prop.source_timestamp is None
+
+
+@pytest.mark.asyncio
+async def test_propline_observation_reaches_existing_confirmation_boundary(monkeypatch):
+    import market_engine
+
+    prop = PlayerProp(
+        provider="PrizePicks",
+        sport="NBA",
+        player_name="Alex Example",
+        team="Example City",
+        stat_type="points",
+        line_value=24.5,
+        direction="OVER",
+        event="Example City at Test Town",
+        event_id="game-1",
+        external_id="projection-1",
+        fetched_at=datetime(2026, 8, 27, 18, 0),
+    )
+
+    class _Provider:
+        def is_available(self):
+            return True
+
+        async def fetch_props(self):
+            return [prop]
+
+    monkeypatch.setattr(market_engine, "_propline_provider", _Provider())
+    monkeypatch.setattr(market_engine.config, "ODDS_API_ENABLED", False)
+
+    result = await market_engine._get_odds_api_confirmation(
+        "NBA",
+        player_name="Alex Example",
+        stat_type="points",
+        direction="OVER",
+        line=24.5,
+        event="Example City at Test Town",
+    )
+
+    assert result is not None
+    assert result["source"] == "PrizePicks"
+    assert result["matched_books"] == ["PrizePicks"]
+    assert result["confirmed"] is True

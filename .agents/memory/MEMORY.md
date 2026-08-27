@@ -84,3 +84,4 @@
 - [OddsAPI error pacing](oddsapi-error-pacing.md) — permanent 422 INVALID_MARKET responses must not back off valid shared polling.
 - [FPR scheduler starvation](fpr-scheduler-starvation.md) — when Underdog scans exceed the FPR interval, serialized deferrals can prevent live FPR execution without a post-scan handoff.
 - [Provider confirmation boundary](provider-confirmation-boundary.md) — confirmations are read-only corroboration: reuse existing OddsAPI rows/cache, never add polling, scoring, or delivery paths.
+- [PropLine endpoint safety](propline-endpoint.md) — require an explicit authorized API URL; never send the credential to a guessed host.
