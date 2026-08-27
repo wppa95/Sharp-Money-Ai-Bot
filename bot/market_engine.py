@@ -4695,9 +4695,17 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 if getattr(pool_snaps[key], "line_moved", False) is True
             )
 
-        # Advancement is based on the canonical cursor window, not the
-        # prioritized subset selected from it.
-        fpr_end_cursor  = min(fpr_cursor + len(cursor_window), fpr_pool_size)
+        # Advance through the contiguous canonical prefix that was actually
+        # processed.  A prioritized mover may come from outside the window and
+        # consume capacity, so advancing over an unprocessed tail would skip
+        # that tail until a later rotation.
+        _batch_key_set = set(batch_keys)
+        _cursor_advanced = 0
+        for _cursor_key in cursor_window:
+            if _cursor_key not in _batch_key_set:
+                break
+            _cursor_advanced += 1
+        fpr_end_cursor  = min(fpr_cursor + _cursor_advanced, fpr_pool_size)
         fpr_batch_size  = len(batch_keys)
         fpr_batch_source_ids = len({
             str(getattr(pool_snaps[key], "external_id", None) or key[:3])

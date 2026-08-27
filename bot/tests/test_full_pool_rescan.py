@@ -634,6 +634,63 @@ class TestFPRJob:
 
         assert len(call_count) == 3, f"Expected 3 processed (batch_size=3), got {len(call_count)}"
 
+    async def test_line_mover_priority_does_not_skip_cursor_remainder(self):
+        """A mover is prioritized, but an unprocessed cursor tail remains next."""
+        regular_a = _make_snap(player="A", sport="NBA")
+        mover = _make_snap(player="B", sport="NBA")
+        mover.line_moved = True
+        regular_c = _make_snap(player="C", sport="NBA")
+        pool = {
+            ("A", "Points", 22.5): regular_a,
+            ("B", "Points", 22.5): mover,
+            ("C", "Points", 22.5): regular_c,
+        }
+        db = _make_db(pool=pool)
+        ctx = _make_context(db)
+        # Sorted order is B (mover), A, C. Start at A so B can be prioritized
+        # from outside the cursor window without losing C.
+        h = _make_health(cursor=1)
+        processed = []
+
+        async def _fake_history(player, stat, limit=30):
+            processed.append(player)
+            return []
+
+        db.get_ud_prop_history = _fake_history
+
+        from market_engine import _full_pool_rescan_job
+
+        with (
+            patch("market_engine.get_health_tracker", return_value=h),
+            patch("market_engine.config") as cfg,
+            patch("market_engine._fetch_and_compute_hit_rates", new=AsyncMock(return_value=None)),
+            patch("market_engine._is_game_live_or_past", return_value=False),
+            patch("market_engine._is_prop_deduped", return_value=True),
+            patch("engine.ud_scoring.score_ud_prop", return_value=_make_score()),
+            patch("engine.player_validator.validate_player_prop", return_value=_make_validation()),
+            patch("engine.ud_bet_decision.make_ud_bet_decision", return_value=_make_decision()),
+            patch("engine.ud_scoring.compute_market_quality", return_value=MagicMock()),
+            patch("engine.ud_scoring.detect_market_pressure", return_value=MagicMock()),
+        ):
+            cfg.FPR_BATCH_SIZE = 2
+            cfg.allowed_user_ids = set()
+            cfg.UD_VALIDATION_MIN_SAMPLES = 5
+            cfg.UD_ALERT_DEDUP_WINDOW = 3600
+            cfg.MIN_UNDERDOG_LINE_CHANGE = 0.5
+            cfg.ud_strict_alert_sports = frozenset({"MLB", "NFL"})
+            cfg.ud_mlb_alert_tiers = frozenset({"S"})
+            cfg.is_mlb_under_allowed = lambda s: False
+            cfg.min_stars_for_sport = lambda s: 3
+            cfg.min_conf_for_sport_tier = lambda s, t: 70
+            await _full_pool_rescan_job(ctx)
+
+        assert processed == ["B", "A"]
+        assert h.set_fpr_cursor.call_args[0][0] == 2
+        stats = h.set_fpr_stats.call_args[0][0]
+        assert stats["line_movers_prioritized"] == 1
+        assert stats["uncovered_props"] == 1
+        assert stats["next_rotation"] == 1
+
     # ── Test 13: stable refresh still works alongside FPR ─────────────────────
     async def test_stable_refresh_unaffected_by_fpr(self):
         """Running FPR does not modify stable-refresh cursor — test 13."""
