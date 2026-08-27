@@ -1,0 +1,335 @@
+🔴 ODDS API QUOTA — MAXIMIZE USAGE BY AUGUST 30
+
+Continue from the current Sharp Money Bot implementation.
+
+This is a targeted Odds API utilization change only.
+
+Do NOT redesign the bot or change unrelated monitoring, scoring, evidence, Telegram, Underdog, FPR, grading, or database behavior.
+
+1. GOAL
+
+I have a 30,000-call Odds API quota that expires at the end of August 30, 2026.
+
+Current usage is approximately:
+
+* Quota: 30,000
+* Used: ~1,300
+* Remaining: ~28,700
+
+I want the bot to use essentially the entire available 30,000-call quota by the end of August 30, while making legitimate useful Odds API requests.
+
+Do NOT intentionally make meaningless requests just to burn quota.
+
+Use the quota to maximize useful market/odds coverage for the Sharp Money system.
+
+2. FIRST — CALCULATE THE REQUIRED RATE
+
+Before changing the polling behavior, calculate:
+
+* Current UTC time
+* Time remaining until the end of August 30
+* Current calls used
+* Current calls remaining
+* Required calls/day
+* Required calls/hour
+* Required calls/minute
+* Required average request rate to consume the remaining quota by the deadline
+
+Make this calculation dynamically rather than hardcoding today’s numbers.
+
+3. AUDIT CURRENT ODDS API USAGE
+
+Inspect the existing Odds API implementation and determine:
+
+* Which scheduler job makes Odds API calls
+* Current polling interval
+* Current number of requests per polling cycle
+* Sports requested
+* Markets requested
+* Regions requested
+* Whether requests are sequential or concurrent
+* Whether the bot unnecessarily waits between requests
+* Whether multiple sports can be requested efficiently
+* Whether event-level requests are available/useful
+* Whether requests are being skipped because of sport normalization
+* Whether ACTIVE_SPORTS is incorrectly causing valid sports to log as unknown
+* Whether the existing “unknown sport in ACTIVE_SPORTS” warnings are preventing legitimate Odds API coverage
+* Current quota consumption per hour
+* Expected quota consumption under the current configuration
+
+Do not change anything until the actual bottleneck is identified.
+
+4. MAXIMIZE LEGITIMATE QUOTA USAGE
+
+Increase Odds API utilization so the bot can realistically consume the remaining quota before August 30.
+
+Use the existing architecture.
+
+Where supported and safe:
+
+* Increase polling frequency
+* Request all relevant active sports
+* Request all relevant supported markets
+* Use efficient batching where the provider supports it
+* Use concurrent independent requests where appropriate
+* Remove unnecessary internal delays
+* Avoid unnecessary serialization
+* Use the available quota aggressively during the remaining period
+
+Do NOT:
+
+* Create fake API calls
+* Request random unsupported sports
+* Spam identical requests unnecessarily
+* Bypass provider rate limits
+* Break the existing scheduler
+* Increase monitoring-job concurrency
+* Change max_instances=1
+* Create competing monitoring loops
+
+5. PRIORITIZE USEFUL SPORTS
+
+The Odds API poller should prioritize sports that are currently active and useful to the Sharp Money engine.
+
+Make sure valid sports are correctly normalized.
+
+The current logs show warnings such as:
+
+Unknown sport in ACTIVE_SPORTS: TENNIS
+
+Unknown sport in ACTIVE_SPORTS: CS
+
+Unknown sport in ACTIVE_SPORTS: LOL
+
+Unknown sport in ACTIVE_SPORTS: VAL
+
+Unknown sport in ACTIVE_SPORTS: DOTA
+
+Unknown sport in ACTIVE_SPORTS: PGA
+
+Unknown sport in ACTIVE_SPORTS: FIFA
+
+Unknown sport in ACTIVE_SPORTS: CFB
+
+Investigate these.
+
+Do not assume they are actually unsupported.
+
+If the sport exists in the Underdog/Sharp Money universe but does not have an Odds API equivalent, handle that distinction correctly.
+
+Only request sports that Odds API actually supports.
+
+Do not generate bogus Odds API requests for unsupported sports.
+
+6. QUOTA PACING CONTROLLER
+
+Add or improve a lightweight quota pacing controller around the existing Odds API poller.
+
+It should know:
+
+* Quota limit
+* Calls used
+* Calls remaining
+* Deadline
+* Current calls/hour
+* Required calls/hour
+* Current request latency
+* Provider rate-limit response if applicable
+
+Then determine whether the bot is:
+
+🟢 Ahead of quota target
+🟡 On pace
+🔴 Behind quota target
+
+If behind target, safely increase useful polling/request coverage.
+
+If ahead of target, avoid unnecessary requests.
+
+The objective is to finish near the full 30,000-call allowance by the deadline.
+
+7. DO NOT BREAK UNDERDOG MONITORING
+
+This is critical.
+
+Odds API utilization must NOT interfere with:
+
+* Underdog monitoring
+* Current active source-ID universe
+* FPR
+* Full-pool rotation
+* Snapshot persistence
+* Hourly grading
+* Evidence collection
+* Telegram delivery
+* Dashboard
+* /funnel
+
+Do not turn the Odds API into a competing monitoring cadence.
+
+The existing Underdog monitoring lifecycle remains the source of truth for Underdog props.
+
+Odds API remains a market/odds provider feeding the existing engine.
+
+8. FIX THE UNKNOWN-SPORT PROBLEM WHERE APPROPRIATE
+
+Audit the sport normalization used by the Odds API poller.
+
+Ensure:
+
+* Valid Odds API sports are recognized
+* Unsupported Underdog-only sports are not treated as fatal errors
+* Supported sports are actually queried
+* No legitimate Odds API sport is silently skipped because of an incorrect alias
+* Warnings accurately distinguish “not supported by Odds API” from “configuration bug”
+
+Do not redesign the sport architecture.
+
+Make the smallest compatible normalization fix.
+
+9. QUOTA VISIBILITY
+
+Add clear runtime visibility to the existing logs/status where appropriate.
+
+I want to see something equivalent to:
+
+* Odds API calls used
+* Odds API calls remaining
+* Calls/hour
+* Required calls/hour
+* Quota deadline
+* Quota pacing status
+
+Do not redesign the Telegram UI.
+
+Use existing status/log infrastructure where possible.
+
+10. SAFETY LIMITS
+
+The quota target is aggressive, but do not violate the provider’s actual limits.
+
+If the API returns:
+
+* 429
+* rate-limit headers
+* quota exhaustion
+* temporary provider errors
+
+handle them correctly.
+
+Never create an uncontrolled request storm.
+
+The goal is:
+
+maximum legitimate utilization, not uncontrolled API spam.
+
+11. TESTING
+
+Add focused tests proving:
+
+* Quota math is correct
+* Deadline calculation is correct
+* Required calls/hour is correct
+* Pacing status changes correctly
+* Supported sports are recognized
+* Unsupported sports are handled correctly
+* Polling schedule increases utilization appropriately
+* Concurrent requests behave correctly where applicable
+* Rate-limit responses trigger safe backoff
+* Existing Underdog scheduler remains unchanged
+* max_instances=1 remains unchanged
+* Existing monitoring tests remain green
+
+Run the full test suite after the changes.
+
+12. LIVE VERIFICATION
+
+Do not report completion based only on tests.
+
+Run the actual bot and verify:
+
+* Odds API requests are occurring
+* Requests are occurring at the new intended rate
+* Quota usage is increasing
+* Calls/hour is measurable
+* Remaining quota is decreasing
+* The bot is on pace to consume the remaining quota by August 30
+* Supported sports are actually being queried
+* No unnecessary unsupported requests are generated
+* No 429/rate-limit storm occurs
+* Underdog monitoring continues normally
+* FPR continues normally
+* Hourly grading continues normally
+* max_instances=1 remains intact
+
+Let the bot run long enough to obtain real quota-consumption evidence.
+
+13. IMPORTANT — DO NOT TOUCH THESE
+
+Do NOT change:
+
+* Underdog monitoring cadence
+* FPR rotation
+* Snapshot persistence
+* Player evidence
+* Graded-prop evidence
+* Hit/miss grading logic
+* Tier 1/Tier 2 rules
+* Telegram delivery rules
+* Agent Reach
+* Scoring formulas
+* BQ/MQ calculations
+* Database schema unless absolutely necessary
+* Clean restart behavior
+* max_instances=1
+* Railway configuration
+* The known Replit/Railway Telegram 409 conflict
+
+This task is specifically about Odds API quota utilization and legitimate market coverage.
+
+14. FINAL ACCEPTANCE
+
+Do not create a checkpoint until all of these are true:
+
+* Remaining quota calculated
+* Deadline calculated
+* Required calls/hour calculated
+* Current request rate measured
+* Actual Odds API bottleneck identified
+* Polling utilization increased appropriately
+* Supported sports queried correctly
+* Unknown-sport normalization issue addressed where appropriate
+* Quota pacing is visible
+* Calls/hour is measurable
+* Bot is demonstrably consuming quota faster
+* Bot is on pace to use essentially all 30,000 calls by August 30
+* Rate limits are respected
+* No uncontrolled request storm
+* Underdog monitoring unaffected
+* FPR unaffected
+* Hourly grading unaffected
+* max_instances=1 preserved
+* Focused tests pass
+* Full test suite passes
+* Live Odds API requests verified
+* Live quota consumption verified
+* No unrelated behavior changed
+* NO CHECKPOINT CREATED
+
+🔴 FINAL INSTRUCTION
+
+Do not simply tell me the code was changed.
+
+I want the actual running bot to demonstrate that Odds API quota consumption has materially increased and that the system is on pace to use the remaining quota before August 30.
+
+Make the smallest possible targeted changes.
+
+Do not redesign the architecture.
+
+Do not create fake requests.
+
+Do not interfere with Underdog monitoring.
+
+Do not touch the known Replit/Railway Telegram conflict.
+
+Do not create a checkpoint until implementation and live verification are complete.
