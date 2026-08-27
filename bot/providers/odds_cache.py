@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
@@ -34,6 +35,7 @@ import aiohttp
 
 from .base import FailureType
 from .health_monitor import get_health_monitor
+from .quota_pacing import get_quota_pacer
 
 logger = logging.getLogger(__name__)
 
@@ -256,6 +258,10 @@ class OddsApiCache:
             "oddsFormat": odds_format,
         }
         mon = get_health_monitor()
+        pacer = get_quota_pacer()
+        started_at = time.monotonic()
+        if pacer is not None:
+            pacer.record_request_started()
 
         try:
             timeout = aiohttp.ClientTimeout(total=30)
@@ -284,10 +290,17 @@ class OddsApiCache:
                                 f"{resp.status} {error_code or message}",
                                 ftype,
                             )
+                        if pacer is not None:
+                            pacer.record_error(
+                                resp.status,
+                                quota_exhausted=(ftype == FailureType.QUOTA),
+                            )
                         raise OddsApiError(resp.status, error_code, message, ftype)
 
                     resp.raise_for_status()
                     data: list[dict] = await resp.json()
+                    if pacer is not None:
+                        pacer.record_request_finished(started_at)
 
                     remaining = resp.headers.get("x-requests-remaining", "?")
                     used      = resp.headers.get("x-requests-used", "?")
@@ -299,16 +312,30 @@ class OddsApiCache:
                     return data
 
         except OddsApiError:
+            if pacer is not None:
+                pacer._last_latency_ms = max(
+                    0.0, (time.monotonic() - started_at) * 1000.0
+                )
             raise
         except aiohttp.ClientError as exc:
             err = str(exc)
             if mon:
                 mon.record_failure(_PROVIDER_NAME, err, FailureType.HTTP_ERROR)
+            if pacer is not None:
+                pacer.record_error()
+                pacer._last_latency_ms = max(
+                    0.0, (time.monotonic() - started_at) * 1000.0
+                )
             raise OddsApiError(0, "", err, FailureType.HTTP_ERROR) from exc
         except Exception as exc:
             err = str(exc)
             if mon:
                 mon.record_failure(_PROVIDER_NAME, err, FailureType.UNKNOWN)
+            if pacer is not None:
+                pacer.record_error()
+                pacer._last_latency_ms = max(
+                    0.0, (time.monotonic() - started_at) * 1000.0
+                )
             raise OddsApiError(0, "", err, FailureType.UNKNOWN) from exc
 
 

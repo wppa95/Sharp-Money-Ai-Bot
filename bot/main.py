@@ -99,6 +99,7 @@ from providers import init_health_monitor
 from providers.odds_cache import init_odds_cache
 from providers.game_results import OddsApiResultsProvider
 from providers.usage_tracker import init_usage_tracker, get_usage_tracker
+from providers.quota_pacing import init_quota_pacer, get_quota_pacer
 from engine.health import init_health_tracker, get_health_tracker
 from engine.pregame_watch import get_pregame_watch_engine
 
@@ -121,18 +122,41 @@ def _configured_odds_api_sports() -> list[tuple[str, Sport]]:
     Those identifiers must not be parsed by the sportsbook poller as
     ``models.Sport`` values.
     """
+    raw_configured = getattr(config, "ODDS_API_SPORTS_RAW", None)
+    if isinstance(raw_configured, str) and raw_configured.strip():
+        configured_values = raw_configured.split(",")
+    else:
+        # Compatibility for tests and callers that provide the pre-split
+        # ACTIVE_SPORTS-only configuration object.
+        configured_values = getattr(config, "active_sports", [])
+
+    aliases = {
+        "CFB": Sport.NCAAF,
+        "NCAA": Sport.NCAAF,
+        "FOOTBALL": Sport.NFL,
+        "BASKETBALL": Sport.NBA,
+        "BASEBALL": Sport.MLB,
+        "HOCKEY": Sport.NHL,
+    }
+    by_name = {member.value.casefold(): member for member in Sport}
     supported: list[tuple[str, Sport]] = []
     ignored: list[str] = []
-    for raw_value in config.active_sports:
+    seen_odds_keys: set[str] = set()
+    for raw_value in configured_values:
         sport_value = str(raw_value).strip()
-        try:
-            sport = Sport(sport_value)
-        except ValueError:
+        if not sport_value:
+            continue
+        sport = aliases.get(sport_value.upper()) or by_name.get(sport_value.casefold())
+        if sport is None:
             ignored.append(sport_value)
             continue
-        if sport not in _SPORT_TO_ODDS_API_KEY:
+        odds_key = _SPORT_TO_ODDS_API_KEY.get(sport)
+        if not odds_key:
             ignored.append(sport_value)
             continue
+        if odds_key in seen_odds_keys:
+            continue
+        seen_odds_keys.add(odds_key)
         supported.append((sport_value, sport))
 
     if ignored:
@@ -241,9 +265,7 @@ async def post_init(application: Application) -> None:
     # PrizePicks provider is temporarily disabled — not registered so it never
     # shows as a failed provider in /status or logs.
     # OddsAPI is registered so quota headers (x-requests-remaining/used) recorded
-    # by OddsApiCache._fetch() appear in /status and health logs.  The broad
-    # sportsbook EV polling job (_poll_odds_job) remains disabled; the only
-    # OddsAPI calls are the on-demand S/A-tier confirmation calls in market_engine.
+    # by OddsApiCache._fetch() appear in /status and health logs.
     _health_monitor.register("OddsAPI")
     _health_monitor.register("Underdog")
     logger.info("Provider health monitor initialised (OddsAPI + Underdog)")
@@ -264,6 +286,12 @@ async def post_init(application: Application) -> None:
 
     init_odds_cache(ttl_seconds=config.ODDS_API_CACHE_TTL)
     logger.info("Odds API shared cache initialised (TTL=%ds)", config.ODDS_API_CACHE_TTL)
+    init_quota_pacer(
+        quota_limit=config.ODDS_API_QUOTA_LIMIT,
+        deadline=config.ODDS_API_DEADLINE_UTC,
+        min_interval_seconds=config.ODDS_API_MIN_REQUEST_INTERVAL,
+        max_interval_seconds=config.ODDS_API_MAX_REQUEST_INTERVAL,
+    )
 
     # ── API usage tracker + budget enforcement ────────────────────────────────
     _usage_tracker = init_usage_tracker(
@@ -312,18 +340,15 @@ async def post_init(application: Application) -> None:
     # Register background jobs
     jq = application.job_queue
     if jq:
-        # ── Sportsbook polling disabled — Underdog-only mode ─────────────────
-        # To re-enable sportsbook monitoring: uncomment the blocks below and
-        # restart the bot.  All logic is preserved; nothing has been deleted.
-        # The OddsAPI poller must stay disabled here.  ACTIVE_SPORTS is the
-        # Underdog scanner scope and includes sports without a generic OddsAPI
-        # enum/key.  OddsAPI is used on-demand for confirmation/CLV only.
-        # jq.run_repeating(
-        #     _poll_odds_job,
-        #     interval=config.ODDS_POLL_INTERVAL,
-        #     first=10,
-        #     name="odds_poller",
-        # )
+        # The OddsAPI poller has its own normalized sport scope and adaptive
+        # quota pacing.  It never reads ACTIVE_SPORTS for provider selection.
+        jq.run_repeating(
+            _poll_odds_job,
+            interval=config.ODDS_POLL_INTERVAL,
+            first=10,
+            name="odds_poller",
+            job_kwargs={"max_instances": 1, "misfire_grace_time": 120},
+        )
         # jq.run_repeating(_steam_check_job,    interval=config.STEAM_CHECK_INTERVAL,      first=15,  name="steam_checker")
         # Store DK/FD player-prop markets separately from the h2h/totals EV
         # poller. Only the enabled sportsbook books are retained.
@@ -779,6 +804,7 @@ async def _poll_odds_job(context) -> None:
     bot      = context.bot
     chat_ids = list(config.allowed_user_ids)
     delivery = AlertDelivery(_db, bot, chat_ids)
+    pacer = get_quota_pacer()
 
     # ── 1. Fetch odds for every active sport ──────────────────────────────────
     all_lines: list[OddsLine] = []
@@ -787,11 +813,12 @@ async def _poll_odds_job(context) -> None:
         allowed_books.add("draftkings")
     if config.FANDUEL_ENABLED:
         allowed_books.add("fanduel")
-    if not allowed_books:
-        logger.debug("_poll_odds_job: no sportsbook moneyline books enabled")
+    if not getattr(config, "ODDS_API_ENABLED", True):
+        logger.debug("_poll_odds_job: OddsAPI disabled by configuration")
         return
 
-    for sport_str, sport in _configured_odds_api_sports():
+    configured_sports = _configured_odds_api_sports()
+    for sport_str, sport in configured_sports:
         # Skip sports that are out of season / have no active markets.
         # The checker is fail-open: returns True if cache not yet populated.
         if _season_checker is not None:
@@ -802,12 +829,24 @@ async def _poll_odds_job(context) -> None:
                     sport_str, odds_key,
                 )
                 continue
+        if pacer is not None and not await pacer.wait_for_slot():
+            logger.warning("_poll_odds_job: quota pacer blocked the remaining cycle")
+            break
         lines = await _engine.fetch_live_odds(sport, markets="h2h,totals")
         allowed_book_names = {book.replace(" ", "") for book in allowed_books}
-        all_lines.extend(
-            line for line in lines
-            if line.sportsbook.lower().replace(" ", "") in allowed_book_names
-        )
+        if allowed_book_names:
+            all_lines.extend(
+                line for line in lines
+                if line.sportsbook.lower().replace(" ", "") in allowed_book_names
+            )
+        else:
+            # Fetching and storing the complete market response keeps OddsAPI
+            # useful for confirmation/CLV even when optional DK/FD delivery is
+            # disabled.  AlertDelivery still applies the existing scope gate.
+            all_lines.extend(lines)
+
+    if pacer is not None:
+        logger.info("OddsAPI quota pacing: %s", pacer.telemetry().summary)
 
     if not all_lines:
         logger.debug("_poll_odds_job: no lines returned from API")
