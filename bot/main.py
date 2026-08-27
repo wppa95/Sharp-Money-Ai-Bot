@@ -332,7 +332,7 @@ async def post_init(application: Application) -> None:
     ))
 
     init_market_engine(registry)
-    init_odds_confirmation(_engine)   # wire OddsAPI confirmation into market engine
+    init_odds_confirmation(_engine, _db)   # wire existing OddsAPI data into confirmation
 
     # Store db reference in bot_data for market engine jobs
     application.bot_data["db"] = _db
