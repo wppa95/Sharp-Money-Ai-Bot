@@ -305,3 +305,175 @@ class TestUpsertPreservesGrading:
         # A PASS re-evaluation is ignored rather than overwriting the
         # directional record.
         assert row.recommendation == "OVER"
+
+
+class TestBulkPropOpportunityLog:
+    @pytest.mark.asyncio
+    async def test_bulk_filters_passes_and_writes_all_directional_rows(
+        self, db: Database
+    ) -> None:
+        rows = [
+            {
+                "external_id": f"bulk-{index}",
+                "player_name": f"Player {index}",
+                "team": "TEAM",
+                "sport": "NBA",
+                "stat_type": "Points",
+                "line_value": 20.5 + index,
+                "recommendation": "OVER" if index % 2 else "UNDER",
+                "decision_tier": "A",
+                "confidence": 70 + index,
+                "game_time": _future(6),
+                "provider": "Underdog",
+                "bet_quality_score": 80,
+                "qualification_path": ["score", "direction"],
+                "reason_codes": ["L5", "EDGE"],
+            }
+            for index in range(65)
+        ]
+        rows.append({
+            "external_id": "bulk-pass",
+            "player_name": "Transient",
+            "team": "TEAM",
+            "sport": "NBA",
+            "stat_type": "Points",
+            "line_value": 20.5,
+            "recommendation": "PASS",
+            "decision_tier": "PASS",
+            "confidence": 20,
+            "game_time": _future(6),
+        })
+
+        inserted = await db.log_prop_opportunity_bulk(rows)
+
+        assert inserted == 65
+        async with db.session() as s:
+            from sqlalchemy import func, select
+
+            count_result = await s.execute(
+                select(func.count(PropOpportunityLog.id)).where(
+                    PropOpportunityLog.external_id.like("bulk-%")
+                )
+            )
+            assert count_result.scalar() == 65
+            pass_result = await s.execute(
+                select(PropOpportunityLog).where(
+                    PropOpportunityLog.external_id == "bulk-pass"
+                )
+            )
+            assert pass_result.scalar_one_or_none() is None
+
+    @pytest.mark.asyncio
+    async def test_bulk_upsert_uses_last_duplicate_and_preserves_grading(
+        self, db: Database
+    ) -> None:
+        base = {
+            "external_id": "bulk-upsert",
+            "player_name": "Bulk Player",
+            "team": "TEAM",
+            "sport": "MLB",
+            "stat_type": "Hits",
+            "line_value": 1.5,
+            "recommendation": "OVER",
+            "decision_tier": "A",
+            "confidence": 72,
+            "game_time": _past(8),
+        }
+        await db.log_prop_opportunity_bulk([base])
+
+        async with db.session() as s:
+            from sqlalchemy import select
+
+            result = await s.execute(
+                select(PropOpportunityLog).where(
+                    PropOpportunityLog.external_id == "bulk-upsert"
+                )
+            )
+            original = result.scalar_one()
+        await db.grade_opportunity(original.id, "HIT", 3.0)
+
+        updated = dict(base)
+        updated.update(
+            line_value=2.5,
+            recommendation="UNDER",
+            decision_tier="S",
+            confidence=91,
+            stars=5,
+            provider="Underdog",
+        )
+        duplicate = dict(updated, line_value=3.5, confidence=95)
+        await db.log_prop_opportunity_bulk([updated, duplicate])
+
+        async with db.session() as s:
+            from sqlalchemy import select
+
+            result = await s.execute(
+                select(PropOpportunityLog).where(
+                    PropOpportunityLog.external_id == "bulk-upsert"
+                )
+            )
+            row = result.scalar_one()
+
+        assert row.id == original.id
+        assert row.line_value == 3.5
+        assert row.recommendation == "UNDER"
+        assert row.confidence == 95
+        assert row.result == "HIT"
+        assert row.actual_value == 3.0
+        assert row.graded_at is not None
+
+    @pytest.mark.asyncio
+    async def test_bulk_persists_evidence_and_intelligence_summaries(
+        self, db: Database
+    ) -> None:
+        intelligence = {
+            "evidence_completeness": {"score": 88},
+            "sharp_confidence": {
+                "score": 76,
+                "components": {"market": 40, "sample": 36},
+            },
+        }
+        await db.log_prop_opportunity_bulk([{
+            "external_id": "bulk-intelligence",
+            "player_name": "Evidence Player",
+            "team": "TEAM",
+            "sport": "NFL",
+            "stat_type": "Passing Yards",
+            "line_value": 250.5,
+            "recommendation": "OVER",
+            "decision_tier": "S",
+            "confidence": 90,
+            "game_time": _future(10),
+            "stars": 5,
+            "risk_level": "LOW",
+            "explanation": "Strong evidence",
+            "provider": "Underdog",
+            "bet_quality_score": 92,
+            "qualification_path": ["history", "market"],
+            "reason_codes": ["STRONG_L5"],
+            "downstream_intelligence": intelligence,
+        }])
+
+        async with db.session() as s:
+            from sqlalchemy import select
+            import json
+
+            result = await s.execute(
+                select(PropOpportunityLog).where(
+                    PropOpportunityLog.external_id == "bulk-intelligence"
+                )
+            )
+            row = result.scalar_one()
+
+        assert row.stars == 5
+        assert row.provider == "Underdog"
+        assert row.bet_quality_score == 92
+        assert json.loads(row.qualification_path) == ["history", "market"]
+        assert json.loads(row.reason_codes) == ["STRONG_L5"]
+        assert json.loads(row.downstream_intelligence_json) == intelligence
+        assert row.evidence_completeness == 88
+        assert row.sharp_confidence == 76
+        assert json.loads(row.sharp_confidence_components) == {
+            "market": 40,
+            "sample": 36,
+        }
