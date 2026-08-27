@@ -12,6 +12,7 @@ from providers.propline import (
     PropLinePrizePicksProvider,
     normalize_propline_prizepicks_record,
 )
+from engine.delivery_gates import is_tier2_sport
 from providers.prop_provider import PlayerProp
 from engine.provider_confirmation import (
     ConfirmationObservation,
@@ -44,6 +45,18 @@ class _Session:
     def get(self, url, **kwargs):
         self.calls.append((url, kwargs))
         return self.response
+
+
+class _QueueSession:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def get(self, url, **kwargs):
+        self.calls.append((url, kwargs))
+        if not self.responses:
+            raise AssertionError("unexpected HTTP request")
+        return self.responses.pop(0)
 
 
 def test_normalization_preserves_prizepicks_identity_and_metadata():
@@ -227,6 +240,165 @@ def test_official_odds_route_accepts_standard_prizepicks_props_only():
     assert "player_points" in session.calls[0][1]["params"]["markets"]
 
 
+def test_official_sports_discovery_returns_active_sports_only():
+    session = _Session(
+        _Response(
+            200,
+            [
+                {"key": "basketball_nba", "title": "NBA", "active": True},
+                {"key": "football_ncaaf", "title": "NCAAF", "active": True},
+                {"key": "boxing", "title": "Boxing", "active": False},
+                {"key": "", "title": "Invalid", "active": True},
+            ],
+        )
+    )
+    client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://api.prop-line.com",
+        session=session,
+        min_request_interval=0,
+    )
+
+    sports = asyncio.run(client.discover_sports())
+
+    assert [(sport.official_key, sport.canonical_key) for sport in sports] == [
+        ("basketball_nba", "NBA"),
+        ("football_ncaaf", "NCAAF"),
+    ]
+    assert session.calls[0][0] == "https://api.prop-line.com/v1/sports"
+
+
+def test_bulk_fetch_discovers_and_fetches_multiple_sports_without_nba_only_path():
+    discovery = _Response(
+        200,
+        [
+            {"key": "basketball_nba", "title": "NBA", "active": True},
+            {"key": "football_nfl", "title": "NFL", "active": True},
+            {"key": "boxing", "title": "Boxing", "active": True},
+        ],
+    )
+    nba = _Response(
+        200,
+        [
+            {
+                "id": "nba-game",
+                "sport_key": "basketball_nba",
+                "bookmakers": [{
+                    "key": "prizepicks",
+                    "markets": [{
+                        "key": "player_points",
+                        "outcomes": [{
+                            "description": "NBA Player",
+                            "name": "Over",
+                            "point": 20.5,
+                            "dfs_odds_type": "standard",
+                        }],
+                    }],
+                }],
+            }
+        ],
+    )
+    nfl = _Response(
+        200,
+        [
+            {
+                "id": "nfl-game",
+                "sport_key": "football_nfl",
+                "bookmakers": [{
+                    "key": "prizepicks",
+                    "markets": [{
+                        "key": "player_rushing_yards",
+                        "outcomes": [{
+                            "description": "NFL Player",
+                            "name": "Under",
+                            "point": 55.5,
+                            "dfs_odds_type": "standard",
+                        }],
+                    }],
+                }],
+            }
+        ],
+    )
+    client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://api.prop-line.com",
+        session=_QueueSession([discovery, nba, nfl, _Response(200, [])]),
+        min_request_interval=0,
+    )
+
+    props = asyncio.run(PropLinePrizePicksProvider(client=client).fetch_props())
+
+    assert {(prop.sport, prop.player_name, prop.direction) for prop in props} == {
+        ("NBA", "NBA Player", "OVER"),
+        ("NFL", "NFL Player", "UNDER"),
+    }
+    assert all(prop.provider == "PrizePicks" for prop in props)
+
+
+@pytest.mark.parametrize(
+    ("official_key", "title", "expected"),
+    [
+        ("football_ncaaf", "NCAAF", "NCAAF"),
+        ("americanfootball_nfl", "NFL", "NFL"),
+        ("hockey_nhl", "NHL", "NHL"),
+        ("mma_ufc", "UFC", "UFC"),
+        ("soccer_fifa_world_cup", "FIFA World Cup", "FIFA"),
+        ("aussie_rules_afl", "AFL", "AFL"),
+    ],
+)
+def test_discovered_sport_normalization(official_key, title, expected):
+    from providers.propline import _canonical_discovered_sport
+
+    assert _canonical_discovered_sport(official_key, title) == expected
+
+
+@pytest.mark.parametrize("sport", ["MLB", "NBA", "NFL", "CFB", "NCAAF", "FOOTBALL"])
+def test_canonical_tier2_sports_are_preserved(sport):
+    assert is_tier2_sport(sport)
+
+
+@pytest.mark.parametrize("sport", ["NHL", "WNBA", "FIFA", "TENNIS", "PGA", "CS", "CFL"])
+def test_other_discovered_sports_are_canonical_tier1(sport):
+    assert not is_tier2_sport(sport)
+
+
+def test_sport_scoped_fetch_preserves_requested_alias_for_confirmation_matching():
+    session = _Session(
+        _Response(
+            200,
+            [{
+                "id": "cfb-game",
+                "sport_key": "football_ncaaf",
+                "bookmakers": [{
+                    "key": "prizepicks",
+                    "markets": [{
+                        "key": "player_rushing_yards",
+                        "outcomes": [{
+                            "description": "College Player",
+                            "name": "Over",
+                            "point": 40.5,
+                            "dfs_odds_type": "standard",
+                        }],
+                    }],
+                }],
+            }],
+        )
+    )
+    client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://api.prop-line.com",
+        session=session,
+        min_request_interval=0,
+    )
+
+    props = asyncio.run(
+        PropLinePrizePicksProvider(client=client).fetch_props_for_sport("CFB")
+    )
+
+    assert len(props) == 1
+    assert props[0].sport == "CFB"
+
+
 def test_client_reuses_fresh_cache_instead_of_repeating_request():
     session = _Session(
         _Response(
@@ -271,6 +443,53 @@ def test_client_handles_rate_limit_with_backoff():
     assert asyncio.run(client.fetch_prizepicks_props()).props == []
     assert asyncio.run(client.fetch_prizepicks_props()).props == []
     assert len(session.calls) == 1
+
+
+def test_discovery_reuses_fresh_cache_instead_of_repeating_request():
+    session = _Session(_Response(200, [{"key": "basketball_nba", "active": True}]))
+    client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://api.prop-line.com",
+        session=session,
+        min_request_interval=0,
+        cache_ttl=300,
+    )
+
+    first = asyncio.run(client.discover_sports())
+    second = asyncio.run(client.discover_sports())
+
+    assert first == second
+    assert len(session.calls) == 1
+
+
+def test_discovery_rate_limit_protects_daily_budget_and_backoff():
+    session = _Session(_Response(429, headers={"Retry-After": "60"}))
+    clock_value = [100.0]
+    client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://api.prop-line.com",
+        session=session,
+        min_request_interval=0,
+        clock=lambda: clock_value[0],
+    )
+
+    assert asyncio.run(client.discover_sports()) == []
+    assert asyncio.run(client.discover_sports()) == []
+    assert len(session.calls) == 1
+
+
+def test_unknown_sport_is_skipped_without_fabricating_an_official_key():
+    client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://api.prop-line.com",
+        min_request_interval=0,
+    )
+
+    props = asyncio.run(
+        PropLinePrizePicksProvider(client=client).fetch_props_for_sport("CRICKET")
+    )
+
+    assert props == []
 
 
 def test_confirmation_rejects_stale_or_ambiguous_prizepicks_matches():

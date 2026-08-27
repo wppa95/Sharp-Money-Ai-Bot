@@ -17,7 +17,7 @@ import logging
 import os
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Optional
 
@@ -519,7 +519,7 @@ def _official_odds_records(payload: Any) -> list[dict[str, Any]]:
                         {
                             "provider": "PrizePicks",
                             "market_type": market_key,
-                            "sport": sport_key,
+                            "sport": _canonical_discovered_sport(sport_key),
                             "player": outcome.get("description"),
                             "player_id": outcome.get("player_id"),
                             "stat": stat_key,
@@ -909,7 +909,10 @@ class PropLinePrizePicksProvider(PropProviderBase):
             )
             return []
         result = await self.client.fetch_prizepicks_props(sport_key=official_sport)
-        return [prop for prop in result.props if prop.sport == canonical_sport]
+        # The same official endpoint can have multiple aliases in the bot
+        # namespace (for example CFB/NCAAF and SOCCER/EPL).  The requested
+        # canonical identity is authoritative for confirmation matching.
+        return [replace(prop, sport=canonical_sport) for prop in result.props]
 
     def normalize_stat(self, raw: str) -> str:
         return _normalize_stat(raw)
