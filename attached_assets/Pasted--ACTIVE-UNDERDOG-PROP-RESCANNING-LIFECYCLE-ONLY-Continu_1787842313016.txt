@@ -1,0 +1,432 @@
+🔴 ACTIVE UNDERDOG PROP RESCANNING LIFECYCLE ONLY
+
+Continue from the current Sharp Money Bot implementation.
+
+Make ONLY the changes required to fix the active Underdog prop rescanning lifecycle below.
+
+Do not combine this task with the upcoming provider-expansion task.
+
+Do not change PrizePicks, DraftKings, FanDuel, OddsAPI, Agent Reach, or any other provider behavior in this task.
+
+Do not redesign the architecture.
+
+Do not create a checkpoint until implementation, tests, and live verification are complete.
+
+⸻
+
+1. CORE REQUIREMENT
+
+Every currently active Underdog prop that the bot has seen must remain eligible for continuous batched rescanning until its event/game starts or the prop is removed from the active feed.
+
+The bot must NOT limit the active monitoring universe to:
+
+* PropLineHistory
+* Newly detected props
+* Line movers
+* Actionable candidates
+* Telegram-delivered props
+* Previously scored props
+* Only the most recent batch
+
+The authoritative active universe must be the latest active Underdog source-ID state.
+
+Historical snapshot rows remain historical records and must not individually re-enter active rotation.
+
+⸻
+
+2. BATCHED FULL-UNIVERSE ROTATION
+
+Do NOT scan the entire active universe simultaneously.
+
+Use the existing FPR mechanism as the sole active full-pool rotation.
+
+The behavior must be:
+
+Active source-ID universe → bounded FPR batch → rescore → advance cursor → next batch → continue → wraparound → repeat
+
+Requirements:
+
+* Maintain a bounded batch size based on the existing adaptive/performance limits.
+* Advance the FPR cursor after each completed batch.
+* Continue until the full active universe has been covered.
+* When the end is reached, wrap to the beginning.
+* Begin the next rotation automatically.
+* Newly discovered props must enter the active universe.
+* Line movers must receive priority.
+* Remaining active props must not starve.
+
+Do NOT create another full-pool cursor or competing rotation.
+
+⸻
+
+3. PROP LINE HISTORY MUST NOT LIMIT ROTATION
+
+Verify that FPR does NOT use the smaller PropLineHistory population as its active universe.
+
+The active universe must come from the latest active Underdog snapshots/source IDs, respecting:
+
+* Real source/external ID
+* Latest state
+* Removal markers
+* Event/game start
+* Alternate active lines where applicable
+
+PropLineHistory can continue providing historical evidence, but it must NOT determine which props are eligible for active FPR rotation.
+
+⸻
+
+4. EVERY ACTIVE PROP MUST EVENTUALLY BE RESCANNED
+
+A prop must remain eligible even when it is:
+
+* Unchanged
+* Previously scored
+* Previously rejected
+* Previously delivered
+* Weakly supported
+* Missing evidence
+* Cold-start
+* Non-actionable
+
+Delivery deduplication must remain downstream.
+
+Being previously evaluated or previously delivered must never remove a prop from FPR rotation.
+
+⸻
+
+5. NEW PROPS
+
+New first-appearance props must:
+
+1. Be persisted.
+2. Be evaluated.
+3. Receive priority.
+4. Enter the normal FPR universe.
+5. Remain active after the first scan.
+6. Continue receiving rescans until event start/removal.
+
+The new-prop fast path must NOT replace full-pool rotation.
+
+⸻
+
+6. LINE MOVERS
+
+When an active prop’s line moves:
+
+* Detect the movement from the previous active state.
+* Rescore it promptly.
+* Keep it in the active universe afterward.
+* Continue rescanning it in future rotations.
+* Do not let delivery deduplication remove it from monitoring.
+
+⸻
+
+7. EVENT-START LIFECYCLE
+
+When an event/game starts:
+
+* The prop leaves the active FPR rotation.
+* Historical snapshots remain intact.
+* Existing grading remains available.
+* The existing outcome system eventually records HIT/MISS/PUSH where applicable.
+
+Do NOT delete historical data simply because a prop leaves active monitoring.
+
+The distinction must remain:
+
+Inactive for monitoring ≠ deleted from history.
+
+⸻
+
+8. CURSOR / ROTATION FAIRNESS
+
+Prevent provider ordering or database ordering from causing the same props to consume every batch.
+
+Verify:
+
+* Cursor advances.
+* Successive batches contain different source IDs.
+* Different sports receive coverage.
+* Previously scanned props eventually return.
+* New props are incorporated.
+* Line movers receive priority without permanently starving the remainder.
+* A completed rotation begins another rotation.
+
+If priority queues are used, ensure the remainder of the active universe continues receiving guaranteed rotation coverage.
+
+⸻
+
+9. LIVE ROTATION METRICS
+
+The existing funnel/health reporting should expose enough information to prove rotation.
+
+Track/report where the current system already exposes monitoring metrics:
+
+* Active source-ID pool size
+* FPR batch size
+* Rotation number
+* Cursor start
+* Cursor end
+* Number rescored
+* Unique source IDs rescored
+* Sports covered
+* Coverage percentage
+* Remaining uncovered active props
+* Rotation completion
+* Next rotation
+
+Do not create a duplicate monitoring system.
+
+⸻
+
+10. PRESERVE EXISTING SYSTEMS
+
+Do NOT modify:
+
+* OddsAPI quota/pacing
+* OddsAPI sport scope
+* PrizePicks
+* DraftKings
+* FanDuel
+* Agent Reach
+* Underdog ingestion architecture
+* Snapshot persistence architecture except where required to support this lifecycle
+* Player identity
+* Provider evidence
+* Graded-prop evidence
+* HIT/MISS/PUSH grading
+* Scoring formulas
+* BQ/MQ
+* Confidence
+* Telegram rules
+* Tier 1/Tier 2
+* Stable Refresh architecture
+* Hourly grading
+* Scheduler architecture
+* max_instances=1
+* Clean-restart behavior
+* Railway
+* Replit/Railway Telegram 409 handling
+
+FPR must remain the sole active full-pool rotation.
+
+Do not introduce another rotation mechanism.
+
+⸻
+
+11. DATABASE SAFETY
+
+Do NOT:
+
+* Delete historical snapshots.
+* Rewrite historical outcomes.
+* Fabricate evidence.
+* Create duplicate historical records.
+* Change unrelated database structures.
+
+Preserve:
+
+* Source IDs
+* Historical snapshots
+* Player identity
+* Sport
+* Market/stat
+* Line
+* Game/event time
+* Removal state
+* Existing outcomes
+
+The active pool is a latest-state view over the historical snapshot universe.
+
+⸻
+
+12. REGRESSION TESTS
+
+Add focused tests proving:
+
+* Active FPR pool comes from latest source-ID state.
+* PropLineHistory does not limit FPR.
+* New props enter FPR.
+* New props remain after their first scan.
+* Line movers are prioritized.
+* Unchanged props eventually get rescanned.
+* Previously delivered props remain eligible.
+* Previously rejected/non-actionable props remain eligible.
+* Cold-start props remain eligible.
+* Event-started props leave active rotation.
+* Historical data remains after event start.
+* Cursor advances correctly.
+* Cursor wraps correctly.
+* Multiple rotations work.
+* New props entering mid-rotation are incorporated.
+* Multiple sports receive coverage.
+* The same small group cannot consume every batch.
+* Active source IDs remain unique in the current-state pool.
+* Removal markers supersede active state correctly.
+* Alternate active lines are preserved where appropriate.
+
+Do NOT weaken existing tests.
+
+Run the full existing suite after the focused tests.
+
+⸻
+
+13. REQUIRED LIVE VERIFICATION
+
+Tests alone are NOT sufficient.
+
+Run the actual Sharp Money Bot and capture real evidence across multiple consecutive monitoring cycles.
+
+Active universe
+
+Verify:
+
+* Current active source-ID count.
+* Current FPR pool count.
+* PropLineHistory count separately.
+* Active props exist outside PropLineHistory.
+* Multiple sports are represented.
+
+First rotation
+
+Verify:
+
+* FPR starts.
+* Batch is bounded.
+* Cursor advances.
+* Source IDs in the next batch differ from the prior batch.
+* Rescoring occurs.
+* Coverage increases.
+
+Continued rotation
+
+Verify across multiple batches:
+
+* Different props continue appearing.
+* Different sports appear.
+* Unchanged props are eventually rescored.
+* Previously delivered props remain eligible.
+* New props enter the rotation.
+* Line movers receive priority.
+* Remaining active props continue receiving coverage.
+
+Wraparound
+
+If the current active pool is too large to observe a complete wraparound during one short test window, do NOT falsely claim it.
+
+Instead:
+
+* Verify the cursor logic reaches the end correctly in a controlled test.
+* Verify live cursor advancement across consecutive batches.
+* Report whether a live wraparound was observed or only regression-tested.
+
+Do not fabricate full-rotation evidence.
+
+Event lifecycle
+
+Where a real event starts during observation:
+
+* Confirm its prop leaves the active pool.
+* Confirm historical data remains.
+* Confirm grading remains possible.
+
+Performance
+
+Measure:
+
+* Batch size
+* Cycle duration
+* FPR duration
+* Props/sec
+* Database time
+* Provider time
+* Coverage progression
+
+Keep:
+
+max_instances=1
+
+Do not increase concurrency to solve performance.
+
+⸻
+
+14. CRITICAL ACCEPTANCE CONDITION
+
+Do NOT report:
+
+“The bot scans all active props”
+
+unless the implementation and evidence support that statement.
+
+The required lifecycle is:
+
+All active source IDs
+→ bounded batch
+→ rescore
+→ cursor advancement
+→ different batch
+→ continued coverage
+→ wraparound
+→ next rotation
+
+The entire universe does NOT need to be scanned simultaneously.
+
+It must be continuously covered in sustainable batches until event start/removal.
+
+⸻
+
+15. FINAL ACCEPTANCE CHECKLIST
+
+Do not create a checkpoint until all applicable items are verified:
+
+* Active universe uses latest active Underdog source-ID state.
+* PropLineHistory does not limit FPR.
+* Historical snapshots remain intact.
+* New props enter rotation.
+* New props remain in rotation.
+* Line movers receive priority.
+* Unchanged props eventually get rescanned.
+* Previously delivered props remain eligible.
+* Previously rejected/non-actionable props remain eligible.
+* Cold-start props remain eligible.
+* Event-started props leave active rotation.
+* Started props remain available for grading.
+* FPR is the sole full-pool rotation.
+* Cursor advances.
+* Cursor wraps correctly.
+* Multiple rotations are supported.
+* New props entering mid-rotation are incorporated.
+* Multiple sports receive coverage.
+* Same small group does not repeatedly consume every batch.
+* Coverage is measurable.
+* Source-ID uniqueness is preserved.
+* Removal state is respected.
+* Alternate active lines are preserved.
+* max_instances=1 remains intact.
+* Existing tests remain green.
+* Multiple live cycles are verified.
+* No unrelated behavior changed.
+* No historical data deleted.
+* NO CHECKPOINT CREATED UNTIL LIVE VERIFICATION PASSES.
+
+🔴 FINAL INSTRUCTION
+
+This is Task 1 — Active Underdog Prop Rescanning Lifecycle ONLY.
+
+Do not touch the provider-expansion work.
+
+Do not touch OddsAPI.
+
+Do not touch PrizePicks.
+
+Do not touch DraftKings/FanDuel.
+
+Do not touch Agent Reach.
+
+Do not redesign the bot.
+
+Do not change scoring or Telegram rules.
+
+Do not create another rotation system.
+
+Make the smallest targeted changes necessary and prove with the running bot that the complete active Underdog source-ID universe is continuously rescanned in bounded batches until each prop reaches event start/removal.
