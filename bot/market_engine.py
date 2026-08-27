@@ -299,6 +299,62 @@ _priority_override_sent: set = set()
 # cadence alive without duplicating the heavy scoring work.
 _ud_full_scan_running: bool = False
 
+# FPR is scheduled independently, but it must not lose its only execution window
+# when a long Underdog scan occupies the shared full-scan slot.  A deferred trigger
+# records one retry request; the active Underdog job hands that request off after
+# releasing the slot.  These are process-local coordination flags, not a second
+# rotation or another scheduler.
+_fpr_deferred_pending: bool = False
+_fpr_deferred_context: object | None = None
+_fpr_handoff_task: asyncio.Task | None = None
+_fpr_execution_running: bool = False
+
+
+def _queue_deferred_fpr(context: object) -> None:
+    """Remember one FPR trigger to run after the current full scan."""
+    global _fpr_deferred_pending, _fpr_deferred_context
+    _fpr_deferred_pending = True
+    _fpr_deferred_context = context
+
+
+def _schedule_deferred_fpr() -> None:
+    """Start the one queued FPR pass once the shared scan slot is free."""
+    global _fpr_deferred_pending, _fpr_deferred_context, _fpr_handoff_task
+
+    if not _fpr_deferred_pending:
+        return
+    if _fpr_handoff_task is not None and not _fpr_handoff_task.done():
+        return
+
+    context = _fpr_deferred_context
+    _fpr_deferred_pending = False
+    _fpr_deferred_context = None
+
+    async def _run_deferred_fpr() -> None:
+        global _fpr_handoff_task
+        try:
+            logger.info("full_pool_rescan: running deferred batch after Underdog scan")
+            await _full_pool_rescan_job(context)
+        except Exception:
+            # The FPR job records its own failures.  This guard prevents an
+            # unexpected task-level exception from becoming an unhandled-task
+            # warning and hiding the next scheduled opportunity.
+            logger.exception("full_pool_rescan: deferred handoff failed")
+        finally:
+            _fpr_handoff_task = None
+
+    _fpr_handoff_task = asyncio.create_task(
+        _run_deferred_fpr(),
+        name="deferred_full_pool_rescan",
+    )
+
+
+def _release_underdog_scan_slot() -> None:
+    """Release the shared slot and hand one deferred FPR trigger to the loop."""
+    global _ud_full_scan_running
+    _ud_full_scan_running = False
+    _schedule_deferred_fpr()
+
 
 def _bq_stars(bq: int) -> str:
     """V3.4 star display string computed from Bet Quality (decision.confidence).
@@ -1592,7 +1648,7 @@ async def underdog_job(context) -> None:
         _cycle_timing.finish("fetch_parse")
         logger.info("underdog_cycle_timing: %s", _cycle_timing.summary(0, 0))
         _job_activity_end("underdog")
-        _ud_full_scan_running = False
+        _release_underdog_scan_slot()
         return
 
     _cycle_timing.finish("fetch_parse")
@@ -1606,7 +1662,7 @@ async def underdog_job(context) -> None:
         if _health:
             _health.record_provider_fetch("Underdog")
             _health.record_job_run("underdog_job")   # empty response = successful run
-        _ud_full_scan_running = False
+        _release_underdog_scan_slot()
         return
 
     if _health:
@@ -3670,7 +3726,7 @@ async def underdog_job(context) -> None:
             # The guard is claimed before this try block.  Always release it
             # on a processing failure so one malformed row cannot stall every
             # subsequent scheduled scan.
-            _ud_full_scan_running = False
+            _release_underdog_scan_slot()
             _job_activity_end("underdog")
             return
 
@@ -3783,7 +3839,7 @@ async def underdog_job(context) -> None:
         )
 
     # Clear the full-scan concurrency guard so future scheduled instances run full scans.
-    _ud_full_scan_running = False
+    _release_underdog_scan_slot()
 
     
 
@@ -4566,7 +4622,6 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
     bot          = context.bot
     if db is None:
         return
-    _job_activity_start("fpr")
 
     chat_ids = list(config.allowed_user_ids)
     now      = datetime.utcnow()
@@ -4575,6 +4630,15 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
     if _health:
         _health.record_job_started("full_pool_rescan_job")
 
+    global _fpr_execution_running, _ud_full_scan_running
+    if _fpr_execution_running:
+        logger.info("full_pool_rescan: deferred trigger already running")
+        if _health:
+            _health.record_job_run("full_pool_rescan_job")
+        return
+
+    _job_activity_start("fpr")
+
     # The Underdog cold-start/full scan owns the database while it restores
     # state and ingests the live feed.  Defer this rotation batch so the
     # canonical FPR remains the only full-pool rotation once it starts.
@@ -4582,10 +4646,17 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         logger.info(
             "full_pool_rescan: deferred while Underdog full scan is running"
         )
+        _queue_deferred_fpr(context)
         if _health:
             _health.record_job_run("full_pool_rescan_job")
         _job_activity_end("fpr")
         return
+
+    # Claim the same serialized full-scan slot for the duration of the FPR
+    # batch.  This prevents the post-scan handoff from overlapping a new
+    # Underdog scan and keeps Stable Refresh from competing with this rotation.
+    _fpr_execution_running = True
+    _ud_full_scan_running = True
 
     # ── Mutable cycle stats ───────────────────────────────────────────────────
     fpr_pool_size       = 0
@@ -4616,8 +4687,11 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         active_pool: dict = await db.get_all_active_underdog_snapshots_by_line()
         fpr_pool_size = len(active_pool)
         if fpr_pool_size == 0:
+            _fpr_execution_running = False
+            _ud_full_scan_running = False
             if _health:
                 _health.record_job_run("full_pool_rescan_job")
+            _job_activity_end("fpr")
             return
 
         def _fpr_sort_key(item):
@@ -4895,8 +4969,11 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
 
     except Exception as _fpr_exc:
         logger.exception("full_pool_rescan_job: error: %s", _fpr_exc)
+        _fpr_execution_running = False
+        _ud_full_scan_running = False
         if _health:
             _health.record_job_fail("full_pool_rescan_job", str(_fpr_exc))
+        _job_activity_end("fpr")
         return
 
     # ── Console log (human-readable — internal cursor values never shown) ─────
@@ -4958,4 +5035,6 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         "full_pool_rescan_job: rotation=#%d pool=%d batch=%d rescored=%d sent=%d",
         _display_rotation, fpr_pool_size, fpr_batch_size, fpr_rescored, fpr_sent,
     )
+    _fpr_execution_running = False
+    _ud_full_scan_running = False
     _job_activity_end("fpr")
