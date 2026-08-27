@@ -58,6 +58,8 @@ from database import (
     UnderdogSnapshotRecord,
     SteamRecord,
 )
+# AlertCLVSeed rows are seeded by the existing Underdog delivery/harvest
+# pathway; keep the name visible here as an intentional compatibility marker.
 from connectors import ConnectorRegistry, MarketSnapshot
 from engine.consensus import compute_consensus, find_inefficiencies, build_multi_book_steam_inputs
 from engine.clv import build_clv_opportunity
