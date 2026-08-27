@@ -2243,7 +2243,7 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     now   = datetime.utcnow()
     today = now.strftime("%b %d, %Y")
 
-    # ── 1. Fetch Underdog props (same pool as /picks) ─────────────────────────
+    # ── 1. Fetch provider-owned props (same pool as /picks) ──────────────────
     ud_props = await _db.get_top_ud_props_for_picks(limit=30, since_hours=6)
     # Display filter: hide season-long futures (stored & tracked as normal).
     ud_props = [
@@ -2251,17 +2251,31 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not _is_season_future(p.stat_type)
         and not is_telegram_suppressed_sport(p.sport)
     ]
-    if not ud_props:
+    try:
+        pp_props = await _db.get_latest_props_for_provider("PrizePicks", since_hours=24)
+    except Exception:
+        pp_props = []
+    pp_props = [
+        p for p in pp_props
+        if not _is_season_future(p.stat_type)
+        and not is_telegram_suppressed_sport(p.sport)
+    ]
+    provider_props = [
+        *[("Underdog", p) for p in ud_props],
+        *[("PrizePicks", p) for p in pp_props],
+    ]
+    if not provider_props:
         await update.message.reply_text(
             "🎯 <b>Sharp Money Prop Slip</b>\n\n"
             "No qualifying player props available right now.\n\n"
             "<i>Season-long futures are excluded from this view.\n"
-            "Underdog props are tracked every 5 min. Run /picks to check current opportunities.</i>",
+            "Underdog and PrizePicks props are tracked independently. "
+            "Run /picks to check current opportunities.</i>",
             parse_mode=ParseMode.HTML,
         )
         return
 
-    # ── 2. Cross-provider enrichment (same as /picks) ─────────────────────────
+    # ── 2. Cross-provider enrichment for Underdog rows ───────────────────────
     try:
         pp_rows = await _db.get_latest_props_for_provider("PrizePicks", since_hours=24)
     except Exception:
@@ -2269,18 +2283,20 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     # ── 3. Build PropPickAdapter candidates (Underdog + PrizePicks only) ─────
     _candidates: list[PropPickAdapter] = []
-    for plh in ud_props:
-        comp = build_player_prop_market_comparison(
-            player_name    = plh.player_name,
-            sport          = plh.sport,
-            stat_type      = plh.stat_type,
-            ud_line        = plh.line_value,
-            previous_line  = plh.prev_line,
-            fetched_at     = plh.fetched_at,
-            pp_rows        = pp_rows,
-            now            = now,
-            min_confidence = 0,
-        )
+    for provider, plh in provider_props:
+        comp = None
+        if provider == "Underdog":
+            comp = build_player_prop_market_comparison(
+                player_name    = plh.player_name,
+                sport          = plh.sport,
+                stat_type      = plh.stat_type,
+                ud_line        = plh.line_value,
+                previous_line  = plh.prev_line,
+                fetched_at     = plh.fetched_at,
+                pp_rows        = pp_rows,
+                now            = now,
+                min_confidence = 0,
+            )
         adapter = PropPickAdapter(plh, comp)
         # Populate bet direction from synced PropLineHistory column
         _plh_rec = getattr(plh, "bet_recommendation", None)
