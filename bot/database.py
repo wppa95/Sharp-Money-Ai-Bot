@@ -2672,45 +2672,40 @@ class Database:
         if not pairs:
             return histories
 
-        # Keep bind parameters safely below SQLite's lower variable limits.
-        chunk_size = 400
+        # The snapshot table is append-only and each live Underdog scan writes
+        # one contiguous batch.  The most recent 500,000 rows cover many
+        # complete scans while keeping this read bounded even when the raw
+        # history has grown to billions of rows.  FPR only needs the newest
+        # ``limit`` records for each pair, so older rows cannot affect the
+        # result when the bounded window contains enough history.
+        _HISTORY_LOOKBACK_ROWS = 500_000
         async with self.session() as s:
-            for start in range(0, len(pairs), chunk_size):
-                chunk = pairs[start:start + chunk_size]
-                ranked = (
-                    select(
-                        UnderdogSnapshotRecord.id.label("snapshot_id"),
-                        func.row_number().over(
-                            partition_by=(
-                                UnderdogSnapshotRecord.player_name,
-                                UnderdogSnapshotRecord.stat_type,
-                            ),
-                            order_by=(
-                                desc(UnderdogSnapshotRecord.fetched_at),
-                                desc(UnderdogSnapshotRecord.id),
-                            ),
-                        ).label("history_rank"),
-                    )
-                    .where(
-                        UnderdogSnapshotRecord.removed == False,  # noqa: E712
-                        tuple_(
-                            UnderdogSnapshotRecord.player_name,
-                            UnderdogSnapshotRecord.stat_type,
-                        ).in_(chunk),
-                    )
-                    .subquery()
+            _latest_id = (
+                await s.execute(
+                    select(UnderdogSnapshotRecord.id)
+                    .order_by(desc(UnderdogSnapshotRecord.id))
+                    .limit(1)
                 )
+            ).scalar()
+            if _latest_id is not None:
                 result = await s.execute(
                     select(UnderdogSnapshotRecord)
-                    .join(
-                        ranked,
-                        UnderdogSnapshotRecord.id == ranked.c.snapshot_id,
+                    .where(
+                        UnderdogSnapshotRecord.id
+                        >= max(1, int(_latest_id) - _HISTORY_LOOKBACK_ROWS),
+                        UnderdogSnapshotRecord.removed == False,  # noqa: E712
+                        UnderdogSnapshotRecord.player_name.in_(
+                            {pair[0] for pair in pairs}
+                        ),
+                        UnderdogSnapshotRecord.stat_type.in_(
+                            {pair[1] for pair in pairs}
+                        ),
                     )
-                    .where(ranked.c.history_rank <= max(1, int(limit)))
                 )
                 for record in result.scalars().all():
                     pair = (record.player_name, record.stat_type)
-                    histories.setdefault(pair, []).append(record)
+                    if pair in histories:
+                        histories[pair].append(record)
 
         for records in histories.values():
             records.sort(
