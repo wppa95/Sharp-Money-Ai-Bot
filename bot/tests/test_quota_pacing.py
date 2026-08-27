@@ -55,3 +55,12 @@ def test_zero_remaining_quota_is_exhausted():
     pacer.update_quota(remaining=0, used=30_000)
     assert pacer.can_request() is False
     assert pacer.telemetry().status == "EXHAUSTED"
+
+
+def test_invalid_market_does_not_backoff_useful_poller():
+    """Permanent 422 request-shape errors must not delay valid market calls."""
+    pacer = OddsApiQuotaPacer(deadline="2026-08-31T00:00:00Z")
+    pacer.update_quota(remaining=100, used=29_900)
+    pacer.record_request_failed(0.0, status=422)
+    assert pacer.can_request() is True
+    assert pacer.telemetry().backoff_seconds == 0
