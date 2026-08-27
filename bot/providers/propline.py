@@ -5,10 +5,9 @@ PropLine is an authorized, third-party source for PrizePicks projections.  This
 module deliberately knows nothing about Underdog or sportsbook markets.  It
 normalizes only PrizePicks player props into the shared ``PlayerProp`` model.
 
-The endpoint is configurable because PropLine deployments may expose different
-API gateways.  ``PROPLINE_API_URL`` must be a full endpoint URL.  There is no
-safe fallback URL: a key without an authorized endpoint disables the provider
-instead of sending credentials to an invented or unrelated host.
+The official PropLine API base URL is used by default.  ``PROPLINE_API_URL``
+may override it only when PropLine documents a different authorized endpoint.
+The client never invents an API path or sends credentials to another host.
 """
 
 from __future__ import annotations
@@ -29,7 +28,7 @@ from providers.prop_provider import PlayerProp, PropProviderBase
 logger = logging.getLogger(__name__)
 
 PROPLINE_PROVIDER_NAME = "PrizePicks"
-DEFAULT_PROPLINE_API_URL = ""
+DEFAULT_PROPLINE_API_URL = "https://api.prop-line.com"
 
 _STAT_NORMALIZATION = {
     "pts": "points",

@@ -1,0 +1,101 @@
+Configure PropLine API Endpoint
+
+Continue from the completed PropLine PrizePicks-only integration.
+
+The PROPLINE_API_KEY secret is already configured.
+
+PropLine has now provided its official API endpoint in their onboarding email:
+
+https://api.prop-line.com
+
+Their email confirms the account is on the Free tier with a limit of 1,000 requests/day.
+
+Make ONLY this configuration/fix
+
+Configure the existing PropLine client to use the official PropLine API endpoint above.
+
+Do NOT change the PropLine architecture that is already implemented.
+
+Do NOT create a new adapter, scheduler, scoring engine, monitoring loop, or database.
+
+Keep PropLine restricted to:
+
+PrizePicks player props only.
+
+Do NOT use PropLine for:
+
+* Underdog
+* DraftKings
+* FanDuel
+* Moneylines
+* Game totals
+* Other sportsbooks
+* Other monitoring purposes
+
+Authentication
+
+Continue using the existing:
+
+PROPLINE_API_KEY
+
+Do not hard-code or expose the API key.
+
+Do not print the key in logs.
+
+Free-tier protection
+
+Respect the PropLine Free-tier limit of:
+
+1,000 requests/day
+
+Use conservative pacing, caching, and existing backoff behavior.
+
+Do not create an uncontrolled request loop or request storm.
+
+Live verification
+
+After configuring the official endpoint:
+
+1. Verify the API key is detected.
+2. Verify the official PropLine endpoint responds successfully.
+3. Verify PrizePicks data can actually be retrieved.
+4. Verify only PrizePicks player-prop records are accepted.
+5. Verify normalized PrizePicks props enter the existing confirmation/evaluation boundary.
+6. Verify Underdog remains the existing primary monitoring source.
+7. Verify no direct PrizePicks/DataDome requests are made.
+8. Verify no second scheduler or monitoring loop was created.
+9. Verify FPR remains unchanged.
+10. Verify Stable Refresh remains unchanged.
+11. Verify max_instances=1 remains unchanged.
+12. Verify the PropLine free-tier pacing is active.
+
+If the endpoint requires a specific path beyond the base URL, use only the path documented by PropLine. Do not guess undocumented endpoints.
+
+Testing
+
+Run:
+
+* Focused PropLine tests
+* Existing provider/confirmation tests
+* Full test suite
+* Compilation checks
+* Diff/whitespace checks
+
+Do not weaken existing tests.
+
+Important
+
+Do NOT deploy or restart Railway as part of this task unless specifically required by the existing workflow.
+
+Do NOT change scoring, evidence, FPR, Stable Refresh, Telegram, Discord, OddsAPI, Underdog, or unrelated behavior.
+
+Do NOT create a checkpoint.
+
+Report exactly:
+
+* What endpoint was configured.
+* Whether live PropLine authentication succeeded.
+* Whether PrizePicks data was actually returned.
+* How many PrizePicks observations were received, if any.
+* Tests passed.
+* Any remaining limitation.
