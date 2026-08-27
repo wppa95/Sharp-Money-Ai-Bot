@@ -698,9 +698,14 @@ async def _get_odds_api_confirmation(
       • any provider/database exception or timeout
     """
     normalized_market = normalize_market(market_type)
-    if not getattr(config, "ODDS_API_ENABLED", True):
+    pp_available = bool(
+        normalized_market == "player_prop"
+        and _propline_provider is not None
+        and getattr(_propline_provider, "is_available", lambda: False)()
+    )
+    if not getattr(config, "ODDS_API_ENABLED", True) and not pp_available:
         return None
-    if normalized_market == "player_prop" and _analysis_engine is None:
+    if normalized_market == "player_prop" and _analysis_engine is None and not pp_available:
         return None
 
     allowed_books = set()
@@ -726,6 +731,43 @@ async def _get_odds_api_confirmation(
     try:
         import asyncio as _asyncio
         if normalized_market == "player_prop":
+            # PropLine is an additional, read-only PrizePicks corroboration
+            # source.  It reuses this existing confirmation call rather than
+            # creating a PrizePicks scheduler or polling loop.
+            if pp_available:
+                try:
+                    pp_props = await _asyncio.wait_for(
+                        _propline_provider.fetch_props(), timeout=5.0
+                    )
+                    pp_observations = []
+                    for prop in pp_props:
+                        if line is not None and abs(float(prop.line_value) - float(line)) > 0.51:
+                            continue
+                        pp_observations.append(
+                            observation_from_record(
+                                prop,
+                                provider="PrizePicks",
+                                sport=prop.sport,
+                                market_type="player_prop",
+                                player=prop.player_name,
+                                stat_type=prop.stat_type,
+                                direction=prop.direction,
+                                line=prop.line_value,
+                            )
+                        )
+                    pp_result = confirm_market(
+                        target,
+                        pp_observations,
+                        allowed_providers={"PrizePicks"},
+                        max_age_seconds=20 * 60,
+                    )
+                    if pp_result is not None:
+                        return pp_result
+                except Exception as _pp_exc:
+                    logger.debug("PropLine PrizePicks confirmation skipped: %s", type(_pp_exc).__name__)
+
+            if not getattr(config, "ODDS_API_ENABLED", True):
+                return None
             from engine.analysis import Sport as _Sport
             try:
                 sport_enum = _Sport(sport)
