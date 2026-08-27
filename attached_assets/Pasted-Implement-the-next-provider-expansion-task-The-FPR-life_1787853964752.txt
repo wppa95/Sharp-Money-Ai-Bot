@@ -1,0 +1,222 @@
+Implement the next provider-expansion task.
+
+The FPR/lifecycle work is already complete and closed. Do not reopen or modify that work.
+
+Make only the smallest targeted changes necessary to add the following capabilities.
+
+1. UNDERDOG — MONEYLINES + TOTALS
+
+Keep Underdog as the primary monitoring source.
+
+Allow Underdog:
+
+* Moneylines
+* Totals
+* Player props
+
+Do not remove or weaken the existing Underdog player-prop monitoring.
+
+Moneylines and totals should flow through the existing monitoring/evaluation architecture rather than creating a separate monitoring pipeline.
+
+2. DRAFTKINGS + FANDUEL — LINE CONFIRMATION
+
+Enable DraftKings and FanDuel as supporting market-confirmation sources.
+
+Use them for:
+
+Moneylines
+
+* Confirm Underdog moneyline pricing/market direction where the corresponding market exists.
+
+Totals
+
+* Confirm Underdog totals where the corresponding market exists.
+
+Player Props
+
+* Use DraftKings and FanDuel player props to help confirm Underdog player-prop lines, direction, and market context.
+
+The purpose is line confirmation and evidence, not replacing Underdog as the primary monitored feed.
+
+Do not fabricate a confirmation when a corresponding DraftKings/FanDuel market is unavailable.
+
+Clearly distinguish:
+
+* Underdog observed line
+* DraftKings confirmation
+* FanDuel confirmation
+* Missing/unavailable confirmation
+
+3. PRIZEPICKS + UNDERDOG TOGETHER
+
+Restore PrizePicks as a supported primary player-prop source alongside Underdog.
+
+The bot should be able to monitor/use:
+
+* Underdog
+* PrizePicks
+
+without one disabling the other.
+
+Do not make PrizePicks dependent on Underdog being available.
+
+Do not create duplicate monitoring cycles.
+
+Both feeds should ultimately use the existing unified evaluation/tracking architecture.
+
+4. AGENT REACH ANALYSIS
+
+Keep Agent Reach as an analyst/enrichment layer, not a second alert pipeline.
+
+Agent Reach should be able to obtain/use:
+
+* PrizePicks lines when available
+* OddsAPI market data when available
+
+for analysis and confirmation.
+
+It should be able to compare relevant market information against the existing monitored prop.
+
+Do not fabricate data when a provider does not return a corresponding market.
+
+Do not allow Agent Reach to bypass the existing monitoring, scoring, evidence, deduplication, safety, or delivery controls.
+
+5. PRESERVE EXISTING ARCHITECTURE
+
+Do NOT change:
+
+* FPR/full-pool rotation
+* Stable Refresh behavior
+* Unified monitoring lifecycle
+* Scheduler cadence
+* max_instances=1
+* Adaptive batching
+* Scoring formulas
+* BQ/MQ calculations
+* Confidence calculations
+* Evidence lifecycle
+* Graded-prop history
+* HIT/MISS/PUSH tracking
+* Player identity handling
+* Current active-pool logic
+* Event-start/removal handling
+* Telegram delivery rules
+* Discord delivery rules
+* Dashboard
+* /funnel
+* /picks
+* /slip
+* SQLite persistence/retry behavior
+* Existing OddsAPI quota/pacing work
+* Existing NFL exclusion from the default OddsAPI polling scope
+* Clean-restart behavior
+
+Do not redesign the bot.
+
+Do not create competing provider-specific monitoring loops.
+
+6. PROVIDER FAILURES
+
+Provider availability must be graceful.
+
+If:
+
+* PrizePicks is unavailable
+* DraftKings is unavailable
+* FanDuel is unavailable
+* OddsAPI is unavailable
+* Agent Reach cannot retrieve a source
+
+the bot must continue operating with the providers that are available.
+
+Do not treat missing confirmation as fabricated confirmation.
+
+7. MARKET MATCHING
+
+Use proper matching based on the existing prop identity/market model.
+
+For player props, match using the appropriate:
+
+* player identity
+* sport
+* market/stat
+* line
+* direction
+* event/game context
+
+Prevent cross-player or cross-market contamination.
+
+For moneylines/totals, match the appropriate:
+
+* sport
+* event
+* teams
+* market
+* line
+
+Do not assume two similarly named markets are equivalent without validation.
+
+8. TESTING
+
+Add focused regression tests for:
+
+* Underdog moneyline support
+* Underdog totals support
+* DraftKings moneyline confirmation
+* DraftKings totals confirmation
+* FanDuel moneyline confirmation
+* FanDuel totals confirmation
+* DraftKings player-prop confirmation
+* FanDuel player-prop confirmation
+* PrizePicks + Underdog operating together
+* Agent Reach PrizePicks analysis
+* Agent Reach OddsAPI analysis
+* Missing-provider behavior
+* Missing-market behavior
+* Correct player/event/market matching
+* No fabricated confirmation
+* No duplicate monitoring cycles
+* Existing FPR/lifecycle behavior remains intact
+* Existing OddsAPI pacing remains intact
+
+Run the relevant focused tests first, then the full regression suite.
+
+9. LIVE VERIFICATION
+
+After implementation and tests, verify the running bot.
+
+Confirm actual runtime evidence for:
+
+* Underdog moneylines/totals being recognized.
+* Underdog player props continuing normally.
+* DraftKings confirmation when matching markets exist.
+* FanDuel confirmation when matching markets exist.
+* PrizePicks operating alongside Underdog when data is available.
+* Agent Reach can use PrizePicks/OddsAPI data for analysis.
+* Provider failures do not stop the unified monitoring system.
+* No duplicate monitoring cadence was created.
+* FPR remains the only full-pool rotation.
+* max_instances=1 remains intact.
+
+Do not claim live verification from tests alone.
+
+10. IMPORTANT
+
+Do not restart or deploy Railway unless absolutely required for the live verification step.
+
+Do not create a checkpoint until the implementation and required validation are complete.
+
+Do not reopen the completed FPR/lifecycle task.
+
+Do not modify unrelated systems.
+
+When finished, report exactly:
+
+* What changed
+* Focused tests passed
+* Full-suite result
+* Live provider behavior observed
+* Any provider limitations encountered
+* Any remaining issue
+
+Then stop. We will handle any remaining issue as a separate task.
