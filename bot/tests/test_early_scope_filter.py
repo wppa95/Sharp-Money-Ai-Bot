@@ -170,7 +170,10 @@ def test_configured_odds_api_sports_excludes_underdog_only_scope():
     with patch.object(main_mod, "config", mock_config):
         configured = main_mod._configured_odds_api_sports()
 
-    assert [(raw, sport.value) for raw, sport in configured] == [("WNBA", "WNBA")]
+    assert [(raw, sport.value) for raw, sport in configured] == [
+        ("WNBA", "WNBA"),
+        ("CFB", "NCAAF"),
+    ]
 
 
 @pytest.mark.asyncio

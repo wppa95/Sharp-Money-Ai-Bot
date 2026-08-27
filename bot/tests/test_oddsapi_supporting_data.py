@@ -645,11 +645,11 @@ class TestHealthMonitorRegistration(unittest.TestCase):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Broad polling remains disabled
+# Broad OddsAPI polling is restored with its own safe scope
 # ─────────────────────────────────────────────────────────────────────────────
 
-class TestBroadPollingDisabled(unittest.TestCase):
-    """Broad sportsbook polling (_poll_odds_job, _player_props_job) must remain OFF."""
+class TestOddsPollingEnabled(unittest.TestCase):
+    """OddsAPI game-line polling is active; player props remain independently off."""
 
     @staticmethod
     def _main_src():
@@ -658,19 +658,18 @@ class TestBroadPollingDisabled(unittest.TestCase):
         with open(path) as f:
             return f.read()
 
-    def test_poll_odds_job_still_commented_out(self):
-        """_poll_odds_job must NOT be scheduled — it polls all sports broadly."""
+    def test_poll_odds_job_is_scheduled(self):
+        """The quota-aware game-line poller must be scheduled."""
         import re
         src = self._main_src()
-        # Match only lines where jq.run_repeating(_poll_odds_job is NOT preceded by #
         lines = src.splitlines()
-        active = [
-            l for l in lines
-            if re.search(r'jq\.run_repeating\(_poll_odds_job', l)
-            and not l.lstrip().startswith("#")
-        ]
-        self.assertEqual(len(active), 0,
-                         "_poll_odds_job must remain commented out (broad polling disabled)")
+        active = any(
+            "name=\"odds_poller\"" in lines[i]
+            and any("_poll_odds_job" in lines[j] and not lines[j].lstrip().startswith("#")
+                    for j in range(max(0, i - 8), i + 1))
+            for i in range(len(lines))
+        )
+        self.assertTrue(active, "_poll_odds_job must be scheduled")
 
     def test_player_props_job_still_commented_out(self):
         """_player_props_job must NOT be scheduled — it broadly polls all player props."""
