@@ -1,0 +1,291 @@
+ADD PRIZEPICKS AS A SECOND NORMALIZED PROVIDER — AUTHORIZATION-READY
+
+Continue from the current Sharp Money AI Bot implementation.
+
+The goal is to make PrizePicks usable alongside Underdog through a legitimate/authorized data source, without disrupting the existing Underdog monitoring system.
+
+1. PRIZEPICKS PROVIDER ADAPTER
+
+Add a clean PrizePicks provider adapter using the existing provider architecture.
+
+The adapter must be capable of consuming PrizePicks data when an authorized API, partner feed, or licensed third-party PrizePicks feed is configured.
+
+Normalize PrizePicks data into the bot’s existing prop representation, including where available:
+
+* Provider/source
+* Stable source ID
+* Player
+* Player ID
+* Sport
+* Event/game
+* Event ID
+* Market/stat
+* Line
+* Direction/side
+* Timestamp
+* Provider status
+
+Do not create a separate PrizePicks scoring model.
+
+Do not create a separate alert pipeline.
+
+2. UNAUTHORIZED DIRECT ACCESS MUST REMAIN DISABLED
+
+Do NOT attempt to bypass PrizePicks/DataDome protection.
+
+Do NOT add:
+
+* Proxy rotation
+* CAPTCHA solving
+* Browser fingerprint spoofing
+* Stealth automation
+* Header manipulation intended to evade protection
+* Reverse-engineered authentication
+* Unauthorized scraping
+
+The existing direct PrizePicks endpoint may remain disabled until PrizePicks provides authorized access.
+
+If no authorized PrizePicks credential/feed is configured, the adapter should fail gracefully and clearly report that PrizePicks is unavailable.
+
+3. PRIZEPICKS + UNDERDOG COEXISTENCE
+
+Underdog remains the primary monitoring provider.
+
+PrizePicks becomes an additional normalized input when authorized data is available.
+
+Both providers must feed the existing unified monitoring/evaluation lifecycle.
+
+Do NOT create:
+
+* A second competing monitoring scheduler
+* A second scoring engine
+* A second FPR rotation
+* A second grading system
+* A second evidence system
+* A second Telegram pipeline
+
+PrizePicks observations should enter the same downstream evaluation, evidence, persistence, grading, and delivery contracts already used by the bot.
+
+4. SOURCE IDENTITY MUST REMAIN SEPARATE
+
+Never merge Underdog and PrizePicks records merely because the player/market/line is identical.
+
+Every observation must retain its provider identity.
+
+A normalized identity should distinguish at minimum:
+
+* Provider
+* Source ID
+* Player
+* Sport
+* Market/stat
+* Event/game
+* Line
+* Observation timestamp
+
+Prevent cross-provider contamination.
+
+An Underdog prop must remain identifiable as Underdog.
+
+A PrizePicks prop must remain identifiable as PrizePicks.
+
+5. PRIZEPICKS LINE CONFIRMATION
+
+When authorized PrizePicks data is available, allow it to participate in the existing line-confirmation framework.
+
+Support comparisons such as:
+
+Underdog ↔ PrizePicks
+
+and, where applicable:
+
+Underdog ↔ DraftKings/FanDuel
+
+Use the existing conservative identity and freshness checks.
+
+Require appropriate matching of:
+
+* Sport
+* Event/game
+* Player
+* Player ID where available
+* Market/stat
+* Direction
+* Line
+* Timestamp/freshness
+
+Reject ambiguous matches.
+
+Never assume two similarly named props are the same market.
+
+6. AGENT REACH BOUNDARY
+
+Agent Reach remains an analyst/enrichment layer only.
+
+It may research or enrich information about PrizePicks when appropriate, but it must NOT:
+
+* Bypass DataDome
+* Become the primary PrizePicks line feed
+* Create a second monitoring loop
+* Create a second scoring system
+* Create an independent alert pipeline
+
+Do not use web research as a substitute for structured current PrizePicks data.
+
+7. CONFIGURATION
+
+Add configuration support for an authorized PrizePicks provider/feed.
+
+The configuration should allow the provider to be enabled only when valid credentials/access are present.
+
+Default behavior should remain safe:
+
+No authorized PrizePicks credentials/feed = PrizePicks disabled.
+
+Do not hard-code credentials.
+
+Do not commit secrets.
+
+Do not modify existing Underdog credentials.
+
+8. PERSISTENCE
+
+Use the existing persistence infrastructure.
+
+PrizePicks observations should be stored using the existing historical prop/snapshot mechanisms where compatible.
+
+Do not create a second incompatible PrizePicks database.
+
+Preserve:
+
+* Historical observations
+* Source identity
+* Event identity
+* Player identity
+* Line
+* Direction
+* Timestamp
+
+Do not delete existing Underdog history.
+
+9. GRADING / HISTORY
+
+When a PrizePicks prop becomes eligible for grading, use the existing graded-prop lifecycle.
+
+Do not create PrizePicks-specific grading logic unless absolutely required by provider semantics.
+
+Provider-backed results remain preferred.
+
+Real graded outcomes may supplement missing provider history according to the existing evidence lifecycle.
+
+No fabricated results.
+
+No duplicate dates.
+
+No cross-player/stat contamination.
+
+10. PRESERVE EXISTING SYSTEMS
+
+Do NOT change unrelated behavior.
+
+Specifically preserve:
+
+* Underdog monitoring
+* Unified monitoring cadence
+* FPR
+* Stable Refresh behavior
+* Scheduler configuration
+* max_instances=1
+* Adaptive batching
+* Scoring formulas
+* Evidence providers
+* Player identity normalization
+* Hit/miss tracking
+* Telegram delivery rules
+* Discord delivery
+* OddsAPI pacing
+* DraftKings/FanDuel confirmation
+* Agent Reach analyst functionality
+* Clean restart behavior
+* Existing database history
+* Task #155
+* Existing SQLite persistence fixes
+
+Do not redesign the architecture.
+
+11. TESTING
+
+Add focused regression tests for:
+
+* PrizePicks normalization
+* Source-ID preservation
+* Provider identity separation
+* Player identity matching
+* Event matching
+* Market/stat matching
+* Direction matching
+* Line matching
+* Freshness checks
+* Ambiguous-match rejection
+* Cross-provider contamination prevention
+* Graceful behavior when PrizePicks credentials are absent
+* Graceful behavior when the provider returns an error
+* PrizePicks + Underdog coexistence
+* Existing confirmation behavior remaining intact
+* Agent Reach remaining analyst-only
+* No second scheduler or monitoring pipeline being created
+
+Run the full existing test suite.
+
+Do not weaken existing tests.
+
+12. LIVE VALIDATION
+
+If no authorized PrizePicks feed/credentials are currently available:
+
+Do NOT attempt unauthorized access.
+
+Instead live-verify that:
+
+1. The bot starts normally.
+2. Underdog continues operating normally.
+3. PrizePicks remains safely disabled.
+4. No second PrizePicks monitoring loop starts.
+5. No DataDome bypass is attempted.
+6. Existing FPR continues normally.
+7. DraftKings/FanDuel confirmation continues normally.
+8. Existing OddsAPI pacing remains unchanged.
+9. Agent Reach remains analyst-only.
+10. Existing scheduler and max_instances=1 behavior remain intact.
+
+If an authorized PrizePicks feed is already configured, additionally verify that real PrizePicks observations enter the existing unified lifecycle without creating a competing pipeline.
+
+13. NO DEPLOYMENT REQUIREMENT
+
+Do not deploy Railway as part of this task unless explicitly required for live validation.
+
+Do not change production configuration without authorization.
+
+Do not create a checkpoint until implementation, tests, and required validation are complete.
+
+FINAL REQUIREMENT
+
+This task is specifically about making the bot authorization-ready for PrizePicks alongside Underdog.
+
+Do not bypass PrizePicks security controls.
+
+Do not fabricate PrizePicks data.
+
+Do not build a second monitoring architecture.
+
+Keep Underdog working exactly as it does now.
+
+After completion, report:
+
+* Exactly what changed
+* Tests passed
+* What was live-verified
+* Whether authorized PrizePicks data was actually available
+* Any remaining provider limitation
+
+Do NOT claim PrizePicks is live unless real authorized PrizePicks data was actually observed.
