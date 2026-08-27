@@ -3203,33 +3203,6 @@ class Database:
             "downstream_intelligence": downstream_intelligence,
         }])
         return
-        # The active monitoring universe has no secondary classification.
-        # Keep the nullable column only for compatibility with old databases.
-        watchlist_state = None
-        _qpath = _json.dumps(qualification_path) if qualification_path else None
-        _rcodes = _json.dumps(reason_codes) if reason_codes else None
-        if downstream_intelligence is None:
-            from engine.downstream_intelligence import build_downstream_payload
-            downstream_intelligence = build_downstream_payload(
-                evidence={},
-                bet_quality=bet_quality_score,
-                bet_confidence=confidence,
-                sample_size=0,
-            )
-        _intel_json = (
-            _json.dumps(downstream_intelligence, separators=(",", ":"))
-            if downstream_intelligence else None
-        )
-        _intel_completeness = (
-            (downstream_intelligence.get("evidence_completeness") or {}).get("score")
-            if downstream_intelligence else None
-        )
-        _sharp = (downstream_intelligence or {}).get("sharp_confidence") or {}
-        _sharp_confidence = _sharp.get("score") if downstream_intelligence else None
-        _sharp_components = (
-            _json.dumps(_sharp.get("components") or {}, separators=(",", ":"))
-            if downstream_intelligence else None
-        )
         stmt = (
             _sqlite_insert(PropOpportunityLog)
             .values(
