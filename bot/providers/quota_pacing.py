@@ -127,6 +127,12 @@ class OddsApiQuotaPacer:
     ) -> None:
         """Record latency and apply safe backoff for a failed request."""
         self._last_latency_ms = max(0.0, (time.monotonic() - started_at) * 1000.0)
+        # A 422 is a permanent request-shape/market error, not a transient
+        # provider failure.  Retrying it only delays the useful game-line
+        # poller and can turn a disabled market into pacing noise.
+        if status == 422 and not quota_exhausted:
+            self._backoff_seconds = 0.0
+            return
         self.record_error(status, quota_exhausted=quota_exhausted)
 
     def record_error(self, status: int = 0, *, quota_exhausted: bool = False) -> None:
