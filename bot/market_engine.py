@@ -4670,7 +4670,16 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 len(mover_keys),
                 fpr_limit if fpr_limit == 1 else max(1, fpr_limit // 2),
             )
-            priority_keys = mover_keys[:mover_limit]
+            # Preserve progress at the cursor boundary: a mover currently
+            # under the cursor must be selected before a mover elsewhere.
+            # Otherwise an outside mover could repeatedly consume the only
+            # priority slot while the cursor's first row remains untouched.
+            window_movers = [
+                key for key in cursor_window
+                if getattr(pool_snaps[key], "line_moved", False) is True
+            ]
+            outside_movers = [key for key in mover_keys if key not in cursor_window]
+            priority_keys = (window_movers + outside_movers)[:mover_limit]
             regular_batch = [
                 key for key in cursor_window
                 if getattr(pool_snaps[key], "line_moved", False) is not True
