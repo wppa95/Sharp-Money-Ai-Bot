@@ -1,0 +1,55 @@
+Resume Task #153’s live verification from the current implementation.
+
+Do NOT redesign anything and do NOT start the DraftKings/FanDuel/PrizePicks/Agent Reach work yet.
+
+The previous verification stopped after the final restart before a post-restart FPR batch completed.
+
+The code/tests were already passing at 4,530 tests. Do not redo unrelated work.
+
+Required live verification
+
+Keep the bot running and verify actual runtime behavior:
+
+1. Confirm the bot starts cleanly.
+2. Confirm max_instances=1.
+3. Confirm FPR is the only full-pool rotation.
+4. Confirm Stable Refresh does NOT maintain a competing full-pool rotation.
+5. Confirm the current active Underdog universe is used, not PropLineHistory as the limiting pool.
+6. Wait for an actual FPR batch to COMPLETE after the latest restart.
+7. Record:
+    * active pool size
+    * FPR batch size
+    * starting cursor
+    * ending cursor
+    * rotation number
+    * props rescored
+    * sports represented
+    * completion status
+8. Confirm the cursor actually advances.
+9. Confirm the next FPR batch selects different active props rather than repeatedly rescanning the same batch.
+10. Confirm unchanged previously-seen props remain eligible for FPR rescanning.
+11. Confirm previously delivered props remain eligible for rescanning.
+12. Confirm new props and line movers retain priority.
+13. Confirm props whose events have started are excluded from active rotation but remain available for grading/history.
+14. Confirm FPR progresses toward complete coverage of the current active pool.
+
+Important
+
+Do not claim the lifecycle fix is fully live-verified unless an actual post-restart FPR batch completes and the persisted cursor/rotation metrics demonstrate advancement.
+
+If the FPR job is taking too long, diagnose the actual bottleneck. Do NOT:
+
+* increase concurrency
+* create another rotation
+* add a fixed cap
+* reduce the active universe
+* use PropLineHistory as the active-pool limiter
+* redesign the architecture
+* change scoring
+* change delivery rules
+* change evidence
+* change grading
+
+Do not create a checkpoint until the required live FPR evidence is captured.
+
+After the completed FPR batch is observed, report the exact runtime evidence and whether Task #153 is genuinely ready to close.
