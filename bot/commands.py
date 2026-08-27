@@ -1264,7 +1264,7 @@ class PropPickAdapter:
         self.game_description = f"vs {plh.team}" if plh.team else ""
         self.detected_at = plh.fetched_at
         self.result      = None
-        self.sportsbook  = "Underdog"
+        self.sportsbook  = getattr(plh, "provider", None) or "Underdog"
         self.comp        = comp
 
             #Confidence → tier
@@ -1643,9 +1643,18 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             stars = _stars_from_conf(float(conf))
         tier_icon = _TIER_EMOJI.get(tier, "⚪")
 
-        # Underdog line (canonical for this prop)
-        ud_pl = comp.lines.get("Underdog") if comp else None
-        ud_v  = ud_pl.line_value if (ud_pl and ud_pl.available) else plh.line_value
+        # Keep the source line canonical for this row. A PrizePicks-only row
+        # must never be rendered as though its line came from Underdog.
+        provider = getattr(plh, "provider", None) or "Underdog"
+        provider_emoji = _PROV_EMOJI.get(provider, "📡")
+        provider_line = (
+            comp.lines.get(provider) if comp and provider in comp.lines else None
+        )
+        source_v = (
+            provider_line.line_value
+            if provider_line is not None and provider_line.available
+            else plh.line_value
+        )
 
         # Bet direction — primary: synced column on PropLineHistory (always fresh)
         # Secondary: live UnderdogSnapshotRecord via _rec_map (handles same-cycle updates)
@@ -1705,7 +1714,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             "━━━━━━━━━━━━━━━━━━",
             f"<b>#{rank} {plh.player_name}</b>",
             f"Market: {plh.stat_type}",
-            f"🐶 Underdog Line: <code>{ud_v:.1f}</code>  {_ll(ud_v)}",
+            f"{provider_emoji} {provider} Line: <code>{source_v:.1f}</code>  {_ll(source_v)}",
             f"{gt_str}{plh.sport}",
             "",
             f"🎯 Pick: <b>{pick_label}</b>",
@@ -1755,7 +1764,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             f"  BQ: {_shown(_bq, '/100')} · {_bq_label}",
             f"  Sharp Confidence: {_shown(_sharp.get('score') if isinstance(_sharp, dict) else None, '/100')}",
             f"  Model Projection: {_shown(_projection)}",
-            f"  Current Line: {_shown(ud_v)}",
+            f"  Current Line: {_shown(source_v)}",
             f"  Model Edge / Current-Line Value: {_shown(_edge)}",
             f"  Line Movement: {_shown(_movement.get('direction') if isinstance(_movement, dict) and _movement.get('available') else None)}",
             f"  Movement Quality: {_movement_quality}",
@@ -1786,7 +1795,9 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
             if evid:
                 entry_lines.append("")
-                entry_lines.append(f"📊 <b>Evidence</b>  <i>(vs {ud_v:.1f} line)</i>")
+                entry_lines.append(
+                    f"📊 <b>Evidence</b>  <i>(vs {source_v:.1f} line)</i>"
+                )
                 entry_lines.extend(evid)
 
             # H2H — only shown when ≥3 games vs current opponent exist
@@ -1809,7 +1820,9 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 f"{_ll(v).split(' ')[0]} <code>{v:.1f}</code>" for v in alt
             )
             entry_lines.append(f"  {alt_labeled}")
-            entry_lines.append(f"  Current Selected: 🐶 <code>{ud_v:.1f}</code>")
+            entry_lines.append(
+                f"  Current Selected: {provider_emoji} <code>{source_v:.1f}</code>"
+            )
 
         return "\n".join(entry_lines)
 
