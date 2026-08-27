@@ -703,6 +703,7 @@ class AnalysisEngine:
                                     american_odds=int(outcome["price"]),
                                     line=outcome.get("point"),
                                     event_start=event_start,
+                                    observed_at=datetime.utcnow(),
                                 )
                             )
                         except (KeyError, TypeError, ValueError) as exc:

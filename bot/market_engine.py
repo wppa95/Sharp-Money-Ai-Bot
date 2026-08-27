@@ -61,6 +61,12 @@ from connectors import ConnectorRegistry, MarketSnapshot
 from engine.consensus import compute_consensus, find_inefficiencies, build_multi_book_steam_inputs
 from engine.clv import build_clv_opportunity
 from engine.steam import compute_steam_simple
+from engine.provider_confirmation import (
+    ConfirmationTarget,
+    confirm_market,
+    observation_from_record,
+    normalize_market,
+)
 from alerts import AlertDelivery, broadcast_alert, identify_sharp_books
 from alerts_multiplatform import (
     format_steam_multibook_alert,
@@ -237,12 +243,19 @@ _registry: Optional[ConnectorRegistry] = None
 # Set once at startup via init_odds_confirmation(); used by
 # _get_odds_api_confirmation() to call fetch_player_prop_lines().
 _analysis_engine: Optional[object] = None
+_confirmation_db: Optional[Database] = None
 
 
-def init_odds_confirmation(engine: object) -> None:
-    """Store the AnalysisEngine reference for OddsAPI player prop confirmation calls."""
-    global _analysis_engine
+def init_odds_confirmation(engine: object, db: Optional[Database] = None) -> None:
+    """Store the existing analysis/DB services used for confirmation.
+
+    The optional DB reference is only used for already-polled h2h/totals rows;
+    it never creates another polling cycle.  One-argument callers remain
+    supported for the existing player-prop tests and integrations.
+    """
+    global _analysis_engine, _confirmation_db
     _analysis_engine = engine
+    _confirmation_db = db
 
 # ── Player results integration ────────────────────────────────────────────────
 # Singleton provider and per-day fetch dedup cache.
