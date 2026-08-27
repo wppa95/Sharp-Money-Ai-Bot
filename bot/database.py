@@ -5,6 +5,7 @@ Stores odds history, alerts, and EV opportunities for historical tracking.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -21,6 +22,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 from sqlalchemy.orm import DeclarativeBase
 
 logger = logging.getLogger(__name__)
+
+_UNDERDOG_BULK_MAX_RETRIES = 2
+_UNDERDOG_BULK_RETRY_DELAYS = (0.25, 0.75)
+
+
+def _is_sqlite_lock_error(exc: BaseException) -> bool:
+    """Return whether an exception is a transient SQLite writer lock."""
+    message = str(exc).lower()
+    return "database is locked" in message or "database table is locked" in message
 
 
 def _tier_from_confidence(ai_confidence: int) -> str:
@@ -2460,18 +2470,58 @@ class Database:
     async def save_underdog_snapshots_bulk(
         self,
         records: "list[UnderdogSnapshotRecord]",
-    ) -> None:
+    ) -> dict[str, int]:
         """Insert a list of UnderdogSnapshotRecords in a single transaction.
 
         Used by the cold-start path to avoid opening one SQLite write
         transaction per prop (which causes lock contention with concurrent
-        background jobs).
+        background jobs).  A transient SQLite writer lock is retried with a
+        fresh transaction.  Non-lock errors and exhausted retries propagate to
+        the caller so a scan cannot report successful persistence falsely.
         """
         if not records:
-            return
-        async with self.session() as s:
-            s.add_all(records)
-            await s.commit()
+            return {"records_written": 0, "retry_count": 0}
+
+        retry_count = 0
+        for attempt in range(_UNDERDOG_BULK_MAX_RETRIES + 1):
+            try:
+                async with self.session() as s:
+                    s.add_all(records)
+                    await s.commit()
+                if retry_count:
+                    logger.info(
+                        "save_underdog_snapshots_bulk: persisted %d records after %d retries",
+                        len(records), retry_count,
+                    )
+                return {
+                    "records_written": len(records),
+                    "retry_count": retry_count,
+                }
+            except Exception as exc:
+                if not _is_sqlite_lock_error(exc):
+                    logger.error(
+                        "save_underdog_snapshots_bulk: non-retryable failure "
+                        "(%d records): %s",
+                        len(records), exc,
+                    )
+                    raise
+                if attempt >= _UNDERDOG_BULK_MAX_RETRIES:
+                    logger.error(
+                        "save_underdog_snapshots_bulk: exhausted %d retries "
+                        "(%d records): %s",
+                        _UNDERDOG_BULK_MAX_RETRIES, len(records), exc,
+                    )
+                    raise
+                retry_count += 1
+                delay = _UNDERDOG_BULK_RETRY_DELAYS[
+                    min(retry_count - 1, len(_UNDERDOG_BULK_RETRY_DELAYS) - 1)
+                ]
+                logger.warning(
+                    "save_underdog_snapshots_bulk: SQLite lock; retry %d/%d "
+                    "in %.2fs (%d records)",
+                    retry_count, _UNDERDOG_BULK_MAX_RETRIES, delay, len(records),
+                )
+                await asyncio.sleep(delay)
 
     async def get_recent_underdog_snapshots(self, limit: int = 50) -> list["UnderdogSnapshotRecord"]:
         async with self.session() as s:

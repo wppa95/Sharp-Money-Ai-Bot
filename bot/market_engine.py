@@ -1696,6 +1696,13 @@ async def underdog_job(context) -> None:
     # priority order after the standing scan finishes.  Ranked delivery ensures the
     # best picks get rate-limit slots first when more qualify than the window allows.
     _delivery_queue:     list[dict]                 = []
+    _snapshot_intentionally_skipped = 0
+    _snapshot_intended = 0
+    _snapshot_persisted = 0
+    _snapshot_failed_batches = 0
+    _snapshot_failed_records = 0
+    _snapshot_retry_count = 0
+    _persistence_ok = True
     # Scoring data for every scored prop — bulk-written to PropLineHistory at end of
     # scan cycle so /picks and /slip can apply tier-aware delivery gates.
     # Key: (player, sport, stat_type) → (mq_score: int, bq_score: float).
@@ -1761,6 +1768,7 @@ async def underdog_job(context) -> None:
             if not is_removed and _is_futures_stat(stat_type):
                 _sp_fut = snap.sport or "UNKNOWN"
                 _sport_futures[_sp_fut] = _sport_futures.get(_sp_fut, 0) + 1
+                _snapshot_intentionally_skipped += 1
                 continue
 
             # Stage 1: daily prop count per sport (non-removed, non-futures)

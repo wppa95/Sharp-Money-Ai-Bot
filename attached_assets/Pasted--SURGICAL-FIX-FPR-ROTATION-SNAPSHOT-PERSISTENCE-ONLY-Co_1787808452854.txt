@@ -1,0 +1,498 @@
+🔴 SURGICAL FIX — FPR ROTATION + SNAPSHOT PERSISTENCE ONLY
+
+Continue from the current Sharp Money Bot implementation and the completed read-only audit.
+
+Do NOT touch the new-prop issue yet.
+
+Do NOT redesign the monitoring architecture.
+
+Do NOT replace FPR.
+
+Do NOT create a second full-pool rotation.
+
+Do NOT change scoring formulas, evidence logic, Telegram rules, Agent Reach, or unrelated behavior.
+
+Do NOT create a checkpoint until all work below is implemented, tested, and live-verified.
+
+⸻
+
+1. PRESERVE THE CURRENT FPR DESIGN
+
+The audit confirmed that the intended FPR source is the complete current active/seens Underdog source-ID universe.
+
+Current audit:
+
+* Historical snapshots: 19,575,301
+* Unique props ever seen: 34,334
+* Current active source-ID props: 25,115
+* Intended FPR population: 25,115
+* Active source-ID props outside FPR: 0
+* FPR batch size: 10,000
+
+Keep this architecture.
+
+FPR must remain the sole full-pool rotation.
+
+Stable Refresh must NOT become another full-pool rotation.
+
+Do NOT switch FPR back to PropLineHistory.
+
+Do NOT reduce the active universe to the ~7K historical PropLineHistory population.
+
+Do NOT add an arbitrary fixed ceiling.
+
+⸻
+
+2. LIVE-PROVE THE FULL FPR ROTATION
+
+The code currently intends to rotate through all current active props using:
+
+* complete active source-ID population
+* batch size
+* persisted cursor
+* cursor advancement
+* wraparound
+* repeated rescoring
+
+I need this actually proven live, not merely proven by tests.
+
+Run the bot and verify multiple consecutive FPR batches.
+
+For each completed batch record:
+
+* FPR pool size
+* batch size
+* cursor before
+* cursor after
+* rotation number
+* number selected
+* number rescored
+* sports represented
+* completion status
+
+Verify that:
+
+Batch 1
+
+Starts from the current cursor.
+
+Batch 2
+
+Starts after Batch 1 rather than repeating Batch 1.
+
+Subsequent batches
+
+Continue advancing through the pool.
+
+Wraparound
+
+When the cursor reaches the end, the next rotation begins at the start.
+
+Critical
+
+Previously seen unchanged props MUST remain eligible.
+
+Previously delivered props MUST remain eligible for underlying rescoring.
+
+Line movers/new props may receive priority, but they must NOT permanently consume the entire FPR rotation.
+
+⸻
+
+3. VERIFY COMPLETE SPORT COVERAGE
+
+For every FPR batch, record its actual sport distribution.
+
+The audit found 23 active sports:
+
+BASKETBALL
+CFB
+CFL
+CS
+DGPT
+DOTA
+ESPORTS
+FIFA
+HIGHLIMIT
+KBO
+LOL
+MLB
+MMA
+MOTORCYCLE
+NFL
+NPB
+OUTLAWS
+PGA
+RACING
+TENNIS
+USAC
+VAL
+WNBA
+
+Do NOT require every sport to appear in every individual 10,000-row batch.
+
+Instead verify that the rotating batches collectively cover the active universe.
+
+Confirm that provider ordering does not permanently starve smaller sports.
+
+⸻
+
+4. VERIFY THE 25,115 ACTIVE PROPS ARE THE RESCAN UNIVERSE
+
+Do NOT rescan the 19.5M historical snapshot rows individually.
+
+The desired behavior is:
+
+ALL CURRENTLY ACTIVE PROPS THAT HAVE BEEN SEEN
+
+must eventually rotate through FPR.
+
+The lifecycle must remain:
+
+Underdog feed
+→ snapshot persistence
+→ latest source-ID state
+→ active/unstarted filtering
+→ FPR pool
+→ bounded batch
+→ scoring
+→ evaluation
+→ cursor advancement
+→ next batch
+→ repeat
+→ event starts
+→ removed from active rotation
+→ retained for grading/history
+
+Verify that a prop can only leave the active FPR universe because:
+
+* its latest state is removed, OR
+* its event/game has started.
+
+It must NOT leave because:
+
+* it did not move
+* it was previously evaluated
+* it was previously delivered
+* it scored low
+* it was PASS
+* it lacked evidence
+* it was cold-start
+* it is outside PropLineHistory
+
+⸻
+
+5. HARDEN UNDERDOG SNAPSHOT PERSISTENCE
+
+The audit found an intermittent SQLite contention problem.
+
+Confirmed event:
+
+* Underdog persistence was writing 8,288 records across 42 chunks.
+* Another database writer experienced SQLite locking.
+* The Underdog batch itself completed successfully.
+* However, the current code can continue after an incremental bulk-save failure.
+
+This creates a potential data-integrity problem.
+
+Make the smallest targeted reliability fix so that a SQLite lock during Underdog snapshot persistence does not silently result in incomplete persistence.
+
+Requirements:
+
+* Preserve all legitimate fetched snapshot records that the current ingestion contract intends to store.
+* Do not fabricate rows.
+* Do not delete historical rows.
+* Do not change snapshot identity semantics.
+* Do not change source-ID behavior.
+* Do not change the active-pool logic.
+* Do not change FPR selection.
+* Do not change scoring.
+
+If a transient SQLite lock occurs:
+
+* retry safely where appropriate
+* preserve transaction integrity
+* avoid duplicate rows
+* do not silently swallow a failed batch
+* record the failure clearly if retries are exhausted
+* ensure the monitoring state does not falsely report successful persistence when a batch failed
+
+Use the existing database infrastructure.
+
+Do NOT create a second persistence system.
+
+⸻
+
+6. DO NOT CONFUSE INTENTIONALLY SKIPPED PROPS WITH LOST DATA
+
+The audit found:
+
+Underdog returned 8,377 projections.
+
+8,288 were persisted.
+
+89 were futures/season-long records intentionally skipped before snapshot persistence.
+
+Preserve that existing behavior unless the current ingestion contract explicitly says otherwise.
+
+Do NOT classify those intentional exclusions as SQLite data loss.
+
+The logs/reporting should make the distinction clear.
+
+⸻
+
+7. VERIFY SNAPSHOT PERSISTENCE
+
+After the targeted fix, run a live Underdog cycle and verify:
+
+* fetched count
+* intentionally skipped count
+* intended snapshot-write count
+* successfully persisted count
+* failed batch count
+* retry count
+* database row count increase
+
+The numbers must reconcile.
+
+For example:
+
+Fetched
+= intentionally skipped
+
+* intended-to-persist
+
+And:
+
+intended-to-persist
+= successfully persisted
+
+* permanently failed after retries
+
+If permanently failed records exist, they must be explicitly reported rather than silently disappearing.
+
+⸻
+
+8. VERIFY RESCAN + PERSISTENCE TOGETHER
+
+During live verification, prove that:
+
+1. Underdog feed is fetched.
+2. New snapshots are persisted.
+3. Current active universe is rebuilt correctly.
+4. FPR selects from the active universe.
+5. FPR processes bounded batches.
+6. Cursor advances.
+7. Previously unchanged props eventually return.
+8. Historical snapshot data remains intact.
+
+Do not claim success based only on unit tests.
+
+⸻
+
+9. TASK #151
+
+Inspect the existing Task #151 SQLite contention issue.
+
+After the fix, classify it as:
+
+* Resolved
+* Reduced but still intermittent
+* Still recurring
+
+Provide the exact evidence.
+
+Do NOT close or modify the task unless explicitly required by the existing workflow.
+
+⸻
+
+10. RUNTIME SAFETY
+
+Preserve:
+
+max_instances=1
+
+Do NOT increase concurrency to solve SQLite contention.
+
+Do NOT create overlapping FPR jobs.
+
+Do NOT create another scheduler cadence.
+
+Do NOT make Stable Refresh compete with FPR.
+
+If concurrency is used inside a bounded database-safe operation, keep it limited and do not allow overlapping monitoring cycles.
+
+⸻
+
+11. REQUIRED TESTING
+
+Run:
+
+Focused tests
+
+* FPR cursor advancement
+* FPR batch selection
+* FPR wraparound
+* unchanged-prop rescanning
+* previously delivered prop rescanning
+* complete active-universe selection
+* event-start exclusion
+* snapshot persistence
+* SQLite retry/transaction behavior
+* duplicate prevention
+* skipped-futures accounting
+* multi-sport FPR distribution
+
+Full suite
+
+Run the complete test suite and report the exact number passing.
+
+Also run:
+
+* Python compilation
+* diff check
+
+Do not weaken existing tests simply to make them pass.
+
+⸻
+
+12. REQUIRED LIVE VERIFICATION
+
+This is mandatory.
+
+Do NOT report completion based solely on tests.
+
+Live verification must show:
+
+Underdog
+
+* Fresh feed fetched successfully
+* Intended snapshots persisted
+* No silent snapshot-write failures
+* Source IDs preserved
+* Multiple sports represented
+
+FPR
+
+* FPR batch completed
+* FPR pool reflects current active universe
+* Cursor advanced
+* Next batch does not repeat the previous batch
+* Multiple consecutive batches complete
+* Rotation number advances
+* Wraparound works
+* Unchanged props remain eligible
+* Previously delivered props remain eligible
+* Multiple sports receive FPR coverage
+
+Persistence
+
+* SQLite contention behavior verified
+* Retries behave correctly
+* Failed writes are not silently swallowed
+* Database totals reconcile with ingestion totals
+
+Safety
+
+* max_instances=1
+* No overlapping monitoring cycles
+* No competing full-pool rotation
+* Stable Refresh remains non-rotational
+
+⸻
+
+13. DO NOT TOUCH THESE
+
+Do NOT modify:
+
+* New-prop handling
+* Scoring formulas
+* BQ/MQ calculations
+* Confidence calculations
+* Evidence providers
+* Player history
+* Graded-prop lifecycle
+* Telegram delivery rules
+* Discord
+* Agent Reach
+* PrizePicks
+* PickFinder
+* Stable Refresh behavior except preserving its non-rotational role
+* Scheduler cadence
+* max_instances
+* Adaptive batching
+* Dashboard formatting
+* /funnel reporting logic
+* /stats
+* /tracking
+* /grades
+* Clean restart
+* Historical snapshot data
+* Database schema unless absolutely unavoidable
+
+The next task will address the new-prop issue separately.
+
+⸻
+
+14. REQUIRED FINAL REPORT
+
+Return:
+
+Exact FPR Verification
+
+* Pool size:
+* Batch size:
+* Batch 1:
+* Batch 2:
+* Batch 3:
+* Cursor progression:
+* Rotation progression:
+* Wraparound:
+* Sports covered:
+* Unchanged props rescanned:
+* Previously delivered props rescanned:
+
+Snapshot Persistence
+
+* Fetched:
+* Intentionally skipped:
+* Intended to persist:
+* Successfully persisted:
+* Retry count:
+* Permanently failed:
+* Database increase:
+
+Task #151
+
+* Status:
+* Root cause:
+* Evidence:
+* Data-loss risk after fix:
+
+Tests
+
+* Focused:
+* Full suite:
+* Compilation:
+* Diff check:
+
+Runtime
+
+* Last completed Underdog cycle:
+* Last completed FPR batch:
+* Current active universe:
+* Current FPR cursor:
+* Current FPR pool:
+* max_instances:
+* Any skipped instances:
+
+⸻
+
+🔴 FINAL RULE
+
+Do not claim that all 25K active props are being rescanned unless multiple completed live FPR batches prove cursor progression through that population.
+
+Do not claim SQLite persistence is fixed unless a real runtime cycle verifies the write/retry behavior.
+
+Do not touch the new-prop issue yet.
+
+Do not create a checkpoint until this surgical task is completely verified.
