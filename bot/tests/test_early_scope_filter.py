@@ -163,11 +163,11 @@ def test_configured_odds_api_sports_excludes_underdog_only_scope():
     """ACTIVE_SPORTS may contain Underdog identifiers absent from OddsAPI."""
     import main as main_mod
 
-    with patch.object(
-        main_mod.config,
-        "active_sports",
-        ["TENNIS", "WNBA", "CS", "LOL", "VAL", "DOTA", "PGA", "FIFA", "CFB"],
-    ):
+    mock_config = MagicMock()
+    mock_config.active_sports = [
+        "TENNIS", "WNBA", "CS", "LOL", "VAL", "DOTA", "PGA", "FIFA", "CFB"
+    ]
+    with patch.object(main_mod, "config", mock_config):
         configured = main_mod._configured_odds_api_sports()
 
     assert [(raw, sport.value) for raw, sport in configured] == [("WNBA", "WNBA")]
