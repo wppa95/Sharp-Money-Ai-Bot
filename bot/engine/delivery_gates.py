@@ -5,14 +5,17 @@ from __future__ import annotations
 from typing import Optional
 
 
-# Tier 2 is intentionally limited to the three major US sports.  Every
-# supported sport not listed here is Tier 1.
-TIER2_SPORTS: frozenset[str] = frozenset({"MLB", "NFL", "NBA"})
+# Tier 2 is an exact alias set.  Every other value, including unknown future
+# sports and CFL, is Tier 1.  Exact aliases avoid accidentally classifying a
+# sport merely because its name contains "football".
+TIER2_SPORTS: frozenset[str] = frozenset(
+    {"MLB", "NBA", "NFL", "FOOTBALL", "CFB", "NCAA", "NCAAF"}
+)
 
 
 def is_tier2_sport(sport: Optional[str]) -> bool:
     """Return whether a sport uses the stricter Telegram delivery gate."""
-    return (sport or "").upper() in TIER2_SPORTS
+    return (sport or "").strip().upper() in TIER2_SPORTS
 
 
 def tier_delivery_gate(
@@ -26,7 +29,7 @@ def tier_delivery_gate(
     """Return whether an actionable prop may reach Telegram.
 
     Tier 1 requires only a real direction and strong supporting evidence.
-    Tier 2 (MLB/NFL/NBA) additionally requires strong BQ and MQ plus a
+    Tier 2 additionally requires strong BQ and MQ plus a
     high-confidence decision.  Decision labels such as S/A/B/C are not used
     as delivery gates; they remain evaluation and reporting metadata.
     """

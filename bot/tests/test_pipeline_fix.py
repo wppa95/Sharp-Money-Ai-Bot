@@ -193,17 +193,10 @@ class TestStandingPathGatesIntact:
         )
 
     def test_score_tier_gate_still_in_standing_path(self):
-        """Standing path must still require prior S/A/B tier snapshot (or derived equivalent).
-
-        The gate was extended from ("A","S") to ("A","S","B") so B-tier candidates
-        can enter the standing path when score_total ≥ 50, consistent with the spec
-        change making S/A/B all actionable.
-        """
+        """Standing path must use the canonical delivery gate, not tier labels."""
         src = self._get_engine_source()
-        # The gate now uses _prev_eff_tier including B-tier
-        assert '_prev_eff_tier not in ("A", "S", "B")' in src, (
-            "Effective-tier gate missing or too narrow in standing path — "
-            "must block tiers below B (S/A/B are all actionable)."
+        assert "tier_gate [standing]" in src, (
+            "Canonical delivery gate missing from standing path."
         )
 
     def test_24h_dedup_still_in_standing_path(self):
@@ -224,10 +217,10 @@ class TestStandingPathGatesIntact:
         )
 
     def test_confidence_gate_still_in_standing_path(self):
-        """Per-tier confidence gate must still be applied in standing path."""
+        """Tier-2 numeric thresholds remain in the canonical gate."""
         src = self._get_engine_source()
-        assert "conf_gate [standing]" in src, (
-            "Confidence gate removed from standing path."
+        assert "_tier_delivery_gate" in src and "bq_score" in src, (
+            "Canonical Tier-2 quality gate missing from standing path."
         )
 
     def test_bq_gate_removed_from_standing_path(self):
@@ -280,8 +273,8 @@ class TestMLBNFLGatesUnchanged:
         )
 
     def test_strict_alert_sports_config_referenced(self):
-        """ud_strict_alert_sports must still be referenced in market_engine.py."""
+        """Tier classification must use the exact shared alias predicate."""
         src = self._get_engine_source()
-        assert "ud_strict_alert_sports" in src, (
-            "ud_strict_alert_sports not found — MLB/NFL strict treatment may be broken."
+        assert "_is_tier2_sport" in src, (
+            "Shared exact Tier-2 sport predicate is not referenced."
         )

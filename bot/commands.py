@@ -1573,38 +1573,9 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 plh.player_name, plh.stat_type, _eff_rec,
             )
             continue
-        # MLB: OVER only for user-facing picks (UNDER is internally tracked but not surfaced)
-        if _key == "MLB" and _eff_rec == "UNDER":
-            logger.debug(
-                "cmd_picks: skipping %s/%s — MLB UNDER blocked from user-facing output",
-                plh.player_name, plh.stat_type,
-            )
-            continue
-        # Tier-aware delivery gate — apply same rules as Telegram delivery.
-        # Tier 1 (non-NBA/MLB/NFL): only direction matters (already checked above).
-        # Tier 2 (NBA/MLB/NFL): BQ ≥ 85 AND MQ ≥ 85 — BOTH mandatory.
-        # NULL scores pass through conservatively (not yet rescored this cycle).
-        _plh_sport = getattr(plh, "sport", "") or ""
-        _plh_mq    = getattr(plh, "market_quality_score", None)
-        _plh_bq    = getattr(plh, "score_total", None)
-        if _plh_sport.upper() in {"NBA", "MLB", "NFL"}:
-            # Tier 2: enforce both gates when scores are available.
-            _t2_mq_ok = (_plh_mq is None) or (float(_plh_mq) >= 85.0)
-            _t2_bq_ok = (_plh_bq is None) or (float(_plh_bq) >= 85.0)
-            if not (_t2_mq_ok and _t2_bq_ok):
-                logger.debug(
-                    "cmd_picks: skipping %s/%s — Tier-2 gate (bq=%s mq=%s dir=%s)",
-                    plh.player_name, plh.stat_type, _plh_bq, _plh_mq, _eff_rec,
-                )
-                continue
-        # Tier 1: no BQ/MQ numeric gate — direction already verified above.
-        # Note: no secondary confidence gate here.  The DB query already requires
-        # score_tier in ("S","A") — all props reaching this loop have been scored
-        # above the A-tier confidence floor by the engine.  A secondary gate using
-        # bet_confidence or proxy_match_confidence incorrectly blocks esports sports
-        # (CS/LOL/VAL/ESPORTS) that have no cross-provider comparison data and
-        # therefore always report low proxy_match_confidence even when they are
-        # genuinely S-tier.
+        # /picks is a research view, not a second delivery gate. Preserve all
+        # directional recommendations, including MLB UNDER and lower labels;
+        # the canonical Telegram boundary is enforced by AlertDelivery.
         if _key not in _sport_groups:
             _sport_groups[_key] = []
         _sport_groups[_key].append((_flat_idx, plh, comp))
@@ -2281,9 +2252,8 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception as _slip_rec_exc:
         logger.debug("cmd_slip: rec_map lookup failed: %s", _slip_rec_exc)
 
-    # Slip eligibility gate — same rules as Telegram alerts:
-    #   1. Must have an explicit OVER or UNDER direction (no "—" / PASS props)
-    #   2. MLB UNDER blocked from user-facing slips (internally tracked, not surfaced)
+        # Slip eligibility is directional only.  This is a research tool, not
+        # a second Telegram delivery gate.
     _slip_ineligible = 0
     _candidates_eligible: list[PropPickAdapter] = []
     for _cand in _candidates:
@@ -2294,37 +2264,6 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 _cand.player_name, _cand.stat_type, _cand.best_side,
             )
             continue
-        if _cand.sport.upper() == "MLB" and _cand.best_side == "UNDER":
-            _slip_ineligible += 1
-            logger.debug(
-                "cmd_slip: excluding %s/%s — MLB UNDER blocked from user-facing slips",
-                _cand.player_name, _cand.stat_type,
-            )
-            continue
-        # Tier-aware delivery gate — mirrors the existing alert-delivery policy.
-        # Tier 2 (MLB/NBA/NFL): BQ ≥ 85 AND MQ ≥ 85 — BOTH mandatory.
-        # Tier 1 (WNBA/CS/TENNIS/DOTA/LOL/VALORANT/TT/BADMINTON/GOLF/NCAAF/MMA/SOCCER):
-        #   direction check above is sufficient; no additional BQ/MQ numeric gate.
-        _slip_sport = (getattr(_cand, "sport", "") or "").upper()
-        if _slip_sport in {"NBA", "MLB", "NFL"}:
-            # Look up PLH for stored MQ and BQ scores.
-            _slip_plh = next(
-                (p for p in ud_props if
-                 p.player_name == _cand.player_name
-                 and p.stat_type == _cand.stat_type),
-                None,
-            )
-            _slip_mq = getattr(_slip_plh, "market_quality_score", None) if _slip_plh else None
-            _slip_bq = getattr(_slip_plh, "score_total",          None) if _slip_plh else None
-            _s2_mq_ok = (_slip_mq is None) or (float(_slip_mq) >= 85.0)
-            _s2_bq_ok = (_slip_bq is None) or (float(_slip_bq) >= 85.0)
-            if not (_s2_mq_ok and _s2_bq_ok):
-                _slip_ineligible += 1
-                logger.debug(
-                    "cmd_slip: excluding %s/%s — Tier-2 gate (bq=%s mq=%s dir=%s)",
-                    _cand.player_name, _cand.stat_type, _slip_bq, _slip_mq, _cand.best_side,
-                )
-                continue
         _candidates_eligible.append(_cand)
     if _slip_ineligible:
         logger.info(
@@ -3571,15 +3510,6 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         ]
 
         # ── Section 1: Scan Pipeline (from ScanCycleLog) ─────────────────────────────
-        # Stable refresh stats from health sidecar (non-fatal if unavailable)
-        sr_stats: dict = {}
-        try:
-            from engine.health import get_health_tracker as _get_ht
-            _ht = _get_ht()
-            if _ht is not None:
-                sr_stats = _ht.get_stable_refresh_stats()
-        except Exception:
-            pass
         # FPR stats describe the current canonical active by-line universe.
         # Keep this separate from ScanCycleLog.active, which is a cumulative
         # per-scan observation count and must not be presented as the current
@@ -3635,10 +3565,8 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             sc_analyzed  = scan_summary.get("analyzed", 0)
             sc_delivered = scan_summary.get("alert_delivered", 0)
             _avg_mins    = (since_h * 60) // max(sc_cycles, 1)
-            # Stable refresh scored count from health sidecar
-            sr_rescored  = sr_stats.get("sr_rescored", 0)
             fpr_rescored = fpr_stats.get("fpr_rescored", 0)
-            sc_total_scored = sc_analyzed + sr_rescored + fpr_rescored
+            sc_total_scored = sc_analyzed + fpr_rescored
             # Note: sc_analyzed = sc_new + sc_lc + sc_cold (all scored paths).
             # sc_cold = cold-start re-scored (first cycle after restart, every active prop).
             lines += [
@@ -3660,36 +3588,10 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 f"   ├─ New:                         <b>{sc_new:,}</b>",
                 f"   ├─ Line moved:                  <b>{sc_lc:,}</b>",
                 f"   ├─ Cold-start:                  <b>{sc_cold:,}</b>",
-                f"   └─ Stable refresh:              <b>{sr_rescored:,}</b>",
                 f"   └─ Full-pool rotation:           <b>{fpr_rescored:,}</b>",
                 f"🎯 Strong actionable candidates:   <b>{sc_delivered:,}</b>",
                 f"📤 Delivered to Telegram:          <b>{sc_delivered:,}</b>",
             ]
-            # ── Stable Refresh block ──────────────────────────────────────────
-            if sr_stats:
-                sr_pool      = sr_stats.get("pool_size",    0)
-                sr_batch     = sr_stats.get("batch_size",   0)
-                sr_c_start   = sr_stats.get("cursor_start", 0)
-                sr_c_end     = sr_stats.get("cursor_end",   0)
-                sr_progress  = (
-                    f"{(sr_c_end / sr_pool * 100):.1f}%" if sr_pool > 0 else "—"
-                )
-                sr_qual      = sr_stats.get("sr_actionable", 0)
-                sr_sent      = sr_stats.get("sr_sent",      0)
-                sr_rej       = sr_stats.get("sr_not_delivered",  0)
-                lines += [
-                    "",
-                    _thick,
-                    "🔄 <b>Stable Refresh</b>  <i>(last cycle)</i>",
-                    _thick,
-                    "",
-                    f"Progress:           <b>{sr_progress}</b>",
-                    f"Coverage:           <b>{sr_c_end:,} / {sr_pool:,}</b> active props",
-                    f"Batch size:         <b>{sr_batch:,}</b>",
-                    f"🔬 Rescored:        <b>{sr_rescored:,}</b>",
-                    f"🎯 Actionable:       <b>{sr_qual:,}</b>  (sent: {sr_sent})",
-                    f"⏸ Not delivered:    <b>{sr_rej:,}</b>",
-                ]
             # ── Full-Pool Rescan Rotation block ──────────────────────────────────
             try:
                 if fpr_stats:
@@ -3749,7 +3651,6 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         # HealthTracker rather than ScanCycleLog.
         sc_rescored = (
             scan_summary.get("analyzed", 0)
-            + sr_stats.get("sr_rescored", 0)
             + fpr_stats.get("fpr_rescored", 0)
         )
         sc_movers = scan_summary.get("line_changed", 0)

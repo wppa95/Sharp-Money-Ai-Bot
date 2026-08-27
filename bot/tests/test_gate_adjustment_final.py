@@ -14,13 +14,21 @@ os.environ.setdefault("TELEGRAM_TOKEN", "test:token")
 import market_engine as me
 
 
-def test_tier2_sports_are_exactly_major_us_sports():
-    assert me._TIER2_SPORTS == frozenset({"MLB", "NFL", "NBA"})
+def test_tier2_sports_use_exact_canonical_aliases():
+    assert me._TIER2_SPORTS == frozenset(
+        {"MLB", "NFL", "NBA", "FOOTBALL", "CFB", "NCAA", "NCAAF"}
+    )
     assert me._is_tier2_sport("mlb")
     assert me._is_tier2_sport("NFL")
     assert me._is_tier2_sport("NBA")
+    assert me._is_tier2_sport("football")
+    assert me._is_tier2_sport("CFB")
+    assert me._is_tier2_sport("NCAA")
+    assert me._is_tier2_sport("NCAAF")
     assert not me._is_tier2_sport("WNBA")
     assert not me._is_tier2_sport("SOCCER")
+    assert not me._is_tier2_sport("CFL")
+    assert not me._is_tier2_sport("future-football-league")
 
 
 @pytest.mark.parametrize("sport", ["WNBA", "NHL", "SOCCER", "CS", "TENNIS"])
@@ -30,7 +38,7 @@ def test_tier1_needs_direction_and_evidence_only(sport, direction):
     assert not me._tier_delivery_gate(sport, direction, 1, 1, False, "S", confidence=99)
 
 
-@pytest.mark.parametrize("sport", ["MLB", "NFL", "NBA"])
+@pytest.mark.parametrize("sport", ["MLB", "NFL", "NBA", "Football", "CFB", "NCAA", "NCAAF"])
 def test_tier2_requires_strong_evidence_confidence_bq_and_mq(sport):
     kwargs = dict(evidence_available=True, score_tier="C", confidence=90)
     assert me._tier_delivery_gate(sport, "OVER", 85, 85, **kwargs)

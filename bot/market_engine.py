@@ -1204,9 +1204,8 @@ _DELIVERY_TIER_BASE: dict[str, float] = {
 }
 
 
-# Sports that are Tier 2.  Tier 1 is every supported sport not in this set.
-# New non-NFL/non-NBA sports automatically remain Tier 1.
-# This is the CANONICAL source of truth — do NOT expand it.
+# Sports that are Tier 2.  Tier 1 is every sport not in this exact alias set.
+# This is the CANONICAL source of truth — do NOT duplicate or broaden it here.
 _TIER2_SPORTS: frozenset[str] = _CANONICAL_TIER2_SPORTS
 
 
@@ -1253,15 +1252,15 @@ def _tier_delivery_gate(
     """
     Canonical delivery eligibility gate used by ALL Telegram delivery paths.
 
-    Tier 1 = every supported sport except NBA, MLB, NFL.
-    Tier 2 = ONLY NBA, MLB, NFL.
+    Tier 1 = every sport except the canonical Tier 2 aliases.
+    Tier 2 = MLB, NBA, NFL, Football, CFB, NCAA, and NCAAF.
 
     Tier 1 rules:
         • Valid OVER or UNDER direction is required.
         • Strong supporting evidence is required.
         • S/A/B/C labels do not gate delivery.
 
-    Tier 2 rules (MLB/NFL/NBA):
+    Tier 2 rules:
         • Valid OVER or UNDER direction is required.
         • Strong supporting evidence is required.
         • Confidence must be at least 90, BQ at least 85, and MQ at least 85.
@@ -1356,9 +1355,10 @@ def _apply_delivery_diversification(queue: list) -> list:
         )
         return group
 
-    # Split by sport tier — Tier 2 = NBA/MLB/NFL , everything else is Tier 1.
-    t1 = [c for c in queue if (c.get("sport") or "").upper() not in _TIER2_SPORTS]
-    t2 = [c for c in queue if (c.get("sport") or "").upper() in _TIER2_SPORTS]
+    # Split by the canonical exact alias predicate.  Do not use substring
+    # matching: CFL is intentionally Tier 1.
+    t1 = [c for c in queue if not _is_tier2_sport(c.get("sport") or "")]
+    t2 = [c for c in queue if _is_tier2_sport(c.get("sport") or "")]
 
     # Rank within each tier independently.
     _rank_group(t1)
@@ -1888,14 +1888,9 @@ async def underdog_job(context) -> None:
                     min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
                     history_snap = _hist_snap,
                 )
-                # Immediate criteria — sport-neutral:
-                #   - 0.5 line AND supported betting category (all sports)
-                #   - OR score reaches the sport-specific quality threshold:
-                #       Tier 2 (MLB/NFL) → UD_MIN_STARS_TO_ALERT (default 3)
-                #       Tier 1 (others)  → UD_NON_STRICT_MIN_STARS (default 2)
-                #     Uses the same min_stars_for_sport() helper as line-change
-                #     and standing paths so the star floor is consistent across
-                #     all three alert paths.
+                # Immediate criteria controls whether a new prop gets remote
+                # history fetched in this pass.  It is not a Telegram
+                # qualification gate; the shared delivery gate below owns that.
                 np_immediate = (
                     (line_val <= config.UD_NEW_PROP_IMMEDIATE_LINE_THRESHOLD
                      and stat_type in config.UD_PRIORITY_STAT_CATEGORIES)
@@ -1975,40 +1970,13 @@ async def underdog_job(context) -> None:
                     "validation": validation,
                     "decision":   decision,
                 })
-                # Send only when: S/A score, real directional pick, and sport is
-                # in the betting-alert whitelist.
+                # Any directional decision may enter the shared delivery gate.
+                # Score tier, stars, and confidence labels remain metadata.
                 _np_bet_ready = (
-                    np_immediate
-                    and decision is not None
+                    decision is not None
                     and decision.recommendation != "PASS"
                     and (snap.sport or "UNKNOWN") in config.ud_alert_sports
                 )
-                # Per-tier confidence gate — sport-conditional: MLB/NFL use strict thresholds;
-                # all other sports use relaxed thresholds to surface more opportunities (#2).
-                if _np_bet_ready and decision is not None:
-                    _np_min_conf = config.min_conf_for_sport_tier(
-                        snap.sport or "", decision.decision_tier
-                    )
-                    if decision.confidence < _np_min_conf:
-                        _np_bet_ready = False
-                        logger.debug(
-                            "UD conf_gate [new]: %s | %s | conf=%d < min=%d (tier=%s sport=%s)",
-                            player, stat_type,
-                            decision.confidence, _np_min_conf,
-                            decision.decision_tier, snap.sport or "UNKNOWN",
-                        )
-                # Strict-sport tier gate — MLB and NFL are S-tier only (default).
-                # All other sports follow normal S/A/B/C tier rules.
-                if _np_bet_ready and decision is not None:
-                    _sport_up = (snap.sport or "").upper()
-                    if (_sport_up in config.ud_strict_alert_sports
-                            and decision.decision_tier not in config.ud_mlb_alert_tiers):
-                        _np_bet_ready = False
-                        logger.debug(
-                            "UD sport_tier_gate [new]: %s | %s | sport=%s tier=%s blocked (min=%s)",
-                            player, stat_type, _sport_up,
-                            decision.decision_tier, config.UD_MLB_MIN_TIER,
-                        )
                 # Direction gate for Tier 2 (MLB/NFL):
                 #   NFL UNDER → fully allowed (all markets)
                 #   MLB UNDER → restricted to whitelist markets only
@@ -2024,7 +1992,6 @@ async def underdog_job(context) -> None:
                             player, stat_type,
                         )
                     # NFL UNDER: no gate — fully allowed per spec
-                # BQ gate removed: decision_tier (S/A) enforces quality.
                 # Game-live hard gate — block actionable alerts when game has already started (#5).
                 # Uses _is_game_live_or_past which checks status field + game_time elapsed.
                 # Internal market intelligence continues regardless.
@@ -2064,12 +2031,6 @@ async def underdog_job(context) -> None:
                     )
                     _np_bet_ready = False
 
-                # Pre-delivery checks only prepare diagnostics. PASS/no-direction
-                # remains internal and is rescanned until it becomes a pick.
-                _np_bet_ready = (
-                    decision is not None
-                    and decision.recommendation in ("OVER", "UNDER")
-                )
                 if _np_bet_ready and chat_ids:
                     # Prop Intelligence trace for richer alert context
                     _np_intel_trace: Optional[dict] = None
@@ -2097,8 +2058,8 @@ async def underdog_job(context) -> None:
                         except Exception:
                             pass
                     # ── Tier delivery gate [new-prop] ────────────────────────
-                    # Tier 1 (all except NBA/MLB/NFL): direction only.
-                    # Tier 2 (NBA/MLB/NFL): BQ ≥ 75 AND MQ ≥ 75 AND direction.
+                    # Tier 1: direction plus evidence.
+                    # Tier 2: direction, evidence, confidence ≥90, BQ/MQ ≥85.
                     _np_mq_score  = float(getattr(market_quality, "score", 0) if market_quality else 0)
                     _np_bq_score  = float(score.total if score else 0)
                     _np_direction = decision.recommendation if decision else ""
@@ -2144,7 +2105,7 @@ async def underdog_job(context) -> None:
                             "bq":                 float(score.total if score else 0),
                             "mq":                 float(getattr(market_quality, "score", 0) if market_quality else 0),
                             "is_meaningful_change": False,  # new props have no prev line
-                            "is_tier1":           (snap.sport or "UNKNOWN") in config.ud_tier1_sports,
+                            "is_tier1":           not _is_tier2_sport(snap.sport or "UNKNOWN"),
                             "_sent":              False,
                         })
                         _dq_collected = True
@@ -2548,24 +2509,6 @@ async def underdog_job(context) -> None:
                     and prev_line is not None
                     and abs(snap.line - prev_line) >= config.MIN_UNDERDOG_LINE_CHANGE
                 ))
-                # Per-tier confidence gate for directional picks (not removals)
-                if should_alert and not is_removed and decision is not None and decision.recommendation != "PASS":
-                    _lc_min_conf = {
-                        "S": config.UD_MIN_CONF_S,
-                        "A": config.UD_MIN_CONF_A,
-                        "B": config.UD_MIN_CONF_B,
-                    }.get(decision.decision_tier, 0)
-                    if False:
-                        should_alert = False
-                        logger.debug(
-                            "UD conf_gate [lc]: %s | %s | conf=%d < min=%d (tier=%s)",
-                            player, stat_type,
-                            decision.confidence, _lc_min_conf, decision.decision_tier,
-                        )
-
-                # BQ gate removed — decision_tier (S/A only) already enforces quality.
-                # MLB/NFL UNDER is now allowed per Tier 2 spec.
-
                 # Stage 4: gated count — full betting gate passed
                 if should_alert and not is_removed:
                     _sp_gated = snap.sport or "UNKNOWN"
@@ -2724,7 +2667,7 @@ async def underdog_job(context) -> None:
                             "bq":                 float(score.total if score else 0),
                             "mq":                 float(getattr(market_quality, "score", 0) if market_quality else 0),
                             "is_meaningful_change": _lc_is_mc,
-                            "is_tier1":           (snap.sport or "UNKNOWN") in config.ud_tier1_sports,
+                    "is_tier1":           not _is_tier2_sport(snap.sport or "UNKNOWN"),
                             "_sent":              False,
                         })
                         _dq_collected = True
@@ -2896,24 +2839,9 @@ async def underdog_job(context) -> None:
                 _prev = recent_by_key.get((_sp, _st))
                 if _prev is None:
                     continue
-                # Derive effective tier: if the latest snapshot has score_tier=NULL (stored
-                # during a no-change cycle without re-scoring), fall back to deriving tier
-                # from score_total so stable high-quality Tier 1 props aren't silently
-                # dropped merely because a later no-change snapshot has score_tier=NULL.
-                _prev_eff_tier = _prev.score_tier
-                # Only apply score_total fallback when score_tier is NULL (no-change
-                # cycle stored without re-scoring).  An explicitly stored "B" or "PASS"
-                # tier must NOT be promoted by the fallback.
-                if _prev_eff_tier is None and _prev.score_total is not None:
-                    if _prev.score_total >= 80:
-                        _prev_eff_tier = "S"
-                    elif _prev.score_total >= 65:
-                        _prev_eff_tier = "A"
-                    elif _prev.score_total >= 50:
-                        _prev_eff_tier = "B"
-                if _prev_eff_tier not in ("A", "S", "B"):
-                    continue
-    
+                # Keep every scored/previously observed prop eligible for
+                # re-evaluation.  score_tier is reporting metadata and must
+                # not create a hidden S/A/B allowlist for the standing path.
                 _standing_candidates.append((_snap, _sp, _st, _sport, _prev))
     
             # Sort within each sport (top 3 per sport) — never compare across sports
@@ -2929,7 +2857,14 @@ async def underdog_job(context) -> None:
                 _line_val = _ssnap.line or 0.0
     
                 # 24 h dedup — skip if already alerted today (DB: UnderdogSnapshotRecord.alert_sent)
-                if await db.has_recent_ud_alert(_sp, _st, within_seconds=86400):
+                _recent_alert_check = db.has_recent_ud_alert(
+                    _sp, _st, within_seconds=86400
+                )
+                # Test doubles and compatibility callers may not expose the
+                # async DB method.  Do not let that abort the whole scan.
+                if not hasattr(_recent_alert_check, "__await__"):
+                    continue
+                if await _recent_alert_check:
                     continue
 
                 # In-memory dedup — catches same-session props sent via 95+ broadcast_alert.
@@ -3027,24 +2962,6 @@ async def underdog_job(context) -> None:
                         _sp, _st, _ssport,
                         (_sdec.recommendation if _sdec is not None else "None"),
                         (_sdec.reason if _sdec is not None else "no_decision"),
-                    )
-                    continue
-
-                # Per-tier confidence gate — sport-conditional for standing plays (#2)
-                _s_min_conf = config.min_conf_for_sport_tier(_ssport, _sdec.decision_tier)
-                if _sdec.confidence < _s_min_conf:
-                    logger.debug(
-                        "UD conf_gate [standing]: %s | %s | conf=%d < min=%d (tier=%s sport=%s)",
-                        _sp, _st, _sdec.confidence, _s_min_conf, _sdec.decision_tier, _ssport,
-                    )
-                    continue
-
-                # Strict-sport tier gate for standing plays — MLB and NFL are S-tier only.
-                if (_ssport.upper() in config.ud_strict_alert_sports
-                        and _sdec.decision_tier not in config.ud_mlb_alert_tiers):
-                    logger.debug(
-                        "UD sport_tier_gate [standing]: %s | %s | sport=%s tier=%s blocked (min=%s)",
-                        _sp, _st, _ssport.upper(), _sdec.decision_tier, config.UD_MLB_MIN_TIER,
                     )
                     continue
 
@@ -3149,7 +3066,7 @@ async def underdog_job(context) -> None:
                     "bq":                 float(_sscore.total if _sscore else 0),
                     "mq":                 float(getattr(_smq, "score", 0) if _smq else 0),
                     "is_meaningful_change": False,  # standing = stable line
-                    "is_tier1":           _ssport in config.ud_tier1_sports,
+                    "is_tier1":           not _is_tier2_sport(_ssport),
                     "_sent":              False,
                 })
 
@@ -3210,7 +3127,8 @@ async def underdog_job(context) -> None:
                 # ── Tier delivery gate backstop ───────────────────────────────
                 # Belt-and-suspenders: any candidate that slipped through the
                 # collection-point gate is caught here before Telegram.
-                # Tier 1: direction only.  Tier 2: BQ ≥ 75 AND MQ ≥ 75.
+                # Tier 1: direction plus evidence. Tier 2 additionally requires
+                # confidence ≥90 and BQ/MQ ≥85.
                 _dq_mq_score  = float(getattr(_dq_mq, "score", 0) if _dq_mq else _dq.get("mq", 0))
                 _dq_bq_score  = float(_dq.get("bq", 0))
                 _dq_direction = _dq_dec.recommendation if _dq_dec else ""
@@ -3749,6 +3667,11 @@ async def underdog_job(context) -> None:
                     module="market_engine.underdog_job",
                     error=str(_job_exc),
                 )
+            # The guard is claimed before this try block.  Always release it
+            # on a processing failure so one malformed row cannot stall every
+            # subsequent scheduled scan.
+            _ud_full_scan_running = False
+            _job_activity_end("underdog")
             return
 
     # ── Bridge to PropLineHistory (lifecycle tracking) ─────────────────────────

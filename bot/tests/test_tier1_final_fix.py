@@ -21,7 +21,7 @@ import pytest
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestPicksDBQueryTier1BAllowed:
-    """get_top_ud_props_for_picks must allow B-tier for non-MLB/NFL sports."""
+    """get_top_ud_props_for_picks is an analyst view, independent of labels."""
 
     def _src(self) -> str:
         import database as db_mod
@@ -29,18 +29,16 @@ class TestPicksDBQueryTier1BAllowed:
 
     def test_b_tier_included_for_non_strict_sports(self):
         src = self._src()
-        assert "B" in src, "B-tier must be included in the filter"
-        assert 'notin_' in src or 'NOT IN' in src.upper() or 'not in' in src.lower(), \
-            "must exclude MLB/NFL from B-tier allowance"
+        assert "score_tier.isnot(None)" in src
+        assert "Decision labels are metadata" in src
 
     def test_mlb_excluded_from_b_tier(self):
         src = self._src()
-        assert '"MLB"' in src or "'MLB'" in src
-        assert "notin_" in src or "NOT IN" in src.upper()
+        assert "MLB" not in src.split("Sport-balanced selection")[0]
 
     def test_nfl_excluded_from_b_tier(self):
         src = self._src()
-        assert '"NFL"' in src or "'NFL'" in src
+        assert "NFL" not in src.split("Sport-balanced selection")[0]
 
     def test_null_tier_still_excluded(self):
         """NULL/unscored rows must still be excluded for all sports."""
@@ -60,10 +58,10 @@ class TestPicksDBQueryTier1BAllowed:
             or 'notin_' in src  # not-in excludes PASS by not mentioning it
 
     def test_s_a_still_allowed_for_all_sports(self):
-        """S and A must still be allowed for every sport (unchanged)."""
+        """No decision label is required for the analyst-facing query."""
         src = self._src()
-        assert '"S"' in src and '"A"' in src
-        assert ".in_(" in src
+        assert "score_tier.isnot(None)" in src
+        assert ".in_(" not in src
 
     def test_mlb_b_tier_excluded_logic(self):
         """Simulate: MLB B-tier prop must NOT pass the filter."""
@@ -660,12 +658,11 @@ class TestPriorPassesIntact:
         assert "MLB" in src and "UNDER" in src
 
     def test_score_tier_in_s_a_only_for_strict_display(self):
-        """Strict gate (S/A only for MLB/NBA/NFL) must exist in the DB query layer."""
+        """The DB query must not recreate Telegram delivery gates."""
         import database as db_mod
         db_src = inspect.getsource(db_mod.Database.get_top_ud_props_for_picks)
-        # New contract: notin_ separates Tier-1 from Tier-2; Tier-2 uses score_tier.in_
-        assert "notin_" in db_src
-        assert "score_tier" in db_src
+        assert "score_tier.isnot(None)" in db_src
+        assert "ud_mlb_alert_tiers" not in db_src
 
     def test_funnel_near_miss_accepted_key_dedup_intact(self):
         import database as db_mod

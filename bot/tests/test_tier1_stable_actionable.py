@@ -307,11 +307,11 @@ class TestStableTier1ReachesActionable:
         )
 
     def test_mlb_nfl_strict_gates_in_standing_path(self):
-        """Tier gate + UNDER gate present; BQ gate removed per spec."""
+        """Standing path uses the shared delivery gate; no label gate is duplicated."""
         import inspect, market_engine as _me
         src = inspect.getsource(_me.underdog_job)
-        assert "sport_tier_gate [standing]" in src
-        assert "mlb_under_gate [standing]" in src  # Tier 2: UNDER always blocked
+        assert "tier_gate [standing]" in src
+        assert "_tier_delivery_gate" in src
         assert "bq_gate [standing]" not in src
 
     def test_fix_uses_score_total_thresholds_matching_ud_scoring(self):

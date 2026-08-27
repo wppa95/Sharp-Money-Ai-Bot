@@ -9,7 +9,7 @@ from engine.delivery_gates import TIER2_SPORTS, is_tier2_sport
 from market_engine import _tier_delivery_gate as tier_delivery_gate
 
 
-@pytest.mark.parametrize("sport", ["NBA", "MLB", "NFL"])
+@pytest.mark.parametrize("sport", ["NBA", "MLB", "NFL", "Football", "CFB", "NCAA", "NCAAF"])
 def test_tier2_sports_use_the_strict_delivery_policy(sport):
     assert is_tier2_sport(sport)
     assert not tier_delivery_gate(sport, "OVER", 80, 85, True, "S", confidence=89)
@@ -17,7 +17,7 @@ def test_tier2_sports_use_the_strict_delivery_policy(sport):
     assert tier_delivery_gate(sport, "UNDER", 85, 85, True, "B", confidence=95)
 
 
-@pytest.mark.parametrize("sport", ["NHL", "WNBA", "SOCCER", "DOTA", "TENNIS"])
+@pytest.mark.parametrize("sport", ["NHL", "WNBA", "SOCCER", "DOTA", "TENNIS", "CFL", "FUTURE_SPORT"])
 def test_tier1_sports_need_direction_and_evidence_but_not_quality_floors(sport):
     assert not is_tier2_sport(sport)
     assert tier_delivery_gate(sport, "OVER", 0, 0, True, "PASS", confidence=0)
@@ -27,7 +27,9 @@ def test_tier1_sports_need_direction_and_evidence_but_not_quality_floors(sport):
 
 
 def test_tier2_sports_are_the_shared_canonical_set():
-    assert TIER2_SPORTS == frozenset({"MLB", "NFL", "NBA"})
+    assert TIER2_SPORTS == frozenset(
+        {"MLB", "NFL", "NBA", "FOOTBALL", "CFB", "NCAA", "NCAAF"}
+    )
 
 
 def test_priority_helpers_cover_all_decision_tiers():
