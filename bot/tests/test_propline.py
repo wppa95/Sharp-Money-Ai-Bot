@@ -247,7 +247,7 @@ async def test_propline_observation_reaches_existing_confirmation_boundary(monke
         event="Example City at Test Town",
         event_id="game-1",
         external_id="projection-1",
-        fetched_at=datetime(2026, 8, 27, 18, 0),
+        fetched_at=datetime.utcnow(),
     )
 
     class _Provider:
