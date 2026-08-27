@@ -385,7 +385,7 @@ def _schedule_deferred_fpr() -> None:
 
 def _release_underdog_scan_slot() -> None:
     """Release the shared slot and hand one deferred FPR trigger to the loop."""
-    global _ud_full_scan_running
+    global _ud_full_scan_running, _prizepicks_cycle_task
     _ud_full_scan_running = False
     _schedule_deferred_fpr()
 
@@ -1794,6 +1794,7 @@ async def _try_claim_delivery_slot(
     sport: str,
     stat: str,
     line: float,
+    provider: str = "Underdog",
 ) -> bool:
     """Atomically check the dedup dict and claim the delivery slot if available.
 
@@ -1813,14 +1814,19 @@ async def _try_claim_delivery_slot(
     of retry attempts when the rate-limiter is saturated.
     """
     async with _prop_dedup_lock:
+        dedup_player = (
+            _prizepicks_dedup_player(player)
+            if str(provider).strip().lower() == "prizepicks"
+            else player
+        )
         if _is_prop_deduped(
-            _prop_market_alerted, player, sport, stat, line,
+            _prop_market_alerted, dedup_player, sport, stat, line,
             dedup_window_seconds=config.UD_ALERT_DEDUP_WINDOW,
             min_line_change=config.MIN_UNDERDOG_LINE_CHANGE,
         ):
             return False
         # Pre-claim: record immediately so concurrent paths see it as alerted.
-        _record_prop_alerted(_prop_market_alerted, player, sport, stat, line)
+        _record_prop_alerted(_prop_market_alerted, dedup_player, sport, stat, line)
         return True
 
 
@@ -2030,6 +2036,17 @@ async def underdog_job(context) -> None:
         _job_activity_end("underdog")
         return
     _ud_full_scan_running = True
+
+    # PrizePicks shares this existing full-scan cadence; it is not registered
+    # as another scheduler job.  Run it as a guarded companion task so a slow
+    # or unavailable authorized feed cannot delay Underdog state restoration.
+    if (
+        _prizepicks_cycle_task is None
+        or _prizepicks_cycle_task.done()
+    ):
+        _prizepicks_cycle_task = asyncio.create_task(
+            _run_prizepicks_independent_cycle(context)
+        )
 
     # ── Evict stale dedup entries ─────────────────────────────────────────────
     # _prop_market_alerted keys are (player, sport, stat_type); values are
