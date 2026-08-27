@@ -726,6 +726,7 @@ async def _get_odds_api_confirmation(
                 observation_from_record(
                     row,
                     provider=getattr(row, "sportsbook", ""),
+                    sport=sport,
                     market_type=getattr(row, "market_key", market_key),
                     player=getattr(row, "player_name", ""),
                     stat_type=stat_type,
