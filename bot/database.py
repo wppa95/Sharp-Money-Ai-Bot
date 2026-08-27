@@ -16,7 +16,7 @@ from sqlalchemy import (
     Boolean, Column, DateTime, Float,
     Integer, String, Text,
     UniqueConstraint,
-    select, func, desc, text, delete, or_
+    select, func, desc, text, delete, or_, tuple_
 )
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
@@ -2652,6 +2652,76 @@ class Database:
             )
             return list(result.scalars().all())
 
+    async def get_ud_prop_history_bulk(
+        self,
+        props: "list[tuple[str, str]]",
+        limit: int = 20,
+    ) -> "dict[tuple[str, str], list[UnderdogSnapshotRecord]]":
+        """Load recent Underdog histories for many player/stat pairs.
+
+        FPR evaluates thousands of alternate lines, often sharing the same
+        player/stat history.  Read each pair once in bounded tuple-IN chunks,
+        retaining the same newest-first, non-removed semantics as
+        ``get_ud_prop_history``.
+        """
+        pairs = list(dict.fromkeys(
+            (str(player), str(stat)) for player, stat in props
+            if player and stat
+        ))
+        histories = {pair: [] for pair in pairs}
+        if not pairs:
+            return histories
+
+        # Keep bind parameters safely below SQLite's lower variable limits.
+        chunk_size = 400
+        async with self.session() as s:
+            for start in range(0, len(pairs), chunk_size):
+                chunk = pairs[start:start + chunk_size]
+                ranked = (
+                    select(
+                        UnderdogSnapshotRecord.id.label("snapshot_id"),
+                        func.row_number().over(
+                            partition_by=(
+                                UnderdogSnapshotRecord.player_name,
+                                UnderdogSnapshotRecord.stat_type,
+                            ),
+                            order_by=(
+                                desc(UnderdogSnapshotRecord.fetched_at),
+                                desc(UnderdogSnapshotRecord.id),
+                            ),
+                        ).label("history_rank"),
+                    )
+                    .where(
+                        UnderdogSnapshotRecord.removed == False,  # noqa: E712
+                        tuple_(
+                            UnderdogSnapshotRecord.player_name,
+                            UnderdogSnapshotRecord.stat_type,
+                        ).in_(chunk),
+                    )
+                    .subquery()
+                )
+                result = await s.execute(
+                    select(UnderdogSnapshotRecord)
+                    .join(
+                        ranked,
+                        UnderdogSnapshotRecord.id == ranked.c.snapshot_id,
+                    )
+                    .where(ranked.c.history_rank <= max(1, int(limit)))
+                )
+                for record in result.scalars().all():
+                    pair = (record.player_name, record.stat_type)
+                    histories.setdefault(pair, []).append(record)
+
+        for records in histories.values():
+            records.sort(
+                key=lambda record: (
+                    record.fetched_at or datetime.min,
+                    record.id or 0,
+                ),
+                reverse=True,
+            )
+        return histories
+
     async def get_recently_alerted_prop_keys(
         self,
         within_seconds: int = 86400,
@@ -2891,6 +2961,49 @@ class Database:
                 .limit(limit)
             )
             return list(result.scalars().all())
+
+    async def get_player_results_bulk(
+        self,
+        props: "list[tuple[str, str, str]]",
+        limit: int = 30,
+    ) -> "dict[tuple[str, str, str], list[PlayerGameResult]]":
+        """Load game-result evidence for many FPR props in one read session."""
+        keys = list(dict.fromkeys(
+            (str(player), str(sport), str(stat).lower().strip())
+            for player, sport, stat in props
+            if player and sport and stat
+        ))
+        results_by_key = {key: [] for key in keys}
+        if not keys:
+            return results_by_key
+
+        players = {key[0] for key in keys}
+        sports = {key[1] for key in keys}
+        stats = {key[2] for key in keys}
+        async with self.session() as s:
+            result = await s.execute(
+                select(PlayerGameResult).where(
+                    PlayerGameResult.player_name.in_(players),
+                    PlayerGameResult.sport.in_(sports),
+                    PlayerGameResult.stat_type.in_(stats),
+                )
+            )
+            for record in result.scalars().all():
+                key = (
+                    record.player_name,
+                    record.sport,
+                    (record.stat_type or "").lower().strip(),
+                )
+                if key in results_by_key:
+                    results_by_key[key].append(record)
+
+        for records in results_by_key.values():
+            records.sort(
+                key=lambda record: record.game_date or "",
+                reverse=True,
+            )
+            del records[max(1, int(limit)):]
+        return results_by_key
 
     async def count_player_results(
         self,

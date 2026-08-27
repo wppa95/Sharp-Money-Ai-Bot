@@ -779,6 +779,7 @@ async def _fetch_and_compute_hit_rates(
     current_line: float,
     allow_remote: bool = True,
     cycle_timing: Optional[_CycleTiming] = None,
+    preloaded_results: Optional[list] = None,
 ) -> "Optional[object]":
     """
     Fetch fresh game results (at most once per calendar day per player/stat),
@@ -835,7 +836,9 @@ async def _fetch_and_compute_hit_rates(
                     len(raw_results), player_name, stat_type,
                 )
 
-        if cycle_timing is not None:
+        if preloaded_results is not None:
+            db_results = list(preloaded_results)
+        elif cycle_timing is not None:
             db_results = await cycle_timing.await_db(
                 "read",
                 "get_player_results",
