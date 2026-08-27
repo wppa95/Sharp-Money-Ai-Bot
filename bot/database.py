@@ -3203,31 +3203,6 @@ class Database:
             "downstream_intelligence": downstream_intelligence,
         }])
         return
-                set_           = {
-                    "recommendation":     recommendation,
-                    "decision_tier":      decision_tier,
-                    "confidence":         confidence,
-                    "line_value":         line_value,
-                    "stars":              stars,
-                    "risk_level":         risk_level,
-                    "explanation":        explanation,
-                    "recommendation_id":  rec_id,
-                    "provider":           provider,
-                    "bet_quality_score":  bet_quality_score,
-                    "qualification_path": _qpath,
-                    "reason_codes":       _rcodes,
-                    "watchlist_state":    watchlist_state,
-                    "downstream_intelligence_json": _intel_json,
-                    "evidence_completeness": _intel_completeness,
-                    "sharp_confidence": _sharp_confidence,
-                    "sharp_confidence_components": _sharp_components,
-                }
-            )
-        )
-        async with self.session() as s:
-            await s.execute(stmt)
-            await s.commit()
-
     async def log_prop_opportunity_bulk(
         self,
         opportunities: "list[dict]",
