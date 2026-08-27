@@ -684,7 +684,9 @@ async def _get_odds_api_confirmation(
       • any provider/database exception or timeout
     """
     normalized_market = normalize_market(market_type)
-    if not getattr(config, "ODDS_API_ENABLED", True) or _analysis_engine is None:
+    if not getattr(config, "ODDS_API_ENABLED", True):
+        return None
+    if normalized_market == "player_prop" and _analysis_engine is None:
         return None
 
     allowed_books = set()
@@ -709,13 +711,12 @@ async def _get_odds_api_confirmation(
     )
     try:
         import asyncio as _asyncio
-        from engine.analysis import Sport as _Sport
-        try:
-            sport_enum = _Sport(sport)
-        except ValueError:
-            return None
-
         if normalized_market == "player_prop":
+            from engine.analysis import Sport as _Sport
+            try:
+                sport_enum = _Sport(sport)
+            except ValueError:
+                return None
             market_key = _UD_TO_ODDS_API_MARKET.get(stat_type.lower().strip())
             if not market_key:
                 return None
