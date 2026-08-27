@@ -1,0 +1,222 @@
+@Replit
+
+RESUME THE CURRENT PRIZEPICKS INDEPENDENT-SOURCE TASK
+
+The previous run stopped only because the Replit free usage limit was reached.
+
+Continue from the exact inspection/implementation state where you stopped.
+
+DO NOT restart the task from scratch.
+DO NOT redo the completed PropLine integration.
+DO NOT redo the completed 54-sport discovery work.
+
+The goal is to finish making PrizePicks a FIRST-CLASS INDEPENDENT BETTING SOURCE alongside Underdog.
+
+REQUIRED ARCHITECTURE
+
+Underdog:
+
+Underdog source → shared evaluation → UNDERDOG PICK
+
+PrizePicks:
+
+PropLine/PrizePicks source → shared evaluation → PRIZEPICKS PICK
+
+PrizePicks must NOT be confirmation-only.
+
+A PrizePicks prop must be able to become actionable without requiring an Underdog match.
+
+Underdog must remain independently actionable without requiring PrizePicks.
+
+If the same player/market exists on both platforms, keep BOTH provider observations independently with their own:
+
+* Source/provider identity
+* Line
+* Direction
+* Timestamp
+* Event/game identity
+* Evaluation result
+* Grading/history
+
+Cross-platform information may be used as supporting market context, but never overwrite one provider’s line or source identity.
+
+TELEGRAM
+
+Every actionable pick must clearly identify the platform.
+
+Use:
+
+UNDERDOG PICK
+
+or:
+
+PRIZEPICKS PICK
+
+I need to immediately know where to place the bet.
+
+Do NOT merge the two platforms into one pick.
+
+Do NOT suppress legitimate PrizePicks picks merely because a large number of PrizePicks observations exist.
+
+INVESTIGATE THE 200+ TELEGRAM MESSAGES
+
+Earlier, after the PrizePicks expansion, I opened the Telegram chat and saw 200+ bot messages.
+
+Now that PrizePicks is intentionally an independent actionable source, determine exactly what those messages represented.
+
+Before making any fix, reconcile:
+
+* Number of PropLine PrizePicks observations
+* Number normalized
+* Number evaluated
+* Number actionable
+* Number of Telegram messages generated
+* Number actually delivered
+* Duplicate messages
+* Unique picks
+* Whether the messages were legitimate PrizePicks Picks
+* Whether any messages were provider observations incorrectly treated as alerts
+* Whether a restart replayed/queued messages
+* Whether polling caused duplicates
+
+If there is a genuine duplicate/flood problem, fix ONLY the duplication/flood behavior.
+
+Do NOT disable legitimate PrizePicks Pick delivery.
+
+PRIZEPICKS COVERAGE
+
+Keep the completed dynamic PropLine discovery.
+
+The integration must continue to discover and check ALL available PrizePicks-supported sports.
+
+The previous live verification established:
+
+* 54 active sports discovered
+* NBA: 82 props
+* NFL: 36 props
+* NCAAF: 24 props
+* Tennis: 66 props
+* WNBA: 388 props
+* OVER and UNDER present
+
+Do NOT revert to NBA-only behavior.
+
+Continue using:
+
+* Official PropLine sport discovery
+* Canonical sport alias resolution
+* PrizePicks-only filtering
+* Standard player-prop markets only
+* Per-sport caching
+* Conservative pacing
+* Backoff/rate-limit handling
+* No direct PrizePicks/DataDome access
+
+TIER CLASSIFICATION
+
+Use the existing canonical classification:
+
+TIER 2:
+
+* MLB
+* NFL
+* NBA
+* CFB/NCAAF
+
+TIER 1:
+EVERY OTHER SPORT.
+
+The source/provider does NOT determine the tier.
+
+Do NOT create another tier system.
+
+Do NOT reintroduce:
+
+* S/A/B/C gates
+* PASS
+* Watchlist/Near-Miss
+* Any obsolete qualification gate
+
+SHARED INFRASTRUCTURE
+
+Reuse the existing shared:
+
+* Evaluation
+* Scoring
+* Evidence
+* Persistence
+* Deduplication
+* Grading
+* Historical tracking
+* Confirmation boundaries
+
+Do NOT create:
+
+* A second scoring engine
+* A second database
+* A duplicate monitoring architecture
+* A competing scheduler
+* A duplicate alert pipeline
+
+PRESERVE CURRENT SYSTEMS
+
+Do NOT change:
+
+* Underdog monitoring
+* FPR
+* Stable Refresh
+* Scheduler cadence
+* max_instances=1
+* OddsAPI pacing
+* DraftKings/FanDuel player-prop confirmation
+* Scoring formulas
+* Evidence architecture
+* Grading
+* Database schema unless absolutely necessary
+* Clean restart behavior
+* Unrelated Telegram behavior
+
+The separate DK/FanDuel moneyline and totals cleanup will be handled AFTER this task.
+
+The separate Underdog evidence/PickFinder discrepancy investigation will also be handled AFTER this task.
+
+Do NOT work on either of those two follow-up tasks yet.
+
+TESTING
+
+Run:
+
+* Focused PrizePicks/PropLine tests
+* Provider/evaluation tests
+* Telegram delivery/dedup tests
+* Full regression suite
+* Compilation checks
+* Diff/whitespace checks
+
+Then perform live verification when the PropLine quota permits.
+
+If the free PropLine quota is temporarily exhausted, continue code work and tests that do not require live requests, then perform live verification after the quota resets.
+
+LIVE ACCEPTANCE
+
+Do not claim completion based only on tests.
+
+Verify live that:
+
+* PrizePicks independently enters the evaluation lifecycle.
+* PrizePicks can independently produce an actionable pick.
+* Underdog remains independently actionable.
+* Telegram clearly labels the platform.
+* Same-platform duplicates are prevented.
+* Cross-platform provider identities remain separate.
+* Multiple PrizePicks sports remain supported.
+* Tier 1/Tier 2 classification is correct.
+* No second scheduler exists.
+* FPR remains intact.
+* Stable Refresh remains intact.
+* max_instances=1 remains intact.
+* Existing Underdog behavior remains intact.
+
+Do NOT create a checkpoint until implementation and live verification are complete.
+
+Report exactly what changed, exactly what caused the 200+ Telegram messages, test results, and live verification results.
