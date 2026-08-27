@@ -3455,45 +3455,103 @@ class Database:
         """
         now = datetime.utcnow()
         async with self.session() as s:
+            # Every serialized Underdog scan stamps its snapshot records with
+            # one shared ``fetched_at`` value and inserts them in contiguous
+            # primary-key order.  Prefer that newest complete feed batch over
+            # grouping the entire raw-history table by external_id.  The
+            # latter is exact but becomes prohibitively expensive once the
+            # append-only snapshot table reaches billions of rows.
+            #
+            # Keep the bounded ID lookback deliberately larger than the
+            # normal feed size.  If a legacy/small database does not have a
+            # substantial batch, use the historical query below so tests and
+            # older data retain their exact source-ID reconciliation semantics.
+            _latest_row = (
+                await s.execute(
+                    select(
+                        UnderdogSnapshotRecord.id,
+                        UnderdogSnapshotRecord.fetched_at,
+                    )
+                    .order_by(desc(UnderdogSnapshotRecord.id))
+                    .limit(1)
+                )
+            ).first()
+            _recent_rows: list[UnderdogSnapshotRecord] = []
+            if _latest_row is not None and _latest_row[1] is not None:
+                _latest_id, _latest_fetched_at = _latest_row
+                _recent_rows = list(
+                    (
+                        await s.execute(
+                            select(UnderdogSnapshotRecord)
+                            .where(
+                                UnderdogSnapshotRecord.id >= max(
+                                    1, int(_latest_id) - 50_000
+                                ),
+                                UnderdogSnapshotRecord.fetched_at
+                                == _latest_fetched_at,
+                            )
+                            .order_by(UnderdogSnapshotRecord.id)
+                        )
+                    ).scalars().all()
+                )
+
+            if len(_recent_rows) >= 1_000:
+                # This is the current complete feed, so each source ID has
+                # exactly one authoritative row in this bounded result.
+                rows = _recent_rows
+                logger.info(
+                    "get_all_active_underdog_snapshots_by_line: "
+                    "using latest feed batch (%d rows)",
+                    len(rows),
+                )
+            else:
+                # Historical fallback: source IDs are stable through line
+                # movements. Compute MAX(id) over all rows, including removal
+                # markers, so a removal wins.
+                rows = []
             # Source IDs are stable through line movements. Compute MAX(id)
             # over all rows, including removal markers, so a removal wins.
-            source_subq = (
-                select(func.max(UnderdogSnapshotRecord.id))
-                .where(
-                    UnderdogSnapshotRecord.external_id.isnot(None),
-                    UnderdogSnapshotRecord.external_id != "",
-                )
-                .group_by(
-                    UnderdogSnapshotRecord.external_id,
-                )
-                .scalar_subquery()
-            )
-            # Rows without a source ID retain the historical by-line fallback.
-            legacy_subq = (
-                select(func.max(UnderdogSnapshotRecord.id))
-                .where(
-                    or_(
-                        UnderdogSnapshotRecord.external_id.is_(None),
-                        UnderdogSnapshotRecord.external_id == "",
+            if not rows:
+                source_subq = (
+                    select(func.max(UnderdogSnapshotRecord.id))
+                    .where(
+                        UnderdogSnapshotRecord.external_id.isnot(None),
+                        UnderdogSnapshotRecord.external_id != "",
                     )
+                    .group_by(
+                        UnderdogSnapshotRecord.external_id,
+                    )
+                    .scalar_subquery()
                 )
-                .group_by(
-                    UnderdogSnapshotRecord.player_name,
-                    UnderdogSnapshotRecord.stat_type,
-                    UnderdogSnapshotRecord.line_value,
+                # Rows without a source ID retain the historical by-line
+                # fallback.
+                legacy_subq = (
+                    select(func.max(UnderdogSnapshotRecord.id))
+                    .where(
+                        or_(
+                            UnderdogSnapshotRecord.external_id.is_(None),
+                            UnderdogSnapshotRecord.external_id == "",
+                        )
+                    )
+                    .group_by(
+                        UnderdogSnapshotRecord.player_name,
+                        UnderdogSnapshotRecord.stat_type,
+                        UnderdogSnapshotRecord.line_value,
+                    )
+                    .scalar_subquery()
                 )
-                .scalar_subquery()
-            )
-            result = await s.execute(
-                select(UnderdogSnapshotRecord).where(
-                    or_(
-                        UnderdogSnapshotRecord.id.in_(source_subq),
-                        UnderdogSnapshotRecord.id.in_(legacy_subq),
-                    ),
+                rows = list(
+                    (
+                        await s.execute(
+                            select(UnderdogSnapshotRecord).where(
+                                or_(
+                                    UnderdogSnapshotRecord.id.in_(source_subq),
+                                    UnderdogSnapshotRecord.id.in_(legacy_subq),
+                                ),
+                            ).order_by(UnderdogSnapshotRecord.id)
+                        )
+                    ).scalars().all()
                 )
-                .order_by(UnderdogSnapshotRecord.id)
-            )
-            rows = list(result.scalars().all())
 
         # Older versions used ``player_stat`` as external_id.  Once a real
         # source ID exists for the same player/stat, that synthetic identity
