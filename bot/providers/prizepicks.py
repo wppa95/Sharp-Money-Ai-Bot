@@ -22,7 +22,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from providers.prop_provider import PlayerProp, PropProviderBase
-from providers.propline import PropLinePrizePicksProvider
+from providers.propline import PropLineClient, PropLinePrizePicksProvider
 
 # Import the existing PrizePicks data models (bot/prizepicks.py)
 try:
@@ -141,6 +141,10 @@ class PrizePicksProvider(PropProviderBase):
     ) -> None:
         self._sport_filter = sport_filter
         self._session      = session
+        self._authorized  = PropLinePrizePicksProvider(
+            sport_filter=sport_filter,
+            client=PropLineClient(session=session),
+        )
 
     # ── PropProviderBase interface ────────────────────────────────────────────
 
@@ -157,10 +161,13 @@ class PrizePicksProvider(PropProviderBase):
 
     def is_available(self) -> bool:
         """
-        DataDome blocks direct API calls.  Returns False until a bypass exists.
-        Override this method or use PrizePicksManualProvider for testing.
+        Return whether the authorized PropLine feed is configured.
+
+        The direct PrizePicks/DataDome client is never used here.  Keeping this
+        wrapper preserves the existing public provider name while routing any
+        configured live feed through PropLine.
         """
-        return False
+        return self._authorized.is_available()
 
     async def fetch_props(self) -> list[PlayerProp]:
         """
@@ -169,6 +176,8 @@ class PrizePicksProvider(PropProviderBase):
         Not yet functional — DataDome protection prevents direct API calls.
         Use PrizePicksManualProvider to supply props from a test/manual feed.
         """
+        if self.is_available():
+            return await self._authorized.fetch_props()
         if not _PRIZEPICKS_MODULE:
             raise ImportError(
                 "bot/prizepicks.py could not be imported — cannot fetch PrizePicks lines."
