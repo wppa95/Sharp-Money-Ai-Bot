@@ -4699,6 +4699,10 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         # prioritized subset selected from it.
         fpr_end_cursor  = min(fpr_cursor + len(cursor_window), fpr_pool_size)
         fpr_batch_size  = len(batch_keys)
+        fpr_batch_source_ids = len({
+            str(getattr(pool_snaps[key], "external_id", None) or key[:3])
+            for key in batch_keys
+        })
         fpr_next_cursor = fpr_end_cursor % fpr_pool_size  # wraps to 0 at pool end
 
         # Rotation completes when the batch reaches the last prop in the pool
