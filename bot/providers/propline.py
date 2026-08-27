@@ -48,6 +48,10 @@ _STAT_NORMALIZATION = {
     "steals": "steals",
     "pts+reb+ast": "pts+reb+ast",
     "pra": "pts+reb+ast",
+    "points_assists": "points+assists",
+    "points_rebounds": "points+rebounds",
+    "rebounds_assists": "rebounds+assists",
+    "points_rebounds_assists": "pts+reb+ast",
     "fantasy points": "fantasy points",
     "hits": "hits",
     "hr": "home runs",
@@ -75,12 +79,17 @@ _STAT_NORMALIZATION = {
 
 _SPORT_NORMALIZATION = {
     "BASEBALL": "MLB",
+    "BASEBALL MLB": "MLB",
     "BASKETBALL": "NBA",
+    "BASKETBALL NBA": "NBA",
     "FOOTBALL": "NFL",
+    "FOOTBALL NFL": "NFL",
     "AMERICAN FOOTBALL": "NFL",
     "HOCKEY": "NHL",
+    "HOCKEY NHL": "NHL",
     "WOMENS BASKETBALL": "WNBA",
     "WOMEN'S BASKETBALL": "WNBA",
+    "BASKETBALL WNBA": "WNBA",
 }
 
 _OVER_UNDER = {"OVER", "UNDER"}
@@ -306,6 +315,111 @@ def _extract_records(payload: Any) -> list[dict[str, Any]]:
             if nested:
                 return nested
     return []
+
+
+_OFFICIAL_MARKETS = (
+    "player_points",
+    "player_rebounds",
+    "player_assists",
+    "player_threes",
+    "player_blocks",
+    "player_steals",
+    "player_points_rebounds",
+    "player_points_assists",
+    "player_rebounds_assists",
+    "player_points_rebounds_assists",
+    "player_hits",
+    "player_home_runs",
+    "player_rbis",
+    "player_total_bases",
+    "player_strikeouts",
+    "player_walks",
+    "player_rushing_yards",
+    "player_receiving_yards",
+    "player_receptions",
+    "player_passing_yards",
+    "player_passing_tds",
+    "player_rush_rec_yards",
+    "player_shots_on_goal",
+    "player_games_won",
+    "player_sets_won",
+    "player_kills",
+    "player_deaths",
+    "player_maps_won",
+)
+
+_CANONICAL_TO_OFFICIAL_SPORT = {
+    "MLB": "baseball_mlb",
+    "NBA": "basketball_nba",
+    "NFL": "football_nfl",
+    "NHL": "hockey_nhl",
+    "WNBA": "basketball_wnba",
+    "TENNIS": "tennis",
+    "SOCCER": "soccer_epl",
+    "CS": "esports",
+    "DOTA": "esports",
+    "LOL": "esports",
+}
+
+
+def _official_odds_records(payload: Any) -> list[dict[str, Any]]:
+    """Flatten the documented PropLine odds response into normalizer records."""
+    if not isinstance(payload, list):
+        return []
+
+    records: list[dict[str, Any]] = []
+    for event in payload:
+        if not isinstance(event, dict):
+            continue
+        sport_key = _clean(event.get("sport_key"))
+        event_id = _clean(event.get("id"))
+        home = _clean(event.get("home_team"))
+        away = _clean(event.get("away_team"))
+        event_label = f"{away} at {home}".strip(" at")
+        event_data = {
+            "id": event_id,
+            "name": event_label,
+            "start_time": event.get("commence_time"),
+        }
+        for bookmaker in event.get("bookmakers") or []:
+            if not isinstance(bookmaker, dict):
+                continue
+            bookmaker_key = _clean(bookmaker.get("key")).lower().replace("_", "")
+            if bookmaker_key not in {"prizepicks", "prizepick"}:
+                continue
+            for market in bookmaker.get("markets") or []:
+                if not isinstance(market, dict):
+                    continue
+                market_key = _clean(market.get("key")).lower()
+                if not market_key.startswith("player_"):
+                    continue
+                stat_key = market_key.removeprefix("player_")
+                for outcome in market.get("outcomes") or []:
+                    if not isinstance(outcome, dict):
+                        continue
+                    odds_type = _clean(outcome.get("dfs_odds_type")).lower()
+                    if odds_type and odds_type != "standard":
+                        continue
+                    records.append(
+                        {
+                            "provider": "PrizePicks",
+                            "market_type": market_key,
+                            "sport": sport_key,
+                            "player": outcome.get("description"),
+                            "player_id": outcome.get("player_id"),
+                            "stat": stat_key,
+                            "line": outcome.get("point"),
+                            "direction": outcome.get("name"),
+                            "event": event_data,
+                            "external_id": outcome.get("book_outcome_id")
+                            or f"{event_id}:{market_key}:{outcome.get('description', '')}:{odds_type or 'standard'}",
+                            "updated_at": outcome.get("last_change_at")
+                            or market.get("last_update")
+                            or event.get("last_update"),
+                            "status": "available",
+                        }
+                    )
+    return records
 
 
 class PropLineClient:
