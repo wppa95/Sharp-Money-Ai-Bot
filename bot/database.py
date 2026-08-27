@@ -4231,7 +4231,7 @@ class Database:
             )
             out: dict = {}
             for row in pol_result.all():
-                player, sport, stat, sent_at, line, provider = row
+                player, sport, stat, provider, sent_at, line = row
                 if sent_at is None:
                     continue
                 if hasattr(sent_at, "timestamp"):
@@ -4271,7 +4271,7 @@ class Database:
                 .order_by(PropLineHistory.first_alert_sent_at)
             )
             for row in plh_result.all():
-                player, sport, stat, sent_at, line, provider = row
+                player, sport, stat, provider, sent_at, line = row
                 if sent_at is None:
                     continue
                 key = (
