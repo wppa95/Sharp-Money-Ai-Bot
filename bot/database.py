@@ -3203,13 +3203,6 @@ class Database:
             "downstream_intelligence": downstream_intelligence,
         }])
         return
-        import hashlib
-        import json as _json
-        from sqlalchemy.dialects.sqlite import insert as _sqlite_insert
-        now    = datetime.utcnow()
-        rec_id = hashlib.sha256(
-            f"{external_id}:{stat_type}".encode()
-        ).hexdigest()[:16]
         # The active monitoring universe has no secondary classification.
         # Keep the nullable column only for compatibility with old databases.
         watchlist_state = None
