@@ -176,6 +176,21 @@ def test_configured_odds_api_sports_excludes_underdog_only_scope():
     ]
 
 
+def test_default_odds_api_scope_excludes_nfl():
+    """NFL is not part of the default OddsAPI polling scope."""
+    import main as main_mod
+
+    mock_config = MagicMock()
+    mock_config.ODDS_API_SPORTS_RAW = (
+        "MLB,NBA,NHL,NCAAF,NCAAB,UFC,WNBA,EPL,LaLiga,SerieA,"
+        "Bundesliga,Ligue1,MLS,UCL"
+    )
+    with patch.object(main_mod, "config", mock_config):
+        configured = main_mod._configured_odds_api_sports()
+
+    assert "NFL" not in {sport.value for _, sport in configured}
+
+
 @pytest.mark.asyncio
 async def test_steam_check_job_skips_non_mlb_before_db_read():
     """get_odds_window must not be called for non-MLB sports."""

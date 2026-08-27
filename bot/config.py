@@ -48,7 +48,7 @@ class Config:
     # and may contain provider-only identifiers such as CS, LOL, or TENNIS.
     ODDS_API_SPORTS_RAW: str = os.environ.get(
         "ODDS_API_SPORTS",
-        "MLB,NBA,NFL,NHL,NCAAF,NCAAB,UFC,WNBA,EPL,LaLiga,SerieA,"
+        "MLB,NBA,NHL,NCAAF,NCAAB,UFC,WNBA,EPL,LaLiga,SerieA,"
         "Bundesliga,Ligue1,MLS,UCL",
     )
     ODDS_API_QUOTA_LIMIT: int = int(os.environ.get("ODDS_API_QUOTA_LIMIT", "30000"))
