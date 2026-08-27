@@ -1,0 +1,177 @@
+Implement PropLine → PrizePicks-Only Integration
+
+Continue from the current Sharp Money Bot implementation.
+
+The PROPLINE_API_KEY secret is already configured in Replit and Railway.
+
+Make ONLY the targeted changes required below.
+
+Goal
+
+Add PropLine as a PrizePicks-only current-line provider so the bot can use PrizePicks alongside the existing Underdog monitoring system.
+
+Requirements
+
+1. PropLine Scope
+
+Use PropLine ONLY for PrizePicks player props.
+
+Do NOT use PropLine for:
+
+* Underdog
+* DraftKings
+* FanDuel
+* Moneylines
+* Game totals
+* Any other sportsbook
+* Any other monitoring purpose
+
+Existing Underdog, DraftKings/FanDuel, and OddsAPI integrations remain unchanged.
+
+2. API Authentication
+
+Read the existing environment variable:
+
+PROPLINE_API_KEY
+
+Never hard-code the API key.
+
+If the key is missing, the provider must gracefully disable itself without crashing the bot.
+
+3. Shared Prop Model
+
+Normalize PropLine PrizePicks data into the bot’s existing player-prop representation.
+
+Preserve:
+
+* Provider/source = PrizePicks
+* Player identity
+* Sport
+* Event/game
+* Market/stat
+* Line
+* Over/Under direction where available
+* Source/external ID where available
+* Provider timestamp/freshness information
+
+Do not create a second incompatible prop model.
+
+4. PrizePicks Confirmation
+
+Use PropLine PrizePicks data as an additional confirmation/reference source for the existing Underdog player-prop pipeline.
+
+When an Underdog player prop has a matching PrizePicks prop, conservatively compare:
+
+* Player
+* Sport
+* Event/game
+* Market/stat
+* Line
+* Direction
+* Freshness
+* Source identity
+
+Reject ambiguous or stale matches.
+
+Do not fabricate a match when identity cannot be established confidently.
+
+5. No Direct PrizePicks Access
+
+Do NOT re-enable the existing direct PrizePicks API client.
+
+Do NOT attempt to bypass DataDome.
+
+Do NOT use browser automation, proxy rotation, CAPTCHA solving, fingerprint spoofing, or any other anti-bot circumvention.
+
+PropLine is the only PrizePicks data source for this task.
+
+6. No New Monitoring Architecture
+
+Do NOT create:
+
+* A second monitoring loop
+* A second scheduler
+* A second scoring engine
+* A second FPR
+* A second alert pipeline
+* A separate PrizePicks database
+* A competing cadence
+
+Feed the normalized PrizePicks data into the existing architecture.
+
+Preserve:
+
+* Unified monitoring lifecycle
+* FPR
+* Stable Refresh
+* Existing scoring
+* Evidence system
+* Grading
+* Telegram delivery
+* Dashboard
+* max_instances=1
+* Existing Underdog behavior
+* OddsAPI pacing
+
+7. Rate Limits / Free Tier
+
+The PropLine free tier is limited, so implement conservative request pacing.
+
+Do not create uncontrolled request volume.
+
+Respect provider rate-limit responses and back off appropriately.
+
+Avoid redundant requests when existing fresh PrizePicks data can be reused.
+
+8. Testing
+
+Add focused regression tests for:
+
+* API-key loading
+* Missing API key
+* PrizePicks-only filtering
+* Player-prop normalization
+* Player identity matching
+* Event/game matching
+* Market/stat matching
+* Line matching
+* Direction matching
+* Freshness rejection
+* Ambiguous-match rejection
+* Provider failure handling
+* Rate-limit/backoff handling
+* No direct PrizePicks polling
+* No PropLine Underdog usage
+* No duplicate scheduler/monitoring loop
+
+Run the full existing test suite as well.
+
+Do not weaken existing tests.
+
+9. Live Verification
+
+After implementation:
+
+1. Verify the bot starts successfully.
+2. Verify PROPLINE_API_KEY is detected without exposing the secret in logs.
+3. Verify PropLine successfully returns PrizePicks data.
+4. Verify only PrizePicks data is accepted from PropLine.
+5. Verify normalized PrizePicks player props reach the existing confirmation/evaluation path.
+6. Verify no direct PrizePicks/DataDome requests are being made.
+7. Verify Underdog monitoring continues normally.
+8. Verify FPR continues normally.
+9. Verify scheduler max_instances=1 remains unchanged.
+10. Verify no duplicate monitoring loop was created.
+11. Report actual live PropLine/PrizePicks observations separately from test-only verification.
+
+Important
+
+Do NOT deploy or restart Railway as part of this task.
+
+Do NOT change unrelated behavior.
+
+Do NOT modify scoring formulas or betting rules.
+
+Do NOT create a checkpoint.
+
+Report exactly what was changed, exactly what tests passed, and exactly what was live-verified.
