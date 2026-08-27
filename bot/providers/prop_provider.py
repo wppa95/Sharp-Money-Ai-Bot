@@ -61,6 +61,13 @@ class PlayerProp:
     external_id: str = ""       # provider's own identifier (for deduplication)
     game_id:     str = ""       # game/event identifier from the provider
     fetched_at:  datetime = field(default_factory=datetime.utcnow)
+    # Optional source metadata.  Existing providers may leave these blank.
+    direction:   str = ""       # "OVER" | "UNDER" when the source supplies it
+    player_id:   str = ""
+    event_id:    str = ""
+    event:       str = ""       # human-readable event/game label
+    provider_status: str = ""
+    source_timestamp: Optional[datetime] = None
 
     # ── Identity helpers ──────────────────────────────────────────────────────
 

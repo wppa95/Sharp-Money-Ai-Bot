@@ -1,13 +1,8 @@
 """
-PrizePicks provider — concrete PropProviderBase implementation.
+PrizePicks provider adapters.
 
-Since the PrizePicks API is protected by DataDome, this provider currently
-operates in "manual feed" mode only via PrizePicksManualProvider.
-
-When DataDome is bypassed or an alternative data source becomes available:
-  1.  Implement auth/proxy bypass in PrizePicksClient (bot/prizepicks.py).
-  2.  Override PrizePicksProvider.is_available() to return True.
-  3.  The rest of the system picks up PlayerProp objects automatically.
+The direct PrizePicks client remains disabled.  ``PropLinePrizePicksProvider``
+is the only live provider and is implemented in ``providers.propline``.
 
 Data flow:
     Manual JSON feed  ──┐
@@ -27,6 +22,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from providers.prop_provider import PlayerProp, PropProviderBase
+from providers.propline import PropLinePrizePicksProvider
 
 # Import the existing PrizePicks data models (bot/prizepicks.py)
 try:
