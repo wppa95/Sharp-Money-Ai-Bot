@@ -2520,6 +2520,10 @@ class Database:
         Return the earliest alert timestamp for each (player_name, stat_type)
         pair that had an Underdog alert sent within the last *since_hours*.
 
+        PropLineHistory is the normalized lifecycle source for this value.
+        Reading it avoids scanning the much larger raw Underdog snapshot table
+        during cold-start recovery.
+
         Used at startup to restore _MARKET_FIRST_ALERT state so the market
         availability window is accurate after a restart.
         """
@@ -2528,17 +2532,18 @@ class Database:
         async with self.session() as s:
             result = await s.execute(
                 select(
-                    UnderdogSnapshotRecord.player_name,
-                    UnderdogSnapshotRecord.stat_type,
-                    func.min(UnderdogSnapshotRecord.fetched_at),
+                    PropLineHistory.player_name,
+                    PropLineHistory.stat_type,
+                    func.min(PropLineHistory.first_alert_sent_at),
                 )
                 .where(
-                    UnderdogSnapshotRecord.alert_sent == True,   # noqa: E712
-                    UnderdogSnapshotRecord.fetched_at >= cutoff,
+                    PropLineHistory.provider == "Underdog",
+                    PropLineHistory.first_alert_sent_at.isnot(None),
+                    PropLineHistory.first_alert_sent_at >= cutoff,
                 )
                 .group_by(
-                    UnderdogSnapshotRecord.player_name,
-                    UnderdogSnapshotRecord.stat_type,
+                    PropLineHistory.player_name,
+                    PropLineHistory.stat_type,
                 )
             )
             return {(row[0], row[1]): row[2] for row in result.all()}
@@ -3568,18 +3573,23 @@ class Database:
         }
 
     async def get_pending_opportunities(
-        self, cutoff_hours: int = 4
+        self,
+        cutoff_hours: int = 4,
+        after_id: Optional[int] = None,
+        limit: int = 500,
     ) -> "list[PropOpportunityLog]":
         """
         Return PENDING opportunities whose game_time was at least cutoff_hours ago.
 
         Used by the opportunity_grader job to find outcomes that can now be
-        looked up in player_game_results.
+        looked up in player_game_results.  ``after_id`` lets the hourly job
+        rotate through a large backlog without retrying the same oldest rows
+        on every cycle.
         """
         from datetime import timedelta
         cutoff = datetime.utcnow() - timedelta(hours=cutoff_hours)
         async with self.session() as s:
-            result = await s.execute(
+            stmt = (
                 select(PropOpportunityLog)
                 .where(
                     PropOpportunityLog.result    == "PENDING",
@@ -3587,8 +3597,10 @@ class Database:
                     PropOpportunityLog.game_time <  cutoff,
                 )
                 .order_by(PropOpportunityLog.game_time)
-                .limit(500)
             )
+            if after_id is not None:
+                stmt = stmt.where(PropOpportunityLog.id > int(after_id))
+            result = await s.execute(stmt.limit(max(1, min(int(limit), 500))))
             return list(result.scalars().all())
 
     async def grade_opportunity(

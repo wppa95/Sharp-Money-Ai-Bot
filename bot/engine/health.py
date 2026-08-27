@@ -816,6 +816,17 @@ class HealthTracker:
             self._state["stable_refresh_cursor"] = max(0, int(cursor))
             self._save()
 
+    def get_opportunity_grader_cursor(self) -> int:
+        """Return the last opportunity id visited by the rotating grader."""
+        with self._lock:
+            return max(0, int(self._state.get("opportunity_grader_cursor", 0)))
+
+    def set_opportunity_grader_cursor(self, cursor: int) -> None:
+        """Persist the opportunity id checkpoint used by hourly grading."""
+        with self._lock:
+            self._state["opportunity_grader_cursor"] = max(0, int(cursor))
+            self._save()
+
     def get_wl_refresh_cursor(self) -> int:
         """Return the current rolling cursor into the FIFO-sorted watchlist candidate pool."""
         with self._lock:

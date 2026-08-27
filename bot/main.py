@@ -341,8 +341,18 @@ async def post_init(application: Application) -> None:
         jq.run_repeating(_clv_seed_job,        interval=900,                                first=120, name="clv_seeder")
         # CLV harvest job — every hour (processes seeds after game_time passes)
         jq.run_repeating(_clv_harvest_job,          interval=3600,  first=300,  name="clv_harvester")
-        # Opportunity grader — hourly (grades completed prop opportunities)
-        jq.run_repeating(_grade_opportunities_job,  interval=3600, first=3600, name="opportunity_grader")
+        # Opportunity grader — hourly (grades completed prop opportunities).
+        # A bounded, rotating worker must never overlap itself while provider
+        # lookups are in flight.
+        jq.run_repeating(
+            _grade_opportunities_job,
+            interval=3600,
+            # Run once shortly after startup, then continue on the hourly
+            # cadence.  A restart should not defer grading for a full hour.
+            first=60,
+            name="opportunity_grader",
+            job_kwargs={"max_instances": 1, "misfire_grace_time": 120},
+        )
         from player_history_job import player_history_collector_job
         jq.run_repeating(player_history_collector_job, interval=240, first=60, name="player_history_collector", job_kwargs={"max_instances": 1, "misfire_grace_time": 120})
         # API budget check — every 15 minutes
@@ -534,6 +544,11 @@ async def post_shutdown(application: Application) -> None:
 
 # ── Heartbeat job ─────────────────────────────────────────────────────────────
 
+_GRADE_BATCH_SIZE = 250
+_GRADE_FETCH_CONCURRENCY = 12
+_GRADE_FETCH_TIMEOUT_SECONDS = 20
+
+
 async def _grade_opportunities_job(context) -> None:
     """
     Every hour: grade completed prop opportunities from stored game results.
@@ -555,8 +570,34 @@ async def _grade_opportunities_job(context) -> None:
     if _ht_start:
         _ht_start.record_job_started("_grade_opportunities_job")
     try:
-        pending = await db.get_pending_opportunities(cutoff_hours=4)
+        _cursor = (
+            _ht_start.get_opportunity_grader_cursor()
+            if _ht_start and hasattr(_ht_start, "get_opportunity_grader_cursor")
+            else 0
+        )
+        try:
+            pending = await db.get_pending_opportunities(
+                cutoff_hours=4,
+                after_id=_cursor,
+                limit=_GRADE_BATCH_SIZE,
+            )
+        except TypeError:
+            # Keep lightweight test doubles and older database adapters
+            # compatible while production uses the rotating query.
+            pending = await db.get_pending_opportunities(cutoff_hours=4)
+        # Wrap once the cursor reaches the end of the pending set.
+        if not pending and _cursor:
+            try:
+                pending = await db.get_pending_opportunities(
+                    cutoff_hours=4,
+                    after_id=None,
+                    limit=_GRADE_BATCH_SIZE,
+                )
+            except TypeError:
+                pending = await db.get_pending_opportunities(cutoff_hours=4)
         if not pending:
+            if _ht_start:
+                _ht_start.record_job_run("_grade_opportunities_job")
             return
 
         # ── Proactively fetch player results so grading works without /backfill ──
@@ -568,22 +609,38 @@ async def _grade_opportunities_job(context) -> None:
             from providers.player_stats import PlayerStatsProvider as _GradeStatProvider
             _grade_stat_prov = _GradeStatProvider()
             _grade_fetched: set = set()
+            _grade_targets = []
             for _gopp in pending:
                 _gkey = (_gopp.player_name, _gopp.sport, (_gopp.stat_type or "").lower().strip())
                 if _gkey in _grade_fetched:
                     continue
                 _grade_fetched.add(_gkey)
-                try:
-                    _graw = await _grade_stat_prov.fetch_results(
-                        _gopp.player_name, _gopp.sport, _gopp.stat_type
-                    )
-                    for _gr in _graw:
-                        await db.upsert_player_result(_gr)
-                except Exception as _gfetch_exc:
-                    logger.debug(
-                        "_grade_opportunities_job: fetch_results failed for %s/%s: %s",
-                        _gopp.player_name, _gopp.stat_type, _gfetch_exc,
-                    )
+                _grade_targets.append(_gopp)
+
+            _grade_sem = asyncio.Semaphore(_GRADE_FETCH_CONCURRENCY)
+
+            async def _fetch_grade_results(_gopp):
+                async with _grade_sem:
+                    try:
+                        return await asyncio.wait_for(
+                            _grade_stat_prov.fetch_results(
+                                _gopp.player_name, _gopp.sport, _gopp.stat_type
+                            ),
+                            timeout=_GRADE_FETCH_TIMEOUT_SECONDS,
+                        )
+                    except Exception as _gfetch_exc:
+                        logger.debug(
+                            "_grade_opportunities_job: fetch_results failed for %s/%s: %s",
+                            _gopp.player_name, _gopp.stat_type, _gfetch_exc,
+                        )
+                        return []
+
+            _grade_batches = await asyncio.gather(
+                *(_fetch_grade_results(_gopp) for _gopp in _grade_targets)
+            )
+            for _graw in _grade_batches:
+                for _gr in _graw:
+                    await db.upsert_player_result(_gr)
         except Exception as _prov_exc:
             logger.warning("_grade_opportunities_job: stat provider init failed: %s", _prov_exc)
 
@@ -639,6 +696,10 @@ async def _grade_opportunities_job(context) -> None:
             )
         _ht_g = get_health_tracker()
         if _ht_g:
+            if hasattr(_ht_g, "set_opportunity_grader_cursor") and pending:
+                _ht_g.set_opportunity_grader_cursor(
+                    max(int(getattr(_opp, "id", 0) or 0) for _opp in pending)
+                )
             _ht_g.record_job_run("_grade_opportunities_job")
     except Exception:
         logger.exception("_grade_opportunities_job: unexpected error")

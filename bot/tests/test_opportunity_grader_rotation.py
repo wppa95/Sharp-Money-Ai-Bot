@@ -1,0 +1,188 @@
+"""Focused tests for the bounded, restart-safe hourly opportunity grader."""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import sys
+from datetime import datetime, timedelta
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+os.environ.setdefault("TELEGRAM_TOKEN", "test:token")
+
+import main
+
+
+class _Health:
+    def __init__(self, cursor: int = 0):
+        self.cursor = cursor
+        self.started = 0
+        self.runs = 0
+        self.failures = []
+
+    def get_opportunity_grader_cursor(self):
+        return self.cursor
+
+    def set_opportunity_grader_cursor(self, cursor):
+        self.cursor = cursor
+
+    def record_job_started(self, name):
+        self.started += 1
+
+    def record_job_run(self, name):
+        self.runs += 1
+
+    def record_job_fail(self, name, reason):
+        self.failures.append((name, reason))
+
+
+def _opp(opp_id: int, player: str, stat: str, *, recommendation="OVER"):
+    return SimpleNamespace(
+        id=opp_id,
+        player_name=player,
+        sport="NBA",
+        stat_type=stat,
+        game_time=datetime.utcnow() - timedelta(hours=6),
+        line_value=10.0,
+        recommendation=recommendation,
+        result="PENDING",
+        decision_tier="B",
+        confidence=60,
+    )
+
+
+def _context(db):
+    return SimpleNamespace(bot_data={"db": db})
+
+
+@pytest.mark.asyncio
+async def test_grader_deduplicates_provider_fetches_and_grades_directions():
+    first = _opp(11, "Player One", "Points")
+    duplicate = _opp(12, "Player One", "Points")
+    under = _opp(13, "Player Two", "Rebounds", recommendation="UNDER")
+
+    db = MagicMock()
+    db.get_pending_opportunities = AsyncMock(return_value=[first, duplicate, under])
+    db.upsert_player_result = AsyncMock()
+    async def get_result(player, sport, stat, game_date):
+        return SimpleNamespace(actual_value=11.0 if player == "Player One" else 9.0)
+
+    db.get_game_result_for_grading = AsyncMock(side_effect=get_result)
+    db.grade_opportunity = AsyncMock()
+    health = _Health()
+    fetch_calls = []
+
+    async def fetch_results(player, sport, stat):
+        fetch_calls.append((player, sport, stat))
+        return []
+
+    provider = MagicMock()
+    provider.fetch_results = fetch_results
+    with (
+        patch.object(main, "get_health_tracker", return_value=health),
+        patch("providers.player_stats.PlayerStatsProvider", return_value=provider),
+    ):
+        await main._grade_opportunities_job(_context(db))
+
+    assert fetch_calls == [
+        ("Player One", "NBA", "Points"),
+        ("Player Two", "NBA", "Rebounds"),
+    ]
+    assert [call.args[:3] for call in db.grade_opportunity.await_args_list] == [
+        (11, "HIT", 11.0),
+        (12, "HIT", 11.0),
+        (13, "HIT", 9.0),
+    ]
+    assert health.cursor == 13
+    assert health.runs == 1
+
+
+@pytest.mark.asyncio
+async def test_grader_fetches_concurrently_with_a_bounded_batch():
+    opportunities = [_opp(i, f"Player {i}", "Points") for i in range(1, 31)]
+    db = MagicMock()
+    db.get_pending_opportunities = AsyncMock(return_value=opportunities)
+    db.upsert_player_result = AsyncMock()
+    db.get_game_result_for_grading = AsyncMock(return_value=None)
+    health = _Health()
+    active = 0
+    max_active = 0
+
+    async def fetch_results(player, sport, stat):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.001)
+        active -= 1
+        return []
+
+    provider = MagicMock()
+    provider.fetch_results = fetch_results
+    with (
+        patch.object(main, "get_health_tracker", return_value=health),
+        patch("providers.player_stats.PlayerStatsProvider", return_value=provider),
+    ):
+        await main._grade_opportunities_job(_context(db))
+
+    assert 1 < max_active <= main._GRADE_FETCH_CONCURRENCY
+    db.get_pending_opportunities.assert_awaited_once_with(
+        cutoff_hours=4, after_id=0, limit=main._GRADE_BATCH_SIZE
+    )
+    assert health.cursor == 30
+    assert health.runs == 1
+
+
+@pytest.mark.asyncio
+async def test_grader_wraps_cursor_and_records_no_data_completion():
+    row = _opp(7, "Wrap Player", "Points")
+    db = MagicMock()
+    db.get_pending_opportunities = AsyncMock(side_effect=[[], [row]])
+    db.upsert_player_result = AsyncMock()
+    db.get_game_result_for_grading = AsyncMock(return_value=None)
+    db.grade_opportunity = AsyncMock()
+    health = _Health(cursor=100)
+
+    provider = MagicMock()
+    provider.fetch_results = AsyncMock(return_value=[])
+    with (
+        patch.object(main, "get_health_tracker", return_value=health),
+        patch("providers.player_stats.PlayerStatsProvider", return_value=provider),
+    ):
+        await main._grade_opportunities_job(_context(db))
+
+    assert db.get_pending_opportunities.await_args_list[0].kwargs == {
+        "cutoff_hours": 4, "after_id": 100, "limit": main._GRADE_BATCH_SIZE
+    }
+    assert db.get_pending_opportunities.await_args_list[1].kwargs == {
+        "cutoff_hours": 4, "after_id": None, "limit": main._GRADE_BATCH_SIZE
+    }
+    assert health.cursor == 7
+    assert health.runs == 1
+    db.grade_opportunity.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_no_pending_work_still_records_a_successful_health_run():
+    db = MagicMock()
+    db.get_pending_opportunities = AsyncMock(return_value=[])
+    health = _Health()
+
+    with patch.object(main, "get_health_tracker", return_value=health):
+        await main._grade_opportunities_job(_context(db))
+
+    assert health.started == 1
+    assert health.runs == 1
+    assert health.failures == []
+
+
+def test_grader_source_keeps_pending_selection_and_idempotent_update_contract():
+    source = __import__("inspect").getsource(main._grade_opportunities_job)
+    assert 'result == "PENDING"' not in source  # selection belongs in Database
+    assert "get_game_result_for_grading" in source
+    assert "grade_opportunity" in source
+    assert "get_opportunity_grader_cursor" in source
+    assert "set_opportunity_grader_cursor" in source

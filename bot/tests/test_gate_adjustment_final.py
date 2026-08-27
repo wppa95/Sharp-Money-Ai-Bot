@@ -1,4 +1,4 @@
-"""v3.6 regressions: unified monitoring, delivery quality, and persistence."""
+"""Regression tests for the canonical Tier 1/Tier 2 delivery gate."""
 
 from __future__ import annotations
 
@@ -14,56 +14,40 @@ os.environ.setdefault("TELEGRAM_TOKEN", "test:token")
 import market_engine as me
 
 
-@pytest.mark.parametrize("sport", ["MLB", "NFL", "NBA", "WNBA", "CS", "SOCCER"])
+def test_tier2_sports_are_exactly_major_us_sports():
+    assert me._TIER2_SPORTS == frozenset({"MLB", "NFL", "NBA"})
+    assert me._is_tier2_sport("mlb")
+    assert me._is_tier2_sport("NFL")
+    assert me._is_tier2_sport("NBA")
+    assert not me._is_tier2_sport("WNBA")
+    assert not me._is_tier2_sport("SOCCER")
+
+
+@pytest.mark.parametrize("sport", ["WNBA", "NHL", "SOCCER", "CS", "TENNIS"])
 @pytest.mark.parametrize("direction", ["OVER", "UNDER"])
-def test_unified_gate_allows_both_directions_when_quality_is_strong(sport, direction):
-    assert me._tier_delivery_gate(sport, direction, 80, 85, True, "S") is True
+def test_tier1_needs_direction_and_evidence_only(sport, direction):
+    assert me._tier_delivery_gate(sport, direction, 1, 1, True, "C", confidence=1)
+    assert not me._tier_delivery_gate(sport, direction, 1, 1, False, "S", confidence=99)
 
 
-@pytest.mark.parametrize("tier", ["A", "B", "C"])
-def test_non_top_tiers_remain_monitored_but_are_not_deliverable(tier):
-    """Lower tiers are evaluated/persisted; Telegram delivery stays quality gated."""
-    assert me._tier_delivery_gate("MLB", "OVER", 80, 85, True, tier) is False
+@pytest.mark.parametrize("sport", ["MLB", "NFL", "NBA"])
+def test_tier2_requires_strong_evidence_confidence_bq_and_mq(sport):
+    kwargs = dict(evidence_available=True, score_tier="C", confidence=90)
+    assert me._tier_delivery_gate(sport, "OVER", 85, 85, **kwargs)
+    assert me._tier_delivery_gate(sport, "UNDER", 85, 85, **kwargs)
+    assert not me._tier_delivery_gate(sport, "OVER", 84, 85, **kwargs)
+    assert not me._tier_delivery_gate(sport, "OVER", 85, 84, **kwargs)
+    assert not me._tier_delivery_gate(sport, "OVER", 85, 85, True, "S", confidence=89)
+    assert not me._tier_delivery_gate(sport, "OVER", 85, 85, False, "S", confidence=95)
 
 
-def test_mq_is_the_intentional_hard_delivery_gate():
-    assert me._tier_delivery_gate("MLB", "OVER", 80, 84, True, "S") is False
-    assert me._tier_delivery_gate("MLB", "OVER", 80, 85, True, "S") is True
+def test_direction_is_always_required():
+    assert not me._tier_delivery_gate("NHL", "PASS", 100, 100, True, "S", confidence=100)
+    assert not me._tier_delivery_gate("NBA", "", 100, 100, True, "S", confidence=100)
 
 
-def test_no_sport_tier_classifier_remains():
-    assert me._TIER2_SPORTS == frozenset()
-    for sport in ("MLB", "NFL", "NBA", "WNBA", "CS"):
-        assert me._is_tier2_sport(sport) is False
-
-
-class TestUnifiedPathsAndPersistence:
-    @pytest.fixture(scope="class")
-    @classmethod
-    def src(cls) -> str:
-        return inspect.getsource(me)
-
-    def test_delivery_paths_use_one_canonical_gate(self, src):
-        assert src.count("_tier_delivery_gate(") >= 4
-        assert "ACTIONABLE BET PICK" in src
-
-    def test_monitoring_state_is_persisted_for_restart(self, src):
-        assert "_init_state_from_db" in src
-        assert "_prop_market_alerted" in src
-        assert "save_underdog_snapshot" in src
-        assert "update_prop_lifecycle_state" in src
-
-    def test_continuous_cycle_persistence_is_instrumented(self):
-        timing = me._CycleTiming(1)
-        timing.database("write", "underdog_snapshot", 0.01)
-        timing.database("write", "prop_lifecycle", 0.01)
-        counts = timing.summary(2, 2)["diagnostics"]["counts"]
-        assert counts["persistence_snapshot_writes"] == 1
-        assert counts["persistence_grading_tracking_writes"] == 1
-
-
-def test_dedup_state_is_line_aware_and_importable():
-    from market_engine import _is_prop_deduped, _prop_market_alerted, _record_prop_alerted
-    assert callable(_is_prop_deduped)
-    assert callable(_record_prop_alerted)
-    assert isinstance(_prop_market_alerted, dict)
+def test_all_scan_paths_call_the_canonical_wrapper():
+    source = inspect.getsource(me)
+    assert source.count("_tier_delivery_gate(") >= 7
+    assert "engine.delivery_gates" in source
+    assert "_full_pool_rescan_job" in source

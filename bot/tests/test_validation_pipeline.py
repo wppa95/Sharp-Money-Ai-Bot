@@ -28,13 +28,10 @@ def test_first_seen_statistical_prop_is_validation_context_not_pipeline_block():
 
 
 def test_strict_telegram_gate_stays_sport_independent():
-    for sport in ("NFL", "MLB", "NBA", "NHL", "WNBA", "TENNIS", "DOTA"):
-        assert _tier_delivery_gate(sport, "OVER", 80, 85, True, "S")
-        assert not _tier_delivery_gate(sport, "OVER", 79, 85, True, "S")
-        assert not _tier_delivery_gate(sport, "OVER", 80, 84, True, "S")
-        assert not _tier_delivery_gate(sport, "OVER", 80, 85, False, "S")
-        assert not _tier_delivery_gate(sport, "OVER", 80, 85, True, "A")
-        assert not _tier_delivery_gate(sport, "OVER", 80, 85, True, "B")
-        assert not _tier_delivery_gate(sport, "OVER", 80, 85, True, "C")
-        assert not _tier_delivery_gate(sport, "OVER", 80, 85, True, "PASS")
-        assert not _tier_delivery_gate(sport, "MONEYLINE", 100, 100, True, "S")
+    for sport in ("NFL", "MLB", "NBA"):
+        assert _tier_delivery_gate(sport, "OVER", 85, 85, True, "S", confidence=90)
+        assert not _tier_delivery_gate(sport, "OVER", 80, 85, True, "S", confidence=89)
+        assert not _tier_delivery_gate(sport, "OVER", 85, 85, False, "S", confidence=90)
+    for sport in ("NHL", "WNBA", "TENNIS", "DOTA"):
+        assert _tier_delivery_gate(sport, "OVER", 0, 0, True, "PASS", confidence=0)
+        assert not _tier_delivery_gate(sport, "MONEYLINE", 100, 100, True, "S", confidence=100)

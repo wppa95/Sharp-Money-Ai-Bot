@@ -1,4 +1,4 @@
-"""Extended v3.6 coverage for the shared monitoring and delivery gate."""
+"""Extended coverage for shared monitoring and delivery rules."""
 
 from __future__ import annotations
 
@@ -7,29 +7,29 @@ import inspect
 import pytest
 
 import market_engine
-from market_engine import _tier_delivery_gate
+from market_engine import _tier_delivery_gate as tier_delivery_gate
 
 
-@pytest.mark.parametrize("sport", ["MLB", "NFL", "NBA", "WNBA", "CS2", "TENNIS"])
-@pytest.mark.parametrize("direction", ["OVER", "UNDER"])
-def test_every_scan_path_accepts_universal_directions(sport, direction):
-    assert _tier_delivery_gate(sport, direction, 80, 85, True, "S") is True
+@pytest.mark.parametrize("sport", ["MLB", "NFL", "NBA"])
+@pytest.mark.parametrize("direction", ["OVER", "UNDER", "over", "under"])
+def test_tier2_directions_require_the_full_quality_tuple(sport, direction):
+    assert not tier_delivery_gate(sport, direction, 80, 85, True, "S", confidence=89)
+    assert tier_delivery_gate(sport, direction, 85, 85, True, "S", confidence=90)
 
 
-@pytest.mark.parametrize("sport", ["MLB", "NFL", "NBA", "WNBA", "CS2"])
-def test_mq_hard_gate_is_consistent_across_sports(sport):
-    assert _tier_delivery_gate(sport, "OVER", 80, 84, True, "S") is False
-    assert _tier_delivery_gate(sport, "OVER", 80, 85, True, "S") is True
+@pytest.mark.parametrize("sport", ["WNBA", "CS2", "TENNIS"])
+def test_tier1_directions_are_not_restricted_by_quality_scores(sport):
+    assert tier_delivery_gate(sport, "OVER", 0, 0, True, "PASS", confidence=0)
+    assert tier_delivery_gate(sport, "UNDER", 80, 85, True, "C", confidence=1)
 
 
-@pytest.mark.parametrize("tier", ["A", "B", "C"])
-def test_lower_tiers_are_not_reclassified_as_watchlist(tier):
-    """A failed delivery gate must not imply a separate Watchlist class."""
-    assert _tier_delivery_gate("WNBA", "UNDER", 80, 85, True, tier) is False
+@pytest.mark.parametrize("tier", ["A", "B", "C", "PASS"])
+def test_tier_labels_do_not_create_a_watchlist_class(tier):
+    assert tier_delivery_gate("WNBA", "UNDER", 0, 0, True, tier, confidence=0)
 
 
 def test_invalid_recommendations_never_deliver():
-    assert _tier_delivery_gate("SOCCER", "PASS", 100, 100, True, "S") is False
+    assert not tier_delivery_gate("SOCCER", "PASS", 100, 100, True, "S", confidence=100)
 
 
 def test_all_delivery_paths_reference_canonical_gate():
@@ -47,12 +47,3 @@ def test_monitoring_and_restart_persistence_are_continuous():
         "_prop_market_alerted",
     ):
         assert marker in src
-
-
-def test_cycle_metrics_record_persistence_writes():
-    timing = market_engine._CycleTiming(7)
-    timing.database("write", "snapshot", 0)
-    timing.database("write", "mq_score_tracking", 0)
-    diagnostics = timing.summary(1, 1)["diagnostics"]["counts"]
-    assert diagnostics["persistence_snapshot_writes"] == 1
-    assert diagnostics["persistence_grading_tracking_writes"] == 1

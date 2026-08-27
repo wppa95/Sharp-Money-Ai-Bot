@@ -29,6 +29,7 @@ from telegram.constants import ParseMode
 from telegram.error import TelegramError
 
 from config import config
+from engine.delivery_gates import tier_delivery_gate as _canonical_tier_delivery_gate
 from engine.score_validation import clamp_score
 from models import EVOpportunity, Recommendation, SteamAlert
 
@@ -563,12 +564,32 @@ def format_start_message() -> str:
     ])
 
 
-# ── Tier 2 Telegram block (temporary) ────────────────────────────────────────
-# Sports in this set are monitored, scored, and stored normally, but Telegram
-# delivery is suppressed.  Module-level so tests can patch it when verifying
-# sport-specific formatting independent of the delivery block.
 def is_telegram_suppressed_sport(sport: Optional[str]) -> bool:
-    """Compatibility hook retained; no sport is suppressed by classification."""
+    """Compatibility hook retained for non-Underdog alert paths."""
+    return False
+
+
+def _has_strong_underdog_evidence(
+    score: object = None,
+    validation: object = None,
+    decision: object = None,
+    intelligence_trace: object = None,
+) -> bool:
+    """Mirror the delivery evidence check without importing market_engine."""
+    if bool(getattr(validation, "has_supporting_data", False)):
+        return True
+    if int(getattr(score, "n_history", 0) or 0) >= 5:
+        return True
+    for obj in (decision, intelligence_trace):
+        if isinstance(obj, dict) and any(
+            value not in (None, {}, [], "") for value in obj.values()
+        ):
+            return True
+        if obj is not None:
+            for attr in ("evidence", "bet_evidence", "intelligence_trace"):
+                value = getattr(obj, attr, None)
+                if value not in (None, {}, [], ""):
+                    return True
     return False
 
 
@@ -607,10 +628,9 @@ async def broadcast_alert(
     Broadcast an alert to multiple chat IDs.
     Returns {"sent": n, "failed": m}.
 
-    When ``sport`` is provided, the Tier 2 Telegram block is enforced here
-    as the lowest possible delivery boundary — even if an upstream gate was
-    accidentally omitted.  This is a safety net; upstream callers should
-    also have their own guards.
+    The Underdog delivery boundary applies its shared Tier 1/Tier 2 gate
+    before reaching this low-level sender.  This function remains generic for
+    other alert types and does not infer prop evidence from message text.
     """
     sent = failed = 0
     for cid in chat_ids:
@@ -1038,7 +1058,7 @@ class AlertDelivery:
         No DB-level dedup is applied here — dedup is handled upstream in
         _prizepicks_job by checking for recent PPEdgeRecords in the DB.
         """
-        # ── Tier 2 Telegram block (PP path) ─────────────────────────────────────
+        # Compatibility hook for non-Underdog alert paths.
         _pp_sport = getattr(getattr(opp, "pp_line", None), "sport", None) or ""
         if is_telegram_suppressed_sport(_pp_sport):
             logger.info(
@@ -1157,19 +1177,6 @@ class AlertDelivery:
              - default               → format_underdog_change_alert   (🎯 BET PICK)
           5. Broadcast to all registered chat IDs.
         """
-        # ── FINAL Tier 2 Telegram backstop — runs before any import or logic ────
-        # Must be the very first executable statement so no code path can bypass it.
-        # NBA / MLB / NFL props are scanned, scored, and stored normally, but
-        # Telegram delivery is suppressed here — the authoritative delivery boundary.
-        # A second backstop lives in broadcast_alert() for additional defense-in-depth.
-        if is_telegram_suppressed_sport(sport):
-            logger.info(
-                "deliver_underdog: Tier 2 Telegram blocked — sport=%s player=%s stat=%s",
-                sport, player_name, stat_type,
-            )
-            return DeliveryResult(sent=False, filtered=True,
-                                  filtered_reason=f"Tier 2 sport blocked (temporary): {sport}")
-
         # Moneylines are retained and scored for monitoring, but only an
         # explicitly Strong-moneyline designation may reach Telegram. Keep this
         # before normal new/removal/movement-only exceptions so none bypass it.
@@ -1233,27 +1240,35 @@ class AlertDelivery:
                 logger.info("Underdog alert capped: %s | %s | %s", player_name, stat_type, reason)
                 return DeliveryResult(sent=False, filtered=True, filtered_reason=reason)
 
-        # Canonical Telegram qualification gate. Sport is intentionally not
-        # part of this decision; all supported sports are treated equally.
+        # Canonical Telegram qualification gate. Removals and internal
+        # market-move diagnostics retain their existing separate handling;
+        # actionable picks use the shared Tier 1/Tier 2 rules.
         if (
             decision is not None
             and not removed
             and not market_move_only
             and not _strong_moneyline
         ):
-            _tier = getattr(decision, "decision_tier", None)
             _bq = float(getattr(score, "total", 0) or 0)
-            _mq_label_obj = getattr(market_quality, "label", None)
-            _mq_label = getattr(_mq_label_obj, "value", _mq_label_obj)
+            _mq = float(getattr(market_quality, "score", 0) or 0)
             _direction = str(getattr(decision, "recommendation", "") or "").upper()
-            if (
-                _tier != "S" or _bq < 80.0
-                or _mq_label != "ELITE"
-                or _direction not in {"OVER", "UNDER"}
+            if not _canonical_tier_delivery_gate(
+                sport=sport,
+                direction=_direction,
+                bq_score=_bq,
+                mq_score=_mq,
+                evidence_available=_has_strong_underdog_evidence(
+                    score=score,
+                    validation=validation,
+                    decision=decision,
+                    intelligence_trace=intelligence_trace,
+                ),
+                confidence=getattr(decision, "confidence", None),
             ):
                 return DeliveryResult(
-                    sent=False, filtered=True,
-                    filtered_reason="Strict Telegram qualification gate",
+                    sent=False,
+                    filtered=True,
+                    filtered_reason="Tier delivery qualification gate",
                 )
 
 

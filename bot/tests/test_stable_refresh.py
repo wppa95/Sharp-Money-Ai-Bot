@@ -934,17 +934,14 @@ class TestStableRefreshJob:
 
     @pytest.mark.asyncio
     async def test_per_prop_fallback_only_when_bulk_raises(self):
-        """Per-prop has_recent_ud_alert is only called when get_recently_alerted_prop_keys
-        raises — not when it returns an empty frozenset."""
+        """Stable Refresh never falls back to a per-prop full-pool traversal."""
         snap = _make_snap()
         db   = _build_minimal_db(
             active_pool={("Test Player", "Points"): snap},
         )
-        # Override bulk to raise (simulating DB error)
         db.get_recently_alerted_prop_keys = AsyncMock(
             side_effect=Exception("simulated bulk query failure")
         )
-        db.has_recent_ud_alert = AsyncMock(return_value=True)  # per-prop → dedup
         ctx  = _make_context(db)
 
         with (
@@ -955,8 +952,8 @@ class TestStableRefreshJob:
             from market_engine import _stable_refresh_job
             await _stable_refresh_job(ctx)
 
-        # Bulk failed → per-prop fallback was used
-        db.has_recent_ud_alert.assert_called()
+        db.has_recent_ud_alert.assert_not_called()
+        db.log_prop_opportunity.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_in_memory_dedup_suppresses_prop(self):
@@ -980,14 +977,7 @@ class TestStableRefreshJob:
 
     @pytest.mark.asyncio
     async def test_s_tier_alert_persists_alert_sent_to_db(self):
-        """
-        After delivering a stable S-tier alert via the normal deliver_underdog path,
-        mark_ud_snapshot_alert_sent must be called so that get_recently_alerted_prop_keys()
-        returns this prop in the next cycle (preventing re-alert after a bot restart).
-
-        Note: the separate 95+ priority override broadcast_alert path has been removed per
-        spec. All stable refresh alerts now flow through deliver_underdog.
-        """
+        """Stable Refresh does not score or deliver a full-pool S-tier alert."""
         snap = _make_snap(player="Priority Player", stat="Points", sport="NBA")
         db   = _build_minimal_db(
             active_pool={("Priority Player", "Points"): snap},
@@ -995,37 +985,18 @@ class TestStableRefreshJob:
         )
         ctx  = _make_context(db)
 
-        s_score = _make_score(total=97, tier="S", stars=5)
-        s_dec   = _make_decision(rec="OVER", tier="S", conf=97)
-
-        delivery      = MagicMock()
-        delivery.sent = True   # simulate successful Telegram send
-
         with (
             patch("market_engine.get_health_tracker", return_value=None),
             patch("market_engine._is_futures_stat",   return_value=False),
-            patch("market_engine._is_prop_deduped",   return_value=False),
-            patch("market_engine._tier_delivery_gate", return_value=True),
-            patch("market_engine._is_tier2_sport",    return_value=False),
-            patch("market_engine._try_claim_delivery_slot", new_callable=AsyncMock, return_value=True),
-            patch("engine.ud_scoring.score_ud_prop",   return_value=s_score),
-            patch("engine.player_validator.validate_player_prop", return_value=_make_validation()),
-            patch("market_engine._fetch_and_compute_hit_rates", new_callable=AsyncMock, return_value=None),
-            patch("engine.ud_bet_decision.make_ud_bet_decision",  return_value=s_dec),
-            patch("market_engine._ud_line_fresh",     return_value=True),
-            patch("market_engine._is_game_live_or_past", return_value=False),
-            patch("market_engine._get_odds_api_confirmation", new_callable=AsyncMock, return_value=None),
-            patch("market_engine.AlertDelivery") as mock_ad,
+            patch("engine.ud_scoring.score_ud_prop") as score,
+            patch("market_engine.AlertDelivery") as delivery,
         ):
-            mock_ad.return_value.deliver_underdog = AsyncMock(return_value=delivery)
             from market_engine import _stable_refresh_job
             await _stable_refresh_job(ctx)
 
-        # DB persistence must be called — mark_ud_snapshot_alert_sent is called from
-        # inside stable_refresh_job after a successful deliver_underdog send
-        db.mark_ud_snapshot_alert_sent.assert_called_once_with(
-            "Priority Player", "Points"
-        )
+        score.assert_not_called()
+        delivery.assert_not_called()
+        db.mark_ud_snapshot_alert_sent.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_restart_dedup_via_db_prevents_re_alert(self):
@@ -1127,7 +1098,7 @@ class TestStableRefreshJob:
 
     @pytest.mark.asyncio
     async def test_qualifying_prop_logged_without_classification(self):
-        """A rescored prop is logged without a retired monitoring class."""
+        """Stable Refresh leaves scoring and opportunity logging to FPR."""
         snap = _make_snap()
         db   = _build_minimal_db(
             active_pool={("Test Player", "Points"): snap},
@@ -1135,31 +1106,18 @@ class TestStableRefreshJob:
         )
         ctx  = _make_context(db)
 
-        good_score = _make_score(total=75, tier="A", stars=4)
-        good_dec   = _make_decision(rec="OVER", tier="A", conf=72)
-        delivery   = MagicMock()
-        delivery.sent = False  # don't actually send Telegram
-
         with (
             patch("market_engine.get_health_tracker", return_value=None),
             patch("market_engine._is_futures_stat",   return_value=False),
-            patch("market_engine._is_prop_deduped",   return_value=False),
-            patch("engine.ud_scoring.score_ud_prop",   return_value=good_score),
-            patch("engine.player_validator.validate_player_prop", return_value=_make_validation()),
-            patch("market_engine._fetch_and_compute_hit_rates", new_callable=AsyncMock, return_value=None),
-            patch("engine.ud_bet_decision.make_ud_bet_decision",  return_value=good_dec),
-            patch("market_engine._is_game_live_or_past", return_value=False),
-            patch("market_engine._ud_line_fresh",     return_value=True),
-            patch("market_engine.AlertDelivery") as mock_ad,
-            patch("market_engine._get_odds_api_confirmation", new_callable=AsyncMock, return_value=None),
+            patch("engine.ud_scoring.score_ud_prop") as score,
+            patch("market_engine.AlertDelivery") as delivery,
         ):
-            mock_ad.return_value.deliver_underdog = AsyncMock(return_value=delivery)
             from market_engine import _stable_refresh_job
             await _stable_refresh_job(ctx)
 
-        calls = db.log_prop_opportunity.call_args_list
-        assert len(calls) >= 1
-        assert all(c.kwargs.get("watchlist_state") is None for c in calls)
+        score.assert_not_called()
+        delivery.assert_not_called()
+        db.log_prop_opportunity.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_empty_pool_completes_without_error(self):

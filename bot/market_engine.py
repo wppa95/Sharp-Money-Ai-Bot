@@ -36,6 +36,7 @@ import logging
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from typing import Optional
 
 from config import config
@@ -44,6 +45,11 @@ from engine.prop_intelligence import compute_prop_intelligence as _compute_intel
 from engine.downstream_intelligence import build_downstream_payload as _build_downstream_intel
 from engine.player_prop_market import _is_prop_deduped, _record_prop_alerted
 from engine.score_validation import clamp_score
+from engine.delivery_gates import (
+    TIER2_SPORTS as _CANONICAL_TIER2_SPORTS,
+    is_tier2_sport as _canonical_is_tier2_sport,
+    tier_delivery_gate as _canonical_tier_delivery_gate,
+)
 from database import (
     Database,
     MarketSnapshotRecord,
@@ -493,6 +499,9 @@ async def _init_state_from_db(db: "Database") -> None:
         logger.debug("State recovery: _prop_market_alerted restore skipped — %s", _exc)
 
 
+_STATE_RESTORE_TIMEOUT_SECONDS = 10.0
+_SCAN_LOOKUP_TIMEOUT_SECONDS = 15.0
+
 
 # ── Player Prop Market alert dedup ────────────────────────────────────────────
 # Dict[(player, sport, stat_type)] → (last_alert_timestamp_float, last_alerted_line)
@@ -504,6 +513,13 @@ async def _init_state_from_db(db: "Database") -> None:
 # A significant line movement always fires, even within the window.
 # Intentionally module-level: persists across cycles, resets on bot restart.
 _prop_market_alerted: dict = {}
+
+# Previous fetched Underdog state used for in-process line-change detection.
+# The database remains the durable source of record; this avoids a full-table
+# grouped-history scan on every two-minute polling cycle.
+_ud_scan_state: dict[tuple[str, str], object] = {}
+_ud_known_keys: set[tuple[str, str]] = set()
+_ud_scan_db_id: int | None = None
 
 # ── Delivery dedup concurrency lock ───────────────────────────────────────────
 # asyncio.Lock that makes the dedup check+record pair atomic across concurrent
@@ -1089,10 +1105,6 @@ async def consensus_check_job(context) -> None:
         if cr is None:
             continue
 
-        # ── Tier 2 Telegram block (temporary) ────────────────────────────────────
-        if _is_tier2_sport(ineff.sport):
-            logger.debug("consensus_check_job: Tier 2 block — sport=%s ineff=%s", ineff.sport, ineff.selection)
-            continue
         message = format_inefficiency_alert(ineff, cr)
         await broadcast_alert(bot, chat_ids, message)
         logger.info(
@@ -1150,10 +1162,6 @@ async def consensus_check_job(context) -> None:
         open_odds    = first_snap.get("open_odds", 0)
         current_odds = first_snap.get("current_odds", 0)
 
-        # ── Tier 2 Telegram block (temporary) ────────────────────────────────────
-        if _is_tier2_sport(sport):
-            logger.debug("consensus_check_job: Tier 2 block — sport=%s steam=%s", sport, selection)
-            continue
         message = format_steam_multibook_alert(
             event           = event,
             selection       = selection,
@@ -1199,11 +1207,11 @@ _DELIVERY_TIER_BASE: dict[str, float] = {
 # Sports that are Tier 2.  Tier 1 is every supported sport not in this set.
 # New non-NFL/non-NBA sports automatically remain Tier 1.
 # This is the CANONICAL source of truth — do NOT expand it.
-_TIER2_SPORTS: frozenset[str] = frozenset()
+_TIER2_SPORTS: frozenset[str] = _CANONICAL_TIER2_SPORTS
 
 
 def _is_tier2_sport(sport: str) -> bool:
-    return False
+    return _canonical_is_tier2_sport(sport)
 
 
 def _has_strong_delivery_evidence(
@@ -1240,6 +1248,7 @@ def _tier_delivery_gate(
     mq_score: float,
     evidence_available: bool = False,
     score_tier: str | None = None,
+    confidence: float | None = None,
 ) -> bool:
     """
     Canonical delivery eligibility gate used by ALL Telegram delivery paths.
@@ -1249,22 +1258,24 @@ def _tier_delivery_gate(
 
     Tier 1 rules:
         • Valid OVER or UNDER direction is required.
-        • S-tier, BQ ≥ 80, and ELITE MQ are required.
-        • Only OVER/UNDER directions are valid.
+        • Strong supporting evidence is required.
+        • S/A/B/C labels do not gate delivery.
 
-    Tier 2 rules (stricter):
+    Tier 2 rules (MLB/NFL/NBA):
         • Valid OVER or UNDER direction is required.
-        • Existing Tier 2 behavior is preserved.
+        • Strong supporting evidence is required.
+        • Confidence must be at least 90, BQ at least 85, and MQ at least 85.
+        • S/A/B/C labels do not gate delivery.
 
     Returns True if the candidate may proceed to delivery; False to block.
     """
-    if (direction or "").upper() not in ("OVER", "UNDER"):
-        return False
-    return (
-        score_tier == "S"
-        and bq_score >= 80.0
-        and mq_score >= 85.0
-        and bool(evidence_available)
+    return _canonical_tier_delivery_gate(
+        sport=sport,
+        direction=direction,
+        bq_score=bq_score,
+        mq_score=mq_score,
+        evidence_available=evidence_available,
+        confidence=confidence,
     )
 
 
@@ -1423,10 +1434,6 @@ async def clv_check_job(context) -> None:
             if already:
                 continue
 
-            # ── Tier 2 Telegram block (temporary) ────────────────────────────────
-            if _is_tier2_sport(snap.sport):
-                logger.debug("clv_check_job: Tier 2 block — sport=%s clv=%s", snap.sport, opp.selection)
-                continue
             message = format_clv_opportunity_alert(opp)
             await broadcast_alert(bot, chat_ids, message)
             logger.info(
@@ -1472,8 +1479,15 @@ async def underdog_job(context) -> None:
     if db is None:
         return
 
-    global _cold_start_done
+    global _cold_start_done, _ud_scan_state, _ud_known_keys, _ud_scan_db_id
     is_cold_start = not _cold_start_done   # True only on the very first successful fetch
+    _new_db_context = _ud_scan_db_id != id(db)
+    if _new_db_context:
+        # Isolated callers/tests may provide a new database double for each
+        # invocation.  Never leak the previous database's in-memory state.
+        _ud_scan_state = {}
+        _ud_known_keys = set()
+        _ud_scan_db_id = id(db)
 
     chat_ids = list(config.allowed_user_ids)
     now      = datetime.utcnow()
@@ -1490,6 +1504,21 @@ async def underdog_job(context) -> None:
     _health = get_health_tracker()
     if _health:
         _health.record_job_started("underdog_job")
+
+    # Claim the full-scan slot before cold-start state restoration.  Restoring
+    # dedup/lifecycle state can itself be expensive on a large SQLite history;
+    # FPR and Stable Refresh must not start competing full-pool reads during
+    # that window.
+    global _ud_full_scan_running
+    if _ud_full_scan_running:
+        logger.info(
+            "underdog_job: full scan in progress — deferring overlapping trigger"
+        )
+        if _health:
+            _health.record_job_run("underdog_job")
+        _job_activity_end("underdog")
+        return
+    _ud_full_scan_running = True
 
     # ── Evict stale dedup entries ─────────────────────────────────────────────
     # _prop_market_alerted keys are (player, sport, stat_type); values are
@@ -1526,7 +1555,20 @@ async def underdog_job(context) -> None:
 
     # On first run: restore module-level state from DB (market availability tracking)
     if is_cold_start:
-        await _init_state_from_db(db)
+        try:
+            await asyncio.wait_for(
+                _init_state_from_db(db),
+                timeout=_STATE_RESTORE_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            # Recovery is a best-effort restart aid.  It must not prevent the
+            # live Underdog feed from starting when a large SQLite history is
+            # slow to read.
+            logger.warning(
+                "underdog_job: state recovery exceeded %.1fs; "
+                "continuing with live feed",
+                _STATE_RESTORE_TIMEOUT_SECONDS,
+            )
     _cycle_timing.finish("state_restore")
     _cycle_timing.start("fetch_parse")
 
@@ -1535,17 +1577,6 @@ async def underdog_job(context) -> None:
     # scoring.  If the primary scan is active, the secondary instance only fetches +
     # detects new props (fast, ~2–5 s) and returns immediately so the 2-min cadence
     # is preserved without duplicating heavy scoring work.
-    global _ud_full_scan_running
-    if _ud_full_scan_running:
-            logger.info(
-                "underdog_job: full scan in progress — deferring overlapping trigger"
-            )
-            if _health:
-                _health.record_job_run("underdog_job")
-            return
-
-    _ud_full_scan_running = True
-
     # Memory baseline — log current RSS before the heavy scan to diagnose OOM kills.
     # Uses VmRSS (/proc/self/status) which reflects actual live RSS rather than the
     # all-time high-water mark returned by resource.ru_maxrss.
@@ -1651,6 +1682,7 @@ async def underdog_job(context) -> None:
     _cs_before_tiers:     dict       = {}  # tier counts under old calibration (before)
     _cs_after_tiers:      dict       = {}  # tier counts under new calibration (after)
     _scored_props:        list[dict] = []  # all scored props this cycle — for end-of-cycle debug log
+    _next_ud_scan_state:  dict[tuple[str, str], object] = {}
     _processed_keys:      set        = set()   # (player, stat_type) pairs handled in main loop
     # Batch for the end-of-cycle new-prop digest sent after the loop.
     # Each entry: {player, stat_type, sport, team, line, score, immediate, game_time}
@@ -1679,23 +1711,39 @@ async def underdog_job(context) -> None:
     _cycle_timing.start("scoring_evidence")
 
     try:
-        # Two DB round-trips before the loop — both O(unique props), no LIMIT.
-        # 1. Most-recent non-removed snapshot per (player, stat) for line-change detection.
-        # 2. All ever-seen (player, stat) keys (incl. removed) to detect first appearances.
-        recent_by_key: dict[tuple[str, str], UnderdogSnapshotRecord] = (
-            await _cycle_timing.await_db(
+        # Use the preceding fetched feed for normal-cycle comparisons.  On a
+        # restart there is intentionally no movement classification on the
+        # first fresh feed, which prevents false alerts while the durable
+        # recovery queries are best-effort and may be slow on a large SQLite DB.
+        if is_cold_start:
+            known_keys = {
+                (snap.player or "Unknown", _extract_ud_stat_type(
+                    snap.selection, snap.player, snap.line,
+                ))
+                for snap in ud_snaps
+            }
+            recent_by_key = {}
+            _cycle_timing.count("history_lookups_bypassed")
+        elif _new_db_context:
+            # Compatibility path for direct callers that start with an already
+            # warm bot flag but have no process-local scan state.
+            recent_by_key = await _cycle_timing.await_db(
                 "read",
                 "get_latest_underdog_snapshot_per_prop",
                 db.get_latest_underdog_snapshot_per_prop(),
             )
-        )
-        _cycle_timing.count("latest_snapshot_props_returned", len(recent_by_key))
-        known_keys: set[tuple[str, str]] = await _cycle_timing.await_db(
-            "read",
-            "get_known_underdog_prop_keys",
-            db.get_known_underdog_prop_keys(),
-        )
-        _cycle_timing.count("known_prop_keys_returned", len(known_keys))
+            known_keys = await _cycle_timing.await_db(
+                "read",
+                "get_known_underdog_prop_keys",
+                db.get_known_underdog_prop_keys(),
+            )
+            _cycle_timing.count("latest_snapshot_props_returned", len(recent_by_key))
+            _cycle_timing.count("known_prop_keys_returned", len(known_keys))
+        else:
+            recent_by_key = _ud_scan_state
+            known_keys = _ud_known_keys
+            _cycle_timing.count("latest_snapshot_props_returned", len(recent_by_key))
+            _cycle_timing.count("known_prop_keys_returned", len(known_keys))
     
         for snap in ud_snaps:
             is_removed = "[REMOVED]" in snap.selection
@@ -1729,9 +1777,12 @@ async def underdog_job(context) -> None:
             prev_line: Optional[float] = None
     
             if prev_record is not None and snap.line is not None:
-                if prev_record.line_value != snap.line:
+                # Production cycles use compact in-memory state; compatibility
+                # callers/tests may still provide ORM records.
+                _previous_line = getattr(prev_record, "line_value", None)
+                if _previous_line is not None and _previous_line != snap.line:
                     line_changed = True
-                    prev_line    = prev_record.line_value
+                    prev_line    = _previous_line
 
             _path_kind = (
                 "new_prop" if is_new_prop
@@ -2050,6 +2101,7 @@ async def underdog_job(context) -> None:
                             intelligence_trace=_np_intel_trace,
                         ),
                         score_tier=getattr(decision, "decision_tier", None),
+                        confidence=getattr(decision, "confidence", None),
                     )
                     if not _np_gate_ok:
                         logger.debug(
@@ -2624,6 +2676,7 @@ async def underdog_job(context) -> None:
                             intelligence_trace=_lc_intel_trace,
                         ),
                         score_tier=getattr(decision, "decision_tier", None),
+                        confidence=getattr(decision, "confidence", None),
                     ):
                         should_alert = False
                         logger.debug(
@@ -2758,6 +2811,17 @@ async def underdog_job(context) -> None:
                 bet_reason         = decision.reason         if decision is not None else None,
                 bet_evidence_json  = decision.to_json()      if decision is not None else None,
                 fetched_at         = now,
+            )
+            _next_ud_scan_state[(player, stat_type)] = SimpleNamespace(
+                line_value=float(snap.line or 0.0),
+                score_tier=score.tier if score is not None else getattr(prev_record, "score_tier", None),
+                score_total=(
+                    clamp_score(score.total, "ud_score.total", 0, 100)
+                    if score is not None
+                    else getattr(prev_record, "score_total", None)
+                ),
+                alert_sent=bool(ud_result.sent),
+                fetched_at=now,
             )
             # Cold-start: buffer for a single bulk transaction after the loop.
             # Incremental: also buffer — bulk-saved once after the loop completes
@@ -3044,6 +3108,7 @@ async def underdog_job(context) -> None:
                         intelligence_trace=_s_intel_trace,
                     ),
                     score_tier=getattr(_sdec, "decision_tier", None),
+                    confidence=getattr(_sdec, "confidence", None),
                 ):
                     logger.debug(
                         "UD tier_gate [standing]: %s | %s | sport=%s bq=%.0f mq=%.0f dir=%s — blocked",
@@ -3148,6 +3213,7 @@ async def underdog_job(context) -> None:
                         intelligence_trace=_dq_intel,
                     ),
                     score_tier=getattr(_dq_dec, "decision_tier", None),
+                    confidence=getattr(_dq_dec, "confidence", None),
                 ):
                     _n_dq_deferred += 1
                     _dq_deferred_log.append(
@@ -3155,12 +3221,6 @@ async def underdog_job(context) -> None:
                         f" [sport={_dq_sport} bq={_dq_bq_score:.0f}"
                         f" mq={_dq_mq_score:.0f} dir={_dq_direction}]: tier gate (backstop)"
                     )
-                    continue
-
-                # ── Tier 2 Telegram block (temporary) ────────────────────────────────────
-                # NBA / MLB / NFL props are scanned, scored, stored, and ranked normally
-                # but Telegram delivery is suppressed until this block is removed.
-                if _is_tier2_sport(_dq_sport):
                     continue
 
                 # ── Atomic dedup claim ─────────────────────────────────────────────────
@@ -3371,6 +3431,35 @@ async def underdog_job(context) -> None:
                     _cs_after_tiers.get("PASS", 0),
                 )
     
+        # Keep only compact previous-prop state needed by the next poll.
+        # This replaces a full grouped-history query against the raw snapshot
+        # table while preserving durable snapshots and known-prop semantics.
+        for _state_snap in ud_snaps:
+            _state_player = _state_snap.player or "Unknown"
+            _state_stat = _extract_ud_stat_type(
+                _state_snap.selection, _state_snap.player, _state_snap.line,
+            )
+            _state_key = (_state_player, _state_stat)
+            if _state_key not in _next_ud_scan_state:
+                _state_prev = recent_by_key.get(_state_key)
+                _next_ud_scan_state[_state_key] = SimpleNamespace(
+                    line_value=float(_state_snap.line or 0.0),
+                    score_tier=getattr(_state_prev, "score_tier", None),
+                    score_total=getattr(_state_prev, "score_total", None),
+                    alert_sent=False,
+                    fetched_at=now,
+                )
+        _ud_scan_state = _next_ud_scan_state
+        _current_scan_keys: set[tuple[str, str]] = set()
+        for _state_snap in ud_snaps:
+            _state_player = _state_snap.player or "Unknown"
+            _state_stat = _extract_ud_stat_type(
+                _state_snap.selection, _state_snap.player, _state_snap.line,
+            )
+            _state_key = (_state_player, _state_stat)
+            _current_scan_keys.add(_state_key)
+        _ud_known_keys.update(_current_scan_keys)
+
         _cycle_timing.finish("ranking_delivery")
         _cycle_timing.start("final_bookkeeping")
         # ── Persist scan checkpoint ────────────────────────────────────────────────
@@ -3787,6 +3876,18 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
     if _health:
         _health.record_job_started("stable_refresh_job")
 
+    # Do not compete with the first Underdog scan while it restores state and
+    # establishes the canonical active pool.  The next two-minute trigger will
+    # retry after the scan releases the slot.
+    if _ud_full_scan_running:
+        logger.info(
+            "stable_refresh: deferred while Underdog full scan is running"
+        )
+        if _health:
+            _health.record_job_run("stable_refresh_job")
+        _job_activity_end("stable_refresh")
+        return
+
     # Stats for console/health
     pool_size    = 0
     cursor       = 0
@@ -3824,16 +3925,17 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 key[0], key[1], key[2],
             ),
         )
-        pool_size         = len(pool_keys)
-
-        # Load cursor; wrap to current pool size so a shrinking pool never OOBs
-        cursor = _health.get_stable_refresh_cursor() if _health else 0
-        cursor = (cursor % pool_size) if pool_size > 0 else 0
-
-        # Slice batch — wraps at end of pool
-        end_cursor  = min(cursor + _STABLE_REFRESH_BATCH_SIZE, pool_size)
-        batch_keys  = pool_keys[cursor:end_cursor]
-        next_cursor = end_cursor % pool_size if pool_size > 0 else 0
+        # FPR owns the only full-pool rotation.  Stable Refresh still loads
+        # the active universe below so it can reconcile watchlist rows, but it
+        # must not maintain a second cursor or rescore a batch of every prop.
+        # Keep these compatibility stats at zero rather than reporting a
+        # misleading second rotation in health.json.
+        pool_keys         = []
+        pool_size         = 0
+        cursor            = 0
+        end_cursor        = 0
+        batch_keys        = []
+        next_cursor       = 0
 
         # Build line-map from pool for the freshness guard.  Uses line_value —
         # the canonical ORM field on UnderdogSnapshotRecord.  No divergence is
@@ -4063,12 +4165,8 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 except Exception:
                     pass
 
-            # ── Tier 2 Telegram block (temporary) ────────────────────────────────
-            # NBA / MLB / NFL props remain in the active pool and are rescored
-            # every cycle — only Telegram delivery is suppressed.
-            if _is_tier2_sport(_sr_sport):
-                continue
-
+            # NBA / MLB / NFL props remain in the active pool; the shared
+            # delivery gate applies the stricter quality rules at send time.
             # ── Atomic dedup claim [stable-refresh] ──────────────────────────────
             # Claim before delivery so the delivery-queue path cannot also send.
             if not await _try_claim_delivery_slot(_sr_player, _sr_sport, _sr_stat, _sr_line):
@@ -4136,10 +4234,6 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 # deliver_underdog returned not-sent (rate-limited, disabled sport, etc.)
                 sr_not_delivered += 1
                 sr_actionable -= 1
-
-        # Advance cursor — persisted to health.json so it survives restarts
-        if _health:
-            _health.set_stable_refresh_cursor(next_cursor)
 
     except Exception as _sr_exc:
         logger.exception("stable_refresh_job [part1]: error: %s", _sr_exc)
@@ -4278,15 +4372,13 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                             score=_wl_score, intelligence_trace=getattr(_wl_dec, "evidence", None),
                         ),
                         score_tier=getattr(_wl_dec, "decision_tier", None),
+                        confidence=getattr(_wl_dec, "confidence", None),
                     )
                     if not _wl_mq_ok:
                         logger.debug(
                             "UD tier_gate [watchlist]: %s | %s | sport=%s bq=%.0f mq=%.0f dir=%s — blocked",
                             _wl_player, _wl_stat, _wl_sport, _wl_bq_score, _wl_mq_score, _wl_dec.recommendation,
                         )
-                    # ── Tier 2 Telegram block (temporary) ─────────────────────
-                    if _wl_mq_ok and _is_tier2_sport(_wl_sport):
-                        _wl_mq_ok = False  # scored/stored — no Telegram for Tier 2
                     if _wl_mq_ok:
                      # ── Atomic dedup claim [watchlist] ────────────────────────
                      if not await _try_claim_delivery_slot(
@@ -4483,6 +4575,18 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
     if _health:
         _health.record_job_started("full_pool_rescan_job")
 
+    # The Underdog cold-start/full scan owns the database while it restores
+    # state and ingests the live feed.  Defer this rotation batch so the
+    # canonical FPR remains the only full-pool rotation once it starts.
+    if _ud_full_scan_running:
+        logger.info(
+            "full_pool_rescan: deferred while Underdog full scan is running"
+        )
+        if _health:
+            _health.record_job_run("full_pool_rescan_job")
+        _job_activity_end("fpr")
+        return
+
     # ── Mutable cycle stats ───────────────────────────────────────────────────
     fpr_pool_size       = 0
     fpr_cursor          = 0
@@ -4633,6 +4737,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                             score=_fpr_score, intelligence_trace=getattr(_fpr_dec, "evidence", None),
                         ),
                         score_tier=getattr(_fpr_dec, "decision_tier", None),
+                        confidence=getattr(_fpr_dec, "confidence", None),
                     )
                     if not _fpr_mq_ok:
                         fpr_not_delivered += 1
@@ -4640,9 +4745,6 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                             "UD tier_gate [fpr]: %s | %s | sport=%s bq=%.0f mq=%.0f dir=%s — blocked",
                             _fpr_player, _fpr_stat, _fpr_sport, _fpr_bq_score, _fpr_mq_score, _fpr_dec.recommendation,
                         )
-                    # ── Tier 2 Telegram block (temporary) ─────────────────────
-                    if _fpr_mq_ok and _is_tier2_sport(_fpr_sport):
-                        _fpr_mq_ok = False  # scored/stored — no Telegram for Tier 2
                     if _fpr_mq_ok:
                      # ── Atomic dedup claim [full-pool-rescan] ─────────────────
                      if not await _try_claim_delivery_slot(
