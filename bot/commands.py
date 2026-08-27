@@ -1983,9 +1983,13 @@ def _render_slip_section(
                     return f"<code>{v:.1f}</code>" if v is not None else "—"
                 pp_pl = comp.lines.get("PrizePicks")
                 pp_v  = pp_pl.line_value if (pp_pl and pp_pl.available) else None
-                row_parts = [f"🐶 {_lv2(best_line)}"]
-                if pp_v is not None:
-                    row_parts.append(f"🟣 {_lv2(pp_v)}")
+                _source = getattr(r, "sportsbook", None) or "Underdog"
+                _source_emoji = {"Underdog": "🐶", "PrizePicks": "🟣"}.get(
+                    _source, "📡"
+                )
+                row_parts = [f"{_source_emoji} {_source} {_lv2(best_line)}"]
+                if _source != "PrizePicks" and pp_v is not None:
+                    row_parts.append(f"🟣 PrizePicks {_lv2(pp_v)}")
                 provider_row = "\n    " + "  ".join(row_parts)
 
         section.append(
