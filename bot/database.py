@@ -3338,7 +3338,6 @@ class Database:
                         "sharp_confidence",
                         "sharp_confidence_components",
                     )
-                )
                 stmt = _insert_stmt.on_conflict_do_update(
                     index_elements=["external_id", "stat_type"],
                     set_=_update_columns,
