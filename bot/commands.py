@@ -1373,8 +1373,11 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     _midnight_utc = now.replace(hour=0, minute=0, second=0, microsecond=0)
     _since_hours  = max((now - _midnight_utc).total_seconds() / 3600, 4.0)
 
-    # ── 1. Underdog props ─────────────────────────────────────────────────────
-    logger.info("cmd_picks: fetching UD props (limit=%d sport=%s)", limit * 3, sport_filter)
+    # ── 1. Provider-owned props ──────────────────────────────────────────────
+    # PrizePicks is actionable on its own; it is not merely Underdog
+    # enrichment. Keep the provider in the candidate identity so matching
+    # player/stat rows remain separate in this analyst view.
+    logger.info("cmd_picks: fetching provider props (limit=%d sport=%s)", limit * 3, sport_filter)
     ud_props = await _db.get_top_ud_props_for_picks(limit=limit * 3, since_hours=_since_hours)
     ud_props = [
         p for p in ud_props
@@ -1382,49 +1385,69 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         and not is_telegram_suppressed_sport(p.sport)
     ]
 
-    
-
     if sport_filter:
         ud_props = [p for p in ud_props if p.sport.upper() == sport_filter]
 
-    # Display filter: hide season-long futures (stored & tracked as normal).
+    try:
+        pp_rows = await _db.get_latest_props_for_provider("PrizePicks", since_hours=_since_hours)
+    except Exception:
+        pp_rows = []
 
-    ud_props = ud_props[:limit]
+    pp_props = [
+        p for p in pp_rows
+        if not _is_season_future(p.stat_type)
+        and not is_telegram_suppressed_sport(p.sport)
+        and (not sport_filter or p.sport.upper() == sport_filter)
+    ]
+    provider_props: list[tuple[str, Any]] = [
+        *[("Underdog", p) for p in ud_props],
+        *[("PrizePicks", p) for p in pp_props],
+    ]
+    provider_props = list({
+        (
+            provider,
+            str(getattr(prop, "player_name", "")).strip().lower(),
+            str(getattr(prop, "sport", "")).upper(),
+            str(getattr(prop, "stat_type", "")).strip().lower(),
+        ): (provider, prop)
+        for provider, prop in provider_props
+    }.values())[: limit * 3]
 
-    if not ud_props:
+    if not provider_props:
         hint = f" for {sport_filter}" if sport_filter else ""
         await update.message.reply_text(
             f"🎯 <b>Actionable Player Prop Picks</b>\n\n"
             f"No qualifying player props available right now{hint}.\n\n"
             f"<i>Season-long futures are excluded from this view.\n"
             f"Ranked through the Sharp Money scoring engine.\n"
-            f"Underdog data used as the primary source.</i>",
+            f"Underdog and PrizePicks decisions are shown separately.</i>",
             parse_mode=ParseMode.HTML,
         )
         return
 
-    logger.info("cmd_picks: UD fetch done — %d props after filter (sport=%s)", len(ud_props), sport_filter)
+    logger.info(
+        "cmd_picks: provider fetch done — UD=%d PP=%d (sport=%s)",
+        len(ud_props), len(pp_props), sport_filter,
+    )
 
-    # ── 2. Cross-provider data (PrizePicks only — DK/FD removed from workflow) ─
-    try:
-        pp_rows = await _db.get_latest_props_for_provider("PrizePicks", since_hours=_since_hours)
-    except Exception:
-        pp_rows = []
-
-    # ── 3. Build PlayerPropMarketComparison for each prop ────────────────────
+    # ── 2. Build comparisons without inventing a cross-provider match ────────
     picks: list[tuple] = []   # [(PropLineHistory, PlayerPropMarketComparison|None)]
-    for plh in ud_props:
-        comp = build_player_prop_market_comparison(
-            player_name    = plh.player_name,
-            sport          = plh.sport,
-            stat_type      = plh.stat_type,
-            ud_line        = plh.line_value,
-            previous_line  = plh.prev_line,
-            fetched_at     = plh.fetched_at,
-            pp_rows        = pp_rows,
-            now            = now,
-            min_confidence = 0,   # show all props; confidence is display info, not a gate
-        )
+    for provider, plh in provider_props:
+        # The comparison helper is Underdog-anchored. For a standalone
+        # PrizePicks row, comp=None prevents a PP line being mislabeled as UD.
+        comp = None
+        if provider == "Underdog":
+            comp = build_player_prop_market_comparison(
+                player_name    = plh.player_name,
+                sport          = plh.sport,
+                stat_type      = plh.stat_type,
+                ud_line        = plh.line_value,
+                previous_line  = plh.prev_line,
+                fetched_at     = plh.fetched_at,
+                pp_rows        = pp_rows,
+                now            = now,
+                min_confidence = 0,
+            )
         picks.append((plh, comp))
 
     # Sort within each sport independently — never rank different sports against each other.
