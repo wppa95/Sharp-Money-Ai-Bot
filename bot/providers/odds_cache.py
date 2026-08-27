@@ -314,14 +314,13 @@ class OddsApiCache:
                     )
                     return data
 
-        except OddsApiError:
+        except OddsApiError as exc:
             if pacer is not None:
                 pacer.record_request_failed(
                     started_at,
-                    status=getattr(sys.exc_info()[1], "status", 0),
+                    status=exc.status,
                     quota_exhausted=(
-                        getattr(sys.exc_info()[1], "failure_type", None)
-                        == FailureType.QUOTA
+                        exc.failure_type == FailureType.QUOTA
                     ),
                 )
             raise
