@@ -1,0 +1,47 @@
+Task #72 is implemented and the full suite is green at 4,539 tests.
+
+Before closing Task #72, complete the remaining live verification only. Do not make unrelated changes and do not create another task.
+
+Verify on the actual running bot:
+
+1. Underdog moneylines
+    * Confirm a live Underdog moneyline is parsed and persisted.
+    * Confirm it can be matched against DraftKings/FanDuel confirmation data when available.
+2. Underdog game totals
+    * Confirm a live Underdog total is parsed and persisted.
+    * Confirm DraftKings/FanDuel total confirmation works when matching data is available.
+3. Underdog player props
+    * Confirm a live Underdog player prop can be matched against DraftKings/FanDuel player-prop data.
+    * Verify player/event/stat/direction/freshness matching is conservative.
+    * Verify mismatches and ambiguous matches are rejected rather than falsely confirmed.
+4. PrizePicks + Underdog coexistence
+    * Confirm PrizePicks support remains available alongside Underdog.
+    * Confirm this does not create a second monitoring cycle, duplicate polling loop, or duplicate delivery pipeline.
+    * Agent Reach must remain enrichment/analysis only.
+5. Persistence
+    * Confirm the newly supported Underdog moneyline and total snapshots actually persist.
+    * Confirm existing player-prop persistence remains intact.
+6. No regressions
+    * FPR remains the only full-pool rotation.
+    * Stable Refresh remains non-rotational.
+    * max_instances=1 remains unchanged.
+    * Task #155 remains untouched.
+    * OddsAPI pacing remains unchanged.
+    * Telegram delivery rules remain unchanged.
+    * Existing scoring/evidence/history behavior remains unchanged.
+
+If a provider does not expose usable live data during the verification window, report that explicitly. Do not fabricate a successful live confirmation.
+
+Run the focused tests again if needed, but do not report Task #72 as fully live-verified based solely on tests.
+
+Do not create a checkpoint until the live verification is complete.
+
+At the end, report:
+
+* Exact live Underdog markets observed
+* Exact confirmation paths successfully verified
+* PrizePicks coexistence result
+* Persistence result
+* Any provider limitations
+* Any remaining issues
+* Full-suite result
