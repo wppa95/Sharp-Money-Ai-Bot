@@ -81,3 +81,4 @@
 - [Unified monitoring universe](unified-monitoring-universe.md) — every active prop line is continuously scannable; delivery eligibility never creates a rotation or tracking queue.
 - [Directional persistence policy](pass-watchlist-persistence.md) — PASS/no-direction/watchlist are transient scan results; only OVER/UNDER evaluations are persisted.
 - [Provider scope separation](provider-scope-separation.md) — ACTIVE_SPORTS is the Underdog universe, not a generic OddsAPI sport list; keep provider namespaces separate.
+- [OddsAPI error pacing](oddsapi-error-pacing.md) — permanent 422 INVALID_MARKET responses must not back off valid shared polling.
