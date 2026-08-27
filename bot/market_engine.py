@@ -4803,6 +4803,44 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         if fpr_end_cursor >= fpr_pool_size:
             rotation_complete = True
 
+        # Alternate lines share player/stat history.  Load each history once
+        # for this bounded batch instead of opening one SQLite session per line.
+        _fpr_history_by_prop: dict[tuple[str, str], list] = {}
+        _fpr_bulk_history = getattr(db, "get_ud_prop_history_bulk", None)
+        if asyncio.iscoroutinefunction(_fpr_bulk_history):
+            try:
+                _fpr_history_by_prop = await _fpr_bulk_history(
+                    [(_key[0], _key[1]) for _key in batch_keys],
+                    limit=30,
+                )
+            except Exception as _fpr_bulk_history_exc:
+                logger.warning(
+                    "full_pool_rescan: bulk history read failed; "
+                    "falling back to per-prop reads: %s",
+                    _fpr_bulk_history_exc,
+                )
+
+        # Evidence is also shared by alternate lines for a player/stat.  The
+        # bulk result is keyed by the exact stat spelling used by the decision
+        # layer, matching _fetch_and_compute_hit_rates' existing lookup.
+        _fpr_results_by_prop: dict[tuple[str, str, str], list] = {}
+        _fpr_bulk_results = getattr(db, "get_player_results_bulk", None)
+        if asyncio.iscoroutinefunction(_fpr_bulk_results):
+            try:
+                _fpr_results_by_prop = await _fpr_bulk_results(
+                    [(_key[0], getattr(pool_snaps[_key], "sport", None) or "UNKNOWN", _key[1])
+                     for _key in batch_keys],
+                    limit=30,
+                )
+            except Exception as _fpr_bulk_results_exc:
+                logger.warning(
+                    "full_pool_rescan: bulk evidence read failed; "
+                    "falling back to per-prop reads: %s",
+                    _fpr_bulk_results_exc,
+                )
+
+        _fpr_opportunity_rows: list[dict] = []
+
         # ── Score each prop in this batch ─────────────────────────────────────
         for _fpr_key in batch_keys:
             _fpr_player, _fpr_stat, _fpr_line_val = _fpr_key[:3]
@@ -4819,7 +4857,14 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 # or deliver a prop after its event has started.
                 if _is_game_live_or_past(_fpr_snap, now):
                     continue
-                _fpr_hist  = await db.get_ud_prop_history(_fpr_player, _fpr_stat, limit=30)
+                if _fpr_history_by_prop:
+                    _fpr_hist = _fpr_history_by_prop.get(
+                        (_fpr_player, _fpr_stat), []
+                    )
+                else:
+                    _fpr_hist = await db.get_ud_prop_history(
+                        _fpr_player, _fpr_stat, limit=30
+                    )
 
                 # Rescanning DOES count toward API/fetch totals per requirement
                 fpr_total_rescanned += 1
@@ -4841,7 +4886,11 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
                 )
                 _fpr_hits = await _fetch_and_compute_hit_rates(
-                    db, _fpr_player, _fpr_sport, _fpr_stat, _fpr_line, allow_remote=False,
+                    db, _fpr_player, _fpr_sport, _fpr_stat, _fpr_line,
+                    allow_remote=False,
+                    preloaded_results=_fpr_results_by_prop.get(
+                        (_fpr_player, _fpr_sport, _fpr_stat.lower().strip())
+                    ) if _fpr_results_by_prop else None,
                 )
                 _fpr_dec = _fpr_decide(
                     score        = _fpr_score,
@@ -4853,31 +4902,30 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 )
 
                 # Keep the canonical monitoring/evidence stream complete for
-                # every full-pool evaluation.  Include the line in the
-                # identity so alternate lines cannot overwrite one another.
-                try:
-                    _fpr_ext_id = (
-                        getattr(_fpr_snap, "external_id", None)
-                        or str(getattr(_fpr_snap, "id", None) or "")
-                    )
-                    await db.log_prop_opportunity(
-                        external_id=f"{_fpr_ext_id}:{_fpr_line:g}",
-                        player_name=_fpr_player,
-                        team=getattr(_fpr_snap, "team", "") or "",
-                        sport=_fpr_sport,
-                        stat_type=_fpr_stat,
-                        line_value=_fpr_line,
-                        recommendation=getattr(_fpr_dec, "recommendation", "PASS"),
-                        decision_tier=getattr(_fpr_dec, "decision_tier", None),
-                        confidence=getattr(_fpr_dec, "confidence", 0),
-                        game_time=getattr(_fpr_snap, "game_time", None),
-                        provider="Underdog",
-                        bet_quality_score=float(getattr(_fpr_score, "total", 0) or 0),
-                        reason_codes=_compute_reason_codes(_fpr_score, _fpr_dec),
-                        watchlist_state=None,
-                    )
-                except Exception as _fpr_log_exc:
-                    logger.debug("full_pool_rescan: opportunity log failed: %s", _fpr_log_exc)
+                # every directional evaluation.  Buffer rows and persist them
+                # in one bounded upsert after scoring; PASS remains transient,
+                # matching log_prop_opportunity's existing contract.
+                _fpr_ext_id = (
+                    getattr(_fpr_snap, "external_id", None)
+                    or str(getattr(_fpr_snap, "id", None) or "")
+                )
+                if getattr(_fpr_dec, "recommendation", "PASS") in ("OVER", "UNDER"):
+                    _fpr_opportunity_rows.append({
+                        "external_id": f"{_fpr_ext_id}:{_fpr_line:g}",
+                        "player_name": _fpr_player,
+                        "team": getattr(_fpr_snap, "team", "") or "",
+                        "sport": _fpr_sport,
+                        "stat_type": _fpr_stat,
+                        "line_value": _fpr_line,
+                        "recommendation": getattr(_fpr_dec, "recommendation", "PASS"),
+                        "decision_tier": getattr(_fpr_dec, "decision_tier", None),
+                        "confidence": getattr(_fpr_dec, "confidence", 0),
+                        "game_time": getattr(_fpr_snap, "game_time", None),
+                        "provider": "Underdog",
+                        "bet_quality_score": float(getattr(_fpr_score, "total", 0) or 0),
+                        "reason_codes": _compute_reason_codes(_fpr_score, _fpr_dec),
+                        "watchlist_state": None,
+                    })
 
                 # Scan-time eligibility is non-blocking. PASS/no-direction
                 # remains in the monitoring stream for the next rotation.
@@ -4955,6 +5003,28 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 fpr_rescored        += 1
                 fpr_total_rescanned += 1
                 fpr_by_sport[_fpr_sport] = fpr_by_sport.get(_fpr_sport, 0) + 1
+
+        if _fpr_opportunity_rows:
+            _fpr_bulk_opportunity = getattr(db, "log_prop_opportunity_bulk", None)
+            if asyncio.iscoroutinefunction(_fpr_bulk_opportunity):
+                try:
+                    await _fpr_bulk_opportunity(_fpr_opportunity_rows)
+                except Exception as _fpr_bulk_log_exc:
+                    logger.warning(
+                        "full_pool_rescan: bulk opportunity write failed: %s",
+                        _fpr_bulk_log_exc,
+                    )
+            else:
+                # Compatibility path for lightweight test doubles and older
+                # database objects that do not expose the bulk method.
+                for _fpr_row in _fpr_opportunity_rows:
+                    try:
+                        await db.log_prop_opportunity(**_fpr_row)
+                    except Exception as _fpr_log_exc:
+                        logger.debug(
+                            "full_pool_rescan: opportunity log failed: %s",
+                            _fpr_log_exc,
+                        )
 
         # ── Advance cursor; increment rotation when pool is fully covered ──────
         if rotation_complete:
