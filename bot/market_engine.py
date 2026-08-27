@@ -35,6 +35,7 @@ import gc
 import logging
 import time
 from collections import defaultdict
+from dataclasses import replace
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from typing import Optional
@@ -765,10 +766,11 @@ async def _get_odds_api_confirmation(
         # that carry the same player/stat market, while avg_line/confirmed
         # only use the requested side.
         from engine.provider_confirmation import _matches_identity as _matches
+        identity_target = replace(target, direction="")
         identity_rows = [
             row for row in observations
             if row.provider_key in {b.replace(" ", "") for b in allowed_books}
-            and _matches(target, row, candidate_names={
+            and _matches(identity_target, row, candidate_names={
                 normalize_name(getattr(candidate, "player", ""))
                 for candidate in observations
             })
