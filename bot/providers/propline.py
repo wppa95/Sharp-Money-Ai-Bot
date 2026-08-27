@@ -361,7 +361,7 @@ class PropLineClient:
         return bool(
             self._cache
             and self.cache_ttl > 0
-            and (now - self._cache.fetched_at.timestamp()) < self.cache_ttl
+            and (time.time() - self._cache.fetched_at.timestamp()) < self.cache_ttl
         )
 
     async def fetch_prizepicks_props(self) -> PropLineFetchResult:
@@ -371,7 +371,7 @@ class PropLineClient:
 
         async with self._lock:
             now = self._clock()
-            if self._cache_is_fresh(time.time()):
+            if self._cache_is_fresh(now):
                 return PropLineFetchResult(
                     list(self._cache.props),
                     self._cache.fetched_at,

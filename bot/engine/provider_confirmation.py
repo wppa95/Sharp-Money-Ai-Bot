@@ -135,6 +135,8 @@ class ConfirmationTarget:
     line: Optional[float] = None
     event: str = ""
     game_time: Optional[datetime] = None
+    event_id: str = ""
+    source_id: str = ""
 
     @property
     def market(self) -> str:
@@ -157,6 +159,8 @@ class ConfirmationObservation:
     odds: Optional[int] = None
     event: str = ""
     observed_at: Optional[datetime] = None
+    event_id: str = ""
+    source_id: str = ""
 
     @property
     def market(self) -> str:
@@ -201,8 +205,10 @@ def observation_from_record(
 
     observed = (
         _value(record, "observed_at", None)
+        or _value(record, "source_timestamp", None)
         or _value(record, "timestamp", None)
         or _value(record, "recorded_at", None)
+        or _value(record, "fetched_at", None)
     )
     if not isinstance(observed, datetime):
         observed = None
@@ -231,6 +237,8 @@ def observation_from_record(
         odds=parsed_odds,
         event=_clean(_value(record, "event", "")),
         observed_at=observed,
+        event_id=_clean(_value(record, "event_id", _value(record, "game_id", ""))),
+        source_id=_clean(_value(record, "source_id", _value(record, "external_id", ""))),
     )
 
 
@@ -239,6 +247,8 @@ def _same_sport(target: ConfirmationTarget, observation: ConfirmationObservation
 
 
 def _same_event(target: ConfirmationTarget, observation: ConfirmationObservation) -> bool:
+    if target.event_id and observation.event_id:
+        return target.event_id == observation.event_id
     # Opaque provider IDs cannot be compared to OddsAPI's human event string.
     # When both are human labels, require the complete normalized token set.
     if not (_has_human_event(target.event) and _has_human_event(observation.event)):
@@ -355,6 +365,22 @@ def confirm_market(
     if not matches:
         return None
 
+    # PropLine is a single authorized source rather than a collection of
+    # sportsbooks.  If it gives multiple event/line/direction candidates for
+    # the same target, do not choose one arbitrarily.
+    pp_matches = [row for row in matches if row.provider_key == "prizepicks"]
+    if pp_matches:
+        pp_signatures = {
+            (
+                row.event_id or normalize_event(row.event),
+                row.line,
+                normalize_direction(row.direction),
+            )
+            for row in pp_matches
+        }
+        if len(pp_signatures) > 1:
+            return None
+
     # One source can emit duplicate rows. Keep the newest row per provider;
     # ambiguity between different providers remains visible.
     by_provider: dict[str, ConfirmationObservation] = {}
@@ -389,7 +415,11 @@ def confirm_market(
         "line_delta": line_delta,
         "confirmed": bool(lines or odds),
         "strong_confirmation": strong,
-        "source": "OddsAPI",
+        "source": (
+            "PrizePicks"
+            if unique and all(row.provider_key == "prizepicks" for row in unique)
+            else "OddsAPI"
+        ),
         "notes": (
             f"{len(unique)} book{'s' if len(unique) != 1 else ''}"
             + (f" · avg {avg_line:.1f}" if avg_line is not None else " · no line")

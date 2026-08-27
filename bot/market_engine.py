@@ -248,6 +248,8 @@ _registry: Optional[ConnectorRegistry] = None
 # _get_odds_api_confirmation() to call fetch_player_prop_lines().
 _analysis_engine: Optional[object] = None
 _confirmation_db: Optional[Database] = None
+_propline_provider: Optional[object] = None
+_propline_last_persisted_at: Optional[datetime] = None
 
 
 def init_odds_confirmation(engine: object, db: Optional[Database] = None) -> None:
@@ -257,9 +259,18 @@ def init_odds_confirmation(engine: object, db: Optional[Database] = None) -> Non
     it never creates another polling cycle.  One-argument callers remain
     supported for the existing player-prop tests and integrations.
     """
-    global _analysis_engine, _confirmation_db
+    global _analysis_engine, _confirmation_db, _propline_provider, _propline_last_persisted_at
     _analysis_engine = engine
     _confirmation_db = db
+    _propline_last_persisted_at = None
+    try:
+        from providers.propline import PropLinePrizePicksProvider
+        _propline_provider = PropLinePrizePicksProvider()
+    except Exception:
+        # Provider setup is optional; the existing OddsAPI confirmation path
+        # must remain available even if PropLine dependencies/configuration
+        # are unavailable.
+        _propline_provider = None
 
 # ── Player results integration ────────────────────────────────────────────────
 # Singleton provider and per-day fetch dedup cache.
