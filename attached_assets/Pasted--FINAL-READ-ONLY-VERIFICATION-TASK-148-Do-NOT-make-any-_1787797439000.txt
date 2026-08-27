@@ -1,0 +1,220 @@
+🔴 FINAL READ-ONLY VERIFICATION — TASK #148
+
+Do NOT make any code changes yet.
+
+Do NOT create a checkpoint.
+Do NOT mark Task #148 complete.
+Do NOT deploy Railway.
+Do NOT restart the bot.
+
+Perform a strict read-only verification of the current implementation after the Task #148 changes.
+
+The goal is to determine whether Task #148 is actually complete based on the requirements already approved.
+
+1. COMPLETE ACTIVE/SEEN UNIVERSE
+
+Verify from the actual database and current implementation:
+
+* The monitoring universe is NOT limited to PropLineHistory.
+* Every Underdog prop the bot has seen and that remains active is eligible for monitoring.
+* The ~7k line-history population is not being incorrectly used as the entire active universe.
+* Historical snapshots remain preserved separately.
+* Current active props are represented using the correct current/source identity.
+* Unchanged props remain eligible for future rescans.
+
+Report exact counts for:
+
+* Total historical snapshots
+* Unique seen props
+* Current active props
+* Current active props represented in PropLineHistory
+* Current active props outside PropLineHistory
+
+2. FPR ROTATION
+
+Verify the existing FPR mechanism without changing it.
+
+Confirm:
+
+* FPR uses the complete intended active/seens universe.
+* Cursor advances across batches.
+* Batches eventually cover the complete active universe.
+* Next rotation begins after full coverage.
+* New props are incorporated.
+* Unchanged props are eventually selected.
+* Previously evaluated props are eventually selected again.
+* Previously delivered props are not excluded before evaluation.
+* No provider-ordering issue prevents certain sports from being reached.
+* max_instances=1 remains intact.
+* No competing rotation exists.
+
+Do not modify FPR during this verification.
+
+3. SOURCE-ID / LEGACY IDENTITY
+
+This is the one remaining concern identified in the previous review.
+
+Determine whether legacy synthetic snapshot identities can cause:
+
+* Phantom active props
+* Duplicate current props
+* Removal markers failing to supersede older synthetic rows
+* Current lines remaining active after their real source line was removed
+
+Verify whether the new reconciliation logic already fully handles this.
+
+Important:
+
+Do NOT perform the proposed legacy identity backfill automatically.
+
+First determine whether it is actually required for the approved requirements.
+
+If the current runtime behavior is already correct without the backfill, leave the database untouched.
+
+If a backfill is genuinely required, STOP and report exactly why before making it.
+
+4. EVENT-START LIFECYCLE
+
+Verify:
+
+* Props remain active until their associated event starts.
+* Started events are excluded from active monitoring.
+* Historical snapshots are preserved.
+* Finished events remain available for grading.
+* No premature removal occurs.
+* No historical data is deleted.
+
+5. HOURLY GRADING
+
+Verify the actual scheduler/runtime configuration:
+
+* Grading job is registered.
+* Grading interval is exactly 1 hour.
+* It is actually running.
+* Completed events can enter grading.
+* HIT/MISS/PUSH persistence is idempotent.
+* Already-graded outcomes are not duplicated.
+* Actual result/value is stored.
+* Historical learning can consume the graded result.
+
+Do not change anything during this verification.
+
+6. REPORTING
+
+Verify the actual command output/data sources for:
+
+/funnel
+
+* Active universe is correct.
+* FPR rescoring is represented.
+* Sport Funnel Breakdown represents actual current monitoring/evaluation activity.
+* It is not limited to the old PropCandidateLog population.
+* It does not artificially show only a handful of sports.
+
+/dashboard
+
+* Duplicate tracked-props metric has been removed from the top section.
+* Lower activity/tracking section remains intact.
+
+/stats
+
+* Tracked opportunities use the authoritative underlying opportunity source.
+* It no longer incorrectly reports zero when opportunities exist.
+
+/tracking
+
+* Uses the same authoritative tracking data.
+* Grading cadence says 1 hour.
+* Pending/graded/HIT/MISS/PUSH values are consistent.
+
+/grades
+
+* Verify whether it correctly aliases/behaves like /grade.
+* Do not fabricate results.
+
+7. TELEGRAM RULES
+
+Verify that Task #148 did NOT alter the working delivery gates.
+
+Confirm:
+
+* Tier 1 = every sport except MLB/NFL/NBA.
+* Tier 2 = MLB/NFL/NBA.
+* Tier 1 requires Strong/Elite direction + strong evidence + existing safety/dedup/live-game protections.
+* Tier 2 retains Strong/Elite + strong evidence + 90/100+ confidence + BQ + MQ.
+* S/A/B/C are not evaluation gates.
+* Delivery deduplication remains downstream.
+* No old S/A/B/C delivery gate was accidentally restored.
+
+8. AGENT REACH — DO NOT CHANGE ARCHITECTURE
+
+Verify the current Agent Reach implementation.
+
+The previous inspection concluded that Agent Reach is currently an analyst-stage research/enrichment adapter, not an independent Telegram alert source.
+
+Confirm:
+
+* Agent Reach is still functioning within its intended analyst role.
+* It does not silently suppress normal monitoring.
+* It does not bypass canonical delivery rules.
+* It does not falsely claim that an Agent Reach alert was delivered.
+* It does not require creation of a second alert system.
+
+Critical:
+
+Do NOT convert Agent Reach into a standalone Telegram alert source during this verification.
+
+If the user-facing requirement “Agent Reach alerts” cannot be satisfied under the existing architecture, clearly report that as an architectural limitation rather than changing the architecture.
+
+9. LIVE RUNTIME CHECK
+
+Read-only only.
+
+Inspect the currently running bot and verify:
+
+* Process is healthy.
+* Scheduler is active.
+* max_instances=1.
+* Monitoring is running.
+* FPR is running.
+* Hourly grader is registered.
+* No duplicate monitoring jobs exist.
+* No overlapping monitoring cycles exist.
+* No critical runtime errors are occurring.
+
+Do not restart the bot.
+
+10. FINAL DECISION
+
+At the end, provide a strict PASS/FAIL table:
+
+Requirement	Status	Evidence
+Complete active/seens universe	PASS/FAIL	exact evidence
+FPR complete-universe rotation	PASS/FAIL	exact evidence
+Unchanged props eventually rescanned	PASS/FAIL	exact evidence
+Source-ID reconciliation	PASS/FAIL	exact evidence
+Event-start lifecycle	PASS/FAIL	exact evidence
+Hourly grading	PASS/FAIL	exact evidence
+/funnel reporting	PASS/FAIL	exact evidence
+Sport Funnel	PASS/FAIL	exact evidence
+/dashboard	PASS/FAIL	exact evidence
+/stats	PASS/FAIL	exact evidence
+/tracking	PASS/FAIL	exact evidence
+/grades	PASS/FAIL	exact evidence
+Telegram rules preserved	PASS/FAIL	exact evidence
+Agent Reach boundary	PASS/FAIL	exact evidence
+Runtime health	PASS/FAIL	exact evidence
+
+🔴 FINAL RULE
+
+Do not make changes.
+
+Do not create a checkpoint.
+
+Do not mark Task #148 complete.
+
+Do not perform the legacy identity backfill.
+
+Only report whether the current implementation actually satisfies the approved requirements.
+
+If anything fails, identify the exact smallest fix required and STOP there.
