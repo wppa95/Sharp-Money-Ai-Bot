@@ -66,6 +66,7 @@ from engine.provider_confirmation import (
     confirm_market,
     observation_from_record,
     normalize_market,
+    normalize_name,
 )
 from alerts import AlertDelivery, broadcast_alert, identify_sharp_books
 from alerts_multiplatform import (
@@ -767,7 +768,8 @@ async def _get_odds_api_confirmation(
             row for row in observations
             if row.provider_key in {b.replace(" ", "") for b in allowed_books}
             and _matches(target, row, candidate_names={
-                getattr(candidate, "player", "") for candidate in observations
+                normalize_name(getattr(candidate, "player", ""))
+                for candidate in observations
             })
         ]
         directional = [
