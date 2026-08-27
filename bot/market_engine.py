@@ -3389,15 +3389,30 @@ async def underdog_job(context) -> None:
             # empty the list object that was handed to the mock in tests.
             _incr_snapshot = list(_incremental_records)
             _incremental_records.clear()
+            _snapshot_intended += len(_incr_snapshot)
             try:
-                await _cycle_timing.await_db(
+                _write_result = await _cycle_timing.await_db(
                     "write",
                     "save_underdog_snapshots_bulk",
                     db.save_underdog_snapshots_bulk(_incr_snapshot),
                 )
+                _snapshot_persisted += (
+                    int(_write_result.get("records_written", len(_incr_snapshot)))
+                    if isinstance(_write_result, dict)
+                    else len(_incr_snapshot)
+                )
+                _snapshot_retry_count += (
+                    int(_write_result.get("retry_count", 0))
+                    if isinstance(_write_result, dict)
+                    else 0
+                )
             except Exception as _bulk_exc:
-                logger.warning(
-                    "underdog_job: bulk snapshot save failed (%d records): %s",
+                _snapshot_failed_batches += 1
+                _snapshot_failed_records += len(_incr_snapshot)
+                _persistence_ok = False
+                logger.error(
+                    "underdog_job: bulk snapshot save permanently failed "
+                    "after database retries (%d records): %s",
                     len(_incr_snapshot), _bulk_exc,
                 )
             finally:
@@ -3412,18 +3427,50 @@ async def underdog_job(context) -> None:
                 _cs_total = len(_cold_start_records)
                 for _cs_i in range(0, _cs_total, _CS_CHUNK):
                     _cs_batch = _cold_start_records[_cs_i: _cs_i + _CS_CHUNK]
-                    await _cycle_timing.await_db(
-                        "write",
-                        "save_underdog_snapshots_bulk",
-                        db.save_underdog_snapshots_bulk(_cs_batch),
-                    )
+                    _snapshot_intended += len(_cs_batch)
+                    try:
+                        _write_result = await _cycle_timing.await_db(
+                            "write",
+                            "save_underdog_snapshots_bulk",
+                            db.save_underdog_snapshots_bulk(_cs_batch),
+                        )
+                        _snapshot_persisted += (
+                            int(_write_result.get("records_written", len(_cs_batch)))
+                            if isinstance(_write_result, dict)
+                            else len(_cs_batch)
+                        )
+                        _snapshot_retry_count += (
+                            int(_write_result.get("retry_count", 0))
+                            if isinstance(_write_result, dict)
+                            else 0
+                        )
+                    except Exception as _cs_exc:
+                        _snapshot_failed_batches += 1
+                        _snapshot_failed_records += len(_cs_batch)
+                        _persistence_ok = False
+                        logger.error(
+                            "underdog_job: cold-start bulk snapshot save permanently "
+                            "failed after database retries (%d records): %s",
+                            len(_cs_batch), _cs_exc,
+                        )
                     del _cs_batch  # release this batch immediately
                 _cold_start_records.clear()  # release full list
                 logger.info(
-                    "underdog_job: cold-start bulk save — %d records written (%d chunks)",
-                    _cs_total, (_cs_total + _CS_CHUNK - 1) // _CS_CHUNK,
+                    "underdog_job: cold-start bulk save — intended=%d persisted=%d "
+                    "failed_records=%d retries=%d (%d chunks)",
+                    _cs_total,
+                    _snapshot_persisted,
+                    _snapshot_failed_records,
+                    _snapshot_retry_count,
+                    (_cs_total + _CS_CHUNK - 1) // _CS_CHUNK,
                 )
-            _cold_start_done = True
+            # Do not latch cold-start complete after an exhausted snapshot batch.
+            # The next feed cycle must retry the cold-start path rather than
+            # falsely treating incomplete persistence as recovered.
+            if _persistence_ok:
+                _cold_start_done = True
+            else:
+                _cold_start_done = False
             logger.info(
                     "underdog_job: cold-start complete — scored %d props\n"
                     "  before (old cal):  S=%d  A=%d  B=%d  PASS=%d\n"
@@ -3707,7 +3754,6 @@ async def underdog_job(context) -> None:
     # ── Bridge to PropLineHistory (lifecycle tracking) ─────────────────────────
     # Must run AFTER the main try block so snapshots exist in UnderdogSnapshotRecord.
     # A bridge failure is surfaced as a job failure so /health can alert on it.
-    _persistence_ok = True
     try:
         bridged = await db.sync_underdog_snapshots_to_prop_history(
             limit=6000, since_hours=0.17   # ~10 min window covers the current cycle's rows
@@ -3755,6 +3801,29 @@ async def underdog_job(context) -> None:
         )
     if _lc_fail_count > 0:
         _persistence_ok = False
+
+    _snapshot_fetched = (
+        _snapshot_intentionally_skipped + _snapshot_intended
+    )
+    _cycle_timing.count(
+        "snapshot_intentionally_skipped", _snapshot_intentionally_skipped
+    )
+    _cycle_timing.count("snapshot_intended", _snapshot_intended)
+    _cycle_timing.count("snapshot_persisted", _snapshot_persisted)
+    _cycle_timing.count("snapshot_failed_batches", _snapshot_failed_batches)
+    _cycle_timing.count("snapshot_failed_records", _snapshot_failed_records)
+    _cycle_timing.count("snapshot_retries", _snapshot_retry_count)
+    logger.info(
+        "underdog_snapshot_persistence: fetched=%d intentionally_skipped=%d "
+        "intended=%d persisted=%d failed_batches=%d failed_records=%d retries=%d",
+        _snapshot_fetched,
+        _snapshot_intentionally_skipped,
+        _snapshot_intended,
+        _snapshot_persisted,
+        _snapshot_failed_batches,
+        _snapshot_failed_records,
+        _snapshot_retry_count,
+    )
 
     # ── Player Prop Market engine (post-bridge, post-lifecycle) ──────────────
     # DISABLED: run_player_prop_market_cycle sends "🟣 PLAYER PROP MARKET ALERT"
@@ -3810,7 +3879,7 @@ async def underdog_job(context) -> None:
         else:
             _health.record_job_fail(
                 "underdog_job",
-                "persistence stage failed (bridge or lifecycle update)",
+                "snapshot persistence, bridge, or lifecycle stage failed",
             )
             _health.record_pipeline_fail(
                 stage  = "lifecycle_bridge",
