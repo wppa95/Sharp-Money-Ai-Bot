@@ -44,6 +44,23 @@ class Config:
     ODDS_API_ENABLED: bool = os.environ.get("ODDS_API_ENABLED", "true").lower() not in (
         "false", "0", "no", "off"
     )
+    # Separate OddsAPI scope.  ACTIVE_SPORTS belongs to the Underdog namespace
+    # and may contain provider-only identifiers such as CS, LOL, or TENNIS.
+    ODDS_API_SPORTS_RAW: str = os.environ.get(
+        "ODDS_API_SPORTS",
+        "MLB,NBA,NFL,NHL,NCAAF,NCAAB,UFC,WNBA,EPL,LaLiga,SerieA,"
+        "Bundesliga,Ligue1,MLS,UCL",
+    )
+    ODDS_API_QUOTA_LIMIT: int = int(os.environ.get("ODDS_API_QUOTA_LIMIT", "30000"))
+    ODDS_API_DEADLINE_UTC: str = os.environ.get(
+        "ODDS_API_DEADLINE_UTC", "2026-08-31T00:00:00Z"
+    )
+    ODDS_API_MIN_REQUEST_INTERVAL: float = float(
+        os.environ.get("ODDS_API_MIN_REQUEST_INTERVAL", "1")
+    )
+    ODDS_API_MAX_REQUEST_INTERVAL: int = int(
+        os.environ.get("ODDS_API_MAX_REQUEST_INTERVAL", "900")
+    )
     # PrizePicks uses a public API — no key required. Field reserved for future
     # authenticated endpoints.
     PRIZEPICKS_API_KEY: str = os.environ.get("PRIZEPICKS_API_KEY", "")
@@ -336,7 +353,7 @@ class Config:
     # requests/month.  Set to 0 to disable budget enforcement entirely.
     # Telegram warnings fire at 75 %, 90 %, and 100 % of this value.
     ODDS_API_MONTHLY_BUDGET: int = int(
-        os.environ.get("ODDS_API_MONTHLY_BUDGET", "20000")
+        os.environ.get("ODDS_API_MONTHLY_BUDGET", str(ODDS_API_QUOTA_LIMIT))
     )
 
     # ── Alert limits ─────────────────────────────────────────────────────────
