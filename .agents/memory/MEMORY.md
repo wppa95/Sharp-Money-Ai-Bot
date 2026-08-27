@@ -82,3 +82,4 @@
 - [Directional persistence policy](pass-watchlist-persistence.md) — PASS/no-direction/watchlist are transient scan results; only OVER/UNDER evaluations are persisted.
 - [Provider scope separation](provider-scope-separation.md) — ACTIVE_SPORTS is the Underdog universe, not a generic OddsAPI sport list; keep provider namespaces separate.
 - [OddsAPI error pacing](oddsapi-error-pacing.md) — permanent 422 INVALID_MARKET responses must not back off valid shared polling.
+- [FPR scheduler starvation](fpr-scheduler-starvation.md) — when Underdog scans exceed the FPR interval, serialized deferrals can prevent live FPR execution without a post-scan handoff.
