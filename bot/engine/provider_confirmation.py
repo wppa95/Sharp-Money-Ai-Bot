@@ -199,7 +199,11 @@ def observation_from_record(
     except (TypeError, ValueError):
         parsed_odds = None
 
-    observed = _value(record, "timestamp", None) or _value(record, "recorded_at", None)
+    observed = (
+        _value(record, "observed_at", None)
+        or _value(record, "timestamp", None)
+        or _value(record, "recorded_at", None)
+    )
     if not isinstance(observed, datetime):
         observed = None
 
