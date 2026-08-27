@@ -1163,6 +1163,7 @@ class AlertDelivery:
         market_confirmation: Optional[dict] = None,  # OddsAPI sportsbook confirmation data
         high_priority: bool = False,  # True for 85–94/100 S-tier (4★+) → prepend 🔥 header
         is_moneyline: bool = False,
+        source: str = "Underdog",
     ) -> "DeliveryResult":
         """
         Full Underdog prop alert pipeline:
@@ -1177,6 +1178,8 @@ class AlertDelivery:
              - default               → format_underdog_change_alert   (🎯 BET PICK)
           5. Broadcast to all registered chat IDs.
         """
+        source = source.strip() or "Underdog"
+        source_upper = source.upper()
         # Moneylines are retained and scored for monitoring, but only an
         # explicitly Strong-moneyline designation may reach Telegram. Keep this
         # before normal new/removal/movement-only exceptions so none bypass it.
@@ -1229,8 +1232,9 @@ class AlertDelivery:
                 )
                 return DeliveryResult(sent=False, filtered=True, filtered_reason=timing_reason)
 
-        # 3. Daily Underdog cap (disabled by default — DAILY_UNDERDOG_LIMIT=0)
-        if config.DAILY_UNDERDOG_LIMIT > 0:
+        # 3. Daily Underdog cap (PrizePicks has its own source identity and
+        # must never consume or inherit the Underdog cap).
+        if source_upper == "UNDERDOG" and config.DAILY_UNDERDOG_LIMIT > 0:
             today_ud = await self._db.count_today_underdog_alerts()
             if today_ud >= config.DAILY_UNDERDOG_LIMIT:
                 reason = (
@@ -1314,6 +1318,7 @@ class AlertDelivery:
                 opponent=opponent,
                 intelligence_trace=intelligence_trace,
                 market_confirmation=market_confirmation,
+                source=source,
             )
         else:
             message = format_underdog_change_alert(
@@ -1335,6 +1340,7 @@ class AlertDelivery:
                 intelligence_trace=intelligence_trace,
                 opening_line=opening_line,
                 market_confirmation=market_confirmation,
+                source=source,
             )
 
         # 5. Broadcast
@@ -1353,7 +1359,10 @@ class AlertDelivery:
             except Exception:
                 from datetime import datetime as _now_dt
                 _ts_str = _now_dt.utcnow().strftime("%H:%M UTC")
-            message += f"\n\n<i>⏱ Line as of {_ts_str} — verify on Underdog before placing</i>"
+            message += (
+                f"\n\n<i>⏱ Line as of {_ts_str} — "
+                f"verify on {source} before placing</i>"
+            )
 
         counts     = await broadcast_alert(self._bot, self._chat_ids, message, sport=sport)
         discord_sent = False

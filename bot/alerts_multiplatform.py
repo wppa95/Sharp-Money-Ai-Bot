@@ -671,6 +671,7 @@ def format_underdog_change_alert(
     intelligence_trace: Optional[dict] = None, # prop_intelligence trace from decision_trace
     opening_line: Optional[float] = None,     # First ever line from PropLineHistory
     market_confirmation: Optional[dict] = None,  # OddsAPI sportsbook confirmation data
+    source: str = "Underdog",
 ) -> str:
     """Format an alert for an Underdog prop line change or removed prop.
 
@@ -680,28 +681,39 @@ def format_underdog_change_alert(
     When *score* (a UDPropScore) is supplied, the grade is shown.
     When *validation* is supplied, a compact history signal line is appended.
     """
+    source = source.strip() or "Underdog"
+    source_upper = source.upper()
+    source_emoji = "🟣" if source_upper == "PRIZEPICKS" else "🐶"
     sport_icon = {
         "NFL": "🏈", "NBA": "🏀", "MLB": "⚾",
         "NHL": "🏒", "UFC": "🥊", "WNBA": "🏀",
     }.get(sport, "🎯")
 
     if removed:
-        header         = "🚫 <b>UNDERDOG PROP REMOVED</b>"
+        header         = f"🚫 <b>{source_upper} PROP REMOVED</b>"
         movement_block = f"  🐶 <b>Last Line:</b>  <code>{old_line:.1f}</code>"
     elif standing:
-        header         = "🎯 <b>ACTIONABLE BET PICK</b>"
+        header         = (
+            "🎯 <b>ACTIONABLE BET PICK</b>"
+            if source_upper == "UNDERDOG"
+            else f"🎯 <b>{source_upper} PICK</b>"
+        )
         movement_block = (
-            f"📊 <b>Underdog Line</b>\n"
-            f"  🐶 <code>{new_line:.1f}</code>  {_line_label(new_line)}"
+            f"📊 <b>{source} Line</b>\n"
+            f"  {source_emoji} <code>{new_line:.1f}</code>  {_line_label(new_line)}"
         )
     else:
         change         = new_line - old_line
         direction_icon = "📈" if change > 0 else "📉"
-        header         = "🎯 <b>ACTIONABLE BET PICK</b>"
+        header         = (
+            "🎯 <b>ACTIONABLE BET PICK</b>"
+            if source_upper == "UNDERDOG"
+            else f"🎯 <b>{source_upper} PICK</b>"
+        )
         change_sign    = "+" if change >= 0 else ""
         movement_block = (
-            f"📊 <b>Underdog Line</b>\n"
-            f"  🐶 <code>{new_line:.1f}</code>  {_line_label(new_line)}\n"
+            f"📊 <b>{source} Line</b>\n"
+            f"  {source_emoji} <code>{new_line:.1f}</code>  {_line_label(new_line)}\n"
             f"  Previous:         <code>{old_line:.1f}</code>\n"
             f"  {direction_icon} Move:  <code>{change_sign}{change:.1f}</code>"
         )
@@ -982,6 +994,7 @@ def format_underdog_new_prop_alert(
     opponent: Optional[str] = None,           # Opponent team / player (when available)
     intelligence_trace: Optional[dict] = None, # prop_intelligence trace from decision_trace
     market_confirmation: Optional[dict] = None,  # OddsAPI sportsbook confirmation data
+    source: str = "Underdog",
 ) -> str:
     """Format a 🚨 UNDERDOG PROP LIVE alert for a first-appearance prop.
 
@@ -989,6 +1002,9 @@ def format_underdog_new_prop_alert(
     time AND has sufficient history to justify an immediate alert.
     The validation gate ensures props with no history go to digest only.
     """
+    source = source.strip() or "Underdog"
+    source_upper = source.upper()
+    source_emoji = "🟣" if source_upper == "PRIZEPICKS" else "🐶"
     sport_icon = {
         "NFL": "🏈", "NBA": "🏀", "MLB": "⚾",
         "NHL": "🏒", "UFC": "🥊", "WNBA": "🏀",
@@ -1076,7 +1092,11 @@ def format_underdog_new_prop_alert(
     _thick = "━" * 18
     parts = [
         _thick,
-        "🚨 <b>UNDERDOG PROP LIVE</b>",
+        (
+            "🚨 <b>UNDERDOG PROP LIVE</b>"
+            if source_upper == "UNDERDOG"
+            else f"🎯 <b>{source_upper} PICK</b>"
+        ),
         _thick,
         "",
         f"{sport_icon} <b>{sport} — {stat_type}</b>",
@@ -1086,7 +1106,7 @@ def format_underdog_new_prop_alert(
         avail_block.lstrip("\n"),
         "",
         _div(),
-        f"  🐶 <b>Underdog Line:</b>  <code>{line_value:.1f}</code>  {_line_label(line_value)}",
+        f"  {source_emoji} <b>{source} Line:</b>  <code>{line_value:.1f}</code>  {_line_label(line_value)}",
         f"  <b>First Seen:</b>    {datetime.utcnow().strftime('%H:%M UTC')}"
         + opponent_str
         + game_str
