@@ -1,0 +1,336 @@
+🔴 SURGICAL FIX — REMAINING RUNTIME ISSUES ONLY
+
+Continue from the current implementation.
+
+Do NOT redesign the bot. Do NOT rewrite FPR. Do NOT change unrelated behavior.
+
+The Telegram 409 Conflict is NOT a bug to fix. I intentionally have the bot running in both Replit and Railway, so both environments can compete for the same Telegram polling token. Cross the Telegram 409 issue off this task completely. Do not modify Telegram polling because of this.
+
+Task #148 is already merged, but the read-only audit identified the following remaining issues that need to be corrected and live-verified.
+
+⸻
+
+1. REMOVE THE COMPETING FULL-POOL ROTATION
+
+The current audit found that both:
+
+* FPR/full-pool rotation
+* Stable Refresh
+
+can independently walk the same active pool with their own cursors.
+
+I do NOT want two competing full-pool rotations.
+
+Required behavior
+
+FPR remains the sole authoritative bounded full-pool rotation.
+
+Preserve the existing working FPR:
+
+* Complete active Underdog universe
+* Batched processing
+* Persistent cursor
+* Wraparound
+* Continuous rotation
+* Unchanged props included
+* Previously evaluated props included
+* Previously delivered props included for rescoring
+* No pre-scoring delivery dedup
+* Existing scoring/evidence/evaluation flow unchanged
+* max_instances=1
+
+Do NOT redesign FPR.
+
+Remove or disable only the competing Stable Refresh behavior if it independently walks the same full active pool.
+
+Do not remove Stable Refresh functionality that serves another legitimate purpose.
+
+The goal is:
+
+ONE authoritative full-pool cursor/rotation — FPR.
+
+⸻
+
+2. HOURLY OPPORTUNITY GRADING MUST ACTUALLY RUN
+
+The grader is registered at 1-hour intervals, but runtime evidence showed:
+
+* No successful grader last_run
+* 83,765 pending opportunity rows
+* 0 HIT/MISS/PUSH results
+
+Fix the actual runtime execution problem.
+
+Required:
+
+* Grading runs every 1 hour
+* max_instances=1
+* No overlapping grader runs
+* Every eligible tracked opportunity is eventually evaluated after its event/game time
+* Persist:
+    * HIT
+    * MISS
+    * PUSH
+    * actual result/value
+    * player
+    * sport
+    * market/stat
+    * line
+    * direction
+    * timestamp
+* Grading must not depend on Telegram delivery
+* Grading must include the underlying tracked prop universe
+* Idempotent: don’t duplicate the same outcome
+* Preserve historical records
+* Do not fabricate results
+* Existing provider results remain preferred
+
+After fixing, actually observe a successful grader execution or perform an equivalent live runtime verification that proves the scheduler invokes and completes it.
+
+Do NOT simply verify that the scheduler registration says 3600.
+
+⸻
+
+3. RESTORE THE CANONICAL TIER 1 / TIER 2 DELIVERY RULES
+
+The audit found that the current implementation has:
+
+* _TIER2_SPORTS = frozenset()
+* _is_tier2_sport() effectively always false
+* One common delivery gate being applied to all sports
+
+That is incorrect.
+
+Restore the intended rules:
+
+Tier 2
+
+Tier 2 = ONLY:
+
+* MLB
+* NFL
+* NBA
+
+Tier 2 Telegram delivery requires:
+
+* Strong or Elite direction
+* Strong supporting evidence
+* Confidence >= 90/100
+* BQ requirement
+* MQ requirement
+* Existing deduplication
+* Existing live-game protections
+* Existing safety protections
+
+Do NOT require S/A/B/C classification.
+
+Tier 1
+
+Tier 1 = EVERY sport other than:
+
+* MLB
+* NFL
+* NBA
+
+Examples include:
+
+* CFB
+* WNBA
+* Tennis
+* FIFA
+* CS
+* LOL
+* DOTA
+* VAL
+* PGA
+* MMA
+* NHL
+* NPB
+* KBO
+* CFL
+* Racing
+* and every other non-MLB/NFL/NBA sport.
+
+Tier 1 Telegram delivery requires:
+
+* Strong or Elite direction
+* Strong supporting evidence
+* Actionable conditions
+* Existing deduplication
+* Existing live-game protections
+* Existing safety protections
+
+Tier 1 does NOT require:
+
+* S-tier
+* A-tier
+* B-tier
+* C-tier
+
+Critical
+
+Do not change the underlying scoring/evaluation system.
+
+S/A/B/C must NOT become evaluation gates.
+
+This is a Telegram delivery distinction only.
+
+Do not create duplicate delivery-rule systems.
+
+⸻
+
+4. SOURCE-ID ISSUE — VERIFY BEFORE CHANGING ANYTHING
+
+Do NOT blindly perform the proposed legacy backfill.
+
+The audit found that the stored historical database still contains synthetic IDs, but the current implementation is supposed to preserve real Underdog source IDs.
+
+Before changing anything:
+
+1. Run a fresh current Underdog feed cycle.
+2. Inspect the newly persisted snapshots.
+3. Confirm whether current snapshots contain the real source/line identity.
+4. Confirm that removal events using the modern source identity supersede older synthetic records correctly.
+5. Confirm active-pool reconciliation is correct.
+6. Confirm FPR sees the current active universe correctly.
+
+Only make a source-ID change if the fresh current feed actually demonstrates a defect.
+
+Do NOT modify historical data merely because old rows contain synthetic IDs.
+
+Do NOT perform a large historical backfill unless absolutely proven necessary.
+
+⸻
+
+5. PRESERVE EVERYTHING THAT IS ALREADY WORKING
+
+Do NOT change:
+
+* FPR batch size
+* FPR cursor architecture
+* FPR scoring
+* FPR evidence loading
+* FPR opportunity logging
+* Underdog ingestion architecture
+* Player identity fixes
+* Provider evidence
+* Graded-prop evidence lifecycle
+* Full active-universe logic
+* Funnel reporting
+* Sport Funnel reporting
+* Dashboard reporting
+* /stats
+* /tracking
+* /grades
+* /picks
+* /slip
+* Agent Reach
+* Clean restart
+* Adaptive batching
+* Scheduler max_instances=1
+* Monitoring cadence
+* Database history
+* Telegram formatting
+* Discord behavior
+* PrizePicks
+* PickFinder
+* #line-movements
+* Scoring formulas
+* BQ/MQ calculations
+* Confidence calculations
+
+Except where explicitly required above.
+
+⸻
+
+6. REQUIRED VALIDATION
+
+Run focused tests for:
+
+* FPR remains the sole full-pool rotation
+* Stable Refresh no longer competes for the same full active pool
+* Unchanged props continue reaching FPR
+* Previously evaluated props continue reaching FPR
+* Previously delivered props continue reaching FPR scoring
+* Hourly grader actually executes
+* HIT/MISS/PUSH persistence
+* Idempotent grading
+* Tier 1 delivery rules
+* Tier 2 delivery rules
+* No S/A/B/C delivery requirement
+* Tier 2 = MLB/NFL/NBA only
+* Tier 1 = every other sport
+* Source-ID behavior with a fresh feed
+* Active-pool reconciliation
+
+Then run:
+
+* Full test suite
+* Python compilation
+* git diff --check
+
+⸻
+
+7. REQUIRED LIVE VERIFICATION
+
+Do NOT report completion from tests alone.
+
+After the changes:
+
+Full-pool rotation
+
+Verify live that:
+
+* FPR continues processing the complete active universe in batches.
+* Cursor advances.
+* Cursor wraps.
+* Multiple sports are represented.
+* Unchanged props are processed.
+* Previously evaluated props are processed.
+* Full-pool rotation remains continuous.
+* There is only one authoritative full-pool cursor.
+
+Grading
+
+Verify live that:
+
+* Hourly grader starts.
+* Hourly grader completes.
+* last_run updates successfully.
+* Pending opportunities decrease when eligible results are available.
+* HIT/MISS/PUSH records are persisted.
+
+Delivery
+
+Verify the canonical rules using representative test/runtime cases:
+
+* Tier 1 strong/elite + evidence can pass without S/A/B/C.
+* Tier 2 MLB/NFL/NBA requires 90+ confidence + BQ + MQ + strong evidence.
+* Weak/non-actionable props remain blocked.
+* Existing dedup/live-game/safety protections remain intact.
+
+Source identity
+
+Verify with a fresh Underdog cycle before making any historical change.
+
+⸻
+
+8. IMPORTANT — NO CHECKPOINT
+
+Do NOT create a checkpoint/task completion marker until:
+
+* All required changes are implemented.
+* Focused tests pass.
+* Full suite passes.
+* Runtime verification passes.
+* Fresh source-ID verification is complete.
+* FPR remains intact.
+* No competing full-pool rotation remains.
+
+Do not mark this complete just because the code compiles.
+
+Do not touch Railway deployment as part of this task.
+
+The Telegram 409 caused by simultaneously running Replit + Railway is intentional and is NOT part of this fix.
+
+Make the smallest possible surgical changes.
