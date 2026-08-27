@@ -327,12 +327,22 @@ async def post_init(application: Application) -> None:
             name="full_pool_rescan",
             job_kwargs={"max_instances": 1, "misfire_grace_time": 120},
         )
+        # Stable refresh is the existing DB-only refresh path.  Keep it
+        # single-instance and separate from the FPR cursor; it does not create
+        # a second full-pool rotation.
+        jq.run_repeating(
+            _stable_refresh_job,
+            interval=120,
+            first=120,
+            name="stable_refresh",
+            job_kwargs={"max_instances": 1, "misfire_grace_time": 120},
+        )
         # CLV seed job — every 15 minutes (creates AlertCLVSeed entries for alerts)
         jq.run_repeating(_clv_seed_job,        interval=900,                                first=120, name="clv_seeder")
         # CLV harvest job — every hour (processes seeds after game_time passes)
         jq.run_repeating(_clv_harvest_job,          interval=3600,  first=300,  name="clv_harvester")
-        # Opportunity grader — every 6 hours (grades completed prop opportunities)
-        jq.run_repeating(_grade_opportunities_job,  interval=21600, first=3600, name="opportunity_grader")
+        # Opportunity grader — hourly (grades completed prop opportunities)
+        jq.run_repeating(_grade_opportunities_job,  interval=3600, first=3600, name="opportunity_grader")
         from player_history_job import player_history_collector_job
         jq.run_repeating(player_history_collector_job, interval=240, first=60, name="player_history_collector", job_kwargs={"max_instances": 1, "misfire_grace_time": 120})
         # API budget check — every 15 minutes
@@ -350,7 +360,7 @@ async def post_init(application: Application) -> None:
                 name="season_checker",
             )
         logger.info(
-            "Jobs scheduled — underdog: every %ds, stable_refresh: every 240s, "
+            "Jobs scheduled — underdog: every %ds, stable_refresh: every 120s, "
             "pregame: every %ds, season_check: every %ds, heartbeat: every 60s "
             "[player_props_fetcher disabled — PP pipeline off]",
             config.UNDERDOG_POLL_INTERVAL,
@@ -526,7 +536,7 @@ async def post_shutdown(application: Application) -> None:
 
 async def _grade_opportunities_job(context) -> None:
     """
-    Every 6 hours: grade completed prop opportunities from stored game results.
+    Every hour: grade completed prop opportunities from stored game results.
 
     Finds PENDING rows in prop_opportunity_log whose game_time passed at least
     4 hours ago, looks up the actual player stat in player_game_results, and
@@ -1741,6 +1751,7 @@ def main() -> None:
     app.add_handler(CommandHandler("dashboard", cmd_dashboard))
     app.add_handler(CommandHandler("alerts",    cmd_alerts))
     app.add_handler(CommandHandler("grade",     cmd_grade))
+    app.add_handler(CommandHandler("grades",    cmd_grade))
     app.add_handler(CommandHandler("start",     cmd_start))
     app.add_handler(CommandHandler("help",      cmd_help))
     app.add_handler(CommandHandler("status",    cmd_status))

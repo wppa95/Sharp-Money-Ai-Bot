@@ -196,7 +196,7 @@ class DashboardReport:
         # ── Activity summary (Underdog-focused) ──────────────────────────────
         parts += [
             "📬 <b>Activity Summary</b>",
-            f"  Underdog Snapshots:  <b>{self.total_ud_alerts:,}</b>",
+            f"  Underdog activity records: <b>{self.total_ud_alerts:,}</b>",
             f"  Actionable Picks Today: <b>{self.today_ud_alerts:,}</b>",
             "",
         ]

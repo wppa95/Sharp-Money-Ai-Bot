@@ -2811,7 +2811,8 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         pp_today   = await _db.count_today_pp_alerts()
         total_ud   = await _db.count_underdog_records()
         resolved   = await _db.get_all_resolved_pp_edges(limit=500)
-        edges_24h  = await _db.get_top_pp_edges(limit=100, hours=24)
+        tracking   = await _db.get_tracking_summary()
+        tracked_opportunities = int(tracking.get("total", 0) or 0)
 
         lines: list[str] = [
             f"📈 <b>Pick Stats</b>  ·  Uptime: {_uptime_str()}",
@@ -2822,7 +2823,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             "<b>Pipeline (last 24 h)</b>",
         ]
 
-        lines.append(f"  Tracked opportunities: <b>{len(edges_24h):,}</b>")
+        lines.append(f"  Tracked opportunities: <b>{tracked_opportunities:,}</b>")
 
         lines.append("")
         lines.append(f"<b>All-time</b>  ({total_ud:,} Underdog snapshots)")
@@ -3186,7 +3187,7 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     lines += [
         "",
         "━━━━━━━━━━━━━━━━━━",
-        "<i>Results graded every 6 h from stored game stats.</i>",
+        "<i>Results graded every 1 h from stored game stats.</i>",
         "<i>OVER perspective: HIT = actual &gt; line, MISS = actual &lt; line.</i>",
     ]
 

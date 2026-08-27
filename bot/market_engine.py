@@ -2724,8 +2724,14 @@ async def underdog_job(context) -> None:
                 _alert_outcome = "failed"
     
             # Persist snapshot — includes scoring and delivery outcome for analysis
+            _source_external_id = getattr(snap, "external_id", None)
+            if not isinstance(_source_external_id, str) or not _source_external_id:
+                _source_external_id = f"{player}_{stat_type}"
             record = UnderdogSnapshotRecord(
-                external_id   = f"{player}_{stat_type}"[:64],  # stable identity key
+                # Preserve the connector's source ID.  It is stable across a
+                # line movement and lets the active-by-line query retire the
+                # old line without deleting its historical snapshot.
+                external_id   = _source_external_id[:64],
                 player_name   = player,
                 team          = snap.team or "",
                 sport         = snap.sport,
@@ -4543,6 +4549,11 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             _fpr_line   = float(_fpr_snap.line_value or 0.0)
 
             try:
+                # Active-pool queries also apply this filter, but keep the
+                # guard here so a stale in-memory/test pool can never rescore
+                # or deliver a prop after its event has started.
+                if _is_game_live_or_past(_fpr_snap, now):
+                    continue
                 _fpr_hist  = await db.get_ud_prop_history(_fpr_player, _fpr_stat, limit=30)
 
                 # Rescanning DOES count toward API/fetch totals per requirement

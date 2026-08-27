@@ -15,7 +15,7 @@ from sqlalchemy import (
     Boolean, Column, DateTime, Float,
     Integer, String, Text,
     UniqueConstraint,
-    select, func, desc, text, delete
+    select, func, desc, text, delete, or_
 )
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
@@ -3209,27 +3209,44 @@ class Database:
         self,
     ) -> "dict[tuple[str, str, float], UnderdogSnapshotRecord]":
         """
-        Return the most-recent snapshot for every (player_name, stat_type, line_value)
-        triplet **where the latest snapshot for that triplet is not a removal**.
+        Return the current active Underdog prop universe keyed by
+        ``(player_name, stat_type, line_value)``.
 
-        Unlike :meth:`get_active_underdog_snapshot_per_prop` which groups by
-        (player_name, stat_type) and returns only one snapshot per player+stat pair
-        (the single most-recent line), this method groups by the full
-        (player_name, stat_type, line_value) triplet.  Every alt-line variant for
-        the same player+stat combination is therefore returned as a separate entry,
-        giving the complete eligible active-prop universe.
+        A source ``external_id`` identifies one Underdog prop across line
+        movements.  Therefore the latest row is selected by external_id first,
+        rather than by line alone.  This keeps an old line as historical data
+        without leaving it in the active rotation after that same source prop
+        moves.  Distinct source IDs (the normal alternate-line representation)
+        still produce distinct active entries.
 
-        Example: a player with Points at 24.5, 25.5 and 26.5 contributes three
-        entries in the returned dict instead of one.
-
-        Used exclusively by the full-pool rescan job so it rotates through every
-        alt-line variant.  The stable-refresh and watchlist-rescan jobs continue to
-        use :meth:`get_active_underdog_snapshot_per_prop` (one per player+stat).
+        Rows with no source ID use the full player/stat/line triplet as a
+        backwards-compatible fallback. Started events are no longer eligible
+        for active rescanning, but their snapshots remain available to grading.
         """
+        now = datetime.utcnow()
         async with self.session() as s:
-            # Step 1 — latest row id per (player, stat, line) triplet (all rows, including removals)
-            subq = (
+            # Source IDs are stable through line movements. Compute MAX(id)
+            # over all rows, including removal markers, so a removal wins.
+            source_subq = (
                 select(func.max(UnderdogSnapshotRecord.id))
+                .where(
+                    UnderdogSnapshotRecord.external_id.isnot(None),
+                    UnderdogSnapshotRecord.external_id != "",
+                )
+                .group_by(
+                    UnderdogSnapshotRecord.external_id,
+                )
+                .scalar_subquery()
+            )
+            # Rows without a source ID retain the historical by-line fallback.
+            legacy_subq = (
+                select(func.max(UnderdogSnapshotRecord.id))
+                .where(
+                    or_(
+                        UnderdogSnapshotRecord.external_id.is_(None),
+                        UnderdogSnapshotRecord.external_id == "",
+                    )
+                )
                 .group_by(
                     UnderdogSnapshotRecord.player_name,
                     UnderdogSnapshotRecord.stat_type,
@@ -3237,15 +3254,42 @@ class Database:
                 )
                 .scalar_subquery()
             )
-            # Step 2 — keep only those latest rows where removed=False
             result = await s.execute(
                 select(UnderdogSnapshotRecord).where(
-                    UnderdogSnapshotRecord.id.in_(subq),
-                    UnderdogSnapshotRecord.removed == False,  # noqa: E712
+                    or_(
+                        UnderdogSnapshotRecord.id.in_(source_subq),
+                        UnderdogSnapshotRecord.id.in_(legacy_subq),
+                    ),
                 )
+                .order_by(UnderdogSnapshotRecord.id)
             )
-            rows = result.scalars().all()
-        return {(r.player_name, r.stat_type, r.line_value): r for r in rows}
+            rows = list(result.scalars().all())
+
+        # Older versions used ``player_stat`` as external_id.  Once a real
+        # source ID exists for the same player/stat, that synthetic identity
+        # is no longer authoritative—even when its latest row is still active
+        # and the modern row is a removal marker.
+        modern_props = {
+            (r.player_name, r.stat_type)
+            for r in rows
+            if r.external_id
+            and r.external_id != f"{r.player_name}_{r.stat_type}"[:64]
+        }
+
+        active: dict[tuple[str, str, float], UnderdogSnapshotRecord] = {}
+        for row in rows:
+            if row.removed:
+                continue
+            if (
+                row.game_time is not None
+                and row.game_time <= now
+            ):
+                continue
+            is_legacy = row.external_id == f"{row.player_name}_{row.stat_type}"[:64]
+            if is_legacy and (row.player_name, row.stat_type) in modern_props:
+                continue
+            active[(row.player_name, row.stat_type, row.line_value)] = row
+        return active
 
     async def get_active_watchlist_candidates(self) -> list:
         """Compatibility shim; all active props use the canonical pool."""
