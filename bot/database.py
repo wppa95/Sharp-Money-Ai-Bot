@@ -3313,35 +3313,35 @@ class Database:
         if not prepared:
             return 0
 
-        _update_columns = {
-            "recommendation": PropOpportunityLog.recommendation,
-            "decision_tier": PropOpportunityLog.decision_tier,
-            "confidence": PropOpportunityLog.confidence,
-            "line_value": PropOpportunityLog.line_value,
-            "stars": PropOpportunityLog.stars,
-            "risk_level": PropOpportunityLog.risk_level,
-            "explanation": PropOpportunityLog.explanation,
-            "recommendation_id": PropOpportunityLog.recommendation_id,
-            "provider": PropOpportunityLog.provider,
-            "bet_quality_score": PropOpportunityLog.bet_quality_score,
-            "qualification_path": PropOpportunityLog.qualification_path,
-            "reason_codes": PropOpportunityLog.reason_codes,
-            "watchlist_state": PropOpportunityLog.watchlist_state,
-            "downstream_intelligence_json": PropOpportunityLog.downstream_intelligence_json,
-            "evidence_completeness": PropOpportunityLog.evidence_completeness,
-            "sharp_confidence": PropOpportunityLog.sharp_confidence,
-            "sharp_confidence_components": PropOpportunityLog.sharp_confidence_components,
-        }
         async with self.session() as s:
             for start in range(0, len(prepared), chunk_size):
                 rows = prepared[start:start + chunk_size]
-                stmt = (
-                    _sqlite_insert(PropOpportunityLog)
-                    .values(rows)
-                    .on_conflict_do_update(
-                        index_elements=["external_id", "stat_type"],
-                        set_=_update_columns,
+                _insert_stmt = _sqlite_insert(PropOpportunityLog).values(rows)
+                _update_columns = {
+                    column: getattr(_insert_stmt.excluded, column)
+                    for column in (
+                        "recommendation",
+                        "decision_tier",
+                        "confidence",
+                        "line_value",
+                        "stars",
+                        "risk_level",
+                        "explanation",
+                        "recommendation_id",
+                        "provider",
+                        "bet_quality_score",
+                        "qualification_path",
+                        "reason_codes",
+                        "watchlist_state",
+                        "downstream_intelligence_json",
+                        "evidence_completeness",
+                        "sharp_confidence",
+                        "sharp_confidence_components",
                     )
+                )
+                stmt = _insert_stmt.on_conflict_do_update(
+                    index_elements=["external_id", "stat_type"],
+                    set_=_update_columns,
                 )
                 await s.execute(stmt)
                 await s.commit()
