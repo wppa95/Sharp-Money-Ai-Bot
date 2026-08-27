@@ -1,0 +1,39 @@
+Proceed with Task #152 — Maximize OddsAPI Usage.
+
+The plan is approved, with this additional acceptance requirement:
+
+The objective is to legitimately consume essentially the remaining OddsAPI quota before the August 30, 2026 deadline, as long as the provider’s actual rate limits permit it.
+
+Before considering the task complete, verify all of the following:
+
+* The existing useful OddsAPI polling path is actually restored/enabled.
+* The current ~1,300 used / ~28,700 remaining quota is confirmed from live provider data.
+* Required calls/hour and calls/minute are calculated dynamically from the current time and Aug. 30 UTC deadline.
+* The bot is demonstrably consuming calls faster than the current rate.
+* The bot is on pace to consume essentially the remaining quota by the deadline.
+* Only legitimate supported OddsAPI sports/markets are requested.
+* Underdog-only sports are not sent to OddsAPI.
+* The existing OddsAPI sport normalization is corrected where necessary.
+* No fake/random quota-burning requests are made.
+* No uncontrolled request storm is created.
+* Rate limits and 429 responses trigger safe backoff.
+* Quota/cache behavior remains safe.
+* Quota telemetry shows used, remaining, current rate, required rate, deadline, latency, and pacing status.
+* Underdog monitoring remains unchanged.
+* FPR remains unchanged.
+* Hourly grading remains unchanged.
+* Telegram delivery remains unchanged.
+* Agent Reach remains unchanged.
+* max_instances=1 remains unchanged.
+* The known Replit/Railway Telegram 409 conflict is left untouched.
+* Focused tests pass.
+* Full test suite passes.
+* Live OddsAPI requests are observed.
+* Live quota consumption is observed.
+* No unrelated behavior is changed.
+
+Do not create a checkpoint until the live quota-consumption requirement is demonstrated.
+
+Do not merely report that the poller was enabled. I need actual live evidence that the request rate increased and that the bot is on pace to use the available quota before August 30.
+
+Make the smallest targeted changes possible.
