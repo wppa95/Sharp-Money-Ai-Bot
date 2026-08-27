@@ -375,7 +375,11 @@ def _official_odds_records(payload: Any) -> list[dict[str, Any]]:
         event_id = _clean(event.get("id"))
         home = _clean(event.get("home_team"))
         away = _clean(event.get("away_team"))
-        event_label = f"{away} at {home}".strip(" at")
+        event_label = (
+            f"{away} at {home}"
+            if away and home
+            else away or home or event_id
+        )
         event_data = {
             "id": event_id,
             "name": event_label,
@@ -455,6 +459,13 @@ class PropLineClient:
         self._backoff_until = 0.0
         self._cache: Optional[PropLineFetchResult] = None
         self._cache_clock_at: Optional[float] = None
+        self._cache_scope = ""
+        self._request_day = datetime.utcnow().date()
+        self._request_count = 0
+        # Stay below PropLine's documented 1,000-request daily free limit even
+        # if callers invoke this client more often than the normal 5-minute
+        # pacing interval.
+        self.daily_request_limit = 900
 
     @property
     def is_configured(self) -> bool:
@@ -470,30 +481,64 @@ class PropLineClient:
             await self._session.close()
             self._session = None
 
-    def _cache_is_fresh(self, now: float) -> bool:
+    def _cache_is_fresh(self, now: float, scope: str) -> bool:
         return bool(
             self._cache
             and self.cache_ttl > 0
             and self._cache_clock_at is not None
+            and self._cache_scope == scope
             and (now - self._cache_clock_at) < self.cache_ttl
         )
 
-    async def fetch_prizepicks_props(self) -> PropLineFetchResult:
+    def _reset_daily_budget_if_needed(self) -> None:
+        today = datetime.utcnow().date()
+        if today != self._request_day:
+            self._request_day = today
+            self._request_count = 0
+
+    def _official_request(
+        self, sport_key: Optional[str],
+    ) -> tuple[str, dict[str, str], str]:
+        base_url = self.api_url.rstrip("/")
+        if base_url == DEFAULT_PROPLINE_API_URL:
+            official_sport = sport_key or "basketball_nba"
+            return (
+                f"{base_url}/v1/sports/{official_sport}/odds",
+                {
+                    "markets": ",".join(_OFFICIAL_MARKETS),
+                    "bookmakers": "prizepicks",
+                },
+                official_sport,
+            )
+        return (
+            self.api_url,
+            {"provider": "prizepicks", "market": "player_props"},
+            sport_key or "__custom__",
+        )
+
+    async def fetch_prizepicks_props(
+        self, *, sport_key: Optional[str] = None,
+    ) -> PropLineFetchResult:
         if not self.is_configured:
-            logger.info("PropLine PrizePicks provider disabled: PROPLINE_API_KEY is missing")
+            logger.info("PropLine PrizePicks provider disabled: credentials or endpoint missing")
             return PropLineFetchResult([], datetime.utcnow(), from_cache=False)
 
         async with self._lock:
+            self._reset_daily_budget_if_needed()
+            url, params, scope = self._official_request(sport_key)
             now = self._clock()
-            if self._cache_is_fresh(now):
+            if self._cache_is_fresh(now, scope):
                 return PropLineFetchResult(
                     list(self._cache.props),
                     self._cache.fetched_at,
                     from_cache=True,
                 )
+            if self._request_count >= self.daily_request_limit:
+                logger.warning("PropLine daily request budget exhausted; skipping request")
+                return PropLineFetchResult([], datetime.utcnow(), from_cache=False)
             if now < self._backoff_until:
                 logger.warning("PropLine rate-limit backoff active; reusing fresh cache if available")
-                if self._cache is not None:
+                if self._cache is not None and self._cache_scope == scope:
                     return PropLineFetchResult(
                         list(self._cache.props), self._cache.fetched_at, from_cache=True
                     )
@@ -509,14 +554,14 @@ class PropLineClient:
             if session is None:
                 session = aiohttp.ClientSession()
             try:
+                self._request_count += 1
                 headers = {
                     "Authorization": f"Bearer {self.api_key}",
                     "X-API-Key": self.api_key,
                     "Accept": "application/json",
                 }
-                params = {"provider": "prizepicks", "market": "player_props"}
                 timeout = aiohttp.ClientTimeout(total=self.timeout_seconds)
-                async with session.get(self.api_url, headers=headers, params=params, timeout=timeout) as response:
+                async with session.get(url, headers=headers, params=params, timeout=timeout) as response:
                     if response.status == 429:
                         retry_after = _retry_after_seconds(response)
                         self._backoff_until = self._clock() + retry_after
@@ -548,14 +593,20 @@ class PropLineClient:
                     await session.close()
 
             fetched_at = datetime.utcnow()
+            records = (
+                _official_odds_records(payload)
+                if url.startswith(f"{DEFAULT_PROPLINE_API_URL}/v1/")
+                else _extract_records(payload)
+            )
             props = [
                 prop
-                for record in _extract_records(payload)
+                for record in records
                 if (prop := normalize_propline_prizepicks_record(record, fetched_at=fetched_at))
                 is not None
             ]
             self._cache = PropLineFetchResult(props, fetched_at, from_cache=False)
             self._cache_clock_at = self._clock()
+            self._cache_scope = scope
             return PropLineFetchResult(list(props), fetched_at, from_cache=False)
 
 
@@ -599,10 +650,32 @@ class PropLinePrizePicksProvider(PropProviderBase):
         if not self.is_available():
             logger.info("PropLine PrizePicks provider is disabled")
             return []
-        result = await self.client.fetch_prizepicks_props()
+        # Keep the abstract provider interface intact.  The engine uses the
+        # sport-scoped method below so one confirmation request costs one
+        # documented odds call rather than polling every supported sport.
+        sport_key = (
+            _CANONICAL_TO_OFFICIAL_SPORT.get(self.sport_keys[0], self.sport_keys[0])
+            if self._sport_filter
+            else "basketball_nba"
+        )
+        result = await self.client.fetch_prizepicks_props(sport_key=sport_key)
         if self._sport_filter is None:
             return result.props
         return [prop for prop in result.props if prop.sport in self._sport_filter]
+
+    async def fetch_props_for_sport(self, sport: str) -> list[PlayerProp]:
+        """Fetch only one canonical sport for confirmation freshness and quota safety."""
+        if not self.is_available():
+            logger.info("PropLine PrizePicks provider is disabled")
+            return []
+        canonical_sport = _normalize_sport(sport)
+        if self._sport_filter is not None and canonical_sport not in self._sport_filter:
+            return []
+        official_sport = _CANONICAL_TO_OFFICIAL_SPORT.get(
+            canonical_sport, canonical_sport.lower()
+        )
+        result = await self.client.fetch_prizepicks_props(sport_key=official_sport)
+        return [prop for prop in result.props if prop.sport == canonical_sport]
 
     def normalize_stat(self, raw: str) -> str:
         return _normalize_stat(raw)

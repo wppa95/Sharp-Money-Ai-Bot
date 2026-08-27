@@ -736,8 +736,16 @@ async def _get_odds_api_confirmation(
             # creating a PrizePicks scheduler or polling loop.
             if pp_available:
                 try:
+                    _fetch_for_sport = getattr(
+                        _propline_provider, "fetch_props_for_sport", None
+                    )
+                    _pp_fetch = (
+                        _fetch_for_sport(sport)
+                        if callable(_fetch_for_sport)
+                        else _propline_provider.fetch_props()
+                    )
                     pp_props = await _asyncio.wait_for(
-                        _propline_provider.fetch_props(), timeout=5.0
+                        _pp_fetch, timeout=5.0
                     )
                     global _propline_last_persisted_at
                     if pp_props and db is not None and hasattr(
