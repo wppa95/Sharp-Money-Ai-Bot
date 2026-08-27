@@ -1545,6 +1545,107 @@ class Database:
             s.add_all(records)
             await s.commit()
 
+    async def upsert_prop_line_history_batch(
+        self,
+        provider: str,
+        props: "list[object]",
+    ) -> int:
+        """
+        Persist a normalized provider batch in the shared prop-history table.
+
+        This lets authorized PrizePicks observations share lifecycle/history
+        storage with Underdog without adding a second database or pipeline.
+        """
+        if not props:
+            return 0
+
+        keys = {
+            (
+                getattr(prop, "player_name", "") or "",
+                getattr(prop, "sport", "") or "",
+                getattr(prop, "stat_type", "") or "",
+            )
+            for prop in props
+        }
+        async with self.session() as s:
+            result = await s.execute(
+                select(PropLineHistory)
+                .where(
+                    PropLineHistory.provider == provider,
+                    tuple_(
+                        PropLineHistory.player_name,
+                        PropLineHistory.sport,
+                        PropLineHistory.stat_type,
+                    ).in_(list(keys)),
+                )
+                .order_by(desc(PropLineHistory.fetched_at))
+            )
+            latest: dict[tuple[str, str, str], PropLineHistory] = {}
+            for row in result.scalars().all():
+                key = (row.player_name, row.sport, row.stat_type)
+                latest.setdefault(key, row)
+
+            for prop in props:
+                key = (
+                    getattr(prop, "player_name", "") or "",
+                    getattr(prop, "sport", "") or "",
+                    getattr(prop, "stat_type", "") or "",
+                )
+                line_value = float(getattr(prop, "line_value", 0.0) or 0.0)
+                observed_at = (
+                    getattr(prop, "source_timestamp", None)
+                    or getattr(prop, "fetched_at", None)
+                    or datetime.utcnow()
+                )
+                row = latest.get(key)
+                if row is None:
+                    row = PropLineHistory(
+                        provider=provider,
+                        sport=key[1],
+                        player_name=key[0],
+                        team=getattr(prop, "team", "") or "",
+                        stat_type=key[2],
+                        line_value=line_value,
+                        game_time=getattr(prop, "game_time", None),
+                        external_id=getattr(prop, "external_id", "") or "",
+                        game_id=(
+                            getattr(prop, "event_id", "")
+                            or getattr(prop, "game_id", "")
+                            or ""
+                        ),
+                        fetched_at=observed_at,
+                        first_seen=observed_at,
+                        last_seen=observed_at,
+                        change_count=0,
+                        opening_line=line_value,
+                    )
+                    s.add(row)
+                    latest[key] = row
+                    continue
+
+                old_line = float(row.line_value or 0.0)
+                changed = abs(old_line - line_value) >= 0.01
+                if changed:
+                    row.prev_line = old_line
+                    row.change_count = (row.change_count or 0) + 1
+                row.line_value = line_value
+                row.team = getattr(prop, "team", "") or row.team
+                row.game_time = getattr(prop, "game_time", None) or row.game_time
+                row.external_id = getattr(prop, "external_id", "") or row.external_id
+                row.game_id = (
+                    getattr(prop, "event_id", "")
+                    or getattr(prop, "game_id", "")
+                    or row.game_id
+                )
+                row.fetched_at = observed_at
+                row.first_seen = row.first_seen or observed_at
+                row.last_seen = observed_at
+                row.removed = False
+                row.lifecycle_state = "DISCOVERED"
+
+            await s.commit()
+        return len(props)
+
     async def get_prop_line_history(
         self,
         provider:    str,
