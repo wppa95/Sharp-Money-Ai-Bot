@@ -293,11 +293,6 @@ class OddsApiCache:
                                 f"{resp.status} {error_code or message}",
                                 ftype,
                             )
-                        if pacer is not None:
-                            pacer.record_error(
-                                resp.status,
-                                quota_exhausted=(ftype == FailureType.QUOTA),
-                            )
                         raise OddsApiError(resp.status, error_code, message, ftype)
 
                     resp.raise_for_status()
