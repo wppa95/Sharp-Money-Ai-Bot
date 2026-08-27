@@ -44,7 +44,11 @@ from config import config
 from engine.health import get_health_tracker
 from engine.prop_intelligence import compute_prop_intelligence as _compute_intel
 from engine.downstream_intelligence import build_downstream_payload as _build_downstream_intel
-from engine.player_prop_market import _is_prop_deduped, _record_prop_alerted
+from engine.player_prop_market import (
+    _is_prop_deduped,
+    _record_prop_alerted,
+    _release_prop_delivery_claim,
+)
 from engine.score_validation import clamp_score
 from engine.delivery_gates import (
     TIER2_SPORTS as _CANONICAL_TIER2_SPORTS,
@@ -283,6 +287,8 @@ _player_result_fetch_cache: set = set()
 # accumulate in memory.  Clear the entire set once it grows past this ceiling so
 # the next cycle re-fetches fresh data — a safe, cheap reset at ~300 s cadence.
 _PLAYER_RESULT_CACHE_MAX = 5_000
+_prizepicks_cycle_task: Optional[asyncio.Task] = None
+_PRIZEPICKS_DEDUP_PREFIX = "PrizePicks::"
 
 
 def _player_provider_label(sport: str) -> str:
@@ -1019,6 +1025,313 @@ async def _fetch_and_compute_hit_rates(
             "_fetch_and_compute_hit_rates: %s / %s: %s", player_name, stat_type, exc
         )
         return None
+
+
+def _prizepicks_dedup_player(player_name: str) -> str:
+    """Keep the legacy three-part dedup map provider-scoped."""
+    return f"{_PRIZEPICKS_DEDUP_PREFIX}{player_name}"
+
+
+async def _run_prizepicks_independent_cycle(context) -> None:
+    """Evaluate the authorized PrizePicks feed through the shared prop pipeline.
+
+    This is deliberately a companion coroutine of ``underdog_job`` rather than
+    another scheduled job.  It owns no scoring, result, or delivery rules:
+    those are the same functions used by Underdog.  A provider failure is
+    contained here so it can never abort the Underdog scan.
+    """
+    db = context.bot_data.get("db")
+    bot = getattr(context, "bot", None)
+    if db is None or bot is None or _propline_provider is None:
+        return
+    if not getattr(_propline_provider, "is_available", lambda: False)():
+        return
+
+    try:
+        props = await _propline_provider.fetch_props()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("prizepicks_cycle: authorized feed failed: %s", type(exc).__name__)
+        return
+    if not props:
+        logger.debug("prizepicks_cycle: no normalized PrizePicks props")
+        return
+
+    # One observation per provider-owned identity per cycle.  The provider's
+    # external/event IDs are retained; the fallback key still keeps provider
+    # identity separate from Underdog.
+    unique_props: dict[tuple[str, str, str, str], object] = {}
+    for prop in props:
+        player = str(getattr(prop, "player_name", "") or "").strip()
+        sport = str(getattr(prop, "sport", "") or "").upper().strip()
+        stat = str(getattr(prop, "stat_type", "") or "").strip()
+        try:
+            line = float(getattr(prop, "line_value", 0.0))
+        except (TypeError, ValueError):
+            continue
+        if not player or not sport or not stat or line < 0:
+            continue
+        identity = (
+            player,
+            sport,
+            stat,
+            str(
+                getattr(prop, "external_id", "")
+                or getattr(prop, "event_id", "")
+                or getattr(prop, "game_id", "")
+                or ""
+            ),
+        )
+        unique_props[identity] = prop
+
+    if not unique_props:
+        return
+
+    from engine.ud_scoring import (
+        score_ud_prop,
+        compute_market_quality,
+        detect_market_pressure,
+    )
+    from engine.player_validator import validate_player_prop
+    from engine.ud_bet_decision import make_ud_bet_decision
+
+    actionable: list[dict] = []
+    enrichment_budget = 250
+    enrichment_used = 0
+    evaluated = 0
+    directional = 0
+
+    for prop in unique_props.values():
+        player = str(getattr(prop, "player_name", "") or "").strip()
+        sport = str(getattr(prop, "sport", "") or "").upper().strip()
+        stat = str(getattr(prop, "stat_type", "") or "").strip()
+        line = float(getattr(prop, "line_value", 0.0) or 0.0)
+        try:
+            history_rows = await db.get_prop_line_history(
+                "PrizePicks", player, sport, stat, limit=30
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "prizepicks_cycle: history lookup failed for %s/%s: %s",
+                player, stat, type(exc).__name__,
+            )
+            history_rows = []
+
+        # PropLineHistory stores the current source line.  Adapt its movement
+        # fields to the scoring/validation contract without importing an
+        # Underdog model or attributing the row to Underdog.
+        history = [
+            SimpleNamespace(
+                line_value=float(getattr(row, "line_value", 0.0) or 0.0),
+                prev_line=getattr(row, "prev_line", None),
+                line_moved=(
+                    getattr(row, "prev_line", None) is not None
+                    or bool(getattr(row, "change_count", 0))
+                ),
+                fetched_at=getattr(row, "fetched_at", None),
+            )
+            for row in history_rows
+        ]
+        previous = (
+            float(getattr(history_rows[0], "line_value"))
+            if history_rows and getattr(history_rows[0], "line_value", None) is not None
+            else None
+        )
+        score = score_ud_prop(
+            player_name=player,
+            stat_type=stat,
+            sport=sport,
+            current_line=line,
+            prev_line=(previous if previous is not None and abs(line - previous) >= 0.01 else None),
+            history=history,
+        )
+        market_quality = compute_market_quality(stat, line, score)
+        market_pressure = detect_market_pressure(previous, history)
+
+        history_snap = None
+        try:
+            from providers.player_history import get_player_history_provider
+            history_snap = await get_player_history_provider().get_snapshot(
+                db, player, sport, stat, line, ud_history=history
+            )
+        except Exception:
+            pass
+        validation = validate_player_prop(
+            player_name=player,
+            stat_type=stat,
+            current_line=line,
+            history=history,
+            min_samples=config.UD_VALIDATION_MIN_SAMPLES,
+            history_snap=history_snap,
+        )
+
+        # Keep the existing enrichment safety budget.  This makes a full
+        # multi-sport PropLine response harmless to the public stats providers.
+        hit_rates = None
+        if enrichment_used < enrichment_budget:
+            hit_rates = await _fetch_and_compute_hit_rates(
+                db, player, sport, stat, line
+            )
+            enrichment_used += 1
+        decision = None
+        if hit_rates is not None:
+            decision = make_ud_bet_decision(
+                score=score,
+                validation=validation,
+                current_line=line,
+                prev_line=(previous if previous is not None and abs(line - previous) >= 0.01 else None),
+                hit_rates=hit_rates,
+                sport=sport,
+            )
+        evaluated += 1
+
+        if decision is None or decision.recommendation not in ("OVER", "UNDER"):
+            continue
+        directional += 1
+        external_id = str(
+            getattr(prop, "external_id", "")
+            or getattr(prop, "event_id", "")
+            or getattr(prop, "game_id", "")
+            or f"{player}:{sport}:{stat}"
+        )
+        setattr(prop, "score_tier", getattr(decision, "decision_tier", None))
+        setattr(prop, "bet_recommendation", decision.recommendation)
+        setattr(prop, "bet_confidence", decision.confidence)
+        setattr(prop, "market_quality_score", getattr(market_quality, "score", None))
+        setattr(prop, "score_total", getattr(score, "total", None))
+        try:
+            await db.log_prop_opportunity(
+                external_id=external_id,
+                player_name=player,
+                team=str(getattr(prop, "team", "") or ""),
+                sport=sport,
+                stat_type=stat,
+                line_value=line,
+                recommendation=decision.recommendation,
+                decision_tier=decision.decision_tier,
+                confidence=decision.confidence,
+                game_time=getattr(prop, "game_time", None),
+                provider="PrizePicks",
+                bet_quality_score=decision.confidence,
+                reason_codes=_compute_reason_codes(score, decision),
+                downstream_intelligence=_build_downstream_intel(
+                    line_delta=(line - previous) if previous is not None else None,
+                    evidence={
+                        "historical": getattr(validation, "to_dict", lambda: {})(),
+                        "market": getattr(decision, "evidence", None)
+                        or getattr(decision, "bet_evidence", None),
+                    },
+                    line=line,
+                    bet_quality=getattr(score, "total", None),
+                    bet_confidence=decision.confidence,
+                    market_quality=getattr(market_quality, "score", None),
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "prizepicks_cycle: opportunity write failed for %s/%s: %s",
+                player, stat, type(exc).__name__,
+            )
+            continue
+
+        if _tier_delivery_gate(
+            sport,
+            decision.recommendation,
+            float(getattr(score, "total", 0) or 0),
+            float(getattr(market_quality, "score", 0) or 0),
+            _has_strong_delivery_evidence(
+                score=score,
+                validation=validation,
+                decision=decision,
+                intelligence_trace=None,
+            ),
+            score_tier=getattr(decision, "decision_tier", None),
+            confidence=getattr(decision, "confidence", None),
+        ):
+            actionable.append({
+                "prop": prop,
+                "player": player,
+                "sport": sport,
+                "stat": stat,
+                "line": line,
+                "previous": previous or line,
+                "external_id": external_id,
+                "score": score,
+                "validation": validation,
+                "decision": decision,
+                "market_quality": market_quality,
+                "market_pressure": market_pressure,
+            })
+
+    try:
+        await db.upsert_prop_line_history_batch("PrizePicks", list(unique_props.values()))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("prizepicks_cycle: history persistence failed: %s", type(exc).__name__)
+        return
+
+    chat_ids = list(config.allowed_user_ids)
+    if not chat_ids:
+        logger.info(
+            "prizepicks_cycle: observations=%d evaluated=%d directional=%d actionable=%d "
+            "delivered=0 (no recipients)",
+            len(unique_props), evaluated, directional, len(actionable),
+        )
+        return
+
+    delivered = 0
+    delivery = AlertDelivery(db, bot, chat_ids)
+    for candidate in actionable:
+        player = candidate["player"]
+        sport = candidate["sport"]
+        stat = candidate["stat"]
+        line = candidate["line"]
+        dedup_player = _prizepicks_dedup_player(player)
+        if not await _try_claim_delivery_slot(
+            dedup_player, sport, stat, line, provider="PrizePicks"
+        ):
+            continue
+        result = await delivery.deliver_underdog(
+            player_name=player,
+            team=str(getattr(candidate["prop"], "team", "") or ""),
+            sport=sport,
+            stat_type=stat,
+            old_line=candidate["previous"],
+            new_line=line,
+            game_time=getattr(candidate["prop"], "game_time", None),
+            score=candidate["score"],
+            validation=candidate["validation"],
+            decision=candidate["decision"],
+            market_quality=candidate["market_quality"],
+            market_pressure=candidate["market_pressure"],
+            pp_line=line,
+            standing=True,
+            source="PrizePicks",
+        )
+        if result.sent:
+            delivered += 1
+            try:
+                await db.mark_opportunity_alert_sent(
+                    candidate["external_id"], stat, provider="PrizePicks"
+                )
+                await db.update_prop_lifecycle_state(
+                    "PrizePicks", player, sport, stat, "ACTIVE_ALERTED",
+                    first_alert_sent_at=datetime.utcnow(),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "prizepicks_cycle: delivery bookkeeping failed for %s/%s: %s",
+                    player, stat, type(exc).__name__,
+                )
+        else:
+            _release_prop_delivery_claim(
+                _prop_market_alerted, dedup_player, sport, stat, line
+            )
+
+    logger.info(
+        "prizepicks_cycle: observations=%d evaluated=%d directional=%d "
+        "actionable=%d delivered=%d",
+        len(unique_props), evaluated, directional, len(actionable), delivered,
+    )
+
 
 # In-memory snapshot cache: market_key -> list[MarketSnapshot]
 _snapshot_cache: dict[tuple, list[MarketSnapshot]] = {}
