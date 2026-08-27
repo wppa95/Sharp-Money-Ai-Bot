@@ -59,6 +59,11 @@ def _value(record: Any, key: str, default: Any = None) -> Any:
 
 
 def _clean(value: Any) -> str:
+    # Enum values are used by the existing analysis models.  Prefer their
+    # public value (e.g. "Moneyline") over str(Enum), which is often
+    # "MarketType.MONEYLINE".
+    if hasattr(value, "value") and not isinstance(value, (str, bytes)):
+        value = value.value
     return _SPACE_RE.sub(" ", str(value or "")).strip()
 
 
@@ -197,6 +202,17 @@ def observation_from_record(
     if not isinstance(observed, datetime):
         observed = None
 
+    normalized_market = normalize_market(raw_market)
+    raw_direction = (
+        direction or _value(record, "description", "")
+        or _value(record, "direction", "")
+    )
+    # OddsRecord/OddsLine game markets store the side in selection rather
+    # than a separate description.  Do not infer a player-prop direction from
+    # an arbitrary selection string.
+    if not raw_direction and normalized_market == "total":
+        raw_direction = _value(record, "selection", "")
+
     return ConfirmationObservation(
         provider=_clean(provider or _value(record, "sportsbook", _value(record, "provider", ""))),
         sport=_clean(_value(record, "sport", "")).upper(),
@@ -205,10 +221,7 @@ def observation_from_record(
         player=_clean(player or _value(record, "player_name", _value(record, "player", ""))),
         team=_clean(_value(record, "team", "")),
         stat_type=_clean(stat_type or _value(record, "stat_type", raw_market_key)),
-        direction=normalize_direction(
-            direction or _value(record, "description", "")
-            or _value(record, "direction", "")
-        ),
+        direction=normalize_direction(raw_direction),
         line=parsed_line,
         odds=parsed_odds,
         event=_clean(_value(record, "event", "")),

@@ -61,6 +61,9 @@ class MarketSnapshot:
     # Explicit marker for pick'em moneyline markets.  Kept additive so all
     # existing over/under snapshots retain their historical shape.
     is_moneyline: bool = False
+    # Explicit marker for pick'em game totals.  Game markets share the
+    # Underdog feed with player props but must never enter prop scoring.
+    is_game_market: bool = False
 
     @property
     def market_key(self) -> tuple[str, str, str, str]:

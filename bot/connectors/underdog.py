@@ -55,6 +55,7 @@ class UnderdogProjection:
     odds: int = 0
     market_type: str = "Pick'em"
     is_moneyline: bool = False
+    is_game_market: bool = False
     selection: str = ""
     event: str = ""
 
@@ -149,6 +150,7 @@ class UnderdogConnector(BaseConnector):
             external_id  = proj.external_id,
             is_pickem    = True,
              is_moneyline  = proj.is_moneyline,
+             is_game_market = proj.is_game_market,
             )
             # Stash notes for downstream consumers via a convention attr
             object.__setattr__(snaps, "_notes", notes) if False else None
@@ -184,6 +186,7 @@ class UnderdogConnector(BaseConnector):
                     external_id  = old.external_id,
                     is_pickem    = True,
                      is_moneyline  = old.is_moneyline,
+                     is_game_market = old.is_game_market,
                 ))
 
         self._last_seen = current_ids
@@ -357,9 +360,9 @@ class UnderdogConnector(BaseConnector):
                 logger.debug("Underdog parse error: %s", exc)
                 continue
 
-        # Moneyline feeds have varied over time.  Only parse explicitly named
-        # moneyline containers and fields; never infer from arbitrary nested
-        # objects (which protects the v1 over_under_lines parser).
+        # Game-market feeds have varied over time.  Only parse explicitly named
+        # moneyline/total containers and market types; never infer from
+        # arbitrary nested objects (which protects the player-prop parser).
         containers = []
         for key in ("moneyline_lines", "moneylines", "moneyline_markets"):
             value = data.get(key, [])
@@ -420,6 +423,68 @@ class UnderdogConnector(BaseConnector):
                     line_value=None, game_id=str(event_id or ""),
                     odds=odds_int, market_type="Moneyline", is_moneyline=True,
                     selection=team, event=str(event_id or ""),
+                ))
+
+        total_containers = []
+        for key in ("total_lines", "totals", "total_markets", "game_total_lines",
+                    "game_totals"):
+            value = data.get(key, [])
+            total_containers.extend(value if isinstance(value, list) else [value])
+        for game in data.get("games", []):
+            if not isinstance(game, dict):
+                continue
+            for market in game.get("markets", []):
+                if not isinstance(market, dict):
+                    continue
+                kind = str(market.get("market_type") or market.get("type") or
+                           market.get("key") or "").lower()
+                if "total" in kind and "player" not in kind:
+                    total_containers.append({**market, "_game": game})
+
+        for item in total_containers:
+            if not isinstance(item, dict):
+                continue
+            game = item.get("_game") or {}
+            outcomes = item.get("outcomes") or item.get("selections")
+            entries = outcomes if isinstance(outcomes, list) else [item]
+            for outcome in entries:
+                if not isinstance(outcome, dict):
+                    continue
+                side = _first(outcome, "name", "selection", "side", "direction")
+                raw_line = _first(outcome, "point", "line", "total", "stat_value")
+                if side is None or raw_line is None:
+                    continue
+                side_text = str(side).strip()
+                if side_text.lower() not in {"over", "under", "o", "u"}:
+                    continue
+                try:
+                    total_line = float(raw_line)
+                except (TypeError, ValueError):
+                    continue
+                odds = _first(outcome, "odds", "price", "american_odds")
+                try:
+                    odds_int = int(odds) if odds is not None else 0
+                except (TypeError, ValueError):
+                    continue
+                ext = _first(outcome, "id", "external_id")
+                parent_id = _first(item, "id", "external_id", "market_id")
+                event_id = _first(outcome, "event_id", "game_id", "match_id") or \
+                    _first(item, "event_id", "game_id", "match_id") or \
+                    _first(game, "id", "game_id", "match_id")
+                sport = _first(outcome, "sport", "sport_id") or \
+                    _first(item, "sport", "sport_id") or _first(game, "sport", "sport_id")
+                if sport is None:
+                    continue
+                event = _first(outcome, "event", "event_name") or \
+                    _first(item, "event", "event_name", "name") or \
+                    _first(game, "event", "event_name", "name") or str(event_id or "")
+                stable = str(ext or f"{parent_id or event_id or 'event'}:{side_text}:{total_line:g}")
+                projections.append(UnderdogProjection(
+                    external_id=stable, player_name="", team="",
+                    sport=str(sport).upper(), stat_type="Game Total",
+                    line_value=total_line, game_id=str(event_id or ""),
+                    market_type="Total (O/U)", is_game_market=True,
+                    selection=side_text.title(), event=str(event),
                 ))
 
         logger.debug("Underdog: parsed %d projections", len(projections))
