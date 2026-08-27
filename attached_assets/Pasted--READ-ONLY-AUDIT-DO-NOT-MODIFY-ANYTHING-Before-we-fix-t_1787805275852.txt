@@ -1,0 +1,351 @@
+🔴 READ-ONLY AUDIT — DO NOT MODIFY ANYTHING
+
+Before we fix the new-prop issue, perform a strict read-only audit of the current Sharp Money Bot.
+
+Do NOT modify code, database state, scheduler configuration, tasks, deployments, Railway, Telegram configuration, or Git.
+
+Do NOT restart the bot.
+
+Do NOT create a checkpoint.
+
+Do NOT mark any task complete.
+
+The purpose is to establish exactly what the current production implementation is doing after Task #150.
+
+⸻
+
+1. FULL SEEN-PROP UNIVERSE
+
+I need a definitive answer to this requirement:
+
+Every Underdog prop the bot has seen must remain eligible for sustainable batched rescanning until its event/game has started.
+
+The bot must NOT only rescan the smaller canonical current line-history pool.
+
+Audit the distinction between:
+
+* All historical Underdog snapshots
+* All currently active/seens props
+* Current canonical active-by-line pool
+* PropLineHistory
+* FPR pool
+* Any in-memory monitoring pool
+* Any other normalized active pool
+
+Determine the exact counts for each.
+
+I specifically want to know:
+
+A. Total historical snapshots
+
+How many Underdog snapshot rows exist?
+
+B. Unique props ever seen
+
+Count unique props using the appropriate identity.
+
+C. Unique currently active props
+
+Count props whose latest state indicates the event has not started and the prop remains active.
+
+D. Props represented in PropLineHistory
+
+Exact count.
+
+E. Active props represented in FPR
+
+Exact count.
+
+F. Active props NOT represented in FPR
+
+Exact count.
+
+G. Active/seens props outside PropLineHistory
+
+Exact count.
+
+Do NOT confuse cumulative snapshot observations with unique props.
+
+⸻
+
+2. DETERMINE THE ACTUAL RESCAN UNIVERSE
+
+Trace the exact production path used by the Underdog monitor and FPR.
+
+Answer definitively:
+
+When a prop has been seen previously but has not moved, does it eventually get rescanned?
+
+And more importantly:
+
+Does the bot eventually rescan ALL currently active props it has seen, or only the smaller canonical FPR pool?
+
+Show the exact lifecycle conceptually:
+
+Underdog feed → persistence → active/seens universe → batching → rescore → evaluation → repeat until event starts → grading after event
+
+Identify any point where a previously seen prop can permanently fall out of the rescan universe.
+
+⸻
+
+3. 600K+ SNAPSHOT QUESTION
+
+The bot has recently reported hundreds of thousands of Underdog observations, for example:
+
+* 600K+
+* 645K
+* 675K+
+
+Determine exactly what those numbers represent.
+
+Explain:
+
+* Whether they are cumulative snapshot rows
+* Whether they represent unique props
+* Whether they represent current active props
+* Whether they are merely historical observations
+* Whether those rows remain available for future grading
+* Whether those rows participate in future rescanning
+
+Do NOT assume that 600K snapshots means 600K unique active props.
+
+Give the exact interpretation.
+
+⸻
+
+4. EVENT-START LIFECYCLE
+
+Verify what happens when a prop’s event/game starts.
+
+Before event start:
+
+* prop remains eligible for rescanning
+* prop remains eligible for scoring
+* prop remains eligible for evidence
+* prop remains eligible for evaluation
+* prop remains eligible for tracking
+
+After event start:
+
+* remove it from active rescan rotation
+* DO NOT delete its historical snapshots
+* DO NOT delete its opportunity records
+* retain enough information to grade the eventual result
+* record HIT/MISS/PUSH when the result becomes available
+
+Verify this exact lifecycle in the current implementation.
+
+⸻
+
+5. NEW PROP VS EXISTING PROP
+
+Audit whether the system has separate treatment for:
+
+* New props
+* Unchanged props
+* Line movers
+* Previously evaluated props
+* Previously delivered props
+* Cold-start props
+
+Determine whether any of these categories can prevent a prop from eventually returning to the rescan rotation.
+
+The desired behavior is:
+
+New props receive priority, but previously seen unchanged props must eventually rotate back through scoring.
+
+Previously delivered props must also remain eligible for underlying rescoring.
+
+Delivery deduplication must remain downstream.
+
+⸻
+
+6. FPR VS STABLE REFRESH
+
+Task #150 established that FPR should be the sole full-pool rotation.
+
+Verify that this remains true.
+
+Confirm:
+
+* FPR has the only active-pool rotation cursor
+* Stable Refresh does not independently walk the same full pool
+* No hidden second full-pool cursor exists
+* No duplicate full-pool traversal is occurring
+* FPR continues to batch and wrap around
+
+Do NOT change anything.
+
+⸻
+
+7. TASK #151 — SQLITE CONTENTION
+
+Audit the SQLite contention event recorded as Task #151.
+
+Determine:
+
+* Exact operation that caused contention
+* Which jobs were writing simultaneously
+* Whether the contention was caused by Underdog bulk persistence
+* Whether FPR was involved
+* Whether grading was involved
+* Whether Stable Refresh was involved
+* Whether contention is still occurring
+* Whether it can cause lost snapshots
+* Whether it can cause incomplete snapshot persistence
+* Whether it can cause a monitoring cycle to terminate early
+
+Do NOT fix it yet.
+
+Only identify the root cause and impact.
+
+⸻
+
+8. PERSISTENCE INTEGRITY
+
+Verify that every fetched Underdog snapshot is persisted appropriately.
+
+Check for:
+
+* failed inserts
+* dropped batches
+* transaction rollbacks
+* duplicate handling
+* source-ID preservation
+* missing source IDs
+* accidental overwrites
+* stale-line collisions
+
+Determine whether the database contains the full observed history or whether some observations are being discarded.
+
+⸻
+
+9. SPORT COVERAGE
+
+Audit the seen/active universe by sport.
+
+Give exact counts for currently active props by sport.
+
+Do NOT use the old PropCandidateLog funnel as the source of truth.
+
+Use the same authoritative population that the monitoring system actually uses.
+
+Confirm that all legitimate Underdog sports remain eligible for rotation.
+
+⸻
+
+10. CURRENT RUNTIME
+
+Read the current runtime state without restarting.
+
+Report:
+
+* Bot uptime
+* Last completed Underdog cycle
+* Last completed FPR cycle
+* Current FPR cursor
+* FPR pool size
+* Current batch size
+* Current cycle duration
+* Whether any scan is currently running
+* Scheduler skipped-instance status
+* Grader last successful run
+* Any current SQLite contention
+* Any current provider errors
+
+Do not modify anything.
+
+⸻
+
+11. TELEGRAM 409
+
+The Telegram 409 conflict is caused by the bot running in both Replit and Railway.
+
+Treat this as known environmental noise.
+
+Do NOT spend time fixing it.
+
+Do NOT change Telegram polling.
+
+Do NOT count the 409 as a Task #151 monitoring failure.
+
+⸻
+
+12. AGENT REACH
+
+Verify only that the existing Agent Reach integration remains intact.
+
+Confirm:
+
+* /analyst can use Agent Reach
+* It remains an analyst/enrichment layer
+* It does not replace the monitoring engine
+* It does not alter scoring
+* It does not create a second alert pipeline
+
+Do NOT redesign Agent Reach.
+
+⸻
+
+13. REQUIRED OUTPUT
+
+Return a strict audit table:
+
+Requirement	PASS/FAIL	Exact Evidence
+
+Then provide:
+
+Exact Current Counts
+
+* Historical snapshots:
+* Unique props ever seen:
+* Current active props:
+* Current FPR pool:
+* Active props outside FPR:
+* PropLineHistory props:
+* Active props outside PropLineHistory:
+
+Exact Rescan Lifecycle
+
+Explain precisely whether:
+
+ALL currently active/seens props eventually rotate through rescoring before their event starts.
+
+Task #151
+
+State whether SQLite contention is:
+
+* resolved
+* intermittent
+* recurring
+* capable of dropping data
+
+Current Runtime
+
+Provide the live runtime facts.
+
+⸻
+
+FINAL RULE
+
+This is a READ-ONLY AUDIT ONLY.
+
+Do NOT:
+
+* fix anything
+* optimize anything
+* restart anything
+* deploy anything
+* alter the database
+* alter tasks
+* create checkpoints
+* modify Telegram
+* modify FPR
+* modify Stable Refresh
+* modify scoring
+* modify evidence
+* modify grading
+
+We will use the audit results to determine the next surgical fix.
+
+Do not claim the 600K+ observations are being rescanned unless the implementation and live evidence actually prove that they are.
