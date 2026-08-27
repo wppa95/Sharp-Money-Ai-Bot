@@ -66,6 +66,39 @@ async def test_active_pool_keeps_distinct_alternate_lines(db):
 
 
 @pytest.mark.asyncio
+async def test_latest_source_removal_wins_after_line_movement(db):
+    """A removal marker for the moved source ID retires its active state."""
+    await db.save_underdog_snapshot(_snapshot(external_id="projection-1", line=24.5))
+    await db.save_underdog_snapshot(_snapshot(external_id="projection-1", line=25.5))
+    await db.save_underdog_snapshot(
+        _snapshot(external_id="projection-1", line=25.5, removed=True)
+    )
+
+    assert await db.get_all_active_underdog_snapshots_by_line() == {}
+
+
+@pytest.mark.asyncio
+async def test_source_reappearance_restores_only_newest_active_state(db):
+    """A source ID can reappear while all prior snapshots remain historical."""
+    await db.save_underdog_snapshot(_snapshot(external_id="projection-1", line=24.5))
+    await db.save_underdog_snapshot(
+        _snapshot(external_id="projection-1", line=24.5, removed=True)
+    )
+    await db.save_underdog_snapshot(_snapshot(external_id="projection-1", line=26.5))
+
+    active = await db.get_all_active_underdog_snapshots_by_line()
+    assert set(active) == {("Rotation Player", "Points", 26.5)}
+    assert active[("Rotation Player", "Points", 26.5)].external_id == "projection-1"
+
+    async with db.session() as session:
+        from sqlalchemy import func, select
+        count = await session.scalar(
+            select(func.count()).select_from(UnderdogSnapshotRecord)
+        )
+    assert count == 3
+
+
+@pytest.mark.asyncio
 async def test_started_prop_leaves_active_pool_but_history_remains(db):
     """Game start removes rotation eligibility, not the raw snapshot record."""
     started = dt.datetime.utcnow() - dt.timedelta(minutes=1)
