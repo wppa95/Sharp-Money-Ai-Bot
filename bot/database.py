@@ -3203,39 +3203,6 @@ class Database:
             "downstream_intelligence": downstream_intelligence,
         }])
         return
-        stmt = (
-            _sqlite_insert(PropOpportunityLog)
-            .values(
-                external_id        = external_id,
-                player_name        = player_name,
-                team               = team,
-                sport              = sport,
-                stat_type          = stat_type,
-                line_value         = line_value,
-                recommendation     = recommendation,
-                decision_tier      = decision_tier,
-                confidence         = confidence,
-                game_time          = game_time,
-                detected_at        = now,
-                result             = "PENDING",
-                actual_value       = None,
-                graded_at          = None,
-                stars              = stars,
-                risk_level         = risk_level,
-                explanation        = explanation,
-                recommendation_id  = rec_id,
-                provider           = provider,
-                bet_quality_score  = bet_quality_score,
-                qualification_path = _qpath,
-                reason_codes       = _rcodes,
-                watchlist_state    = watchlist_state,
-                downstream_intelligence_json = _intel_json,
-                evidence_completeness = _intel_completeness,
-                sharp_confidence = _sharp_confidence,
-                sharp_confidence_components = _sharp_components,
-            )
-            .on_conflict_do_update(
-                index_elements = ["external_id", "stat_type"],
                 set_           = {
                     "recommendation":     recommendation,
                     "decision_tier":      decision_tier,
