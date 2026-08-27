@@ -10,7 +10,7 @@ Also owns fetch_live_odds() — the live data feed via The Odds API.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
@@ -99,6 +99,9 @@ class PlayerPropLine:
     american_odds: int
     line:         Optional[float]
     event_start:  Optional[datetime]
+    # Observation time is distinct from event_start and lets confirmation
+    # reject stale cached rows without treating game time as fetch time.
+    observed_at:  datetime = field(default_factory=datetime.utcnow)
 
 
 # ── Vig removal ───────────────────────────────────────────────────────────────
