@@ -285,6 +285,11 @@ def _matches_identity(
             return False
         if normalize_stat(target.stat_type) != normalize_stat(observation.stat_type):
             return False
+        if target.direction and (
+            normalize_direction(target.direction)
+            != normalize_direction(observation.direction)
+        ):
+            return False
         # Team IDs and provider-specific team codes are often not comparable.
         # Only reject a disagreement when both sources expose the same kind of
         # human-readable team label.
