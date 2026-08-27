@@ -417,9 +417,11 @@ def _official_odds_records(payload: Any) -> list[dict[str, Any]]:
                             "event": event_data,
                             "external_id": outcome.get("book_outcome_id")
                             or f"{event_id}:{market_key}:{outcome.get('description', '')}:{odds_type or 'standard'}",
-                            "updated_at": outcome.get("last_change_at")
-                            or market.get("last_update")
-                            or event.get("last_update"),
+                            # The odds endpoint can return a currently
+                            # available line whose last-change timestamp is
+                            # older than the fetch.  The client fetch time is
+                            # the authoritative freshness marker for this
+                            # current-line response.
                             "status": "available",
                         }
                     )
