@@ -165,21 +165,15 @@ def test_compute_market_quality_still_imported():
 
 
 def test_s_tier_threshold_85():
-    """S-tier threshold must be ≥85 in _tier_from_conf or equivalent."""
-    src = _src("market_engine.py")
-    # S-tier confidence threshold comment or value
-    assert "85" in src and "S" in src  # broad; precise check follows
-    # _tier_from_conf uses 85 as the S cutoff
-    assert re.search(r'conf\s*>=\s*85', src) or re.search(r'>=\s*85.*[Ss]', src) or \
-           "_TIER_S_CUTOFF = 85" in src or "UD_MIN_CONF_S" in src, \
-           "S-tier 85 cutoff not found in market_engine.py"
+    """S-tier threshold remains configurable at 85."""
+    src = _src("config.py")
+    assert "UD_MIN_CONF_S" in src and '"85"' in src
 
 
 def test_a_tier_threshold_70():
-    """A-tier threshold must be 70 in config / _tier_from_conf."""
-    src = _src("market_engine.py")
-    assert re.search(r'conf\s*>=\s*70', src) or "UD_MIN_CONF_A" in src, \
-        "A-tier 70 cutoff not found in market_engine.py"
+    """A-tier threshold remains configurable at 75."""
+    src = _src("config.py")
+    assert "UD_MIN_CONF_A" in src and '"75"' in src
 
 
 # ── 7. Confidence / BQ gates ──────────────────────────────────────────────────

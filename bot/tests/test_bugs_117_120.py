@@ -307,8 +307,8 @@ class TestBug120UnifiedDeliveryGates:
         base = os.path.dirname(os.path.dirname(__file__))
         with open(os.path.join(base, "market_engine.py")) as f:
             src = f.read()
-        assert "BQ gate removed" in src, (
-            "market_engine.py must document that the obsolete BQ gate was removed"
+        assert "_tier_delivery_gate" in src, (
+            "market_engine.py must use the shared delivery gate"
         )
 
     def test_source_code_bq_gate_removed(self):
@@ -321,9 +321,8 @@ class TestBug120UnifiedDeliveryGates:
         assert "# Strict-sport Bet Quality gate — MLB/NFL require BQ" not in src, (
             "Old BQ gate comment found — gate should have been removed per spec Tier 2"
         )
-        # The removal note must exist instead
-        assert "BQ gate removed" in src, (
-            "BQ gate removal comment not found — confirm all three paths removed the gate"
+        assert "_tier_delivery_gate" in src, (
+            "Shared delivery gate not found — confirm all three paths use it"
         )
 
     def test_star_floor_is_unified_across_sports(self):

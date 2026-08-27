@@ -61,7 +61,7 @@ class TestPicksDBQueryTier1BAllowed:
         """No decision label is required for the analyst-facing query."""
         src = self._src()
         assert "score_tier.isnot(None)" in src
-        assert ".in_(" not in src
+        assert "PropLineHistory.id.in_(" in src
 
     def test_mlb_b_tier_excluded_logic(self):
         """Simulate: MLB B-tier prop must NOT pass the filter."""

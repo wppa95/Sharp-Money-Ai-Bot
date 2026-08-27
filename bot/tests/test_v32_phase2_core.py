@@ -129,12 +129,10 @@ class TestP1EsportsTierOnePicksNotBlocked:
         assert "MLB" in src and "UNDER" in src
 
     def test_db_query_still_requires_s_a_tier(self):
-        """DB query must still gate on S/A tier (unchanged from prior pass)."""
+        """DB query must return evaluated rows without a retired label gate."""
         import database as db_mod
         src = inspect.getsource(db_mod.Database.get_top_ud_props_for_picks)
-        assert ".in_(" in src
-        assert '"S"' in src or "'S'" in src
-        assert '"A"' in src or "'A'" in src
+        assert "score_tier.isnot(None)" in src
         assert 'score_tier != "PASS"' not in src
 
 

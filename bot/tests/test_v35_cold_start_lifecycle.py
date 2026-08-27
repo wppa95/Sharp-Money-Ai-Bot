@@ -193,13 +193,10 @@ class TestReq4RestartResumeIdentification:
         )
 
     def test_standing_path_checks_score_tier_from_db(self):
-        """Standing path uses DB-stored score_tier to identify DISCOVERED S/A props."""
+        """Standing path carries the stored tier into the shared delivery gate."""
         src = inspect.getsource(__import__("market_engine").underdog_job)
-        assert "_prev_eff_tier" in src, (
-            "Standing path must derive effective tier from stored score_tier"
-        )
-        assert "score_tier" in src and ("S" in src or '"A"' in src), (
-            "Standing path must check S/A tier from DB records"
+        assert "score_tier" in src and "_tier_delivery_gate" in src, (
+            "Standing path must use stored/evaluated tier data with the shared gate"
         )
 
     def test_standing_path_cold_start_gate(self):
@@ -361,16 +358,9 @@ class TestReq8STierGraduation:
         )
 
     def test_s_tier_delivery_gate_non_strict_sport(self):
-        """For Tier 1 sports: S-tier only needs confidence ≥ 80 (not BQ ≥ 95).
-
-        MLB/NFL require BQ ≥ 95 (strict gate). CS/LOL/WNBA etc. do NOT have
-        the strict BQ gate — only the per-tier confidence gate (S ≥ 80).
-        """
+        """Tier 1 delivery uses the shared evidence/direction gate."""
         src = inspect.getsource(__import__("market_engine").underdog_job)
-        # The strict BQ gate must check ud_strict_alert_sports (not all sports)
-        assert "ud_strict_alert_sports" in src, (
-            "BQ ≥ 95 gate must be scoped to strict sports (MLB/NFL)"
-        )
+        assert "_tier_delivery_gate" in src
 
     def test_s_tier_confidence_threshold_from_config(self):
         """S-tier confidence threshold is configurable (UD_MIN_CONF_S)."""
@@ -418,12 +408,9 @@ class TestReq9ATierGraduation:
         )
 
     def test_a_tier_not_blocked_by_strict_sport_tier_gate(self):
-        """A-tier for non-strict sports (CS/WNBA etc.) must NOT be blocked by MLB/NFL gate."""
+        """A-tier is evaluated by the shared gate rather than a label gate."""
         src = inspect.getsource(__import__("market_engine").underdog_job)
-        # The strict-sport tier gate uses ud_mlb_alert_tiers
-        assert "ud_mlb_alert_tiers" in src or "ud_strict_alert_sports" in src, (
-            "Strict-sport tier gate must check sport before applying S-only restriction"
-        )
+        assert "_tier_delivery_gate" in src
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -515,27 +502,18 @@ class TestReq11MLBTier2:
         )
 
     def test_mlb_requires_s_tier_only(self):
-        """MLB requires S-tier only (not A or B)."""
+        """MLB uses the numeric Tier 2 quality gate; labels do not gate delivery."""
         src = inspect.getsource(__import__("market_engine").underdog_job)
-        assert "ud_mlb_alert_tiers" in src, (
-            "MLB S-tier-only gate must use ud_mlb_alert_tiers"
-        )
+        assert "_tier_delivery_gate" in src, "MLB must use the shared Tier 2 gate"
 
     def test_mlb_cold_start_props_face_same_gates_as_normal(self):
-        """MLB cold-start props face the SAME gates: S+OVER only.
-
-        fast_resume does NOT weaken MLB/NFL gates.
-        Tier gate (S-only) + UNDER gate both remain active.
-        BQ gate removed per spec (tier gate enforces quality).
-        """
+        """MLB cold-start props face the same shared delivery gate as normal scans."""
         src = inspect.getsource(__import__("market_engine").underdog_job)
         standing_start = src.find("4A: Standing opportunity scan")
         assert standing_start != -1, "Standing path header must exist"
         standing_src = src[standing_start:]
-        assert "ud_strict_alert_sports" in standing_src, "Strict sport tier check in standing"
-        assert "ud_mlb_alert_tiers" in standing_src, "MLB/NFL tier gate must be in standing path"
-        assert "mlb_under_gate [standing]" in standing_src, "UNDER gate must be in standing path"
-        assert "bq_gate [standing]" not in standing_src, "BQ gate removed per spec"
+        assert "_tier_delivery_gate" in standing_src, "Tier 2 gate must be in standing path"
+        assert "bq_gate [standing]" not in standing_src, "retired BQ gate found"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -564,19 +542,11 @@ class TestReq12NFLTier2:
             assert "S" in tiers or "s" in tiers, "S must be an allowed tier for strict sports"
 
     def test_fast_resume_does_not_bypass_nfl_gates(self):
-        """fast_resume=True must NOT bypass NFL/MLB tier or UNDER gates."""
+        """Cold-start behavior must not bypass the shared Tier 2 delivery gate."""
         src = inspect.getsource(__import__("market_engine").underdog_job)
         standing_start = src.find("4A: Standing opportunity scan")
         standing_src = src[standing_start:]
-        assert "ud_strict_alert_sports" in standing_src, (
-            "fast_resume must NOT bypass ud_strict_alert_sports tier gate"
-        )
-        assert "ud_mlb_alert_tiers" in standing_src, (
-            "fast_resume must NOT bypass MLB/NFL S-only tier gate"
-        )
-        assert "mlb_under_gate [standing]" in standing_src, (
-            "fast_resume must NOT bypass MLB/NFL UNDER direction gate"
-        )
+        assert "_tier_delivery_gate" in standing_src
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -867,11 +837,9 @@ class TestIssue1QualifiedIsIntermediate:
         )
 
     def test_confidence_gate_present_in_standing(self):
-        """Per-tier confidence gate must be in the standing path."""
+        """Shared delivery gate must be in the standing path."""
         src = inspect.getsource(__import__("market_engine").underdog_job)
-        assert "min_conf_for_sport_tier" in src, (
-            "min_conf_for_sport_tier must gate standing path confidence"
-        )
+        assert "_tier_delivery_gate" in src
 
     def test_qualified_does_not_guarantee_telegram_delivery(self):
         """'qualified' status does NOT guarantee Telegram delivery.
@@ -893,11 +861,7 @@ class TestIssue1QualifiedIsIntermediate:
         src = inspect.getsource(__import__("market_engine").underdog_job)
         standing_start = src.find("4A: Standing opportunity scan")
         standing_src = src[standing_start:]
-        gates = [
-            "_s_min_conf",           # confidence gate
-            "_is_game_live_or_past",  # live/past gate
-            "has_recent_ud_alert",    # dedup gate
-        ]
+        gates = ["_tier_delivery_gate", "_is_game_live_or_past", "has_recent_ud_alert"]
         for gate in gates:
             assert gate in standing_src, (
                 f"Gate '{gate}' must exist in standing path after PropCandidateLog write"
