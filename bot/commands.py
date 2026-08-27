@@ -3615,6 +3615,13 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     _fpr_rot      = fpr_stats.get("rotation",         1)
                     _fpr_rescored = fpr_stats.get("fpr_rescored",     0)
                     _fpr_sent     = fpr_stats.get("fpr_sent",         0)
+                    _fpr_sources  = fpr_stats.get("active_source_ids", _fpr_pool)
+                    _fpr_uncovered = fpr_stats.get(
+                        "uncovered_props", max(0, _fpr_pool - _fpr_covered)
+                    )
+                    _fpr_next_rot  = fpr_stats.get(
+                        "next_rotation", _fpr_rot + (1 if _fpr_done else 0)
+                    )
                     _fpr_done     = fpr_stats.get("rotation_complete", False)
                     _fpr_status   = "✅ complete — next started" if _fpr_done else "🔄 in progress"
                     lines += [
@@ -3624,8 +3631,11 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                         _thick,
                         "",
                         f"Rotation:           <b>#{_fpr_rot}</b>  ({_fpr_status})",
+                        f"Next rotation:      <b>#{_fpr_next_rot}</b>",
                         f"Progress:           <b>{_fpr_pct:.1f}%</b>",
                         f"Coverage:           <b>{_fpr_covered:,} / {_fpr_pool:,}</b> active props",
+                        f"Active source IDs:  <b>{_fpr_sources:,}</b>",
+                        f"Uncovered remainder: <b>{_fpr_uncovered:,}</b>",
                         f"🔬 Rescored:        <b>{_fpr_rescored:,}</b>",
                         f"📤 Sent:            <b>{_fpr_sent:,}</b>",
                     ]
