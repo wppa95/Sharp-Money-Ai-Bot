@@ -138,6 +138,95 @@ def test_client_uses_key_without_logging_or_polling_other_sources():
     }
 
 
+def test_official_odds_route_accepts_standard_prizepicks_props_only():
+    session = _Session(
+        _Response(
+            200,
+            [
+                {
+                    "id": "game-1",
+                    "sport_key": "basketball_nba",
+                    "home_team": "Test Town",
+                    "away_team": "Example City",
+                    "commence_time": "2026-08-28T00:00:00Z",
+                    "bookmakers": [
+                        {
+                            "key": "prizepicks",
+                            "markets": [
+                                {
+                                    "key": "player_points",
+                                    "last_update": "2026-08-27T18:00:00Z",
+                                    "outcomes": [
+                                        {
+                                            "description": "Alex Example",
+                                            "player_id": "player-1",
+                                            "name": "Over",
+                                            "point": 24.5,
+                                            "dfs_odds_type": "standard",
+                                            "last_change_at": "2026-08-27T17:59:00Z",
+                                        },
+                                        {
+                                            "description": "Alex Example",
+                                            "player_id": "player-1",
+                                            "name": "Under",
+                                            "point": 24.5,
+                                            "dfs_odds_type": "standard",
+                                            "last_change_at": "2026-08-27T17:59:00Z",
+                                        },
+                                        {
+                                            "description": "Alex Example",
+                                            "player_id": "player-1",
+                                            "name": "Over",
+                                            "point": 26.5,
+                                            "dfs_odds_type": "demon",
+                                            "last_change_at": "2026-08-27T17:59:00Z",
+                                        },
+                                    ],
+                                },
+                                {
+                                    "key": "h2h",
+                                    "outcomes": [
+                                        {"description": "Example City", "name": "Over", "point": 1}
+                                    ],
+                                },
+                            ],
+                        },
+                        {
+                            "key": "draftkings",
+                            "markets": [
+                                {
+                                    "key": "player_points",
+                                    "outcomes": [
+                                        {"description": "Other Player", "name": "Over", "point": 20}
+                                    ],
+                                }
+                            ],
+                        },
+                    ],
+                }
+            ],
+        )
+    )
+    client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://api.prop-line.com",
+        session=session,
+        min_request_interval=0,
+    )
+
+    props = asyncio.run(
+        PropLinePrizePicksProvider(client=client).fetch_props_for_sport("NBA")
+    )
+
+    assert len(props) == 2
+    assert {prop.direction for prop in props} == {"OVER", "UNDER"}
+    assert all(prop.provider == "PrizePicks" for prop in props)
+    assert all(prop.sport == "NBA" for prop in props)
+    assert session.calls[0][0] == "https://api.prop-line.com/v1/sports/basketball_nba/odds"
+    assert session.calls[0][1]["params"]["bookmakers"] == "prizepicks"
+    assert "player_points" in session.calls[0][1]["params"]["markets"]
+
+
 def test_client_reuses_fresh_cache_instead_of_repeating_request():
     session = _Session(
         _Response(
