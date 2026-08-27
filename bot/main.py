@@ -112,6 +112,37 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+def _configured_odds_api_sports() -> list[tuple[str, Sport]]:
+    """Return only configured sports supported by the OddsAPI namespace.
+
+    ``ACTIVE_SPORTS`` is also used as the Underdog scanner scope, so it can
+    contain valid Underdog-only identifiers such as CS, LOL, VAL, and TENNIS.
+    Those identifiers must not be parsed by the sportsbook poller as
+    ``models.Sport`` values.
+    """
+    supported: list[tuple[str, Sport]] = []
+    ignored: list[str] = []
+    for raw_value in config.active_sports:
+        sport_value = str(raw_value).strip()
+        try:
+            sport = Sport(sport_value)
+        except ValueError:
+            ignored.append(sport_value)
+            continue
+        if sport not in _SPORT_TO_ODDS_API_KEY:
+            ignored.append(sport_value)
+            continue
+        supported.append((sport_value, sport))
+
+    if ignored:
+        logger.debug(
+            "OddsAPI poll scope: ignoring %d Underdog-only/unsupported sports: %s",
+            len(ignored),
+            ", ".join(ignored),
+        )
+    return supported
+
 # ── Module-level singletons ────────────────────────────────────────────────────
 # Initialised inside post_init so they live in the bot's event loop.
 _db: Database | None = None
@@ -757,12 +788,7 @@ async def _poll_odds_job(context) -> None:
         logger.debug("_poll_odds_job: no sportsbook moneyline books enabled")
         return
 
-    for sport_str in config.active_sports:
-        try:
-            sport = Sport(sport_str)
-        except ValueError:
-            logger.warning("Unknown sport in ACTIVE_SPORTS: %s", sport_str)
-            continue
+    for sport_str, sport in _configured_odds_api_sports():
         # Skip sports that are out of season / have no active markets.
         # The checker is fail-open: returns True if cache not yet populated.
         if _season_checker is not None:
@@ -894,11 +920,7 @@ async def _steam_check_job(context) -> None:
     window   = timedelta(seconds=config.ODDS_POLL_INTERVAL * 5)
     since = now - window
 
-    for sport_str in config.active_sports:
-        try:
-            sport = Sport(sport_str)
-        except ValueError:
-            continue
+    for sport_str, sport in _configured_odds_api_sports():
 
         # Skip sports that are out of season / have no active markets.
         if _season_checker is not None:
