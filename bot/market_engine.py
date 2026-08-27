@@ -739,6 +739,26 @@ async def _get_odds_api_confirmation(
                     pp_props = await _asyncio.wait_for(
                         _propline_provider.fetch_props(), timeout=5.0
                     )
+                    global _propline_last_persisted_at
+                    if pp_props and db is not None and hasattr(
+                        db, "upsert_prop_line_history_batch"
+                    ):
+                        _pp_marker = max(
+                            (getattr(prop, "fetched_at", None) for prop in pp_props),
+                            default=None,
+                        )
+                        if _pp_marker is not None and _pp_marker != _propline_last_persisted_at:
+                            try:
+                                await _asyncio.wait_for(
+                                    db.upsert_prop_line_history_batch("PrizePicks", pp_props),
+                                    timeout=5.0,
+                                )
+                                _propline_last_persisted_at = _pp_marker
+                            except Exception as _pp_db_exc:
+                                logger.debug(
+                                    "PropLine PrizePicks history sync skipped: %s",
+                                    type(_pp_db_exc).__name__,
+                                )
                     pp_observations = []
                     for prop in pp_props:
                         if line is not None and abs(float(prop.line_value) - float(line)) > 0.51:
