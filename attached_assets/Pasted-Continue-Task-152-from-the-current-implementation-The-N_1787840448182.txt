@@ -1,0 +1,119 @@
+Continue Task #152 from the current implementation.
+
+The NFL scope correction is complete and verified. Do not change it back.
+
+NFL must remain:
+
+* ❌ Excluded from the OddsAPI polling scope
+* ✅ Included in the separate Underdog monitoring universe
+
+Now finish the remaining Task #152 work.
+
+REQUIRED NEXT STEP — LIVE QUOTA VERIFICATION
+
+Do not make additional architecture changes unless the live data proves they are necessary.
+
+Use the current live OddsAPI quota data and calculate:
+
+* Calls used
+* Calls remaining
+* Current UTC time
+* Time remaining until August 30, 2026 23:59:59 UTC
+* Current calls/hour
+* Required calls/hour to consume the remaining quota
+* Current pacing status: AHEAD / ON PACE / BEHIND
+
+Then observe the actual running bot long enough to establish a real consumption rate.
+
+Acceptance target
+
+The bot should be demonstrably consuming the remaining quota at a rate that puts it on pace to use essentially all available calls by the August 30 deadline, subject to the provider’s actual rate limits.
+
+Do not fake or waste calls.
+
+VERIFY LIVE REQUESTS
+
+Confirm the running bot is actually making legitimate OddsAPI requests for supported sports.
+
+Confirm:
+
+* MLB requests occur
+* NBA requests occur
+* Other supported configured sports occur where applicable
+* NFL does NOT occur
+* Underdog NFL monitoring remains unaffected
+* Unsupported Underdog-only sports are not sent to OddsAPI
+
+QUOTA PACING
+
+Verify the quota pacing telemetry reports:
+
+* Used
+* Remaining
+* Current rate
+* Required rate
+* Deadline
+* Request latency
+* Pacing state
+
+If the bot is behind pace, make only the smallest targeted adjustment necessary to increase legitimate OddsAPI utilization.
+
+If it is already on pace, do not make unnecessary changes.
+
+Respect:
+
+* Provider rate limits
+* 429 responses
+* Existing cache protections
+* Existing scheduler protections
+* max_instances=1
+
+Do NOT create an uncontrolled request storm.
+
+PRESERVE EXISTING SYSTEMS
+
+Do NOT change:
+
+* Underdog monitoring
+* FPR
+* Snapshot persistence
+* Player evidence
+* Graded-prop evidence
+* Hourly grading
+* Scoring
+* BQ/MQ
+* Telegram delivery
+* Tier 1/Tier 2 rules
+* Agent Reach
+* Clean restart behavior
+* max_instances=1
+* Railway
+* The known Replit/Railway Telegram 409 conflict
+
+Do not reintroduce NFL into OddsAPI polling.
+
+TESTING
+
+Run the relevant focused tests and then the full suite.
+
+Confirm the existing NFL-exclusion regression remains green.
+
+LIVE ACCEPTANCE
+
+Do not report Task #152 as complete based solely on tests.
+
+I need actual runtime evidence showing:
+
+* OddsAPI requests occurring
+* NFL absent from OddsAPI requests
+* Quota usage increasing
+* Calls/hour measured
+* Required calls/hour measured
+* Pacing status calculated
+* Bot on pace, or the precise remaining bottleneck identified and minimally corrected
+* Underdog monitoring unaffected
+* No uncontrolled rate-limit behavior
+
+Do not create a checkpoint until live quota consumption has been verified.
+
+Report the exact live numbers and whether the bot is currently on pace for the August 30 deadline.

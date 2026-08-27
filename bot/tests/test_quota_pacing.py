@@ -32,6 +32,16 @@ def test_required_rate_uses_remaining_quota_and_live_deadline():
     assert pacer.telemetry().required_calls_per_minute > 5.0
 
 
+def test_required_rate_learns_provider_credit_cost():
+    pacer = OddsApiQuotaPacer(deadline="2026-08-31T00:00:00Z")
+    pacer.update_quota(remaining=28_700, used=1_300)
+    pacer.update_quota(remaining=28_698, used=1_302)
+    assert pacer.telemetry().quota_cost_per_request == 2
+    assert pacer.required_calls_per_hour() == pytest.approx(
+        28_698 / 2 / pacer.hours_remaining(), rel=0.01
+    )
+
+
 def test_unknown_quota_waits_for_headers_without_claiming_pace():
     pacer = OddsApiQuotaPacer(deadline="2026-08-31T00:00:00Z")
     telemetry = pacer.telemetry()

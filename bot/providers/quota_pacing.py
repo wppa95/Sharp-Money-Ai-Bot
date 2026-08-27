@@ -42,6 +42,7 @@ class QuotaTelemetry:
 
     quota_used: Optional[int]
     quota_remaining: Optional[int]
+    quota_cost_per_request: float
     current_calls_per_hour: float
     required_calls_per_hour: float
     required_calls_per_minute: float
@@ -60,6 +61,7 @@ class QuotaTelemetry:
         latency = f"{self.latency_ms:.0f}ms" if self.latency_ms is not None else "?"
         return (
             f"used={used} remaining={remaining} "
+            f"cost={self.quota_cost_per_request:.1f}/request "
             f"current={self.current_calls_per_hour:.1f}/h "
             f"required={self.required_calls_per_hour:.1f}/h "
             f"({self.required_calls_per_minute:.2f}/min) "
@@ -89,6 +91,10 @@ class OddsApiQuotaPacer:
         self._last_request_at: Optional[float] = None
         self._quota_used: Optional[int] = None
         self._quota_remaining: Optional[int] = None
+        # OddsAPI quota headers represent credits, and a request can cost
+        # more than one credit depending on its market set.  Learn the live
+        # cost from successive provider headers instead of assuming 1.
+        self._quota_cost_per_request = 1.0
         self._last_latency_ms: Optional[float] = None
         self._backoff_until = 0.0
         self._backoff_seconds = 0.0
@@ -101,10 +107,20 @@ class OddsApiQuotaPacer:
         used: Optional[int] = None,
     ) -> None:
         """Store authoritative values from OddsAPI response headers."""
+        previous_used = self._quota_used
+        previous_remaining = self._quota_remaining
         if remaining is not None:
             self._quota_remaining = max(0, int(remaining))
         if used is not None:
             self._quota_used = max(0, int(used))
+        deltas = []
+        if used is not None and previous_used is not None:
+            deltas.append(int(used) - previous_used)
+        if remaining is not None and previous_remaining is not None:
+            deltas.append(previous_remaining - int(remaining))
+        positive_deltas = [delta for delta in deltas if 0 < delta <= 100]
+        if positive_deltas:
+            self._quota_cost_per_request = float(positive_deltas[-1])
 
     def record_request_started(self) -> None:
         """Record one actual outgoing HTTP request, not a cache hit."""
@@ -158,7 +174,15 @@ class OddsApiQuotaPacer:
 
     def current_calls_per_hour(self) -> float:
         self._prune()
-        return float(len(self._request_times))
+        if len(self._request_times) < 2:
+            return 0.0
+        span = self._request_times[-1] - self._request_times[0]
+        if span <= 0:
+            return 0.0
+        # Extrapolate the observed request cadence over an hour.  A raw
+        # count under-reports a newly-started poller for most of its first
+        # hour and incorrectly labels a healthy cadence as BEHIND.
+        return float((len(self._request_times) - 1) * 3600.0 / span)
 
     def required_calls_per_hour(self) -> float:
         if self._quota_remaining is None:
@@ -166,7 +190,7 @@ class OddsApiQuotaPacer:
         hours = self.hours_remaining()
         if hours <= 0:
             return 0.0
-        return self._quota_remaining / hours
+        return self._quota_remaining / self._quota_cost_per_request / hours
 
     def required_interval_seconds(self) -> float:
         required = self.required_calls_per_hour()
@@ -219,6 +243,7 @@ class OddsApiQuotaPacer:
         return QuotaTelemetry(
             quota_used=self._quota_used,
             quota_remaining=self._quota_remaining,
+            quota_cost_per_request=self._quota_cost_per_request,
             current_calls_per_hour=current,
             required_calls_per_hour=required,
             required_calls_per_minute=required / 60.0,
