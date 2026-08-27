@@ -1996,7 +1996,7 @@ async def underdog_job(context) -> None:
     if db is None:
         return
 
-    global _cold_start_done, _ud_scan_state, _ud_known_keys, _ud_scan_db_id
+    global _cold_start_done, _ud_scan_state, _ud_known_keys, _ud_scan_db_id, _prizepicks_cycle_task
     is_cold_start = not _cold_start_done   # True only on the very first successful fetch
     _new_db_context = _ud_scan_db_id != id(db)
     if _new_db_context:
