@@ -171,6 +171,7 @@ def observation_from_record(
     record: Any,
     *,
     provider: Optional[str] = None,
+    sport: Optional[str] = None,
     market_type: Optional[str] = None,
     player: Optional[str] = None,
     stat_type: Optional[str] = None,
@@ -215,7 +216,7 @@ def observation_from_record(
 
     return ConfirmationObservation(
         provider=_clean(provider or _value(record, "sportsbook", _value(record, "provider", ""))),
-        sport=_clean(_value(record, "sport", "")).upper(),
+        sport=_clean(sport if sport is not None else _value(record, "sport", "")).upper(),
         market_type=_clean(raw_market),
         selection=_clean(_value(record, "selection", "")),
         player=_clean(player or _value(record, "player_name", _value(record, "player", ""))),
