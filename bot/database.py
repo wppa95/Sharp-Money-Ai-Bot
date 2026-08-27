@@ -3181,8 +3181,28 @@ class Database:
         Extended result codes accepted by grade_opportunity:
           HIT | MISS | PUSH | PENDING | VOID | CANCELLED | INJURY_VOID | GAME_INTERRUPTED
         """
-        if (recommendation or "").upper() not in ("OVER", "UNDER"):
-            return
+        await self.log_prop_opportunity_bulk([{
+            "external_id": external_id,
+            "player_name": player_name,
+            "team": team,
+            "sport": sport,
+            "stat_type": stat_type,
+            "line_value": line_value,
+            "recommendation": recommendation,
+            "decision_tier": decision_tier,
+            "confidence": confidence,
+            "game_time": game_time,
+            "stars": stars,
+            "risk_level": risk_level,
+            "explanation": explanation,
+            "provider": provider,
+            "bet_quality_score": bet_quality_score,
+            "qualification_path": qualification_path,
+            "reason_codes": reason_codes,
+            "watchlist_state": watchlist_state,
+            "downstream_intelligence": downstream_intelligence,
+        }])
+        return
         import hashlib
         import json as _json
         from sqlalchemy.dialects.sqlite import insert as _sqlite_insert
@@ -3274,6 +3294,150 @@ class Database:
         async with self.session() as s:
             await s.execute(stmt)
             await s.commit()
+
+    async def log_prop_opportunity_bulk(
+        self,
+        opportunities: "list[dict]",
+    ) -> int:
+        """Batch-upsert directional prop opportunities in bounded chunks.
+
+        This has the same contract as ``log_prop_opportunity``: PASS rows are
+        transient, the identity is ``(external_id, stat_type)``, and grading
+        fields are deliberately omitted from conflict updates.
+        """
+        if not opportunities:
+            return 0
+
+        import hashlib
+        import json as _json
+        from sqlalchemy.dialects.sqlite import insert as _sqlite_insert
+        from engine.downstream_intelligence import build_downstream_payload
+
+        # Keep the statement well below SQLite's default bind-parameter limit.
+        chunk_size = 30
+        now = datetime.utcnow()
+        prepared_by_identity: dict[tuple[str, str], dict] = {}
+        for opportunity in opportunities:
+            if not isinstance(opportunity, dict):
+                continue
+            _recommendation = str(
+                opportunity.get("recommendation") or ""
+            ).upper()
+            if _recommendation not in ("OVER", "UNDER"):
+                continue
+
+            _external_id = opportunity.get("external_id")
+            _stat_type = opportunity.get("stat_type")
+            if _external_id is None or _stat_type is None:
+                continue
+            _external_id = str(_external_id)
+            _stat_type = str(_stat_type)
+            _confidence = opportunity.get("confidence", 0)
+            _bet_quality = opportunity.get("bet_quality_score")
+            _intelligence = opportunity.get("downstream_intelligence")
+            if _intelligence is None:
+                _intelligence = build_downstream_payload(
+                    evidence={},
+                    bet_quality=_bet_quality,
+                    bet_confidence=_confidence,
+                    sample_size=0,
+                )
+
+            _rec_id = hashlib.sha256(
+                f"{_external_id}:{_stat_type}".encode()
+            ).hexdigest()[:16]
+            _qpath = (
+                _json.dumps(opportunity.get("qualification_path"))
+                if opportunity.get("qualification_path") else None
+            )
+            _rcodes = (
+                _json.dumps(opportunity.get("reason_codes"))
+                if opportunity.get("reason_codes") else None
+            )
+            _intel_json = (
+                _json.dumps(_intelligence, separators=(",", ":"))
+                if _intelligence else None
+            )
+            _intel_completeness = (
+                (_intelligence.get("evidence_completeness") or {}).get("score")
+                if _intelligence else None
+            )
+            _sharp = (_intelligence or {}).get("sharp_confidence") or {}
+            _sharp_confidence = _sharp.get("score") if _intelligence else None
+            _sharp_components = (
+                _json.dumps(_sharp.get("components") or {}, separators=(",", ":"))
+                if _intelligence else None
+            )
+
+            # The active monitoring universe has no secondary classification.
+            # Keep the nullable column only for compatibility with old databases.
+            prepared_by_identity[(_external_id, _stat_type)] = {
+                "external_id": _external_id,
+                "player_name": opportunity.get("player_name"),
+                "team": opportunity.get("team"),
+                "sport": opportunity.get("sport"),
+                "stat_type": _stat_type,
+                "line_value": opportunity.get("line_value"),
+                "recommendation": _recommendation,
+                "decision_tier": opportunity.get("decision_tier"),
+                "confidence": _confidence,
+                "game_time": opportunity.get("game_time"),
+                "detected_at": now,
+                "result": "PENDING",
+                "actual_value": None,
+                "graded_at": None,
+                "stars": opportunity.get("stars"),
+                "risk_level": opportunity.get("risk_level"),
+                "explanation": opportunity.get("explanation"),
+                "recommendation_id": _rec_id,
+                "provider": opportunity.get("provider"),
+                "bet_quality_score": _bet_quality,
+                "qualification_path": _qpath,
+                "reason_codes": _rcodes,
+                "watchlist_state": None,
+                "downstream_intelligence_json": _intel_json,
+                "evidence_completeness": _intel_completeness,
+                "sharp_confidence": _sharp_confidence,
+                "sharp_confidence_components": _sharp_components,
+            }
+
+        prepared = list(prepared_by_identity.values())
+        if not prepared:
+            return 0
+
+        _update_columns = {
+            "recommendation": PropOpportunityLog.recommendation,
+            "decision_tier": PropOpportunityLog.decision_tier,
+            "confidence": PropOpportunityLog.confidence,
+            "line_value": PropOpportunityLog.line_value,
+            "stars": PropOpportunityLog.stars,
+            "risk_level": PropOpportunityLog.risk_level,
+            "explanation": PropOpportunityLog.explanation,
+            "recommendation_id": PropOpportunityLog.recommendation_id,
+            "provider": PropOpportunityLog.provider,
+            "bet_quality_score": PropOpportunityLog.bet_quality_score,
+            "qualification_path": PropOpportunityLog.qualification_path,
+            "reason_codes": PropOpportunityLog.reason_codes,
+            "watchlist_state": PropOpportunityLog.watchlist_state,
+            "downstream_intelligence_json": PropOpportunityLog.downstream_intelligence_json,
+            "evidence_completeness": PropOpportunityLog.evidence_completeness,
+            "sharp_confidence": PropOpportunityLog.sharp_confidence,
+            "sharp_confidence_components": PropOpportunityLog.sharp_confidence_components,
+        }
+        async with self.session() as s:
+            for start in range(0, len(prepared), chunk_size):
+                rows = prepared[start:start + chunk_size]
+                stmt = (
+                    _sqlite_insert(PropOpportunityLog)
+                    .values(rows)
+                    .on_conflict_do_update(
+                        index_elements=["external_id", "stat_type"],
+                        set_=_update_columns,
+                    )
+                )
+                await s.execute(stmt)
+                await s.commit()
+        return len(prepared)
 
     async def log_prop_candidate_batch(
         self,
