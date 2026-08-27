@@ -33,3 +33,18 @@ async def get_all_active_underdog_snapshots_by_line(self) -> dict[tuple[str, str
 ```
 Groups MAX(id) by (player_name, stat_type, line_value), filters removed=False.
 Location: database.py, immediately after get_active_underdog_snapshot_per_prop.
+
+## Runtime performance rule
+When the snapshot table is large, resolve the active FPR universe from the
+newest complete timestamped feed batch before falling back to historical
+`MAX(id)` reconciliation. A serialized live scan writes one shared timestamp,
+so this preserves the current active alt-line set without regrouping the
+entire append-only history.
+
+**Why:** The historical grouping query eventually became the dominant FPR
+startup cost on a multi-gigabyte SQLite snapshot table, even after the scoring
+loop's per-prop reads and writes were batched.
+
+**How to apply:** Keep the historical source-ID/removal path for small or
+legacy databases, and retain the current-batch event-start filter before
+returning active rows.
