@@ -1,0 +1,211 @@
+🔴 FINISH FPR PERFORMANCE FIX — DO NOT CREATE ANOTHER TASK
+
+Continue from the existing FPR performance follow-up task already in progress.
+
+Do NOT create a duplicate task.
+
+The FPR/Underdog handoff is already fixed and verified. Do not redo it.
+
+The remaining problem is that the FPR 10,000-prop batch is taking roughly 27+ minutes and the bot can stop before the batch finishes. Fix this now so we can complete the monitoring lifecycle and move on to the next work.
+
+1. PRIMARY GOAL
+
+Make the existing FPR full-pool rotation complete its bounded batches reliably and fast enough to support continuous rotation.
+
+Current active universe is approximately 21,000+ props.
+
+FPR must continue to:
+
+* Use the complete current active Underdog source-ID universe.
+* Process props in bounded batches.
+* Rescan unchanged props.
+* Rescan previously delivered props.
+* Continue rescoring/evaluating active props.
+* Advance the FPR cursor after a successful batch.
+* Wrap around and begin the next rotation.
+* Remove props from active rotation only when their event has started or the source prop is removed.
+* Preserve historical snapshots and grading records.
+
+2. FIX THE ACTUAL BOTTLENECK
+
+The observed bottleneck is FPR performing expensive per-prop history/evidence/database work across 10,000 rows.
+
+Inspect the actual runtime bottleneck and optimize it surgically.
+
+Prefer:
+
+* Bulk database reads instead of repeated per-prop queries.
+* Batched database writes instead of one write per prop where safely possible.
+* Reuse already-loaded history/evidence.
+* Avoid redundant provider/database calls.
+* Reuse data already available in the monitoring cycle.
+* Keep transactions bounded and safe.
+* Preserve the existing evidence/history semantics.
+
+Do NOT simply lower the batch size to make the runtime look better.
+
+Do NOT skip props.
+
+Do NOT remove evidence.
+
+Do NOT remove history.
+
+Do NOT stop rescoring unchanged props.
+
+Do NOT create another rotation.
+
+Do NOT increase scheduler concurrency.
+
+Keep:
+
+max_instances=1
+
+3. PRESERVE THE EXISTING MONITORING CONTRACT
+
+Do NOT change:
+
+* Underdog ingestion
+* Complete active-universe selection
+* Source-ID identity
+* FPR cursor semantics
+* Scoring formulas
+* OVER/UNDER evaluation
+* Evidence rules
+* Player history
+* Graded-prop evidence
+* HIT/MISS/PUSH grading
+* Telegram delivery rules
+* Tier rules
+* OddsAPI
+* Agent Reach
+* Stable Refresh behavior
+* Hourly grading
+* Clean restart behavior
+* Database historical records
+* Safety/deduplication protections
+
+Only optimize the FPR workload required to make the existing lifecycle complete reliably.
+
+4. IMPORTANT — DO NOT TURN THIS INTO A NEW ARCHITECTURE
+
+The desired architecture remains:
+
+Underdog feed
+→ persist snapshots
+→ current active source-ID universe
+→ FPR bounded batch
+→ rescore/evaluate every selected prop
+→ evidence/history processing
+→ delivery gates
+→ cursor advances
+→ next FPR batch
+→ full-pool wraparound
+→ repeat
+
+FPR remains the only full-pool rotation.
+
+Stable Refresh must NOT become another full-pool rotation.
+
+5. LIVE VERIFICATION IS REQUIRED
+
+Do not close this based only on tests.
+
+After the optimization:
+
+1. Restart the Sharp Money Bot once.
+2. Verify clean startup.
+3. Verify max_instances=1.
+4. Verify Underdog and FPR do not overlap.
+5. Let an FPR batch actually finish.
+6. Confirm the final FPR health metrics are persisted.
+7. Confirm cursor advancement.
+8. Run the next FPR batch.
+9. Confirm the second batch also completes.
+10. Confirm the cursor continues advancing.
+11. Confirm different props are processed in the subsequent batch.
+12. Confirm multiple sports appear across the batches.
+13. Confirm unchanged props are still eligible.
+14. Confirm previously delivered props are still eligible.
+15. Confirm event-started props are removed from the active rotation while historical records remain.
+16. Confirm Stable Refresh does not create a competing FPR cursor.
+17. Confirm Underdog defers while FPR owns the serialized heavy-work slot and then resumes afterward.
+18. Confirm the bot remains running after the FPR batches complete.
+
+6. PERFORMANCE ACCEPTANCE
+
+Measure the actual FPR batch duration before and after the fix.
+
+The goal is a substantial reduction from the observed ~27+ minutes.
+
+Do not claim success merely because the batch eventually completes.
+
+The optimization should make the full active pool practically rotatable.
+
+For approximately 21K+ active props, verify:
+
+* Batch 1 completes.
+* Batch 2 completes.
+* Cursor advances correctly.
+* Rotation progresses toward full coverage.
+* No artificial fixed cap is introduced.
+* No props are silently discarded.
+
+If the current runtime still cannot support practical full-pool rotation, identify the exact remaining bottleneck and fix that bottleneck before closing.
+
+7. REGRESSION TESTS
+
+Add focused regression coverage for:
+
+* FPR batch completion.
+* Cursor advancement.
+* Multiple sequential batches.
+* Full-pool wraparound.
+* Unchanged prop rescanning.
+* Previously delivered prop rescanning.
+* Event-start exclusion.
+* Stable Refresh remaining non-rotational.
+* max_instances=1.
+* Batched/bulk history processing.
+* No loss of evidence/history.
+* No dropped snapshots.
+* No change to scoring/delivery behavior.
+
+Then run the full existing suite.
+
+Existing tests must remain green unless a test expectation legitimately reflects the corrected behavior.
+
+8. FINAL ACCEPTANCE
+
+Do NOT mark the task complete until ALL are true:
+
+* FPR bottleneck identified.
+* FPR performance optimized.
+* No batch-size reduction used as the solution.
+* No props skipped.
+* No evidence/history removed.
+* FPR remains the only full-pool rotation.
+* max_instances=1 preserved.
+* Underdog/FPR serialization preserved.
+* FPR Batch 1 completes live.
+* FPR Batch 2 completes live.
+* Cursor advances live.
+* Rotation advances live.
+* Multiple sports appear.
+* Unchanged props remain eligible.
+* Previously delivered props remain eligible.
+* Event-started props leave active rotation but remain historical.
+* Stable Refresh has no competing FPR cursor.
+* Full test suite passes.
+* Compilation/diff checks pass.
+* Bot remains running after successful FPR batches.
+* No unrelated behavior changed.
+
+Do not create another task.
+
+Do not create a checkpoint until this is actually live-verified.
+
+Once all of the above is verified, report the exact before/after FPR batch duration, batch sizes, cursor progression, active-pool size, and live verification results.
+
+Then stop.
+
+After this is genuinely complete, we will move on to the new-prop fixes.
