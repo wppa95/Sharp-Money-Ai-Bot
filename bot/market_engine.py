@@ -4589,6 +4589,9 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
 
     # ── Mutable cycle stats ───────────────────────────────────────────────────
     fpr_pool_size       = 0
+    fpr_unique_source_ids = 0
+    fpr_batch_source_ids  = 0
+    fpr_line_movers       = 0
     fpr_cursor          = 0
     fpr_end_cursor      = 0
     fpr_next_cursor     = 0
@@ -4618,14 +4621,27 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             return
 
         def _fpr_sort_key(item):
-            """Stable ordering for the unified full-pool rotation."""
-            (player, stat, line), snap = item
+            """Stable ordering for the unified full-pool rotation.
+
+            A line movement is a prompt-priority signal, not a second queue.
+            ``is True`` is intentional here: test doubles and legacy rows can
+            expose truthy sentinel attributes that are not actual movement
+            markers.
+            """
+            key, snap = item
+            player, stat, line = key[:3]
             sport = (getattr(snap, "sport", None) or "").upper()
-            return (sport, player, stat, line)
+            is_mover = getattr(snap, "line_moved", False) is True
+            external_id = str(getattr(snap, "external_id", None) or "")
+            return (0 if is_mover else 1, sport, player, stat, line, external_id)
 
         sorted_items = sorted(active_pool.items(), key=_fpr_sort_key)
         pool_keys    = [k for k, _ in sorted_items]
         pool_snaps   = {k: v for k, v in sorted_items}
+        fpr_unique_source_ids = len({
+            str(getattr(snap, "external_id", None) or key[:3])
+            for key, snap in sorted_items
+        })
 
         # ── Load and clamp cursor ─────────────────────────────────────────────
         fpr_rotation = _health.get_fpr_rotation() if _health else 1
@@ -4633,8 +4649,55 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         fpr_cursor   = fpr_cursor % fpr_pool_size  # safe if pool shrank
 
         # ── Slice batch ───────────────────────────────────────────────────────
-        fpr_end_cursor  = min(fpr_cursor + config.FPR_BATCH_SIZE, fpr_pool_size)
-        batch_keys      = pool_keys[fpr_cursor:fpr_end_cursor]
+        # Movers receive prompt priority inside this same FPR batch, but the
+        # persisted cursor remains the sole rotation state.  Reserve capacity
+        # for the ordinary cursor slice whenever possible so a noisy movement
+        # set cannot starve unchanged active props.  The cursor still advances
+        # over the full canonical pool (including prioritized rows); otherwise
+        # a mover-heavy pool could prevent the normal rotation from completing.
+        fpr_limit = max(1, int(config.FPR_BATCH_SIZE))
+        cursor_window = pool_keys[
+            fpr_cursor:min(fpr_cursor + fpr_limit, fpr_pool_size)
+        ]
+        mover_keys = [
+            key for key, snap in sorted_items
+            if getattr(snap, "line_moved", False) is True
+        ]
+        regular_keys = [key for key, snap in sorted_items
+                        if getattr(snap, "line_moved", False) is not True]
+        if mover_keys and regular_keys:
+            mover_limit = min(
+                len(mover_keys),
+                fpr_limit if fpr_limit == 1 else max(1, fpr_limit // 2),
+            )
+            priority_keys = mover_keys[:mover_limit]
+            regular_batch = [
+                key for key in cursor_window
+                if getattr(pool_snaps[key], "line_moved", False) is not True
+            ][:fpr_limit - len(priority_keys)]
+            batch_keys = priority_keys + regular_batch
+            # Fill any unused capacity from this cursor window without
+            # duplicating a prioritized mover.
+            batch_keys.extend(
+                key for key in cursor_window
+                if key not in batch_keys
+            )
+            batch_keys = batch_keys[:fpr_limit]
+            fpr_line_movers = sum(
+                1 for key in batch_keys
+                if getattr(pool_snaps[key], "line_moved", False) is True
+            )
+        else:
+            # The normal bounded cursor slice is also the all-movers fallback.
+            batch_keys = cursor_window
+            fpr_line_movers = sum(
+                1 for key in batch_keys
+                if getattr(pool_snaps[key], "line_moved", False) is True
+            )
+
+        # Advancement is based on the canonical cursor window, not the
+        # prioritized subset selected from it.
+        fpr_end_cursor  = min(fpr_cursor + len(cursor_window), fpr_pool_size)
         fpr_batch_size  = len(batch_keys)
         fpr_next_cursor = fpr_end_cursor % fpr_pool_size  # wraps to 0 at pool end
 
@@ -4644,7 +4707,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
 
         # ── Score each prop in this batch ─────────────────────────────────────
         for _fpr_key in batch_keys:
-            _fpr_player, _fpr_stat, _fpr_line_val = _fpr_key
+            _fpr_player, _fpr_stat, _fpr_line_val = _fpr_key[:3]
             _fpr_snap  = pool_snaps.get(_fpr_key)
             if _fpr_snap is None:
                 continue
@@ -4856,6 +4919,11 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             "pct_complete":         round(fpr_end_cursor / fpr_pool_size * 100, 1)
                                     if fpr_pool_size else 0.0,
             "fpr_rescored":         fpr_rescored,
+            "active_source_ids":    fpr_unique_source_ids,
+            "batch_source_ids":     fpr_batch_source_ids,
+            "line_movers_prioritized": fpr_line_movers,
+            "uncovered_props":      max(0, fpr_pool_size - fpr_end_cursor),
+            "next_rotation":        fpr_rotation,
             "fpr_actionable":       fpr_actionable,
             "fpr_sent":             fpr_sent,
             "fpr_not_delivered":    fpr_not_delivered,
