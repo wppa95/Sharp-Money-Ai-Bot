@@ -1,0 +1,421 @@
+🔴 FINISH REMAINING SHARP MONEY BOT FIXES
+
+Continue from the current implementation.
+
+The snapshot persistence fix is already complete and live-verified. Do NOT redo it, regress it, or change unrelated behavior.
+
+Make only the following targeted changes.
+
+⸻
+
+1. RESTORE THE TWO REMAINING FIXES
+
+Complete the two remaining runtime fixes from the previous task:
+
+A. Hourly opportunity grading
+
+The opportunity grader must:
+
+* Run every 1 hour
+* Continue running hourly after startup
+* Successfully execute and record its health/completion state
+* Grade eligible completed-event opportunities
+* Persist HIT / MISS / PUSH and actual result/value
+* Remain idempotent
+* Not fabricate results
+* Not require Telegram delivery for grading
+
+Keep the existing grading architecture.
+
+Do NOT change the grading logic unnecessarily.
+
+B. Canonical Tier 1 / Tier 2 Telegram delivery rules
+
+Restore the canonical delivery distinction below.
+
+⸻
+
+2. TIER 2
+
+Tier 2 is ONLY:
+
+* MLB
+* NBA
+* NFL
+* Football
+* CFB
+* NCAA
+* NCAAF
+
+Treat football/NFL/CFB/NCAA/NCAAF aliases consistently so the same football sport cannot accidentally fall into Tier 1 because of naming differences.
+
+Tier 2 remains monitored normally.
+
+For Telegram delivery, Tier 2 requires:
+
+* Strong or Elite direction
+* Strong supporting evidence
+* 90/100+ confidence
+* BQ
+* MQ
+* Existing deduplication
+* Existing live-game protections
+* Existing safety protections
+
+Do NOT require:
+
+* S-tier
+* A-tier
+* B-tier
+* C-tier
+
+S/A/B/C remain display classifications only.
+
+The Tier 2 blocker is the 90/100+ confidence + BQ + MQ + evidence + Strong/Elite direction requirement.
+
+⸻
+
+3. TIER 1
+
+Tier 1 is EVERY SPORT OTHER THAN THE TIER 2 SPORTS ABOVE.
+
+The current Sport Funnel Breakdown shows these Tier 1 sports and they must be explicitly supported:
+
+* FIFA
+* TENNIS
+* CS
+* PGA
+* MMA
+* LOL
+* WNBA
+* KBO
+* VAL
+* CFL
+* NPB
+* MOTORCYCLE
+* USAC
+* HIGHLIMIT
+
+Also ensure these previously supported non-Tier-2 sports remain Tier 1 when present:
+
+* DOTA
+* DGPT
+* ESPORTS
+* RACING
+* OUTLAWS
+* BASKETBALL
+* and any other legitimate non-Tier-2 sport.
+
+IMPORTANT
+
+Do NOT create a permanently limited hardcoded Tier 1 list.
+
+The canonical rule must be:
+
+If sport is NOT MLB, NBA, NFL/Football, CFB/NCAA/NCAAF → Tier 1.
+
+This means newly appearing sports automatically become Tier 1 without requiring another code change.
+
+⸻
+
+4. TIER 1 TELEGRAM DELIVERY
+
+Tier 1 Telegram delivery requires:
+
+* Strong or Elite direction
+* Strong supporting evidence
+* Actionable conditions
+* Existing deduplication
+* Existing live-game protections
+* Existing safety protections
+
+Tier 1 does NOT require:
+
+* S-tier
+* A-tier
+* B-tier
+* C-tier
+* 90/100 confidence solely because it is Tier 1
+
+A Tier 1 prop with a B/C/PASS-style display classification must still be allowed through underlying evaluation.
+
+The Telegram gate should evaluate the canonical Tier 1 conditions rather than the display classification.
+
+⸻
+
+5. REMOVE ALL LEGACY TIER LOGIC
+
+Audit every actionable Telegram delivery path.
+
+Remove any remaining logic that:
+
+* Requires S-tier
+* Requires A-tier
+* Blocks B-tier
+* Blocks C-tier
+* Blocks PASS solely because of classification
+* Blocks every Tier 2 prop
+* Uses an obsolete confidence threshold
+* Treats all sports as Tier 2
+* Treats all sports as Tier 1
+* Uses inconsistent sport aliases
+
+Apply the canonical rules consistently to:
+
+* Main monitoring delivery
+* FPR delivery
+* Watchlist/actionable delivery where still applicable
+* /picks
+* /slip
+* Any other actionable-pick delivery path
+
+Do not create duplicate qualification systems.
+
+⸻
+
+6. REMOVE STABLE REFRESH DISPLAY
+
+The Stable Refresh system may remain internally where required for compatibility, but do not display Stable Refresh as a separate monitoring stage anymore.
+
+Remove the Stable Refresh section from:
+
+* /funnel
+* /dashboard
+* Scan Pipeline output
+* Any user-facing monitoring status output
+
+Do NOT create a replacement Stable Refresh section.
+
+Do NOT reintroduce Stable Refresh as a competing full-pool rotation.
+
+FPR remains the sole full-pool rotation.
+
+⸻
+
+7. PRESERVE FULL-POOL ROTATION
+
+Do NOT change the working FPR architecture.
+
+FPR must remain responsible for rotating the complete current active Underdog source-ID universe.
+
+Continue to:
+
+* Prioritize new props
+* Prioritize line movers
+* Rescan unchanged props
+* Rescan previously delivered props
+* Rotate through the complete active pool
+* Advance the cursor
+* Wrap around
+* Exclude removed props
+* Exclude events after they start
+* Preserve historical snapshots for grading/history
+
+Do NOT switch FPR back to PropLineHistory-only scanning.
+
+Do NOT introduce a fixed 500-prop ceiling.
+
+Do NOT create another full-pool rotation.
+
+⸻
+
+8. CURRENT ACTIVE UNIVERSE
+
+The active universe must remain based on the latest Underdog source-ID state.
+
+Historical snapshot observations are NOT individual active props.
+
+The bot should:
+
+* Retain historical snapshots
+* Determine the latest state for each source ID
+* Exclude removed props from active rotation
+* Exclude props once their event has started
+* Keep those historical records available for grading and analysis
+
+Do not delete historical data.
+
+⸻
+
+9. SNAPSHOT PERSISTENCE — DO NOT REGRESS
+
+The recently completed persistence fix must remain intact.
+
+Preserve:
+
+* Source IDs
+* Bulk persistence reconciliation
+* Lock-only retries
+* Fresh transaction per retry
+* Bounded retry delays
+* Failed-batch reporting
+* Intentional futures/season-long exclusions
+* _cold_start_done safety behavior
+
+Do not modify this system unless required to prevent regression.
+
+⸻
+
+10. AGENT REACH
+
+Keep Agent Reach exactly within its existing architectural boundary.
+
+It should remain available to the analyst/research path.
+
+Verify that:
+
+* Agent Reach research works
+* It enriches analyst output
+* It does not alter scoring
+* It does not bypass delivery gates
+* It does not create a duplicate alert pipeline
+
+Do NOT redesign Agent Reach into a second monitoring/alert system.
+
+⸻
+
+11. TESTING
+
+Add/update focused regression tests for:
+
+Tiering
+
+* MLB → Tier 2
+* NBA → Tier 2
+* NFL → Tier 2
+* Football aliases → Tier 2
+* CFB → Tier 2
+* NCAA → Tier 2
+* NCAAF → Tier 2
+* FIFA → Tier 1
+* Tennis → Tier 1
+* CS → Tier 1
+* PGA → Tier 1
+* MMA → Tier 1
+* LOL → Tier 1
+* WNBA → Tier 1
+* KBO → Tier 1
+* VAL → Tier 1
+* CFL → Tier 1
+* NPB → Tier 1
+* Motorcycle → Tier 1
+* USAC → Tier 1
+* HIGHLIMIT → Tier 1
+* DOTA → Tier 1
+* DGPT → Tier 1
+* ESPORTS → Tier 1
+* RACING → Tier 1
+* OUTLAWS → Tier 1
+* Unknown/new non-Tier-2 sport → automatically Tier 1
+
+Delivery gates
+
+Verify:
+
+* Tier 1 does not require S/A/B/C
+* Tier 2 does not require S/A/B/C
+* Tier 2 requires 90/100+ confidence
+* Tier 2 requires BQ
+* Tier 2 requires MQ
+* Both tiers require Strong/Elite direction and strong evidence
+* Existing safety/dedup/live-game protections remain intact
+* No legacy classification gate remains
+
+Grading
+
+Verify:
+
+* Grader runs hourly
+* Startup execution works
+* Subsequent hourly execution works
+* Completed events are graded
+* HIT persists
+* MISS persists
+* PUSH persists
+* Actual result persists
+* Duplicate grading is prevented
+* Non-Telegram tracked props can be graded
+
+Reporting
+
+Verify:
+
+* Stable Refresh is no longer displayed
+* FPR remains displayed
+* Dashboard remains functional
+* /funnel remains functional
+* Sport Funnel Breakdown remains accurate
+* Current active universe remains source-ID based
+
+⸻
+
+12. LIVE VERIFICATION
+
+Do not report completion based only on tests.
+
+After implementation:
+
+1. Restart only the Sharp Money Bot workflow if required.
+2. Confirm scheduler starts correctly.
+3. Confirm max_instances=1 remains intact.
+4. Confirm the hourly grader executes successfully.
+5. Confirm a fresh Underdog cycle completes.
+6. Confirm FPR remains the only full-pool rotation.
+7. Confirm Stable Refresh is no longer displayed.
+8. Confirm Tier 1/Tier 2 classification behavior from the live system.
+9. Confirm at least one live monitoring cycle processes the current source-ID active universe.
+10. Confirm no regression in snapshot persistence.
+11. Confirm Agent Reach remains available through its intended analyst path.
+12. Confirm no unrelated functionality changed.
+
+Do NOT restart Railway.
+
+Do NOT touch the known Replit/Railway Telegram 409 conflict. That is caused by both environments polling the same Telegram bot and is intentionally excluded from this task.
+
+⸻
+
+13. FINAL ACCEPTANCE
+
+Do NOT create a checkpoint until all of the following are verified:
+
+* Hourly grader executes successfully
+* Grading remains hourly
+* HIT/MISS/PUSH persistence works
+* Tier 2 = MLB/NBA/NFL/Football/CFB/NCAA/NCAAF
+* Tier 1 = every other sport
+* All sports from the current funnel are correctly Tier 1 where applicable
+* Unknown future non-Tier-2 sports automatically become Tier 1
+* No S/A/B/C Telegram gates remain
+* Tier 2 90/100+ + BQ + MQ blocker remains
+* Strong/Elite + strong evidence required for Telegram
+* Stable Refresh is no longer displayed
+* FPR remains the sole full-pool rotation
+* Current active universe remains source-ID based
+* Snapshot persistence fix remains intact
+* Agent Reach analyst path remains intact
+* Existing safety/dedup/live-game protections remain intact
+* Focused tests pass
+* Full test suite passes
+* Live monitoring verification passes
+* No unrelated behavior changed
+* NO CHECKPOINT CREATED
+
+🔴 FINAL INSTRUCTION
+
+Do not claim completion based solely on tests.
+
+I want the actual running Sharp Money Bot verified.
+
+Make the smallest possible targeted changes.
+
+Do not redesign the architecture.
+
+Do not change scoring formulas.
+
+Do not change provider integrations.
+
+Do not change the working snapshot persistence fix.
+
+Do not touch the known Replit/Railway Telegram conflict.
+
+Do not create a checkpoint until every requirement above is implemented and live-verified.
