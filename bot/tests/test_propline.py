@@ -1,0 +1,232 @@
+"""Focused tests for the authorized PropLine → PrizePicks adapter."""
+
+from __future__ import annotations
+
+import asyncio
+from datetime import datetime, timedelta
+
+import pytest
+
+from providers.propline import (
+    PropLineClient,
+    PropLinePrizePicksProvider,
+    normalize_propline_prizepicks_record,
+)
+from providers.prop_provider import PlayerProp
+from engine.provider_confirmation import (
+    ConfirmationObservation,
+    ConfirmationTarget,
+    confirm_market,
+)
+
+
+class _Response:
+    def __init__(self, status: int, payload=None, headers=None):
+        self.status = status
+        self._payload = payload if payload is not None else {}
+        self.headers = headers or {}
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return None
+
+    async def json(self, **_kwargs):
+        return self._payload
+
+
+class _Session:
+    def __init__(self, response):
+        self.response = response
+        self.calls = []
+
+    def get(self, url, **kwargs):
+        self.calls.append((url, kwargs))
+        return self.response
+
+
+def test_normalization_preserves_prizepicks_identity_and_metadata():
+    observed = datetime(2026, 8, 27, 18, 0)
+    prop = normalize_propline_prizepicks_record(
+        {
+            "provider": "PrizePicks",
+            "market_type": "player_prop",
+            "id": "projection-1",
+            "player": {"id": "player-1", "name": "Alex Example"},
+            "sport": "basketball",
+            "stat": "PTS",
+            "line": 24.5,
+            "direction": "Over",
+            "team": "Example City",
+            "event": {
+                "id": "game-1",
+                "name": "Example City at Test Town",
+                "start_time": "2026-08-28T00:00:00Z",
+            },
+            "updated_at": "2026-08-27T17:59:00Z",
+            "status": "available",
+        },
+        fetched_at=observed,
+    )
+
+    assert prop is not None
+    assert prop.provider == "PrizePicks"
+    assert prop.player_name == "Alex Example"
+    assert prop.player_id == "player-1"
+    assert prop.sport == "NBA"
+    assert prop.stat_type == "points"
+    assert prop.line_value == 24.5
+    assert prop.direction == "OVER"
+    assert prop.event_id == "game-1"
+    assert prop.external_id == "projection-1"
+    assert prop.source_timestamp == datetime(2026, 8, 27, 17, 59)
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        {"provider": "Underdog", "market_type": "player_prop", "player_name": "A", "sport": "NBA", "stat": "Points", "line": 20},
+        {"provider": "PrizePicks", "market_type": "moneyline", "player_name": "A", "sport": "NBA", "stat": "Points", "line": 20},
+        {"provider": "PrizePicks", "market_type": "game_total", "player_name": "A", "sport": "NBA", "stat": "Points", "line": 20},
+        {"provider": "PrizePicks", "market_type": "player_prop", "player_name": "A", "sport": "NBA", "stat": "Points", "line": "not-a-line"},
+    ],
+)
+def test_only_prizepicks_player_props_are_accepted(record):
+    assert normalize_propline_prizepicks_record(record) is None
+
+
+def test_missing_key_disables_provider_without_request():
+    client = PropLineClient(api_key="", api_url="https://example.invalid", min_request_interval=0)
+    provider = PropLinePrizePicksProvider(client=client)
+
+    assert provider.is_available() is False
+    assert asyncio.run(provider.fetch_props()) == []
+
+
+def test_client_uses_key_without_logging_or_polling_other_sources():
+    session = _Session(
+        _Response(
+            200,
+            {"data": [{
+                "provider": "PrizePicks",
+                "market": "player_props",
+                "player_name": "Alex Example",
+                "sport": "NBA",
+                "stat_type": "Points",
+                "line": 24.5,
+                "id": "pp-1",
+            }]},
+        )
+    )
+    client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://authorized.example/props",
+        session=session,
+        min_request_interval=0,
+    )
+
+    props = asyncio.run(PropLinePrizePicksProvider(client=client).fetch_props())
+
+    assert len(props) == 1
+    assert props[0].provider == "PrizePicks"
+    assert len(session.calls) == 1
+    assert session.calls[0][0] == "https://authorized.example/props"
+    assert session.calls[0][1]["params"] == {
+        "provider": "prizepicks",
+        "market": "player_props",
+    }
+
+
+def test_client_reuses_fresh_cache_instead_of_repeating_request():
+    session = _Session(
+        _Response(
+            200,
+            {"props": [{
+                "provider": "PrizePicks",
+                "market": "player_props",
+                "player_name": "Alex Example",
+                "sport": "NBA",
+                "stat_type": "Points",
+                "line": 24.5,
+            }]},
+        )
+    )
+    client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://authorized.example/props",
+        session=session,
+        min_request_interval=0,
+        cache_ttl=300,
+    )
+
+    first = asyncio.run(client.fetch_prizepicks_props())
+    second = asyncio.run(client.fetch_prizepicks_props())
+
+    assert first.from_cache is False
+    assert second.from_cache is True
+    assert len(session.calls) == 1
+
+
+def test_client_handles_rate_limit_with_backoff():
+    session = _Session(_Response(429, headers={"Retry-After": "60"}))
+    clock_value = [100.0]
+    client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://authorized.example/props",
+        session=session,
+        min_request_interval=0,
+        clock=lambda: clock_value[0],
+    )
+
+    assert asyncio.run(client.fetch_prizepicks_props()).props == []
+    assert asyncio.run(client.fetch_prizepicks_props()).props == []
+    assert len(session.calls) == 1
+
+
+def test_confirmation_rejects_stale_or_ambiguous_prizepicks_matches():
+    now = datetime(2026, 8, 27, 18, 0)
+    target = ConfirmationTarget(
+        sport="NBA",
+        market_type="player_prop",
+        player="Alex Example",
+        stat_type="points",
+        direction="OVER",
+        line=24.5,
+        event="Example City at Test Town",
+    )
+    stale = ConfirmationObservation(
+        provider="PrizePicks",
+        sport="NBA",
+        market_type="player_prop",
+        player="Alex Example",
+        stat_type="points",
+        direction="OVER",
+        line=24.5,
+        event="Example City at Test Town",
+        observed_at=now - timedelta(hours=1),
+    )
+    assert confirm_market(
+        target, [stale], allowed_providers={"PrizePicks"},
+        max_age_seconds=600, now=now,
+    ) is None
+
+    fresh_a = ConfirmationObservation(**{**stale.__dict__, "observed_at": now, "event_id": "g1"})
+    fresh_b = ConfirmationObservation(**{**stale.__dict__, "observed_at": now, "event_id": "g2"})
+    assert confirm_market(
+        target, [fresh_a, fresh_b], allowed_providers={"PrizePicks"},
+        max_age_seconds=600, now=now,
+    ) is None
+
+
+def test_player_prop_extra_metadata_is_optional_for_existing_providers():
+    prop = PlayerProp(
+        provider="Underdog",
+        sport="NBA",
+        player_name="Alex Example",
+        team="",
+        stat_type="points",
+        line_value=24.5,
+    )
+    assert prop.direction == ""
+    assert prop.source_timestamp is None

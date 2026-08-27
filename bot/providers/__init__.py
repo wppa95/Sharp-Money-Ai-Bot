@@ -20,6 +20,13 @@ from .usage_tracker import (
     init_usage_tracker,
     infer_call_priority,
 )
+from .propline import (
+    PropLineClient,
+    PropLineError,
+    PropLineRateLimitError,
+    PropLinePrizePicksProvider,
+    normalize_propline_prizepicks_record,
+)
 
 __all__ = [
     "FailureType",
@@ -38,4 +45,9 @@ __all__ = [
     "get_usage_tracker",
     "init_usage_tracker",
     "infer_call_priority",
+    "PropLineClient",
+    "PropLineError",
+    "PropLineRateLimitError",
+    "PropLinePrizePicksProvider",
+    "normalize_propline_prizepicks_record",
 ]

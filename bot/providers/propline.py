@@ -342,6 +342,7 @@ class PropLineClient:
         self._last_request_at: Optional[float] = None
         self._backoff_until = 0.0
         self._cache: Optional[PropLineFetchResult] = None
+        self._cache_clock_at: Optional[float] = None
 
     @property
     def is_configured(self) -> bool:
@@ -361,7 +362,8 @@ class PropLineClient:
         return bool(
             self._cache
             and self.cache_ttl > 0
-            and (time.time() - self._cache.fetched_at.timestamp()) < self.cache_ttl
+            and self._cache_clock_at is not None
+            and (now - self._cache_clock_at) < self.cache_ttl
         )
 
     async def fetch_prizepicks_props(self) -> PropLineFetchResult:
@@ -441,6 +443,7 @@ class PropLineClient:
                 is not None
             ]
             self._cache = PropLineFetchResult(props, fetched_at, from_cache=False)
+            self._cache_clock_at = self._clock()
             return PropLineFetchResult(list(props), fetched_at, from_cache=False)
 
 
