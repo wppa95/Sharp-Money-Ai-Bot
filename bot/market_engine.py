@@ -658,34 +658,54 @@ _UD_TO_ODDS_API_MARKET: dict[str, str] = {
 
 async def _get_odds_api_confirmation(
     sport: str,
-    player_name: str,
-    stat_type: str,
-    direction: str,
-    line: float,
+    player_name: str = "",
+    stat_type: str = "",
+    direction: str = "",
+    line: float = 0.0,
+    *,
+    market_type: str = "player_prop",
+    selection: str = "",
+    team: str = "",
+    event: str = "",
+    game_time: Optional[datetime] = None,
+    db: Optional[Database] = None,
 ) -> Optional[dict]:
     """
-    Query OddsAPI player prop lines as a non-blocking market confirmation signal.
+    Query already-supported DraftKings/FanDuel observations as a
+    non-blocking confirmation signal.
 
-    Only fires for sports/stats configured in _UD_TO_ODDS_API_MARKET (NBA + MLB).
-    DraftKings and FanDuel are supporting books only; Underdog remains the
-    source of the player-prop pick and alert. Uses the cached OddsApiCache —
-    no extra quota if already fetched this cycle.
+    Player props use the existing cached player-prop fetch.  Moneyline and
+    totals use h2h/totals OddsRecord rows written by the existing OddsAPI
+    poller, so this function never starts a second polling cycle.
 
     Returns None when:
-      • sport/stat not mapped, or _analysis_engine not initialised
-      • player not found on any sportsbook
-      • any exception or 5-second timeout
-
-    Returns dict with keys: num_books, avg_line (float|None), notes (str), confirmed (bool).
+      • the source is disabled/unavailable or no safe match exists
+      • any provider/database exception or timeout
     """
-    if not getattr(config, "ODDS_API_ENABLED", True):
-        return None
-    if _analysis_engine is None:
-        return None
-    market_key = _UD_TO_ODDS_API_MARKET.get(stat_type.lower().strip())
-    if not market_key:
+    normalized_market = normalize_market(market_type)
+    if not getattr(config, "ODDS_API_ENABLED", True) or _analysis_engine is None:
         return None
 
+    allowed_books = set()
+    if getattr(config, "DRAFTKINGS_ENABLED", False):
+        allowed_books.add("draftkings")
+    if getattr(config, "FANDUEL_ENABLED", False):
+        allowed_books.add("fanduel")
+    if not allowed_books:
+        return None
+
+    target = ConfirmationTarget(
+        sport=sport,
+        market_type=normalized_market,
+        selection=selection,
+        player=player_name,
+        team=team,
+        stat_type=stat_type,
+        direction=direction,
+        line=line,
+        event=event,
+        game_time=game_time,
+    )
     try:
         import asyncio as _asyncio
         from engine.analysis import Sport as _Sport
@@ -694,86 +714,103 @@ async def _get_odds_api_confirmation(
         except ValueError:
             return None
 
-        lines = await _asyncio.wait_for(
-            _analysis_engine.fetch_player_prop_lines(sport_enum),
-            timeout=5.0,
-        )
+        if normalized_market == "player_prop":
+            market_key = _UD_TO_ODDS_API_MARKET.get(stat_type.lower().strip())
+            if not market_key:
+                return None
+            lines = await _asyncio.wait_for(
+                _analysis_engine.fetch_player_prop_lines(sport_enum),
+                timeout=5.0,
+            )
+            observations = [
+                observation_from_record(
+                    row,
+                    provider=getattr(row, "sportsbook", ""),
+                    market_type=getattr(row, "market_key", market_key),
+                    player=getattr(row, "player_name", ""),
+                    stat_type=stat_type,
+                    direction=getattr(row, "description", ""),
+                    line=getattr(row, "line", None),
+                    odds=getattr(row, "american_odds", None),
+                )
+                for row in lines
+            ]
+        else:
+            source_db = db or _confirmation_db
+            if source_db is None:
+                return None
+            # The existing h2h/totals poller records both books.  A short
+            # freshness window prevents an old event from being presented as
+            # current confirmation while tolerating normal poll gaps.
+            rows = await _asyncio.wait_for(
+                source_db.get_odds_window(
+                    sport,
+                    datetime.utcnow() - timedelta(hours=4),
+                ),
+                timeout=5.0,
+            )
+            observations = [
+                observation_from_record(row)
+                for row in rows
+                if normalize_market(getattr(row, "market_type", "")) == normalized_market
+            ]
     except Exception:
         return None
 
-    # Search only the enabled DraftKings/FanDuel lines. These are confirmation
-    # data for an Underdog prop, never a standalone sportsbook alert source.
-    allowed_books = set()
-    if getattr(config, "DRAFTKINGS_ENABLED", False):
-        allowed_books.add("draftkings")
-    if getattr(config, "FANDUEL_ENABLED", False):
-        allowed_books.add("fanduel")
-    allowed_book_names = {book.replace(" ", "") for book in allowed_books}
-
-    player_lower   = player_name.lower().strip()
-    direction_label = direction.strip().lower()  # "over" | "under"
-
-    book_lines: list[float] = []
-    book_odds:  list[int]   = []   # American odds for this direction (CLV seed use)
-    sportsbooks:  set[str]  = set()
-
-    for pl in lines:
-        if pl.sportsbook.lower().replace(" ", "") not in allowed_book_names:
-            continue
-        if pl.market_key != market_key:
-            continue
-        pl_name = (pl.player_name or "").lower().strip()
-        # Accept exact match or surname suffix match (e.g. "Caminero" in "Junior Caminero")
-        if pl_name != player_lower:
-            parts_ud  = player_lower.split()
-            parts_pl  = pl_name.split()
-            if not (parts_ud and parts_pl and (
-                parts_ud[-1] in pl_name or parts_pl[-1] in player_lower
-            )):
-                continue
-        if pl.line is None:
-            continue
-        sportsbooks.add(pl.sportsbook)
-        if (pl.description or "").lower().strip() == direction_label:
-            book_lines.append(pl.line)
-            if pl.american_odds:
-                book_odds.append(pl.american_odds)
-
-    if not sportsbooks:
-        return None
-
-    num_books = len(sportsbooks)
-    avg_line  = sum(book_lines) / len(book_lines) if book_lines else None
-    # avg_odds: average American odds across books for this direction.
-    # Used for CLV seeding when the pick is stored as an AlertCLVSeed.
-    avg_odds  = round(sum(book_odds) / len(book_odds)) if book_odds else None
-
-    if avg_line is not None:
-        diff = avg_line - line
-        if abs(diff) < 0.05:
-            notes = f"{num_books} book{'s' if num_books != 1 else ''} · avg {avg_line:.1f} ✅"
-        elif diff > 0:
-            notes = f"{num_books} book{'s' if num_books != 1 else ''} · avg {avg_line:.1f} ({diff:+.1f} vs UD)"
+    if normalized_market == "player_prop":
+        # Preserve the established display semantics: num_books counts books
+        # that carry the same player/stat market, while avg_line/confirmed
+        # only use the requested side.
+        from engine.provider_confirmation import _matches_identity as _matches
+        identity_rows = [
+            row for row in observations
+            if row.provider_key in {b.replace(" ", "") for b in allowed_books}
+            and _matches(target, row, candidate_names={
+                getattr(candidate, "player", "") for candidate in observations
+            })
+        ]
+        directional = [
+            row for row in identity_rows
+            if row.direction == direction.strip().upper()
+        ]
+        if not identity_rows:
+            return None
+        by_provider = {row.provider_key: row for row in identity_rows}
+        book_lines = [row.line for row in directional if row.line is not None]
+        book_odds = [row.odds for row in directional if row.odds not in (None, 0)]
+        num_books = len(by_provider)
+        avg_line = sum(book_lines) / len(book_lines) if book_lines else None
+        avg_odds = round(sum(book_odds) / len(book_odds)) if book_odds else None
+        line_delta = abs(avg_line - line) if avg_line is not None else None
+        diff = avg_line - line if avg_line is not None else None
+        notes = f"{num_books} book{'s' if num_books != 1 else ''}"
+        if avg_line is None:
+            notes += " · no direct line match"
+        elif abs(diff or 0) < 0.05:
+            notes += f" · avg {avg_line:.1f} ✅"
         else:
-            notes = f"{num_books} book{'s' if num_books != 1 else ''} · avg {avg_line:.1f} ({diff:+.1f} vs UD)"
-    else:
-        notes = f"{num_books} book{'s' if num_books != 1 else ''} · no direct line match"
+            notes += f" · avg {avg_line:.1f} ({diff:+.1f} vs UD)"
+        return {
+            "market_type": normalized_market,
+            "num_books": num_books,
+            "directional_books": len(book_lines),
+            "avg_line": avg_line,
+            "avg_odds": avg_odds,
+            "line_delta": line_delta,
+            "notes": notes,
+            "confirmed": avg_line is not None,
+            "strong_confirmation": len(book_lines) >= 2 and line_delta is not None and line_delta <= 0.5,
+        }
 
-    line_delta = abs(avg_line - line) if avg_line is not None else None
-    strong_confirmation = (
-        len(book_lines) >= 2
-        and line_delta is not None
-        and line_delta <= 0.5
+    result = confirm_market(
+        target,
+        observations,
+        allowed_providers=allowed_books,
+        max_age_seconds=4 * 60 * 60,
     )
-    return {
-        "num_books": num_books,
-        "directional_books": len(book_lines),
-        "avg_line":  avg_line,
-        "avg_odds":  avg_odds,   # American odds for this direction (CLV seeding support)
-        "notes":     notes,
-        "confirmed": avg_line is not None,
-        "strong_confirmation": strong_confirmation,
-    }
+    if result is None:
+        return None
+    return result
 
 
 def _get_player_stats_provider():
@@ -1685,27 +1722,33 @@ async def underdog_job(context) -> None:
         _health.record_provider_fetch("Underdog")
 
     ud_snaps = [s for s in snapshots if s.sportsbook == "Underdog"]
-    # Moneylines share the pick'em feed but not the player-prop scoring model.
-    # Persist them in the existing canonical snapshot history so odds rotation
-    # removals remain observable, then keep them out of over/under scoring.
-    ud_moneylines = [
+    # Game markets share the pick'em feed but not the player-prop scoring
+    # model. Persist them in the existing canonical snapshot history so
+    # rotation/removal remains observable, then keep them out of prop scoring.
+    ud_game_markets = [
         s for s in ud_snaps
         if getattr(s, "is_moneyline", False) is True
+        or getattr(s, "is_game_market", False) is True
     ]
-    if ud_moneylines:
-        for _ml in ud_moneylines:
+    if ud_game_markets:
+        for _gm in ud_game_markets:
             await _cycle_timing.await_db(
                 "write",
-                "save_market_snapshot_underdog_moneyline",
+                "save_market_snapshot_underdog_game_market",
                 db.save_market_snapshot(MarketSnapshotRecord(
-                    sportsbook=_ml.sportsbook, sport=_ml.sport, league=_ml.league,
-                    event=_ml.event, market_type="Moneyline", selection=_ml.selection,
-                    player=None, team=_ml.team, line=None, odds=_ml.odds,
-                    opening_odds=_ml.opening_odds, is_pickem=True,
-                    game_time=_ml.game_time, recorded_at=datetime.utcnow(),
+                    sportsbook=_gm.sportsbook, sport=_gm.sport, league=_gm.league,
+                    event=_gm.event,
+                    market_type=(
+                        "Moneyline" if getattr(_gm, "is_moneyline", False)
+                        else (_gm.market_type or "Total (O/U)")
+                    ),
+                    selection=_gm.selection,
+                    player=None, team=_gm.team, line=_gm.line, odds=_gm.odds,
+                    opening_odds=_gm.opening_odds, is_pickem=True,
+                    game_time=_gm.game_time, recorded_at=datetime.utcnow(),
                 )),
             )
-        ud_snaps = [s for s in ud_snaps if s not in ud_moneylines]
+        ud_snaps = [s for s in ud_snaps if s not in ud_game_markets]
     _cycle_timing.count("active_pool_fetched", len(snapshots))
     _cycle_timing.count("active_pool_sportsbook_filtered", len(snapshots) - len(ud_snaps))
     # Capture count before the list is cleared later for memory recovery.
