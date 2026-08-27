@@ -1,0 +1,82 @@
+Finish and close the current FPR/lifecycle task only.
+
+Do NOT start a new task yet.
+
+Do NOT modify unrelated systems.
+
+The latest live /funnel evidence shows:
+
+* 5 scans in the last hour
+* ~12 minutes average scan duration
+* 50,101 Underdog projections fetched
+* 731 new first-appearance props
+* 154 line movers
+* 10,685 total props scored
+* 9,800 full-pool rotation props processed
+* 15 active sports represented
+* Canonical active pool: 9,800
+* Stable Refresh display is no longer present
+* FPR is processing the full active pool rather than only new/moved props
+
+The remaining requirement is to finish the current task’s verification and close it, not redesign anything.
+
+Required final verification
+
+Verify from the running bot that:
+
+1. FPR remains the sole full-pool rotation.
+2. Stable Refresh does NOT maintain a competing rotation cursor.
+3. FPR processes the current active Underdog universe.
+4. The FPR cursor advances between completed batches.
+5. Rotation advances normally after a completed batch.
+6. Previously unchanged props remain eligible for future FPR rescans.
+7. Previously delivered props remain eligible for future FPR rescans.
+8. New props remain part of the monitored universe after detection.
+9. Line movers are rescored.
+10. Event-started/removed props leave active rotation without deleting historical records.
+11. Multiple sports continue receiving FPR coverage.
+12. No separate competing full-pool rotation is introduced.
+13. max_instances=1 remains unchanged.
+14. Do not change scheduler concurrency.
+15. Do not change scoring, evidence, Telegram rules, Agent Reach, OddsAPI, grading, persistence, or unrelated behavior.
+
+Important
+
+The /funnel numbers above are supporting evidence, but do not claim FPR completion solely from the aggregate funnel.
+
+Use the actual FPR runtime/health state and persisted FPR metrics to verify cursor progression and completed rotation.
+
+If another FPR batch is already running, let it finish naturally. Do not restart the bot just to manufacture a result.
+
+If the required FPR completion/cursor progression is already present, use that evidence and close the current task.
+
+If it is not present, wait for the existing FPR job to complete rather than making another code change.
+
+Do NOT create another task
+
+Do not create Task #155 or any other duplicate follow-up.
+
+Do not modify the existing task scope.
+
+Do not create a checkpoint for a new task.
+
+Once the current FPR/lifecycle requirements are actually verified, mark the existing task complete and report:
+
+* FPR batch size
+* previous cursor
+* new cursor
+* rotation number
+* completion status
+* active pool size
+* sports covered
+* duration
+* whether unchanged props were included
+* whether delivered props remained eligible
+* Stable Refresh rotation status
+* max_instances=1 status
+* exact tests passed
+* exact live verification performed
+
+If the runtime cannot provide the final FPR completion evidence, do not falsely mark the task complete. Report the precise missing evidence instead.
+
+After this current task is genuinely closed, stop. We will handle the new-prop lifecycle fix as a separate task afterward.
