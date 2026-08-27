@@ -2173,6 +2173,10 @@ async def underdog_job(context) -> None:
                                 stat_type,
                                 decision.recommendation,
                                 line_val,
+                                team=snap.team or "",
+                                event=snap.event or "",
+                                game_time=snap.game_time,
+                                db=db,
                             )
                         except Exception:
                             pass
@@ -2729,6 +2733,10 @@ async def underdog_job(context) -> None:
                                 stat_type,
                                 decision.recommendation,
                                 snap.line or 0.0,
+                                team=snap.team or "",
+                                event=snap.event or "",
+                                game_time=snap.game_time,
+                                db=db,
                             )
                         except Exception:
                             pass
@@ -3129,6 +3137,10 @@ async def underdog_job(context) -> None:
                             _st,
                             _sdec.recommendation,
                             _line_val,
+                            team=getattr(_snap, "team", "") or "",
+                            event=getattr(_snap, "event", "") or "",
+                            game_time=getattr(_snap, "game_time", None),
+                            db=db,
                         )
                     except Exception:
                         pass
@@ -4280,6 +4292,10 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 try:
                     _sr_odds_confirm = await _get_odds_api_confirmation(
                         _sr_sport, _sr_player, _sr_stat, _sr_dec.recommendation, _sr_line,
+                        team=getattr(_sr_snap, "team", "") or "",
+                        event=getattr(_sr_snap, "event", "") or "",
+                        game_time=getattr(_sr_snap, "game_time", None),
+                        db=db,
                     )
                 except Exception:
                     pass
