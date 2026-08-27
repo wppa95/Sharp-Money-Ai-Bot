@@ -193,7 +193,21 @@ def _fmt_provider_status_line(provider_name: str, display_name: str) -> str:
                 detail = f" ({h.quota_remaining:,} req remaining)"
             elif h.error_msg:
                 detail = f" — {h.error_msg[:50]}"
-            return f"  {display_name}:  {h.status_emoji} {h.status.value}{detail}"
+            pace = ""
+            if provider_name == "OddsAPI":
+                try:
+                    from providers.quota_pacing import get_quota_pacer
+                    pacer = get_quota_pacer()
+                    if pacer is not None:
+                        telemetry = pacer.telemetry()
+                        pace = (
+                            f" · pace {telemetry.status.lower()} "
+                            f"{telemetry.current_calls_per_hour:.1f}/"
+                            f"{telemetry.required_calls_per_hour:.1f}h"
+                        )
+                except ImportError:
+                    pass
+            return f"  {display_name}:  {h.status_emoji} {h.status.value}{detail}{pace}"
     except ImportError:
         pass
     return f"  {display_name}:  ⚪ not tracked"

@@ -118,6 +118,17 @@ class OddsApiQuotaPacer:
         self._consecutive_errors = 0
         self._backoff_seconds = 0.0
 
+    def record_request_failed(
+        self,
+        started_at: float,
+        *,
+        status: int = 0,
+        quota_exhausted: bool = False,
+    ) -> None:
+        """Record latency and apply safe backoff for a failed request."""
+        self._last_latency_ms = max(0.0, (time.monotonic() - started_at) * 1000.0)
+        self.record_error(status, quota_exhausted=quota_exhausted)
+
     def record_error(self, status: int = 0, *, quota_exhausted: bool = False) -> None:
         """Apply bounded backoff after 429s and transient provider failures."""
         self._consecutive_errors += 1

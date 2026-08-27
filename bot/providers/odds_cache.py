@@ -204,6 +204,9 @@ class OddsApiCache:
         mon = get_health_monitor()
         if mon:
             mon.record_success(provider_name, quota_remaining=remaining, quota_used=used)
+        pacer = get_quota_pacer()
+        if pacer is not None:
+            pacer.update_quota(remaining=remaining, used=used)
 
     def invalidate(
         self,
@@ -313,29 +316,21 @@ class OddsApiCache:
 
         except OddsApiError:
             if pacer is not None:
-                pacer._last_latency_ms = max(
-                    0.0, (time.monotonic() - started_at) * 1000.0
-                )
+                pacer.record_request_failed(started_at)
             raise
         except aiohttp.ClientError as exc:
             err = str(exc)
             if mon:
                 mon.record_failure(_PROVIDER_NAME, err, FailureType.HTTP_ERROR)
             if pacer is not None:
-                pacer.record_error()
-                pacer._last_latency_ms = max(
-                    0.0, (time.monotonic() - started_at) * 1000.0
-                )
+                pacer.record_request_failed(started_at)
             raise OddsApiError(0, "", err, FailureType.HTTP_ERROR) from exc
         except Exception as exc:
             err = str(exc)
             if mon:
                 mon.record_failure(_PROVIDER_NAME, err, FailureType.UNKNOWN)
             if pacer is not None:
-                pacer.record_error()
-                pacer._last_latency_ms = max(
-                    0.0, (time.monotonic() - started_at) * 1000.0
-                )
+                pacer.record_request_failed(started_at)
             raise OddsApiError(0, "", err, FailureType.UNKNOWN) from exc
 
 
