@@ -25,6 +25,23 @@ logger = logging.getLogger(__name__)
 
 _UNDERDOG_BULK_MAX_RETRIES = 2
 _UNDERDOG_BULK_RETRY_DELAYS = (0.25, 0.75)
+_PRIZEPICKS_EXTERNAL_PREFIX = "PrizePicks::"
+
+
+def _stored_opportunity_external_id(external_id: str, provider: Optional[str]) -> str:
+    """Keep legacy SQLite uniqueness compatible while separating providers."""
+    value = str(external_id or "")
+    if str(provider or "").strip().lower() == "prizepicks":
+        if not value.startswith(_PRIZEPICKS_EXTERNAL_PREFIX):
+            value = f"{_PRIZEPICKS_EXTERNAL_PREFIX}{value}"
+    return value
+
+
+def _dedup_player_key(player_name: str, provider: Optional[str]) -> str:
+    """Provider-scope the legacy three-part in-memory dedup key."""
+    if str(provider or "").strip().lower() == "prizepicks":
+        return f"{_PRIZEPICKS_EXTERNAL_PREFIX}{player_name}"
+    return player_name
 
 
 def _is_sqlite_lock_error(exc: BaseException) -> bool:
@@ -1564,6 +1581,11 @@ class Database:
                 getattr(prop, "player_name", "") or "",
                 getattr(prop, "sport", "") or "",
                 getattr(prop, "stat_type", "") or "",
+                (
+                    getattr(prop, "event_id", "")
+                    or getattr(prop, "game_id", "")
+                    or ""
+                ),
             )
             for prop in props
         }
@@ -1580,9 +1602,14 @@ class Database:
                 )
                 .order_by(desc(PropLineHistory.fetched_at))
             )
-            latest: dict[tuple[str, str, str], PropLineHistory] = {}
+            latest: dict[tuple[str, str, str, str], PropLineHistory] = {}
             for row in result.scalars().all():
-                key = (row.player_name, row.sport, row.stat_type)
+                key = (
+                    row.player_name,
+                    row.sport,
+                    row.stat_type,
+                    row.game_id or "",
+                )
                 latest.setdefault(key, row)
 
             for prop in props:
@@ -1590,6 +1617,11 @@ class Database:
                     getattr(prop, "player_name", "") or "",
                     getattr(prop, "sport", "") or "",
                     getattr(prop, "stat_type", "") or "",
+                    (
+                        getattr(prop, "event_id", "")
+                        or getattr(prop, "game_id", "")
+                        or ""
+                    ),
                 )
                 line_value = float(getattr(prop, "line_value", 0.0) or 0.0)
                 observed_at = (
@@ -1618,6 +1650,11 @@ class Database:
                         last_seen=observed_at,
                         change_count=0,
                         opening_line=line_value,
+                        score_tier=getattr(prop, "score_tier", None),
+                        bet_recommendation=getattr(prop, "bet_recommendation", None),
+                        bet_confidence=getattr(prop, "bet_confidence", None),
+                        market_quality_score=getattr(prop, "market_quality_score", None),
+                        score_total=getattr(prop, "score_total", None),
                     )
                     s.add(row)
                     latest[key] = row
@@ -1642,6 +1679,25 @@ class Database:
                 row.last_seen = observed_at
                 row.removed = False
                 row.lifecycle_state = "DISCOVERED"
+                row.score_tier = getattr(prop, "score_tier", None) or row.score_tier
+                row.bet_recommendation = (
+                    getattr(prop, "bet_recommendation", None) or row.bet_recommendation
+                )
+                row.bet_confidence = (
+                    getattr(prop, "bet_confidence", None)
+                    if getattr(prop, "bet_confidence", None) is not None
+                    else row.bet_confidence
+                )
+                row.market_quality_score = (
+                    getattr(prop, "market_quality_score", None)
+                    if getattr(prop, "market_quality_score", None) is not None
+                    else row.market_quality_score
+                )
+                row.score_total = (
+                    getattr(prop, "score_total", None)
+                    if getattr(prop, "score_total", None) is not None
+                    else row.score_total
+                )
 
             await s.commit()
         return len(props)
@@ -3334,7 +3390,8 @@ class Database:
             _stat_type = opportunity.get("stat_type")
             if _external_id is None or _stat_type is None:
                 continue
-            _external_id = str(_external_id)
+            _provider = opportunity.get("provider")
+            _external_id = _stored_opportunity_external_id(_external_id, _provider)
             _stat_type = str(_stat_type)
             _confidence = opportunity.get("confidence", 0)
             _bet_quality = opportunity.get("bet_quality_score")
@@ -3394,7 +3451,7 @@ class Database:
                 "risk_level": opportunity.get("risk_level"),
                 "explanation": opportunity.get("explanation"),
                 "recommendation_id": _rec_id,
-                "provider": opportunity.get("provider"),
+                "provider": _provider,
                 "bet_quality_score": _bet_quality,
                 "qualification_path": _qpath,
                 "reason_codes": _rcodes,
@@ -4063,6 +4120,7 @@ class Database:
         self,
         external_id: str,
         stat_type:   str,
+        provider:    Optional[str] = None,
     ) -> None:
         """
         Mark an existing PropOpportunityLog row as a delivered Telegram actionable pick.
@@ -4080,8 +4138,14 @@ class Database:
             await s.execute(
                 _sa_update(PropOpportunityLog)
                 .where(
-                    PropOpportunityLog.external_id == external_id,
+                    PropOpportunityLog.external_id == _stored_opportunity_external_id(
+                        external_id, provider
+                    ),
                     PropOpportunityLog.stat_type   == stat_type,
+                    *(
+                        [PropOpportunityLog.provider == provider]
+                        if provider else []
+                    ),
                 )
                 .values(
                     alert_sent    = True,
@@ -4151,6 +4215,7 @@ class Database:
                     PropOpportunityLog.player_name,
                     PropOpportunityLog.sport,
                     PropOpportunityLog.stat_type,
+                    PropOpportunityLog.provider,
                     PropOpportunityLog.alert_sent_at,
                     PropOpportunityLog.line_value,
                 )
@@ -4165,12 +4230,16 @@ class Database:
             )
             out: dict = {}
             for row in pol_result.all():
-                player, sport, stat, sent_at, line = row
+                player, sport, stat, sent_at, line, provider = row
                 if sent_at is None:
                     continue
                 ts_unix = sent_at.timestamp()
                 line_f  = float(line or 0)
-                out[(player, sport or "UNKNOWN", stat)] = (ts_unix, line_f)
+                out[(
+                    _dedup_player_key(player, provider),
+                    sport or "UNKNOWN",
+                    stat,
+                )] = (ts_unix, line_f)
 
             # Fallback: PropLineHistory rows where first_alert_sent_at is set.
             # Covers cases where log_prop_opportunity failed silently and left
@@ -4183,6 +4252,7 @@ class Database:
                     PropLineHistory.player_name,
                     PropLineHistory.sport,
                     PropLineHistory.stat_type,
+                    PropLineHistory.provider,
                     PropLineHistory.first_alert_sent_at,
                     PropLineHistory.line_value,
                 )
@@ -4193,10 +4263,14 @@ class Database:
                 .order_by(PropLineHistory.first_alert_sent_at)
             )
             for row in plh_result.all():
-                player, sport, stat, sent_at, line = row
+                player, sport, stat, sent_at, line, provider = row
                 if sent_at is None:
                     continue
-                key = (player, sport or "UNKNOWN", stat)
+                key = (
+                    _dedup_player_key(player, provider),
+                    sport or "UNKNOWN",
+                    stat,
+                )
                 if key in out:
                     continue  # POL entry takes priority
                 ts_unix = sent_at.timestamp()
