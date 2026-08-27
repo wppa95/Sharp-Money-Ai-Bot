@@ -1,0 +1,236 @@
+PrizePicks Must Be Its Own Independent Pick Source
+
+Continue from the completed PropLine PrizePicks integration.
+
+I need to clarify the intended architecture:
+
+PrizePicks is NOT merely a confirmation/reference source.
+
+PrizePicks should operate as its own independent betting source alongside Underdog.
+
+The bot should be capable of generating and delivering:
+
+* Underdog Pick
+* PrizePicks Pick
+
+so I immediately know which platform to place the bet on.
+
+1. PRIZEPICKS AS AN INDEPENDENT SOURCE
+
+Treat PrizePicks through PropLine as a first-class source, similar to Underdog.
+
+PrizePicks observations should:
+
+* Enter the shared normalized prop universe.
+* Be independently evaluated.
+* Be independently eligible for actionable-pick delivery.
+* Preserve PrizePicks as the source/provider identity.
+* Maintain their own current line and direction.
+* Be tracked independently for historical performance.
+* Be graded independently when results become available.
+
+Do NOT require a matching Underdog prop for a PrizePicks Pick to become actionable.
+
+Do NOT require PrizePicks to merely confirm an Underdog prop.
+
+Both sources should be capable of producing their own picks.
+
+2. TELEGRAM LABELING — CRITICAL
+
+Every actionable Telegram pick must clearly identify the betting platform.
+
+For example:
+
+🟢 UNDERDOG PICK
+
+Player — Market
+Line
+OVER/UNDER
+Confidence
+Evidence
+Reasoning
+
+or:
+
+🔵 PRIZEPICKS PICK
+
+Player — Market
+Line
+OVER/UNDER
+Confidence
+Evidence
+Reasoning
+
+The platform label must be impossible to confuse.
+
+Use the canonical provider/source identity rather than trying to infer the platform from the market.
+
+3. SAME PROP ON BOTH PLATFORMS
+
+If the same player/market appears on both Underdog and PrizePicks:
+
+Do NOT merge them into one platform.
+
+Instead:
+
+* Keep the Underdog observation.
+* Keep the PrizePicks observation.
+* Evaluate each source’s actual line independently.
+* Preserve each source’s line, direction, timestamp, and provider identity.
+
+If both independently qualify, Telegram may show:
+
+UNDERDOG PICK
+and
+
+PRIZEPICKS PICK
+
+as separate actionable picks.
+
+If only one qualifies, send only that source’s pick.
+
+4. CROSS-PLATFORM INFORMATION
+
+The bot may use the other platform’s information as supporting market context where appropriate.
+
+For example:
+
+Underdog line = 24.5
+PrizePicks line = 22.5
+
+The system may recognize that the difference between platforms is meaningful information.
+
+However:
+
+* Do not overwrite one provider’s line with another provider’s line.
+* Do not change the source identity.
+* Do not fabricate a line.
+* Do not turn a PrizePicks observation into an Underdog pick.
+* Do not turn an Underdog observation into a PrizePicks pick.
+
+Each actionable pick must remain tied to the actual platform/source.
+
+5. ALL AVAILABLE PRIZEPICKS SPORTS
+
+Keep the completed dynamic PropLine discovery behavior.
+
+PrizePicks should continue checking all available sports returned by the official PropLine discovery endpoint.
+
+Do NOT revert to NBA-only behavior.
+
+Maintain the current verified multi-sport discovery and normalization.
+
+6. TIER CLASSIFICATION
+
+Use the existing canonical tier classification.
+
+Tier 2
+
+* MLB
+* NFL
+* NBA
+* CFB / NCAAF
+
+Tier 1
+
+Every other sport.
+
+PrizePicks and Underdog should use the same canonical sport classification.
+
+The source/provider does NOT determine the tier.
+
+7. SHARED EVALUATION, INDEPENDENT SOURCES
+
+Use the existing shared evaluation/evidence/scoring infrastructure.
+
+Do NOT create:
+
+* A second scoring engine
+* A second evidence engine
+* A duplicate database
+* A duplicate monitoring architecture
+* A duplicate scheduler unnecessarily
+
+Instead:
+
+Underdog source → shared evaluation → Underdog Pick
+
+PrizePicks source → shared evaluation → PrizePicks Pick
+
+Both feed the same underlying system while retaining independent provider identity.
+
+8. TELEGRAM DUPLICATION PROTECTION
+
+Do not allow repeated polling of the same PrizePicks line to generate duplicate Telegram messages.
+
+Use the existing deduplication protections.
+
+A meaningful line change, new prop, or materially changed evaluation may create a new actionable event according to existing rules.
+
+Do not spam Telegram simply because the same PrizePicks observation was fetched again.
+
+9. EXISTING SAFEGUARDS
+
+Preserve all existing:
+
+* Direction requirements
+* Evidence requirements
+* Confidence logic
+* Deduplication
+* Live-game protections
+* Safety protections
+* Grading
+* Historical tracking
+* FPR
+* Stable Refresh
+* Scheduler protections
+* max_instances=1
+* OddsAPI confirmation
+* DraftKings/FanDuel confirmation
+
+Do not redesign these systems.
+
+10. IMPORTANT — INVESTIGATE THE 200+ TELEGRAM MESSAGES
+
+Earlier, after the PrizePicks expansion, I opened the Telegram chat and saw 200+ messages.
+
+Now that PrizePicks is intentionally an independent actionable source, determine whether those messages were:
+
+* legitimate PrizePicks Picks,
+* duplicate PrizePicks Picks,
+* normal provider observations incorrectly formatted as picks,
+* startup/status messages,
+* or another delivery issue.
+
+Do NOT blindly suppress PrizePicks Telegram delivery just because there were many messages.
+
+Instead, identify exactly what generated them and whether the volume was legitimate.
+
+If there is a duplicate/flood issue, fix ONLY the duplication/flood behavior while preserving legitimate PrizePicks Pick delivery.
+
+11. LIVE VERIFICATION
+
+After implementation:
+
+Verify live that:
+
+* PropLine continues discovering available PrizePicks sports.
+* PrizePicks observations are independently evaluated.
+* PrizePicks can produce an actionable pick without requiring Underdog confirmation.
+* Underdog can independently produce an actionable pick.
+* Telegram clearly labels each source.
+* Same-platform duplicates are prevented.
+* Cross-platform matching does not merge source identities.
+* Both sources can coexist in the same monitoring system.
+* Tier 1/Tier 2 classification remains correct.
+* Existing FPR and Stable Refresh behavior remains intact.
+* No duplicate scheduler is introduced.
+* max_instances=1 remains intact.
+
+Run focused tests and the full regression suite.
+
+Restart only as needed for live verification.
+
+Do NOT create a checkpoint until the implementation and live verification are complete.
+
+Report exactly what changed, what caused the earlier 200+ Telegram messages, and what was verified live.
