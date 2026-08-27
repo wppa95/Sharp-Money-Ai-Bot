@@ -1,0 +1,75 @@
+Perform a READ-ONLY investigation into the best legitimate way to provide PrizePicks line data to the Sharp Money Bot so PrizePicks and Underdog can operate together.
+
+Do NOT modify code, database, scheduler, Telegram, Railway, Replit, scoring, evidence, FPR, Stable Refresh, or monitoring behavior during this investigation.
+
+Goal
+
+Determine how we can obtain reliable PrizePicks line data for the bot without bypassing DataDome or violating PrizePicks access controls.
+
+Investigate these options:
+
+1. Official PrizePicks API/data access
+    * Determine whether PrizePicks currently provides an official API or authorized developer/data-access program.
+    * Determine requirements, availability, authentication, rate limits, and whether player-prop lines can legally be consumed by our bot.
+2. Legitimate third-party data providers
+    * Identify reputable providers that legally offer PrizePicks lines/data.
+    * Determine whether their feeds include:
+        * Player
+        * Sport
+        * Market/stat
+        * Line
+        * Over/Under
+        * Event/game
+        * Timestamp
+    * Determine whether their licensing permits automated use in our bot.
+3. PrizePicks + Underdog coexistence
+    * Determine the cleanest architecture for adding PrizePicks as a second input source while keeping Underdog as the existing primary monitoring source.
+    * PrizePicks must NOT create a second competing monitoring scheduler or duplicate scoring/delivery pipeline.
+    * Both sources should ultimately feed the existing unified evaluation architecture.
+4. Agent Reach
+    * Determine whether Agent Reach can legitimately retrieve current PrizePicks lines or useful PrizePicks data.
+    * If possible, determine the limitations and freshness.
+    * Keep Agent Reach as an enrichment/data-access layer rather than creating a second monitoring engine.
+5. DataDome
+    * Explain exactly what is currently blocking the existing direct PrizePicks access.
+    * Determine whether there is any authorized method to obtain access despite the current automated 403 response.
+    * Do NOT attempt to bypass, defeat, spoof, or circumvent DataDome.
+
+Important constraints
+
+Do NOT:
+
+* Bypass DataDome
+* Circumvent CAPTCHAs or anti-bot protections
+* Use proxy rotation to evade blocking
+* Spoof browser fingerprints
+* Scrape through unauthorized methods
+* Modify the bot
+* Add a new scheduler
+* Add a competing monitoring loop
+* Change Underdog behavior
+* Change scoring
+* Change Telegram delivery
+* Change FPR
+* Change Stable Refresh
+* Change the database
+* Deploy or restart Railway
+
+This is strictly an investigation.
+
+Final report
+
+Give me:
+
+* The best legitimate option
+* The second-best option
+* Whether an official PrizePicks API is available
+* Any legitimate third-party providers worth considering
+* Whether Agent Reach can help
+* Estimated data freshness/limitations
+* Expected cost if applicable
+* What credentials/access we would need
+* Whether PrizePicks + Underdog can share the existing unified pipeline
+* Your recommended approach
+
+Do not make any code changes until I approve the recommended approach.
