@@ -6,8 +6,9 @@ module deliberately knows nothing about Underdog or sportsbook markets.  It
 normalizes only PrizePicks player props into the shared ``PlayerProp`` model.
 
 The endpoint is configurable because PropLine deployments may expose different
-API gateways.  ``PROPLINE_API_URL`` may be a full endpoint URL; the default is
-the documented PrizePicks player-props route used by the hosted API.
+API gateways.  ``PROPLINE_API_URL`` must be a full endpoint URL.  There is no
+safe fallback URL: a key without an authorized endpoint disables the provider
+instead of sending credentials to an invented or unrelated host.
 """
 
 from __future__ import annotations
@@ -28,9 +29,7 @@ from providers.prop_provider import PlayerProp, PropProviderBase
 logger = logging.getLogger(__name__)
 
 PROPLINE_PROVIDER_NAME = "PrizePicks"
-DEFAULT_PROPLINE_API_URL = (
-    "https://api.propline.com/v1/prizepicks/player-props"
-)
+DEFAULT_PROPLINE_API_URL = ""
 
 _STAT_NORMALIZATION = {
     "pts": "points",
