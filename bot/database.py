@@ -1589,6 +1589,7 @@ class Database:
             )
             for prop in props
         }
+        base_keys = {(player, sport, stat) for player, sport, stat, _ in keys}
         async with self.session() as s:
             result = await s.execute(
                 select(PropLineHistory)
@@ -1598,7 +1599,7 @@ class Database:
                         PropLineHistory.player_name,
                         PropLineHistory.sport,
                         PropLineHistory.stat_type,
-                    ).in_(list(keys)),
+                    ).in_(list(base_keys)),
                 )
                 .order_by(desc(PropLineHistory.fetched_at))
             )
