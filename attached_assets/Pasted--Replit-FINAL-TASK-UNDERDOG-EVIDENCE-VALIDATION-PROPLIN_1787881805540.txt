@@ -1,0 +1,175 @@
+@Replit
+
+FINAL TASK — UNDERDOG EVIDENCE VALIDATION + PROPLINE SUPPORT
+
+Investigate the discrepancy between the player-history statistics shown by the Sharp Money Bot for Underdog player props and the statistics shown by PickFinder.
+
+The goal is to determine whether the bot’s Underdog player-prop evidence is accurate and whether PropLine should also be used to support Underdog player-prop evidence.
+
+Do NOT redesign the system.
+
+1. VALIDATE CURRENT UNDERDOG EVIDENCE
+
+Take real Underdog player props and compare the bot’s displayed:
+
+* L5
+* L10
+* L20
+* L30
+* Season
+* Relevant splits
+* H2H where applicable
+
+against an independent trusted source such as PickFinder and/or the appropriate official provider.
+
+Identify exactly where any discrepancy originates.
+
+Check:
+
+* Player identity
+* Player ID
+* Sport
+* Team
+* Opponent
+* Event/game
+* Stat/market
+* Game date
+* Completed vs scheduled games
+* Home/away or relevant splits
+* Result normalization
+* Duplicate games
+* Missing games
+* Incorrect stat mapping
+* Incorrect date matching
+
+Do not assume PickFinder or the bot is correct. Determine the actual source of truth for each discrepancy.
+
+2. PROPLINE FOR UNDERDOG EVIDENCE
+
+Determine whether PropLine provides usable Underdog player-prop data that can legitimately improve confirmation/evidence.
+
+If PropLine supports Underdog player props, evaluate:
+
+* Player
+* Sport
+* Market/stat
+* Line
+* Direction
+* Event/game
+* Provider/source
+* Timestamp
+* Freshness
+* Identity matching
+
+Determine whether PropLine should be used as:
+
+* Primary Underdog player-prop source,
+* Confirmation source,
+* Evidence source,
+* Or fallback source.
+
+Do NOT automatically replace the existing Underdog feed.
+
+Use the evidence from the investigation to determine the correct role.
+
+3. EVIDENCE PRIORITY
+
+Preserve the existing evidence architecture.
+
+Where legitimate provider data exists:
+
+Provider evidence should remain preferred over inferred/graded evidence.
+
+PropLine must never fabricate history.
+
+Do not convert missing evidence into fake values.
+
+If evidence cannot be verified, keep it N/A rather than inventing a result.
+
+4. FIX ONLY REAL DISCREPANCIES
+
+If the investigation identifies a real bug in player-history collection, identity matching, stat normalization, date matching, or evidence selection, make the smallest targeted fix necessary.
+
+Do NOT change scoring formulas.
+
+Do NOT redesign the evidence system.
+
+Do NOT change Telegram rules.
+
+Do NOT change PrizePicks behavior.
+
+Do NOT change FPR or Stable Refresh.
+
+Do NOT change scheduler cadence or max_instances=1.
+
+Do NOT change unrelated provider behavior.
+
+5. LIVE VALIDATION
+
+Use real Underdog player props and compare the bot’s evidence against the independent source.
+
+Verify multiple sports where practical.
+
+For any discrepancies found, show:
+
+* Bot value
+* Independent-source value
+* Correct value
+* Root cause
+* Fix applied
+
+Then verify the corrected values live.
+
+6. PROPLINE VALIDATION
+
+Verify whether the authorized PropLine endpoint can provide Underdog player-prop information.
+
+If it does:
+
+* Verify actual live Underdog observations.
+* Verify player/stat/event identity matching.
+* Verify freshness.
+* Determine whether the data is useful enough to support the Underdog evidence lifecycle.
+
+If PropLine does NOT provide usable Underdog data, do not fabricate or force it into the pipeline. Report that clearly.
+
+7. TESTING
+
+Run:
+
+* Focused player-history/evidence tests
+* Identity tests
+* Stat-normalization tests
+* Provider matching tests
+* Graded-history tests
+* Full regression suite
+* Compilation checks
+* Diff/whitespace checks
+
+8. FINAL LIVE HEALTH CHECK
+
+Confirm:
+
+* Underdog remains the primary Underdog monitoring source.
+* PrizePicks through PropLine remains the primary PrizePicks source.
+* PropLine does not accidentally replace or interfere with Underdog unless the evidence investigation proves that is necessary.
+* Both sources remain independently actionable.
+* FPR remains intact.
+* Stable Refresh remains intact.
+* Scheduler remains intact.
+* max_instances=1 remains intact.
+* No duplicate monitoring pipeline was created.
+* No unrelated behavior changed.
+
+Do not claim completion based only on tests.
+
+Report exactly:
+
+1. What caused the PickFinder/stat discrepancies.
+2. What was fixed.
+3. Whether PropLine supports usable Underdog player-prop data.
+4. What role PropLine should have for Underdog, based on the evidence.
+5. Exact test results.
+6. Exact live verification results.
+
+This is the final planned task before we stop making feature changes and let the bot run and collect real historical data.

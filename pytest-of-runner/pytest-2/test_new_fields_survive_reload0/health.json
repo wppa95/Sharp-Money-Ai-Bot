@@ -1,0 +1,25 @@
+{
+  "jobs": {
+    "underdog_job": {
+      "last_started": "2026-08-28 02:19:00 UTC",
+      "last_started_ts": 1787883540.503602
+    }
+  },
+  "last_job_started": "underdog_job",
+  "last_job_started_at": "2026-08-28 02:19:00 UTC",
+  "last_underdog_scan": "2026-08-28 02:19:00 UTC",
+  "last_underdog_scan_ts": 1787883540.503839,
+  "last_underdog_props": 99,
+  "last_underdog_alerts": 4,
+  "last_db_write": "2026-08-28 02:19:00 UTC",
+  "last_db_write_ts": 1787883540.504036,
+  "last_db_operation": "test_op",
+  "last_pipeline_fail": {
+    "stage": "stage",
+    "module": "mod",
+    "error": "test error",
+    "ts": "2026-08-28 02:19:00 UTC"
+  },
+  "last_error": "[pipeline:stage:mod] test error",
+  "last_error_ts": "2026-08-28 02:19:00 UTC"
+}

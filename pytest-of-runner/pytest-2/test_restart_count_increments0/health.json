@@ -1,0 +1,20 @@
+{
+  "restart_count": 2,
+  "restart_history": [
+    {
+      "ts": "2026-08-28 02:19:00 UTC",
+      "reason": "first_start",
+      "shutdown_at": null,
+      "session_secs": null
+    },
+    {
+      "ts": "2026-08-28 02:19:00 UTC",
+      "reason": "clean_restart",
+      "shutdown_at": "2026-08-28 02:19:00 UTC",
+      "session_secs": 0.00017380714416503906
+    }
+  ],
+  "last_startup": "2026-08-28 02:19:00 UTC",
+  "last_startup_ts": 1787883540.466934,
+  "last_startup_reason": "clean_restart"
+}

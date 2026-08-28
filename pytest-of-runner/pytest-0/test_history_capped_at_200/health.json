@@ -1,0 +1,128 @@
+{
+  "restart_count": 26,
+  "restart_history": [
+    {
+      "ts": "2026-08-28 01:59:00 UTC",
+      "reason": "clean_restart",
+      "shutdown_at": "2026-08-28 01:59:00 UTC",
+      "session_secs": 0.00015878677368164062
+    },
+    {
+      "ts": "2026-08-28 01:59:00 UTC",
+      "reason": "clean_restart",
+      "shutdown_at": "2026-08-28 01:59:00 UTC",
+      "session_secs": 0.00015091896057128906
+    },
+    {
+      "ts": "2026-08-28 01:59:00 UTC",
+      "reason": "clean_restart",
+      "shutdown_at": "2026-08-28 01:59:00 UTC",
+      "session_secs": 0.00013399124145507812
+    },
+    {
+      "ts": "2026-08-28 01:59:00 UTC",
+      "reason": "clean_restart",
+      "shutdown_at": "2026-08-28 01:59:00 UTC",
+      "session_secs": 0.00013589859008789062
+    },
+    {
+      "ts": "2026-08-28 01:59:00 UTC",
+      "reason": "clean_restart",
+      "shutdown_at": "2026-08-28 01:59:00 UTC",
+      "session_secs": 0.00024509429931640625
+    },
+    {
+      "ts": "2026-08-28 01:59:00 UTC",
+      "reason": "clean_restart",
+      "shutdown_at": "2026-08-28 01:59:00 UTC",
+      "session_secs": 0.0001552104949951172
+    },
+    {
+      "ts": "2026-08-28 01:59:00 UTC",
+      "reason": "clean_restart",
+      "shutdown_at": "2026-08-28 01:59:00 UTC",
+      "session_secs": 0.0001900196075439453
+    },
+    {
+      "ts": "2026-08-28 01:59:00 UTC",
+      "reason": "clean_restart",
+      "shutdown_at": "2026-08-28 01:59:00 UTC",
+      "session_secs": 0.00018477439880371094
+    },
+    {
+      "ts": "2026-08-28 01:59:00 UTC",
+      "reason": "clean_restart",
+      "shutdown_at": "2026-08-28 01:59:00 UTC",
+      "session_secs": 0.00018715858459472656
+    },
+    {
+      "ts": "2026-08-28 01:59:00 UTC",
+      "reason": "clean_restart",
+      "shutdown_at": "2026-08-28 01:59:00 UTC",
+      "session_secs": 0.0006089210510253906
+    },
+    {
+      "ts": "2026-08-28 01:59:00 UTC",
+      "reason": "clean_restart",
+      "shutdown_at": "2026-08-28 01:59:00 UTC",
+      "session_secs": 0.00023818016052246094
+    },
+    {
+      "ts": "2026-08-28 01:59:00 UTC",
+      "reason": "clean_restart",
+      "shutdown_at": "2026-08-28 01:59:00 UTC",
+      "session_secs": 0.0002601146697998047
+    },
+    {
+      "ts": "2026-08-28 01:59:00 UTC",
+      "reason": "clean_restart",
+      "shutdown_at": "2026-08-28 01:59:00 UTC",
+      "session_secs": 0.0002009868621826172
+    },
+    {
+      "ts": "2026-08-28 01:59:00 UTC",
+      "reason": "clean_restart",
+      "shutdown_at": "2026-08-28 01:59:00 UTC",
+      "session_secs": 0.00020313262939453125
+    },
+    {
+      "ts": "2026-08-28 01:59:00 UTC",
+      "reason": "clean_restart",
+      "shutdown_at": "2026-08-28 01:59:00 UTC",
+      "session_secs": 0.0002040863037109375
+    },
+    {
+      "ts": "2026-08-28 01:59:00 UTC",
+      "reason": "clean_restart",
+      "shutdown_at": "2026-08-28 01:59:00 UTC",
+      "session_secs": 0.0003361701965332031
+    },
+    {
+      "ts": "2026-08-28 01:59:00 UTC",
+      "reason": "clean_restart",
+      "shutdown_at": "2026-08-28 01:59:00 UTC",
+      "session_secs": 0.00021409988403320312
+    },
+    {
+      "ts": "2026-08-28 01:59:00 UTC",
+      "reason": "clean_restart",
+      "shutdown_at": "2026-08-28 01:59:00 UTC",
+      "session_secs": 0.0002338886260986328
+    },
+    {
+      "ts": "2026-08-28 01:59:00 UTC",
+      "reason": "clean_restart",
+      "shutdown_at": "2026-08-28 01:59:00 UTC",
+      "session_secs": 0.0002110004425048828
+    },
+    {
+      "ts": "2026-08-28 01:59:00 UTC",
+      "reason": "clean_restart",
+      "shutdown_at": "2026-08-28 01:59:00 UTC",
+      "session_secs": 0.0002739429473876953
+    }
+  ],
+  "last_startup": "2026-08-28 01:59:00 UTC",
+  "last_startup_ts": 1787882340.48305,
+  "last_startup_reason": "clean_restart"
+}

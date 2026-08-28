@@ -1,0 +1,10 @@
+{
+  "jobs": {
+    "_budget_check_job": {
+      "last_run": "2026-08-28 02:19:54 UTC",
+      "last_run_ts": 1787883594.378122,
+      "run_count": 1,
+      "fail_streak": 0
+    }
+  }
+}

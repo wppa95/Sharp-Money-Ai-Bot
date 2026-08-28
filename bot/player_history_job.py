@@ -12,14 +12,14 @@ logger = logging.getLogger(__name__)
 _CYCLE_TIME_BUDGET_SECONDS = 210.0
 
 # Sports for which PlayerStatsProvider.fetch_results() has a working data
-# path.  Unsupported sports (LOL, VALORANT/VAL, PGA/GOLF, MMA, TT,
-# BADMINTON, FIFA) would always return [] — filtering them avoids wasting
-# API-call budget on sports that can never produce DB rows.
+# path.  Unsupported sports (LOL, VALORANT/VAL, PGA/GOLF, MMA, TT, and
+# BADMINTON) would always return [] — filtering them avoids wasting API-call
+# budget on sports that can never produce DB rows.
 _SUPPORTED_HISTORY_SPORTS = frozenset({
     "MLB", "NBA", "NFL",
     "WNBA", "NHL", "CS", "DOTA", "TENNIS",
     "NCAAF", "CFB",   # CFB is the Underdog identifier for NCAAF
-    "MLS", "NCAAB",
+    "MLS", "NCAAB", "FIFA",
     "SOCCER",         # Requires FOOTBALL_DATA_API_KEY; returns [] gracefully without it
 })
 

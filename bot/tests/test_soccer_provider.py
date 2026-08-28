@@ -398,6 +398,16 @@ class TestStatAccuracy:
         results = run(provider.fetch_results("Harry Kane", "SOCCER", "goals"))
         assert all(r.sport == "SOCCER" for r in results)
 
+    def test_fifa_sport_label_is_preserved(self):
+        provider = _make_provider()
+        matches  = [_make_match(goals=[_goal("Harry Kane")])]
+        _inject_player(provider, matches=matches)
+
+        results = run(provider.fetch_results("Harry Kane", "FIFA", "goals"))
+
+        assert results
+        assert all(r.sport == "FIFA" for r in results)
+
     def test_game_date_extracted(self):
         provider = _make_provider()
         matches  = [_make_match(date="2024-11-02", goals=[_goal("Harry Kane")])]

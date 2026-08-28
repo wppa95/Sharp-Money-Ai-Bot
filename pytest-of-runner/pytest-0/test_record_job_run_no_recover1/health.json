@@ -1,0 +1,36 @@
+{
+  "jobs": {
+    "underdog_job": {
+      "last_fail": "2026-08-28 01:59:00 UTC",
+      "last_fail_ts": 1787882340.141474,
+      "last_error": "err",
+      "fail_count": 1,
+      "fail_streak": 0,
+      "recent_fails": [
+        {
+          "ts": "2026-08-28 01:59:00 UTC",
+          "error": "err"
+        }
+      ],
+      "last_run": "2026-08-28 01:59:00 UTC",
+      "last_run_ts": 1787882340.142156,
+      "run_count": 2
+    }
+  },
+  "last_error": "[underdog_job] err",
+  "last_error_ts": "2026-08-28 01:59:00 UTC",
+  "last_recovery_event": {
+    "job": "underdog_job",
+    "reason": "fail_streak=1: err",
+    "ts": "2026-08-28 01:59:00 UTC",
+    "ts_unix": 1787882340.142008
+  },
+  "recovery_history": [
+    {
+      "job": "underdog_job",
+      "reason": "fail_streak=1: err",
+      "ts": "2026-08-28 01:59:00 UTC",
+      "ts_unix": 1787882340.142008
+    }
+  ]
+}

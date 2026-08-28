@@ -1,0 +1,9 @@
+{
+  "stable_refresh_stats": {
+    "pool_size": 4400,
+    "sr_rescored": 4400,
+    "sr_sent": 2
+  },
+  "last_stable_refresh": "2026-08-28 02:02:20 UTC",
+  "last_stable_refresh_ts": 1787882540.998141
+}

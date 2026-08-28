@@ -1,0 +1,12 @@
+{
+  "providers": {
+    "Underdog": {
+      "last_error": "2026-08-28 02:19:00 UTC",
+      "last_error_msg": "timeout",
+      "error_count": 1,
+      "error_streak": 1
+    }
+  },
+  "last_error": "[provider:Underdog] timeout",
+  "last_error_ts": "2026-08-28 02:19:00 UTC"
+}

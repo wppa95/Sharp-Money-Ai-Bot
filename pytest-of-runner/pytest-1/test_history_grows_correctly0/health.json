@@ -1,0 +1,44 @@
+{
+  "restart_count": 6,
+  "restart_history": [
+    {
+      "ts": "2026-08-28 02:01:23 UTC",
+      "reason": "first_start",
+      "shutdown_at": null,
+      "session_secs": null
+    },
+    {
+      "ts": "2026-08-28 02:01:23 UTC",
+      "reason": "clean_restart",
+      "shutdown_at": "2026-08-28 02:01:23 UTC",
+      "session_secs": 0.0002269744873046875
+    },
+    {
+      "ts": "2026-08-28 02:01:23 UTC",
+      "reason": "clean_restart",
+      "shutdown_at": "2026-08-28 02:01:23 UTC",
+      "session_secs": 0.000164031982421875
+    },
+    {
+      "ts": "2026-08-28 02:01:23 UTC",
+      "reason": "clean_restart",
+      "shutdown_at": "2026-08-28 02:01:23 UTC",
+      "session_secs": 0.0001499652862548828
+    },
+    {
+      "ts": "2026-08-28 02:01:23 UTC",
+      "reason": "clean_restart",
+      "shutdown_at": "2026-08-28 02:01:23 UTC",
+      "session_secs": 0.00015401840209960938
+    },
+    {
+      "ts": "2026-08-28 02:01:23 UTC",
+      "reason": "clean_restart",
+      "shutdown_at": "2026-08-28 02:01:23 UTC",
+      "session_secs": 0.00016999244689941406
+    }
+  ],
+  "last_startup": "2026-08-28 02:01:23 UTC",
+  "last_startup_ts": 1787882483.603009,
+  "last_startup_reason": "clean_restart"
+}

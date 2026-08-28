@@ -1,0 +1,14 @@
+{
+  "jobs": {
+    "job_a": {
+      "last_started": "2026-08-28 01:59:00 UTC",
+      "last_started_ts": 1787882340.507247
+    },
+    "job_b": {
+      "last_started": "2026-08-28 01:59:00 UTC",
+      "last_started_ts": 1787882340.507431
+    }
+  },
+  "last_job_started": "job_b",
+  "last_job_started_at": "2026-08-28 01:59:00 UTC"
+}

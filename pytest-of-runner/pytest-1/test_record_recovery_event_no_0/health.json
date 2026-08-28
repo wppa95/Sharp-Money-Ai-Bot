@@ -1,0 +1,16 @@
+{
+  "last_recovery_event": {
+    "job": "underdog_job",
+    "reason": "job succeeded after failures",
+    "ts": "2026-08-28 02:01:23 UTC",
+    "ts_unix": 1787882483.202982
+  },
+  "recovery_history": [
+    {
+      "job": "underdog_job",
+      "reason": "job succeeded after failures",
+      "ts": "2026-08-28 02:01:23 UTC",
+      "ts_unix": 1787882483.202982
+    }
+  ]
+}

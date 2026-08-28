@@ -1,0 +1,10 @@
+{
+  "jobs": {
+    "underdog_job": {
+      "last_run": "2026-08-28 02:01:23 UTC",
+      "last_run_ts": 1787882483.220101,
+      "run_count": 1,
+      "fail_streak": 0
+    }
+  }
+}

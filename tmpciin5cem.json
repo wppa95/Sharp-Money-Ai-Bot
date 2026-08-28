@@ -1,0 +1,19 @@
+{
+  "jobs": {
+    "myjob": {
+      "last_fail": "2026-08-28 02:01:23 UTC",
+      "last_fail_ts": 1787882483.458129,
+      "last_error": "something went wrong",
+      "fail_count": 1,
+      "fail_streak": 1,
+      "recent_fails": [
+        {
+          "ts": "2026-08-28 02:01:23 UTC",
+          "error": "something went wrong"
+        }
+      ]
+    }
+  },
+  "last_error": "[myjob] something went wrong",
+  "last_error_ts": "2026-08-28 02:01:23 UTC"
+}

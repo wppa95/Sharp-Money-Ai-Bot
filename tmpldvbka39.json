@@ -1,0 +1,23 @@
+{
+  "jobs": {
+    "_clv_harvest_job": {
+      "last_started": "2026-08-28 02:19:54 UTC",
+      "last_started_ts": 1787883594.3967,
+      "last_fail": "2026-08-28 02:19:54 UTC",
+      "last_fail_ts": 1787883594.397197,
+      "last_error": "ImportError: import of engine.clv halted; None in sys.modules",
+      "fail_count": 1,
+      "fail_streak": 1,
+      "recent_fails": [
+        {
+          "ts": "2026-08-28 02:19:54 UTC",
+          "error": "ImportError: import of engine.clv halted; None in sys.modules"
+        }
+      ]
+    }
+  },
+  "last_job_started": "_clv_harvest_job",
+  "last_job_started_at": "2026-08-28 02:19:54 UTC",
+  "last_error": "[_clv_harvest_job] ImportError: import of engine.clv halted; None in sys.modules",
+  "last_error_ts": "2026-08-28 02:19:54 UTC"
+}

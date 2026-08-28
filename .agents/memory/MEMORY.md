@@ -87,3 +87,4 @@
 - [PropLine endpoint safety](propline-endpoint.md) — require an explicit authorized API URL; never send the credential to a guessed host.
 - [Provider history adapter contract](provider-history-adapter.md) — provider-specific history adapters must preserve scorer-required lifecycle fields such as removed.
 - [PropLine cycle pacing](propline-cycle-pacing.md) — primary PrizePicks monitoring fetches one configured sport per shared cycle; do not use the all-sports fetch in production.
+- [FIFA history alias](fifa-history-alias.md) — FIFA may reuse the soccer provider only when result labels remain FIFA; empty provider results stay N/A.

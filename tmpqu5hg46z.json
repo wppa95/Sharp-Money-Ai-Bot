@@ -1,0 +1,10 @@
+{
+  "jobs": {
+    "_clv_seed_job": {
+      "last_run": "2026-08-28 02:19:54 UTC",
+      "last_run_ts": 1787883594.385201,
+      "run_count": 1,
+      "fail_streak": 0
+    }
+  }
+}

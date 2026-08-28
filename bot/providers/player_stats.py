@@ -183,6 +183,7 @@ _MLB_HITTING_MAP: dict[str, str] = {
     "total bases":        "totalBases",
     "stolen bases":       "stolenBases",
     "walks":              "baseOnBalls",
+    "batter walks":       "baseOnBalls",
     "runs scored":        "runs",
     "runs":               "runs",
     "singles":            "_singles",    # hits - 2B - 3B - HR
@@ -206,6 +207,7 @@ _MLB_PITCHING_MAP: dict[str, str] = {
     "earned runs":          "earnedRuns",
     "innings pitched":      "inningsPitched",
     "outs recorded":        "_outs",     # inningsPitched * 3 (fractional → outs)
+    "pitching outs":        "_outs",
 }
 
 # Stat types that belong to the MLB pitching group
@@ -213,7 +215,7 @@ _MLB_PITCHING_STATS: frozenset[str] = frozenset({
     "strikeouts", "pitcher strikeouts", "ks",
     "hits allowed", "walks allowed",
     "earned runs allowed", "earned runs",
-    "innings pitched", "outs recorded",
+    "innings pitched", "outs recorded", "pitching outs",
 })
 
 # Lazy singletons for esports / tennis / sleeper / NHL providers
@@ -426,7 +428,7 @@ class PlayerStatsProvider:
                 return await _get_nhl_provider().fetch_results(
                     player_name, "NHL", stat_type
                 )
-            elif sport_upper == "SOCCER":
+            elif sport_upper in ("SOCCER", "FIFA"):
                 # Uses SoccerStatsProvider (football-data.org API).
                 # Requires FOOTBALL_DATA_API_KEY env var (free token at
                 # https://www.football-data.org/client/register).
@@ -438,7 +440,7 @@ class PlayerStatsProvider:
                 # Enable manually: UD_ALERT_SPORTS=...,SOCCER + FOOTBALL_DATA_API_KEY.
                 # _fetch_espn_soccer() is also available for ESPN-accessible envs.
                 return await _get_soccer_provider().fetch_results(
-                    player_name, "SOCCER", stat_type
+                    player_name, sport_upper, stat_type
                 )
             elif sport_upper in _ESPN_ROUTE:
                 sport_slug, league_slug = _ESPN_ROUTE[sport_upper]

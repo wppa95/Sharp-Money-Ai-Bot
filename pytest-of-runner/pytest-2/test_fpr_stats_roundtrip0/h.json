@@ -1,0 +1,8 @@
+{
+  "fpr_stats": {
+    "pool_size": 100,
+    "fpr_rescored": 10
+  },
+  "last_fpr_run": "2026-08-28 02:18:59 UTC",
+  "last_fpr_run_ts": 1787883539.748095
+}

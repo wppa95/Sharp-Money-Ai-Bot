@@ -1,0 +1,10 @@
+{
+  "jobs": {
+    "_season_check_job": {
+      "last_run": "2026-08-28 02:02:17 UTC",
+      "last_run_ts": 1787882537.569825,
+      "run_count": 1,
+      "fail_streak": 0
+    }
+  }
+}

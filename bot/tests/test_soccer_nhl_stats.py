@@ -533,6 +533,28 @@ class TestSoccerFetchResults:
 
         assert len(results) == 1
 
+    def test_fifa_routes_to_soccer_provider_and_preserves_label(self):
+        import providers.player_stats as ps_mod
+        result = self._make_fake_result()
+
+        calls = []
+
+        async def fake_fetch(player_name, sport, stat_type):
+            calls.append((player_name, sport, stat_type))
+            return [result._replace(sport=sport)]
+
+        mock = type("M", (), {"fetch_results": staticmethod(fake_fetch)})()
+        original = ps_mod._soccer_provider_instance
+        ps_mod._soccer_provider_instance = mock
+        try:
+            provider = PlayerStatsProvider()
+            results = run(provider.fetch_results(self._PLAYER, "FIFA", "goals"))
+        finally:
+            ps_mod._soccer_provider_instance = original
+
+        assert calls == [(self._PLAYER, "FIFA", "goals")]
+        assert results[0].sport == "FIFA"
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # NHL: dispatch and stat map

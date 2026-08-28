@@ -166,10 +166,12 @@ class SoccerStatsProvider:
             # have entries in multiple competitions; merging preserves full history.
             all_results: list[RawGameResult] = []
             seen_dates: set[str] = set()
+            result_sport = sport.upper()
             for comp_code, team_name in placements:
                 matches = await self._get_competition_matches(comp_code, season)
                 leg_results = self._extract_team_results(
-                    player_name, player_norm, stat_lower, team_name, matches
+                    player_name, player_norm, stat_lower, team_name, matches,
+                    sport=result_sport,
                 )
                 for r in leg_results:
                     if r.game_date not in seen_dates:
@@ -257,6 +259,8 @@ class SoccerStatsProvider:
         stat_lower: str,
         team_name: str,
         matches: list[dict],
+        *,
+        sport: str = "SOCCER",
     ) -> list[RawGameResult]:
         """
         Return a RawGameResult for every finished match the player's team played,
@@ -289,7 +293,7 @@ class SoccerStatsProvider:
 
             results.append(RawGameResult(
                 player_name  = player_name,
-                sport        = "SOCCER",
+                sport        = sport,
                 stat_type    = stat_lower,
                 game_date    = game_date,
                 actual_value = val,
