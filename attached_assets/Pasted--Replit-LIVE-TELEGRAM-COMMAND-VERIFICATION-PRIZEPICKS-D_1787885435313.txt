@@ -1,0 +1,148 @@
+@Replit
+
+LIVE TELEGRAM COMMAND VERIFICATION + PRIZEPICKS DISPLAY UPDATE
+
+The bot responded successfully to /status.
+
+After that:
+
+* /dashboard stayed on “⏳ Gathering stats…” for 5+ minutes.
+* /funnel received no response.
+* /help received no response.
+
+We need to verify the LIVE Telegram command system and also make sure PrizePicks is represented correctly in the bot displays.
+
+1. READ-ONLY COMMAND VERIFICATION FIRST
+
+Before making changes, inspect the LIVE Telegram polling/command handler.
+
+Do NOT restart the bot.
+Do NOT deploy.
+Do NOT change scheduler, monitoring, scoring, providers, database, or Telegram delivery logic.
+
+Verify every currently registered Telegram command, including at minimum:
+
+/status
+/dashboard
+/funnel
+/alerts
+/picks
+/slip
+/grade
+/performance
+/backtest
+/analyze
+/testalert
+/help
+
+Also discover and test any additional registered commands.
+
+For each command report:
+
+* Responds successfully
+* Hangs/times out
+* Returns an error
+* Requires arguments
+* Intentionally disabled/unavailable
+
+Specifically determine whether /dashboard is blocking the Telegram event loop or command worker and causing subsequent commands to stop responding.
+
+Use the minimum possible checks.
+Do NOT make unnecessary provider/API requests.
+Do NOT run expensive commands unnecessarily.
+
+2. PRIZEPICKS DISPLAY UPDATE
+
+PrizePicks through PropLine is now a PRIMARY player-prop source alongside Underdog.
+
+Update the user-facing displays so this is clearly represented.
+
+Provider status should show:
+
+🟢 Underdog — Primary Player Props
+🟢 PrizePicks — PropLine — Primary Player Props
+🔴 DraftKings/FanDuel — Disabled
+
+Where the display already provides provider statistics, include PrizePicks/PropLine separately:
+
+* Last successful sync
+* Props/observations fetched
+* Props persisted
+* Props evaluated/rescored
+* Actionable candidates
+* Delivered picks
+
+Do NOT merge PrizePicks counts with Underdog counts.
+
+Telegram picks must remain clearly labeled:
+
+UNDERDOG PICK
+
+or
+
+PRIZEPICKS PICK
+
+so it is obvious where each pick should be placed.
+
+3. DISPLAY SCOPE
+
+Make the smallest targeted display/reporting changes necessary.
+
+PrizePicks should be represented wherever provider/source information is currently displayed, including /status and /dashboard where applicable.
+
+The funnel should also clearly distinguish PrizePicks from Underdog if provider-level data is shown.
+
+Do NOT create duplicate pipelines or schedulers.
+
+4. DO NOT CHANGE CORE BEHAVIOR
+
+Preserve exactly:
+
+* Underdog as the primary Underdog player-prop source
+* PrizePicks through PropLine as the primary PrizePicks player-prop source
+* No PropLine Underdog feed
+* DK/FD player props, moneylines, and totals disabled
+* Existing scoring
+* Existing evidence system
+* Existing grading
+* Existing Telegram qualification rules
+* FPR
+* Stable Refresh
+* Unified monitoring cadence
+* Scheduler
+* max_instances=1
+* Clean restart behavior
+* Database architecture
+
+Do NOT redesign or refactor unrelated systems.
+
+5. VERIFICATION AFTER THE DISPLAY FIX
+
+After the command-handler diagnosis, apply only the targeted display fix if needed.
+
+Then verify the affected Telegram commands again.
+
+Confirm:
+
+* /status responds
+* /dashboard responds without hanging
+* /funnel responds
+* /help responds
+* Remaining registered commands remain functional
+* PrizePicks is visible as a separate primary source
+* Underdog remains separately identified
+* DK/FD remain shown as disabled
+* PrizePicks and Underdog counts do not merge
+* Telegram provider labels remain correct
+
+Run only directly affected tests and a compilation/diff check.
+
+Use minimal credits and minimal runtime/API calls.
+
+Do NOT perform an extended observation window.
+
+Do NOT claim success based only on tests. Confirm the actual Telegram command behavior where possible.
+
+Report the complete command status matrix and exactly what display change was made.
+
+STOP after verification.
