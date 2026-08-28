@@ -31,8 +31,8 @@ logger = logging.getLogger(__name__)
 # Priority order: PrizePicks (PRIMARY) → Underdog (SECONDARY) → DK/FD (SUPPORTING ONLY)
 #
 SCOPE_RULES: dict[str, str] = {
-    "PrizePicks": "ALWAYS PASS — player props, all sports (primary source)",
-    "Underdog":   "ALWAYS PASS — player props, all sports (secondary source)",
+    "PrizePicks": "ALLOW — player props, all sports (primary source)",
+    "Underdog":   "ALLOW — player props, all sports (secondary source)",
     "DraftKings": "Moneyline (h2h) + totals for active sports only — other markets BLOCKED",
     "FanDuel":    "Moneyline (h2h) + totals for active sports only — other markets BLOCKED",
     "System":     "ALWAYS BLOCKED — multi-book steam, CLV, inefficiency alerts excluded",
@@ -73,7 +73,7 @@ def check(obj: AlertObject) -> FilterResult:
     if src in (AlertSource.PRIZEPICKS, AlertSource.UNDERDOG) and is_football_related_sport(obj.sport):
         return _block(obj, "Blocked: football-related betting output")
 
-    # ── PrizePicks / Underdog: player props — always pass ────────────────────
+    # ── PrizePicks / Underdog: player props ──────────────────────────────────
     if src in (AlertSource.PRIZEPICKS, AlertSource.UNDERDOG):
         return FilterResult(allowed=True)
 

@@ -366,7 +366,7 @@ class TestDeliverUnderdog:
         delivery._bot.send_message.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_strong_moneyline_can_be_delivered(self, monkeypatch):
+    async def test_football_moneyline_is_suppressed(self, monkeypatch):
         delivery = self._delivery()
         decision = MagicMock(
             moneyline_strength="STRONG",
@@ -391,7 +391,9 @@ class TestDeliverUnderdog:
             decision=decision,
             score=score,
         )
-        assert result.sent is True
+        assert result.sent is False
+        assert result.filtered is True
+        assert "Football" in result.filtered_reason
 
     @pytest.mark.asyncio
     async def test_line_change_higher_broadcast(self):
@@ -545,8 +547,8 @@ class TestDeliverUnderdog:
         assert "Connor McDavid" in msg
 
     @pytest.mark.asyncio
-    async def test_underdog_sport_icon_nfl(self):
-        """NFL format includes the football emoji — patch Tier 2 block to test formatting."""
+    async def test_underdog_football_is_not_sent(self):
+        """Football remains tracked but never reaches Telegram betting output."""
         sent_messages: list[str] = []
 
         async def capture(chat_id, text, **kwargs):
@@ -564,7 +566,7 @@ class TestDeliverUnderdog:
             old_line    = 85.5,
             new_line    = 89.5,
         )
-        assert "🏈" in sent_messages[0]
+        assert sent_messages == []
 
     @pytest.mark.asyncio
     async def test_underdog_sport_icon_nba(self):

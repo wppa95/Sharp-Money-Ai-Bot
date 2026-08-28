@@ -907,6 +907,27 @@ class PropLinePrizePicksProvider(PropProviderBase):
     def is_available(self) -> bool:
         return self.client.is_configured
 
+    async def discover_sports(self) -> Optional[list[PropLineSport]]:
+        """Return active PropLine sports for the official endpoint.
+
+        A custom authorized endpoint may not expose the documented catalog;
+        ``None`` tells the caller to use its configured compatibility scope.
+        An empty list from the official catalog is meaningful and means there
+        is no currently advertised PrizePicks slate.
+        """
+        if not self.is_available():
+            return []
+        if self.client.api_url.rstrip("/") != DEFAULT_PROPLINE_API_URL:
+            return None
+        discovered = await self.client.discover_sports()
+        if self._sport_filter is not None:
+            discovered = [
+                sport
+                for sport in discovered
+                if sport.canonical_key in self._sport_filter
+            ]
+        return discovered
+
     async def fetch_props(self) -> list[PlayerProp]:
         if not self.is_available():
             logger.info("PropLine PrizePicks provider is disabled")

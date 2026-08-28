@@ -980,10 +980,6 @@ class Database:
                     PropLineHistory.game_time.is_(None),
                     PropLineHistory.game_time > datetime.utcnow(),
                 ),
-                # /picks is an analyst-facing view of evaluated props.
-                # Decision labels are metadata, not a display gate; only
-                # unscored rows are excluded.
-                PropLineHistory.score_tier.isnot(None),
             ]
             if sports is not None:
                 filters.append(PropLineHistory.sport.in_(normalized_sports))

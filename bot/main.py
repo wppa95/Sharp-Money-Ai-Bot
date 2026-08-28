@@ -103,7 +103,6 @@ from providers.game_results import OddsApiResultsProvider
 from providers.usage_tracker import init_usage_tracker, get_usage_tracker
 from providers.quota_pacing import init_quota_pacer, get_quota_pacer
 from engine.health import init_health_tracker, get_health_tracker
-from engine.pregame_watch import get_pregame_watch_engine
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -368,7 +367,6 @@ async def post_init(application: Application) -> None:
             first=60,
             name="player_props_fetcher",
         )
-        jq.run_repeating(_pregame_watch_job,   interval=config.PREGAME_SCAN_INTERVAL,    first=30,  name="pregame_watcher")
         # Legacy _prizepicks_job remains disabled.  The authorized PropLine
         # PrizePicks cycle runs as a guarded companion task inside underdog_job.
         # jq.run_repeating(connector_poll_job,  interval=config.CONNECTOR_POLL_INTERVAL,   first=20,  name="connector_poller")
@@ -441,10 +439,9 @@ async def post_init(application: Application) -> None:
             )
         logger.info(
             "Jobs scheduled — underdog: every %ds, stable_refresh: every 120s, "
-            "pregame: every %ds, season_check: every %ds, heartbeat: every 60s "
+            "season_check: every %ds, heartbeat: every 60s "
             "[PrizePicks/PropLine companion cycle enabled=%s; DK/FD delivery disabled]",
             config.UNDERDOG_POLL_INTERVAL,
-            config.PREGAME_SCAN_INTERVAL,
             config.SEASON_CHECK_INTERVAL,
             _propline_enabled,
         )
@@ -1490,52 +1487,6 @@ async def _season_check_job(context) -> None:
 
 
 # ── Pregame market watch job (continuous, all-day) ────────────────────────────
-
-async def _pregame_watch_job(context) -> None:
-    """
-    Continuous pregame market watch — runs every PREGAME_SCAN_INTERVAL seconds.
-
-    Each cycle:
-      1. morning_scan: discover new props and record opening lines.
-      2. pregame_scan: re-fetch current lines, compute movement, fire alerts
-         for qualifying props (conf ≥ 60) not yet alerted this session and
-         for any prop whose line moved since the last alert.
-      3. clear_stale: remove entries for games that have already started.
-
-    No sport filtering here — the engine accepts every sport Underdog carries.
-    """
-    if _db is None:
-        logger.debug("_pregame_watch_job: DB not ready, skipping")
-        return
-
-    _ht = get_health_tracker()
-    if _ht:
-        _ht.record_job_started("_pregame_watch_job")
-    try:
-        bot      = context.application.bot
-        chat_ids = list(config.allowed_user_ids)
-        engine   = get_pregame_watch_engine()
-
-        n_created = await engine.morning_scan(_db)
-        n_alerts  = await engine.pregame_scan(_db, bot, chat_ids)
-        n_cleared = engine.clear_stale()
-
-        if n_created or n_alerts or n_cleared:
-            logger.info(
-                "_pregame_watch_job: watching=%d  new=%d  alerts=%d  cleared=%d",
-                engine.watch_count, n_created, n_alerts, n_cleared,
-            )
-        else:
-            logger.debug("_pregame_watch_job: watching=%d  no changes", engine.watch_count)
-
-        if _ht:
-            _ht.record_job_run("_pregame_watch_job")
-
-    except Exception as exc:
-        logger.exception("_pregame_watch_job: error: %s", exc)
-        if _ht:
-            _ht.record_job_fail("_pregame_watch_job", str(exc))
-
 
 # ── Player-prop odds fetching job ─────────────────────────────────────────────
 

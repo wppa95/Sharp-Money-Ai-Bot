@@ -1506,6 +1506,18 @@ def _is_active_display_sport(sport: Optional[str]) -> bool:
     }
 
 
+def _is_current_provider_sport(
+    sport: Optional[str],
+    provider: Optional[str],
+) -> bool:
+    """Apply the provider's own current-slate scope."""
+    if str(provider or "").strip().lower() == "prizepicks":
+        # ACTIVE_SPORTS is the Underdog scope. PrizePicks has an independent
+        # active catalog, so dynamic PP sports must remain visible here.
+        return bool(str(sport or "").strip())
+    return _is_active_display_sport(sport)
+
+
 # ── /picks tier constants ─────────────────────────────────────────────────────
 # New PPAnalysisScore vocabulary (S/A/B/PASS) plus legacy AlertTier values for
 # any records written before the scoring engine was introduced.
@@ -1724,7 +1736,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     pp_props = [
         p for p in pp_rows
         if not _is_season_future(p.stat_type)
-        and _is_active_display_sport(p.sport)
+        and _is_current_provider_sport(p.sport, "PrizePicks")
         and not is_telegram_suppressed_sport(p.sport)
         and _is_upcoming_game(getattr(p, "game_time", None))
         and (not sport_filter or p.sport.upper() == sport_filter)
@@ -1849,7 +1861,11 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     _rec_map: dict = {}
     try:
         _rec_map = await _bounded(_db.get_ud_recommendations_bulk(
-            [(plh.player_name, plh.sport, plh.stat_type) for plh, _ in picks],
+            [
+                (plh.player_name, plh.sport, plh.stat_type)
+                for plh, _ in picks
+                if (getattr(plh, "provider", None) or "Underdog") == "Underdog"
+            ],
             since_hours=24,
         ))
         if not _rec_map and picks:
@@ -1879,6 +1895,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 plh.player_name, plh.sport, plh.stat_type, since_hours=24
             )
             for plh, _ in picks
+            if (getattr(plh, "provider", None) or "Underdog") == "Underdog"
         ],
         return_exceptions=True,
     ))
@@ -1931,7 +1948,10 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         _live_r, _ = _rec_map.get(
             (plh.player_name, plh.sport, plh.stat_type), (None, None)
         )
-        if _live_r is not None:
+        if (
+            (getattr(plh, "provider", None) or "Underdog") == "Underdog"
+            and _live_r is not None
+        ):
             _eff_rec = _live_r
         # Skip props without a direction — user only wants actionable picks.
         if _eff_rec not in ("OVER", "UNDER"):
@@ -1999,7 +2019,10 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                     _live_rec, _live_conf = _rv
                     break
         # Prefer live snapshot if available; fall back to synced column
-        if _live_rec is not None:
+        if (
+            (getattr(plh, "provider", None) or "Underdog") == "Underdog"
+            and _live_rec is not None
+        ):
             bet_rec = _live_rec
         if bet_rec is None:
             logger.debug(
@@ -2123,7 +2146,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         # ── Alternate lines (if Underdog offers multiple) ─────────────────────
         alt = _alt_lines[flat_idx]
         # Only show when there are ≥2 distinct lines
-        if len(alt) >= 2:
+        if len(alt) >= 2 and provider == "Underdog":
             entry_lines.append("")
             entry_lines.append("📊 <b>Available Underdog Lines:</b>")
             alt_labeled = "  ".join(
@@ -2592,7 +2615,7 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     pp_props = [
         p for p in pp_props
         if not _is_season_future(p.stat_type)
-        and _is_active_display_sport(p.sport)
+        and _is_current_provider_sport(p.sport, "PrizePicks")
         and not is_telegram_suppressed_sport(p.sport)
         and _is_upcoming_game(getattr(p, "game_time", None))
     ]
@@ -2643,11 +2666,17 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             adapter.best_side = _plh_rec
         _candidates.append(adapter)
 
-    # Override with fresher live snapshot directions where available
+    # Override with fresher provider-owned directions where available.  The
+    # generic PropLineHistory row is authoritative for PP; the snapshot table
+    # is only an Underdog freshness source.
     try:
         _slip_rec_map = await _report_read(
             _db.get_ud_recommendations_bulk(
-                [(plh.player_name, plh.sport, plh.stat_type) for plh in ud_props],
+                [
+                    (plh.player_name, plh.sport, plh.stat_type)
+                    for provider, plh in provider_props
+                    if provider == "Underdog"
+                ],
                 since_hours=24,
             ),
             fallback={},
@@ -2655,7 +2684,7 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         for _cand in _candidates:
             _k = (_cand.player_name, _cand.sport, _cand.stat_type)
             _lr, _ = _slip_rec_map.get(_k, (None, None))
-            if _lr in ("OVER", "UNDER"):
+            if _cand.sportsbook == "Underdog" and _lr in ("OVER", "UNDER"):
                 _cand.best_side = _lr
     except Exception as _slip_rec_exc:
         logger.debug("cmd_slip: rec_map lookup failed: %s", _slip_rec_exc)
@@ -2713,7 +2742,7 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         lines = [
             f"🎯 <b>Sharp Money Prop Slips — {today}</b>",
             f"<i>{len(slips)} slip size{'s' if len(slips) != 1 else ''} built "
-            f"from {len(_candidates)} Underdog props</i>",
+            f"from {len(_candidates)} Underdog and PrizePicks props</i>",
             "",
         ]
         for size in sorted(slips):
@@ -2721,7 +2750,7 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             lines.extend(_render_slip_section(size, slips[size], label))
             lines.append("")
 
-    lines.append("<i>⚠️ Research tool — not betting advice.  Verify lines before placing.</i>")
+    lines.append("<i>⚠️ Research tool — not betting advice.</i>")
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
 

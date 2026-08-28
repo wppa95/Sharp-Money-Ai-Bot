@@ -369,6 +369,49 @@ _PRIZEPICKS_DEDUP_PREFIX = "PrizePicks::"
 _prizepicks_sport_cursor = 0
 
 
+async def _get_prizepicks_scan_sports(provider) -> tuple[str, ...]:
+    """Return the provider's active canonical sports, with a safe config fallback.
+
+    PropLine's sports catalog is authoritative when available.  The configured
+    list remains a compatibility fallback for test/custom providers and for a
+    temporary catalog outage; it is never used to turn an empty successful
+    catalog into a fabricated sport.
+    """
+    configured = tuple(
+        str(sport).strip()
+        for sport in getattr(config, "prizepicks_leagues", [])
+        if str(sport).strip()
+    )
+    discover = getattr(provider, "discover_sports", None)
+    if not callable(discover):
+        return configured
+    try:
+        discovered = await discover()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "prizepicks_cycle: active-sport discovery failed; using configured fallback: %s",
+            type(exc).__name__,
+        )
+        return configured
+
+    sports: list[str] = []
+    seen: set[str] = set()
+    for item in discovered or []:
+        canonical = str(
+            getattr(item, "canonical_key", None)
+            or getattr(item, "sport", None)
+            or item
+        ).strip()
+        if canonical and canonical.upper() not in seen:
+            seen.add(canonical.upper())
+            sports.append(canonical)
+    if discovered is None:
+        return configured
+    # A successful but empty catalog means there is no currently advertised
+    # PP slate.  Do not issue requests against guessed static sports.
+    return tuple(sports)
+
+
 def _player_provider_label(sport: str) -> str:
     """Best-effort provider attribution for the existing player-stats routes."""
     labels = {
@@ -524,7 +567,7 @@ def _format_95_priority_alert(
         f"\nLine: {line_val:.1f}"
         f"{dir_line}\n"
         f"\n<i>🔥 Bet Quality {conf}/100 — Priority</i>"
-        f"\n<i>⚠️ Verify current line on Underdog before placing.</i>"
+        f"\n<i>Line movement and decision context are shown for research.</i>"
     )
 
 
@@ -1201,19 +1244,14 @@ async def _run_prizepicks_independent_cycle(
     if not getattr(_propline_provider, "is_available", lambda: False)():
         return
 
-    # The authorized feed exposes many sports, but the configured PrizePicks
-    # scope is intentionally smaller.  Fetch one configured sport per shared
-    # Underdog cycle.  PropLine's 120-second global pacing plus one sport per
-    # cycle keeps the normal two-sport configuration at 720 requests/day,
-    # below its 1,000-request daily limit, while avoiding a serial bulk fetch.
+    # Fetch one active sport per shared Underdog cycle.  The official PropLine
+    # catalog is preferred so newly supported sports are monitored without a
+    # code/config change.  One sport per cycle preserves the provider pacing
+    # and keeps the request budget bounded.
     if _fetched_props is None:
-        configured_sports = tuple(
-            str(sport).strip()
-            for sport in getattr(config, "prizepicks_leagues", [])
-            if str(sport).strip()
-        )
+        configured_sports = await _get_prizepicks_scan_sports(_propline_provider)
         if not configured_sports:
-            logger.warning("prizepicks_cycle: no configured PrizePicks sports; skipping")
+            logger.info("prizepicks_cycle: no active PrizePicks sports; skipping")
             return
         global _prizepicks_sport_cursor
         sport = configured_sports[_prizepicks_sport_cursor % len(configured_sports)]

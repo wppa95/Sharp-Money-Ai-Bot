@@ -779,12 +779,12 @@ def format_underdog_change_alert(
         ):
             strong_under_line = (
                 "🔥 <b>STRONG UNDER</b>  "
-                "<i>(BQ ≥ 70 — verify line on Underdog before placing)</i>"
+                "<i>(BQ ≥ 70 — informational signal)</i>"
             )
         elif rec == "UNDER" and conf is not None and int(conf) >= 30:
             strong_under_line = (
                 "🔴 <b>Strong UNDER Signal</b>  "
-                "<i>(BQ ≥ 30 — verify line on Underdog before placing)</i>"
+                "<i>(BQ ≥ 30 — informational signal)</i>"
             )
 
         # Full hit-history breakdown — show every available window on actionable alerts.

@@ -836,7 +836,7 @@ def format_pp_alert(
         f"─────────────────────────────",
         *_risk_section(risk_factors),
         "",
-        f"<i>Compare line at prizepicks.com before placing.</i>",
+        f"<i>PrizePicks line and market context are shown for research.</i>",
     ]
 
     return "\n".join(parts)
