@@ -238,12 +238,11 @@ class TestStandingPathGatesIntact:
             "silent rejections cannot be diagnosed from logs."
         )
 
-    def test_debug_logging_added_for_decision_pass_rejection(self):
-        """Debug log must be present for PASS decision rejection in standing path."""
+    def test_no_direction_is_not_logged_as_rejection(self):
+        """Unavailable direction remains transient rather than a rejection class."""
         src = self._get_engine_source()
-        assert "standing_gate [decision_pass]" in src, (
-            "Debug log for standing path decision_pass rejection is missing."
-        )
+        assert "standing_gate [decision_pass]" not in src
+        assert "decision_pass" not in src
 
 
 # ─────────────────────────────────────────────────────────────────────────────

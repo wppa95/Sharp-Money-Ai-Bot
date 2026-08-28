@@ -410,10 +410,12 @@ class PlayerGameResult(Base):
 
 class PropOpportunityLog(Base):
     """
-    Every evaluated player prop opportunity — both PLAY and PASS decisions.
+    Directional player prop opportunities used for evidence and grading.
 
     One row per (external_id, stat_type) pair, recorded immediately after
-    ``make_ud_bet_decision()`` runs, regardless of recommendation.
+    evaluation produces an OVER or UNDER direction. Non-directional evaluations
+    remain represented by the canonical active prop and scan metrics rather
+    than a separate classification row.
 
     ``result`` is stored from the OVER perspective for consistent analysis:
       "HIT"     → actual_value > line_value  (over cleared)
@@ -426,8 +428,6 @@ class PropOpportunityLog(Base):
       PLAY OVER  + MISS → ❌ incorrect pick
       PLAY UNDER + MISS → ✅ correct pick  (under cleared = over failed)
       PLAY UNDER + HIT  → ❌ incorrect pick
-      PASS       + HIT  → 📈 missed OVER opportunity
-      PASS       + MISS → ✅ correct pass   (over would have failed)
     """
     __tablename__ = "prop_opportunity_log"
 
@@ -438,8 +438,8 @@ class PropOpportunityLog(Base):
     sport          = Column(String(32),  nullable=False, index=True)
     stat_type      = Column(String(64),  nullable=False)
     line_value     = Column(Float,       nullable=False)
-    recommendation = Column(String(8),   nullable=False)   # OVER | UNDER | PASS
-    decision_tier  = Column(String(8),   nullable=False)   # S | A | B | PASS
+    recommendation = Column(String(8),   nullable=False)   # Current writes: OVER | UNDER
+    decision_tier  = Column(String(8),   nullable=False)   # Legacy score metadata
     confidence     = Column(Integer,     nullable=False, default=0)
     game_time      = Column(DateTime,    nullable=True)
     game_id        = Column(String(128), nullable=False, default="", index=True)
@@ -463,17 +463,17 @@ class PropOpportunityLog(Base):
     bet_quality_score  = Column(Integer,     nullable=True)               # 0-100 decision confidence
     qualification_path = Column(Text,        nullable=True)               # JSON list of gate outcomes
     reason_codes       = Column(Text,        nullable=True)               # JSON: ["STRONG_L5", …]
-    watchlist_state    = Column(String(16),  nullable=True)               # Qualified|Watchlist|Rejected|Removed
+    watchlist_state    = Column(String(16),  nullable=True)               # Legacy compatibility; current writes null
     settlement_source  = Column(String(64),  nullable=True)               # "auto_grade"|"manual"|None
-    manual_opinion     = Column(String(8),   nullable=True)               # "OVER"|"UNDER"|"PASS"|None
+    manual_opinion     = Column(String(8),   nullable=True)               # Legacy compatibility
     # Downstream intelligence — additive and never used as a delivery gate.
     downstream_intelligence_json = Column(Text, nullable=True)
     evidence_completeness        = Column(Integer, nullable=True)
     sharp_confidence             = Column(Integer, nullable=True)
     sharp_confidence_components  = Column(Text, nullable=True)
     # Telegram actionable pick tracking — set True only when the 🎯 ACTIONABLE BET PICK
-    # alert was successfully delivered to Telegram.  Props that were evaluated but not
-    # sent (PASS, blocked, filtered, market-move-only) remain False.
+    # alert was successfully delivered to Telegram. Directional opportunities
+    # that were not delivered remain False.
     alert_sent         = Column(Boolean,     nullable=False, default=False)
     alert_sent_at      = Column(DateTime,    nullable=True)               # UTC timestamp of delivery
 
@@ -489,18 +489,12 @@ class PropOpportunityLog(Base):
 
 class PropCandidateLog(Base):
     """
-    Every scored prop candidate — both qualifying and rejected.
+    Directional scored-candidate evidence.
 
-    Written once per candidate per scan cycle.  Use this table for:
-      • Edge transparency — see exactly where candidates filter out.
-      • Qualification calibration — measure false positives / false negatives.
-      • Funnel analytics — candidates → qualified → alerted → hit/miss.
-
-    gate_decision values:
-      ACCEPTED  — tier S/A, no gate failures, alert was queued
-      WATCHLIST — tier B without strong enough component scores to alert
-      REJECTED  — tier PASS, or failed confidence/sport/decision gate
-      REMOVED   — provider removed the prop during this cycle
+    Written once per directional candidate per scan cycle. The legacy
+    gate_decision and rejection_reason columns remain for compatibility with
+    existing databases, but current writes use EVALUATED with no rejection
+    reason. Alert delivery is tracked separately.
     """
     __tablename__ = "prop_candidate_log"
 
@@ -513,10 +507,10 @@ class PropCandidateLog(Base):
     line_value           = Column(Float,       nullable=False, default=0.0)
     provider             = Column(String(32),  nullable=False, default="Underdog")
     score_total          = Column(Float,       nullable=True)
-    score_tier           = Column(String(8),   nullable=True)    # S / A / B / PASS
+    score_tier           = Column(String(8),   nullable=True)    # Scoring metadata
     confidence           = Column(Integer,     nullable=True)
-    gate_decision        = Column(String(16),  nullable=False)   # ACCEPTED/WATCHLIST/REJECTED/REMOVED
-    rejection_reason     = Column(Text,        nullable=True)    # human-readable rejection label
+    gate_decision        = Column(String(16),  nullable=False)   # Current writes: EVALUATED
+    rejection_reason     = Column(Text,        nullable=True)    # Legacy compatibility; current writes null
     reason_codes         = Column(Text,        nullable=True)    # JSON list e.g. ["STRONG_L5", "S_TIER"]
     snapshot_external_id = Column(String(64),  nullable=True, index=True)
 
@@ -3706,8 +3700,8 @@ class Database:
         sport: str,
         stat_type: str,
         line_value: float,
-        recommendation: str,            # OVER | UNDER | PASS
-        decision_tier: str,             # S | A | B | PASS
+        recommendation: str,            # Current writes: OVER | UNDER
+        decision_tier: str,             # Legacy score metadata
         confidence: int,
         game_time: "Optional[datetime]",
         game_id: str = "",
@@ -3720,7 +3714,7 @@ class Database:
         bet_quality_score:  "Optional[int]"  = None,   # 0-100 (== confidence for now)
         qualification_path: "Optional[list]" = None,   # gates passed, JSON-encoded
         reason_codes:       "Optional[list]" = None,   # structured codes, JSON-encoded
-        watchlist_state:    "Optional[str]"  = None,   # Qualified|Watchlist|Rejected|Removed
+        watchlist_state:    "Optional[str]"  = None,   # Legacy compatibility; ignored on writes
         downstream_intelligence: "Optional[dict]" = None,
     ) -> None:
         """
@@ -3767,9 +3761,9 @@ class Database:
     ) -> int:
         """Batch-upsert directional prop opportunities in bounded chunks.
 
-        This has the same contract as ``log_prop_opportunity``: PASS rows are
-        transient, the identity is ``(external_id, stat_type)``, and grading
-        fields are deliberately omitted from conflict updates.
+        This has the same contract as ``log_prop_opportunity``: non-directional
+        evaluations are transient, the identity is ``(external_id, stat_type)``,
+        and grading fields are deliberately omitted from conflict updates.
         """
         if not opportunities:
             return 0
@@ -3940,7 +3934,7 @@ class Database:
                         score_total          = c.get("score_total"),
                         score_tier           = c.get("score_tier"),
                         confidence           = c.get("confidence"),
-                        gate_decision        = c.get("gate_decision", "REJECTED"),
+                        gate_decision        = c.get("gate_decision", "EVALUATED"),
                         rejection_reason     = c.get("rejection_reason"),
                         reason_codes         = c.get("reason_codes"),
                         snapshot_external_id = c.get("snapshot_external_id"),
@@ -4270,9 +4264,6 @@ class Database:
         from datetime import timedelta
         cutoff = datetime.utcnow() - timedelta(hours=since_hours)
 
-        # The old gate-decision aggregation intentionally remains below for
-        # database compatibility with historical rows, but is no longer part
-        # of the monitoring/reporting contract.
         async with self.session() as s:
             total_res = await s.execute(
                 select(func.count(PropCandidateLog.id))
@@ -4299,121 +4290,6 @@ class Database:
             "since_hours": since_hours,
             "tracked": tracked,
             "by_sport": by_sport,
-            "top_rejections": [],
-        }
-
-        # Run all four queries inside a single session to avoid DB lock contention
-        # between separate session acquisitions (particularly during cold-start
-        # PropCandidateLog writes of ~5000 rows).
-        async with self.session() as s:
-            # 1. Gate-decision counts
-            cnt_rows = await s.execute(
-                select(
-                    PropCandidateLog.gate_decision,
-                    func.count(PropCandidateLog.id).label("n"),
-                )
-                .where(PropCandidateLog.scan_ts >= cutoff)
-                .group_by(PropCandidateLog.gate_decision)
-            )
-            counts = {}
-            for r in cnt_rows.all():
-                # Legacy rows are folded into the unified rejected bucket.
-                # The retired label must not leak into command/report output.
-                key = "REJECTED" if r.gate_decision == "WATCHLIST" else r.gate_decision
-                counts[key] = counts.get(key, 0) + r.n
-
-            # 2. Recent rejections — highest score first so near-misses surface first.
-            # Props that were ACCEPTED at any point in the window are excluded: the
-            # same prop can accumulate multiple PropCandidateLog rows across scan
-            # cycles (INSERT, not upsert), so a prop rejected in one cycle but
-            # accepted in another would otherwise appear as a Near-Miss even though
-            # it was correctly handled.
-            acc_rows = await s.execute(
-                select(
-                    PropCandidateLog.player_name,
-                    PropCandidateLog.sport,
-                    PropCandidateLog.stat_type,
-                )
-                .where(
-                    PropCandidateLog.scan_ts >= cutoff,
-                    PropCandidateLog.gate_decision == "ACCEPTED",
-                )
-                .distinct()
-            )
-            _accepted_keys: set = {
-                (r.player_name, r.sport, r.stat_type)
-                for r in acc_rows.all()
-            }
-
-            rej_rows = await s.execute(
-                select(
-                    PropCandidateLog.player_name,
-                    PropCandidateLog.sport,
-                    PropCandidateLog.stat_type,
-                    PropCandidateLog.rejection_reason,
-                    PropCandidateLog.score_tier,
-                    PropCandidateLog.score_total,
-                )
-                .where(
-                    PropCandidateLog.scan_ts    >= cutoff,
-                    PropCandidateLog.gate_decision == "REJECTED",
-                )
-                .order_by(desc(PropCandidateLog.score_total))
-                .limit(20)  # overfetch to allow filtering before returning 8
-            )
-            _all_rej = [dict(r._mapping) for r in rej_rows.all()]
-
-            # 3. Per-sport breakdown — sport × gate_decision counts
-            sport_rows = await s.execute(
-                select(
-                    PropCandidateLog.sport,
-                    PropCandidateLog.gate_decision,
-                    func.count(PropCandidateLog.id).label("n"),
-                )
-                .where(PropCandidateLog.scan_ts >= cutoff)
-                .group_by(PropCandidateLog.sport, PropCandidateLog.gate_decision)
-                .order_by(PropCandidateLog.sport)
-            )
-            _sport_gate_rows = sport_rows.all()
-
-        # Filter out any prop that was also ACCEPTED in the window, then deduplicate
-        # by (player_name, sport, stat_type) keeping the highest-scoring REJECTED row.
-        _seen_keys: set = set()
-        top_rej: list = []
-        for _r in _all_rej:
-            _k = (_r.get("player_name"), _r.get("sport"), _r.get("stat_type"))
-            if _k in _accepted_keys or _k in _seen_keys:
-                continue
-            _seen_keys.add(_k)
-            top_rej.append(_r)
-            if len(top_rej) >= 8:
-                break
-
-        # Aggregate into per-sport dicts
-        _sport_map: dict[str, dict] = {}
-        for row in _sport_gate_rows:
-            sp = row.sport or "UNKNOWN"
-            if sp not in _sport_map:
-                _sport_map[sp] = {
-                    "sport":     sp,
-                    "scanned":   0,
-                    "accepted":  0,
-                    "rejected":  0,
-                    "removed":   0,
-                }
-            _sport_map[sp]["scanned"] += row.n
-            key = row.gate_decision.lower() if row.gate_decision else "unknown"
-            if key == "watchlist":
-                key = "rejected"
-            if key in _sport_map[sp]:
-                _sport_map[sp][key] += row.n
-        by_sport = sorted(_sport_map.values(), key=lambda d: d["scanned"], reverse=True)
-
-        return {
-            "since_hours":    since_hours,
-            "counts":         counts,
-            "top_rejections": top_rej,
-            "by_sport":       by_sport,
         }
 
     async def get_pending_opportunities(
@@ -4537,8 +4413,9 @@ class Database:
         Mark an existing PropOpportunityLog row as a delivered Telegram actionable pick.
 
         Called immediately after ``deliver_underdog()`` returns ``sent=True`` for a
-        🎯 ACTIONABLE BET PICK alert.  Only those rows end up with alert_sent=True —
-        📈 MARKET MOVE, blocked/filtered/PASS props, and removals are never marked.
+        🎯 ACTIONABLE BET PICK alert. Only those rows end up with
+        alert_sent=True; monitoring observations and undelivered directional
+        evaluations are never marked.
 
         The row must already exist (created by ``log_prop_opportunity``).  If it
         doesn't exist yet this is a no-op (which is safe — the try/except in the
@@ -4993,23 +4870,26 @@ class Database:
 
     async def get_tracking_summary(self) -> "dict":
         """
-        Return aggregate tracking statistics for the /tracking command.
+        Return directional pick statistics for the /tracking command.
 
         Returns a dict with:
           counts:   { recommendation → { result → count } }
-          by_tier:  { tier → { recommendation → { result → count } } }
           by_sport: { sport → { recommendation → { result → count } } }
-          total:    int  (all rows ever logged)
+          total:    int  (directional rows ever logged)
           pending:  int  (awaiting grading)
+
+        Historical non-directional rows are ignored rather than exposed as a
+        separate monitoring or outcome class.
         """
         async with self.session() as s:
+            directional = PropOpportunityLog.recommendation.in_(["OVER", "UNDER"])
             # Overall rec × result
             rows = await s.execute(
                 select(
                     PropOpportunityLog.recommendation,
                     PropOpportunityLog.result,
                     func.count(PropOpportunityLog.id).label("n"),
-                ).group_by(
+                ).where(directional).group_by(
                     PropOpportunityLog.recommendation,
                     PropOpportunityLog.result,
                 )
@@ -5018,23 +4898,6 @@ class Database:
             for rec, res, n in rows.all():
                 counts.setdefault(rec, {})[res] = n
 
-            # By decision_tier
-            tier_rows = await s.execute(
-                select(
-                    PropOpportunityLog.decision_tier,
-                    PropOpportunityLog.recommendation,
-                    PropOpportunityLog.result,
-                    func.count(PropOpportunityLog.id).label("n"),
-                ).group_by(
-                    PropOpportunityLog.decision_tier,
-                    PropOpportunityLog.recommendation,
-                    PropOpportunityLog.result,
-                )
-            )
-            by_tier: dict = {}
-            for tier, rec, res, n in tier_rows.all():
-                by_tier.setdefault(tier, {}).setdefault(rec, {})[res] = n
-
             # By sport
             sport_rows = await s.execute(
                 select(
@@ -5042,7 +4905,7 @@ class Database:
                     PropOpportunityLog.recommendation,
                     PropOpportunityLog.result,
                     func.count(PropOpportunityLog.id).label("n"),
-                ).group_by(
+                ).where(directional).group_by(
                     PropOpportunityLog.sport,
                     PropOpportunityLog.recommendation,
                     PropOpportunityLog.result,
@@ -5055,18 +4918,21 @@ class Database:
             # Totals
             total_row = await s.execute(
                 select(func.count(PropOpportunityLog.id))
+                .where(directional)
             )
             total = total_row.scalar() or 0
 
             pending_row = await s.execute(
                 select(func.count(PropOpportunityLog.id))
-                .where(PropOpportunityLog.result == "PENDING")
+                .where(
+                    directional,
+                    PropOpportunityLog.result == "PENDING",
+                )
             )
             pending = pending_row.scalar() or 0
 
         return {
             "counts":   counts,
-            "by_tier":  by_tier,
             "by_sport": by_sport,
             "total":    total,
             "pending":  pending,

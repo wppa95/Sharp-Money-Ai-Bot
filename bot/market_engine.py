@@ -1534,13 +1534,11 @@ def _compute_reason_codes(
     if _tier_code:
         codes.append(_tier_code)
 
-    # Decision gate
+    # Direction is evidence metadata, not a monitoring classification.
     if decision is not None:
-        _rec = getattr(decision, "recommendation", "PASS")
+        _rec = getattr(decision, "recommendation", None)
         if _rec in ("OVER", "UNDER"):
             codes.append(f"GATE:{_rec}")
-        else:
-            codes.append("GATE:DECISION_PASS")
 
     return codes
 
@@ -1557,7 +1555,7 @@ def _compute_reason_codes_from_scored_dict(p: dict) -> list[str]:
     avg  = p.get("avg", 0) or 0
     sta  = p.get("sta", 0) or 0
     vel  = p.get("vel", 0) or 0
-    tier = p.get("tier", "PASS")
+    tier = p.get("score_tier")
 
     if n < 5:
         codes.append("LOW_SAMPLE")
@@ -2407,9 +2405,10 @@ async def underdog_job(context) -> None:
 
     _cycle_timing.count("active_pool_props", len(ud_snaps))
 
-    # Summary counters — emitted as a single INFO line after the loop
+    # Summary counters — emitted as a single INFO line after the loop.
+    # Monitoring reports counts and neutral evaluation metrics; score tiers are
+    # scoring metadata, not monitoring states.
     _n_scored:        int       = 0
-    _tier_counts:     dict      = {"S": 0, "A": 0, "B": 0, "PASS": 0}
     _n_qualified:     int       = 0   # line-change props that passed the scoring gate
     _n_removed:       int       = 0   # props with [REMOVED] marker
     _n_new_prop:      int       = 0   # first-appearance props detected this cycle
@@ -2420,8 +2419,6 @@ async def underdog_job(context) -> None:
     _n_lc_sent:            int       = 0   # line-change alerts delivered this cycle
     _cold_start_records:  list       = []  # records buffered for bulk save at end of cold-start
     _incremental_records: list       = []  # incremental records batched for end-of-loop bulk save
-    _cs_before_tiers:     dict       = {}  # tier counts under old calibration (before)
-    _cs_after_tiers:      dict       = {}  # tier counts under new calibration (after)
     _scored_props:        list[dict] = []  # all scored props this cycle — for end-of-cycle debug log
     _next_ud_scan_state:  dict[tuple[str, str], object] = {}
     _processed_keys:      set        = set()   # (player, stat_type) pairs handled in main loop
@@ -2662,42 +2659,47 @@ async def underdog_job(context) -> None:
                         hit_rates    = hit_rates,
                         sport        = snap.sport or "",
                     )
-                    # Persist only directional opportunities. Non-directional
-                    # props remain in the active pool and are rescanned.
-                    try:
-                        await db.log_prop_opportunity(
-                            external_id = getattr(snap, "external_id", None) or getattr(snap, "id", None) or "",
-                            player_name       = player,
-                            team              = snap.team or "",
-                            sport             = snap.sport or "UNKNOWN",
-                            stat_type         = stat_type,
-                            line_value        = line_val,
-                            recommendation    = decision.recommendation,
-                            decision_tier     = decision.decision_tier,
-                            confidence        = decision.confidence,
-                            game_time         = snap.game_time,
-                            game_id           = getattr(snap, "game_id", "") or "",
-                            provider          = "Underdog",
-                            bet_quality_score = decision.confidence,
-                            reason_codes      = _compute_reason_codes(score, decision),
-                            watchlist_state   = None,
-                            downstream_intelligence = _build_downstream_intel(
-                                line_delta=getattr(snap, "line_delta", None),
-                                evidence={
-                                    "historical": getattr(validation, "to_dict", lambda: {})(),
-                                    "market": getattr(decision, "evidence", None)
-                                    or getattr(decision, "bet_evidence", None),
-                                },
-                                line=line_val,
-                                bet_quality=getattr(score, "total", None),
-                                bet_confidence=decision.confidence,
-                                market_quality=getattr(score, "market_quality", None),
-                            ),
-                        )
-                    except Exception as _pol_exc:
-                        logger.warning(
-                            "underdog_job: log_prop_opportunity [new-prop] failed: %s", _pol_exc
-                        )
+                    # Persist only directional opportunities. A prop without a
+                    # direction remains in the canonical active pool and is
+                    # evaluated again by normal scans, Stable Refresh, and FPR.
+                    if (
+                        decision is not None
+                        and decision.recommendation in ("OVER", "UNDER")
+                    ):
+                        try:
+                            await db.log_prop_opportunity(
+                                external_id = getattr(snap, "external_id", None) or getattr(snap, "id", None) or "",
+                                player_name       = player,
+                                team              = snap.team or "",
+                                sport             = snap.sport or "UNKNOWN",
+                                stat_type         = stat_type,
+                                line_value        = line_val,
+                                recommendation    = decision.recommendation,
+                                decision_tier     = decision.decision_tier,
+                                confidence        = decision.confidence,
+                                game_time         = snap.game_time,
+                                game_id           = getattr(snap, "game_id", "") or "",
+                                provider          = "Underdog",
+                                bet_quality_score = decision.confidence,
+                                reason_codes      = _compute_reason_codes(score, decision),
+                                watchlist_state   = None,
+                                downstream_intelligence = _build_downstream_intel(
+                                    line_delta=getattr(snap, "line_delta", None),
+                                    evidence={
+                                        "historical": getattr(validation, "to_dict", lambda: {})(),
+                                        "market": getattr(decision, "evidence", None)
+                                        or getattr(decision, "bet_evidence", None),
+                                    },
+                                    line=line_val,
+                                    bet_quality=getattr(score, "total", None),
+                                    bet_confidence=decision.confidence,
+                                    market_quality=getattr(score, "market_quality", None),
+                                ),
+                            )
+                        except Exception as _pol_exc:
+                            logger.warning(
+                                "underdog_job: log_prop_opportunity [new-prop] failed: %s", _pol_exc
+                            )
 
                 # Always add to the cycle batch — even blocked props appear in digest
                 _new_props_batch.append({
@@ -2856,54 +2858,23 @@ async def underdog_job(context) -> None:
                         })
                         _dq_collected = True
                         # ud_result stays DeliveryResult(sent=False) — delivery happens below.
-                # ── Debug tracking (new-prop) ─────────────────────────────────────
+                # ── Neutral evaluation metrics (new-prop) ─────────────────────────
                 if score is not None:
-                    if _np_bet_ready:
-                        _np_rej = "sent" if ud_result.sent else (
-                            "filtered" if ud_result.filtered else "new_prop_failed"
-                        )
-                    elif not np_immediate:
-                        _np_rej = "not_immediate"
-                    elif decision is None:
-                        _np_rej = "no_decision"
-                    elif decision.recommendation == "PASS":
-                        _np_rej = "decision_pass"
-                        logger.debug(
-                            "UD decision_pass [new]: %s | %s | %s | line=%.1f"
-                            " | %d★ %d/100 | reason=%s"
-                            " | l5=%s l10=%s games=%s val_data=%s",
-                            player, stat_type, snap.sport or "UNKNOWN", line_val,
-                            score.stars, score.total,
-                            decision.reason,
-                            (f"{decision.l5_hit_rate:.0%}({decision.l5_games}g)"
-                             if decision.l5_hit_rate is not None else "N/A"),
-                            (f"{decision.l10_hit_rate:.0%}({decision.l10_games}g)"
-                             if decision.l10_hit_rate is not None else "N/A"),
-                            (hit_rates.total_games if hit_rates is not None else "no_data"),
-                            getattr(validation, "has_supporting_data", "?"),
-                        )
-                    elif (snap.sport or "UNKNOWN") not in config.ud_alert_sports:
-                        _np_rej = f"sport_blocked ({snap.sport})"
-                    else:
-                        _np_rej = "unknown"
                     _scored_props.append({
                         "player":          player,
                         "stat_type":       stat_type,
                         "sport":           snap.sport or "UNKNOWN",
                         "total":           score.total,
-                        "tier":            score.tier,
-                        "stars":           score.stars,
-                        "stars_d":         getattr(score, "stars_display", "?????"),
-                        "rejection":       _np_rej,
                         "path":            "new",
-                        "decision_reason": (decision.reason if decision is not None else None),
-                        "decision_recommendation": (
-                            decision.recommendation if decision is not None else "PASS"
+                        "score_tier":      score.tier,
+                        "direction":       (
+                            decision.recommendation
+                            if decision is not None
+                            and decision.recommendation in ("OVER", "UNDER")
+                            else None
                         ),
-                        # decision_tier is the bet-decision confidence tier (S≥85/A≥70/B≥50),
-                        # distinct from score.tier (composite UDPropScore tier).
-                        # MLB/NFL gate uses decision_tier; score.tier is the composite label.
-                        "decision_tier":   (decision.decision_tier if decision is not None else None),
+                        "decision_conf":   (decision.confidence if decision is not None else None),
+                        "evidence_available": bool(validation.has_supporting_data),
                         # ── component breakdown ──────────────────────────────
                         "vel":       score.move_velocity,
                         "act":       score.historical_activity,
@@ -2984,35 +2955,34 @@ async def underdog_job(context) -> None:
                             hit_rates    = hit_rates,
                             sport        = snap.sport or "",
                         )
-                        # Log every evaluated opportunity (PLAY or PASS) for tracking
-                        try:
-                            await _cycle_timing.await_db(
-                                "write",
-                                "log_prop_opportunity",
-                                db.log_prop_opportunity(
-                                external_id       = getattr(snap, "external_id", None) or getattr(snap, "id", None) or "",
-                                player_name       = player,
-                                team              = snap.team or "",
-                                sport             = snap.sport or "UNKNOWN",
-                                stat_type         = stat_type,
-                                line_value        = snap.line or 0.0,
-                                recommendation    = decision.recommendation,
-                                decision_tier     = decision.decision_tier,
-                                confidence        = decision.confidence,
-                                game_time         = snap.game_time,
-                                game_id           = getattr(snap, "game_id", "") or "",
-                                provider          = "Underdog",
-                                bet_quality_score = decision.confidence,
-                                reason_codes      = _compute_reason_codes(score, decision),
-                                watchlist_state   = None,
-                                ),
-                            )
-                        except Exception as _pol_exc:
-                            logger.warning(
-                                "underdog_job: log_prop_opportunity [lc] failed: %s", _pol_exc
-                            )
+                        if decision.recommendation in ("OVER", "UNDER"):
+                            try:
+                                await _cycle_timing.await_db(
+                                    "write",
+                                    "log_prop_opportunity",
+                                    db.log_prop_opportunity(
+                                    external_id       = getattr(snap, "external_id", None) or getattr(snap, "id", None) or "",
+                                    player_name       = player,
+                                    team              = snap.team or "",
+                                    sport             = snap.sport or "UNKNOWN",
+                                    stat_type         = stat_type,
+                                    line_value        = snap.line or 0.0,
+                                    recommendation    = decision.recommendation,
+                                    decision_tier     = decision.decision_tier,
+                                    confidence        = decision.confidence,
+                                    game_time         = snap.game_time,
+                                    game_id           = getattr(snap, "game_id", "") or "",
+                                    provider          = "Underdog",
+                                    bet_quality_score = decision.confidence,
+                                    reason_codes      = _compute_reason_codes(score, decision),
+                                    watchlist_state   = None,
+                                    ),
+                                )
+                            except Exception as _pol_exc:
+                                logger.warning(
+                                    "underdog_job: log_prop_opportunity [lc] failed: %s", _pol_exc
+                                )
                     _n_scored += 1
-                    _tier_counts[score.tier] = _tier_counts.get(score.tier, 0) + 1
 
                     logger.debug(
                         "UD score: %s | %s | %s (tier=%s stars=%d n=%d has_data=%s)",
@@ -3062,18 +3032,7 @@ async def underdog_job(context) -> None:
                         hit_rates    = None,  # no game history at cold-start
                         sport        = snap.sport or "",
                     )
-                    # ── Before/after tier comparison for the completion log ───────
-                    _legacy_act   = _score_historical_activity_legacy(ud_history)
-                    _legacy_total = 0 + _legacy_act + score.avg_vs_line + score.consistency + score.stability
-                    if   _legacy_total >= 80: _legacy_tier = "S"
-                    elif _legacy_total >= 65: _legacy_tier = "A"
-                    elif _legacy_total >= 50: _legacy_tier = "B"
-                    else:                     _legacy_tier = "PASS"
-                    _cs_before_tiers[_legacy_tier] = _cs_before_tiers.get(_legacy_tier, 0) + 1
-                    _cs_after_tiers[score.tier]    = _cs_after_tiers.get(score.tier, 0) + 1
-    
                     _n_cold_start_scored += 1
-                    _tier_counts[score.tier] = _tier_counts.get(score.tier, 0) + 1
     
                 # ── Re-entry detection ────────────────────────────────────────────
                 # A prop returns after removal: known_keys has it (via
@@ -3183,59 +3142,23 @@ async def underdog_job(context) -> None:
                         _sport_actionable[_actionable_sport] = (
                             _sport_actionable.get(_actionable_sport, 0) + 1
                         )
-                    # ── Debug tracking (line-change / cold-start) ─────────────────
+                    # ── Neutral evaluation metrics (line-change / cold-start) ─────
                     if score is not None:
-                        if is_cold_start:
-                            _lc_rej = "cold_start"
-                        elif is_qualified:
-                            _lc_rej = "qualified"
-                        elif decision is None:
-                            _lc_rej = "no_decision (PASS tier)"
-                        elif decision.recommendation == "PASS":
-                            _lc_rej = "decision_pass"
-                            logger.debug(
-                                "UD decision_pass [lc]: %s | %s | %s | line=%.1f"
-                                " | %d★ %d/100 | reason=%s"
-                                " | l5=%s l10=%s games=%s val_data=%s",
-                                player, stat_type, snap.sport or "UNKNOWN",
-                                snap.line or 0.0,
-                                score.stars, score.total,
-                                decision.reason,
-                                (f"{decision.l5_hit_rate:.0%}({decision.l5_games}g)"
-                                 if decision.l5_hit_rate is not None else "N/A"),
-                                (f"{decision.l10_hit_rate:.0%}({decision.l10_games}g)"
-                                 if decision.l10_hit_rate is not None else "N/A"),
-                                (hit_rates.total_games if hit_rates is not None else "no_data"),
-                                getattr(validation, "has_supporting_data", "?"),
-                            )
-                        elif (snap.sport or "UNKNOWN") not in config.ud_alert_sports:
-                            _lc_rej = f"sport_blocked ({snap.sport})"
-                        elif not _lc_mlb_ok:
-                            if decision.recommendation == "UNDER":
-                                _lc_rej = f"mlb_under_blocked ({decision.decision_tier})"
-                            else:
-                                _lc_rej = f"mlb_tier_blocked ({decision.decision_tier}, MLB min=S)"
-                        else:
-                            _lc_rej = "unknown"
                         _scored_props.append({
                             "player":          player,
                             "stat_type":       stat_type,
                             "sport":           snap.sport or "UNKNOWN",
                             "team":            snap.team or "",
                             "total":           score.total,
-                            "tier":            score.tier,
-                            "stars":           score.stars,
-                            "stars_d":         getattr(score, "stars_display", "?????"),
-                            "rejection":       _lc_rej,
+                            "score_tier":      score.tier,
                             "path":            "cs" if is_cold_start else "lc",
-                            "decision_reason": (decision.reason if decision is not None else None),
-                            "decision_recommendation": (
-                                decision.recommendation if decision is not None else "PASS"
+                            "direction":       (
+                                decision.recommendation
+                                if decision is not None
+                                and decision.recommendation in ("OVER", "UNDER")
+                                else None
                             ),
-                            # decision_tier is the bet-decision confidence tier (S≥85/A≥70/B≥50),
-                            # distinct from score.tier (composite UDPropScore tier).
-                            # MLB/NFL gate uses decision_tier; score.tier is the composite label.
-                            "decision_tier":   (decision.decision_tier if decision is not None else None),
+                            "evidence_available": bool(validation.has_supporting_data),
                             # ── component breakdown ──────────────────────────────
                             "vel":       score.move_velocity,
                             "act":       score.historical_activity,
@@ -3672,7 +3595,12 @@ async def underdog_job(context) -> None:
                     hit_rates    = _shits,
                     sport        = _ssport,
                 )
-                # Log every evaluated opportunity (PLAY or PASS) for tracking
+                if _sdec is None or _sdec.recommendation == "PASS":
+                    continue
+
+                # Only directional evaluations enter the opportunity/evidence
+                # stream. The active snapshot itself remains continuously
+                # monitored regardless of whether a direction is available.
                 try:
                     await db.log_prop_opportunity(
                         external_id = getattr(_ssnap, "external_id", None) or getattr(_ssnap, "id", None) or "",
@@ -3707,15 +3635,6 @@ async def underdog_job(context) -> None:
                     logger.warning(
                         "underdog_job: log_prop_opportunity [standing] failed: %s", _pol_exc
                     )
-
-                if _sdec is None or _sdec.recommendation == "PASS":
-                    logger.debug(
-                        "UD standing_gate [decision_pass]: %s | %s | %s — decision=%s reason=%s",
-                        _sp, _st, _ssport,
-                        (_sdec.recommendation if _sdec is not None else "None"),
-                        (_sdec.reason if _sdec is not None else "no_decision"),
-                    )
-                    continue
 
                 # Direction gate for Tier 2:
                 #   NFL UNDER → fully allowed (no market restriction)
@@ -4146,19 +4065,9 @@ async def underdog_job(context) -> None:
             else:
                 _cold_start_done = False
             logger.info(
-                    "underdog_job: cold-start complete — scored %d props\n"
-                    "  before (old cal):  S=%d  A=%d  B=%d  PASS=%d\n"
-                    "   after (new cal):  S=%d  A=%d  B=%d  PASS=%d",
-                    _n_cold_start_scored,
-                    _cs_before_tiers.get("S",    0),
-                    _cs_before_tiers.get("A",    0),
-                    _cs_before_tiers.get("B",    0),
-                    _cs_before_tiers.get("PASS", 0),
-                    _cs_after_tiers.get("S",    0),
-                    _cs_after_tiers.get("A",    0),
-                    _cs_after_tiers.get("B",    0),
-                    _cs_after_tiers.get("PASS", 0),
-                )
+                "underdog_job: cold-start complete — evaluated %d active props",
+                _n_cold_start_scored,
+            )
     
         # Keep only compact previous-prop state needed by the next poll.
         # This replaces a full grouped-history query against the raw snapshot
@@ -4201,15 +4110,11 @@ async def underdog_job(context) -> None:
             logger.debug("underdog_job: checkpoint record skipped — %s", _ckpt_exc)
 
         logger.info(
-            "underdog_job: fetched=%d scored=%d cold_start=%d S=%d A=%d B=%d PASS=%d "
-            "qualified=%d removed=%d new=%d new_sent=%d",
+            "underdog_job: fetched=%d evaluated=%d cold_start=%d "
+            "actionable=%d removed=%d new=%d new_sent=%d",
             len(ud_snaps),
             _n_scored,
             _n_cold_start_scored,
-            _tier_counts.get("S",    0),
-            _tier_counts.get("A",    0),
-            _tier_counts.get("B",    0),
-            _tier_counts.get("PASS", 0),
             _n_qualified,
             _n_removed,
             _n_new_prop,
@@ -4225,7 +4130,6 @@ async def underdog_job(context) -> None:
             ),
         ]
         if _scored_props:
-            from collections import Counter
             # Group by sport first — never compare scores across sports
             from collections import defaultdict as _dd
             _sport_buckets: dict = _dd(list)
@@ -4238,17 +4142,15 @@ async def underdog_job(context) -> None:
                 )
             _dbg_lines.append(f"  top 3/sport by score (sports: {', '.join(sorted(_sport_buckets.keys()))}):")
             for _i, _p in enumerate(_top, 1):
-                # Header line: rank, player, stat, sport, total, tier, stars, path, rejection
+                _direction = _p.get("direction") or "—"
+                _evidence = "yes" if _p.get("evidence_available") else "no"
+                # Header line contains neutral evaluation metrics only.
                 _dbg_lines.append(
                     f"    {_i:2d}. {_p['player'][:24]:<24} | {_p['stat_type']:<22}"
-                    f" | {_p['sport']:<5} | {_p['total']:3d}/100 {_p['tier']}"
-                    f" {_p['stars_d']} [{_p['path']}] → {_p['rejection']}"
+                    f" | {_p['sport']:<5} | score={_p['total']:3d}/100"
+                    f" | direction={_direction} | evidence={_evidence}"
+                    f" | path={_p['path']}"
                 )
-                # Extra line for decision_pass: show the engine's own reason string
-                if _p["rejection"] == "decision_pass" and _p.get("decision_reason"):
-                    _dbg_lines.append(
-                        f"        ↳ engine: {_p['decision_reason']}"
-                    )
                 # Component line: each dimension with its cap, plus n and current line
                 _has_comp = "vel" in _p
                 if _has_comp:
@@ -4261,12 +4163,6 @@ async def underdog_job(context) -> None:
                         f"  n={_p['n']}"
                         f"  line={_p['line']}"
                     )
-            _rej_counts = Counter(_p["rejection"] for _p in _scored_props)
-            _rej_str = "  ".join(
-                f"{_k}={_v}"
-                for _k, _v in sorted(_rej_counts.items(), key=lambda x: -x[1])
-            )
-            _dbg_lines.append(f"  rejection breakdown:  {_rej_str}")
         # Per-sport pipeline diagnostics (#7) — shows where props drop off each stage
         if _sport_raw or _sport_futures or _sport_move_detected or _sport_gated:
             _all_sports = sorted(set(
@@ -4300,27 +4196,11 @@ async def underdog_job(context) -> None:
                 _cand_total = 0
                 _cand_rows: list[dict] = []
                 for _cp in _scored_props:
-                    # Weak/no-direction evaluations stay in the canonical
-                    # active pool and are rescanned; do not create a stored
-                    # PASS/watchlist/rejected candidate record for them.
-                    if _cp.get("decision_recommendation") not in ("OVER", "UNDER"):
+                    # No-direction evaluations stay in the canonical active
+                    # pool and are rescanned; candidate/evidence rows remain
+                    # directional only.
+                    if _cp.get("direction") not in ("OVER", "UNDER"):
                         continue
-                    _ctier = _cp.get("tier", "PASS")
-                    _crej  = _cp.get("rejection")
-                    _csport = (_cp.get("sport") or "").upper()
-                    _is_strict_sport = _csport in {"MLB", "NFL"}
-                    _accepted_rejections = (
-                        "qualified", "sent", "filtered", "new_prop_failed", "cold_start"
-                    )
-                    if _crej in _accepted_rejections:
-                        # "qualified"       — is_qualified=True (S/A tier, passed scoring gate, eligible for alert)
-                        # "sent"            — new-prop path: alert delivered to Telegram
-                        # "filtered"        — new-prop path: reached delivery, filtered by dedup/reversal
-                        # "new_prop_failed" — new-prop path: passed all gates, delivery failed
-                        # "cold_start"      — S/A tier prop scored during init; standing path may deliver it
-                        _cgd = "ACCEPTED"
-                    else:
-                        _cgd = "REJECTED"
                     _ccodes = _compute_reason_codes_from_scored_dict(_cp)
                     _cand_rows.append({
                         "scan_ts":              _now_ts,
@@ -4331,10 +4211,13 @@ async def underdog_job(context) -> None:
                         "line_value":           float(_cp.get("line") or 0.0),
                         "provider":             "Underdog",
                         "score_total":          _cp.get("total"),
-                        "score_tier":           _ctier,
+                        "score_tier":           _cp.get("score_tier"),
                         "confidence":           _cp.get("decision_conf"),
-                        "gate_decision":        _cgd,
-                        "rejection_reason":     _crej,
+                        # Legacy column retained for schema compatibility.
+                        # Current monitoring uses one neutral evaluated state;
+                        # delivery is measured separately in ScanCycleLog.
+                        "gate_decision":        "EVALUATED",
+                        "rejection_reason":     None,
                         "reason_codes":         _json.dumps(_ccodes) if _ccodes else None,
                         "snapshot_external_id": _cp.get("external_id"),
                     })
@@ -4849,31 +4732,36 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 sport        = _sr_sport,
             )
 
-            # Log opportunity for tracking (non-fatal)
+            # Persist directional opportunities only. A missing direction is a
+            # transient evaluation result; the active prop stays in rotation.
             _sr_ext_id = (
                 getattr(_sr_snap, "external_id", None)
                 or str(getattr(_sr_snap, "id", None) or "")
             )
-            try:
-                await db.log_prop_opportunity(
-                    external_id       = _sr_ext_id,
-                    player_name       = _sr_player,
-                    team              = _sr_snap.team or "",
-                    sport             = _sr_sport,
-                    stat_type         = _sr_stat,
-                    line_value        = _sr_line,
-                    recommendation    = (_sr_dec.recommendation if _sr_dec else "PASS"),
-                    decision_tier     = (_sr_dec.decision_tier  if _sr_dec else "PASS"),
-                    confidence        = (_sr_dec.confidence     if _sr_dec else 0),
-                    game_time         = _sr_snap.game_time,
-                    game_id           = getattr(_sr_snap, "game_id", "") or "",
-                    provider          = "Underdog",
-                    bet_quality_score = (_sr_dec.confidence if _sr_dec else 0),
-                    reason_codes      = _compute_reason_codes(_sr_score, _sr_dec),
-                    watchlist_state   = None,
-                )
-            except Exception as _sr_pol_exc:
-                logger.debug("stable_refresh: log_prop_opportunity failed: %s", _sr_pol_exc)
+            if (
+                _sr_dec is not None
+                and _sr_dec.recommendation in ("OVER", "UNDER")
+            ):
+                try:
+                    await db.log_prop_opportunity(
+                        external_id       = _sr_ext_id,
+                        player_name       = _sr_player,
+                        team              = _sr_snap.team or "",
+                        sport             = _sr_sport,
+                        stat_type         = _sr_stat,
+                        line_value        = _sr_line,
+                        recommendation    = _sr_dec.recommendation,
+                        decision_tier     = _sr_dec.decision_tier,
+                        confidence        = _sr_dec.confidence,
+                        game_time         = _sr_snap.game_time,
+                        game_id           = getattr(_sr_snap, "game_id", "") or "",
+                        provider          = "Underdog",
+                        bet_quality_score = _sr_dec.confidence,
+                        reason_codes      = _compute_reason_codes(_sr_score, _sr_dec),
+                        watchlist_state   = None,
+                    )
+                except Exception as _sr_pol_exc:
+                    logger.debug("stable_refresh: log_prop_opportunity failed: %s", _sr_pol_exc)
 
             # ── Normal gate sequence ──────────────────────────────────────────
             if _sr_dec is None or _sr_dec.recommendation == "PASS":
@@ -5608,14 +5496,14 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 )
 
                 # Keep the canonical monitoring/evidence stream complete for
-                # every directional evaluation.  Buffer rows and persist them
-                # in one bounded upsert after scoring; PASS remains transient,
-                # matching log_prop_opportunity's existing contract.
+                # every directional evaluation. Buffer rows and persist them
+                # in one bounded upsert after scoring; unavailable direction
+                # remains a transient evaluation result.
                 _fpr_ext_id = (
                     getattr(_fpr_snap, "external_id", None)
                     or str(getattr(_fpr_snap, "id", None) or "")
                 )
-                if getattr(_fpr_dec, "recommendation", "PASS") in ("OVER", "UNDER"):
+                if getattr(_fpr_dec, "recommendation", None) in ("OVER", "UNDER"):
                     _fpr_opportunity_rows.append({
                         "external_id": f"{_fpr_ext_id}:{_fpr_line:g}",
                         "player_name": _fpr_player,
@@ -5623,7 +5511,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         "sport": _fpr_sport,
                         "stat_type": _fpr_stat,
                         "line_value": _fpr_line,
-                        "recommendation": getattr(_fpr_dec, "recommendation", "PASS"),
+                        "recommendation": getattr(_fpr_dec, "recommendation", None),
                         "decision_tier": getattr(_fpr_dec, "decision_tier", None),
                         "confidence": getattr(_fpr_dec, "confidence", 0),
                         "game_time": getattr(_fpr_snap, "game_time", None),
@@ -5634,8 +5522,8 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         "watchlist_state": None,
                     })
 
-                # Scan-time eligibility is non-blocking. PASS/no-direction
-                # remains in the monitoring stream for the next rotation.
+                # Scan-time eligibility is non-blocking. Props without a
+                # direction remain in the monitoring stream for the next rotation.
                 _fpr_qualifies = (
                     _fpr_dec is not None
                     and _fpr_dec.recommendation in ("OVER", "UNDER")

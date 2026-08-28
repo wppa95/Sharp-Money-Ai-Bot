@@ -3,10 +3,10 @@ Tests for the INFO-level summary line emitted at the end of underdog_job.
 
 Scenarios:
   - No pick'em snapshots returned → no summary line (early return)
-  - Only removed props → fetched=N scored=0 S=0 A=0 B=0 PASS=0 qualified=0 removed=N
-  - Line-changed prop that scores PASS → scored=1 PASS=1 qualified=0
-  - Line-changed prop that scores A/S-tier with real OVER/UNDER pick → qualified=1
-  - Mixed batch (removed + PASS-scored + unchanged) → all counters correct
+  - Only removed props → fetched=N evaluated=0 actionable=0 removed=N
+  - Line-changed prop without direction → evaluated=1 actionable=0
+  - Line-changed prop with real OVER/UNDER pick → actionable=1
+  - Mixed batch (removed + no-direction + unchanged) → all counters correct
   - Exactly one summary line emitted per run
   - All eight fields present in the message
 """
@@ -156,13 +156,10 @@ async def test_only_removed_props(caplog):
 
     summary = next(r for r in caplog.records if "underdog_job: fetched=" in r.message)
     assert "fetched=2"   in summary.message
-    assert "scored=0"    in summary.message
-    assert "S=0"         in summary.message
-    assert "A=0"         in summary.message
-    assert "B=0"         in summary.message
-    assert "PASS=0"      in summary.message
-    assert "qualified=0" in summary.message
+    assert "evaluated=0"  in summary.message
+    assert "actionable=0" in summary.message
     assert "removed=2"   in summary.message
+    assert "PASS=" not in summary.message
 
 
 @pytest.mark.asyncio
@@ -179,10 +176,10 @@ async def test_line_changed_scores_pass(caplog):
 
     summary = next(r for r in caplog.records if "underdog_job: fetched=" in r.message)
     assert "fetched=1"   in summary.message
-    assert "scored=1"    in summary.message
-    assert "PASS=1"      in summary.message
-    assert "qualified=0" in summary.message
+    assert "evaluated=1"  in summary.message
+    assert "actionable=0" in summary.message
     assert "removed=0"   in summary.message
+    assert "PASS=" not in summary.message
 
 
 @pytest.mark.asyncio
@@ -231,10 +228,10 @@ async def test_line_changed_qualifies(caplog):
 
     summary = next(r for r in caplog.records if "underdog_job: fetched=" in r.message)
     assert "fetched=1" in summary.message
-    assert "scored=1"  in summary.message
+    assert "evaluated=1" in summary.message
     assert "removed=0" in summary.message
-    assert int(summary.message.split("scored=")[1].split()[0])    == 1
-    assert int(summary.message.split("qualified=")[1].split()[0]) == 1
+    assert int(summary.message.split("evaluated=")[1].split()[0])  == 1
+    assert int(summary.message.split("actionable=")[1].split()[0]) == 1
 
 
 @pytest.mark.asyncio
@@ -259,9 +256,9 @@ async def test_mixed_batch_counts(caplog):
     summary = next(r for r in caplog.records if "underdog_job: fetched=" in r.message)
     assert "fetched=3"   in summary.message
     assert "removed=1"   in summary.message
-    assert "scored=1"    in summary.message
-    assert "PASS=1"      in summary.message
-    assert "qualified=0" in summary.message
+    assert "evaluated=1"  in summary.message
+    assert "actionable=0" in summary.message
+    assert "PASS=" not in summary.message
 
 
 @pytest.mark.asyncio
@@ -285,5 +282,10 @@ async def test_all_fields_present(caplog):
         await _run_job(snaps, db)
 
     summary = next(r for r in caplog.records if "underdog_job: fetched=" in r.message)
-    for field in ("fetched=", "scored=", "S=", "A=", "B=", "PASS=", "qualified=", "removed="):
+    for field in (
+        "fetched=", "evaluated=", "cold_start=", "actionable=",
+        "removed=", "new=", "new_sent=",
+    ):
         assert field in summary.message, f"field '{field}' missing from summary"
+    for retired in ("scored=", "PASS=", "qualified="):
+        assert retired not in summary.message

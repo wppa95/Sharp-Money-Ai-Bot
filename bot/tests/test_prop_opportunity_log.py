@@ -266,10 +266,10 @@ class TestGetTrackingSummary:
     async def test_summary_has_expected_keys(self, db: Database) -> None:
         summary = await db.get_tracking_summary()
         assert "counts"   in summary
-        assert "by_tier"  in summary
         assert "by_sport" in summary
         assert "total"    in summary
         assert "pending"  in summary
+        assert "by_tier" not in summary
 
 
 class TestUpsertPreservesGrading:

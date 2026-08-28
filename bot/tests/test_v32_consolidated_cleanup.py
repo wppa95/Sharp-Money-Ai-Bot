@@ -115,11 +115,11 @@ class TestP1CountActionablePicks:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# P2 — get_funnel_summary near-misses must exclude ACCEPTED props
+# P2 — get_funnel_summary reports neutral active monitoring
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestP2FunnelNearMisses:
-    """Funnel and tracking queries use the persistent candidate history."""
+    """Funnel queries report neutral candidate history."""
 
     def _src(self) -> str:
         import database as db_mod
@@ -135,35 +135,40 @@ class TestP2FunnelNearMisses:
 
     def test_source_has_candidate_state_filter(self):
         src = self._src()
-        assert "gate_decision" in src
+        assert "gate_decision" not in src
+        assert "rejection_reason" not in src
 
     def test_source_deduplicates_candidates(self):
         src = self._src()
-        assert "dedup" in src.lower() or "_seen_keys" in src
+        assert "_seen_keys" not in src
+        assert "_accepted_keys" not in src
 
     def test_source_limits_candidate_history(self):
         src = self._src()
-        assert "limit" in src.lower()
+        assert ".limit(" not in src
 
     def test_source_reports_candidate_outcomes(self):
         src = self._src()
-        assert "gate_decision" in src
+        assert '"tracked"' in src
+        assert '"by_sport"' in src
 
     def test_candidate_history_is_keyed(self):
         src = self._src()
-        assert "player_name" in src and "stat_type" in src
+        assert "PropCandidateLog.sport" in src
+        assert "PropCandidateLog.scan_ts" in src
 
     def test_candidate_history_avoids_duplicate_rows(self):
         src = self._src()
-        assert "seen" in src.lower() or "distinct" in src.lower()
+        assert "top_rejections" not in src
 
     def test_candidate_history_has_bounded_output(self):
         src = self._src()
-        assert "limit" in src.lower()
+        assert "since_hours" in src
 
     def test_candidate_query_is_compact(self):
         src = self._src()
-        assert "distinct" in src.lower() or ".distinct()" in src
+        assert "select(func.count" in src
+        assert "group_by(PropCandidateLog.sport)" in src
 
     def test_funnel_command_handler_exists(self):
         import commands as cmd

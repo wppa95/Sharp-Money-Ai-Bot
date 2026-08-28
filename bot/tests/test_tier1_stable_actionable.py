@@ -134,14 +134,14 @@ class TestSupportingDataGatePresent:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 5. Stable Tier 1 prop without direction (PASS decision) → rejected
+# 5. Stable prop without direction remains transient
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestDirectionGatePresent:
-    def test_pass_decision_gate_in_standing_path(self):
+    def test_no_direction_gate_in_standing_path_has_no_rejection_label(self):
         import inspect, market_engine as _me
         src = inspect.getsource(_me.underdog_job)
-        assert "decision_pass" in src, "PASS-decision gate must exist in standing path"
+        assert "decision_pass" not in src
         assert '_sdec.recommendation == "PASS"' in src
 
 

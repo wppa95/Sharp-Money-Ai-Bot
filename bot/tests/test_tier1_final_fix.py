@@ -664,11 +664,13 @@ class TestPriorPassesIntact:
         assert "score_tier.isnot(None)" in db_src
         assert "ud_mlb_alert_tiers" not in db_src
 
-    def test_funnel_near_miss_accepted_key_dedup_intact(self):
+    def test_funnel_uses_neutral_tracking_summary(self):
         import database as db_mod
         src = inspect.getsource(db_mod.Database.get_funnel_summary)
-        assert "_accepted_keys" in src
-        assert "_seen_keys" in src
+        assert '"tracked"' in src
+        assert '"by_sport"' in src
+        assert "top_rejections" not in src
+        assert "gate_decision" not in src
 
 
 # ═══════════════════════════════════════════════════════════════════════════

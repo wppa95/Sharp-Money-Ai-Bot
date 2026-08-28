@@ -75,12 +75,11 @@ class TestColdStartGateSource:
             "Fast Resume removed: old 'not _fast_resume' guard must be gone"
         )
 
-    def test_cold_start_lc_rejection_label(self):
-        """Cold-start props in LC path get 'cold_start' rejection label."""
+    def test_cold_start_has_no_rejection_label(self):
+        """Cold-start is counted as scan context, not a rejection status."""
         src = self._me_src()
-        assert '"cold_start"' in src or "'cold_start'" in src, (
-            "LC path must label cold_start props as 'cold_start' in rejection tracking"
-        )
+        assert "_n_cold_start_scored" in src
+        assert '"cold_start"' not in src and "'cold_start'" not in src
 
 
 # ═══════════════════════════════════════════════════════════════════════════

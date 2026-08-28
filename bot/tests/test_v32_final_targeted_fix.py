@@ -95,26 +95,11 @@ class TestColdStartGateDecision:
         assert _compute_gate_decision("strict_tier_blocked (A, NFL min=S)", "A") == "REJECTED"
 
     def test_cold_start_in_gate_decision_code(self):
-        """'cold_start' must appear in the accepted-reasons set that gates ACCEPTED."""
+        """Cold-start is a scan metric, not a candidate classification."""
         import inspect, market_engine as _me
         src = inspect.getsource(_me.underdog_job)
-        # The refactored code extracts accepted reasons into _accepted_rejections:
-        #   _accepted_rejections = ("qualified", "sent", ..., "cold_start")
-        # and references that variable in the elif branches.
-        # Either inline or variable style is acceptable.
-        has_inline = any(
-            '"cold_start"' in l and "_crej in" in l
-            for l in src.splitlines()
-        )
-        has_variable = (
-            '"cold_start"' in src
-            and "_accepted_rejections" in src
-            and "_cgd" in src
-        )
-        assert has_inline or has_variable, (
-            "cold_start must appear in the gate_decision accepted-reasons set"
-        )
-        assert '_cgd = "ACCEPTED"' in src
+        assert "_n_cold_start_scored" in src
+        assert '"cold_start"' not in src
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -409,11 +394,11 @@ class TestRegressionGuards:
         import inspect, market_engine as _me
         assert "deliver_underdog" in inspect.getsource(_me.underdog_job)
 
-    def test_mlb_under_still_blocked(self):
-        """MLB UNDER block must still be present in lc path."""
+    def test_mlb_under_not_reintroduced_as_rejection_class(self):
+        """Direction handling must not recreate a legacy rejection label."""
         import inspect, market_engine as _me
         src = inspect.getsource(_me.underdog_job)
-        assert "mlb_under_blocked" in src
+        assert "mlb_under_blocked" not in src
 
     def test_no_credentials_exposed_in_user_facing_output(self):
         """API key values must never be sent to users via Telegram messages."""

@@ -510,11 +510,13 @@ class TestPersistenceIntact:
         assert "get_recent_alerted_props_for_dedup" in src
 
     def test_prop_candidate_log_funnel_dedup(self):
-        """Near-miss dedup fix from prior pass is still intact."""
+        """Funnel uses neutral candidate tracking without legacy near-miss logic."""
         import database as db_mod
         src = inspect.getsource(db_mod.Database.get_funnel_summary)
-        assert "_accepted_keys" in src
-        assert "_seen_keys" in src
+        assert '"tracked"' in src
+        assert '"by_sport"' in src
+        assert "_accepted_keys" not in src
+        assert "_seen_keys" not in src
 
     def test_count_actionable_over_under_filter(self):
         """OVER/UNDER filter from prior pass still in place."""

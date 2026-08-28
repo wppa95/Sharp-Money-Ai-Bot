@@ -1377,7 +1377,7 @@ class PropPickAdapter:
 
         # Direction: market-information label, not a betting call
         # Direction placeholder — updated from DB recommendation in cmd_picks/cmd_slip
-        # rendering loop so it reflects the actual OVER/UNDER/PASS from Underdog scoring.
+        # rendering loop so it reflects an available OVER/UNDER direction.
         self.best_side = "—"
 
 
@@ -1659,7 +1659,6 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     _PICK_LABEL: dict[str, str] = {
         "OVER":  "OVER (More) ⬆",
         "UNDER": "UNDER (Less) ⬇",
-        "PASS":  "PASS ⚪",
     }
 
     _SPORT_ICON: dict[str, str] = {
@@ -1674,7 +1673,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     # ── Per-sport grouping — actionable picks only ────────────────────────────
     # Preserve the within-sport confidence order. Never rank sports against each
-    # other. Skip props with no actionable direction (Pick: — or PASS).
+    # other. Skip props with no actionable direction.
     from collections import OrderedDict as _OD
     _sport_groups: _OD = _OD()
     for _flat_idx, (plh, comp) in enumerate(picks):
@@ -1686,7 +1685,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
         if _live_r is not None:
             _eff_rec = _live_r
-        # Skip PASS / no-direction props — user only wants actionable picks
+        # Skip props without a direction — user only wants actionable picks.
         if _eff_rec not in ("OVER", "UNDER"):
             logger.debug(
                 "cmd_picks: skipping %s/%s — no actionable direction (rec=%s)",
@@ -1709,7 +1708,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         #   - tier  → plh.score_tier  (set by the Underdog scoring engine)
         #   - conf  → derived from score_tier band midpoint
         # PropLineHistory stores score_tier but not score_confidence; bet_confidence
-        # is the DECISION confidence (0 for PASS props) — unsuitable for tier display.
+        # is the decision confidence and may be zero when direction is unavailable.
         # We derive a representative display confidence from the tier band midpoint so
         # S-tier props show 5 stars and A-tier props show 4 stars.
         _db_tier = getattr(plh, "score_tier", None) or ""
@@ -1756,7 +1755,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             bet_rec = _live_rec
         if bet_rec is None:
             logger.debug(
-                "cmd_picks: no recommendation found for %s/%s — showing PASS",
+                "cmd_picks: no direction available for %s/%s",
                 plh.player_name, plh.stat_type,
             )
         pick_label = _PICK_LABEL.get(bet_rec or "", "—")
@@ -3264,7 +3263,7 @@ async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/tracking — Show PLAY vs PASS opportunity tracking and grading results."""
+    """/tracking — Show directional pick tracking and grading results."""
     if not _check_allowed(update):
         await update.message.reply_text("⛔ Unauthorized.")
         return
@@ -3280,7 +3279,6 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
 
     counts   = data.get("counts", {})
-    by_tier  = data.get("by_tier", {})
     by_sport = data.get("by_sport", {})
     total    = data.get("total", 0)
     pending  = data.get("pending", 0)
@@ -3305,7 +3303,7 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "",
     ]
 
-    # ── PLAY (OVER + UNDER) ────────────────────────────────────────────────────
+    # ── Directional picks (OVER + UNDER) ───────────────────────────────────────
     play_recs = ("OVER", "UNDER")
     play_hit = play_miss = play_push = play_pending = 0
     for rec in play_recs:
@@ -3324,8 +3322,8 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     lines += [
         "━━━━━━━━━━━━━━━━━━",
-        "✅ <b>PLAY Results</b>",
-        f"  Total PLAYs:   <code>{play_total}</code>",
+        "✅ <b>Directional Pick Results</b>",
+        f"  Total picks:   <code>{play_total}</code>",
         f"  Graded:        <code>{play_graded}</code>",
     ]
     if play_graded > 0:
@@ -3350,33 +3348,7 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 f"  <i>UNDER picks: {u_hit}/{u_tot} ({_hit_rate(u_hit, u_tot)})</i>"
             )
     else:
-        lines.append("  <i>No graded PLAY results yet.</i>")
-
-    lines.append("")
-
-    # ── PASS (Missed Opportunity Analysis) ────────────────────────────────────
-    pass_hit     = _n(counts, "PASS", "HIT")     # over cleared — missed opportunity
-    pass_miss    = _n(counts, "PASS", "MISS")    # over failed  — correct pass
-    pass_push    = _n(counts, "PASS", "PUSH")
-    pass_pending = _n(counts, "PASS", "PENDING")
-    pass_graded  = pass_hit + pass_miss + pass_push
-    pass_total   = pass_graded + pass_pending
-
-    lines += [
-        "━━━━━━━━━━━━━━━━━━",
-        "📚 <b>Tracked outcomes</b>",
-        f"  Total tracked:      <code>{pass_total + play_total}</code>",
-        f"  Graded:             <code>{pass_graded + play_graded}</code>",
-    ]
-    if pass_graded > 0:
-        lines += [
-            f"  📈 Additional outcomes: <code>{pass_graded}</code>  "
-            f"({_hit_rate(pass_graded, pass_graded)})",
-            f"  ➖ Push:            <code>{pass_push}</code>",
-            f"  ⏳ Pending:         <code>{pass_pending}</code>",
-        ]
-    else:
-        lines.append("  <i>No graded tracked outcomes yet.</i>")
+        lines.append("  <i>No graded directional pick results yet.</i>")
 
     # ── By Sport ──────────────────────────────────────────────────────────────
     if by_sport:

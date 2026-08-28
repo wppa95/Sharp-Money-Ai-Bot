@@ -128,15 +128,15 @@ class TestGateDecisionSourceCode:
         )
 
     def test_new_condition_present(self):
-        """The fixed condition must reference the correct rejection labels."""
+        """Current candidate evidence uses one neutral evaluated state."""
         src = self._load_source()
-        assert '"qualified"' in src and '"sent"' in src and '"filtered"' in src, (
-            "New gate_decision condition labels not found in market_engine.py"
-        )
+        assert '"gate_decision":        "EVALUATED"' in src
+        assert '"rejection_reason":     None' in src
 
     def test_accepted_still_in_source(self):
         src = self._load_source()
-        assert '"ACCEPTED"' in src, "ACCEPTED assignment removed from market_engine.py"
+        assert '"ACCEPTED"' not in src
+        assert '"REJECTED"' not in src
 
 
 # ── Bug 2: sync scope (limit / since_hours) ───────────────────────────────────

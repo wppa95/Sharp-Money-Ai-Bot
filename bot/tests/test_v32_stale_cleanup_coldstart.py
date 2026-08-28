@@ -333,7 +333,8 @@ class TestGatesPreservedAfterCleanup:
     def test_direction_gate_in_standing_path(self):
         import inspect, market_engine as _me
         src = inspect.getsource(_me.underdog_job)
-        assert "decision_pass" in src
+        assert "decision_pass" not in src
+        assert '_sdec.recommendation == "PASS"' in src
 
     def test_live_game_gate_in_standing_path(self):
         import inspect, market_engine as _me

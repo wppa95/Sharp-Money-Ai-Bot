@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 
 @dataclass
 class TierPerf:
-    """Performance stats for one confidence tier (S / A / B / PASS)."""
+    """Legacy confidence-tier performance container."""
     tier:      str
     count:     int
     avg_edge:  Optional[float] = None   # avg best_edge from pp_edge_records
@@ -44,7 +44,7 @@ class TierPerf:
 
     @property
     def tier_emoji(self) -> str:
-        return {"S": "🔥", "A": "🟢", "B": "🟡", "PASS": "⚪"}.get(self.tier, "⚪")
+        return {"S": "🔥", "A": "🟢", "B": "🟡"}.get(self.tier, "⚪")
 
 
 @dataclass
@@ -715,7 +715,10 @@ class DashboardEngine:
                         PropOpportunityLog.result,
                         func.count(),
                     )
-                    .where(PropOpportunityLog.result.in_(["HIT", "MISS", "PUSH"]))
+                    .where(
+                        PropOpportunityLog.result.in_(["HIT", "MISS", "PUSH"]),
+                        PropOpportunityLog.recommendation.in_(["OVER", "UNDER"]),
+                    )
                     .group_by(PropOpportunityLog.result)
                 )
                 for result_val, cnt in count_res.all():
@@ -734,6 +737,7 @@ class DashboardEngine:
                     .where(
                         PropOpportunityLog.error_type.isnot(None),
                         PropOpportunityLog.result == "MISS",
+                        PropOpportunityLog.recommendation.in_(["OVER", "UNDER"]),
                     )
                     .group_by(PropOpportunityLog.error_type)
                 )
@@ -757,7 +761,10 @@ class DashboardEngine:
                         PropOpportunityLog.result,
                         func.count(),
                     )
-                    .where(PropOpportunityLog.result.in_(["HIT", "MISS"]))
+                    .where(
+                        PropOpportunityLog.result.in_(["HIT", "MISS"]),
+                        PropOpportunityLog.recommendation.in_(["OVER", "UNDER"]),
+                    )
                     .group_by(PropOpportunityLog.sport, PropOpportunityLog.result)
                 )
                 sport_stats: dict = {}

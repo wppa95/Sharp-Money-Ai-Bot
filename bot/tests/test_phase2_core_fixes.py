@@ -141,8 +141,8 @@ class TestDecisionTierStoredInScoredProps:
         assert entry["tier"] == entry["decision_tier"] == "S"
         assert entry["rejection"] == "qualified"
 
-    def test_source_code_new_prop_has_decision_tier(self):
-        """Verify decision_tier is present in market_engine.py new-prop _scored_props.append."""
+    def test_source_code_new_prop_has_score_tier_metadata(self):
+        """New-prop debug evidence keeps score metadata without monitoring state."""
         import os
         base = os.path.dirname(os.path.dirname(__file__))
         with open(os.path.join(base, "market_engine.py")) as f:
@@ -152,12 +152,11 @@ class TestDecisionTierStoredInScoredProps:
         assert idx != -1
         # Use closing brace of the append dict as the boundary (1500 chars is safe)
         snippet = src[idx: idx + 1500]
-        assert '"decision_tier"' in snippet, (
-            "decision_tier missing from new-prop _scored_props.append"
-        )
+        assert '"score_tier"' in snippet
+        assert '"rejection"' not in snippet
 
-    def test_source_code_line_change_has_decision_tier(self):
-        """Verify decision_tier is present in market_engine.py line-change _scored_props.append."""
+    def test_source_code_line_change_has_score_tier_metadata(self):
+        """Line-change debug evidence keeps score metadata without monitoring state."""
         import os
         base = os.path.dirname(os.path.dirname(__file__))
         with open(os.path.join(base, "market_engine.py")) as f:
@@ -168,9 +167,8 @@ class TestDecisionTierStoredInScoredProps:
         assert second != -1
         # Use 1600 chars — line-change dict has more fields than new-prop dict
         snippet = src[second: second + 1600]
-        assert '"decision_tier"' in snippet, (
-            "decision_tier missing from line-change _scored_props.append"
-        )
+        assert '"score_tier"' in snippet
+        assert '"rejection"' not in snippet
 
 
 # ── #114 props_count captured before clear ─────────────────────────────────
