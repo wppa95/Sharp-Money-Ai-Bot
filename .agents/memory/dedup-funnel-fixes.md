@@ -32,3 +32,10 @@ description: Root causes and fixes for /funnel reliability, duplicate Aranda ale
 ## How to apply
 - Any future "duplicate alert after restart" investigation: check if the player has any `PropOpportunityLog.alert_sent=True` rows AND `PropLineHistory.first_alert_sent_at` is set. If PLH has the timestamp but POL has no True rows, the `log_prop_opportunity` silent fail was the cause.
 - /funnel "Could not load": check for `_db is None` (startup race) or DB lock errors — now caught and logged via `logger.exception`.
+
+### Provider-aware timestamp projections
+- SQLite can return a selected DATETIME column as an ISO string, and adding a provider column changes the positional row order. Dedup restoration must unpack the exact select order and normalize both datetime representations before calling `timestamp()`.
+
+**Why:** A restart-dedup regression treated the provider name as the timestamp, which could silently reintroduce duplicate alerts for provider-owned props.
+
+**How to apply:** When extending a SQLAlchemy projection, update the row unpacking in the same change and test both providers using the same external ID.
