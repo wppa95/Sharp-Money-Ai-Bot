@@ -470,21 +470,30 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         # ── Market provider health (live prop sources) ────────────────────────
         lines.append("")
         lines.append("<b>📡 Market Providers</b>")
-        for provider in ("Underdog",):
+        _market_provider_labels = {
+            "Underdog": "Primary Player Props",
+            "PrizePicks": "PropLine — Primary Player Props",
+        }
+        for provider in ("Underdog", "PrizePicks"):
             info = ht.get_provider_info(provider)
             if info:
                 last_fetch = ht.provider_last_fetch_str(provider)
                 streak = info.get("error_streak", 0)
                 icon = "✅" if streak == 0 else "⚠️" if streak < 3 else "🚨"
                 lines.append(
-                    f"  {icon} <b>{_html.escape(provider)}</b>  ·  last fetch: {_html.escape(last_fetch)}"
+                    f"  {icon} <b>{_html.escape(provider)}</b> — "
+                    f"{_market_provider_labels[provider]}  ·  "
+                    f"last fetch: {_html.escape(last_fetch)}"
                     + (f"  ·  err streak: {streak}" if streak else "")
                 )
                 last_err_msg = info.get("last_error_msg")
                 if last_err_msg and streak:
                     lines.append(f"      ↳ {_html.escape(str(last_err_msg)[:100])}")
             else:
-                lines.append(f"  ⚪ <b>{_html.escape(provider)}</b>  ·  not yet fetched")
+                lines.append(
+                    f"  ⚪ <b>{_html.escape(provider)}</b> — "
+                    f"{_market_provider_labels[provider]}  ·  not yet fetched"
+                )
 
         # ── Stat provider health (historical enrichment) ──────────────────────
         lines.append("")
