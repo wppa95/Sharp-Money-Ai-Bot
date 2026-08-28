@@ -1182,6 +1182,7 @@ async def _run_prizepicks_independent_cycle(context) -> None:
             SimpleNamespace(
                 line_value=float(getattr(row, "line_value", 0.0) or 0.0),
                 prev_line=getattr(row, "prev_line", None),
+                removed=bool(getattr(row, "removed", False)),
                 line_moved=(
                     getattr(row, "prev_line", None) is not None
                     or bool(getattr(row, "change_count", 0))
