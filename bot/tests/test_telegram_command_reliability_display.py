@@ -503,6 +503,70 @@ async def test_bounded_timeout_returns_before_cancellation_cleanup_finishes():
 
 
 @pytest.mark.asyncio
+async def test_backfill_reports_busy_database_instead_of_hanging():
+    update, context = _update_and_context()
+    db = MagicMock()
+
+    async def busy_pending_read(*args, **kwargs):
+        await asyncio.sleep(1)
+
+    db.get_pending_opportunities = busy_pending_read
+    with (
+        patch("commands._check_allowed", return_value=True),
+        patch("commands._db", db),
+        patch("commands._COMMAND_TIMEOUT_SECONDS", 0.01),
+    ):
+        await asyncio.wait_for(commands.cmd_backfill(update, context), timeout=0.2)
+
+    messages = [call.args[0] for call in update.message.reply_text.await_args_list]
+    assert any("still working" in message for message in messages)
+    assert all("Traceback" not in message for message in messages)
+
+
+@pytest.mark.asyncio
+async def test_tracking_reports_unavailable_when_summary_is_busy():
+    update, context = _update_and_context()
+    db = MagicMock()
+
+    async def busy_summary():
+        await asyncio.sleep(1)
+
+    db.get_tracking_summary = busy_summary
+    with (
+        patch("commands._check_allowed", return_value=True),
+        patch("commands._db", db),
+        patch("commands._COMMAND_TIMEOUT_SECONDS", 0.01),
+    ):
+        await asyncio.wait_for(commands.cmd_tracking(update, context), timeout=0.2)
+
+    message = update.message.reply_text.await_args.args[0]
+    assert "temporarily unavailable" in message
+    assert "database is busy" in message
+    assert "Traceback" not in message
+
+
+@pytest.mark.asyncio
+async def test_analyst_reports_unavailable_when_recent_picks_read_is_busy():
+    update, context = _update_and_context()
+    db = MagicMock()
+
+    async def busy_recent_snapshots(*args, **kwargs):
+        await asyncio.sleep(1)
+
+    db.get_recent_underdog_snapshots = busy_recent_snapshots
+    with (
+        patch("commands._check_allowed", return_value=True),
+        patch("commands._db", db),
+        patch("commands._COMMAND_TIMEOUT_SECONDS", 0.01),
+    ):
+        await asyncio.wait_for(commands.cmd_analyst(update, context), timeout=0.2)
+
+    messages = [call.args[0] for call in update.message.reply_text.await_args_list]
+    assert any("Analyst evidence is temporarily unavailable" in message for message in messages)
+    assert all("Traceback" not in message for message in messages)
+
+
+@pytest.mark.asyncio
 async def test_stats_keeps_fast_metrics_when_one_report_read_times_out():
     update, context = _update_and_context()
     db = MagicMock()
