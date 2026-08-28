@@ -4313,16 +4313,24 @@ class Database:
         """
         async with self.session() as s:
             rows = await s.execute(
-                select(PropOpportunityLog.result, func.count(PropOpportunityLog.id))
+                select(
+                    PropOpportunityLog.provider,
+                    PropOpportunityLog.result,
+                    func.count(PropOpportunityLog.id),
+                )
                 .where(
                     PropOpportunityLog.alert_sent       == True,    # noqa: E712
                     PropOpportunityLog.recommendation.in_(["OVER", "UNDER"]),
                 )
-                .group_by(PropOpportunityLog.result)
+                .group_by(PropOpportunityLog.provider, PropOpportunityLog.result)
             )
             buckets: dict = {}
-            for result_val, n in rows.all():
+            by_provider: dict = {}
+            for provider, result_val, n in rows.all():
                 buckets[result_val] = buckets.get(result_val, 0) + n
+                source = provider or "Underdog"
+                source_buckets = by_provider.setdefault(source, {})
+                source_buckets[result_val] = source_buckets.get(result_val, 0) + n
 
         hit     = buckets.get("HIT",  0)
         miss    = buckets.get("MISS", 0)
@@ -4335,6 +4343,26 @@ class Database:
         graded  = hit + miss + push
         total   = graded + pending
         hit_rate = round(hit / graded * 100, 1) if graded > 0 else 0.0
+        def _provider_summary(source_buckets: dict) -> dict:
+            source_hit = source_buckets.get("HIT", 0)
+            source_miss = source_buckets.get("MISS", 0)
+            source_push = source_buckets.get("PUSH", 0)
+            source_pending = sum(
+                n for k, n in source_buckets.items()
+                if k not in ("HIT", "MISS", "PUSH")
+            )
+            source_graded = source_hit + source_miss + source_push
+            return {
+                "total": source_graded + source_pending,
+                "hit": source_hit,
+                "miss": source_miss,
+                "push": source_push,
+                "pending": source_pending,
+                "graded": source_graded,
+                "hit_rate": round(source_hit / source_graded * 100, 1)
+                if source_graded > 0 else 0.0,
+            }
+
         return {
             "total":    total,
             "hit":      hit,
@@ -4343,6 +4371,10 @@ class Database:
             "pending":  pending,
             "graded":   graded,
             "hit_rate": hit_rate,
+            "by_provider": {
+                source: _provider_summary(source_buckets)
+                for source, source_buckets in by_provider.items()
+            },
         }
 
     async def get_learning_rollups(self) -> "dict":

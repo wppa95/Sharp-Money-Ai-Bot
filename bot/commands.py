@@ -529,6 +529,12 @@ async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             tg_lines.append(f"  ✅ Hits: {tg_h}   ❌ Misses: {tg_m}   🟡 Pushes: {tg_p}   ⏳ Pending: {tg_pend}")
             if tg_perf["graded"] > 0:
                 tg_lines.append(f"  Hit Rate: <b>{tg_hr}%</b>")
+            for source, source_perf in sorted(tg_perf.get("by_provider", {}).items()):
+                tg_lines.append(
+                    f"  <b>{_html.escape(source)}:</b> "
+                    f"{source_perf['hit']}H-{source_perf['miss']}M-"
+                    f"{source_perf['push']}P · {source_perf['pending']} pending"
+                )
         tg_lines.append("")
         if intel.get("sample_size", 0):
             _cal = "calibrated sample" if intel.get("calibrated") else "descriptive only (<5)"
@@ -2549,7 +2555,10 @@ async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 _tier = getattr(r, "decision_tier", "")
                 _rec_icon = "⬆️" if _rec == "OVER" else ("⬇️" if _rec == "UNDER" else "")
                 lines.append(
-                    f"  🐶 {_rec_icon} <b>{r.player_name}</b>  {r.stat_type}  "
+                    _source = getattr(r, "provider", None) or "Underdog"
+                    _source_icon = "🟣" if _source == "PrizePicks" else "🐶"
+                    f"  {_source_icon} <b>{_source} PICK</b> · "
+                    f"{_rec_icon} <b>{r.player_name}</b>  {r.stat_type}  "
                     f"<code>{_lv:.1f}</code>  ·  <i>{r.sport}</i>"
                     f"  ·  {_tier}  ·  {_ts_str}"
                 )
