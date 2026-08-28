@@ -1,0 +1,1104 @@
+🔴 IMPORTANT — READ FIRST
+
+I’ve pushed to railway and these are the  **current Railway Sharp Money Bot implementation to update in replit. **
+
+This is a targeted reliability and behavior cleanup based on the issues discovered after moving the bot to Railway.
+
+DO NOT STOP UNTIL EVERYTHING IS COMPLETED
+
+Do NOT redesign the architecture.
+Do NOT rewrite working systems.
+Do NOT change unrelated behavior.
+Do NOT create a checkpoint until implementation, tests, and required live verification are complete.
+
+Make the smallest targeted changes necessary.
+
+⸻
+
+🤖 REPLIT MODEL SELECTION — DO NOT ASK ME
+
+Never ask me:
+
+“Use a more capable model when needed for this request?”
+
+Do not ask me to choose:
+
+* Free
+* Power
+* Max
+
+Always automatically use the recommended capable agent/model for the complexity of the task.
+
+I do not want to make this choice after every checkpoint or completed task.
+
+Do not interrupt the workflow to ask me which model/agent mode to use.
+
+⸻
+
+1. PROVIDER IDENTITY MUST BE CONSISTENT EVERYWHERE
+
+The bot has two primary player-prop providers:
+
+🐶 Underdog
+
+Primary player props.
+
+🟣 PrizePicks / PropLine
+
+Primary player props.
+
+PrizePicks/PropLine is not secondary.
+
+Both providers must be treated as first-class primary player-prop sources throughout:
+
+* Monitoring
+* Tracking
+* Grading
+* Dashboard
+* Funnel
+* Alerts
+* History
+* Performance
+* Reporting
+
+Do not mix provider identities.
+
+⸻
+
+2. CS2 / PROPLINE PROVIDER SEPARATION
+
+If PropLine/PrizePicks is providing the current CS2 prop line, the bot must NOT say or imply that PandaScore is the provider for that current line.
+
+Correct distinction:
+
+Current CS2 player-prop provider:
+
+* PrizePicks / PropLine
+
+Historical enrichment:
+
+* PandaScore only when genuinely configured and actually used.
+
+Do NOT display PandaScore as the current provider of a PropLine line.
+
+Do not fabricate provider relationships.
+
+This same separation must apply to every sport.
+
+⸻
+
+3. ALL LEGITIMATE PRIZEPICKS SPORTS MUST BE MONITORED
+
+Do not hard-code PrizePicks to only:
+
+* NBA
+* MLB
+
+PrizePicks/PropLine must support all legitimate supported sports for which current PrizePicks props are actually available.
+
+The system should dynamically recognize available PrizePicks/PropLine sports.
+
+Do not fabricate unsupported sports or props.
+
+⸻
+
+4. FOOTBALL CAN BE MONITORED — BUT NEVER BETTING OUTPUT
+
+Football-related sports may remain fully monitored and tracked.
+
+This includes:
+
+* NFL
+* NCAAF
+* CFB
+* FCS
+* CFL
+* UFL
+* XFL
+* AFL
+* AFLW
+* Any other football-related league or competition
+
+Football is allowed for:
+
+✅ Monitoring
+✅ Rescanning
+✅ Snapshot persistence
+✅ Line tracking
+✅ Historical tracking
+✅ HIT/MISS/PUSH grading
+✅ Player history
+✅ Evidence collection
+✅ Internal analysis
+✅ Calibration/performance data
+
+But football must NEVER reach Telegram as betting output.
+
+HARD TELEGRAM RESTRICTION
+
+Regardless of how strong the prop is, football-related props must NEVER generate:
+
+❌ Telegram betting picks
+❌ Telegram actionable alerts
+❌ Telegram recommendations
+❌ /picks betting results
+❌ /slip betting legs
+❌ /alerts betting deliveries
+
+This restriction applies regardless of:
+
+* OVER/UNDER direction
+* Bet Quality
+* Confidence
+* Market Quality
+* Evidence
+* Historical performance
+* Line movement
+* New-prop status
+* Rescan status
+* Provider
+* Whether the prop otherwise qualifies
+
+Football is a monitored/tracked data source only.
+
+This must be a hard provider-independent Telegram sport exclusion, not a scoring gate.
+
+Do NOT remove football from the monitoring or historical tracking universe.
+
+Add regression tests proving football remains monitored/tracked but can never reach Telegram betting output.
+
+⸻
+
+5. PRE-GAME ONLY — NO LIVE/IN-GAME PICKS
+
+Only pre-game/event props may generate new picks.
+
+A prop should enter monitoring:
+
+* As soon as a valid prop becomes available, or
+* Within the 24-hour pre-game window.
+
+Once the event/game has started:
+
+❌ No new betting pick
+❌ No new actionable Telegram alert
+❌ No new /picks betting result
+❌ No new /slip leg
+
+Historical tracking must remain intact.
+
+Inactive for betting output ≠ deleted from history.
+
+⸻
+
+6. ALL ACTIVE PROPS MUST CONTINUE RESCANNING
+
+Do NOT only rescan:
+
+* Line movers
+* New props
+* Actionable props
+* Previously delivered props
+* Previously scored props
+
+Every active pre-game prop must remain eligible for continuous rescanning.
+
+Required lifecycle:
+
+Active source-ID universe
+→ bounded FPR batch
+→ evaluate
+→ rescore
+→ advance cursor
+→ next batch
+→ continue
+→ wraparound
+→ repeat
+
+A prop does NOT need to move its line to be rescanned.
+
+This is critical because opportunities can become actionable without a large discrete line movement.
+
+⸻
+
+7. FPR REMAINS THE SOLE FULL-POOL ROTATION
+
+Do not create another rotation system.
+
+FPR must continuously cover:
+
+* New props
+* Unchanged props
+* Previously rejected props
+* Previously delivered props
+* Cold-start props
+* Missing-evidence props
+* Previously evaluated props
+
+Delivery deduplication must remain downstream.
+
+Being previously delivered must never remove a prop from monitoring.
+
+⸻
+
+8. NEW PROPS
+
+New props must:
+
+1. Persist.
+2. Be evaluated.
+3. Receive appropriate priority.
+4. Enter FPR.
+5. Remain active after first scan.
+6. Continue receiving rescans until event start/removal.
+
+The new-prop fast path must NOT replace full-pool rotation.
+
+⸻
+
+9. LINE MOVERS
+
+Line movers receive priority.
+
+When a line moves:
+
+* Detect movement.
+* Rescore promptly.
+* Allow a directional pick when valid.
+* Keep the prop in the active universe.
+* Continue rescanning it.
+
+Delivery deduplication must not remove it from monitoring.
+
+⸻
+
+10. DIRECTION IS THE ONLY PICK QUALIFICATION GATE
+
+Remove obsolete qualification gates.
+
+Do NOT require:
+
+* S-tier
+* A-tier
+* B-tier
+* C-tier
+* Watchlist
+* Near-Miss
+* PASS
+* Tier 1
+* Tier 2
+* Arbitrary legacy confidence thresholds
+* Arbitrary legacy evidence thresholds
+
+to establish a directional recommendation.
+
+Core requirement:
+
+A valid OVER or UNDER direction.
+
+Existing legitimate safety protections remain, including:
+
+* Stale-line protection
+* Event-start protection
+* Provider validity
+* Duplicate prevention
+* Flood protection
+* Delivery safety
+* Other legitimate operational safeguards
+
+Do not confuse safety protections with retired qualification gates.
+
+⸻
+
+11. NO WATCHLIST / PASS / TIER SYSTEM
+
+These retired concepts must not control the current monitoring model.
+
+Do not generate or display:
+
+* Watchlist
+* Near-Miss
+* PASS
+* Tier 1
+* Tier 2
+* S/A/B/C qualification
+
+They must not appear as qualification gates in:
+
+* /picks
+* /slip
+* /alerts
+* /funnel
+* /dashboard
+* /performance
+* /stats
+* /tracking
+* /analyst
+* Alert delivery
+* Provider output
+* Monitoring output
+
+If an old compatibility field exists internally, it must not affect current qualification or delivery.
+
+⸻
+
+12. ALERT FORMAT — RICH FORMAT FOR BOTH PROVIDERS
+
+Use the richer alert format that includes, where available:
+
+* Provider
+* Sport
+* Player
+* Market
+* Current line
+* Previous line
+* Movement
+* Recommendation
+* Bet Quality
+* Hit history
+* Evidence
+* Market Quality
+* Analyst reasoning
+* Timestamp
+
+Provider labels must be:
+
+🐶 UNDERDOG PICK
+
+for Underdog.
+
+🟣 PRIZEPICKS PICK
+
+for PrizePicks.
+
+Do NOT label these simply:
+
+ACTIONABLE BET PICK
+
+The provider must always be obvious.
+
+⸻
+
+13. REMOVE “VERIFY BEFORE PLACING” LANGUAGE
+
+When current provider data is healthy, do NOT include:
+
+“verify line before placing”
+
+“verify on Underdog before placing”
+
+“verify on PrizePicks before placing”
+
+or similar uncertainty/failure language.
+
+Current successful provider data should be displayed cleanly.
+
+If a provider genuinely becomes unavailable, use the existing honest unavailable/error handling.
+
+Do not falsely imply a provider failure.
+
+⸻
+
+14. DUPLICATE ALERT SPAM MUST BE FIXED
+
+The bot demonstrated duplicate spam involving the same player/market.
+
+This is acceptable:
+
+Max Muncy — Batter Strikeouts 0.5
+
+followed later by:
+
+Max Muncy — Batter Strikeouts 1.5
+
+if the line materially changed.
+
+This is NOT acceptable:
+
+Repeatedly sending the same effective alert every monitoring cycle.
+
+Suppress duplicates when:
+
+* Same provider
+* Same player
+* Same market
+* Same line
+* Same direction
+* Same effective recommendation
+* No meaningful new information
+
+But continue monitoring the prop.
+
+Monitoring must never be disabled just because delivery was deduplicated.
+
+⸻
+
+15. PROVIDER-SPECIFIC ALERT HISTORY
+
+/alerts must display both providers.
+
+Examples:
+
+🐶 UNDERDOG PICK
+
+🟣 PRIZEPICKS PICK
+
+PrizePicks alerts must not disappear because Underdog has more records.
+
+Do not let one provider crowd the other out of reporting.
+
+⸻
+
+16. PROVIDER-SPECIFIC PIPELINE ACCOUNTING
+
+/funnel must independently show:
+
+Underdog
+
+* Observed
+* Evaluated
+* Rescored
+* Actionable
+* Delivered
+
+PrizePicks / PropLine
+
+* Observed
+* Evaluated
+* Rescored
+* Actionable
+* Delivered
+
+Fix any accounting mismatch where PrizePicks has actually fetched/evaluated/delivered props but:
+
+Observed: 0
+
+is displayed.
+
+Pipeline metrics must reflect actual provider activity.
+
+⸻
+
+17. /HEALTH MUST SHOW BOTH PROVIDER PIPELINES
+
+/health must show:
+
+📡 Underdog Pipeline
+
+and:
+
+📡 PrizePicks Pipeline
+
+Each should expose appropriate current metrics such as:
+
+* Last scan
+* Props observed
+* Evaluated
+* Rescored
+* Actionable
+* Delivered
+* Last DB write
+* Current failure streak where applicable
+
+PrizePicks must not appear as an optional secondary system.
+
+⸻
+
+18. STATUS / PROVIDERS / CONFIG
+
+These commands must consistently identify:
+
+* 🟢 Underdog — Primary Player Props
+* 🟢 PrizePicks — PropLine — Primary Player Props
+
+/providers must correctly distinguish current provider vs historical enrichment.
+
+/config must show the real supported PrizePicks scope.
+
+Do not hard-code PrizePicks to NBA/MLB.
+
+⸻
+
+19. DASHBOARD MUST TRACK THE FULL MONITORED UNIVERSE
+
+The dashboard previously showed a small number such as:
+
+Tracked opportunities: 447
+
+while the system had tens of thousands of Underdog snapshots.
+
+That must not represent the entire tracking universe.
+
+The monitoring system must track the full monitored prop universe.
+
+Every monitored snapshot should remain eligible for:
+
+* Future rescoring
+* Grading
+* HIT/MISS/PUSH tracking
+* Historical analysis
+* Rolling evidence
+* Performance analysis
+
+Do NOT restrict persistent tracking to Telegram-delivered actionable picks.
+
+⸻
+
+20. HIT / MISS / PUSH TRACKING
+
+Every eligible monitored prop should eventually be gradeable once the event result is available.
+
+Persist:
+
+* Provider
+* Player
+* Sport
+* Market/stat
+* Line
+* Direction
+* Timestamp
+* Event/game
+* Actual result
+* HIT
+* MISS
+* PUSH where applicable
+
+Tracking must be independent of Telegram delivery.
+
+A prop does NOT need to become a betting alert to be graded.
+
+⸻
+
+21. PLAYER HISTORY MUST USE THE FULL TRACKED PROP UNIVERSE
+
+Continue using legitimate provider evidence and graded-prop evidence.
+
+Provider evidence remains preferred.
+
+Graded outcomes supplement missing provider history.
+
+No:
+
+* Fabricated history
+* Duplicate dates
+* Cross-player contamination
+* Cross-stat contamination
+
+Progressively build:
+
+* L5
+* L10
+* L20
+* L30
+* Season
+
+from actual results.
+
+⸻
+
+22. PERFORMANCE / GRADING COMMANDS
+
+These commands must operate from the persistent tracked universe:
+
+* /performance
+* /grade
+* /stats
+* /tracking
+* /slipstats
+* /backtest
+* /calibration
+* /player
+
+They should not depend solely on Telegram-delivered picks.
+
+As tracked events finish, their results should become available to these systems.
+
+⸻
+
+23. /DASHBOARD RECENTLY TRACKED PROPS
+
+Recently Tracked Props must:
+
+* Use persistent tracking data.
+* Include ALL supported sports.
+* Include both providers.
+* Distinguish provider.
+* Never hard-code NFL.
+* Reflect actual recent snapshots.
+* Continue using the existing hourly dashboard refresh behavior.
+
+Football may appear here because it is monitored/tracked.
+
+That does NOT mean football can generate Telegram betting output.
+
+⸻
+
+24. /PICKS MUST NOT FALSELY SAY “NO PICKS”
+
+The system previously returned:
+
+No actionable betting picks right now.
+
+while alerts had already been delivered.
+
+This indicates the current /picks query and alert pipeline are not consistently reading the same active provider/current-run data.
+
+Fix this.
+
+If valid active directional picks exist, /picks must be capable of finding them.
+
+It must:
+
+* Use active data
+* Exclude started events
+* Exclude football betting output
+* Distinguish Underdog vs PrizePicks
+* Avoid stale/inactive records
+* Respect provider identity
+
+⸻
+
+25. /SLIP
+
+/slip must:
+
+* Use current active pre-game props.
+* Include both primary providers.
+* Respect provider identity.
+* Exclude football.
+* Exclude live/in-game props.
+* Use valid directional props.
+* Avoid duplicate effective legs.
+* Avoid stale/inactive props.
+* Not depend on retired Watchlist/PASS/Tier/S/A/B/C gates.
+
+Do not fabricate legs.
+
+⸻
+
+26. NO LIVE PROPS IN ANY BETTING DISPLAY
+
+All betting output paths must enforce the same pre-game rule.
+
+This includes:
+
+* Telegram alerts
+* /picks
+* /slip
+* /alerts
+* Other betting recommendation displays
+
+Started/live props may remain in:
+
+* Historical tracking
+* Grading
+* Player history
+* Performance analysis
+
+but must not become new betting recommendations.
+
+⸻
+
+27. CONSISTENT PROVIDER LABELING EVERYWHERE
+
+Underdog
+
+🐶 Underdog line
+🐶 UNDERDOG PICK
+
+PrizePicks
+
+🟣 PrizePicks/PropLine line
+🟣 PRIZEPICKS PICK
+
+Never call a PrizePicks line an Underdog line.
+
+Never call an Underdog line a PrizePicks line.
+
+Do not merge current provider records into an ambiguous provider-neutral line.
+
+⸻
+
+28. CLEAN CURRENT-RUN REPORTING
+
+Dashboard, funnel, health, status, alerts, and provider reports must represent the same current monitoring run.
+
+Do not allow:
+
+* Old counters
+* Stale provider counters
+* Previous-run active props
+* Stale FPR cursor
+* Stale alert counts
+* Stale pipeline state
+
+to masquerade as current data.
+
+Historical database records remain intact.
+
+⸻
+
+29. PRESERVE COMPLETED WORK
+
+Do NOT regress:
+
+* Clean restart
+* Unified monitoring cadence
+* Shared 2-minute monitor
+* max_instances=1
+* Adaptive batching
+* FPR rotation
+* Active Underdog source-ID lifecycle
+* Provider evidence
+* Graded-prop evidence
+* Player identity handling
+* Railway process stability
+* Scheduler behavior
+* Telegram 409 protections
+* PrizePicks/PropLine reliability work
+* Partial-result protection
+* Command timeout protection
+* Existing provider integrations
+
+Do not redesign these systems.
+
+⸻
+
+30. DO NOT CHANGE UNRELATED BETTING LOGIC
+
+Do NOT change:
+
+* Scoring formulas
+* BQ calculation
+* MQ calculation
+* Confidence calculation
+* Legitimate safety protections
+* Stale-line protection
+* Event-start protection
+* Flood protection
+* Provider fetch architecture
+* Database schema unless absolutely required
+
+Only remove obsolete qualification/delivery behavior that conflicts with this task.
+
+⸻
+
+31. TEST REQUIREMENTS
+
+Add focused regression tests proving:
+
+Provider separation
+
+* Underdog and PrizePicks remain separate.
+* Both are primary providers.
+* PropLine current CS2 lines do not identify PandaScore as the current provider.
+* PandaScore only appears when genuinely used for historical enrichment.
+
+PrizePicks
+
+* All legitimate supported PrizePicks sports can enter monitoring.
+* PrizePicks activity appears correctly in pipeline metrics.
+* PrizePicks alerts appear in /alerts.
+* PrizePicks picks appear in /picks.
+* PrizePicks history contributes to grading.
+
+Football
+
+* Football remains monitored.
+* Football remains tracked.
+* Football snapshots persist.
+* Football can be graded historically.
+* Football does NOT generate betting picks.
+* Football does NOT generate Telegram betting alerts.
+* Football does NOT appear as a /slip betting leg.
+* Football does NOT bypass the restriction through another alert path.
+
+Pregame
+
+* Props available before the event are eligible.
+* Props inside the 24-hour pregame window are eligible.
+* Props available earlier than 24 hours can enter when available.
+* Started/live props cannot generate new picks.
+* Started props remain historically gradeable.
+
+Rescanning
+
+* New props remain in FPR.
+* Unchanged props remain in FPR.
+* Previously evaluated props remain in FPR.
+* Previously delivered props remain in FPR.
+* Previously rejected/non-actionable props remain in FPR.
+* Cold-start props remain in FPR.
+* FPR cursor advances.
+* FPR wraps.
+* Multiple rotations work.
+* Line movers receive priority.
+* Remaining props do not starve.
+
+Tracking
+
+* Every monitored snapshot can be persisted.
+* Non-actionable props remain tracked.
+* Historical outcomes persist.
+* HIT/MISS/PUSH persist.
+* Graded results feed rolling history.
+
+Alerts
+
+* Direction is sufficient for qualification.
+* No S/A/B/C gate remains.
+* No Tier gate remains.
+* No Watchlist/PASS gate remains.
+* Duplicate effective alerts are suppressed.
+* Meaningful line changes can create a new alert.
+* Provider-specific labels are correct.
+* “Verify before placing” language is absent from healthy current alerts.
+* Football cannot reach Telegram.
+
+Display
+
+* /health contains both provider pipelines.
+* /providers correctly identifies current providers.
+* /config shows all legitimate PrizePicks scope.
+* /alerts shows both providers.
+* /picks shows current active provider-specific picks.
+* /slip uses current active pregame props.
+* /dashboard includes all supported tracked sports.
+* /funnel reports both providers accurately.
+* Performance/tracking commands use persistent tracking data.
+* No false “no picks” response when valid current picks exist.
+* No indefinite “Gathering stats…” state.
+
+⸻
+
+32. REQUIRED LIVE VERIFICATION
+
+Tests alone are NOT sufficient.
+
+After implementation, verify the actual running bot.
+
+Provider verification
+
+Confirm live:
+
+* Underdog fetch succeeds.
+* PrizePicks/PropLine fetch succeeds.
+* Both appear as primary player-prop providers.
+* Current CS2 PropLine lines do not identify PandaScore as current provider.
+* PandaScore is not falsely presented as current CS2 provider.
+
+PrizePicks verification
+
+Confirm live PrizePicks props are:
+
+* Fetched
+* Persisted
+* Evaluated
+* Rescored
+* Tracked
+* Displayed
+* Available for grading
+
+Confirm multiple legitimate PrizePicks sports can appear when live data is available.
+
+Football verification
+
+Confirm live:
+
+* Football data continues being monitored.
+* Football snapshots continue being tracked.
+* Football remains available for historical grading.
+* No football betting alert reaches Telegram.
+* No football pick appears in /picks.
+* No football leg appears in /slip.
+* No alternate Telegram path bypasses the football restriction.
+
+Pregame verification
+
+Confirm:
+
+* Pregame props are eligible.
+* Live/in-game props are excluded from new picks.
+* Started props remain in historical tracking.
+
+Rescanning verification
+
+Across multiple monitoring cycles confirm:
+
+* New props appear.
+* Line movers receive priority.
+* Unchanged props continue returning through FPR.
+* Previously evaluated props continue returning.
+* Previously delivered props remain eligible.
+* Multiple sports receive coverage.
+* FPR cursor advances.
+* No small group monopolizes the rotation.
+
+Alert verification
+
+Observe naturally generated alerts.
+
+Do NOT use /testalert.
+
+Do NOT fabricate props.
+
+Do NOT alter thresholds to force an alert.
+
+Confirm naturally generated alerts:
+
+* Distinguish Underdog vs PrizePicks.
+* Use the rich alert format.
+* Contain a valid direction.
+* Do not show Tier/Watchlist/PASS/S/A/B/C labels.
+* Do not contain “verify before placing” language when provider data is healthy.
+* Do not spam identical effective alerts.
+* Can generate a new alert after a meaningful line change.
+* Never allow football-related betting output.
+
+Dashboard verification
+
+Confirm:
+
+* /dashboard returns actual data.
+* /funnel returns actual data.
+* /health returns actual data.
+* /status returns actual data.
+* No indefinite “Gathering stats…” state.
+* No indefinite timeout.
+* Partial results remain honest when a subsystem is slow.
+* Both providers are represented correctly.
+
+Tracking verification
+
+Confirm persistent tracking contains the broader monitored prop universe, not only Telegram-delivered actionable picks.
+
+The monitored universe must remain gradeable.
+
+⸻
+
+33. NO CHECKPOINT UNTIL VERIFIED
+
+Do NOT create a checkpoint simply because:
+
+* Tests pass.
+* Compilation passes.
+* Deployment succeeds.
+* The agent says it is complete.
+
+The task is not complete until required live verification has been performed.
+
+If something cannot be live-verified, explicitly report it as:
+
+UNVERIFIED
+
+Do not falsely claim success.
+
+⸻
+
+34. FINAL ACCEPTANCE CHECKLIST
+
+Before creating any checkpoint:
+
+* Recommended capable model was selected automatically; I was not asked Free/Power/Max.
+* Underdog is a primary player-prop provider.
+* PrizePicks/PropLine is a primary player-prop provider.
+* Provider identities are separated everywhere.
+* PropLine current CS2 lines do not use/display PandaScore as current provider.
+* PandaScore is historical-only when genuinely used.
+* PrizePicks supports all legitimate supported sports.
+* Football remains monitored.
+* Football remains tracked.
+* Football remains historically gradeable.
+* Football can NEVER reach Telegram betting output.
+* Football cannot appear in /picks as a betting recommendation.
+* Football cannot appear in /slip as a betting leg.
+* No alternate alert path bypasses the football restriction.
+* Only pre-game props can generate new picks.
+* Props enter monitoring as soon as legitimately available or within the 24-hour pregame window.
+* Live/in-game props cannot generate new picks.
+* Started props remain historically tracked.
+* All active props continue receiving FPR rescans.
+* Unchanged props remain eligible.
+* Previously evaluated props remain eligible.
+* Previously delivered props remain eligible.
+* New props remain in rotation.
+* Line movers receive priority.
+* Remaining active props do not starve.
+* FPR remains the sole full-pool rotation.
+* Direction is the only pick qualification gate.
+* No S/A/B/C qualification gate remains.
+* No Tier 1/Tier 2 qualification gate remains.
+* No Watchlist/Near-Miss/PASS qualification gate remains.
+* Duplicate effective alerts are suppressed.
+* Meaningful line changes can create new alerts.
+* Rich alert format is used for both providers.
+* Underdog alerts are labeled Underdog.
+* PrizePicks alerts are labeled PrizePicks.
+* Healthy alerts contain no “verify before placing” language.
+* /alerts shows both providers.
+* /picks shows current active provider-specific picks.
+* /slip uses current active pregame props.
+* /health shows both provider pipelines.
+* /providers shows correct current providers.
+* /config shows correct PrizePicks scope.
+* /dashboard shows all supported tracked sports.
+* /funnel reports both provider pipelines accurately.
+* Dashboard tracking represents the broader monitored universe.
+* All monitored snapshots remain persistent and gradeable.
+* HIT/MISS/PUSH tracking is persistent.
+* Provider evidence remains preferred.
+* Graded-prop evidence supplements missing provider history.
+* No fabricated evidence exists.
+* No cross-player/stat contamination exists.
+* Clean restart remains intact.
+* max_instances=1 remains intact.
+* Shared monitoring cadence remains intact.
+* Adaptive batching remains intact.
+* FPR remains intact.
+* Railway process stability remains intact.
+* Command timeout/partial-result protections remain intact.
+* PrizePicks reliability fixes remain intact.
+* Focused regression tests pass.
+* Full test suite passes.
+* Compilation/diff checks pass.
+* Live bot verification passes.
+* Natural alert verification passes where naturally generated alerts are available.
+* No unrelated behavior changed.
+* NO CHECKPOINT UNTIL ALL APPLICABLE ITEMS ARE VERIFIED.
+
+🔴 FINAL INSTRUCTION
+
+This is a targeted Railway monitoring, provider, alert, tracking, and display cleanup.
+
+Do not redesign the bot.
+
+Do not rewrite working systems.
+
+Do not create competing monitoring systems.
+
+Do not create another rotation.
+
+Do not force alerts.
+
+Do not use /testalert for acceptance.
+
+Do not fabricate data.
+
+Do not change unrelated scoring or betting logic.
+
+The intended behavior is:
+
+Monitor everything that should be monitored.
+Track everything that should be tracked.
+Continuously rescan the full active pre-game prop universe.
+Keep Underdog and PrizePicks/PropLine completely distinct.
+Treat both as primary player-prop providers.
+Allow valid directional picks from both providers.
+Never allow football or football-related sports to reach Telegram betting output.
+Keep football fully monitored and tracked for historical data.
+Never generate live/in-game betting picks.
+Suppress only duplicate effective alerts—not legitimate new line changes.
+Use the same underlying tracked data for grading, history, dashboard, funnel, and performance.
+Keep all successful displays clean and free of obsolete uncertainty language.
+
+Only create the checkpoint after the implementation and verification genuinely prove it’s complete.
