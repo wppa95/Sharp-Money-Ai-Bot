@@ -67,6 +67,29 @@ async def _status_db_read(label: str, coro):
         return None
 
 
+async def _status_db_reads(reads: list) -> list:
+    """Collect status counters without letting pending cancellation abort /status."""
+    tasks = [asyncio.create_task(read) for read in reads]
+    done, pending = await asyncio.wait(
+        tasks,
+        timeout=_COMMAND_TIMEOUT_SECONDS,
+    )
+    for task in pending:
+        task.cancel()
+
+    values = []
+    for task in tasks:
+        if task not in done:
+            values.append(None)
+            continue
+        try:
+            values.append(task.result())
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("cmd_status: counter task failed: %s", exc)
+            values.append(None)
+    return values
+
+
 def _format_status_count(value: object) -> str:
     """Render a counter honestly when a transient DB lock prevents reading it."""
     if value is None:
@@ -742,8 +765,8 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 total_prop_history,
                 ud_history,
                 pp_history,
-            ) = await _bounded(
-                asyncio.gather(
+            ) = await _status_db_reads(
+                [
                     _status_db_read(
                         "alerts today", _db.count_today_actionable_alerts()
                     ),
@@ -758,7 +781,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                         "PrizePicks prop history",
                         _db.count_prop_line_history(provider="PrizePicks"),
                     ),
-                )
+                ]
             )
         else:
             _alerts_today = total_prop_history = ud_history = pp_history = 0
