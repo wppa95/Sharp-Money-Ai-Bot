@@ -515,6 +515,7 @@ def format_help_message() -> str:
         f"                    <i>/slip 3 · /slip 5</i>",
         f"  /dashboard      — Player prop activity, provider status, alert history",
         f"  /alerts         — Recent actionable pick alert history",
+        f"  /reconcile [h]  — Reconcile source volume with Telegram delivery",
         f"  /grade          — Win/loss breakdown by tier for resolved picks",
         "",
         "<b>📊 Market Analysis</b>",
