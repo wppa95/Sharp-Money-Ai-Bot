@@ -128,6 +128,31 @@ class EVRecord(Base):
     alert_sent = Column(Boolean, default=False, nullable=False)
 
 
+# ── Telegram delivery audit ───────────────────────────────────────────────────
+
+class TelegramDeliveryAudit(Base):
+    """Durable audit row for one outbound Telegram alert attempt.
+
+    This is separate from opportunity rows because one opportunity can produce
+    multiple legitimate alerts, while one alert can fan out to many recipients.
+    """
+    __tablename__ = "telegram_delivery_audit"
+
+    id                = Column(Integer, primary_key=True, autoincrement=True)
+    provider          = Column(String(32), nullable=False, default="Unknown", index=True)
+    alert_kind        = Column(String(32), nullable=False, default="ACTIONABLE_PICK")
+    delivery_path     = Column(String(32), nullable=False, default="unknown")
+    player_name       = Column(String(128), nullable=True)
+    sport             = Column(String(32), nullable=True, index=True)
+    stat_type         = Column(String(64), nullable=True)
+    external_id       = Column(String(128), nullable=True, index=True)
+    line_value        = Column(Float, nullable=True)
+    outcome           = Column(String(24), nullable=False)  # sent|failed|rate_limited
+    recipients_sent   = Column(Integer, nullable=False, default=0)
+    recipients_failed = Column(Integer, nullable=False, default=0)
+    attempted_at      = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
 # ── PrizePicks models ─────────────────────────────────────────────────────────
 
 class PrizePicksRecord(Base):
