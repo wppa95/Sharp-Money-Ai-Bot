@@ -2591,6 +2591,85 @@ async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.message.reply_text(_re.sub(r"<[^>]+>", "", _alerts_body))
 
 
+async def cmd_reconcile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/reconcile [hours] — reconcile source volume with Telegram delivery."""
+    if not _check_allowed(update):
+        await update.message.reply_text("⛔ Unauthorized.")
+        return
+    if _db is None:
+        await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
+        return
+
+    try:
+        hours = int(context.args[0]) if context.args else 72
+        hours = max(1, min(hours, 720))
+        report = await _db.get_telegram_reconciliation(
+            since_hours=hours,
+            bucket_minutes=60,
+        )
+        lines = [
+            "🔎 <b>Telegram Alert Reconciliation</b>",
+            f"<i>UTC window: last {hours} hours · hourly buckets</i>",
+            "",
+            "<b>Source → pipeline → delivery</b>",
+            "<code>Provider       Observed  Evaluated  Actionable  "
+            "Delivered  Recipients</code>",
+        ]
+        for provider, row in sorted(report.get("by_provider", {}).items()):
+            lines.append(
+                f"<code>{_html.escape(provider[:13]):<13} "
+                f"{row.get('observed', 0):>8,} "
+                f"{row.get('evaluated', 0):>10,} "
+                f"{row.get('actionable_persisted', 0):>10,} "
+                f"{row.get('delivered_alerts', 0):>9,} "
+                f"{row.get('delivered_recipients', 0):>10,}</code>"
+            )
+
+        lines += [
+            "",
+            "<b>Accounting interpretation</b>",
+            f"  Durable audit rows: <code>{report.get('audit_rows', 0):,}</code>",
+            f"  Duplicate audited deliveries: "
+            f"<code>{report.get('duplicate_delivery_events', 0):,}</code>",
+        ]
+        if report.get("exact_recipient_count_available"):
+            lines.append("  ✅ Recipient counts are available from the delivery ledger.")
+        else:
+            lines += [
+                "  ⚠️ Legacy rows prove a successful send attempt only.",
+                "  Telegram message IDs, recipients, and retries were not retained",
+                "  before the delivery ledger was added.",
+            ]
+
+        buckets = report.get("time_buckets", [])
+        if buckets:
+            lines += [
+                "",
+                "<b>Hourly delivered alerts</b>",
+                "<code>UTC bucket          Provider       Alerts  Recipients</code>",
+            ]
+            for bucket in buckets[-24:]:
+                lines.append(
+                    f"<code>{bucket['bucket'][:16]:<18} "
+                    f"{_html.escape(bucket['provider'][:13]):<13} "
+                    f"{bucket.get('delivered_alerts', 0):>6,} "
+                    f"{bucket.get('delivered_recipients', 0):>10,}</code>"
+                )
+
+        lines += [
+            "",
+            "<i>Raw provider observations and funnel evaluations are not Telegram "
+            "messages. PrizePicks, Underdog, and sportsbook paths remain separate.</i>",
+        ]
+        body = "\n".join(lines)
+        await update.message.reply_text(body, parse_mode=ParseMode.HTML)
+    except (TypeError, ValueError):
+        await update.message.reply_text("Usage: /reconcile [hours]")
+    except Exception as exc:
+        logger.exception("cmd_reconcile: failed: %s", exc)
+        await update.message.reply_text("⚠️ /reconcile failed. Check bot logs.")
+
+
 async def cmd_grade(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/grade — Grade resolved actionable picks by tier (WIN/LOSS/PUSH breakdown)."""
     if not _check_allowed(update):
