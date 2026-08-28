@@ -3068,6 +3068,7 @@ class Database:
         actual_value = raw.actual_value
         opponent     = raw.opponent
         source       = raw.source
+        game_id      = str(getattr(raw, "game_id", "") or "")
 
         async with self.session() as s:
             result = await s.execute(
@@ -3076,6 +3077,7 @@ class Database:
                     PlayerGameResult.sport       == sport,
                     PlayerGameResult.stat_type   == stat_type,
                     PlayerGameResult.game_date   == game_date,
+                    PlayerGameResult.game_id     == game_id,
                 )
             )
             record = result.scalar_one_or_none()
@@ -3088,6 +3090,7 @@ class Database:
                     opponent     = opponent,
                     actual_value = actual_value,
                     source       = source,
+                    game_id      = game_id,
                 ))
             else:
                 record.actual_value = actual_value
@@ -3378,6 +3381,7 @@ class Database:
         decision_tier: str,             # S | A | B | PASS
         confidence: int,
         game_time: "Optional[datetime]",
+        game_id: str = "",
         # Phase 2 enrichment — optional, captured at alert time
         stars:       "Optional[int]"   = None,   # 0–5 stars
         risk_level:  "Optional[str]"   = None,   # "LOW" | "MEDIUM" | "HIGH"
@@ -3416,6 +3420,7 @@ class Database:
             "decision_tier": decision_tier,
             "confidence": confidence,
             "game_time": game_time,
+            "game_id": game_id,
             "stars": stars,
             "risk_level": risk_level,
             "explanation": explanation,
@@ -3515,6 +3520,7 @@ class Database:
                 "decision_tier": opportunity.get("decision_tier"),
                 "confidence": _confidence,
                 "game_time": opportunity.get("game_time"),
+                "game_id": str(opportunity.get("game_id") or ""),
                 "detected_at": now,
                 "result": "PENDING",
                 "actual_value": None,
@@ -3549,6 +3555,7 @@ class Database:
                         "decision_tier",
                         "confidence",
                         "line_value",
+                        "game_id",
                         "stars",
                         "risk_level",
                         "explanation",
@@ -4618,10 +4625,20 @@ class Database:
         }
 
     async def get_game_result_for_grading(
-        self, player_name: str, sport: str, stat_type: str, game_date: str
+        self,
+        player_name: str,
+        sport: str,
+        stat_type: str,
+        game_date: str,
+        *,
+        game_id: str = "",
+        provider: Optional[str] = None,
     ) -> "Optional[PlayerGameResult]":
         """
-        Return the PlayerGameResult for a given player / sport / stat / date, or None.
+        Return the PlayerGameResult for a given player / sport / stat / date and
+        event identity, or None. Provider is accepted for call-site clarity:
+        game results are shared official-stat evidence, while provider remains
+        an opportunity identity and settlement-rule input.
 
         stat_type is normalised to lowercase before lookup because upsert_player_result
         stores all stat types in lowercase.  This prevents silent mismatches between
@@ -4636,6 +4653,7 @@ class Database:
                     PlayerGameResult.sport       == sport,
                     PlayerGameResult.stat_type   == normalised_stat,
                     PlayerGameResult.game_date   == game_date,
+                    PlayerGameResult.game_id     == str(game_id or ""),
                 )
                 .limit(1)
             )
