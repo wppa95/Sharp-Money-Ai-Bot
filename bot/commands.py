@@ -2043,7 +2043,6 @@ def _render_slip_section(
     section: list[str] = [heading, ""]
 
     for i, r in enumerate(records, 1):
-        tier_icon  = _TIER_EMOJI.get(r.tier or "Low", "⚪")
         stars_str  = _stars_from_conf(r.confidence)
         conf_label = f"{r.confidence:.0f}/100" if r.confidence is not None else "—"
         if r.confidence is not None:
@@ -2119,7 +2118,7 @@ def _render_slip_section(
                 provider_row = "\n    " + "  ".join(row_parts)
 
         section.append(
-            f"  <b>Leg {i}</b>  {tier_icon} {r.tier or '—'}  {stars_str}\n"
+            f"  <b>Leg {i}</b>  {stars_str}\n"
             f"    <b>{r.player_name}</b> · {r.stat_type}\n"
             f"    {r.best_side} {line_str}  ·  conf {conf_label}"
             f"  ·  sharp {_sharp.score}/100"
@@ -2375,11 +2374,13 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     # ── 1. Fetch provider-owned props (same pool as /picks) ──────────────────
     ud_props = await _db.get_top_ud_props_for_picks(limit=30, since_hours=6)
-    # Display filter: hide season-long futures (stored & tracked as normal).
+    # Display filter: hide season-long futures and already-started events
+    # (stored & tracked as normal).
     ud_props = [
         p for p in ud_props
         if not _is_season_future(p.stat_type)
         and not is_telegram_suppressed_sport(p.sport)
+        and _is_upcoming_game(getattr(p, "game_time", None))
     ]
     try:
         pp_props = await _db.get_latest_props_for_provider("PrizePicks", since_hours=24)
@@ -2389,6 +2390,7 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         p for p in pp_props
         if not _is_season_future(p.stat_type)
         and not is_telegram_suppressed_sport(p.sport)
+        and _is_upcoming_game(getattr(p, "game_time", None))
     ]
     provider_props = [
         *[("Underdog", p) for p in ud_props],
@@ -2397,7 +2399,7 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not provider_props:
         await update.message.reply_text(
             "🎯 <b>Sharp Money Prop Slip</b>\n\n"
-            "No qualifying player props available right now.\n\n"
+            "No current directional player props available right now.\n\n"
             "<i>Season-long futures are excluded from this view.\n"
             "Underdog and PrizePicks props are tracked independently. "
             "Run /picks to check current opportunities.</i>",
@@ -2475,7 +2477,7 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(
             "🎯 <b>Sharp Money Prop Slip</b>\n\n"
             f"Not enough independent picks to build a slip "
-            f"({len(_candidates)} candidate{'s' if len(_candidates) != 1 else ''} "
+            f"({len(_candidates)} directional prop{'s' if len(_candidates) != 1 else ''} "
             f"after correlation filtering).\n\n"
             f"<i>Check back after the next poll cycle.</i>",
             parse_mode=ParseMode.HTML,
@@ -4157,10 +4159,9 @@ async def cmd_player(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     for r in rows[:8]:
         sym   = result_sym.get(r.result, "⏳")
         date  = r.detected_at.strftime("%b %d") if r.detected_at else "?"
-        tier  = _TIER_EMOJI.get(r.decision_tier or "", "⚪")
         av    = f" → <i>{r.actual_value:g}</i>" if r.actual_value is not None else ""
         lines.append(
-            f"{sym} {tier} <b>{r.stat_type}</b> {r.recommendation or ''} "
+            f"{sym} <b>{r.stat_type}</b> {r.recommendation or ''} "
             f"<code>{r.line_value:g}</code>  ·  {r.sport}  ·  {date}{av}"
         )
 

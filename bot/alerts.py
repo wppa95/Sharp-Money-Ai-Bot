@@ -569,7 +569,7 @@ def format_start_message() -> str:
         "<b>What I do:</b>",
         f"  🐶 Monitor Underdog Fantasy and PrizePicks via PropLine",
         f"  📈 Detect line movement across the active sport rotation",
-        f"  🎯 Alert when a qualified OVER or UNDER pick is confirmed",
+        f"  🎯 Alert when a clear OVER or UNDER signal is confirmed",
         f"  🗃️ Collect multi-sport data for grading and model learning",
         "",
         "<b>Alert format:</b>  🎯 ACTIONABLE BET PICK",
