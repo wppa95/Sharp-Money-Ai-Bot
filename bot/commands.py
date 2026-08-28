@@ -1644,6 +1644,16 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 update.effective_user.id if update.effective_user else "?")
     try:
       return await _bounded(_cmd_picks_inner(update, context))
+    except asyncio.TimeoutError:
+        logger.warning(
+            "cmd_picks: report exceeded %.1fs; returning unavailable state",
+            _COMMAND_TIMEOUT_SECONDS,
+        )
+        await update.message.reply_text(
+            "⚠️ Picks are temporarily unavailable because monitoring data is busy. "
+            "Please retry shortly; the scan continues independently.",
+            parse_mode=ParseMode.HTML,
+        )
     except Exception as exc:
         logger.exception("cmd_picks: unhandled error: %s", exc)
         await update.message.reply_text(
@@ -2191,6 +2201,7 @@ def _render_slip_section(
     (new player prop market framework).
     """
     from engine.timing import format_game_time_label as _fmt_gt
+    from engine.downstream_intelligence import compute_sharp_confidence as _sharp_conf
 
     records    = slip_result.legs
     actual     = len(records)
@@ -3025,6 +3036,16 @@ async def cmd_grade(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     try:
       return await _cmd_grade_inner(update, context)
+    except asyncio.TimeoutError:
+        logger.warning(
+            "cmd_grade: report exceeded %.1fs; returning unavailable state",
+            _COMMAND_TIMEOUT_SECONDS,
+        )
+        await update.message.reply_text(
+            "⚠️ Grade data is temporarily unavailable because the database is busy. "
+            "Please retry shortly; monitoring continues.",
+            parse_mode=ParseMode.HTML,
+        )
     except Exception as exc:
         logger.exception("cmd_grade: unexpected error: %s", exc)
         await update.message.reply_text("⚠️ /grade failed. Check bot logs.")

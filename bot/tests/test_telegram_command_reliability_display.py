@@ -567,6 +567,70 @@ async def test_analyst_reports_unavailable_when_recent_picks_read_is_busy():
 
 
 @pytest.mark.asyncio
+async def test_picks_reports_unavailable_when_live_report_exceeds_deadline():
+    update, context = _update_and_context()
+    db = MagicMock()
+    with (
+        patch("commands._check_allowed", return_value=True),
+        patch("commands._db", db),
+        patch("commands._COMMAND_TIMEOUT_SECONDS", 0.01),
+        patch(
+            "commands._cmd_picks_inner",
+            AsyncMock(side_effect=asyncio.sleep(1)),
+        ),
+    ):
+        await asyncio.wait_for(commands.cmd_picks(update, context), timeout=0.2)
+
+    message = update.message.reply_text.await_args.args[0]
+    assert "Picks are temporarily unavailable" in message
+    assert "scan continues independently" in message
+    assert "failed" not in message.lower()
+
+
+@pytest.mark.asyncio
+async def test_grade_reports_unavailable_when_live_report_exceeds_deadline():
+    update, context = _update_and_context()
+    db = MagicMock()
+    with (
+        patch("commands._check_allowed", return_value=True),
+        patch("commands._db", db),
+        patch("commands._COMMAND_TIMEOUT_SECONDS", 0.01),
+        patch(
+            "commands._cmd_grade_inner",
+            AsyncMock(side_effect=asyncio.sleep(1)),
+        ),
+    ):
+        await asyncio.wait_for(commands.cmd_grade(update, context), timeout=0.2)
+
+    message = update.message.reply_text.await_args.args[0]
+    assert "Grade data is temporarily unavailable" in message
+    assert "monitoring continues" in message
+    assert "failed" not in message.lower()
+
+
+@pytest.mark.asyncio
+async def test_slip_section_has_confidence_helper_in_its_own_scope():
+    """The live /slip path must not depend on /picks' local imports."""
+    from commands import _render_slip_section
+
+    leg = SimpleNamespace(
+        confidence=80,
+        pp_line_value=25.5,
+        prev_line=None,
+        game_time=None,
+        player_name="Test Player",
+        sport="NBA",
+        stat_type="Points",
+        best_side="OVER",
+        comp=None,
+    )
+    slip = SimpleNamespace(legs=[leg])
+
+    lines = _render_slip_section(2, slip)
+    assert any("Test Player" in line for line in lines)
+
+
+@pytest.mark.asyncio
 async def test_stats_keeps_fast_metrics_when_one_report_read_times_out():
     update, context = _update_and_context()
     db = MagicMock()
