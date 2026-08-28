@@ -358,6 +358,8 @@ _player_result_fetch_cache: set = set()
 # the next cycle re-fetches fresh data — a safe, cheap reset at ~300 s cadence.
 _PLAYER_RESULT_CACHE_MAX = 5_000
 _prizepicks_cycle_task: Optional[asyncio.Task] = None
+_prizepicks_last_started_at: Optional[float] = None
+_PRIZEPICKS_CYCLE_INTERVAL_SECONDS = 120.0
 _PRIZEPICKS_DEDUP_PREFIX = "PrizePicks::"
 _prizepicks_sport_cursor = 0
 
@@ -1109,6 +1111,35 @@ async def _fetch_and_compute_hit_rates(
 def _prizepicks_dedup_player(player_name: str) -> str:
     """Keep the legacy three-part dedup map provider-scoped."""
     return f"{_PRIZEPICKS_DEDUP_PREFIX}{player_name}"
+
+
+def _start_prizepicks_cycle(context, *, force: bool = False) -> bool:
+    """Start at most one PropLine cycle without adding another scheduler job.
+
+    The Underdog scan can legitimately run longer than its nominal two-minute
+    interval.  The heartbeat calls this helper as a handoff opportunity so
+    PropLine cadence does not inherit that scan duration.  ``force`` is used
+    by the first Underdog trigger to start the initial cycle immediately.
+    """
+    global _prizepicks_cycle_task, _prizepicks_last_started_at
+
+    if _prizepicks_cycle_task is not None and not _prizepicks_cycle_task.done():
+        return False
+
+    now = time.monotonic()
+    if (
+        not force
+        and _prizepicks_last_started_at is not None
+        and now - _prizepicks_last_started_at < _PRIZEPICKS_CYCLE_INTERVAL_SECONDS
+    ):
+        return False
+
+    _prizepicks_last_started_at = now
+    _prizepicks_cycle_task = asyncio.create_task(
+        _run_prizepicks_independent_cycle(context),
+        name="prizepicks_companion_cycle",
+    )
+    return True
 
 
 async def _run_prizepicks_independent_cycle(context) -> None:
@@ -2242,16 +2273,10 @@ async def underdog_job(context) -> None:
         return
     _ud_full_scan_running = True
 
-    # PrizePicks shares this existing full-scan cadence; it is not registered
-    # as another scheduler job.  Run it as a guarded companion task so a slow
-    # or unavailable authorized feed cannot delay Underdog state restoration.
-    if (
-        _prizepicks_cycle_task is None
-        or _prizepicks_cycle_task.done()
-    ):
-        _prizepicks_cycle_task = asyncio.create_task(
-            _run_prizepicks_independent_cycle(context)
-        )
+    # PrizePicks is not registered as another scheduler job.  Start the first
+    # cycle immediately; the existing heartbeat continues the cadence if this
+    # long-running Underdog scan outlives its nominal two-minute interval.
+    _start_prizepicks_cycle(context, force=True)
 
     # ── Evict stale dedup entries ─────────────────────────────────────────────
     # _prop_market_alerted keys are (player, sport, stat_type); values are
