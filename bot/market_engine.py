@@ -110,15 +110,7 @@ async def _broadcast_consensus_alert(
         outcome = "rate_limited"
         counts = {"sent": 0, "failed": 0, "rate_limited": True}
     else:
-        counts = await _broadcast_consensus_alert(
-            db=db,
-            bot=bot,
-            chat_ids=chat_ids,
-            message=message,
-            sport=ineff.sport,
-            alert_kind="INEFFICIENCY",
-            stat_type=ineff.market_type,
-        )
+        counts = await broadcast_alert(bot, chat_ids, message)
         sent = int(counts.get("sent", 0) or 0)
         if sent:
             limiter.record_sent()
@@ -1694,9 +1686,9 @@ async def consensus_check_job(context) -> None:
             bot=bot,
             chat_ids=chat_ids,
             message=message,
-            sport=str(sport),
-            alert_kind="STEAM",
-            stat_type=market_type,
+            sport=ineff.sport,
+            alert_kind="INEFFICIENCY",
+            stat_type=ineff.market_type,
         )
         alert_sent = counts["sent"] > 0
         logger.info(
@@ -1767,7 +1759,15 @@ async def consensus_check_job(context) -> None:
             current_odds    = current_odds,
             sharp_books     = sharp_books,
         )
-        counts = await broadcast_alert(bot, chat_ids, message)
+        counts = await _broadcast_consensus_alert(
+            db=db,
+            bot=bot,
+            chat_ids=chat_ids,
+            message=message,
+            sport=str(sport),
+            alert_kind="STEAM",
+            stat_type=market_type,
+        )
         alert_sent = counts["sent"] > 0
         logger.info(
             "Multi-book steam alert: %s | %s | score=%d → sent=%s",
@@ -2036,23 +2036,33 @@ async def clv_check_job(context) -> None:
                 continue
 
             message = format_clv_opportunity_alert(opp)
-            await broadcast_alert(bot, chat_ids, message)
+            counts = await _broadcast_consensus_alert(
+                db=db,
+                bot=bot,
+                chat_ids=chat_ids,
+                message=message,
+                sport=str(snap.sport),
+                alert_kind="CLV",
+                stat_type=snap.market_type,
+            )
+            alert_sent = counts.get("sent", 0) > 0
             logger.info(
-                "CLV opportunity: %s | %s | %s | lead=%+d",
-                opp.event, opp.selection, opp.sportsbook, opp.clv_lead,
+                "CLV opportunity: %s | %s | %s | lead=%+d → sent=%s",
+                opp.event, opp.selection, opp.sportsbook, opp.clv_lead, alert_sent,
             )
             # Persist dedup marker only when alert was actually sent
-            await db.save_market_snapshot(MarketSnapshotRecord(
-                sportsbook  = snap.sportsbook,
-                sport       = snap.sport,
-                league      = snap.league,
-                event       = snap.event,
-                market_type = snap.market_type,
-                selection   = snap.selection,
-                odds        = snap.odds,
-                recorded_at = now,
-                alert_sent  = True,
-            ))
+            if alert_sent:
+                await db.save_market_snapshot(MarketSnapshotRecord(
+                    sportsbook  = snap.sportsbook,
+                    sport        = snap.sport,
+                    league       = snap.league,
+                    event        = snap.event,
+                    market_type = snap.market_type,
+                    selection    = snap.selection,
+                    odds         = snap.odds,
+                    recorded_at = now,
+                    alert_sent  = True,
+                ))
 
             break  # one alert per market key per cycle
 
