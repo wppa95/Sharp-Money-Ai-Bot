@@ -14,7 +14,7 @@ import pytest
 
 import commands
 import market_engine
-from alerts import format_help_message
+from alerts import broadcast_alert, format_help_message
 from connectors import ConnectorRegistry
 from connectors.underdog import UnderdogConnector
 from engine.dashboard import DashboardReport, DailyTrend, SportPerf
@@ -528,6 +528,34 @@ async def test_stats_keeps_fast_metrics_when_one_report_read_times_out():
     assert "PrizePicks (PropLine): <b>unavailable</b>" in message
     assert "Tracked opportunities: <b>12</b>" in message
     assert "99 Underdog snapshots" in message
+
+
+@pytest.mark.asyncio
+async def test_direct_broadcast_sanitizes_retired_labels_without_losing_pick_context():
+    """Legacy/direct callers cannot leak internal classifications to Telegram."""
+    bot = MagicMock()
+    bot.send_message = AsyncMock()
+    raw = (
+        "🎯 <b>OVER</b> · Player Points 12.5\n"
+        "S-Tier · Tier 1 · WATCHLIST · Near-Miss · PASS · decision_pass\n"
+        "Evidence: 8 games · Quality: 88 · Line moved +0.5 · 2026-08-28 14:00 UTC"
+    )
+
+    result = await broadcast_alert(bot, [123], raw, sport="NFL")
+
+    assert result == {"sent": 1, "failed": 0}
+    delivered = bot.send_message.await_args.kwargs["text"]
+    assert "OVER" in delivered
+    assert "12.5" in delivered
+    assert "Evidence: 8 games" in delivered
+    assert "Quality: 88" in delivered
+    assert "Line moved +0.5" in delivered
+    assert not re.search(
+        r"\b(?:S|A|B|C)[- ]?Tier\b|\bTier[- ]?[12]\b|"
+        r"\bWATCHLIST\b|\bNEAR[- ]MISS\b|\bPASS\b|\bdecision_pass\b",
+        delivered,
+        flags=re.IGNORECASE,
+    )
 
 
 @pytest.mark.asyncio
