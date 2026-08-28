@@ -18,6 +18,7 @@ immediately scannable on a mobile screen.
 from __future__ import annotations
 
 import logging
+import inspect
 import re
 from html import unescape
 from dataclasses import dataclass, field
@@ -31,6 +32,7 @@ from telegram.error import TelegramError
 from config import config
 from engine.delivery_gates import tier_delivery_gate as _canonical_tier_delivery_gate
 from engine.score_validation import clamp_score
+from engine.telegram_rate_limiter import get_rate_limiter
 from models import EVOpportunity, Recommendation, SteamAlert
 
 if TYPE_CHECKING:
@@ -918,6 +920,44 @@ class AlertDelivery:
         self._ev_dedup    = ev_dedup_window    if ev_dedup_window    is not None else config.EV_DEDUP_WINDOW
         self._steam_dedup = steam_dedup_window if steam_dedup_window is not None else config.STEAM_DEDUP_WINDOW
 
+    async def _audit_telegram_attempt(
+        self,
+        *,
+        provider: str,
+        alert_kind: str,
+        delivery_path: str,
+        player_name: Optional[str],
+        sport: Optional[str],
+        stat_type: Optional[str],
+        external_id: Optional[str],
+        line_value: Optional[float],
+        outcome: str,
+        recipients_sent: int,
+        recipients_failed: int,
+    ) -> None:
+        """Best-effort durable accounting; never changes delivery semantics."""
+        method = getattr(self._db, "log_telegram_delivery", None)
+        if method is None:
+            return
+        try:
+            result = method(
+                provider=provider,
+                alert_kind=alert_kind,
+                delivery_path=delivery_path,
+                player_name=player_name,
+                sport=sport,
+                stat_type=stat_type,
+                external_id=external_id,
+                line_value=line_value,
+                outcome=outcome,
+                recipients_sent=recipients_sent,
+                recipients_failed=recipients_failed,
+            )
+            if inspect.isawaitable(result):
+                await result
+        except Exception as exc:
+            logger.warning("Telegram delivery audit write failed: %s", exc)
+
     # ── EV delivery ───────────────────────────────────────────────────────────
 
     async def deliver_ev(self, opp: EVOpportunity) -> DeliveryResult:
@@ -1114,10 +1154,42 @@ class AlertDelivery:
                 )
                 return DeliveryResult(sent=False, filtered=True, filtered_reason=reason)
 
+        # Global limiter is deliberately applied after all source-specific
+        # qualification and caps.  It counts one alert, not one recipient.
+        if self._chat_ids:
+            limiter = get_rate_limiter()
+            limiter.record_qualified()
+            rate = limiter.check(
+                tier_str or "B",
+                float(getattr(score, "total", 0) or 0),
+                float(getattr(score, "total", 0) or 0),
+            )
+            if not rate.allowed:
+                return DeliveryResult(
+                    sent=False,
+                    rate_limited=True,
+                    filtered_reason=rate.reason,
+                )
+
         # 3. Format and send
         message = format_pp_alert(opp)
         counts  = await broadcast_alert(self._bot, self._chat_ids, message)
         alert_sent = counts["sent"] > 0
+        if alert_sent:
+            get_rate_limiter().record_sent()
+        await self._audit_telegram_attempt(
+            provider="PrizePicks",
+            alert_kind="ACTIONABLE_PICK",
+            delivery_path="prizepicks",
+            player_name=getattr(opp.pp_line, "player_name", None),
+            sport=_pp_sport,
+            stat_type=getattr(opp.pp_line, "stat_type", None),
+            external_id=getattr(opp.pp_line, "external_id", None),
+            line_value=getattr(opp.pp_line, "line_value", None),
+            outcome="sent" if alert_sent else "failed",
+            recipients_sent=counts["sent"],
+            recipients_failed=counts["failed"],
+        )
 
         result  = DeliveryResult(
             sent             = alert_sent,
@@ -1276,6 +1348,36 @@ class AlertDelivery:
                 )
 
 
+        # The limiter is shared by Underdog and PrizePicks, so a simultaneous
+        # provider surge cannot bypass protection by taking another path.
+        _actionable = decision is not None and not removed and not market_move_only
+        if self._chat_ids and _actionable:
+            limiter = get_rate_limiter()
+            limiter.record_qualified()
+            _ud_tier = (
+                getattr(decision, "decision_tier", None)
+                or getattr(score, "tier", None)
+                or "B"
+            )
+            _ud_conf = float(getattr(decision, "confidence", 0) or 0)
+            _ud_bq = float(getattr(score, "total", 0) or 0)
+            _meaningful = (
+                new_prop
+                or abs(new_line - old_line) >= 2 * config.MIN_UNDERDOG_LINE_CHANGE
+            )
+            rate = limiter.check(
+                str(_ud_tier),
+                _ud_conf,
+                _ud_bq,
+                is_meaningful_change=_meaningful,
+            )
+            if not rate.allowed:
+                return DeliveryResult(
+                    sent=False,
+                    rate_limited=True,
+                    filtered_reason=rate.reason,
+                )
+
         # 4. Format
         # S-tier gate: Market Quality < 80 or Confidence < 80 → cap decision tier to A.
         # Guards against BQ-only S-tier labels when MQ or confidence doesn't support it.
@@ -1369,6 +1471,25 @@ class AlertDelivery:
         if not removed and not market_move_only:
             discord_sent = await send_discord_alert(message)
         alert_sent = counts["sent"] > 0
+        if alert_sent and _actionable:
+            get_rate_limiter().record_sent()
+        await self._audit_telegram_attempt(
+            provider=source,
+            alert_kind=(
+                "REMOVAL" if removed
+                else "MARKET_MOVE" if market_move_only
+                else "ACTIONABLE_PICK"
+            ),
+            delivery_path="underdog",
+            player_name=player_name,
+            sport=sport,
+            stat_type=stat_type,
+            external_id=None,
+            line_value=new_line,
+            outcome="sent" if alert_sent else "failed",
+            recipients_sent=counts["sent"],
+            recipients_failed=counts["failed"],
+        )
 
         
 
