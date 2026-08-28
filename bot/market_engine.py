@@ -313,6 +313,16 @@ _analysis_engine: Optional[object] = None
 _confirmation_db: Optional[Database] = None
 _propline_provider: Optional[object] = None
 _propline_last_persisted_at: Optional[datetime] = None
+_SPORTSBOOK_CONFIRMATION_BOOKS = frozenset({"draftkings", "fanduel"})
+
+
+def _sportsbook_key(value: object) -> str:
+    return "".join(ch for ch in str(value or "").lower() if ch.isalnum())
+
+
+def _sportsbook_confirmation_enabled() -> bool:
+    """Return the temporary gate for DK/FanDuel confirmation."""
+    return bool(getattr(config, "SPORTSBOOK_CONFIRMATION_ENABLED", False))
 
 
 def init_odds_confirmation(engine: object, db: Optional[Database] = None) -> None:
@@ -763,6 +773,9 @@ async def _get_odds_api_confirmation(
       • any provider/database exception or timeout
     """
     normalized_market = normalize_market(market_type)
+    sportsbook_confirmation_enabled = _sportsbook_confirmation_enabled()
+    if not sportsbook_confirmation_enabled and normalized_market in {"moneyline", "total"}:
+        return None
     pp_available = bool(
         normalized_market == "player_prop"
         and _propline_provider is not None
@@ -774,11 +787,12 @@ async def _get_odds_api_confirmation(
         return None
 
     allowed_books = set()
-    if getattr(config, "DRAFTKINGS_ENABLED", False):
-        allowed_books.add("draftkings")
-    if getattr(config, "FANDUEL_ENABLED", False):
-        allowed_books.add("fanduel")
-    if not allowed_books:
+    if sportsbook_confirmation_enabled:
+        if getattr(config, "DRAFTKINGS_ENABLED", False):
+            allowed_books.add("draftkings")
+        if getattr(config, "FANDUEL_ENABLED", False):
+            allowed_books.add("fanduel")
+    if not allowed_books and not pp_available:
         return None
 
     target = ConfirmationTarget(
@@ -859,6 +873,8 @@ async def _get_odds_api_confirmation(
                 except Exception as _pp_exc:
                     logger.debug("PropLine PrizePicks confirmation skipped: %s", type(_pp_exc).__name__)
 
+            if not sportsbook_confirmation_enabled:
+                return None
             if not getattr(config, "ODDS_API_ENABLED", True):
                 return None
             from engine.analysis import Sport as _Sport

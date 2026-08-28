@@ -212,6 +212,9 @@ class Config:
     DRAFTKINGS_ENABLED: bool = os.environ.get("DRAFTKINGS_ENABLED", "false").lower() == "true"
     FANDUEL_ENABLED:    bool = os.environ.get("FANDUEL_ENABLED",    "false").lower() == "true"
     UNDERDOG_ENABLED:   bool = os.environ.get("UNDERDOG_ENABLED",   "true").lower() == "true"
+    # Temporary safety switch: DK/FD remain configured for future support, but
+    # must not participate in confirmation until this is deliberately enabled.
+    SPORTSBOOK_CONFIRMATION_ENABLED: bool = False
 
     # Polling intervals for multi-platform connectors (seconds)
     CONNECTOR_POLL_INTERVAL:  int = int(os.environ.get("CONNECTOR_POLL_INTERVAL",  "90"))
