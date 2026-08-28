@@ -3347,7 +3347,8 @@ class Database:
                     "(id, player_name, sport, stat_type, game_date, opponent, "
                     "actual_value, source, game_id, fetched_at) "
                     "SELECT id, player_name, sport, stat_type, game_date, opponent, "
-                    "actual_value, source, game_id, fetched_at "
+                    "actual_value, source, game_id, "
+                    "COALESCE(fetched_at, CURRENT_TIMESTAMP) "
                     "FROM player_game_results_legacy"
                 ))
                 await conn.execute(text("DROP TABLE player_game_results_legacy"))
