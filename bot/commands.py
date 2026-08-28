@@ -46,11 +46,54 @@ _STATUS_DB_READ_TIMEOUT_SECONDS = 1.0
 
 
 async def _bounded(coro, timeout: Optional[float] = None):
-    """Keep an optional reporting query from holding a Telegram worker forever."""
-    return await asyncio.wait_for(
-        coro,
-        timeout=_COMMAND_TIMEOUT_SECONDS if timeout is None else timeout,
-    )
+    """Bound a report operation without waiting for slow cancellation cleanup.
+
+    ``asyncio.wait_for(coro)`` waits for the coroutine's cancellation to finish.
+    That is normally harmless, but an aiosqlite worker can take a while to
+    unwind a locked operation.  A Telegram command must be able to return its
+    unavailable/partial response without inheriting that delay.
+    """
+    timeout_value = _COMMAND_TIMEOUT_SECONDS if timeout is None else timeout
+    task = asyncio.ensure_future(coro)
+    done, _pending = await asyncio.wait({task}, timeout=timeout_value)
+    if task in done:
+        return task.result()
+
+    task.cancel()
+
+    def _consume_finished(report_task: asyncio.Future) -> None:
+        if report_task.cancelled():
+            return
+        try:
+            report_task.exception()
+        except Exception:
+            pass
+
+    # Consume a late exception without awaiting slow database cleanup.
+    task.add_done_callback(_consume_finished)
+    raise asyncio.TimeoutError
+
+
+async def _independent_report_reads(
+    reads: list,
+    timeout: Optional[float] = None,
+) -> list:
+    """Run optional report reads together and return unavailable per slow read."""
+    timeout_value = _COMMAND_TIMEOUT_SECONDS if timeout is None else timeout
+    tasks = [asyncio.ensure_future(read) for read in reads]
+    done, _pending = await asyncio.wait(tasks, timeout=timeout_value)
+    values: list = []
+    for task in tasks:
+        if task not in done:
+            task.cancel()
+            values.append(None)
+            continue
+        try:
+            values.append(task.result())
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("report counter unavailable: %s", exc)
+            values.append(None)
+    return values
 
 
 async def _status_db_read(label: str, coro):
@@ -2599,11 +2642,11 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     try:
         from engine.dashboard import DashboardEngine
-        report = await asyncio.wait_for(
+        report = await _bounded(
             DashboardEngine.gather(_db),
             timeout=_DASHBOARD_TIMEOUT_SECONDS,
         )
-        msg    = report.to_telegram()
+        msg = report.to_telegram()
         await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
     except asyncio.TimeoutError:
         logger.warning(
@@ -2612,15 +2655,17 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         )
         await update.message.reply_text(
             f"{EMOJI['warn']} Dashboard is taking too long to load. "
-            "Please try again after the current scan finishes."
+            "Showing live provider activity below; unavailable metrics can be "
+            "retried independently."
         )
-        return
+        # Do not return: provider activity and current tracking data are
+        # independent of the slow aggregate report.
     except Exception as exc:
         logger.exception("cmd_dashboard: DashboardEngine failed: %s", exc)
         await update.message.reply_text(
-            f"{EMOJI['warn']} Dashboard unavailable: {exc}", parse_mode=ParseMode.HTML
+            f"{EMOJI['warn']} Dashboard unavailable; showing live activity.",
+            parse_mode=ParseMode.HTML,
         )
-        return
 
     # ── Player Prop Market section ────────────────────────────────────────────
     try:
@@ -2669,17 +2714,21 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         pm_lines.append("")
         pm_lines.append("<b>📊 Player Prop Activity</b>")
         try:
-            total_ud, ud_history, pp_history = await _bounded(asyncio.gather(
+            total_ud, ud_history, pp_history = await _independent_report_reads([
                 _db.count_underdog_records(),
                 _db.count_prop_line_history(provider="Underdog"),
                 _db.count_prop_line_history(provider="PrizePicks"),
-            ))
+            ])
+            if total_ud is None or ud_history is None:
+                pm_lines.append("  Underdog snapshots/history: <i>unavailable</i>")
+            else:
+                pm_lines.append(
+                    f"  Underdog snapshots:  <code>{total_ud:,}</code> total"
+                    f"  ·  history: <code>{ud_history:,}</code>"
+                )
             pm_lines.append(
-                f"  Underdog snapshots:  <code>{total_ud:,}</code> total"
-                f"  ·  history: <code>{ud_history:,}</code>"
-            )
-            pm_lines.append(
-                f"  PrizePicks (PropLine) history: <code>{pp_history:,}</code>"
+                "  PrizePicks (PropLine) history: "
+                + (f"<code>{pp_history:,}</code>" if pp_history is not None else "<i>unavailable</i>")
             )
         except Exception:
             pm_lines.append("  <i>Prop counts unavailable</i>")
@@ -2688,10 +2737,10 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         pm_lines.append("")
         pm_lines.append("<b>🔔 Recently Tracked Props</b>  <i>(last hour · all sports)</i>")
         try:
-            _recent_by_provider = await _bounded(asyncio.gather(
+            _recent_by_provider = await _independent_report_reads([
                 _db.get_recent_tracked_props("Underdog", since_hours=1, limit=100),
                 _db.get_recent_tracked_props("PrizePicks", since_hours=1, limit=100),
-            ))
+            ])
         except Exception:
             _recent_by_provider = (None, None)
         for (_provider, _icon), recent_props in zip(
@@ -3153,31 +3202,47 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     try:
-        # Gather independent reads concurrently under one command bound.
-        ud_today, pp_today, total_ud, resolved, tracking = await _bounded(
-            asyncio.gather(
-                _db.count_today_actionable_alerts(),
-                _db.count_today_pp_alerts(),
-                _db.count_underdog_records(),
-                _db.get_all_resolved_pp_edges(limit=500),
-                _db.get_tracking_summary(),
-            )
+        # Each metric is optional.  A locked history query must not hide the
+        # provider counts or make the entire Telegram command fail.
+        ud_today, pp_today, total_ud, resolved, tracking = await _independent_report_reads([
+            _db.count_today_actionable_alerts(),
+            _db.count_today_pp_alerts(),
+            _db.count_underdog_records(),
+            _db.get_all_resolved_pp_edges(limit=500),
+            _db.get_tracking_summary(),
+        ])
+        tracked_opportunities = (
+            int(tracking.get("total", 0) or 0)
+            if isinstance(tracking, dict)
+            else None
         )
-        tracked_opportunities = int(tracking.get("total", 0) or 0)
 
         lines: list[str] = [
             f"📈 <b>Pick Stats</b>  ·  Uptime: {_uptime_str()}",
             "",
             "<b>Today's Actionable Picks</b>",
-            f"  Underdog:    <b>{ud_today}</b>",
+            f"  Underdog:    <b>{ud_today if ud_today is not None else 'unavailable'}</b>",
+            f"  PrizePicks (PropLine): <b>{pp_today if pp_today is not None else 'unavailable'}</b>",
             "",
             "<b>Pipeline (last 24 h)</b>",
         ]
 
-        lines.append(f"  Tracked opportunities: <b>{tracked_opportunities:,}</b>")
+        lines.append(
+            "  Tracked opportunities: <b>"
+            + (
+                f"{tracked_opportunities:,}"
+                if tracked_opportunities is not None
+                else "unavailable"
+            )
+            + "</b>"
+        )
 
         lines.append("")
-        lines.append(f"<b>All-time</b>  ({total_ud:,} Underdog snapshots)")
+        lines.append(
+            "<b>All-time</b>  ("
+            + (f"{total_ud:,}" if total_ud is not None else "unavailable")
+            + " Underdog snapshots)"
+        )
 
         if resolved:
             wins   = sum(1 for r in resolved if (r.result or "").upper() == "WIN")
@@ -3189,6 +3254,8 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 f"  Resolved:    <b>{total_res}</b>  W:{wins}  L:{losses}  P:{pushes}",
                 f"  Hit rate:    <code>{hit_rate:.0f}%</code>",
             ]
+        elif resolved is None:
+            lines.append("  <i>Resolved results unavailable right now.</i>")
         else:
             lines.append("  <i>No resolved picks yet — results recorded after games finish.</i>")
 
