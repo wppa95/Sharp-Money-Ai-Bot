@@ -4580,11 +4580,6 @@ async def underdog_job(context) -> None:
             len(_MARKET_FIRST_ALERT), len(_prop_market_alerted),
         )
 
-    # Clear the full-scan concurrency guard so future scheduled instances run full scans.
-    _release_underdog_scan_slot()
-
-    
-
     # Record job outcome — failure if any persistence stage raised.
     if _health:
         if _persistence_ok:
@@ -4616,6 +4611,10 @@ async def underdog_job(context) -> None:
         ),
     )
     _job_activity_end("underdog")
+    # Release only after health, timing, and activity bookkeeping are complete.
+    # The deferred FPR handoff must never overlap this final write/diagnostic
+    # window, even though the main scan work has already finished.
+    _release_underdog_scan_slot()
 
 
 # ── Stable Refresh Job ─────────────────────────────────────────────────────────
@@ -4707,10 +4706,25 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         # This ensures props whose most-recent feed record is a removal are
         # absent from the pool, preventing false rescores and alerts.
         active_pool: dict = await db.get_all_active_underdog_snapshots_by_line()
+        # Underdog has priority over this DB-only companion job.  It may have
+        # claimed the shared slot while this pool read was in flight; stop
+        # before any rescore loop so the two jobs do not contend for SQLite.
+        if _ud_full_scan_running:
+            logger.info("stable_refresh: yielding to Underdog after pool read")
+            if _health:
+                _health.record_job_run("stable_refresh_job")
+            _job_activity_end("stable_refresh")
+            return
         # Keep direct callers with older test/database doubles functional
         # while production always uses the canonical by-line universe.
         if not isinstance(active_pool, dict):
             active_pool = await db.get_active_underdog_snapshot_per_prop()
+            if _ud_full_scan_running:
+                logger.info("stable_refresh: yielding to Underdog after fallback pool read")
+                if _health:
+                    _health.record_job_run("stable_refresh_job")
+                _job_activity_end("stable_refresh")
+                return
         if active_pool and all(len(key) == 2 for key in active_pool):
             active_pool = {
                 (player, stat, float(getattr(snap, "line_value", 0.0) or 0.0)): snap
