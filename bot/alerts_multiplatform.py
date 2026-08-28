@@ -70,27 +70,20 @@ def _bq_stars(bq: int) -> str:
 def _bq_priority_label(bq: int, direction: str = "", sport: str = "") -> str:
     """Priority/actionability label for a given Bet Quality score.
 
-    Classification:
-      80+   → 💪 STRONG BET (OVER) / 💪 STRONG BET (UNDER for Tier 2 MLB/NFL)
-              → ⚠️ note: Tier 1 UNDER uses the separate 🔥 STRONG UNDER standalone label
-      75–79 → 🟢 ACTIONABLE
-      70–74 → 👀 WATCHLIST ONLY
-      <70   → (not shown; would not reach alert formatter)
+    User-facing labels describe the strength of the current pick only.  The
+    internal score tiers are deliberately not exposed in Telegram.
 
-    STRONG UNDER (🔥) is a Tier 1-only standalone label handled in the caller.
-    For Tier 2 (MLB/NFL) UNDER picks, use 💪 STRONG BET to avoid confusion.
+    The historical STRONG UNDER label is intentionally not emitted here; the
+    direction and Bet Quality score already carry that information without
+    creating a second classification vocabulary.
     """
     _tier2_sport = sport.upper() in {"MLB", "NFL"}
     if bq >= 80:
-        # Tier 1 UNDER keeps "💪 STRONG UNDER" inline priority label.
-        # Tier 2 (MLB/NFL) UNDER avoids "STRONG UNDER" — spec reserves that for Tier 1 only.
-        if direction == "UNDER":
-            return "💪 STRONG BET" if _tier2_sport else "💪 STRONG UNDER"
         return "💪 STRONG BET"
     elif bq >= 75:
         return "🟢 ACTIONABLE"
     elif bq >= 70:
-        return "👀 WATCHLIST ONLY"
+        return "🟡 DEVELOPING EDGE"
     return ""
 
 
@@ -330,9 +323,9 @@ def _format_decision_block(
     line: Optional[float] = None,
 ) -> str:
     """
-    Format the full OVER / UNDER / PASS evaluation block for Underdog alerts.
+    Format the full OVER / UNDER evaluation block for Underdog alerts.
 
-    Shows tier, confidence, all per-window hit-rate statistics, and a reason.
+    Shows confidence, all per-window hit-rate statistics, and a reason.
     When *line* is supplied and the recommendation is OVER or UNDER, a
     "📌 Suggested Play: OVER/UNDER X.X" line is added immediately after the
     recommendation so the actionable play is always visible at a glance.
@@ -341,9 +334,11 @@ def _format_decision_block(
     if decision is None:
         return ""
 
-    rec       = getattr(decision, "recommendation", "PASS")
+    rec       = getattr(decision, "recommendation", "") or ""
+    if rec not in ("OVER", "UNDER"):
+        # Non-directional evaluations are internal scan results, not alerts.
+        return ""
     emoji     = getattr(decision, "recommendation_emoji", lambda: "⚪")()
-    tier_disp = getattr(decision, "tier_display",         lambda: "—")()
     conf      = getattr(decision, "confidence_display",   lambda: "—")()
     reason    = getattr(decision, "reason", "")
     avg_disp  = getattr(decision, "avg_vs_line_display",  lambda: "N/A")()
@@ -363,7 +358,7 @@ def _format_decision_block(
     def _a(name):
         return getattr(decision, name, None)
 
-    is_pick = rec != "PASS"
+    is_pick = True
 
     # Suggested Play — shown first so the actionable line is immediately visible.
     play_line = (
@@ -371,7 +366,6 @@ def _format_decision_block(
         if (is_pick and line is not None) else ""
     )
 
-    tier_line = f"\n   {tier_disp}" if is_pick else ""
     # Bet Quality = How strong is the actual recommendation?
     # Kept separate from Market Quality (how reliable is the market data).
     conf_line = (
@@ -400,7 +394,6 @@ def _format_decision_block(
         f"\n\n{_div()}"
         f"\n🎯 <b>Recommendation:</b>  {emoji} {rec}"
         f"{play_line}"
-        f"{tier_line}"
         f"{conf_line}"
         f"{evidence_block}"
         f"{reason_block}"
@@ -453,7 +446,7 @@ def _validate_final_tier(
 
     Parameters
     ----------
-    tier               : Raw tier string from UDBetDecision ("S" | "A" | "B" | "PASS")
+     tier               : Raw internal tier string from UDBetDecision
     conf               : Overall confidence score 0-100
     intelligence_trace : prop_intelligence trace dict (optional)
     """
@@ -733,11 +726,10 @@ def format_underdog_change_alert(
             f"  <i>(total move: {total_move_sign}{new_line - opening_line:.1f})</i>"
         )
 
-    # Grade + movement score vs bet confidence separation
+    # Grade + movement score vs bet confidence separation.
     # V3.4: stars and displayed BQ come from decision.confidence, not score.total.
     grade_str = ""
     if score is not None:
-        tier      = getattr(score, "tier",          "?")
         total     = getattr(score, "total",          0)
         n_hist    = getattr(score, "n_history",      0)
         move_vel  = getattr(score, "move_velocity",  None)  # market movement component
@@ -750,7 +742,7 @@ def format_underdog_change_alert(
             s_disp    = getattr(score, "stars_display", "?" * 5)
             _bq_label = f"{total}/100"
 
-        grade_str = f"\n\n📊 <b>Grade:</b>  <code>{tier}</code>  {s_disp}  <code>{_bq_label}</code>  <i>(n={n_hist})</i>"
+        grade_str = f"\n\n📊 <b>Grade:</b>  {s_disp}  <code>{_bq_label}</code>  <i>(n={n_hist})</i>"
 
         if not removed and move_vel is not None:
             grade_str += (
@@ -802,29 +794,14 @@ def format_underdog_change_alert(
     if rec in ("OVER", "UNDER") and not removed:
         pick_emoji = "🟢" if rec == "OVER" else "🔴"
         pick_line = f"📌 <b>PICK:</b>  {pick_emoji} <b>{rec} {new_line:.1f}</b>"
-        if tier:
-            pick_line += f"   ·   <b>{tier}-Tier</b>"
         if conf is not None:
             _bq_int = int(conf)
             pick_line += f"   ·   Bet Quality <code>{_bq_int}/100</code>  {_bq_stars(_bq_int)}"
             _priority_lbl = _bq_priority_label(_bq_int, direction=rec, sport=sport)
             if _priority_lbl:
                 pick_line += f"   ·   {_priority_lbl}"
-        # STRONG UNDER signal — Tier 1 sports only (not MLB/NFL).
-        # Fires when: UNDER direction + confidence ≥ 30 AND BQ (decision.confidence) ≥ 70.
-        # Does NOT promote the prop to S-tier — tier/actionability still determined by confidence.
-        _is_tier1_sport = sport.upper() not in {"MLB", "NFL"}
-        if (rec == "UNDER"
-                and _is_tier1_sport
-                and conf is not None
-                and int(conf) >= 30
-                and int(conf) >= 70):
-            strong_under_line = "🔥 <b>STRONG UNDER</b>  <i>(BQ ≥ 70 — verify line on Underdog before placing)</i>"
-        elif rec == "UNDER" and conf is not None and int(conf) >= 30:
-            strong_under_line = (
-                "🔴 <b>Strong UNDER Signal</b>"
-                "  <i>(BQ ≥ 30 — verify line on Underdog before placing)</i>"
-            )
+        # The former STRONG UNDER presentation was redundant with the
+        # direction, Bet Quality, and freshness disclaimer already shown.
 
         # Full hit-history breakdown — show every available window on actionable alerts.
         if not removed:
@@ -1043,24 +1020,12 @@ def format_underdog_new_prop_alert(
             f"<code>{getattr(validation, 'rate_summary', lambda: '')()}</code>"
         )
 
-    # Strong UNDER label — Tier 1 sports only (not MLB/NFL).
-    # Fires when: UNDER direction + BQ (decision.confidence) ≥ 70.
-    # Does NOT promote the prop to S-tier — tier/actionability determined by confidence.
+    # The former STRONG UNDER label is intentionally omitted from user output.
     _np_rec = getattr(decision, "recommendation", None) if decision is not None else None
     _np_bq  = getattr(decision, "confidence", None)     if decision is not None else None
     _np_sport_up = (sport or "").upper()
     _np_is_tier1 = _np_sport_up not in {"MLB", "NFL"}
     _np_strong_under = ""
-    if (_np_rec == "UNDER"
-            and _np_is_tier1
-            and _np_bq is not None
-            and int(_np_bq) >= 70):
-        _np_strong_under = "🔥 <b>STRONG UNDER</b>  <i>(BQ ≥ 70 — verify line on Underdog before placing)</i>"
-    elif _np_rec == "UNDER" and _np_bq is not None and int(_np_bq) >= 30:
-        _np_strong_under = (
-            "🔴 <b>Strong UNDER Signal</b>"
-            "  <i>(BQ ≥ 30 — verify line on Underdog before placing)</i>"
-        )
 
     # L5 history block — always shown; falls back to N/A when no history available.
     _np_l5     = getattr(decision, "l5_hit_rate", None) if decision is not None else None
@@ -1076,8 +1041,7 @@ def format_underdog_new_prop_alert(
     if line_value <= low_line_threshold:
         reasons.append(f"• Low starting line ({line_value} ≤ {low_line_threshold})")
     if score is not None and getattr(score, "stars", 0) >= 3:
-        tier = getattr(score, "tier", "?")
-        reasons.append(f"• Score qualifies ({tier}-tier)")
+        reasons.append("• Score qualifies for current market review")
     if validation is not None and getattr(validation, "has_supporting_data", False):
         reasons.append(f"• Supporting history available ({getattr(validation, 'n_history', 0)} snapshots)")
 
@@ -1154,7 +1118,8 @@ def format_underdog_new_prop_cycle_summary(
       immediate (bool), game_time (datetime|None).
 
     Sorted display order: 0.5 lines first → line asc → stars desc.
-    Immediately-alerted props are marked with ⚡; others with a tier badge.
+       Immediately-alerted props are marked with ⚡; other entries show their
+       quality stars without exposing internal classification names.
     """
     if not new_props:
         return ""
@@ -1191,11 +1156,10 @@ def format_underdog_new_prop_cycle_summary(
     for p in shown:
         score  = p.get("score")
         stars  = getattr(score, "stars_display", "·····") if score else "·····"
-        tier   = getattr(score, "tier",          "?")     if score else "?"
         sport  = p.get("sport", "")
         icon   = sport_icon.get(sport, "🎯")
         line   = p.get("line") or 0.0
-        marker = "⚡" if p.get("immediate") else f"<code>{tier}</code>"
+        marker = "⚡" if p.get("immediate") else "•"
         parts.append(
             f"  {marker}  {icon} {p['player']} — {p['stat_type']}"
             f"  @{line}  {stars}"

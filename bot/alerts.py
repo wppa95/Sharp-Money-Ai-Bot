@@ -620,6 +620,10 @@ async def send_alert(
     keyboard: Optional[list[list[InlineKeyboardButton]]] = None,
 ) -> bool:
     """Send a formatted alert message. Returns True on success."""
+    # All live Telegram paths eventually pass through this low-level sender.
+    # Keep internal scoring vocabulary out of user-facing alerts, including
+    # legacy/direct broadcast callers that do not use the current formatters.
+    message = _sanitize_user_alert_message(message)
     markup = InlineKeyboardMarkup(keyboard) if keyboard else None
     try:
         await bot.send_message(
@@ -633,6 +637,23 @@ async def send_alert(
     except TelegramError as exc:
         logger.error("Failed to send alert to %s: %s", chat_id, exc)
         return False
+
+
+def _sanitize_user_alert_message(message: str) -> str:
+    """Remove retired classification labels at the final Telegram boundary.
+
+    This is deliberately narrow: evidence, direction, line movement, quality
+    scores, provider identity, and safety disclaimers are preserved.  Internal
+    tier/recommendation values remain available to the engine and database.
+    """
+    text = str(message or "")
+    text = re.sub(r"\b(?:S|A|B|C)-Tier\b", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bTier[- ]?[12]\b", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bWATCHLIST(?: ONLY)?\b", "DEVELOPING EDGE", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bSTRONG UNDER(?: SIGNAL)?\b", "UNDER SIGNAL", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bdecision_pass\b", "no-direction", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bnot_immediate\b", "not yet actionable", text, flags=re.IGNORECASE)
+    return re.sub(r"[ \t]{2,}", " ", text)
 
 
 async def broadcast_alert(
@@ -650,6 +671,7 @@ async def broadcast_alert(
     before reaching this low-level sender.  This function remains generic for
     other alert types and does not infer prop evidence from message text.
     """
+    message = _sanitize_user_alert_message(message)
     sent = failed = 0
     for cid in chat_ids:
         if await send_alert(bot, cid, message):
