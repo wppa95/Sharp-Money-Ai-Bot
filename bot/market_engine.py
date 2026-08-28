@@ -111,7 +111,7 @@ async def _broadcast_consensus_alert(
         outcome = "rate_limited"
         counts = {"sent": 0, "failed": 0, "rate_limited": True}
     else:
-        counts = await broadcast_alert(bot, chat_ids, message)
+        counts = await broadcast_alert(bot, chat_ids, message, sport=sport)
         sent = int(counts.get("sent", 0) or 0)
         if sent:
             limiter.record_sent()

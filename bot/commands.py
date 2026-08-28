@@ -2153,6 +2153,7 @@ async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     try:
         from alerts_multiplatform import format_underdog_change_alert
+        from alerts import _sanitize_user_alert_message
 
         # MLB strikeouts — Freddy Peralta, line moved 5.0 → 5.5.
         # Uses the same format as live 🎯 ACTIONABLE BET PICK alerts.
@@ -2168,7 +2169,7 @@ async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             decision    = None,
         )
         await update.message.reply_text(
-            msg,
+            _sanitize_user_alert_message(msg),
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True,
         )
