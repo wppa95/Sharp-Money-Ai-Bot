@@ -12,8 +12,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 import commands
+import market_engine
 from alerts import format_help_message
 from engine.dashboard import DashboardReport, DailyTrend, SportPerf
+from providers.base import FailureType, ProviderHealth, ProviderStatus
 
 
 def _update_and_context(args: list[str] | None = None):
@@ -41,6 +43,37 @@ def _mock_status_db() -> MagicMock:
     return db
 
 
+def _health(
+    name: str,
+    status: ProviderStatus = ProviderStatus.OK,
+    failures: int = 0,
+) -> ProviderHealth:
+    return ProviderHealth(
+        name=name,
+        status=status,
+        last_success=None,
+        last_failure=None,
+        consecutive_failures=failures,
+        failure_type=None,
+        quota_remaining=None,
+        quota_used=None,
+    )
+
+
+def _health_monitor(
+    underdog: ProviderHealth | None = None,
+    prizepicks: ProviderHealth | None = None,
+) -> MagicMock:
+    monitor = MagicMock()
+    health_by_provider = {
+        "Underdog": underdog or _health("Underdog"),
+        "PrizePicks": prizepicks or _health("PrizePicks"),
+    }
+    monitor.get_health.side_effect = health_by_provider.__getitem__
+    monitor.get_all_health.return_value = health_by_provider
+    return monitor
+
+
 def test_help_lists_every_registered_command_and_no_unregistered_restarts():
     main_source = (Path(__file__).resolve().parents[1] / "main.py").read_text()
     registered = set(re.findall(r'CommandHandler\("([^"]+)"', main_source))
@@ -66,13 +99,28 @@ def test_every_registered_command_resolves_to_an_async_handler():
 
 
 def test_canonical_provider_roles_are_exact():
-    lines = commands._primary_player_prop_provider_lines()
+    lines = commands._primary_player_prop_provider_lines(_health_monitor())
 
     assert lines == [
         "  🟢 <b>Underdog</b> — Primary Player Props",
         "  🟢 <b>PrizePicks</b> — PropLine — Primary Player Props",
         "  🔴 <b>DraftKings/FanDuel</b> — Disabled",
     ]
+
+
+def test_provider_roles_show_degraded_underdog_and_disabled_prizepicks():
+    monitor = _health_monitor(
+        underdog=_health("Underdog", ProviderStatus.DEGRADED, failures=1),
+        prizepicks=_health("PrizePicks", ProviderStatus.DISABLED),
+    )
+
+    lines = commands._primary_player_prop_provider_lines(monitor)
+    runtime = commands._primary_provider_runtime_lines(monitor)
+
+    assert lines[0] == "  🟡 <b>Underdog</b> — Primary Player Props"
+    assert lines[1] == "  ⚪ <b>PrizePicks</b> — PropLine — Disabled"
+    assert "    🟡 Underdog: degraded" in runtime[1]
+    assert "1 failure" in runtime[1]
 
 
 @pytest.mark.asyncio
@@ -104,6 +152,7 @@ async def test_status_shows_provider_roles_and_separate_history_counts():
         patch("commands._check_allowed", return_value=True),
         patch("commands._db", db),
         patch("commands._season_checker", None),
+        patch("providers.get_health_monitor", return_value=_health_monitor()),
     ):
         await commands.cmd_status(update, context)
 
@@ -133,6 +182,7 @@ async def test_dashboard_activity_section_keeps_provider_counts_separate():
         patch("commands._check_allowed", return_value=True),
         patch("commands._db", db),
         patch("engine.dashboard.DashboardEngine.gather", AsyncMock(return_value=report)),
+        patch("providers.get_health_monitor", return_value=_health_monitor()),
     ):
         await commands.cmd_dashboard(update, context)
 
@@ -142,6 +192,27 @@ async def test_dashboard_activity_section_keeps_provider_counts_separate():
     assert "PrizePicks (PropLine) history: <code>30</code>" in activity
     assert "🐶 <b>Underdog</b>" in activity
     assert "🟣 <b>PrizePicks</b>" in activity
+
+
+@pytest.mark.asyncio
+async def test_providers_command_includes_live_primary_provider_health():
+    update, context = _update_and_context()
+    monitor = _health_monitor(
+        underdog=_health("Underdog", ProviderStatus.DEGRADED, failures=1),
+        prizepicks=_health("PrizePicks", ProviderStatus.OK),
+    )
+
+    with (
+        patch("commands._check_allowed", return_value=True),
+        patch("providers.get_health_monitor", return_value=monitor),
+    ):
+        await commands.cmd_providers(update, context)
+
+    message = update.message.reply_text.await_args.args[0]
+    assert "🟡 <b>Underdog</b> — Primary Player Props" in message
+    assert "🟢 <b>PrizePicks</b> — PropLine — Primary Player Props" in message
+    assert "🟡 Underdog: degraded" in message
+    assert "🟢 PrizePicks: ok" in message
 
 
 def test_dashboard_report_does_not_merge_provider_breakdowns():
@@ -241,3 +312,39 @@ async def test_alert_history_preserves_uppercase_provider_pick_labels():
     message = update.message.reply_text.await_args.args[0]
     assert "<b>UNDERDOG PICK</b>" in message
     assert "<b>PRIZEPICKS PICK</b>" in message
+
+
+@pytest.mark.asyncio
+async def test_prizepicks_companion_cycle_records_success_health():
+    context = SimpleNamespace(bot_data={"db": MagicMock()}, bot=MagicMock())
+    provider = MagicMock()
+    provider.is_available.return_value = True
+    provider.fetch_props_for_sport = AsyncMock(return_value=[])
+    monitor = MagicMock()
+
+    with (
+        patch.object(market_engine, "_propline_provider", provider),
+        patch.object(market_engine, "get_health_monitor", return_value=monitor),
+    ):
+        await market_engine._run_prizepicks_independent_cycle(context)
+
+    monitor.record_success.assert_called_once_with("PrizePicks")
+
+
+@pytest.mark.asyncio
+async def test_prizepicks_companion_cycle_records_failure_health():
+    context = SimpleNamespace(bot_data={"db": MagicMock()}, bot=MagicMock())
+    provider = MagicMock()
+    provider.is_available.return_value = True
+    provider.fetch_props_for_sport = AsyncMock(side_effect=TimeoutError("timed out"))
+    monitor = MagicMock()
+
+    with (
+        patch.object(market_engine, "_propline_provider", provider),
+        patch.object(market_engine, "get_health_monitor", return_value=monitor),
+    ):
+        await market_engine._run_prizepicks_independent_cycle(context)
+
+    monitor.record_failure.assert_called_once_with(
+        "PrizePicks", "timed out", FailureType.TIMEOUT
+    )

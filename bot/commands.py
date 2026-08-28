@@ -43,13 +43,69 @@ _DASHBOARD_TIMEOUT_SECONDS = 20.0
 _PROVIDER_REPORT_TIMEOUT_SECONDS = 5.0
 
 
-def _primary_player_prop_provider_lines() -> list[str]:
-    """Canonical user-facing roles for player-prop market providers."""
+def _primary_player_prop_provider_lines(
+    health_monitor: object | None = None,
+) -> list[str]:
+    """Render configured provider roles with the current health-state icon."""
+    underdog_enabled = bool(config.UNDERDOG_ENABLED)
+    try:
+        from providers.propline import PropLinePrizePicksProvider
+        prizepicks_enabled = PropLinePrizePicksProvider().is_available()
+    except Exception:
+        prizepicks_enabled = False
+
+    provider_icons = {
+        "Underdog": "🟢" if underdog_enabled else "⚪",
+        "PrizePicks": "🟢" if prizepicks_enabled else "⚪",
+    }
+    if health_monitor is not None and hasattr(health_monitor, "get_health"):
+        for provider in ("Underdog", "PrizePicks"):
+            try:
+                health = health_monitor.get_health(provider)
+                provider_icons[provider] = health.status_emoji
+                if health.status.value == "disabled":
+                    if provider == "Underdog":
+                        underdog_enabled = False
+                    else:
+                        prizepicks_enabled = False
+            except Exception:
+                pass
+
     return [
-        "  🟢 <b>Underdog</b> — Primary Player Props",
-        "  🟢 <b>PrizePicks</b> — PropLine — Primary Player Props",
+        (
+            f"  {provider_icons['Underdog']} <b>Underdog</b> — "
+            + ("Primary Player Props" if underdog_enabled else "Disabled")
+        ),
+        (
+            f"  {provider_icons['PrizePicks']} <b>PrizePicks</b> — PropLine — "
+            + ("Primary Player Props" if prizepicks_enabled else "Disabled")
+        ),
         "  🔴 <b>DraftKings/FanDuel</b> — Disabled",
     ]
+
+
+def _primary_provider_runtime_lines(health_monitor: object | None) -> list[str]:
+    """Render live fetch health separately from each provider's configured role."""
+    lines = ["  <i>Live fetch health</i>"]
+    if health_monitor is None or not hasattr(health_monitor, "get_health"):
+        return lines + ["    ⚪ Runtime health unavailable"]
+    for provider in ("Underdog", "PrizePicks"):
+        try:
+            health = health_monitor.get_health(provider)
+            last_ok = health.format_last_success()
+            failure_note = (
+                f" · {health.consecutive_failures} "
+                f"failure{'s' if health.consecutive_failures != 1 else ''}"
+                if health.consecutive_failures
+                else ""
+            )
+            lines.append(
+                f"    {health.status_emoji} {provider}: "
+                f"{health.status.value} · last ✓: {last_ok}{failure_note}"
+            )
+        except Exception:
+            lines.append(f"    ⚪ {provider}: health unavailable")
+    return lines
 
 # ── Module-level references (set by main.py on startup) ───────────────────────
 _db: Optional[Database] = None
@@ -645,7 +701,8 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
         # ── Market provider health (live prop lines) ──────────────────────────────
         lines.append("📡 <b>Market Providers</b>")
-        lines.extend(_primary_player_prop_provider_lines())
+        lines.extend(_primary_player_prop_provider_lines(_mon))
+        lines.extend(_primary_provider_runtime_lines(_mon))
         if _mon:
             for name, h in _mon.get_all_health().items():
                 # Primary provider roles are rendered above. Keep any independent
@@ -2456,7 +2513,13 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         # ── Provider status ───────────────────────────────────────────────────
         # Market providers (live prop lines)
         pm_lines.append("<b>📡 Market Providers</b>")
-        pm_lines.extend(_primary_player_prop_provider_lines())
+        try:
+            from providers import get_health_monitor
+            _dashboard_mon = get_health_monitor()
+        except Exception:
+            _dashboard_mon = None
+        pm_lines.extend(_primary_player_prop_provider_lines(_dashboard_mon))
+        pm_lines.extend(_primary_provider_runtime_lines(_dashboard_mon))
         pm_lines.append("")
 
         # Stat providers (historical enrichment for hit-rate pipeline)
@@ -2899,12 +2962,18 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     try:
         import os
         pandascore_key = bool(os.environ.get("PANDASCORE_API_KEY", "").strip())
+        try:
+            from providers import get_health_monitor
+            _mon = get_health_monitor()
+        except Exception:
+            _mon = None
 
         lines: list[str] = [
             "🔌 <b>Provider Status</b>",
             "",
             "<b>Player Prop Market Providers</b>",
-            *_primary_player_prop_provider_lines(),
+            *_primary_player_prop_provider_lines(_mon),
+            *_primary_provider_runtime_lines(_mon),
             "",
             "<b>Historical Enrichment by Sport</b>",
         ]

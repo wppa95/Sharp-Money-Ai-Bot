@@ -263,13 +263,21 @@ async def post_init(application: Application) -> None:
 
     # ── Provider health monitor + shared Odds API cache ──────────────────────
     _health_monitor = init_health_monitor()
-    # PrizePicks provider is temporarily disabled — not registered so it never
-    # shows as a failed provider in /status or logs.
+    # PrizePicks runs through the authorized PropLine companion cycle launched
+    # by underdog_job.  Register it here so command reports show real fetch
+    # health instead of treating the provider role as a health signal.
+    from providers.propline import PropLinePrizePicksProvider
+    _propline_enabled = PropLinePrizePicksProvider().is_available()
+    _health_monitor.register("PrizePicks", disabled=not _propline_enabled)
     # OddsAPI is registered so quota headers (x-requests-remaining/used) recorded
     # by OddsApiCache._fetch() appear in /status and health logs.
     _health_monitor.register("OddsAPI")
-    _health_monitor.register("Underdog")
-    logger.info("Provider health monitor initialised (OddsAPI + Underdog)")
+    _health_monitor.register("Underdog", disabled=not config.UNDERDOG_ENABLED)
+    logger.info(
+        "Provider health monitor initialised "
+        "(OddsAPI + Underdog + PrizePicks/PropLine=%s)",
+        "enabled" if _propline_enabled else "disabled",
+    )
     if config.discord_configured:
         logger.info(
             "Discord delivery configured (guild=%s, channel=%s)",
@@ -360,7 +368,8 @@ async def post_init(application: Application) -> None:
             name="player_props_fetcher",
         )
         jq.run_repeating(_pregame_watch_job,   interval=config.PREGAME_SCAN_INTERVAL,    first=30,  name="pregame_watcher")
-        # _prizepicks_job disabled — PrizePicks provider temporarily off
+        # Legacy _prizepicks_job remains disabled.  The authorized PropLine
+        # PrizePicks cycle runs as a guarded companion task inside underdog_job.
         # jq.run_repeating(connector_poll_job,  interval=config.CONNECTOR_POLL_INTERVAL,   first=20,  name="connector_poller")
         # jq.run_repeating(consensus_check_job, interval=config.CONSENSUS_CHECK_INTERVAL,  first=25,  name="consensus_checker")
         # jq.run_repeating(clv_check_job,       interval=config.CLV_CHECK_INTERVAL,        first=35,  name="clv_checker")
@@ -432,10 +441,11 @@ async def post_init(application: Application) -> None:
         logger.info(
             "Jobs scheduled — underdog: every %ds, stable_refresh: every 120s, "
             "pregame: every %ds, season_check: every %ds, heartbeat: every 60s "
-            "[player_props_fetcher disabled — PP pipeline off]",
+            "[PrizePicks/PropLine companion cycle enabled=%s; DK/FD delivery disabled]",
             config.UNDERDOG_POLL_INTERVAL,
             config.PREGAME_SCAN_INTERVAL,
             config.SEASON_CHECK_INTERVAL,
+            _propline_enabled,
         )
     else:
         logger.warning("JobQueue not available — background jobs disabled.")

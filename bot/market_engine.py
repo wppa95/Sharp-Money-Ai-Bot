@@ -52,6 +52,7 @@ from engine.player_prop_market import (
 )
 from engine.score_validation import clamp_score
 from engine.telegram_rate_limiter import get_rate_limiter
+from providers import FailureType, get_health_monitor
 from engine.delivery_gates import (
     TIER2_SPORTS as _CANONICAL_TIER2_SPORTS,
     is_tier2_sport as _canonical_is_tier2_sport,
@@ -1120,6 +1121,7 @@ async def _run_prizepicks_independent_cycle(context) -> None:
     """
     db = context.bot_data.get("db")
     bot = getattr(context, "bot", None)
+    provider_health = get_health_monitor()
     if db is None or bot is None or _propline_provider is None:
         return
     if not getattr(_propline_provider, "is_available", lambda: False)():
@@ -1151,8 +1153,17 @@ async def _run_prizepicks_independent_cycle(context) -> None:
             # implement the provider-wide fetch method.
             props = await _propline_provider.fetch_props()
     except Exception as exc:  # noqa: BLE001
+        if provider_health is not None:
+            failure_type = (
+                FailureType.TIMEOUT
+                if isinstance(exc, (asyncio.TimeoutError, TimeoutError))
+                else FailureType.HTTP_ERROR
+            )
+            provider_health.record_failure("PrizePicks", str(exc), failure_type)
         logger.warning("prizepicks_cycle: authorized feed failed: %s", type(exc).__name__)
         return
+    if provider_health is not None:
+        provider_health.record_success("PrizePicks")
     if not props:
         logger.debug("prizepicks_cycle: no normalized PrizePicks props for %s", sport)
         return
