@@ -570,14 +570,15 @@ async def test_analyst_reports_unavailable_when_recent_picks_read_is_busy():
 async def test_picks_reports_unavailable_when_live_report_exceeds_deadline():
     update, context = _update_and_context()
     db = MagicMock()
+
+    async def slow_picks(*args, **kwargs):
+        await asyncio.sleep(1)
+
     with (
         patch("commands._check_allowed", return_value=True),
         patch("commands._db", db),
         patch("commands._COMMAND_TIMEOUT_SECONDS", 0.01),
-        patch(
-            "commands._cmd_picks_inner",
-            AsyncMock(side_effect=asyncio.sleep(1)),
-        ),
+        patch("commands._cmd_picks_inner", AsyncMock(side_effect=slow_picks)),
     ):
         await asyncio.wait_for(commands.cmd_picks(update, context), timeout=0.2)
 
@@ -591,14 +592,15 @@ async def test_picks_reports_unavailable_when_live_report_exceeds_deadline():
 async def test_grade_reports_unavailable_when_live_report_exceeds_deadline():
     update, context = _update_and_context()
     db = MagicMock()
+
+    async def slow_grade(*args, **kwargs):
+        await asyncio.sleep(1)
+
     with (
         patch("commands._check_allowed", return_value=True),
         patch("commands._db", db),
         patch("commands._COMMAND_TIMEOUT_SECONDS", 0.01),
-        patch(
-            "commands._cmd_grade_inner",
-            AsyncMock(side_effect=asyncio.sleep(1)),
-        ),
+        patch("commands._cmd_grade_inner", AsyncMock(side_effect=slow_grade)),
     ):
         await asyncio.wait_for(commands.cmd_grade(update, context), timeout=0.2)
 
@@ -624,7 +626,7 @@ async def test_slip_section_has_confidence_helper_in_its_own_scope():
         best_side="OVER",
         comp=None,
     )
-    slip = SimpleNamespace(legs=[leg])
+    slip = SimpleNamespace(legs=[leg], correlation_warnings=[], excluded=[])
 
     lines = _render_slip_section(2, slip)
     assert any("Test Player" in line for line in lines)
