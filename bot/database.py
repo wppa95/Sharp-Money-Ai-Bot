@@ -1406,6 +1406,280 @@ class Database:
             )
             return result.scalar() or 0
 
+    async def log_telegram_delivery(
+        self,
+        *,
+        provider: str,
+        alert_kind: str = "ACTIONABLE_PICK",
+        delivery_path: str = "unknown",
+        player_name: Optional[str] = None,
+        sport: Optional[str] = None,
+        stat_type: Optional[str] = None,
+        external_id: Optional[str] = None,
+        line_value: Optional[float] = None,
+        outcome: str,
+        recipients_sent: int = 0,
+        recipients_failed: int = 0,
+        attempted_at: Optional[datetime] = None,
+    ) -> None:
+        """Persist one outbound Telegram attempt without affecting delivery."""
+        async with self.session() as s:
+            s.add(TelegramDeliveryAudit(
+                provider=str(provider or "Unknown"),
+                alert_kind=str(alert_kind or "ACTIONABLE_PICK"),
+                delivery_path=str(delivery_path or "unknown"),
+                player_name=player_name,
+                sport=sport,
+                stat_type=stat_type,
+                external_id=external_id,
+                line_value=line_value,
+                outcome=str(outcome or "failed"),
+                recipients_sent=int(recipients_sent or 0),
+                recipients_failed=int(recipients_failed or 0),
+                attempted_at=attempted_at or datetime.utcnow(),
+            ))
+            await s.commit()
+
+    async def get_telegram_reconciliation(
+        self,
+        since_hours: int = 72,
+        bucket_minutes: int = 60,
+    ) -> dict:
+        """Reconcile source volume with persisted and delivered alert volume.
+
+        Legacy rows are intentionally reported separately from the durable
+        audit ledger.  This prevents a candidate/evaluation count or a
+        recipient fan-out count from being presented as Telegram messages.
+        """
+        from datetime import timedelta
+
+        since_hours = max(1, int(since_hours))
+        bucket_minutes = max(5, min(1440, int(bucket_minutes)))
+        cutoff = datetime.utcnow() - timedelta(hours=since_hours)
+        bucket_seconds = bucket_minutes * 60
+
+        def _blank() -> dict:
+            return {
+                "observed": 0,
+                "evaluated": 0,
+                "actionable_persisted": 0,
+                "delivery_attempts": 0,
+                "delivered_alerts": 0,
+                "delivered_recipients": 0,
+                "failed_attempts": 0,
+                "rate_limited": 0,
+                "dedup_suppressed": 0,
+            }
+
+        by_provider: dict[str, dict] = {}
+        buckets: dict[tuple[str, str], dict] = {}
+
+        def _provider(name: Optional[str]) -> str:
+            return str(name or "Unknown").strip() or "Unknown"
+
+        def _ensure(name: str) -> dict:
+            return by_provider.setdefault(name, _blank())
+
+        def _bucket(dt: Optional[datetime]) -> Optional[str]:
+            if dt is None:
+                return None
+            try:
+                epoch = int(dt.replace(tzinfo=None).timestamp())
+                start = datetime.utcfromtimestamp(epoch - (epoch % bucket_seconds))
+                return start.strftime("%Y-%m-%d %H:%M:%S")
+            except (AttributeError, TypeError, ValueError, OSError):
+                return None
+
+        def _add_bucket(
+            provider: str,
+            dt: Optional[datetime],
+            *,
+            evaluated: int = 0,
+            actionable_persisted: int = 0,
+            delivery_attempts: int = 0,
+            delivered_alerts: int = 0,
+            delivered_recipients: int = 0,
+        ) -> None:
+            label = _bucket(dt)
+            if label is None:
+                return
+            row = buckets.setdefault((label, provider), _blank())
+            row["evaluated"] += evaluated
+            row["actionable_persisted"] += actionable_persisted
+            row["delivery_attempts"] += delivery_attempts
+            row["delivered_alerts"] += delivered_alerts
+            row["delivered_recipients"] += delivered_recipients
+
+        async with self.session() as s:
+            # Raw observations are source volume, not alert volume.
+            for model, timestamp_column, provider_name in (
+                (UnderdogSnapshotRecord, UnderdogSnapshotRecord.fetched_at, "Underdog"),
+                (PrizePicksRecord, PrizePicksRecord.fetched_at, "PrizePicks"),
+            ):
+                try:
+                    n = await s.execute(
+                        select(func.count()).select_from(model).where(timestamp_column >= cutoff)
+                    )
+                    _ensure(provider_name)["observed"] += int(n.scalar() or 0)
+                except Exception as exc:
+                    logger.debug("telegram reconciliation observation query skipped: %s", exc)
+
+            # Candidate rows are the broad evaluation stream.
+            try:
+                candidate_rows = await s.execute(
+                    select(PropCandidateLog.provider, func.count(PropCandidateLog.id))
+                    .where(PropCandidateLog.scan_ts >= cutoff)
+                    .group_by(PropCandidateLog.provider)
+                )
+                for provider_name, count in candidate_rows.all():
+                    _ensure(_provider(provider_name))["evaluated"] += int(count or 0)
+            except Exception as exc:
+                logger.debug("telegram reconciliation candidate query skipped: %s", exc)
+
+            # Canonical Underdog/PrizePicks opportunity rows.
+            pol_rows = await s.execute(
+                select(
+                    PropOpportunityLog.provider,
+                    PropOpportunityLog.detected_at,
+                    PropOpportunityLog.recommendation,
+                    PropOpportunityLog.alert_sent,
+                    PropOpportunityLog.alert_sent_at,
+                ).where(
+                    or_(
+                        PropOpportunityLog.detected_at >= cutoff,
+                        PropOpportunityLog.alert_sent_at >= cutoff,
+                    )
+                )
+            )
+            for provider_name, detected_at, recommendation, alert_sent, alert_sent_at in pol_rows.all():
+                provider = _provider(provider_name or "Underdog")
+                row = _ensure(provider)
+                if detected_at is not None and detected_at >= cutoff:
+                    if str(recommendation or "").upper() in {"OVER", "UNDER"}:
+                        row["actionable_persisted"] += 1
+                    _add_bucket(
+                        provider,
+                        detected_at,
+                        evaluated=1,
+                        actionable_persisted=(
+                            1 if str(recommendation or "").upper() in {"OVER", "UNDER"} else 0
+                        ),
+                    )
+                if alert_sent and alert_sent_at is not None and alert_sent_at >= cutoff:
+                    row["delivered_alerts"] += 1
+                    _add_bucket(provider, alert_sent_at, delivered_alerts=1)
+
+            # Legacy independent PrizePicks edge rows.
+            pp_rows = await s.execute(
+                select(
+                    PPEdgeRecord.detected_at,
+                    PPEdgeRecord.alert_sent,
+                ).where(PPEdgeRecord.detected_at >= cutoff)
+            )
+            for detected_at, alert_sent in pp_rows.all():
+                row = _ensure("PrizePicks")
+                row["actionable_persisted"] += 1
+                if alert_sent:
+                    row["delivered_alerts"] += 1
+                _add_bucket(
+                    "PrizePicks",
+                    detected_at,
+                    actionable_persisted=1,
+                    delivered_alerts=1 if alert_sent else 0,
+                )
+
+            audit_rows = await s.execute(
+                select(
+                    TelegramDeliveryAudit.provider,
+                    TelegramDeliveryAudit.delivery_path,
+                    TelegramDeliveryAudit.player_name,
+                    TelegramDeliveryAudit.sport,
+                    TelegramDeliveryAudit.stat_type,
+                    TelegramDeliveryAudit.external_id,
+                    TelegramDeliveryAudit.line_value,
+                    TelegramDeliveryAudit.outcome,
+                    TelegramDeliveryAudit.recipients_sent,
+                    TelegramDeliveryAudit.recipients_failed,
+                    TelegramDeliveryAudit.attempted_at,
+                ).where(TelegramDeliveryAudit.attempted_at >= cutoff)
+            )
+            audit_identity_counts: dict[tuple, int] = {}
+            audit_count = 0
+            for (
+                provider_name, delivery_path, player_name, sport, stat_type,
+                external_id, line_value, outcome, recipients_sent,
+                recipients_failed, attempted_at,
+            ) in audit_rows.all():
+                provider = _provider(provider_name)
+                row = _ensure(provider)
+                outcome = str(outcome or "failed").lower()
+                row["delivery_attempts"] += 1
+                row["delivered_recipients"] += int(recipients_sent or 0)
+                if outcome == "sent":
+                    row["delivered_alerts"] += 1
+                elif outcome == "rate_limited":
+                    row["rate_limited"] += 1
+                elif outcome == "deduped":
+                    row["dedup_suppressed"] += 1
+                else:
+                    row["failed_attempts"] += 1
+                _add_bucket(
+                    provider,
+                    attempted_at,
+                    delivery_attempts=1,
+                    delivered_alerts=1 if outcome == "sent" else 0,
+                    delivered_recipients=int(recipients_sent or 0),
+                )
+                audit_count += 1
+                identity = (
+                    provider, delivery_path, player_name, sport, stat_type,
+                    external_id, line_value,
+                )
+                audit_identity_counts[identity] = audit_identity_counts.get(identity, 0) + 1
+
+        duplicate_delivery_events = sum(
+            max(0, count - 1) for count in audit_identity_counts.values()
+        )
+        legacy_delivery_rows = sum(
+            row["delivered_alerts"] for row in by_provider.values()
+        ) - sum(
+            row["delivered_alerts"] for row in by_provider.values()
+            if False
+        )
+        # The ledger count is the only exact outbound-message count.  The
+        # separate field makes the legacy limitation explicit to /reconcile.
+        audited_deliveries = sum(
+            row["delivered_alerts"] for row in by_provider.values()
+        )
+        legacy_deliveries = sum(
+            row["delivered_alerts"] for row in by_provider.values()
+        ) - audited_deliveries
+
+        return {
+            "since_hours": since_hours,
+            "bucket_minutes": bucket_minutes,
+            "window_start": cutoff,
+            "by_provider": by_provider,
+            "time_buckets": [
+                {
+                    "bucket": bucket,
+                    "provider": provider,
+                    **values,
+                }
+                for (bucket, provider), values in sorted(buckets.items())
+            ],
+            "audit_rows": audit_count,
+            "audited_deliveries": audited_deliveries,
+            "legacy_delivery_rows": legacy_deliveries,
+            "duplicate_delivery_events": duplicate_delivery_events,
+            "exact_recipient_count_available": audit_count > 0,
+            "accounting_note": (
+                "Legacy alert_sent rows prove a successful send attempt but do not "
+                "store Telegram message IDs, recipients, or retries. Exact outbound "
+                "message and fan-out counts are available only for audit rows."
+            ),
+        }
+
     async def get_resolved_actionable_picks(self, limit: int = 200) -> list:
         """
         Actionable picks (alert_sent=True) that have been graded (result ≠ PENDING).
