@@ -2616,13 +2616,15 @@ async def cmd_reconcile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             "Delivered  Recipients</code>",
         ]
         for provider, row in sorted(report.get("by_provider", {}).items()):
+            delivered = row.get("audit_delivered_alerts", 0) or row.get("delivered_alerts", 0)
+            recipients = row.get("audit_recipients", 0) or row.get("delivered_recipients", 0)
             lines.append(
                 f"<code>{_html.escape(provider[:13]):<13} "
                 f"{row.get('observed', 0):>8,} "
                 f"{row.get('evaluated', 0):>10,} "
                 f"{row.get('actionable_persisted', 0):>10,} "
-                f"{row.get('delivered_alerts', 0):>9,} "
-                f"{row.get('delivered_recipients', 0):>10,}</code>"
+                f"{delivered:>9,} "
+                f"{recipients:>10,}</code>"
             )
 
         lines += [
@@ -2649,11 +2651,19 @@ async def cmd_reconcile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 "<code>UTC bucket          Provider       Alerts  Recipients</code>",
             ]
             for bucket in buckets[-24:]:
+                bucket_alerts = (
+                    bucket.get("audit_delivered_alerts", 0)
+                    or bucket.get("delivered_alerts", 0)
+                )
+                bucket_recipients = (
+                    bucket.get("audit_recipients", 0)
+                    or bucket.get("delivered_recipients", 0)
+                )
                 lines.append(
                     f"<code>{bucket['bucket'][:16]:<18} "
                     f"{_html.escape(bucket['provider'][:13]):<13} "
-                    f"{bucket.get('delivered_alerts', 0):>6,} "
-                    f"{bucket.get('delivered_recipients', 0):>10,}</code>"
+                    f"{bucket_alerts:>6,} "
+                    f"{bucket_recipients:>10,}</code>"
                 )
 
         lines += [
