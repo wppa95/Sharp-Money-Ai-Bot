@@ -1232,6 +1232,9 @@ async def cmd_performance(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if not _check_allowed(update):
         await update.message.reply_text("⛔ Unauthorized.")
         return
+    if _db is None:
+        await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
+        return
 
     await update.message.reply_text("⏳ Loading performance…")
     try:
@@ -1313,6 +1316,9 @@ async def cmd_backtest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     """/backtest [limit] — Run a full backtest on the last N resolved alerts."""
     if not _check_allowed(update):
         await update.message.reply_text("⛔ Unauthorized.")
+        return
+    if _db is None:
+        await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
         return
 
     # Optional limit argument

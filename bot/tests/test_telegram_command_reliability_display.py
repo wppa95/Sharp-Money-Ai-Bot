@@ -146,6 +146,22 @@ async def test_dashboard_times_out_without_holding_command_worker():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("handler_name", ["cmd_performance", "cmd_backtest"])
+async def test_slow_history_commands_report_database_not_ready(handler_name):
+    update, context = _update_and_context()
+
+    with (
+        patch("commands._check_allowed", return_value=True),
+        patch("commands._db", None),
+    ):
+        await getattr(commands, handler_name)(update, context)
+
+    messages = [call.args[0] for call in update.message.reply_text.await_args_list]
+    assert messages == ["⚠️ Database not ready."]
+    assert "NoneType" not in messages[0]
+
+
+@pytest.mark.asyncio
 async def test_status_shows_provider_roles_and_separate_history_counts():
     update, context = _update_and_context()
     db = _mock_status_db()
