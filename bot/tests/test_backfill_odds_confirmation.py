@@ -136,6 +136,12 @@ class TestUdToOddsApiMarketMapping:
 class TestGetOddsApiConfirmation:
     """Tests for _get_odds_api_confirmation()."""
 
+    @pytest.fixture(autouse=True)
+    def enable_legacy_sportsbook_confirmation(self, monkeypatch):
+        """Exercise the preserved DK/FD path as an explicit future opt-in."""
+        import config
+        monkeypatch.setattr(config.config, "SPORTSBOOK_CONFIRMATION_ENABLED", True)
+
     @pytest.mark.asyncio
     async def test_returns_none_when_engine_not_set(self):
         from market_engine import _get_odds_api_confirmation

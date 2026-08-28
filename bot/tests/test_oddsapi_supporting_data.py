@@ -121,6 +121,15 @@ def _run(coro):
 class TestConfirmationResultShape(unittest.TestCase):
     """Confirmation result must include avg_odds for CLV seeding support."""
 
+    def setUp(self):
+        import config
+        self._confirmation_enabled = config.config.SPORTSBOOK_CONFIRMATION_ENABLED
+        config.config.SPORTSBOOK_CONFIRMATION_ENABLED = True
+
+    def tearDown(self):
+        import config
+        config.config.SPORTSBOOK_CONFIRMATION_ENABLED = self._confirmation_enabled
+
     def _make_engine_mock(self, lines):
         engine = MagicMock()
         engine.fetch_player_prop_lines = AsyncMock(return_value=lines)
@@ -278,6 +287,15 @@ class TestTierGate(unittest.TestCase):
 
 class TestStrongUnderSupport(unittest.TestCase):
     """Strong UNDER candidates at S/A tier must be included in OddsAPI lookups."""
+
+    def setUp(self):
+        import config
+        self._confirmation_enabled = config.config.SPORTSBOOK_CONFIRMATION_ENABLED
+        config.config.SPORTSBOOK_CONFIRMATION_ENABLED = True
+
+    def tearDown(self):
+        import config
+        config.config.SPORTSBOOK_CONFIRMATION_ENABLED = self._confirmation_enabled
 
     def test_strong_under_s_tier_included(self):
         """S-tier UNDER candidate passes gate — spec section 4."""
@@ -553,6 +571,15 @@ class TestStandingPathGate(unittest.TestCase):
 class TestCLVSeedingSupport(unittest.TestCase):
     """avg_odds in the confirmation result enables AlertCLVSeed.bet_odds population."""
 
+    def setUp(self):
+        import config
+        self._confirmation_enabled = config.config.SPORTSBOOK_CONFIRMATION_ENABLED
+        config.config.SPORTSBOOK_CONFIRMATION_ENABLED = True
+
+    def tearDown(self):
+        import config
+        config.config.SPORTSBOOK_CONFIRMATION_ENABLED = self._confirmation_enabled
+
     def test_avg_odds_is_integer_or_none(self):
         """avg_odds must be int (rounded) or None — AlertCLVSeed.bet_odds is Integer."""
         import market_engine as me
@@ -713,6 +740,15 @@ class TestOddsPollingEnabled(unittest.TestCase):
 
 class TestSurnameFuzzyMatch(unittest.TestCase):
     """Player name matching must accept surname-only matches."""
+
+    def setUp(self):
+        import config
+        self._confirmation_enabled = config.config.SPORTSBOOK_CONFIRMATION_ENABLED
+        config.config.SPORTSBOOK_CONFIRMATION_ENABLED = True
+
+    def tearDown(self):
+        import config
+        config.config.SPORTSBOOK_CONFIRMATION_ENABLED = self._confirmation_enabled
 
     def test_surname_match_works(self):
         """'Caminero' should match 'Junior Caminero' via surname suffix."""

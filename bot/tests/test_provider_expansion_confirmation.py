@@ -11,6 +11,13 @@ import pytest
 
 sys.path.insert(0, ".")
 
+
+@pytest.fixture(autouse=True)
+def enable_legacy_sportsbook_confirmation(monkeypatch):
+    """Keep the reusable confirmation implementation covered behind opt-in."""
+    import config
+    monkeypatch.setattr(config.config, "SPORTSBOOK_CONFIRMATION_ENABLED", True)
+
 from connectors.underdog import UnderdogConnector
 from engine.provider_confirmation import (
     ConfirmationObservation,
