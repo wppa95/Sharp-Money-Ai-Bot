@@ -11,6 +11,8 @@ from sqlalchemy import select
 from alerts_multiplatform import format_underdog_change_alert
 from commands import PropPickAdapter
 from database import Database, PropOpportunityLog
+import market_engine
+from engine.player_results import compute_hit_rates
 
 
 @pytest.fixture()
@@ -39,6 +41,96 @@ def _opportunity(provider: str) -> dict:
 
 
 class TestIndependentPrizePicks:
+    async def test_cycle_accepts_persisted_history_with_removed_field(self, monkeypatch):
+        prop = SimpleNamespace(
+            provider="PrizePicks",
+            player_name="Cade Cunningham",
+            team="DET",
+            sport="NBA",
+            stat_type="Points",
+            line_value=10.5,
+            game_time=None,
+            external_id="pp-cade-points",
+            event_id="event-1",
+        )
+        now = datetime.utcnow()
+        history_rows = [
+            SimpleNamespace(
+                line_value=9.5,
+                prev_line=9.0,
+                change_count=1,
+                removed=False,
+                fetched_at=now,
+            )
+            for _ in range(30)
+        ]
+        results = [
+            SimpleNamespace(
+                player_name=prop.player_name,
+                stat_type=prop.stat_type,
+                actual_value=12.0,
+                game_date=(now.date()).isoformat(),
+                opponent="TEST",
+            )
+            for _ in range(10)
+        ]
+        hit_rates = compute_hit_rates(results, prop.line_value)
+
+        class FakeDB:
+            def __init__(self):
+                self.logged = []
+                self.saved = []
+
+            async def get_prop_line_history(self, provider, player, sport, stat, limit=30):
+                assert provider == "PrizePicks"
+                return history_rows
+
+            async def log_prop_opportunity(self, **kwargs):
+                self.logged.append(kwargs)
+
+            async def upsert_prop_line_history_batch(self, provider, props):
+                self.saved.append((provider, list(props)))
+
+            async def mark_opportunity_alert_sent(self, *args, **kwargs):
+                pass
+
+            async def update_prop_lifecycle_state(self, *args, **kwargs):
+                pass
+
+        class FakeProvider:
+            def is_available(self):
+                return True
+
+            async def fetch_props(self):
+                return [prop]
+
+        class FakeDelivery:
+            def __init__(self, db, bot, chat_ids):
+                pass
+
+            async def deliver_underdog(self, **kwargs):
+                return SimpleNamespace(sent=False)
+
+        async def fake_enrichment(*args, **kwargs):
+            return hit_rates
+
+        async def claim_slot(*args, **kwargs):
+            return True
+
+        db = FakeDB()
+        monkeypatch.setattr(market_engine, "_propline_provider", FakeProvider())
+        monkeypatch.setattr(market_engine, "_fetch_and_compute_hit_rates", fake_enrichment)
+        monkeypatch.setattr(market_engine, "AlertDelivery", FakeDelivery)
+        monkeypatch.setattr(market_engine, "_try_claim_delivery_slot", claim_slot)
+
+        await market_engine._run_prizepicks_independent_cycle(
+            SimpleNamespace(bot_data={"db": db}, bot=object())
+        )
+
+        assert db.saved and db.saved[0][0] == "PrizePicks"
+        assert db.logged
+        assert db.logged[0]["provider"] == "PrizePicks"
+
     async def test_same_external_id_is_stored_once_per_provider(self, db):
         await db.log_prop_opportunity(**_opportunity("Underdog"))
         await db.log_prop_opportunity(**_opportunity("PrizePicks"))
