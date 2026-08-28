@@ -86,3 +86,4 @@
 - [Provider confirmation boundary](provider-confirmation-boundary.md) — confirmations are read-only corroboration: reuse existing OddsAPI rows/cache, never add polling, scoring, or delivery paths.
 - [PropLine endpoint safety](propline-endpoint.md) — require an explicit authorized API URL; never send the credential to a guessed host.
 - [Provider history adapter contract](provider-history-adapter.md) — provider-specific history adapters must preserve scorer-required lifecycle fields such as removed.
+- [PropLine cycle pacing](propline-cycle-pacing.md) — primary PrizePicks monitoring fetches one configured sport per shared cycle; do not use the all-sports fetch in production.
