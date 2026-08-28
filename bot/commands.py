@@ -2725,7 +2725,12 @@ async def cmd_backfill(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 continue
             game_date  = opp.game_time.strftime("%Y-%m-%d")
             result_row = await _db.get_game_result_for_grading(
-                opp.player_name, opp.sport, opp.stat_type, game_date
+                opp.player_name,
+                opp.sport,
+                opp.stat_type,
+                game_date,
+                game_id=getattr(opp, "game_id", ""),
+                provider=getattr(opp, "provider", None),
             )
             if result_row is None:
                 no_data += 1
