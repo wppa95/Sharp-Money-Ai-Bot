@@ -39,6 +39,17 @@ logger = logging.getLogger(__name__)
 
 # ── Bot startup time for uptime tracking ──────────────────────────────────────
 _START_TIME = time.monotonic()
+_DASHBOARD_TIMEOUT_SECONDS = 20.0
+_PROVIDER_REPORT_TIMEOUT_SECONDS = 5.0
+
+
+def _primary_player_prop_provider_lines() -> list[str]:
+    """Canonical user-facing roles for player-prop market providers."""
+    return [
+        "  🟢 <b>Underdog</b> — Primary Player Props",
+        "  🟢 <b>PrizePicks</b> — PropLine — Primary Player Props",
+        "  🔴 <b>DraftKings/FanDuel</b> — Disabled",
+    ]
 
 # ── Module-level references (set by main.py on startup) ───────────────────────
 _db: Optional[Database] = None
@@ -616,15 +627,12 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         total_steam = await _db.count_steam_records() if _db else 0
         total_ev    = await _db.count_ev_records() if _db else 0
         db_records  = await _db.count_odds_records() if _db else 0
-        # Load provider health monitor and odds cache singletons
+        # Load provider health monitor singleton
         try:
             from providers import get_health_monitor
-            from providers.odds_cache import get_odds_cache
-            _mon   = get_health_monitor()
-            _cache = get_odds_cache()
+            _mon = get_health_monitor()
         except ImportError:
-            _mon   = None
-            _cache = None
+            _mon = None
 
         # DB-backed daily alert count — resets at UTC midnight; survives restart.
         # Historical records are preserved in PropOpportunityLog; use /alerts for history.
@@ -637,10 +645,12 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
         # ── Market provider health (live prop lines) ──────────────────────────────
         lines.append("📡 <b>Market Providers</b>")
+        lines.extend(_primary_player_prop_provider_lines())
         if _mon:
             for name, h in _mon.get_all_health().items():
-                # Only show active live-market providers; skip disabled/legacy
-                if name in ("PrizePicks", "DraftKings", "FanDuel"):
+                # Primary provider roles are rendered above. Keep any independent
+                # supporting market providers visible without duplicating them.
+                if name in ("Underdog", "PrizePicks", "DraftKings", "FanDuel"):
                     continue
                 last_ok   = h.format_last_success()
 
@@ -667,8 +677,6 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     f"  {h.status_emoji} <b>{_html.escape(name)}</b>  {_html.escape(h.status.value)}"
                     f"  ·  last ✓: {_html.escape(last_ok)}{fail_note}"
                 )
-        else:
-            lines.append("  ⚪ Underdog     not yet tracked")
         lines.append("")
 
         # ── Stat provider health (historical enrichment) ──────────────────────
@@ -761,12 +769,11 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         # ── Database ──────────────────────────────────────────────────────────────
         total_prop_history = await _db.count_prop_line_history() if _db else 0
         lines.append("📊 <b>Database Records</b>")
-        if total_prop_history:
-            ud_history = await _db.count_prop_line_history(provider="Underdog") if _db else 0
-            lines.append(
-                f"  PropLineHistory: {total_prop_history:,}"
-                + (f"  (UD:{ud_history:,})" if ud_history else "")
-            )
+        ud_history = await _db.count_prop_line_history(provider="Underdog") if _db else 0
+        pp_history = await _db.count_prop_line_history(provider="PrizePicks") if _db else 0
+        lines.append(f"  Shared prop history: {total_prop_history:,}")
+        lines.append(f"    Underdog: {ud_history:,}")
+        lines.append(f"    PrizePicks (PropLine): {pp_history:,}")
 
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
     except Exception as exc:
@@ -2419,9 +2426,22 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     try:
         from engine.dashboard import DashboardEngine
-        report = await DashboardEngine.gather(_db)
+        report = await asyncio.wait_for(
+            DashboardEngine.gather(_db),
+            timeout=_DASHBOARD_TIMEOUT_SECONDS,
+        )
         msg    = report.to_telegram()
         await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+    except asyncio.TimeoutError:
+        logger.warning(
+            "cmd_dashboard: aggregation exceeded %.1fs",
+            _DASHBOARD_TIMEOUT_SECONDS,
+        )
+        await update.message.reply_text(
+            f"{EMOJI['warn']} Dashboard is taking too long to load. "
+            "Please try again after the current scan finishes."
+        )
+        return
     except Exception as exc:
         logger.exception("cmd_dashboard: DashboardEngine failed: %s", exc)
         await update.message.reply_text(
@@ -2431,26 +2451,12 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     # ── Player Prop Market section ────────────────────────────────────────────
     try:
-        pm_lines: list[str] = ["🐶 <b>Underdog Activity — Live</b>", ""]
+        pm_lines: list[str] = ["🎯 <b>Player Prop Activity — Live</b>", ""]
 
         # ── Provider status ───────────────────────────────────────────────────
-        from providers import get_health_monitor
-        _hmon = get_health_monitor()
         # Market providers (live prop lines)
         pm_lines.append("<b>📡 Market Providers</b>")
-        _ud_h = _hmon.get_health("Underdog") if (_hmon and hasattr(_hmon, "get_health")) else None
-        if _ud_h is not None:
-            _ud_last = _ud_h.format_last_success() if hasattr(_ud_h, "format_last_success") else "—"
-            _ud_fail = (
-                f"  ({_ud_h.consecutive_failures} fails)"
-                if getattr(_ud_h, "consecutive_failures", 0) else ""
-            )
-            pm_lines.append(
-                f"  🐶 {_ud_h.status_emoji} <b>Underdog</b>  {_ud_h.status.value}"
-                f"  ·  last ✓: {_ud_last}{_ud_fail}"
-            )
-        else:
-            pm_lines.append("  🐶 ⚪ <b>Underdog</b>  ·  not yet tracked")
+        pm_lines.extend(_primary_player_prop_provider_lines())
         pm_lines.append("")
 
         # Stat providers (historical enrichment for hit-rate pipeline)
@@ -2480,43 +2486,51 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         pm_lines.append("  ⚪ <b>ESPN</b>  on-demand gamelog (NBA/NFL/WNBA/MLB)")
         pm_lines.append("  ⚪ <b>NHL API</b>  on-demand skater/goalie logs")
 
-        # ── Underdog prop counts from DB ──────────────────────────────────────
+        # ── Provider-separated prop counts from DB ────────────────────────────
         pm_lines.append("")
         pm_lines.append("<b>📊 Player Prop Activity</b>")
         try:
             total_ud = await _db.count_underdog_records()
-            # Recent snapshots (last 6 h) = rough active prop count
-            ud_recent = await _db.count_prop_line_history()
+            ud_history = await _db.count_prop_line_history(provider="Underdog")
+            pp_history = await _db.count_prop_line_history(provider="PrizePicks")
             pm_lines.append(
                 f"  Underdog snapshots:  <code>{total_ud:,}</code> total"
-                f"  ·  PropHistory rows: <code>{ud_recent:,}</code>"
+                f"  ·  history: <code>{ud_history:,}</code>"
+            )
+            pm_lines.append(
+                f"  PrizePicks (PropLine) history: <code>{pp_history:,}</code>"
             )
         except Exception:
             pm_lines.append("  <i>Prop counts unavailable</i>")
 
-        # ── Recent Underdog props tracked ─────────────────────────────────────
+        # ── Recent props tracked, kept separate by provider ───────────────────
         pm_lines.append("")
         pm_lines.append("<b>🔔 Recently Tracked Props</b>  <i>(last hour · all sports)</i>")
-        try:
-            # Read the persistent tracking stream, not delivered-alert history.
-            # This keeps rejected, non-actionable, and multi-sport props visible.
-            recent_props = await _db.get_recent_tracked_props(
-                "Underdog", since_hours=1, limit=100
-            )
-            if recent_props:
-                for _r in recent_props[:5]:
-                    _lc = getattr(_r, "lifecycle_state", None) or "—"
-                    _lc_icon = {"ACTIVE_ALERTED": "✅", "DISCOVERED": "🔍", "REMOVED": "🚫"}.get(_lc, "⚪")
-                    pm_lines.append(
-                        f"  {_lc_icon} <b>{_r.player_name}</b>  {_r.stat_type}  "
-                        f"<code>{float(_r.line_value):.1f}</code>  ·  <i>{_r.sport}</i>"
-                    )
-                if len(recent_props) > 5:
-                    pm_lines.append(f"  <i>…and {len(recent_props) - 5} more. Use /alerts for history.</i>")
-            else:
-                pm_lines.append("  <i>No props tracked yet in this window.</i>")
-        except Exception:
-            pm_lines.append("  <i>Use /alerts for detailed alert history.</i>")
+        for _provider, _icon in (("Underdog", "🐶"), ("PrizePicks", "🟣")):
+            pm_lines.append(f"  {_icon} <b>{_provider}</b>")
+            try:
+                # Read the persistent tracking stream, not delivered-alert history.
+                recent_props = await _db.get_recent_tracked_props(
+                    _provider, since_hours=1, limit=100
+                )
+                if recent_props:
+                    for _r in recent_props[:3]:
+                        _lc = getattr(_r, "lifecycle_state", None) or "—"
+                        _lc_icon = {
+                            "ACTIVE_ALERTED": "✅",
+                            "DISCOVERED": "🔍",
+                            "REMOVED": "🚫",
+                        }.get(_lc, "⚪")
+                        pm_lines.append(
+                            f"    {_lc_icon} <b>{_r.player_name}</b>  {_r.stat_type}  "
+                            f"<code>{float(_r.line_value):.1f}</code>  ·  <i>{_r.sport}</i>"
+                        )
+                    if len(recent_props) > 3:
+                        pm_lines.append(f"    <i>…and {len(recent_props) - 3} more.</i>")
+                else:
+                    pm_lines.append("    <i>No props tracked in this window.</i>")
+            except Exception:
+                pm_lines.append("    <i>Tracking data unavailable.</i>")
 
         # ── Bot health ────────────────────────────────────────────────────────
         pm_lines += [
@@ -2569,8 +2583,9 @@ async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 _rec_icon = "⬆️" if _rec == "OVER" else ("⬇️" if _rec == "UNDER" else "")
                 _source = getattr(r, "provider", None) or "Underdog"
                 _source_icon = "🟣" if _source == "PrizePicks" else "🐶"
+                _source_label = "PRIZEPICKS" if _source == "PrizePicks" else "UNDERDOG"
                 lines.append(
-                    f"  {_source_icon} <b>{_source} PICK</b> · "
+                    f"  {_source_icon} <b>{_source_label} PICK</b> · "
                     f"{_rec_icon} <b>{r.player_name}</b>  {r.stat_type}  "
                     f"<code>{_lv:.1f}</code>  ·  <i>{r.sport}</i>"
                     f"  ·  {_tier}  ·  {_ts_str}"
@@ -2888,7 +2903,10 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         lines: list[str] = [
             "🔌 <b>Provider Status</b>",
             "",
-            "<b>Underdog Alert Sports</b>",
+            "<b>Player Prop Market Providers</b>",
+            *_primary_player_prop_provider_lines(),
+            "",
+            "<b>Historical Enrichment by Sport</b>",
         ]
 
         # Per-sport provider details
@@ -3694,7 +3712,52 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             _thick,
             "📡 <b>Scan Pipeline</b>",
             _thick,
+            "",
+            "<b>Player Prop Market Providers</b>",
+            *_primary_player_prop_provider_lines(),
         ]
+
+        # Existing reconciliation data already keeps provider observations,
+        # evaluations, actionable rows, and deliveries separate. Bound this
+        # optional reporting query so it cannot make /funnel unresponsive.
+        provider_pipeline: dict = {}
+        try:
+            reconciliation = await asyncio.wait_for(
+                _db.get_telegram_reconciliation(
+                    since_hours=since_h,
+                    bucket_minutes=60,
+                ),
+                timeout=_PROVIDER_REPORT_TIMEOUT_SECONDS,
+            )
+            if isinstance(reconciliation, dict):
+                provider_pipeline = reconciliation.get("by_provider", {})
+        except asyncio.TimeoutError:
+            logger.warning(
+                "cmd_funnel: provider reconciliation exceeded %.1fs",
+                _PROVIDER_REPORT_TIMEOUT_SECONDS,
+            )
+        except Exception as _provider_exc:
+            logger.debug("cmd_funnel: provider reconciliation unavailable: %s", _provider_exc)
+
+        if provider_pipeline:
+            lines += [
+                "",
+                f"<b>Provider Pipeline</b>  <i>(last {since_h}h)</i>",
+            ]
+            for _provider in ("Underdog", "PrizePicks"):
+                _row = provider_pipeline.get(_provider, {})
+                _delivered = (
+                    _row.get("audit_delivered_alerts", 0)
+                    or _row.get("delivered_alerts", 0)
+                )
+                lines += [
+                    f"  <b>{_provider}</b>",
+                    f"    Observed: <code>{int(_row.get('observed', 0) or 0):,}</code>"
+                    f"  ·  Evaluated: <code>{int(_row.get('evaluated', 0) or 0):,}</code>",
+                    f"    Actionable persisted: "
+                    f"<code>{int(_row.get('actionable_persisted', 0) or 0):,}</code>"
+                    f"  ·  Delivered: <code>{int(_delivered or 0):,}</code>",
+                ]
 
         # ── Section 1: Scan Pipeline (from ScanCycleLog) ─────────────────────────────
         # FPR stats describe the current canonical active by-line universe.

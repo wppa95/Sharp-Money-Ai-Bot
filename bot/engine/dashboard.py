@@ -194,11 +194,13 @@ class DashboardReport:
             "",
         ]
 
-        # ── Activity summary (Underdog-focused) ──────────────────────────────
+        # ── Activity summary (provider-separated) ────────────────────────────
         parts += [
             "📬 <b>Activity Summary</b>",
-            f"  Underdog activity records: <b>{self.total_ud_alerts:,}</b>",
-            f"  Actionable Picks Today: <b>{self.today_ud_alerts:,}</b>",
+            f"  Underdog activity: <b>{self.total_ud_alerts:,}</b>"
+            f"  ·  today: <b>{self.today_ud_alerts:,}</b>",
+            f"  PrizePicks activity: <b>{self.total_pp_alerts:,}</b>"
+            f"  ·  today: <b>{self.today_pp_alerts:,}</b>",
             "",
         ]
 
@@ -237,7 +239,9 @@ class DashboardReport:
                 ev_str  = f"  EV {sp.avg_ev:+.1f}%"  if sp.avg_ev  is not None else ""
                 clv_str = f"  CLV {sp.avg_clv:+.1f}%" if sp.avg_clv is not None else ""
                 parts.append(
-                    f"  {sp.sport:<10} n=<code>{sp.total:>3}</code>"
+                    f"  {sp.sport:<10} UD <code>{sp.ud_count:>3}</code>"
+                    f" · PP <code>{sp.pp_count:>3}</code>"
+                    f" · EV <code>{sp.ev_count:>3}</code>"
                     f"{ev_str}{clv_str}"
                 )
             if self.best_sport:
@@ -266,9 +270,11 @@ class DashboardReport:
         if trend_days:
             parts.append("📅 <b>Today</b>")
             for d in trend_days[-1:]:
-                bar = "▪" * min(d.total, 10)
                 parts.append(
-                    f"  {d.date_str}  <code>{d.total:>3}</code>  {bar}"
+                    f"  {d.date_str}  UD <code>{d.ud_count}</code>"
+                    f" · PP <code>{d.pp_count}</code>"
+                    f" · EV <code>{d.ev_count}</code>"
+                    f" · Steam <code>{d.steam_count}</code>"
                 )
 
         # ── System panel ──────────────────────────────────────────────────────
