@@ -3933,16 +3933,12 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 pass
 
         # Fetch scan pipeline summary (non-fatal: new method may not exist on old schema)
-        _scan_result, summary = await _bounded(asyncio.gather(
+        _scan_result, summary = await _independent_report_reads([
             _db.get_scan_cycle_summary(since_hours=since_h),
             _db.get_funnel_summary(since_hours=since_h),
-            return_exceptions=True,
-        ))
-        scan_summary: dict = (
-            _scan_result if isinstance(_scan_result, dict) else {}
-        )
-        if isinstance(summary, Exception):
-            raise summary
+        ])
+        scan_summary: dict = _scan_result if isinstance(_scan_result, dict) else {}
+        summary = summary if isinstance(summary, dict) else {}
 
         tracked   = int(summary.get("tracked", 0) or 0)
 
@@ -3976,7 +3972,7 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         # optional reporting query so it cannot make /funnel unresponsive.
         provider_pipeline: dict = {}
         try:
-            reconciliation = await asyncio.wait_for(
+            reconciliation = await _bounded(
                 _db.get_telegram_reconciliation(
                     since_hours=since_h,
                     bucket_minutes=60,
