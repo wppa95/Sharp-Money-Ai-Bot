@@ -816,10 +816,11 @@ async def _poll_odds_job(context) -> None:
     # ── 1. Fetch odds for every active sport ──────────────────────────────────
     all_lines: list[OddsLine] = []
     allowed_books = set()
-    if config.DRAFTKINGS_ENABLED:
-        allowed_books.add("draftkings")
-    if config.FANDUEL_ENABLED:
-        allowed_books.add("fanduel")
+    if config.SPORTSBOOK_CONFIRMATION_ENABLED:
+        if config.DRAFTKINGS_ENABLED:
+            allowed_books.add("draftkings")
+        if config.FANDUEL_ENABLED:
+            allowed_books.add("fanduel")
     if not getattr(config, "ODDS_API_ENABLED", True):
         logger.debug("_poll_odds_job: OddsAPI disabled by configuration")
         return
@@ -841,6 +842,11 @@ async def _poll_odds_job(context) -> None:
             break
         lines = await _engine.fetch_live_odds(sport, markets="h2h,totals")
         allowed_book_names = {book.replace(" ", "") for book in allowed_books}
+        if not config.SPORTSBOOK_CONFIRMATION_ENABLED:
+            lines = [
+                line for line in lines
+                if line.sportsbook.lower().replace(" ", "") not in {"draftkings", "fanduel"}
+            ]
         if allowed_book_names:
             all_lines.extend(
                 line for line in lines
@@ -1530,6 +1536,12 @@ async def _player_props_job(context) -> None:
     """
     if _db is None or _engine is None:
         logger.debug("_player_props_job: DB or engine not ready, skipping")
+        return
+    if not config.SPORTSBOOK_CONFIRMATION_ENABLED:
+        logger.info(
+            "_player_props_job: sportsbook confirmation disabled; "
+            "skipping DraftKings/FanDuel player props"
+        )
         return
 
     now = datetime.utcnow()
