@@ -96,6 +96,17 @@ async def _independent_report_reads(
     return values
 
 
+async def _report_read(coro, *, fallback=None, timeout: Optional[float] = None):
+    """Read one optional report value without leaking DB contention to Telegram."""
+    try:
+        return await _bounded(coro, timeout=timeout)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("report read unavailable: %s", exc)
+        return fallback
+
+
 async def _status_db_read(label: str, coro):
     """Return one status counter without allowing a busy SQLite DB to fail /status."""
     try:
@@ -705,10 +716,12 @@ async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await update.message.reply_text("⚠️ Database not available.")
             return
 
-        rollups, tg_perf = await _bounded(asyncio.gather(
+        rollups, tg_perf = await _independent_report_reads([
             db.get_learning_rollups(),
             db.get_telegram_pick_performance(),
-        ))
+        ])
+        rollups = rollups if isinstance(rollups, dict) else {}
+        tg_perf = tg_perf if isinstance(tg_perf, dict) else {}
         total   = rollups.get("total_graded", 0)
         intel   = rollups.get("intelligence", {})
 
@@ -1111,7 +1124,14 @@ async def cmd_steam(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     try:
-        records = await _db.get_recent_steam(limit=5)
+        records = await _report_read(_db.get_recent_steam(limit=5), fallback=None)
+
+        if records is None:
+            await update.message.reply_text(
+                f"{EMOJI['warn']} Steam history is temporarily unavailable. "
+                "Live monitoring is unaffected."
+            )
+            return
 
         if not records:
             await update.message.reply_text(
@@ -1165,7 +1185,14 @@ async def cmd_ev(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     try:
-        records = await _db.get_recent_ev(limit=5)
+        records = await _report_read(_db.get_recent_ev(limit=5), fallback=None)
+
+        if records is None:
+            await update.message.reply_text(
+                f"{EMOJI['warn']} +EV history is temporarily unavailable. "
+                "Live monitoring is unaffected."
+            )
+            return
 
         if not records:
             await update.message.reply_text(
@@ -1230,7 +1257,13 @@ async def cmd_clv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     try:
         from alerts_multiplatform import format_clv_history
-        records = await _db.get_recent_clv_records(limit=20)
+        records = await _report_read(_db.get_recent_clv_records(limit=20), fallback=None)
+        if records is None:
+            await update.message.reply_text(
+                f"{EMOJI['warn']} CLV history is temporarily unavailable. "
+                "It can be retried without interrupting monitoring."
+            )
+            return
         msg = format_clv_history(records)
         await update.message.reply_text(msg, parse_mode="HTML")
     except Exception as exc:
@@ -1264,17 +1297,19 @@ async def cmd_market(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             )
             return
 
-        results = compute_consensus(
+        results = await _bounded(asyncio.to_thread(
+            compute_consensus,
             all_snaps,
             min_books=config.CONSENSUS_MIN_BOOKS,
             outlier_threshold=config.INEFFICIENCY_THRESHOLD,
-        )
+        ), timeout=_PROVIDER_REPORT_TIMEOUT_SECONDS)
         msg = format_consensus_summary(results)
         await update.message.reply_text(msg, parse_mode="HTML")
     except Exception as exc:
         logger.exception("cmd_market error: %s", exc)
         await update.message.reply_text(
-            f"{EMOJI['warn']} Could not load market data: {exc}",
+            f"{EMOJI['warn']} Market data is temporarily unavailable. "
+            "Live monitoring is unaffected.",
             parse_mode="HTML",
         )
 
@@ -1293,11 +1328,13 @@ async def cmd_performance(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         from engine.backtesting import BacktestEngine
         from engine.ranking import RankingTier, RankingDecision
 
-        records, _ud_rollups, _tg_perf = await _bounded(asyncio.gather(
+        records, _ud_rollups, _tg_perf = await _independent_report_reads([
             _db.get_ev_records_with_results(limit=500, include_pending=False),
             _db.get_learning_rollups(),
             _db.get_telegram_pick_performance(),
-        ))
+        ])
+        _ud_rollups = _ud_rollups if isinstance(_ud_rollups, dict) else {}
+        _tg_perf = _tg_perf if isinstance(_tg_perf, dict) else {}
 
         if not records:
             _total = _ud_rollups.get("total_graded", 0)
@@ -1410,7 +1447,8 @@ async def cmd_backtest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     except Exception as exc:
         logger.exception("cmd_backtest error: %s", exc)
         await update.message.reply_text(
-            f"{EMOJI['warn']} Backtest failed: {exc}",
+            f"{EMOJI['warn']} Backtest is temporarily unavailable. "
+            "The report can be retried while monitoring continues.",
             parse_mode="HTML",
         )
 
