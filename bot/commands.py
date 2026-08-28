@@ -3035,7 +3035,7 @@ async def cmd_grade(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     try:
-      return await _cmd_grade_inner(update, context)
+        return await _bounded(_cmd_grade_inner(update, context))
     except asyncio.TimeoutError:
         logger.warning(
             "cmd_grade: report exceeded %.1fs; returning unavailable state",
