@@ -339,6 +339,7 @@ class AlertCLVSeed(Base):
     tier             = Column(String(16),  nullable=True)      # "S" | "A" | "B" | "PASS" | "High" | …
     # Timing
     game_time        = Column(DateTime,    nullable=True)      # UTC game start — when to harvest
+    game_id          = Column(String(128), nullable=False, default="", index=True)
     alerted_at       = Column(DateTime,    default=datetime.utcnow, nullable=False)
     # CLV result (populated by harvest job)
     clv_pct          = Column(Float,       nullable=True)      # computed CLV%; None until harvested
@@ -358,8 +359,9 @@ class PlayerGameResult(Base):
     ``engine.player_results.compute_hit_rates()`` to build L5/L10/L20/L30/Season
     and H2H windows for the betting decision engine.
 
-    Unique on (player_name, sport, stat_type, game_date) — re-upserted when the
-    API reports a corrected boxscore.
+    Unique on (player_name, sport, stat_type, game_date, game_id) — re-upserted
+    when the API reports a corrected boxscore. ``game_id`` is optional for
+    legacy/stat-provider rows that do not expose an event ID.
     """
     __tablename__ = "player_game_results"
 
