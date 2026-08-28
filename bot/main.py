@@ -56,6 +56,7 @@ from commands import (
     cmd_slip,
     cmd_dashboard,
     cmd_alerts,
+    cmd_reconcile,
     cmd_grade,
     cmd_clv,
     cmd_market,
@@ -1881,6 +1882,7 @@ def main() -> None:
     app.add_handler(CommandHandler("slip",      cmd_slip))
     app.add_handler(CommandHandler("dashboard", cmd_dashboard))
     app.add_handler(CommandHandler("alerts",    cmd_alerts))
+    app.add_handler(CommandHandler("reconcile", cmd_reconcile))
     app.add_handler(CommandHandler("grade",     cmd_grade))
     app.add_handler(CommandHandler("grades",    cmd_grade))
     app.add_handler(CommandHandler("start",     cmd_start))
