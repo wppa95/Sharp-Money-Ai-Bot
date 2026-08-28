@@ -1,0 +1,62 @@
+🔴 FIX /status ONLY — ACTUAL ROOT CAUSE CONFIRMED
+
+The running Telegram /status command is still failing after the previous change.
+
+The console traceback shows:
+
+bot/commands.py → cmd_status
+→ _bounded()
+→ asyncio.wait_for()
+→ TimeoutError
+
+The individual _status_db_read() timeout is being cancelled/propagated into the OUTER _bounded() timeout, causing /status to fall into:
+
+⚠️ /status failed. Check bot logs.
+
+Do NOT redesign anything.
+
+Do NOT change unrelated commands.
+Do NOT change monitoring, scoring, providers, PrizePicks, Underdog, scheduler, FPR, Stable Refresh, database architecture, or Telegram rules.
+
+Do NOT waste unnecessary time or unnecessary credits on unrelated investigation.
+
+ONLY fix the /status timeout/failure path.
+
+Required behavior:
+
+* One slow/locked SQLite counter must NEVER make the entire /status command fail.
+* Each database counter may independently become unavailable.
+* Provider health must still display.
+* PrizePicks health must still display.
+* Underdog health must still display.
+* Scheduler/heartbeat must still display.
+* Monitoring status must still display.
+* Available database counters must still display.
+* /status must return a valid response even when one or more database reads are locked or unavailable.
+* Prevent cancellation from the inner _status_db_read() from escaping into the overall /status failure path.
+* Do not simply increase the outer timeout.
+* Do not suppress real unexpected exceptions.
+* Keep the existing 1-second per-counter protection where appropriate.
+
+Add the smallest regression test that reproduces THIS exact failure sequence:
+
+SQLite counter → inner timeout/cancellation → outer status timeout → generic /status failed.
+
+The test must prove that the command instead returns a partial but valid /status response with the affected counter marked unavailable.
+
+Then:
+
+1. Run the focused /status tests.
+2. Compile.
+3. Restart Sharp Money Bot once to load the fix.
+4. Verify exactly one managed bot process.
+5. Actually invoke /status through Telegram.
+6. Confirm there is no new /status failed traceback.
+
+Do NOT touch Railway.
+
+Do NOT create a checkpoint.
+
+Do NOT report completion until /status has been tested through the actual Telegram command after the restart.
+
+Report the exact targeted change and the live Telegram result.

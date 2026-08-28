@@ -194,6 +194,39 @@ async def test_status_returns_health_when_one_db_counter_times_out():
 
 
 @pytest.mark.asyncio
+async def test_status_survives_counter_cancellation_during_outer_deadline():
+    """Reproduce inner timeout/cancellation escaping the outer /status timeout."""
+    update, context = _update_and_context()
+    db = _mock_status_db()
+
+    async def cancellation_resistant_counter():
+        try:
+            await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            # Simulate aiosqlite taking time to unwind a cancelled DB operation.
+            await asyncio.sleep(0.05)
+            return 0
+
+    db.count_today_actionable_alerts = cancellation_resistant_counter
+
+    with (
+        patch("commands._check_allowed", return_value=True),
+        patch("commands._db", db),
+        patch("commands._season_checker", None),
+        patch("commands._STATUS_DB_READ_TIMEOUT_SECONDS", 0.01),
+        patch("commands._COMMAND_TIMEOUT_SECONDS", 0.02),
+        patch("providers.get_health_monitor", return_value=_health_monitor()),
+    ):
+        await asyncio.wait_for(commands.cmd_status(update, context), timeout=0.2)
+
+    message = update.message.reply_text.await_args.args[0]
+    assert "Sharp Money Bot" in message
+    assert "Some database counters are temporarily unavailable" in message
+    assert "Alerts today: unavailable" in message
+    assert "/status failed" not in message
+
+
+@pytest.mark.asyncio
 async def test_dashboard_activity_section_keeps_provider_counts_separate():
     update, context = _update_and_context()
     db = MagicMock()

@@ -58,7 +58,10 @@ async def _status_db_read(label: str, coro):
     try:
         return await asyncio.wait_for(coro, timeout=_STATUS_DB_READ_TIMEOUT_SECONDS)
     except asyncio.CancelledError:
-        raise
+        # If the outer report deadline fires while aiosqlite is still unwinding
+        # its cancellation, this optional counter must not cancel /status too.
+        logger.warning("cmd_status: %s counter cancelled; marking unavailable", label)
+        return None
     except Exception as exc:  # noqa: BLE001
         logger.warning("cmd_status: %s counter unavailable: %s", label, exc)
         return None
