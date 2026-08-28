@@ -1129,9 +1129,12 @@ def _start_prizepicks_cycle(context, *, force: bool = False) -> bool:
         return False
 
     now = time.monotonic()
+    # ``force`` is only an initial-start escape hatch.  Underdog invokes this
+    # helper from every scan, so allowing it to bypass the interval would
+    # create an immediate second fetch that then collides with PropLine's
+    # provider pacing.
     if (
-        not force
-        and _prizepicks_last_started_at is not None
+        _prizepicks_last_started_at is not None
         and now - _prizepicks_last_started_at < _PRIZEPICKS_CYCLE_INTERVAL_SECONDS
     ):
         return False
