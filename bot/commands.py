@@ -3153,7 +3153,6 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     try:
         import os
-        pandascore_key = bool(os.environ.get("PANDASCORE_API_KEY", "").strip())
         try:
             from providers import get_health_monitor
             _mon = get_health_monitor()
@@ -3176,7 +3175,6 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             ("WNBA",   "🏀", "ESPN gamelog",      "espn.com/api",           True,            "free — no key"),
             ("DOTA",   "🎮", "OpenDota API",      "api.opendota.com",       True,            "free — no key"),
             ("TENNIS", "🎾", "JeffSackmann CSV", "github.com/JeffSackmann", True,            "free — no key"),
-            ("CS2",    "🖥️", "PandaScore API",   "api.pandascore.co",       pandascore_key,  "historical enrichment only · " + ("configured" if pandascore_key else "not configured")),
         ]
 
         ud_sports = config.ud_alert_sports
@@ -3187,12 +3185,6 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             lines.append(
                 f"  {scope_tag} {icon} <b>{sport:<6}</b>  {provider_name}\n"
                 f"         <i>{note}  ·  {host}</i>"
-            )
-
-        if not pandascore_key:
-            lines.append("")
-            lines.append(
-                "<i>⚪ CS2 enrichment: optional — not configured.</i>"
             )
 
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
@@ -3427,10 +3419,8 @@ async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.message.reply_text("⛔ Unauthorized.")
         return
 
-    import os
-    pandascore_set = bool(os.environ.get("PANDASCORE_API_KEY", "").strip())
     ud_sports = ", ".join(sorted(config.ud_alert_sports or [])) or "none"
-    pp_sports = ", ".join(config.prizepicks_leagues or []) or "none"
+    pp_sports = ", ".join(config.prizepicks_leagues or []) or "provider-discovered"
     try:
         from providers import get_health_monitor
         _config_mon = get_health_monitor()
@@ -3460,7 +3450,6 @@ async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"  NHL API:           ✅ active",
         f"  OpenDota (DOTA):   ✅ active",
         f"  JeffSackmann:      ✅ active (Tennis)",
-        f"  PandaScore (CS2):  {'configured' if pandascore_set else 'not configured'} · historical only",
         f"  Sleeper (NFL):     {'✅ active' if getattr(config, 'UD_SLEEPER_ENABLED', True) else '⏸️ disabled'}",
         "",
         "<b>Poll Intervals</b>",

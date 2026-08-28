@@ -1257,6 +1257,9 @@ async def _run_prizepicks_independent_cycle(
                     else FailureType.HTTP_ERROR
                 )
                 provider_health.record_failure("PrizePicks", str(exc), failure_type)
+            _health = get_health_tracker()
+            if _health:
+                _health.record_provider_error("PrizePicks", str(exc))
             logger.info(
                 "prizepicks_cycle: provider=PrizePicks sport=%s fetch_succeeded=false "
                 "observations=0 persisted=0 evaluated=0 actionable=0 delivered=0",
@@ -1266,6 +1269,10 @@ async def _run_prizepicks_independent_cycle(
             return
         if fetch_succeeded and provider_health is not None:
             provider_health.record_success("PrizePicks")
+        if fetch_succeeded:
+            _health = get_health_tracker()
+            if _health:
+                _health.record_provider_fetch("PrizePicks")
         if not fetch_succeeded:
             if provider_health is not None:
                 _failure_types = {
@@ -1279,6 +1286,11 @@ async def _run_prizepicks_independent_cycle(
                     "PrizePicks",
                     fetch_error or "PropLine fetch failed",
                     _failure_types.get(fetch_failure_kind, FailureType.UNKNOWN),
+                )
+            _health = get_health_tracker()
+            if _health:
+                _health.record_provider_error(
+                    "PrizePicks", fetch_error or "PropLine fetch failed"
                 )
             logger.info(
                 "prizepicks_cycle: provider=PrizePicks sport=%s fetch_succeeded=false "
