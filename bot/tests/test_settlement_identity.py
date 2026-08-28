@@ -42,7 +42,7 @@ def _opportunity(provider: str, game_id: str, external_id: str) -> dict:
         "recommendation": "OVER",
         "decision_tier": "A",
         "confidence": 80,
-        "game_time": datetime(2026, 8, 20) - timedelta(hours=8),
+        "game_time": datetime(2026, 8, 20),
         "game_id": game_id,
         "provider": provider,
     }
