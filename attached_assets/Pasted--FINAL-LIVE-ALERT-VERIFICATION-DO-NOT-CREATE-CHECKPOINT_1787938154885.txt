@@ -1,0 +1,269 @@
+🔴 FINAL LIVE ALERT VERIFICATION — DO NOT CREATE CHECKPOINT YET
+
+⚠️ IMPORTANT — READ FIRST
+
+Do NOT waste unnecessary time or unnecessary credits on unnecessary things.
+
+Do NOT ask me which Agent mode to use. Always use the recommended/appropriate Agent mode automatically.
+
+Do NOT ask me whether to use Free, Power, or Max. Automatically choose the recommended model based on task complexity. Use Free when sufficient and Power/Max only when genuinely necessary. Do not pause for approval.
+
+Do NOT redo completed work.
+
+Do NOT redesign or refactor unrelated systems.
+
+Do NOT investigate unrelated problems.
+
+Make only the smallest targeted verification/fix required below.
+
+DO NOT create a checkpoint until this verification is complete.
+
+⸻
+
+1. REMAINING ACCEPTANCE ITEM
+
+The previous verification confirmed:
+
+* /grade works through Telegram.
+* /slip works through Telegram.
+* /picks handles contention gracefully.
+* Inactive NBA rows no longer crowd out the active slate.
+* 221 focused tests pass.
+* Exactly one bot process is running.
+* /health is OK.
+* No new command errors appeared.
+* PrizePicks/PropLine is functioning.
+* Underdog has no current failure streak.
+
+However, one explicit acceptance requirement remains unresolved:
+
+The actual live actionable Telegram alert path has NOT yet been observed after the legacy classification cleanup.
+
+The previous live alert contained:
+
+A-Tier
+
+and:
+
+WATCHLIST ONLY
+
+That must be conclusively addressed.
+
+⸻
+
+2. DO NOT CREATE A MOCK ALERT
+
+Do NOT use:
+
+* /testalert
+* a fabricated database record
+* a manually constructed Telegram message
+* a unit-test-only formatter result
+
+as proof of the live alert path.
+
+We need a legitimate alert generated naturally by the running monitoring system.
+
+⸻
+
+3. OBSERVE THE NEXT LEGITIMATE ACTIONABLE ALERT
+
+Allow the existing monitoring system to operate normally.
+
+When a legitimate actionable alert is naturally generated, inspect the actual Telegram message.
+
+Do not change scoring thresholds merely to force an alert.
+
+Do not manufacture evidence.
+
+Do not create a synthetic qualifying prop.
+
+Do not bypass existing safety/dedup rules.
+
+⸻
+
+4. LIVE ALERT MUST NOT CONTAIN LEGACY CLASSIFICATIONS
+
+The actual Telegram alert must contain NONE of:
+
+* A-Tier
+* B-Tier
+* C-Tier
+* S-Tier
+* Tier 1
+* Tier 2
+* Watchlist
+* WATCHLIST ONLY
+* Near-Miss
+* PASS
+* decision_pass
+* not_immediate
+
+Do NOT replace them with another tier/classification system.
+
+The obsolete classification framework must be completely absent from the live actionable alert.
+
+⸻
+
+5. PRESERVE LEGITIMATE ALERT INFORMATION
+
+The alert should continue to provide the legitimate information already supported by the system, such as:
+
+* Sport
+* Player
+* Market
+* Current line
+* Previous line
+* Line movement
+* Direction
+* BQ
+* MQ
+* Confidence where applicable
+* Evidence/history where available
+* Reason/context
+* Timestamp
+* Existing safety checks
+* Existing deduplication protections
+
+Do not remove useful betting-signal information just to hide the legacy labels.
+
+⸻
+
+6. ALSO CHECK THE UNDERLYING CURRENT OUTPUT
+
+When the legitimate alert is generated, verify that the same obsolete classifications are not leaking into:
+
+* /picks
+* /alerts
+* /dashboard
+* /funnel
+* /tracking
+* /health
+* current monitoring logs
+
+Specifically confirm there is no current:
+
+* PASS
+* decision_pass
+* not_immediate
+* Watchlist
+* Near-Miss
+* Tier 1
+* Tier 2
+* S/A/B/C qualification framework
+
+Internal scoring values may remain if they are required internally, but they must not be exposed as the current monitoring classification framework.
+
+⸻
+
+7. IF NO LEGITIMATE ALERT IS GENERATED
+
+This is critical.
+
+If no legitimate actionable alert occurs during the observation window:
+
+Do NOT claim live alert verification passed.
+
+Report exactly:
+
+“Live alert-path verification was not observed because no legitimate actionable alert was generated during the observation window.”
+
+The task must remain explicitly marked as not fully live-verified rather than falsely checking the box.
+
+⸻
+
+8. DO NOT CHANGE UNRELATED SYSTEMS
+
+Do NOT modify:
+
+* Railway
+* OddsAPI
+* PrizePicks authentication
+* Underdog ingestion
+* FPR
+* Stable Refresh
+* scheduler architecture
+* scheduler concurrency
+* max_instances=1
+* scoring formulas
+* BQ/MQ calculations
+* confidence calculations
+* evidence providers
+* player identity
+* graded-prop evidence
+* HIT/MISS/PUSH
+* historical data
+* Discord
+* unrelated Telegram formatting
+* unrelated betting rules
+
+Do not add providers.
+
+Do not create another polling loop.
+
+Do not create another scheduler.
+
+Do not increase concurrency.
+
+⸻
+
+9. TESTING
+
+Do not waste credits by rerunning the entire 4,600+ test suite unnecessarily.
+
+Only run focused tests if a real problem is discovered.
+
+The primary purpose of this task is live verification of the actual alert-generation/delivery path.
+
+⸻
+
+10. FINAL ACCEPTANCE
+
+Do not create a checkpoint until one of these two honest outcomes is reached:
+
+PASS
+
+* A legitimate actionable Telegram alert was naturally generated.
+* Actual Telegram message inspected.
+* No A/B/C/S-Tier.
+* No Tier 1/Tier 2.
+* No Watchlist/Watchlist Only.
+* No Near-Miss.
+* No PASS.
+* No decision_pass.
+* No not_immediate.
+* Legitimate signal/evidence information remains intact.
+* Current /picks and /alerts contain no retired classification terminology.
+* No current monitoring output leaks the retired framework.
+* No unrelated behavior changed.
+
+OR HONESTLY UNVERIFIED
+
+If no legitimate alert occurs:
+
+* Explicitly report that the live alert path was not observed.
+* Do NOT mark the live-alert requirement complete.
+* Do NOT claim the overall task is fully live-verified.
+* Do NOT fabricate evidence.
+
+⸻
+
+🔴 FINAL INSTRUCTION
+
+Do not tell me this is complete based on tests.
+
+I specifically need the actual live Telegram alert path verified.
+
+Do not use /testalert as proof.
+
+Do not manufacture an alert.
+
+Do not change thresholds just to force one.
+
+Do not ask me which Agent mode to use. Always choose the recommended mode automatically.
+
+Do not ask me whether to use Free, Power, or Max. Automatically choose the appropriate option.
+
+Do not waste time or credits on anything outside this exact verification.
+
+Do not create a checkpoint until the live alert requirement is honestly resolved.
