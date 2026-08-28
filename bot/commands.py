@@ -4472,7 +4472,7 @@ async def cmd_slipstats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             "",
             "<b>SLIP JOURNAL</b>",
             _thick,
-            "  <i>Slip journal metrics are temporarily unavailable.</i>",
+            "  <i>Slip journal database error; metrics are temporarily unavailable.</i>",
         ]
         lines.append(f"\n{_thick}")
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
