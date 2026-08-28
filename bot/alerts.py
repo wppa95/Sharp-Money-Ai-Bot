@@ -1275,7 +1275,7 @@ class AlertDelivery:
         opening_line: Optional[float] = None,  # First ever line from PropLineHistory
         market_move_only: bool = False,  # True → send lightweight market-move alert only
         market_confirmation: Optional[dict] = None,  # OddsAPI sportsbook confirmation data
-        high_priority: bool = False,  # True for 85–94/100 S-tier (4★+) → prepend 🔥 header
+        high_priority: bool = False,  # Legacy priority-display compatibility flag
         is_moneyline: bool = False,
         source: str = "Underdog",
     ) -> "DeliveryResult":
@@ -1529,7 +1529,7 @@ class AlertDelivery:
         else:
             event_str = "HIGHER" if new_line > old_line else "LOWER"
         score_tag = (
-            f" [tier={score.tier} stars={score.stars} score={score.total}]"
+            f" [stars={score.stars} score={score.total}]"
             if score is not None else ""
         )
         log_fn = logger.info if alert_sent else logger.warning

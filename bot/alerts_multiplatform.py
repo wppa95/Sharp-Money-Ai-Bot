@@ -432,18 +432,11 @@ def _validate_final_tier(
     intelligence_trace: Optional[dict],
 ) -> str:
     """
-    Final tier validation gate — runs before Telegram formatting.
+    Compatibility helper for legacy callers.
 
-    Ensures the displayed recommendation tier is consistent with actual
-    confidence score, role stability, and risk signals.  Only downgrades
-    — never upgrades.
-
-    Rules
-    -----
-        S-tier requires:
-      • Confidence ≥ 80  (79/100 confidence should not be labeled S-tier)
-
-    Role/playtime no longer affects tier.
+    Tier metadata is not an alert qualification or formatting gate.  Keep the
+    value unchanged so stale callers cannot silently downgrade a directional
+    recommendation based on confidence or intelligence metadata.
 
     Parameters
     ----------
@@ -451,17 +444,7 @@ def _validate_final_tier(
     conf               : Overall confidence score 0-100
     intelligence_trace : prop_intelligence trace dict (optional)
     """
-    if tier not in ("S", "A", "B"):
-        return tier
-
-    validated = tier
-
-    # Gate 1: S-tier requires confidence ≥ 80
-    if validated == "S" and conf < 80:
-        validated = "A"
-
-    # Gate 2 (role-based) removed — role/playtime is not reliable across sports.
-    return validated
+    return tier
 
 
 def _format_market_pressure_block(market_pressure: Optional[object]) -> str:

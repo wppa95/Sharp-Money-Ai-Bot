@@ -236,15 +236,14 @@ def _role_trace(role_label: str, stability: str = "Stable") -> dict:
     }
 
 
-def test_validate_final_tier_s_low_conf_downgrades_to_a():
-    """S-tier with confidence < 80 must be downgraded to A."""
+def test_validate_final_tier_preserves_internal_metadata():
+    """Legacy helper must not turn confidence into a delivery gate."""
     result = _validate_final_tier("S", 79, None)
-    assert result == "A"
+    assert result == "S"
 
 
-def test_validate_final_tier_s_conf_79_with_no_trace():
-    """S-tier + 79 conf → A, even without intelligence trace."""
-    assert _validate_final_tier("S", 79, {}) == "A"
+def test_validate_final_tier_preserves_metadata_without_trace():
+    assert _validate_final_tier("S", 79, {}) == "S"
 
 
 def test_validate_final_tier_s_conf_80_passes():
@@ -384,8 +383,8 @@ def _simple_decision(tier: str, conf: int, rec: str = "OVER"):
     )
 
 
-def test_analyst_block_tier_note_when_downgraded():
-    """When tier is downgraded (S→A), a ⚠️ note must appear in the analyst block."""
+def test_analyst_block_omits_internal_tier_note():
+    """Internal tier validation must not leak a tier-adjustment label."""
     decision = _simple_decision("S", 75, "OVER")
     result = _format_analyst_inline_block(
         player_name        = "Jazz Chisholm",
@@ -396,8 +395,9 @@ def test_analyst_block_tier_note_when_downgraded():
         decision           = decision,
         intelligence_trace = None,
     )
-    # Should contain a downgrade note
-    assert "S→A" in result or ("adjusted" in result and "S" in result and "A" in result)
+    assert "adjusted" not in result.lower()
+    assert "tier" not in result.lower()
+    assert "OVER" in result
 
 
 def test_analyst_block_no_note_when_tier_unchanged():

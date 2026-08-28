@@ -47,10 +47,11 @@ def test_build_final_recommendation_mentions_player():
     assert "Luka Doncic" in n.final_recommendation
 
 
-def test_build_final_recommendation_mentions_tier():
+def test_build_final_recommendation_omits_internal_tier():
     from engine.analyst import build_analyst_from_alert_parts
     n = build_analyst_from_alert_parts("Luka Doncic", "Rebounds", "NBA", 8.5, "OVER", "S", 80)
-    assert "S-tier" in n.final_recommendation or "S tier" in n.final_recommendation
+    assert "tier" not in n.final_recommendation.lower()
+    assert "80/100 confidence" in n.final_recommendation
 
 
 def test_build_uses_intelligence_trace():
@@ -114,10 +115,10 @@ def test_build_none_intelligence_trace_no_error():
     assert n.recommended_because.strip()
 
 
-def test_build_b_tier_would_avoid_mentions_b_specific_condition():
+def test_build_low_confidence_would_avoid_mentions_confidence_condition():
     from engine.analyst import build_analyst_from_alert_parts
     n = build_analyst_from_alert_parts("Test", "Points", "NBA", 20.5, "OVER", "B", 57)
-    assert "contradicting" in n.would_avoid_because.lower() or "B" in n.would_avoid_because
+    assert "confidence" in n.would_avoid_because.lower()
 
 
 # ── format_analyst_alert_block ────────────────────────────────────────────────

@@ -398,10 +398,9 @@ _MARKET_FIRST_ALERT: dict = {}
 # Evict entries older than this many hours each scan cycle (prevents unbounded growth).
 _MARKET_FIRST_ALERT_TTL_H: int = 24
 
-# ── 95+ S-tier priority override ─────────────────────────────────────────────
-# Tracks (player, sport, stat_type) tuples for which a 95+ override alert was
-# already sent this session.  Persists across scan cycles; cleared on bot restart.
-# Prevents the same exceptional prop from firing the override repeatedly.
+# ── Legacy priority-display compatibility state ───────────────────────────────
+# Retained for compatibility with older state and tests.  It does not qualify,
+# rank, or independently deliver a directional prop.
 _priority_override_sent: set = set()
 
 # ── Underdog full-scan concurrency guard ──────────────────────────────────────
@@ -494,10 +493,10 @@ def _format_95_priority_alert(
     decision: "Optional[object]",
     line_val: float,
 ) -> str:
-    """Format the Telegram message for a 95+ Bet Quality S-tier priority alert.
+    """Format the legacy high-confidence priority-display message.
 
-    Triggered when decision.confidence ≥ 95 AND decision_tier == "S".
-    Confidence + Quality gates apply; both OVER and UNDER are valid for all sports.
+    Both OVER and UNDER are valid for all sports.  Current delivery uses the
+    shared direction-only gate rather than this legacy formatter.
     """
     sport  = getattr(snap, "sport", None) or "UNKNOWN"
     rec    = getattr(decision, "recommendation", "PASS") if decision is not None else "PASS"
@@ -2016,8 +2015,8 @@ _DELIVERY_TIER_BASE: dict[str, float] = {
 }
 
 
-# Sports that are Tier 2.  Tier 1 is every sport not in this exact alias set.
-# This is the CANONICAL source of truth — do NOT duplicate or broaden it here.
+# Sports cohorts used only for deterministic delivery ordering.  They do not
+# change whether a valid directional candidate qualifies for delivery.
 _TIER2_SPORTS: frozenset[str] = _CANONICAL_TIER2_SPORTS
 
 
@@ -2127,9 +2126,9 @@ def _cand_priority(c: dict) -> float:
 
 def _apply_delivery_diversification(queue: list) -> list:
     """
-    Split candidates into Tier 1 (non-NBA/MLB/NFL) and Tier 2 (NBA/MLB/NFL) groups,
-    rank within each group by priority with a soft diversification penalty, then
-    interleave so Tier 1 candidates always precede Tier 2 candidates in the final
+    Split candidates into the configured sport cohorts, rank within each group
+    by change priority with a soft diversification penalty, then place the
+    non-NBA/MLB/NFL cohort before the NBA/MLB/NFL cohort in the final
     delivery order.
 
     The delivery loop applies the total-window cap (10 per 5 minutes) via the
@@ -2163,7 +2162,7 @@ def _apply_delivery_diversification(queue: list) -> list:
     _rank_group(t1)
     _rank_group(t2)
 
-    # Tier 1 first, then Tier 2 — delivery loop enforces the per-tier hard cap.
+    # Preserve the existing deterministic cohort order.
     result = t1 + t2
     queue.clear()
     queue.extend(result)
@@ -2909,7 +2908,7 @@ async def underdog_job(context) -> None:
                             _np_intel_trace = _np_intel.intelligence_trace
                         except Exception:
                             pass
-                    # OddsAPI market confirmation — non-blocking, S/A tier only
+                    # OddsAPI market confirmation — optional, non-blocking
                     _np_odds_confirm: Optional[dict] = None
                     if (decision is not None
                             and decision.decision_tier in ("S", "A")
@@ -2928,9 +2927,8 @@ async def underdog_job(context) -> None:
                             )
                         except Exception:
                             pass
-                    # ── Tier delivery gate [new-prop] ────────────────────────
-                    # Tier 1: direction plus evidence.
-                    # Tier 2: direction, evidence, confidence ≥90, BQ/MQ ≥85.
+                    # ── Direction delivery gate [new-prop] ───────────────────
+                    # Scoring, evidence, and quality values are informational.
                     _np_mq_score  = float(getattr(market_quality, "score", 0) if market_quality else 0)
                     _np_bq_score  = float(score.total if score else 0)
                     _np_direction = decision.recommendation if decision else ""
@@ -3761,10 +3759,7 @@ async def underdog_job(context) -> None:
                         _s_intel_trace = _s_intel.intelligence_trace
                     except Exception:
                         pass
-                # OddsAPI market confirmation — non-blocking, S/A tier only.
-                # Strong UNDER candidates (direction=UNDER) are included because
-                # they must pass S/A-tier qualification to reach this path.
-                # B/PASS candidates are explicitly excluded.
+                # OddsAPI market confirmation is optional and non-blocking.
                 _s_odds_confirm: Optional[dict] = None
                 if (_sdec.decision_tier in ("S", "A")
                         and _sdec.recommendation != "PASS"):
@@ -3896,8 +3891,8 @@ async def underdog_job(context) -> None:
                 # ── Tier delivery gate backstop ───────────────────────────────
                 # Belt-and-suspenders: any candidate that slipped through the
                 # collection-point gate is caught here before Telegram.
-                # Tier 1: direction plus evidence. Tier 2 additionally requires
-                # confidence ≥90 and BQ/MQ ≥85.
+                # Final backstop: preserve the direction-only qualification
+                # contract before any Telegram delivery callback.
                 _dq_mq_score  = float(getattr(_dq_mq, "score", 0) if _dq_mq else _dq.get("mq", 0))
                 _dq_bq_score  = float(_dq.get("bq", 0))
                 _dq_direction = _dq_dec.recommendation if _dq_dec else ""

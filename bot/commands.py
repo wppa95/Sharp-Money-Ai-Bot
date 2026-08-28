@@ -1961,11 +1961,12 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         # S-tier props show 5 stars and A-tier props show 4 stars.
         _db_tier = getattr(plh, "score_tier", None) or ""
         _db_conf = getattr(plh, "score_confidence", None)
-        # Derive a display confidence from score_tier when score_confidence is absent.
+        # Derive a display confidence from the stored score band when the
+        # numeric confidence is absent.
         if _db_conf is None and _db_tier in ("S", "A", "B"):
             _db_conf = {"S": 87, "A": 72, "B": 57}.get(_db_tier)
         if conf < 30 and _db_tier in ("S", "A", "B") and _db_conf is not None:
-            # No cross-provider data — use engine scores for display
+            # No cross-provider data — use engine scores for display.
             tier  = _db_tier
             stars = _stars_from_conf(float(_db_conf))
         else:
