@@ -1,0 +1,631 @@
+🔴 FINAL CONSOLIDATED FIX — ONLY VERIFIED PROBLEMS
+
+⚠️ IMPORTANT — READ FIRST
+
+DO NOT waste unnecessary time or unnecessary credits on unnecessary things.
+
+DO NOT ask me which Agent mode I want to use.
+
+Always use the recommended/appropriate Agent mode automatically for the task. Do not stop and ask me to choose between Agent modes.
+
+Do NOT redesign the bot.
+
+Do NOT refactor unrelated systems.
+
+Do NOT redo completed work.
+
+Do NOT investigate unrelated providers or features.
+
+Make only the smallest targeted fixes required for the specific problems listed below.
+
+DO NOT touch Railway.
+
+Do not create a checkpoint until the requested fixes and verification are complete.
+
+⸻
+
+1. PRESERVE THE COMPLETED WORK
+
+The following work is already implemented and verified. Do not redo or regress it:
+
+* Active Underdog source-ID/FPR lifecycle work
+* Player identity normalization
+* Provider-backed evidence foundation
+* Graded-prop evidence lifecycle
+* HIT/MISS/PUSH tracking foundation
+* Clean restart behavior
+* Unified monitoring cadence
+* Adaptive batching
+* Scheduler max_instances=1
+* PrizePicks/PropLine primary-provider integration
+* PrizePicks 120-second pacing
+* /status cancellation/timeout fix
+* Removal of active monitoring PASS/rejection/Watchlist/Near-Miss framework
+* 4,626+ full-suite passing baseline
+* Exactly one managed bot process
+
+Do NOT alter these unless a change is absolutely required to fix one of the specific issues below.
+
+⸻
+
+2. CRITICAL RUNTIME PROBLEM — COMMANDS ARE HANGING
+
+Several Telegram commands worked eventually or passed direct handler tests, but the actual Telegram bot is becoming unresponsive while monitoring is running.
+
+Observed:
+
+* /dashboard stayed at ⏳ Gathering stats… for multiple minutes.
+* /alerts returned nothing.
+* /stats returned nothing.
+* /status worked earlier but later returned nothing.
+* Other commands are taking substantially longer than normal.
+* Health output repeatedly shows warnings/stale recovery information.
+* It appears background jobs may not be completing normally.
+
+This strongly suggests runtime/event-loop/database contention.
+
+Fix ONLY this:
+
+Ensure Telegram command handlers remain responsive while the monitoring pipeline is running.
+
+Do NOT solve this by:
+
+* Increasing arbitrary timeouts.
+* Increasing scheduler concurrency.
+* Creating duplicate monitoring jobs.
+* Disabling monitoring.
+* Removing database tracking.
+* Reducing the active prop universe.
+* Hiding failures.
+
+Keep:
+
+max_instances=1
+
+The monitoring pipeline must remain serialized where required, but Telegram reporting must not block behind a long-running scan or SQLite operation.
+
+Use bounded/independent reporting reads where necessary.
+
+A slow database query should make that particular metric unavailable—not freeze the entire Telegram command.
+
+⸻
+
+3. /DASHBOARD
+
+Current behavior:
+
+⏳ Gathering stats…
+
+and it can remain there for minutes.
+
+Fix /dashboard so it:
+
+* Returns promptly while monitoring is running.
+* Does not wait for the current monitoring cycle to finish.
+* Does not block the Telegram event loop.
+* Uses current/persistent monitoring data.
+* Handles locked/slow database reads independently.
+* Shows partial data when one metric is unavailable.
+* Does NOT fall into an endless loading state.
+* Shows Underdog provider activity.
+* Shows PrizePicks/PropLine provider activity.
+* Shows current tracked props across all applicable sports.
+* Does not show DK/FD as active player-prop providers.
+* Does not show PASS, decision_pass, not_immediate, Watchlist, Near-Miss, Tier 1, Tier 2, or S/A/B/C qualification classifications.
+
+Do not redesign the dashboard.
+
+⸻
+
+4. /ALERTS
+
+/alerts previously returned nothing.
+
+Fix and verify the actual Telegram command.
+
+It must:
+
+* Return promptly.
+* Show recent actionable alerts when they exist.
+* Show a valid empty state when none exist.
+* Never hang indefinitely.
+* Never require a full monitoring cycle to finish before responding.
+* Never show stale/out-of-season events as current actionable alerts.
+* Preserve historical records.
+
+Do not invent alerts.
+
+⸻
+
+5. /STATS
+
+/stats previously returned nothing.
+
+Fix and verify the actual Telegram command.
+
+It must:
+
+* Return promptly.
+* Show valid current statistics when data exists.
+* Show an honest empty/unavailable state when data is unavailable.
+* Never hang indefinitely.
+* Not block behind the monitoring scan.
+* Not fabricate metrics.
+
+⸻
+
+6. VERIFY ALL 34 TELEGRAM COMMANDS
+
+Do NOT assume that resolving to an async handler means the command works.
+
+Actually invoke the registered commands through the running Telegram bot.
+
+Verify all 34:
+
+/start
+/help
+/status
+/health
+/providers
+/config
+/blocks
+/block
+/dashboard
+/alerts
+/funnel
+/reconcile
+/picks
+/slip
+/grade
+/grades
+/player
+/slipstats
+/analyze
+/market
+/steam
+/ev
+/clv
+/performance
+/backtest
+/stats
+/calibration
+/tracking
+/analyst
+/rollups
+/refinement
+/backfill
+/pp_import
+/testalert
+
+For each command verify:
+
+* It responds.
+* It does not hang.
+* It returns a valid response or valid usage/error response.
+* It does not block the Telegram event loop.
+
+Especially verify:
+
+* /dashboard
+* /alerts
+* /stats
+* /calibration
+* /tracking
+* /analyst
+* /funnel
+* /picks
+* /grade
+* /performance
+* /backtest
+
+Do not waste credits repeatedly invoking commands that already pass.
+
+⸻
+
+7. PRIZEPICKS / PROPLINE CADENCE
+
+PrizePicks through PropLine is a primary player-prop provider alongside Underdog.
+
+Required cadence:
+
+120 seconds / 2 minutes
+
+The live verification already showed:
+
+14:35:59 — NBA fetch started
+14:37:59 — MLB fetch started
+
+Preserve this.
+
+Do NOT introduce another competing scheduler.
+
+Keep:
+
+max_instances=1
+
+PrizePicks/PropLine must continue participating every ~2 minutes while Underdog monitoring is running.
+
+Do NOT let a slow Underdog scan prevent the next scheduled PropLine fetch.
+
+Do NOT violate PropLine pacing.
+
+Do NOT blindly request every sport every cycle if the provider budget would be harmed.
+
+Use sustainable sport rotation.
+
+⸻
+
+8. PRIZEPICKS MUST APPEAR IN ALL RELEVANT DISPLAYS
+
+PrizePicks/PropLine must appear consistently in:
+
+* /status
+* /health
+* /providers
+* /config
+* /dashboard
+* /funnel
+* /alerts
+* /picks
+* /help
+
+Show real provider health where applicable.
+
+Do not show a provider as healthy merely because it is registered.
+
+⸻
+
+9. /HEALTH DISPLAY
+
+Current /health output does NOT show PrizePicks under Market Providers.
+
+It also shows stale operational information such as:
+
+Last recovery
+fail_streak=1
+pipeline failure
+
+Clean this up.
+
+Required:
+
+Market Providers
+
+* Underdog — Primary Player Props
+* PrizePicks — PropLine — Primary Player Props
+
+Show actual live fetch state for both.
+
+Remove stale/historical failure/recovery sections from the normal health display unless they represent a currently active condition that is genuinely useful to the operator.
+
+Do not repeatedly display old failures as if they are current failures.
+
+The health command should communicate:
+
+* Current health
+* Current scheduler status
+* Current monitoring status
+* Current provider status
+
+not stale historical noise.
+
+⸻
+
+10. REMOVE PANDA SCORE FROM CURRENT CS2 PROVIDER PRESENTATION
+
+This is important.
+
+For PrizePicks CS2 player props, PropLine is the provider.
+
+Therefore:
+
+* CS2 player-prop source = PropLine
+* Do NOT present PandaScore as the CS2 player-prop source.
+* Do NOT make PandaScore appear to be required for CS2 PrizePicks alerts.
+* Do NOT suppress CS2 PrizePicks lines because PandaScore is unavailable.
+
+The current /providers and /config outputs still mention:
+
+PandaScore (CS2)
+
+Even though they say historical enrichment only.
+
+For this task, remove PandaScore from CS2 current player-prop provider displays/configuration because PropLine is the current player-prop source.
+
+Do not create a second CS2 provider path.
+
+If PandaScore is retained internally for unrelated historical enrichment, it must not interfere with or represent current PrizePicks CS2 sourcing.
+
+⸻
+
+11. PRIZEPICKS SPORTS
+
+/config currently says:
+
+PrizePicks sports: NBA, MLB
+
+But the system goal is multi-sport PrizePicks through PropLine.
+
+Do NOT silently restrict PrizePicks to MLB/NBA if PropLine provides additional supported sports.
+
+Use the existing authorized PropLine sport metadata/rotation.
+
+Available PrizePicks sports should be discovered from the existing provider response/metadata and rotated sustainably.
+
+Do NOT fabricate unsupported sports.
+
+Do NOT make broad expensive API requests just to prove unsupported sports.
+
+⸻
+
+12. CURRENT PICKS / ALERTS LIFECYCLE
+
+The /picks output previously showed:
+
+* NBA props
+* historical-looking lines
+* candidates with unavailable model projection
+* old Tier A/B labels
+
+The current monitoring framework has already removed qualification/rejection classifications.
+
+Ensure /picks and /alerts reflect the current model only.
+
+Do NOT display:
+
+* PASS
+* decision_pass
+* not_immediate
+* Watchlist
+* Near-Miss
+* Tier 1
+* Tier 2
+* S/A/B/C qualification gates
+
+Do not show stale/out-of-season events as current actionable candidates.
+
+A prop must be current/active according to the existing event lifecycle before being presented as an actionable current pick.
+
+Historical data remains available separately.
+
+⸻
+
+13. INTERNAL SCORING PASS
+
+Previous cleanup removed PASS from the monitoring framework, but the implementation retained internal scoring-engine PASS behavior.
+
+Preserve scoring formulas unless absolutely necessary.
+
+However, verify that internal scoring PASS can never leak into:
+
+* /picks
+* /alerts
+* /dashboard
+* /funnel
+* /tracking
+* monitoring logs
+* current qualification/rejection output
+
+There should be no user-facing PASS/rejection framework.
+
+Do NOT replace it with another classification framework.
+
+⸻
+
+14. DATABASE CONTENTION
+
+The /status fix correctly made individual database counters independently bounded.
+
+Apply the same principle where required to the commands that are currently hanging.
+
+Do NOT globally increase database timeouts.
+
+Do NOT make the monitoring pipeline wait for Telegram commands.
+
+Do NOT make Telegram commands wait for the entire monitoring cycle.
+
+Do NOT create a second database architecture.
+
+If a metric cannot be read quickly:
+
+unavailable
+
+is acceptable.
+
+The command itself must still return.
+
+⸻
+
+15. JOB COMPLETION / HEALTH
+
+The user is observing that commands and health displays repeatedly show warnings and it appears jobs may not be completing.
+
+Do a targeted runtime inspection of the existing jobs only.
+
+Verify:
+
+* Underdog monitor completes.
+* PrizePicks/PropLine fetch completes.
+* Scheduler heartbeat continues.
+* Jobs are not overlapping.
+* max_instances=1 remains.
+* A long monitoring job does not prevent Telegram commands from responding.
+* Provider fetches aren’t silently stuck.
+* Health timestamps update after successful runs.
+
+Do not redesign the scheduler.
+
+Do not add concurrency.
+
+Do not add another scheduler.
+
+⸻
+
+16. PORT 8080 WARNING
+
+There was an API-server console warning:
+
+EADDRINUSE: address already in use 0.0.0.0:8080
+
+This is known to be separate from the bot polling path.
+
+Do NOT spend unnecessary credits investigating or redesigning the API server.
+
+Only verify that it does not interfere with the Sharp Money Bot Telegram polling/runtime.
+
+If isolated, leave it alone.
+
+⸻
+
+17. PRESERVE ALL UNRELATED SYSTEMS
+
+Do NOT change:
+
+* OddsAPI behavior
+* PrizeLine/PropLine authentication
+* Underdog ingestion architecture
+* FPR
+* Stable Refresh
+* Adaptive batching
+* scoring formulas
+* BQ/MQ
+* confidence calculations
+* evidence providers
+* player identity
+* graded-prop evidence
+* HIT/MISS/PUSH grading
+* clean restart
+* scheduler architecture
+* max_instances=1
+* Discord
+* Railway
+* historical database data
+* unrelated Telegram formatting
+* unrelated betting rules
+
+Do not delete historical records.
+
+Do not fabricate evidence.
+
+Do not create a checkpoint early.
+
+⸻
+
+18. TESTING — BE EFFICIENT
+
+Do NOT waste credits running huge repetitive tests.
+
+First run focused tests for the actual changed areas:
+
+* command responsiveness
+* dashboard
+* alerts
+* stats
+* health
+* provider display
+* PrizePicks cadence
+* PrizePicks sport rotation
+* CS2 PropLine sourcing
+* current-pick lifecycle
+* PASS/rejection display cleanup
+
+Then run the full suite once if needed for regression confirmation.
+
+Do not repeatedly run the full suite after every tiny change.
+
+⸻
+
+19. REQUIRED LIVE VERIFICATION
+
+Tests are NOT sufficient.
+
+After changes are loaded:
+
+Runtime
+
+* Exactly one managed python bot/main.py process.
+* Clean startup.
+* No command-failure traceback.
+* Scheduler heartbeat active.
+
+PrizePicks
+
+* Real PropLine fetch.
+* Real 120-second cadence.
+* At least two consecutive fetches confirming cadence.
+* Underdog remains active simultaneously.
+* PrizePicks persists data.
+* Provider identity is PrizePicks/PropLine.
+
+Commands
+
+Actually invoke the Telegram commands.
+
+At minimum verify:
+
+* /help
+* /status
+* /health
+* /providers
+* /config
+* /dashboard
+* /alerts
+* /funnel
+* /picks
+* /grade
+* /performance
+* /backtest
+* /stats
+* /calibration
+* /tracking
+* /analyst
+
+And verify the complete 34-command registration list.
+
+Displays
+
+Confirm:
+
+* PrizePicks shown as primary provider.
+* Underdog shown as primary provider.
+* DK/FD absent.
+* PandaScore absent from current CS2 player-prop presentation.
+* No PASS/rejection/Watchlist/Near-Miss/Tier/S-A-B-C framework in current monitoring displays.
+* Current picks/alerts do not show stale/out-of-season candidates.
+
+Responsiveness
+
+Do not report a command as working merely because its handler exists.
+
+The actual Telegram response must arrive.
+
+Do not sit waiting indefinitely. If a command times out, capture the actual runtime cause and fix only that cause.
+
+⸻
+
+20. FINAL ACCEPTANCE
+
+Do not report completion until the running bot demonstrates:
+
+* /dashboard responds reliably.
+* /alerts responds reliably.
+* /stats responds reliably.
+* /status remains reliable under monitoring load.
+* /health shows PrizePicks and Underdog current health.
+* All registered commands respond appropriately.
+* PrizePicks/PropLine runs every ~2 minutes.
+* PrizePicks remains a primary player-prop provider.
+* PrizePicks sport rotation is sustainable and multi-sport where available.
+* CS2 current PrizePicks sourcing is PropLine.
+* PandaScore is not presented as the CS2 PrizePicks provider.
+* DK/FD are absent from current displays.
+* PASS/rejection/Watchlist/Near-Miss/Tier/S-A-B-C framework is absent from current monitoring displays.
+* /picks and /alerts do not present stale/out-of-season current candidates.
+* Telegram commands remain responsive while monitoring is running.
+* Exactly one managed bot process remains active.
+* max_instances=1 remains intact.
+* No unrelated system was changed.
+* No Railway changes were made.
+* No checkpoint is created until all of the above is actually verified.
+
+Be efficient. Fix only what is listed here. Do not spend credits on unrelated work.
