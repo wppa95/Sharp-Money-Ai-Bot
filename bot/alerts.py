@@ -1139,7 +1139,7 @@ class AlertDelivery:
         Full PrizePicks alert pipeline:
           0. Scope filter.
           1. Game timing filter — block games already started or outside window.
-          2. Daily alert cap check — S-tier always bypasses; A/B count against cap.
+          2. Require a valid OVER/UNDER direction.
           3. format_pp_alert.
           4. Broadcast to all registered chat IDs.
 
@@ -1170,7 +1170,6 @@ class AlertDelivery:
 
         # 1. Game timing filter
         game_time = getattr(opp.pp_line, "start_time", None)
-        tier_str  = score.tier if score else None
         allowed, timing_reason = is_game_alertable(
             game_time,
             min_minutes=config.ALERT_WINDOW_MIN_MINUTES,
@@ -1185,22 +1184,16 @@ class AlertDelivery:
             )
             return DeliveryResult(sent=False, filtered=True, filtered_reason=timing_reason)
 
-        # 2. Daily alert cap
-        # S-tier always passes.  A/B tiers count against DAILY_ALERT_LIMIT.
-        # Only A/B-tier records count toward the budget — S-tier volume never
-        # reduces the A/B quota.
-        if config.DAILY_ALERT_LIMIT > 0 and tier_str in ("A", "B"):
-            today_sent = await self._db.count_today_pp_alerts(in_tiers=["A", "B"])
-            if today_sent >= config.DAILY_ALERT_LIMIT:
-                reason = (
-                    f"Daily PP alert cap reached ({today_sent}/{config.DAILY_ALERT_LIMIT}) "
-                    f"— tier {tier_str} suppressed (S-tier bypasses cap)"
-                )
-                logger.info(
-                    "PP alert capped: %s | %s | %s",
-                    opp.pp_line.player_name, opp.pp_line.stat_type, reason,
-                )
-                return DeliveryResult(sent=False, filtered=True, filtered_reason=reason)
+        # 2. Direction is the only qualification decision.  Scope, timing,
+        # deduplication, flood protection, and delivery failures remain
+        # independent safety/integrity protections.
+        _pp_direction = str(getattr(opp, "best_side", "") or "").strip().upper()
+        if _pp_direction not in {"OVER", "UNDER"}:
+            return DeliveryResult(
+                sent=False,
+                filtered=True,
+                filtered_reason="No valid OVER/UNDER direction",
+            )
 
         # Global limiter is deliberately applied after all source-specific
         # qualification and caps.  It counts one alert, not one recipient.
@@ -1208,7 +1201,7 @@ class AlertDelivery:
             limiter = get_rate_limiter()
             limiter.record_qualified()
             rate = limiter.check(
-                tier_str or "B",
+                _pp_direction,
                 float(getattr(score, "total", 0) or 0),
                 float(getattr(score, "total", 0) or 0),
             )
@@ -1427,24 +1420,6 @@ class AlertDelivery:
                 )
 
         # 4. Format
-        # S-tier gate: Market Quality < 80 or Confidence < 80 → cap decision tier to A.
-        # Guards against BQ-only S-tier labels when MQ or confidence doesn't support it.
-        if decision is not None and getattr(decision, "decision_tier", None) == "S":
-            _mq_score = (
-                getattr(market_quality, "score", None)
-                if market_quality is not None else None
-            )
-            _bq_conf = getattr(decision, "confidence", 0)
-            if (_mq_score is not None and _mq_score < 80) or _bq_conf < 80:
-                class _CappedDecision:
-                    """Thin wrapper that reports A-tier while preserving all other attrs."""
-                    decision_tier = "A"
-                    def __init__(self, orig):
-                        self._orig = orig
-                    def __getattr__(self, name):
-                        return getattr(self._orig, name)
-                decision = _CappedDecision(decision)
-
         if market_move_only:
             message = format_market_move_detected(
                 player_name, team, sport, stat_type,

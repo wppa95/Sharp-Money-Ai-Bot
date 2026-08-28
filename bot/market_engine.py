@@ -2062,23 +2062,11 @@ def _tier_delivery_gate(
     confidence: float | None = None,
 ) -> bool:
     """
-    Canonical delivery eligibility gate used by ALL Telegram delivery paths.
+    Canonical directional qualification used by all Underdog paths.
 
-    Tier 1 = every sport except the canonical Tier 2 aliases.
-    Tier 2 = MLB, NBA, NFL, Football, CFB, NCAA, and NCAAF.
-
-    Tier 1 rules:
-        • Valid OVER or UNDER direction is required.
-        • Strong supporting evidence is required.
-        • S/A/B/C labels do not gate delivery.
-
-    Tier 2 rules:
-        • Valid OVER or UNDER direction is required.
-        • Strong supporting evidence is required.
-        • Confidence must be at least 90, BQ at least 85, and MQ at least 85.
-        • S/A/B/C labels do not gate delivery.
-
-    Returns True if the candidate may proceed to delivery; False to block.
+    Extra score/evidence parameters remain for compatibility with existing
+    call sites and diagnostics.  They are informational and never gate a
+    valid directional pick.
     """
     return _canonical_tier_delivery_gate(
         sport=sport,
@@ -2132,16 +2120,9 @@ async def _try_claim_delivery_slot(
 
 
 def _cand_priority(c: dict) -> float:
-    """Raw priority score for a delivery candidate (higher = deliver first)."""
-    base = _DELIVERY_TIER_BASE.get(c.get("tier", "PASS"), 0.0)
-    conf = float(c.get("conf") or 0)
-    bq   = float(c.get("bq")   or 0)
-    mq   = float(c.get("mq")   or 0)
+    """Neutral delivery ordering; quality labels never select winners."""
     mc   = 200.0 if c.get("is_meaningful_change") else 0.0
-    odds_bonus = 350.0 if (
-        c.get("odds_confirm") or {}
-    ).get("strong_confirmation") else 0.0
-    return base + conf * 0.5 + bq * 0.3 + mq * 0.2 + mc + odds_bonus
+    return mc
 
 
 def _apply_delivery_diversification(queue: list) -> list:

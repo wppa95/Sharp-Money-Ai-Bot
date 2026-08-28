@@ -8,7 +8,7 @@ Prevents alert floods by enforcing three nested layers:
   Layer 1 — Per-window rate limit
     At most TG_RATE_MAX_PER_WINDOW alerts may be sent in any rolling
     TG_RATE_WINDOW_SECONDS window.  Higher-tier props consume slots first:
-    when only 1 slot is left in the window, it is reserved for S/A-tier.
+    Every qualified directional prop shares this budget.
 
   Layer 2 — Emergency flood-protection mode
     If TG_FLOOD_THRESHOLD alerts are sent inside the window, flood-protection
@@ -17,7 +17,7 @@ Prevents alert floods by enforcing three nested layers:
     not even meaningful-change overrides.
 
   Layer 3 — Meaningful-change override (bypass Layer 1 only)
-    A big line move or direction flip in an S/A-tier prop may bypass the
+    A big line move or direction flip may bypass the
     per-window budget cap (Layer 1) exactly once per event, but it cannot
     bypass flood-protection mode (Layer 2).
 
@@ -57,10 +57,6 @@ from dataclasses import dataclass
 from typing import Optional
 
 logger = logging.getLogger(__name__)
-
-# Tier rank for slot-priority decisions (lower = higher priority)
-_TIER_RANK: dict[str, int] = {"S": 0, "A": 1, "B": 2, "C": 3, "PASS": 4}
-
 
 # ── Result object ─────────────────────────────────────────────────────────────
 
@@ -206,14 +202,13 @@ class TelegramRateLimiter:
         slots_remaining = self._max_per_window - slots_used
 
         if slots_remaining <= 0:
-            # Budget exhausted — meaningful-change bypass for S/A only
-            tier_rank = _TIER_RANK.get(tier, 3)
-            if is_meaningful_change and tier_rank <= 1:
+            # Budget exhausted — meaningful-change bypass for any direction.
+            if is_meaningful_change:
                 logger.info(
                     "TelegramRateLimiter: meaningful-change bypass — "
-                    "tier=%s conf=%.0f bq=%.0f "
+                    "conf=%.0f bq=%.0f "
                     "(window=%d/%d, flood-safe)",
-                    tier, confidence, bq,
+                    confidence, bq,
                     window_count, self._max_per_window,
                 )
                 return RateLimitResult(
@@ -233,23 +228,6 @@ class TelegramRateLimiter:
                 window_count= window_count,
                 window_max  = self._max_per_window,
             )
-
-        # ── Layer 1: Tier-priority slot reservation ────────────────────────
-        # When only 1 slot remains, reserve it for S or A.
-        # When 2 slots remain, B can use one of them.
-        tier_rank = _TIER_RANK.get(tier, 3)
-        if tier_rank >= 2 and slots_remaining < 2:   # B/C with ≤1 slot left
-            if not is_meaningful_change:
-                self._cycle_deferred += 1
-                return RateLimitResult(
-                    allowed     = False,
-                    reason      = (
-                        f"rate-limited (tier={tier} — "
-                        f"last slot reserved for S/A, {slots_remaining} remaining)"
-                    ),
-                    window_count= window_count,
-                    window_max  = self._max_per_window,
-                )
 
         # ── Allowed ────────────────────────────────────────────────────────
         return RateLimitResult(

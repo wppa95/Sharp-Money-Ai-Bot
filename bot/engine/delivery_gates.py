@@ -28,19 +28,9 @@ def tier_delivery_gate(
 ) -> bool:
     """Return whether an actionable prop may reach Telegram.
 
-    Tier 1 requires only a real direction and strong supporting evidence.
-    Tier 2 additionally requires strong BQ and MQ plus a
-    high-confidence decision.  Decision labels such as S/A/B/C are not used
-    as delivery gates; they remain evaluation and reporting metadata.
+    Qualification is directional only.  The remaining arguments are retained
+    for call-site compatibility and reporting, but score/tier/evidence values
+    must not become hidden delivery gates.  Timing, scope, stale-line,
+    provider, deduplication, and rate-limit protections run independently.
     """
-    if (direction or "").upper() not in {"OVER", "UNDER"}:
-        return False
-    if not evidence_available:
-        return False
-    if not is_tier2_sport(sport):
-        return True
-    return (
-        float(confidence or 0.0) >= 90.0
-        and float(bq_score or 0.0) >= 85.0
-        and float(mq_score or 0.0) >= 85.0
-    )
+    return (direction or "").strip().upper() in {"OVER", "UNDER"}

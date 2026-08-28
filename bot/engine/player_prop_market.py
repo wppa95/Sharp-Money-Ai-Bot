@@ -6,10 +6,8 @@ earlier "PrizePicks Reference Alert" model with a multi-provider market view
 that surfaces the best available line across all data sources.
 
 Supported providers (in priority order):
-    🟣 PrizePicks  — primary (manual import via /pp_import; API is DataDome-blocked)
+    🟣 PrizePicks  — primary (authorized PropLine provider)
     🐶 Underdog    — secondary (live via UnderdogConnector)
-    🎰 DraftKings  — tertiary (live via DraftKingsConnector when active)
-    🦊 FanDuel     — tertiary (live via FanDuelConnector when active)
 
 When a provider has no data for a given player/market, its line is shown as
 "Unavailable" in the alert. The system continues using available sources.
@@ -18,11 +16,8 @@ Design principles:
   - "Best available line" = the highest-confidence live line regardless of source
   - Proxy Match Confidence measures provider agreement / proxy reliability —
     NOT betting confidence. Labelled explicitly as "Proxy Match Confidence".
-  - Alert qualification tiers:
-      S / A  — always qualify
-      B+     — B-tier props with avg_vs_line ≥ 14/20 AND stability ≥ 10/15
-      weak B — B-tier props that fail B+ criteria; suppressed (movement-only noise)
-      PASS   — never alerted
+  - Alert qualification is a valid OVER/UNDER direction only.  Score,
+    confidence, evidence, and legacy tier labels remain informational.
   - Per-session dedup key: (player_name, sport, stat_type, line_str)
   - Old format_pp_reference_alert remains as dead code; this module owns the
     active alert path. No duplicate alert paths exist.
@@ -54,7 +49,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ProviderLine:
     """A single provider's line for one player/market combination."""
-    provider:    str              # "PrizePicks" | "Underdog" | "DraftKings" | "FanDuel"
+    provider:    str              # "PrizePicks" | "Underdog"
     emoji:       str              # visual identifier
     line_value:  Optional[float]  # None = unavailable
     available:   bool             # True if a line exists
@@ -65,13 +60,12 @@ class ProviderLine:
         return "Unavailable"
 
 
-# All providers the system is aware of, in display order.
-PROVIDER_ORDER = ["PrizePicks", "Underdog", "DraftKings", "FanDuel"]
+# Current player-prop display providers, in display order.  Sportsbook
+# connectors are intentionally not part of this current monitoring view.
+PROVIDER_ORDER = ["PrizePicks", "Underdog"]
 PROVIDER_EMOJI = {
     "PrizePicks": "🟣",
     "Underdog":   "🐶",
-    "DraftKings": "🎰",
-    "FanDuel":    "🦊",
 }
 
 # Sports that PrizePicks actively offers lines for
@@ -105,38 +99,18 @@ _PP_CANONICAL_STATS: frozenset[str] = frozenset(_STAT_NORM.values())
 
 PROXY_CONFIDENCE_THRESHOLD = 80
 
-# ── B+ qualification gate ──────────────────────────────────────────────────────
-# B-tier props (UDPropScore total 50–64) only qualify for alerts when their
-# *quality* components are strong, not just their movement components.
-#
-# Movement-only B props (high vel/act, low avg/sta) produce noisy alerts with
-# weak historical backing.  The B+ gate ensures a B prop has a meaningful
-# historical deviation signal (avg_vs_line) AND consistent line values
-# (stability) before it fires an alert.
-#
-# Thresholds chosen so that a prop at the top of the avg/sta scales always
-# qualifies regardless of its movement score (e.g. 20/20 avg + 15/15 sta):
-#   avg_vs_line ≥ 14 / 20  (70 % of max)
-#   stability   ≥ 10 / 15  (67 % of max)
-#
-# To adjust, change these constants — do NOT change scoring weights.
-_B_PLUS_AVG_MIN: int = 14   # avg_vs_line threshold (scored_props key "avg")
-_B_PLUS_STA_MIN: int = 10   # stability threshold   (scored_props key "sta")
+# Kept as read-only compatibility helpers for older callers and reports.
+# They are not consulted by the active alert cycle.
+_B_PLUS_AVG_MIN: int = 14
+_B_PLUS_STA_MIN: int = 10
 
 
 def _is_b_plus(p: dict) -> bool:
-    """Return True if a B-tier scored_prop meets B+ alert-qualification criteria.
-
-    Requires both:
-      avg_vs_line ("avg") ≥ _B_PLUS_AVG_MIN  — strong historical deviation signal
-      stability   ("sta") ≥ _B_PLUS_STA_MIN  — consistent line values over time
-
-    Missing keys are treated as 0 (fails).  S/A/PASS callers should never
-    reach this function — it is only meaningful for tier == "B".
-    """
-    avg = int(p.get("avg") or 0)
-    sta = int(p.get("sta") or 0)
-    return avg >= _B_PLUS_AVG_MIN and sta >= _B_PLUS_STA_MIN
+    """Return the legacy B+ classification without making it a gate."""
+    return (
+        int(p.get("avg") or 0) >= _B_PLUS_AVG_MIN
+        and int(p.get("sta") or 0) >= _B_PLUS_STA_MIN
+    )
 
 
 def normalize_stat(raw: str) -> str:
@@ -251,17 +225,18 @@ def build_player_prop_market_comparison(
     previous_line:  Optional[float] = None,
     fetched_at:     Optional[datetime] = None,
     pp_rows:        Optional[list] = None,      # PropLineHistory rows (provider=PrizePicks)
-    dk_line:        Optional[float] = None,     # DraftKings prop line if available
-    fd_line:        Optional[float] = None,     # FanDuel prop line if available
+    dk_line:        Optional[float] = None,     # legacy compatibility; not displayed
+    fd_line:        Optional[float] = None,     # legacy compatibility; not displayed
     now:            Optional[datetime] = None,
     min_confidence: int = PROXY_CONFIDENCE_THRESHOLD,  # override for /picks (use 0 to show all)
 ) -> Optional[PlayerPropMarketComparison]:
     """
     Build a PlayerPropMarketComparison from available provider data.
 
-    Returns None if proxy_match_confidence < min_confidence (default: PROXY_CONFIDENCE_THRESHOLD).
-    Pass min_confidence=0 to build a comparison for all props regardless of score
-    (useful for /picks display where confidence is shown as info, not a gate).
+    ``min_confidence`` is an optional presentation filter for callers that
+    explicitly request one.  The active alert cycle passes zero because proxy
+    confidence is informational and cannot qualify or reject a directional
+    pick.
     """
     if now is None:
         now = datetime.utcnow()
@@ -313,18 +288,6 @@ def build_player_prop_market_comparison(
             line_value = ud_line,
             available  = True,
         ),
-        "DraftKings": ProviderLine(
-            provider   = "DraftKings",
-            emoji      = PROVIDER_EMOJI["DraftKings"],
-            line_value = dk_line,
-            available  = dk_line is not None,
-        ),
-        "FanDuel": ProviderLine(
-            provider   = "FanDuel",
-            emoji      = PROVIDER_EMOJI["FanDuel"],
-            line_value = fd_line,
-            available  = fd_line is not None,
-        ),
     }
 
     # ── Compute market view ───────────────────────────────────────────────────
@@ -336,7 +299,7 @@ def build_player_prop_market_comparison(
     best_provider: Optional[str] = None
     best_line:     Optional[float] = None
     if available_lines:
-        # Prefer PrizePicks > Underdog > DraftKings > FanDuel
+        # Prefer PrizePicks over Underdog when both are available.
         for p in PROVIDER_ORDER:
             match = [(n, v) for n, v in available_lines if n == p]
             if match:
@@ -609,22 +572,19 @@ async def run_player_prop_market_cycle(
     scored_props:  list[dict],
     alerted_set:   dict,
     now:           Optional[datetime] = None,
-    confidence_threshold: int = PROXY_CONFIDENCE_THRESHOLD,
+    confidence_threshold: int = 0,
 ) -> int:
     """
     Run the Player Prop Market Engine over the current cycle's high-scoring props.
 
-    Qualification rules (see module docstring for B+ criteria):
-      S / A  — always qualify
-      B+     — B-tier with avg_vs_line ≥ 14/20 AND stability ≥ 10/15
-      weak B — suppressed (movement-only noise)
-      PASS   — never alerted
+    Qualification is a valid OVER/UNDER direction only.  Score, proxy
+    confidence, evidence, and legacy tier labels are informational.
 
     For each qualifying candidate:
     1. Fetch PP PropLineHistory rows (one DB query for the batch).
     2. Build a PlayerPropMarketComparison.
-    3. Broadcast a 🟣 PLAYER PROP MARKET ALERT if confidence >= threshold
-       and the prop has not already been alerted in this session.
+    3. Broadcast a 🟣 PLAYER PROP MARKET ALERT when the comparison can be
+       built and the prop has not already been alerted in this session.
 
     Returns the number of alerts sent.
     """
@@ -634,29 +594,11 @@ async def run_player_prop_market_cycle(
         now = datetime.utcnow()
 
     def _admits(p: dict) -> bool:
-        tier = p.get("tier", "")
-        if tier in ("S", "A"):
-            return True
-        if tier == "B":
-            qualifies = _is_b_plus(p)
-            if qualifies:
-                logger.debug(
-                    "player_prop_market: B+ admitted — %s/%s  avg=%s sta=%s total=%s",
-                    p.get("player"), p.get("stat_type"),
-                    p.get("avg"), p.get("sta"), p.get("total"),
-                )
-            else:
-                logger.debug(
-                    "player_prop_market: B suppressed (weak) — %s/%s  avg=%s sta=%s total=%s",
-                    p.get("player"), p.get("stat_type"),
-                    p.get("avg"), p.get("sta"), p.get("total"),
-                )
-            return qualifies
-        return False
+        return (p.get("direction") or "").strip().upper() in {"OVER", "UNDER"}
 
     candidates = [p for p in scored_props if _admits(p)]
     if not candidates:
-        logger.debug("player_prop_market: no qualifying props (S/A or B+) — skipping")
+        logger.debug("player_prop_market: no directional props — skipping")
         return 0
 
     # One DB query for all PP history rows
@@ -665,27 +607,6 @@ async def run_player_prop_market_cycle(
     except Exception as exc:
         logger.debug("player_prop_market: failed to fetch PP rows: %s", exc)
         pp_rows = []
-
-    # Pre-fetch DK/FD player-prop OddsRecords for the whole cycle (1 query each)
-    dk_fd_index: dict[tuple[str, str], float] = {}
-    try:
-        dk_fd_rows = await db.get_recent_player_prop_lines(
-            ["DraftKings", "FanDuel"], since_hours=4
-        )
-        for rec in dk_fd_rows:
-            sel      = (getattr(rec, "selection", None) or "").strip()
-            line_val = getattr(rec, "line", None)
-            if line_val is None:
-                continue
-            for suffix in (" Over", " Under"):
-                if sel.endswith(suffix):
-                    pkey = sel[: -len(suffix)].strip().lower()
-                    key  = (pkey, rec.sportsbook)
-                    if key not in dk_fd_index:
-                        dk_fd_index[key] = float(line_val)
-                    break
-    except Exception as exc:
-        logger.debug("player_prop_market: failed to fetch DK/FD rows: %s", exc)
 
     alerts_sent = 0
     for p in candidates:
@@ -713,10 +634,6 @@ async def run_player_prop_market_cycle(
             )
             continue
 
-        pkey    = player.lower()
-        dk_line = dk_fd_index.get((pkey, "DraftKings"))
-        fd_line = dk_fd_index.get((pkey, "FanDuel"))
-
         comp = build_player_prop_market_comparison(
             player_name   = player,
             sport         = sport,
@@ -725,8 +642,7 @@ async def run_player_prop_market_cycle(
             previous_line = prev_line,
             fetched_at    = now,
             pp_rows       = pp_rows,
-            dk_line       = dk_line,
-            fd_line       = fd_line,
+            min_confidence = confidence_threshold,
             now           = now,
         )
         if comp is None:
