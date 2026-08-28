@@ -32,6 +32,7 @@ from telegram.error import TelegramError
 from config import config
 from engine.delivery_gates import tier_delivery_gate as _canonical_tier_delivery_gate
 from engine.score_validation import clamp_score
+from engine.sport_policy import is_football_related_sport
 from engine.telegram_rate_limiter import get_rate_limiter
 from models import EVOpportunity, Recommendation, SteamAlert
 
@@ -583,8 +584,8 @@ def format_start_message() -> str:
 
 
 def is_telegram_suppressed_sport(sport: Optional[str]) -> bool:
-    """Compatibility hook retained for non-Underdog alert paths."""
-    return False
+    """Block football betting output while preserving monitoring/history."""
+    return is_football_related_sport(sport)
 
 
 def _has_strong_underdog_evidence(
@@ -677,10 +678,13 @@ async def broadcast_alert(
     Broadcast an alert to multiple chat IDs.
     Returns {"sent": n, "failed": m}.
 
-    Delivery qualification is enforced before this low-level sender.  This
-    function remains generic for other alert types and does not infer prop
-    evidence from message text.
+    Delivery qualification is enforced before this low-level sender.  The
+    provider-independent football restriction is repeated here as a final
+    backstop for legacy/direct callers that pass a sport.
     """
+    if is_football_related_sport(sport):
+        logger.info("broadcast_alert: football betting output suppressed: sport=%s", sport)
+        return {"sent": 0, "failed": len(chat_ids)}
     message = _sanitize_user_alert_message(message)
     sent = failed = 0
     for cid in chat_ids:
@@ -1283,7 +1287,7 @@ class AlertDelivery:
         Full Underdog prop alert pipeline:
           0. normalize_underdog → AlertObject.
           1. Scope check.
-          2. Game timing filter — skipped for removals and new-prop alerts.
+          2. Game timing filter — skipped only for removals.
           3. Daily Underdog cap check (disabled by default; set DAILY_UNDERDOG_LIMIT > 0).
           4. Format and broadcast.
              - market_move_only=True → format_market_move_detected (📈 MARKET MOVE)
@@ -1294,6 +1298,12 @@ class AlertDelivery:
         """
         source = source.strip() or "Underdog"
         source_upper = source.upper()
+        if is_football_related_sport(sport):
+            return DeliveryResult(
+                sent=False,
+                filtered=True,
+                filtered_reason="Football-related betting output is disabled",
+            )
         # Moneylines are retained and scored for monitoring, but only an
         # explicitly Strong-moneyline designation may reach Telegram. Keep this
         # before normal new/removal/movement-only exceptions so none bypass it.
@@ -1327,10 +1337,9 @@ class AlertDelivery:
         if not scope.allowed:
             return DeliveryResult(sent=False, filtered=True, filtered_reason=scope.reason)
 
-        # 2. Game timing filter
-        # Skipped for removals (game may have ended) and new-prop alerts
-        # (opportunity is now — timing gate must not suppress first-appearance alerts).
-        if not removed and not new_prop:
+        # 2. Game timing filter.  Removal records may arrive after the event,
+        # but no new or re-entry prop may bypass the started-event check.
+        if not removed:
             line_change = abs(new_line - old_line)
             allowed, timing_reason = is_game_alertable(
                 game_time,
@@ -1470,26 +1479,6 @@ class AlertDelivery:
             )
 
         # 5. Broadcast
-        # Freshness timestamp — helps users know how old the line is before placing.
-        # This is especially important when the bot alerts at poll T and the user
-        # acts at T+N minutes when the market may have already moved.
-        # Only appended to actionable picks (not removals, not market-move-only alerts).
-        if message and not removed and not market_move_only:
-            try:
-                from zoneinfo import ZoneInfo as _ZI
-                from datetime import datetime as _now_dt
-                _now_et = _now_dt.utcnow().replace(tzinfo=_ZI("UTC")).astimezone(
-                    _ZI("America/New_York")
-                )
-                _ts_str = _now_et.strftime("%-I:%M %p ET")
-            except Exception:
-                from datetime import datetime as _now_dt
-                _ts_str = _now_dt.utcnow().strftime("%H:%M UTC")
-            message += (
-                f"\n\n<i>⏱ Line as of {_ts_str} — "
-                f"verify on {source} before placing</i>"
-            )
-
         counts     = await broadcast_alert(self._bot, self._chat_ids, message, sport=sport)
         discord_sent = False
         if not removed and not market_move_only:

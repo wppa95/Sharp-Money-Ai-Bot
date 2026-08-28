@@ -658,9 +658,9 @@ def format_underdog_change_alert(
         movement_block = f"  🐶 <b>Last Line:</b>  <code>{old_line:.1f}</code>"
     elif standing:
         header         = (
-            "🎯 <b>ACTIONABLE BET PICK</b>"
+            "🐶 <b>UNDERDOG PICK</b>"
             if source_upper == "UNDERDOG"
-            else f"🎯 <b>{source_upper} PICK</b>"
+            else "🟣 <b>PRIZEPICKS PICK</b>"
         )
         movement_block = (
             f"📊 <b>{source} Line</b>\n"
@@ -670,9 +670,9 @@ def format_underdog_change_alert(
         change         = new_line - old_line
         direction_icon = "📈" if change > 0 else "📉"
         header         = (
-            "🎯 <b>ACTIONABLE BET PICK</b>"
+            "🐶 <b>UNDERDOG PICK</b>"
             if source_upper == "UNDERDOG"
-            else f"🎯 <b>{source_upper} PICK</b>"
+            else "🟣 <b>PRIZEPICKS PICK</b>"
         )
         change_sign    = "+" if change >= 0 else ""
         movement_block = (
@@ -1010,22 +1010,11 @@ def format_underdog_new_prop_alert(
     _np_rec = getattr(decision, "recommendation", None) if decision is not None else None
     _np_bq  = getattr(decision, "confidence", None)     if decision is not None else None
     _np_sport_up = (sport or "").upper()
-    _np_is_tier1 = _np_sport_up not in {"MLB", "NFL"}
     _np_strong_under = ""
-    if (
-        _np_rec == "UNDER"
-        and _np_is_tier1
-        and _np_bq is not None
-        and int(_np_bq) >= 70
-    ):
-        _np_strong_under = (
-            "🔥 <b>STRONG UNDER</b>  "
-            "<i>(BQ ≥ 70 — verify line on Underdog before placing)</i>"
-        )
-    elif _np_rec == "UNDER" and _np_bq is not None and int(_np_bq) >= 30:
+    if _np_rec == "UNDER" and _np_bq is not None and int(_np_bq) >= 30:
         _np_strong_under = (
             "🔴 <b>Strong UNDER Signal</b>  "
-            "<i>(BQ ≥ 30 — verify line on Underdog before placing)</i>"
+            "<i>(informational market signal)</i>"
         )
 
     # L5 history block — always shown; falls back to N/A when no history available.
@@ -1058,9 +1047,9 @@ def format_underdog_new_prop_alert(
     parts = [
         _thick,
         (
-            "🚨 <b>UNDERDOG PROP LIVE</b>"
+            "🐶 <b>UNDERDOG PICK</b>"
             if source_upper == "UNDERDOG"
-            else f"🎯 <b>{source_upper} PICK</b>"
+            else "🟣 <b>PRIZEPICKS PICK</b>"
         ),
         _thick,
         "",
