@@ -371,11 +371,12 @@ class PlayerGameResult(Base):
     opponent     = Column(String(128), nullable=True)
     actual_value = Column(Float,       nullable=False)
     source       = Column(String(32),  nullable=False, default="api")
+    game_id      = Column(String(128), nullable=False, default="", index=True)
     fetched_at   = Column(DateTime,    default=datetime.utcnow, nullable=False)
 
     __table_args__ = (
         UniqueConstraint(
-            "player_name", "sport", "stat_type", "game_date",
+            "player_name", "sport", "stat_type", "game_date", "game_id",
             name="uq_player_game_result",
         ),
     )
