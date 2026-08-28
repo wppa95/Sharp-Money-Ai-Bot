@@ -1498,6 +1498,14 @@ def _is_upcoming_game(game_time: Optional[datetime]) -> bool:
     return game_time > now
 
 
+def _is_active_display_sport(sport: Optional[str]) -> bool:
+    """Keep current pick/slip views aligned with the configured live slate."""
+    sport_key = str(sport or "").strip().upper()
+    return bool(sport_key) and sport_key in {
+        str(value).strip().upper() for value in config.active_sports
+    }
+
+
 # ── /picks tier constants ─────────────────────────────────────────────────────
 # New PPAnalysisScore vocabulary (S/A/B/PASS) plus legacy AlertTier values for
 # any records written before the scoring engine was introduced.
@@ -1696,6 +1704,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     ud_props = [
         p for p in ud_props
         if not _is_season_future(p.stat_type)
+        and _is_active_display_sport(p.sport)
         and not is_telegram_suppressed_sport(p.sport)
         and _is_upcoming_game(getattr(p, "game_time", None))
     ]
@@ -1711,6 +1720,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     pp_props = [
         p for p in pp_rows
         if not _is_season_future(p.stat_type)
+        and _is_active_display_sport(p.sport)
         and not is_telegram_suppressed_sport(p.sport)
         and _is_upcoming_game(getattr(p, "game_time", None))
         and (not sport_filter or p.sport.upper() == sport_filter)
@@ -2561,6 +2571,7 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     ud_props = [
         p for p in ud_props
         if not _is_season_future(p.stat_type)
+        and _is_active_display_sport(p.sport)
         and not is_telegram_suppressed_sport(p.sport)
         and _is_upcoming_game(getattr(p, "game_time", None))
     ]
@@ -2574,6 +2585,7 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     pp_props = [
         p for p in pp_props
         if not _is_season_future(p.stat_type)
+        and _is_active_display_sport(p.sport)
         and not is_telegram_suppressed_sport(p.sport)
         and _is_upcoming_game(getattr(p, "game_time", None))
     ]

@@ -47,6 +47,14 @@ def _mock_status_db() -> MagicMock:
     return db
 
 
+def test_current_display_sport_filter_uses_configured_active_slate():
+    with patch.object(commands.config, "active_sports", ["WNBA", "CS"]):
+        assert commands._is_active_display_sport("wnba")
+        assert commands._is_active_display_sport("CS")
+        assert not commands._is_active_display_sport("NBA")
+        assert not commands._is_active_display_sport(None)
+
+
 def _health(
     name: str,
     status: ProviderStatus = ProviderStatus.OK,
