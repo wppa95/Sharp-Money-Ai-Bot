@@ -1607,6 +1607,29 @@ class Database:
                     delivered_alerts=1 if alert_sent else 0,
                 )
 
+            # Legacy sportsbook paths are kept separate from Underdog and
+            # PrizePicks.  They are normally scope-blocked, but historical
+            # rows must remain visible if an older configuration delivered one.
+            for model in (EVRecord, SteamRecord):
+                legacy_rows = await s.execute(
+                    select(model.detected_at, model.alert_sent)
+                    .where(model.detected_at >= cutoff)
+                )
+                for detected_at, alert_sent in legacy_rows.all():
+                    row = _ensure("Sportsbook")
+                    row["evaluated"] += 1
+                    row["actionable_persisted"] += 1
+                    if alert_sent:
+                        row["delivered_alerts"] += 1
+                        legacy_deliveries += 1
+                    _add_bucket(
+                        "Sportsbook",
+                        detected_at,
+                        evaluated=1,
+                        actionable_persisted=1,
+                        delivered_alerts=1 if alert_sent else 0,
+                    )
+
             audit_rows = await s.execute(
                 select(
                     TelegramDeliveryAudit.provider,
