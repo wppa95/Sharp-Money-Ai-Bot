@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -161,3 +163,69 @@ async def test_reconciliation_excludes_old_rows(db):
 
     assert report["by_provider"].get("Underdog", {}).get("actionable_persisted", 0) == 0
     assert report["legacy_delivery_rows"] == 0
+
+
+@pytest.mark.asyncio
+async def test_consensus_broadcast_audits_fanout_and_only_counts_sent():
+    import market_engine
+
+    limiter = MagicMock()
+    limiter.check.return_value = SimpleNamespace(allowed=True)
+    db = MagicMock()
+    db.log_telegram_delivery = AsyncMock()
+    with (
+        patch.object(market_engine, "get_rate_limiter", return_value=limiter),
+        patch.object(
+            market_engine,
+            "broadcast_alert",
+            new_callable=AsyncMock,
+            return_value={"sent": 2, "failed": 1},
+        ) as broadcast,
+    ):
+        counts = await market_engine._broadcast_consensus_alert(
+            db=db,
+            bot=MagicMock(),
+            chat_ids=[1, 2, 3],
+            message="test",
+            sport="MLB",
+            alert_kind="INEFFICIENCY",
+        )
+
+    assert counts["sent"] == 2
+    limiter.record_qualified.assert_called_once()
+    limiter.record_sent.assert_called_once()
+    broadcast.assert_awaited_once()
+    db.log_telegram_delivery.assert_awaited_once()
+    assert db.log_telegram_delivery.await_args.kwargs["recipients_sent"] == 2
+    assert db.log_telegram_delivery.await_args.kwargs["outcome"] == "sent"
+
+
+@pytest.mark.asyncio
+async def test_consensus_broadcast_rate_limit_skips_network_and_is_audited():
+    import market_engine
+
+    limiter = MagicMock()
+    limiter.check.return_value = SimpleNamespace(
+        allowed=False,
+        reason="rate-limited",
+    )
+    db = MagicMock()
+    db.log_telegram_delivery = AsyncMock()
+    with (
+        patch.object(market_engine, "get_rate_limiter", return_value=limiter),
+        patch.object(market_engine, "broadcast_alert", new_callable=AsyncMock) as broadcast,
+    ):
+        counts = await market_engine._broadcast_consensus_alert(
+            db=db,
+            bot=MagicMock(),
+            chat_ids=[1],
+            message="test",
+            sport="NBA",
+            alert_kind="STEAM",
+        )
+
+    assert counts == {"sent": 0, "failed": 0, "rate_limited": True}
+    broadcast.assert_not_awaited()
+    limiter.record_sent.assert_not_called()
+    db.log_telegram_delivery.assert_awaited_once()
+    assert db.log_telegram_delivery.await_args.kwargs["outcome"] == "rate_limited"
