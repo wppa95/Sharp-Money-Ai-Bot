@@ -1065,6 +1065,7 @@ async def cmd_performance(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
         records = await _db.get_ev_records_with_results(limit=500, include_pending=False)
         _ud_rollups = await _db.get_learning_rollups()
+        _tg_perf = await _db.get_telegram_pick_performance()
 
         if not records:
             _total = _ud_rollups.get("total_graded", 0)
@@ -1074,9 +1075,14 @@ async def cmd_performance(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 _lines = [
                     "📊 <b>Performance History</b>",
                     "",
-                    "🎯 <b>Underdog graded opportunities</b>",
+                    "🎯 <b>Actionable prop performance</b>",
                     f"Resolved plays: <b>{_total}</b>",
                 ]
+                for _source, _source_perf in sorted(_tg_perf.get("by_provider", {}).items()):
+                    _lines.append(
+                        f"  {_source}: {_source_perf['hit']}H-{_source_perf['miss']}M-"
+                        f"{_source_perf['push']}P · {source_perf['pending']} pending"
+                    )
                 for _sport, _row in sorted(_sport_rows.items()):
                     _lines.append(
                         f"  {_sport}: {_row['W']}W-{_row['L']}L-{_row['P']}P "
@@ -1109,6 +1115,13 @@ async def cmd_performance(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 f"  · Sharp Confidence avg: "
                 f"{_intel.get('sharp_confidence_avg') if _intel.get('sharp_confidence_avg') is not None else '—'}/100"
             )
+        if _tg_perf.get("by_provider"):
+            msg += "\n\n🎯 <b>Actionable picks by source</b>"
+            for _source, _source_perf in sorted(_tg_perf["by_provider"].items()):
+                msg += (
+                    f"\n  {_source}: {_source_perf['hit']}H-{_source_perf['miss']}M-"
+                    f"{_source_perf['push']}P · {_source_perf['pending']} pending"
+                )
         await update.message.reply_text(msg, parse_mode="HTML")
 
     except Exception as exc:

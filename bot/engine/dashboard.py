@@ -111,6 +111,7 @@ class IntelligencePanel:
     strongest_sport:   Optional[str]   = None
     weakest_sport:     Optional[str]   = None
     strongest_market:  Optional[str]   = None
+    provider_breakdown: dict           = field(default_factory=dict)
 
 
 @dataclass
@@ -295,6 +296,12 @@ class DashboardReport:
                     f"  Graded: <code>{ip.total_graded}</code>  "
                     f"Hit rate: <code>{ip.hit_rate*100:.0f}%</code>"
                 )
+            if ip.provider_breakdown:
+                parts.append("  By source:")
+                for source, counts in sorted(ip.provider_breakdown.items()):
+                    parts.append(
+                        f"    {source}: {counts['W']}W-{counts['L']}L-{counts['P']}P"
+                    )
             if ip.total_misses > 0:
                 parts.append(
                     f"  Miss types:  "
@@ -764,6 +771,35 @@ class DashboardEngine:
                     ip.weakest_sport   = min(sport_hr, key=sport_hr.__getitem__)
                     if ip.strongest_sport == ip.weakest_sport:
                         ip.weakest_sport = None
+
+                # Keep provider performance separate so PrizePicks results
+                # cannot appear to be Underdog results in the dashboard.
+                provider_res = await s.execute(
+                    select(
+                        PropOpportunityLog.provider,
+                        PropOpportunityLog.recommendation,
+                        PropOpportunityLog.result,
+                        func.count(),
+                    )
+                    .where(PropOpportunityLog.result.in_(["HIT", "MISS", "PUSH"]))
+                    .where(PropOpportunityLog.recommendation.in_(["OVER", "UNDER"]))
+                    .group_by(
+                        PropOpportunityLog.provider,
+                        PropOpportunityLog.recommendation,
+                        PropOpportunityLog.result,
+                    )
+                )
+                for provider_val, rec_val, result_val, cnt in provider_res.all():
+                    source = provider_val or "Underdog"
+                    source_counts = ip.provider_breakdown.setdefault(
+                        source, {"W": 0, "L": 0, "P": 0}
+                    )
+                    if result_val == "PUSH":
+                        source_counts["P"] += cnt
+                    elif rec_val == "OVER":
+                        source_counts["W" if result_val == "HIT" else "L"] += cnt
+                    else:
+                        source_counts["W" if result_val == "MISS" else "L"] += cnt
 
             r.intelligence_panel = ip
         except Exception:
