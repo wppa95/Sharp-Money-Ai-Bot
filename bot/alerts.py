@@ -647,12 +647,22 @@ def _sanitize_user_alert_message(message: str) -> str:
     tier/recommendation values remain available to the engine and database.
     """
     text = str(message or "")
-    text = re.sub(r"\b(?:S|A|B|C)-Tier\b", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b(?:S|A|B|C)[- ]?Tier\b", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b(?:S/A/B/C|S/A|A/B)[- ]?Tier\b", "", text, flags=re.IGNORECASE)
     text = re.sub(r"\bTier[- ]?[12]\b", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"\bWATCHLIST(?: ONLY)?\b", "DEVELOPING EDGE", text, flags=re.IGNORECASE)
+    text = re.sub(
+        r"\b(?:WATCHLIST(?: ONLY)?|NEAR[- ]MISS)\b",
+        "DEVELOPING EDGE",
+        text,
+        flags=re.IGNORECASE,
+    )
     text = re.sub(r"\bSTRONG UNDER(?: SIGNAL)?\b", "UNDER SIGNAL", text, flags=re.IGNORECASE)
     text = re.sub(r"\bdecision_pass\b", "no-direction", text, flags=re.IGNORECASE)
     text = re.sub(r"\bnot_immediate\b", "not yet actionable", text, flags=re.IGNORECASE)
+    # PASS is an internal recommendation state, not a user-facing outcome.
+    # Restrict the replacement to the standalone word so "passed" and
+    # ordinary prose remain untouched.
+    text = re.sub(r"\bPASS\b", "NO DIRECTION", text, flags=re.IGNORECASE)
     return re.sub(r"[ \t]{2,}", " ", text)
 
 
@@ -691,7 +701,7 @@ async def send_discord_alert(message: str) -> bool:
     if not config.discord_configured:
         return False
 
-    content = unescape(re.sub(r"<[^>]+>", "", message)).strip()
+    content = unescape(re.sub(r"<[^>]+>", "", _sanitize_user_alert_message(message))).strip()
     if len(content) > 2000:
         content = content[:1997] + "..."
 

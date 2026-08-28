@@ -24,6 +24,17 @@ _SUPPORTED_HISTORY_SPORTS = frozenset({
 })
 
 
+def _underdog_scan_running() -> bool:
+    """Return whether the shared Underdog scan currently owns the DB-heavy slot."""
+    try:
+        from market_engine import _ud_full_scan_running
+        return bool(_ud_full_scan_running)
+    except (ImportError, AttributeError):
+        # Keep the collector usable in isolated tests and older integrations
+        # where the market engine module is not installed.
+        return False
+
+
 def _fair_cycle_targets(
     targets: list[tuple[str, str, str]],
     limit: int,
@@ -62,6 +73,17 @@ async def player_history_collector_job(context) -> None:
     if not db:
         logger.warning("player_history_collector_job: db not ready")
         return
+    ht = get_health_tracker()
+    # Player history is enrichment, not the live monitoring path.  Do not
+    # start another pool read while Underdog owns the shared scan slot.
+    if _underdog_scan_running():
+        logger.info(
+            "player_history_collector_job: Underdog scan active — yielding this cycle"
+        )
+        if ht:
+            ht.record_job_started("player_history_collector_job")
+            ht.record_job_run("player_history_collector_job")
+        return
     _activity_end = None
     try:
         from market_engine import _job_activity_start, _job_activity_end
@@ -69,7 +91,6 @@ async def player_history_collector_job(context) -> None:
         _activity_end = _job_activity_end
     except ImportError:
         pass
-    ht = get_health_tracker()
     if ht:
         ht.record_job_started("player_history_collector_job")
     logger.info(
@@ -99,6 +120,20 @@ async def player_history_collector_job(context) -> None:
                 "player_history_collector_job: active snapshot load failed: %s",
                 exc,
             )
+
+        # Underdog may have claimed the slot while the active-pool query was
+        # waiting on SQLite.  Yield before the fallback query or any provider
+        # work so the live scan gets exclusive access to the hot path.
+        if _underdog_scan_running():
+            logger.info(
+                "player_history_collector_job: Underdog scan claimed slot "
+                "after active-pool load — yielding"
+            )
+            if ht:
+                ht.record_job_run("player_history_collector_job")
+            if _activity_end:
+                _activity_end("player_history")
+            return
 
         # ── Fallback: recent PropLineHistory when no active snapshot ──────────
         if not targets:
@@ -139,13 +174,23 @@ async def player_history_collector_job(context) -> None:
         rows_by_sport: dict[str, int] = {}
         cycle_started = time.monotonic()
         stopped_for_budget = False
+        stopped_for_underdog = False
         for player, sport, stat in cycle_targets:
+            if _underdog_scan_running():
+                stopped_for_underdog = True
+                break
             if time.monotonic() - cycle_started >= _CYCLE_TIME_BUDGET_SECONDS:
                 stopped_for_budget = True
                 break
             target_counts[sport] = target_counts.get(sport, 0) + 1
             try:
                 raw = await provider.fetch_results(player, sport, stat)
+                # A provider request can overlap the instant Underdog claims
+                # the slot.  Do not begin the next SQLite write in that case;
+                # the next history cycle will retry this target.
+                if _underdog_scan_running():
+                    stopped_for_underdog = True
+                    break
                 for r in raw:
                     await db.upsert_player_result(r)
                 if raw:
@@ -162,9 +207,11 @@ async def player_history_collector_job(context) -> None:
         logger.info(
             "player_history_collector_job: done players_ok=%d rows=%d "
             "targets_attempted=%d elapsed=%.1fs stopped_for_budget=%s "
-            "targets_by_sport=%s players_ok_by_sport=%s rows_by_sport=%s",
+            "stopped_for_underdog=%s targets_by_sport=%s "
+            "players_ok_by_sport=%s rows_by_sport=%s",
             ok, rows, sum(target_counts.values()), time.monotonic() - cycle_started,
-            stopped_for_budget, target_counts, ok_by_sport, rows_by_sport,
+            stopped_for_budget, stopped_for_underdog, target_counts,
+            ok_by_sport, rows_by_sport,
         )
         if ht:
             ht.record_job_run("player_history_collector_job")

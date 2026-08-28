@@ -484,7 +484,7 @@ class PregameWatchEngine:
 
             try:
                 msg    = format_pregame_watch_alert(entry, comp)
-                counts = await broadcast_alert(bot, chat_ids, msg)
+                counts = await broadcast_alert(bot, chat_ids, msg, sport=entry.sport)
                 if counts.get("sent", 0) > 0:
                     alerts_sent += 1
                     self._alerted_set.add(alert_key)

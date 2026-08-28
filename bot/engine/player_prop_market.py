@@ -734,7 +734,7 @@ async def run_player_prop_market_cycle(
 
         try:
             message = format_player_prop_market_alert(comp)
-            counts  = await broadcast_alert(bot, chat_ids, message)
+            counts  = await broadcast_alert(bot, chat_ids, message, sport=sport)
             if counts.get("sent", 0) > 0:
                 _record_prop_alerted(alerted_set, player, sport, stat_type, line)
                 alerts_sent += 1
