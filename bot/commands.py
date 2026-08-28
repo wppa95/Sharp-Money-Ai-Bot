@@ -3087,14 +3087,36 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def cmd_backfill(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/backfill — Fetch latest stats for all pending opportunities and grade them."""
+    """/backfill — Run grading without blocking Telegram on a busy database."""
     if not _check_allowed(update):
         await update.message.reply_text("⛔ Unauthorized.")
         return
     if _db is None:
         await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
         return
+    try:
+        await _bounded(_cmd_backfill_inner(update, context))
+    except asyncio.TimeoutError:
+        logger.warning(
+            "cmd_backfill: grading exceeded %.1fs; background cleanup may continue",
+            _COMMAND_TIMEOUT_SECONDS,
+        )
+        await update.message.reply_text(
+            "⚠️ Backfill is still working or temporarily blocked by the database. "
+            "The command stopped waiting; retry /backfill shortly and use /rollups "
+            "to inspect completed grading.",
+            parse_mode=ParseMode.HTML,
+        )
+    except Exception as exc:
+        logger.exception("cmd_backfill: unexpected error: %s", exc)
+        await update.message.reply_text(
+            "⚠️ /backfill is temporarily unavailable. Monitoring continues.",
+            parse_mode=ParseMode.HTML,
+        )
 
+
+async def _cmd_backfill_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/backfill — Fetch latest stats for all pending opportunities and grade them."""
     await update.message.reply_text("⏳ Running backfill grading pass…")
 
     try:
@@ -3205,9 +3227,13 @@ async def cmd_backfill(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         ]
         await update.message.reply_text("\n".join(lines_out), parse_mode=ParseMode.HTML)
 
+    except asyncio.CancelledError:
+        # The outer bounded wrapper intentionally stops waiting without
+        # waiting for slow SQLite cancellation cleanup.
+        raise
     except Exception as exc:
-        logger.exception("cmd_backfill: unexpected error: %s", exc)
-        await update.message.reply_text(f"⚠️ /backfill failed: {exc}")
+        logger.exception("cmd_backfill inner error: %s", exc)
+        raise
 
 
 async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -3542,9 +3568,20 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     try:
         data = await _bounded(_db.get_tracking_summary())
+    except asyncio.TimeoutError:
+        logger.warning("cmd_tracking: summary exceeded %.1fs", _COMMAND_TIMEOUT_SECONDS)
+        await update.message.reply_text(
+            "⚠️ Tracking data is temporarily unavailable because the database is busy. "
+            "Please retry shortly.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
     except Exception as exc:
         logger.exception("cmd_tracking: DB error: %s", exc)
-        await update.message.reply_text("⚠️ /tracking failed — check bot logs.")
+        await update.message.reply_text(
+            "⚠️ Tracking data is temporarily unavailable. Please retry shortly.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     counts   = data.get("counts", {})
@@ -3796,9 +3833,19 @@ async def cmd_analyst(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
         await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+    except asyncio.TimeoutError:
+        logger.warning("cmd_analyst: report exceeded %.1fs", _COMMAND_TIMEOUT_SECONDS)
+        await update.message.reply_text(
+            "⚠️ Analyst evidence is temporarily unavailable because the database "
+            "or research service is busy. Please retry shortly.",
+            parse_mode=ParseMode.HTML,
+        )
     except Exception as exc:
         logger.exception("cmd_analyst failed: %s", exc)
-        await update.message.reply_text("⚠️ /analyst failed. Check bot logs.")
+        await update.message.reply_text(
+            "⚠️ Analyst evidence is temporarily unavailable. Please retry shortly.",
+            parse_mode=ParseMode.HTML,
+        )
 
 
 async def cmd_blocks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
