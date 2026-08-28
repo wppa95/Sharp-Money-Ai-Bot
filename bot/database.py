@@ -672,6 +672,8 @@ class Database:
         await self._migrate_prop_opportunity_log_v5()
         await self._migrate_prop_line_history_v4()
         await self._migrate_prop_line_history_v5()
+        await self._migrate_player_game_results_v1()
+        await self._migrate_prop_opportunity_log_v6()
         await self._migrate_scan_cycle_log_v1()
         # player_risk_records is created by create_all (new table); no column migration needed
         logger.info("Database initialised at %s", self._url)
@@ -3296,6 +3298,72 @@ class Database:
                 except Exception:
                     pass
         logger.info("_migrate_prop_opportunity_log_v5: downstream intelligence columns ensured")
+
+    async def _migrate_player_game_results_v1(self) -> None:
+        """Add game identity and replace the legacy date-only uniqueness key."""
+        async with self._engine.begin() as conn:
+            try:
+                await conn.execute(text(
+                    "ALTER TABLE player_game_results ADD COLUMN game_id "
+                    "VARCHAR(128) NOT NULL DEFAULT ''"
+                ))
+            except Exception:
+                pass
+
+            # Fresh databases already have the five-column constraint. For
+            # SQLite databases created before game identity existed, rebuild
+            # this table so same-day events can coexist safely.
+            if not self._url.startswith("sqlite"):
+                return
+            try:
+                indexes = await conn.execute(
+                    text("PRAGMA index_list('player_game_results')")
+                )
+                unique_old = False
+                for row in indexes.mappings().all():
+                    if not row.get("unique"):
+                        continue
+                    index_name = str(row.get("name", "")).replace("'", "''")
+                    info = await conn.execute(
+                        text(f"PRAGMA index_info('{index_name}')")
+                    )
+                    columns = [item.get("name") for item in info.mappings().all()]
+                    if columns == ["player_name", "sport", "stat_type", "game_date"]:
+                        unique_old = True
+                        break
+                if not unique_old:
+                    return
+
+                await conn.execute(text(
+                    "ALTER TABLE player_game_results "
+                    "RENAME TO player_game_results_legacy"
+                ))
+                await conn.run_sync(Base.metadata.create_all)
+                await conn.execute(text(
+                    "INSERT INTO player_game_results "
+                    "(id, player_name, sport, stat_type, game_date, opponent, "
+                    "actual_value, source, game_id, fetched_at) "
+                    "SELECT id, player_name, sport, stat_type, game_date, opponent, "
+                    "actual_value, source, game_id, fetched_at "
+                    "FROM player_game_results_legacy"
+                ))
+                await conn.execute(text("DROP TABLE player_game_results_legacy"))
+            except Exception as exc:
+                logger.warning(
+                    "_migrate_player_game_results_v1: preserving legacy schema: %s",
+                    exc,
+                )
+
+    async def _migrate_prop_opportunity_log_v6(self) -> None:
+        """Add provider event identity to opportunity rows."""
+        async with self._engine.begin() as conn:
+            try:
+                await conn.execute(text(
+                    "ALTER TABLE prop_opportunity_log ADD COLUMN "
+                    "game_id VARCHAR(128) NOT NULL DEFAULT ''"
+                ))
+            except Exception:
+                pass
 
     async def log_prop_opportunity(
         self,
