@@ -5425,6 +5425,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         "decision_tier": getattr(_fpr_dec, "decision_tier", None),
                         "confidence": getattr(_fpr_dec, "confidence", 0),
                         "game_time": getattr(_fpr_snap, "game_time", None),
+                        "game_id": getattr(_fpr_snap, "game_id", "") or "",
                         "provider": "Underdog",
                         "bet_quality_score": float(getattr(_fpr_score, "total", 0) or 0),
                         "reason_codes": _compute_reason_codes(_fpr_score, _fpr_dec),

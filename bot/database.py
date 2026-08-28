@@ -4170,12 +4170,14 @@ class Database:
                         if opp_row.game_time
                         else datetime.utcnow().strftime("%Y-%m-%d")
                     )
+                    evidence_game_id = str(opp_row.game_id or "")
                     existing = await s.execute(
                         select(PlayerGameResult).where(
                             PlayerGameResult.player_name == player_name,
                             PlayerGameResult.sport == sport,
                             PlayerGameResult.stat_type == stat_type,
                             PlayerGameResult.game_date == evidence_date,
+                            PlayerGameResult.game_id == evidence_game_id,
                         )
                     )
                     if existing.scalar_one_or_none() is None:
@@ -4187,6 +4189,7 @@ class Database:
                             opponent=opp_row.team or None,
                             actual_value=actual_value,
                             source="graded_prop",
+                            game_id=evidence_game_id,
                         ))
             await s.execute(
                 _sa_update(PropOpportunityLog)
