@@ -968,6 +968,10 @@ class Database:
                     PropLineHistory.provider   == "Underdog",
                     PropLineHistory.fetched_at >= cutoff,
                     PropLineHistory.removed.isnot(True),
+                    or_(
+                        PropLineHistory.game_time.is_(None),
+                        PropLineHistory.game_time > datetime.utcnow(),
+                    ),
                     # /picks is an analyst-facing view of evaluated props.
                     # Decision labels are metadata, not a display gate; only
                     # unscored rows are excluded.
@@ -4464,6 +4468,12 @@ class Database:
                     PropOpportunityLog.alert_sent    == True,   # noqa: E712
                     PropOpportunityLog.alert_sent_at >= cutoff,
                     PropOpportunityLog.recommendation.in_(["OVER", "UNDER"]),
+                    # Historical delivery rows stay stored, while the Telegram
+                    # current-alert display excludes known live/finished games.
+                    or_(
+                        PropOpportunityLog.game_time.is_(None),
+                        PropOpportunityLog.game_time > datetime.utcnow(),
+                    ),
                 )
                 .order_by(desc(PropOpportunityLog.alert_sent_at))
                 .limit(limit)

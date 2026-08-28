@@ -390,30 +390,21 @@ class TestSilentErrorLogging:
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 7. /picks delivery status indicator
+# 7. /picks neutral current-monitoring display
 # ══════════════════════════════════════════════════════════════════════
 
 class TestPicksDeliveryStatus:
-    """Verify /picks shows delivery status for each prop."""
+    """Verify /picks does not recreate a candidate/delivery classification."""
 
-    def test_picks_render_includes_delivery_label(self):
-        """_render_pick_entry must check first_alert_sent_at and show a status."""
+    def test_picks_render_omits_delivery_classification(self):
         import inspect, commands
-        src = inspect.getsource(commands)
-        assert "first_alert_sent_at" in src, (
-            "/picks must check PropLineHistory.first_alert_sent_at for delivery status"
-        )
-        assert "not yet delivered" in src, (
-            "/picks must label undelivered candidates as 'not yet delivered'"
-        )
-        assert "Delivered:" in src, (
-            "/picks must show 'Delivered: HH:MM' for confirmed delivered props"
-        )
+        src = inspect.getsource(commands._cmd_picks_inner)
+        assert "first_alert_sent_at" not in src
+        assert "not yet delivered" not in src
+        assert "Delivered:" not in src
+        assert "Tier:" not in src
 
-    def test_picks_header_clarifies_candidate_meaning(self):
-        """The /picks display must clarify that it shows candidates, not only delivered picks."""
+    def test_picks_header_describes_current_provider_lines(self):
         import inspect, commands
-        src = inspect.getsource(commands)
-        assert "Candidate" in src or "candidate" in src, (
-            "/picks must label undelivered props as candidates"
-        )
+        src = inspect.getsource(commands._cmd_picks_inner)
+        assert "Underdog and PrizePicks lines are shown separately." in src

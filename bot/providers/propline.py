@@ -126,6 +126,12 @@ class PropLineFetchResult:
     props: list[PlayerProp]
     fetched_at: datetime
     from_cache: bool = False
+    # An empty, successful response is valid (for example, no currently
+    # available projections).  Keep it distinct from a locally blocked,
+    # quota-skipped, or failed request so health telemetry is not optimistic.
+    succeeded: bool = False
+    error: str = ""
+    failure_kind: str = ""
 
 
 @dataclass(frozen=True)
@@ -548,7 +554,7 @@ class PropLineClient:
         api_key: Optional[str] = None,
         api_url: Optional[str] = None,
         session: Any = None,
-        min_request_interval: float = 300.0,
+        min_request_interval: float = 120.0,
         cache_ttl: float = 240.0,
         timeout_seconds: float = 15.0,
         sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep,
@@ -731,13 +737,19 @@ class PropLineClient:
     ) -> PropLineFetchResult:
         if not self.is_configured:
             logger.info("PropLine PrizePicks provider disabled: credentials or endpoint missing")
-            return PropLineFetchResult([], datetime.utcnow(), from_cache=False)
+            return PropLineFetchResult(
+                [], datetime.utcnow(), from_cache=False,
+                error="PropLine is not configured", failure_kind="disabled",
+            )
         if (
             self.api_url.rstrip("/") == DEFAULT_PROPLINE_API_URL
             and not _clean(sport_key)
         ):
             logger.warning("PropLine official odds request skipped: sport key is required")
-            return PropLineFetchResult([], datetime.utcnow(), from_cache=False)
+            return PropLineFetchResult(
+                [], datetime.utcnow(), from_cache=False,
+                error="PropLine sport key is required", failure_kind="configuration",
+            )
 
         async with self._lock:
             self._reset_daily_budget_if_needed()
@@ -749,18 +761,28 @@ class PropLineClient:
                     list(cached.props),
                     cached.fetched_at,
                     from_cache=True,
+                    succeeded=True,
                 )
             if self._request_count >= self.daily_request_limit:
                 logger.warning("PropLine daily request budget exhausted; skipping request")
-                return PropLineFetchResult([], datetime.utcnow(), from_cache=False)
+                return PropLineFetchResult(
+                    [], datetime.utcnow(), from_cache=False,
+                    error="PropLine daily request budget exhausted", failure_kind="quota",
+                )
             if now < self._backoff_until:
                 logger.warning("PropLine rate-limit backoff active; reusing fresh cache if available")
                 cached = self._cache_by_scope.get(scope)
                 if cached is not None:
                     return PropLineFetchResult(
-                        list(cached.props), cached.fetched_at, from_cache=True
+                        list(cached.props),
+                        cached.fetched_at,
+                        from_cache=True,
+                        succeeded=True,
                     )
-                return PropLineFetchResult([], datetime.utcnow(), from_cache=False)
+                return PropLineFetchResult(
+                    [], datetime.utcnow(), from_cache=False,
+                    error="PropLine rate-limit backoff active", failure_kind="quota",
+                )
             if self._last_request_at is not None:
                 delay = self.min_request_interval - (now - self._last_request_at)
                 if delay > 0:
@@ -796,16 +818,32 @@ class PropLineClient:
                     payload = await response.json(content_type=None)
             except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
                 logger.warning("PropLine PrizePicks request failed: %s", type(exc).__name__)
-                return PropLineFetchResult([], datetime.utcnow(), from_cache=False)
+                return PropLineFetchResult(
+                    [], datetime.utcnow(), from_cache=False,
+                    error=f"PropLine request failed: {type(exc).__name__}",
+                    failure_kind=(
+                        "timeout" if isinstance(exc, asyncio.TimeoutError) else "http"
+                    ),
+                )
             except PropLineRateLimitError as exc:
                 logger.warning("PropLine PrizePicks rate limited; backing off for %.0fs", exc.retry_after)
-                return PropLineFetchResult([], datetime.utcnow(), from_cache=False)
+                return PropLineFetchResult(
+                    [], datetime.utcnow(), from_cache=False,
+                    error=str(exc), failure_kind="quota",
+                )
             except PropLineError as exc:
                 logger.warning("PropLine PrizePicks provider error: %s", exc)
-                return PropLineFetchResult([], datetime.utcnow(), from_cache=False)
+                return PropLineFetchResult(
+                    [], datetime.utcnow(), from_cache=False,
+                    error=str(exc), failure_kind="http",
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("PropLine PrizePicks unexpected response error: %s", type(exc).__name__)
-                return PropLineFetchResult([], datetime.utcnow(), from_cache=False)
+                return PropLineFetchResult(
+                    [], datetime.utcnow(), from_cache=False,
+                    error=f"PropLine response error: {type(exc).__name__}",
+                    failure_kind="unknown",
+                )
             finally:
                 if owns_local_session:
                     await session.close()
@@ -822,12 +860,16 @@ class PropLineClient:
                 if (prop := normalize_propline_prizepicks_record(record, fetched_at=fetched_at))
                 is not None
             ]
-            self._cache = PropLineFetchResult(props, fetched_at, from_cache=False)
+            self._cache = PropLineFetchResult(
+                props, fetched_at, from_cache=False, succeeded=True
+            )
             self._cache_clock_at = self._clock()
             self._cache_scope = scope
             self._cache_by_scope[scope] = self._cache
             self._cache_clock_by_scope[scope] = self._cache_clock_at
-            return PropLineFetchResult(list(props), fetched_at, from_cache=False)
+            return PropLineFetchResult(
+                list(props), fetched_at, from_cache=False, succeeded=True
+            )
 
 
 def _retry_after_seconds(response: Any) -> float:
@@ -895,24 +937,47 @@ class PropLinePrizePicksProvider(PropProviderBase):
 
     async def fetch_props_for_sport(self, sport: str) -> list[PlayerProp]:
         """Fetch only one canonical sport for confirmation freshness and quota safety."""
+        result = await self.fetch_props_for_sport_result(sport)
+        return result.props
+
+    async def fetch_props_for_sport_result(self, sport: str) -> PropLineFetchResult:
+        """Fetch one sport and retain whether PropLine itself accepted the request."""
         if not self.is_available():
             logger.info("PropLine PrizePicks provider is disabled")
-            return []
+            return PropLineFetchResult(
+                [], datetime.utcnow(),
+                error="PropLine is not configured", failure_kind="disabled",
+            )
         canonical_sport = _normalize_sport(sport)
         if self._sport_filter is not None and canonical_sport not in self._sport_filter:
-            return []
+            return PropLineFetchResult(
+                [], datetime.utcnow(),
+                error=f"PropLine sport is outside configured scope: {canonical_sport}",
+                failure_kind="configuration",
+            )
         official_sport = self.client.official_sport_for(canonical_sport)
         if not official_sport:
             logger.debug(
                 "PropLine sport unavailable or unsupported; skipping %s",
                 canonical_sport,
             )
-            return []
+            return PropLineFetchResult(
+                [], datetime.utcnow(),
+                error=f"PropLine sport is unsupported: {canonical_sport}",
+                failure_kind="configuration",
+            )
         result = await self.client.fetch_prizepicks_props(sport_key=official_sport)
         # The same official endpoint can have multiple aliases in the bot
         # namespace (for example CFB/NCAAF and SOCCER/EPL).  The requested
         # canonical identity is authoritative for confirmation matching.
-        return [replace(prop, sport=canonical_sport) for prop in result.props]
+        return PropLineFetchResult(
+            [replace(prop, sport=canonical_sport) for prop in result.props],
+            result.fetched_at,
+            from_cache=result.from_cache,
+            succeeded=result.succeeded,
+            error=result.error,
+            failure_kind=result.failure_kind,
+        )
 
     def normalize_stat(self, raw: str) -> str:
         return _normalize_stat(raw)

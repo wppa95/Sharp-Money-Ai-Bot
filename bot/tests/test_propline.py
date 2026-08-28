@@ -426,6 +426,8 @@ def test_client_reuses_fresh_cache_instead_of_repeating_request():
 
     assert first.from_cache is False
     assert second.from_cache is True
+    assert first.succeeded is True
+    assert second.succeeded is True
     assert len(session.calls) == 1
 
 
@@ -440,9 +442,22 @@ def test_client_handles_rate_limit_with_backoff():
         clock=lambda: clock_value[0],
     )
 
-    assert asyncio.run(client.fetch_prizepicks_props()).props == []
-    assert asyncio.run(client.fetch_prizepicks_props()).props == []
+    first = asyncio.run(client.fetch_prizepicks_props())
+    second = asyncio.run(client.fetch_prizepicks_props())
+    assert first.props == []
+    assert second.props == []
+    assert first.succeeded is False
+    assert second.succeeded is False
     assert len(session.calls) == 1
+
+
+def test_client_default_pacing_supports_one_request_per_120_second_cycle():
+    client = PropLineClient(api_key="test-only-key")
+
+    assert client.min_request_interval == 120.0
+    # At this rate the companion's one request each 120-second cycle makes
+    # 720 daily requests, safely below the provider's 1,000-request limit.
+    assert 24 * 60 * 60 / client.min_request_interval < 1000
 
 
 def test_discovery_reuses_fresh_cache_instead_of_repeating_request():

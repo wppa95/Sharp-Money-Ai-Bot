@@ -39,8 +39,17 @@ logger = logging.getLogger(__name__)
 
 # ── Bot startup time for uptime tracking ──────────────────────────────────────
 _START_TIME = time.monotonic()
-_DASHBOARD_TIMEOUT_SECONDS = 20.0
-_PROVIDER_REPORT_TIMEOUT_SECONDS = 5.0
+_DASHBOARD_TIMEOUT_SECONDS = 3.0
+_PROVIDER_REPORT_TIMEOUT_SECONDS = 2.0
+_COMMAND_TIMEOUT_SECONDS = 3.0
+
+
+async def _bounded(coro, timeout: Optional[float] = None):
+    """Keep an optional reporting query from holding a Telegram worker forever."""
+    return await asyncio.wait_for(
+        coro,
+        timeout=_COMMAND_TIMEOUT_SECONDS if timeout is None else timeout,
+    )
 
 
 def _primary_player_prop_provider_lines(
@@ -62,7 +71,17 @@ def _primary_player_prop_provider_lines(
         for provider in ("Underdog", "PrizePicks"):
             try:
                 health = health_monitor.get_health(provider)
-                provider_icons[provider] = health.status_emoji
+                # Registration alone is not a successful fetch.  Do not show a
+                # green runtime state until this process has observed one.
+                provider_icons[provider] = (
+                    "⚪"
+                    if (
+                        not getattr(health, "last_success", None)
+                        and getattr(getattr(health, "status", None), "value", "")
+                        == "ok"
+                    )
+                    else health.status_emoji
+                )
                 if health.status.value == "disabled":
                     if provider == "Underdog":
                         underdog_enabled = False
@@ -74,13 +93,12 @@ def _primary_player_prop_provider_lines(
     return [
         (
             f"  {provider_icons['Underdog']} <b>Underdog</b> — "
-            + ("Primary Player Props" if underdog_enabled else "Disabled")
+            + ("Primary Player Props" if underdog_enabled else "Unavailable")
         ),
         (
             f"  {provider_icons['PrizePicks']} <b>PrizePicks</b> — PropLine — "
-            + ("Primary Player Props" if prizepicks_enabled else "Disabled")
+            + ("Primary Player Props" if prizepicks_enabled else "Unavailable")
         ),
-        "  🔴 <b>DraftKings/FanDuel</b> — Disabled",
     ]
 
 
@@ -92,7 +110,18 @@ def _primary_provider_runtime_lines(health_monitor: object | None) -> list[str]:
     for provider in ("Underdog", "PrizePicks"):
         try:
             health = health_monitor.get_health(provider)
-            last_ok = health.format_last_success()
+            awaiting_first_fetch = not getattr(health, "last_success", None)
+            last_ok = (
+                health.format_last_success()
+                if not awaiting_first_fetch
+                else "awaiting first successful fetch"
+            )
+            state = (
+                "awaiting first successful fetch"
+                if awaiting_first_fetch and getattr(health.status, "value", "") == "ok"
+                else health.status.value
+            )
+            icon = "⚪" if state == "awaiting first successful fetch" else health.status_emoji
             failure_note = (
                 f" · {health.consecutive_failures} "
                 f"failure{'s' if health.consecutive_failures != 1 else ''}"
@@ -100,8 +129,8 @@ def _primary_provider_runtime_lines(health_monitor: object | None) -> list[str]:
                 else ""
             )
             lines.append(
-                f"    {health.status_emoji} {provider}: "
-                f"{health.status.value} · last ✓: {last_ok}{failure_note}"
+                f"    {icon} {provider}: "
+                f"{state} · last ✓: {last_ok}{failure_note}"
             )
         except Exception:
             lines.append(f"    ⚪ {provider}: health unavailable")
@@ -576,8 +605,10 @@ async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await update.message.reply_text("⚠️ Database not available.")
             return
 
-        rollups = await db.get_learning_rollups()
-        tg_perf = await db.get_telegram_pick_performance()
+        rollups, tg_perf = await _bounded(asyncio.gather(
+            db.get_learning_rollups(),
+            db.get_telegram_pick_performance(),
+        ))
         total   = rollups.get("total_graded", 0)
         intel   = rollups.get("intelligence", {})
 
@@ -679,10 +710,28 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.message.reply_text("⛔ Unauthorized.")
         return
     try:
-        # DB counts
-        total_steam = await _db.count_steam_records() if _db else 0
-        total_ev    = await _db.count_ev_records() if _db else 0
-        db_records  = await _db.count_odds_records() if _db else 0
+        # Bound all DB reads as one unit so a scan cannot hold this command.
+        if _db:
+            (
+                total_steam,
+                total_ev,
+                db_records,
+                _alerts_today,
+                total_prop_history,
+                ud_history,
+                pp_history,
+            ) = await _bounded(asyncio.gather(
+                _db.count_steam_records(),
+                _db.count_ev_records(),
+                _db.count_odds_records(),
+                _db.count_today_actionable_alerts(),
+                _db.count_prop_line_history(),
+                _db.count_prop_line_history(provider="Underdog"),
+                _db.count_prop_line_history(provider="PrizePicks"),
+            ))
+        else:
+            total_steam = total_ev = db_records = _alerts_today = 0
+            total_prop_history = ud_history = pp_history = 0
         # Load provider health monitor singleton
         try:
             from providers import get_health_monitor
@@ -692,7 +741,6 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
         # DB-backed daily alert count — resets at UTC midnight; survives restart.
         # Historical records are preserved in PropOpportunityLog; use /alerts for history.
-        _alerts_today = await _db.count_today_actionable_alerts() if _db else 0
         lines: list[str] = [
             f"🤖 <b>Sharp Money Bot</b>  ·  Uptime: {_uptime_str()}",
             f"📬 Alerts today: {_alerts_today:,}",
@@ -824,10 +872,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 lines.append("")
 
         # ── Database ──────────────────────────────────────────────────────────────
-        total_prop_history = await _db.count_prop_line_history() if _db else 0
         lines.append("📊 <b>Database Records</b>")
-        ud_history = await _db.count_prop_line_history(provider="Underdog") if _db else 0
-        pp_history = await _db.count_prop_line_history(provider="PrizePicks") if _db else 0
         lines.append(f"  Shared prop history: {total_prop_history:,}")
         lines.append(f"    Underdog: {ud_history:,}")
         lines.append(f"    PrizePicks (PropLine): {pp_history:,}")
@@ -1123,13 +1168,16 @@ async def cmd_performance(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.message.reply_text("⛔ Unauthorized.")
         return
 
+    await update.message.reply_text("⏳ Loading performance…")
     try:
         from engine.backtesting import BacktestEngine
         from engine.ranking import RankingTier, RankingDecision
 
-        records = await _db.get_ev_records_with_results(limit=500, include_pending=False)
-        _ud_rollups = await _db.get_learning_rollups()
-        _tg_perf = await _db.get_telegram_pick_performance()
+        records, _ud_rollups, _tg_perf = await _bounded(asyncio.gather(
+            _db.get_ev_records_with_results(limit=500, include_pending=False),
+            _db.get_learning_rollups(),
+            _db.get_telegram_pick_performance(),
+        ))
 
         if not records:
             _total = _ud_rollups.get("total_graded", 0)
@@ -1169,7 +1217,7 @@ async def cmd_performance(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             return
 
         engine = BacktestEngine()
-        report = engine.run(records)
+        report = await _bounded(asyncio.to_thread(engine.run, records))
         msg = report.to_telegram()
         _intel = _ud_rollups.get("intelligence", {})
         if _ud_rollups.get("total_graded", 0):
@@ -1219,7 +1267,7 @@ async def cmd_backtest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             parse_mode="HTML",
         )
 
-        records = await _db.get_ev_records_with_results(limit=limit, include_pending=False)
+        records = await _bounded(_db.get_ev_records_with_results(limit=limit, include_pending=False))
 
         if not records:
             await update.message.reply_text(
@@ -1230,7 +1278,9 @@ async def cmd_backtest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             )
             return
 
-        report = run_backtest(records)
+        # Backtesting is CPU-bound synchronous code.  Running it in the event
+        # loop prevents Telegram from processing cancellation/timeouts.
+        report = await _bounded(asyncio.to_thread(run_backtest, records))
         msg = report.to_telegram()
         await update.message.reply_text(msg, parse_mode="HTML")
 
@@ -1275,6 +1325,16 @@ def _is_season_future(stat_type: str) -> bool:
     if " season" in lower:
         return True
     return False
+
+
+def _is_upcoming_game(game_time: Optional[datetime]) -> bool:
+    """Unknown start times remain displayable; known live/past games do not."""
+    if game_time is None:
+        return True
+    now = datetime.now(timezone.utc)
+    if game_time.tzinfo is None:
+        return game_time > now.replace(tzinfo=None)
+    return game_time > now
 
 
 # ── /picks tier constants ─────────────────────────────────────────────────────
@@ -1422,7 +1482,7 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.info("cmd_picks: command received from user %s",
                 update.effective_user.id if update.effective_user else "?")
     try:
-      return await _cmd_picks_inner(update, context)
+      return await _bounded(_cmd_picks_inner(update, context))
     except Exception as exc:
         logger.exception("cmd_picks: unhandled error: %s", exc)
         await update.message.reply_text(
@@ -1461,18 +1521,19 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     # enrichment. Keep the provider in the candidate identity so matching
     # player/stat rows remain separate in this analyst view.
     logger.info("cmd_picks: fetching provider props (limit=%d sport=%s)", limit * 3, sport_filter)
-    ud_props = await _db.get_top_ud_props_for_picks(limit=limit * 3, since_hours=_since_hours)
+    ud_props = await _bounded(_db.get_top_ud_props_for_picks(limit=limit * 3, since_hours=_since_hours))
     ud_props = [
         p for p in ud_props
         if not _is_season_future(p.stat_type)
         and not is_telegram_suppressed_sport(p.sport)
+        and _is_upcoming_game(getattr(p, "game_time", None))
     ]
 
     if sport_filter:
         ud_props = [p for p in ud_props if p.sport.upper() == sport_filter]
 
     try:
-        pp_rows = await _db.get_latest_props_for_provider("PrizePicks", since_hours=_since_hours)
+        pp_rows = await _bounded(_db.get_latest_props_for_provider("PrizePicks", since_hours=_since_hours))
     except Exception:
         pp_rows = []
 
@@ -1480,6 +1541,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         p for p in pp_rows
         if not _is_season_future(p.stat_type)
         and not is_telegram_suppressed_sport(p.sport)
+        and _is_upcoming_game(getattr(p, "game_time", None))
         and (not sport_filter or p.sport.upper() == sport_filter)
     ]
     provider_props: list[tuple[str, Any]] = [
@@ -1502,8 +1564,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             f"🎯 <b>Actionable Player Prop Picks</b>\n\n"
             f"No qualifying player props available right now{hint}.\n\n"
             f"<i>Season-long futures are excluded from this view.\n"
-            f"Ranked through the Sharp Money scoring engine.\n"
-            f"Underdog and PrizePicks decisions are shown separately.</i>",
+            f"Underdog and PrizePicks lines are shown separately.</i>",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -1590,7 +1651,9 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             return None, None
 
     logger.info("cmd_picks: starting hit-rate gather for %d props", len(picks))
-    _hr_raw    = await _asyncio.gather(*[_get_hr(plh) for plh, _ in picks], return_exceptions=True)
+    _hr_raw    = await _bounded(
+        _asyncio.gather(*[_get_hr(plh) for plh, _ in picks], return_exceptions=True)
+    )
     _hit_rates = [(None, None) if isinstance(r, Exception) else r for r in _hr_raw]
     logger.info("cmd_picks: hit-rate gather complete")
 
@@ -1600,10 +1663,10 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     logger.info("cmd_picks: fetching recommendations + alternate lines")
     _rec_map: dict = {}
     try:
-        _rec_map = await _db.get_ud_recommendations_bulk(
+        _rec_map = await _bounded(_db.get_ud_recommendations_bulk(
             [(plh.player_name, plh.sport, plh.stat_type) for plh, _ in picks],
             since_hours=24,
-        )
+        ))
         if not _rec_map and picks:
             logger.warning(
                 "cmd_picks: get_ud_recommendations_bulk returned empty for %d props "
@@ -1625,7 +1688,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     except Exception as _rec_exc:
         logger.warning("cmd_picks: recommendation lookup failed: %s", _rec_exc)
 
-    _alt_raw = await _asyncio.gather(
+    _alt_raw = await _bounded(_asyncio.gather(
         *[
             _db.get_all_ud_lines_for_prop(
                 plh.player_name, plh.sport, plh.stat_type, since_hours=24
@@ -1633,7 +1696,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             for plh, _ in picks
         ],
         return_exceptions=True,
-    )
+    ))
     _alt_lines: list[list[float]] = [
         [] if isinstance(r, Exception) else (r or [])
         for r in _alt_raw
@@ -1641,10 +1704,10 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     logger.info("cmd_picks: recs=%d, alt-line queries done", len(_rec_map))
 
     try:
-        _intel_map = await _db.get_latest_downstream_intelligence(
+        _intel_map = await _bounded(_db.get_latest_downstream_intelligence(
             [(plh.player_name, plh.sport, plh.stat_type) for plh, _ in picks],
             since_hours=72,
-        )
+        ))
     except Exception as _intel_exc:
         logger.warning("cmd_picks: downstream intelligence lookup failed: %s", _intel_exc)
         _intel_map = {}
@@ -1723,7 +1786,6 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         else:
             tier  = _tier_from_conf(conf)
             stars = _stars_from_conf(float(conf))
-        tier_icon = _TIER_EMOJI.get(tier, "⚪")
 
         # Keep the source line canonical for this row. A PrizePicks-only row
         # must never be rendered as though its line came from Underdog.
@@ -1775,22 +1837,6 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             if lbl:
                 gt_str = f"⏰ {lbl}  ·  "
 
-        # ── Delivery status ───────────────────────────────────────────────────
-        # PropLineHistory.first_alert_sent_at is set when the prop was actually
-        # broadcast to Telegram.  Props without it are scored S/A candidates that
-        # are tracked but have not yet been delivered (pending dedup, timing, etc.).
-        _alert_ts = getattr(plh, "first_alert_sent_at", None)
-        if _alert_ts is not None:
-            try:
-                from zoneinfo import ZoneInfo as _ZIp
-                _ad = _alert_ts.replace(tzinfo=_ZIp("UTC")).astimezone(_ZIp("America/New_York"))
-                _at_str = _ad.strftime("%-I:%M %p ET %b %-d")
-            except Exception:
-                _at_str = str(_alert_ts)[:16]
-            _delivery_label = f"📤 Delivered: {_at_str}"
-        else:
-            _delivery_label = "⏳ Candidate — not yet delivered via Telegram"
-
         # ── Build entry ───────────────────────────────────────────────────────
         entry_lines: list[str] = [
             "━━━━━━━━━━━━━━━━━━",
@@ -1800,9 +1846,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             f"{gt_str}{plh.sport}",
             "",
             f"🎯 Pick: <b>{pick_label}</b>",
-            f"Confidence: {conf}/100  {stars}",
-            f"Tier: {tier} {tier_icon}{move_str}",
-            f"<i>{_delivery_label}</i>",
+            f"Confidence: {conf}/100  {stars}{move_str}",
         ]
 
         # Persisted Task #135 downstream intelligence.  Do not derive a model
@@ -2552,9 +2596,11 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         pm_lines.append("")
         pm_lines.append("<b>📊 Player Prop Activity</b>")
         try:
-            total_ud = await _db.count_underdog_records()
-            ud_history = await _db.count_prop_line_history(provider="Underdog")
-            pp_history = await _db.count_prop_line_history(provider="PrizePicks")
+            total_ud, ud_history, pp_history = await _bounded(asyncio.gather(
+                _db.count_underdog_records(),
+                _db.count_prop_line_history(provider="Underdog"),
+                _db.count_prop_line_history(provider="PrizePicks"),
+            ))
             pm_lines.append(
                 f"  Underdog snapshots:  <code>{total_ud:,}</code> total"
                 f"  ·  history: <code>{ud_history:,}</code>"
@@ -2568,13 +2614,22 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         # ── Recent props tracked, kept separate by provider ───────────────────
         pm_lines.append("")
         pm_lines.append("<b>🔔 Recently Tracked Props</b>  <i>(last hour · all sports)</i>")
-        for _provider, _icon in (("Underdog", "🐶"), ("PrizePicks", "🟣")):
+        try:
+            _recent_by_provider = await _bounded(asyncio.gather(
+                _db.get_recent_tracked_props("Underdog", since_hours=1, limit=100),
+                _db.get_recent_tracked_props("PrizePicks", since_hours=1, limit=100),
+            ))
+        except Exception:
+            _recent_by_provider = (None, None)
+        for (_provider, _icon), recent_props in zip(
+            (("Underdog", "🐶"), ("PrizePicks", "🟣")),
+            _recent_by_provider,
+        ):
             pm_lines.append(f"  {_icon} <b>{_provider}</b>")
             try:
                 # Read the persistent tracking stream, not delivered-alert history.
-                recent_props = await _db.get_recent_tracked_props(
-                    _provider, since_hours=1, limit=100
-                )
+                if recent_props is None:
+                    raise RuntimeError("tracking query unavailable")
                 if recent_props:
                     for _r in recent_props[:3]:
                         _lc = getattr(_r, "lifecycle_state", None) or "—"
@@ -2629,7 +2684,13 @@ async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     lines.append("🎯 <b>Actionable Pick Alerts</b>")
     try:
         # 24-hour display window; historical records remain stored in PropOpportunityLog.
-        alerted_opps = await _db.get_alerted_opportunity_log(since_hours=24, limit=8)
+        alerted_opps = await _bounded(
+            _db.get_alerted_opportunity_log(since_hours=24, limit=8)
+        )
+        alerted_opps = [
+            r for r in alerted_opps
+            if _is_upcoming_game(getattr(r, "game_time", None))
+        ]
         if alerted_opps:
             # "sent" = Telegram API accepted the send; no message ID stored.
             lines.append(f"  <i>{len(alerted_opps)} shown (last 24h)</i>")
@@ -2641,7 +2702,6 @@ async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 _ts   = getattr(r, "alert_sent_at", None)
                 _ts_str = _fmt_user_ts(_ts)
                 _rec  = getattr(r, "recommendation", "")
-                _tier = getattr(r, "decision_tier", "")
                 _rec_icon = "⬆️" if _rec == "OVER" else ("⬇️" if _rec == "UNDER" else "")
                 _source = getattr(r, "provider", None) or "Underdog"
                 _source_icon = "🟣" if _source == "PrizePicks" else "🐶"
@@ -2650,11 +2710,11 @@ async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     f"  {_source_icon} <b>{_source_label} PICK</b> · "
                     f"{_rec_icon} <b>{r.player_name}</b>  {r.stat_type}  "
                     f"<code>{_lv:.1f}</code>  ·  <i>{r.sport}</i>"
-                    f"  ·  {_tier}  ·  {_ts_str}"
+                    f"  ·  {_ts_str}"
                 )
         else:
             lines.append("  <i>No player prop alerts sent in the last 24 h.</i>")
-            lines.append("  <i>Alerts fire when props pass all qualification + delivery gates.</i>")
+            lines.append("  <i>New alerts appear here after delivery.</i>")
     except Exception as exc:
         logger.warning("cmd_alerts: prop history lookup failed: %s", exc)
         lines.append("  <i>Alert history unavailable — check /health for job status.</i>")
@@ -2784,8 +2844,10 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     PropOpportunityLog result values: HIT | MISS | PUSH | PENDING
     Mapped to display:  HIT→W  MISS→L  PUSH/REFUND→P
     """
-    resolved  = await _db.get_resolved_actionable_picks(limit=200)
-    total_all = await _db.count_actionable_pick_records()
+    resolved, total_all = await _bounded(asyncio.gather(
+        _db.get_resolved_actionable_picks(limit=200),
+        _db.count_actionable_pick_records(),
+    ))
 
     lines: list[str] = ["📊 <b>Sharp Money Pick Grades</b>", ""]
 
@@ -2983,7 +3045,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             ("WNBA",   "🏀", "ESPN gamelog",      "espn.com/api",           True,            "free — no key"),
             ("DOTA",   "🎮", "OpenDota API",      "api.opendota.com",       True,            "free — no key"),
             ("TENNIS", "🎾", "JeffSackmann CSV", "github.com/JeffSackmann", True,            "free — no key"),
-            ("CS2",    "🖥️", "PandaScore API",   "api.pandascore.co",       pandascore_key,  "key active" if pandascore_key else "⚠️ PANDASCORE_API_KEY not set"),
+            ("CS2",    "🖥️", "PandaScore API",   "api.pandascore.co",       pandascore_key,  "historical enrichment only · " + ("configured" if pandascore_key else "not configured")),
         ]
 
         ud_sports = config.ud_alert_sports
@@ -3018,12 +3080,16 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     try:
-        # Gather data
-        ud_today   = await _db.count_today_actionable_alerts()   # Telegram-delivered picks only
-        pp_today   = await _db.count_today_pp_alerts()
-        total_ud   = await _db.count_underdog_records()
-        resolved   = await _db.get_all_resolved_pp_edges(limit=500)
-        tracking   = await _db.get_tracking_summary()
+        # Gather independent reads concurrently under one command bound.
+        ud_today, pp_today, total_ud, resolved, tracking = await _bounded(
+            asyncio.gather(
+                _db.count_today_actionable_alerts(),
+                _db.count_today_pp_alerts(),
+                _db.count_underdog_records(),
+                _db.get_all_resolved_pp_edges(limit=500),
+                _db.get_tracking_summary(),
+            )
+        )
         tracked_opportunities = int(tracking.get("total", 0) or 0)
 
         lines: list[str] = [
@@ -3075,7 +3141,7 @@ async def cmd_calibration(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     try:
         from engine.calibration import CalibrationEngine
         engine = CalibrationEngine()
-        report = await engine.compute(_db)
+        report = await _bounded(engine.compute(_db))
         await update.message.reply_text(report.to_telegram(), parse_mode=ParseMode.HTML)
     except Exception as exc:
         logger.exception("cmd_calibration error: %s", exc)
@@ -3214,42 +3280,42 @@ async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
     import os
     pandascore_set = bool(os.environ.get("PANDASCORE_API_KEY", "").strip())
-    odds_api_set   = bool(config.ODDS_API_KEY)
-
     ud_sports = ", ".join(sorted(config.ud_alert_sports or [])) or "none"
-    active_sp = ", ".join(config.active_sports or []) or "none"
+    pp_sports = ", ".join(config.prizepicks_leagues or []) or "none"
+    try:
+        from providers import get_health_monitor
+        _config_mon = get_health_monitor()
+    except Exception:
+        _config_mon = None
 
     lines: list[str] = [
         "⚙️ <b>Bot Configuration</b>",
         "",
         "<b>Alert Scope</b>",
         f"  Underdog sports:   <code>{ud_sports}</code>",
-        f"  Min stars (alert): <code>{config.UD_MIN_STARS_TO_ALERT}★</code>",
+        f"  PrizePicks sports: <code>{pp_sports}</code>",
         f"  Min validation:    <code>{config.UD_VALIDATION_MIN_SAMPLES} snapshots</code>",
-        "",
-        "<b>Scoring Thresholds</b>",
-        f"  Min AI confidence: <code>{config.MIN_AI_CONFIDENCE}/100</code>",
-        f"  Min conf S-tier:   <code>{getattr(config, 'UD_MIN_CONF_S', '—')}</code>",
-        f"  Min conf A-tier:   <code>{getattr(config, 'UD_MIN_CONF_A', '—')}</code>",
-        f"  Market bypass:     <code>score≥70 + |line move|≥2%</code>",
         "",
         "<b>Alert Limits</b>",
         f"  Daily UD cap:      <code>{'unlimited' if config.DAILY_UNDERDOG_LIMIT == 0 else config.DAILY_UNDERDOG_LIMIT}</code>",
         "",
-        "<b>Primary Provider</b>",
-        f"  🐶 Underdog:       {'✅ enabled' if config.UNDERDOG_ENABLED else '❌ disabled'}",
+        "<b>Player Prop Market Providers</b>",
+        *_primary_player_prop_provider_lines(_config_mon),
+        *_primary_provider_runtime_lines(_config_mon),
+        f"  Rotation: one PrizePicks sport every <code>{config.UNDERDOG_POLL_INTERVAL}s</code>",
+        f"  CS2 current PrizePicks lines: <b>PropLine</b>",
         "",
-        "<b>Stat Data Sources</b>",
+        "<b>Historical Enrichment Sources</b>",
         f"  ESPN gamelog:      ✅ active (NBA/NFL/WNBA/MLB/Soccer/NHL)",
         f"  MLB Stats API:     ✅ active",
         f"  NHL API:           ✅ active",
         f"  OpenDota (DOTA):   ✅ active",
         f"  JeffSackmann:      ✅ active (Tennis)",
-        f"  PandaScore (CS2):  {'✅ active' if pandascore_set else '⚠️ not set — CS2 alerts suppressed'}",
+        f"  PandaScore (CS2):  {'configured' if pandascore_set else 'not configured'} · historical only",
         f"  Sleeper (NFL):     {'✅ active' if getattr(config, 'UD_SLEEPER_ENABLED', True) else '⏸️ disabled'}",
         "",
         "<b>Poll Intervals</b>",
-        f"  Underdog:          <code>{config.UNDERDOG_POLL_INTERVAL}s ({config.UNDERDOG_POLL_INTERVAL // 60} min)</code>",
+        f"  Shared monitor:    <code>{config.UNDERDOG_POLL_INTERVAL}s ({config.UNDERDOG_POLL_INTERVAL // 60} min)</code>",
         f"  Season check:      <code>{config.SEASON_CHECK_INTERVAL}s</code>",
         "",
         "<i>Secrets are never shown. Restart the bot after changing env vars.</i>",
@@ -3272,7 +3338,7 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
 
     try:
-        data = await _db.get_tracking_summary()
+        data = await _bounded(_db.get_tracking_summary())
     except Exception as exc:
         logger.exception("cmd_tracking: DB error: %s", exc)
         await update.message.reply_text("⚠️ /tracking failed — check bot logs.")
@@ -3392,6 +3458,7 @@ async def cmd_analyst(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text("⚠️ Database not ready.")
         return
 
+    await update.message.reply_text("⏳ Gathering analyst evidence…")
     try:
         from engine.analyst import build_analyst_narrative
         from engine.agent_reach_research import (
@@ -3402,10 +3469,14 @@ async def cmd_analyst(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         from engine.candidate import candidate_from_ud_decision
 
         # Retrieve recent alerted Underdog snapshots with bet recommendations
-        snaps = await _db.get_recent_underdog_snapshots(limit=5)
+        snaps = await _bounded(_db.get_recent_underdog_snapshots(limit=5))
         alerted = [
             s for s in snaps
-            if getattr(s, "alert_sent", False) and getattr(s, "bet_recommendation", None)
+            if (
+                getattr(s, "alert_sent", False)
+                and getattr(s, "bet_recommendation", None) in ("OVER", "UNDER")
+                and _is_upcoming_game(getattr(s, "game_time", None))
+            )
         ]
 
         if not alerted:
@@ -3473,13 +3544,13 @@ async def cmd_analyst(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 logger.debug("cmd_analyst: skip snap %s: %s", snap.player_name, exc)
 
         service = get_agent_reach_research_service()
-        researched = await asyncio.gather(
+        researched = await _bounded(asyncio.gather(
             *(
                 research_candidate(candidate, service=service)
                 for _, candidate in candidate_rows
             ),
             return_exceptions=True,
-        )
+        ))
         for (snap, original), enriched in zip(candidate_rows, researched):
             c = original
             if isinstance(enriched, Exception):
@@ -3496,8 +3567,7 @@ async def cmd_analyst(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 f"{_html.escape(snap.stat_type)} <code>{snap.line_value:.1f}</code>"
             )
             lines.append(
-                f"Decision: <b>{_html.escape(getattr(snap, 'bet_recommendation', 'PASS') or 'PASS')}</b>  "
-                f"Tier: <b>{_html.escape(getattr(snap, 'score_tier', 'B') or 'B')}</b>"
+                f"Direction: <b>{_html.escape(getattr(snap, 'bet_recommendation', ''))}</b>"
             )
             if isinstance(research_trace, dict):
                 result_status = research_trace.get("status")
@@ -3715,6 +3785,7 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if _db is None:
         await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
         return
+    await update.message.reply_text("⏳ Gathering pipeline data…")
     try:
         since_h = 24
         if context.args:
@@ -3724,12 +3795,16 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 pass
 
         # Fetch scan pipeline summary (non-fatal: new method may not exist on old schema)
-        scan_summary: dict = {}
-        try:
-            scan_summary = await _db.get_scan_cycle_summary(since_hours=since_h)
-        except Exception as _scl_exc:
-            logger.debug("cmd_funnel: scan_cycle_summary unavailable: %s", _scl_exc)
-        summary = await _db.get_funnel_summary(since_hours=since_h)
+        _scan_result, summary = await _bounded(asyncio.gather(
+            _db.get_scan_cycle_summary(since_hours=since_h),
+            _db.get_funnel_summary(since_hours=since_h),
+            return_exceptions=True,
+        ))
+        scan_summary: dict = (
+            _scan_result if isinstance(_scan_result, dict) else {}
+        )
+        if isinstance(summary, Exception):
+            raise summary
 
         tracked   = int(summary.get("tracked", 0) or 0)
 

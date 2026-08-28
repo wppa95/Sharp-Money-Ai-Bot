@@ -1129,9 +1129,9 @@ async def _run_prizepicks_independent_cycle(context) -> None:
 
     # The authorized feed exposes many sports, but the configured PrizePicks
     # scope is intentionally smaller.  Fetch one configured sport per shared
-    # Underdog cycle: the PropLine client enforces its five-minute request
-    # pacing, so fetching every discovered sport serially would delay all
-    # persistence/evaluation for hours.
+    # Underdog cycle.  PropLine's 120-second global pacing plus one sport per
+    # cycle keeps the normal two-sport configuration at 720 requests/day,
+    # below its 1,000-request daily limit, while avoiding a serial bulk fetch.
     configured_sports = tuple(
         str(sport).strip()
         for sport in getattr(config, "prizepicks_leagues", [])
@@ -1145,13 +1145,32 @@ async def _run_prizepicks_independent_cycle(context) -> None:
     _prizepicks_sport_cursor = (_prizepicks_sport_cursor + 1) % len(configured_sports)
 
     try:
+        fetch_result_for_sport = getattr(
+            _propline_provider, "fetch_props_for_sport_result", None
+        )
         fetch_for_sport = getattr(_propline_provider, "fetch_props_for_sport", None)
-        if callable(fetch_for_sport):
+        if callable(fetch_result_for_sport):
+            fetch_result = await fetch_result_for_sport(sport)
+            props = fetch_result.props
+            fetch_succeeded = bool(fetch_result.succeeded)
+            fetch_error = str(getattr(fetch_result, "error", "") or "")
+            fetch_failure_kind = str(
+                getattr(fetch_result, "failure_kind", "") or ""
+            )
+        elif callable(fetch_for_sport):
             props = await fetch_for_sport(sport)
+            # Legacy integrations return only props and cannot distinguish an
+            # empty successful response from an internal provider failure.
+            fetch_succeeded = True
+            fetch_error = ""
+            fetch_failure_kind = ""
         else:
             # Compatibility for lightweight providers/integrations that only
             # implement the provider-wide fetch method.
             props = await _propline_provider.fetch_props()
+            fetch_succeeded = True
+            fetch_error = ""
+            fetch_failure_kind = ""
     except Exception as exc:  # noqa: BLE001
         if provider_health is not None:
             failure_type = (
@@ -1160,12 +1179,41 @@ async def _run_prizepicks_independent_cycle(context) -> None:
                 else FailureType.HTTP_ERROR
             )
             provider_health.record_failure("PrizePicks", str(exc), failure_type)
+        logger.info(
+            "prizepicks_cycle: provider=PrizePicks sport=%s fetch_succeeded=false "
+            "observations=0 persisted=0 evaluated=0 actionable=0 delivered=0",
+            sport,
+        )
         logger.warning("prizepicks_cycle: authorized feed failed: %s", type(exc).__name__)
         return
-    if provider_health is not None:
+    if fetch_succeeded and provider_health is not None:
         provider_health.record_success("PrizePicks")
+    if not fetch_succeeded:
+        if provider_health is not None:
+            _failure_types = {
+                "timeout": FailureType.TIMEOUT,
+                "quota": FailureType.QUOTA,
+                "http": FailureType.HTTP_ERROR,
+                "configuration": FailureType.UNKNOWN,
+                "disabled": FailureType.UNKNOWN,
+            }
+            provider_health.record_failure(
+                "PrizePicks",
+                fetch_error or "PropLine fetch failed",
+                _failure_types.get(fetch_failure_kind, FailureType.UNKNOWN),
+            )
+        logger.info(
+            "prizepicks_cycle: provider=PrizePicks sport=%s fetch_succeeded=false "
+            "observations=0 persisted=0 evaluated=0 actionable=0 delivered=0",
+            sport,
+        )
+        return
     if not props:
-        logger.debug("prizepicks_cycle: no normalized PrizePicks props for %s", sport)
+        logger.info(
+            "prizepicks_cycle: provider=PrizePicks sport=%s fetch_succeeded=true "
+            "observations=0 persisted=0 evaluated=0 actionable=0 delivered=0",
+            sport,
+        )
         return
 
     # One observation per provider-owned identity per cycle.  The provider's
@@ -1196,6 +1244,11 @@ async def _run_prizepicks_independent_cycle(context) -> None:
         unique_props[identity] = prop
 
     if not unique_props:
+        logger.info(
+            "prizepicks_cycle: provider=PrizePicks sport=%s fetch_succeeded=true "
+            "observations=0 persisted=0 evaluated=0 actionable=0 delivered=0",
+            sport,
+        )
         return
 
     from engine.ud_scoring import (
@@ -1384,14 +1437,20 @@ async def _run_prizepicks_independent_cycle(context) -> None:
         await db.upsert_prop_line_history_batch("PrizePicks", list(unique_props.values()))
     except Exception as exc:  # noqa: BLE001
         logger.warning("prizepicks_cycle: history persistence failed: %s", type(exc).__name__)
+        logger.info(
+            "prizepicks_cycle: provider=PrizePicks sport=%s fetch_succeeded=true "
+            "observations=%d persisted=0 evaluated=%d actionable=%d delivered=0",
+            sport, len(unique_props), evaluated, len(actionable),
+        )
         return
 
     chat_ids = list(config.allowed_user_ids)
     if not chat_ids:
         logger.info(
-            "prizepicks_cycle: observations=%d evaluated=%d directional=%d actionable=%d "
+            "prizepicks_cycle: provider=PrizePicks sport=%s fetch_succeeded=true "
+            "observations=%d persisted=%d evaluated=%d directional=%d actionable=%d "
             "delivered=0 (no recipients)",
-            len(unique_props), evaluated, directional, len(actionable),
+            sport, len(unique_props), len(unique_props), evaluated, directional, len(actionable),
         )
         return
 
@@ -1445,9 +1504,9 @@ async def _run_prizepicks_independent_cycle(context) -> None:
             )
 
     logger.info(
-        "prizepicks_cycle: observations=%d evaluated=%d directional=%d "
-        "actionable=%d delivered=%d",
-        len(unique_props), evaluated, directional, len(actionable), delivered,
+        "prizepicks_cycle: provider=PrizePicks sport=%s fetch_succeeded=true "
+        "observations=%d persisted=%d evaluated=%d directional=%d actionable=%d delivered=%d",
+        sport, len(unique_props), len(unique_props), evaluated, directional, len(actionable), delivered,
     )
 
 

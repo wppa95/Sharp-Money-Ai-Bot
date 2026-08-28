@@ -1,0 +1,317 @@
+🔴 CONTINUE — FIX ONLY THE REMAINING ITEMS
+
+Do NOT waste unnecessary time or unnecessary credits on unnecessary things.
+
+Do NOT change anything except the specific problems listed below.
+
+The active-monitoring classification cleanup has already been implemented and verified. Do not redo or regress it.
+
+Continue from the current implementation and finish only the remaining items from the previous request.
+
+1. PRIZEPICKS CADENCE
+
+PrizePicks through PropLine must operate as a primary player-prop source alongside Underdog.
+
+Required cadence:
+
+Every 1–2 minutes.
+
+Use the existing unified monitoring cadence/companion cycle.
+
+Do NOT create a second competing scheduler or overlapping monitoring loop.
+
+Keep:
+
+max_instances=1
+
+Do NOT blindly fetch all sports every cycle if that would exceed PropLine’s request budget.
+
+Use the existing sport rotation/round-robin approach so PrizePicks participates every 1–2 minutes while available sports continue rotating sustainably.
+
+Verify live:
+
+* PrizePicks actually runs.
+* Actual interval between PrizePicks fetches.
+* PropLine requests succeed.
+* Props are persisted.
+* Props are evaluated.
+* Multiple available sports rotate.
+* Provider identity remains PrizePicks.
+* No Underdog identity contamination.
+
+2. ALL TELEGRAM COMMANDS MUST WORK
+
+Verify every registered command actually responds:
+
+/start
+/help
+/status
+/health
+/providers
+/config
+/blocks
+/block
+/dashboard
+/alerts
+/funnel
+/reconcile
+/picks
+/slip
+/grade
+/grades
+/player
+/slipstats
+/analyze
+/market
+/steam
+/ev
+/clv
+/performance
+/backtest
+/stats
+/calibration
+/tracking
+/analyst
+/rollups
+/refinement
+/backfill
+/pp_import
+/testalert
+
+The following previously produced no response or timed out and must specifically be fixed/verified:
+
+* /dashboard
+* /alerts
+* /stats
+* /calibration
+* /tracking
+* /analyst
+
+Also verify that the slower commands return promptly:
+
+* /funnel
+* /picks
+* /grade
+* /performance
+* /backtest
+* /providers
+* /config
+
+Do not simply hide the problem with an excessive timeout.
+
+3. PRIZEPICKS MUST APPEAR IN DISPLAYS
+
+PrizePicks/PropLine must be represented as a primary player-prop provider in applicable:
+
+* /status
+* /health
+* /providers
+* /config
+* /dashboard
+* /funnel
+* /alerts
+* /picks
+* /help
+
+Where applicable show real:
+
+* Provider health
+* Last successful fetch
+* Last failure/degraded state
+* Current cadence
+* Sports/rotation
+* Fetched
+* Persisted
+* Evaluated
+* Actionable
+* Delivered
+
+Do not fabricate metrics.
+
+4. REMOVE DK/FD FROM CURRENT DISPLAYS
+
+DraftKings/FanDuel player props are disabled.
+
+Remove DK/FD from all current player-prop operator displays.
+
+Do not present them as active providers.
+
+Do not delete dormant integrations unless required.
+
+5. CS2 SOURCE DISPLAY
+
+For current PrizePicks player props:
+
+PropLine is the source.
+
+Do not display PandaScore as the current PrizePicks player-prop source.
+
+PandaScore may remain an optional historical enrichment provider, but it must be clearly separated from the primary PrizePicks source.
+
+6. HEALTH DISPLAY
+
+/health, /status, /providers, /dashboard, and /config must report actual provider health.
+
+For both:
+
+* Underdog
+* PrizePicks/PropLine
+
+Show the actual latest fetch state.
+
+Do not mark a provider healthy merely because it is registered.
+
+Do not surface stale historical pipeline failures as current provider failures.
+
+7. CURRENT / ACTIVE PICKS
+
+/alerts and /picks must not show stale or out-of-season events as current actionable candidates.
+
+Use the existing lifecycle/event-state logic.
+
+Historical records must remain intact.
+
+Do not delete historical data.
+
+8. INTERNAL PASS BEHAVIOR
+
+The previous cleanup correctly removed PASS/decision_pass/not_immediate/rejection statuses from active monitoring reports and logs.
+
+The response stated:
+
+“Preserved internal scoring-engine PASS behavior.”
+
+Do NOT change scoring formulas unnecessarily.
+
+However, verify that internal scoring-engine PASS behavior cannot leak back into the current monitoring classification, rejection, funnel, dashboard, /picks, or /alerts displays.
+
+The user-facing/current monitoring framework must remain free of:
+
+* PASS
+* decision_pass
+* not_immediate
+* rejection breakdowns
+* Watchlist
+* Near-Miss
+* Tier 1
+* Tier 2
+* S/A/B/C qualification gates
+
+Do not create a replacement classification framework.
+
+9. DASHBOARD / FUNNEL RESPONSIVENESS
+
+Fix the observed dashboard timeout:
+
+“⚠️ Dashboard is taking too long to load. Please try again after the current scan finishes.”
+
+Dashboard and funnel must remain responsive while monitoring is active.
+
+Do not block the Telegram event loop with expensive reporting work.
+
+Use the existing current-run data.
+
+Do not create another monitoring system.
+
+10. PRESERVE COMPLETED SYSTEMS
+
+Do NOT change:
+
+* Underdog monitoring architecture
+* FPR
+* Stable Refresh
+* Adaptive batching
+* Scheduler architecture
+* max_instances=1
+* Clean-restart behavior
+* Provider evidence architecture
+* Graded-prop evidence
+* HIT/MISS/PUSH grading
+* Scoring formulas
+* BQ/MQ calculations
+* Confidence calculations
+* Telegram safety/dedup/live-game protections
+* OddsAPI behavior
+* PropLine authentication
+* Historical data
+* Database architecture unless absolutely necessary
+* Discord behavior
+* Railway configuration
+
+Do not redo completed work.
+
+11. VERIFICATION
+
+Do not report completion based only on tests.
+
+Run the actual bot and verify the commands.
+
+Command verification
+
+Invoke every registered command listed above.
+
+Record whether each:
+
+* Responds successfully
+* Returns valid usage/error output where appropriate
+* Times out
+* Fails
+
+PrizePicks verification
+
+Live verify:
+
+* PropLine connection
+* PrizePicks fetch
+* 1–2 minute cadence
+* Sport rotation
+* Persistence
+* Evaluation
+* Provider identity
+* No cross-provider contamination
+
+Display verification
+
+Verify:
+
+* Underdog shown as primary.
+* PrizePicks/PropLine shown as primary.
+* DK/FD absent from current displays.
+* PandaScore not shown as current PrizePicks source.
+* PASS/rejection/tier framework absent from current monitoring displays.
+* /alerts and /picks contain only active/current actionable candidates.
+* Provider health reflects real fetch outcomes.
+
+Runtime safety
+
+Keep exactly one managed bot process.
+
+Keep:
+
+max_instances=1
+
+Do not deploy Railway.
+
+Do not restart Railway.
+
+Do not modify unrelated systems.
+
+FINAL ACCEPTANCE
+
+Do not create a checkpoint until the actual running bot proves:
+
+* PrizePicks is a primary player-prop source alongside Underdog.
+* PrizePicks participates every 1–2 minutes.
+* Available PrizePicks sports rotate sustainably within the PropLine request budget.
+* All registered Telegram commands respond correctly.
+* Dashboard/funnel respond reliably.
+* /alerts and /picks do not surface stale/out-of-season current candidates.
+* PASS/rejection/Watchlist/Near-Miss/Tier/S-A-B-C framework is absent from current monitoring displays.
+* DK/FD are absent from current player-prop displays.
+* CS2 current PrizePicks sourcing is represented as PropLine.
+* Underdog and PrizePicks health reflect actual fetch outcomes.
+* Exactly one managed bot process remains active.
+* max_instances=1 remains intact.
+* No unrelated behavior was changed.
+
+Do not waste time or credits on anything outside these requirements.

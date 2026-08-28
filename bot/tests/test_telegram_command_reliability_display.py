@@ -105,9 +105,8 @@ def test_canonical_provider_roles_are_exact():
     lines = commands._primary_player_prop_provider_lines(_health_monitor())
 
     assert lines == [
-        "  🟢 <b>Underdog</b> — Primary Player Props",
-        "  🟢 <b>PrizePicks</b> — PropLine — Primary Player Props",
-        "  🔴 <b>DraftKings/FanDuel</b> — Disabled",
+        "  ⚪ <b>Underdog</b> — Primary Player Props",
+        "  ⚪ <b>PrizePicks</b> — PropLine — Primary Player Props",
     ]
 
 
@@ -121,7 +120,7 @@ def test_provider_roles_show_degraded_underdog_and_disabled_prizepicks():
     runtime = commands._primary_provider_runtime_lines(monitor)
 
     assert lines[0] == "  🟡 <b>Underdog</b> — Primary Player Props"
-    assert lines[1] == "  ⚪ <b>PrizePicks</b> — PropLine — Disabled"
+    assert lines[1] == "  ⚪ <b>PrizePicks</b> — PropLine — Unavailable"
     assert "    🟡 Underdog: degraded" in runtime[1]
     assert "1 failure" in runtime[1]
 
@@ -160,9 +159,9 @@ async def test_status_shows_provider_roles_and_separate_history_counts():
         await commands.cmd_status(update, context)
 
     message = update.message.reply_text.await_args.args[0]
-    assert "🟢 <b>Underdog</b> — Primary Player Props" in message
-    assert "🟢 <b>PrizePicks</b> — PropLine — Primary Player Props" in message
-    assert "🔴 <b>DraftKings/FanDuel</b> — Disabled" in message
+    assert "⚪ <b>Underdog</b> — Primary Player Props" in message
+    assert "⚪ <b>PrizePicks</b> — PropLine — Primary Player Props" in message
+    assert "DraftKings/FanDuel" not in message
     assert "Underdog: 20" in message
     assert "PrizePicks (PropLine): 10" in message
 
@@ -213,9 +212,9 @@ async def test_providers_command_includes_live_primary_provider_health():
 
     message = update.message.reply_text.await_args.args[0]
     assert "🟡 <b>Underdog</b> — Primary Player Props" in message
-    assert "🟢 <b>PrizePicks</b> — PropLine — Primary Player Props" in message
+    assert "⚪ <b>PrizePicks</b> — PropLine — Primary Player Props" in message
     assert "🟡 Underdog: degraded" in message
-    assert "🟢 PrizePicks: ok" in message
+    assert "⚪ PrizePicks: awaiting first successful fetch" in message
 
 
 def test_dashboard_report_does_not_merge_provider_breakdowns():
@@ -322,6 +321,7 @@ async def test_prizepicks_companion_cycle_records_success_health():
     context = SimpleNamespace(bot_data={"db": MagicMock()}, bot=MagicMock())
     provider = MagicMock()
     provider.is_available.return_value = True
+    provider.fetch_props_for_sport_result = None
     provider.fetch_props_for_sport = AsyncMock(return_value=[])
     monitor = MagicMock()
 
@@ -339,6 +339,7 @@ async def test_prizepicks_companion_cycle_records_failure_health():
     context = SimpleNamespace(bot_data={"db": MagicMock()}, bot=MagicMock())
     provider = MagicMock()
     provider.is_available.return_value = True
+    provider.fetch_props_for_sport_result = None
     provider.fetch_props_for_sport = AsyncMock(side_effect=TimeoutError("timed out"))
     monitor = MagicMock()
 

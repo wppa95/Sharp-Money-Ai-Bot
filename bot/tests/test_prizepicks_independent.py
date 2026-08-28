@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -13,6 +14,7 @@ from commands import PropPickAdapter
 from database import Database, PropOpportunityLog
 import market_engine
 from engine.player_results import compute_hit_rates
+from providers.propline import PropLineFetchResult
 
 
 @pytest.fixture()
@@ -41,7 +43,7 @@ def _opportunity(provider: str) -> dict:
 
 
 class TestIndependentPrizePicks:
-    async def test_cycle_uses_one_configured_sport_when_provider_supports_scoped_fetch(
+    async def test_cycles_round_robin_one_configured_sport_with_scoped_fetch(
         self, monkeypatch
     ):
         calls = []
@@ -69,8 +71,50 @@ class TestIndependentPrizePicks:
         await market_engine._run_prizepicks_independent_cycle(
             SimpleNamespace(bot_data={"db": FakeDB()}, bot=object())
         )
+        await market_engine._run_prizepicks_independent_cycle(
+            SimpleNamespace(bot_data={"db": FakeDB()}, bot=object())
+        )
 
-        assert calls == ["NBA"]
+        assert calls == ["NBA", "MLB"]
+
+    async def test_failed_propline_fetch_is_not_recorded_as_provider_success(
+        self, monkeypatch, caplog
+    ):
+        class FakeProvider:
+            def is_available(self):
+                return True
+
+            async def fetch_props_for_sport_result(self, sport):
+                return PropLineFetchResult([], datetime.utcnow(), succeeded=False)
+
+        class FakeHealth:
+            def __init__(self):
+                self.successes = []
+                self.failures = []
+
+            def record_success(self, provider):
+                self.successes.append(provider)
+
+            def record_failure(self, provider, error, failure_type):
+                self.failures.append((provider, error, failure_type))
+
+        health = FakeHealth()
+        monkeypatch.setattr(market_engine, "_propline_provider", FakeProvider())
+        monkeypatch.setattr(market_engine, "_prizepicks_sport_cursor", 0)
+        monkeypatch.setattr(
+            market_engine.config, "PRIZEPICKS_LEAGUES_RAW", "NBA,MLB"
+        )
+        monkeypatch.setattr(market_engine, "get_health_monitor", lambda: health)
+
+        with caplog.at_level(logging.INFO):
+            await market_engine._run_prizepicks_independent_cycle(
+                SimpleNamespace(bot_data={"db": object()}, bot=object())
+            )
+
+        assert health.successes == []
+        assert health.failures
+        assert health.failures[0][0] == "PrizePicks"
+        assert "provider=PrizePicks sport=NBA fetch_succeeded=false" in caplog.text
 
     async def test_cycle_accepts_persisted_history_with_removed_field(self, monkeypatch):
         prop = SimpleNamespace(
