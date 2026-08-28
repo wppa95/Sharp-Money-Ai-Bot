@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import gc
+import inspect
 import logging
 import time
 from collections import defaultdict
@@ -50,6 +51,7 @@ from engine.player_prop_market import (
     _release_prop_delivery_claim,
 )
 from engine.score_validation import clamp_score
+from engine.telegram_rate_limiter import get_rate_limiter
 from engine.delivery_gates import (
     TIER2_SPORTS as _CANONICAL_TIER2_SPORTS,
     is_tier2_sport as _canonical_is_tier2_sport,
@@ -83,6 +85,71 @@ from alerts_multiplatform import (
     format_underdog_change_alert,
     format_market_move_detected,  # noqa: F401 — imported for availability check
 )
+
+
+async def _broadcast_consensus_alert(
+    *,
+    db: Database,
+    bot,
+    chat_ids: list,
+    message: str,
+    sport: str,
+    alert_kind: str,
+    player_name: Optional[str] = None,
+    stat_type: Optional[str] = None,
+    line_value: Optional[float] = None,
+) -> dict:
+    """Rate-limit and audit the legacy consensus broadcast path."""
+    if not chat_ids:
+        return {"sent": 0, "failed": 0, "rate_limited": False}
+
+    limiter = get_rate_limiter()
+    limiter.record_qualified()
+    rate = limiter.check("A", 80, 80, is_meaningful_change=True)
+    if not rate.allowed:
+        outcome = "rate_limited"
+        counts = {"sent": 0, "failed": 0, "rate_limited": True}
+    else:
+        counts = await _broadcast_consensus_alert(
+            db=db,
+            bot=bot,
+            chat_ids=chat_ids,
+            message=message,
+            sport=ineff.sport,
+            alert_kind="INEFFICIENCY",
+            stat_type=ineff.market_type,
+        )
+        sent = int(counts.get("sent", 0) or 0)
+        if sent:
+            limiter.record_sent()
+        outcome = "sent" if sent else "failed"
+        counts = {
+            **counts,
+            "sent": sent,
+            "failed": int(counts.get("failed", 0) or 0),
+            "rate_limited": False,
+        }
+
+    audit = getattr(db, "log_telegram_delivery", None)
+    if audit is not None:
+        try:
+            result = audit(
+                provider="Sportsbook",
+                alert_kind=alert_kind,
+                delivery_path="consensus",
+                player_name=player_name,
+                sport=sport,
+                stat_type=stat_type,
+                line_value=line_value,
+                outcome=outcome,
+                recipients_sent=counts["sent"],
+                recipients_failed=counts["failed"],
+            )
+            if inspect.isawaitable(result):
+                await result
+        except Exception as exc:
+            logger.warning("Consensus Telegram audit write failed: %s", exc)
+    return counts
 
 logger = logging.getLogger(__name__)
 
@@ -1622,7 +1689,15 @@ async def consensus_check_job(context) -> None:
             continue
 
         message = format_inefficiency_alert(ineff, cr)
-        counts = await broadcast_alert(bot, chat_ids, message)
+        counts = await _broadcast_consensus_alert(
+            db=db,
+            bot=bot,
+            chat_ids=chat_ids,
+            message=message,
+            sport=str(sport),
+            alert_kind="STEAM",
+            stat_type=market_type,
+        )
         alert_sent = counts["sent"] > 0
         logger.info(
             "Inefficiency alert: %s | %s | %s | dev=%+d → sent=%s",
