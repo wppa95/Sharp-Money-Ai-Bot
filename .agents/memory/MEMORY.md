@@ -89,3 +89,4 @@
 - [PropLine cycle pacing](propline-cycle-pacing.md) — primary PrizePicks monitoring fetches one configured sport per shared cycle; do not use the all-sports fetch in production.
 - [FIFA history alias](fifa-history-alias.md) — FIFA may reuse the soccer provider only when result labels remain FIFA; empty provider results stay N/A.
 - [Command report resilience](command-report-resilience.md) — one locked SQLite counter must not make a Telegram health/report command fail wholesale.
+- [Workflow process verification](workflow-process-verification.md) — after restarting a managed bot workflow, verify and reconcile process count before trusting scheduler or Telegram state.
