@@ -358,6 +358,8 @@ _player_result_fetch_cache: set = set()
 # the next cycle re-fetches fresh data — a safe, cheap reset at ~300 s cadence.
 _PLAYER_RESULT_CACHE_MAX = 5_000
 _prizepicks_cycle_task: Optional[asyncio.Task] = None
+_prizepicks_processing_tasks: set[asyncio.Task] = set()
+_prizepicks_processing_lock: Optional[asyncio.Lock] = None
 _prizepicks_last_started_at: Optional[float] = None
 _PRIZEPICKS_CYCLE_INTERVAL_SECONDS = 120.0
 _PRIZEPICKS_DEDUP_PREFIX = "PrizePicks::"
@@ -1142,7 +1144,30 @@ def _start_prizepicks_cycle(context, *, force: bool = False) -> bool:
     return True
 
 
-async def _run_prizepicks_independent_cycle(context) -> None:
+def _track_prizepicks_processing_task(task: asyncio.Task) -> None:
+    """Keep deferred evaluations observable and consume task exceptions."""
+    _prizepicks_processing_tasks.add(task)
+
+    def _finished(completed: asyncio.Task) -> None:
+        _prizepicks_processing_tasks.discard(completed)
+        if completed.cancelled():
+            return
+        try:
+            completed.result()
+        except Exception:  # noqa: BLE001
+            logger.exception("prizepicks_cycle: deferred evaluation failed")
+
+    task.add_done_callback(_finished)
+
+
+async def _run_prizepicks_independent_cycle(
+    context,
+    *,
+    _fetched_props: Optional[list] = None,
+    _fetched_sport: Optional[str] = None,
+    _processing_locked: bool = False,
+    background_processing: bool = False,
+) -> None:
     """Evaluate the authorized PrizePicks feed through the shared prop pipeline.
 
     This is deliberately a companion coroutine of ``underdog_job`` rather than
@@ -1150,6 +1175,19 @@ async def _run_prizepicks_independent_cycle(context) -> None:
     those are the same functions used by Underdog.  A provider failure is
     contained here so it can never abort the Underdog scan.
     """
+    global _prizepicks_processing_lock
+    if _fetched_props is not None and not _processing_locked:
+        if _prizepicks_processing_lock is None:
+            _prizepicks_processing_lock = asyncio.Lock()
+        async with _prizepicks_processing_lock:
+            await _run_prizepicks_independent_cycle(
+                context,
+                _fetched_props=_fetched_props,
+                _fetched_sport=_fetched_sport,
+                _processing_locked=True,
+            )
+        return
+
     db = context.bot_data.get("db")
     bot = getattr(context, "bot", None)
     provider_health = get_health_monitor()
@@ -1163,89 +1201,107 @@ async def _run_prizepicks_independent_cycle(context) -> None:
     # Underdog cycle.  PropLine's 120-second global pacing plus one sport per
     # cycle keeps the normal two-sport configuration at 720 requests/day,
     # below its 1,000-request daily limit, while avoiding a serial bulk fetch.
-    configured_sports = tuple(
-        str(sport).strip()
-        for sport in getattr(config, "prizepicks_leagues", [])
-        if str(sport).strip()
-    )
-    if not configured_sports:
-        logger.warning("prizepicks_cycle: no configured PrizePicks sports; skipping")
-        return
-    global _prizepicks_sport_cursor
-    sport = configured_sports[_prizepicks_sport_cursor % len(configured_sports)]
-    _prizepicks_sport_cursor = (_prizepicks_sport_cursor + 1) % len(configured_sports)
-    logger.info("prizepicks_cycle_started: provider=PrizePicks sport=%s", sport)
+    if _fetched_props is None:
+        configured_sports = tuple(
+            str(sport).strip()
+            for sport in getattr(config, "prizepicks_leagues", [])
+            if str(sport).strip()
+        )
+        if not configured_sports:
+            logger.warning("prizepicks_cycle: no configured PrizePicks sports; skipping")
+            return
+        global _prizepicks_sport_cursor
+        sport = configured_sports[_prizepicks_sport_cursor % len(configured_sports)]
+        _prizepicks_sport_cursor = (_prizepicks_sport_cursor + 1) % len(configured_sports)
+        props = None
+        logger.info("prizepicks_cycle_started: provider=PrizePicks sport=%s", sport)
 
-    try:
-        fetch_result_for_sport = getattr(
-            _propline_provider, "fetch_props_for_sport_result", None
-        )
-        fetch_for_sport = getattr(_propline_provider, "fetch_props_for_sport", None)
-        if callable(fetch_result_for_sport):
-            fetch_result = await fetch_result_for_sport(sport)
-            props = fetch_result.props
-            fetch_succeeded = bool(fetch_result.succeeded)
-            fetch_error = str(getattr(fetch_result, "error", "") or "")
-            fetch_failure_kind = str(
-                getattr(fetch_result, "failure_kind", "") or ""
+        try:
+            fetch_result_for_sport = getattr(
+                _propline_provider, "fetch_props_for_sport_result", None
             )
-        elif callable(fetch_for_sport):
-            props = await fetch_for_sport(sport)
-            # Legacy integrations return only props and cannot distinguish an
-            # empty successful response from an internal provider failure.
-            fetch_succeeded = True
-            fetch_error = ""
-            fetch_failure_kind = ""
-        else:
-            # Compatibility for lightweight providers/integrations that only
-            # implement the provider-wide fetch method.
-            props = await _propline_provider.fetch_props()
-            fetch_succeeded = True
-            fetch_error = ""
-            fetch_failure_kind = ""
-    except Exception as exc:  # noqa: BLE001
-        if provider_health is not None:
-            failure_type = (
-                FailureType.TIMEOUT
-                if isinstance(exc, (asyncio.TimeoutError, TimeoutError))
-                else FailureType.HTTP_ERROR
+            fetch_for_sport = getattr(_propline_provider, "fetch_props_for_sport", None)
+            if callable(fetch_result_for_sport):
+                fetch_result = await fetch_result_for_sport(sport)
+                props = fetch_result.props
+                fetch_succeeded = bool(fetch_result.succeeded)
+                fetch_error = str(getattr(fetch_result, "error", "") or "")
+                fetch_failure_kind = str(
+                    getattr(fetch_result, "failure_kind", "") or ""
+                )
+            elif callable(fetch_for_sport):
+                props = await fetch_for_sport(sport)
+                # Legacy integrations return only props and cannot distinguish an
+                # empty successful response from an internal provider failure.
+                fetch_succeeded = True
+                fetch_error = ""
+                fetch_failure_kind = ""
+            else:
+                # Compatibility for lightweight providers/integrations that only
+                # implement the provider-wide fetch method.
+                props = await _propline_provider.fetch_props()
+                fetch_succeeded = True
+                fetch_error = ""
+                fetch_failure_kind = ""
+        except Exception as exc:  # noqa: BLE001
+            if provider_health is not None:
+                failure_type = (
+                    FailureType.TIMEOUT
+                    if isinstance(exc, (asyncio.TimeoutError, TimeoutError))
+                    else FailureType.HTTP_ERROR
+                )
+                provider_health.record_failure("PrizePicks", str(exc), failure_type)
+            logger.info(
+                "prizepicks_cycle: provider=PrizePicks sport=%s fetch_succeeded=false "
+                "observations=0 persisted=0 evaluated=0 actionable=0 delivered=0",
+                sport,
             )
-            provider_health.record_failure("PrizePicks", str(exc), failure_type)
-        logger.info(
-            "prizepicks_cycle: provider=PrizePicks sport=%s fetch_succeeded=false "
-            "observations=0 persisted=0 evaluated=0 actionable=0 delivered=0",
-            sport,
-        )
-        logger.warning("prizepicks_cycle: authorized feed failed: %s", type(exc).__name__)
-        return
-    if fetch_succeeded and provider_health is not None:
-        provider_health.record_success("PrizePicks")
-    if not fetch_succeeded:
-        if provider_health is not None:
-            _failure_types = {
-                "timeout": FailureType.TIMEOUT,
-                "quota": FailureType.QUOTA,
-                "http": FailureType.HTTP_ERROR,
-                "configuration": FailureType.UNKNOWN,
-                "disabled": FailureType.UNKNOWN,
-            }
-            provider_health.record_failure(
-                "PrizePicks",
-                fetch_error or "PropLine fetch failed",
-                _failure_types.get(fetch_failure_kind, FailureType.UNKNOWN),
+            logger.warning("prizepicks_cycle: authorized feed failed: %s", type(exc).__name__)
+            return
+        if fetch_succeeded and provider_health is not None:
+            provider_health.record_success("PrizePicks")
+        if not fetch_succeeded:
+            if provider_health is not None:
+                _failure_types = {
+                    "timeout": FailureType.TIMEOUT,
+                    "quota": FailureType.QUOTA,
+                    "http": FailureType.HTTP_ERROR,
+                    "configuration": FailureType.UNKNOWN,
+                    "disabled": FailureType.UNKNOWN,
+                }
+                provider_health.record_failure(
+                    "PrizePicks",
+                    fetch_error or "PropLine fetch failed",
+                    _failure_types.get(fetch_failure_kind, FailureType.UNKNOWN),
+                )
+            logger.info(
+                "prizepicks_cycle: provider=PrizePicks sport=%s fetch_succeeded=false "
+                "observations=0 persisted=0 evaluated=0 actionable=0 delivered=0",
+                sport,
             )
-        logger.info(
-            "prizepicks_cycle: provider=PrizePicks sport=%s fetch_succeeded=false "
-            "observations=0 persisted=0 evaluated=0 actionable=0 delivered=0",
-            sport,
-        )
-        return
+            return
+    else:
+        sport = _fetched_sport or ""
+        props = _fetched_props
+
     if not props:
         logger.info(
             "prizepicks_cycle: provider=PrizePicks sport=%s fetch_succeeded=true "
             "observations=0 persisted=0 evaluated=0 actionable=0 delivered=0",
             sport,
         )
+        return
+
+    if background_processing:
+        processing_task = asyncio.create_task(
+            _run_prizepicks_independent_cycle(
+                context,
+                _fetched_props=list(props),
+                _fetched_sport=sport,
+            ),
+            name="prizepicks_deferred_evaluation",
+        )
+        _track_prizepicks_processing_task(processing_task)
         return
 
     # One observation per provider-owned identity per cycle.  The provider's
