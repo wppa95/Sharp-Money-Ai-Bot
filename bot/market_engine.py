@@ -361,7 +361,10 @@ _prizepicks_cycle_task: Optional[asyncio.Task] = None
 _prizepicks_processing_tasks: set[asyncio.Task] = set()
 _prizepicks_processing_lock: Optional[asyncio.Lock] = None
 _prizepicks_last_started_at: Optional[float] = None
-_PRIZEPICKS_CYCLE_INTERVAL_SECONDS = 120.0
+# Heartbeat runs once per minute.  Keep a small scheduling margin below the
+# provider's 120-second request pacing so clock jitter cannot defer a handoff
+# by a third heartbeat; the client still enforces the full provider interval.
+_PRIZEPICKS_CYCLE_INTERVAL_SECONDS = 110.0
 _PRIZEPICKS_DEDUP_PREFIX = "PrizePicks::"
 _prizepicks_sport_cursor = 0
 
