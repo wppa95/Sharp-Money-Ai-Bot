@@ -48,7 +48,7 @@ def _mock_status_db() -> MagicMock:
 
 
 def test_current_display_sport_filter_uses_configured_active_slate():
-    with patch.object(commands.config, "active_sports", ["WNBA", "CS"]):
+    with patch.object(commands.config, "ACTIVE_SPORTS_RAW", "WNBA,CS"):
         assert commands._is_active_display_sport("wnba")
         assert commands._is_active_display_sport("CS")
         assert not commands._is_active_display_sport("NBA")
