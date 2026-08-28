@@ -42,6 +42,7 @@ _START_TIME = time.monotonic()
 _DASHBOARD_TIMEOUT_SECONDS = 3.0
 _PROVIDER_REPORT_TIMEOUT_SECONDS = 2.0
 _COMMAND_TIMEOUT_SECONDS = 3.0
+_STATUS_DB_READ_TIMEOUT_SECONDS = 1.0
 
 
 async def _bounded(coro, timeout: Optional[float] = None):
@@ -50,6 +51,27 @@ async def _bounded(coro, timeout: Optional[float] = None):
         coro,
         timeout=_COMMAND_TIMEOUT_SECONDS if timeout is None else timeout,
     )
+
+
+async def _status_db_read(label: str, coro):
+    """Return one status counter without allowing a busy SQLite DB to fail /status."""
+    try:
+        return await asyncio.wait_for(coro, timeout=_STATUS_DB_READ_TIMEOUT_SECONDS)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("cmd_status: %s counter unavailable: %s", label, exc)
+        return None
+
+
+def _format_status_count(value: object) -> str:
+    """Render a counter honestly when a transient DB lock prevents reading it."""
+    if value is None:
+        return "unavailable"
+    try:
+        return f"{int(value):,}"
+    except (TypeError, ValueError):
+        return "unavailable"
 
 
 def _primary_player_prop_provider_lines(
@@ -713,25 +735,34 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         # Bound all DB reads as one unit so a scan cannot hold this command.
         if _db:
             (
-                total_steam,
-                total_ev,
-                db_records,
                 _alerts_today,
                 total_prop_history,
                 ud_history,
                 pp_history,
-            ) = await _bounded(asyncio.gather(
-                _db.count_steam_records(),
-                _db.count_ev_records(),
-                _db.count_odds_records(),
-                _db.count_today_actionable_alerts(),
-                _db.count_prop_line_history(),
-                _db.count_prop_line_history(provider="Underdog"),
-                _db.count_prop_line_history(provider="PrizePicks"),
-            ))
+            ) = await _bounded(
+                asyncio.gather(
+                    _status_db_read(
+                        "alerts today", _db.count_today_actionable_alerts()
+                    ),
+                    _status_db_read(
+                        "shared prop history", _db.count_prop_line_history()
+                    ),
+                    _status_db_read(
+                        "Underdog prop history",
+                        _db.count_prop_line_history(provider="Underdog"),
+                    ),
+                    _status_db_read(
+                        "PrizePicks prop history",
+                        _db.count_prop_line_history(provider="PrizePicks"),
+                    ),
+                )
+            )
         else:
-            total_steam = total_ev = db_records = _alerts_today = 0
-            total_prop_history = ud_history = pp_history = 0
+            _alerts_today = total_prop_history = ud_history = pp_history = 0
+        _status_counts_degraded = any(
+            value is None
+            for value in (_alerts_today, total_prop_history, ud_history, pp_history)
+        )
         # Load provider health monitor singleton
         try:
             from providers import get_health_monitor
@@ -743,9 +774,15 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         # Historical records are preserved in PropOpportunityLog; use /alerts for history.
         lines: list[str] = [
             f"🤖 <b>Sharp Money Bot</b>  ·  Uptime: {_uptime_str()}",
-            f"📬 Alerts today: {_alerts_today:,}",
+            f"📬 Alerts today: {_format_status_count(_alerts_today)}",
             "",
         ]
+        if _status_counts_degraded:
+            lines.append(
+                "⚠️ Some database counters are temporarily unavailable; "
+                "live monitoring continues."
+            )
+            lines.append("")
 
         # ── Market provider health (live prop lines) ──────────────────────────────
         lines.append("📡 <b>Market Providers</b>")
@@ -873,9 +910,11 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
         # ── Database ──────────────────────────────────────────────────────────────
         lines.append("📊 <b>Database Records</b>")
-        lines.append(f"  Shared prop history: {total_prop_history:,}")
-        lines.append(f"    Underdog: {ud_history:,}")
-        lines.append(f"    PrizePicks (PropLine): {pp_history:,}")
+        lines.append(f"  Shared prop history: {_format_status_count(total_prop_history)}")
+        lines.append(f"    Underdog: {_format_status_count(ud_history)}")
+        lines.append(
+            f"    PrizePicks (PropLine): {_format_status_count(pp_history)}"
+        )
 
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
     except Exception as exc:

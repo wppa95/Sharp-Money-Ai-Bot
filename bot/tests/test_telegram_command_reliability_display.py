@@ -167,6 +167,33 @@ async def test_status_shows_provider_roles_and_separate_history_counts():
 
 
 @pytest.mark.asyncio
+async def test_status_returns_health_when_one_db_counter_times_out():
+    update, context = _update_and_context()
+    db = _mock_status_db()
+
+    async def never_finishes():
+        await asyncio.sleep(1)
+
+    db.count_today_actionable_alerts = never_finishes
+
+    with (
+        patch("commands._check_allowed", return_value=True),
+        patch("commands._db", db),
+        patch("commands._season_checker", None),
+        patch("commands._STATUS_DB_READ_TIMEOUT_SECONDS", 0.01),
+        patch("providers.get_health_monitor", return_value=_health_monitor()),
+    ):
+        await asyncio.wait_for(commands.cmd_status(update, context), timeout=0.2)
+
+    message = update.message.reply_text.await_args.args[0]
+    assert "Sharp Money Bot" in message
+    assert "Some database counters are temporarily unavailable" in message
+    assert "Alerts today: unavailable" in message
+    assert "Underdog: 20" in message
+    assert "PrizePicks (PropLine): 10" in message
+
+
+@pytest.mark.asyncio
 async def test_dashboard_activity_section_keeps_provider_counts_separate():
     update, context = _update_and_context()
     db = MagicMock()
