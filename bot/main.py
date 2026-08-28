@@ -709,13 +709,14 @@ async def _grade_opportunities_job(context) -> None:
             if not opp.game_time:
                 continue
             game_date = opp.game_time.strftime("%Y-%m-%d")
+            _result_lookup_kwargs = {}
+            if getattr(opp, "game_id", ""):
+                _result_lookup_kwargs["game_id"] = opp.game_id
+            if getattr(opp, "provider", None):
+                _result_lookup_kwargs["provider"] = opp.provider
             result_row = await db.get_game_result_for_grading(
-                opp.player_name,
-                opp.sport,
-                opp.stat_type,
-                game_date,
-                game_id=getattr(opp, "game_id", ""),
-                provider=getattr(opp, "provider", None),
+                opp.player_name, opp.sport, opp.stat_type, game_date,
+                **_result_lookup_kwargs,
             )
             if result_row is None:
                 no_data += 1
