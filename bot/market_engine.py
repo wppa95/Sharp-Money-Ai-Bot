@@ -1622,23 +1622,25 @@ async def consensus_check_job(context) -> None:
             continue
 
         message = format_inefficiency_alert(ineff, cr)
-        await broadcast_alert(bot, chat_ids, message)
+        counts = await broadcast_alert(bot, chat_ids, message)
+        alert_sent = counts["sent"] > 0
         logger.info(
-            "Inefficiency alert: %s | %s | %s | dev=%+d",
-            ineff.event, ineff.selection, ineff.sportsbook, ineff.deviation,
+            "Inefficiency alert: %s | %s | %s | dev=%+d → sent=%s",
+            ineff.event, ineff.selection, ineff.sportsbook, ineff.deviation, alert_sent,
         )
         # Persist dedup marker only when alert was actually sent
-        await db.save_market_snapshot(MarketSnapshotRecord(
-            sportsbook  = ineff.sportsbook,
-            sport       = ineff.sport,
-            league      = ineff.sport,
-            event       = ineff.event,
-            market_type = ineff.market_type,
-            selection   = ineff.selection,
-            odds        = ineff.offered_odds,
-            recorded_at = now,
-            alert_sent  = True,
-        ))
+        if alert_sent:
+            await db.save_market_snapshot(MarketSnapshotRecord(
+                sportsbook  = ineff.sportsbook,
+                sport        = ineff.sport,
+                league      = ineff.sport,
+                event       = ineff.event,
+                market_type = ineff.market_type,
+                selection    = ineff.selection,
+                odds        = ineff.offered_odds,
+                recorded_at = now,
+                alert_sent  = True,
+            ))
 
     # ── 2. Multi-book steam detection ────────────────────────────────────────
     steam_inputs = build_multi_book_steam_inputs(all_snaps)
@@ -1690,27 +1692,29 @@ async def consensus_check_job(context) -> None:
             current_odds    = current_odds,
             sharp_books     = sharp_books,
         )
-        await broadcast_alert(bot, chat_ids, message)
+        counts = await broadcast_alert(bot, chat_ids, message)
+        alert_sent = counts["sent"] > 0
         logger.info(
-            "Multi-book steam alert: %s | %s | score=%d",
-            event, selection, result.steam_score,
+            "Multi-book steam alert: %s | %s | score=%d → sent=%s",
+            event, selection, result.steam_score, alert_sent,
         )
         # Persist SteamRecord only when alert was actually sent
-        await db.save_steam(SteamRecord(
-            alert_type      = "MULTI_BOOK_STEAM",
-            sport           = sport,
-            market_type     = market_type,
-            event           = event,
-            selection       = selection,
-            opening_odds    = open_odds,
-            current_odds    = current_odds,
-            steam_score     = result.steam_score,
-            steam_direction = result.direction.value,
-            books_moved     = ", ".join(books_moved),
-            notes           = f"Multi-book steam: {len(books_moved)} books moved",
-            detected_at     = now,
-            alert_sent      = True,
-        ))
+        if alert_sent:
+            await db.save_steam(SteamRecord(
+                alert_type      = "MULTI_BOOK_STEAM",
+                sport           = sport,
+                market_type     = market_type,
+                event           = event,
+                selection       = selection,
+                opening_odds    = open_odds,
+                current_odds    = current_odds,
+                steam_score     = result.steam_score,
+                steam_direction = result.direction.value,
+                books_moved     = ", ".join(books_moved),
+                notes           = f"Multi-book steam: {len(books_moved)} books moved",
+                detected_at     = now,
+                alert_sent      = True,
+            ))
 
 
 # ── Delivery priority helpers (used by underdog_job ranked-delivery phase) ────

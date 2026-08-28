@@ -1473,6 +1473,8 @@ class Database:
 
         by_provider: dict[str, dict] = {}
         buckets: dict[tuple[str, str], dict] = {}
+        legacy_deliveries = 0
+        audited_deliveries = 0
 
         def _provider(name: Optional[str]) -> str:
             return str(name or "Unknown").strip() or "Unknown"
@@ -1567,6 +1569,7 @@ class Database:
                     )
                 if alert_sent and alert_sent_at is not None and alert_sent_at >= cutoff:
                     row["delivered_alerts"] += 1
+                    legacy_deliveries += 1
                     _add_bucket(provider, alert_sent_at, delivered_alerts=1)
 
             # Legacy independent PrizePicks edge rows.
@@ -1581,6 +1584,7 @@ class Database:
                 row["actionable_persisted"] += 1
                 if alert_sent:
                     row["delivered_alerts"] += 1
+                    legacy_deliveries += 1
                 _add_bucket(
                     "PrizePicks",
                     detected_at,
@@ -1617,6 +1621,7 @@ class Database:
                 row["delivered_recipients"] += int(recipients_sent or 0)
                 if outcome == "sent":
                     row["delivered_alerts"] += 1
+                    audited_deliveries += 1
                 elif outcome == "rate_limited":
                     row["rate_limited"] += 1
                 elif outcome == "deduped":
@@ -1640,20 +1645,6 @@ class Database:
         duplicate_delivery_events = sum(
             max(0, count - 1) for count in audit_identity_counts.values()
         )
-        legacy_delivery_rows = sum(
-            row["delivered_alerts"] for row in by_provider.values()
-        ) - sum(
-            row["delivered_alerts"] for row in by_provider.values()
-            if False
-        )
-        # The ledger count is the only exact outbound-message count.  The
-        # separate field makes the legacy limitation explicit to /reconcile.
-        audited_deliveries = sum(
-            row["delivered_alerts"] for row in by_provider.values()
-        )
-        legacy_deliveries = sum(
-            row["delivered_alerts"] for row in by_provider.values()
-        ) - audited_deliveries
 
         return {
             "since_hours": since_hours,
