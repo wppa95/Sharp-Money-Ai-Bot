@@ -10,7 +10,7 @@ import json
 import logging
 import os
 from datetime import datetime
-from typing import Optional
+from typing import Iterable, Optional
 
 from sqlalchemy import (
     Boolean, Column, DateTime, Float,
@@ -951,32 +951,45 @@ class Database:
         return deduped
 
     async def get_top_ud_props_for_picks(
-        self, limit: int = 10, since_hours: int = 24
+        self,
+        limit: int = 10,
+        since_hours: int = 24,
+        sports: Optional[Iterable[str]] = None,
     ) -> "list[PropLineHistory]":
         """Return the most-recent Underdog prop snapshot for each (player, stat) within the window.
 
         Non-removed props only, ordered by fetched_at DESC so freshest data appears first.
-        Used as the primary data source for /picks and /slip.
+        Used as the primary data source for /picks and /slip. When ``sports`` is
+        provided, the allowlist is applied before overfetch and balancing so
+        inactive high-volume sports cannot crowd out the live slate.
         """
         from datetime import timedelta
         from sqlalchemy import or_, and_
         cutoff = datetime.utcnow() - timedelta(hours=since_hours)
+        normalized_sports = {
+            str(sport).strip().upper()
+            for sport in (sports or ())
+            if str(sport).strip()
+        }
         async with self.session() as s:
+            filters = [
+                PropLineHistory.provider   == "Underdog",
+                PropLineHistory.fetched_at >= cutoff,
+                PropLineHistory.removed.isnot(True),
+                or_(
+                    PropLineHistory.game_time.is_(None),
+                    PropLineHistory.game_time > datetime.utcnow(),
+                ),
+                # /picks is an analyst-facing view of evaluated props.
+                # Decision labels are metadata, not a display gate; only
+                # unscored rows are excluded.
+                PropLineHistory.score_tier.isnot(None),
+            ]
+            if sports is not None:
+                filters.append(PropLineHistory.sport.in_(normalized_sports))
             subq = (
                 select(func.max(PropLineHistory.id))
-                .where(
-                    PropLineHistory.provider   == "Underdog",
-                    PropLineHistory.fetched_at >= cutoff,
-                    PropLineHistory.removed.isnot(True),
-                    or_(
-                        PropLineHistory.game_time.is_(None),
-                        PropLineHistory.game_time > datetime.utcnow(),
-                    ),
-                    # /picks is an analyst-facing view of evaluated props.
-                    # Decision labels are metadata, not a display gate; only
-                    # unscored rows are excluded.
-                    PropLineHistory.score_tier.isnot(None),
-                )
+                .where(*filters)
                 .group_by(
                     PropLineHistory.player_name,
                     PropLineHistory.sport,
