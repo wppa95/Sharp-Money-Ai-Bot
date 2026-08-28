@@ -14,8 +14,11 @@ import pytest
 import commands
 import market_engine
 from alerts import format_help_message
+from connectors import ConnectorRegistry
+from connectors.underdog import UnderdogConnector
 from engine.dashboard import DashboardReport, DailyTrend, SportPerf
 from providers.base import FailureType, ProviderHealth, ProviderStatus
+from providers.health_monitor import ProviderHealthMonitor
 
 
 def _update_and_context(args: list[str] | None = None):
@@ -348,3 +351,49 @@ async def test_prizepicks_companion_cycle_records_failure_health():
     monitor.record_failure.assert_called_once_with(
         "PrizePicks", "timed out", FailureType.TIMEOUT
     )
+
+
+@pytest.mark.asyncio
+async def test_real_underdog_registry_failure_and_recovery_reach_command_output():
+    connector = UnderdogConnector(enabled=True)
+    connector._fetch_projections = AsyncMock(
+        side_effect=[RuntimeError("API down"), []]
+    )
+    registry = ConnectorRegistry()
+    registry.register(connector)
+    monitor = ProviderHealthMonitor()
+    monitor.register("Underdog")
+    monitor.register("PrizePicks")
+    context = SimpleNamespace(bot_data={"db": MagicMock()}, bot=MagicMock())
+
+    async def run_job():
+        with (
+            patch.object(market_engine, "_registry", registry),
+            patch.object(market_engine, "_cold_start_done", True),
+            patch.object(market_engine, "_ud_full_scan_running", False),
+            patch.object(market_engine, "_propline_provider", None),
+            patch.object(market_engine, "get_health_monitor", return_value=monitor),
+            patch("market_engine.get_health_tracker", return_value=MagicMock()),
+        ):
+            await market_engine.underdog_job(context)
+
+    async def provider_message() -> str:
+        update, command_context = _update_and_context()
+        with (
+            patch("commands._check_allowed", return_value=True),
+            patch("providers.get_health_monitor", return_value=monitor),
+        ):
+            await commands.cmd_providers(update, command_context)
+        return update.message.reply_text.await_args.args[0]
+
+    await run_job()
+    degraded = await provider_message()
+    assert monitor.get_health("Underdog").status == ProviderStatus.DEGRADED
+    assert "🟡 <b>Underdog</b> — Primary Player Props" in degraded
+    assert "🟡 Underdog: degraded" in degraded
+
+    await run_job()
+    recovered = await provider_message()
+    assert monitor.get_health("Underdog").status == ProviderStatus.OK
+    assert "🟢 <b>Underdog</b> — Primary Player Props" in recovered
+    assert "🟢 Underdog: ok" in recovered

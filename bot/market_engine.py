@@ -2261,6 +2261,14 @@ async def underdog_job(context) -> None:
     try:
         snapshots = await _registry.fetch_pickem()
     except Exception as _fetch_exc:
+        provider_health = get_health_monitor()
+        if provider_health is not None:
+            failure_type = (
+                FailureType.TIMEOUT
+                if isinstance(_fetch_exc, (asyncio.TimeoutError, TimeoutError))
+                else FailureType.HTTP_ERROR
+            )
+            provider_health.record_failure("Underdog", str(_fetch_exc), failure_type)
         if _health:
             _health.record_provider_error("Underdog", str(_fetch_exc))
             _health.record_job_fail("underdog_job", str(_fetch_exc))
@@ -2270,6 +2278,57 @@ async def underdog_job(context) -> None:
         _job_activity_end("underdog")
         _release_underdog_scan_slot()
         return
+
+    # ConnectorRegistry deliberately contains provider exceptions so one feed
+    # cannot abort other connectors.  Read the Underdog connector's explicit
+    # outcome to distinguish a legitimate empty feed from a swallowed failure.
+    _underdog_fetch_error = ""
+    try:
+        _underdog_connector = next(
+            (
+                connector
+                for connector in _registry.pickem_connectors
+                if getattr(connector, "name", "") == "Underdog"
+            ),
+            None,
+        )
+        if _underdog_connector is not None:
+            _underdog_fetch_error = str(
+                getattr(_underdog_connector, "last_fetch_error", "") or ""
+            )
+    except Exception:
+        _underdog_connector = None
+
+    provider_health = get_health_monitor()
+    if _underdog_fetch_error:
+        if provider_health is not None:
+            _error_lower = _underdog_fetch_error.lower()
+            _failure_type = (
+                FailureType.BLOCKED
+                if "403" in _error_lower or "blocked" in _error_lower
+                else (
+                    FailureType.TIMEOUT
+                    if "timeout" in _error_lower or "timed out" in _error_lower
+                    else FailureType.HTTP_ERROR
+                )
+            )
+            provider_health.record_failure(
+                "Underdog", _underdog_fetch_error, _failure_type
+            )
+        if _health:
+            _health.record_provider_error("Underdog", _underdog_fetch_error)
+            _health.record_job_fail("underdog_job", _underdog_fetch_error)
+        logger.warning(
+            "underdog_job: connector fetch failed: %s",
+            _underdog_fetch_error,
+        )
+        _cycle_timing.finish("fetch_parse")
+        logger.info("underdog_cycle_timing: %s", _cycle_timing.summary(0, 0))
+        _job_activity_end("underdog")
+        _release_underdog_scan_slot()
+        return
+    if provider_health is not None and _underdog_connector is not None:
+        provider_health.record_success("Underdog")
 
     _cycle_timing.finish("fetch_parse")
     _cycle_timing.start("active_pool")

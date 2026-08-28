@@ -104,12 +104,16 @@ class ConnectorRegistry:
         connectors = self.pickem_connectors
         if not connectors:
             return []
-        tasks = {c.name: asyncio.create_task(c.fetch()) for c in connectors}
+        tasks = {c.name: (c, asyncio.create_task(c.fetch())) for c in connectors}
         results: list[MarketSnapshot] = []
-        for name, task in tasks.items():
+        for name, (connector, task) in tasks.items():
             try:
                 results.extend(await task)
             except Exception as exc:
+                # Preserve the provider-specific outcome even though the
+                # registry intentionally contains the exception.  The owning
+                # job uses this to report real live-feed health.
+                connector.last_fetch_error = str(exc)[:200]
                 logger.warning("Connector %s fetch error: %s", name, exc)
         return results
 

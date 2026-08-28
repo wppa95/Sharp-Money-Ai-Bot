@@ -86,6 +86,9 @@ class UnderdogConnector(BaseConnector):
         self._previous: dict[str, UnderdogProjection] = {}
         # Set of external_ids present in last fetch (for removal detection)
         self._last_seen: set[str] = set()
+        # Explicit fetch outcome for the registry/owning job.  A legitimate
+        # empty response leaves this as None; transport/HTTP failures set it.
+        self.last_fetch_error: Optional[str] = None
 
     # ── Public interface ──────────────────────────────────────────────────────
 
@@ -93,6 +96,7 @@ class UnderdogConnector(BaseConnector):
         if not self.enabled:
             return []
 
+        self.last_fetch_error = None
         projections = await self._fetch_projections()
         if projections is None:
             return []
@@ -212,23 +216,8 @@ class UnderdogConnector(BaseConnector):
                 async with s.get(url) as resp:
                     if resp.status != 200:
                         logger.warning("Underdog API HTTP %d", resp.status)
-                        try:
-                            from providers.health_monitor import get_health_monitor as _ghm
-                            from providers.base import FailureType as _FT
-                            _mon = _ghm()
-                            if _mon:
-                                _ftype = _FT.BLOCKED if resp.status == 403 else _FT.HTTP_ERROR
-                                _mon.record_failure("Underdog", f"HTTP {resp.status}", _ftype)
-                        except ImportError:
-                            pass
+                        self.last_fetch_error = f"HTTP {resp.status}"
                         return None
-                    try:
-                        from providers.health_monitor import get_health_monitor as _ghm
-                        _mon = _ghm()
-                        if _mon:
-                            _mon.record_success("Underdog")
-                    except ImportError:
-                        pass
 
                     raw = await resp.json(content_type=None)
                         
@@ -241,19 +230,13 @@ class UnderdogConnector(BaseConnector):
 
                     return projections
         except aiohttp.ClientError as exc:
-                logger.warning("Underdog request error: %s", exc)
-                return None
+            self.last_fetch_error = str(exc)[:200] or type(exc).__name__
+            logger.warning("Underdog request error: %s", exc)
+            return None
 
         except Exception as exc:  # noqa: BLE001
+            self.last_fetch_error = str(exc)[:200] or type(exc).__name__
             logger.warning("Underdog unexpected error: %s", exc)
-            try:
-                from providers.health_monitor import get_health_monitor as _ghm
-                from providers.base import FailureType as _FT
-                _mon = _ghm()
-                if _mon:
-                    _mon.record_failure("Underdog", str(exc)[:120], _FT.UNKNOWN)
-            except ImportError:
-                pass
             return None
 
             projections = self._parse(raw)
