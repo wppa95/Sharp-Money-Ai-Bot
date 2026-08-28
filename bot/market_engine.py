@@ -1138,7 +1138,7 @@ def _start_prizepicks_cycle(context, *, force: bool = False) -> bool:
 
     _prizepicks_last_started_at = now
     _prizepicks_cycle_task = asyncio.create_task(
-        _run_prizepicks_independent_cycle(context),
+        _run_prizepicks_independent_cycle(context, background_processing=True),
         name="prizepicks_companion_cycle",
     )
     return True
