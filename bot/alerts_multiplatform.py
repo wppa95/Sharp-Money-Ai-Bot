@@ -925,7 +925,11 @@ def format_market_move_detected(
         "<i>This is a market signal, not yet a bet pick.</i>",
         game_str,
         "",
-        f"🕐 <i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>",
+        (
+            f"🕐 <b>Line as of:</b> "
+            f"<i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>"
+            if not removed else ""
+        ),
         "",
         _thick,
     ]
@@ -1087,7 +1091,8 @@ def format_underdog_new_prop_alert(
         *([f"📡 <b>Market Check:</b>  {market_confirmation['notes']}"]
           if market_confirmation and market_confirmation.get("notes") else []),
         "",
-        f"{EMOJI['clock']} <i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>",
+        f"{EMOJI['clock']} <b>Line as of:</b> "
+        f"<i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>",
         "",
         _thick,
     ]

@@ -684,7 +684,9 @@ async def broadcast_alert(
     """
     if is_football_related_sport(sport):
         logger.info("broadcast_alert: football betting output suppressed: sport=%s", sport)
-        return {"sent": 0, "failed": len(chat_ids)}
+        # Suppression is an intentional no-send outcome, not a transport
+        # failure.  Failed counts are reserved for attempted deliveries.
+        return {"sent": 0, "failed": 0}
     message = _sanitize_user_alert_message(message)
     sent = failed = 0
     for cid in chat_ids:

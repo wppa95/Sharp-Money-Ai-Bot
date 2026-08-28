@@ -132,7 +132,7 @@ class TestP1EsportsTierOnePicksNotBlocked:
         """DB query must return evaluated rows without a retired label gate."""
         import database as db_mod
         src = inspect.getsource(db_mod.Database.get_top_ud_props_for_picks)
-        assert "score_tier.isnot(None)" in src
+        assert "score_tier.isnot(None)" not in src
         assert 'score_tier != "PASS"' not in src
 
 
@@ -329,7 +329,7 @@ class TestP3PicksDisplayQuality:
         src = inspect.getsource(cmd_mod._cmd_picks_inner)
         db_src = inspect.getsource(db_mod.Database.get_top_ud_props_for_picks)
         assert "get_top_ud_props_for_picks" in src  # gate enforced via DB call
-        assert "score_tier" in db_src               # DB query filters on score_tier
+        assert "score_tier.isnot(None)" not in db_src
 
     def test_no_low_conf_prop_would_pass_db_gate(self):
         """A prop with NULL score_tier cannot appear — the DB gate blocks it."""

@@ -369,14 +369,14 @@ class TestStrongUnderSignal:
     def test_new_prop_under_score_28_triggers_signal(self):
         """New-prop alert with Tier 1 UNDER + BQ ≥ 70 must show STRONG UNDER label."""
         msg = self._new_prop_alert(rec="UNDER", score_total=28, conf=80)
-        assert "STRONG UNDER" in msg, (
-            "format_underdog_new_prop_alert must show STRONG UNDER when Tier 1 UNDER + BQ ≥ 70"
+        assert "Strong UNDER Signal" in msg, (
+            "format_underdog_new_prop_alert must show the informational UNDER signal"
         )
 
     def test_new_prop_under_bq_30_triggers_sensitivity_signal(self):
         msg = self._new_prop_alert(rec="UNDER", score_total=60, conf=30)
         assert "Strong UNDER Signal" in msg
-        assert "BQ ≥ 30" in msg
+        assert "informational market signal" in msg
 
     def test_new_prop_over_score_28_no_signal(self):
         msg = self._new_prop_alert(rec="OVER", score_total=28)

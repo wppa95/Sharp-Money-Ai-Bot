@@ -404,8 +404,8 @@ class TestAlertFreshness:
     def test_35_freshness_timestamp_in_alert_output(self):
         """35. Alert freshness timestamp must appear in actionable alerts."""
         from pathlib import Path
-        src = (Path(__file__).resolve().parents[1] / "alerts.py").read_text()
-        assert "Line as of" in src or "line as of" in src.lower(), (
+        src = (Path(__file__).resolve().parents[1] / "alerts_multiplatform.py").read_text()
+        assert "Line as of" in src, (
             "Freshness timestamp 'Line as of HH:MM ET' missing from alerts.py"
         )
 

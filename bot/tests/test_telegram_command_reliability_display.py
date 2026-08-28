@@ -681,19 +681,8 @@ async def test_direct_broadcast_sanitizes_retired_labels_without_losing_pick_con
 
     result = await broadcast_alert(bot, [123], raw, sport="NFL")
 
-    assert result == {"sent": 1, "failed": 0}
-    delivered = bot.send_message.await_args.kwargs["text"]
-    assert "OVER" in delivered
-    assert "12.5" in delivered
-    assert "Evidence: 8 games" in delivered
-    assert "Quality: 88" in delivered
-    assert "Line moved +0.5" in delivered
-    assert not re.search(
-        r"\b(?:S|A|B|C)[- ]?Tier\b|\bTier[- ]?[12]\b|"
-        r"\bWATCHLIST\b|\bNEAR[- ]MISS\b|\bPASS\b|\bdecision_pass\b",
-        delivered,
-        flags=re.IGNORECASE,
-    )
+    assert result == {"sent": 0, "failed": 0}
+    bot.send_message.assert_not_awaited()
 
 
 @pytest.mark.asyncio

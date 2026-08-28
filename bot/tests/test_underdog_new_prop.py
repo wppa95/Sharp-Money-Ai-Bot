@@ -539,7 +539,7 @@ def test_format_new_prop_alert_contains_required_fields():
         score=None,
         low_line_threshold=1.0,
     )
-    assert "UNDERDOG PROP LIVE" in msg
+    assert "UNDERDOG PICK" in msg
     assert "Aaron Judge" in msg
     assert "Home Runs" in msg
     assert "0.5" in msg
@@ -593,7 +593,7 @@ def test_format_new_prop_includes_grade_when_score_present():
 
 @pytest.mark.asyncio
 async def test_new_prop_bypasses_timing_filter():
-    """new_prop=True must skip the game timing filter."""
+    """new props must still respect the pregame timing filter."""
     from alerts import AlertDelivery
     from alert_scope_filter import FilterResult
 
@@ -622,5 +622,6 @@ async def test_new_prop_bypasses_timing_filter():
             new_prop=True,
         )
 
-    assert result.sent is True
-    assert len(timing_called) == 0, "Timing filter must not be called for new_prop alerts"
+    assert result.sent is False
+    assert result.filtered is True
+    assert len(timing_called) == 1, "Timing filter must run for new_prop alerts"

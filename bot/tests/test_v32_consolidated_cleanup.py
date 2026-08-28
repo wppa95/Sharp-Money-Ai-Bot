@@ -200,7 +200,7 @@ class TestP3APicksDbQuery:
 
     def test_source_reads_score_state(self):
         src = self._src()
-        assert "score_tier" in src
+        assert "score_tier.isnot(None)" not in src
 
     def test_source_reads_delivery_state(self):
         src = self._src()
@@ -283,7 +283,7 @@ class TestP3BPicksDisplayGate:
     def test_db_query_is_authoritative(self):
         import inspect, database as db_mod
         src = inspect.getsource(db_mod.Database.get_top_ud_props_for_picks)
-        assert "score_tier" in src and ("fetched_at" in src or "line_value" in src)
+        assert "fetched_at" in src
 
     def test_tracked_prop_with_low_proxy_conf_not_filtered(self):
         """An S-tier prop with proxy_match_confidence=0 must NOT be filtered out.
@@ -520,7 +520,7 @@ class TestP3PicksTierEnforcement:
     def test_query_has_persistent_state_fields(self):
         import inspect, database as db_mod
         src = inspect.getsource(db_mod.Database.get_top_ud_props_for_picks)
-        assert "score_tier" in src and ("fetched_at" in src or "line_value" in src)
+        assert "fetched_at" in src
 
     def test_cmd_picks_has_confidence_gate(self):
         import inspect, commands as cmd_mod

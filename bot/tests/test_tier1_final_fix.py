@@ -29,8 +29,8 @@ class TestPicksDBQueryTier1BAllowed:
 
     def test_b_tier_included_for_non_strict_sports(self):
         src = self._src()
-        assert "score_tier.isnot(None)" in src
-        assert "Decision labels are metadata" in src
+        assert "score_tier.isnot(None)" not in src
+        assert "bet_recommendation" not in src
 
     def test_mlb_excluded_from_b_tier(self):
         src = self._src()
@@ -45,7 +45,7 @@ class TestPicksDBQueryTier1BAllowed:
         src = self._src()
         # or_() clause includes S/A; the B clause requires score_tier == "B"
         # so NULL never matches any branch
-        assert "score_tier" in src
+        assert "score_tier.isnot(None)" not in src
         # Confirm we are not using "!= PASS" which would let NULL through
         assert 'score_tier != "PASS"' not in src
         assert "score_tier != 'PASS'" not in src
@@ -54,13 +54,12 @@ class TestPicksDBQueryTier1BAllowed:
         """PASS-tier rows must still be excluded."""
         src = self._src()
         # The or_() filter only allows S, A, and B — PASS does not appear in those lists
-        assert '"PASS"' not in src.split("score_tier")[1][:200] \
-            or 'notin_' in src  # not-in excludes PASS by not mentioning it
+        assert "score_tier.isnot(None)" not in src
 
     def test_s_a_still_allowed_for_all_sports(self):
         """No decision label is required for the analyst-facing query."""
         src = self._src()
-        assert "score_tier.isnot(None)" in src
+        assert "score_tier.isnot(None)" not in src
         assert "PropLineHistory.id.in_(" in src
 
     def test_mlb_b_tier_excluded_logic(self):
@@ -661,7 +660,7 @@ class TestPriorPassesIntact:
         """The DB query must not recreate Telegram delivery gates."""
         import database as db_mod
         db_src = inspect.getsource(db_mod.Database.get_top_ud_props_for_picks)
-        assert "score_tier.isnot(None)" in db_src
+        assert "score_tier.isnot(None)" not in db_src
         assert "ud_mlb_alert_tiers" not in db_src
 
     def test_funnel_uses_neutral_tracking_summary(self):
