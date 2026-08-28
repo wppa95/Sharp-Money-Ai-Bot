@@ -1466,6 +1466,8 @@ class Database:
                 "delivery_attempts": 0,
                 "delivered_alerts": 0,
                 "delivered_recipients": 0,
+                "audit_delivered_alerts": 0,
+                "audit_recipients": 0,
                 "failed_attempts": 0,
                 "rate_limited": 0,
                 "dedup_suppressed": 0,
@@ -1501,6 +1503,8 @@ class Database:
             delivery_attempts: int = 0,
             delivered_alerts: int = 0,
             delivered_recipients: int = 0,
+            audit_delivered_alerts: int = 0,
+            audit_recipients: int = 0,
         ) -> None:
             label = _bucket(dt)
             if label is None:
@@ -1511,6 +1515,8 @@ class Database:
             row["delivery_attempts"] += delivery_attempts
             row["delivered_alerts"] += delivered_alerts
             row["delivered_recipients"] += delivered_recipients
+            row["audit_delivered_alerts"] += audit_delivered_alerts
+            row["audit_recipients"] += audit_recipients
 
         async with self.session() as s:
             # Raw observations are source volume, not alert volume.
@@ -1533,9 +1539,13 @@ class Database:
                     .where(PropCandidateLog.scan_ts >= cutoff)
                     .group_by(PropCandidateLog.provider)
                 )
+                candidate_providers: set[str] = set()
                 for provider_name, count in candidate_rows.all():
-                    _ensure(_provider(provider_name))["evaluated"] += int(count or 0)
+                    provider = _provider(provider_name)
+                    candidate_providers.add(provider)
+                    _ensure(provider)["evaluated"] += int(count or 0)
             except Exception as exc:
+                candidate_providers = set()
                 logger.debug("telegram reconciliation candidate query skipped: %s", exc)
 
             # Canonical Underdog/PrizePicks opportunity rows.
@@ -1557,12 +1567,17 @@ class Database:
                 provider = _provider(provider_name or "Underdog")
                 row = _ensure(provider)
                 if detected_at is not None and detected_at >= cutoff:
+                    # PropCandidateLog is the broad evaluation stream.  POL is
+                    # used as a fallback for providers without candidate rows,
+                    # avoiding a double evaluation count for Underdog.
+                    if provider not in candidate_providers:
+                        row["evaluated"] += 1
                     if str(recommendation or "").upper() in {"OVER", "UNDER"}:
                         row["actionable_persisted"] += 1
                     _add_bucket(
                         provider,
                         detected_at,
-                        evaluated=1,
+                        evaluated=1 if provider not in candidate_providers else 0,
                         actionable_persisted=(
                             1 if str(recommendation or "").upper() in {"OVER", "UNDER"} else 0
                         ),
@@ -1620,7 +1635,7 @@ class Database:
                 row["delivery_attempts"] += 1
                 row["delivered_recipients"] += int(recipients_sent or 0)
                 if outcome == "sent":
-                    row["delivered_alerts"] += 1
+                    row["audit_delivered_alerts"] += 1
                     audited_deliveries += 1
                 elif outcome == "rate_limited":
                     row["rate_limited"] += 1
@@ -1632,8 +1647,8 @@ class Database:
                     provider,
                     attempted_at,
                     delivery_attempts=1,
-                    delivered_alerts=1 if outcome == "sent" else 0,
-                    delivered_recipients=int(recipients_sent or 0),
+                    audit_delivered_alerts=1 if outcome == "sent" else 0,
+                    audit_recipients=int(recipients_sent or 0),
                 )
                 audit_count += 1
                 identity = (
