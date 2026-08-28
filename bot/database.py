@@ -1633,7 +1633,7 @@ class Database:
                 row = _ensure(provider)
                 outcome = str(outcome or "failed").lower()
                 row["delivery_attempts"] += 1
-                row["delivered_recipients"] += int(recipients_sent or 0)
+                row["audit_recipients"] += int(recipients_sent or 0)
                 if outcome == "sent":
                     row["audit_delivered_alerts"] += 1
                     audited_deliveries += 1
