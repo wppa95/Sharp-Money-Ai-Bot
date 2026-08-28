@@ -206,9 +206,9 @@ class Config:
     )
 
     # ── Multi-platform connector settings ────────────────────────────────────
-    # Enable/disable individual connectors via env vars
-    # Temporarily disabled pending full Underdog pipeline validation (doc #9).
-    # Re-enable by setting DRAFTKINGS_ENABLED=true / FANDUEL_ENABLED=true env vars.
+    # Enable/disable individual connectors via env vars.  DK/FD flags are
+    # retained for future support; sportsbook confirmation is separately
+    # disabled by SPORTSBOOK_CONFIRMATION_ENABLED below.
     DRAFTKINGS_ENABLED: bool = os.environ.get("DRAFTKINGS_ENABLED", "false").lower() == "true"
     FANDUEL_ENABLED:    bool = os.environ.get("FANDUEL_ENABLED",    "false").lower() == "true"
     UNDERDOG_ENABLED:   bool = os.environ.get("UNDERDOG_ENABLED",   "true").lower() == "true"

@@ -853,9 +853,9 @@ async def _poll_odds_job(context) -> None:
                 if line.sportsbook.lower().replace(" ", "") in allowed_book_names
             )
         else:
-            # Fetching and storing the complete market response keeps OddsAPI
-            # useful for confirmation/CLV even when optional DK/FD delivery is
-            # disabled.  AlertDelivery still applies the existing scope gate.
+            # Keep unrelated sportsbook lines available to the existing EV
+            # path, but never retain DK/FD lines while their confirmation role
+            # is disabled.
             all_lines.extend(lines)
 
     if pacer is not None:

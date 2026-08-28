@@ -761,12 +761,14 @@ async def _get_odds_api_confirmation(
     db: Optional[Database] = None,
 ) -> Optional[dict]:
     """
-    Query already-supported DraftKings/FanDuel observations as a
-    non-blocking confirmation signal.
+    Query optional DraftKings/FanDuel observations as a non-blocking
+    confirmation signal.  The sportsbook path is currently disabled by an
+    explicit safety gate; PropLine PrizePicks corroboration remains available.
 
     Player props use the existing cached player-prop fetch.  Moneyline and
     totals use h2h/totals OddsRecord rows written by the existing OddsAPI
-    poller, so this function never starts a second polling cycle.
+    poller only when the future sportsbook opt-in is enabled, so this function
+    never starts a second polling cycle.
 
     Returns None when:
       • the source is disabled/unavailable or no safe match exists
