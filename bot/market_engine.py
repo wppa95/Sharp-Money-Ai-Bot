@@ -1174,6 +1174,7 @@ async def _run_prizepicks_independent_cycle(context) -> None:
     global _prizepicks_sport_cursor
     sport = configured_sports[_prizepicks_sport_cursor % len(configured_sports)]
     _prizepicks_sport_cursor = (_prizepicks_sport_cursor + 1) % len(configured_sports)
+    logger.info("prizepicks_cycle_started: provider=PrizePicks sport=%s", sport)
 
     try:
         fetch_result_for_sport = getattr(
