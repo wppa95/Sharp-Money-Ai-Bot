@@ -1081,7 +1081,7 @@ async def cmd_performance(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 for _source, _source_perf in sorted(_tg_perf.get("by_provider", {}).items()):
                     _lines.append(
                         f"  {_source}: {_source_perf['hit']}H-{_source_perf['miss']}M-"
-                        f"{_source_perf['push']}P · {source_perf['pending']} pending"
+                        f"{_source_perf['push']}P · {_source_perf['pending']} pending"
                     )
                 for _sport, _row in sorted(_sport_rows.items()):
                     _lines.append(
