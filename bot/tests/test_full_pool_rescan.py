@@ -362,6 +362,62 @@ class TestFPRJob:
         # Selection must enter the real evaluation pipeline even when the
         # prop was already delivered recently.
         db.get_ud_prop_history.assert_awaited()
+
+    async def test_mixed_primary_provider_pool_stays_in_one_rotation(self, monkeypatch):
+        """PrizePicks rows join legacy Underdog rows without a second FPR."""
+        monkeypatch.delenv("ALLOWED_USER_IDS", raising=False)
+        pp_snap = _make_snap(
+            player="PP Player",
+            sport="NBA",
+            line=12.5,
+            ext_id="pp-points-1",
+        )
+        ud_snap = _make_snap(
+            player="UD Player",
+            sport="MLB",
+            line=4.5,
+            ext_id="ud-hits-1",
+        )
+        db = _make_db(pool={("UD Player", "Hits", 4.5): ud_snap})
+        db.get_all_active_prop_line_history_by_line = AsyncMock(
+            return_value={
+                (
+                    "PrizePicks", "PP Player", "NBA", "Points", 12.5,
+                    "pp-points-1",
+                ): pp_snap,
+            }
+        )
+        db.get_prop_line_history_bulk = AsyncMock(
+            return_value={
+                ("PrizePicks", "PP Player", "NBA", "Points"): [],
+                ("Underdog", "UD Player", "MLB", "Hits"): [],
+            }
+        )
+        ctx = _make_context(db)
+        health = _make_health(cursor=0)
+
+        from market_engine import _full_pool_rescan_job
+
+        with (
+            patch("market_engine.get_health_tracker", return_value=health),
+            patch("market_engine._fetch_and_compute_hit_rates", new=AsyncMock(return_value=None)),
+            patch("market_engine._is_game_live_or_past", return_value=False),
+            patch("engine.ud_scoring.score_ud_prop", return_value=_make_score()),
+            patch("engine.player_validator.validate_player_prop", return_value=_make_validation()),
+            patch("engine.ud_bet_decision.make_ud_bet_decision", return_value=_make_decision()),
+            patch("engine.ud_scoring.compute_market_quality", return_value=MagicMock()),
+            patch("engine.ud_scoring.detect_market_pressure", return_value=MagicMock()),
+        ):
+            await _full_pool_rescan_job(ctx)
+
+        assert db.get_all_active_prop_line_history_by_line.await_count == 1
+        assert db.get_all_active_underdog_snapshots_by_line.await_count == 1
+        logged = [
+            call.kwargs["provider"]
+            for call in db.log_prop_opportunity.await_args_list
+        ]
+        assert "PrizePicks" in logged
+        assert "Underdog" in logged
         db.log_prop_opportunity.assert_awaited()
 
     # ── Test 2 & 3 & 18: rejected / scored props get rescanned ───────────────

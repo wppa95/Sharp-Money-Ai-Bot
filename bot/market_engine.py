@@ -5347,7 +5347,8 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
     • Interval:   config.FPR_INTERVAL   (default 300 s / 5 min)
     • When all props in the current pool have been covered the rotation counter
       increments and the cursor resets to 0 automatically.
-    • Removed/inactive props are excluded by get_all_active_underdog_snapshots_by_line().
+    • Removed/inactive props are excluded by the canonical provider-neutral
+      active PropLineHistory pool.
     • All existing alert gates (dedup, direction, BQ, tier, live-game) apply.
     """
     from engine.player_validator import validate_player_prop as _fpr_validate
@@ -5417,14 +5418,25 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
     rotation_complete   = False
 
     try:
-        # ── Fetch full active pool from DB (zero Underdog API calls) ──────────
-        # get_all_active_underdog_snapshots_by_line() groups by (player_name,
-        # stat_type, line_value) so every alt-line variant for the same player+stat
-        # is a separate entry.  This returns the complete eligible active-prop
-        # universe (all ~100k+ alt-line props) rather than the ~9k unique
-        # player+stat pairs returned by get_active_underdog_snapshot_per_prop().
-        # Removed/inactive props are excluded (latest row per triplet, removed=False).
-        active_pool: dict = await db.get_all_active_underdog_snapshots_by_line()
+        # ── Fetch full active pool from DB (zero provider API calls) ──────────
+        # PropLineHistory is the canonical shared stream for both primary
+        # providers. Keep the legacy Underdog query as a compatibility fallback
+        # for older test doubles and databases.
+        _generic_pool = getattr(
+            db, "get_all_active_prop_line_history_by_line", None
+        )
+        if asyncio.iscoroutinefunction(_generic_pool):
+            active_pool: dict = await _generic_pool(
+                providers=("Underdog", "PrizePicks")
+            )
+            # Underdog's live feed still owns the legacy snapshot table. Merge
+            # it into the same serialized rotation instead of dropping it when
+            # normalized PrizePicks rows are present.
+            _legacy_ud_pool = await db.get_all_active_underdog_snapshots_by_line()
+            for _ud_key, _ud_snap in _legacy_ud_pool.items():
+                active_pool.setdefault(("Underdog", *_ud_key), _ud_snap)
+        else:
+            active_pool = await db.get_all_active_underdog_snapshots_by_line()
         fpr_pool_size = len(active_pool)
         if fpr_pool_size == 0:
             _fpr_execution_running = False
@@ -5433,6 +5445,41 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 _health.record_job_run("full_pool_rescan_job")
             _job_activity_end("fpr")
             return
+
+        def _fpr_parts(key, snap) -> tuple[str, str, str, str, float, str]:
+            """Normalize provider-scoped keys and legacy Underdog keys."""
+            _key_provider = (
+                len(key) >= 4
+                and str(key[0]).strip().lower() in {"underdog", "prizepicks"}
+            )
+            if _key_provider and len(key) >= 6:
+                provider, player, sport, stat, line, source_id = key[:6]
+            elif _key_provider and len(key) == 5:
+                provider, player, sport, stat, line = key[:5]
+                source_id = ""
+            elif _key_provider:
+                provider, player, stat, line = key[:4]
+                sport = getattr(snap, "sport", None) or "UNKNOWN"
+                source_id = ""
+            else:
+                _snap_provider = getattr(snap, "provider", None)
+                provider = (
+                    _snap_provider
+                    if str(_snap_provider).strip().lower()
+                    in {"underdog", "prizepicks"}
+                    else "Underdog"
+                )
+                player, stat, line = key[:3]
+                sport = getattr(snap, "sport", None) or "UNKNOWN"
+                source_id = ""
+            return (
+                str(provider),
+                str(player),
+                str(stat),
+                str(sport).upper(),
+                float(line or getattr(snap, "line_value", 0.0) or 0.0),
+                str(source_id or getattr(snap, "external_id", None) or ""),
+            )
 
         def _fpr_sort_key(item):
             """Stable ordering for the unified full-pool rotation.
@@ -5443,17 +5490,27 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             markers.
             """
             key, snap = item
-            player, stat, line = key[:3]
-            sport = (getattr(snap, "sport", None) or "").upper()
+            provider, player, stat, sport, line, _source_id = _fpr_parts(key, snap)
             is_mover = getattr(snap, "line_moved", False) is True
             external_id = str(getattr(snap, "external_id", None) or "")
-            return (0 if is_mover else 1, sport, player, stat, line, external_id)
+            return (
+                0 if is_mover else 1,
+                sport,
+                provider,
+                player,
+                stat,
+                line,
+                external_id,
+            )
 
         sorted_items = sorted(active_pool.items(), key=_fpr_sort_key)
         pool_keys    = [k for k, _ in sorted_items]
         pool_snaps   = {k: v for k, v in sorted_items}
         fpr_unique_source_ids = len({
-            str(getattr(snap, "external_id", None) or key[:3])
+            (
+                _fpr_parts(key, snap)[0],
+                str(getattr(snap, "external_id", None) or key[:3]),
+            )
             for key, snap in sorted_items
         })
 
@@ -5542,20 +5599,51 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
 
         # Alternate lines share player/stat history.  Load each history once
         # for this bounded batch instead of opening one SQLite session per line.
-        _fpr_history_by_prop: dict[tuple[str, str], list] = {}
-        _fpr_bulk_history = getattr(db, "get_ud_prop_history_bulk", None)
-        if asyncio.iscoroutinefunction(_fpr_bulk_history):
+        _fpr_history_by_prop: dict[tuple, list] = {}
+        _fpr_history_bulk_loaded = False
+        _fpr_generic_bulk_history = getattr(db, "get_prop_line_history_bulk", None)
+        if asyncio.iscoroutinefunction(_fpr_generic_bulk_history):
             try:
-                _fpr_history_by_prop = await _fpr_bulk_history(
-                    [(_key[0], _key[1]) for _key in batch_keys],
+                _fpr_history_by_prop = await _fpr_generic_bulk_history(
+                    [
+                        (
+                            _fpr_parts(_key, pool_snaps[_key])[0],
+                            _fpr_parts(_key, pool_snaps[_key])[1],
+                            _fpr_parts(_key, pool_snaps[_key])[3],
+                            _fpr_parts(_key, pool_snaps[_key])[2],
+                        )
+                        for _key in batch_keys
+                    ],
                     limit=30,
                 )
+                _fpr_history_bulk_loaded = True
             except Exception as _fpr_bulk_history_exc:
                 logger.warning(
                     "full_pool_rescan: bulk history read failed; "
                     "falling back to per-prop reads: %s",
                     _fpr_bulk_history_exc,
                 )
+        else:
+            _fpr_bulk_history = getattr(db, "get_ud_prop_history_bulk", None)
+            if asyncio.iscoroutinefunction(_fpr_bulk_history):
+                try:
+                    _fpr_history_by_prop = await _fpr_bulk_history(
+                        [
+                            (
+                                _fpr_parts(_key, pool_snaps[_key])[1],
+                                _fpr_parts(_key, pool_snaps[_key])[2],
+                            )
+                            for _key in batch_keys
+                        ],
+                        limit=30,
+                    )
+                    _fpr_history_bulk_loaded = True
+                except Exception as _fpr_bulk_history_exc:
+                    logger.warning(
+                        "full_pool_rescan: Underdog bulk history read failed; "
+                        "falling back to per-prop reads: %s",
+                        _fpr_bulk_history_exc,
+                    )
 
         # Evidence is also shared by alternate lines for a player/stat.  The
         # bulk result is keyed by the exact stat spelling used by the decision
@@ -5565,8 +5653,14 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         if asyncio.iscoroutinefunction(_fpr_bulk_results):
             try:
                 _fpr_results_by_prop = await _fpr_bulk_results(
-                    [(_key[0], getattr(pool_snaps[_key], "sport", None) or "UNKNOWN", _key[1])
-                     for _key in batch_keys],
+                    [
+                        (
+                            _fpr_parts(_key, pool_snaps[_key])[1],
+                            _fpr_parts(_key, pool_snaps[_key])[3],
+                            _fpr_parts(_key, pool_snaps[_key])[2],
+                        )
+                        for _key in batch_keys
+                    ],
                     limit=30,
                 )
             except Exception as _fpr_bulk_results_exc:
@@ -5580,13 +5674,21 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
 
         # ── Score each prop in this batch ─────────────────────────────────────
         for _fpr_key in batch_keys:
-            _fpr_player, _fpr_stat, _fpr_line_val = _fpr_key[:3]
             _fpr_snap  = pool_snaps.get(_fpr_key)
             if _fpr_snap is None:
                 continue
 
-            _fpr_sport  = (getattr(_fpr_snap, "sport", None) or "UNKNOWN").upper()
-            _fpr_line   = float(_fpr_snap.line_value or 0.0)
+            (
+                _fpr_provider,
+                _fpr_player,
+                _fpr_stat,
+                _fpr_sport,
+                _fpr_line_val,
+                _fpr_source_id,
+            ) = _fpr_parts(_fpr_key, _fpr_snap)
+            _fpr_line = float(
+                getattr(_fpr_snap, "line_value", None) or _fpr_line_val
+            )
 
             try:
                 # Active-pool queries also apply this filter, but keep the
@@ -5594,14 +5696,39 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 # or deliver a prop after its event has started.
                 if _is_game_live_or_past(_fpr_snap, now):
                     continue
-                if _fpr_history_by_prop:
+                if _fpr_history_bulk_loaded:
+                    _fpr_hist = _fpr_history_by_prop.get(
+                        (
+                            _fpr_provider,
+                            _fpr_player,
+                            _fpr_sport,
+                            _fpr_stat,
+                        ),
+                        [],
+                    )
+                    # Legacy Underdog bulk history is keyed only by
+                    # player/stat and remains supported for test doubles.
+                    if not _fpr_hist and _fpr_provider == "Underdog":
+                        _fpr_hist = _fpr_history_by_prop.get(
+                            (_fpr_player, _fpr_stat), []
+                        )
+                elif _fpr_history_by_prop:
                     _fpr_hist = _fpr_history_by_prop.get(
                         (_fpr_player, _fpr_stat), []
                     )
                 else:
-                    _fpr_hist = await db.get_ud_prop_history(
-                        _fpr_player, _fpr_stat, limit=30
-                    )
+                    if _fpr_provider == "Underdog":
+                        _fpr_hist = await db.get_ud_prop_history(
+                            _fpr_player, _fpr_stat, limit=30
+                        )
+                    else:
+                        _fpr_hist = await db.get_prop_line_history(
+                            _fpr_provider,
+                            _fpr_player,
+                            _fpr_sport,
+                            _fpr_stat,
+                            limit=30,
+                        )
 
                 # Rescanning DOES count toward API/fetch totals per requirement
                 fpr_total_rescanned += 1
@@ -5659,7 +5786,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         "confidence": getattr(_fpr_dec, "confidence", 0),
                         "game_time": getattr(_fpr_snap, "game_time", None),
                         "game_id": getattr(_fpr_snap, "game_id", "") or "",
-                        "provider": "Underdog",
+                        "provider": _fpr_provider,
                         "bet_quality_score": float(getattr(_fpr_score, "total", 0) or 0),
                         "reason_codes": _compute_reason_codes(_fpr_score, _fpr_dec),
                         "watchlist_state": None,
@@ -5696,6 +5823,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                      # ── Atomic dedup claim [full-pool-rescan] ─────────────────
                      if not await _try_claim_delivery_slot(
                          _fpr_player, _fpr_sport, _fpr_stat, _fpr_line,
+                         provider=_fpr_provider,
                      ):
                          fpr_not_delivered += 1
                          logger.debug(
@@ -5718,12 +5846,39 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         decision        = _fpr_dec,
                         market_quality  = _fpr_mq,
                         market_pressure = _fpr_mp,
+                        pp_line         = (
+                            _fpr_line if _fpr_provider == "PrizePicks" else None
+                        ),
                         standing        = True,
+                        source          = _fpr_provider,
                     )
                     if _fpr_mq_ok and _fpr_result.sent:
                         fpr_sent      += 1
                         fpr_actionable += 1
                         # _record_prop_alerted already called by _try_claim_delivery_slot.
+                        try:
+                            await db.mark_opportunity_alert_sent(
+                                _fpr_ext_id,
+                                _fpr_stat,
+                                provider=_fpr_provider,
+                            )
+                            await db.update_prop_lifecycle_state(
+                                _fpr_provider,
+                                _fpr_player,
+                                _fpr_sport,
+                                _fpr_stat,
+                                "ACTIVE_ALERTED",
+                                first_alert_sent_at=datetime.utcnow(),
+                            )
+                        except Exception as _fpr_bookkeeping_exc:
+                            logger.debug(
+                                "full_pool_rescan: delivery bookkeeping failed "
+                                "for %s/%s/%s: %s",
+                                _fpr_provider,
+                                _fpr_player,
+                                _fpr_stat,
+                                _fpr_bookkeeping_exc,
+                            )
                     elif _fpr_mq_ok:
                         # deliver_underdog returned not-sent (rate-limited, etc.)
                         fpr_not_delivered += 1

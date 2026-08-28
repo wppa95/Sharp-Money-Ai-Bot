@@ -33,3 +33,15 @@ sports and can misattribute provider data.
 **How to apply:** Discover PP sports through PropLine, scan one sport per shared
 cycle for pacing, and keep PP/UD recommendation and alternate-line lookups
 provider-scoped in `/picks` and `/slip`.
+
+The serialized full-pool rotation must merge fresh PrizePicks `PropLineHistory`
+rows with the legacy Underdog snapshot pool; normalized provider rows alone are
+not a replacement for the Underdog source of truth.
+
+**Why:** Underdog live observations still originate in its provider-specific
+snapshot table, while PrizePicks observations use the normalized shared table.
+Replacing one with the other silently removes a primary provider from FPR.
+
+**How to apply:** Keep provider and event identity in normalized FPR keys,
+exclude normalized rows older than the active-feed freshness window, and use
+the shared opportunity log for provider-aware grading/reporting.

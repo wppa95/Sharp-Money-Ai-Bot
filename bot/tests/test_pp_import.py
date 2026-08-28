@@ -13,7 +13,8 @@ from __future__ import annotations
 import asyncio
 import sys
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import Optional
 
 import pytest
@@ -84,6 +85,45 @@ async def _import_props(db: Database, lines: list[str]) -> list[tuple[str, str, 
         )
         results.append((parsed["player_name"], parsed["stat_type"], event))
     return results
+
+
+@pytest.mark.asyncio
+async def test_active_fpr_pool_returns_fresh_mixed_provider_lines(db):
+    """The canonical FPR pool includes both provider namespaces."""
+    now = datetime.utcnow()
+    await db.upsert_prop_line_history_batch(
+        "PrizePicks",
+        [SimpleNamespace(
+            player_name="PP Player",
+            sport="NBA",
+            stat_type="Points",
+            line_value=18.5,
+            external_id="pp-1",
+            event_id="pp-game-1",
+            team="DET",
+            game_time=now + timedelta(hours=2),
+            source_timestamp=now,
+        )],
+    )
+    await db.upsert_prop_line_history_batch(
+        "Underdog",
+        [SimpleNamespace(
+            player_name="UD Player",
+            sport="MLB",
+            stat_type="Hits",
+            line_value=1.5,
+            external_id="ud-1",
+            event_id="ud-game-1",
+            team="NYY",
+            game_time=now + timedelta(hours=2),
+            source_timestamp=now,
+        )],
+    )
+
+    pool = await db.get_all_active_prop_line_history_by_line()
+
+    assert ("PrizePicks", "PP Player", "NBA", "Points", 18.5, "pp-1") in pool
+    assert ("Underdog", "UD Player", "MLB", "Hits", 1.5, "ud-1") in pool
 
 
 # ── Parse tests ───────────────────────────────────────────────────────────────

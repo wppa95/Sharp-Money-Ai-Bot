@@ -3215,6 +3215,70 @@ class Database:
             )
         return histories
 
+    async def get_prop_line_history_bulk(
+        self,
+        props: "list[tuple[str, str, str, str]]",
+        limit: int = 30,
+    ) -> "dict[tuple[str, str, str, str], list[PropLineHistory]]":
+        """Load recent normalized histories for mixed providers in one read.
+
+        The provider is part of the lookup key so matching Underdog and
+        PrizePicks props never share history accidentally. A bounded ID window
+        keeps this safe for the append-only table while covering recent feed
+        batches.
+        """
+        keys = list(dict.fromkeys(
+            (
+                str(provider or ""),
+                str(player or ""),
+                str(sport or "").upper(),
+                str(stat or ""),
+            )
+            for provider, player, sport, stat in props
+            if provider and player and sport and stat
+        ))
+        histories: dict[tuple[str, str, str, str], list[PropLineHistory]] = {
+            key: [] for key in keys
+        }
+        if not keys:
+            return histories
+
+        _HISTORY_LOOKBACK_ROWS = 500_000
+        async with self.session() as s:
+            latest_id = (
+                await s.execute(
+                    select(PropLineHistory.id)
+                    .order_by(desc(PropLineHistory.id))
+                    .limit(1)
+                )
+            ).scalar()
+            if latest_id is None:
+                return histories
+            result = await s.execute(
+                select(PropLineHistory)
+                .where(
+                    PropLineHistory.id >= max(1, int(latest_id) - _HISTORY_LOOKBACK_ROWS),
+                    tuple_(
+                        PropLineHistory.provider,
+                        PropLineHistory.player_name,
+                        PropLineHistory.sport,
+                        PropLineHistory.stat_type,
+                    ).in_(keys),
+                    PropLineHistory.removed.isnot(True),
+                )
+                .order_by(desc(PropLineHistory.fetched_at), desc(PropLineHistory.id))
+            )
+            for record in result.scalars().all():
+                key = (
+                    record.provider,
+                    record.player_name,
+                    (record.sport or "").upper(),
+                    record.stat_type,
+                )
+                if key in histories and len(histories[key]) < max(1, int(limit)):
+                    histories[key].append(record)
+        return histories
+
     async def get_recently_alerted_prop_keys(
         self,
         within_seconds: int = 86400,
@@ -4146,6 +4210,67 @@ class Database:
                 continue
             active[(row.player_name, row.stat_type, row.line_value)] = row
         return active
+
+    async def get_all_active_prop_line_history_by_line(
+        self,
+        providers: "Optional[Iterable[str]]" = None,
+    ) -> "dict[tuple[str, str, str, str, float, str], PropLineHistory]":
+        """Return the current normalized active prop universe by provider/line.
+
+        PropLineHistory is the shared tracking stream for PrizePicks and
+        Underdog. The latest row is selected per provider-owned event identity,
+        so a removal marker cannot resurrect an older line.
+        """
+        provider_names = tuple(dict.fromkeys(
+            str(provider).strip()
+            for provider in (providers or ("Underdog", "PrizePicks"))
+            if str(provider).strip()
+        ))
+        if not provider_names:
+            return {}
+        from datetime import timedelta
+        now = datetime.utcnow()
+        # PropLineHistory is not an absence/removal log for every provider.
+        # Bound the current FPR universe to recently observed rows so a prop
+        # that disappeared from a provider feed cannot live forever.
+        freshness_cutoff = now - timedelta(hours=6)
+        async with self.session() as s:
+            subq = (
+                select(func.max(PropLineHistory.id))
+                .where(PropLineHistory.provider.in_(provider_names))
+                .group_by(
+                    PropLineHistory.provider,
+                    PropLineHistory.player_name,
+                    PropLineHistory.sport,
+                    PropLineHistory.stat_type,
+                    PropLineHistory.game_id,
+                )
+                .scalar_subquery()
+            )
+            result = await s.execute(
+                select(PropLineHistory).where(
+                    PropLineHistory.id.in_(subq),
+                    PropLineHistory.removed.isnot(True),
+                    PropLineHistory.fetched_at >= freshness_cutoff,
+                    or_(
+                        PropLineHistory.game_time.is_(None),
+                        PropLineHistory.game_time > now,
+                    ),
+                )
+            )
+            rows = result.scalars().all()
+        return {
+            (
+                row.provider,
+                row.player_name,
+                (row.sport or "").upper(),
+                row.stat_type,
+                float(row.line_value or 0.0),
+                str(row.external_id or row.game_id or ""),
+            ): row
+            for row in rows
+            if row.line_value is not None
+        }
 
     async def get_active_watchlist_candidates(self) -> list:
         """Compatibility shim; all active props use the canonical pool."""

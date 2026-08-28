@@ -80,3 +80,35 @@ async def test_player_history_stops_before_db_write_when_underdog_claims_after_f
         "Player One", "NFL", "passing yards"
     )
     db.upsert_player_result.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_player_history_collects_prizepicks_only_active_target():
+    """PrizePicks-only rows use the same shared historical provider path."""
+    pp_row = SimpleNamespace(
+        player_name="PP Player",
+        sport="NBA",
+        stat_type="Points",
+        line_value=18.5,
+    )
+    db = MagicMock()
+    db.get_all_active_prop_line_history_by_line = AsyncMock(
+        return_value={
+            ("PrizePicks", "PP Player", "NBA", "Points", 18.5, "pp-1"): pp_row,
+        }
+    )
+    db.upsert_player_result = AsyncMock()
+    context = SimpleNamespace(bot_data={"db": db})
+
+    fake_provider = MagicMock()
+    fake_provider.fetch_results = AsyncMock(return_value=[])
+    with (
+        patch("player_history_job._underdog_scan_running", return_value=False),
+        patch("providers.player_stats.PlayerStatsProvider", return_value=fake_provider),
+        patch("engine.health.get_health_tracker", return_value=None),
+    ):
+        await player_history_collector_job(context)
+
+    fake_provider.fetch_results.assert_awaited_once_with(
+        "PP Player", "NBA", "points"
+    )

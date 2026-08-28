@@ -1,7 +1,9 @@
 """Background job: collect real player game results for supported sports."""
 from __future__ import annotations
 
+import asyncio
 import logging
+import re
 import time
 
 logger = logging.getLogger(__name__)
@@ -60,7 +62,7 @@ def _fair_cycle_targets(
 
 
 async def player_history_collector_job(context) -> None:
-    """Fetch real game results for active Underdog props with providers.
+    """Fetch real game results for active primary-provider props.
 
     Selects all active players whose sport has a working
     PlayerStatsProvider data path, then calls fetch_results() until the
@@ -104,10 +106,32 @@ async def player_history_collector_job(context) -> None:
         targets: list[tuple[str, str, str]] = []
         seen: set[tuple[str, str, str]] = set()
 
-        # ── Primary path: active snapshot (full Tier-1 pool, no player cap) ──
+        # ── Primary path: canonical active pool (both primary providers) ──
         try:
-            active = await db.get_active_underdog_snapshot_per_prop()
-            for (player, stat), s in active.items():
+            _generic_active = getattr(
+                db, "get_all_active_prop_line_history_by_line", None
+            )
+            if asyncio.iscoroutinefunction(_generic_active):
+                active = await _generic_active(
+                    providers=("Underdog", "PrizePicks")
+                )
+                active_rows = active.values()
+            else:
+                active = await db.get_active_underdog_snapshot_per_prop()
+                active_rows = active.values()
+            for s in active_rows:
+                player = (
+                    getattr(s, "player_name", None)
+                    or getattr(s, "player", None)
+                    or ""
+                )
+                stat = getattr(s, "stat_type", "") or ""
+                if not stat:
+                    selection = str(getattr(s, "selection", "") or "").strip()
+                    # Legacy Underdog snapshots expose "Stat Line" rather
+                    # than separate stat/line fields.
+                    stat = re.sub(r"\s+-?\d+(?:\.\d+)?\s*$", "", selection)
+                    stat = stat or selection
                 sport = (getattr(s, "sport", None) or "UNKNOWN").upper()
                 if sport not in _SUPPORTED_HISTORY_SPORTS:
                     continue  # No provider data path — skip to avoid wasting API calls
@@ -135,10 +159,24 @@ async def player_history_collector_job(context) -> None:
                 _activity_end("player_history")
             return
 
-        # ── Fallback: recent PropLineHistory when no active snapshot ──────────
+        # ── Fallback: recent normalized history when no active rows ──────────
         if not targets:
             try:
-                plh = await db.get_latest_props_for_provider("Underdog", since_hours=48)
+                _generic_active = getattr(
+                    db, "get_all_active_prop_line_history_by_line", None
+                )
+                if asyncio.iscoroutinefunction(_generic_active):
+                    plh = []
+                    for _provider in ("Underdog", "PrizePicks"):
+                        plh.extend(
+                            await db.get_latest_props_for_provider(
+                                _provider, since_hours=48
+                            )
+                        )
+                else:
+                    plh = await db.get_latest_props_for_provider(
+                        "Underdog", since_hours=48
+                    )
                 for s in plh:
                     sport = (getattr(s, "sport", None) or "UNKNOWN").upper()
                     if sport not in _SUPPORTED_HISTORY_SPORTS:
