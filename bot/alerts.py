@@ -653,7 +653,7 @@ def _sanitize_user_alert_message(message: str) -> str:
     text = re.sub(r"\bTier[- ]?[12]\b", "", text, flags=re.IGNORECASE)
     text = re.sub(
         r"\b(?:WATCHLIST(?: ONLY)?|NEAR[- ]MISS)\b",
-        "DEVELOPING EDGE",
+        "",
         text,
         flags=re.IGNORECASE,
     )
@@ -898,8 +898,7 @@ def format_pp_reference_alert(match: "PPReferenceMatch") -> str:  # noqa: F821
         f"─────────────────────────────",
         f"⚠️  <b>Reference only — not confirmed PrizePicks data.</b>",
         f"    Underdog and PrizePicks lines typically match within ±0.5",
-        f"    but can diverge. Always verify at prizepicks.com before",
-        f"    placing a pick.",
+        f"    but can diverge.",
         f"",
         f"{EMOJI['clock']} <i>{match.matched_at.strftime('%Y-%m-%d %H:%M UTC')}</i>",
     ]

@@ -20,3 +20,16 @@ then hid all rows without surfacing the active sports that were available.
 
 **How to apply:** Pass the configured active-sport allowlist into the
 Underdog current-view query, while keeping the scanner itself provider-wide.
+
+PrizePicks current views use the active sport catalog returned by its authorized
+PropLine provider, not the Underdog `ACTIVE_SPORTS` allowlist. If the official
+catalog is empty, do not guess static sports; custom endpoints without catalog
+support may use the configured compatibility fallback.
+
+**Why:** PrizePicks and Underdog are equally primary but have independent
+provider scopes; constraining PP to Underdog's list hides legitimate PP-only
+sports and can misattribute provider data.
+
+**How to apply:** Discover PP sports through PropLine, scan one sport per shared
+cycle for pacing, and keep PP/UD recommendation and alternate-line lookups
+provider-scoped in `/picks` and `/slip`.
