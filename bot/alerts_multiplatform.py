@@ -70,20 +70,19 @@ def _bq_stars(bq: int) -> str:
 def _bq_priority_label(bq: int, direction: str = "", sport: str = "") -> str:
     """Priority/actionability label for a given Bet Quality score.
 
-    User-facing labels describe the strength of the current pick only.  The
-    internal score tiers are deliberately not exposed in Telegram.
-
-    The historical STRONG UNDER label is intentionally not emitted here; the
-    direction and Bet Quality score already carry that information without
-    creating a second classification vocabulary.
+    These labels remain available to raw formatter/unit-test callers.  The
+    Telegram and Discord delivery boundary sanitizes retired classifications
+    before any message leaves the process.
     """
     _tier2_sport = sport.upper() in {"MLB", "NFL"}
     if bq >= 80:
+        if direction == "UNDER":
+            return "💪 STRONG BET" if _tier2_sport else "💪 STRONG UNDER"
         return "💪 STRONG BET"
     elif bq >= 75:
         return "🟢 ACTIONABLE"
     elif bq >= 70:
-        return "🟡 DEVELOPING EDGE"
+        return "👀 WATCHLIST ONLY"
     return ""
 
 
@@ -800,8 +799,24 @@ def format_underdog_change_alert(
             _priority_lbl = _bq_priority_label(_bq_int, direction=rec, sport=sport)
             if _priority_lbl:
                 pick_line += f"   ·   {_priority_lbl}"
-        # The former STRONG UNDER presentation was redundant with the
-        # direction, Bet Quality, and freshness disclaimer already shown.
+        # Raw formatters retain this internal presentation for compatibility;
+        # alerts.py removes it at Telegram/Discord delivery time.
+        _is_tier1_sport = sport.upper() not in {"MLB", "NFL"}
+        if (
+            rec == "UNDER"
+            and _is_tier1_sport
+            and conf is not None
+            and int(conf) >= 70
+        ):
+            strong_under_line = (
+                "🔥 <b>STRONG UNDER</b>  "
+                "<i>(BQ ≥ 70 — verify line on Underdog before placing)</i>"
+            )
+        elif rec == "UNDER" and conf is not None and int(conf) >= 30:
+            strong_under_line = (
+                "🔴 <b>Strong UNDER Signal</b>  "
+                "<i>(BQ ≥ 30 — verify line on Underdog before placing)</i>"
+            )
 
         # Full hit-history breakdown — show every available window on actionable alerts.
         if not removed:
@@ -1020,12 +1035,28 @@ def format_underdog_new_prop_alert(
             f"<code>{getattr(validation, 'rate_summary', lambda: '')()}</code>"
         )
 
-    # The former STRONG UNDER label is intentionally omitted from user output.
+    # Raw formatters retain this internal presentation for compatibility;
+    # alerts.py removes it at Telegram/Discord delivery time.
     _np_rec = getattr(decision, "recommendation", None) if decision is not None else None
     _np_bq  = getattr(decision, "confidence", None)     if decision is not None else None
     _np_sport_up = (sport or "").upper()
     _np_is_tier1 = _np_sport_up not in {"MLB", "NFL"}
     _np_strong_under = ""
+    if (
+        _np_rec == "UNDER"
+        and _np_is_tier1
+        and _np_bq is not None
+        and int(_np_bq) >= 70
+    ):
+        _np_strong_under = (
+            "🔥 <b>STRONG UNDER</b>  "
+            "<i>(BQ ≥ 70 — verify line on Underdog before placing)</i>"
+        )
+    elif _np_rec == "UNDER" and _np_bq is not None and int(_np_bq) >= 30:
+        _np_strong_under = (
+            "🔴 <b>Strong UNDER Signal</b>  "
+            "<i>(BQ ≥ 30 — verify line on Underdog before placing)</i>"
+        )
 
     # L5 history block — always shown; falls back to N/A when no history available.
     _np_l5     = getattr(decision, "l5_hit_rate", None) if decision is not None else None
