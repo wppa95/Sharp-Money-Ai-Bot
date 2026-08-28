@@ -41,6 +41,37 @@ def _opportunity(provider: str) -> dict:
 
 
 class TestIndependentPrizePicks:
+    async def test_cycle_uses_one_configured_sport_when_provider_supports_scoped_fetch(
+        self, monkeypatch
+    ):
+        calls = []
+
+        class FakeProvider:
+            def is_available(self):
+                return True
+
+            async def fetch_props_for_sport(self, sport):
+                calls.append(sport)
+                return []
+
+            async def fetch_props(self):
+                raise AssertionError("scoped provider fetch should be preferred")
+
+        class FakeDB:
+            async def get_prop_line_history(self, *args, **kwargs):
+                return []
+
+        monkeypatch.setattr(market_engine, "_propline_provider", FakeProvider())
+        monkeypatch.setattr(market_engine, "_prizepicks_sport_cursor", 0)
+        monkeypatch.setattr(
+            market_engine.config, "PRIZEPICKS_LEAGUES_RAW", "NBA,MLB"
+        )
+        await market_engine._run_prizepicks_independent_cycle(
+            SimpleNamespace(bot_data={"db": FakeDB()}, bot=object())
+        )
+
+        assert calls == ["NBA"]
+
     async def test_cycle_accepts_persisted_history_with_removed_field(self, monkeypatch):
         prop = SimpleNamespace(
             provider="PrizePicks",

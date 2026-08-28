@@ -358,6 +358,7 @@ _player_result_fetch_cache: set = set()
 _PLAYER_RESULT_CACHE_MAX = 5_000
 _prizepicks_cycle_task: Optional[asyncio.Task] = None
 _PRIZEPICKS_DEDUP_PREFIX = "PrizePicks::"
+_prizepicks_sport_cursor = 0
 
 
 def _player_provider_label(sport: str) -> str:
@@ -1124,13 +1125,36 @@ async def _run_prizepicks_independent_cycle(context) -> None:
     if not getattr(_propline_provider, "is_available", lambda: False)():
         return
 
+    # The authorized feed exposes many sports, but the configured PrizePicks
+    # scope is intentionally smaller.  Fetch one configured sport per shared
+    # Underdog cycle: the PropLine client enforces its five-minute request
+    # pacing, so fetching every discovered sport serially would delay all
+    # persistence/evaluation for hours.
+    configured_sports = tuple(
+        str(sport).strip()
+        for sport in getattr(config, "prizepicks_leagues", [])
+        if str(sport).strip()
+    )
+    if not configured_sports:
+        logger.warning("prizepicks_cycle: no configured PrizePicks sports; skipping")
+        return
+    global _prizepicks_sport_cursor
+    sport = configured_sports[_prizepicks_sport_cursor % len(configured_sports)]
+    _prizepicks_sport_cursor = (_prizepicks_sport_cursor + 1) % len(configured_sports)
+
     try:
-        props = await _propline_provider.fetch_props()
+        fetch_for_sport = getattr(_propline_provider, "fetch_props_for_sport", None)
+        if callable(fetch_for_sport):
+            props = await fetch_for_sport(sport)
+        else:
+            # Compatibility for lightweight providers/integrations that only
+            # implement the provider-wide fetch method.
+            props = await _propline_provider.fetch_props()
     except Exception as exc:  # noqa: BLE001
         logger.warning("prizepicks_cycle: authorized feed failed: %s", type(exc).__name__)
         return
     if not props:
-        logger.debug("prizepicks_cycle: no normalized PrizePicks props")
+        logger.debug("prizepicks_cycle: no normalized PrizePicks props for %s", sport)
         return
 
     # One observation per provider-owned identity per cycle.  The provider's
