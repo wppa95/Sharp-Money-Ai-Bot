@@ -1700,7 +1700,11 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     # enrichment. Keep the provider in the candidate identity so matching
     # player/stat rows remain separate in this analyst view.
     logger.info("cmd_picks: fetching provider props (limit=%d sport=%s)", limit * 3, sport_filter)
-    ud_props = await _bounded(_db.get_top_ud_props_for_picks(limit=limit * 3, since_hours=_since_hours))
+    ud_props = await _bounded(_db.get_top_ud_props_for_picks(
+        limit=limit * 3,
+        since_hours=_since_hours,
+        sports=config.active_sports,
+    ))
     ud_props = [
         p for p in ud_props
         if not _is_season_future(p.stat_type)
@@ -2563,7 +2567,11 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     # ── 1. Fetch provider-owned props (same pool as /picks) ──────────────────
     ud_props = await _report_read(
-        _db.get_top_ud_props_for_picks(limit=30, since_hours=6),
+        _db.get_top_ud_props_for_picks(
+            limit=30,
+            since_hours=6,
+            sports=config.active_sports,
+        ),
         fallback=[],
     )
     # Display filter: hide season-long futures and already-started events
