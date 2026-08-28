@@ -1,0 +1,936 @@
+🔴 FINAL CONSOLIDATED FIX — READ FIRST
+
+⚠️ IMPORTANT — DO NOT WASTE TIME OR CREDITS
+
+Do NOT waste unnecessary time or unnecessary credits on unnecessary things.
+
+Do NOT ask me which Agent mode to use. Always use the recommended/appropriate Agent mode automatically.
+
+Do NOT ask me whether to use Free, Power, or Max. Automatically choose the recommended model based on the task. Use Power/Max only when genuinely necessary; otherwise use Free. Do not pause for my approval.
+
+Do NOT redesign the bot.
+
+Do NOT refactor unrelated systems.
+
+Do NOT redo completed work.
+
+Do NOT investigate unrelated problems.
+
+Make only the smallest targeted changes required below.
+
+Do NOT touch Railway.
+
+Do NOT create a checkpoint until implementation, testing, and required live verification are complete.
+
+⸻
+
+1. THIS IS THE FINAL REMAINING RUNTIME TASK
+
+Previously deferred:
+
+* #160 — Diagnose/fix Underdog scans starving scheduled maintenance jobs
+* #161 — Extend partial-result protection to the remaining Telegram report commands
+
+Also fix the newly discovered live Telegram alert classification leak described below.
+
+These are the only remaining problems in this scope.
+
+Do NOT expand the scope beyond these items.
+
+⸻
+
+2. PRESERVE EVERYTHING ALREADY COMPLETED
+
+Do NOT redo or regress:
+
+* Clean restart behavior
+* Active Underdog source-ID/FPR lifecycle
+* Full-pool rotation
+* Adaptive batching
+* Unified monitoring cadence
+* max_instances=1
+* Player identity normalization
+* Provider-backed evidence
+* Graded-prop evidence
+* HIT/MISS/PUSH tracking
+* PASS/rejection/Watchlist/Near-Miss removal from the monitoring framework
+* PrizePicks/PropLine integration
+* PrizePicks 120-second cadence
+* PrizePicks provider health
+* /status independent database-counter handling
+* Dashboard/health/provider display fixes
+* CS2 current PropLine sourcing
+* DK/FD removal from current provider displays
+* Existing scoring/BQ/MQ/confidence behavior
+* Existing Telegram delivery rules unless required to remove the obsolete classification leak
+* Historical data
+
+Do not alter these unless absolutely required for the specific fixes below.
+
+⸻
+
+3. LIVE TELEGRAM ALERT LEAK — MUST FIX
+
+A real live alert was received containing:
+
+A-Tier
+
+and:
+
+WATCHLIST ONLY
+
+Example live alert:
+
+📌 PICK: 🔴 UNDER 30.5 · A-Tier · Bet Quality 70/100 · 👀 WATCHLIST ONLY
+
+This proves the legacy classification/delivery framework is still reaching the actual Telegram alert-generation/delivery path.
+
+This must be fixed.
+
+Remove from live Telegram alerts completely:
+
+* PASS
+* decision_pass
+* not_immediate
+* Watchlist
+* WATCHLIST ONLY
+* Near-Miss
+* Tier 1
+* Tier 2
+* S-Tier
+* A-Tier
+* B-Tier
+* C-Tier
+* Any equivalent legacy classification/delivery label
+
+Do not replace these with another tier system.
+
+Do not simply rename A-Tier to another classification.
+
+The requirement is to remove the obsolete classification framework from the live alert path.
+
+⸻
+
+4. IMPORTANT — DO NOT REMOVE THE ACTUAL SIGNAL
+
+Preserve legitimate information such as:
+
+* Player
+* Sport
+* Market
+* Current line
+* Previous line
+* Movement
+* Direction
+* BQ
+* MQ
+* Confidence where applicable
+* Evidence/history
+* Reason
+* Timestamp
+* Existing safety/dedup protections
+
+Only remove the obsolete classification/delivery framework.
+
+Do not change scoring formulas merely to make the alert pass.
+
+Do not manufacture evidence to justify an alert.
+
+⸻
+
+5. AUDIT EVERY LIVE TELEGRAM ALERT PATH
+
+Do not fix only the formatter that produced the example.
+
+Audit every path capable of generating/sending actionable Telegram alerts, including:
+
+* Main monitoring delivery
+* Stable Refresh
+* FPR
+* Watchlist/actionable legacy path
+* /testalert
+* Any shared alert formatter/helper
+* Any downstream delivery helper
+
+The canonical current framework must be consistent everywhere.
+
+There must be no remaining path capable of outputting:
+
+A-Tier
+
+B-Tier
+
+C-Tier
+
+S-Tier
+
+WATCHLIST ONLY
+
+PASS
+
+decision_pass
+
+not_immediate
+
+or Near-Miss.
+
+⸻
+
+6. CURRENT ALERT QUALIFICATION
+
+Do not reintroduce a classification gate.
+
+A current alert should be based on the existing legitimate signal/evidence requirements.
+
+Do NOT create a new tier system.
+
+Do NOT create another qualification framework.
+
+Preserve the existing scoring and evidence calculations.
+
+⸻
+
+7. TASK #160 — UNDERDOG MUST NOT STARVE MAINTENANCE JOBS
+
+Observed behavior:
+
+* Underdog monitoring runs for long periods.
+* /health showed maintenance jobs with very old timestamps.
+* Telegram commands became slow/unresponsive while monitoring was active.
+* The monitoring pipeline appears capable of monopolizing runtime/database resources.
+
+Investigate the actual runtime cause.
+
+Determine whether the bottleneck is:
+
+* asyncio event loop
+* synchronous/blocking work
+* SQLite lock/transaction
+* CPU
+* provider/network wait
+* excessive sequential processing
+* another measurable existing bottleneck
+
+Do NOT guess.
+
+Measure/inspect the actual cause.
+
+⸻
+
+8. FIX #160 WITHOUT ADDING CONCURRENCY
+
+The solution must NOT be:
+
+* Increasing scheduler concurrency
+* Creating another Underdog process
+* Running overlapping monitoring cycles
+* Creating another polling loop
+* Duplicating the scheduler
+* Disabling maintenance jobs
+* Reducing monitoring coverage
+* Arbitrarily shrinking the active prop universe
+
+Keep:
+
+max_instances=1
+
+The goal is:
+
+Long monitoring work must not prevent independent scheduled maintenance jobs from getting execution time.
+
+Use the smallest targeted fix possible.
+
+Do not rewrite the monitoring engine.
+
+⸻
+
+9. MAINTENANCE JOBS
+
+Verify the following continue executing normally while Underdog monitoring is active:
+
+* CLV seeder
+* CLV harvester
+* Budget checker
+* Season checker
+* PrizePicks/PropLine monitoring
+* Other existing scheduled maintenance jobs
+
+Do not change their intended intervals unless absolutely necessary.
+
+Do not create duplicate jobs.
+
+⸻
+
+10. PRIZEPICKS MUST NOT BE STARVED
+
+PrizePicks/PropLine is a primary player-prop provider.
+
+Required cadence:
+
+~120 seconds / 2 minutes
+
+Preserve the already-verified PropLine pacing.
+
+Do NOT let a long Underdog scan prevent the next scheduled PropLine fetch.
+
+Do NOT violate PropLine request pacing.
+
+Do NOT create another competing polling loop.
+
+⸻
+
+11. TASK #161 — ALL TELEGRAM REPORT COMMANDS MUST BE NON-BLOCKING
+
+Audit the remaining report commands for the same problem.
+
+At minimum:
+
+* /alerts
+* /picks
+* /slip
+* /grade
+* /grades
+* /player
+* /slipstats
+* /performance
+* /backtest
+* /calibration
+* /tracking
+* /analyst
+* /rollups
+* /refinement
+* /market
+* /steam
+* /ev
+* /clv
+* /reconcile
+* /providers
+* /config
+* /health
+
+Previously fixed commands must remain fixed:
+
+* /status
+* /dashboard
+* /funnel
+* /stats
+
+⸻
+
+12. COMMAND RESPONSIVENESS
+
+Every command must:
+
+* Return a response.
+* Avoid indefinite loading.
+* Avoid blocking the Telegram event loop.
+* Avoid waiting for the current Underdog scan.
+* Avoid waiting indefinitely for a slow database operation.
+* Return partial data when appropriate.
+* Mark unavailable metrics honestly.
+* Never fabricate data.
+
+A slow metric should become:
+
+unavailable
+
+rather than freezing the entire command.
+
+Do NOT solve this by globally increasing timeouts.
+
+⸻
+
+13. /DASHBOARD
+
+Verify /dashboard:
+
+* Returns promptly.
+* Does not remain stuck at ⏳ Gathering stats….
+* Does not wait for a monitoring cycle to finish.
+* Shows current provider activity.
+* Shows Underdog.
+* Shows PrizePicks/PropLine.
+* Shows tracked data across applicable sports.
+* Does not show DK/FD as current providers.
+* Does not show PASS/rejection/Watchlist/Near-Miss/Tier/S-A-B-C terminology.
+
+⸻
+
+14. /ALERTS
+
+Verify /alerts:
+
+* Returns promptly.
+* Shows recent actionable alerts when available.
+* Shows an honest empty state when none exist.
+* Does not hang.
+* Does not show stale/out-of-season current alerts.
+* Does not show obsolete tier/watchlist/PASS terminology.
+
+⸻
+
+15. /PICKS
+
+Verify /picks:
+
+* Returns promptly.
+* Shows current eligible directional props.
+* Does not show stale/out-of-season current candidates.
+* Does not show PASS.
+* Does not show decision_pass.
+* Does not show not_immediate.
+* Does not show Watchlist/Near-Miss.
+* Does not show Tier 1/Tier 2.
+* Does not show S/A/B/C qualification tiers.
+* Preserves current evidence/source information.
+
+Historical records may remain in the database but must not leak into current actionable output.
+
+⸻
+
+16. /SLIP
+
+Verify /slip:
+
+* Returns promptly.
+* Uses current eligible picks.
+* Does not hang.
+* Does not fabricate picks.
+* Does not include stale/out-of-season events.
+* Preserves existing slip construction rules.
+* Does not reintroduce removed classifications.
+
+⸻
+
+17. /GRADE, /PERFORMANCE, /BACKTEST, /CALIBRATION
+
+These commands must distinguish:
+
+* No resolved records.
+* Pending records.
+* Resolved records.
+
+They must return honestly and promptly.
+
+Do not fabricate results.
+
+Preserve the existing grading architecture.
+
+⸻
+
+18. /PLAYER
+
+Verify /player NAME:
+
+* Returns promptly.
+* Uses existing persistent player history.
+* Handles missing history cleanly.
+* Does not block behind monitoring.
+* Does not fabricate evidence.
+* Preserves player identity handling.
+
+⸻
+
+19. /MARKET, /STEAM, /EV, /CLV, /RECONCILE
+
+Verify each:
+
+* Returns promptly.
+* Handles empty datasets.
+* Handles slow database reads.
+* Does not block the monitoring pipeline.
+* Does not block Telegram.
+* Preserves existing calculations.
+
+Do NOT change scoring formulas.
+
+⸻
+
+20. /HEALTH
+
+/health must show current operational health.
+
+Market Providers must include:
+
+* 🟢 Underdog — Primary Player Props
+* 🟢 PrizePicks — PropLine — Primary Player Props
+
+Live health must reflect actual fetch state.
+
+Do not show stale historical failures as though they are current.
+
+Do not hide a genuinely active failure.
+
+⸻
+
+21. PROVIDER DISPLAY CONSISTENCY
+
+Verify:
+
+Underdog
+
+Primary player-prop provider.
+
+PrizePicks / PropLine
+
+Primary player-prop provider.
+
+DK/FD
+
+Must NOT appear in current provider displays.
+
+CS2
+
+Current PrizePicks CS2 player-prop source is:
+
+PropLine
+
+Do NOT present PandaScore as the CS2 player-prop provider.
+
+Do not suppress current CS2 PrizePicks lines because PandaScore is unavailable.
+
+⸻
+
+22. NO LEGACY CLASSIFICATION OUTPUT ANYWHERE CURRENT
+
+Current monitoring/reporting output must not display:
+
+* PASS
+* decision_pass
+* not_immediate
+* Watchlist
+* Near-Miss
+* Tier 1
+* Tier 2
+* S-Tier
+* A-Tier
+* B-Tier
+* C-Tier
+* Watchlist Only
+* Rejection breakdowns based on the removed framework
+
+This applies to:
+
+* Telegram alerts
+* /picks
+* /alerts
+* /dashboard
+* /funnel
+* /tracking
+* /health
+* logs where these are monitoring classifications
+* any current qualification display
+
+Do not alter unrelated historical records unless necessary for correct current reporting.
+
+⸻
+
+23. INTERNAL SCORING ENGINE
+
+If internal scoring code still uses an internal PASS value as part of its calculation/state:
+
+That is acceptable only if it cannot leak into the current monitoring/reporting/delivery framework.
+
+Do not rewrite scoring formulas unnecessarily.
+
+The user-facing/current monitoring system must have no PASS/rejection classification framework.
+
+⸻
+
+24. DATABASE CONTENTION
+
+Use the existing bounded/partial-result pattern where needed.
+
+Required behavior:
+
+fast metrics → render
+
+and:
+
+slow metric → unavailable
+
+Do NOT:
+
+* globally increase timeouts
+* block monitoring
+* block Telegram
+* delete historical data
+* create another database system
+
+⸻
+
+25. PORT 8080 WARNING
+
+The existing API-server warning:
+
+EADDRINUSE: address already in use 0.0.0.0:8080
+
+is known to be separate from the bot polling path.
+
+Do NOT spend unnecessary credits investigating it.
+
+Only verify that it does not interfere with the Sharp Money Bot Telegram/runtime path.
+
+If isolated, leave it alone.
+
+⸻
+
+26. TESTING — BE EFFICIENT
+
+Do not waste credits.
+
+First run focused tests for:
+
+#160
+
+* Underdog runtime/resource behavior
+* maintenance-job scheduling
+* PropLine not being starved
+* no overlapping monitoring
+
+#161
+
+* command timeouts
+* partial-result behavior
+* dashboard
+* alerts
+* picks
+* stats
+* health
+* performance/reporting commands
+
+Alert leak
+
+* No A/B/C/S tier labels in actual alert formatting.
+* No Watchlist/Near-Miss/PASS output.
+* No legacy classification path.
+* Current alert information remains intact.
+
+Then run the full suite once after the targeted fixes.
+
+Do not repeatedly run the full 4,600+ suite after every small change.
+
+⸻
+
+27. REQUIRED LIVE VERIFICATION
+
+Tests alone are NOT sufficient.
+
+Run the actual Sharp Money Bot.
+
+Runtime
+
+Verify:
+
+* Exactly one managed python bot/main.py process.
+* Clean startup.
+* Scheduler heartbeat active.
+* max_instances=1.
+* No overlapping monitoring cycles.
+
+Underdog
+
+While Underdog monitoring is actively running:
+
+* Maintenance jobs continue getting execution time.
+* CLV jobs continue.
+* Budget checker continues.
+* Season checker continues.
+* Telegram commands remain responsive.
+
+PrizePicks
+
+Verify:
+
+* Real PropLine fetches occur.
+* Two consecutive fetches confirm approximately 120-second start-to-start pacing.
+* Underdog remains active simultaneously.
+* PropLine does not get starved by Underdog.
+* Provider health timestamps update.
+
+Telegram Commands
+
+Actually invoke the real Telegram commands.
+
+At minimum:
+
+* /help
+* /status
+* /health
+* /providers
+* /config
+* /dashboard
+* /alerts
+* /funnel
+* /reconcile
+* /picks
+* /slip
+* /grade
+* /grades
+* /player
+* /slipstats
+* /performance
+* /backtest
+* /stats
+* /calibration
+* /tracking
+* /analyst
+* /rollups
+* /refinement
+* /market
+* /steam
+* /ev
+* /clv
+* /backfill
+* /pp_import
+* /testalert
+
+And verify the complete registered 34-command inventory.
+
+For every command:
+
+* Actual Telegram response arrives.
+* No indefinite loading.
+* Valid empty/partial/usage output where appropriate.
+
+⸻
+
+28. LIVE LOAD TEST
+
+Do NOT only test commands while the bot is idle.
+
+The important test is while:
+
+* Underdog monitoring is active.
+* PropLine monitoring is active.
+* Database activity is occurring.
+
+During that load, invoke:
+
+1. /status
+2. /health
+3. /dashboard
+4. /alerts
+5. /picks
+6. /stats
+7. /funnel
+8. /performance
+9. /tracking
+10. /grade
+
+Confirm each responds without waiting for the full monitoring cycle.
+
+⸻
+
+29. LIVE TELEGRAM ALERT VERIFICATION
+
+This is mandatory because the previous live alert proved that the legacy framework still exists somewhere in the delivery path.
+
+Observe an actual alert generated by the running bot after the fix.
+
+The alert must NOT contain:
+
+* A-Tier
+* B-Tier
+* C-Tier
+* S-Tier
+* Watchlist Only
+* Watchlist
+* Near-Miss
+* PASS
+* decision_pass
+* not_immediate
+* Tier 1
+* Tier 2
+
+Do not claim this is fixed based only on unit tests.
+
+Do not use a fabricated mock alert as proof.
+
+If no legitimate alert is generated during the verification window, report that fact rather than falsely claiming the live alert path was verified.
+
+⸻
+
+30. DO NOT HIDE REAL FAILURES
+
+If a genuine failure occurs:
+
+* Report it honestly.
+* Identify the failing component.
+* Do not suppress the failure simply to make the dashboard green.
+* Fix only failures within this task.
+
+⸻
+
+31. NO UNRELATED CHANGES
+
+Do NOT modify:
+
+* Railway
+* OddsAPI
+* PrizePicks authentication
+* Underdog ingestion architecture
+* FPR architecture
+* Stable Refresh architecture
+* scoring formulas
+* BQ/MQ
+* confidence
+* evidence providers
+* player identity
+* graded-prop evidence
+* HIT/MISS/PUSH logic
+* clean restart
+* historical database records
+* Discord
+* unrelated Telegram formatting
+* unrelated betting rules
+
+Do NOT add new providers.
+
+Do NOT create a new monitoring architecture.
+
+Do NOT create a second scheduler.
+
+Do NOT increase scheduler concurrency.
+
+⸻
+
+32. MODEL/COST DECISION
+
+Never ask me which model to use.
+
+Never ask me whether to use Free, Power, or Max.
+
+Automatically choose the recommended option for the task.
+
+Use Free when it is sufficient.
+
+Use Power or Max only when genuinely necessary for the complexity of the work.
+
+Do not stop and wait for my approval.
+
+⸻
+
+33. FINAL ACCEPTANCE CHECKLIST
+
+Do not create a checkpoint until every applicable item is verified.
+
+Runtime / #160
+
+* Actual Underdog starvation cause identified.
+* Targeted fix implemented.
+* No scheduler concurrency increase.
+* max_instances=1 preserved.
+* Maintenance jobs continue during Underdog monitoring.
+* CLV jobs continue.
+* Budget checker continues.
+* Season checker continues.
+* PrizePicks/PropLine continues.
+* No duplicate polling loops.
+* No overlapping monitoring cycles.
+
+Telegram / #161
+
+* /alerts responds.
+* /picks responds.
+* /slip responds.
+* /grade responds.
+* /grades responds.
+* /player responds.
+* /slipstats responds.
+* /performance responds.
+* /backtest responds.
+* /calibration responds.
+* /tracking responds.
+* /analyst responds.
+* /rollups responds.
+* /refinement responds.
+* /market responds.
+* /steam responds.
+* /ev responds.
+* /clv responds.
+* /reconcile responds.
+* /providers responds.
+* /config responds.
+* /health responds.
+* /status remains fixed.
+* /dashboard remains fixed.
+* /funnel remains fixed.
+* /stats remains fixed.
+* All 34 commands are actually exercised.
+
+Live alert cleanup
+
+* No A-Tier appears in live alerts.
+* No B-Tier appears in live alerts.
+* No C-Tier appears in live alerts.
+* No S-Tier appears in live alerts.
+* No Watchlist appears in live alerts.
+* No Watchlist Only appears in live alerts.
+* No Near-Miss appears in live alerts.
+* No PASS appears in live alerts.
+* No decision_pass appears in live alerts.
+* No not_immediate appears in live alerts.
+* No Tier 1/Tier 2 appears in live alerts.
+* No replacement tier system is introduced.
+* Legitimate pick/evidence information remains intact.
+
+Provider
+
+* Underdog shown as primary player-prop provider.
+* PrizePicks/PropLine shown as primary player-prop provider.
+* Underdog live health works.
+* PrizePicks live health works.
+* PrizePicks remains approximately 120 seconds.
+* DK/FD absent from current provider displays.
+* PandaScore absent from current CS2 player-prop presentation.
+* CS2 current PrizePicks sourcing is PropLine.
+
+Current monitoring framework
+
+* PASS absent from current monitoring output.
+* decision_pass absent.
+* not_immediate absent.
+* Watchlist absent.
+* Near-Miss absent.
+* Tier 1 absent.
+* Tier 2 absent.
+* S/A/B/C qualification labels absent.
+* No legacy rejection framework remains in current monitoring output.
+
+Reliability
+
+* Telegram remains responsive under monitoring load.
+* No stale indefinite loading states.
+* Slow database metrics degrade gracefully.
+* Real failures remain visible.
+* Exactly one managed bot process.
+* max_instances=1.
+* No unrelated behavior changed.
+* No Railway changes.
+* Full suite remains green.
+* NO CHECKPOINT CREATED UNTIL LIVE VERIFICATION PASSES.
+
+⸻
+
+🔴 FINAL INSTRUCTION
+
+Do not tell me this is complete based only on tests.
+
+I need the actual running bot verified under real monitoring load.
+
+Do not ask me which Agent mode to use.
+
+Do not ask me whether to use Free, Power, or Max.
+
+Automatically select the recommended model.
+
+Use Free when sufficient and Power/Max only when genuinely necessary.
+
+Do not pause for approval.
+
+Do not waste time or credits on anything outside the stated problems.
+
+Do not redesign anything.
+
+Do not create a checkpoint until implementation, tests, and live runtime verification all pass.
