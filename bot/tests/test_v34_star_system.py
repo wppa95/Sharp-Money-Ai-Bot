@@ -189,15 +189,15 @@ class TestBqPriorityLabel:
         lbl = self._fn()(75)
         assert "ACTIONABLE" in lbl, f"75 must be ACTIONABLE, got {lbl!r}"
 
-    def test_74_watchlist(self):
+    def test_74_has_no_retired_classification(self):
         lbl = self._fn()(74)
-        assert "WATCHLIST" in lbl, f"74 must be WATCHLIST, got {lbl!r}"
-        assert "HIGH PRIORITY" not in lbl
-        assert "ACTIONABLE" not in lbl
+        assert "WATCHLIST" not in lbl
+        assert lbl == ""
 
-    def test_70_watchlist(self):
+    def test_70_has_no_retired_classification(self):
         lbl = self._fn()(70)
-        assert "WATCHLIST" in lbl, f"70 must be WATCHLIST, got {lbl!r}"
+        assert "WATCHLIST" not in lbl
+        assert lbl == ""
 
     def test_69_not_actionable_label_empty_or_absent(self):
         """69 would not normally reach the formatter; label should be empty or non-promotional."""

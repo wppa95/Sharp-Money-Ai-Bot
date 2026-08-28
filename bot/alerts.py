@@ -677,9 +677,9 @@ async def broadcast_alert(
     Broadcast an alert to multiple chat IDs.
     Returns {"sent": n, "failed": m}.
 
-    The Underdog delivery boundary applies its shared Tier 1/Tier 2 gate
-    before reaching this low-level sender.  This function remains generic for
-    other alert types and does not infer prop evidence from message text.
+    Delivery qualification is enforced before this low-level sender.  This
+    function remains generic for other alert types and does not infer prop
+    evidence from message text.
     """
     message = _sanitize_user_alert_message(message)
     sent = failed = 0
@@ -1108,7 +1108,7 @@ class AlertDelivery:
         risk_factors = compute_steam_risk_factors(alert)
         message = format_steam_alert(alert, sharp_books=sharp_books, risk_factors=risk_factors)
 
-        # 4. Send  (sport kwarg enforces the Tier 2 backstop in broadcast_alert)
+        # 4. Send
         _steam_sport = getattr(alert, "sport", None)
         counts = await broadcast_alert(self._bot, self._chat_ids, message, sport=_steam_sport)
         alert_sent = counts["sent"] > 0
@@ -1150,13 +1150,13 @@ class AlertDelivery:
         _pp_sport = getattr(getattr(opp, "pp_line", None), "sport", None) or ""
         if is_telegram_suppressed_sport(_pp_sport):
             logger.info(
-                "deliver_pp: Tier 2 Telegram blocked — sport=%s player=%s stat=%s",
+                "deliver_pp: sport suppressed — sport=%s player=%s stat=%s",
                 _pp_sport,
                 getattr(getattr(opp, "pp_line", None), "player_name", "?"),
                 getattr(getattr(opp, "pp_line", None), "stat_type", "?"),
             )
             return DeliveryResult(sent=False, filtered=True,
-                                  filtered_reason=f"Tier 2 sport blocked (temporary): {_pp_sport}")
+                                  filtered_reason=f"Sport suppressed (temporary): {_pp_sport}")
 
         from alert_normalizer import normalize_pp
         from alert_scope_filter import check
@@ -1188,6 +1188,7 @@ class AlertDelivery:
         # deduplication, flood protection, and delivery failures remain
         # independent safety/integrity protections.
         _pp_direction = str(getattr(opp, "best_side", "") or "").strip().upper()
+        tier_str = getattr(score, "tier", "?") if score is not None else "?"
         if _pp_direction not in {"OVER", "UNDER"}:
             return DeliveryResult(
                 sent=False,
@@ -1359,7 +1360,7 @@ class AlertDelivery:
 
         # Canonical Telegram qualification gate. Removals and internal
         # market-move diagnostics retain their existing separate handling;
-        # actionable picks use the shared Tier 1/Tier 2 rules.
+        # actionable picks require a valid direction.
         if (
             decision is not None
             and not removed

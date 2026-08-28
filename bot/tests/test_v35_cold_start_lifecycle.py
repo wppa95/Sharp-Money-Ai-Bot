@@ -487,11 +487,11 @@ class TestReq11MLBTier2:
         from config import config
         assert "MLB" in {s.upper() for s in config.ud_alert_sports}
 
-    def test_mlb_under_blocked_in_standing_path(self):
-        """MLB/NFL UNDER must be blocked in the standing path — Tier 2 is OVER only."""
+    def test_mlb_under_has_no_sport_specific_standing_block(self):
+        """MLB/NFL UNDER is allowed when it has a valid direction."""
         src = inspect.getsource(__import__("market_engine").underdog_job)
-        assert "mlb_under_gate [standing]" in src, (
-            "mlb_under_gate [standing] not found — MLB/NFL UNDER must be blocked for Tier 2"
+        assert "mlb_under_gate [standing]" not in src, (
+            "sport-specific MLB UNDER gate found in standing path"
         )
 
     def test_mlb_bq_gate_removed_from_standing_path(self):

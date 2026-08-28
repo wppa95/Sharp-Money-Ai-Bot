@@ -2775,8 +2775,8 @@ async def underdog_job(context) -> None:
                     or score.stars >= config.UD_NON_STRICT_MIN_STARS
                 )
                 # Do not block evaluation when evidence is missing.  The
-                # validation result remains attached to the opportunity, while
-                # the delivery gate requires evidence before Telegram.
+                # validation result remains attached to the opportunity and
+                # direction is resolved for every active prop.
                 if np_immediate and not validation.has_supporting_data:
                     logger.debug(
                         "UD new-prop has no supporting evidence yet: %s | %s | %s",
@@ -2785,29 +2785,27 @@ async def underdog_job(context) -> None:
                 # Fetch real game results — required before any directional pick.
                 # Also fetch for np_immediate props (e.g. 0.5-line priority stats)
                 # even when they score PASS tier (no prev_line → low movement score).
-                hit_rates = None
-                if score.tier != "PASS" or np_immediate:
-                    hit_rates = await _fetch_and_compute_hit_rates(
-                        db, player, snap.sport or "UNKNOWN", stat_type, line_val,
-                        cycle_timing=_cycle_timing,
-                    )
-                    decision = make_ud_bet_decision(
-                        score        = score,
-                        validation   = validation,
-                        current_line = line_val,
-                        prev_line    = None,
-                        hit_rates    = hit_rates,
-                        sport        = snap.sport or "",
-                    )
-                    # Persist only directional opportunities. A prop without a
-                    # direction remains in the canonical active pool and is
-                    # evaluated again by normal scans, Stable Refresh, and FPR.
-                    if (
-                        decision is not None
-                        and decision.recommendation in ("OVER", "UNDER")
-                    ):
-                        try:
-                            await db.log_prop_opportunity(
+                hit_rates = await _fetch_and_compute_hit_rates(
+                    db, player, snap.sport or "UNKNOWN", stat_type, line_val,
+                    cycle_timing=_cycle_timing,
+                )
+                decision = make_ud_bet_decision(
+                    score        = score,
+                    validation   = validation,
+                    current_line = line_val,
+                    prev_line    = None,
+                    hit_rates    = hit_rates,
+                    sport        = snap.sport or "",
+                )
+                # Persist only directional opportunities. A prop without a
+                # direction remains in the canonical active pool and is
+                # evaluated again by normal scans, Stable Refresh, and FPR.
+                if (
+                    decision is not None
+                    and decision.recommendation in ("OVER", "UNDER")
+                ):
+                    try:
+                        await db.log_prop_opportunity(
                                 external_id = getattr(snap, "external_id", None) or getattr(snap, "id", None) or "",
                                 player_name       = player,
                                 team              = snap.team or "",
@@ -2835,11 +2833,11 @@ async def underdog_job(context) -> None:
                                     bet_confidence=decision.confidence,
                                     market_quality=getattr(score, "market_quality", None),
                                 ),
-                            )
-                        except Exception as _pol_exc:
-                            logger.warning(
-                                "underdog_job: log_prop_opportunity [new-prop] failed: %s", _pol_exc
-                            )
+                        )
+                    except Exception as _pol_exc:
+                        logger.warning(
+                            "underdog_job: log_prop_opportunity [new-prop] failed: %s", _pol_exc
+                        )
 
                 # Always add to the cycle batch — even blocked props appear in digest
                 _new_props_batch.append({
@@ -2858,24 +2856,9 @@ async def underdog_job(context) -> None:
                 # Score tier, stars, and confidence labels remain metadata.
                 _np_bet_ready = (
                     decision is not None
-                    and decision.recommendation != "PASS"
+                    and decision.recommendation in ("OVER", "UNDER")
                     and (snap.sport or "UNKNOWN") in config.ud_alert_sports
                 )
-                # Direction gate for Tier 2 (MLB/NFL):
-                #   NFL UNDER → fully allowed (all markets)
-                #   MLB UNDER → restricted to whitelist markets only
-                #   MLB/NFL OVER → always allowed
-                if _np_bet_ready and decision is not None:
-                    _np_sport_strict = (snap.sport or "").upper()
-                    if (_np_sport_strict == "MLB"
-                            and decision.recommendation == "UNDER"
-                            and not config.is_mlb_under_allowed(stat_type)):
-                        _np_bet_ready = False
-                        logger.debug(
-                            "UD mlb_under_gate [new]: %s | %s | market not in MLB UNDER whitelist",
-                            player, stat_type,
-                        )
-                    # NFL UNDER: no gate — fully allowed per spec
                 # Game-live hard gate — block actionable alerts when game has already started (#5).
                 # Uses _is_game_live_or_past which checks status field + game_time elapsed.
                 # Internal market intelligence continues regardless.
@@ -3248,32 +3231,16 @@ async def underdog_job(context) -> None:
                     # Lifecycle tracking (REMOVED state) still applied via _lifecycle_removed.
                     is_qualified = False
                 else:
-                    # Line-change props: require A-tier or better, a real directional
-                    # pick from the decision engine, and sport in betting whitelist.
-                    # Cold-start props always fail this gate — alerts suppressed.
-                    # Re-entries qualify via is_reentry_qualified (set above) regardless
-                    # of decision engine result — there is no previous line to compare.
-                    # Every non-removal alert requires a real directional pick.
-                    # Re-entries no longer bypass the decision engine.
-                    _lc_sport_up = (snap.sport or "").upper()
-                    # MLB UNDER direction gate — restricted to whitelist markets only.
-                    # MLB OVER: unrestricted. NFL UNDER: no gate (fully allowed).
-                    _lc_mlb_ok = (
-                        _lc_sport_up != "MLB"
-                        or decision is None
-                        or decision.recommendation != "UNDER"
-                        or config.is_mlb_under_allowed(stat_type)
-                    )
-                    # Qualification gate: use the decision engine and actual alert gates.
-                    # Tier 1 vs Tier 2 affects priority/ranking, not A/B actionability.
+                    # Line-change props need a real directional pick and an
+                    # active provider scope. Cold-start, lifecycle, timing,
+                    # deduplication, and freshness checks remain independent
+                    # safety/integrity protections.
                     is_qualified = (
                         not is_cold_start
                         and score is not None
                         and decision is not None
-                        and decision.recommendation != "PASS"
                         and decision.recommendation in ("OVER", "UNDER")
                         and (snap.sport or "UNKNOWN") in config.ud_alert_sports
-                        and _lc_mlb_ok
                     )
                     if is_qualified and not is_reentry_qualified:
                         _n_qualified += 1
@@ -3775,19 +3742,6 @@ async def underdog_job(context) -> None:
                     logger.warning(
                         "underdog_job: log_prop_opportunity [standing] failed: %s", _pol_exc
                     )
-
-                # Direction gate for Tier 2:
-                #   NFL UNDER → fully allowed (no market restriction)
-                #   MLB UNDER → restricted to whitelist markets only
-                if (_ssport.upper() == "MLB"
-                        and _sdec.recommendation == "UNDER"
-                        and not config.is_mlb_under_allowed(_st)):
-                    logger.debug(
-                        "UD mlb_under_gate [standing]: %s | %s | market not in MLB UNDER whitelist",
-                        _sp, _st,
-                    )
-                    continue
-                # NFL UNDER: no gate — fully allowed per spec
 
                 # Game-live hard gate for standing plays — block if game already started (#5).
                 if _is_game_live_or_past(_ssnap, now):
@@ -4608,13 +4562,12 @@ async def underdog_job(context) -> None:
 #   • Takes the next ≤10,000 props from the cursor position.
 #   • Rescores each using the existing engine + all existing alert gates.
 #   • Sends qualifying Telegram alerts through AlertDelivery.deliver_underdog().
-#   • Applies the Watchlist UNDER rule: score 30–40 with UNDER recommendation
-#     → watchlist_state='Watchlist' instead of silent rejection.
+#   • Rescores each active prop and preserves directional evaluations.
 #   • Advances the cursor; wraps to 0 at end of pool.
 #
-# PART 2 — Watchlist rescan:
-#   • Queries PropOpportunityLog rows where watchlist_state='Watchlist'.
-#   • Rescores each.  Promotion → alert; score decline → Rejected; prop gone → Removed.
+# PART 2 — Previously monitored rows:
+#   • Queries persisted monitoring rows for compatibility with older data.
+#   • Rescores each; only valid directional results can reach delivery.
 #
 # Both parts use the existing dedup, direction, BQ, conf, and live-game gates.
 # The fast path (underdog_job) is completely unaffected.
@@ -4918,11 +4871,14 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     logger.debug("stable_refresh: log_prop_opportunity failed: %s", _sr_pol_exc)
 
             # ── Normal gate sequence ──────────────────────────────────────────
-            if _sr_dec is None or _sr_dec.recommendation == "PASS":
+            if (
+                _sr_dec is None
+                or _sr_dec.recommendation not in ("OVER", "UNDER")
+            ):
                 sr_not_delivered += 1
                 continue
 
-            # All scan-time gates are non-blocking. PASS/no-direction was
+            # All scan-time gates are non-blocking. Missing/invalid direction was
             # handled above; directional picks proceed to the Telegram gate.
             sr_actionable += 1
             _sr_mq = _sr_cmq(_sr_stat, _sr_line, _sr_score)
@@ -5236,10 +5192,10 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         except Exception:
                             pass
                         logger.info(
-                            "🔥 WATCHLIST PROMOTED | %s | %s | %s"
-                            " | Line: %.1f | Tier: %s | Score: %d/100",
+                            "Directional candidate delivered | %s | %s | %s"
+                            " | Line: %.1f | Score: %d/100",
                             _wl_player, _wl_sport, _wl_stat,
-                            _wl_cur_line, _wl_score.tier, int(_wl_score.total),
+                            _wl_cur_line, int(_wl_score.total),
                         )
 
                 elif _wl_cur_total < 30:

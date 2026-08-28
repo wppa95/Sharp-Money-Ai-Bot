@@ -82,7 +82,9 @@ def _bq_priority_label(bq: int, direction: str = "", sport: str = "") -> str:
     elif bq >= 75:
         return "🟢 ACTIONABLE"
     elif bq >= 70:
-        return "👀 WATCHLIST ONLY"
+        # Direction is the only qualification gate.  Do not expose the
+        # retired watchlist classification in raw formatter output.
+        return ""
     return ""
 
 
@@ -485,22 +487,19 @@ def _format_available_lines_block(
     fd_line: Optional[float] = None,
 ) -> str:
     """
-    Render a 📊 Available Lines block showing only providers with real data.
-    Providers with no current data are omitted entirely.
+    Render a 📊 Available Lines block for current player-prop providers.
+    DraftKings/FanDuel arguments remain accepted for legacy callers but are
+    intentionally ignored so stale sportsbook rows cannot leak into current
+    prop alerts.
     """
     lines = ["\n\n📊 <b>Available Line</b>" if (
-        sum(v is not None for v in [pp_line, ud_line, dk_line, fd_line]) == 1
+        sum(v is not None for v in [pp_line, ud_line]) == 1
     ) else "\n\n📊 <b>Available Lines</b>"]
 
     if pp_line is not None:
         lines.append(f"\n🟣 PrizePicks:  <code>{pp_line:.1f}</code>")
     if ud_line is not None:
         lines.append(f"\n🐶 Underdog:    <code>{ud_line:.1f}</code>")
-    if dk_line is not None:
-        lines.append(f"\n🎰 DraftKings:  <code>{dk_line:.1f}</code>")
-    if fd_line is not None:
-        lines.append(f"\n🦊 FanDuel:     <code>{fd_line:.1f}</code>")
-
     return "".join(lines)
 
 
@@ -518,11 +517,10 @@ def _format_analyst_inline_block(
 
     Calls engine.analyst.format_analyst_alert_block — which is a pure function
     that builds the narrative from stored decision artifacts.  Returns "" for
-    PASS/removal decisions, or when the import fails.
+    non-directional/removal decisions, or when the import fails.
 
-    Applies the final tier validation gate (_validate_final_tier) so the
-    analyst block reflects a consistent tier/confidence/role assessment.
-    A mismatch note is appended when the gate downgrades the tier.
+    Tier remains internal metadata.  The narrative is based on the actual
+    confidence value and never adds a tier-adjustment message.
     """
     if decision is None:
         return ""
@@ -535,15 +533,6 @@ def _format_analyst_inline_block(
         stars = getattr(score, "stars", 3) or 3
         rlvl  = "LOW" if stars >= 4 else "MEDIUM" if stars >= 3 else "HIGH"
 
-    # Apply final tier validation gate before passing to analyst
-    validated_tier = _validate_final_tier(raw_tier, int(conf), intelligence_trace)
-    tier_note = ""
-    if validated_tier != raw_tier:
-        tier_note = (
-            f"\n\n⚠️ <i>Tier adjusted {raw_tier}→{validated_tier}: "
-            f"confidence {conf}/100 does not support {raw_tier}-tier.</i>"
-        )
-
     try:
         from engine.analyst import format_analyst_alert_block
         block = format_analyst_alert_block(
@@ -552,12 +541,12 @@ def _format_analyst_inline_block(
             sport              = sport or "UNKNOWN",
             line               = float(line),
             decision_rec       = rec,
-            decision_tier      = validated_tier,
+            decision_tier      = raw_tier,
             confidence         = int(conf),
             risk_level         = rlvl,
             intelligence_trace = intelligence_trace,
         )
-        return block + tier_note
+        return block
     except Exception:
         return ""
 
@@ -778,12 +767,9 @@ def format_underdog_change_alert(
     change = (new_line - old_line) if not removed else 0.0
     change_sign = "+" if change >= 0 else ""
 
-    # Pick / tier / quality from decision
+    # Pick / quality from decision.  Tier remains internal metadata only.
     rec = getattr(decision, "recommendation", None) if decision else None
-    tier = getattr(decision, "decision_tier", None) if decision else None
     conf = getattr(decision, "confidence", None) if decision else None
-    if tier is None and score is not None:
-        tier = getattr(score, "tier", None)
     if conf is None and score is not None:
         conf = getattr(score, "total", None)
 
@@ -1008,7 +994,8 @@ def format_underdog_new_prop_alert(
         if game_time else ""
     )
 
-    # Grade block — V3.4: stars and BQ label from decision.confidence when available
+    # Grade block — stars and BQ are informational; legacy tier labels are
+    # deliberately omitted from user-facing prop alerts.
     grade_str = ""
     if score is not None:
         tier   = getattr(score, "tier",         "?")
@@ -1022,7 +1009,7 @@ def format_underdog_new_prop_alert(
             s_disp    = getattr(score, "stars_display", "?" * 5)
             _bq_label = f"{total}/100"
         grade_str = (
-            f"\n\n📊 <b>Grade:</b>  <code>{tier}</code>  {s_disp}  "
+            f"\n\n📊 <b>Grade:</b>  {s_disp}  "
             f"<code>{_bq_label}</code>"
             f"  <i>(n={n_hist})</i>"
         )
@@ -1035,8 +1022,8 @@ def format_underdog_new_prop_alert(
             f"<code>{getattr(validation, 'rate_summary', lambda: '')()}</code>"
         )
 
-    # Raw formatters retain this internal presentation for compatibility;
-    # alerts.py removes it at Telegram/Discord delivery time.
+    # Quality labels are informational only; direction is the sole
+    # qualification gate.
     _np_rec = getattr(decision, "recommendation", None) if decision is not None else None
     _np_bq  = getattr(decision, "confidence", None)     if decision is not None else None
     _np_sport_up = (sport or "").upper()
@@ -1076,7 +1063,7 @@ def format_underdog_new_prop_alert(
     if validation is not None and getattr(validation, "has_supporting_data", False):
         reasons.append(f"• Supporting history available ({getattr(validation, 'n_history', 0)} snapshots)")
 
-    # Available lines block (all 4 providers)
+    # Available lines block (PrizePicks + Underdog only)
     avail_block = _format_available_lines_block(
         ud_line = line_value,
         pp_line = pp_line,

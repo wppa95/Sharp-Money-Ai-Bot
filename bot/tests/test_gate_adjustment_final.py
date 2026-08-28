@@ -1,4 +1,4 @@
-"""Regression tests for the canonical Tier 1/Tier 2 delivery gate."""
+"""Regression tests for the canonical direction-only delivery gate."""
 
 from __future__ import annotations
 
@@ -31,22 +31,10 @@ def test_tier2_sports_use_exact_canonical_aliases():
     assert not me._is_tier2_sport("future-football-league")
 
 
-@pytest.mark.parametrize("sport", ["WNBA", "NHL", "SOCCER", "CS", "TENNIS"])
+@pytest.mark.parametrize("sport", ["WNBA", "NHL", "SOCCER", "CS", "TENNIS", "MLB", "NFL"])
 @pytest.mark.parametrize("direction", ["OVER", "UNDER"])
-def test_tier1_needs_direction_and_evidence_only(sport, direction):
-    assert me._tier_delivery_gate(sport, direction, 1, 1, True, "C", confidence=1)
-    assert not me._tier_delivery_gate(sport, direction, 1, 1, False, "S", confidence=99)
-
-
-@pytest.mark.parametrize("sport", ["MLB", "NFL", "NBA", "Football", "CFB", "NCAA", "NCAAF"])
-def test_tier2_requires_strong_evidence_confidence_bq_and_mq(sport):
-    kwargs = dict(evidence_available=True, score_tier="C", confidence=90)
-    assert me._tier_delivery_gate(sport, "OVER", 85, 85, **kwargs)
-    assert me._tier_delivery_gate(sport, "UNDER", 85, 85, **kwargs)
-    assert not me._tier_delivery_gate(sport, "OVER", 84, 85, **kwargs)
-    assert not me._tier_delivery_gate(sport, "OVER", 85, 84, **kwargs)
-    assert not me._tier_delivery_gate(sport, "OVER", 85, 85, True, "S", confidence=89)
-    assert not me._tier_delivery_gate(sport, "OVER", 85, 85, False, "S", confidence=95)
+def test_every_direction_is_eligible_without_evidence_or_quality(sport, direction):
+    assert me._tier_delivery_gate(sport, direction, 0, 0, False, "PASS", confidence=0)
 
 
 def test_direction_is_always_required():

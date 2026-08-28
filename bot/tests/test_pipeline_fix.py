@@ -246,11 +246,11 @@ class TestStandingPathGatesIntact:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Regression: MLB/NFL gates unchanged
+# Regression: sport-independent directional delivery
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestMLBNFLGatesUnchanged:
-    """MLB/NFL strict gates must remain intact after the fix."""
+    """MLB/NFL remain in scope without a sport-specific direction gate."""
 
     def _get_engine_source(self) -> str:
         import pathlib
@@ -264,11 +264,11 @@ class TestMLBNFLGatesUnchanged:
             "bq_gate [new] found — BQ gate must be removed per spec Tier 2"
         )
 
-    def test_mlb_under_block_present(self):
-        """MLB/NFL UNDER block must be present — Tier 2 OVER only."""
+    def test_mlb_under_block_removed(self):
+        """MLB/NFL UNDER must not have a sport-specific delivery block."""
         src = self._get_engine_source()
-        assert "mlb_under_gate" in src, (
-            "mlb_under_gate not found in market_engine.py — MLB/NFL UNDER must be blocked for Tier 2"
+        assert "mlb_under_gate" not in src, (
+            "mlb_under_gate found in market_engine.py — direction is sport-independent"
         )
 
     def test_strict_alert_sports_config_referenced(self):

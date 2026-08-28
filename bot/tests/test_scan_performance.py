@@ -195,23 +195,19 @@ def test_bq_gate_still_present():
     assert "bq_gate" in src or "bet_quality_score" in src or "BQ" in src
 
 
-# ── 8. MLB UNDER whitelist ────────────────────────────────────────────────────
+# ── 8. MLB UNDER direction coverage ──────────────────────────────────────────
 
 
-def test_mlb_under_whitelist_present():
-    """MLB UNDER whitelist logic must still exist in market_engine.py."""
+def test_mlb_under_whitelist_removed():
+    """The retired MLB UNDER whitelist must not remain in market_engine.py."""
     src = _src("market_engine.py")
-    assert "MLB UNDER whitelist" in src, \
-        "MLB UNDER whitelist not found in market_engine.py"
+    assert "MLB UNDER whitelist" not in src
 
 
-def test_mlb_under_whitelist_has_entries():
-    """MLB UNDER whitelist must gate delivery paths in market_engine.py."""
+def test_mlb_under_has_no_whitelist_entries():
+    """No delivery path should retain an MLB UNDER whitelist."""
     src = _src("market_engine.py")
-    # Must appear at least twice — lc/np path and standing path
-    count = src.count("MLB UNDER whitelist")
-    assert count >= 2, \
-        f"MLB UNDER whitelist appears only {count} time(s) — may be missing from a delivery path"
+    assert "mlb_under_gate" not in src
 
 
 # ── 9. NFL direction rules ────────────────────────────────────────────────────

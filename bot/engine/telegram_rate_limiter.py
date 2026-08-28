@@ -7,8 +7,8 @@ Prevents alert floods by enforcing three nested layers:
 
   Layer 1 — Per-window rate limit
     At most TG_RATE_MAX_PER_WINDOW alerts may be sent in any rolling
-    TG_RATE_WINDOW_SECONDS window.  Higher-tier props consume slots first:
-    Every qualified directional prop shares this budget.
+    TG_RATE_WINDOW_SECONDS window.  Every qualified directional prop shares
+    this budget; internal tier/quality metadata does not reserve slots.
 
   Layer 2 — Emergency flood-protection mode
     If TG_FLOOD_THRESHOLD alerts are sent inside the window, flood-protection
@@ -34,7 +34,7 @@ Usage
     limiter = get_rate_limiter()
 
     # Before broadcast:
-    result = limiter.check(tier, confidence, bq, is_meaningful_change=...)
+    result = limiter.check(direction, confidence, bq, is_meaningful_change=...)
     if not result.allowed:
         return DeliveryResult(sent=False, rate_limited=True, ...)
 
@@ -129,7 +129,7 @@ class TelegramRateLimiter:
 
     def check(
         self,
-        tier: str,
+        direction: str,
         confidence: float,
         bq: float,
         *,
@@ -144,13 +144,15 @@ class TelegramRateLimiter:
 
         Parameters
         ──────────
-        tier               Decision tier ("S", "A", "B", "C").
+        direction          Valid OVER/UNDER direction.  Retained as the first
+                           positional argument for compatibility; it does not
+                           create a quality or tier gate.
         confidence         Confidence score 0–100.
         bq                 Bet Quality score (score.total) 0–100.
         is_meaningful_change
                            True when the caller has detected a significant line
                            move (≥ 2× min change) or a direction flip.  Grants
-                           a budget bypass for S/A-tier (Layer 1 only).
+                           a budget bypass for meaningful changes (Layer 1 only).
         """
         now = time.monotonic()
         self._prune(now)

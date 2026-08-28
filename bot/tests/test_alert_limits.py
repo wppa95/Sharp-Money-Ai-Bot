@@ -80,11 +80,11 @@ def _patch_scope_allowed():
     )
 
 
-# ── deliver_pp: S-tier bypasses cap ──────────────────────────────────────────
+# ── deliver_pp: no tier-based daily cap ─────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_s_tier_bypasses_daily_cap():
-    """S-tier PP alerts always fire regardless of daily count."""
+    """A directional PP alert fires regardless of the legacy tier label."""
     db = _make_db(pp_today=999)  # cap massively exceeded
     delivery = _make_delivery(db)
     opp   = _make_opp(tier="S", edge=10.0)
@@ -108,8 +108,8 @@ async def test_s_tier_bypasses_daily_cap():
 
 
 @pytest.mark.asyncio
-async def test_a_tier_blocked_when_cap_reached():
-    """A-tier PP alert is suppressed when daily cap is hit."""
+async def test_a_tier_is_not_blocked_when_daily_count_is_high():
+    """The old PrizePicks tier-based daily cap is no longer a gate."""
     from config import config
     db = _make_db(pp_today=config.DAILY_ALERT_LIMIT)
     delivery = _make_delivery(db)
@@ -119,18 +119,20 @@ async def test_a_tier_blocked_when_cap_reached():
     from alert_scope_filter import FilterResult
     with (
         patch("alert_scope_filter.check", return_value=FilterResult(allowed=True)),
+        patch("alerts.format_pp_alert", return_value="<msg>"),
+        patch("alerts.broadcast_alert", new_callable=AsyncMock,
+              return_value={"sent": 1, "failed": 0}),
         patch("engine.timing.is_game_alertable", return_value=(True, "")),
     ):
         result = await delivery.deliver_pp(opp, score)
 
-    assert result.sent is False
-    assert result.filtered is True
-    assert "cap" in result.filtered_reason.lower() or "limit" in result.filtered_reason.lower()
+    assert result.sent is True
+    assert result.filtered is False
 
 
 @pytest.mark.asyncio
-async def test_b_tier_blocked_when_cap_reached():
-    """B-tier PP alert is suppressed when daily cap is hit."""
+async def test_b_tier_is_not_blocked_when_daily_count_is_high():
+    """Low-tier metadata does not block a directional PP alert."""
     from config import config
     db = _make_db(pp_today=config.DAILY_ALERT_LIMIT)
     delivery = _make_delivery(db)
@@ -140,12 +142,15 @@ async def test_b_tier_blocked_when_cap_reached():
     from alert_scope_filter import FilterResult
     with (
         patch("alert_scope_filter.check", return_value=FilterResult(allowed=True)),
+        patch("alerts.format_pp_alert", return_value="<msg>"),
+        patch("alerts.broadcast_alert", new_callable=AsyncMock,
+              return_value={"sent": 1, "failed": 0}),
         patch("engine.timing.is_game_alertable", return_value=(True, "")),
     ):
         result = await delivery.deliver_pp(opp, score)
 
-    assert result.sent is False
-    assert result.filtered is True
+    assert result.sent is True
+    assert result.filtered is False
 
 
 @pytest.mark.asyncio

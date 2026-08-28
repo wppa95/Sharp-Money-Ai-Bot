@@ -6,9 +6,9 @@ Covers:
   - _compute_proxy_confidence (all 4 scoring dimensions)
   - build_player_prop_market_comparison (full + below-threshold + re-entry)
   - format_player_prop_market_alert (structure, labels, confidence display)
-  - run_player_prop_market_cycle (dedup, B+/weak-B gate, alert sent)
-  - _is_b_plus (B+ quality gate — avg_vs_line + stability thresholds)
-  - Provider priority (PP > UD > DK > FD)
+  - run_player_prop_market_cycle (dedup, direction-only admission, alert sent)
+  - _is_b_plus (legacy compatibility helper)
+  - Provider priority (PP > UD)
   - Movement calculation
   - Market consensus rounding
   - Stat normalisation
@@ -295,7 +295,7 @@ class TestBuildComparison:
         assert result.best_provider == "PrizePicks"
         assert result.best_line == 6.0
 
-    def test_dk_fd_lines_stored(self):
+    def test_dk_fd_lines_are_not_stored_in_current_comparison(self):
         result = build_player_prop_market_comparison(
             player_name = "Test Player",
             sport       = "MLB",
@@ -306,10 +306,7 @@ class TestBuildComparison:
             now         = NOW,
         )
         assert result is not None
-        assert result.lines["DraftKings"].available
-        assert result.lines["DraftKings"].line_value == 5.0
-        assert result.lines["FanDuel"].available
-        assert result.lines["FanDuel"].line_value == 5.5
+        assert set(result.lines) == {"PrizePicks", "Underdog"}
 
     def test_movement_calculated(self):
         result = build_player_prop_market_comparison(
@@ -393,8 +390,7 @@ class TestBuildComparison:
         )
         assert result is not None
         assert result.lines["PrizePicks"].available is False
-        assert result.lines["DraftKings"].available is False
-        assert result.lines["FanDuel"].available is False
+        assert set(result.lines) == {"PrizePicks", "Underdog"}
         assert result.lines["Underdog"].available is True
 
 
@@ -805,12 +801,13 @@ class TestRunCycleBPlus:
         db.get_recent_player_prop_lines  = AsyncMock(return_value=[])
         return db
 
-    def _prop(self, tier="B", avg=0, sta=0):
+    def _prop(self, tier="B", avg=0, sta=0, direction="OVER"):
         return {
             "player":    "Allisha Gray",
             "stat_type": "points",
             "sport":     "WNBA",
             "tier":      tier,
+            "direction": direction,
             "line":      18.5,
             "prev_line": 18.0,
             "avg":       avg,
@@ -818,8 +815,8 @@ class TestRunCycleBPlus:
             "total":     52,
         }
 
-    def test_weak_b_sends_zero(self):
-        """B-tier prop with low avg/sta is suppressed."""
+    def test_weak_b_directional_prop_is_admitted(self):
+        """Low-quality metadata does not block a directional prop."""
         with patch("alerts.broadcast_alert", new_callable=AsyncMock) as m:
             m.return_value = {"sent": 1}
             sent = LOOP.run_until_complete(run_player_prop_market_cycle(
@@ -830,11 +827,11 @@ class TestRunCycleBPlus:
                 alerted_set  = {},
                 now          = NOW,
             ))
-        assert sent == 0
-        m.assert_not_called()
+        assert sent == 1
+        m.assert_called_once()
 
     def test_b_plus_prop_is_admitted(self):
-        """B-tier prop with strong avg+sta passes the gate and reaches broadcast."""
+        """B-tier metadata does not block a directional prop."""
         with patch("alerts.broadcast_alert", new_callable=AsyncMock) as m:
             m.return_value = {"sent": 1}
             LOOP.run_until_complete(run_player_prop_market_cycle(
@@ -845,11 +842,11 @@ class TestRunCycleBPlus:
                 alerted_set  = {},
                 now          = NOW,
             ))
-        # Gate admitted the prop — broadcast was attempted
+        # Directional admission reaches broadcast.
         m.assert_called_once()
 
-    def test_pass_tier_always_suppressed(self):
-        """PASS props never reach broadcast regardless of avg/sta."""
+    def test_pass_tier_directional_prop_is_admitted(self):
+        """The legacy PASS label does not block a valid direction."""
         with patch("alerts.broadcast_alert", new_callable=AsyncMock) as m:
             m.return_value = {"sent": 1}
             sent = LOOP.run_until_complete(run_player_prop_market_cycle(
@@ -860,11 +857,11 @@ class TestRunCycleBPlus:
                 alerted_set  = {},
                 now          = NOW,
             ))
-        assert sent == 0
-        m.assert_not_called()
+        assert sent == 1
+        m.assert_called_once()
 
     def test_s_tier_always_admitted(self):
-        """S-tier is always admitted regardless of avg/sta (may be 0 in cold-start)."""
+        """S-tier metadata does not affect directional admission."""
         with patch("alerts.broadcast_alert", new_callable=AsyncMock) as m:
             m.return_value = {"sent": 1}
             LOOP.run_until_complete(run_player_prop_market_cycle(
@@ -878,7 +875,7 @@ class TestRunCycleBPlus:
         m.assert_called_once()
 
     def test_a_tier_always_admitted(self):
-        """A-tier is always admitted regardless of avg/sta."""
+        """A-tier metadata does not affect directional admission."""
         with patch("alerts.broadcast_alert", new_callable=AsyncMock) as m:
             m.return_value = {"sent": 1}
             LOOP.run_until_complete(run_player_prop_market_cycle(
@@ -891,14 +888,14 @@ class TestRunCycleBPlus:
             ))
         m.assert_called_once()
 
-    def test_mixed_batch_only_qualifying_fire(self):
-        """Mixed batch: S admitted, B+ admitted, weak-B suppressed, PASS suppressed."""
+    def test_mixed_batch_only_directional_props_fire(self):
+        """Every valid direction is admitted; a missing direction is rejected."""
         props = [
-            self._prop(tier="S",    avg=0,  sta=0 ),   # always admitted
-            self._prop(tier="A",    avg=0,  sta=0 ),   # always admitted
-            self._prop(tier="B",    avg=20, sta=15),   # B+ — admitted
-            self._prop(tier="B",    avg=2,  sta=1 ),   # weak-B — suppressed
-            self._prop(tier="PASS", avg=20, sta=15),   # PASS — suppressed
+            self._prop(tier="S",    avg=0,  sta=0 ),   # admitted
+            self._prop(tier="A",    avg=0,  sta=0 ),   # admitted
+            self._prop(tier="B",    avg=20, sta=15),   # admitted
+            self._prop(tier="B",    avg=2,  sta=1 ),   # admitted
+            self._prop(tier="PASS", avg=20, sta=15, direction=""),  # rejected
         ]
         # Dedup will block duplicates (same player/stat/line), so run each as
         # its own cycle to count independent admits.
@@ -915,15 +912,15 @@ class TestRunCycleBPlus:
                     now          = NOW,
                 ))
                 call_count += m.call_count
-        # S + A + B+ = 3 admitted; weak-B + PASS = 2 suppressed
-        assert call_count == 3
+        # Four valid directions are admitted; the missing direction is rejected.
+        assert call_count == 4
 
 
-# ── Provider ordering (PP > UD > DK > FD) ────────────────────────────────────
+# ── Provider ordering (PP > UD) ──────────────────────────────────────────────
 
 class TestProviderPriority:
     def test_order_constant(self):
-        assert PROVIDER_ORDER == ["PrizePicks", "Underdog", "DraftKings", "FanDuel"]
+        assert PROVIDER_ORDER == ["PrizePicks", "Underdog"]
 
     def test_dk_beats_fd_when_pp_ud_unavailable(self):
         result = build_player_prop_market_comparison(

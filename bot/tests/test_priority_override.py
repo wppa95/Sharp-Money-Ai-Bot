@@ -844,8 +844,8 @@ class TestV33SportDirectionPolicy:
                 f"{var} was re-added — the 95+ override paths are removed; "
                 "MLB UNDER is gated at is_qualified (_lc_mlb_ok) level."
             )
-        # MLB UNDER whitelist gate must still exist in the lc path
-        assert "_lc_mlb_ok" in src, "_lc_mlb_ok missing — MLB UNDER whitelist gate not in lc path"
+        # Direction is sport-independent; no MLB UNDER whitelist gate remains.
+        assert "_lc_mlb_ok" not in src, "_lc_mlb_ok found — MLB UNDER must not be specially gated"
 
 
 # ═══════════════════════════════════════════════════════════════════════════

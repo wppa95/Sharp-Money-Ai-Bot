@@ -1,4 +1,4 @@
-"""Extended coverage for shared monitoring and delivery rules."""
+"""Extended coverage for direction-only monitoring and delivery rules."""
 
 from __future__ import annotations
 
@@ -10,22 +10,15 @@ import market_engine
 from market_engine import _tier_delivery_gate as tier_delivery_gate
 
 
-@pytest.mark.parametrize("sport", ["MLB", "NFL", "NBA"])
+@pytest.mark.parametrize("sport", ["MLB", "NFL", "NBA", "WNBA", "CS2", "TENNIS"])
 @pytest.mark.parametrize("direction", ["OVER", "UNDER", "over", "under"])
-def test_tier2_directions_require_the_full_quality_tuple(sport, direction):
-    assert not tier_delivery_gate(sport, direction, 80, 85, True, "S", confidence=89)
-    assert tier_delivery_gate(sport, direction, 85, 85, True, "S", confidence=90)
-
-
-@pytest.mark.parametrize("sport", ["WNBA", "CS2", "TENNIS"])
-def test_tier1_directions_are_not_restricted_by_quality_scores(sport):
-    assert tier_delivery_gate(sport, "OVER", 0, 0, True, "PASS", confidence=0)
-    assert tier_delivery_gate(sport, "UNDER", 80, 85, True, "C", confidence=1)
+def test_directional_candidates_ignore_quality_and_tier_metadata(sport, direction):
+    assert tier_delivery_gate(sport, direction, 0, 0, False, "PASS", confidence=0)
 
 
 @pytest.mark.parametrize("tier", ["A", "B", "C", "PASS"])
-def test_tier_labels_do_not_create_a_watchlist_class(tier):
-    assert tier_delivery_gate("WNBA", "UNDER", 0, 0, True, tier, confidence=0)
+def test_tier_labels_do_not_create_a_delivery_class(tier):
+    assert tier_delivery_gate("WNBA", "UNDER", 0, 0, False, tier, confidence=0)
 
 
 def test_invalid_recommendations_never_deliver():

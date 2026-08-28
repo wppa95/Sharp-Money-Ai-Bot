@@ -706,7 +706,7 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/rollups — show learning performance rollups by tier, sport, and stat type."""
+    """/rollups — show learning performance rollups by sport and stat type."""
     if not _check_allowed(update):
         await update.message.reply_text("⛔ Unauthorized.")
         return
@@ -2068,7 +2068,6 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             elif _mag is not None:
                 _movement_quality = f"{_movement.get('direction', 'UNKNOWN')} · {_mag}"
         _historical = _evidence.get("historical") if isinstance(_evidence, dict) else None
-        _grade = getattr(plh, "score_tier", None)
         entry_lines.extend([
             "",
             "🧠 <b>Downstream Intelligence</b>",
@@ -2082,7 +2081,6 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             f"  Evidence Completeness: {_shown(_complete.get('score') if isinstance(_complete, dict) else None, '/100')}",
             f"  Historical Evidence: {_shown(_json.dumps(_historical, separators=(',', ':')) if _historical else None)}",
             f"  Market Quality: {_shown(_mq, '/100')} · {_mq_label}",
-            f"  Final Model Grade: {_shown(_grade)}",
         ])
 
         # ── Evidence block ────────────────────────────────────────────────────
@@ -2137,12 +2135,12 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
         return "\n".join(entry_lines)
 
-    # Guard: if all fetched props were PASS/no-direction after filtering, say so.
+    # Guard: if all fetched props lack a valid direction, say so.
     if not _sport_groups:
         await update.message.reply_text(
             "No actionable betting picks right now.\n\n"
             "<i>Props are scanned continuously — picks only appear once a prop "
-            "has a clear OVER/UNDER direction with sufficient evidence.</i>",
+            "has a valid OVER/UNDER direction.</i>",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -3046,7 +3044,7 @@ async def cmd_reconcile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def cmd_grade(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/grade — Grade resolved actionable picks by tier (WIN/LOSS/PUSH breakdown)."""
+    """/grade — Grade resolved actionable picks (WIN/LOSS/PUSH breakdown)."""
     if not _check_allowed(update):
         await update.message.reply_text("⛔ Unauthorized.")
         return

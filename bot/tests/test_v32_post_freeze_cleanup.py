@@ -497,11 +497,11 @@ class TestRegressionGuards(unittest.TestCase):
         self.assertIn('"Underdog"', src)
         self.assertNotIn('"DraftKings"', src)
 
-    def test_mlb_under_still_blocked(self):
+    def test_mlb_under_is_still_in_scope(self):
         import market_engine as me
-        src = inspect.getsource(me.underdog_job)
-        self.assertIn("MLB", src)
-        self.assertIn("UNDER", src)
+        src = inspect.getsource(me._tier_delivery_gate)
+        self.assertIn("direction", src)
+        self.assertNotIn("mlb_under_gate", src)
 
     def test_database_utc_timestamps_not_changed(self):
         """mark_opportunity_alert_sent must still use utcnow (not local time)."""

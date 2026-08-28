@@ -86,15 +86,6 @@ def _g(obj: Any, *keys, default: Any = None) -> Any:
     return cur
 
 
-def _tier_label(tier: str) -> str:
-    return {
-        "S": "highest-confidence (S-tier)",
-        "A": "high-confidence (A-tier)",
-        "B": "moderate-confidence (B-tier)",
-        "PASS": "low-confidence (PASS)",
-    }.get(tier, tier)
-
-
 def _confidence_label(conf: int) -> str:
     """
     Return a calibrated signal label based on actual confidence score.
@@ -137,8 +128,9 @@ def _build_recommended_because(candidate: "Candidate") -> str:
     conf  = candidate.confidence
     trace = candidate.decision_trace
 
-    # Lead with confidence tier
-    parts.append(f"This is a {_tier_label(candidate.tier)} {candidate.decision} on "
+    # Lead with the measured confidence signal, not an internal tier label.
+    parts.append(f"This is a {_confidence_label(conf.overall if conf else 0)} "
+                 f"{candidate.decision} on "
                  f"{candidate.stat_type} ({candidate.line:.1f}) for {candidate.player_name}.")
 
     # Confidence dimension narrative
@@ -522,7 +514,7 @@ def build_analyst_from_alert_parts(
     conf_label = _confidence_label(confidence)
     why_parts.append(
         f"{conf_label} — {decision_rec} on {stat_type} "
-        f"({line:.1f}) for {player_name} ({decision_tier}-tier)."
+        f"({line:.1f}) for {player_name}."
     )
     if confidence >= 80:
         why_parts.append(f"Overall confidence is strong at {confidence}/100.")
@@ -595,8 +587,6 @@ def build_analyst_from_alert_parts(
         "player is listed as questionable or out before game time",
         "line moves more than 1.0 against the recommended side",
     ]
-    if decision_tier == "B":
-        conditions.append("a contradicting game-time alert appears for this prop")
     if (confidence or 0) < 65:
         conditions.append(
             f"overall confidence falls further from current {confidence}/100"
@@ -604,12 +594,14 @@ def build_analyst_from_alert_parts(
     would_avoid = "Would avoid if: " + "; ".join(conditions[:3]) + "."
 
     # ── Final recommendation ────────────────────────────────────────────────
-    qualifier = {"S": "Strong signal — ", "A": "Solid edge — ", "B": "Moderate edge — "}.get(
-        decision_tier, ""
+    qualifier = (
+        "Strong signal — " if confidence >= 80
+        else "Solid edge — " if confidence >= 65
+        else "Directional signal — "
     )
     final_recommendation = (
         f"{qualifier}recommended {decision_rec} on {player_name} {stat_type} ({line:.1f}) "
-        f"in {sport} at {confidence}/100 confidence ({decision_tier}-tier)."
+        f"in {sport} at {confidence}/100 confidence."
     )
 
     return AnalystNarrative(

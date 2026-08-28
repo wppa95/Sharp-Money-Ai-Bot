@@ -577,13 +577,12 @@ class TestV34RegressionGuard:
             "_fast_resume must be removed from market_engine — Fast Resume is no longer supported"
         )
 
-    def test_mlb_nfl_under_tier2_rule_in_source(self):
-        """MLB/NFL UNDER blocked at all alert paths — Tier 2 rule must remain."""
+    def test_mlb_nfl_under_has_no_sport_specific_rule_in_source(self):
+        """MLB/NFL UNDER is not blocked by a sport-specific alert rule."""
         import inspect, market_engine as me
         src = inspect.getsource(me.underdog_job)
-        # The strict sport + UNDER block must remain
-        assert "ud_strict_alert_sports" in src or "MLB" in src, (
-            "MLB/NFL UNDER Tier 2 block must remain in underdog_job"
+        assert "mlb_under_gate" not in src, (
+            "MLB/NFL UNDER must not have a dedicated sport-specific gate"
         )
 
     def test_strong_under_signal_in_alerts(self):
