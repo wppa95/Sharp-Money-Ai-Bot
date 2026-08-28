@@ -2554,9 +2554,9 @@ async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 _rec  = getattr(r, "recommendation", "")
                 _tier = getattr(r, "decision_tier", "")
                 _rec_icon = "⬆️" if _rec == "OVER" else ("⬇️" if _rec == "UNDER" else "")
+                _source = getattr(r, "provider", None) or "Underdog"
+                _source_icon = "🟣" if _source == "PrizePicks" else "🐶"
                 lines.append(
-                    _source = getattr(r, "provider", None) or "Underdog"
-                    _source_icon = "🟣" if _source == "PrizePicks" else "🐶"
                     f"  {_source_icon} <b>{_source} PICK</b> · "
                     f"{_rec_icon} <b>{r.player_name}</b>  {r.stat_type}  "
                     f"<code>{_lv:.1f}</code>  ·  <i>{r.sport}</i>"
