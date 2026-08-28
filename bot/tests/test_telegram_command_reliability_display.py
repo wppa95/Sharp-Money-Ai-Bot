@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import re
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -474,3 +475,151 @@ async def test_real_underdog_registry_failure_and_recovery_reach_command_output(
     assert monitor.get_health("Underdog").status == ProviderStatus.OK
     assert "🟢 <b>Underdog</b> — Primary Player Props" in recovered
     assert "🟢 Underdog: ok" in recovered
+
+
+@pytest.mark.asyncio
+async def test_bounded_timeout_returns_before_cancellation_cleanup_finishes():
+    """A slow aiosqlite cancellation must not hold the Telegram command."""
+    cleanup_finished = asyncio.Event()
+
+    async def cancellation_resistant_report():
+        try:
+            await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            await asyncio.sleep(0.08)
+            cleanup_finished.set()
+            return "late result"
+
+    started = time.monotonic()
+    with pytest.raises(asyncio.TimeoutError):
+        await commands._bounded(
+            cancellation_resistant_report(),
+            timeout=0.01,
+        )
+
+    elapsed = time.monotonic() - started
+    assert elapsed < 0.06
+    await asyncio.wait_for(cleanup_finished.wait(), timeout=0.2)
+
+
+@pytest.mark.asyncio
+async def test_stats_keeps_fast_metrics_when_one_report_read_times_out():
+    update, context = _update_and_context()
+    db = MagicMock()
+    db.count_today_actionable_alerts = AsyncMock(return_value=4)
+    db.count_underdog_records = AsyncMock(return_value=99)
+    db.get_all_resolved_pp_edges = AsyncMock(return_value=[])
+    db.get_tracking_summary = AsyncMock(return_value={"total": 12})
+
+    async def slow_prizepicks_count():
+        await asyncio.sleep(1)
+
+    db.count_today_pp_alerts = slow_prizepicks_count
+
+    with (
+        patch("commands._check_allowed", return_value=True),
+        patch("commands._db", db),
+        patch("commands._COMMAND_TIMEOUT_SECONDS", 0.01),
+    ):
+        await asyncio.wait_for(commands.cmd_stats(update, context), timeout=0.2)
+
+    message = update.message.reply_text.await_args.args[0]
+    assert "Underdog:    <b>4</b>" in message
+    assert "PrizePicks (PropLine): <b>unavailable</b>" in message
+    assert "Tracked opportunities: <b>12</b>" in message
+    assert "99 Underdog snapshots" in message
+
+
+@pytest.mark.asyncio
+async def test_dashboard_keeps_provider_activity_when_one_count_read_times_out():
+    update, context = _update_and_context()
+    db = MagicMock()
+    db.count_underdog_records = AsyncMock(return_value=100)
+    db.get_recent_tracked_props = AsyncMock(return_value=[])
+
+    async def provider_history(provider=None):
+        if provider == "Underdog":
+            await asyncio.sleep(1)
+            return 70
+        return 30
+
+    db.count_prop_line_history = AsyncMock(side_effect=provider_history)
+
+    with (
+        patch("commands._check_allowed", return_value=True),
+        patch("commands._db", db),
+        patch("engine.dashboard.DashboardEngine.gather", AsyncMock(return_value=DashboardReport())),
+        patch("providers.get_health_monitor", return_value=_health_monitor()),
+        patch("commands._COMMAND_TIMEOUT_SECONDS", 0.01),
+    ):
+        await asyncio.wait_for(commands.cmd_dashboard(update, context), timeout=0.2)
+
+    activity = update.message.reply_text.await_args_list[-1].args[0]
+    assert "Underdog snapshots/history: <i>unavailable</i>" in activity
+    assert "PrizePicks (PropLine) history: <code>30</code>" in activity
+    assert "🐶 <b>Underdog</b>" in activity
+    assert "🟣 <b>PrizePicks</b>" in activity
+
+
+@pytest.mark.asyncio
+async def test_funnel_keeps_fast_pipeline_sections_when_scan_read_times_out():
+    update, context = _update_and_context()
+    db = MagicMock()
+    db.get_funnel_summary = AsyncMock(
+        return_value={"tracked": 3, "by_sport": []}
+    )
+    db.get_telegram_reconciliation = AsyncMock(
+        return_value={
+            "by_provider": {
+                "Underdog": {"observed": 10, "evaluated": 8},
+                "PrizePicks": {"observed": 5, "evaluated": 4},
+            }
+        }
+    )
+
+    async def slow_scan_summary(*args, **kwargs):
+        await asyncio.sleep(1)
+
+    db.get_scan_cycle_summary = slow_scan_summary
+
+    with (
+        patch("commands._check_allowed", return_value=True),
+        patch("commands._db", db),
+        patch("commands._COMMAND_TIMEOUT_SECONDS", 0.01),
+    ):
+        await asyncio.wait_for(commands.cmd_funnel(update, context), timeout=0.2)
+
+    message = update.message.reply_text.await_args_list[-1].args[0]
+    assert "Provider Pipeline" in message
+    assert "Observed: <code>10</code>  ·  Evaluated: <code>8</code>" in message
+    assert "Observed: <code>5</code>  ·  Evaluated: <code>4</code>" in message
+    assert "Candidate records tracked: <b>3</b>" in message
+    assert "Could not load funnel data" not in message
+
+
+@pytest.mark.asyncio
+async def test_current_provider_reports_do_not_present_pandascore():
+    update, context = _update_and_context()
+    monitor = _health_monitor()
+
+    with (
+        patch("commands._check_allowed", return_value=True),
+        patch("providers.get_health_monitor", return_value=monitor),
+    ):
+        await commands.cmd_providers(update, context)
+
+    providers_message = update.message.reply_text.await_args.args[0]
+    assert "Underdog" in providers_message
+    assert "PrizePicks" in providers_message
+    assert "PandaScore" not in providers_message
+
+    update, context = _update_and_context()
+    with (
+        patch("commands._check_allowed", return_value=True),
+        patch("providers.get_health_monitor", return_value=monitor),
+    ):
+        await commands.cmd_config(update, context)
+
+    config_message = update.message.reply_text.await_args.args[0]
+    assert "CS2 current PrizePicks lines: <b>PropLine</b>" in config_message
+    assert "PandaScore" not in config_message
