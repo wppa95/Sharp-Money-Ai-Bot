@@ -1,0 +1,680 @@
+🔴 FINAL FRAMEWORK AUDIT + ALERT LOGIC CLEANUP
+
+⚠️ IMPORTANT — READ FIRST
+
+Do NOT waste unnecessary time or unnecessary credits on unnecessary things.
+
+Do NOT ask me which Agent mode to use. Always use the recommended/appropriate Agent mode automatically.
+
+Do NOT ask me whether to use Free, Power, or Max. Automatically choose the recommended model based on task complexity. Use Free when sufficient and Power/Max only when genuinely necessary. Do not pause for approval.
+
+Do NOT redo completed work.
+
+Do NOT redesign the architecture.
+
+Do NOT refactor unrelated systems.
+
+Do NOT change unrelated betting rules, scoring, providers, scheduler behavior, or database behavior.
+
+Make only the smallest targeted changes required by this task.
+
+DO NOT create a checkpoint until the audit, fixes, tests, and verification are complete.
+
+⸻
+
+1. GOAL
+
+Perform a complete audit of the current Sharp Money Bot framework and determine whether any obsolete classification/qualification framework remains anywhere in the active monitoring, evaluation, persistence, reporting, or Telegram delivery paths.
+
+If any retired framework remains and is no longer required, remove it completely.
+
+Do not merely hide it from one command.
+
+Trace the actual framework through:
+
+ingestion → snapshot → evaluation → scoring → classification → persistence → selection → alert delivery → Telegram reporting → dashboard/funnel
+
+Remove obsolete logic at the appropriate source point so it cannot leak back into another command or delivery path.
+
+⸻
+
+2. RETIRED FRAMEWORK — MUST NOT REMAIN AS ACTIVE LOGIC
+
+Search the relevant codebase for active monitoring/classification logic involving:
+
+* PASS
+* decision_pass
+* not_immediate
+* Watchlist
+* WATCHLIST ONLY
+* Near-Miss
+* S-Tier
+* A-Tier
+* B-Tier
+* C-Tier
+* Tier 1
+* Tier 2
+* S/A/B/C qualification gates
+* old accepted/rejected classification
+* old rejection classification
+* legacy candidate qualification gates
+
+Do not remove legitimate uses of ordinary words such as “pass” when they are unrelated to the retired betting-monitoring framework.
+
+Distinguish ordinary technical/English usage from the obsolete betting classification system.
+
+The retired framework must not remain as a hidden alert gate.
+
+⸻
+
+3. 🚨 CRITICAL ALERT RULE — DIRECTION IS THE ONLY QUALIFICATION GATE
+
+For both Underdog and PrizePicks/PropLine actionable alerts:
+
+The only qualification gate is valid betting direction.
+
+Valid direction means:
+
+* OVER / MORE
+* UNDER / LESS
+
+A prop with a valid betting direction must remain eligible for the alert pipeline.
+
+Do NOT block an otherwise valid directional alert because of:
+
+* S/A/B/C
+* Tier 1/Tier 2
+* PASS
+* Watchlist
+* Near-Miss
+* decision_pass
+* not_immediate
+* confidence threshold
+* BQ threshold
+* MQ threshold
+* evidence completeness threshold
+* minimum history threshold
+* L5/L10/L20/L30 availability
+* cold-start status
+* provider-history availability
+* previous rejection
+* previous delivery
+* previous evaluation
+* score threshold
+* classification label
+* historical sample size
+
+Do not replace these with another hidden qualification threshold.
+
+There must not be a secondary “quality” gate that effectively performs the same job under a different name.
+
+IMPORTANT SAFETY DISTINCTION
+
+Direction-only qualification does NOT mean bypassing legitimate data-integrity and safety protections.
+
+Keep existing protections that are genuinely required for valid delivery, including where already implemented:
+
+* valid player/market data
+* valid provider/source
+* valid active line
+* event/game-state protections
+* stale-line protections
+* duplicate-alert protection
+* existing provider-specific safety checks
+* existing reliability blocks
+* existing delivery integrity protections
+
+These are data-integrity/safety protections, not classification gates.
+
+Do not invent new safety thresholds.
+
+Do not add a replacement tier system.
+
+Do not use scoring labels as hidden alert gates.
+
+Audit the actual path:
+
+provider → active snapshot → evaluation → direction → alert selection → Telegram
+
+and verify that direction is the only qualification decision in that chain apart from required data-integrity/safety protections.
+
+⸻
+
+4. 🐶 UNDERDOG AND 🟣 PRIZEPICKS MUST REMAIN SEPARATE
+
+Do NOT mix the two providers.
+
+🐶 UNDERDOG
+
+Underdog remains the primary Underdog player-prop monitoring/alert system.
+
+Preserve:
+
+* active Underdog source-ID monitoring
+* active prop lifecycle
+* FPR/full-pool rotation
+* line-movement detection
+* rescoring
+* evidence
+* deduplication
+* safety protections
+* historical tracking
+* existing Underdog alert behavior except for removal of obsolete classification gates
+
+Do not apply PrizePicks-specific provider logic to Underdog.
+
+🟣 PRIZEPICKS / PROPLINE
+
+PrizePicks/PropLine remains a separate primary player-prop source.
+
+Preserve:
+
+* PrizePicks/PropLine line identity
+* PrizePicks-specific source data
+* approximately 120-second / 2-minute cadence
+* independent fetching
+* existing PropLine persistence/evidence behavior
+* existing PrizePicks alert behavior except for removal of obsolete classification gates
+
+Do not make PrizePicks dependent on Underdog completing first.
+
+Do not make Underdog dependent on PrizePicks completing first.
+
+They are separate provider feeds within the same overall monitoring system.
+
+⸻
+
+5. PROVIDER-SPECIFIC ALERT OUTPUT
+
+Verify provider identity throughout the entire alert path.
+
+Underdog alert
+
+Must use:
+
+* Underdog provider identity
+* Underdog source/line context
+* Underdog movement information
+
+PrizePicks alert
+
+Must use:
+
+* PrizePicks/PropLine provider identity
+* PrizePicks/PropLine source/line context
+* PrizePicks/PropLine movement information
+
+Never:
+
+* label a PrizePicks alert as Underdog
+* label an Underdog alert as PrizePicks
+* use the wrong provider’s line
+* use the wrong provider’s source ID
+* use the wrong provider’s snapshot/history
+* apply the wrong provider’s alert logic
+
+⸻
+
+6. RETIRED CLASSIFICATIONS MUST NOT APPEAR IN ALERTS
+
+Neither provider’s actionable Telegram alert should expose:
+
+* S-Tier
+* A-Tier
+* B-Tier
+* C-Tier
+* Tier 1
+* Tier 2
+* Watchlist
+* WATCHLIST ONLY
+* Near-Miss
+* PASS
+* decision_pass
+* not_immediate
+
+Do not replace them with another classification hierarchy.
+
+The alert should communicate the actual directional signal and supported information.
+
+⸻
+
+7. UNDERLYING EVALUATION MUST NOT USE RETIRED CLASSIFICATIONS AS GATES
+
+A prop must not be excluded from monitoring/evaluation because of:
+
+* S
+* A
+* B
+* C
+* PASS
+* Watchlist
+* Near-Miss
+* Tier 1
+* Tier 2
+
+These must not determine whether a prop:
+
+* remains monitored
+* remains in rotation
+* gets rescored
+* receives evidence
+* gets tracked
+* gets graded
+* remains in historical analysis
+
+Internal scoring calculations may remain if legitimately needed internally.
+
+The requirement is specifically to remove the retired classification framework as an evaluation/monitoring/alert gate.
+
+⸻
+
+8. CURRENT MONITORING MODEL
+
+The unified monitoring/evaluation model remains the source of truth.
+
+Do NOT introduce:
+
+* Tier 1
+* Tier 2
+* Watchlist
+* Near-Miss
+* PASS classification
+* S/A/B/C qualification gates
+
+Do not create a replacement qualification hierarchy.
+
+All valid directional props should remain eligible for the normal monitoring/evaluation lifecycle subject to legitimate data-integrity and safety protections.
+
+⸻
+
+9. COMMAND AUDIT
+
+Audit all commands for retired-framework leakage.
+
+At minimum inspect:
+
+* /picks
+* /slip
+* /alerts
+* /dashboard
+* /funnel
+* /tracking
+* /status
+* /health
+* /providers
+* /config
+* /performance
+* /backtest
+* /stats
+* /calibration
+* /grade
+* /player
+* /slipstats
+* /market
+* /steam
+* /ev
+* /clv
+* /reconcile
+* /backfill
+* /analyst
+* /rollups
+* /refinement
+
+Commands must remain functional.
+
+Remove obsolete monitoring classifications without breaking legitimate command functionality.
+
+⸻
+
+10. DASHBOARD / FUNNEL
+
+Ensure /dashboard and /funnel do not:
+
+* count Watchlist
+* count Near-Miss
+* count PASS
+* display Tier 1/Tier 2
+* display S/A/B/C qualification
+* display obsolete rejection classifications
+
+They should report the actual current monitoring/evaluation state.
+
+Do not remove useful current-run metrics.
+
+Do not redesign the dashboard.
+
+⸻
+
+11. PROVIDER DISPLAYS
+
+Current player-prop provider displays should show:
+
+* 🟢 Underdog — Primary Player Props
+* 🟢 PrizePicks — PropLine — Primary Player Props
+
+Do NOT display DraftKings/FanDuel as current player-prop providers.
+
+CS2
+
+Current CS2 PrizePicks lines use:
+
+PropLine
+
+Do not present PandaScore as the current CS2 player-prop provider.
+
+Do not require PandaScore for current CS2 PrizePicks/PropLine lines.
+
+If PandaScore remains anywhere, it must only be because of a legitimate separate historical-enrichment function that is actually supported and used.
+
+It must not suppress or block current PropLine CS2 monitoring.
+
+⸻
+
+12. PRIZEPICKS CADENCE
+
+Preserve the existing PrizePicks/PropLine cadence:
+
+approximately 120 seconds / 2 minutes start-to-start.
+
+Verify:
+
+* PrizePicks fetches continue approximately every 120 seconds.
+* Underdog continues independently.
+* One provider does not starve the other.
+* No duplicate polling loop is created.
+* No additional scheduler is created.
+* No concurrency increase is introduced.
+
+Keep existing scheduler/concurrency safeguards.
+
+⸻
+
+13. ACTIVE UNDERDOG ROTATION
+
+Do not regress the completed Underdog active-prop lifecycle.
+
+The active universe remains:
+
+latest active Underdog source-ID state
+
+and FPR remains the sole full-pool rotation.
+
+Every active prop must remain eligible for:
+
+* rescanning
+* rescoring
+* evidence
+* tracking
+* grading
+* future rotations
+
+until event start/removal.
+
+Previously:
+
+* delivered
+* rejected
+* non-actionable
+* unchanged
+* cold-start
+
+props must not disappear from the active monitoring universe solely because of those states.
+
+Do not create another rotation system.
+
+⸻
+
+14. HIT/MISS + EVIDENCE
+
+Do not regress the completed evidence/graded-prop system.
+
+Preserve:
+
+* provider-backed evidence
+* graded-prop evidence
+* L5
+* L10
+* L20
+* L30
+* Season
+* HIT
+* MISS
+* PUSH
+* actual result/value
+* player
+* sport
+* market/stat
+* timestamp
+* historical persistence
+
+Do not fabricate evidence.
+
+Do not make alert delivery a requirement for tracking/grading.
+
+⸻
+
+15. LIVE ALERT VERIFICATION
+
+After the audit/fixes:
+
+Do NOT use /testalert as proof of the real alert path.
+
+Do NOT:
+
+* fabricate a prop
+* fabricate an alert
+* manually insert a fake qualifying record
+* modify thresholds merely to force an alert
+* bypass safety/deduplication
+* manufacture provider data
+
+Allow the existing bot to operate normally.
+
+When a legitimate actionable alert naturally occurs, inspect the actual Telegram message.
+
+Confirm:
+
+* correct provider
+* correct player
+* correct market
+* correct line
+* correct provider/source context
+* valid OVER/MORE or UNDER/LESS direction
+* legitimate signal information
+* no retired classification terminology
+* no hidden classification gate blocked it
+
+If a legitimate alert occurs for Underdog, verify Underdog separately.
+
+If a legitimate alert occurs for PrizePicks/PropLine, verify PrizePicks separately.
+
+If both occur, verify both independently.
+
+⸻
+
+16. IF NO LEGITIMATE ALERT OCCURS
+
+Do NOT fabricate one.
+
+Report honestly:
+
+“No legitimate live alert was generated during the observation window, so the live alert delivery path was not observed.”
+
+Do not claim live alert verification passed based only on tests.
+
+Do not create a checkpoint solely because tests pass.
+
+⸻
+
+17. TESTS
+
+Add or update only focused regression tests necessary to prove:
+
+* Retired classifications are no longer generated by the active monitoring framework.
+* Retired classifications do not act as evaluation gates.
+* PASS is not an active monitoring qualification.
+* Watchlist/Near-Miss is not an active monitoring qualification.
+* Tier 1/Tier 2 is not an active monitoring qualification.
+* S/A/B/C is not an active monitoring qualification.
+* Direction is the only qualification gate for actionable alerts.
+* Legitimate data-integrity/safety protections remain intact.
+* Underdog alert logic remains provider-specific.
+* PrizePicks/PropLine alert logic remains provider-specific.
+* Provider identities cannot be mixed.
+* Underdog lines are not mislabeled PrizePicks.
+* PrizePicks lines are not mislabeled Underdog.
+* CS2 current lines use PropLine.
+* PandaScore is not required for current CS2 player props.
+* DK/FD do not appear as current player-prop providers.
+* All current commands continue returning valid responses.
+* Dashboard/funnel remain functional.
+* Existing identity/evidence/graded-history behavior remains intact.
+* Underdog FPR active-prop lifecycle remains intact.
+* PrizePicks cadence remains approximately 120 seconds.
+* max_instances=1 remains intact.
+
+Do not waste credits rerunning thousands of tests repeatedly.
+
+Run focused tests first.
+
+Run the full suite once after targeted fixes if practical.
+
+⸻
+
+18. LIVE RUNTIME CHECK
+
+After changes, verify:
+
+* Exactly one bot process.
+* Heartbeat current.
+* /health healthy.
+* Underdog fetch healthy.
+* PrizePicks/PropLine fetch healthy.
+* Both providers operate independently.
+* No new command failure traceback.
+* No scheduler overlap.
+* No unnecessary skipped monitoring jobs.
+* No retired classification framework appearing in current runtime output.
+* No DK/FD current-provider leakage.
+* No PandaScore dependency for current CS2 PropLine lines.
+
+Do not restart Railway.
+
+Do not modify Railway.
+
+⸻
+
+19. DO NOT CHANGE UNRELATED SYSTEMS
+
+Do NOT modify:
+
+* scoring formulas
+* BQ/MQ calculations
+* confidence calculations
+* player identity
+* provider evidence
+* graded-prop evidence
+* HIT/MISS/PUSH
+* Underdog FPR architecture
+* Stable Refresh
+* adaptive batching
+* scheduler architecture
+* max_instances=1
+* clean restart
+* historical data
+* OddsAPI
+* PrizePicks authentication
+* Discord
+* unrelated Telegram formatting
+* unrelated betting rules
+
+Do not redesign the bot.
+
+Do not add another monitoring system.
+
+Do not add another polling loop.
+
+Do not increase concurrency.
+
+⸻
+
+20. REPORT RESULTS IN THREE CATEGORIES
+
+At the end, report:
+
+A. CODE AUDIT
+
+Exactly where retired framework logic was found, if anywhere, and exactly what was removed.
+
+Also explicitly state whether any hidden alert qualification gates remain.
+
+B. TEST VERIFICATION
+
+Exactly which focused tests were added/updated and their results.
+
+Clearly distinguish focused tests from the full suite.
+
+C. LIVE VERIFICATION
+
+Exactly what was observed from:
+
+* running bot
+* /health
+* /status
+* /providers
+* /config
+* /picks
+* /alerts
+* actual Telegram alerts, if any
+
+Do not represent code tests as live verification.
+
+Do not represent callback tests as actual Telegram verification.
+
+⸻
+
+21. CHECKPOINT RULE
+
+DO NOT CREATE A CHECKPOINT until:
+
+* The complete audit is finished.
+* Any remaining obsolete framework logic has been removed.
+* Direction-only alert qualification is confirmed.
+* Underdog and PrizePicks/PropLine alert paths remain separate.
+* Provider identities are correct.
+* Focused tests pass.
+* Existing behavior remains intact.
+* Live runtime is healthy.
+* All applicable live verification is honestly reported.
+
+If no legitimate alert naturally occurs, explicitly leave live-alert verification marked UNVERIFIED.
+
+Do not claim full completion when it is not proven.
+
+⸻
+
+🔴 FINAL INSTRUCTION
+
+Audit first. Fix only what is actually found.
+
+The most important requirement is that there must be NO hidden qualification gate beyond valid betting direction and legitimate data-integrity/safety protections.
+
+Do not simply remove the words “Tier,” “PASS,” or “Watchlist” from Telegram formatting while leaving the underlying logic active.
+
+Trace the actual decision path and remove the obsolete framework at its source.
+
+Underdog and PrizePicks/PropLine are separate alert systems. Do not mix their data, provider identity, source IDs, lines, or alert logic.
+
+Do not ask me which Agent mode to use. Always choose the recommended mode automatically.
+
+Do not ask me whether to use Free, Power, or Max. Choose automatically based on task complexity.
+
+Do not waste unnecessary time or credits on unnecessary things.
+
+Do not force an alert.
+
+Do not fabricate evidence.
+
+Do not change thresholds to manufacture an alert.
+
+Do not create a checkpoint until the audit, fixes, testing, and honest verification are complete.
