@@ -2517,7 +2517,13 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # ── Journal subcommand dispatcher ────────────────────────────────────────
     _JOURNAL_SUBCMDS = {"create", "add", "grade", "journal", "j", "history"}
     if args and args[0].lower() in _JOURNAL_SUBCMDS:
-        await _cmd_slip_journal(update, context, args)
+        try:
+            await _bounded(_cmd_slip_journal(update, context, args))
+        except asyncio.TimeoutError:
+            await update.message.reply_text(
+                f"{EMOJI['warn']} Slip journal is busy right now. "
+                "No report data was changed; please retry."
+            )
         return
 
     single_size: Optional[int] = None
@@ -2534,7 +2540,10 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     today = now.strftime("%b %d, %Y")
 
     # ── 1. Fetch provider-owned props (same pool as /picks) ──────────────────
-    ud_props = await _db.get_top_ud_props_for_picks(limit=30, since_hours=6)
+    ud_props = await _report_read(
+        _db.get_top_ud_props_for_picks(limit=30, since_hours=6),
+        fallback=[],
+    )
     # Display filter: hide season-long futures and already-started events
     # (stored & tracked as normal).
     ud_props = [
@@ -2544,7 +2553,10 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         and _is_upcoming_game(getattr(p, "game_time", None))
     ]
     try:
-        pp_props = await _db.get_latest_props_for_provider("PrizePicks", since_hours=24)
+        pp_props = await _report_read(
+            _db.get_latest_props_for_provider("PrizePicks", since_hours=24),
+            fallback=[],
+        )
     except Exception:
         pp_props = []
     pp_props = [
@@ -2570,7 +2582,10 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     # ── 2. Cross-provider enrichment for Underdog rows ───────────────────────
     try:
-        pp_rows = await _db.get_latest_props_for_provider("PrizePicks", since_hours=24)
+        pp_rows = await _report_read(
+            _db.get_latest_props_for_provider("PrizePicks", since_hours=24),
+            fallback=[],
+        )
     except Exception:
         pp_rows = []
 
@@ -2599,9 +2614,12 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     # Override with fresher live snapshot directions where available
     try:
-        _slip_rec_map = await _db.get_ud_recommendations_bulk(
-            [(plh.player_name, plh.sport, plh.stat_type) for plh in ud_props],
-            since_hours=24,
+        _slip_rec_map = await _report_read(
+            _db.get_ud_recommendations_bulk(
+                [(plh.player_name, plh.sport, plh.stat_type) for plh in ud_props],
+                since_hours=24,
+            ),
+            fallback={},
         )
         for _cand in _candidates:
             _k = (_cand.player_name, _cand.sport, _cand.stat_type)
@@ -2909,10 +2927,19 @@ async def cmd_reconcile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     try:
         hours = int(context.args[0]) if context.args else 72
         hours = max(1, min(hours, 720))
-        report = await _db.get_telegram_reconciliation(
-            since_hours=hours,
-            bucket_minutes=60,
+        report = await _report_read(
+            _db.get_telegram_reconciliation(
+                since_hours=hours,
+                bucket_minutes=60,
+            ),
+            fallback=None,
         )
+        if report is None:
+            await update.message.reply_text(
+                f"{EMOJI['warn']} Reconciliation is temporarily unavailable. "
+                "Live monitoring is unaffected."
+            )
+            return
         lines = [
             "🔎 <b>Telegram Alert Reconciliation</b>",
             f"<i>UTC window: last {hours} hours · hourly buckets</i>",
@@ -3786,7 +3813,7 @@ async def cmd_blocks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     try:
         from engine.player_block import PlayerBlock, blocks_summary_telegram
 
-        db_records = await _db.get_active_blocks()
+        db_records = await _report_read(_db.get_active_blocks(), fallback=[])
         now = datetime.now(timezone.utc).replace(tzinfo=None)
 
         blocks = []
@@ -4278,7 +4305,16 @@ async def cmd_player(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
     name_query = " ".join(args)
     try:
-        rows = await _db.get_player_prop_history(name_query, limit=20)
+        rows = await _report_read(
+            _db.get_player_prop_history(name_query, limit=20),
+            fallback=None,
+        )
+        if rows is None:
+            await update.message.reply_text(
+                f"{EMOJI['warn']} Player history is temporarily unavailable. "
+                "Please retry shortly."
+            )
+            return
     except Exception as exc:
         logger.exception("cmd_player: db error: %s", exc)
         await update.message.reply_text(f"{EMOJI['warn']} DB error: {exc}")
@@ -4349,13 +4385,17 @@ async def cmd_slipstats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
 
     try:
-        slip_stats = await _db.get_slip_journal_stats()
+        slip_stats, sport_rows = await _independent_report_reads([
+            _db.get_slip_journal_stats(),
+            _db.get_pick_accuracy_by_sport(limit_sports=10),
+        ])
+        slip_stats = slip_stats if isinstance(slip_stats, dict) else None
+        sport_rows = sport_rows if isinstance(sport_rows, list) else None
         # Pick accuracy per-sport from prop_opportunity_log
-        sport_rows = await _db.get_pick_accuracy_by_sport(limit_sports=10)
     except Exception as exc:
         logger.exception("cmd_slipstats: db error: %s", exc)
-        await update.message.reply_text(f"{EMOJI['warn']} DB error: {exc}")
-        return
+        slip_stats = None
+        sport_rows = None
 
     _thick = "━" * 30
     lines = [
@@ -4373,10 +4413,23 @@ async def cmd_slipstats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             tot  = h + m
             rate = f"{h / tot * 100:.0f}%" if tot > 0 else "—"
             lines.append(f"  {sp:<12} {h}H / {m}M  →  {rate}")
+    elif sport_rows is None:
+        lines.append("  <i>Pick accuracy is temporarily unavailable.</i>")
     else:
         lines.append("  <i>No graded picks yet — data accumulates as games complete.</i>")
 
     # Slip journal stats
+    if slip_stats is None:
+        lines += [
+            "",
+            "<b>SLIP JOURNAL</b>",
+            _thick,
+            "  <i>Slip journal metrics are temporarily unavailable.</i>",
+        ]
+        lines.append(f"\n{_thick}")
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+        return
+
     lines += [
         "",
         f"<b>SLIP JOURNAL</b>  ({slip_stats['total_slips']} graded slips)",
