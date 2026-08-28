@@ -1210,6 +1210,11 @@ async def _run_prizepicks_independent_cycle(context) -> None:
                 decision_tier=decision.decision_tier,
                 confidence=decision.confidence,
                 game_time=getattr(prop, "game_time", None),
+                game_id=str(
+                    getattr(prop, "game_id", "")
+                    or getattr(prop, "event_id", "")
+                    or ""
+                ),
                 provider="PrizePicks",
                 bet_quality_score=decision.confidence,
                 reason_codes=_compute_reason_codes(score, decision),

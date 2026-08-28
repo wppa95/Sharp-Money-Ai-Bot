@@ -54,6 +54,7 @@ class RawGameResult(NamedTuple):
     actual_value: float
     opponent:     Optional[str]  # abbreviation or display name; None if unknown
     source:       str            # "mlb_stats_api" | "espn_gamelog"
+    game_id:      str = ""       # provider event/game identifier when available
 
 
 # ── Stat-type mapping tables ──────────────────────────────────────────────────
@@ -508,6 +509,11 @@ class PlayerStatsProvider:
 
             opponent_obj = split.get("opponent") or {}
             opponent     = opponent_obj.get("abbreviation") or opponent_obj.get("name")
+            game_id      = str(
+                split.get("gamePk")
+                or (split.get("game") or {}).get("gamePk")
+                or ""
+            )
 
             results.append(RawGameResult(
                 player_name  = player_name,
@@ -517,6 +523,7 @@ class PlayerStatsProvider:
                 actual_value = raw_val,
                 opponent     = opponent,
                 source       = "mlb_stats_api",
+                game_id      = game_id,
             ))
 
         logger.debug(
@@ -682,6 +689,7 @@ class PlayerStatsProvider:
                     actual_value = val,
                     opponent     = opp,
                     source       = "espn_gamelog",
+                    game_id      = str(event_id),
                 ))
             return results
 
