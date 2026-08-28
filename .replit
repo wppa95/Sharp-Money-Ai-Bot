@@ -22,7 +22,7 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "python bot/main.py"
+args = "BOT_HEALTH_PORT=8081 python bot/main.py"
 
 [workflows.workflow.metadata]
 outputType = "console"

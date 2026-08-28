@@ -185,14 +185,37 @@ _health_runner: Optional[Any] = None
 
 # ── HTTP health-check server ───────────────────────────────────────────────────
 
+def _health_server_port() -> tuple[int, str]:
+    """Return the health port and the configuration source used.
+
+    The local bot workflow shares the workspace with the API and mockup
+    artifacts, which own ports 8080 and 8081. Keep an explicit bot-only
+    override for that environment, while continuing to honor deployment
+    platforms' PORT contract.
+    """
+    raw_port = os.environ.get("BOT_HEALTH_PORT")
+    source = "BOT_HEALTH_PORT"
+    if not raw_port:
+        raw_port = os.environ.get("PORT")
+        source = "PORT"
+    if not raw_port:
+        return 8099, "local default"
+
+    port = int(raw_port)
+    if port <= 0:
+        raise ValueError(f"{source} must be a positive port, got {raw_port!r}")
+    return port, source
+
+
 async def _start_health_server() -> None:
     """
     Start a minimal HTTP health-check server so uptime monitors can verify the
     bot process is alive.
 
-    Listens on the PORT environment variable (Replit deployments set this to the
-    port mapped to external port 80).  Falls back to 8080 when PORT is unset
-    (local dev).
+    Listens on BOT_HEALTH_PORT when explicitly configured for the local bot
+    workflow.  Otherwise it honors PORT (the deployment platform contract) and
+    falls back to 8099 locally so it does not collide with the API or mockup
+    artifacts.
 
     Routes:
         GET /          → 200 OK
@@ -210,7 +233,7 @@ async def _start_health_server() -> None:
     try:
         import aiohttp.web as _web
 
-        port = int(os.environ.get("PORT", 8080))
+        port, port_source = _health_server_port()
 
         async def _ok(_req: _web.Request) -> _web.Response:
             return _web.Response(text="OK", content_type="text/plain")
@@ -224,7 +247,11 @@ async def _start_health_server() -> None:
         await _health_runner.setup()
         site = _web.TCPSite(_health_runner, "0.0.0.0", port)
         await site.start()
-        logger.info("Health server listening on port %d", port)
+        logger.info(
+            "Health server listening on port %d (source=%s)",
+            port,
+            port_source,
+        )
     except Exception as exc:  # noqa: BLE001
         # Non-fatal — the Telegram bot continues even if health server fails.
         logger.warning("Health server failed to start (non-fatal): %s", exc)

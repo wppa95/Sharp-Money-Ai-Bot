@@ -1,0 +1,59 @@
+modules = ["nodejs-24", "python-3.11"]
+
+[deployment]
+run = ["python", "bot/main.py"]
+deploymentTarget = "vm"
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Sharp Money Bot"
+
+[[workflows.workflow]]
+name = "Sharp Money Bot"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "BOT_HEALTH_PORT=8099 python bot/main.py"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 20000
+
+[nix]
+channel = "stable-25_05"
+packages = ["nano"]
+
+[userenv]
+
+[userenv.shared]
+ALLOWED_USER_IDS = "7245518659"
+UD_SLEEPER_ENABLED = "true"
+ODDS_API_ENABLED = "true"
+DRAFTKINGS_ENABLED = "true"
+FANDUEL_ENABLED = "true"
+FPR_BATCH_SIZE = "10000"
+PROPLINE_API_KEY = "35420e7f127026b8c2cf29138dcab69c"
+
+[[ports]]
+localPort = 8080
+externalPort = 80
+
+[[ports]]
+localPort = 8081
+externalPort = 8081
+
+[[ports]]
+localPort = 8099
+externalPort = 8099
