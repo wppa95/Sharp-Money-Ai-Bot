@@ -339,7 +339,6 @@ class AlertCLVSeed(Base):
     tier             = Column(String(16),  nullable=True)      # "S" | "A" | "B" | "PASS" | "High" | …
     # Timing
     game_time        = Column(DateTime,    nullable=True)      # UTC game start — when to harvest
-    game_id          = Column(String(128), nullable=False, default="", index=True)
     alerted_at       = Column(DateTime,    default=datetime.utcnow, nullable=False)
     # CLV result (populated by harvest job)
     clv_pct          = Column(Float,       nullable=True)      # computed CLV%; None until harvested
@@ -418,6 +417,7 @@ class PropOpportunityLog(Base):
     decision_tier  = Column(String(8),   nullable=False)   # S | A | B | PASS
     confidence     = Column(Integer,     nullable=False, default=0)
     game_time      = Column(DateTime,    nullable=True)
+    game_id        = Column(String(128), nullable=False, default="", index=True)
     detected_at    = Column(DateTime,    default=datetime.utcnow, nullable=False)
     # Grading — filled by the opportunity_grader job after game_time passes
     result         = Column(String(8),   nullable=False, default="PENDING", index=True)
