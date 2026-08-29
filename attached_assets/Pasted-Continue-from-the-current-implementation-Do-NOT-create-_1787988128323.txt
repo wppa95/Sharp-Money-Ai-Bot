@@ -1,0 +1,467 @@
+Continue from the current implementation.
+
+Do NOT create a new task.
+Do NOT propose a follow-up task.
+If an existing task directly covers this work, you may close it after implementation and local validation.
+
+Do NOT perform live/production verification.
+Do NOT restart Railway.
+Do NOT deploy Railway.
+Do NOT send Telegram commands.
+Do NOT send test alerts.
+Do NOT query production data.
+Do NOT fabricate production data.
+
+1. CORE REPORTING RULE
+
+The bot’s reporting must distinguish the entire persisted prop universe from directional opportunities and Telegram delivery.
+
+A prop being non-actionable or not delivered does NOT mean it was not tracked.
+
+The authoritative reporting population must come from the persistent provider-separated prop observation/history data.
+
+Do NOT use Telegram delivery counts as the definition of tracking.
+
+Do NOT use candidate-log counts as the primary definition of tracking when normalized persistent history exists.
+
+2. PROVIDER SEPARATION
+
+Underdog and PrizePicks / PropLine must remain completely provider-separated in reporting.
+
+Every relevant display must correctly identify:
+
+🐶 Underdog
+🟣 PrizePicks
+
+Do not allow PP data to inherit Underdog labels, lines, sports, recommendations, or counts.
+
+Do not allow Underdog data to inherit PP labels, lines, sports, recommendations, or counts.
+
+3. ACTIVE TRACKING VS DIRECTIONAL VS DELIVERY
+
+Keep these populations separate:
+
+Tracked
+
+Every persisted eligible prop observation/snapshot that belongs to the active/current tracking universe.
+
+Directional
+
+Tracked props for which the model produced a valid OVER or UNDER direction.
+
+Delivered
+
+Directional opportunities actually sent to Telegram.
+
+Pending
+
+Tracked/directional records whose event has not yet produced a final result.
+
+Resolved
+
+Records with a final result available.
+
+HIT / MISS / PUSH
+
+Resolved directional outcomes based on the stored line and direction.
+
+Do NOT collapse these populations into one number.
+
+A prop can be:
+
+Tracked → Directional → Pending → Resolved → HIT/MISS/PUSH
+
+without ever being delivered to Telegram.
+
+4. EVERY PROP REMAINS GRADEABLE
+
+Every persisted monitored prop should remain eligible for eventual grading when:
+
+* its event completes
+* the actual result becomes available
+* the prop has sufficient information to grade
+
+This applies regardless of:
+
+* provider
+* sport
+* whether it moved
+* whether it was actionable
+* whether it was delivered
+* whether it was previously rejected
+* whether it was previously rescanned
+* whether it had evidence
+* whether it was cold-start
+
+Do NOT restrict grading to Telegram-delivered picks.
+
+5. HIT / MISS / PUSH
+
+Use the existing grading infrastructure.
+
+When an eligible tracked directional prop resolves, persist:
+
+* Provider
+* Player
+* Sport
+* Market/stat
+* Line
+* Direction
+* Event/game
+* Timestamp/date
+* Actual result/value
+* HIT
+* MISS
+* PUSH where applicable
+
+Prevent:
+
+* duplicate grading
+* duplicate dates
+* cross-player contamination
+* cross-provider contamination
+* incorrect line/direction association
+
+Do not fabricate results.
+
+6. COMMANDS THAT MUST USE CORRECT POPULATIONS
+
+Audit and correct, where necessary:
+
+* /picks
+* /slip
+* /dashboard
+* /alerts
+* /grade
+* /grades
+* /stats
+* /performance
+* /backtest
+* /calibration
+* /tracking
+* /player
+* /slipstats
+* /funnel
+* /reconcile
+
+Each command must use the correct population for what it claims to display.
+
+Specifically:
+
+/grade / /grades
+
+Must report grading from persisted directional tracked opportunities, not only Telegram-delivered alerts.
+
+/stats
+
+Must clearly distinguish:
+
+* tracked
+* directional
+* delivered
+* pending
+* resolved
+* HIT
+* MISS
+* PUSH
+
+and provide provider-separated totals.
+
+/tracking
+
+Must represent the persistent tracked prop population, not merely actionable/delivered opportunities.
+
+/performance
+
+Must use resolved tracked directional opportunities.
+
+/backtest
+
+Must prefer provider-separated resolved tracked opportunities over legacy EV-only records when normalized tracked data exists.
+
+/calibration
+
+Must use the appropriate resolved tracked population and retain provider context.
+
+/alerts
+
+Must remain a historical delivery ledger/report.
+
+Do not hide previously delivered alerts merely because their games have started.
+
+/funnel
+
+Must distinguish observation/tracking counts from candidate/actionable/delivery counts.
+
+/reconcile
+
+Must preserve provider-separated source → tracked → directional/actionable → delivered accounting.
+
+7. DASHBOARD
+
+The dashboard must clearly distinguish:
+
+Player Prop Activity
+
+* Underdog observations/tracked
+* PrizePicks observations/tracked
+
+Directional Opportunities
+
+* Underdog
+* PrizePicks
+
+Delivered Alerts
+
+* Underdog
+* PrizePicks
+
+Pending / Resolved
+
+* Underdog
+* PrizePicks
+
+HIT / MISS / PUSH
+
+* Underdog
+* PrizePicks
+
+Do not present a small directional/delivery number as though it represents the entire tracked prop universe.
+
+8. RECENTLY TRACKED PROPS
+
+Recently Tracked Props must represent actual persistent tracking data.
+
+Keep:
+
+* all sports
+* both providers
+* most recent tracked observations/outcomes
+* provider labels
+
+Do NOT hard-code NFL.
+
+Do NOT limit this section to Telegram-delivered picks.
+
+Do NOT use candidate-log rows as the primary source when normalized persistent tracking history exists.
+
+9. PLAYER HISTORY
+
+/player NAME should distinguish:
+
+* tracked opportunities
+* directional opportunities
+* delivered picks
+* pending
+* resolved
+* HIT/MISS/PUSH
+
+Provider must remain visible.
+
+Do not make a player appear to have only three tracked records simply because only three directional records were generated.
+
+10. SLIP / PICK REPORTING
+
+/picks and /slip are actionable/directional displays.
+
+They should NOT redefine the underlying tracked universe.
+
+They may show only current valid pregame directional opportunities where appropriate, while historical tracking and grading remain independent.
+
+Preserve the current provider-specific labels:
+
+* 🐶 UNDERDOG PICK
+* 🟣 PRIZEPICKS PICK
+
+Do NOT use generic:
+
+ACTIONABLE BET PICK
+
+for provider-specific player-prop alerts.
+
+Do NOT add “verify before placing” language.
+
+11. FOOTBALL
+
+Preserve the existing football exclusion.
+
+Football and football-related sports remain outside active monitoring/provider processing.
+
+Do NOT reintroduce football into active tracking.
+
+Historical football records already stored must remain intact.
+
+Soccer/association football remains supported.
+
+12. PREGAME SAFETY
+
+Preserve the existing strict pregame protection.
+
+Only current valid pregame directional opportunities may appear in actionable displays.
+
+Started/live/in-progress/final events must not be presented as current actionable picks.
+
+Historical alert reporting remains separate.
+
+13. PROVIDER-SPECIFIC COUNTS
+
+Make sure the reporting layer does not produce contradictions such as:
+
+* /status showing PP history exists
+* /funnel showing PP observed = 0
+* /stats showing PP = 0
+* /alerts showing PP deliveries
+* while persistent PP history exists
+
+The same normalized provider-separated persistent source should be used consistently wherever appropriate.
+
+Do not erase historical records to make counts match.
+
+Fix the accounting logic instead.
+
+14. LEGACY FALLBACKS
+
+Legacy candidate-log / EV records may remain as fallback only when normalized persistent tracking data is genuinely unavailable.
+
+Do not let legacy records override normalized provider-separated tracking history.
+
+Do not delete legacy data.
+
+15. NO ARCHITECTURAL REDESIGN
+
+Do NOT change:
+
+* Underdog ingestion
+* PrizePicks ingestion
+* FPR
+* active source-ID lifecycle
+* provider identity
+* evidence providers
+* graded-prop evidence lifecycle
+* scoring
+* BQ/MQ
+* confidence
+* pregame safety
+* deduplication
+* scheduler
+* adaptive batching
+* max_instances=1
+* football exclusion
+* soccer monitoring
+* Stable Refresh removal
+* CLV architecture
+* Railway configuration
+
+Make the smallest reporting/accounting changes necessary.
+
+16. TESTS
+
+Add/update focused regression tests proving:
+
+* All persisted snapshots remain tracked.
+* Tracking is independent of Telegram delivery.
+* Directional counts are separate from tracked counts.
+* Delivered counts are separate from tracked counts.
+* Pending/resolved populations are separate.
+* HIT/MISS/PUSH grading is delivery-independent.
+* Underdog and PrizePicks remain provider-separated.
+* PP history appears in reporting when normalized PP history exists.
+* /stats reports correct populations.
+* /tracking reports persistent tracking.
+* /grade uses persisted directional tracked opportunities.
+* /performance uses resolved tracked opportunities.
+* /backtest prefers normalized resolved tracked opportunities.
+* /calibration uses the correct resolved population.
+* /alerts remains delivery history.
+* /funnel distinguishes observation/tracking/actionable/delivery populations.
+* /reconcile preserves provider-separated accounting.
+* /dashboard Recently Tracked Props includes all sports/providers.
+* /player distinguishes tracking from directional/delivery.
+* /picks and /slip remain actionable displays without redefining tracking.
+* Provider labels remain correct.
+* No generic ACTIONABLE BET PICK label remains for provider-specific player-prop alerts.
+* No “verify before placing” language is reintroduced.
+* Pregame filtering remains intact.
+* Football remains excluded.
+* Historical football records remain intact.
+* No duplicate grading occurs.
+* No fabricated results are generated.
+
+Run:
+
+1. Focused reporting/accounting regression tests.
+2. Full existing test suite.
+3. Python compilation.
+4. git diff --check.
+
+17. NO LIVE VERIFICATION
+
+NO LIVE/PRODUCTION VERIFICATION IS REQUIRED.
+
+Do NOT:
+
+* restart Railway
+* deploy Railway
+* send Telegram commands
+* send test alerts
+* wait for natural game results
+* query production data
+
+Local tests and static/code-path verification are sufficient for this change.
+
+18. TASK MANAGEMENT
+
+Do NOT create a new task.
+
+Do NOT propose another follow-up task.
+
+If the existing reporting/accounting task directly covers this work, close that existing task after successful implementation and local validation.
+
+FINAL REPORT
+
+Report exactly:
+
+IMPLEMENTED
+
+What reporting/accounting logic changed.
+
+TESTED
+
+* Focused tests: X passed
+* Full suite: X passed
+* Compilation: PASS/FAIL
+* Diff check: PASS/FAIL
+
+PRESERVED
+
+Confirm:
+
+* Underdog
+* PrizePicks
+* all-sport tracking
+* persistent snapshot history
+* directional grading
+* HIT/MISS/PUSH
+* provider separation
+* pregame safety
+* football exclusion
+* soccer monitoring
+* FPR
+* Stable Refresh removal
+* scheduler
+* adaptive batching
+* max_instances=1
+* historical data
+
+were preserved.
+
+LIVE VERIFICATION
+
+NO LIVE/PRODUCTION VERIFICATION WAS PERFORMED.
+
+TASK
+
+Do not create a new task.
+If an existing reporting/accounting task covers this work, close that existing task only.
+
+Do not propose additional tasks.
