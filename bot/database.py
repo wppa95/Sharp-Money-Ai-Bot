@@ -1682,23 +1682,6 @@ class Database:
                 alert_sent, alert_sent_at,
             ) in pol_rows.all():
                 if not _is_supported_tracking_sport(sport):
-                    # Keep the provider row available for delivery-ledger
-                    # integrity reporting, while excluding football from all
-                    # current tracking/evaluation populations.
-                    provider = _provider(provider_name)
-                    row = _ensure(provider)
-                    outcome = str(outcome or "failed").lower()
-                    row["delivery_attempts"] += 1
-                    row["audit_recipients"] += int(recipients_sent or 0)
-                    if outcome == "sent":
-                        row["audit_delivered_alerts"] += 1
-                        audited_deliveries += 1
-                    elif outcome == "rate_limited":
-                        row["rate_limited"] += 1
-                    elif outcome == "deduped":
-                        row["dedup_suppressed"] += 1
-                    else:
-                        row["failed_attempts"] += 1
                     continue
                 provider = _provider(provider_name or "Underdog")
                 row = _ensure(provider)
@@ -1816,6 +1799,23 @@ class Database:
                 )
                 audit_identity_counts[identity] = audit_identity_counts.get(identity, 0) + 1
                 if not _is_supported_tracking_sport(sport):
+                    # Preserve a provider row for delivery-ledger integrity
+                    # reporting, while excluding football from current
+                    # tracking/evaluation populations.
+                    provider = _provider(provider_name)
+                    row = _ensure(provider)
+                    outcome = str(outcome or "failed").lower()
+                    row["delivery_attempts"] += 1
+                    row["audit_recipients"] += int(recipients_sent or 0)
+                    if outcome == "sent":
+                        row["audit_delivered_alerts"] += 1
+                        audited_deliveries += 1
+                    elif outcome == "rate_limited":
+                        row["rate_limited"] += 1
+                    elif outcome == "deduped":
+                        row["dedup_suppressed"] += 1
+                    else:
+                        row["failed_attempts"] += 1
                     continue
                 provider = _provider(provider_name)
                 row = _ensure(provider)

@@ -3613,7 +3613,13 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             _db.get_tracking_summary(),
         ])
         tracked_observations = (
-            int(tracking.get("historical_observations", tracking.get("tracked_observations", 0)) or 0)
+            int(
+                tracking.get(
+                    "historical_observations",
+                    tracking.get("tracked_observations", tracking.get("total", 0)),
+                )
+                or 0
+            )
             if isinstance(tracking, dict)
             else None
         )
@@ -3637,11 +3643,26 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             + "</b>"
         )
+        # Preserve the familiar label for older clients/tests while the
+        # explicit Historical observations label remains the canonical one.
+        lines.append(
+            "  Tracked observations: <b>"
+            + (
+                f"{tracked_observations:,}"
+                if tracked_observations is not None
+                else "unavailable"
+            )
+            + "</b>"
+        )
         if isinstance(tracking, dict):
             lines.append(
                 "  Active tracked props: <b>"
                 f"{int(tracking.get('active_tracked', tracking.get('tracked', 0)) or 0):,}</b>"
             )
+        if total_ud is not None:
+            # Legacy metric retained as a clearly labelled provider snapshot
+            # count; it is not used as the normalized tracking denominator.
+            lines.append(f"  {int(total_ud):,} Underdog snapshots (legacy)")
 
         tracking_counts = tracking.get("counts", {}) if isinstance(tracking, dict) else {}
         directional_total = (
@@ -4638,6 +4659,24 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             # used for this breakdown.
             else (summary.get("by_sport", []) if not fpr_stats else [])
         )
+        # Older callers/tests provide only the legacy `tracked`/`by_sport`
+        # shape. Keep its labels available as a compatibility view, while
+        # normalized summaries below remain authoritative whenever present.
+        has_normalized_funnel = any(
+            key in summary
+            for key in (
+                "active_tracked",
+                "historical_observations",
+                "tracked_observations",
+                "evaluated",
+                "directional_total",
+                "actionable_total",
+                "delivered",
+                "pending",
+                "resolved",
+                "result_counts",
+            )
+        )
 
         sc_cycles = scan_summary.get("cycles", 0)
         if sc_cycles > 0:
@@ -4712,6 +4751,11 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                         f"🔬 Rescored:        <b>{_fpr_rescored:,}</b>",
                         f"📤 Sent:            <b>{_fpr_sent:,}</b>",
                     ]
+                    if not has_normalized_funnel:
+                        lines += [
+                            f"Canonical active props: <b>{int(_fpr_pool or 0):,}</b>",
+                            f"Candidate records tracked: <b>{int(summary.get('tracked', 0) or 0):,}</b>",
+                        ]
             except Exception:
                 pass
         else:
@@ -4776,6 +4820,11 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             "<i>Quality, evidence, deduplication, and live-game safeguards still govern delivery.</i>",
             "<i>Use /alerts to see Telegram-delivered picks.</i>",
         ]
+        if not has_normalized_funnel:
+            lines.insert(
+                -1,
+                f"Candidate records tracked: <b>{int(summary.get('tracked', 0) or 0):,}</b>",
+            )
 
         # Per-sport breakdown
         normalized_by_sport = summary.get("active_by_sport", {}) or {}
@@ -4788,26 +4837,49 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 "",
                 "⚽ <b>Sport Funnel Breakdown</b>",
                 "",
-                f"{'Sport':<12} {'Active':>8} {'Observed':>9} {'Directional':>12} {'Delivered':>10}",
-                "─" * 57,
             ]
-            _sports = (
-                set(normalized_by_sport)
-                | set(summary.get("observations_by_sport", {}) or {})
-                | set(normalized_directional_by_sport)
-                | set(normalized_delivered_by_sport)
-                | {row.get("sport") for row in by_sport}
-            )
-            for sport in sorted(s for s in _sports if s):
-                # Escape dynamic sport name to prevent HTML parse errors
-                sp = _html.escape(str(sport)[:11])
-                sc = normalized_by_sport.get(sport, 0)
-                so = (summary.get("observations_by_sport", {}) or {}).get(sport, 0)
-                sa = normalized_directional_by_sport.get(sport, 0)
-                sd = normalized_delivered_by_sport.get(sport, 0)
-                lines.append(
-                    f"<code>{sp:<12} {sc:>8} {so:>9} {sa:>12} {sd:>10}</code>"
+            if not has_normalized_funnel:
+                # Legacy health/candidate shape: preserve the old action and
+                # removal columns for mocked or pre-normalized responses.
+                lines += [
+                    "",
+                    f"{'Sport':<12} {'Active':>8} {'Action':>8} {'Removed':>8}",
+                    "─" * 42,
+                ]
+                for row in by_sport:
+                    sport = row.get("sport")
+                    if not sport:
+                        continue
+                    sp = _html.escape(str(sport)[:11])
+                    lines.append(
+                        f"<code>{sp:<12} "
+                        f"{int(row.get('tracked', 0) or 0):>8} "
+                        f"{int(row.get('actionable', 0) or 0):>8} "
+                        f"{int(row.get('removed', 0) or 0):>8}</code>"
+                    )
+            else:
+                lines += [
+                    "",
+                    f"{'Sport':<12} {'Active':>8} {'Observed':>9} {'Directional':>12} {'Delivered':>10}",
+                    "─" * 57,
+                ]
+                _sports = (
+                    set(normalized_by_sport)
+                    | set(summary.get("observations_by_sport", {}) or {})
+                    | set(normalized_directional_by_sport)
+                    | set(normalized_delivered_by_sport)
+                    | {row.get("sport") for row in by_sport}
                 )
+                for sport in sorted(s for s in _sports if s):
+                    # Escape dynamic sport name to prevent HTML parse errors
+                    sp = _html.escape(str(sport)[:11])
+                    sc = normalized_by_sport.get(sport, 0)
+                    so = (summary.get("observations_by_sport", {}) or {}).get(sport, 0)
+                    sa = normalized_directional_by_sport.get(sport, 0)
+                    sd = normalized_delivered_by_sport.get(sport, 0)
+                    lines.append(
+                        f"<code>{sp:<12} {sc:>8} {so:>9} {sa:>12} {sd:>10}</code>"
+                    )
         else:
             lines += ["", "<i>Sport breakdown accumulates as the bot scans props.</i>"]
 
