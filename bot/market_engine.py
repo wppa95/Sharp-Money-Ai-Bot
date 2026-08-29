@@ -1760,6 +1760,7 @@ async def _run_prizepicks_independent_cycle(
             old_line=candidate["previous"],
             new_line=line,
             game_time=getattr(candidate["prop"], "game_time", None),
+            game_status=getattr(candidate["prop"], "provider_status", None),
             score=candidate["score"],
             validation=candidate["validation"],
             decision=candidate["decision"],
@@ -4157,6 +4158,10 @@ async def underdog_job(context) -> None:
                     old_line            = _dq_prev or _dq_line_val,
                     new_line            = _dq_line_val,
                     game_time           = _dq_snap.game_time,
+                    game_status         = (
+                        getattr(_dq_snap, "game_status", None)
+                        or getattr(_dq_snap, "provider_status", None)
+                    ),
                     score               = _dq_score,
                     new_prop            = _dq_is_new,
                     validation          = _dq_val,
@@ -5179,6 +5184,10 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 old_line            = _sr_line,
                 new_line            = _sr_line,
                 game_time           = _sr_snap.game_time,
+                game_status         = (
+                    getattr(_sr_snap, "game_status", None)
+                    or getattr(_sr_snap, "provider_status", None)
+                ),
                 score               = _sr_score,
                 validation          = _sr_val,
                 decision            = _sr_dec,
@@ -5396,6 +5405,10 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         old_line       = _wl_cur_line,
                         new_line       = _wl_cur_line,
                         game_time      = _wl_snap.game_time,
+                        game_status    = (
+                            getattr(_wl_snap, "game_status", None)
+                            or getattr(_wl_snap, "provider_status", None)
+                        ),
                         score          = _wl_score,
                         validation     = _wl_val,
                         decision       = _wl_dec,
@@ -5687,7 +5700,9 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         def _fpr_sort_key(item):
             """Stable ordering for the unified full-pool rotation.
 
-            A line movement is a prompt-priority signal, not a second queue.
+            New observations and line movements are prompt-priority signals,
+            not second queues.  They remain inside the same persisted cursor
+            rotation so ordinary stable props cannot be starved.
             ``is True`` is intentional here: test doubles and legacy rows can
             expose truthy sentinel attributes that are not actual movement
             markers.
@@ -5695,9 +5710,29 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             key, snap = item
             provider, player, stat, sport, line, _source_id = _fpr_parts(key, snap)
             is_mover = getattr(snap, "line_moved", False) is True
+            if not is_mover:
+                _prev_line = getattr(snap, "prev_line", None)
+                try:
+                    is_mover = (
+                        _prev_line is not None
+                        and abs(float(_prev_line) - float(line)) >= 0.01
+                    )
+                except (TypeError, ValueError):
+                    is_mover = False
+            _first_seen = getattr(snap, "first_seen", None)
+            _last_seen = getattr(snap, "last_seen", None)
+            is_new = bool(
+                getattr(snap, "new_prop", False) is True
+                or (
+                    _first_seen is not None
+                    and _last_seen is not None
+                    and _first_seen == _last_seen
+                )
+            )
             external_id = str(getattr(snap, "external_id", None) or "")
             return (
                 0 if is_mover else 1,
+                0 if is_new else 1,
                 sport,
                 provider,
                 player,
@@ -5735,10 +5770,10 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         ]
         mover_keys = [
             key for key, snap in sorted_items
-            if getattr(snap, "line_moved", False) is True
+            if _fpr_sort_key((key, snap))[0] == 0
         ]
         regular_keys = [key for key, snap in sorted_items
-                        if getattr(snap, "line_moved", False) is not True]
+                        if _fpr_sort_key((key, snap))[0] != 0]
         if mover_keys and regular_keys:
             mover_limit = min(
                 len(mover_keys),
@@ -5750,13 +5785,13 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             # priority slot while the cursor's first row remains untouched.
             window_movers = [
                 key for key in cursor_window
-                if getattr(pool_snaps[key], "line_moved", False) is True
+                if _fpr_sort_key((key, pool_snaps[key]))[0] == 0
             ]
             outside_movers = [key for key in mover_keys if key not in cursor_window]
             priority_keys = (window_movers + outside_movers)[:mover_limit]
             regular_batch = [
                 key for key in cursor_window
-                if getattr(pool_snaps[key], "line_moved", False) is not True
+                if _fpr_sort_key((key, pool_snaps[key]))[0] != 0
             ][:fpr_limit - len(priority_keys)]
             batch_keys = priority_keys + regular_batch
             # Fill any unused capacity from this cursor window without
@@ -5768,14 +5803,14 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             batch_keys = batch_keys[:fpr_limit]
             fpr_line_movers = sum(
                 1 for key in batch_keys
-                if getattr(pool_snaps[key], "line_moved", False) is True
+                if _fpr_sort_key((key, pool_snaps[key]))[0] == 0
             )
         else:
             # The normal bounded cursor slice is also the all-movers fallback.
             batch_keys = cursor_window
             fpr_line_movers = sum(
                 1 for key in batch_keys
-                if getattr(pool_snaps[key], "line_moved", False) is True
+                if _fpr_sort_key((key, pool_snaps[key]))[0] == 0
             )
 
         # Advance through the contiguous canonical prefix that was actually
@@ -6047,6 +6082,10 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         old_line        = _fpr_line,
                         new_line        = _fpr_line,
                         game_time       = _fpr_snap.game_time,
+                        game_status     = (
+                            getattr(_fpr_snap, "game_status", None)
+                            or getattr(_fpr_snap, "provider_status", None)
+                        ),
                         score           = _fpr_score,
                         validation      = _fpr_val,
                         decision        = _fpr_dec,

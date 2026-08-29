@@ -3011,7 +3011,10 @@ async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         )
         alerted_opps = [
             r for r in alerted_opps
-            if _is_upcoming_game(getattr(r, "game_time", None))
+            if _is_upcoming_game(
+                getattr(r, "game_time", None),
+                getattr(r, "provider_status", None),
+            )
         ]
         if alerted_opps:
             # "sent" = Telegram API accepted the send; no message ID stored.
@@ -3924,7 +3927,10 @@ async def cmd_analyst(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             if (
                 getattr(s, "alert_sent", False)
                 and getattr(s, "bet_recommendation", None) in ("OVER", "UNDER")
-                and _is_upcoming_game(getattr(s, "game_time", None))
+                and _is_upcoming_game(
+                    getattr(s, "game_time", None),
+                    getattr(s, "provider_status", None),
+                )
             )
         ]
 
