@@ -4816,9 +4816,10 @@ async def underdog_job(context) -> None:
     _release_underdog_scan_slot()
 
 
-# ── Stable Refresh Job ─────────────────────────────────────────────────────────
-# Runs every 2 minutes — separate from underdog_job — using only data already
-# stored in the local DB (zero additional Underdog API calls).
+# ── Legacy Stable Refresh implementation ──────────────────────────────────────
+# Retained for compatibility with direct callers and historical state helpers,
+# but intentionally not registered as a background job. FPR is the sole
+# full-pool rotation and uses the current active monitoring pipeline.
 #
 # PART 1 — Rolling stable-pool rescan:
 #   • Loads all active props from DB via get_latest_underdog_snapshot_per_prop().
@@ -4846,7 +4847,11 @@ _STABLE_WATCHLIST_BATCH_SIZE: int = 200    # max watchlist candidates rescanned 
 
 async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
     """
-    Rolling stable-prop rescore + watchlist rescan.  Runs every 2 minutes.
+    Legacy rolling stable-prop rescore + watchlist rescan.
+
+    This function is not independently scheduled. The live monitoring and FPR
+    lifecycle own active-pool processing; direct callers remain supported for
+    compatibility with existing maintenance/tests.
 
     See module-level docstring above for the full design.
     """

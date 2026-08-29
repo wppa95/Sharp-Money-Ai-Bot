@@ -1,0 +1,243 @@
+Continue from the current implementation.
+
+Do NOT create a new task.
+Do NOT propose a follow-up task.
+You may close an existing task if appropriate.
+
+Do NOT perform live/production verification.
+Do NOT restart Railway.
+Do NOT deploy Railway.
+Do NOT send Telegram commands.
+Do NOT send test alerts.
+Do NOT fabricate production data.
+
+BACKGROUND JOB / SCHEDULER CLEANUP
+
+We need to remove redundant background work from the current Sharp Money Bot.
+
+1. STABLE REFRESH
+
+Remove Stable Refresh as an independent background/scheduled job.
+
+Stable Refresh must NOT run on its own competing cadence.
+
+If Stable Refresh functionality is still required by the current monitoring/FPR lifecycle, preserve that functionality through the existing intended pipeline while removing only the redundant independent scheduler job.
+
+Do NOT create a replacement Stable Refresh job.
+
+Do NOT create another monitoring cadence.
+
+Do NOT create another rotation system.
+
+FPR remains the sole full-pool rotation.
+
+2. AUDIT ALL CURRENT BACKGROUND JOBS
+
+Inspect every currently registered scheduler/background job and determine whether it is:
+
+* Required
+* Redundant
+* Obsolete
+* Duplicate
+* Dead/unused
+* Legacy
+* Still required by a current user-facing feature
+
+Only remove jobs that are genuinely redundant, obsolete, dead, or duplicative.
+
+Do NOT remove a job simply because it runs infrequently.
+
+For every job considered for removal, trace what it actually does and whether another current pipeline already performs the same function.
+
+3. SPECIFICALLY LOOK FOR
+
+Audit for duplicate or obsolete versions of:
+
+* Stable Refresh
+* Full-pool scans
+* Underdog monitoring
+* PrizePicks monitoring
+* Player-prop cycles
+* Legacy EV alert loops
+* Legacy sportsbook alert loops
+* Candidate refreshes
+* Tracking collectors
+* Grading collectors
+* Pregame watchers
+* Evidence/history collectors
+* Duplicate provider polling
+* Duplicate FPR/rotation work
+* Any remaining football processing jobs
+
+Do not remove legitimate required functionality.
+
+4. FOOTBALL
+
+Football and football-related sports are already excluded upstream from active monitoring.
+
+Preserve that behavior.
+
+Football must not consume future:
+
+* provider/API calls
+* monitoring capacity
+* scoring
+* evidence enrichment
+* FPR rotation
+* alert-generation processing
+
+Historical football data remains intact.
+
+Soccer/association football remains supported and must NOT be excluded.
+
+5. REQUIRED SYSTEMS
+
+Preserve all genuinely required jobs for:
+
+* Underdog monitoring
+* PrizePicks monitoring
+* FPR/full-pool rotation
+* persistent snapshot tracking
+* HIT/MISS/PUSH grading
+* required evidence/history processing for supported sports
+* CLV seeding/harvesting if still required
+* necessary maintenance/health functions
+
+Do not duplicate any of these functions.
+
+6. SCHEDULER SAFETY
+
+Preserve:
+
+* max_instances=1
+* no overlapping monitoring cycles
+* unified monitoring cadence
+* adaptive batching
+* clean restart behavior
+
+Do NOT increase concurrency.
+
+The goal is to reduce unnecessary background work and resource consumption.
+
+7. RAILWAY LOGGING
+
+The system previously hit:
+
+Railway rate limit of 500 logs/sec reached for replica
+
+with repeated football AlertScopeFilter warnings.
+
+Preserve the upstream football exclusion already implemented.
+
+Check whether any redundant background job could still generate unnecessary blocked football/EV processing.
+
+Do NOT globally suppress warnings.
+
+Important errors and operational logs must remain visible.
+
+8. NO UNRELATED CHANGES
+
+Do NOT change:
+
+* scoring formulas
+* BQ/MQ
+* confidence
+* provider identity
+* evidence rules
+* grading rules
+* FPR behavior
+* active Underdog source-ID lifecycle
+* PrizePicks source-ID handling
+* provider separation
+* Telegram formatting
+* /picks
+* /slip
+* /dashboard
+* /funnel
+* /stats
+* /tracking
+* pregame-only protection
+* deduplication
+* adaptive batching
+* historical data
+* unrelated providers
+
+Make the smallest targeted scheduler changes.
+
+9. TESTS
+
+Add/update focused tests proving:
+
+* Stable Refresh is no longer independently scheduled.
+* No duplicate Stable Refresh cadence exists.
+* FPR remains the sole full-pool rotation.
+* No duplicate Underdog monitor remains.
+* No duplicate PrizePicks monitor remains.
+* No duplicate FPR/full-pool job remains.
+* Any removed legacy/obsolete jobs are no longer registered.
+* Required jobs remain registered.
+* max_instances=1 remains intact.
+* Football remains excluded from active processing.
+* Soccer remains supported.
+* Existing tracking/grading/evidence behavior remains intact.
+
+Run:
+
+1. Focused scheduler/background-job tests.
+2. Full existing test suite.
+3. Python compilation.
+4. git diff --check.
+
+10. NO LIVE VERIFICATION
+
+Do NOT perform live or production verification.
+
+Do NOT restart Railway.
+Do NOT deploy Railway.
+Do NOT send Telegram commands.
+Do NOT send test alerts.
+Do NOT query production data.
+
+11. TASK MANAGEMENT
+
+Do NOT create a new task.
+
+Do not propose a follow-up task.
+
+If there is an existing task directly covering this work, it may be closed after successful implementation and local validation.
+
+FINAL REPORT
+
+Report:
+
+REMOVED
+
+* Every job actually removed and why.
+
+PRESERVED
+
+* Required jobs that remain.
+
+STABLE REFRESH
+
+* Confirm it is no longer independently scheduled.
+* Confirm any required functionality remains available through the intended current pipeline.
+
+DUPLICATE WORK
+
+* Any redundant processing eliminated.
+
+TESTED
+
+* Focused tests: X passed
+* Full suite: X passed
+* Compilation: PASS/FAIL
+* Diff check: PASS/FAIL
+
+UNVERIFIED LIVE
+NO LIVE/PRODUCTION VERIFICATION WAS PERFORMED.
+
+PRESERVED SYSTEMS
+Confirm Underdog, PrizePicks, FPR, tracking, grading, evidence, provider separation, football exclusion, soccer monitoring, pregame protection, deduplication, adaptive batching, max_instances=1, clean restart, and historical data were preserved.
+
+DO NOT CREATE A NEW TASK.

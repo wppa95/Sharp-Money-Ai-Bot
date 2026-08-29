@@ -124,4 +124,5 @@ def test_reporting_and_scheduler_corrections_are_explicit():
     assert "get_tracking_summary" in stats_source
     assert "get_top_pp_edges" not in stats_source
     assert "interval=3600" in startup_source
-    assert 'name="stable_refresh"' in startup_source
+    assert 'name="stable_refresh"' not in startup_source
+    assert "_stable_refresh_job" not in startup_source

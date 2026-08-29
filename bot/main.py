@@ -95,7 +95,6 @@ from market_engine import (
     consensus_check_job,
     clv_check_job,
     underdog_job,
-    _stable_refresh_job,
     _start_prizepicks_cycle,
 )
 from providers import init_health_monitor
@@ -426,16 +425,6 @@ async def post_init(application: Application) -> None:
             name="full_pool_rescan",
             job_kwargs={"max_instances": 1, "misfire_grace_time": 120},
         )
-        # Stable refresh is the existing DB-only refresh path.  Keep it
-        # single-instance and separate from the FPR cursor; it does not create
-        # a second full-pool rotation.
-        jq.run_repeating(
-            _stable_refresh_job,
-            interval=120,
-            first=120,
-            name="stable_refresh",
-            job_kwargs={"max_instances": 1, "misfire_grace_time": 120},
-        )
         # CLV seed job — every 15 minutes (creates AlertCLVSeed entries for alerts)
         jq.run_repeating(_clv_seed_job,        interval=900,                                first=120, name="clv_seeder")
         # CLV harvest job — every hour (processes seeds after game_time passes)
@@ -469,10 +458,11 @@ async def post_init(application: Application) -> None:
                 name="season_checker",
             )
         logger.info(
-            "Jobs scheduled — underdog: every %ds, stable_refresh: every 120s, "
+            "Jobs scheduled — underdog: every %ds, FPR: every %ds, "
             "season_check: every %ds, heartbeat: every 60s "
             "[PrizePicks/PropLine companion cycle enabled=%s; DK/FD delivery disabled]",
             config.UNDERDOG_POLL_INTERVAL,
+            config.FPR_INTERVAL,
             config.SEASON_CHECK_INTERVAL,
             _propline_enabled,
         )
