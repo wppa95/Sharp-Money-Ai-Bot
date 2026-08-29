@@ -1,0 +1,1031 @@
+🔴 IMPORTANT — READ FIRST
+
+Continue from the current Railway Sharp Money Bot implementation.
+
+The previous stabilization work is already implemented and verified. Do NOT redo or regress completed work.
+
+The remaining task is to finish and live-verify the PrizePicks/PropLine monitoring lifecycle.
+
+DO NOT create a checkpoint until all applicable requirements below are actually verified.
+
+Tests passing alone are NOT sufficient.
+
+⸻
+
+🤖 MODEL SELECTION — DO NOT ASK ME
+
+Never ask me which agent/model mode to use.
+
+Do NOT ask:
+
+“Use a more capable model when needed for this request?”
+
+Do NOT ask me to choose:
+
+* Free
+* Power
+* Max
+
+Always automatically use the recommended capable model for the task.
+
+Continue working without interrupting me for model selection.
+
+⸻
+
+1. ALREADY COMPLETED — DO NOT REGRESS
+
+The following has already been implemented and verified:
+
+* PrizePicks/PropLine dynamically discovers legitimate active sports.
+* PrizePicks scans one sport per shared monitoring cycle for pacing/quota protection.
+* PrizePicks and Underdog remain provider-separated.
+* PP rows do not inherit Underdog recommendations or alternate lines.
+* PP is not incorrectly restricted by Underdog ACTIVE_SPORTS.
+* Legacy score-tier database display gating was removed.
+* Football remains monitored/tracked but is blocked from Telegram.
+* The competing/dead pregame watcher was removed.
+* “Verify before placing” language was removed from healthy active alerts.
+* Active alerts use provider-specific line-freshness timestamps.
+* Obsolete tier/watchlist/pass qualification logic was removed.
+* Direction is the current pick qualification requirement, with legitimate operational safety protections preserved.
+* Full test suite previously passed 4,650+ tests.
+* Railway bot restarted successfully.
+* Exactly one bot process was verified running.
+* PrizePicks and Underdog are both primary player-prop providers.
+
+Do not change these systems unless a regression is specifically discovered.
+
+⸻
+
+2. CORE REMAINING OBJECTIVE
+
+PrizePicks must operate as a full primary player-prop provider alongside Underdog.
+
+The complete lifecycle must be:
+
+PrizePicks/PropLine feed
+→ active props
+→ persistence
+→ rescanning
+→ evaluation
+→ directional qualification
+→ tracking
+→ grading
+→ historical evidence
+→ performance history
+→ provider-specific Telegram output
+
+The system must NOT reduce PrizePicks to:
+
+only props that generated an alert.
+
+Every legitimate PP prop must remain part of the monitored/tracked universe.
+
+⸻
+
+3. CRITICAL ISSUE — PRIZEPICKS ALERTS ARE CURRENTLY NBA-ONLY
+
+I have been receiving PrizePicks alerts, but they have only been NBA props.
+
+This must be investigated and fixed.
+
+PrizePicks must NOT be hard-coded to NBA/MLB alert output.
+
+The system should allow every legitimate active PrizePicks/PropLine sport discovered from the official/current PP source to participate in the alert pipeline.
+
+Examples may include legitimate available sports such as:
+
+* NBA
+* MLB
+* WNBA
+* NHL
+* Soccer
+* Tennis
+* Golf
+* MMA
+* CS/CS2
+* DOTA
+* LOL
+* other legitimate PropLine sports
+
+Do NOT invent unsupported sports.
+
+Do NOT assume a sport exists merely because it exists in the code.
+
+Use actual dynamically discovered/current PP sports.
+
+⸻
+
+4. PP SPORT DISCOVERY MUST FLOW THROUGH THE ENTIRE PIPELINE
+
+Dynamic sport discovery cannot stop at fetching.
+
+For every legitimately discovered PP sport:
+
+* Fetch its props.
+* Persist them.
+* Keep them in the active monitoring universe.
+* Rescan them.
+* Evaluate them.
+* Track them.
+* Grade them when results become available.
+* Allow directional props to qualify for PP Telegram alerts when applicable.
+* Include them in /picks, /alerts, /dashboard, /funnel, and tracking/performance data.
+
+Do NOT let NBA receive special treatment simply because it was the first PP sport implemented.
+
+⸻
+
+5. NO FOOTBALL BETTING OUTPUT
+
+This rule remains absolute.
+
+Football and football-related sports include, but are not limited to:
+
+* NFL
+* NCAAF
+* CFB
+* FCS
+* CFL
+* UFL
+* USFL
+* XFL
+* AFL
+* AFLW
+* other football variants
+
+These sports may remain:
+
+* monitored
+* persisted
+* rescanned
+* evaluated
+* tracked
+* historically graded
+* used for evidence
+
+But they must NEVER reach:
+
+* Telegram betting alerts
+* /picks betting output
+* /slip
+* actionable betting output
+
+Do not remove football from monitoring simply to satisfy the Telegram restriction.
+
+⸻
+
+6. NO LIVE/IN-GAME BETTING PROPS
+
+This applies to BOTH providers.
+
+Underdog
+
+PrizePicks
+
+A prop should become eligible for a new betting recommendation:
+
+* as soon as it becomes legitimately available pre-game, or
+* when it enters the desired pre-game monitoring window.
+
+Target:
+
+24 hours before game/event start when available.
+
+But if a legitimate prop becomes available earlier, it can be monitored immediately.
+
+Once the event/game has started:
+
+Do NOT generate a new betting recommendation.
+
+The prop can remain historically tracked and gradeable.
+
+Do not delete its historical snapshots.
+
+⸻
+
+7. FULL PP RESCANNING
+
+PrizePicks must not only rescan:
+
+* new props
+* line movers
+* actionable props
+* previously alerted props
+
+All active PP props must remain eligible for continuous rescanning.
+
+Use the existing unified monitoring/FPR architecture.
+
+Do NOT create a second scheduler.
+
+Do NOT create a competing PP rotation.
+
+Requirements:
+
+* New PP props enter the active universe.
+* Line movers receive priority.
+* Unchanged PP props continue rotating.
+* Previously evaluated props remain eligible.
+* Previously delivered props remain eligible.
+* Cold-start props remain eligible.
+* Weak/non-actionable props remain eligible.
+* Full PP active coverage progresses through bounded batches.
+
+Delivery deduplication must remain downstream.
+
+⸻
+
+8. FULL-POOL TRACKING IS SEPARATE FROM ALERTS
+
+The tracked universe must be substantially larger than the Telegram alert universe.
+
+Do NOT allow metrics such as:
+
+Total evaluated: 440
+
+when the system has tens of thousands of provider observations.
+
+Do not simply rename the metric.
+
+Fix the underlying lifecycle so provider snapshots remain persistent tracking records independent of Telegram delivery.
+
+Every legitimate PP snapshot must remain:
+
+* tracked
+* persisted
+* eligible for grading
+* available for historical analysis
+
+even if it never becomes a directional pick.
+
+⸻
+
+9. PP GRADING
+
+Every eligible PP prop must be capable of being graded after its event finishes.
+
+Persist:
+
+* Provider
+* Player
+* Sport
+* Market/stat
+* Line
+* Direction where applicable
+* Event/game ID
+* Event date
+* Snapshot timestamp
+* Actual result
+* HIT
+* MISS
+* PUSH where applicable
+
+Do NOT restrict grading to Telegram-delivered picks.
+
+⸻
+
+10. PP RESULTS → PLAYER HISTORY
+
+Real PP outcomes must feed the existing evidence/history system.
+
+Progressively build:
+
+* L5
+* L10
+* L20
+* L30
+* Season
+
+Use actual results only.
+
+Rules:
+
+* 0 real samples → N/A
+* insufficient samples → partial history where appropriate
+* enough real samples → progressively larger windows
+* 30+ real samples → full windows
+
+Never turn missing history into fake 0%.
+
+Never fabricate PP results.
+
+Never mix players.
+
+Never mix stats.
+
+Never mix sports.
+
+Never mix providers.
+
+⸻
+
+11. PROVIDER SEPARATION
+
+🐶 UNDERDOG
+
+Primary Player Props.
+
+🟣 PRIZEPICKS / PROPLINE
+
+Primary Player Props.
+
+PP must never inherit:
+
+* Underdog line
+* Underdog previous line
+* Underdog recommendation
+* Underdog provider identity
+* Underdog history
+* Underdog alert state
+
+Underdog must never inherit PP data.
+
+⸻
+
+12. DUPLICATE ALERT CONTROL
+
+I am okay with legitimate alerts when the effective prop changes.
+
+Example:
+
+🟣 PRIZEPICKS PICK
+
+Max Muncy — Batter Strikeouts 0.5
+
+Later:
+
+🟣 PRIZEPICKS PICK
+
+Max Muncy — Batter Strikeouts 1.5
+
+That is acceptable because the line materially changed.
+
+But this is NOT acceptable:
+
+The same player + market + line + direction repeatedly triggering every scan.
+
+Suppress duplicate effective alerts.
+
+However:
+
+Deduplication must NEVER remove the prop from monitoring, rescanning, tracking, or grading.
+
+⸻
+
+13. APPROVED ALERT FORMAT
+
+Use provider-specific alert labels.
+
+Underdog:
+
+🐶 UNDERDOG PICK
+
+PrizePicks:
+
+🟣 PRIZEPICKS PICK
+
+Do NOT use:
+
+ACTIONABLE BET PICK
+
+for these provider-specific player-prop alerts.
+
+Healthy alerts must NOT contain:
+
+verify before placing
+
+or similar failure/uncertainty language.
+
+Do not show obsolete:
+
+* S-tier
+* A-tier
+* B-tier
+* C-tier
+* Watchlist
+* Near-Miss
+* PASS
+* Tier 1
+* Tier 2
+
+as qualification requirements or alert classifications.
+
+Direction remains the qualification requirement.
+
+⸻
+
+14. /PICKS
+
+/picks must show current active pregame directional props from both providers.
+
+It must:
+
+* distinguish 🐶 Underdog and 🟣 PrizePicks
+* exclude started/live props
+* exclude football betting output
+* use current active records
+* avoid stale records
+* avoid provider contamination
+* allow PP sports beyond NBA when legitimate PP data exists
+
+Do NOT let Underdog’s larger dataset crowd PrizePicks out.
+
+Do NOT let NBA crowd every other PP sport.
+
+⸻
+
+15. /ALERTS
+
+/alerts must show both providers.
+
+It must not show only Underdog simply because UD generates more alerts.
+
+It must accurately represent actual provider-specific Telegram deliveries.
+
+Example:
+
+* 🐶 UNDERDOG PICK
+* 🟣 PRIZEPICKS PICK
+
+PP alerts must retain their PP identity.
+
+⸻
+
+16. /HEALTH
+
+/health must show separate provider pipeline health.
+
+Underdog Pipeline
+
+Show its current state.
+
+PrizePicks Pipeline
+
+Show its current state.
+
+Where available include:
+
+* Last scan
+* Observed
+* Evaluated
+* Rescored
+* Actionable
+* Delivered
+* Tracked
+* Pending grading
+* Last DB write
+* Current failure state/streak
+
+Do not show PP as inactive if it is actually operating.
+
+⸻
+
+17. /FUNNEL
+
+/funnel must separately report:
+
+Underdog
+
+Observed → Evaluated → Rescored → Actionable → Delivered → Tracked
+
+PrizePicks
+
+Observed → Evaluated → Rescored → Actionable → Delivered → Tracked
+
+PP must NOT show:
+
+Observed: 0
+
+when real PP observations were fetched/persisted.
+
+Sport breakdown must reflect actual PP activity.
+
+⸻
+
+18. /STATUS
+
+/status must continue showing:
+
+* Underdog primary player props
+* PrizePicks/PropLine primary player props
+
+It must also reflect actual PP activity.
+
+⸻
+
+19. /PROVIDERS
+
+Must continue showing:
+
+🟢 Underdog — Primary Player Props
+
+🟢 PrizePicks — PropLine — Primary Player Props
+
+Do not display PandaScore as the current PP/CS provider.
+
+PandaScore remains historical enrichment only when legitimately used.
+
+⸻
+
+20. /CONFIG
+
+Do not hard-code:
+
+PrizePicks sports: NBA, MLB
+
+if legitimate additional PP sports are dynamically available.
+
+Show actual discovered/current PP sports.
+
+If discovery is unavailable, use the existing legitimate configured fallback.
+
+Never invent sports.
+
+⸻
+
+21. /DASHBOARD
+
+Dashboard must use the persistent broader tracking data.
+
+Recently Tracked Props must include:
+
+* Underdog
+* PrizePicks
+
+and all legitimately tracked sports.
+
+It must NOT be limited to:
+
+* NFL
+* NBA
+* MLB
+* Telegram alerts
+* actionable picks
+
+The dashboard should represent the actual tracking universe.
+
+⸻
+
+22. PERFORMANCE / TRACKING COMMANDS
+
+These must use the broader persistent tracking universe:
+
+* /tracking
+* /performance
+* /grade
+* /stats
+* /slipstats
+* /backtest
+* /calibration
+* /player
+
+Do not make Telegram delivery a prerequisite for historical performance.
+
+⸻
+
+23. PROP OPPORTUNITY TRACKER
+
+Fix the underlying opportunity accounting.
+
+The system must distinguish:
+
+Provider observations
+
+All legitimate provider snapshots.
+
+Evaluations
+
+Props actually evaluated.
+
+Directional opportunities
+
+Props with valid OVER/UNDER direction.
+
+Delivered alerts
+
+Only the subset actually delivered to Telegram.
+
+These numbers must not be collapsed into one small alert-derived population.
+
+⸻
+
+24. FOOTBALL TRACKING VS TELEGRAM
+
+Verify both providers independently.
+
+For football:
+
+Monitoring/tracking/grading = YES
+
+Telegram betting output = NO
+
+For non-football legitimate PP sports:
+
+Monitoring/tracking/grading = YES
+
+Telegram betting output = YES when a valid directional pick exists and normal safety/deduplication conditions are satisfied.
+
+⸻
+
+25. LIVE VERIFICATION — REQUIRED
+
+Do NOT claim this task complete from tests alone.
+
+After implementation, verify the actual running Railway bot.
+
+Provider verification
+
+Confirm:
+
+* Underdog healthy.
+* PrizePicks healthy.
+* Both are primary player-prop providers.
+
+PP sport verification
+
+Confirm the live PP pipeline is capable of processing legitimate PP sports beyond NBA.
+
+The live verification should specifically look for:
+
+* at least one non-NBA, non-football PP sport being fetched
+* persisted
+* evaluated
+* tracked
+
+and, if a legitimate directional opportunity naturally occurs:
+
+* delivered as 🟣 PRIZEPICKS PICK
+
+If the live observation window does not naturally contain a qualifying non-NBA PP prop, mark the alert portion:
+
+UNVERIFIED
+
+Do NOT fabricate one.
+
+Do NOT force one.
+
+Do NOT alter thresholds.
+
+Do NOT use /testalert.
+
+⸻
+
+26. LIVE PP TELEMETRY
+
+During live verification, confirm:
+
+* PP observed count increases when PP data is fetched.
+* PP database/history count increases appropriately.
+* PP evaluations occur.
+* PP rescans occur.
+* PP telemetry is not zero while legitimate PP data is flowing.
+* PP and UD counters remain separate.
+
+If a PP cycle legitimately returns zero observations, determine WHY before declaring the pipeline healthy.
+
+Do not simply accept:
+
+observations=0
+
+without identifying whether the source returned no props or the pipeline failed to persist/process them.
+
+⸻
+
+27. LIVE FULL-POOL VERIFICATION
+
+Verify that PP tracking is broader than alert delivery.
+
+Confirm:
+
+* Multiple PP props are persisted.
+* Unchanged PP props remain eligible for rescanning.
+* Previously evaluated PP props remain eligible.
+* Previously delivered PP props remain eligible.
+* New PP props enter the universe.
+* Multiple PP sports can participate.
+* Football remains tracked but suppressed from betting output.
+
+Do not claim complete full-pool coverage unless the evidence supports it.
+
+⸻
+
+28. LIVE GRADING VERIFICATION
+
+Where real completed PP events are available:
+
+* Confirm PP result data is accepted.
+* Confirm grading produces HIT/MISS/PUSH where applicable.
+* Confirm results persist.
+* Confirm history updates.
+
+If no completed PP event is available during the observation window:
+
+Mark live PP grading as UNVERIFIED.
+
+Do not fabricate a completed event or result.
+
+⸻
+
+29. LIVE COMMAND VERIFICATION
+
+Verify these commands against the running bot:
+
+* /health
+* /status
+* /providers
+* /config
+* /dashboard
+* /funnel
+* /picks
+* /alerts
+* /tracking
+* /performance
+* /grade
+* /stats
+* /calibration
+* /player
+
+Confirm they return promptly.
+
+No command should remain indefinitely on:
+
+Gathering stats…
+
+when the underlying data is available.
+
+No generic:
+
+failed
+
+response should replace an honest partial/unavailable response during database contention.
+
+Preserve the previously implemented command reliability protections.
+
+⸻
+
+30. ALERT VERIFICATION
+
+Observe naturally generated alerts only.
+
+Do NOT use:
+
+* /testalert
+* synthetic props
+* fabricated records
+* threshold changes
+* forced notifications
+
+Verify:
+
+Underdog
+
+🐶 UNDERDOG PICK
+
+PrizePicks
+
+🟣 PRIZEPICKS PICK
+
+Confirm:
+
+* No obsolete tier/watchlist/pass labels.
+* No “verify before placing” language.
+* No football betting alerts.
+* No live/in-game betting alerts.
+* No repeated identical effective alerts.
+* Meaningful line changes can generate a new alert.
+* PP is not restricted to NBA when legitimate non-NBA PP opportunities exist.
+
+⸻
+
+31. PORT 8080 WARNING — DO NOT TOUCH
+
+There is a known pre-existing warning because the optional health server cannot bind to port 8080 while the API artifact uses it.
+
+Do NOT address this in this task.
+
+It is not currently blocking:
+
+* Bot polling
+* Telegram
+* Underdog
+* PrizePicks
+* Monitoring
+
+Leave it unchanged.
+
+⸻
+
+32. DO NOT CHANGE UNRELATED SYSTEMS
+
+Do NOT modify:
+
+* Scoring formulas
+* BQ
+* MQ
+* Confidence calculations
+* OddsAPI
+* PrizePicks quota/pacing beyond what is necessary for this PP lifecycle
+* Underdog FPR architecture
+* Underdog source-ID lifecycle
+* Clean restart
+* max_instances=1
+* Adaptive batching
+* Player identity normalization
+* Provider evidence architecture
+* Graded-prop evidence architecture
+* Football monitoring/tracking
+* Football Telegram suppression
+* Telegram 409 handling
+* Partial-result protections
+* Command timeout protections
+* Railway architecture
+* Optional port-8080 health server
+
+Do not redesign the bot.
+
+Do not create another scheduler.
+
+Do not create another full-pool rotation.
+
+Make only the smallest targeted changes necessary.
+
+⸻
+
+33. TEST REQUIREMENTS
+
+Add focused regression tests for:
+
+PP sport scope
+
+* PP is not NBA-only.
+* Legitimately discovered PP sports can enter the pipeline.
+* PP sports are not inherited from Underdog ACTIVE_SPORTS.
+* Unsupported sports are not fabricated.
+* Football remains monitored/tracked but suppressed from betting output.
+
+PP tracking
+
+* Every legitimate PP observation persists.
+* Unchanged PP props remain tracked.
+* New PP props remain tracked after first scan.
+* Previously evaluated PP props remain eligible.
+* Previously delivered PP props remain eligible.
+* Cold-start PP props remain eligible.
+* PP line movers are rescanned.
+* PP full-pool rotation continues.
+* Tracking is independent of Telegram delivery.
+
+PP grading
+
+* Non-actionable PP props can be graded.
+* PP HIT persists.
+* PP MISS persists.
+* PP PUSH persists.
+* Actual result persists.
+* PP grading feeds progressive history.
+* No duplicate dates.
+* No cross-player contamination.
+* No cross-stat contamination.
+* No provider contamination.
+
+PP alerts
+
+* PP alerts use 🟣 PRIZEPICKS PICK.
+* PP alerts can originate from legitimate non-NBA sports.
+* PP alerts are not restricted to NBA.
+* Duplicate effective PP alerts are suppressed.
+* Meaningful PP line changes can produce new alerts.
+* Football PP cannot reach Telegram.
+* Live/in-game PP cannot generate new betting recommendations.
+
+Commands
+
+* /health reports PP pipeline.
+* /status reports PP.
+* /providers reports PP.
+* /config reports dynamic PP sports.
+* /dashboard reports PP tracked activity.
+* /funnel reports PP observed/evaluated/rescored/actionable/delivered/tracked.
+* /picks can show PP directional props.
+* /alerts reports PP deliveries.
+* /tracking uses broader tracking data.
+* /performance uses broader tracking data.
+* /grade uses broader tracking data.
+* /stats uses broader tracking data.
+
+Run the focused tests.
+
+Then run the full existing test suite.
+
+Do NOT weaken tests simply to make them pass.
+
+⸻
+
+34. FINAL ACCEPTANCE CHECKLIST
+
+Do NOT create a checkpoint until every applicable item is verified.
+
+* Recommended capable model was selected automatically.
+* I was never asked Free/Power/Max.
+* PrizePicks is treated as a primary player-prop provider.
+* Underdog remains a primary player-prop provider.
+* Provider identities remain separated.
+* PP is not NBA-only.
+* Legitimate dynamically discovered PP sports can enter the pipeline.
+* PP sports are not inherited from Underdog sport scope.
+* Unsupported PP sports are never fabricated.
+* PP full active universe is tracked.
+* PP props are continuously rescanned.
+* PP tracking is independent of Telegram delivery.
+* PP non-actionable props remain trackable.
+* PP props can be graded.
+* PP HIT/MISS/PUSH outcomes persist.
+* PP results feed progressive player history.
+* PP telemetry accurately reflects actual observations.
+* /health shows PP pipeline.
+* /funnel shows PP pipeline.
+* /status shows PP.
+* /providers shows PP.
+* /config shows legitimate dynamic PP sports.
+* /dashboard shows PP tracked activity.
+* /alerts shows PP deliveries.
+* /picks can show PP directional picks.
+* Football remains monitored/tracked.
+* Football remains gradeable historically.
+* Football NEVER reaches Telegram betting output.
+* Football NEVER appears in /picks betting output.
+* Football NEVER appears in /slip.
+* Live/in-game props cannot generate new betting recommendations.
+* Pregame props can generate recommendations.
+* PP can monitor props before the event and ideally from the 24-hour pregame window when available.
+* Duplicate effective PP alerts are suppressed.
+* Meaningful PP line changes can generate new alerts.
+* PP alerts use 🟣 PRIZEPICKS PICK.
+* UD alerts use 🐶 UNDERDOG PICK.
+* No ACTIONABLE BET PICK provider-generic label remains for these alerts.
+* No “verify before placing” language remains on healthy alerts.
+* No S/A/B/C gates remain.
+* No Tier 1/Tier 2 gates remain.
+* No Watchlist/Near-Miss/PASS gates remain.
+* Direction remains the qualification requirement.
+* Full tracked universe is independent of alerts.
+* No fabricated evidence.
+* No fabricated PP observations.
+* No fabricated grading results.
+* Existing Underdog behavior is not regressed.
+* Existing FPR architecture is not regressed.
+* Shared cadence remains intact.
+* max_instances=1 remains intact.
+* Adaptive batching remains intact.
+* Clean restart remains intact.
+* Provider-backed evidence remains intact.
+* Graded-prop evidence remains intact.
+* Existing command reliability protections remain intact.
+* Optional port-8080 warning remains untouched.
+* Focused tests pass.
+* Full suite passes.
+* Compilation passes.
+* Diff check passes.
+* Live Railway verification completed.
+* Any unavailable live condition is explicitly marked UNVERIFIED.
+* No unrelated behavior changed.
+* NO CHECKPOINT UNTIL LIVE VERIFICATION IS COMPLETE.
+
+🔴 FINAL INSTRUCTION
+
+The purpose of this task is to finish the PrizePicks/PropLine full monitoring → rescanning → persistence → grading → history → telemetry → all-sport alert lifecycle.
+
+The intended final behavior is:
+
+Underdog + PrizePicks/PropLine are both primary player-prop providers.
+
+PrizePicks is NOT NBA-only.
+
+Every legitimate active PP sport discovered from the real PP source can flow through the same complete monitoring/tracking/evaluation lifecycle.
+
+Every legitimate PP prop remains trackable and gradeable whether or not it ever becomes a Telegram alert.
+
+Football remains monitored, tracked, and historically gradeable but can NEVER reach betting output.
+
+Only pregame props can generate new betting recommendations.
+
+Identical effective alerts are suppressed, while meaningful line changes can generate new alerts.
+
+Underdog and PrizePicks alerts remain clearly provider-specific.
+
+All dashboard, funnel, health, status, picks, alerts, tracking, and performance displays must reflect the actual underlying provider data rather than an alert-only subset.
+
+Do not redesign anything.
+
+Do not create another scheduler.
+
+Do not create another rotation system.
+
+Do not fabricate data.
+
+Do not force alerts.
+
+Do not use /testalert as production verification.
+
+Do not create the checkpoint until the implementation AND actual running Railway verification support the acceptance criteria.
