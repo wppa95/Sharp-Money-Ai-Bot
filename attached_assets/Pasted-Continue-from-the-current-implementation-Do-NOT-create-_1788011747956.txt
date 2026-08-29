@@ -1,0 +1,498 @@
+Continue from the current implementation.
+
+Do NOT create a new task.
+Do NOT propose a follow-up task.
+
+Do NOT perform live or production verification.
+Do NOT send Telegram commands.
+Do NOT send test alerts.
+Do NOT fabricate production data.
+
+Restarts are allowed if required for local testing.
+
+FINAL DELIVERY GATE AUDIT AND FIX
+
+Audit every path that can produce or deliver an actionable Telegram alert.
+
+Make only the smallest targeted fixes necessary.
+
+Do NOT redesign the architecture.
+
+1. ONE CANONICAL DELIVERY GATE
+
+There must be one consistent set of delivery rules.
+
+Audit all paths, including:
+
+* Underdog FPR delivery
+* Underdog monitoring delivery
+* PrizePicks delivery
+* Stable Refresh compatibility/direct paths
+* Watchlist/legacy compatibility paths if any remain
+* /picks
+* /slip
+* any ranked/actionable delivery path
+* any other function capable of sending Telegram actionable picks
+
+Remove conflicting or obsolete delivery gates.
+
+Do not create duplicate rule systems.
+
+2. REMOVE LEGACY QUALIFICATION GATES
+
+The following must NOT be delivery requirements:
+
+* Watchlist
+* Near-Miss
+* PASS
+* S-tier
+* A-tier
+* B-tier
+* C-tier
+
+Do not recreate these classifications.
+
+Do not allow an old classification field to silently block or permit delivery.
+
+The current unified evaluation/direction/evidence model is authoritative.
+
+3. PREGAME-ONLY DELIVERY
+
+Telegram actionable alerts must only be allowed when the event is safely pregame.
+
+Explicitly block:
+
+* STARTED
+* LIVE
+* IN_PROGRESS
+* FINAL
+* COMPLETED
+* POSTPONED/VOID/CANCELLED where applicable
+* equivalent provider live/postgame states
+
+An explicit live/started event state must override a future-looking timestamp.
+
+Unknown event state must be handled conservatively under strict production delivery validation.
+
+Missing timestamps must not be treated as safely pregame unless the provider explicitly confirms a pregame state.
+
+Preserve the existing strict production pregame validation.
+
+4. 24-HOUR RULE
+
+Do NOT make 24 hours a hard eligibility cutoff.
+
+A prop scheduled:
+
+* minutes from start
+* several hours from start
+* 24+ hours from start
+* several days from start
+
+may remain monitored and eligible for evaluation.
+
+Approaching-start status may be used for priority, but must not create a separate watcher or eligibility gate.
+
+5. FOOTBALL TELEGRAM SUPPRESSION
+
+Football/gridiron must never reach Telegram.
+
+Block football-related sports across every delivery path, including aliases such as:
+
+* NFL
+* NCAAF
+* CFB
+* FCS
+* CFL
+* UFL
+* USFL
+* XFL
+* arena football
+* indoor football
+* NCAA Football
+* other gridiron variants
+
+Football can remain monitored/tracked/graded only where the current architecture intentionally preserves that behavior.
+
+Do not delete historical football data.
+
+Soccer must remain allowed.
+
+6. PRIZEPICKS DELIVERY
+
+PrizePicks must use PrizePicks/PropLine data only.
+
+Do NOT inherit Underdog:
+
+* ACTIVE_SPORTS
+* source IDs
+* event IDs
+* tracking records
+* recommendations
+* alternate lines
+* delivery decisions
+
+PP must remain independently evaluated and delivered.
+
+Preserve authoritative PP sport discovery.
+
+Do not limit PP to NBA/MLB.
+
+Do not accidentally suppress legitimate non-football PP sports.
+
+7. UNDERDOG DELIVERY
+
+Underdog delivery must use Underdog identity and data only.
+
+Preserve:
+
+* source ID
+* event ID
+* player
+* sport
+* market/stat
+* line
+* direction
+
+Do not let PrizePicks state or deduplication suppress an Underdog opportunity.
+
+8. DIRECTION / EVIDENCE REQUIREMENTS
+
+Delivery must require a valid actionable direction under the current model.
+
+Do NOT require old S/A/B/C classifications.
+
+Do NOT require Watchlist/PASS.
+
+Do NOT allow a missing/invalid direction to become a Telegram pick merely because another field passes.
+
+Preserve the existing strong-evidence requirements already established for actionable delivery.
+
+Do not invent evidence.
+
+Missing provider evidence remains N/A rather than fabricated.
+
+9. DEDUPLICATION
+
+Exact repeated rescans of the same opportunity must not spam Telegram.
+
+Preserve provider-aware identity:
+
+Provider + Source ID + Event ID + Player + Sport + Market/stat + Line + Direction
+
+Repeated identical opportunities remain suppressed.
+
+Meaningful changes remain eligible, including:
+
+* line change
+* direction change
+* event change
+* source-ID change
+* provider change
+* player/stat identity change where applicable
+
+Do not let delivery deduplication remove the prop from monitoring or grading.
+
+10. DELIVERY CLAIMS
+
+Preserve the recently corrected claim lifecycle:
+
+* claim atomically before delivery
+* release on filtered delivery
+* release on rate limit
+* release on unsuccessful delivery
+* release on unexpected delivery exception
+* retain suppression only after successful delivery
+
+Verify no delivery path bypasses this behavior.
+
+11. DELIVERY RESULT / RECOVERY
+
+Preserve the recently fixed DeliveryResult handling.
+
+No delivery path may access unsupported fields such as the previously invalid .reason.
+
+A delivery result must not falsely trigger monitoring recovery.
+
+Genuine monitoring failures must still be distinguishable from expected delivery outcomes.
+
+12. TRACKING AND GRADING MUST REMAIN INDEPENDENT
+
+A prop does NOT need to reach Telegram to be:
+
+* tracked
+* rescanned
+* graded
+* evidence-enriched
+* included in historical analysis
+
+Do not make Telegram delivery the prerequisite for HIT/MISS/PUSH grading.
+
+Preserve:
+
+* provider separation
+* directional tracking
+* pending grading
+* resolved outcomes
+* HIT
+* MISS
+* PUSH
+* progressive history
+
+13. MONITORING VS DELIVERY
+
+Keep these separate:
+
+Monitoring
+→ continuously rescans the active universe.
+
+Evaluation
+→ evaluates every active prop.
+
+Tracking
+→ persists observations regardless of delivery.
+
+Grading
+→ resolves outcomes regardless of delivery.
+
+Delivery
+→ only sends opportunities that pass the canonical delivery gate.
+
+A failed delivery must never remove a prop from monitoring.
+
+A suppressed duplicate alert must never remove a prop from monitoring.
+
+A non-actionable prop must continue to be rescanned.
+
+14. REPORTING
+
+Do not regress the corrected reporting populations.
+
+Do not report delivery counts as tracking counts.
+
+Keep distinct:
+
+* Active tracked
+* Historical observations
+* Directional
+* Delivered
+* Pending
+* Resolved
+* HIT
+* MISS
+* PUSH
+
+Keep PrizePicks and Underdog separate.
+
+Do not restore Watchlist/PASS/S/A/B/C populations.
+
+15. SCHEDULER
+
+Preserve:
+
+* one Underdog monitor
+* one FPR rotation
+* no independent Stable Refresh job
+* no duplicate PrizePicks monitoring job
+* no duplicate connector/consensus jobs
+* required independent jobs only
+* max_instances=1
+
+Do not add a watcher to solve delivery timing.
+
+16. TESTS
+
+Add/update focused regression tests proving:
+
+Canonical gate
+
+* Every actionable delivery path uses the same canonical gate.
+* No legacy S/A/B/C requirement remains.
+* No Watchlist/PASS requirement remains.
+
+Pregame
+
+* Future event passes.
+* 24-hour event remains eligible.
+* Approaching-start event passes.
+* STARTED blocks.
+* LIVE blocks.
+* IN_PROGRESS blocks.
+* FINAL blocks.
+* COMPLETED blocks.
+* Unknown state is conservatively blocked under strict production validation.
+* Missing timestamp + explicit pregame provider state is handled correctly.
+* Missing timestamp + unknown state is blocked.
+
+Football
+
+* NFL blocked.
+* NCAAF blocked.
+* CFB blocked.
+* FCS blocked.
+* CFL blocked.
+* UFL blocked.
+* USFL blocked.
+* XFL blocked.
+* arena/indoor football blocked.
+* soccer remains allowed.
+
+PrizePicks
+
+* PP uses PP data only.
+* PP does not inherit UD scope.
+* PP does not inherit UD deduplication.
+* PP supports discovered non-football sports.
+* PP alternate lines remain distinct.
+* PP meaningful line changes remain eligible.
+
+Underdog
+
+* UD identity remains provider-specific.
+* PP cannot suppress UD.
+* UD source/event changes remain distinct.
+
+Dedup
+
+* Exact repeated opportunity sends once.
+* 10 repeated rescans send once.
+* 50 repeated rescans send once.
+* 100 repeated rescans send once.
+* line change can send again.
+* direction change can send again.
+* event/source/provider changes can send again.
+
+Claims
+
+* Successful delivery retains claim.
+* Filtered delivery releases claim.
+* Rate-limited delivery releases claim.
+* Failed delivery releases claim.
+* Unexpected exception releases claim.
+* Failed delivery can retry.
+
+Tracking/grading
+
+* Non-actionable prop remains tracked.
+* Non-actionable prop remains rescannable.
+* Undelivered directional opportunity remains gradeable.
+* HIT/MISS/PUSH remain correct.
+* Repeated rescans do not duplicate outcomes.
+
+Recovery
+
+* DeliveryResult uses only supported fields.
+* No .reason regression.
+* Expected delivery outcomes do not create false monitoring failures.
+* Genuine monitoring failure still triggers recovery.
+
+Run:
+
+1. Focused delivery-gate/provider/dedup/pregame tests.
+2. Full existing test suite.
+3. Python compilation.
+4. git diff --check.
+
+17. NO LIVE VERIFICATION
+
+Do NOT perform live/production verification.
+
+Do NOT:
+
+* query Railway production
+* query production database
+* send Telegram commands
+* send test alerts
+* wait for games
+* wait for production cycles
+* fabricate production data
+
+Local tests and static/code-path verification are sufficient.
+
+A local restart is allowed if needed for testing.
+
+18. NO UNRELATED CHANGES
+
+Do NOT change:
+
+* scoring formulas
+* BQ/MQ
+* confidence calculations
+* evidence providers
+* FPR architecture
+* tracking architecture
+* grading architecture
+* provider identity
+* PrizePicks discovery
+* Underdog monitoring
+* monitoring cadence
+* adaptive batching
+* scheduler architecture
+* max_instances=1
+* historical data
+* dashboard accounting except where required to prevent delivery/tracking confusion
+* Stable Refresh removal
+* football exclusion
+* soccer support
+
+Make the smallest targeted changes necessary.
+
+19. TASK MANAGEMENT
+
+Do NOT create a new task.
+Do NOT propose a follow-up task.
+
+If an existing task directly covers this work, it may be closed after successful validation.
+
+FINAL REPORT
+
+IMPLEMENTED
+
+Exactly what changed.
+
+DELIVERY GATE
+
+Explain the canonical rules now governing Telegram delivery.
+
+TESTED
+
+* Focused tests: X passed
+* Full suite: X passed
+* Compilation: PASS/FAIL
+* Diff check: PASS/FAIL
+
+PRESERVED
+
+Confirm:
+
+* continuous active-prop rescanning
+* fair FPR rotation
+* non-actionable rescanning
+* provider separation
+* PrizePicks discovery
+* Underdog source-ID lifecycle
+* pregame-only delivery
+* 24-hour priority without cutoff
+* football Telegram suppression
+* soccer support
+* canonical deduplication
+* failed-delivery retry
+* universal tracking
+* delivery-independent grading
+* HIT/MISS/PUSH
+* corrected reporting
+* scheduler safety
+* max_instances=1
+* Stable Refresh removal
+* historical data
+
+LIVE VERIFICATION
+
+NO LIVE/PRODUCTION VERIFICATION WAS PERFORMED.
+
+TASK MANAGEMENT
+
+No new task was created.
+If an existing task directly covered this work, it may be closed.
+
+DO NOT CREATE A NEW TASK.
