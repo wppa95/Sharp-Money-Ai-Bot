@@ -1,0 +1,205 @@
+Now that the dashboard/funnel reporting fixes are implemented, perform a READ-ONLY live verification of the running Sharp Money Bot.
+
+Do NOT modify code.
+
+Do NOT create a task.
+
+Do NOT deploy or restart Railway.
+
+Do NOT send test alerts.
+
+Use the existing Telegram bot commands only.
+
+1. /dashboard
+
+Confirm:
+
+* Only ONE Provider Pipeline section is displayed.
+* Underdog and PrizePicks are clearly separated.
+* No duplicate provider activity/pipeline section remains.
+* Pipeline metrics are populated from the current normalized data.
+* Recently Tracked Props remains separate and is not duplicated.
+* Recently Tracked Props includes multiple supported non-football sports when available.
+
+2. /funnel
+
+Confirm:
+
+* Sport Funnel Breakdown columns align correctly:
+    * Sport
+    * Active
+    * Observed
+    * Directional
+    * Delivered
+* Multi-digit numbers remain under the correct columns.
+* Sports are ordered Active highest → lowest.
+* Ties use deterministic ordering.
+* Zero-directional sports with active tracked props remain visible.
+* Soccer/FIFA/MLS remain visible when data exists.
+* Football/gridiron remains excluded.
+
+3. /stats
+
+Confirm:
+
+* Historical observations
+* Active tracked props
+* Directional opportunities
+* Pending grading
+* Provider-separated counts
+
+are internally consistent with /dashboard and /funnel.
+
+4. /tracking
+
+Confirm:
+
+* Provider populations remain separated.
+* Active tracked and historical observations are distinct.
+* Directional opportunities are separate from delivered alerts.
+* Underdog and PrizePicks counts are not mixed.
+
+5. /picks
+
+Confirm:
+
+* Underdog and PrizePicks remain separated.
+* Only currently qualifying actionable props are shown.
+* No futures/season-long markets appear.
+* No football props appear.
+* Delivery still requires the canonical OVER/UNDER + legitimate evidence gate.
+
+6. /alerts
+
+Confirm:
+
+* Alert history reflects actual Telegram-delivered player-prop alerts only.
+* No undelivered directional opportunity is incorrectly counted as delivered.
+
+7. /grade
+
+Confirm:
+
+* Pending opportunities remain gradeable independently of Telegram delivery.
+* No resolved result is fabricated.
+* HIT/MISS/PUSH remain tied to actual completed results.
+
+8. RETIRED CLASSIFICATION / BLOCKER AUDIT
+
+This is critical.
+
+Verify that the following are completely removed from the active monitoring/evaluation/delivery framework:
+
+* Watchlist
+* Near-Miss
+* PASS
+* Rejected as a delivery blocker
+* S-tier
+* A-tier
+* B-tier
+* C-tier
+* Tier 1
+* Tier 2
+* decision_tier
+* Any equivalent legacy classification used as an evaluation or delivery gate
+
+They may not:
+
+* Block evaluation
+* Block rescanning
+* Block evidence enrichment
+* Block tracking
+* Block grading
+* Block persistence
+* Determine FPR rotation eligibility
+* Determine whether a prop can become directional
+* Block Telegram delivery
+* Be required for Telegram delivery
+* Suppress a legitimate OVER/UNDER + evidence opportunity
+
+Specifically verify delivery
+
+Confirm the canonical delivery gate is based on the current rules only:
+
+* Valid OVER or UNDER direction
+* Legitimate supporting evidence
+* Existing safety protections
+* Existing pregame/live-game protections
+* Provider-aware identity/deduplication
+* Existing claim/release protections
+* Any other currently approved non-classification safety checks
+
+There must be NO hidden S/A/B/C, PASS, Watchlist, Near-Miss, Rejected, Tier 1, or Tier 2 requirement remaining in any active delivery path.
+
+Check all applicable delivery paths, including:
+
+* Main monitoring delivery
+* FPR delivery
+* PrizePicks delivery
+* /picks
+* /slip
+* Watch/actionable compatibility paths if still callable
+* Stable Refresh compatibility paths if still callable
+
+If any retired classification is still present as executable decision logic or a delivery blocker, do not change it during this verification. Report exactly where it remains.
+
+9. CROSS-COMMAND CONSISTENCY
+
+Compare:
+
+/dashboard
+/funnel
+/stats
+/tracking
+/picks
+/alerts
+/grade
+
+Identify any contradictory numbers, labels, classifications, or populations.
+
+Do NOT change anything if a discrepancy is found.
+
+Report it precisely so it can be fixed separately.
+
+IMPORTANT — READ ONLY
+
+Do NOT:
+
+* Modify code
+* Restart the bot
+* Restart Railway
+* Deploy
+* Send Telegram test alerts
+* Create tasks
+* Change scoring
+* Change delivery rules
+* Change provider scope
+* Change FPR
+* Change tracking
+* Change grading
+
+Final Response
+
+LIVE VERIFICATION
+
+What was actually observed from the running bot.
+
+RETIRED FRAMEWORK AUDIT
+
+Explicitly state whether Watchlist, Near-Miss, PASS, Rejected, S/A/B/C, Tier 1, Tier 2, and decision_tier were found influencing active evaluation, rotation, or delivery.
+
+DELIVERY GATE
+
+State exactly what the live system appears to require for delivery and whether any retired blocker remains.
+
+CONSISTENCY
+
+Which commands agree and which do not.
+
+ISSUES
+
+List any remaining discrepancies or legacy blockers with the exact command/path where observed.
+
+NO CHANGES
+
+Confirm that no code, deployment, restart, Telegram test alert, or task changes were made.
