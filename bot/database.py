@@ -4804,6 +4804,9 @@ class Database:
 
             by_sport_counts: dict[str, int] = {}
             by_provider_counts: dict[str, int] = {}
+            observation_by_sport: dict[str, int] = {}
+            active_by_provider: dict[str, int] = {}
+            active_by_sport: dict[str, int] = {}
             for provider, sport in current_rows:
                 if not _is_supported_tracking_sport(sport):
                     continue
@@ -4813,6 +4816,10 @@ class Database:
                 by_provider_counts[provider_key] = (
                     by_provider_counts.get(provider_key, 0) + 1
                 )
+                active_by_provider[provider_key] = (
+                    active_by_provider.get(provider_key, 0) + 1
+                )
+                active_by_sport[sport_key] = active_by_sport.get(sport_key, 0) + 1
             by_sport = [
                 {"sport": sport, "tracked": count}
                 for sport, count in sorted(
