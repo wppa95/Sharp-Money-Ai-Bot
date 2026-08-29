@@ -45,3 +45,16 @@ Replacing one with the other silently removes a primary provider from FPR.
 **How to apply:** Keep provider and event identity in normalized FPR keys,
 exclude normalized rows older than the active-feed freshness window, and use
 the shared opportunity log for provider-aware grading/reporting.
+
+Provider reconciliation must count PrizePicks observations from fresh,
+non-removed `PropLineHistory` rows rather than the legacy `PrizePicksRecord`
+table. The legacy table can remain empty while normalized PP persistence is
+working correctly.
+
+**Why:** The live PP companion cycle writes the provider-neutral history path;
+using the legacy source made a successful normalized fetch appear as
+`observations=0` in provider funnel telemetry.
+
+**How to apply:** Keep raw Underdog observation counts on its snapshot source,
+but use normalized history for PP observed/tracked counts and candidate logs for
+the broad PP evaluation count.
