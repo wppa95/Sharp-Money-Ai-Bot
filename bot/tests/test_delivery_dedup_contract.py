@@ -84,7 +84,8 @@ def test_meaningful_line_change_is_not_suppressed():
 
 
 @pytest.mark.asyncio
-async def test_fifty_repeated_claims_produce_one_delivery_slot():
+@pytest.mark.parametrize("repeat_count", [10, 50, 100])
+async def test_repeated_claims_produce_one_delivery_slot(repeat_count):
     claims = [
         await market_engine._try_claim_delivery_slot(
             "Player",
@@ -93,7 +94,7 @@ async def test_fifty_repeated_claims_produce_one_delivery_slot():
             0.5,
             **_identity(),
         )
-        for _ in range(50)
+        for _ in range(repeat_count)
     ]
 
     assert sum(claims) == 1

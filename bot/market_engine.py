@@ -6304,62 +6304,62 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                          _fpr_mq_ok = False
                     if _fpr_mq_ok:
                      _fpr_delivery = AlertDelivery(db, bot, chat_ids)
-                      try:
-                       _fpr_result   = await _fpr_delivery.deliver_underdog(
-                        player_name     = _fpr_player,
-                        team            = getattr(_fpr_snap, "team", "") or "",
-                        sport           = _fpr_sport,
-                        stat_type       = _fpr_stat,
-                        old_line        = _fpr_line,
-                        new_line        = _fpr_line,
-                        game_time       = _fpr_snap.game_time,
-                        game_status     = (
-                            getattr(_fpr_snap, "game_status", None)
-                            or getattr(_fpr_snap, "provider_status", None)
-                        ),
-                        score           = _fpr_score,
-                        validation      = _fpr_val,
-                        decision        = _fpr_dec,
-                        market_quality  = _fpr_mq,
-                        market_pressure = _fpr_mp,
-                        pp_line         = (
-                            _fpr_line if _fpr_provider == "PrizePicks" else None
-                        ),
-                        standing        = True,
-                        strict_pregame   = True,
-                        source          = _fpr_provider,
-                       )
-                      except Exception as _fpr_delivery_exc:
-                       _release_prop_delivery_claim(
-                           _prop_market_alerted,
-                           _fpr_player,
-                           _fpr_sport,
-                           _fpr_stat,
-                           _fpr_line,
-                           provider=_fpr_provider,
-                           source_id=str(
-                               getattr(_fpr_snap, "external_id", None)
-                               or getattr(_fpr_snap, "id", None)
-                               or ""
-                           ),
-                           event_id=str(
-                               getattr(_fpr_snap, "event", "")
-                               or getattr(_fpr_snap, "game_id", "")
-                               or ""
-                           ),
-                           direction=str(
-                               getattr(_fpr_dec, "recommendation", "") or ""
-                           ),
-                       )
-                       logger.warning(
-                           "full_pool_rescan: delivery failed; claim released for "
-                           "%s/%s/%s: %s",
-                           _fpr_provider,
-                           _fpr_player,
-                           _fpr_stat,
-                           type(_fpr_delivery_exc).__name__,
-                       )
-                       _fpr_result = DeliveryResult(sent=False)
+                     try:
+                      _fpr_result   = await _fpr_delivery.deliver_underdog(
+                         player_name     = _fpr_player,
+                         team            = getattr(_fpr_snap, "team", "") or "",
+                         sport           = _fpr_sport,
+                         stat_type       = _fpr_stat,
+                         old_line        = _fpr_line,
+                         new_line        = _fpr_line,
+                         game_time       = _fpr_snap.game_time,
+                         game_status     = (
+                             getattr(_fpr_snap, "game_status", None)
+                             or getattr(_fpr_snap, "provider_status", None)
+                         ),
+                         score           = _fpr_score,
+                         validation      = _fpr_val,
+                         decision        = _fpr_dec,
+                         market_quality  = _fpr_mq,
+                         market_pressure = _fpr_mp,
+                         pp_line         = (
+                             _fpr_line if _fpr_provider == "PrizePicks" else None
+                         ),
+                         standing        = True,
+                         strict_pregame   = True,
+                         source          = _fpr_provider,
+                      )
+                     except Exception as _fpr_delivery_exc:
+                      _release_prop_delivery_claim(
+                          _prop_market_alerted,
+                          _fpr_player,
+                          _fpr_sport,
+                          _fpr_stat,
+                          _fpr_line,
+                          provider=_fpr_provider,
+                          source_id=str(
+                              getattr(_fpr_snap, "external_id", None)
+                              or getattr(_fpr_snap, "id", None)
+                              or ""
+                          ),
+                          event_id=str(
+                              getattr(_fpr_snap, "event", "")
+                              or getattr(_fpr_snap, "game_id", "")
+                              or ""
+                          ),
+                          direction=str(
+                              getattr(_fpr_dec, "recommendation", "") or ""
+                          ),
+                      )
+                      logger.warning(
+                          "full_pool_rescan: delivery failed; claim released for "
+                          "%s/%s/%s: %s",
+                          _fpr_provider,
+                          _fpr_player,
+                          _fpr_stat,
+                          type(_fpr_delivery_exc).__name__,
+                      )
+                      _fpr_result = DeliveryResult(sent=False)
                     if _fpr_mq_ok and _fpr_result.sent:
                         fpr_sent      += 1
                         fpr_actionable += 1
