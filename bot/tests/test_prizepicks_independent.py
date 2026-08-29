@@ -155,6 +155,7 @@ class TestIndependentPrizePicks:
             def __init__(self):
                 self.logged = []
                 self.saved = []
+                self.candidates = []
 
             async def get_prop_line_history(self, provider, player, sport, stat, limit=30):
                 assert provider == "PrizePicks"
@@ -162,6 +163,10 @@ class TestIndependentPrizePicks:
 
             async def log_prop_opportunity(self, **kwargs):
                 self.logged.append(kwargs)
+
+            async def log_prop_candidate_batch(self, rows):
+                self.candidates.extend(rows)
+                return len(rows)
 
             async def upsert_prop_line_history_batch(self, provider, props):
                 self.saved.append((provider, list(props)))
@@ -205,6 +210,9 @@ class TestIndependentPrizePicks:
         assert db.saved and db.saved[0][0] == "PrizePicks"
         assert db.logged
         assert db.logged[0]["provider"] == "PrizePicks"
+        assert db.candidates
+        assert all(row["provider"] == "PrizePicks" for row in db.candidates)
+        assert db.candidates[0]["gate_decision"] == "EVALUATED"
 
     async def test_same_external_id_is_stored_once_per_provider(self, db):
         await db.log_prop_opportunity(**_opportunity("Underdog"))

@@ -114,6 +114,35 @@ async def test_reconciliation_separates_provider_and_recipient_counts(db):
 
 
 @pytest.mark.asyncio
+async def test_reconciliation_counts_prizepicks_history_as_observed_and_tracked(db):
+    """Normalized PP rows must appear in provider telemetry without an alert."""
+    from database import PropLineHistory
+
+    now = datetime.utcnow()
+    async with db.session() as session:
+        session.add(PropLineHistory(
+            external_id="pp-history-1",
+            provider="PrizePicks",
+            player_name="PP Player",
+            team="PP",
+            sport="WNBA",
+            stat_type="Points",
+            line_value=18.5,
+            fetched_at=now,
+            removed=False,
+        ))
+        await session.commit()
+
+    report = await db.get_telegram_reconciliation(since_hours=24)
+    pp = report["by_provider"]["PrizePicks"]
+
+    assert pp["observed"] == 1
+    assert pp["tracked"] == 1
+    assert pp["evaluated"] == 0
+    assert pp["actionable_persisted"] == 0
+
+
+@pytest.mark.asyncio
 async def test_reconciliation_flags_replayed_audit_identity(db):
     now = datetime.utcnow()
     for _ in range(2):
