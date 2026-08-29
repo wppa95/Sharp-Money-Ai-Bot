@@ -42,6 +42,21 @@ def test_ranked_delivery_uses_delivery_result_contract_not_reason():
     assert "str(_dq_result)" in source
 
 
+@pytest.mark.asyncio
+async def test_legacy_prizepicks_callback_delegates_to_independent_pipeline():
+    import main
+
+    context = MagicMock()
+    with patch.object(
+        main,
+        "_run_prizepicks_independent_cycle",
+        new_callable=AsyncMock,
+    ) as independent_cycle:
+        await main._prizepicks_job(context)
+
+    independent_cycle.assert_awaited_once_with(context)
+
+
 def test_provider_database_write_isolated_and_persisted(tmp_path: Path):
     tracker = HealthTracker(path=tmp_path / "health.json")
     tracker.record_provider_database_write("PrizePicks", "prop_line_history")

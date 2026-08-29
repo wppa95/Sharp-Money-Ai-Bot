@@ -39,6 +39,36 @@ def test_fifa_uses_existing_soccer_history_path():
     assert "FIFA" in _SUPPORTED_HISTORY_SPORTS
 
 
+def test_football_aliases_are_not_history_targets():
+    assert not (_SUPPORTED_HISTORY_SPORTS & {"NFL", "NCAAF", "CFB"})
+
+
+@pytest.mark.asyncio
+async def test_player_history_skips_football_before_provider_fetch():
+    football_row = SimpleNamespace(
+        player_name="Football Player",
+        sport="NFL",
+        stat_type="passing yards",
+    )
+    db = MagicMock()
+    db.get_all_active_prop_line_history_by_line = AsyncMock(
+        return_value={("Underdog", "Football Player", "NFL", "passing yards"): football_row}
+    )
+    db.get_latest_props_for_provider = AsyncMock(return_value=[])
+    context = SimpleNamespace(bot_data={"db": db})
+    fake_provider = MagicMock()
+    fake_provider.fetch_results = AsyncMock(return_value=[])
+
+    with (
+        patch("player_history_job._underdog_scan_running", return_value=False),
+        patch("providers.player_stats.PlayerStatsProvider", return_value=fake_provider),
+        patch("engine.health.get_health_tracker", return_value=None),
+    ):
+        await player_history_collector_job(context)
+
+    fake_provider.fetch_results.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_player_history_yields_when_underdog_claims_slot_after_active_read():
     """The fallback query/provider work must not start after a live scan claims."""
