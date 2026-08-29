@@ -1462,7 +1462,8 @@ class Database:
 
         since_hours = max(1, int(since_hours))
         bucket_minutes = max(5, min(1440, int(bucket_minutes)))
-        cutoff = datetime.utcnow() - timedelta(hours=since_hours)
+        now = datetime.utcnow()
+        cutoff = now - timedelta(hours=since_hours)
         bucket_seconds = bucket_minutes * 60
 
         def _blank() -> dict:
@@ -1543,18 +1544,57 @@ class Database:
                 except Exception as exc:
                     logger.debug("telegram reconciliation observation query skipped: %s", exc)
 
-            # PropLineHistory is the persistent current tracking universe for
-            # both primary providers.  It supplies PP observations directly
-            # and exposes tracked counts independently from delivery.
+            # PropLineHistory is the persistent tracking universe for both
+            # primary providers.  Count every PP row as an observation (the
+            # table is append-only for monitoring), but count only the latest
+            # row per provider-owned source identity as currently tracked.
             try:
+                pp_observed = await s.execute(
+                    select(func.count()).select_from(PropLineHistory).where(
+                        PropLineHistory.provider == "PrizePicks",
+                        PropLineHistory.fetched_at >= cutoff,
+                    )
+                )
+                _ensure("PrizePicks")["observed"] += int(pp_observed.scalar() or 0)
+
+                tracked_ids = (
+                    select(func.max(PropLineHistory.id))
+                    .where(
+                        PropLineHistory.provider.in_(("Underdog", "PrizePicks")),
+                        PropLineHistory.fetched_at >= cutoff,
+                    )
+                    .group_by(
+                        PropLineHistory.provider,
+                        PropLineHistory.player_name,
+                        PropLineHistory.sport,
+                        PropLineHistory.stat_type,
+                        case(
+                            (
+                                and_(
+                                    PropLineHistory.external_id.isnot(None),
+                                    PropLineHistory.external_id != "",
+                                ),
+                                PropLineHistory.external_id,
+                            ),
+                            else_=PropLineHistory.game_id,
+                        ),
+                    )
+                )
                 tracked_rows = await s.execute(
                     select(
                         PropLineHistory.provider,
                         func.count(PropLineHistory.id),
                     )
                     .where(
-                        PropLineHistory.fetched_at >= cutoff,
-                        PropLineHistory.removed == False,  # noqa: E712
+                        PropLineHistory.id.in_(tracked_ids),
+                        or_(
+                            PropLineHistory.removed == False,  # noqa: E712
+                            PropLineHistory.removed.is_(None),
+                        ),
+                        or_(
+                            PropLineHistory.game_time.is_(None),
+                            PropLineHistory.game_time > now,
+                        ),
                     )
                     .group_by(PropLineHistory.provider)
                 )
@@ -1562,8 +1602,6 @@ class Database:
                     provider = _provider(provider_name)
                     row = _ensure(provider)
                     row["tracked"] += int(count or 0)
-                    if provider == "PrizePicks":
-                        row["observed"] += int(count or 0)
             except Exception as exc:
                 logger.debug("prop-history tracking query skipped: %s", exc)
 
@@ -1936,6 +1974,7 @@ class Database:
         props: "list[object]",
         *,
         append_snapshot: bool = False,
+        refresh_metadata: bool = False,
     ) -> int:
         """
         Persist a normalized provider batch in the shared prop-history table.
@@ -1946,7 +1985,9 @@ class Database:
         ``append_snapshot`` is used by a provider's monitoring ingestion path
         when every observation must remain historically available.  The
         default retains the existing current-state upsert behavior for
-        corroboration and metadata refresh callers.
+        corroboration and metadata refresh callers. ``refresh_metadata`` makes
+        the current-row metadata mirror the supplied object exactly, including
+        clearing a recommendation when the latest evaluation is non-directional.
         """
         if not props:
             return 0
@@ -2087,7 +2128,13 @@ class Database:
                             latest[key], "prev_line", None
                         ),
                         removed=False,
-                        lifecycle_state="DISCOVERED",
+                        lifecycle_state=(
+                            getattr(latest[key], "lifecycle_state", None)
+                            or "DISCOVERED"
+                        ),
+                        first_alert_sent_at=getattr(
+                            latest[key], "first_alert_sent_at", None
+                        ),
                         opening_line=(
                             getattr(latest[key], "opening_line", None)
                             if getattr(latest[key], "opening_line", None) is not None
@@ -2121,25 +2168,37 @@ class Database:
                 row.last_seen = observed_at
                 row.removed = False
                 row.lifecycle_state = "DISCOVERED"
-                row.score_tier = getattr(prop, "score_tier", None) or row.score_tier
-                row.bet_recommendation = (
-                    getattr(prop, "bet_recommendation", None) or row.bet_recommendation
-                )
-                row.bet_confidence = (
-                    getattr(prop, "bet_confidence", None)
-                    if getattr(prop, "bet_confidence", None) is not None
-                    else row.bet_confidence
-                )
-                row.market_quality_score = (
-                    getattr(prop, "market_quality_score", None)
-                    if getattr(prop, "market_quality_score", None) is not None
-                    else row.market_quality_score
-                )
-                row.score_total = (
-                    getattr(prop, "score_total", None)
-                    if getattr(prop, "score_total", None) is not None
-                    else row.score_total
-                )
+                if refresh_metadata:
+                    row.score_tier = getattr(prop, "score_tier", None)
+                    row.bet_recommendation = getattr(
+                        prop, "bet_recommendation", None
+                    )
+                    row.bet_confidence = getattr(prop, "bet_confidence", None)
+                    row.market_quality_score = getattr(
+                        prop, "market_quality_score", None
+                    )
+                    row.score_total = getattr(prop, "score_total", None)
+                else:
+                    row.score_tier = getattr(prop, "score_tier", None) or row.score_tier
+                    row.bet_recommendation = (
+                        getattr(prop, "bet_recommendation", None)
+                        or row.bet_recommendation
+                    )
+                    row.bet_confidence = (
+                        getattr(prop, "bet_confidence", None)
+                        if getattr(prop, "bet_confidence", None) is not None
+                        else row.bet_confidence
+                    )
+                    row.market_quality_score = (
+                        getattr(prop, "market_quality_score", None)
+                        if getattr(prop, "market_quality_score", None) is not None
+                        else row.market_quality_score
+                    )
+                    row.score_total = (
+                        getattr(prop, "score_total", None)
+                        if getattr(prop, "score_total", None) is not None
+                        else row.score_total
+                    )
 
             await s.commit()
         return len(props)
@@ -2151,17 +2210,32 @@ class Database:
         sport:       str,
         stat_type:   str,
         limit:       int = 30,
+        *,
+        external_id: str = "",
+        game_id: str = "",
     ) -> "list[PropLineHistory]":
-        """Return recent snapshots for one player+stat, newest first."""
+        """Return recent snapshots for one source prop, newest first.
+
+        When a provider source ID or event ID is supplied, only that source's
+        snapshots are returned.  Calls without identity arguments retain the
+        legacy player/stat history behavior used by older callers.
+        """
+        source_id = str(external_id or "").strip()
+        event_id = str(game_id or "").strip()
         async with self.session() as s:
+            filters = [
+                PropLineHistory.provider    == provider,
+                PropLineHistory.player_name == player_name,
+                PropLineHistory.sport       == sport,
+                PropLineHistory.stat_type   == stat_type,
+            ]
+            if source_id:
+                filters.append(PropLineHistory.external_id == source_id)
+            elif event_id:
+                filters.append(PropLineHistory.game_id == event_id)
             result = await s.execute(
                 select(PropLineHistory)
-                .where(
-                    PropLineHistory.provider    == provider,
-                    PropLineHistory.player_name == player_name,
-                    PropLineHistory.sport       == sport,
-                    PropLineHistory.stat_type   == stat_type,
-                )
+                .where(*filters)
                 .order_by(desc(PropLineHistory.fetched_at))
                 .limit(limit)
             )
@@ -2177,6 +2251,7 @@ class Database:
         """
         from datetime import timedelta
         cutoff = datetime.utcnow() - timedelta(hours=since_hours)
+        now = datetime.utcnow()
         async with self.session() as s:
             source_identity = case(
                 (
@@ -2276,6 +2351,9 @@ class Database:
         stat_type:   str,
         new_state:   str,
         first_alert_sent_at: "Optional[datetime]" = None,
+        *,
+        external_id: str = "",
+        game_id: str = "",
     ) -> bool:
         """
         Update the lifecycle_state (and optionally first_alert_sent_at) on the
@@ -2292,14 +2370,19 @@ class Database:
 
         async with self.session() as s:
             # Find the most-recent row for this prop identity
+            filters = [
+                PropLineHistory.provider    == provider,
+                PropLineHistory.player_name == player_name,
+                PropLineHistory.sport       == sport,
+                PropLineHistory.stat_type   == stat_type,
+            ]
+            if external_id:
+                filters.append(PropLineHistory.external_id == str(external_id))
+            elif game_id:
+                filters.append(PropLineHistory.game_id == str(game_id))
             result = await s.execute(
                 select(PropLineHistory)
-                .where(
-                    PropLineHistory.provider    == provider,
-                    PropLineHistory.player_name == player_name,
-                    PropLineHistory.sport       == sport,
-                    PropLineHistory.stat_type   == stat_type,
-                )
+                .where(*filters)
                 .order_by(desc(PropLineHistory.fetched_at))
                 .limit(1)
             )
@@ -2534,16 +2617,30 @@ class Database:
 
         now_ts = fetched_at or datetime.utcnow()
 
-        # Find most-recent existing row for this prop+provider
+        # Find most-recent existing row for this provider-owned source identity.
+        # Legacy imports without either identity continue to use the old
+        # player/stat grouping so their lifecycle behavior remains compatible.
+        source_id = str(external_id or "").strip()
+        event_id = str(game_id or "").strip()
+        identity_filters = [
+            PropLineHistory.provider    == provider,
+            PropLineHistory.player_name == player_name,
+            PropLineHistory.sport       == sport,
+            PropLineHistory.stat_type   == stat_type,
+        ]
+        if source_id:
+            identity_filters.append(PropLineHistory.external_id == source_id)
+        elif event_id:
+            identity_filters.append(PropLineHistory.game_id == event_id)
+        else:
+            identity_filters.extend((
+                PropLineHistory.external_id == "",
+                PropLineHistory.game_id == "",
+            ))
         async with self.session() as s:
             result = await s.execute(
                 select(PropLineHistory)
-                .where(
-                    PropLineHistory.provider    == provider,
-                    PropLineHistory.player_name == player_name,
-                    PropLineHistory.sport       == sport,
-                    PropLineHistory.stat_type   == stat_type,
-                )
+                .where(*identity_filters)
                 .order_by(desc(PropLineHistory.fetched_at))
                 .limit(1)
             )
@@ -4545,41 +4642,122 @@ class Database:
 
     async def get_funnel_summary(self, since_hours: int = 24) -> dict:
         """
-        Aggregate the unified active-prop monitoring stream from
-        PropCandidateLog for /funnel.
+        Aggregate the unified current active-prop monitoring stream from
+        PropLineHistory for /funnel.
 
-        Every candidate row is monitored data.  Alert delivery is reported
-        separately and never changes the monitoring status of a prop.
+        Every persisted provider observation is monitoring data.  Alert
+        delivery is reported separately and never changes tracking status.
+        ``PropCandidateLog`` fallback exists only for old databases/tests that
+        have no normalized history rows yet; the returned ``tracked`` field
+        always represents the monitoring population, not Telegram delivery.
         """
         from datetime import timedelta
-        cutoff = datetime.utcnow() - timedelta(hours=since_hours)
+        now = datetime.utcnow()
+        cutoff = now - timedelta(hours=since_hours)
 
         async with self.session() as s:
-            total_res = await s.execute(
-                select(func.count(PropCandidateLog.id))
-                .where(PropCandidateLog.scan_ts >= cutoff)
-            )
-            tracked = int(total_res.scalar() or 0)
-            sport_res = await s.execute(
-                select(
-                    PropCandidateLog.sport,
-                    func.count(PropCandidateLog.id),
+            current_ids = (
+                select(func.max(PropLineHistory.id))
+                .where(
+                    PropLineHistory.provider.in_(("Underdog", "PrizePicks")),
+                    PropLineHistory.fetched_at >= cutoff,
                 )
-                .where(PropCandidateLog.scan_ts >= cutoff)
-                .group_by(PropCandidateLog.sport)
-                .order_by(func.count(PropCandidateLog.id).desc())
+                .group_by(
+                    PropLineHistory.provider,
+                    PropLineHistory.player_name,
+                    PropLineHistory.sport,
+                    PropLineHistory.stat_type,
+                    case(
+                        (
+                            and_(
+                                PropLineHistory.external_id.isnot(None),
+                                PropLineHistory.external_id != "",
+                            ),
+                            PropLineHistory.external_id,
+                        ),
+                        else_=PropLineHistory.game_id,
+                    ),
+                )
             )
-            by_sport = [
-                {
-                    "sport": sport or "UNKNOWN",
-                    "tracked": int(count or 0),
+            current_res = await s.execute(
+                select(
+                    PropLineHistory.provider,
+                    PropLineHistory.sport,
+                ).where(
+                    PropLineHistory.id.in_(current_ids),
+                    or_(
+                        PropLineHistory.removed == False,  # noqa: E712
+                        PropLineHistory.removed.is_(None),
+                    ),
+                    or_(
+                        PropLineHistory.game_time.is_(None),
+                        PropLineHistory.game_time > now,
+                    ),
+                )
+            )
+            current_rows = current_res.all()
+            history_count_res = await s.execute(
+                select(func.count(PropLineHistory.id)).where(
+                    PropLineHistory.provider.in_(("Underdog", "PrizePicks")),
+                )
+            )
+            has_normalized_history = bool(history_count_res.scalar() or 0)
+
+            # Compatibility fallback for installations predating normalized
+            # history, where candidate telemetry is the only available stream.
+            if not current_rows and not has_normalized_history:
+                total_res = await s.execute(
+                    select(func.count(PropCandidateLog.id))
+                    .where(PropCandidateLog.scan_ts >= cutoff)
+                )
+                candidate_total = int(total_res.scalar() or 0)
+                sport_res = await s.execute(
+                    select(
+                        PropCandidateLog.sport,
+                        func.count(PropCandidateLog.id),
+                    )
+                    .where(PropCandidateLog.scan_ts >= cutoff)
+                    .group_by(PropCandidateLog.sport)
+                    .order_by(func.count(PropCandidateLog.id).desc())
+                )
+                by_sport = [
+                    {"sport": sport or "UNKNOWN", "tracked": int(count or 0)}
+                    for sport, count in sport_res.all()
+                ]
+                return {
+                    "since_hours": since_hours,
+                    "tracked": candidate_total,
+                    "by_sport": by_sport,
                 }
-                for sport, count in sport_res.all()
+
+            by_sport_counts: dict[str, int] = {}
+            by_provider_counts: dict[str, int] = {}
+            for provider, sport in current_rows:
+                sport_key = str(sport or "UNKNOWN")
+                provider_key = str(provider or "Unknown")
+                by_sport_counts[sport_key] = by_sport_counts.get(sport_key, 0) + 1
+                by_provider_counts[provider_key] = (
+                    by_provider_counts.get(provider_key, 0) + 1
+                )
+            by_sport = [
+                {"sport": sport, "tracked": count}
+                for sport, count in sorted(
+                    by_sport_counts.items(),
+                    key=lambda item: (-item[1], item[0]),
+                )
             ]
         return {
             "since_hours": since_hours,
-            "tracked": tracked,
+            "tracked": len(current_rows),
             "by_sport": by_sport,
+            "by_provider": [
+                {"provider": provider, "tracked": count}
+                for provider, count in sorted(
+                    by_provider_counts.items(),
+                    key=lambda item: (-item[1], item[0]),
+                )
+            ],
+            "source": "prop_line_history",
         }
 
     async def get_pending_opportunities(
@@ -5166,17 +5344,20 @@ class Database:
 
     async def get_tracking_summary(self) -> "dict":
         """
-        Return directional pick statistics for the /tracking command.
+        Return monitoring and directional performance statistics.
 
         Returns a dict with:
-          counts:   { recommendation → { result → count } }
-          by_sport: { sport → { recommendation → { result → count } } }
-          total:    int  (directional rows ever logged)
-          pending:  int  (awaiting grading)
+          tracked:  current active provider universe (latest source row only)
+          counts:   directional { recommendation → { result → count } }
+          by_sport/by_provider: directional result breakdowns
+          total:     directional rows ever logged (compatibility field)
+          actionable/delivered/resolved: separate directional populations
 
-        Historical non-directional rows are ignored rather than exposed as a
-        separate monitoring or outcome class.
+        Historical non-directional rows are represented by ``tracked`` when
+        they are current provider observations; they are never inferred from
+        delivery or from repeated candidate/evaluation rows.
         """
+        now = datetime.utcnow()
         async with self.session() as s:
             directional = PropOpportunityLog.recommendation.in_(["OVER", "UNDER"])
             # Overall rec × result
@@ -5211,6 +5392,23 @@ class Database:
             for sport, rec, res, n in sport_rows.all():
                 by_sport.setdefault(sport, {}).setdefault(rec, {})[res] = n
 
+            provider_rows = await s.execute(
+                select(
+                    PropOpportunityLog.provider,
+                    PropOpportunityLog.recommendation,
+                    PropOpportunityLog.result,
+                    func.count(PropOpportunityLog.id).label("n"),
+                ).where(directional).group_by(
+                    PropOpportunityLog.provider,
+                    PropOpportunityLog.recommendation,
+                    PropOpportunityLog.result,
+                )
+            )
+            by_provider: dict = {}
+            for provider, rec, res, n in provider_rows.all():
+                provider_key = str(provider or "Underdog")
+                by_provider.setdefault(provider_key, {}).setdefault(rec, {})[res] = n
+
             # Totals
             total_row = await s.execute(
                 select(func.count(PropOpportunityLog.id))
@@ -5227,10 +5425,89 @@ class Database:
             )
             pending = pending_row.scalar() or 0
 
+            delivered_row = await s.execute(
+                select(func.count(PropOpportunityLog.id)).where(
+                    directional,
+                    PropOpportunityLog.alert_sent == True,  # noqa: E712
+                )
+            )
+            delivered = delivered_row.scalar() or 0
+
+            resolved_results = (
+                "HIT", "MISS", "PUSH", "VOID", "CANCELLED",
+                "INJURY_VOID", "GAME_INTERRUPTED",
+            )
+            resolved_row = await s.execute(
+                select(func.count(PropOpportunityLog.id)).where(
+                    directional,
+                    PropOpportunityLog.result.in_(resolved_results),
+                )
+            )
+            resolved = resolved_row.scalar() or 0
+
+            # Current tracking is latest-row-per-provider-source, not the
+            # append-only history row count. A latest removal marker removes
+            # that source from the active universe without resurrecting older
+            # lines.
+            current_ids = (
+                select(func.max(PropLineHistory.id))
+                .where(PropLineHistory.provider.in_(("Underdog", "PrizePicks")))
+                .group_by(
+                    PropLineHistory.provider,
+                    PropLineHistory.player_name,
+                    PropLineHistory.sport,
+                    PropLineHistory.stat_type,
+                    case(
+                        (
+                            and_(
+                                PropLineHistory.external_id.isnot(None),
+                                PropLineHistory.external_id != "",
+                            ),
+                            PropLineHistory.external_id,
+                        ),
+                        else_=PropLineHistory.game_id,
+                    ),
+                )
+            )
+            current_rows = await s.execute(
+                select(
+                    PropLineHistory.provider,
+                    PropLineHistory.sport,
+                ).where(
+                    PropLineHistory.id.in_(current_ids),
+                    or_(
+                        PropLineHistory.removed == False,  # noqa: E712
+                        PropLineHistory.removed.is_(None),
+                    ),
+                    or_(
+                        PropLineHistory.game_time.is_(None),
+                        PropLineHistory.game_time > now,
+                    ),
+                )
+            )
+            active_by_provider: dict[str, int] = {}
+            active_by_sport: dict[str, int] = {}
+            for provider, sport in current_rows.all():
+                provider_key = str(provider or "Unknown")
+                sport_key = str(sport or "UNKNOWN")
+                active_by_provider[provider_key] = (
+                    active_by_provider.get(provider_key, 0) + 1
+                )
+                active_by_sport[sport_key] = active_by_sport.get(sport_key, 0) + 1
+            tracked = sum(active_by_provider.values())
+
         return {
             "counts":   counts,
             "by_sport": by_sport,
+            "by_provider": by_provider,
+            "active_by_provider": active_by_provider,
+            "active_by_sport": active_by_sport,
+            "tracked": tracked,
             "total":    total,
+            "directional_total": total,
+            "actionable": total,
+            "delivered": delivered,
+            "resolved": resolved,
             "pending":  pending,
         }
 

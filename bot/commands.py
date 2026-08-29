@@ -3374,7 +3374,13 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             _db.get_tracking_summary(),
         ])
         tracked_opportunities = (
-            int(tracking.get("total", 0) or 0)
+            int(
+                tracking.get(
+                    "tracked",
+                    tracking.get("total", 0),
+                )
+                or 0
+            )
             if isinstance(tracking, dict)
             else None
         )
@@ -3628,7 +3634,7 @@ async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/tracking — Show directional pick tracking and grading results."""
+    """/tracking — Show persistent monitoring and directional grading results."""
     if not _check_allowed(update):
         await update.message.reply_text("⛔ Unauthorized.")
         return
@@ -3675,7 +3681,8 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     lines: list[str] = [
         "📊 <b>Prop Opportunity Tracker</b>",
-        f"<i>Total evaluated: {total}  ·  Pending grading: {pending}</i>",
+        f"<i>Active tracked props: {int(data.get('tracked', 0) or 0)}  ·  "
+        f"Directional opportunities: {total}  ·  Pending grading: {pending}</i>",
         "",
     ]
 

@@ -1403,6 +1403,88 @@ async def _run_prizepicks_independent_cycle(
     from engine.player_validator import validate_player_prop
     from engine.ud_bet_decision import make_ud_bet_decision
 
+    def _source_identity(prop: object) -> tuple[str, str]:
+        """Return the provider source identity used by normalized history."""
+        external_id = str(getattr(prop, "external_id", "") or "").strip()
+        event_id = str(
+            getattr(prop, "event_id", "")
+            or getattr(prop, "game_id", "")
+            or ""
+        ).strip()
+        return external_id, event_id
+
+    # Read the prior source-specific history before inserting this cycle's
+    # observation.  The raw observation must be durable even if scoring,
+    # enrichment, or delivery later fails, but the new row must not become its
+    # own "previous line" for scoring.
+    history_by_identity: dict[tuple[str, str, str, str], list] = {}
+    for prop in unique_props.values():
+        player = str(getattr(prop, "player_name", "") or "").strip()
+        prop_sport = str(getattr(prop, "sport", "") or "").upper().strip()
+        stat = str(getattr(prop, "stat_type", "") or "").strip()
+        external_id, event_id = _source_identity(prop)
+        history_rows = []
+        try:
+            try:
+                history_rows = await db.get_prop_line_history(
+                    "PrizePicks",
+                    player,
+                    prop_sport,
+                    stat,
+                    limit=30,
+                    external_id=external_id,
+                    game_id=event_id,
+                )
+            except TypeError:
+                # Keep lightweight legacy test doubles and older integrations
+                # compatible while the real Database uses source-aware lookup.
+                history_rows = await db.get_prop_line_history(
+                    "PrizePicks", player, prop_sport, stat, limit=30
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "prizepicks_cycle: history lookup failed for %s/%s: %s",
+                player, stat, type(exc).__name__,
+            )
+        history_by_identity[(
+            player,
+            prop_sport,
+            stat,
+            external_id or event_id,
+        )] = history_rows or []
+
+    try:
+        await db.upsert_prop_line_history_batch(
+            "PrizePicks",
+            list(unique_props.values()),
+            append_snapshot=True,
+        )
+    except TypeError:
+        # Compatibility for old provider test doubles.  Production Database
+        # supports append_snapshot and therefore always retains the observation.
+        try:
+            await db.upsert_prop_line_history_batch(
+                "PrizePicks", list(unique_props.values())
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "prizepicks_cycle: history persistence failed: %s", type(exc).__name__
+            )
+            logger.info(
+                "prizepicks_cycle: provider=PrizePicks sport=%s fetch_succeeded=true "
+                "observations=%d persisted=0 evaluated=0 actionable=0 delivered=0",
+                sport, len(unique_props),
+            )
+            return
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("prizepicks_cycle: history persistence failed: %s", type(exc).__name__)
+        logger.info(
+            "prizepicks_cycle: provider=PrizePicks sport=%s fetch_succeeded=true "
+            "observations=%d persisted=0 evaluated=0 actionable=0 delivered=0",
+            sport, len(unique_props),
+        )
+        return
+
     actionable: list[dict] = []
     _pp_candidate_rows: list[dict] = []
     enrichment_budget = 250
@@ -1415,16 +1497,11 @@ async def _run_prizepicks_independent_cycle(
         sport = str(getattr(prop, "sport", "") or "").upper().strip()
         stat = str(getattr(prop, "stat_type", "") or "").strip()
         line = float(getattr(prop, "line_value", 0.0) or 0.0)
-        try:
-            history_rows = await db.get_prop_line_history(
-                "PrizePicks", player, sport, stat, limit=30
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(
-                "prizepicks_cycle: history lookup failed for %s/%s: %s",
-                player, stat, type(exc).__name__,
-            )
-            history_rows = []
+        external_id_raw, event_id = _source_identity(prop)
+        history_rows = history_by_identity.get(
+            (player, sport, stat, external_id_raw or event_id),
+            [],
+        )
 
         # PropLineHistory stores the current source line.  Adapt its movement
         # fields to the scoring/validation contract without importing an
@@ -1497,9 +1574,8 @@ async def _run_prizepicks_independent_cycle(
 
         external_id = str(
             getattr(prop, "external_id", "")
-            or getattr(prop, "event_id", "")
-            or getattr(prop, "game_id", "")
-            or f"{player}:{sport}:{stat}"
+            or f"{player}:{sport}:{stat}:"
+            f"{getattr(prop, 'event_id', '') or getattr(prop, 'game_id', '') or ''}"
         )
         _pp_candidate_rows.append({
             "scan_ts": datetime.utcnow(),
@@ -1596,7 +1672,21 @@ async def _run_prizepicks_independent_cycle(
             })
 
     try:
-        await db.upsert_prop_line_history_batch("PrizePicks", list(unique_props.values()))
+        # Refresh score/recommendation metadata on the current row without
+        # inserting another snapshot.  The append-only observation was already
+        # committed before evaluation above.
+        try:
+            await db.upsert_prop_line_history_batch(
+                "PrizePicks",
+                list(unique_props.values()),
+                refresh_metadata=True,
+            )
+        except TypeError:
+            # Older test doubles/integrations do not expose the optional
+            # metadata-refresh flag; their current-state upsert is still safe.
+            await db.upsert_prop_line_history_batch(
+                "PrizePicks", list(unique_props.values())
+            )
     except Exception as exc:  # noqa: BLE001
         logger.warning("prizepicks_cycle: history persistence failed: %s", type(exc).__name__)
         logger.info(
@@ -1669,6 +1759,12 @@ async def _run_prizepicks_independent_cycle(
                 await db.update_prop_lifecycle_state(
                     "PrizePicks", player, sport, stat, "ACTIVE_ALERTED",
                     first_alert_sent_at=datetime.utcnow(),
+                    external_id=str(getattr(candidate["prop"], "external_id", "") or ""),
+                    game_id=str(
+                        getattr(candidate["prop"], "event_id", "")
+                        or getattr(candidate["prop"], "game_id", "")
+                        or ""
+                    ),
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
