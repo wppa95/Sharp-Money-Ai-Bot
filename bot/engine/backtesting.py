@@ -57,6 +57,7 @@ class BacktestRecord:
     result:      Optional[str]   # WIN / LOSS / PUSH / None
     clv:         Optional[float] # Closing Line Value %; None if not tracked
     ev_pct:      float           # stored expected_value from the EVRecord
+    provider:    Optional[str] = None
 
 
 @dataclass
@@ -129,6 +130,7 @@ class BacktestReport:
     by_tier:    dict[str, DimensionStats]   # "S" / "A" / "B" / "Pass"
     by_market:  dict[str, DimensionStats]
     by_sport:   dict[str, DimensionStats]
+    by_provider: dict[str, DimensionStats] = field(default_factory=dict)
 
     # ── Summary helpers ───────────────────────────────────────────────────────
 
@@ -217,6 +219,14 @@ class BacktestReport:
             wr = f"{s.win_rate * 100:.1f}%" if s.win_rate is not None else "—"
             lines.append(f"  {sport:<10} n={s.total:<3}  WR={wr}")
 
+        lines.append("")
+        lines.append("<b>📡 By Provider</b>")
+        for provider, s in sorted(self.by_provider.items()):
+            if s.total == 0:
+                continue
+            wr = f"{s.win_rate * 100:.1f}%" if s.win_rate is not None else "—"
+            lines.append(f"  {provider:<18} n={s.total:<3}  WR={wr}")
+
         if self.best_tier:
             lines += ["", f"🥇 <b>Best tier:</b>   {self.best_tier}"]
         if self.best_market:
@@ -292,11 +302,66 @@ class BacktestEngine:
 
         return self._build_report(bt_records)
 
+    def run_prop_opportunities(self, opportunities: list) -> BacktestReport:
+        """Replay resolved directional opportunities from persistent tracking.
+
+        PropOpportunityLog stores outcomes from the OVER perspective. Convert
+        those outcomes to WIN/LOSS from the recorded recommendation without
+        applying a Telegram-delivery filter.
+        """
+        bt_records: list[BacktestRecord] = []
+        for opportunity in opportunities:
+            recommendation = str(
+                getattr(opportunity, "recommendation", "") or ""
+            ).upper()
+            result = str(getattr(opportunity, "result", "") or "").upper()
+            if recommendation not in {"OVER", "UNDER"}:
+                continue
+            if result not in {"HIT", "MISS", "PUSH"}:
+                continue
+
+            if result == "PUSH":
+                bet_result = "PUSH"
+            elif recommendation == "OVER":
+                bet_result = "WIN" if result == "HIT" else "LOSS"
+            else:
+                bet_result = "WIN" if result == "MISS" else "LOSS"
+
+            quality = getattr(opportunity, "bet_quality_score", None)
+            if quality is None:
+                quality = getattr(opportunity, "confidence", None)
+            score = max(0, min(100, int(quality or 0)))
+            bt_records.append(BacktestRecord(
+                event=(
+                    getattr(opportunity, "game_id", None)
+                    or getattr(opportunity, "external_id", None)
+                    or ""
+                ),
+                selection=(
+                    f"{getattr(opportunity, 'player_name', '')} "
+                    f"{getattr(opportunity, 'stat_type', '')} "
+                    f"{recommendation} {getattr(opportunity, 'line_value', '')}"
+                ).strip(),
+                sport=getattr(opportunity, "sport", "") or "",
+                market_type=getattr(opportunity, "stat_type", "") or "",
+                score=score,
+                tier=RankingTier.from_score(score),
+                # The stored directional evaluation is itself the decision.
+                decision=RankingDecision.TAKE,
+                result=bet_result,
+                clv=None,
+                ev_pct=0.0,
+                provider=getattr(opportunity, "provider", None) or "Underdog",
+            ))
+
+        return self._build_report(bt_records)
+
     def _build_report(self, records: list[BacktestRecord]) -> BacktestReport:
         overall    = DimensionStats(label="Overall")
         by_tier:   dict[str, DimensionStats] = {}
         by_market: dict[str, DimensionStats] = {}
         by_sport:  dict[str, DimensionStats] = {}
+        by_provider: dict[str, DimensionStats] = {}
 
         for rec in records:
             # Only count TAKE decisions in breakdown stats
@@ -310,8 +375,17 @@ class BacktestEngine:
             if tier_key  not in by_tier:    by_tier[tier_key]   = DimensionStats(label=tier_key)
             if mkt_key   not in by_market:  by_market[mkt_key]  = DimensionStats(label=mkt_key)
             if spt_key   not in by_sport:   by_sport[spt_key]   = DimensionStats(label=spt_key)
+            provider_key = rec.provider or "Legacy / unavailable"
+            if provider_key not in by_provider:
+                by_provider[provider_key] = DimensionStats(label=provider_key)
 
-            for ds in [overall, by_tier[tier_key], by_market[mkt_key], by_sport[spt_key]]:
+            for ds in [
+                overall,
+                by_tier[tier_key],
+                by_market[mkt_key],
+                by_sport[spt_key],
+                by_provider[provider_key],
+            ]:
                 ds.absorb(rec)
 
         return BacktestReport(
@@ -320,6 +394,7 @@ class BacktestEngine:
             by_tier    = by_tier,
             by_market  = by_market,
             by_sport   = by_sport,
+            by_provider = by_provider,
         )
 
 

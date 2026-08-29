@@ -1786,21 +1786,40 @@ class Database:
 
     async def get_resolved_actionable_picks(self, limit: int = 200) -> list:
         """
-        Actionable picks (alert_sent=True) that have been graded (result ≠ PENDING).
-        Ordered newest-first.  Used by /grade.
+        Directional tracked opportunities that have been graded.
+
+        Delivery is deliberately not part of this query: undelivered
+        observations remain tracked and gradeable.  The historical method name
+        is retained for command/test compatibility.
         """
         async with self.session() as s:
             rows = await s.execute(
                 select(PropOpportunityLog)
                 .where(
-                    PropOpportunityLog.alert_sent     == True,   # noqa: E712
+                    PropOpportunityLog.recommendation.in_(["OVER", "UNDER"]),
                     PropOpportunityLog.result.notin_(["PENDING", ""]),
                     PropOpportunityLog.result.isnot(None),
                 )
-                .order_by(PropOpportunityLog.alert_sent_at.desc())
+                .order_by(PropOpportunityLog.detected_at.desc())
                 .limit(limit)
             )
             return list(rows.scalars().all())
+
+    async def get_resolved_tracked_opportunities(self, limit: int = 200) -> list:
+        """Return resolved directional opportunities from the tracked stream."""
+        return await self.get_resolved_actionable_picks(limit=limit)
+
+    async def count_directional_opportunity_records(self) -> int:
+        """Count all persisted directional opportunities, delivered or not."""
+        async with self.session() as s:
+            result = await s.execute(
+                select(func.count())
+                .select_from(PropOpportunityLog)
+                .where(
+                    PropOpportunityLog.recommendation.in_(["OVER", "UNDER"]),
+                )
+            )
+            return result.scalar() or 0
 
     async def find_player_prop_odds(
         self,

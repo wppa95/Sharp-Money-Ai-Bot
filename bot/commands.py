@@ -1420,14 +1420,37 @@ async def cmd_backtest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             pass
 
     try:
-        from engine.backtesting import run_backtest
+        from engine.backtesting import BacktestEngine, run_backtest
 
         await update.message.reply_text(
             f"⏳ Running backtest on last <b>{limit}</b> resolved records…",
             parse_mode="HTML",
         )
 
-        records = await _bounded(_db.get_ev_records_with_results(limit=limit, include_pending=False))
+        tracked_records = await _report_read(
+            _db.get_resolved_tracked_opportunities(limit=limit),
+            fallback=None,
+        )
+        if tracked_records:
+            # PropOpportunityLog is the provider-separated persistent tracking
+            # stream. It is preferred over legacy sportsbook EVRecord rows.
+            engine = BacktestEngine()
+            report = await _bounded(asyncio.to_thread(
+                engine.run_prop_opportunities,
+                tracked_records,
+            ))
+            msg = report.to_telegram()
+            msg += (
+                "\n\n<i>Source: resolved directional tracked opportunities "
+                "(delivery-independent; provider identity preserved).</i>"
+            )
+            await update.message.reply_text(msg, parse_mode="HTML")
+            return
+
+        # Legacy fallback for installations with no resolved tracked props yet.
+        records = await _bounded(
+            _db.get_ev_records_with_results(limit=limit, include_pending=False)
+        )
 
         if not records:
             await update.message.reply_text(
@@ -3136,22 +3159,21 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     """
     Inner implementation of /grade.
 
-    Source of truth: PropOpportunityLog rows with alert_sent=True.
-    These are the only rows that represent actual 🎯 ACTIONABLE BET PICK alerts
-    delivered to Telegram.  PPEdgeRecord (legacy PP system) is NOT used here.
+    Source of truth: directional PropOpportunityLog rows, whether or not they
+    were delivered to Telegram.  PPEdgeRecord (legacy PP system) is NOT used.
 
     PropOpportunityLog result values: HIT | MISS | PUSH | PENDING
     Mapped to display:  HIT→W  MISS→L  PUSH/REFUND→P
     """
     resolved, total_all = await _bounded(asyncio.gather(
-        _db.get_resolved_actionable_picks(limit=200),
-        _db.count_actionable_pick_records(),
+        _db.get_resolved_tracked_opportunities(limit=200),
+        _db.count_directional_opportunity_records(),
     ))
 
     lines: list[str] = ["📊 <b>Sharp Money Pick Grades</b>", ""]
 
     if not resolved:
-        pending_count = total_all  # all stored picks must be PENDING
+        pending_count = total_all  # unresolved directional records remain pending
         lines += [
             "No resolved picks yet.",
             "<i>Results update automatically when games finish.</i>",
@@ -3414,11 +3436,10 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         # Each metric is optional.  A locked history query must not hide the
         # provider counts or make the entire Telegram command fail.
-        ud_today, pp_today, total_ud, resolved, tracking = await _independent_report_reads([
+        ud_today, pp_today, total_ud, tracking = await _independent_report_reads([
             _db.count_today_actionable_alerts(),
             _db.count_today_pp_alerts(),
             _db.count_underdog_records(),
-            _db.get_all_resolved_pp_edges(limit=500),
             _db.get_tracking_summary(),
         ])
         tracked_opportunities = (
@@ -3453,27 +3474,71 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             + "</b>"
         )
 
-        lines.append("")
-        lines.append(
-            "<b>All-time</b>  ("
-            + (f"{total_ud:,}" if total_ud is not None else "unavailable")
-            + " Underdog snapshots)"
+        tracking_counts = tracking.get("counts", {}) if isinstance(tracking, dict) else {}
+        directional_total = (
+            int(tracking.get("directional_total", tracking.get("total", 0)) or 0)
+            if isinstance(tracking, dict)
+            else None
+        )
+        delivered = (
+            int(tracking.get("delivered", 0) or 0)
+            if isinstance(tracking, dict)
+            else None
+        )
+        pending = (
+            int(tracking.get("pending", 0) or 0)
+            if isinstance(tracking, dict)
+            else None
+        )
+        resolved_total = (
+            int(tracking.get("resolved", 0) or 0)
+            if isinstance(tracking, dict) and "resolved" in tracking
+            else None
         )
 
-        if resolved:
-            wins   = sum(1 for r in resolved if (r.result or "").upper() == "WIN")
-            losses = sum(1 for r in resolved if (r.result or "").upper() == "LOSS")
-            pushes = sum(1 for r in resolved if (r.result or "").upper() in ("PUSH", "REFUND"))
+        lines += [
+            "",
+            "<b>Pipeline populations</b>",
+            f"  Directional: <b>{directional_total if directional_total is not None else 'unavailable'}</b>",
+            f"  Delivered:   <b>{delivered if delivered is not None else 'unavailable'}</b>",
+            f"  Pending:     <b>{pending if pending is not None else 'unavailable'}</b>",
+            f"  Resolved:    <b>{resolved_total if resolved_total is not None else 'unavailable'}</b>",
+        ]
+
+        if tracking_counts:
+            wins = (
+                tracking_counts.get("OVER", {}).get("HIT", 0)
+                + tracking_counts.get("UNDER", {}).get("MISS", 0)
+            )
+            losses = (
+                tracking_counts.get("OVER", {}).get("MISS", 0)
+                + tracking_counts.get("UNDER", {}).get("HIT", 0)
+            )
+            pushes = (
+                tracking_counts.get("OVER", {}).get("PUSH", 0)
+                + tracking_counts.get("UNDER", {}).get("PUSH", 0)
+            )
             total_res = wins + losses + pushes
-            hit_rate  = wins / total_res * 100 if total_res > 0 else 0.0
+            hit_rate = wins / total_res * 100 if total_res > 0 else 0.0
             lines += [
                 f"  Resolved:    <b>{total_res}</b>  W:{wins}  L:{losses}  P:{pushes}",
                 f"  Hit rate:    <code>{hit_rate:.0f}%</code>",
             ]
-        elif resolved is None:
-            lines.append("  <i>Resolved results unavailable right now.</i>")
-        else:
-            lines.append("  <i>No resolved picks yet — results recorded after games finish.</i>")
+        elif isinstance(tracking, dict):
+            lines.append("  <i>Result breakdown unavailable right now.</i>")
+
+        if isinstance(tracking, dict) and tracking.get("active_by_provider"):
+            lines.append("")
+            lines.append("<b>Tracked by provider</b>")
+            for provider, count in sorted(tracking["active_by_provider"].items()):
+                lines.append(f"  {provider}: <b>{int(count):,}</b>")
+
+        lines += [
+            "",
+            "<b>All-time</b>  ("
+            + (f"{total_ud:,}" if total_ud is not None else "unavailable")
+            + " Underdog snapshots; legacy provider table)",
+        ]
 
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
     except Exception as exc:
