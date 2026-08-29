@@ -1,0 +1,303 @@
+Continue from the current implementation.
+
+The delivery-gate cleanup is complete. Now make ONLY the following targeted monitoring/FPR changes.
+
+Do NOT redesign the architecture.
+Do NOT create a new task.
+Do NOT propose a follow-up task.
+Do NOT perform live or production verification.
+
+Do NOT:
+
+* query Railway production
+* query production databases
+* send Telegram commands
+* send test alerts
+* restart Railway
+* deploy Railway
+* wait for production cycles
+
+Use local code inspection and regression testing only.
+
+1. CORRECT FPR PRIORITY ORDER
+
+The remaining active Underdog/PrizePicks props must be the primary rotation population.
+
+Change the effective FPR priority so the normal active universe is always guaranteed coverage.
+
+Required conceptual order:
+
+1. Remaining active props
+2. New props naturally enter as they appear
+3. Line movers naturally receive prompt rescanning
+4. Urgent/actionable movement can receive prompt rescanning
+5. Continue through the remaining active universe
+6. Advance cursor
+7. Wrap around
+8. Start the next rotation
+
+The important requirement is:
+
+Remaining active props must never be starved.
+
+New props and line movers should not create a competing queue that repeatedly consumes the entire batch.
+
+They should receive priority when appropriate, but the normal active universe must continuously progress.
+
+Do NOT create a second rotation mechanism.
+
+FPR remains the sole full-pool rotation.
+
+2. GUARANTEE CONTINUOUS RESCANNING
+
+Every active prop must remain eligible for repeated rescanning until:
+
+* Event/game starts
+* Prop is removed from the active source
+* Prop otherwise becomes inactive according to the existing lifecycle
+
+This includes:
+
+* unchanged props
+* previously scored props
+* previously rejected props
+* non-actionable props
+* cold-start props
+* missing-evidence props
+* previously delivered props
+* props that have never produced a Telegram alert
+
+Being previously evaluated or delivered must never remove a prop from FPR.
+
+Delivery deduplication remains downstream.
+
+3. REMOVE OBSOLETE ACTIVE CLASSIFICATION FRAMEWORK
+
+Completely remove S/A/B/C, PASS, Watchlist, Near-Miss, Tier 1, and Tier 2 from the CURRENT monitoring/evaluation framework.
+
+They must NOT:
+
+* determine FPR priority
+* determine rotation eligibility
+* determine rescanning
+* determine evaluation
+* determine evidence enrichment
+* determine grading
+* determine tracking
+* determine delivery
+
+Do NOT recreate Tier 1/Tier 2.
+
+Do NOT replace the old classifications with another qualification hierarchy.
+
+The unified monitoring/evaluation model is the source of truth.
+
+Historical compatibility fields may remain only where required for old data compatibility, provided they cannot influence current behavior.
+
+4. NON-ACTIONABLE PROPS
+
+Non-actionable does NOT mean inactive.
+
+A prop without a current actionable direction must remain:
+
+* tracked
+* persisted
+* rescanned
+* eligible for future movement detection
+* eligible for future evidence enrichment
+* eligible for grading when a result becomes available
+
+Do NOT remove non-actionable props from FPR.
+
+Do NOT create a replacement Watchlist/PASS category.
+
+5. NEW PROPS
+
+New props must:
+
+* enter the active universe
+* be persisted
+* be evaluated
+* receive an early scan naturally
+* remain in the active universe afterward
+* continue through future FPR rotations
+
+New-prop handling must not replace normal full-pool rotation.
+
+6. LINE MOVERS
+
+Line movement must:
+
+* be detected from active source state
+* trigger prompt rescoring
+* remain in the active universe
+* return to normal rotation afterward
+
+A line mover must not permanently consume the FPR window.
+
+7. ACTIVE-POOL SOURCE
+
+Preserve the existing fix:
+
+FPR active universe comes from the latest active provider source-ID state.
+
+Do NOT use:
+
+* PropLineHistory population size
+* delivered population
+* directional population
+* scored population
+* recommendation population
+* tier population
+
+as the definition of the active FPR universe.
+
+Historical snapshots remain historical.
+
+Active state is the latest active source-ID state.
+
+8. PROVIDER SEPARATION
+
+Preserve:
+
+* PrizePicks source IDs remain PP-specific.
+* Underdog source IDs remain UD-specific.
+* Alternate PP lines remain distinct.
+* Line changes update the correct source identity.
+* PP and UD must never suppress each other.
+* PP must not inherit Underdog ACTIVE_SPORTS.
+* Football remains excluded upstream.
+* Soccer remains supported.
+
+9. EVENT LIFECYCLE
+
+When an event starts or a prop is removed:
+
+* remove it from active FPR rotation
+* preserve all historical snapshots
+* preserve grading eligibility
+* preserve historical outcomes
+
+Inactive monitoring state must never mean deletion of history.
+
+10. REPORTING
+
+Keep current reporting focused on real populations:
+
+* Active tracked
+* Historical observations
+* Directional opportunities
+* Delivered
+* Pending
+* Resolved
+* HIT
+* MISS
+* PUSH
+
+Do NOT restore obsolete current populations:
+
+* Watchlist
+* Near-Miss
+* PASS
+* S/A/B/C
+* Tier 1
+* Tier 2
+
+FPR reporting should show actual rotation/coverage information rather than obsolete classification counts.
+
+11. TESTS
+
+Add/update focused regression tests proving:
+
+FPR priority
+
+* Remaining active props receive guaranteed rotation coverage.
+* New props can receive an early scan without starving the active remainder.
+* Line movers receive prompt rescoring without starving the active remainder.
+* Urgent movement cannot permanently consume the batch.
+* Cursor advances after each batch.
+* Cursor wraps correctly.
+* Multiple rotations work.
+
+Universal rescanning
+
+* Unchanged props remain eligible.
+* Previously scored props remain eligible.
+* Previously rejected props remain eligible.
+* Non-actionable props remain eligible.
+* Cold-start props remain eligible.
+* Previously delivered props remain eligible.
+* Missing-evidence props remain eligible.
+
+Classification neutrality
+
+* S/A/B/C do not affect FPR.
+* PASS does not affect FPR.
+* Watchlist/Near-Miss do not affect FPR.
+* Tier 1/Tier 2 do not affect FPR.
+* decision_tier does not affect FPR.
+
+Lifecycle
+
+* Started events leave active FPR.
+* Removed source IDs leave active FPR.
+* Historical snapshots remain after removal/start.
+* Alternate PP lines remain distinct.
+
+Provider separation
+
+* PP and UD identities remain separate.
+* PP delivery state cannot suppress UD.
+* UD delivery state cannot suppress PP.
+
+Do NOT weaken existing tests.
+
+12. VALIDATION
+
+Run:
+
+1. Focused FPR/rotation/classification/provider/lifecycle tests.
+2. Full existing test suite.
+3. Python compilation.
+4. git diff –check.
+
+Do NOT perform live verification.
+
+FINAL REPORT
+
+IMPLEMENTED
+
+Exactly what changed.
+
+FPR ROTATION
+
+Explain how the active universe is guaranteed continuous coverage without a competing queue.
+
+CLASSIFICATION FRAMEWORK
+
+Confirm obsolete S/A/B/C, PASS, Watchlist/Near-Miss, Tier 1/Tier 2, and decision_tier no longer influence current monitoring/evaluation.
+
+NON-ACTIONABLE
+
+Confirm non-actionable props remain continuously rescannable.
+
+PROVIDER SEPARATION
+
+Confirm PP and UD remain completely independent.
+
+EVENT LIFECYCLE
+
+Confirm started/removed props leave active monitoring while history remains intact.
+
+TESTED
+
+Report focused tests, full suite, compilation, and diff check.
+
+LIVE VERIFICATION
+
+NO LIVE/PRODUCTION VERIFICATION WAS PERFORMED.
+
+TASK MANAGEMENT
+
+No new task was created.
+No follow-up task was proposed.
