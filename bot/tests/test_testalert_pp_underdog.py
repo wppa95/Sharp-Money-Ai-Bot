@@ -13,8 +13,8 @@ Covers:
   AlertDelivery.deliver_underdog:
     - scope filter passes Underdog source (always allowed)
     - line-movement alert formatted and broadcast (new_line > old_line → HIGHER)
-    - line-movement alert formatted for LOWER move
-    - removed=True produces REMOVED formatting
+    - line-movement observations do not reach Telegram
+    - removed=True does not reach Telegram
     - blocked scope returns DeliveryResult(sent=False, filtered=True)
     - game_time forwarded to formatter when supplied
 
@@ -357,6 +357,8 @@ class TestDeliverUnderdog:
             stat_type   = "Points",
             old_line    = 0.5,
             new_line    = 1.5,
+            validation  = MagicMock(has_supporting_data=True),
+            decision    = MagicMock(recommendation="OVER", confidence=80),
         )
         assert not result.filtered
 
@@ -424,6 +426,8 @@ class TestDeliverUnderdog:
             stat_type   = "Points",
             old_line    = 0.5,
             new_line    = 1.5,
+            validation  = MagicMock(has_supporting_data=True),
+            decision    = MagicMock(recommendation="OVER", confidence=80),
         )
 
         assert sent_messages
@@ -431,7 +435,6 @@ class TestDeliverUnderdog:
         assert "Connor McDavid" in msg
         assert "0.5" in msg
         assert "1.5" in msg
-        # New format: direction shown via Move amount; header is 🎯 ACTIONABLE BET PICK
         assert "ACTIONABLE BET PICK" in msg or "+1.0" in msg
 
     @pytest.mark.asyncio
@@ -452,17 +455,18 @@ class TestDeliverUnderdog:
             stat_type   = "Shots on Goal",
             old_line    = 3.5,
             new_line    = 2.5,
+            validation  = MagicMock(has_supporting_data=True),
+            decision    = MagicMock(recommendation="UNDER", confidence=80),
         )
 
         msg = sent_messages[0]
         assert "Nathan MacKinnon" in msg
         assert "3.5" in msg
         assert "2.5" in msg
-        # New format: direction shown via Move amount; header is 🎯 ACTIONABLE BET PICK
         assert "ACTIONABLE BET PICK" in msg or "-1.0" in msg
 
     @pytest.mark.asyncio
-    async def test_removed_prop_formatting(self):
+    async def test_removed_prop_is_monitoring_only(self):
         sent_messages: list[str] = []
 
         async def capture(chat_id, text, **kwargs):
@@ -472,7 +476,7 @@ class TestDeliverUnderdog:
         mock_bot = MagicMock()
         mock_bot.send_message = AsyncMock(side_effect=capture)
         delivery = AlertDelivery(_make_db_mock(), mock_bot, [1])
-        await delivery.deliver_underdog(
+        result = await delivery.deliver_underdog(
             player_name = "Auston Matthews",
             team        = "TOR",
             sport       = "NHL",
@@ -482,9 +486,8 @@ class TestDeliverUnderdog:
             removed     = True,
         )
 
-        msg = sent_messages[0]
-        assert "Auston Matthews" in msg
-        assert "REMOVED" in msg or "🚫" in msg
+        assert result.filtered is True
+        assert sent_messages == []
 
     @pytest.mark.asyncio
     async def test_result_sent_true_on_success(self):
@@ -496,6 +499,8 @@ class TestDeliverUnderdog:
             stat_type   = "Points",
             old_line    = 0.5,
             new_line    = 1.5,
+            validation  = MagicMock(has_supporting_data=True),
+            decision    = MagicMock(recommendation="OVER", confidence=80),
         )
         assert result.sent is True
 
@@ -509,6 +514,8 @@ class TestDeliverUnderdog:
             stat_type   = "Points",
             old_line    = 0.5,
             new_line    = 1.5,
+            validation  = MagicMock(has_supporting_data=True),
+            decision    = MagicMock(recommendation="OVER", confidence=80),
         )
         assert result.sent is False
 
@@ -524,6 +531,8 @@ class TestDeliverUnderdog:
             stat_type   = "Points",
             old_line    = 0.5,
             new_line    = 1.5,
+            validation  = MagicMock(has_supporting_data=True),
+            decision    = MagicMock(recommendation="OVER", confidence=80),
         )
         assert result.recipients_sent   == 3
         assert result.recipients_failed == 0
@@ -551,6 +560,8 @@ class TestDeliverUnderdog:
             old_line    = 0.5,
             new_line    = 1.5,
             game_time   = game_ts,
+            validation  = MagicMock(has_supporting_data=True),
+            decision    = MagicMock(recommendation="OVER", confidence=80),
         )
 
         assert sent_messages, "Expected alert to be sent with future game_time"
@@ -598,6 +609,8 @@ class TestDeliverUnderdog:
             stat_type   = "Points",
             old_line    = 26.5,
             new_line    = 28.5,
+            validation  = MagicMock(has_supporting_data=True),
+            decision    = MagicMock(recommendation="OVER", confidence=80),
         )
         assert "🏀" in sent_messages[0]
 
@@ -614,6 +627,8 @@ class TestDeliverUnderdog:
             stat_type   = "Points",
             old_line    = 0.5,
             new_line    = 1.5,
+            validation  = MagicMock(has_supporting_data=True),
+            decision    = MagicMock(recommendation="OVER", confidence=80),
         )
         assert result.sent is False
         assert result.recipients_failed == 1

@@ -1515,6 +1515,17 @@ class AlertDelivery:
                 logger.info("Underdog alert capped: %s | %s | %s", player_name, stat_type, reason)
                 return DeliveryResult(sent=False, filtered=True, filtered_reason=reason)
 
+        # Removal and market-movement records are monitoring observations,
+        # never actionable betting picks.  Keep the low-level formatter
+        # available for historical/internal callers, but do not let a direct
+        # Telegram path turn either event into a user-facing prop alert.
+        if removed or market_move_only:
+            return DeliveryResult(
+                sent=False,
+                filtered=True,
+                filtered_reason="Monitoring-only event is not Telegram actionable",
+            )
+
         # Every prop Telegram path uses the same canonical gate. Market
         # movement, removal, new-prop, and moneyline labels are monitoring
         # context; none is an actionable direction/evidence substitute.
