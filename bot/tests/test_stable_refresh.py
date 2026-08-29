@@ -746,7 +746,6 @@ class TestWatchlistCursorRotation:
     def test_cursor_wraps_when_stale_exceeds_pool(self):
         """If the persisted cursor exceeds the current pool size (pool shrank),
         it must wrap cleanly via modulo without IndexError."""
-        from market_engine import _STABLE_WATCHLIST_BATCH_SIZE as cap
         pool   = 50
         cursor = 180  # stale — pool shrank
         cursor = cursor % pool if pool > 0 else 0

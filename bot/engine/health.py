@@ -879,7 +879,7 @@ class HealthTracker:
     # ── Full-Pool Rescan (FPR) cursor, rotation & stats ───────────────────────────
 
     def get_fpr_cursor(self) -> int:
-        """Return the current FPR cursor into the priority-sorted active pool."""
+        """Return the current FPR cursor into the stable active pool."""
         with self._lock:
             return max(0, int(self._state.get("fpr_cursor", 0)))
 

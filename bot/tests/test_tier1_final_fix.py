@@ -329,12 +329,12 @@ class TestNpImmediateSportAwareStars:
             "UD_NON_STRICT_MIN_STARS must still appear in np_immediate star check"
         )
 
-    def test_watchlist_scan_has_no_pre_delivery_star_gate(self):
-        """Watchlist props reach the canonical Telegram gate without a star blocker."""
-        src = self._me_src()
-        wl_idx = src.find("_wl_score.stars >= config.min_stars_for_sport")
-        assert wl_idx == -1
-        assert "_wl_dec.recommendation in (\"OVER\", \"UNDER\")" in src
+    def test_legacy_watchlist_scan_has_been_removed(self):
+        """The compatibility function cannot create a second classification queue."""
+        import market_engine as me
+        src = inspect.getsource(me._stable_refresh_job)
+        assert "watchlist" not in src.lower()
+        assert "get_active_watchlist_candidates" not in src
 
 
 # ═══════════════════════════════════════════════════════════════════════════

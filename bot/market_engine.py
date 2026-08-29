@@ -4851,24 +4851,14 @@ async def underdog_job(context) -> None:
 # but intentionally not registered as a background job. FPR is the sole
 # full-pool rotation and uses the current active monitoring pipeline.
 #
-# PART 1 — Rolling stable-pool rescan:
+# Compatibility entry point:
 #   • Loads all active props from DB via get_latest_underdog_snapshot_per_prop().
-#   • Sorts them by (player, stat_type) for a stable, reproducible cursor.
-#   • Takes the next ≤10,000 props from the cursor position.
-#   • Rescores each using the existing engine + all existing alert gates.
-#   • Sends qualifying Telegram alerts through AlertDelivery.deliver_underdog().
-#   • Rescores each active prop and preserves directional evaluations.
-#   • Advances the cursor; wraps to 0 at end of pool.
+#   • Does not own a cursor, rescan queue, promotion queue, or removal queue.
+#   • FPR owns the only scheduled full-pool rotation.
 #
-# PART 2 — Previously monitored rows:
-#   • Queries persisted monitoring rows for compatibility with older data.
-#   • Rescores each; only valid directional results can reach delivery.
-#
-# Both parts use the existing dedup, direction, BQ, conf, and live-game gates.
-# The fast path (underdog_job) is completely unaffected.
+# The live monitoring path and FPR remain completely unaffected.
 
 _STABLE_REFRESH_BATCH_SIZE:   int = 10_000
-_STABLE_WATCHLIST_BATCH_SIZE: int = 200    # max watchlist candidates rescanned per cycle
 
 # Per-stable-refresh-cycle dedup — prevents sending 95+ priority alert more
 # than once per cycle for the same prop.  Reset each time _stable_refresh_job
@@ -4877,13 +4867,13 @@ _STABLE_WATCHLIST_BATCH_SIZE: int = 200    # max watchlist candidates rescanned 
 
 async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
     """
-    Legacy rolling stable-prop rescore + watchlist rescan.
+    Legacy direct-call compatibility entry point.
 
     This function is not independently scheduled. The live monitoring and FPR
     lifecycle own active-pool processing; direct callers remain supported for
     compatibility with existing maintenance/tests.
 
-    See module-level docstring above for the full design.
+    It intentionally does not create a second active-prop rotation.
     """
     from engine.player_validator import validate_player_prop as _sr_validate
     from engine.ud_bet_decision import make_ud_bet_decision as _sr_decide
@@ -4975,9 +4965,9 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 key[0], key[1], key[2],
             ),
         )
-        # FPR owns the only full-pool rotation.  Stable Refresh still loads
-        # the active universe below so it can reconcile watchlist rows, but it
-        # must not maintain a second cursor or rescore a batch of every prop.
+        # FPR owns the only full-pool rotation. Stable Refresh still loads
+        # the active universe for compatibility, but it must not maintain a
+        # second cursor or rescore a batch of every prop.
         # Keep these compatibility stats at zero rather than reporting a
         # misleading second rotation in health.json.
         pool_keys         = []
@@ -5082,54 +5072,6 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
             )
 
-            # ── Watchlist UNDER rule: score 30–40 + UNDER recommendation ─────
-            # Low-scoring UNDER candidates are saved as watchlist rather than
-            # silently dropped so they can be promoted if they improve later.
-            if False and 30 <= _sr_score.total <= 40:
-                try:
-                    _sr_hits_wl = await _fetch_and_compute_hit_rates(
-                        db, _sr_player, _sr_sport, _sr_stat, _sr_line, allow_remote=False
-                    )
-                    _sr_dec_wl = _sr_decide(
-                        score        = _sr_score,
-                        validation   = _sr_val,
-                        current_line = _sr_line,
-                        prev_line    = None,
-                        hit_rates    = _sr_hits_wl,
-                        sport        = _sr_sport,
-                    )
-                    if _sr_dec_wl is not None and _sr_dec_wl.recommendation == "UNDER":
-                        _sr_ext_id_wl = (
-                            getattr(_sr_snap, "external_id", None)
-                            or str(getattr(_sr_snap, "id", None) or "")
-                        )
-                        try:
-                            await db.log_prop_opportunity(
-                                external_id       = _sr_ext_id_wl,
-                                player_name       = _sr_player,
-                                team              = _sr_snap.team or "",
-                                sport             = _sr_sport,
-                                stat_type         = _sr_stat,
-                                line_value        = _sr_line,
-                                recommendation    = _sr_dec_wl.recommendation,
-                                decision_tier     = _sr_dec_wl.decision_tier,
-                                confidence        = _sr_dec_wl.confidence,
-                                game_time         = _sr_snap.game_time,
-                                game_id           = getattr(_sr_snap, "game_id", "") or "",
-                                provider          = "Underdog",
-                                bet_quality_score = _sr_dec_wl.confidence,
-                                reason_codes      = _compute_reason_codes(_sr_score, _sr_dec_wl),
-                                watchlist_state   = None,
-                            )
-                        except Exception:
-                            pass
-                        sr_not_delivered += 1
-                        continue
-                except Exception:
-                    pass
-                sr_not_delivered += 1
-                continue
-
             # ── Normal quality gates ──────────────────────────────────────────
             if not _sr_val.has_supporting_data:
                 sr_not_delivered += 1
@@ -5173,7 +5115,6 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         provider          = "Underdog",
                         bet_quality_score = _sr_dec.confidence,
                         reason_codes      = _compute_reason_codes(_sr_score, _sr_dec),
-                        watchlist_state   = None,
                     )
                 except Exception as _sr_pol_exc:
                     logger.debug("stable_refresh: log_prop_opportunity failed: %s", _sr_pol_exc)
@@ -5376,290 +5317,9 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         if _health:
             _health.record_job_fail("stable_refresh_job", str(_sr_exc))
 
-    # ────────────────────────────────────────────────────────────────────────────
-    # PART 2 — Watchlist rescan
-    # ────────────────────────────────────────────────────────────────────────────
-    try:
-        # The active pool above is the single unified rotation.  Do not run a
-        # separate Watchlist/Near-Miss queue; legacy rows remain readable for
-        # grading, but never control rescoring or rotation.
-        _wl_all       = []
-        wl_active     = len(_wl_all)
-
-        # Rotating cursor — ensures every watchlist entry is eventually rescanned
-        # even when the watchlist exceeds the per-cycle batch cap.
-        # FIFO ordering (id ASC in get_active_watchlist_candidates) guarantees
-        # that advancing the cursor each cycle gives every entry a fair turn.
-        _wl_cursor     = _health.get_wl_refresh_cursor() if _health else 0
-        _wl_cursor     = (_wl_cursor % wl_active) if wl_active > 0 else 0
-        _wl_end        = min(_wl_cursor + _STABLE_WATCHLIST_BATCH_SIZE, wl_active)
-        wl_candidates  = _wl_all[_wl_cursor:_wl_end]
-        _wl_next_cursor = _wl_end % wl_active if wl_active > 0 else 0
-
-        # If part 1 failed (active_pool wasn't set), re-fetch using the same
-        # correct method: MAX(id) over ALL rows then filter removed=False.
-        # Never use get_latest_underdog_snapshot_per_prop here — that method's
-        # MAX-over-non-removed semantics can return a stale active snapshot for
-        # a prop whose latest feed record is a removal, causing false promotions.
-        _wl_pool = {}
-        _wl_line_map = {}
-
-        from engine.ud_scoring import score_ud_prop as _wl_score_fn  # alias
-        from engine.player_validator import validate_player_prop as _wl_validate
-        from engine.ud_bet_decision import make_ud_bet_decision as _wl_decide
-
-        for _wl_row in wl_candidates:
-            _wl_player = _wl_row.player_name  or ""
-            _wl_stat   = _wl_row.stat_type    or ""
-            _wl_sport  = _wl_row.sport        or "UNKNOWN"
-            _wl_line   = float(_wl_row.line_value or 0.0)
-            _wl_ext_id = _wl_row.external_id  or ""
-            _wl_conf   = int(_wl_row.confidence or 0)
-
-            # Check if prop is still in the active pool
-            _wl_snap = _wl_pool.get((_wl_player, _wl_stat))
-            if _wl_snap is None:
-                # Prop removed from Underdog → mark Removed
-                try:
-                    await db.log_prop_opportunity(
-                        external_id       = _wl_ext_id,
-                        player_name       = _wl_player,
-                        team              = getattr(_wl_row, "team", "") or "",
-                        sport             = _wl_sport,
-                        stat_type         = _wl_stat,
-                        line_value        = _wl_line,
-                        recommendation    = getattr(_wl_row, "recommendation", "PASS"),
-                        decision_tier     = getattr(_wl_row, "decision_tier",  "PASS"),
-                        confidence        = _wl_conf,
-                        game_time         = getattr(_wl_row, "game_time", None),
-                        game_id           = getattr(_wl_row, "game_id", "") or "",
-                        provider          = "Underdog",
-                        bet_quality_score = _wl_conf,
-                        watchlist_state   = None,
-                    )
-                except Exception:
-                    pass
-                wl_removed  += 1
-                wl_rescored += 1
-                continue
-
-            wl_rescored     += 1
-            # line_value is the canonical ORM field on UnderdogSnapshotRecord
-            _wl_cur_line     = _wl_snap.line_value or 0.0
-
-            try:
-                _wl_hist  = await db.get_ud_prop_history(_wl_player, _wl_stat, limit=30)
-                _wl_score = _wl_score_fn(
-                    player_name  = _wl_player,
-                    stat_type    = _wl_stat,
-                    sport        = _wl_sport,
-                    current_line = _wl_cur_line,
-                    prev_line    = None,
-                    history      = _wl_hist,
-                )
-                _wl_cur_total = float(_wl_score.total)
-
-                # Track improvement vs previous confidence
-                if _wl_cur_total > _wl_conf + 3:
-                    wl_improved  += 1
-                elif _wl_cur_total < _wl_conf - 3:
-                    wl_declined  += 1
-                else:
-                    wl_unchanged += 1
-
-                _wl_val = _wl_validate(
-                    player_name  = _wl_player,
-                    stat_type    = _wl_stat,
-                    current_line = _wl_cur_line,
-                    history      = _wl_hist,
-                    min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
-                )
-                _wl_hits = await _fetch_and_compute_hit_rates(
-                    db, _wl_player, _wl_sport, _wl_stat, _wl_cur_line, allow_remote=False,
-                )
-                _wl_dec = _wl_decide(
-                    score        = _wl_score,
-                    validation   = _wl_val,
-                    current_line = _wl_cur_line,
-                    prev_line    = None,
-                    hit_rates    = _wl_hits,
-                    sport        = _wl_sport,
-                )
-
-                # Scan-time eligibility is intentionally non-blocking. Keep
-                # PASS/no-direction entries in the monitoring stream; only
-                # directional decisions reach the canonical Telegram gate.
-                _wl_qualifies = (
-                    _wl_dec is not None
-                    and _wl_dec.recommendation in ("OVER", "UNDER")
-                )
-
-                if _wl_qualifies and chat_ids:
-                    # Promote — deliver alert through normal path
-                    _wl_mq       = _sr_cmq(_wl_stat, _wl_cur_line, _wl_score)
-                    _wl_mp       = _sr_dmp(None, _wl_hist)
-                    # ── Tier delivery gate [watchlist] ───────────────────────
-                    _wl_mq_score = float(getattr(_wl_mq, "score", 0) if _wl_mq else 0)
-                    _wl_bq_score = float(_wl_score.total if _wl_score else 0)
-                    _wl_mq_ok    = _tier_delivery_gate(
-                        _wl_sport, _wl_dec.recommendation, _wl_bq_score, _wl_mq_score,
-                        _has_strong_delivery_evidence(
-                            score=_wl_score, intelligence_trace=getattr(_wl_dec, "evidence", None),
-                        ),
-                        score_tier=getattr(_wl_dec, "decision_tier", None),
-                        confidence=getattr(_wl_dec, "confidence", None),
-                    )
-                    if not _wl_mq_ok:
-                        logger.debug(
-                            "UD tier_gate [watchlist]: %s | %s | sport=%s bq=%.0f mq=%.0f dir=%s — blocked",
-                            _wl_player, _wl_stat, _wl_sport, _wl_bq_score, _wl_mq_score, _wl_dec.recommendation,
-                        )
-                    if _wl_mq_ok:
-                     # ── Atomic dedup claim [watchlist] ────────────────────────
-                     if not await _try_claim_delivery_slot(
-                         _wl_player, _wl_sport, _wl_stat, _wl_cur_line,
-                         provider="Underdog",
-                         source_id=str(getattr(_wl_snap, "external_id", None) or getattr(_wl_snap, "id", None) or ""),
-                         event_id=str(getattr(_wl_snap, "event", "") or getattr(_wl_snap, "game_id", "") or ""),
-                         direction=str(getattr(_wl_dec, "recommendation", "") or ""),
-                     ):
-                         logger.debug(
-                             "UD dedup_claim [wl]: %s | %s | concurrent path already claimed",
-                             _wl_player, _wl_stat,
-                         )
-                         _wl_mq_ok = False
-                    if _wl_mq_ok:
-                     _wl_delivery = AlertDelivery(db, bot, chat_ids)
-                     try:
-                      _wl_result   = await _wl_delivery.deliver_underdog(
-                         player_name    = _wl_player,
-                         team           = _wl_snap.team or "",
-                         sport          = _wl_sport,
-                         stat_type      = _wl_stat,
-                         old_line       = _wl_cur_line,
-                         new_line       = _wl_cur_line,
-                         game_time      = _wl_snap.game_time,
-                         game_status    = (
-                             getattr(_wl_snap, "game_status", None)
-                             or getattr(_wl_snap, "provider_status", None)
-                         ),
-                         score          = _wl_score,
-                         validation     = _wl_val,
-                         decision       = _wl_dec,
-                         market_quality = _wl_mq,
-                         market_pressure= _wl_mp,
-                         standing       = True,
-                         strict_pregame = True,
-                      )
-                     except Exception as _wl_delivery_exc:
-                      _release_prop_delivery_claim(
-                          _prop_market_alerted,
-                          _wl_player,
-                          _wl_sport,
-                          _wl_stat,
-                          _wl_cur_line,
-                          provider="Underdog",
-                          source_id=str(
-                              getattr(_wl_snap, "external_id", None)
-                              or getattr(_wl_snap, "id", None)
-                              or ""
-                          ),
-                          event_id=str(
-                              getattr(_wl_snap, "event", "")
-                              or getattr(_wl_snap, "game_id", "")
-                              or ""
-                          ),
-                          direction=str(getattr(_wl_dec, "recommendation", "") or ""),
-                      )
-                      logger.warning(
-                          "stable_refresh: watchlist delivery failed; claim released "
-                          "for %s/%s: %s",
-                          _wl_player, _wl_stat, type(_wl_delivery_exc).__name__,
-                      )
-                      _wl_result = DeliveryResult(sent=False)
-                    if _wl_mq_ok and _wl_result.sent:
-                        wl_promoted += 1
-                        # _record_prop_alerted already called by _try_claim_delivery_slot.
-                        try:
-                            await db.log_prop_opportunity(
-                                external_id       = _wl_ext_id,
-                                player_name       = _wl_player,
-                                team              = _wl_snap.team or "",
-                                sport             = _wl_sport,
-                                stat_type         = _wl_stat,
-                                line_value        = _wl_cur_line,
-                                recommendation    = _wl_dec.recommendation,
-                                decision_tier     = _wl_dec.decision_tier,
-                                confidence        = _wl_dec.confidence,
-                                game_time         = _wl_snap.game_time,
-                                game_id           = getattr(_wl_snap, "game_id", "") or "",
-                                provider          = "Underdog",
-                                bet_quality_score = _wl_dec.confidence,
-                                watchlist_state   = None,
-                            )
-                            await db.mark_ud_snapshot_alert_sent(_wl_player, _wl_stat)
-                            await db.mark_opportunity_alert_sent(_wl_ext_id, _wl_stat)
-                        except Exception:
-                            pass
-                        logger.info(
-                            "Directional candidate delivered | %s | %s | %s"
-                            " | Line: %.1f | Score: %d/100",
-                            _wl_player, _wl_sport, _wl_stat,
-                            _wl_cur_line, int(_wl_score.total),
-                        )
-                    elif _wl_mq_ok:
-                        _release_prop_delivery_claim(
-                            _prop_market_alerted,
-                            _wl_player,
-                            _wl_sport,
-                            _wl_stat,
-                            _wl_cur_line,
-                            provider="Underdog",
-                            source_id=str(
-                                getattr(_wl_snap, "external_id", None)
-                                or getattr(_wl_snap, "id", None)
-                                or ""
-                            ),
-                            event_id=str(
-                                getattr(_wl_snap, "event", "")
-                                or getattr(_wl_snap, "game_id", "")
-                                or ""
-                            ),
-                            direction=str(getattr(_wl_dec, "recommendation", "") or ""),
-                        )
-
-                elif _wl_cur_total < 30:
-                    # Score fell below the watchlist floor → demote to Rejected
-                    try:
-                        await db.log_prop_opportunity(
-                            external_id       = _wl_ext_id,
-                            player_name       = _wl_player,
-                            team              = getattr(_wl_row, "team", "") or "",
-                            sport             = _wl_sport,
-                            stat_type         = _wl_stat,
-                            line_value        = _wl_cur_line,
-                            recommendation    = (_wl_dec.recommendation if _wl_dec else "PASS"),
-                            decision_tier     = (_wl_dec.decision_tier  if _wl_dec else "PASS"),
-                            confidence        = (_wl_dec.confidence     if _wl_dec else 0),
-                            game_time         = _wl_snap.game_time,
-                            game_id           = getattr(_wl_snap, "game_id", "") or "",
-                            provider          = "Underdog",
-                            bet_quality_score = (_wl_dec.confidence if _wl_dec else 0),
-                            watchlist_state   = None,
-                        )
-                    except Exception:
-                        pass
-
-            except Exception as _wl_row_exc:
-                logger.debug(
-                    "stable_refresh [watchlist]: %s/%s: %s",
-                    _wl_player, _wl_stat, _wl_row_exc,
-                )
-
-    except Exception as _wl_all_exc:
-        logger.exception(
-            "stable_refresh_job [part2/watchlist]: error: %s", _wl_all_exc,
-        )
+    # Stable Refresh is retained only as an unscheduled compatibility entry
+    # point. FPR owns the sole full-pool rotation and no secondary queue exists.
+    wl_active = 0
 
     # ── Console log ──────────────────────────────────────────────────────────────
     _thick = "━" * 24
@@ -5672,7 +5332,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         "Progress:          %s\n"
         "Coverage:  %s / %s active props\n"
         "🔬 Rescored:  %6d\n"
-        "🎯 Actionable: %6d  (sent: %d)\n"
+        "🎯 Directional deliveries: %6d  (sent: %d)\n"
         "⏸ Not delivered: %6d\n"
         "⏱ Next refresh:   ~2 min\n"
         "%s",
@@ -5713,22 +5373,21 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
 # FULL-POOL RESCAN ROTATION
 # ──────────────────────────────────────────────────────────────────────────────
 #
-# Independently covers the entire active Underdog prop pool in bounded batches,
-# guaranteeing every prop (stable, rejected, near-miss, watchlist, unchanged)
-# is eventually rescored.  Completely separate from the stable-refresh job —
+# Independently covers the entire active provider pool in bounded batches,
+# guaranteeing every prop (unchanged or previously evaluated) is eventually
+# rescored. Completely separate from the stable-refresh job —
 # uses its own cursor, rotation counter, and stats keys in health.json.
 #
-# Rotation order is deterministic and unified across all sports.  New or
-# meaningful movers are handled by the live scan paths; this job covers the
-# remaining active pool without sport-tier priority.
+# Rotation order is deterministic and unified across all supported sports.
+# New observations and line movements may receive bounded prompt priority, but
+# the ordinary cursor slice is always the primary rotation population.
 #
-# No prop is permanently excluded.  A previous Rejected result does not
-# prevent rescoring in a later rotation; the prop must pass the normal
-# scoring, direction, confidence, BQ, tier, live/pre-game, and Telegram
-# deduplication gates before an alert is delivered.
+# No prop is permanently excluded. A previous evaluation, rejection, missing
+# evidence, or delivery attempt does not prevent rescoring in a later rotation.
+# Delivery protections apply only at the Telegram boundary.
 #
 # Rotation state (persisted in health.json via HealthTracker):
-#   fpr_cursor   — current position in the priority-sorted pool
+#   fpr_cursor   — current position in the stable canonical pool
 #   fpr_rotation — 1-based rotation number; auto-increments at 100% coverage
 #   fpr_stats    — metrics from the last completed cycle
 #
@@ -5744,9 +5403,9 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
     • Interval:   config.FPR_INTERVAL   (default 300 s / 5 min)
     • When all props in the current pool have been covered the rotation counter
       increments and the cursor resets to 0 automatically.
-    • Removed/inactive props are excluded by the canonical provider-neutral
-      active PropLineHistory pool.
-    • Existing delivery protections (dedup, direction, quality, and live-game)
+    • Removed/inactive props are excluded by the canonical provider-aware
+      active pool.
+    • Existing delivery protections (dedup, direction, evidence, and live-game)
       apply only at the Telegram boundary; they do not remove active props from
       the rotation or prevent their evaluation.
     """
@@ -5809,7 +5468,6 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
     fpr_rotation        = 1
     fpr_batch_size      = 0
     fpr_rescored        = 0
-    fpr_actionable      = 0
     fpr_sent            = 0
     fpr_not_delivered   = 0
     fpr_total_rescanned = 0
@@ -5933,69 +5591,18 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             )
 
         def _fpr_sort_key(item):
-            """Stable ordering for the unified full-pool rotation.
+            """Return stable identity ordering for the active universe.
 
-            New observations, line movements, actionable signals, and games
-            approaching their start time are prompt-priority signals, not
-            second queues.  They remain inside the same persisted cursor
-            rotation so ordinary stable props cannot be starved.
-            ``is True`` is intentional here: test doubles and legacy rows can
-            expose truthy sentinel attributes that are not actual movement
-            markers.
+            Recommendation, decision tier, confidence, evidence, rejection,
+            and delivery state are evaluation/reporting concerns. None may
+            influence the canonical rotation order.
             """
             key, snap = item
             provider, player, stat, sport, line, _source_id = _fpr_parts(key, snap)
-            is_mover = getattr(snap, "line_moved", False) is True
-            if not is_mover:
-                _prev_line = getattr(snap, "prev_line", None)
-                try:
-                    is_mover = (
-                        isinstance(_prev_line, (int, float))
-                        and abs(float(_prev_line) - float(line)) >= 0.01
-                    )
-                except (TypeError, ValueError):
-                    is_mover = False
-            _first_seen = getattr(snap, "first_seen", None)
-            _last_seen = getattr(snap, "last_seen", None)
-            is_new = bool(
-                getattr(snap, "new_prop", False) is True
-                or (
-                    isinstance(_first_seen, datetime)
-                    and isinstance(_last_seen, datetime)
-                    and _first_seen == _last_seen
-                )
-            )
-            _recommendation = str(
-                getattr(snap, "bet_recommendation", None)
-                or getattr(snap, "recommendation", None)
-                or ""
-            ).upper()
-            # Only an actual direction is a priority signal. Stored score/tier
-            # metadata is reporting context and must not influence rescanning
-            # order or create an implicit delivery class.
-            is_actionable = _recommendation in {"OVER", "UNDER"}
-            _game_time = getattr(snap, "game_time", None)
-            is_approaching = False
-            if isinstance(_game_time, datetime):
-                try:
-                    _game_time = (
-                        _game_time.replace(tzinfo=None)
-                        if _game_time.tzinfo is not None
-                        else _game_time
-                    )
-                    _minutes_to_start = (_game_time - now).total_seconds() / 60.0
-                    is_approaching = 0.0 <= _minutes_to_start <= 24.0 * 60.0
-                except (TypeError, ValueError):
-                    is_approaching = False
             external_id = str(getattr(snap, "external_id", None) or "")
             return (
-                0 if is_new else 1,
-                0 if is_mover else 1,
-                0 if is_actionable else 1,
-                0 if is_approaching else 1,
-                0 if sport not in config.fpr_low_priority_sports else 1,
-                sport,
                 provider,
+                sport,
                 player,
                 stat,
                 line,
@@ -6019,103 +5626,67 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         fpr_cursor   = fpr_cursor % fpr_pool_size  # safe if pool shrank
 
         # ── Slice batch ───────────────────────────────────────────────────────
-        # Movers receive prompt priority inside this same FPR batch, but the
-        # persisted cursor remains the sole rotation state.  Reserve capacity
-        # for the ordinary cursor slice whenever possible so a noisy movement
-        # set cannot starve unchanged active props.  The cursor still advances
-        # over the full canonical pool (including prioritized rows); otherwise
-        # a mover-heavy pool could prevent the normal rotation from completing.
+        # The cursor window is the guaranteed primary population. New and
+        # moving rows outside that window may use a bounded prompt lane, but
+        # they never replace the cursor boundary and never affect its order.
         fpr_limit = max(1, int(config.FPR_BATCH_SIZE))
         cursor_window = pool_keys[
             fpr_cursor:min(fpr_cursor + fpr_limit, fpr_pool_size)
         ]
-        new_keys = [
-            key for key, snap in sorted_items
-            if _fpr_sort_key((key, snap))[0] == 0
-        ]
-        mover_keys = [
-            key for key, snap in sorted_items
-            if (
-                _fpr_sort_key((key, snap))[0] != 0
-                and _fpr_sort_key((key, snap))[1] == 0
+        def _fpr_prompt_info(key, snap) -> tuple[int, float]:
+            """Classify only fetch freshness/movement, never bet quality."""
+            _line = float(
+                getattr(snap, "line_value", None)
+                or _fpr_parts(key, snap)[4]
             )
-        ]
-        regular_keys = [key for key, snap in sorted_items
-                        if (
-                            _fpr_sort_key((key, snap))[0] != 0
-                            and _fpr_sort_key((key, snap))[1] != 0
-                        )]
-        if (new_keys or mover_keys) and regular_keys:
-            priority_limit = min(
-                len(new_keys) + len(mover_keys),
-                fpr_limit if fpr_limit == 1 else max(1, fpr_limit // 2),
-            )
-            # New observations are the highest-priority prompt work.  Movers
-            # still preserve the cursor boundary: a mover currently under the
-            # cursor is selected before a mover elsewhere, preventing an
-            # outside mover from repeatedly consuming the only priority slot.
-            window_new = [
-                key for key in cursor_window
-                if _fpr_sort_key((key, pool_snaps[key]))[0] == 0
-            ]
-            outside_new = [key for key in new_keys if key not in cursor_window]
-            window_movers = [
-                key for key in cursor_window
-                if (
-                    _fpr_sort_key((key, pool_snaps[key]))[0] != 0
-                    and _fpr_sort_key((key, pool_snaps[key]))[1] == 0
+            _prev_line = getattr(snap, "prev_line", None)
+            try:
+                _movement = (
+                    abs(float(_prev_line) - _line)
+                    if isinstance(_prev_line, (int, float))
+                    else 0.0
                 )
-            ]
-            outside_movers = [key for key in mover_keys if key not in cursor_window]
-            priority_keys = (
-                window_new
-                + outside_new
-                + window_movers
-                + outside_movers
-            )[:priority_limit]
-            regular_batch = [
-                key for key in cursor_window
-                if (
-                    _fpr_sort_key((key, pool_snaps[key]))[0] != 0
-                    and _fpr_sort_key((key, pool_snaps[key]))[1] != 0
+            except (TypeError, ValueError):
+                _movement = 0.0
+            _is_mover = (
+                getattr(snap, "line_moved", False) is True
+                or _movement >= 0.01
+            )
+            _first_seen = getattr(snap, "first_seen", None)
+            _last_seen = getattr(snap, "last_seen", None)
+            _is_new = (
+                getattr(snap, "new_prop", False) is True
+                or (
+                    isinstance(_first_seen, datetime)
+                    and isinstance(_last_seen, datetime)
+                    and _first_seen == _last_seen
                 )
-            ][:fpr_limit - len(priority_keys)]
-            batch_keys = priority_keys + regular_batch
-            # Fill any unused capacity from this cursor window without
-            # duplicating a prioritized mover.
-            batch_keys.extend(
-                key for key in cursor_window
-                if key not in batch_keys
             )
-            batch_keys = batch_keys[:fpr_limit]
-            # A prompt row outside the cursor window must never consume the
-            # only batch slot while leaving the cursor at the same position.
-            # Always process the cursor boundary when it would otherwise be
-            # skipped; this guarantees stable rows eventually get covered.
-            if cursor_window and cursor_window[0] not in batch_keys:
-                batch_keys = [cursor_window[0]] + batch_keys[:-1]
-            fpr_line_movers = sum(
-                1 for key in batch_keys
-                if _fpr_sort_key((key, pool_snaps[key]))[1] == 0
-            )
-        else:
-            # The normal bounded cursor slice is also the all-movers fallback.
-            batch_keys = cursor_window
-            fpr_line_movers = sum(
-                1 for key in batch_keys
-                if _fpr_sort_key((key, pool_snaps[key]))[1] == 0
-            )
+            return (0 if _is_new else (1 if _is_mover else 2), -_movement)
 
-        # Advance through the contiguous canonical prefix that was actually
-        # processed.  A prioritized mover may come from outside the window and
-        # consume capacity, so advancing over an unprocessed tail would skip
-        # that tail until a later rotation.
-        _batch_key_set = set(batch_keys)
-        _cursor_advanced = 0
-        for _cursor_key in cursor_window:
-            if _cursor_key not in _batch_key_set:
-                break
-            _cursor_advanced += 1
+        prompt_keys = sorted(
+            (
+                key for key, snap in sorted_items
+                if key not in cursor_window
+                and _fpr_prompt_info(key, snap)[0] < 2
+            ),
+            key=lambda key: (*_fpr_prompt_info(key, pool_snaps[key]), key),
+        )
+        # At least half of each batch remains ordinary cursor work. A one-item
+        # batch is entirely cursor work so the cursor cannot stall.
+        prompt_limit = min(len(prompt_keys), max(0, fpr_limit // 2))
+        batch_keys = (
+            prompt_keys[:prompt_limit]
+            + [key for key in cursor_window if key not in prompt_keys[:prompt_limit]]
+        )[:fpr_limit]
+        fpr_line_movers = sum(
+            1 for key in batch_keys
+            if _fpr_prompt_info(key, pool_snaps[key])[0] == 1
+        )
+
+        # Advance by the complete cursor window, independent of prompt work.
+        # This makes every active row reachable even when prompt rows persist.
+        _cursor_advanced = len(cursor_window)
         fpr_end_cursor  = min(fpr_cursor + _cursor_advanced, fpr_pool_size)
         fpr_batch_size  = len(batch_keys)
         fpr_batch_source_ids = len({
@@ -6434,7 +6005,6 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                       _fpr_result = DeliveryResult(sent=False)
                     if _fpr_mq_ok and _fpr_result.sent:
                         fpr_sent      += 1
-                        fpr_actionable += 1
                         # _record_prop_alerted already called by _try_claim_delivery_slot.
                         try:
                             await db.mark_opportunity_alert_sent(
@@ -6591,7 +6161,6 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             "line_movers_prioritized": fpr_line_movers,
             "uncovered_props":      max(0, fpr_pool_size - fpr_end_cursor),
             "next_rotation":        fpr_rotation,
-            "fpr_actionable":       fpr_actionable,
             "fpr_sent":             fpr_sent,
             "fpr_not_delivered":    fpr_not_delivered,
             "fpr_total_rescanned":  fpr_total_rescanned,

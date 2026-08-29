@@ -246,26 +246,23 @@ class TestFPRHealthTracker:
         assert "sr_rescored" not in fpr
 
 
-# ── Priority-sort tests ───────────────────────────────────────────────────────
+# ── Canonical ordering tests ────────────────────────────────────────────────────
 
-class TestFPRPrioritySorting:
-    """Priority-sort places Tier 1 + other sports before NFL/MLB — tests 9 & 10."""
+class TestFPRCanonicalOrdering:
+    """The active rotation order is stable and classification-neutral."""
 
     def _sorted_keys(self, snaps_dict):
-        """Run the same sort used in _full_pool_rescan_job."""
-        from config import config
-
-        _low = config.fpr_low_priority_sports
-
         def _key(item):
             (player, stat, line), snap = item
+            provider = "Underdog"
             sport = (getattr(snap, "sport", None) or "").upper()
-            return (1 if sport in _low else 0, player, stat, line)
+            source_id = str(getattr(snap, "external_id", None) or "")
+            return (provider, sport, player, stat, line, source_id)
 
         return [k for k, _ in sorted(snaps_dict.items(), key=_key)]
 
-    def test_tier1_sport_sorted_before_nfl(self):
-        """NBA (Tier 1) appears before NFL (low priority) — test 9."""
+    def test_order_does_not_use_low_priority_sports(self):
+        """Sport classification does not move a prop ahead of cursor order."""
         pool = {
             ("Player NFL", "Passing Yards", 22.5): _make_snap(sport="NFL"),
             ("Player NBA", "Points",        22.5): _make_snap(sport="NBA"),
@@ -273,22 +270,22 @@ class TestFPRPrioritySorting:
         keys = self._sorted_keys(pool)
         nba_idx = next(i for i, k in enumerate(keys) if k[0] == "Player NBA")
         nfl_idx = next(i for i, k in enumerate(keys) if k[0] == "Player NFL")
-        assert nba_idx < nfl_idx, "NBA should appear before NFL"
+        assert (nba_idx, nfl_idx) == (0, 1)
 
-    def test_mlb_sorted_after_other_sports(self):
-        """MLB appears after non-low-priority sports — test 9."""
+    def test_order_is_identity_stable_across_supported_sports(self):
+        """Supported sports are ordered by identity, not tier priority."""
         pool = {
             ("Player MLB", "Strikeouts", 22.5): _make_snap(sport="MLB"),
             ("Player NHL", "Shots",      22.5): _make_snap(sport="NHL"),
             ("Player MMA", "Strikes",    22.5): _make_snap(sport="MMA"),
         }
         keys = self._sorted_keys(pool)
-        mlb_idx = next(i for i, k in enumerate(keys) if k[0] == "Player MLB")
-        # MLB must be last
-        assert mlb_idx == len(keys) - 1, "MLB must be sorted last"
+        assert [key[0] for key in keys] == [
+            "Player MLB", "Player MMA", "Player NHL",
+        ]
 
-    def test_nfl_and_mlb_both_included_in_sort(self):
-        """NFL and MLB are still included in sorted output — test 10."""
+    def test_order_includes_all_pool_rows(self):
+        """The ordering never drops a sport from the active pool."""
         pool = {
             ("A_NBA", "Points",        22.5): _make_snap(sport="NBA"),
             ("A_NFL", "Passing Yards", 22.5): _make_snap(sport="NFL"),
@@ -299,32 +296,19 @@ class TestFPRPrioritySorting:
         assert "NFL" in sports_present, "NFL must be in sorted pool"
         assert "MLB" in sports_present, "MLB must be in sorted pool"
 
-    def test_non_low_priority_sports_all_before_low(self):
-        """Every non-low-priority sport appears before every low-priority sport — test 9."""
+    def test_order_does_not_group_low_priority_sports(self):
+        """There is no special low-priority sport group in the canonical order."""
         pool = {}
         for sport in ["NBA", "WNBA", "NHL", "MMA", "SOCCER"]:
             pool[(f"P_{sport}", "stat", 22.5)] = _make_snap(sport=sport)
         for sport in ["NFL", "MLB"]:
             pool[(f"P_{sport}", "stat", 22.5)] = _make_snap(sport=sport)
 
-        from config import config
-        _low = config.fpr_low_priority_sports
-
-        def _key(item):
-            (player, stat, line), snap = item
-            sport = (getattr(snap, "sport", None) or "").upper()
-            return (1 if sport in _low else 0, player, stat, line)
-
-        sorted_items = sorted(pool.items(), key=_key)
-        # Find the index of first low-priority entry
-        first_low = next(
-            (i for i, (k, v) in enumerate(sorted_items)
-             if v.sport.upper() in _low),
-            len(sorted_items),
-        )
-        # All entries before first_low must be non-low-priority
-        for k, v in sorted_items[:first_low]:
-            assert v.sport.upper() not in _low, f"{v.sport} should not appear before low-priority group"
+        sorted_items = self._sorted_keys(pool)
+        assert [key[0] for key in sorted_items] == [
+            "P_MLB", "P_MMA", "P_NBA", "P_NFL", "P_NHL",
+            "P_SOCCER", "P_WNBA",
+        ]
 
 
 # ── FPR job integration tests ─────────────────────────────────────────────────
@@ -938,8 +922,8 @@ class TestFPRJob:
         }
         db = _make_db(pool=pool)
         ctx = _make_context(db)
-        # Sorted order is B (mover), A, C. Start at A so B can be prioritized
-        # from outside the cursor window without losing C.
+        # Stable order is A, B, C. Start at B; the cursor window remains the
+        # primary batch even though B is a mover.
         h = _make_health(cursor=1)
         processed = []
 
@@ -975,15 +959,15 @@ class TestFPRJob:
             cfg.min_conf_for_sport_tier = lambda s, t: 70
             await _full_pool_rescan_job(ctx)
 
-        assert processed == ["B", "A"]
-        assert h.set_fpr_cursor.call_args[0][0] == 2
+        assert processed == ["B", "C"]
+        assert h.set_fpr_cursor.call_args[0][0] == 0
         stats = h.set_fpr_stats.call_args[0][0]
         assert stats["line_movers_prioritized"] == 1
-        assert stats["uncovered_props"] == 1
-        assert stats["next_rotation"] == 1
+        assert stats["uncovered_props"] == 0
+        assert stats["next_rotation"] == 2
 
     async def test_cursor_boundary_mover_is_not_starved_by_outside_mover(self):
-        """The first mover at the cursor boundary is selected before outside movers."""
+        """Movers in the cursor window retain ordinary cursor order."""
         mover_b = _make_snap(player="B", sport="NBA")
         mover_b.line_moved = True
         mover_c = _make_snap(player="C", sport="NBA")
@@ -996,7 +980,7 @@ class TestFPRJob:
         }
         db = _make_db(pool=pool)
         ctx = _make_context(db)
-        # Sorted order is B, C, A. C is the first row under the cursor.
+        # Stable order is A, B, C. B and C are the cursor window.
         h = _make_health(cursor=1)
         processed = []
 
@@ -1032,8 +1016,61 @@ class TestFPRJob:
             cfg.min_conf_for_sport_tier = lambda s, t: 70
             await _full_pool_rescan_job(ctx)
 
-        assert processed == ["C", "A"]
+        assert processed == ["B", "C"]
         assert h.set_fpr_cursor.call_args[0][0] == 0
+
+    async def test_outside_mover_uses_bounded_prompt_capacity(self):
+        """An outside mover is prompt work, but the cursor still advances."""
+        mover = _make_snap(player="D", sport="NBA")
+        mover.line_moved = True
+        pool = {
+            ("A", "Points", 22.5): _make_snap(player="A", sport="NBA"),
+            ("B", "Points", 22.5): _make_snap(player="B", sport="NBA"),
+            ("C", "Points", 22.5): _make_snap(player="C", sport="NBA"),
+            ("D", "Points", 22.5): mover,
+        }
+        db = _make_db(pool=pool)
+        ctx = _make_context(db)
+        h = _make_health(cursor=0)
+        processed = []
+
+        async def _fake_history(player, stat, limit=30):
+            processed.append(player)
+            return []
+
+        db.get_ud_prop_history = _fake_history
+
+        from market_engine import _full_pool_rescan_job
+
+        with (
+            patch("market_engine.get_health_tracker", return_value=h),
+            patch("market_engine.config") as cfg,
+            patch("market_engine._fetch_and_compute_hit_rates", new=AsyncMock(return_value=None)),
+            patch("market_engine._is_game_live_or_past", return_value=False),
+            patch("market_engine._is_prop_deduped", return_value=True),
+            patch("engine.ud_scoring.score_ud_prop", return_value=_make_score()),
+            patch("engine.player_validator.validate_player_prop", return_value=_make_validation()),
+            patch("engine.ud_bet_decision.make_ud_bet_decision", return_value=_make_decision()),
+            patch("engine.ud_scoring.compute_market_quality", return_value=MagicMock()),
+            patch("engine.ud_scoring.detect_market_pressure", return_value=MagicMock()),
+        ):
+            cfg.FPR_BATCH_SIZE = 2
+            cfg.allowed_user_ids = set()
+            cfg.UD_VALIDATION_MIN_SAMPLES = 5
+            cfg.UD_ALERT_DEDUP_WINDOW = 3600
+            cfg.MIN_UNDERDOG_LINE_CHANGE = 0.5
+            cfg.ud_strict_alert_sports = frozenset({"MLB", "NFL"})
+            cfg.ud_mlb_alert_tiers = frozenset({"S"})
+            cfg.is_mlb_under_allowed = lambda s: False
+            cfg.min_stars_for_sport = lambda s: 3
+            cfg.min_conf_for_sport_tier = lambda s, t: 70
+            await _full_pool_rescan_job(ctx)
+
+        assert processed == ["D", "A"]
+        assert h.set_fpr_cursor.call_args[0][0] == 2
+        stats = h.set_fpr_stats.call_args[0][0]
+        assert stats["line_movers_prioritized"] == 1
+        assert stats["uncovered_props"] == 2
 
     # ── Test 13: stable refresh still works alongside FPR ─────────────────────
     async def test_stable_refresh_unaffected_by_fpr(self):
@@ -1127,7 +1164,7 @@ class TestFPRJob:
             "Rotation:  #1  (🔄 in progress)\n"
             "Progress:  18.4%\n"
             "Coverage:  412,000 / 2,240,000 active props\n"
-            "Priority:  Tier 1 + Other → MLB / NFL (last)\n"
+            "Selection:  Cursor-first; bounded new/moving prompt lane\n"
         )
         assert "cursor=" not in log_line, "cursor value must not appear in display"
         assert "Coverage:" in log_line
