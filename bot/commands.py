@@ -1442,6 +1442,24 @@ async def cmd_backtest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         # loop prevents Telegram from processing cancellation/timeouts.
         report = await _bounded(asyncio.to_thread(run_backtest, records))
         msg = report.to_telegram()
+        provider_perf = await _report_read(
+            _db.get_telegram_pick_performance(),
+            fallback=None,
+        )
+        if isinstance(provider_perf, dict) and provider_perf.get("by_provider"):
+            msg += "\n\n📡 <b>Provider context</b>"
+            msg += "\n<i>Backtest metrics above use legacy EVRecord rows.</i>"
+            for provider, stats in sorted(provider_perf["by_provider"].items()):
+                msg += (
+                    f"\n  {provider}: {stats.get('hit', 0)}H-"
+                    f"{stats.get('miss', 0)}M-{stats.get('push', 0)}P · "
+                    f"{stats.get('pending', 0)} pending"
+                )
+        else:
+            msg += (
+                "\n\n<i>Provider identity is unavailable in the legacy EVRecord "
+                "backtest rows.</i>"
+            )
         await update.message.reply_text(msg, parse_mode="HTML")
 
     except Exception as exc:
@@ -2050,6 +2068,11 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         entry_lines: list[str] = [
             "━━━━━━━━━━━━━━━━━━",
             f"<b>#{rank} {plh.player_name}</b>",
+            (
+                "🐶 <b>UNDERDOG PICK</b>"
+                if provider == "Underdog"
+                else "🟣 <b>PRIZEPICKS PICK</b>"
+            ),
             f"Market: {plh.stat_type}",
             f"{provider_emoji} {provider} Line: <code>{source_v:.1f}</code>  {_ll(source_v)}",
             f"{gt_str}{plh.sport}",
@@ -2439,11 +2462,14 @@ async def _cmd_slip_journal(
             tier        = opp.decision_tier,
             confidence  = opp.confidence,
             game_time   = opp.game_time,
+            provider    = getattr(opp, "provider", None) or "Underdog",
         )
         legs = await _db.get_slip_journal_legs(open_slip.slip_code)
         tier_icon = _TIER_EMOJI.get(opp.decision_tier or "", "⚪")
         await update.message.reply_text(
             f"✅ <b>Leg added to {open_slip.slip_code}</b>\n\n"
+            f"{'🟣' if (getattr(opp, 'provider', None) or '').lower() == 'prizepicks' else '🐶'} "
+            f"<b>{(getattr(opp, 'provider', None) or 'Underdog').upper()} PICK</b>\n"
             f"{tier_icon} <b>{opp.player_name}</b> · {opp.stat_type}\n"
             f"{opp.recommendation} <code>{opp.line_value:g}</code>  ·  "
             f"conf <code>{opp.confidence}/100</code>  ·  {opp.sport}\n\n"
@@ -2486,8 +2512,10 @@ async def _cmd_slip_journal(
         for leg in legs:
             sym = result_sym.get(leg.result, "⏳")
             av  = f"  <i>(actual: {leg.actual_value:g})</i>" if leg.actual_value is not None else ""
+            _leg_provider = getattr(leg, "provider", None) or "Underdog"
             lines.append(
-                f"{sym} <b>{leg.player_name}</b> {leg.direction or ''} "
+                f"{sym} {'🟣' if _leg_provider.lower() == 'prizepicks' else '🐶'} "
+                f"<b>{_leg_provider.upper()} PICK</b> · <b>{leg.player_name}</b> {leg.direction or ''} "
                 f"<code>{leg.line_value:g}</code> · {leg.stat_type}{av}"
             )
 
@@ -2537,7 +2565,12 @@ async def _cmd_slip_journal(
         lines += ["", f"<b>Open: {open_slip.slip_code}</b>  ({len(legs)} leg{'s' if len(legs) != 1 else ''})"]
         for leg in legs:
             sym = {"HIT": "✅", "MISS": "❌", "PUSH": "🔁", "PENDING": "⏳"}.get(leg.result, "⏳")
-            lines.append(f"  {sym} {leg.player_name} · {leg.direction or ''} {leg.line_value:g} · {leg.stat_type}")
+            _leg_provider = getattr(leg, "provider", None) or "Underdog"
+            lines.append(
+                f"  {sym} {'🟣' if _leg_provider.lower() == 'prizepicks' else '🐶'} "
+                f"{_leg_provider.upper()} · {leg.player_name} · "
+                f"{leg.direction or ''} {leg.line_value:g} · {leg.stat_type}"
+            )
 
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
@@ -3143,6 +3176,14 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     overall_hit = overall_w / overall_res * 100 if overall_res > 0 else 0.0
     pending_n   = total_all - len(resolved)
 
+    by_provider: dict[str, dict[str, int]] = {}
+    for record in resolved:
+        provider = str(getattr(record, "provider", None) or "Underdog")
+        bucket = by_provider.setdefault(provider, {"HIT": 0, "MISS": 0, "PUSH": 0})
+        result = (record.result or "").upper()
+        if result in bucket:
+            bucket[result] += 1
+
     lines += [
         "─ <b>Overall</b> " + "─" * 21,
         f"  <b>{overall_res}</b> resolved  "
@@ -3151,6 +3192,13 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         "",
         f"<i>{pending_n} picks still PENDING · results set when games finish.</i>",
     ]
+    if by_provider:
+        lines += ["", "─ <b>By Provider</b> " + "─" * 15]
+        for provider, counts in sorted(by_provider.items()):
+            lines.append(
+                f"  {provider}: {counts['HIT']}H / {counts['MISS']}M / "
+                f"{counts['PUSH']}P"
+            )
 
 
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
@@ -4492,11 +4540,14 @@ async def cmd_player(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         date  = r.detected_at.strftime("%b %d") if r.detected_at else "?"
         av    = f" → <i>{r.actual_value:g}</i>" if r.actual_value is not None else ""
         lines.append(
-            f"{sym} <b>{r.stat_type}</b> {r.recommendation or ''} "
+            f"{sym} "
+            f"{'🟣' if (getattr(r, 'provider', None) or '').lower() == 'prizepicks' else '🐶'} "
+            f"<b>{(getattr(r, 'provider', None) or 'Underdog').upper()} PICK</b> · "
+            f"<b>{r.stat_type}</b> {r.recommendation or ''} "
             f"<code>{r.line_value:g}</code>  ·  {r.sport}  ·  {date}{av}"
         )
 
-    lines.append("\n<i>Source: prop_opportunity_log</i>")
+    lines.append("\n<i>Source: prop_opportunity_log · providers shown per pick</i>")
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
 
@@ -4533,11 +4584,12 @@ async def cmd_slipstats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if sport_rows:
         for row in sport_rows[:8]:
             sp   = row.get("sport", "?")
+            provider = row.get("provider", "Underdog")
             h    = row.get("hits", 0)
             m    = row.get("misses", 0)
             tot  = h + m
             rate = f"{h / tot * 100:.0f}%" if tot > 0 else "—"
-            lines.append(f"  {sp:<12} {h}H / {m}M  →  {rate}")
+            lines.append(f"  {provider:<12} {sp:<8} {h}H / {m}M  →  {rate}")
     elif sport_rows is None:
         lines.append("  <i>Pick accuracy is temporarily unavailable.</i>")
     else:

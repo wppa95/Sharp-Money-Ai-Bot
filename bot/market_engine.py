@@ -694,8 +694,14 @@ async def _init_state_from_db(db: "Database") -> None:
             since_hours=_dedup_restore_hours,
         )
         restored_dedup = 0
-        for (player, sport, stat), (ts_unix, line_f) in recent_alerted.items():
-            key = (player, sport, stat)
+        for raw_key, (ts_unix, line_f) in recent_alerted.items():
+            # New recovery rows retain provider/source/event/direction.  Keep
+            # accepting the compact three-part shape from older databases and
+            # lightweight test doubles.
+            if isinstance(raw_key, tuple) and len(raw_key) >= 7:
+                key = tuple(raw_key)
+            else:
+                key = tuple(raw_key)
             if key not in _prop_market_alerted:
                 _prop_market_alerted[key] = (ts_unix, line_f)
                 restored_dedup += 1
@@ -1730,7 +1736,14 @@ async def _run_prizepicks_independent_cycle(
         line = candidate["line"]
         dedup_player = _prizepicks_dedup_player(player)
         if not await _try_claim_delivery_slot(
-            dedup_player, sport, stat, line, provider="PrizePicks"
+            player, sport, stat, line, provider="PrizePicks",
+            source_id=str(getattr(candidate["prop"], "external_id", "") or ""),
+            event_id=str(
+                getattr(candidate["prop"], "event_id", "")
+                or getattr(candidate["prop"], "game_id", "")
+                or ""
+            ),
+            direction=str(getattr(candidate["decision"], "recommendation", "") or ""),
         ):
             continue
         result = await delivery.deliver_underdog(
@@ -1773,7 +1786,15 @@ async def _run_prizepicks_independent_cycle(
                 )
         else:
             _release_prop_delivery_claim(
-                _prop_market_alerted, dedup_player, sport, stat, line
+                _prop_market_alerted, player, sport, stat, line,
+                provider="PrizePicks",
+                source_id=str(getattr(candidate["prop"], "external_id", "") or ""),
+                event_id=str(
+                    getattr(candidate["prop"], "event_id", "")
+                    or getattr(candidate["prop"], "game_id", "")
+                    or ""
+                ),
+                direction=str(getattr(candidate["decision"], "recommendation", "") or ""),
             )
 
     logger.info(
@@ -2251,6 +2272,9 @@ async def _try_claim_delivery_slot(
     stat: str,
     line: float,
     provider: str = "Underdog",
+    source_id: str = "",
+    event_id: str = "",
+    direction: str = "",
 ) -> bool:
     """Atomically check the dedup dict and claim the delivery slot if available.
 
@@ -2270,19 +2294,24 @@ async def _try_claim_delivery_slot(
     of retry attempts when the rate-limiter is saturated.
     """
     async with _prop_dedup_lock:
-        dedup_player = (
-            _prizepicks_dedup_player(player)
-            if str(provider).strip().lower() == "prizepicks"
-            else player
-        )
         if _is_prop_deduped(
-            _prop_market_alerted, dedup_player, sport, stat, line,
+            _prop_market_alerted, player, sport, stat, line,
             dedup_window_seconds=config.UD_ALERT_DEDUP_WINDOW,
             min_line_change=config.MIN_UNDERDOG_LINE_CHANGE,
+            provider=provider,
+            source_id=source_id,
+            event_id=event_id,
+            direction=direction,
         ):
             return False
         # Pre-claim: record immediately so concurrent paths see it as alerted.
-        _record_prop_alerted(_prop_market_alerted, dedup_player, sport, stat, line)
+        _record_prop_alerted(
+            _prop_market_alerted, player, sport, stat, line,
+            provider=provider,
+            source_id=source_id,
+            event_id=event_id,
+            direction=direction,
+        )
         return True
 
 
@@ -3026,6 +3055,7 @@ async def underdog_job(context) -> None:
                     and decision.recommendation in ("OVER", "UNDER")
                     and (snap.sport or "UNKNOWN") in config.ud_alert_sports
                 )
+                _np_direction = decision.recommendation if decision else ""
                 # Game-live hard gate — block actionable alerts when game has already started (#5).
                 # Uses _is_game_live_or_past which checks status field + game_time elapsed.
                 # Internal market intelligence continues regardless.
@@ -3049,6 +3079,10 @@ async def underdog_job(context) -> None:
                         line_val,
                         dedup_window_seconds=config.UD_ALERT_DEDUP_WINDOW,
                         min_line_change=config.MIN_UNDERDOG_LINE_CHANGE,
+                        provider=getattr(snap, "provider", None) or "Underdog",
+                        source_id=str(getattr(snap, "external_id", None) or getattr(snap, "id", None) or ""),
+                        event_id=str(getattr(snap, "event", "") or getattr(snap, "game_id", "") or ""),
+                        direction=str(_np_direction or ""),
                     ):
                         _np_bet_ready = False
                         logger.debug(
@@ -3513,6 +3547,10 @@ async def underdog_job(context) -> None:
                         snap.line or 0.0,
                         dedup_window_seconds=config.UD_ALERT_DEDUP_WINDOW,
                         min_line_change=config.MIN_UNDERDOG_LINE_CHANGE,
+                        provider=getattr(snap, "provider", None) or "Underdog",
+                        source_id=str(getattr(snap, "external_id", None) or getattr(snap, "id", None) or ""),
+                        event_id=str(getattr(snap, "event", "") or getattr(snap, "game_id", "") or ""),
+                        direction=str(getattr(decision, "recommendation", "") or ""),
                     ):
                         should_alert = False
                         logger.debug(
@@ -3520,13 +3558,8 @@ async def underdog_job(context) -> None:
                             player, stat_type, snap.line or 0.0,
                         )
 
-                # Only the canonical Telegram delivery gate below may block a
-                # directional candidate after it has been evaluated.
-                should_alert = (
-                    not is_removed
-                    and decision is not None
-                    and decision.recommendation in ("OVER", "UNDER")
-                )
+                # The canonical directional qualification is established above;
+                # retain the timing, cooldown, and identity-aware dedup results.
                 if should_alert and chat_ids:
                     # Prop Intelligence trace for richer alert context
                     # ud_history may be unbound in removal-only paths (no scoring was run)
@@ -3822,6 +3855,10 @@ async def underdog_job(context) -> None:
                     _prop_market_alerted, _sp, _ssport, _st, _line_val,
                     dedup_window_seconds=config.UD_ALERT_DEDUP_WINDOW,
                     min_line_change=config.MIN_UNDERDOG_LINE_CHANGE,
+                    provider=getattr(_ssnap, "provider", None) or "Underdog",
+                    source_id=str(getattr(_ssnap, "external_id", None) or getattr(_ssnap, "id", None) or ""),
+                    event_id=str(getattr(_ssnap, "event", "") or getattr(_ssnap, "game_id", "") or ""),
+                    direction=str(getattr(_prev, "bet_recommendation", "") or ""),
                 ):
                     logger.debug(
                         "standing dedup [in-memory]: %s | %s | %s — skipped (already alerted this session)",
@@ -4089,6 +4126,14 @@ async def underdog_job(context) -> None:
                 # see it immediately during the network I/O of the Telegram send.
                 if not await _try_claim_delivery_slot(
                     _dq_player, _dq_sport, _dq_st, _dq_line_val,
+                    provider=getattr(_dq_snap, "provider", None) or "Underdog",
+                    source_id=str(_dq_ext_id or ""),
+                    event_id=str(
+                        getattr(_dq_snap, "event", "")
+                        or getattr(_dq_snap, "game_id", "")
+                        or ""
+                    ),
+                    direction=str(_dq_direction or ""),
                 ):
                     _n_dq_deferred += 1
                     _dq_deferred_log.append(
@@ -4202,6 +4247,14 @@ async def underdog_job(context) -> None:
                         _dq_sport,
                         _dq_st,
                         _dq_line_val,
+                        provider=getattr(_dq_snap, "provider", None) or "Underdog",
+                        source_id=str(_dq_ext_id or ""),
+                        event_id=str(
+                            getattr(_dq_snap, "event", "")
+                            or getattr(_dq_snap, "game_id", "")
+                            or ""
+                        ),
+                        direction=str(_dq_direction or ""),
                     )
                     _n_dq_deferred += 1
                     _dq_deferred_log.append(
@@ -4901,6 +4954,10 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 _prop_market_alerted, _sr_player, _sr_sport, _sr_stat, _sr_line,
                 dedup_window_seconds = config.UD_ALERT_DEDUP_WINDOW,
                 min_line_change      = config.MIN_UNDERDOG_LINE_CHANGE,
+                provider             = getattr(_sr_snap, "provider", None) or "Underdog",
+                source_id            = str(getattr(_sr_snap, "external_id", None) or getattr(_sr_snap, "id", None) or ""),
+                event_id             = str(getattr(_sr_snap, "event", "") or getattr(_sr_snap, "game_id", "") or ""),
+                direction            = str(getattr(_sr_snap, "bet_recommendation", "") or ""),
             ):
                 sr_not_delivered += 1
                 continue
@@ -5092,7 +5149,13 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             # delivery gate applies the stricter quality rules at send time.
             # ── Atomic dedup claim [stable-refresh] ──────────────────────────────
             # Claim before delivery so the delivery-queue path cannot also send.
-            if not await _try_claim_delivery_slot(_sr_player, _sr_sport, _sr_stat, _sr_line):
+            if not await _try_claim_delivery_slot(
+                _sr_player, _sr_sport, _sr_stat, _sr_line,
+                provider="Underdog",
+                source_id=str(getattr(_sr_snap, "external_id", None) or getattr(_sr_snap, "id", None) or ""),
+                event_id=str(getattr(_sr_snap, "event", "") or getattr(_sr_snap, "game_id", "") or ""),
+                direction=str(getattr(_sr_dec, "recommendation", "") or ""),
+            ):
                 sr_not_delivered += 1
                 sr_actionable -= 1
                 logger.debug(
@@ -5307,6 +5370,10 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                      # ── Atomic dedup claim [watchlist] ────────────────────────
                      if not await _try_claim_delivery_slot(
                          _wl_player, _wl_sport, _wl_stat, _wl_cur_line,
+                         provider="Underdog",
+                         source_id=str(getattr(_wl_snap, "external_id", None) or getattr(_wl_snap, "id", None) or ""),
+                         event_id=str(getattr(_wl_snap, "event", "") or getattr(_wl_snap, "game_id", "") or ""),
+                         direction=str(getattr(_wl_dec, "recommendation", "") or ""),
                      ):
                          logger.debug(
                              "UD dedup_claim [wl]: %s | %s | concurrent path already claimed",
@@ -5954,6 +6021,9 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                      if not await _try_claim_delivery_slot(
                          _fpr_player, _fpr_sport, _fpr_stat, _fpr_line,
                          provider=_fpr_provider,
+                         source_id=str(getattr(_fpr_snap, "external_id", None) or getattr(_fpr_snap, "id", None) or ""),
+                         event_id=str(getattr(_fpr_snap, "event", "") or getattr(_fpr_snap, "game_id", "") or ""),
+                         direction=str(getattr(_fpr_dec, "recommendation", "") or ""),
                      ):
                          fpr_not_delivered += 1
                          logger.debug(

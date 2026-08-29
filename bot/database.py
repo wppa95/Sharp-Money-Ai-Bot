@@ -614,6 +614,7 @@ class SlipJournalLeg(Base):
     id           = Column(Integer,    primary_key=True, autoincrement=True)
     slip_code    = Column(String(12),  nullable=False, index=True)   # → SlipJournal.slip_code
     opp_id       = Column(Integer,    nullable=True,  index=True)    # → PropOpportunityLog.id
+    provider     = Column(String(32),  nullable=True)                # Underdog | PrizePicks
     player_name  = Column(String(128), nullable=False)
     team         = Column(String(64),  nullable=False, default="")
     sport        = Column(String(32),  nullable=False, default="")
@@ -693,6 +694,7 @@ class Database:
         await self._migrate_prop_line_history_v5()
         await self._migrate_player_game_results_v1()
         await self._migrate_prop_opportunity_log_v6()
+        await self._migrate_slip_journal_leg_v1()
         await self._migrate_scan_cycle_log_v1()
         # player_risk_records is created by create_all (new table); no column migration needed
         logger.info("Database initialised at %s", self._url)
@@ -4007,6 +4009,16 @@ class Database:
             except Exception:
                 pass
 
+    async def _migrate_slip_journal_leg_v1(self) -> None:
+        """Add provider identity to journal legs without changing old entries."""
+        async with self._engine.begin() as conn:
+            try:
+                await conn.execute(text(
+                    "ALTER TABLE slip_journal_legs ADD COLUMN provider VARCHAR(32)"
+                ))
+            except Exception:
+                pass
+
     async def log_prop_opportunity(
         self,
         *,
@@ -4947,13 +4959,15 @@ class Database:
     async def get_recent_alerted_props_for_dedup(
         self,
         since_hours: int = 24,
-    ) -> "dict[tuple[str, str, str], tuple[float, float]]":
+    ) -> "dict[tuple, tuple[float, float]]":
         """
         Return recently alerted props for restoring the in-memory dedup dict
         (_prop_market_alerted) after a bot restart.
 
-        Returns {(player_name, sport, stat_type): (alert_sent_at_unix, line_value)}
-        for props alerted within the last since_hours.
+        Extended keys are
+        ``(player, sport, stat, provider, source_id, event_id, direction)``.
+        A compact provider-scoped legacy alias is also returned for older
+        recovery callers; active delivery uses the extended identity.
 
         Primary source: PropOpportunityLog rows where alert_sent=True.
         Fallback source: PropLineHistory rows where first_alert_sent_at is set,
@@ -4978,6 +4992,9 @@ class Database:
                     PropOpportunityLog.sport,
                     PropOpportunityLog.stat_type,
                     PropOpportunityLog.provider,
+                    PropOpportunityLog.external_id,
+                    PropOpportunityLog.game_id,
+                    PropOpportunityLog.recommendation,
                     PropOpportunityLog.alert_sent_at,
                     PropOpportunityLog.line_value,
                 )
@@ -4992,7 +5009,7 @@ class Database:
             )
             out: dict = {}
             for row in pol_result.all():
-                player, sport, stat, provider, sent_at, line = row
+                player, sport, stat, provider, source_id, event_id, direction, sent_at, line = row
                 if sent_at is None:
                     continue
                 if hasattr(sent_at, "timestamp"):
@@ -5004,6 +5021,20 @@ class Database:
                         str(sent_at).replace("Z", "+00:00")
                     ).timestamp()
                 line_f  = float(line or 0)
+                provider_name = str(provider or "Underdog").strip() or "Underdog"
+                source_key = str(source_id or "").strip()
+                event_key = str(event_id or "").strip()
+                direction_key = str(direction or "").strip().upper()
+                out[(
+                    str(player or "").strip(),
+                    sport or "UNKNOWN",
+                    stat,
+                    provider_name,
+                    source_key,
+                    event_key,
+                    direction_key,
+                )] = (ts_unix, line_f)
+                # Compatibility with pre-identity recovery code.
                 out[(
                     _dedup_player_key(player, provider),
                     sport or "UNKNOWN",
@@ -5022,6 +5053,9 @@ class Database:
                     PropLineHistory.sport,
                     PropLineHistory.stat_type,
                     PropLineHistory.provider,
+                    PropLineHistory.external_id,
+                    PropLineHistory.game_id,
+                    PropLineHistory.bet_recommendation,
                     PropLineHistory.first_alert_sent_at,
                     PropLineHistory.line_value,
                 )
@@ -5032,16 +5066,9 @@ class Database:
                 .order_by(PropLineHistory.first_alert_sent_at)
             )
             for row in plh_result.all():
-                player, sport, stat, provider, sent_at, line = row
+                player, sport, stat, provider, source_id, event_id, direction, sent_at, line = row
                 if sent_at is None:
                     continue
-                key = (
-                    _dedup_player_key(player, provider),
-                    sport or "UNKNOWN",
-                    stat,
-                )
-                if key in out:
-                    continue  # POL entry takes priority
                 if hasattr(sent_at, "timestamp"):
                     ts_unix = sent_at.timestamp()
                 else:
@@ -5049,7 +5076,30 @@ class Database:
                         str(sent_at).replace("Z", "+00:00")
                     ).timestamp()
                 line_f  = float(line or 0)
-                out[key] = (ts_unix, line_f)
+                provider_name = str(provider or "Underdog").strip() or "Underdog"
+                source_key = str(source_id or "").strip()
+                event_key = str(event_id or "").strip()
+                direction_key = str(direction or "").strip().upper()
+                extended_key = (
+                    str(player or "").strip(),
+                    sport or "UNKNOWN",
+                    stat,
+                    provider_name,
+                    source_key,
+                    event_key,
+                    direction_key,
+                )
+                # POL is authoritative when it exists for the same source
+                # identity; the fallback only fills missing normalized keys.
+                if extended_key not in out:
+                    out[extended_key] = (ts_unix, line_f)
+                legacy_key = (
+                    _dedup_player_key(player, provider),
+                    sport or "UNKNOWN",
+                    stat,
+                )
+                if legacy_key not in out:
+                    out[legacy_key] = (ts_unix, line_f)
 
             return out
 
@@ -5626,12 +5676,14 @@ class Database:
         tier:        Optional[str]      = None,
         confidence:  Optional[int]      = None,
         game_time:   Optional[datetime] = None,
+        provider:    Optional[str]      = None,
     ) -> SlipJournalLeg:
         """Append a leg to an existing slip journal entry."""
         async with self.session() as s:
             leg = SlipJournalLeg(
                 slip_code   = slip_code,
                 opp_id      = opp_id,
+                provider    = provider or "Underdog",
                 player_name = player_name,
                 team        = team,
                 sport       = sport,
@@ -5867,20 +5919,27 @@ class Database:
 
     async def get_pick_accuracy_by_sport(self, limit_sports: int = 10) -> list[dict]:
         """
-        Aggregate HIT/MISS counts per sport from PropOpportunityLog (P12).
+        Aggregate HIT/MISS counts per provider and sport from PropOpportunityLog.
 
-        Returns a list of dicts sorted by total picks desc:
-          [{"sport": str, "hits": int, "misses": int, "pushes": int, "total": int}]
+        Provider is included so source performance cannot be mistaken for a
+        single blended market.  Returns rows sorted by total picks desc:
+          [{"provider": str, "sport": str, "hits": int, "misses": int,
+            "pushes": int, "total": int}]
         """
         async with self.session() as s:
             rows = await s.execute(
                 select(
                     PropOpportunityLog.sport,
+                    PropOpportunityLog.provider,
                     PropOpportunityLog.result,
                     func.count(PropOpportunityLog.id).label("n"),
                 )
                 .where(PropOpportunityLog.result.in_(["HIT", "MISS", "PUSH"]))
-                .group_by(PropOpportunityLog.sport, PropOpportunityLog.result)
+                .group_by(
+                    PropOpportunityLog.sport,
+                    PropOpportunityLog.provider,
+                    PropOpportunityLog.result,
+                )
             )
             raw = rows.all()
 
@@ -5888,14 +5947,22 @@ class Database:
         by_sport: dict[str, dict] = {}
         for row in raw:
             sp = row.sport or "?"
-            if sp not in by_sport:
-                by_sport[sp] = {"sport": sp, "hits": 0, "misses": 0, "pushes": 0}
+            provider = row.provider or "Underdog"
+            key = (provider, sp)
+            if key not in by_sport:
+                by_sport[key] = {
+                    "provider": provider,
+                    "sport": sp,
+                    "hits": 0,
+                    "misses": 0,
+                    "pushes": 0,
+                }
             if row.result == "HIT":
-                by_sport[sp]["hits"] += row.n
+                by_sport[key]["hits"] += row.n
             elif row.result == "MISS":
-                by_sport[sp]["misses"] += row.n
+                by_sport[key]["misses"] += row.n
             elif row.result == "PUSH":
-                by_sport[sp]["pushes"] += row.n
+                by_sport[key]["pushes"] += row.n
 
         result_list = sorted(
             by_sport.values(),

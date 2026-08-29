@@ -1,0 +1,632 @@
+Continue from the current Sharp Money Bot implementation.
+
+Make ONLY the targeted changes below.
+
+Do NOT redesign the architecture.
+Do NOT create a second alert system.
+Do NOT change the underlying monitoring, tracking, grading, evidence, or provider-ingestion architecture except where directly required below.
+
+🚫 NO LIVE VERIFICATION
+
+DO NOT RUN LIVE VERIFICATION FOR THIS REQUEST.
+
+Do NOT:
+
+* Restart the bot
+* Restart Railway
+* Deploy Railway
+* Send Telegram commands
+* Send /testalert
+* Wait for natural alerts
+* Wait for games to finish
+* Generate synthetic production data
+* Generate synthetic alerts
+* Modify production configuration for testing
+
+Verification must be automated only:
+
+INSPECT → FIX → FOCUSED TESTS → FULL SUITE → COMPILE → DIFF CHECK → REPORT
+
+⸻
+
+1. PROVIDER-SPECIFIC ALERT IDENTITY
+
+Underdog and PrizePicks are both primary player-prop providers.
+
+Every actionable Telegram alert must clearly identify its provider.
+
+Use:
+
+🐶 UNDERDOG PICK
+
+for Underdog props.
+
+🟣 PRIZEPICKS PICK
+
+for PrizePicks / PropLine props.
+
+Do NOT use the generic heading:
+
+ACTIONABLE BET PICK
+
+for provider-specific player-prop alerts.
+
+The provider identity must remain attached to the prop from ingestion through:
+
+* evaluation
+* tracking
+* grading
+* alert generation
+* alert history
+* dashboard
+* performance reporting
+
+Do NOT allow PrizePicks props to inherit Underdog identity.
+
+Do NOT allow Underdog props to inherit PrizePicks identity.
+
+⸻
+
+2. USE THE SAME CLEAN ALERT FORMAT FOR BOTH PROVIDERS
+
+The richer current Underdog-style player-prop alert format should be supported by both primary providers.
+
+For either provider, when a valid directional pick exists, the alert should clearly show:
+
+* Provider
+* Sport
+* Market/stat
+* Player
+* Current provider line
+* Previous line when applicable
+* Line movement when applicable
+* Recommendation
+* Bet Quality
+* Confidence where currently supported
+* Relevant player history
+* Evidence
+* Reason
+* Market quality where available
+* Analyst information where currently supported
+* Timestamp
+
+Do NOT copy Underdog-specific wording into PrizePicks alerts where it would be inaccurate.
+
+For example:
+
+Underdog should identify the line as:
+
+Underdog Line
+
+PrizePicks should identify the line as:
+
+PrizePicks Line
+
+Do not call a PrizePicks line an Underdog line.
+
+⸻
+
+3. REMOVE GENERIC / LEGACY ALERT LANGUAGE
+
+Audit all player-prop Telegram alert builders and remove obsolete generic language where it conflicts with the current provider-specific presentation.
+
+Do NOT display:
+
+ACTIONABLE BET PICK
+
+as the primary provider alert heading.
+
+Do NOT display:
+
+verify before placing
+
+or:
+
+verify line on Underdog before placing
+
+or any equivalent stale verification disclaimer.
+
+The bot is responsible for presenting its current evaluated pick cleanly.
+
+Do not add unnecessary warning language.
+
+Preserve legitimate safety protections internally.
+
+⸻
+
+4. DIRECTION-ONLY ALERT QUALIFICATION
+
+The alert qualification model is:
+
+Valid OVER/UNDER direction → eligible for alert
+
+There must be no hidden classification gate.
+
+Do NOT require:
+
+* S-tier
+* A-tier
+* B-tier
+* C-tier
+* PASS
+* Watchlist
+* Near-Miss
+* arbitrary score tier
+* arbitrary evidence tier
+* obsolete confidence gate
+* obsolete MLB-only gate
+
+Do NOT reintroduce any retired qualification system.
+
+A valid directional pick should not be blocked merely because of a historical classification label.
+
+Preserve existing legitimate:
+
+* stale-line protection
+* duplicate protection
+* flood protection
+* safety checks
+* event/game-start checks
+* provider identity checks
+
+Those are operational protections, not qualification tiers.
+
+⸻
+
+5. FOOTBALL TELEGRAM SUPPRESSION
+
+Football remains fully monitored and tracked.
+
+Football includes:
+
+* NFL
+* NCAAF
+* CFB
+* FCS
+* CFL
+* UFL
+* USFL
+* XFL
+* AFL
+* AFLW
+* other football variants
+
+Football props MUST continue through:
+
+* provider ingestion
+* snapshot persistence
+* monitoring
+* rescanning
+* tracking
+* grading
+* historical analysis
+
+But football props MUST NOT reach Telegram.
+
+This applies to BOTH:
+
+* Underdog
+* PrizePicks
+
+Audit every Telegram delivery path for football leakage.
+
+Do not merely hide football from one command.
+
+Block Telegram delivery consistently while leaving the underlying tracking lifecycle intact.
+
+⸻
+
+6. DUPLICATE / REPEATED ALERT CONTROL
+
+We need to prevent alert spam without losing meaningful line movement.
+
+Example:
+
+A player has:
+
+Batter Strikeouts 0.5 UNDER
+
+and the bot alerts.
+
+Later the exact same prop remains:
+
+0.5 UNDER
+
+Do NOT repeatedly send the same alert.
+
+However, if the provider line meaningfully changes:
+
+0.5 → 1.5
+
+the new line may generate a new alert because it represents a materially different betting opportunity.
+
+Therefore alert deduplication must distinguish:
+
+Same opportunity
+
+Same:
+
+* provider
+* source ID
+* player
+* sport
+* market/stat
+* line
+* direction
+* relevant event
+
+→ suppress duplicate delivery.
+
+New opportunity
+
+Meaningful change in:
+
+* line
+* direction
+* provider source ID
+* event
+* other legitimate opportunity identity
+
+→ eligible for a new alert.
+
+Do NOT globally suppress a player forever.
+
+Do NOT suppress all alerts merely because the player/market previously alerted.
+
+Do NOT suppress legitimate line movement.
+
+⸻
+
+7. PROVIDER-SCOPED DEDUPLICATION
+
+Deduplication must remain provider-specific.
+
+For example:
+
+Underdog:
+
+Max Muncy — Batter Strikeouts — 1.5 UNDER
+
+and PrizePicks:
+
+Max Muncy — Batter Strikeouts — 1.5 UNDER
+
+are NOT the same alert opportunity.
+
+They belong to different providers.
+
+Likewise, separate PrizePicks source IDs representing legitimate alternate lines must remain distinct.
+
+Do not cross-deduplicate PP against UD.
+
+⸻
+
+8. ALERT HISTORY
+
+/alerts must preserve provider identity.
+
+Entries should clearly show:
+
+* 🐶 UNDERDOG PICK
+* 🟣 PRIZEPICKS PICK
+
+Do not collapse both providers into a generic actionable-pick label.
+
+Alert history must represent actual delivered alerts.
+
+Do not make tracking counts equal delivery counts.
+
+⸻
+
+9. /PICKS
+
+/picks should present current directional opportunities with clear provider identity.
+
+Provider should be obvious for every result.
+
+Example structure:
+
+🐶 UNDERDOG PICK
+
+or:
+
+🟣 PRIZEPICKS PICK
+
+Do not label PrizePicks opportunities as Underdog.
+
+Do not label Underdog opportunities as PrizePicks.
+
+Do not use provider-specific fields incorrectly.
+
+⸻
+
+10. /SLIP
+
+/slip must preserve provider identity for each leg.
+
+A PrizePicks leg remains PrizePicks.
+
+An Underdog leg remains Underdog.
+
+Do not silently convert or relabel one provider as the other.
+
+Do not use a generic provider label when the actual provider is known.
+
+Preserve the existing slip construction and risk protections.
+
+Do not redesign slip logic.
+
+⸻
+
+11. DASHBOARD / TRACKING / PERFORMANCE
+
+Ensure provider identity remains correct in:
+
+* /dashboard
+* /tracking
+* /stats
+* /performance
+* /grade
+* /player
+* /slipstats
+* /calibration
+* /backtest
+* /funnel
+* /reconcile
+
+Distinguish:
+
+* Underdog observed
+* PrizePicks observed
+* Underdog tracked
+* PrizePicks tracked
+* Underdog directional
+* PrizePicks directional
+* Underdog actionable
+* PrizePicks actionable
+* Underdog delivered
+* PrizePicks delivered
+
+Do not mix provider populations.
+
+⸻
+
+12. ALERT CONTENT MUST NOT CLAIM FALSE DATA
+
+For each provider:
+
+Only display fields actually supported by that provider’s data.
+
+Do NOT fabricate:
+
+* previous lines
+* line movement
+* player history
+* market quality
+* evidence
+* confidence
+* event state
+* result
+
+If a field is legitimately unavailable, use the existing clean missing-data behavior.
+
+Do not manufacture a value simply to make the alert look complete.
+
+⸻
+
+13. PRESERVE TRACKING AND GRADING
+
+These changes must NOT interfere with the universal tracking work already completed.
+
+Every observed prop must remain independently eligible for:
+
+* persistence
+* rescanning
+* grading
+* HIT/MISS/PUSH
+* historical analysis
+
+Alert deduplication only controls alert delivery.
+
+It must NOT remove the prop from:
+
+* monitoring
+* tracking
+* history
+* grading
+* player evidence
+
+⸻
+
+14. TESTS
+
+Add focused regression tests proving:
+
+Provider labels
+
+* Underdog alerts identify as UNDERDOG PICK.
+* PrizePicks alerts identify as PRIZEPICKS PICK.
+* No provider cross-labeling occurs.
+* Provider-specific line labels are correct.
+
+Alert formatting
+
+* Both providers can use the clean player-prop alert structure.
+* No generic ACTIONABLE BET PICK heading remains where provider identity is known.
+* No “verify before placing” language remains.
+* No stale Underdog wording appears in PrizePicks alerts.
+
+Qualification
+
+* Valid OVER direction can alert.
+* Valid UNDER direction can alert.
+* No S/A/B/C requirement exists.
+* No PASS requirement exists.
+* No Watchlist/Near-Miss requirement exists.
+* No obsolete evidence-tier gate exists.
+* No obsolete confidence-tier gate exists.
+
+Football
+
+* NFL remains tracked.
+* NCAAF remains tracked.
+* CFB remains tracked.
+* Other football variants remain tracked.
+* Football remains gradable.
+* Football does NOT reach Telegram.
+* Football suppression applies to both providers.
+
+Deduplication
+
+* Exact same provider/source/player/market/line/direction/event alert is suppressed.
+* Same opportunity is not repeatedly spammed.
+* Meaningful line movement can generate a new alert.
+* Direction change can generate a new alert.
+* New event can generate a new alert.
+* PrizePicks and Underdog do not cross-deduplicate.
+* PP alternate source IDs remain distinct.
+
+Tracking independence
+
+* Suppressing an alert does not remove the prop from tracking.
+* Suppressing an alert does not remove the prop from grading.
+* Suppressing an alert does not remove historical snapshots.
+* Non-alerted props remain eligible for future evaluation.
+
+Run:
+
+1. Focused alert/provider/dedup/football tests.
+2. Full existing test suite.
+3. Python compilation.
+4. git diff --check.
+
+Do not weaken existing tests.
+
+⸻
+
+15. NO PRODUCTION ACTIONS
+
+Again:
+
+DO NOT RUN LIVE VERIFICATION.
+
+Do not:
+
+* restart Railway
+* deploy Railway
+* send Telegram commands
+* wait for natural alerts
+* wait for games
+* create synthetic alerts
+* create synthetic production data
+* alter production thresholds
+
+Automated verification only.
+
+⸻
+
+16. PRESERVE EVERYTHING ALREADY COMPLETED
+
+Do NOT regress:
+
+* PrizePicks dynamic sport discovery
+* PrizePicks all-sport support
+* PrizePicks source-ID identity
+* PrizePicks alternate-line handling
+* PrizePicks observation persistence
+* Underdog active source-ID/FPR lifecycle
+* Underdog full-pool rescanning
+* universal snapshot tracking
+* universal grading
+* progressive player history
+* clean restart
+* unified cadence
+* adaptive batching
+* max_instances=1
+* football monitoring/tracking
+* direction-only qualification
+* existing safety protections
+* existing provider separation
+* Railway configuration
+* OddsAPI
+* unrelated providers
+
+Only change the alert presentation and duplicate-alert behavior requested above.
+
+⸻
+
+17. FINAL REPORT
+
+Report exactly:
+
+IMPLEMENTED
+
+List every actual change made.
+
+TESTED
+
+* Focused tests: X passed
+* Full suite: X passed
+* Compilation: PASS/FAIL
+* Diff check: PASS/FAIL
+
+UNVERIFIED LIVE
+
+State:
+
+NO LIVE VERIFICATION WAS PERFORMED.
+
+List only items that genuinely require production observation.
+
+PRESERVED
+
+Confirm:
+
+* Underdog monitoring preserved.
+* PrizePicks monitoring preserved.
+* Universal tracking preserved.
+* Universal grading preserved.
+* Football remains monitored/tracked/graded but blocked from Telegram.
+* Direction-only alert qualification preserved.
+* Provider separation preserved.
+* Scheduler behavior preserved.
+* Railway was not restarted.
+* Railway was not deployed.
+* No production data was fabricated.
+* No test alerts were sent.
+
+⸻
+
+🔴 FINAL INSTRUCTION
+
+DO NOT RUN LIVE VERIFICATION.
+
+DO NOT RESTART RAILWAY.
+
+DO NOT DEPLOY RAILWAY.
+
+DO NOT SEND TELEGRAM COMMANDS.
+
+DO NOT WAIT FOR NATURAL ALERTS.
+
+Make only the smallest targeted changes necessary.
+
+The end state must be:
+
+Underdog → clean UNDERDOG PICK alert
+
+PrizePicks → clean PRIZEPICKS PICK alert
+
+Both providers → direction-only qualification
+
+No retired tiers/gates
+
+No football Telegram alerts
+
+No repeated identical alerts
+
+Meaningful line movement can generate a new alert
+
+All observations remain tracked and gradable regardless of alert delivery
+
+Verification is automated only.

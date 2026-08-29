@@ -141,6 +141,7 @@ class CalibrationReport:
     ev_records_used:  int = 0
     ud_records_used:  int = 0
     clv_records_used: int = 0
+    provider_breakdown: dict = field(default_factory=dict)
 
     def to_telegram(self) -> str:
         lines: list[str] = [
@@ -237,9 +238,19 @@ class CalibrationReport:
                 r_str = f"{r*100:.0f}%" if r is not None else "n/a"
                 lines.append(f"    {side}: {c}/{c+i} ({r_str})")
 
+        if self.provider_breakdown:
+            lines.append("")
+            lines.append("📡 <b>Actionable Picks by Provider</b>")
+            for provider, stats in sorted(self.provider_breakdown.items()):
+                lines.append(
+                    f"  {provider}: {stats.get('hit', 0)}H-"
+                    f"{stats.get('miss', 0)}M-{stats.get('push', 0)}P · "
+                    f"{stats.get('pending', 0)} pending"
+                )
+
         lines.append("")
         lines.append(
-            f"<i>Based on {self.ud_records_used:,} tracked Underdog records"
+            f"<i>Recommendation sample: {self.ud_records_used:,} tracked Underdog records"
             f" and {self.clv_records_used:,} CLV history records</i>"
         )
         return "\n".join(lines)
@@ -346,6 +357,13 @@ class CalibrationEngine:
 
     async def _compute_recommendation_accuracy(self, db, report: CalibrationReport) -> None:
         """Compute bet recommendation accuracy from resolved Underdog snapshots."""
+        try:
+            provider_perf = await db.get_telegram_pick_performance()
+            if isinstance(provider_perf, dict):
+                report.provider_breakdown = provider_perf.get("by_provider", {}) or {}
+        except Exception as exc:
+            logger.debug("calibration: provider breakdown unavailable: %s", exc)
+
         try:
             ud_snaps = await db.get_recent_underdog_snapshots(limit=500)
         except AttributeError:

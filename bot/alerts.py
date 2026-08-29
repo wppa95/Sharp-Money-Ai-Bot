@@ -478,9 +478,12 @@ def format_ud_removal_alert(
     last_seen: "Optional[datetime]" = None,
     first_alert_sent_at: "Optional[datetime]" = None,
     reason: str = "pulled from board",
+    provider: str = "Underdog",
 ) -> str:
-    """Format a removal alert for an Underdog prop that was previously alerted."""
+    """Format a provider-labeled removal alert for a previously alerted prop."""
     _fmt_dt = lambda dt: dt.strftime("%b %-d %H:%M UTC") if dt else "—"
+    provider = str(provider or "Underdog").strip() or "Underdog"
+    source_emoji = "🟣" if provider.lower() == "prizepicks" else "🐶"
 
     duration_str = "—"
     if first_seen and last_seen:
@@ -491,10 +494,10 @@ def format_ud_removal_alert(
             duration_str = f"{secs // 3600}h {(secs % 3600) // 60}m"
 
     return "\n".join([
-        f"🚫 <b>UNDERDOG PROP REMOVED</b>",
+        f"🚫 <b>{provider.upper()} PROP REMOVED</b>",
         f"",
         f"<b>{player_name}</b>  ·  {sport}  ·  {stat_type}",
-        f"Last line:       <b>{last_line:.1f}</b>",
+        f"{source_emoji} {provider} Line: <b>{last_line:.1f}</b>",
         f"",
         f"First seen:      {_fmt_dt(first_seen)}",
         f"Last seen:       {_fmt_dt(last_seen)}",
@@ -573,9 +576,9 @@ def format_start_message() -> str:
         f"  🎯 Alert when a clear OVER or UNDER signal is confirmed",
         f"  🗃️ Collect multi-sport data for grading and model learning",
         "",
-        "<b>Alert format:</b>  🎯 ACTIONABLE BET PICK",
-        "  Shows direction, confidence score, and supporting data.",
-        "  Picks with a clear direction can reach Telegram.",
+        "<b>Alert format:</b>  provider-specific directional pick",
+        "  Shows the source line, direction, confidence, and supporting data.",
+        "  Underdog and PrizePicks picks are labeled separately.",
         "",
         "Use /help to see all commands.",
         "",
@@ -807,13 +810,13 @@ def format_pp_alert(
     under_fmt = format_odds(opp.sportsbook_under_odds)
 
     parts = [
-        f"🎯 <b>PRIZEPICKS EDGE DETECTED</b>",
+        f"🟣 <b>PRIZEPICKS PICK</b>",
         "",
         f"{s_icon} <b>{pp.sport} — {pp.stat_type}</b>",
         f"👤 <b>{pp.player_name}</b> ({pp.team})",
         "",
-        f"📋 <b>PP Line:</b>     {pp.line_value} ({pp.stat_type})",
-        f"📊 <b>SB Line:</b>     {opp.sportsbook_line} ({opp.sportsbook}) [{line_note}]",
+        f"🟣 <b>PrizePicks Line:</b>  {pp.line_value} ({pp.stat_type})",
+        f"📊 <b>Reference Line:</b>   {opp.sportsbook_line} ({opp.sportsbook}) [{line_note}]",
         f"📉 <b>SB Odds:</b>     O {over_fmt} / U {under_fmt}",
         "",
         f"⚖️  <b>Fair Prob:</b>   {format_probability(adj_prob)} at PP line",

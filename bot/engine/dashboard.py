@@ -23,6 +23,7 @@ Public API
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Optional
@@ -207,8 +208,11 @@ class DashboardReport:
         if self.recent_tracked_props:
             parts.append("🔔 <b>Recently Tracked Props</b>  <i>(last hour · all sports)</i>")
             for prop in self.recent_tracked_props[:5]:
+                provider = prop.get("provider", "Underdog")
+                source_emoji = "🟣" if provider == "PrizePicks" else "🐶"
                 parts.append(
-                    f"  <b>{prop['player_name']}</b>  {prop['stat_type']} "
+                    f"  {source_emoji} <b>{provider.upper()} PICK</b> · "
+                    f"<b>{prop['player_name']}</b>  {prop['stat_type']} "
                     f"<code>{prop['line_value']:.1f}</code> · <i>{prop['sport']}</i>"
                 )
             parts.append("")
@@ -354,18 +358,25 @@ class DashboardEngine:
         # Run all independent queries (best-effort)
         await cls._gather_totals(db, report)
         try:
-            rows = await db.get_recent_tracked_props(
-                "Underdog", since_hours=1, limit=100
+            provider_rows = await asyncio.gather(
+                db.get_recent_tracked_props("Underdog", since_hours=1, limit=100),
+                db.get_recent_tracked_props("PrizePicks", since_hours=1, limit=100),
+                return_exceptions=True,
             )
-            report.recent_tracked_props = [
-                {
-                    "player_name": row.player_name,
-                    "stat_type": row.stat_type,
-                    "line_value": float(row.line_value),
-                    "sport": row.sport,
-                }
-                for row in rows
-            ]
+            report.recent_tracked_props = []
+            for provider, rows in zip(("Underdog", "PrizePicks"), provider_rows):
+                if isinstance(rows, Exception):
+                    continue
+                report.recent_tracked_props.extend(
+                    {
+                        "provider": provider,
+                        "player_name": row.player_name,
+                        "stat_type": row.stat_type,
+                        "line_value": float(row.line_value),
+                        "sport": row.sport,
+                    }
+                    for row in rows
+                )
         except Exception:
             report.recent_tracked_props = []
         await cls._gather_ev_performance(db, report)

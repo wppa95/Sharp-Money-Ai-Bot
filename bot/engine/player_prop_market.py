@@ -514,6 +514,11 @@ def _is_prop_deduped(
     dedup_window_seconds: int,
     min_line_change:      float,
     now_ts:               Optional[float] = None,
+    *,
+    provider:             Optional[str] = None,
+    source_id:            Optional[str] = None,
+    event_id:             Optional[str] = None,
+    direction:            Optional[str] = None,
 ) -> bool:
     """
     Return True when this prop alert should be suppressed.
@@ -525,7 +530,20 @@ def _is_prop_deduped(
     A significant line movement always fires, even within the window.
     Accepts ``now_ts`` for test injection (defaults to ``time.time()``).
     """
-    key = (player, sport, stat_type)
+    # Keep the compact legacy key for old callers/tests.  Production delivery
+    # paths pass the complete provider-owned identity so the same player/stat
+    # can alert independently on different providers, events, lines, and sides.
+    identity = (
+        str(provider or "").strip(),
+        str(source_id or "").strip(),
+        str(event_id or "").strip(),
+        str(direction or "").strip().upper(),
+    )
+    key = (
+        (player, sport, stat_type, *identity)
+        if any(identity)
+        else (player, sport, stat_type)
+    )
     if key not in alerted_set:
         return False
     last_ts, last_line = alerted_set[key]
@@ -542,9 +560,25 @@ def _record_prop_alerted(
     stat_type:   str,
     line:        float,
     now_ts:      Optional[float] = None,
+    *,
+    provider:    Optional[str] = None,
+    source_id:   Optional[str] = None,
+    event_id:    Optional[str] = None,
+    direction:   Optional[str] = None,
 ) -> None:
-    """Record that an alert was sent for (player, sport, stat_type, line)."""
-    alerted_set[(player, sport, stat_type)] = (
+    """Record an alert using its provider-owned source identity."""
+    identity = (
+        str(provider or "").strip(),
+        str(source_id or "").strip(),
+        str(event_id or "").strip(),
+        str(direction or "").strip().upper(),
+    )
+    key = (
+        (player, sport, stat_type, *identity)
+        if any(identity)
+        else (player, sport, stat_type)
+    )
+    alerted_set[key] = (
         now_ts if now_ts is not None else time.time(),
         line,
     )
@@ -555,9 +589,24 @@ def _release_prop_delivery_claim(
     sport: str,
     stat_type: str,
     line: float,
+    *,
+    provider: Optional[str] = None,
+    source_id: Optional[str] = None,
+    event_id: Optional[str] = None,
+    direction: Optional[str] = None,
 ) -> None:
     """Release a pre-delivery dedup claim when Telegram delivery fails."""
-    key = (player, sport, stat_type)
+    identity = (
+        str(provider or "").strip(),
+        str(source_id or "").strip(),
+        str(event_id or "").strip(),
+        str(direction or "").strip().upper(),
+    )
+    key = (
+        (player, sport, stat_type, *identity)
+        if any(identity)
+        else (player, sport, stat_type)
+    )
     current = alerted_set.get(key)
 
     if current is not None:
