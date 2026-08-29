@@ -167,8 +167,11 @@ class TestP2FunnelNearMisses:
 
     def test_candidate_query_is_compact(self):
         src = self._src()
-        assert "select(func.count" in src
-        assert "group_by(PropCandidateLog.sport)" in src
+        # Normalized history is now canonical. Candidate telemetry remains a
+        # compatibility fallback and is aggregated by sport so excluded
+        # football rows cannot inflate the tracked population.
+        assert "PropCandidateLog" in src
+        assert "candidate_total" in src
 
     def test_funnel_command_handler_exists(self):
         import commands as cmd

@@ -143,6 +143,40 @@ async def test_reconciliation_counts_prizepicks_history_as_observed_and_tracked(
 
 
 @pytest.mark.asyncio
+async def test_reconciliation_prefers_normalized_underdog_history_over_legacy_rows(db):
+    from database import PropLineHistory, UnderdogSnapshotRecord
+
+    now = datetime.utcnow()
+    async with db.session() as session:
+        session.add(PropLineHistory(
+            external_id="ud-history-1",
+            provider="Underdog",
+            player_name="UD Player",
+            team="UD",
+            sport="SOCCER",
+            stat_type="Goals",
+            line_value=0.5,
+            fetched_at=now,
+            removed=False,
+        ))
+        session.add(UnderdogSnapshotRecord(
+            external_id="legacy-ud-1",
+            player_name="Legacy UD Player",
+            team="UD",
+            sport="NBA",
+            stat_type="Points",
+            line_value=20.5,
+            fetched_at=now,
+            removed=False,
+        ))
+        await session.commit()
+
+    report = await db.get_telegram_reconciliation(since_hours=24)
+
+    assert report["by_provider"]["Underdog"]["observed"] == 1
+
+
+@pytest.mark.asyncio
 async def test_reconciliation_flags_replayed_audit_identity(db):
     now = datetime.utcnow()
     for _ in range(2):

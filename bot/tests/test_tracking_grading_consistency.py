@@ -136,3 +136,104 @@ async def test_backtest_preserves_provider_identity_and_under_direction(db):
     assert report.overall.wins == 2
     assert report.by_provider["Underdog"].wins == 1
     assert report.by_provider["PrizePicks"].wins == 1
+
+
+@pytest.mark.asyncio
+async def test_funnel_separates_observations_active_directional_and_delivery(db):
+    now = datetime.utcnow()
+    async with db.session() as session:
+        session.add_all([
+            PropLineHistory(
+                external_id="ud-funnel-1",
+                provider="Underdog",
+                player_name="Tracked Player",
+                team="TEAM",
+                sport="NBA",
+                stat_type="Points",
+                line_value=20.5,
+                game_time=now + timedelta(hours=2),
+                fetched_at=now - timedelta(hours=2),
+                removed=False,
+            ),
+            PropLineHistory(
+                external_id="ud-funnel-1",
+                provider="Underdog",
+                player_name="Tracked Player",
+                team="TEAM",
+                sport="NBA",
+                stat_type="Points",
+                line_value=21.5,
+                game_time=now + timedelta(hours=2),
+                fetched_at=now,
+                removed=False,
+            ),
+            PropOpportunityLog(
+                external_id="ud-funnel-1",
+                player_name="Tracked Player",
+                team="TEAM",
+                sport="NBA",
+                stat_type="Points",
+                line_value=21.5,
+                recommendation="OVER",
+                decision_tier="A",
+                confidence=80,
+                game_time=now + timedelta(hours=2),
+                game_id="game-ud-funnel-1",
+                provider="Underdog",
+                result="PENDING",
+                alert_sent=False,
+                detected_at=now,
+            ),
+        ])
+        await session.commit()
+
+    summary = await db.get_funnel_summary(since_hours=24)
+
+    assert summary["tracked"] == 1
+    assert summary["tracked_observations"] == 2
+    assert summary["directional_total"] == 1
+    assert summary["delivered"] == 0
+    assert summary["pending"] == 1
+    assert summary["resolved"] == 0
+    assert summary["directional_by_provider"] == {"Underdog": 1}
+    assert summary["delivered_by_provider"] == {}
+
+
+@pytest.mark.asyncio
+async def test_tracking_summary_excludes_football_but_keeps_soccer(db):
+    now = datetime.utcnow()
+    async with db.session() as session:
+        session.add_all([
+            PropLineHistory(
+                external_id="legacy-football",
+                provider="Underdog",
+                player_name="Football Player",
+                team="TEAM",
+                sport="NFL",
+                stat_type="Passing Yards",
+                line_value=250.5,
+                game_time=now + timedelta(hours=2),
+                fetched_at=now,
+                removed=False,
+            ),
+            PropLineHistory(
+                external_id="soccer-supported",
+                provider="PrizePicks",
+                player_name="Soccer Player",
+                team="TEAM",
+                sport="SOCCER",
+                stat_type="Goals",
+                line_value=0.5,
+                game_time=now + timedelta(hours=2),
+                fetched_at=now,
+                removed=False,
+            ),
+        ])
+        await session.commit()
+
+    summary = await db.get_tracking_summary()
+
+    assert summary["tracked_observations"] == 1
+    assert summary["tracked"] == 1
+    assert summary["active_by_sport"] == {"SOCCER": 1}
+    assert "NFL" not in summary["active_by_sport"]

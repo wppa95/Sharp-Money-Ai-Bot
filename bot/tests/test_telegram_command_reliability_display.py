@@ -664,7 +664,7 @@ async def test_stats_keeps_fast_metrics_when_one_report_read_times_out():
     message = update.message.reply_text.await_args.args[0]
     assert "Underdog:    <b>4</b>" in message
     assert "PrizePicks (PropLine): <b>unavailable</b>" in message
-    assert "Tracked opportunities: <b>12</b>" in message
+    assert "Tracked observations: <b>12</b>" in message
     assert "99 Underdog snapshots" in message
 
 

@@ -50,6 +50,13 @@ def _is_sqlite_lock_error(exc: BaseException) -> bool:
     return "database is locked" in message or "database table is locked" in message
 
 
+def _is_supported_tracking_sport(sport: Optional[object]) -> bool:
+    """Keep football-related legacy rows out of current tracking populations."""
+    from engine.sport_policy import is_football_related_sport
+
+    return not is_football_related_sport(sport)
+
+
 def _tier_from_confidence(ai_confidence: int) -> str:
     """Map an ai_confidence score (0-100) to a tier label for CLV seeding."""
     if ai_confidence >= 95:
@@ -1539,19 +1546,30 @@ class Database:
                 observed_rows = await s.execute(
                     select(
                         PropLineHistory.provider,
+                        PropLineHistory.sport,
                         func.count(PropLineHistory.id),
                     ).where(
                         PropLineHistory.provider.in_(("Underdog", "PrizePicks")),
                         PropLineHistory.fetched_at >= cutoff,
-                    ).group_by(PropLineHistory.provider)
+                    ).group_by(
+                        PropLineHistory.provider,
+                        PropLineHistory.sport,
+                    )
                 )
-                normalized_observed = {
-                    _provider(provider_name): int(count or 0)
-                    for provider_name, count in observed_rows.all()
-                }
+                normalized_observed: dict[str, int] = {}
+                normalized_provider_seen: set[str] = set()
+                for provider_name, sport, count in observed_rows.all():
+                    normalized_provider_seen.add(_provider(provider_name))
+                    if not _is_supported_tracking_sport(sport):
+                        continue
+                    provider_key = _provider(provider_name)
+                    normalized_observed[provider_key] = (
+                        normalized_observed.get(provider_key, 0)
+                        + int(count or 0)
+                    )
                 for provider_name, count in normalized_observed.items():
                     _ensure(provider_name)["observed"] += count
-                if normalized_observed.get("Underdog", 0) == 0:
+                if "Underdog" not in normalized_provider_seen:
                     legacy_ud_observed = await s.execute(
                         select(func.count()).select_from(UnderdogSnapshotRecord).where(
                             UnderdogSnapshotRecord.fetched_at >= cutoff
@@ -1586,6 +1604,7 @@ class Database:
                 tracked_rows = await s.execute(
                     select(
                         PropLineHistory.provider,
+                        PropLineHistory.sport,
                         func.count(PropLineHistory.id),
                     )
                     .where(
@@ -1599,9 +1618,14 @@ class Database:
                             PropLineHistory.game_time > now,
                         ),
                     )
-                    .group_by(PropLineHistory.provider)
+                    .group_by(
+                        PropLineHistory.provider,
+                        PropLineHistory.sport,
+                    )
                 )
-                for provider_name, count in tracked_rows.all():
+                for provider_name, sport, count in tracked_rows.all():
+                    if not _is_supported_tracking_sport(sport):
+                        continue
                     provider = _provider(provider_name)
                     row = _ensure(provider)
                     row["tracked"] += int(count or 0)
@@ -2339,7 +2363,10 @@ class Database:
                 .order_by(desc(PropLineHistory.fetched_at))
                 .limit(limit)
             )
-            return list(result.scalars().all())
+            return [
+                row for row in result.scalars().all()
+                if _is_supported_tracking_sport(row.sport)
+            ]
 
     # ── PropLineHistory migration ────────────────────────────────────────────
 
@@ -4692,7 +4719,6 @@ class Database:
                 select(func.max(PropLineHistory.id))
                 .where(
                     PropLineHistory.provider.in_(("Underdog", "PrizePicks")),
-                    PropLineHistory.fetched_at >= cutoff,
                 )
                 .group_by(
                     PropLineHistory.provider,
@@ -4728,38 +4754,33 @@ class Database:
                 )
             )
             current_rows = current_res.all()
-            history_count_res = await s.execute(
-                select(func.count(PropLineHistory.id)).where(
-                    PropLineHistory.provider.in_(("Underdog", "PrizePicks")),
-                    PropLineHistory.fetched_at >= cutoff,
-                )
-            )
-            tracked_observations = int(history_count_res.scalar() or 0)
             observation_provider_res = await s.execute(
                 select(
                     PropLineHistory.provider,
+                    PropLineHistory.sport,
                     func.count(PropLineHistory.id),
                 )
                 .where(
                     PropLineHistory.provider.in_(("Underdog", "PrizePicks")),
                     PropLineHistory.fetched_at >= cutoff,
                 )
-                .group_by(PropLineHistory.provider)
+                .group_by(PropLineHistory.provider, PropLineHistory.sport)
             )
-            tracked_observations_by_provider = {
-                str(provider or "Unknown"): int(count or 0)
-                for provider, count in observation_provider_res.all()
-            }
+            tracked_observations_by_provider: dict[str, int] = {}
+            for provider, sport, count in observation_provider_res.all():
+                if not _is_supported_tracking_sport(sport):
+                    continue
+                provider_key = str(provider or "Unknown")
+                tracked_observations_by_provider[provider_key] = (
+                    tracked_observations_by_provider.get(provider_key, 0)
+                    + int(count or 0)
+                )
+            tracked_observations = sum(tracked_observations_by_provider.values())
             has_normalized_history = tracked_observations > 0
 
             # Compatibility fallback for installations predating normalized
             # history, where candidate telemetry is the only available stream.
             if not current_rows and not has_normalized_history:
-                total_res = await s.execute(
-                    select(func.count(PropCandidateLog.id))
-                    .where(PropCandidateLog.scan_ts >= cutoff)
-                )
-                candidate_total = int(total_res.scalar() or 0)
                 sport_res = await s.execute(
                     select(
                         PropCandidateLog.sport,
@@ -4772,7 +4793,9 @@ class Database:
                 by_sport = [
                     {"sport": sport or "UNKNOWN", "tracked": int(count or 0)}
                     for sport, count in sport_res.all()
+                    if _is_supported_tracking_sport(sport)
                 ]
+                candidate_total = sum(row["tracked"] for row in by_sport)
                 return {
                     "since_hours": since_hours,
                     "tracked": candidate_total,
@@ -4782,6 +4805,8 @@ class Database:
             by_sport_counts: dict[str, int] = {}
             by_provider_counts: dict[str, int] = {}
             for provider, sport in current_rows:
+                if not _is_supported_tracking_sport(sport):
+                    continue
                 sport_key = str(sport or "UNKNOWN")
                 provider_key = str(provider or "Unknown")
                 by_sport_counts[sport_key] = by_sport_counts.get(sport_key, 0) + 1
@@ -4795,6 +4820,7 @@ class Database:
                     key=lambda item: (-item[1], item[0]),
                 )
             ]
+            tracked_count = sum(by_provider_counts.values())
 
             # Directional opportunities and delivery are separate populations
             # from the active observation universe. Scope these to the report
@@ -4802,6 +4828,7 @@ class Database:
             opportunity_rows = await s.execute(
                 select(
                     PropOpportunityLog.provider,
+                    PropOpportunityLog.sport,
                     PropOpportunityLog.recommendation,
                     PropOpportunityLog.result,
                     PropOpportunityLog.alert_sent,
@@ -4816,7 +4843,9 @@ class Database:
             resolved_total = 0
             directional_by_provider: dict[str, int] = {}
             delivered_by_provider: dict[str, int] = {}
-            for provider, recommendation, result, alert_sent in opportunity_rows.all():
+            for provider, sport, recommendation, result, alert_sent in opportunity_rows.all():
+                if not _is_supported_tracking_sport(sport):
+                    continue
                 provider_key = str(provider or "Underdog")
                 directional_total += 1
                 directional_by_provider[provider_key] = (
@@ -4836,7 +4865,7 @@ class Database:
                     resolved_total += 1
         return {
             "since_hours": since_hours,
-            "tracked": len(current_rows),
+            "tracked": tracked_count,
             "tracked_observations": tracked_observations,
             "tracked_observations_by_provider": tracked_observations_by_provider,
             "directional_total": directional_total,
@@ -5506,61 +5535,72 @@ class Database:
         now = datetime.utcnow()
         async with self.session() as s:
             directional = PropOpportunityLog.recommendation.in_(["OVER", "UNDER"])
-            # Overall rec × result
-            rows = await s.execute(
-                select(
-                    PropOpportunityLog.recommendation,
-                    PropOpportunityLog.result,
-                    func.count(PropOpportunityLog.id).label("n"),
-                ).where(directional).group_by(
-                    PropOpportunityLog.recommendation,
-                    PropOpportunityLog.result,
-                )
-            )
             counts: dict = {}
-            for rec, res, n in rows.all():
-                counts.setdefault(rec, {})[res] = n
-
-            # By sport
-            sport_rows = await s.execute(
-                select(
-                    PropOpportunityLog.sport,
-                    PropOpportunityLog.recommendation,
-                    PropOpportunityLog.result,
-                    func.count(PropOpportunityLog.id).label("n"),
-                ).where(directional).group_by(
-                    PropOpportunityLog.sport,
-                    PropOpportunityLog.recommendation,
-                    PropOpportunityLog.result,
-                )
-            )
             by_sport: dict = {}
-            for sport, rec, res, n in sport_rows.all():
-                by_sport.setdefault(sport, {}).setdefault(rec, {})[res] = n
-
-            provider_rows = await s.execute(
+            by_provider: dict = {}
+            directional_rows = await s.execute(
                 select(
                     PropOpportunityLog.provider,
+                    PropOpportunityLog.sport,
                     PropOpportunityLog.recommendation,
                     PropOpportunityLog.result,
-                    func.count(PropOpportunityLog.id).label("n"),
-                ).where(directional).group_by(
+                ).where(directional)
+            )
+            total = 0
+            pending = 0
+            resolved = 0
+            delivered = 0
+            provider_delivered: dict[str, int] = {}
+            resolved_results = {
+                "HIT", "MISS", "PUSH", "VOID", "CANCELLED",
+                "INJURY_VOID", "GAME_INTERRUPTED",
+            }
+            for provider, sport, rec, res in directional_rows.all():
+                if not _is_supported_tracking_sport(sport):
+                    continue
+                provider_key = str(provider or "Underdog")
+                recommendation_key = str(rec or "").upper()
+                result_key = str(res or "PENDING").upper()
+                counts.setdefault(recommendation_key, {})[result_key] = (
+                    counts.setdefault(recommendation_key, {}).get(result_key, 0) + 1
+                )
+                by_sport.setdefault(sport, {}).setdefault(
+                    recommendation_key, {}
+                )[result_key] = (
+                    by_sport.setdefault(sport, {}).setdefault(
+                        recommendation_key, {}
+                    ).get(result_key, 0) + 1
+                )
+                by_provider.setdefault(provider_key, {}).setdefault(
+                    recommendation_key, {}
+                )[result_key] = (
+                    by_provider.setdefault(provider_key, {}).setdefault(
+                        recommendation_key, {}
+                    ).get(result_key, 0) + 1
+                )
+                total += 1
+                if result_key == "PENDING":
+                    pending += 1
+                elif result_key in resolved_results:
+                    resolved += 1
+
+            # Delivery is queried separately because the tracking query above
+            # intentionally keeps only the fields needed for outcome counts.
+            delivered_rows = await s.execute(
+                select(
                     PropOpportunityLog.provider,
-                    PropOpportunityLog.recommendation,
-                    PropOpportunityLog.result,
+                    PropOpportunityLog.sport,
+                ).where(
+                    directional,
+                    PropOpportunityLog.alert_sent == True,  # noqa: E712
                 )
             )
-            by_provider: dict = {}
-            for provider, rec, res, n in provider_rows.all():
+            for provider, sport in delivered_rows.all():
+                if not _is_supported_tracking_sport(sport):
+                    continue
                 provider_key = str(provider or "Underdog")
-                by_provider.setdefault(provider_key, {}).setdefault(rec, {})[res] = n
-
-            # Totals
-            total_row = await s.execute(
-                select(func.count(PropOpportunityLog.id))
-                .where(directional)
-            )
-            total = total_row.scalar() or 0
+                delivered += 1
+                provider_delivered[provider_key] = provider_delivered.get(provider_key, 0) + 1
 
             # Persistent observations are a separate population from
             # directional opportunities and from Telegram deliveries. Count
@@ -5569,59 +5609,21 @@ class Database:
             observation_rows = await s.execute(
                 select(
                     PropLineHistory.provider,
+                    PropLineHistory.sport,
                     func.count(PropLineHistory.id),
                 )
                 .where(PropLineHistory.provider.in_(("Underdog", "PrizePicks")))
-                .group_by(PropLineHistory.provider)
+                .group_by(PropLineHistory.provider, PropLineHistory.sport)
             )
-            tracked_observations_by_provider = {
-                str(provider or "Unknown"): int(count or 0)
-                for provider, count in observation_rows.all()
-            }
-
-            pending_row = await s.execute(
-                select(func.count(PropOpportunityLog.id))
-                .where(
-                    directional,
-                    PropOpportunityLog.result == "PENDING",
+            tracked_observations_by_provider: dict[str, int] = {}
+            for provider, sport, count in observation_rows.all():
+                if not _is_supported_tracking_sport(sport):
+                    continue
+                provider_key = str(provider or "Unknown")
+                tracked_observations_by_provider[provider_key] = (
+                    tracked_observations_by_provider.get(provider_key, 0)
+                    + int(count or 0)
                 )
-            )
-            pending = pending_row.scalar() or 0
-
-            delivered_row = await s.execute(
-                select(func.count(PropOpportunityLog.id)).where(
-                    directional,
-                    PropOpportunityLog.alert_sent == True,  # noqa: E712
-                )
-            )
-            delivered = delivered_row.scalar() or 0
-            delivered_provider_rows = await s.execute(
-                select(
-                    PropOpportunityLog.provider,
-                    func.count(PropOpportunityLog.id),
-                )
-                .where(
-                    directional,
-                    PropOpportunityLog.alert_sent == True,  # noqa: E712
-                )
-                .group_by(PropOpportunityLog.provider)
-            )
-            provider_delivered = {
-                str(provider or "Underdog"): int(count or 0)
-                for provider, count in delivered_provider_rows.all()
-            }
-
-            resolved_results = (
-                "HIT", "MISS", "PUSH", "VOID", "CANCELLED",
-                "INJURY_VOID", "GAME_INTERRUPTED",
-            )
-            resolved_row = await s.execute(
-                select(func.count(PropOpportunityLog.id)).where(
-                    directional,
-                    PropOpportunityLog.result.in_(resolved_results),
-                )
-            )
-            resolved = resolved_row.scalar() or 0
 
             # Current tracking is latest-row-per-provider-source, not the
             # append-only history row count. A latest removal marker removes
@@ -5666,6 +5668,8 @@ class Database:
             active_by_provider: dict[str, int] = {}
             active_by_sport: dict[str, int] = {}
             for provider, sport in current_rows.all():
+                if not _is_supported_tracking_sport(sport):
+                    continue
                 provider_key = str(provider or "Unknown")
                 sport_key = str(sport or "UNKNOWN")
                 active_by_provider[provider_key] = (

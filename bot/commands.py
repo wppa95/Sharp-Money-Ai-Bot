@@ -3491,7 +3491,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             int(
                 tracking.get(
                     "tracked_observations",
-                    tracking.get("tracked", 0),
+                    tracking.get("tracked", tracking.get("total", 0)),
                 )
                 or 0
             )
