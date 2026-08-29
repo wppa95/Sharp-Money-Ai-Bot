@@ -3485,11 +3485,11 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"  Underdog:    <b>{ud_today if ud_today is not None else 'unavailable'}</b>",
             f"  PrizePicks (PropLine): <b>{pp_today if pp_today is not None else 'unavailable'}</b>",
             "",
-            "<b>Pipeline (last 24 h)</b>",
+            "<b>Reporting populations</b>",
         ]
 
         lines.append(
-            "  Tracked opportunities: <b>"
+            "  Current active tracking universe: <b>"
             + (
                 f"{tracked_opportunities:,}"
                 if tracked_opportunities is not None
@@ -3522,7 +3522,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         lines += [
             "",
-            "<b>Pipeline populations</b>",
+            "<b>Directional populations (all-time)</b>",
             f"  Directional: <b>{directional_total if directional_total is not None else 'unavailable'}</b>",
             f"  Delivered:   <b>{delivered if delivered is not None else 'unavailable'}</b>",
             f"  Pending:     <b>{pending if pending is not None else 'unavailable'}</b>",
@@ -3551,10 +3551,17 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         elif isinstance(tracking, dict):
             lines.append("  <i>Result breakdown unavailable right now.</i>")
 
-        if isinstance(tracking, dict) and tracking.get("active_by_provider"):
+        if isinstance(tracking, dict) and (
+            tracking.get("tracked_observations_by_provider")
+            or tracking.get("active_by_provider")
+        ):
             lines.append("")
-            lines.append("<b>Tracked by provider</b>")
-            for provider, count in sorted(tracking["active_by_provider"].items()):
+            lines.append("<b>Tracked observations by provider</b>")
+            _obs_by_provider = tracking.get(
+                "tracked_observations_by_provider",
+                tracking.get("active_by_provider", {}),
+            )
+            for provider, count in sorted(_obs_by_provider.items()):
                 lines.append(f"  {provider}: <b>{int(count):,}</b>")
 
         lines += [
