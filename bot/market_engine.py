@@ -1768,6 +1768,7 @@ async def _run_prizepicks_independent_cycle(
             market_pressure=candidate["market_pressure"],
             pp_line=line,
             standing=True,
+            strict_pregame=True,
             source="PrizePicks",
         )
         if result.sent:
@@ -4171,6 +4172,7 @@ async def underdog_job(context) -> None:
                     intelligence_trace  = _dq_intel,
                     market_confirmation = _dq_odds,
                     standing            = (_dq_path == "standing"),
+                    strict_pregame      = True,
                 )
 
                 if _dq_result.sent:
@@ -5194,6 +5196,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 market_quality      = _sr_mq,
                 market_pressure     = _sr_mp,
                 standing            = True,
+                strict_pregame      = True,
                 intelligence_trace  = _sr_intel_trace,
                 market_confirmation = _sr_odds_confirm,
             )
@@ -5415,6 +5418,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         market_quality = _wl_mq,
                         market_pressure= _wl_mp,
                         standing       = True,
+                        strict_pregame = True,
                     )
                     if _wl_mq_ok and _wl_result.sent:
                         wl_promoted += 1
@@ -6095,6 +6099,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                             _fpr_line if _fpr_provider == "PrizePicks" else None
                         ),
                         standing        = True,
+                        strict_pregame   = True,
                         source          = _fpr_provider,
                     )
                     if _fpr_mq_ok and _fpr_result.sent:

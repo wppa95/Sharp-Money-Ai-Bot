@@ -11,7 +11,8 @@ Public API
 
 Rules
 ─────
-  • game_time is None → allow (cannot tell; let through)
+  • game_time is None → allow by default for legacy callers
+    (``require_known=True`` blocks unless the provider says pregame)
   • game already started (now ≥ game_time) → always block
   • minutes_to_start > max_minutes → block (too far out)
   • minutes_to_start < min_minutes AND edge < urgent_edge → block
@@ -94,7 +95,10 @@ def is_game_alertable(
 
     Parameters
     ----------
-    game_time:    UTC datetime of game start (naive or aware).  None → allow.
+    game_time:    UTC datetime of game start (naive or aware).  None → allow
+                  unless ``require_known`` is true.
+    game_status:  Optional provider event state; live/final states always block.
+    require_known: Require a reliable pregame timestamp or explicit pregame state.
     min_minutes:  Minimum minutes before start to send (default 30).
     max_minutes:  Maximum minutes before start to send (default 120).
     urgent_edge:  Edge % at or above which min_minutes gate is bypassed.
@@ -105,11 +109,12 @@ def is_game_alertable(
     (True, "")                           → send the alert
     (False, "<human-readable reason>")   → suppress the alert
     """
+    status = str(game_status or "").strip().lower().replace(" ", "_")
+    if status in _BLOCKED_EVENT_STATUSES:
+        return False, f"Event status is {status}"
+
     if game_time is None:
         if require_known:
-            status = str(game_status or "").strip().lower().replace(" ", "_")
-            if status in _BLOCKED_EVENT_STATUSES:
-                return False, f"Event status is {status}"
             if status not in _PREGAME_EVENT_STATUSES:
                 return False, "Event start/state is unknown"
         return True, ""

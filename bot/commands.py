@@ -3009,13 +3009,6 @@ async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         alerted_opps = await _bounded(
             _db.get_alerted_opportunity_log(since_hours=24, limit=8)
         )
-        alerted_opps = [
-            r for r in alerted_opps
-            if _is_upcoming_game(
-                getattr(r, "game_time", None),
-                getattr(r, "provider_status", None),
-            )
-        ]
         if alerted_opps:
             # "sent" = Telegram API accepted the send; no message ID stored.
             lines.append(f"  <i>{len(alerted_opps)} shown (last 24h)</i>")
