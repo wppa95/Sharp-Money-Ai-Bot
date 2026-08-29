@@ -3180,20 +3180,21 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     PropOpportunityLog result values: HIT | MISS | PUSH | PENDING
     Mapped to display:  HIT→W  MISS→L  PUSH/REFUND→P
     """
-    resolved, total_all = await _bounded(asyncio.gather(
-        _db.get_resolved_tracked_opportunities(limit=200),
-        _db.count_directional_opportunity_records(),
-    ))
+    tracking = await _bounded(_db.get_tracking_summary())
+    counts = tracking.get("counts", {}) if isinstance(tracking, dict) else {}
+    total_all = int(tracking.get("directional_total", tracking.get("total", 0)) or 0)
+    resolved_count = int(tracking.get("resolved", 0) or 0)
+    pending_count = int(tracking.get("pending", 0) or 0)
 
     lines: list[str] = ["📊 <b>Sharp Money Pick Grades</b>", ""]
 
-    if not resolved:
-        pending_count = total_all  # unresolved directional records remain pending
+    if resolved_count == 0:
         lines += [
             "No resolved picks yet.",
             "<i>Results update automatically when games finish.</i>",
             "",
             "─ <b>Current snapshot</b> ─",
+            f"  Tracked props: <b>{int(tracking.get('tracked', 0) or 0)}</b>",
             f"  Stored picks:  <b>{total_all}</b>",
             f"  Pending:       <b>{pending_count}</b>",
             f"  Resolved:      <b>0</b>",
@@ -3205,21 +3206,27 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     # Grading is reported for the unified tracked stream; delivery metadata
     # does not create a separate monitoring class.
-    overall_w = sum(1 for r in resolved if (r.result or "").upper() == "HIT")
-    overall_l = sum(1 for r in resolved if (r.result or "").upper() == "MISS")
-    overall_p = sum(1 for r in resolved if (r.result or "").upper() in ("PUSH", "REFUND"))
+    overall_w = int(counts.get("OVER", {}).get("HIT", 0)) + int(
+        counts.get("UNDER", {}).get("MISS", 0)
+    )
+    overall_l = int(counts.get("OVER", {}).get("MISS", 0)) + int(
+        counts.get("UNDER", {}).get("HIT", 0)
+    )
+    overall_p = int(counts.get("OVER", {}).get("PUSH", 0)) + int(
+        counts.get("UNDER", {}).get("PUSH", 0)
+    )
 
     overall_res = overall_w + overall_l + overall_p
     overall_hit = overall_w / overall_res * 100 if overall_res > 0 else 0.0
-    pending_n   = total_all - len(resolved)
+    pending_n   = pending_count
 
     by_provider: dict[str, dict[str, int]] = {}
-    for record in resolved:
-        provider = str(getattr(record, "provider", None) or "Underdog")
+    for provider, provider_counts in (tracking.get("by_provider", {}) or {}).items():
         bucket = by_provider.setdefault(provider, {"HIT": 0, "MISS": 0, "PUSH": 0})
-        result = (record.result or "").upper()
-        if result in bucket:
-            bucket[result] += 1
+        for rec in ("OVER", "UNDER"):
+            bucket["HIT"] += int(provider_counts.get(rec, {}).get("HIT", 0))
+            bucket["MISS"] += int(provider_counts.get(rec, {}).get("MISS", 0))
+            bucket["PUSH"] += int(provider_counts.get(rec, {}).get("PUSH", 0))
 
     lines += [
         "─ <b>Overall</b> " + "─" * 21,
@@ -3228,6 +3235,8 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         f"→ <code>{overall_hit:.0f}%</code> hit",
         "",
         f"<i>{pending_n} picks still PENDING · results set when games finish.</i>",
+        f"<i>Tracked: {int(tracking.get('tracked_observations', tracking.get('tracked', 0)) or 0)} "
+        "persistent observations · delivery-independent.</i>",
     ]
     if by_provider:
         lines += ["", "─ <b>By Provider</b> " + "─" * 15]

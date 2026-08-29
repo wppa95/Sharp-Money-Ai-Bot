@@ -140,6 +140,15 @@ class DashboardReport:
     today_pp_alerts:    int = 0
     # Persistent monitoring stream, intentionally independent of delivery.
     recent_tracked_props: list = field(default_factory=list)
+    # Reporting populations are kept separate: monitoring observations,
+    # directional evaluations, Telegram deliveries, and settlement state.
+    tracked_observations: int = 0
+    directional_opportunities: int = 0
+    delivered_opportunities: int = 0
+    pending_opportunities: int = 0
+    resolved_opportunities: int = 0
+    outcome_pushes: int = 0
+    tracking_by_provider: dict = field(default_factory=dict)
 
     # ── EV performance ────────────────────────────────────────────────────────
     avg_ev_pct:         Optional[float] = None   # avg expected_value from ev_records
@@ -204,6 +213,28 @@ class DashboardReport:
             f"  ·  today: <b>{self.today_pp_alerts:,}</b>",
             "",
         ]
+
+        parts += [
+            "🧾 <b>Tracking Populations</b>",
+            f"  Tracked observations: <code>{self.tracked_observations:,}</code>",
+            f"  Directional OVER/UNDER: <code>{self.directional_opportunities:,}</code>",
+            f"  Telegram delivered: <code>{self.delivered_opportunities:,}</code>",
+            f"  Pending: <code>{self.pending_opportunities:,}</code>"
+            f"  ·  Resolved: <code>{self.resolved_opportunities:,}</code>",
+            f"  Outcomes: <code>{self.outcome_pushes:,} PUSH</code>"
+            " (HIT/MISS shown by provider below)",
+        ]
+        if self.tracking_by_provider:
+            parts.append("  By provider:")
+            for provider, values in sorted(self.tracking_by_provider.items()):
+                parts.append(
+                    f"    {provider}: tracked <code>{values.get('tracked', 0):,}</code>"
+                    f" · directional <code>{values.get('directional', 0):,}</code>"
+                    f" · delivered <code>{values.get('delivered', 0):,}</code>"
+                    f" · {values.get('hit', 0)}H-{values.get('miss', 0)}M-"
+                    f"{values.get('push', 0)}P"
+                )
+        parts.append("")
 
         if self.recent_tracked_props:
             parts.append("🔔 <b>Recently Tracked Props</b>  <i>(last hour · all sports)</i>")
@@ -357,6 +388,65 @@ class DashboardEngine:
 
         # Run all independent queries (best-effort)
         await cls._gather_totals(db, report)
+        try:
+            tracking = await db.get_tracking_summary()
+            if isinstance(tracking, dict):
+                report.tracked_observations = int(
+                    tracking.get("tracked_observations", tracking.get("tracked", 0)) or 0
+                )
+                report.directional_opportunities = int(
+                    tracking.get("directional_total", tracking.get("total", 0)) or 0
+                )
+                report.delivered_opportunities = int(tracking.get("delivered", 0) or 0)
+                report.pending_opportunities = int(tracking.get("pending", 0) or 0)
+                report.resolved_opportunities = int(tracking.get("resolved", 0) or 0)
+                report.outcome_pushes = sum(
+                    int(values.get("PUSH", 0) or 0)
+                    for values in (tracking.get("counts", {}).get("OVER", {}),
+                                   tracking.get("counts", {}).get("UNDER", {}))
+                )
+                active_by_provider = tracking.get("active_by_provider", {}) or {}
+                observed_by_provider = (
+                    tracking.get("tracked_observations_by_provider", {}) or {}
+                )
+                directional_by_provider = tracking.get("by_provider", {}) or {}
+                providers = (
+                    set(active_by_provider)
+                    | set(observed_by_provider)
+                    | set(directional_by_provider)
+                )
+                for provider in providers:
+                    values = directional_by_provider.get(provider, {})
+                    report.tracking_by_provider[provider] = {
+                        "tracked": int(
+                            observed_by_provider.get(
+                                provider, active_by_provider.get(provider, 0)
+                            ) or 0
+                        ),
+                        "directional": sum(
+                            int(values.get(rec, {}).get(result, 0) or 0)
+                            for rec in ("OVER", "UNDER")
+                            for result in (
+                                "HIT", "MISS", "PUSH", "PENDING", "VOID",
+                                "CANCELLED", "INJURY_VOID", "GAME_INTERRUPTED",
+                            )
+                        ),
+                        "delivered": 0,
+                        "hit": 0,
+                        "miss": 0,
+                        "push": 0,
+                    }
+                    provider_row = report.tracking_by_provider[provider]
+                    provider_row["delivered"] = int(
+                        (tracking.get("provider_delivered", {}) or {}).get(provider, 0)
+                        or 0
+                    )
+                    for rec in ("OVER", "UNDER"):
+                        provider_row["hit"] += int(values.get(rec, {}).get("HIT", 0) or 0)
+                        provider_row["miss"] += int(values.get(rec, {}).get("MISS", 0) or 0)
+                        provider_row["push"] += int(values.get(rec, {}).get("PUSH", 0) or 0)
+        except Exception:
+            pass
         try:
             provider_rows = await asyncio.gather(
                 db.get_recent_tracked_props("Underdog", since_hours=1, limit=100),
