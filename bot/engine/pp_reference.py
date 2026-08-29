@@ -41,6 +41,7 @@ from engine.player_prop_market import (
     _try_claim_prop_delivery,
 )
 from engine.sport_policy import is_football_related_sport
+from engine.timing import is_game_alertable
 
 logger = logging.getLogger(__name__)
 
@@ -321,7 +322,7 @@ async def run_pp_reference_cycle(
         and not is_football_related_sport(str(p.get("sport") or ""))
     ]
     if not candidates:
-        logger.debug("pp_reference: no S/A tier props in this cycle — skipping")
+        logger.debug("pp_reference: no directional props in this cycle — skipping")
         return 0
 
     # Fetch recent PP rows from PropLineHistory (one query for the whole batch)
@@ -352,6 +353,21 @@ async def run_pp_reference_cycle(
             logger.debug(
                 "pp_reference: canonical gate blocked — %s / %s / %s",
                 player, stat_type, sport,
+            )
+            continue
+        timing_allowed, timing_reason = is_game_alertable(
+            p.get("game_time"),
+            min_minutes=0,
+            max_minutes=10**9,
+            urgent_edge=0,
+            edge=0,
+            game_status=p.get("game_status") or p.get("provider_status"),
+            require_known=True,
+        )
+        if not timing_allowed:
+            logger.debug(
+                "pp_reference: timing blocked — %s / %s / %s: %s",
+                player, stat_type, sport, timing_reason,
             )
             continue
 

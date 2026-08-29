@@ -4211,6 +4211,12 @@ async def underdog_job(context) -> None:
                         market_pressure     = _dq_mp,
                         intelligence_trace  = _dq_intel,
                         market_confirmation = _dq_odds,
+                        source_id           = str(_dq_ext_id or ""),
+                        event_id            = str(
+                            getattr(_dq_snap, "event", "")
+                            or getattr(_dq_snap, "game_id", "")
+                            or ""
+                        ),
                         standing            = (_dq_path == "standing"),
                         strict_pregame      = True,
                     )
@@ -5269,6 +5275,16 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     strict_pregame      = True,
                     intelligence_trace  = _sr_intel_trace,
                     market_confirmation = _sr_odds_confirm,
+                     source_id            = str(
+                         getattr(_sr_snap, "external_id", None)
+                         or getattr(_sr_snap, "id", None)
+                         or ""
+                     ),
+                     event_id            = str(
+                         getattr(_sr_snap, "event", "")
+                         or getattr(_sr_snap, "game_id", "")
+                         or ""
+                     ),
                 )
             except Exception as _sr_delivery_exc:
                 _release_prop_delivery_claim(
@@ -6374,6 +6390,16 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                          standing        = True,
                          strict_pregame   = True,
                          source          = _fpr_provider,
+                          source_id       = str(
+                              getattr(_fpr_snap, "external_id", None)
+                              or getattr(_fpr_snap, "id", None)
+                              or ""
+                          ),
+                          event_id        = str(
+                              getattr(_fpr_snap, "event", "")
+                              or getattr(_fpr_snap, "game_id", "")
+                              or ""
+                          ),
                       )
                      except Exception as _fpr_delivery_exc:
                       _release_prop_delivery_claim(
