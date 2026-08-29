@@ -420,6 +420,59 @@ class TestFPRJob:
         assert "Underdog" in logged
         db.log_prop_opportunity.assert_awaited()
 
+    async def test_normalized_and_legacy_underdog_rows_share_one_source_identity(self):
+        """The legacy bridge must not duplicate a normalized Underdog source ID."""
+        normalized = _make_snap(
+            player="Shared Player",
+            sport="NBA",
+            line=22.5,
+            ext_id="ud-shared-1",
+        )
+        legacy = _make_snap(
+            player="Shared Player",
+            sport="NBA",
+            line=22.5,
+            ext_id="ud-shared-1",
+        )
+        db = _make_db(
+            pool={("Shared Player", "Points", 22.5): legacy},
+        )
+        db.get_all_active_prop_line_history_by_line = AsyncMock(
+            return_value={
+                (
+                    "Underdog", "Shared Player", "NBA", "Points", 22.5,
+                    "ud-shared-1",
+                ): normalized,
+            }
+        )
+        db.get_prop_line_history_bulk = AsyncMock(
+            return_value={
+                ("Underdog", "Shared Player", "NBA", "Points"): [],
+            }
+        )
+        db.log_prop_opportunity_bulk = AsyncMock()
+        ctx = _make_context(db)
+        health = _make_health(cursor=0)
+
+        from market_engine import _full_pool_rescan_job
+
+        with (
+            patch("market_engine.get_health_tracker", return_value=health),
+            patch("market_engine._fetch_and_compute_hit_rates", new=AsyncMock(return_value=None)),
+            patch("market_engine._is_game_live_or_past", return_value=False),
+            patch("engine.ud_scoring.score_ud_prop", return_value=_make_score()),
+            patch("engine.player_validator.validate_player_prop", return_value=_make_validation()),
+            patch("engine.ud_bet_decision.make_ud_bet_decision", return_value=_make_decision()),
+            patch("engine.ud_scoring.compute_market_quality", return_value=MagicMock()),
+            patch("engine.ud_scoring.detect_market_pressure", return_value=MagicMock()),
+        ):
+            await _full_pool_rescan_job(ctx)
+
+        stats = health.set_fpr_stats.call_args.args[0]
+        assert stats["pool_size"] == 1
+        assert stats["fpr_rescored"] == 1
+        assert stats["active_source_ids"] == 1
+
     # ── Test 2 & 3 & 18: rejected / scored props get rescanned ───────────────
     async def test_rejected_props_eventually_rescanned(self):
         """Previously rejected props are in the active pool and get rescanned — tests 2, 3, 18."""

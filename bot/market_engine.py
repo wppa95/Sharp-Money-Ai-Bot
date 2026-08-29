@@ -5735,9 +5735,53 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             )
             # Underdog's live feed still owns the legacy snapshot table. Merge
             # it into the same serialized rotation instead of dropping it when
-            # normalized PrizePicks rows are present.
+            # normalized PrizePicks rows are present. A normalized Underdog row
+            # may already represent the same source ID, so do not add a second
+            # legacy-key entry for that underlying prop.
+            _normalized_ud_source_ids = {
+                str(getattr(_normalized_snap, "external_id", "") or "")
+                for _normalized_key, _normalized_snap in active_pool.items()
+                if (
+                    str(getattr(_normalized_snap, "provider", "") or "").lower()
+                    in {"", "underdog"}
+                    and str(getattr(_normalized_snap, "external_id", "") or "")
+                )
+                or (
+                    len(_normalized_key) >= 1
+                    and str(_normalized_key[0]).lower() == "underdog"
+                    and str(getattr(_normalized_snap, "external_id", "") or "")
+                )
+            }
+            _normalized_ud_legacy_keys = {
+                (
+                    str(getattr(_normalized_snap, "player_name", "") or ""),
+                    str(getattr(_normalized_snap, "sport", "") or "").upper(),
+                    str(getattr(_normalized_snap, "stat_type", "") or ""),
+                    float(getattr(_normalized_snap, "line_value", 0.0) or 0.0),
+                )
+                for _normalized_key, _normalized_snap in active_pool.items()
+                if (
+                    str(getattr(_normalized_snap, "provider", "") or "").lower()
+                    in {"", "underdog"}
+                    or (
+                        len(_normalized_key) >= 1
+                        and str(_normalized_key[0]).lower() == "underdog"
+                    )
+                )
+            }
             _legacy_ud_pool = await db.get_all_active_underdog_snapshots_by_line()
             for _ud_key, _ud_snap in _legacy_ud_pool.items():
+                _ud_source_id = str(getattr(_ud_snap, "external_id", "") or "")
+                if _ud_source_id and _ud_source_id in _normalized_ud_source_ids:
+                    continue
+                _ud_legacy_key = (
+                    str(getattr(_ud_snap, "player_name", "") or _ud_key[0] or ""),
+                    str(getattr(_ud_snap, "sport", "") or "").upper(),
+                    str(getattr(_ud_snap, "stat_type", "") or _ud_key[1] or ""),
+                    float(getattr(_ud_snap, "line_value", _ud_key[2]) or 0.0),
+                )
+                if not _ud_source_id and _ud_legacy_key in _normalized_ud_legacy_keys:
+                    continue
                 active_pool.setdefault(("Underdog", *_ud_key), _ud_snap)
         else:
             active_pool = await db.get_all_active_underdog_snapshots_by_line()
