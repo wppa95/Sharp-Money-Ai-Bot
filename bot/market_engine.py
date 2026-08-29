@@ -2296,10 +2296,9 @@ async def _try_claim_delivery_slot(
     queue) checking the same candidate during network I/O cannot also pass the
     dedup check and cause a duplicate Telegram alert.
 
-    If delivery subsequently fails (rate-limited, Telegram error, etc.) the
-    claim intentionally remains — the prop is treated as "recently attempted"
-    and will not be retried within the dedup window.  This prevents a flurry
-    of retry attempts when the rate-limiter is saturated.
+    If delivery subsequently fails (rate-limited, Telegram error, filtered,
+    etc.), the caller must release the claim.  A claim is a concurrency lock,
+    not proof that an alert was delivered.
     """
     async with _prop_dedup_lock:
         if _is_prop_deduped(
@@ -5238,6 +5237,25 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 # deliver_underdog returned not-sent (rate-limited, disabled sport, etc.)
                 sr_not_delivered += 1
                 sr_actionable -= 1
+                _release_prop_delivery_claim(
+                    _prop_market_alerted,
+                    _sr_player,
+                    _sr_sport,
+                    _sr_stat,
+                    _sr_line,
+                    provider="Underdog",
+                    source_id=str(
+                        getattr(_sr_snap, "external_id", None)
+                        or getattr(_sr_snap, "id", None)
+                        or ""
+                    ),
+                    event_id=str(
+                        getattr(_sr_snap, "event", "")
+                        or getattr(_sr_snap, "game_id", "")
+                        or ""
+                    ),
+                    direction=str(getattr(_sr_dec, "recommendation", "") or ""),
+                )
 
     except Exception as _sr_exc:
         logger.exception("stable_refresh_job [part1]: error: %s", _sr_exc)
@@ -5449,6 +5467,26 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                             " | Line: %.1f | Score: %d/100",
                             _wl_player, _wl_sport, _wl_stat,
                             _wl_cur_line, int(_wl_score.total),
+                        )
+                    elif _wl_mq_ok:
+                        _release_prop_delivery_claim(
+                            _prop_market_alerted,
+                            _wl_player,
+                            _wl_sport,
+                            _wl_stat,
+                            _wl_cur_line,
+                            provider="Underdog",
+                            source_id=str(
+                                getattr(_wl_snap, "external_id", None)
+                                or getattr(_wl_snap, "id", None)
+                                or ""
+                            ),
+                            event_id=str(
+                                getattr(_wl_snap, "event", "")
+                                or getattr(_wl_snap, "game_id", "")
+                                or ""
+                            ),
+                            direction=str(getattr(_wl_dec, "recommendation", "") or ""),
                         )
 
                 elif _wl_cur_total < 30:
@@ -6132,6 +6170,27 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     elif _fpr_mq_ok:
                         # deliver_underdog returned not-sent (rate-limited, etc.)
                         fpr_not_delivered += 1
+                        _release_prop_delivery_claim(
+                            _prop_market_alerted,
+                            _fpr_player,
+                            _fpr_sport,
+                            _fpr_stat,
+                            _fpr_line,
+                            provider=_fpr_provider,
+                            source_id=str(
+                                getattr(_fpr_snap, "external_id", None)
+                                or getattr(_fpr_snap, "id", None)
+                                or ""
+                            ),
+                            event_id=str(
+                                getattr(_fpr_snap, "event", "")
+                                or getattr(_fpr_snap, "game_id", "")
+                                or ""
+                            ),
+                            direction=str(
+                                getattr(_fpr_dec, "recommendation", "") or ""
+                            ),
+                        )
                 elif not _fpr_qualifies:
                     fpr_not_delivered += 1
 

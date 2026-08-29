@@ -92,3 +92,4 @@
 - [Workflow process verification](workflow-process-verification.md) — after restarting a managed bot workflow, verify and reconcile process count before trusting scheduler or Telegram state.
 - [Provider observation ordering](provider-observation-ordering.md) — persist raw provider observations before scoring; refresh metadata in place so failures cannot erase monitoring evidence.
 - [Pregame delivery boundary](pregame-safety-boundary.md) — strict known-pregame checks apply at production delivery/current-pick views; historical alert reports remain state-independent.
+- [Delivery dedup claims](delivery-dedup-claims.md) — pre-delivery identity claims prevent concurrent duplicates but must be released whenever no Telegram alert was delivered.

@@ -664,6 +664,20 @@ async def run_player_prop_market_cycle(
         sport     = p.get("sport", "")
         line      = float(p.get("line") or 0.0)
         prev_line = p.get("prev_line")   # may be None
+        # Preserve the compact legacy key for old callers that do not provide
+        # source/event identity, but use the provider-owned identity whenever
+        # the scored observation has one.  This keeps alternate lines and
+        # separate events/providers from cross-suppressing one another.
+        source_id = p.get("source_id") or p.get("external_id") or ""
+        event_id = p.get("event_id") or p.get("game_id") or ""
+        dedup_identity = {}
+        if source_id or event_id:
+            dedup_identity = {
+                "provider": p.get("provider") or "PrizePicks",
+                "source_id": source_id,
+                "event_id": event_id,
+                "direction": p.get("direction") or "",
+            }
 
         # Alert suppression — controlled by ALERT_DISABLED_SPORTS env var (default: NFL,NBA).
         # Data is still scored and stored; only the Telegram broadcast is skipped.
@@ -676,6 +690,7 @@ async def run_player_prop_market_cycle(
             player, sport, stat_type, line,
             dedup_window_seconds = _config.config.UD_ALERT_DEDUP_WINDOW,
             min_line_change      = _config.config.MIN_UNDERDOG_LINE_CHANGE,
+            **dedup_identity,
         ):
             logger.debug(
                 "player_prop_market: deduped — %s / %s / %s @ %.1f",
@@ -701,7 +716,14 @@ async def run_player_prop_market_cycle(
             message = format_player_prop_market_alert(comp)
             counts  = await broadcast_alert(bot, chat_ids, message, sport=sport)
             if counts.get("sent", 0) > 0:
-                _record_prop_alerted(alerted_set, player, sport, stat_type, line)
+                _record_prop_alerted(
+                    alerted_set,
+                    player,
+                    sport,
+                    stat_type,
+                    line,
+                    **dedup_identity,
+                )
                 alerts_sent += 1
                 logger.info(
                     "player_prop_market alert sent: %s / %s / %s  "
