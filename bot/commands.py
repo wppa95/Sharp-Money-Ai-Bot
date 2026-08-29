@@ -229,11 +229,14 @@ def _append_provider_pipeline(
     def _metric(key: str) -> str:
         return _format_status_count(reconciliation.get(key))
 
+    _directional = reconciliation.get(
+        "directional", reconciliation.get("actionable_persisted")
+    )
     lines.extend((
         f"  Observed:            {_metric('observed')}",
         f"  Tracked active:      {_metric('tracked')}",
         f"  Evaluated:           {_metric('evaluated')}",
-        f"  Directional:         {_metric('directional')}",
+        f"  Directional/actionable: {_format_status_count(_directional)}",
         f"  Actionable persisted: {_metric('actionable_persisted')}",
         f"  Delivered alerts:    {_metric('delivered_alerts')}",
         f"  Pending grading:     {_metric('pending')}",
@@ -598,19 +601,11 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         # Each provider has its own normalized pipeline counters. Never infer
         # one provider's volume or grading state from the other.
         ud_reconciliation = await _provider_reconciliation("Underdog")
-        ud_reconciliation = await _provider_reconciliation("Underdog")
         pp_reconciliation = await _provider_reconciliation("PrizePicks")
         _append_provider_pipeline(
             lines,
             provider="Underdog",
             health_tracker=ht,
-            reconciliation=ud_reconciliation,
-        )
-        lines.append("")
-        _append_provider_pipeline(
-            lines,
-            provider="Underdog",
-            health_tracker=_ht_pipeline,
             reconciliation=ud_reconciliation,
         )
         lines.append("")

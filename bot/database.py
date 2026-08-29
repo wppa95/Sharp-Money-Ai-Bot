@@ -1682,6 +1682,23 @@ class Database:
                 alert_sent, alert_sent_at,
             ) in pol_rows.all():
                 if not _is_supported_tracking_sport(sport):
+                    # Keep the provider row available for delivery-ledger
+                    # integrity reporting, while excluding football from all
+                    # current tracking/evaluation populations.
+                    provider = _provider(provider_name)
+                    row = _ensure(provider)
+                    outcome = str(outcome or "failed").lower()
+                    row["delivery_attempts"] += 1
+                    row["audit_recipients"] += int(recipients_sent or 0)
+                    if outcome == "sent":
+                        row["audit_delivered_alerts"] += 1
+                        audited_deliveries += 1
+                    elif outcome == "rate_limited":
+                        row["rate_limited"] += 1
+                    elif outcome == "deduped":
+                        row["dedup_suppressed"] += 1
+                    else:
+                        row["failed_attempts"] += 1
                     continue
                 provider = _provider(provider_name or "Underdog")
                 row = _ensure(provider)
@@ -1793,6 +1810,11 @@ class Database:
                 external_id, line_value, outcome, recipients_sent,
                 recipients_failed, attempted_at,
             ) in audit_rows.all():
+                identity = (
+                    _provider(provider_name), delivery_path, player_name, sport,
+                    stat_type, external_id, line_value,
+                )
+                audit_identity_counts[identity] = audit_identity_counts.get(identity, 0) + 1
                 if not _is_supported_tracking_sport(sport):
                     continue
                 provider = _provider(provider_name)
@@ -1817,11 +1839,6 @@ class Database:
                     audit_recipients=int(recipients_sent or 0),
                 )
                 audit_count += 1
-                identity = (
-                    provider, delivery_path, player_name, sport, stat_type,
-                    external_id, line_value,
-                )
-                audit_identity_counts[identity] = audit_identity_counts.get(identity, 0) + 1
 
         duplicate_delivery_events = sum(
             max(0, count - 1) for count in audit_identity_counts.values()
@@ -4856,7 +4873,10 @@ class Database:
                 by_sport = [
                     {
                         "sport": sport or "UNKNOWN",
-                        "tracked": 0,
+                        # Compatibility field: in this fallback only, this
+                        # is candidate/evaluation volume, never active
+                        # tracking. The explicit evaluated key is authoritative.
+                        "tracked": int(count or 0),
                         "evaluated": int(count or 0),
                     }
                     for sport, count in sport_res.all()

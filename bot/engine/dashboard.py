@@ -143,12 +143,16 @@ class DashboardReport:
     # Reporting populations are kept separate: monitoring observations,
     # directional evaluations, Telegram deliveries, and settlement state.
     tracked_observations: int = 0
+    active_tracked_props: int = 0
     directional_opportunities: int = 0
     delivered_opportunities: int = 0
     pending_opportunities: int = 0
     resolved_opportunities: int = 0
+    outcome_hits: int = 0
+    outcome_misses: int = 0
     outcome_pushes: int = 0
     tracking_by_provider: dict = field(default_factory=dict)
+    tracking_by_sport: dict = field(default_factory=dict)
 
     # ── EV performance ────────────────────────────────────────────────────────
     avg_ev_pct:         Optional[float] = None   # avg expected_value from ev_records
@@ -216,25 +220,40 @@ class DashboardReport:
 
         parts += [
             "🧾 <b>Tracking Populations</b>",
-            f"  Tracked observations: <code>{self.tracked_observations:,}</code>",
-            f"  Directional OVER/UNDER: <code>{self.directional_opportunities:,}</code>",
+            f"  Active tracked props: <code>{self.active_tracked_props:,}</code>",
+            f"  Historical observations: <code>{self.tracked_observations:,}</code>",
+            f"  Directional opportunities: <code>{self.directional_opportunities:,}</code>",
             f"  Telegram delivered: <code>{self.delivered_opportunities:,}</code>",
-            f"  Pending: <code>{self.pending_opportunities:,}</code>"
+            f"  Pending grading: <code>{self.pending_opportunities:,}</code>"
             f"  ·  Resolved: <code>{self.resolved_opportunities:,}</code>",
-            f"  Outcomes: <code>{self.outcome_pushes:,} PUSH</code>"
-            " (HIT/MISS shown by provider below)",
+            f"  Outcomes: <code>{self.outcome_hits:,} HIT · {self.outcome_misses:,} MISS · "
+            f"{self.outcome_pushes:,} PUSH</code>",
         ]
         if self.tracking_by_provider:
             parts.append("  By provider:")
             for provider, values in sorted(self.tracking_by_provider.items()):
                 parts.append(
-                    f"    {provider}: tracked <code>{values.get('tracked', 0):,}</code>"
+                    f"    {provider}: active <code>{values.get('active', values.get('tracked', 0)):,}</code>"
+                    f" · observed <code>{values.get('observed', 0):,}</code>"
                     f" · directional <code>{values.get('directional', 0):,}</code>"
                     f" · delivered <code>{values.get('delivered', 0):,}</code>"
+                    f" · pending <code>{values.get('pending', 0):,}</code>"
+                    f" · resolved <code>{values.get('resolved', 0):,}</code>"
                     f" · {values.get('hit', 0)}H-{values.get('miss', 0)}M-"
                     f"{values.get('push', 0)}P"
                 )
         parts.append("")
+
+        if self.tracking_by_sport:
+            parts.append("  By current sport:")
+            for sport, values in sorted(self.tracking_by_sport.items()):
+                parts.append(
+                    f"    {sport}: active <code>{values.get('active', 0):,}</code>"
+                    f" · observed <code>{values.get('observed', 0):,}</code>"
+                    f" · directional <code>{values.get('directional', 0):,}</code>"
+                    f" · delivered <code>{values.get('delivered', 0):,}</code>"
+                )
+            parts.append("")
 
         if self.recent_tracked_props:
             parts.append("🔔 <b>Recently Tracked Props</b>  <i>(last hour · all sports)</i>")
@@ -392,7 +411,14 @@ class DashboardEngine:
             tracking = await db.get_tracking_summary()
             if isinstance(tracking, dict):
                 report.tracked_observations = int(
-                    tracking.get("tracked_observations", tracking.get("tracked", 0)) or 0
+                    tracking.get(
+                        "historical_observations",
+                        tracking.get("tracked_observations", 0),
+                    )
+                    or 0
+                )
+                report.active_tracked_props = int(
+                    tracking.get("active_tracked", tracking.get("tracked", 0)) or 0
                 )
                 report.directional_opportunities = int(
                     tracking.get("directional_total", tracking.get("total", 0)) or 0
@@ -400,51 +426,65 @@ class DashboardEngine:
                 report.delivered_opportunities = int(tracking.get("delivered", 0) or 0)
                 report.pending_opportunities = int(tracking.get("pending", 0) or 0)
                 report.resolved_opportunities = int(tracking.get("resolved", 0) or 0)
-                report.outcome_pushes = sum(
-                    int(values.get("PUSH", 0) or 0)
-                    for values in (tracking.get("counts", {}).get("OVER", {}),
-                                   tracking.get("counts", {}).get("UNDER", {}))
-                )
+                result_counts = tracking.get("result_counts", {}) or {}
+                report.outcome_hits = int(result_counts.get("HIT", 0) or 0)
+                report.outcome_misses = int(result_counts.get("MISS", 0) or 0)
+                report.outcome_pushes = int(result_counts.get("PUSH", 0) or 0)
                 active_by_provider = tracking.get("active_by_provider", {}) or {}
                 observed_by_provider = (
-                    tracking.get("tracked_observations_by_provider", {}) or {}
+                    tracking.get(
+                        "historical_observations_by_provider",
+                        tracking.get("tracked_observations_by_provider", {}),
+                    )
+                    or {}
                 )
                 directional_by_provider = tracking.get("by_provider", {}) or {}
+                directional_totals = tracking.get("directional_by_provider", {}) or {}
+                delivered_by_provider = tracking.get(
+                    "delivered_by_provider",
+                    tracking.get("provider_delivered", {}),
+                ) or {}
+                pending_by_provider = tracking.get("pending_by_provider", {}) or {}
+                resolved_by_provider = tracking.get("resolved_by_provider", {}) or {}
                 providers = (
                     set(active_by_provider)
                     | set(observed_by_provider)
                     | set(directional_by_provider)
+                    | set(directional_totals)
                 )
                 for provider in providers:
                     values = directional_by_provider.get(provider, {})
                     report.tracking_by_provider[provider] = {
-                        "tracked": int(
-                            observed_by_provider.get(
-                                provider, active_by_provider.get(provider, 0)
-                            ) or 0
-                        ),
-                        "directional": sum(
-                            int(values.get(rec, {}).get(result, 0) or 0)
-                            for rec in ("OVER", "UNDER")
-                            for result in (
-                                "HIT", "MISS", "PUSH", "PENDING", "VOID",
-                                "CANCELLED", "INJURY_VOID", "GAME_INTERRUPTED",
-                            )
-                        ),
-                        "delivered": 0,
+                        "active": int(active_by_provider.get(provider, 0) or 0),
+                        "observed": int(observed_by_provider.get(provider, 0) or 0),
+                        "directional": int(directional_totals.get(provider, 0) or 0),
+                        "delivered": int(delivered_by_provider.get(provider, 0) or 0),
+                        "pending": int(pending_by_provider.get(provider, 0) or 0),
+                        "resolved": int(resolved_by_provider.get(provider, 0) or 0),
                         "hit": 0,
                         "miss": 0,
                         "push": 0,
                     }
                     provider_row = report.tracking_by_provider[provider]
-                    provider_row["delivered"] = int(
-                        (tracking.get("provider_delivered", {}) or {}).get(provider, 0)
-                        or 0
-                    )
                     for rec in ("OVER", "UNDER"):
                         provider_row["hit"] += int(values.get(rec, {}).get("HIT", 0) or 0)
                         provider_row["miss"] += int(values.get(rec, {}).get("MISS", 0) or 0)
                         provider_row["push"] += int(values.get(rec, {}).get("PUSH", 0) or 0)
+                active_by_sport = tracking.get("active_by_sport", {}) or {}
+                observed_by_sport = tracking.get("observations_by_sport", {}) or {}
+                directional_by_sport = tracking.get("directional_by_sport", {}) or {}
+                delivered_by_sport = tracking.get("delivered_by_sport", {}) or {}
+                for sport in (
+                    set(active_by_sport)
+                    | set(observed_by_sport)
+                    | set(directional_by_sport)
+                ):
+                    report.tracking_by_sport[sport] = {
+                        "active": int(active_by_sport.get(sport, 0) or 0),
+                        "observed": int(observed_by_sport.get(sport, 0) or 0),
+                        "directional": int(directional_by_sport.get(sport, 0) or 0),
+                        "delivered": int(delivered_by_sport.get(sport, 0) or 0),
+                    }
         except Exception:
             pass
         try:
@@ -464,9 +504,14 @@ class DashboardEngine:
                         "stat_type": row.stat_type,
                         "line_value": float(row.line_value),
                         "sport": row.sport,
+                        "fetched_at": row.fetched_at,
                     }
                     for row in rows
                 )
+            report.recent_tracked_props.sort(
+                key=lambda prop: prop.get("fetched_at") or datetime.min,
+                reverse=True,
+            )
         except Exception:
             report.recent_tracked_props = []
         await cls._gather_ev_performance(db, report)
