@@ -16,7 +16,7 @@ from sqlalchemy import (
     Boolean, Column, DateTime, Float,
     Integer, String, Text,
     UniqueConstraint,
-    select, func, desc, text, delete, or_, tuple_
+    select, func, desc, text, delete, or_, and_, case, tuple_
 )
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
@@ -1944,8 +1944,26 @@ class Database:
         if not props:
             return 0
 
+        def _identity(
+            player: str,
+            sport: str,
+            stat: str,
+            event_id: str,
+            external_id: str,
+        ) -> tuple[str, str, str, str, str]:
+            # PrizePicks source IDs identify separate active projections,
+            # including alternate lines for the same event.  Keep the legacy
+            # Underdog identity unchanged because its event/source lifecycle
+            # is maintained by the provider-specific snapshot bridge.
+            source_key = (
+                external_id
+                if provider == "PrizePicks" and external_id
+                else ""
+            )
+            return (player, sport, stat, event_id, source_key)
+
         keys = {
-            (
+            _identity(
                 getattr(prop, "player_name", "") or "",
                 getattr(prop, "sport", "") or "",
                 getattr(prop, "stat_type", "") or "",
@@ -1954,10 +1972,11 @@ class Database:
                     or getattr(prop, "game_id", "")
                     or ""
                 ),
+                getattr(prop, "external_id", "") or "",
             )
             for prop in props
         }
-        base_keys = {(player, sport, stat) for player, sport, stat, _ in keys}
+        base_keys = {(player, sport, stat) for player, sport, stat, _, _ in keys}
         async with self.session() as s:
             result = await s.execute(
                 select(PropLineHistory)
@@ -1971,18 +1990,19 @@ class Database:
                 )
                 .order_by(desc(PropLineHistory.fetched_at))
             )
-            latest: dict[tuple[str, str, str, str], PropLineHistory] = {}
+            latest: dict[tuple[str, str, str, str, str], PropLineHistory] = {}
             for row in result.scalars().all():
-                key = (
+                key = _identity(
                     row.player_name,
                     row.sport,
                     row.stat_type,
                     row.game_id or "",
+                    row.external_id or "",
                 )
                 latest.setdefault(key, row)
 
             for prop in props:
-                key = (
+                key = _identity(
                     getattr(prop, "player_name", "") or "",
                     getattr(prop, "sport", "") or "",
                     getattr(prop, "stat_type", "") or "",
@@ -1991,6 +2011,7 @@ class Database:
                         or getattr(prop, "game_id", "")
                         or ""
                     ),
+                    getattr(prop, "external_id", "") or "",
                 )
                 line_value = float(getattr(prop, "line_value", 0.0) or 0.0)
                 observed_at = (
@@ -4263,6 +4284,16 @@ class Database:
         # that disappeared from a provider feed cannot live forever.
         freshness_cutoff = now - timedelta(hours=6)
         async with self.session() as s:
+            source_identity = case(
+                (
+                    and_(
+                        PropLineHistory.provider == "PrizePicks",
+                        PropLineHistory.external_id != "",
+                    ),
+                    PropLineHistory.external_id,
+                ),
+                else_=PropLineHistory.game_id,
+            )
             subq = (
                 select(func.max(PropLineHistory.id))
                 .where(PropLineHistory.provider.in_(provider_names))
@@ -4271,7 +4302,7 @@ class Database:
                     PropLineHistory.player_name,
                     PropLineHistory.sport,
                     PropLineHistory.stat_type,
-                    PropLineHistory.game_id,
+                    source_identity,
                 )
                 .scalar_subquery()
             )

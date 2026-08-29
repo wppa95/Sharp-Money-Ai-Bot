@@ -126,6 +126,74 @@ async def test_active_fpr_pool_returns_fresh_mixed_provider_lines(db):
     assert ("Underdog", "UD Player", "MLB", "Hits", 1.5, "ud-1") in pool
 
 
+@pytest.mark.asyncio
+async def test_pp_source_ids_keep_same_event_alternate_lines_separate(db):
+    """PP projections sharing an event still represent separate active lines."""
+    now = datetime.utcnow()
+    props = [
+        SimpleNamespace(
+            player_name="PP Player",
+            sport="NBA",
+            stat_type="Points",
+            line_value=18.5,
+            external_id="pp-low",
+            event_id="pp-game-1",
+            team="DET",
+            game_time=now + timedelta(hours=2),
+            source_timestamp=now,
+        ),
+        SimpleNamespace(
+            player_name="PP Player",
+            sport="NBA",
+            stat_type="Points",
+            line_value=20.5,
+            external_id="pp-high",
+            event_id="pp-game-1",
+            team="DET",
+            game_time=now + timedelta(hours=2),
+            source_timestamp=now,
+        ),
+    ]
+
+    await db.upsert_prop_line_history_batch("PrizePicks", props)
+    pool = await db.get_all_active_prop_line_history_by_line(
+        providers=("PrizePicks",)
+    )
+
+    assert set(pool) == {
+        ("PrizePicks", "PP Player", "NBA", "Points", 18.5, "pp-low"),
+        ("PrizePicks", "PP Player", "NBA", "Points", 20.5, "pp-high"),
+    }
+
+
+@pytest.mark.asyncio
+async def test_pp_source_id_line_move_updates_existing_active_projection(db):
+    """A moved PP source ID updates its row rather than creating a duplicate."""
+    now = datetime.utcnow()
+    prop = SimpleNamespace(
+        player_name="PP Player",
+        sport="NBA",
+        stat_type="Points",
+        line_value=18.5,
+        external_id="pp-source-1",
+        event_id="pp-game-1",
+        team="DET",
+        game_time=now + timedelta(hours=2),
+        source_timestamp=now,
+    )
+    await db.upsert_prop_line_history_batch("PrizePicks", [prop])
+    prop.line_value = 19.5
+    prop.source_timestamp = now + timedelta(minutes=1)
+    await db.upsert_prop_line_history_batch("PrizePicks", [prop])
+
+    pool = await db.get_all_active_prop_line_history_by_line(
+        providers=("PrizePicks",)
+    )
+    assert set(pool) == {
+        ("PrizePicks", "PP Player", "NBA", "Points", 19.5, "pp-source-1")
+    }
+
+
 # ── Parse tests ───────────────────────────────────────────────────────────────
 
 class TestParsePPImportLine:

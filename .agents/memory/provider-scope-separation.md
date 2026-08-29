@@ -58,3 +58,13 @@ using the legacy source made a successful normalized fetch appear as
 **How to apply:** Keep raw Underdog observation counts on its snapshot source,
 but use normalized history for PP observed/tracked counts and candidate logs for
 the broad PP evaluation count.
+
+PrizePicks normalized-history identity must include a non-empty provider source
+ID, not only player/stat/event, so same-event alternate projections remain in
+the active pool while a moved source ID updates in place.
+
+**Why:** PP can publish multiple legitimate lines for the same player/stat/event;
+collapsing them during upsert silently removes active source projections.
+
+**How to apply:** Use the PP source ID for normalized upsert/latest-row grouping;
+retain the existing provider-specific Underdog identity semantics.

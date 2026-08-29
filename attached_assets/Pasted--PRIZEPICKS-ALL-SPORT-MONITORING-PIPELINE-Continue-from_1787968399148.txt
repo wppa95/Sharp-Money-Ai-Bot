@@ -1,0 +1,509 @@
+🔴 PRIZEPICKS ALL-SPORT MONITORING PIPELINE
+
+Continue from the current Sharp Money Bot implementation.
+
+Focus ONLY on the PrizePicks/PropLine monitoring pipeline.
+
+Do not combine this work with unrelated tracking, grading, Telegram, or provider changes.
+
+Do not redesign the architecture.
+
+Do not change unrelated behavior.
+
+⸻
+
+1. MODEL SELECTION — DO NOT ASK ME
+
+After work is completed, do NOT ask:
+
+“Use a more capable model when needed for this request?”
+
+Do NOT ask me to choose:
+
+* Free
+* Power
+* Max
+
+Automatically use the recommended capable model for the work and continue.
+
+Do not interrupt the work for model selection.
+
+⸻
+
+2. CORE OBJECTIVE
+
+PrizePicks is a primary player-prop provider, just like Underdog.
+
+The current implementation appears to be behaving too heavily around NBA.
+
+Fix the PrizePicks monitoring pipeline so that it supports every legitimate sport currently available from the actual PrizePicks/PropLine source, without hard-coding NBA.
+
+The authoritative flow should be:
+
+PrizePicks/PropLine
+→ discover legitimate active sports
+→ discover available props
+→ persist observations
+→ maintain active PP universe
+→ continuously rescan active PP props
+→ make them available to downstream evaluation/tracking
+
+Do not fabricate unsupported sports.
+
+⸻
+
+3. REMOVE NBA-ONLY RESTRICTIONS
+
+Audit the entire PrizePicks pipeline for accidental NBA-only behavior.
+
+Look for:
+
+* hard-coded NBA filters
+* NBA defaults
+* NBA-only queries
+* NBA-only scheduler rotation
+* NBA-only sport normalization
+* NBA-only provider configuration
+* PP queries inheriting NBA restrictions
+* PP queries inheriting Underdog ACTIVE_SPORTS
+* PP database queries filtering only NBA
+* PP active-pool construction limited to NBA
+* PP PropLine discovery limited to NBA
+* PP monitoring limited to NBA
+
+If any are genuine defects, fix them.
+
+Do not remove a legitimate provider limitation if PrizePicks itself does not currently offer that sport.
+
+⸻
+
+4. DYNAMIC PRIZEPICKS SPORT DISCOVERY
+
+Use the actual PrizePicks/PropLine source to determine available sports.
+
+The system should:
+
+1. Discover the current PP sport catalog where supported.
+2. Normalize returned sport identifiers.
+3. Build the active PP sport set dynamically.
+4. Monitor legitimate available PP sports.
+5. Allow newly available PP sports to enter without requiring a code change.
+6. Stop monitoring sports when they are no longer available.
+7. Gracefully handle an empty or failed provider catalog.
+8. Preserve the existing configured-sport fallback only where it is intentionally supported.
+
+Do not invent sports.
+
+Do not make PP inherit:
+
+Underdog ACTIVE_SPORTS
+
+⸻
+
+5. PRIZEPICKS ACTIVE PROP UNIVERSE
+
+PrizePicks must maintain an active prop universe independent of Telegram delivery.
+
+The active PP universe must come from the current legitimate PP/PropLine source state.
+
+Every active PP prop should remain eligible for continuous rescanning until:
+
+* its event/game starts, or
+* the provider removes the prop from the active feed.
+
+Do not limit PP monitoring to:
+
+* new props
+* line movers
+* actionable props
+* Telegram-delivered props
+* previously scored props
+* only the most recent batch
+* only NBA props
+
+⸻
+
+6. BOUNDED PP ROTATION
+
+Do not scan an unlimited PP universe simultaneously.
+
+Use the existing shared monitoring/performance architecture.
+
+Desired lifecycle:
+
+PP active universe
+→ bounded batch
+→ refresh/rescore observation
+→ persist current state
+→ advance rotation
+→ next batch
+→ continue
+
+Do not create a second competing scheduler or rotation system.
+
+Preserve the existing unified cadence.
+
+Preserve:
+
+max_instances=1
+
+Do not increase scheduler concurrency.
+
+⸻
+
+7. NEW PP PROPS
+
+When a new PrizePicks prop appears:
+
+* persist it
+* add it to the active PP universe
+* make it eligible for downstream evaluation
+* give it appropriate new-prop priority
+* keep it active after the first observation
+* continue rescanning it
+
+The first observation must NOT cause the prop to disappear from monitoring.
+
+⸻
+
+8. PP LINE MOVEMENT
+
+When a PrizePicks line changes:
+
+* detect the change
+* preserve the previous state/history
+* update the active state
+* allow downstream systems to recognize the new effective line
+* prioritize the changed prop appropriately
+* keep it in the active monitoring universe
+
+Do not remove a prop from monitoring because it generated an update.
+
+⸻
+
+9. PREGAME MONITORING
+
+PrizePicks betting opportunities are intended to be pregame.
+
+Support props becoming active:
+
+up to 24 hours before event start when available
+
+or immediately when the provider publishes them.
+
+Once the event/game has started, the prop must no longer be eligible for new betting recommendations/alerts.
+
+Historical observations must remain intact.
+
+Do not delete historical data when an event begins.
+
+Do not modify unrelated alert behavior in this work.
+
+⸻
+
+10. FOOTBALL
+
+Football must remain in the monitoring/data system.
+
+These should remain capable of being:
+
+* discovered
+* monitored
+* persisted
+* rescanned
+* tracked downstream
+
+This includes:
+
+* NFL
+* NCAAF
+* CFB
+* FCS
+* CFL
+* UFL
+* USFL
+* XFL
+* AFL
+* AFLW
+* other football variants
+
+Football’s downstream Telegram suppression is already an established requirement and must not be broken.
+
+Do not remove football from monitoring just because it cannot reach Telegram.
+
+⸻
+
+11. PROVIDER SEPARATION
+
+PrizePicks and Underdog must remain completely provider-separated.
+
+PrizePicks must NOT inherit from Underdog:
+
+* ACTIVE_SPORTS
+* active-pool filtering
+* line values
+* alternate lines
+* recommendations
+* history
+* provider IDs
+* sport restrictions
+
+Likewise, Underdog behavior must not be changed.
+
+If PP uses a shared component, make only the provider-specific correction necessary to preserve separation.
+
+⸻
+
+12. PP PERSISTENCE
+
+Every legitimate PP observation received by the monitoring pipeline should remain persistable.
+
+Preserve:
+
+* provider identity
+* source ID
+* player
+* sport
+* market/stat
+* line
+* event/game
+* event start time
+* snapshot timestamp
+* active/removal state
+
+Do not delete historical records.
+
+Do not fabricate PP observations.
+
+Do not fabricate PP sports.
+
+Do not fabricate PP lines.
+
+⸻
+
+13. EMPTY / FAILED PROVIDER CATALOG
+
+The provider may legitimately return an empty catalog.
+
+Do NOT interpret an empty catalog as proof that PP only supports NBA.
+
+Behavior should:
+
+* avoid crashing
+* avoid inventing sports
+* preserve intentionally configured fallback behavior
+* continue normal operation
+* expose honest provider state to downstream telemetry
+
+Do not create fake PP data merely to make tests pass.
+
+⸻
+
+14. PRESERVE ALL OTHER SYSTEMS
+
+Do NOT modify unrelated:
+
+* Underdog monitoring behavior
+* Underdog FPR/source-ID lifecycle
+* universal tracking architecture
+* HIT/MISS/PUSH grading
+* progressive player history
+* Telegram formatting
+* Telegram deduplication
+* S/A/B/C rules
+* Tier rules
+* Watchlist/PASS rules
+* direction-only qualification
+* football Telegram suppression
+* OddsAPI
+* DraftKings
+* FanDuel
+* Agent Reach
+* player identity
+* provider evidence
+* graded-prop evidence
+* clean restart
+* adaptive batching
+* unified cadence
+* scheduler behavior
+* max_instances=1
+* command reliability fixes
+* existing PP provider telemetry
+* Railway configuration
+
+Only modify another component if it is directly required to correct the PP monitoring pipeline.
+
+⸻
+
+15. TESTS
+
+Add focused regression tests for actual defects discovered.
+
+At minimum verify:
+
+Sport discovery
+
+* PP is not hard-coded to NBA.
+* PP can discover multiple legitimate sports.
+* PP dynamically handles the provider’s available sport catalog.
+* PP does not inherit Underdog ACTIVE_SPORTS.
+* Empty PP catalog does not fabricate sports.
+* Configured fallback behaves as intended.
+
+Active PP universe
+
+* Active PP props are maintained independently.
+* New props enter the active universe.
+* New props remain after first observation.
+* Unchanged props remain eligible.
+* Line movers remain eligible.
+* Previously observed props remain eligible.
+* Active props remain eligible for bounded rescanning.
+* Event-started props leave new-opportunity monitoring.
+* Historical observations remain intact.
+
+Provider separation
+
+* PP source IDs remain PP.
+* PP lines remain PP.
+* PP sports remain PP.
+* PP does not inherit Underdog filtering.
+* Underdog behavior remains unchanged.
+
+Football
+
+* Football can remain monitored/persisted.
+* Football is not incorrectly removed from PP monitoring because of downstream Telegram suppression.
+
+Safety
+
+* No duplicate active PP source IDs.
+* Removal state is respected.
+* No fabricated sports.
+* No fabricated observations.
+* No historical deletion.
+
+Run the focused PP pipeline tests.
+
+Then run the full existing test suite.
+
+Do not weaken tests simply to make them pass.
+
+⸻
+
+16. NO LIVE VERIFICATION
+
+Do NOT perform live production verification for this work.
+
+Do NOT:
+
+* restart Railway
+* deploy Railway
+* wait for a natural PP cycle
+* wait for a natural PP alert
+* wait for a PP game to finish
+* send /testalert
+* fabricate production data
+* create synthetic production records
+
+Verification should be:
+
+Inspect → Fix → Focused Tests → Full Suite
+
+If something genuinely cannot be proven without production observation, report it separately as:
+
+UNVERIFIED LIVE
+
+Do not wait for it.
+
+⸻
+
+17. CHECKPOINT
+
+Do not create a checkpoint until:
+
+* PP sport-discovery defects are fixed.
+* PP active-universe defects are fixed.
+* PP rescanning defects are fixed.
+* Provider separation is verified.
+* Focused tests pass.
+* Full suite passes.
+* Compilation passes.
+* Diff checks pass.
+
+⸻
+
+18. FINAL REPORT
+
+Report exactly:
+
+IMPLEMENTED
+
+Every actual PrizePicks monitoring change made.
+
+TESTED
+
+* Focused PP tests: X passed
+* Full suite: X passed
+* Compilation: PASS/FAIL
+* Diff check: PASS/FAIL
+
+UNVERIFIED LIVE
+
+Only production behavior that genuinely requires live observation.
+
+PRESERVED
+
+Confirm:
+
+* Underdog behavior was not changed.
+* Unrelated tracking/grading behavior was not changed.
+* Unrelated Telegram behavior was not changed.
+* Scheduler concurrency was not changed.
+* Railway was not restarted or deployed.
+* No fabricated production data was created.
+* No test alerts were sent.
+
+⸻
+
+🔴 FINAL ACCEPTANCE
+
+* PrizePicks is not NBA-only.
+* PP sport discovery is dynamic where supported.
+* PP does not inherit Underdog ACTIVE_SPORTS.
+* Legitimate PP sports can enter monitoring.
+* Empty PP catalogs are handled honestly.
+* Active PP props remain eligible for bounded rescanning.
+* New PP props enter and remain in rotation.
+* Line movers remain eligible.
+* Unchanged PP props remain eligible.
+* Event-started props leave new-opportunity monitoring.
+* Historical observations remain intact.
+* Football remains monitorable and persistable.
+* PP and Underdog remain provider-separated.
+* No fabricated sports/data.
+* No duplicate active PP source IDs.
+* Focused tests pass.
+* Full suite passes.
+* Compilation passes.
+* Diff checks pass.
+* No unrelated behavior changed.
+* No Railway restart.
+* No Railway deployment.
+* No live verification required.
+
+🔴 FINAL INSTRUCTION
+
+Make the smallest targeted fixes necessary.
+
+Do not redesign the bot.
+
+Do not touch unrelated providers.
+
+Do not change Underdog behavior.
+
+Do not fabricate production data.
+
+Do not wait for live production behavior.
+
+Inspect → Fix → Test → Report.
