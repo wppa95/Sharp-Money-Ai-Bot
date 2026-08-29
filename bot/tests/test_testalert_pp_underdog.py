@@ -191,7 +191,9 @@ class TestDeliverPp:
         delivery = _make_delivery()
         opp      = _make_opp()
         score    = score_pp_edge(opp, history=[], opening_line=26.5)
-        result   = await delivery.deliver_pp(opp, score=score)
+        result   = await delivery.deliver_pp(
+            opp, score=score, evidence_available=True
+        )
         # Not filtered — scope passes PP always
         assert not result.filtered
 
@@ -203,7 +205,9 @@ class TestDeliverPp:
         delivery = AlertDelivery(mock_db, mock_bot, [111, 222])
         opp      = _make_opp()
         score    = score_pp_edge(opp, history=[], opening_line=26.5)
-        await delivery.deliver_pp(opp, score=score)
+        await delivery.deliver_pp(
+            opp, score=score, evidence_available=True
+        )
         assert mock_bot.send_message.call_count == 2   # one per chat_id
 
     @pytest.mark.asyncio
@@ -211,7 +215,9 @@ class TestDeliverPp:
         delivery = _make_delivery()
         opp      = _make_opp()
         score    = score_pp_edge(opp, history=[], opening_line=26.5)
-        result   = await delivery.deliver_pp(opp, score=score)
+        result   = await delivery.deliver_pp(
+            opp, score=score, evidence_available=True
+        )
         assert result.sent is True
         assert result.recipients_sent == 1
 
@@ -220,17 +226,20 @@ class TestDeliverPp:
         delivery = _make_delivery(chat_ids=[])
         opp      = _make_opp()
         score    = score_pp_edge(opp, history=[], opening_line=26.5)
-        result   = await delivery.deliver_pp(opp, score=score)
+        result   = await delivery.deliver_pp(
+            opp, score=score, evidence_available=True
+        )
         assert result.sent is False
         assert result.recipients_sent == 0
 
     @pytest.mark.asyncio
-    async def test_deliver_pp_without_score(self):
-        """deliver_pp should work with score=None (legacy edge path)."""
+    async def test_deliver_pp_without_evidence_is_filtered(self):
+        """A direct PP send cannot bypass the evidence requirement."""
         delivery = _make_delivery()
         opp      = _make_opp()
         result   = await delivery.deliver_pp(opp, score=None)
-        assert not result.filtered
+        assert result.filtered is True
+        assert result.sent is False
 
     @pytest.mark.asyncio
     async def test_recipients_failed_reflected(self):
@@ -240,7 +249,7 @@ class TestDeliverPp:
         mock_db  = _make_db_mock()
         delivery = AlertDelivery(mock_db, mock_bot, [111])
         opp      = _make_opp()
-        result   = await delivery.deliver_pp(opp)
+        result   = await delivery.deliver_pp(opp, evidence_available=True)
         assert result.sent is False
         assert result.recipients_failed == 1
 
@@ -259,7 +268,9 @@ class TestDeliverPp:
         delivery = AlertDelivery(mock_db, mock_bot, [1])
         opp      = _make_opp()
         score    = score_pp_edge(opp, history=[], opening_line=26.5)
-        await delivery.deliver_pp(opp, score=score)
+        await delivery.deliver_pp(
+            opp, score=score, evidence_available=True
+        )
 
         assert sent_messages, "No message was broadcast"
         msg = sent_messages[0]
@@ -281,7 +292,7 @@ class TestDeliverPp:
         mock_db = _make_db_mock()
         delivery = AlertDelivery(mock_db, mock_bot, [1])
         opp      = _make_opp()
-        await delivery.deliver_pp(opp)
+        await delivery.deliver_pp(opp, evidence_available=True)
 
         msg = sent_messages[0]
         # Edge % should appear somewhere in the formatted message
@@ -319,7 +330,7 @@ class TestDeliverPp:
         mock_db  = _make_db_mock()
         delivery = AlertDelivery(mock_db, mock_bot, [1, 2, 3])
         opp      = _make_opp()
-        result   = await delivery.deliver_pp(opp)
+        result   = await delivery.deliver_pp(opp, evidence_available=True)
         assert result.recipients_sent  == 3
         assert result.recipients_failed == 0
 

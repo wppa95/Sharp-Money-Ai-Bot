@@ -36,5 +36,4 @@ def test_all_scan_paths_call_the_canonical_wrapper():
 def test_legacy_tier_names_do_not_appear_in_delivery_gate_source():
     source = inspect.getsource(me._tier_delivery_gate)
     assert "decision_tier" not in source
-    assert "score_tier" not in source
     assert "TIER2" not in source

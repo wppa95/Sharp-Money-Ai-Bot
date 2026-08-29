@@ -347,15 +347,13 @@ class TestReq7ReEvaluationAfterHistory:
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestReq8STierGraduation:
-    """8. S-tier cold-start prop can graduate through standing path to Telegram delivery."""
+    """8. Evidence-backed cold-start props can reach the standing path."""
 
     def test_standing_path_accepts_s_tier(self):
-        """Standing path does NOT block S-tier (it requires A or S from DB)."""
+        """Standing path is not admitted by a legacy tier label."""
         src = inspect.getsource(__import__("market_engine").underdog_job)
-        # _prev_eff_tier in ("A", "S") is the admission gate
-        assert '"A", "S"' in src or '"S"' in src, (
-            "Standing path must admit both A and S tier props"
-        )
+        assert 'decision_tier in ("S", "A")' not in src
+        assert 'score_tier in ("S", "A")' not in src
 
     def test_s_tier_delivery_gate_non_strict_sport(self):
         """Tier 1 delivery uses the shared evidence/direction gate."""
@@ -391,12 +389,13 @@ class TestReq8STierGraduation:
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestReq9ATierGraduation:
-    """9. A-tier cold-start prop can graduate through the standing path."""
+    """9. Evidence-backed props can graduate through the standing path."""
 
     def test_standing_path_accepts_a_tier_from_db(self):
-        """Standing path admits A-tier from DB score_tier."""
+        """Standing path does not require an A-tier database label."""
         src = inspect.getsource(__import__("market_engine").underdog_job)
-        assert '"A"' in src, "Standing path must admit A-tier props"
+        assert 'decision_tier in ("S", "A")' not in src
+        assert 'score_tier in ("S", "A")' not in src
 
     def test_a_tier_confidence_threshold_lower_than_s(self):
         """A-tier confidence threshold must be lower than S-tier."""

@@ -525,22 +525,21 @@ class TestTelegramBehaviorUnchanged(unittest.TestCase):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Standing path gate — recommendation != PASS required
+# Standing path gate — valid direction required
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestStandingPathGate(unittest.TestCase):
-    """The standing path OddsAPI gate must include recommendation != PASS."""
+    """The standing path OddsAPI lookup is direction-only."""
 
     def test_standing_path_gate_includes_pass_check(self):
-        """market_engine source must show the PASS guard on the standing path."""
+        """market_engine source must show the directional guard."""
         import market_engine as me
         src = inspect.getsource(me.underdog_job)
-        # The standing path gate should have recommendation != "PASS"
-        self.assertIn('recommendation != "PASS"', src,
-                      "Standing path must explicitly exclude PASS recommendations")
+        self.assertIn('recommendation in ("OVER", "UNDER")', src,
+                      "Standing path must explicitly require a direction")
 
     def test_all_three_call_sites_have_pass_guard(self):
-        """All 3 _get_odds_api_confirmation call sites must include recommendation != PASS."""
+        """All confirmation call sites must require a valid direction."""
         import market_engine as me
         import re
         src = inspect.getsource(me)   # full module source
@@ -554,13 +553,13 @@ class TestStandingPathGate(unittest.TestCase):
         for i in range(1, len(segments)):
             # Look at the 300 chars immediately before this call
             before = segments[i - 1][-300:]
-            if 'recommendation != "PASS"' in before:
+            if 'recommendation in ("OVER", "UNDER")' in before:
                 guarded += 1
 
         self.assertGreaterEqual(
             guarded, 3,
-            f"All 3 _get_odds_api_confirmation call sites must have recommendation != 'PASS' guard "
-            f"(found {guarded}); standing path was missing it before this fix",
+            f"All 3 _get_odds_api_confirmation call sites must have a direction guard "
+            f"(found {guarded})",
         )
 
 

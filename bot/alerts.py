@@ -603,10 +603,13 @@ def _has_strong_underdog_evidence(
     if int(getattr(score, "n_history", 0) or 0) >= 5:
         return True
     for obj in (decision, intelligence_trace):
-        if isinstance(obj, dict) and any(
-            value not in (None, {}, [], "") for value in obj.values()
-        ):
-            return True
+        if isinstance(obj, dict):
+            if any(
+                obj.get(key) not in (None, {}, [], "")
+                for key in ("evidence", "bet_evidence", "intelligence_trace")
+            ):
+                return True
+            continue
         if obj is not None:
             for attr in ("evidence", "bet_evidence", "intelligence_trace"):
                 value = getattr(obj, attr, None)

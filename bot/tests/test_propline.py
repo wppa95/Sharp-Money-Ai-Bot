@@ -12,7 +12,6 @@ from providers.propline import (
     PropLinePrizePicksProvider,
     normalize_propline_prizepicks_record,
 )
-from engine.delivery_gates import is_tier2_sport
 from providers.prop_provider import PlayerProp
 from engine.provider_confirmation import (
     ConfirmationObservation,
@@ -351,14 +350,16 @@ def test_discovered_sport_normalization(official_key, title, expected):
     assert _canonical_discovered_sport(official_key, title) == expected
 
 
-@pytest.mark.parametrize("sport", ["MLB", "NBA", "NFL", "CFB", "NCAAF", "FOOTBALL"])
-def test_canonical_tier2_sports_are_preserved(sport):
-    assert is_tier2_sport(sport)
+@pytest.mark.parametrize(
+    "sport",
+    ["MLB", "NBA", "NFL", "CFB", "NCAAF", "FOOTBALL", "NHL", "WNBA", "FIFA", "TENNIS", "PGA", "CS", "CFL"],
+)
+def test_discovered_sports_are_not_delivery_tier_classified(sport):
+    """Sport normalization is independent from actionable delivery policy."""
+    from engine import delivery_gates
 
-
-@pytest.mark.parametrize("sport", ["NHL", "WNBA", "FIFA", "TENNIS", "PGA", "CS", "CFL"])
-def test_other_discovered_sports_are_canonical_tier1(sport):
-    assert not is_tier2_sport(sport)
+    assert not hasattr(delivery_gates, "is_tier2_sport")
+    assert not hasattr(delivery_gates, "TIER2_SPORTS")
 
 
 def test_sport_scoped_fetch_preserves_requested_alias_for_confirmation_matching():

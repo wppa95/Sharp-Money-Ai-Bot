@@ -2283,8 +2283,13 @@ def _has_strong_delivery_evidence(
     if int(getattr(score, "n_history", 0) or 0) >= 5:
         return True
     for obj in (decision, intelligence_trace):
-        if isinstance(obj, dict) and any(value not in (None, {}, [], "") for value in obj.values()):
-            return True
+        if isinstance(obj, dict):
+            if any(
+                obj.get(key) not in (None, {}, [], "")
+                for key in ("evidence", "bet_evidence", "intelligence_trace")
+            ):
+                return True
+            continue
         if obj is not None:
             for attr in ("evidence", "bet_evidence", "intelligence_trace"):
                 value = getattr(obj, attr, None)
@@ -3615,7 +3620,7 @@ async def underdog_job(context) -> None:
                             _lc_intel_trace = _lc_intel.intelligence_trace
                     except (NameError, Exception):
                         pass
-                    # OddsAPI market confirmation — non-blocking, S/A tier only, non-removal
+                    # OddsAPI market confirmation — non-blocking, directional, non-removal
                     if (not is_removed
                             and decision is not None
                             and decision.recommendation in ("OVER", "UNDER")):
@@ -5943,21 +5948,10 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 or getattr(snap, "recommendation", None)
                 or ""
             ).upper()
-            _score_tier = str(
-                getattr(snap, "score_tier", None)
-                or getattr(snap, "decision_tier", None)
-                or ""
-            ).upper()
-            _score_total = getattr(snap, "score_total", None)
-            try:
-                _score_total = float(_score_total)
-            except (TypeError, ValueError):
-                _score_total = 0.0
-            is_actionable = (
-                _recommendation in {"OVER", "UNDER"}
-                or _score_tier in {"S", "A"}
-                or _score_total >= 70.0
-            )
+            # Only an actual direction is a priority signal. Stored score/tier
+            # metadata is reporting context and must not influence rescanning
+            # order or create an implicit delivery class.
+            is_actionable = _recommendation in {"OVER", "UNDER"}
             _game_time = getattr(snap, "game_time", None)
             is_approaching = False
             if isinstance(_game_time, datetime):

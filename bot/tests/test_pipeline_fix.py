@@ -272,8 +272,8 @@ class TestMLBNFLGatesUnchanged:
         )
 
     def test_strict_alert_sports_config_referenced(self):
-        """Tier classification must use the exact shared alias predicate."""
+        """Delivery remains provider/sport neutral and does not classify tiers."""
         src = self._get_engine_source()
-        assert "_is_tier2_sport" in src, (
-            "Shared exact Tier-2 sport predicate is not referenced."
+        assert "_is_tier2_sport" not in src, (
+            "Retired Tier-2 classification is still referenced."
         )

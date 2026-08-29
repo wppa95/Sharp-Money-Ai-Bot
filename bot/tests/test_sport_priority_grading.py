@@ -351,12 +351,13 @@ class TestMLBGateLogic:
         assert not is_mlb  # NBA bypasses the MLB gate
 
     def test_gate_uses_decision_tier_not_score_tier(self):
-        """The shared gate must use numeric decision quality, not labels."""
+        """The shared gate must not use tier labels as qualification."""
         import inspect
         import market_engine as me
         source = inspect.getsource(me)
         assert "_canonical_tier_delivery_gate" in source
-        assert "_is_tier2_sport" in source
+        assert "decision_tier in (\"S\", \"A\")" not in source
+        assert "score.tier in (\"S\", \"A\")" not in source
 
 
 # ─────────────────────────────────────────────────────────────────────────────

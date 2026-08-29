@@ -101,7 +101,9 @@ async def test_s_tier_bypasses_daily_cap():
               return_value={"sent": 1, "failed": 0}),
         patch("engine.timing.is_game_alertable", return_value=(True, "")),
     ):
-        result = await delivery.deliver_pp(opp, score)
+        result = await delivery.deliver_pp(
+            opp, score, evidence_available=True
+        )
 
     assert result.sent is True
     assert result.filtered is False
@@ -124,7 +126,9 @@ async def test_a_tier_is_not_blocked_when_daily_count_is_high():
               return_value={"sent": 1, "failed": 0}),
         patch("engine.timing.is_game_alertable", return_value=(True, "")),
     ):
-        result = await delivery.deliver_pp(opp, score)
+        result = await delivery.deliver_pp(
+            opp, score, evidence_available=True
+        )
 
     assert result.sent is True
     assert result.filtered is False
@@ -147,7 +151,9 @@ async def test_b_tier_is_not_blocked_when_daily_count_is_high():
               return_value={"sent": 1, "failed": 0}),
         patch("engine.timing.is_game_alertable", return_value=(True, "")),
     ):
-        result = await delivery.deliver_pp(opp, score)
+        result = await delivery.deliver_pp(
+            opp, score, evidence_available=True
+        )
 
     assert result.sent is True
     assert result.filtered is False
@@ -169,7 +175,9 @@ async def test_a_tier_allowed_when_under_cap():
               return_value={"sent": 1, "failed": 0}),
         patch("engine.timing.is_game_alertable", return_value=(True, "")),
     ):
-        result = await delivery.deliver_pp(opp, score)
+        result = await delivery.deliver_pp(
+            opp, score, evidence_available=True
+        )
 
     assert result.sent is True
 
@@ -190,7 +198,9 @@ async def test_pp_timing_filter_blocks_in_progress_game():
         patch("engine.timing.is_game_alertable",
               return_value=(False, "🔴 Game already in progress")),
     ):
-        result = await delivery.deliver_pp(opp, score)
+        result = await delivery.deliver_pp(
+            opp, score, evidence_available=True
+        )
 
     assert result.sent is False
     assert result.filtered is True
@@ -371,7 +381,9 @@ async def test_s_tier_does_not_consume_ab_cap():
               return_value={"sent": 1, "failed": 0}),
         patch("engine.timing.is_game_alertable", return_value=(True, "")),
     ):
-        result = await delivery.deliver_pp(opp, score)
+        result = await delivery.deliver_pp(
+            opp, score, evidence_available=True
+        )
 
     # A-tier should be sent — S-tier volume must not drain the A/B budget
     assert result.sent is True

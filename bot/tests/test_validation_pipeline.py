@@ -27,8 +27,9 @@ def test_first_seen_statistical_prop_is_validation_context_not_pipeline_block():
     assert "validation_blocked" not in new_prop_block
 
 
-def test_direction_only_gate_stays_sport_independent():
+def test_direction_and_evidence_gate_stays_sport_independent():
     for sport in ("NFL", "MLB", "NBA", "NHL", "WNBA", "TENNIS", "DOTA"):
-        assert _tier_delivery_gate(sport, "OVER", 0, 0, False, "PASS", confidence=0)
-        assert _tier_delivery_gate(sport, "UNDER", 0, 0, False, "C", confidence=1)
+        assert not _tier_delivery_gate(sport, "OVER", 0, 0, False, "PASS", confidence=0)
+        assert _tier_delivery_gate(sport, "OVER", 0, 0, True, "PASS", confidence=0)
+        assert _tier_delivery_gate(sport, "UNDER", 0, 0, True, "C", confidence=1)
         assert not _tier_delivery_gate(sport, "MONEYLINE", 100, 100, True, "S", confidence=100)

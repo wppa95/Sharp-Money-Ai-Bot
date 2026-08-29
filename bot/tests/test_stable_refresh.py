@@ -1283,7 +1283,6 @@ class TestWatchlistRescan:
             patch("market_engine._is_futures_stat",   return_value=False),
             patch("market_engine._is_prop_deduped",   return_value=False),
             patch("market_engine._tier_delivery_gate", return_value=True),
-            patch("market_engine._is_tier2_sport",    return_value=False),
             patch("market_engine._try_claim_delivery_slot", new_callable=AsyncMock, return_value=True),
             patch("engine.ud_scoring.score_ud_prop",   side_effect=score_side_effect),
             patch("engine.player_validator.validate_player_prop", side_effect=val_side_effect),

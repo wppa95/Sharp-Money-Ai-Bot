@@ -145,6 +145,7 @@ async def test_pregame_prizepicks_prop_can_reach_delivery():
         result = await delivery.deliver_pp(
             _pp_opportunity(start_time=_future()),
             strict_pregame=True,
+            evidence_available=True,
         )
     assert result.sent is True
 
