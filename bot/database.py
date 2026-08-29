@@ -4730,9 +4730,26 @@ class Database:
             history_count_res = await s.execute(
                 select(func.count(PropLineHistory.id)).where(
                     PropLineHistory.provider.in_(("Underdog", "PrizePicks")),
+                    PropLineHistory.fetched_at >= cutoff,
                 )
             )
-            has_normalized_history = bool(history_count_res.scalar() or 0)
+            tracked_observations = int(history_count_res.scalar() or 0)
+            observation_provider_res = await s.execute(
+                select(
+                    PropLineHistory.provider,
+                    func.count(PropLineHistory.id),
+                )
+                .where(
+                    PropLineHistory.provider.in_(("Underdog", "PrizePicks")),
+                    PropLineHistory.fetched_at >= cutoff,
+                )
+                .group_by(PropLineHistory.provider)
+            )
+            tracked_observations_by_provider = {
+                str(provider or "Unknown"): int(count or 0)
+                for provider, count in observation_provider_res.all()
+            }
+            has_normalized_history = tracked_observations > 0
 
             # Compatibility fallback for installations predating normalized
             # history, where candidate telemetry is the only available stream.
@@ -4758,6 +4775,8 @@ class Database:
                 return {
                     "since_hours": since_hours,
                     "tracked": candidate_total,
+                    "tracked_observations": candidate_total,
+                    "tracked_observations_by_provider": {},
                     "by_sport": by_sport,
                 }
 
@@ -4780,6 +4799,8 @@ class Database:
         return {
             "since_hours": since_hours,
             "tracked": len(current_rows),
+            "tracked_observations": tracked_observations,
+            "tracked_observations_by_provider": tracked_observations_by_provider,
             "by_sport": by_sport,
             "by_provider": [
                 {"provider": provider, "tracked": count}

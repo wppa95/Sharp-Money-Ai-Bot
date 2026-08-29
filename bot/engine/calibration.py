@@ -96,6 +96,7 @@ class RecommendationAccuracy:
     total:          int   = 0
     correct:        int   = 0
     incorrect:      int   = 0
+    pushes:         int   = 0
     unresolved:     int   = 0
 
     by_side: dict[str, dict[str, int]] = field(default_factory=lambda: {
@@ -111,7 +112,7 @@ class RecommendationAccuracy:
 
     @property
     def resolved(self) -> int:
-        return self.correct + self.incorrect
+        return self.correct + self.incorrect + self.pushes
 
 
 @dataclass
@@ -228,6 +229,8 @@ class CalibrationReport:
                 f"  {self.recommendation.resolved} resolved  "
                 f"accuracy: {acc_str}"
             )
+            if self.recommendation.pushes:
+                lines.append(f"    PUSH: {self.recommendation.pushes}")
             for side in ("OVER", "UNDER", "PASS"):
                 sc = self.recommendation.by_side.get(side, {})
                 c = sc.get("correct", 0)
@@ -297,7 +300,36 @@ class CalibrationEngine:
     # ── Internal methods ──────────────────────────────────────────────────────
 
     async def _compute_tier_calibration(self, db, report: CalibrationReport) -> None:
-        """Compute confidence-tier accuracy from resolved EV records."""
+        """Compute confidence-tier accuracy from the canonical tracked stream."""
+        try:
+            tracked = await db.get_resolved_tracked_opportunities(limit=1000)
+        except Exception:
+            tracked = []
+        if tracked:
+            report.ud_records_used = len(tracked)
+            tier_map: dict[str, TierCalibration] = {
+                t: TierCalibration(tier=t) for t in ("S", "A", "B", "PASS")
+            }
+            for rec in tracked:
+                score = _prop_score(rec)
+                tier = _prop_tier(rec, score)
+                tc = tier_map[tier]
+                tc.total += 1
+                outcome = _prop_bet_outcome(rec)
+                if outcome == "WIN":
+                    tc.wins += 1
+                elif outcome == "LOSS":
+                    tc.losses += 1
+                elif outcome == "PUSH":
+                    tc.pushes += 1
+                tc.avg_confidence = (
+                    ((tc.avg_confidence or 0.0) * (tc.total - 1)) + score
+                ) / tc.total
+            report.tier_calibration = tier_map
+            return
+
+        # Compatibility fallback for legacy installations with no normalized
+        # tracked opportunities yet.
         records = await db.get_ev_records_with_results(limit=1000, include_pending=False)
         report.ev_records_used = len(records)
         report.total_ev_records = await db.count_ev_records()
@@ -356,7 +388,47 @@ class CalibrationEngine:
             pass   # method may not exist yet — non-fatal
 
     async def _compute_recommendation_accuracy(self, db, report: CalibrationReport) -> None:
-        """Compute bet recommendation accuracy from resolved Underdog snapshots."""
+        """Compute bet recommendation accuracy without a delivery filter."""
+        try:
+            tracked = await db.get_resolved_tracked_opportunities(limit=1000)
+        except Exception:
+            tracked = []
+        if tracked:
+            rec_acc = RecommendationAccuracy()
+            for opportunity in tracked:
+                recommendation = str(
+                    getattr(opportunity, "recommendation", "") or ""
+                ).upper()
+                if recommendation not in {"OVER", "UNDER"}:
+                    continue
+                rec_acc.total += 1
+                outcome = _prop_bet_outcome(opportunity)
+                if outcome == "PUSH":
+                    rec_acc.pushes += 1
+                    side = rec_acc.by_side.setdefault(recommendation, {})
+                    side["push"] = side.get("push", 0) + 1
+                elif outcome in {"WIN", "LOSS"}:
+                    correct = outcome == "WIN"
+                    rec_acc.correct += int(correct)
+                    rec_acc.incorrect += int(not correct)
+                    side = rec_acc.by_side.setdefault(
+                        recommendation, {"correct": 0, "incorrect": 0}
+                    )
+                    side["correct" if correct else "incorrect"] += 1
+                else:
+                    rec_acc.unresolved += 1
+            report.ud_records_used = len(tracked)
+            report.total_ud_records = len(tracked)
+            report.recommendation = rec_acc
+            try:
+                provider_perf = await db.get_telegram_pick_performance()
+                if isinstance(provider_perf, dict):
+                    report.provider_breakdown = provider_perf.get("by_provider", {}) or {}
+            except Exception:
+                pass
+            return
+
+        # Compatibility fallback for older databases that have only snapshots.
         try:
             provider_perf = await db.get_telegram_pick_performance()
             if isinstance(provider_perf, dict):
@@ -437,6 +509,38 @@ class CalibrationEngine:
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _prop_score(record) -> int:
+    """Return the score captured for a normalized tracked opportunity."""
+    value = getattr(record, "bet_quality_score", None)
+    if value is None:
+        value = getattr(record, "confidence", None)
+    try:
+        return max(0, min(100, int(value or 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _prop_tier(record, score: int) -> str:
+    stored = str(getattr(record, "decision_tier", "") or "").upper()
+    if stored in {"S", "A", "B", "PASS"}:
+        return stored
+    return _confidence_to_tier(score)
+
+
+def _prop_bet_outcome(record) -> str:
+    """Convert OVER-perspective settlement into bet-perspective outcome."""
+    result = str(getattr(record, "result", "") or "").upper()
+    recommendation = str(
+        getattr(record, "recommendation", "") or ""
+    ).upper()
+    if result == "PUSH":
+        return "PUSH"
+    if result not in {"HIT", "MISS"}:
+        return ""
+    if recommendation == "UNDER":
+        return "WIN" if result == "MISS" else "LOSS"
+    return "WIN" if result == "HIT" else "LOSS"
 
 def _confidence_to_tier(confidence: int) -> str:
     if confidence >= 95:

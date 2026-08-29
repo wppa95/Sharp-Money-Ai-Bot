@@ -1328,6 +1328,26 @@ async def cmd_performance(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         from engine.backtesting import BacktestEngine
         from engine.ranking import RankingTier, RankingDecision
 
+        # Normalized tracked opportunities are the canonical performance
+        # population. Delivery is metadata only and must not remove a graded
+        # record from the report.
+        tracked_records = await _report_read(
+            _db.get_resolved_tracked_opportunities(limit=1000),
+            fallback=None,
+        )
+        if tracked_records:
+            report = await _bounded(asyncio.to_thread(
+                BacktestEngine().run_prop_opportunities,
+                tracked_records,
+            ))
+            msg = report.to_telegram()
+            msg += (
+                "\n\n<i>Source: resolved directional tracked opportunities "
+                "(delivery-independent; provider identity preserved).</i>"
+            )
+            await update.message.reply_text(msg, parse_mode="HTML")
+            return
+
         records, _ud_rollups, _tg_perf = await _independent_report_reads([
             _db.get_ev_records_with_results(limit=500, include_pending=False),
             _db.get_learning_rollups(),
@@ -4277,6 +4297,13 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         summary = summary if isinstance(summary, dict) else {}
 
         tracked   = int(summary.get("tracked", 0) or 0)
+        tracked_observations = int(
+            summary.get("tracked_observations", tracked) or 0
+        )
+        directional_total = int(
+            summary.get("directional_total", summary.get("total", 0)) or 0
+        )
+        delivered_total = int(summary.get("delivered", 0) or 0)
 
         def _fmt_rate(num: int, denom: int) -> str:
             """Format a small percentage with enough precision to stay non-zero."""
@@ -4511,10 +4538,11 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             f"<i>All active props remain in the monitored universe; delivery is separate.</i>",
             "",
             f"📥 Canonical active props: <b>{active:,}</b>",
-            f"🧾 Candidate records tracked: <b>{tracked:,}</b>",
+            f"🧾 Persistent observations: <b>{tracked_observations:,}</b>",
+            f"🎯 Directional OVER/UNDER records: <b>{directional_total:,}</b>",
             f"🔬 Rescored: <b>{sc_rescored:,}</b>",
             f"📈 Line movers: <b>{sc_movers:,}</b>",
-            f"📤 Delivered alerts: <b>{sc_delivered:,}</b>",
+            f"📤 Delivered alerts: <b>{delivered_total:,}</b>",
             "",
             "<i>Actionable evaluation uses the existing direction, quality, evidence,",
             "deduplication, and live-game safeguards.</i>",
@@ -4600,13 +4628,38 @@ async def cmd_player(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         )
         return
 
-    # Aggregate stats
-    total  = len(rows)
-    graded = [r for r in rows if r.result in ("HIT", "MISS", "PUSH")]
-    hits   = sum(1 for r in graded if r.result == "HIT")
-    misses = sum(1 for r in graded if r.result == "MISS")
-    pushes = sum(1 for r in graded if r.result == "PUSH")
-    hit_rate = hits / len(graded) * 100 if graded else None
+    # Keep monitoring, directional, delivery, and settlement populations
+    # separate. Opportunity results are stored from the OVER perspective, so
+    # an UNDER MISS is a correct pick.
+    tracked_rows = [r for r in rows if getattr(r, "tracked_observation", False)]
+    directional_rows = [
+        r for r in rows
+        if str(getattr(r, "recommendation", "") or "").upper() in {"OVER", "UNDER"}
+    ]
+    delivered_rows = [
+        r for r in directional_rows if bool(getattr(r, "alert_sent", False))
+    ]
+    graded = [
+        r for r in directional_rows
+        if str(getattr(r, "result", "") or "").upper() in {"HIT", "MISS", "PUSH"}
+    ]
+    hits = sum(
+        1 for r in graded
+        if (
+            str(r.recommendation).upper() == "OVER"
+            and str(r.result).upper() == "HIT"
+        ) or (
+            str(r.recommendation).upper() == "UNDER"
+            and str(r.result).upper() == "MISS"
+        )
+    )
+    pushes = sum(1 for r in graded if str(r.result).upper() == "PUSH")
+    misses = len(graded) - hits - pushes
+    pending = sum(
+        1 for r in directional_rows
+        if str(getattr(r, "result", "") or "").upper() == "PENDING"
+    )
+    hit_rate = hits / (hits + misses) * 100 if (hits + misses) else None
 
     # Warning thresholds
     warn = ""
@@ -4624,9 +4677,12 @@ async def cmd_player(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     lines = [
         f"👤 <b>Player History — {player_display}</b>",
         "",
-        f"Tracked picks:  <b>{total}</b>",
-        f"Graded:         <b>{len(graded)}</b>  ({hits}H / {misses}M / {pushes}P)",
-        f"Hit rate:       <b>{rate_str}</b>",
+        f"Tracked observations: <b>{len(tracked_rows)}</b>",
+        f"Directional:          <b>{len(directional_rows)}</b>",
+        f"Delivered:            <b>{len(delivered_rows)}</b>",
+        f"Graded:               <b>{len(graded)}</b>  ({hits}H / {misses}M / {pushes}P)",
+        f"Pending:              <b>{pending}</b>",
+        f"Hit rate:             <b>{rate_str}</b>",
     ]
     if warn:
         lines.append(warn)
@@ -4635,14 +4691,21 @@ async def cmd_player(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     lines += ["", "<b>Recent picks</b>"]
     result_sym = {"HIT": "✅", "MISS": "❌", "PUSH": "🔁", "PENDING": "⏳"}
     for r in rows[:8]:
-        sym   = result_sym.get(r.result, "⏳")
-        date  = r.detected_at.strftime("%b %d") if r.detected_at else "?"
-        av    = f" → <i>{r.actual_value:g}</i>" if r.actual_value is not None else ""
+        result = str(getattr(r, "result", "PENDING") or "PENDING").upper()
+        sym   = result_sym.get(result, "⏳")
+        timestamp = getattr(r, "detected_at", None)
+        date  = timestamp.strftime("%b %d") if timestamp else "?"
+        av    = (
+            f" → <i>{r.actual_value:g}</i>"
+            if getattr(r, "actual_value", None) is not None else ""
+        )
+        recommendation = str(getattr(r, "recommendation", "") or "").upper()
+        source = getattr(r, "provider", None) or "Underdog"
         lines.append(
             f"{sym} "
-            f"{'🟣' if (getattr(r, 'provider', None) or '').lower() == 'prizepicks' else '🐶'} "
-            f"<b>{(getattr(r, 'provider', None) or 'Underdog').upper()} PICK</b> · "
-            f"<b>{r.stat_type}</b> {r.recommendation or ''} "
+            f"{'🟣' if source.lower() == 'prizepicks' else '🐶'} "
+            f"<b>{source.upper()} {'PICK' if recommendation else 'TRACKED'}</b> · "
+            f"<b>{r.stat_type}</b> {recommendation or 'TRACKED'} "
             f"<code>{r.line_value:g}</code>  ·  {r.sport}  ·  {date}{av}"
         )
 
@@ -4686,9 +4749,12 @@ async def cmd_slipstats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             provider = row.get("provider", "Underdog")
             h    = row.get("hits", 0)
             m    = row.get("misses", 0)
+            p    = row.get("pushes", 0)
             tot  = h + m
             rate = f"{h / tot * 100:.0f}%" if tot > 0 else "—"
-            lines.append(f"  {provider:<12} {sp:<8} {h}H / {m}M  →  {rate}")
+            lines.append(
+                f"  {provider:<12} {sp:<8} {h}H / {m}M / {p}P  →  {rate}"
+            )
     elif sport_rows is None:
         lines.append("  <i>Pick accuracy is temporarily unavailable.</i>")
     else:
