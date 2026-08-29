@@ -550,16 +550,23 @@ class DashboardEngine:
             )
         except Exception:
             report.recent_tracked_props = []
-        await cls._gather_ev_performance(db, report)
-        await cls._gather_clv_performance(db, report)
-        await cls._gather_ud_breakdown(db, report)
-        await cls._gather_by_sport(db, report)
-        await cls._gather_by_market(db, report)
-        await cls._gather_daily_trend(db, report)
+        # These report sections read independent tables and do not depend on
+        # one another.  Running them together keeps a busy SQLite database
+        # from making the dashboard wait for a long serialized chain of
+        # read-only queries.
+        await asyncio.gather(
+            cls._gather_ev_performance(db, report),
+            cls._gather_clv_performance(db, report),
+            cls._gather_ud_breakdown(db, report),
+            cls._gather_by_sport(db, report),
+            cls._gather_by_market(db, report),
+            cls._gather_daily_trend(db, report),
+            cls._gather_system_panel(db, report),
+            cls._gather_intelligence_panel(db, report),
+            return_exceptions=True,
+        )
         cls._compute_best_worst(report)
-        await cls._gather_system_panel(db, report)
         await cls._gather_provider_pipeline(db, report)
-        await cls._gather_intelligence_panel(db, report)
 
         return report
 
@@ -568,13 +575,28 @@ class DashboardEngine:
     @staticmethod
     async def _gather_totals(db: "Database", r: DashboardReport) -> None:
         try:
-            r.total_ev_alerts    = await db.count_ev_records()
-            r.total_steam_alerts = await db.count_steam_records()
-            r.total_ud_alerts    = await db.count_underdog_records()
-            r.total_pp_alerts    = await db.count_pp_edge_records()
-            r.total_clv_records  = await db.count_clv_records()
-            r.today_ud_alerts    = await db.count_today_underdog_alerts()
-            r.today_pp_alerts    = await db.count_today_pp_alerts()
+            values = await asyncio.gather(
+                db.count_ev_records(),
+                db.count_steam_records(),
+                db.count_underdog_records(),
+                db.count_pp_edge_records(),
+                db.count_clv_records(),
+                db.count_today_underdog_alerts(),
+                db.count_today_pp_alerts(),
+                return_exceptions=True,
+            )
+            fields = (
+                "total_ev_alerts",
+                "total_steam_alerts",
+                "total_ud_alerts",
+                "total_pp_alerts",
+                "total_clv_records",
+                "today_ud_alerts",
+                "today_pp_alerts",
+            )
+            for field_name, value in zip(fields, values):
+                if not isinstance(value, Exception):
+                    setattr(r, field_name, int(value or 0))
         except Exception:
             pass
 
