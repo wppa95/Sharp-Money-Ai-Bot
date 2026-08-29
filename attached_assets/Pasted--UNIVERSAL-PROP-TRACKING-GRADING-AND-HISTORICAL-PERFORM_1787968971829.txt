@@ -1,0 +1,764 @@
+🔴 UNIVERSAL PROP TRACKING, GRADING, AND HISTORICAL PERFORMANCE
+
+Continue from the current Sharp Money Bot implementation.
+
+Make ONLY the targeted changes required to ensure the entire monitored player-prop universe is persistently tracked, graded, and incorporated into historical performance.
+
+Do not redesign the architecture.
+
+Do not change unrelated provider behavior.
+
+Do not change Telegram alert rules except where absolutely necessary to ensure Telegram delivery does not control tracking or grading.
+
+⸻
+
+🚫 ABSOLUTELY NO LIVE VERIFICATION
+
+DO NOT RUN LIVE VERIFICATION FOR THIS REQUEST.
+
+This is a strict requirement.
+
+Do NOT:
+
+* Restart the bot
+* Restart Railway
+* Deploy Railway
+* Wait for a provider cycle
+* Wait for a game to finish
+* Wait for a natural alert
+* Send Telegram commands
+* Send /testalert
+* Generate synthetic production data
+* Create synthetic production records
+* Trigger artificial props
+* Trigger artificial outcomes
+* Modify production configuration for testing
+* Wait for real-world results
+
+Verification for this request must be limited to:
+
+INSPECT → IMPLEMENT → FOCUSED TESTS → FULL TEST SUITE → COMPILE → DIFF CHECK → REPORT
+
+If something genuinely cannot be proven without production observation, report it as:
+
+UNVERIFIED LIVE
+
+Do not perform the live observation.
+
+⸻
+
+1. CORE REQUIREMENT
+
+Every legitimate player-prop snapshot observed by the monitoring system must enter the persistent tracking universe.
+
+Tracking MUST NOT depend on whether the prop:
+
+* Has a direction
+* Is actionable
+* Has high Bet Quality
+* Has high confidence
+* Has supporting evidence
+* Is delivered to Telegram
+* Is rejected
+* Is non-actionable
+* Is cold-start
+* Has moved
+* Has not moved
+* Was previously evaluated
+* Was previously delivered
+* Is football
+* Is from Underdog
+* Is from PrizePicks
+
+The monitoring universe and actionable-alert universe are separate.
+
+Correct lifecycle:
+
+Provider observation
+→ persistent snapshot/history
+→ tracking
+→ grading when result becomes available
+→ historical performance
+
+Alert delivery is downstream.
+
+Telegram delivery must NOT determine whether a prop gets tracked or graded.
+
+⸻
+
+2. BOTH PRIMARY PROVIDERS
+
+Apply this consistently to both:
+
+🐶 Underdog
+
+Primary player-prop provider.
+
+🟣 PrizePicks / PropLine
+
+Primary player-prop provider.
+
+Maintain strict provider separation.
+
+A PrizePicks prop remains a PrizePicks record.
+
+An Underdog prop remains an Underdog record.
+
+Do NOT merge provider identities merely because:
+
+* player is the same
+* sport is the same
+* market is the same
+* line is the same
+
+Provider/source identity must remain intact.
+
+⸻
+
+3. EVERY SNAPSHOT MUST BE PERSISTED
+
+Every legitimate observation should be retained as a historical snapshot.
+
+Preserve at minimum:
+
+* Provider
+* Provider source ID
+* Player
+* Player identity
+* Sport
+* Market/stat
+* Line
+* Direction when applicable
+* Event/game ID when available
+* Event/game start time when available
+* Observation timestamp
+* Active/removal state
+* Previous line when applicable
+* Current line
+* Available result metadata
+
+Do NOT discard snapshots because they are:
+
+* non-directional
+* rejected
+* low quality
+* missing evidence
+* cold-start
+* unchanged
+* not actionable
+* not sent to Telegram
+
+Historical snapshots must remain available after a prop leaves the active monitoring pool.
+
+⸻
+
+4. FIX THE TRACKING UNDERCOUNT
+
+The bot has shown situations where:
+
+* tens of thousands of Underdog snapshots are observed
+* thousands of historical rows exist
+* but only hundreds of tracked opportunities are reported
+
+Audit exactly where this filtering occurs.
+
+Remove any logic causing the persistent tracking universe to be restricted to only:
+
+* directional props
+* actionable props
+* qualified props
+* Telegram alerts
+* high-BQ props
+* high-confidence props
+* line movers
+* new props
+* selected candidate records
+
+Do NOT simply increase a query limit.
+
+Fix the underlying lifecycle.
+
+The persistent tracking universe must represent the legitimate monitored prop universe.
+
+⸻
+
+5. TELEGRAM MUST NOT CONTROL TRACKING
+
+If 10,000 legitimate props are observed and only 20 become Telegram alerts:
+
+10,000 must remain represented in tracking/history.
+
+The 20 alerts are only a downstream subset.
+
+Alert deduplication must not remove historical tracking.
+
+Daily alert limits must not affect tracking.
+
+Alert qualification must not affect tracking.
+
+⸻
+
+6. DIRECTION MUST NOT CONTROL TRACKING
+
+A prop does NOT need an OVER/UNDER recommendation to be tracked.
+
+Track:
+
+* directional props
+* non-directional props
+* unresolved props
+* rejected props
+* cold-start props
+
+If a valid direction becomes available later, the tracked prop must become eligible for directional evaluation without losing prior observations.
+
+⸻
+
+7. PERSISTENT OUTCOME GRADING
+
+When an event/game finishes and a legitimate result becomes available, every eligible tracked prop must be capable of receiving an outcome.
+
+Support:
+
+* HIT
+* MISS
+* PUSH
+
+Also preserve the actual result/value.
+
+Each graded record should preserve:
+
+* Provider
+* Player
+* Sport
+* Market/stat
+* Effective line
+* Direction
+* Event/game
+* Timestamp
+* Actual result
+* Outcome
+
+Do NOT restrict grading to:
+
+* Telegram-delivered picks
+* actionable picks
+* high-confidence picks
+* high-BQ picks
+
+⸻
+
+8. DIRECTIONAL GRADING
+
+For normal directional props:
+
+OVER
+
+Actual > line → HIT
+Actual < line → MISS
+Actual = line → PUSH where applicable
+
+UNDER
+
+Actual < line → HIT
+Actual > line → MISS
+Actual = line → PUSH where applicable
+
+Respect legitimate market-specific grading rules already present.
+
+Do not change unrelated grading formulas.
+
+⸻
+
+9. REAL RESULT PRIORITY
+
+When legitimate provider game data exists:
+
+Real provider result = preferred source of truth
+
+Bot-graded prop results may supplement missing history.
+
+Never fabricate a result.
+
+If a result cannot legitimately be established:
+
+remain unresolved.
+
+Do not convert missing information into:
+
+* 0
+* MISS
+* fake result
+* fake history
+
+⸻
+
+10. PROGRESSIVE PLAYER HISTORY
+
+The tracking system must feed the existing progressive evidence/history system.
+
+Build real history from legitimate resolved results.
+
+Support:
+
+* L5
+* L10
+* L20
+* L30
+* Season
+
+Behavior:
+
+* 0 real results → N/A
+* insufficient results → partial history where appropriate
+* enough results → progressively populate applicable windows
+* 30+ real results → full applicable L5/L10/L20/L30/Season history
+
+Do NOT fabricate missing history.
+
+Do NOT interpret missing history as 0%.
+
+Do NOT allow Telegram delivery status to determine whether a result contributes to player history.
+
+⸻
+
+11. DUPLICATE PROTECTION
+
+Prevent duplicate historical outcomes.
+
+A single real event/result must not create multiple historical results for the same:
+
+provider + player + sport + market/stat + event
+
+Preserve the existing database identity architecture.
+
+Do not create duplicate dates.
+
+Do not allow one player’s result to contaminate another player’s history.
+
+Do not allow one market/stat to contaminate another.
+
+⸻
+
+12. LINE MOVEMENT
+
+Line movement must preserve the historical lifecycle.
+
+Example:
+
+Prop appears at:
+
+0.5
+
+Later moves to:
+
+1.5
+
+Both observations remain historical.
+
+Latest active state = 1.5.
+
+Historical state = both observations.
+
+Do not overwrite historical snapshots when the active line changes.
+
+Preserve the provider-specific identity behavior already implemented.
+
+⸻
+
+13. EVENT START / REMOVAL
+
+When an event starts:
+
+* Remove the prop from new-opportunity monitoring.
+* Preserve historical snapshots.
+* Preserve tracking.
+* Preserve grading eligibility.
+* Preserve resolved outcomes.
+
+Important:
+
+Inactive for monitoring ≠ deleted from history.
+
+⸻
+
+14. FOOTBALL
+
+Football remains fully monitored and tracked.
+
+This includes:
+
+* NFL
+* NCAAF
+* CFB
+* FCS
+* CFL
+* UFL
+* USFL
+* XFL
+* AFL
+* AFLW
+* other football variants
+
+Football must continue contributing to:
+
+* snapshot history
+* tracking
+* grading
+* player history
+* historical analysis
+
+However:
+
+Football must NOT reach Telegram alerts.
+
+Do not remove football from monitoring/tracking because Telegram suppresses it.
+
+⸻
+
+15. PRIZEPICKS ALL-SPORT SUPPORT
+
+PrizePicks must remain all-sport capable based on its legitimate PropLine catalog.
+
+Do not hard-code PP tracking to:
+
+* NBA
+* MLB
+
+Do not inherit Underdog ACTIVE_SPORTS.
+
+Every legitimate PP sport entering the PP monitoring pipeline must enter the same universal tracking/grading lifecycle.
+
+Preserve the PrizePicks provider-specific monitoring fixes already completed.
+
+⸻
+
+16. COMMANDS MUST USE THE SAME SOURCE OF TRUTH
+
+These commands must use the same persistent tracking/grading source of truth:
+
+* /tracking
+* /performance
+* /grade
+* /grades
+* /stats
+* /calibration
+* /player
+* /slipstats
+* /backtest
+
+Do not create separate tracking systems.
+
+Commands should distinguish:
+
+* observed
+* tracked
+* directional
+* actionable
+* delivered
+* pending grading
+* resolved
+* HIT
+* MISS
+* PUSH
+
+Do not collapse these populations.
+
+⸻
+
+17. DASHBOARD CONSISTENCY
+
+/dashboard must accurately distinguish the full monitoring/tracking universe from the actionable subset.
+
+If the monitoring system has persisted tens of thousands of legitimate snapshots, do not report only a few hundred as the complete tracked universe.
+
+Recently Tracked Props must remain:
+
+* persistent
+* current
+* all-sport
+* provider-aware
+
+Do not hard-code:
+
+* NFL
+* NBA
+* MLB
+
+⸻
+
+18. FUNNEL / RECONCILIATION
+
+Provider telemetry must distinguish:
+
+Observed
+
+Raw legitimate provider observations.
+
+Tracked
+
+Persistent monitored prop universe.
+
+Directional
+
+Tracked props with a valid OVER/UNDER direction.
+
+Actionable
+
+Props satisfying downstream recommendation criteria.
+
+Delivered
+
+Props actually sent to Telegram.
+
+These are different populations.
+
+Example:
+
+Observed 90,000
+
+does NOT mean:
+
+Actionable 90,000
+
+And:
+
+Delivered 30
+
+does NOT mean:
+
+Tracked 30
+
+Do not allow delivery counts to masquerade as tracking counts.
+
+⸻
+
+19. DO NOT CHANGE ALERT QUALIFICATION
+
+Do NOT modify the existing alert qualification rules as part of this work.
+
+Do not change:
+
+* direction-only alert requirement
+* football Telegram suppression
+* provider-specific alert labels
+* alert deduplication
+* Bet Quality
+* confidence
+* scoring formulas
+* Telegram formatting
+* stale-line protections
+* safety protections
+
+Tracking and grading operate independently upstream of those rules.
+
+⸻
+
+20. TESTS
+
+Add focused regression tests proving:
+
+Snapshot tracking
+
+* Every legitimate provider observation can be persisted.
+* Non-directional observations are tracked.
+* Rejected observations are tracked.
+* Cold-start observations are tracked.
+* Unchanged observations are tracked.
+* Previously delivered observations remain tracked.
+* Underdog observations are tracked.
+* PrizePicks observations are tracked.
+* Multiple sports are tracked.
+* Football observations are tracked.
+
+Grading
+
+* Tracked props can receive HIT.
+* Tracked props can receive MISS.
+* Tracked props can receive PUSH.
+* Actual results are persisted.
+* Unresolved results remain unresolved.
+* Missing provider data does not create fake results.
+* Telegram delivery is not required for grading.
+
+History
+
+* Resolved results feed L5.
+* Resolved results feed L10.
+* Resolved results feed L20.
+* Resolved results feed L30.
+* Resolved results feed Season.
+* Missing history remains N/A/partial.
+* Provider results take priority over supplemental graded results.
+* No duplicate dates.
+* No cross-player contamination.
+* No cross-market contamination.
+
+Provider separation
+
+* PP remains PP.
+* UD remains UD.
+* PP source IDs remain provider-specific.
+* PP lines remain provider-specific.
+* PP sports remain provider-specific.
+* PP does not inherit Underdog ACTIVE_SPORTS.
+
+Football
+
+* Football remains tracked.
+* Football remains gradable.
+* Football remains in historical analysis.
+* Football remains excluded from Telegram.
+
+Commands
+
+* /tracking uses the full tracking universe.
+* /performance uses resolved tracked outcomes.
+* /grade uses persistent grading data.
+* /stats distinguishes tracked from delivered.
+* /calibration uses actual resolved outcomes.
+* /player uses persistent player history.
+
+Do not weaken existing tests.
+
+Run:
+
+1. Focused tracking/grading/history tests.
+2. Full existing test suite.
+3. Compilation check.
+4. Diff check.
+
+⸻
+
+21. NO LIVE PRODUCTION ACTIONS
+
+Again, DO NOT RUN LIVE VERIFICATION.
+
+Do not restart or deploy anything.
+
+Do not send commands to the production Telegram bot.
+
+Do not wait for real provider data.
+
+Do not wait for games to finish.
+
+Do not create test alerts.
+
+Do not create synthetic production records.
+
+All verification must occur through code inspection and automated tests only.
+
+⸻
+
+22. PRESERVE COMPLETED WORK
+
+Do NOT regress:
+
+* PrizePicks dynamic sport discovery
+* PrizePicks provider separation
+* PrizePicks source-ID handling
+* Underdog active source-ID/FPR lifecycle
+* Underdog rescanning
+* unified cadence
+* adaptive batching
+* clean restart
+* max_instances=1
+* player identity
+* provider evidence
+* graded-prop evidence foundation
+* command reliability
+* football monitoring
+* football Telegram suppression
+* direction-only alert qualification
+* alert deduplication
+* Railway configuration
+* OddsAPI
+* unrelated providers
+
+Only modify components directly required to fix universal tracking/grading.
+
+⸻
+
+23. CHECKPOINT
+
+Do not create a checkpoint until:
+
+* Tracking undercount is fixed.
+* Every monitored provider observation can enter persistent tracking.
+* Tracking is independent of direction.
+* Tracking is independent of Telegram delivery.
+* HIT/MISS/PUSH persistence works.
+* Progressive history uses legitimate resolved results.
+* PP and UD remain provider-separated.
+* Football remains tracked but not Telegram-delivered.
+* Focused tests pass.
+* Full suite passes.
+* Compilation passes.
+* Diff checks pass.
+
+No checkpoint should be created before those conditions are satisfied.
+
+⸻
+
+24. FINAL REPORT
+
+Report exactly:
+
+IMPLEMENTED
+
+Every actual tracking/grading/history change made.
+
+TESTED
+
+* Focused tests: X passed
+* Full suite: X passed
+* Compilation: PASS/FAIL
+* Diff check: PASS/FAIL
+
+UNVERIFIED LIVE
+
+State clearly that NO LIVE VERIFICATION WAS PERFORMED, and list only anything that genuinely cannot be established from automated testing.
+
+PRESERVED
+
+Confirm:
+
+* PrizePicks monitoring was preserved.
+* Underdog monitoring was preserved.
+* Alert qualification was not changed.
+* Football remains monitored/tracked but not Telegram-delivered.
+* Scheduler concurrency was not changed.
+* Railway was not restarted.
+* Railway was not deployed.
+* No production data was fabricated.
+* No test alerts were sent.
+
+⸻
+
+🔴 FINAL INSTRUCTION
+
+DO NOT RUN LIVE VERIFICATION.
+
+DO NOT RESTART OR DEPLOY RAILWAY.
+
+DO NOT SEND TELEGRAM COMMANDS.
+
+DO NOT WAIT FOR NATURAL ALERTS OR GAME RESULTS.
+
+Make the smallest targeted fixes necessary.
+
+Do not redesign the bot.
+
+Do not create a second tracking or grading system.
+
+Do not make Telegram delivery the source of truth for tracking.
+
+Do not make direction the source of truth for tracking.
+
+The monitoring universe is the source of truth.
+
+Every legitimate observed prop must remain part of the persistent historical tracking universe and must be eligible for grading when its real result becomes available.
+
+Verification is automated only:
+
+INSPECT → FIX → FOCUSED TESTS → FULL SUITE → COMPILE → DIFF CHECK → REPORT

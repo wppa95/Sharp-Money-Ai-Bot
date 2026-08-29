@@ -1934,12 +1934,19 @@ class Database:
         self,
         provider: str,
         props: "list[object]",
+        *,
+        append_snapshot: bool = False,
     ) -> int:
         """
         Persist a normalized provider batch in the shared prop-history table.
 
         This lets authorized PrizePicks observations share lifecycle/history
         storage with Underdog without adding a second database or pipeline.
+
+        ``append_snapshot`` is used by a provider's monitoring ingestion path
+        when every observation must remain historically available.  The
+        default retains the existing current-state upsert behavior for
+        corroboration and metadata refresh callers.
         """
         if not props:
             return 0
@@ -1955,11 +1962,10 @@ class Database:
             # including alternate lines for the same event.  Keep the legacy
             # Underdog identity unchanged because its event/source lifecycle
             # is maintained by the provider-specific snapshot bridge.
-            source_key = (
-                external_id
-                if provider == "PrizePicks" and external_id
-                else ""
-            )
+            # A provider source ID is the stable identity through line
+            # movement.  If it is unavailable, event identity is the safest
+            # fallback; a later line update can still refresh that row.
+            source_key = external_id or event_id
             return (player, sport, stat, event_id, source_key)
 
         keys = {
@@ -2052,6 +2058,52 @@ class Database:
 
                 old_line = float(row.line_value or 0.0)
                 changed = abs(old_line - line_value) >= 0.01
+                if append_snapshot:
+                    row = PropLineHistory(
+                        provider=provider,
+                        sport=key[1],
+                        player_name=key[0],
+                        team=getattr(prop, "team", "") or "",
+                        stat_type=key[2],
+                        line_value=line_value,
+                        game_time=getattr(prop, "game_time", None),
+                        external_id=getattr(prop, "external_id", "") or "",
+                        game_id=(
+                            getattr(prop, "event_id", "")
+                            or getattr(prop, "game_id", "")
+                            or ""
+                        ),
+                        fetched_at=observed_at,
+                        first_seen=(
+                            getattr(latest[key], "first_seen", None)
+                            or observed_at
+                        ),
+                        last_seen=observed_at,
+                        change_count=(
+                            (getattr(latest[key], "change_count", 0) or 0)
+                            + (1 if changed else 0)
+                        ),
+                        prev_line=old_line if changed else getattr(
+                            latest[key], "prev_line", None
+                        ),
+                        removed=False,
+                        lifecycle_state="DISCOVERED",
+                        opening_line=(
+                            getattr(latest[key], "opening_line", None)
+                            if getattr(latest[key], "opening_line", None) is not None
+                            else old_line
+                        ),
+                        score_tier=getattr(prop, "score_tier", None),
+                        bet_recommendation=getattr(prop, "bet_recommendation", None),
+                        bet_confidence=getattr(prop, "bet_confidence", None),
+                        market_quality_score=getattr(
+                            prop, "market_quality_score", None
+                        ),
+                        score_total=getattr(prop, "score_total", None),
+                    )
+                    s.add(row)
+                    latest[key] = row
+                    continue
                 if changed:
                     row.prev_line = old_line
                     row.change_count = (row.change_count or 0) + 1
