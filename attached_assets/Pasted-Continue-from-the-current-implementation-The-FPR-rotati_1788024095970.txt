@@ -1,0 +1,340 @@
+Continue from the current implementation.
+
+The FPR rotation and classification-neutrality changes are complete.
+
+Now make ONLY the targeted reporting/accounting corrections below.
+
+Do NOT redesign the architecture.
+Do NOT create a new task.
+Do NOT propose a follow-up task.
+Do NOT perform live or production verification.
+
+Do NOT:
+
+* query Railway production
+* query production databases
+* send Telegram commands
+* send test alerts
+* restart Railway
+* deploy Railway
+* wait for production cycles
+
+Use local inspection, regression tests, compilation, and diff checks only.
+
+1. USE ONE AUTHORITATIVE POPULATION MODEL
+
+All current reporting must distinguish the actual populations instead of treating them as interchangeable.
+
+Keep these separate:
+
+* Active tracked props
+* Historical observations
+* Directional opportunities
+* Delivered alerts
+* Pending grading
+* Resolved outcomes
+* HIT
+* MISS
+* PUSH
+* Removed/started historical records
+
+Do NOT use Telegram delivery counts as tracked-prop counts.
+
+Do NOT use candidate-log counts as the primary normalized population when normalized history exists.
+
+Do NOT use historical observation totals as active tracked totals.
+
+2. /FUNNEL
+
+Ensure /funnel reports actual current monitoring populations.
+
+It should clearly distinguish:
+
+* Active provider observations
+* Historical observations
+* Evaluated opportunities
+* Directional opportunities
+* Rescored props
+* Delivered alerts
+* Pending grading
+* Resolved outcomes
+* HIT/MISS/PUSH where applicable
+* Provider breakdown
+
+Keep PrizePicks and Underdog separate.
+
+FPR rotation reporting must reflect the actual active rotation rather than obsolete classification populations.
+
+Do NOT display:
+
+* Watchlist
+* Near-Miss
+* PASS
+* S/A/B/C
+* Tier 1
+* Tier 2
+
+as current funnel populations.
+
+3. /STATS
+
+Ensure /stats uses precise terminology.
+
+Clearly distinguish:
+
+* Tracked observations
+* Active tracked props
+* Directional opportunities
+* Delivered alerts
+* Pending
+* Resolved
+* HIT
+* MISS
+* PUSH
+
+Provider totals must remain separate.
+
+A prop that was tracked but never delivered must still appear in tracking and grading populations.
+
+4. /TRACKING
+
+Ensure /tracking is based on normalized persistent tracking data.
+
+It must show:
+
+* All supported non-football sports
+* Underdog separately
+* PrizePicks separately
+* Active tracked props
+* Historical observations
+* Directional opportunities
+* Pending outcomes
+* Resolved outcomes
+* Accuracy where enough resolved data exists
+
+Do NOT hard-code NFL, NBA, or MLB.
+
+Do NOT silently exclude legitimate non-football sports.
+
+Football remains excluded from current active tracking populations while historical football records remain preserved.
+
+Soccer remains supported.
+
+5. /RECONCILE
+
+Ensure /reconcile keeps provider accounting separate.
+
+It must distinguish:
+
+Provider → observations → tracked → directional → actionable → delivered.
+
+Do not imply that raw provider observations are Telegram messages.
+
+Delivery ledger counts remain delivery counts.
+
+Persistent tracking remains tracking.
+
+6. /DASHBOARD
+
+Ensure /dashboard uses the same normalized tracking source.
+
+Recently Tracked Props must:
+
+* Include all supported non-football sports
+* Include both PrizePicks and Underdog
+* Use the persistent tracking/history source
+* Reflect the latest hourly tracking view
+* Not be hard-coded to NFL
+* Not be restricted to delivered alerts
+
+Keep current and historical views clearly separated.
+
+7. /HEALTH AND /STATUS
+
+Ensure /health and /status do not report misleading provider values.
+
+For each provider show, where available:
+
+* Provider status
+* Last fetch
+* Last normalized write
+* Observed count
+* Active tracked count
+* Evaluated count
+* Directional count
+* Delivered count
+* Pending count
+* Resolved count
+
+If a provider genuinely has no data, display a clean empty/unavailable state.
+
+Do NOT borrow Underdog numbers for PrizePicks.
+
+Do NOT display stale values as current values.
+
+8. CURRENT-RUN VS HISTORICAL DATA
+
+Current-run monitoring metrics must not accidentally use historical totals.
+
+Clearly distinguish:
+
+Current monitoring
+
+* Current active pool
+* Current FPR rotation
+* Current cycle
+* Current rescoring
+* Current coverage
+
+Historical
+
+* Total observations
+* Historical outcomes
+* Historical grading
+* Historical performance
+
+A restart must not cause old historical totals to appear as current-run scan counts.
+
+9. FPR REPORTING
+
+Keep FPR reporting aligned with the recent rotation changes.
+
+Expose where existing reporting already supports it:
+
+* Active pool size
+* Batch size
+* Cursor position
+* Rotation number
+* Rescored count
+* Unique source IDs
+* Sports covered
+* Coverage
+* Remaining active pool
+
+Do not introduce another monitoring system.
+
+Do not add classification-based metrics back.
+
+10. PROVIDER SEPARATION
+
+Preserve all existing provider identity rules.
+
+PrizePicks:
+
+* Uses PrizePicks source IDs
+* Uses PrizePicks provider catalog
+* Remains independent from Underdog
+* Alternate lines remain distinct
+
+Underdog:
+
+* Uses Underdog source IDs
+* Uses Underdog active source state
+* Remains independent from PrizePicks
+
+No provider’s delivery state should affect another provider’s tracking or delivery counts.
+
+11. FOOTBALL
+
+Keep football completely excluded from current active monitoring/reporting populations where the existing scope requires it.
+
+Preserve historical football records.
+
+Keep soccer included.
+
+Do not expand football back into provider polling, scoring, evidence, FPR, or current tracking.
+
+12. GRADING
+
+Reporting must remain independent from Telegram delivery.
+
+Undelivered directional opportunities remain gradeable.
+
+Resolved tracked opportunities must feed:
+
+* HIT
+* MISS
+* PUSH
+* historical performance
+* progressive player history where applicable
+
+Do not require a Telegram alert for grading.
+
+13. TESTS
+
+Add/update focused tests proving:
+
+* Active counts differ correctly from historical counts.
+* Observations differ correctly from directional opportunities.
+* Directional opportunities differ correctly from delivered alerts.
+* Pending/resolved populations are correct.
+* HIT/MISS/PUSH populations are correct.
+* PrizePicks and Underdog counts remain separate.
+* Multiple non-football sports appear in reporting.
+* Soccer remains included.
+* Football remains excluded from current populations.
+* Historical football records remain preserved.
+* /funnel does not use obsolete classification populations.
+* /stats terminology is accurate.
+* /tracking is not NFL-only.
+* /dashboard recently tracked props are multi-sport and multi-provider.
+* /health and /status do not borrow provider metrics.
+* /reconcile maintains provider-separated accounting.
+* Current-run metrics do not use historical totals.
+* FPR metrics represent actual rotation state.
+
+Do NOT weaken existing tests.
+
+14. VALIDATION
+
+Run:
+
+1. Focused reporting/tracking/funnel/provider/FPR tests.
+2. Full existing test suite.
+3. Python compilation.
+4. git diff –check.
+
+Do NOT perform live verification.
+
+FINAL REPORT
+
+IMPLEMENTED
+
+Exactly what changed.
+
+POPULATION ACCOUNTING
+
+Explain how active, historical, directional, delivered, pending, and resolved populations are separated.
+
+PROVIDERS
+
+Confirm PrizePicks and Underdog remain completely provider-separated.
+
+REPORTING
+
+Confirm /funnel, /stats, /tracking, /dashboard, /health, /status, and /reconcile use the correct populations.
+
+FPR
+
+Confirm FPR reporting reflects the actual active rotation and remains classification-neutral.
+
+FOOTBALL
+
+Confirm football remains excluded from current monitoring/reporting populations while historical records remain intact, and soccer remains supported.
+
+GRADING
+
+Confirm undelivered opportunities remain gradeable.
+
+TESTED
+
+Report focused tests, full suite, compilation, and diff check.
+
+LIVE VERIFICATION
+
+NO LIVE/PRODUCTION VERIFICATION WAS PERFORMED.
+
+TASK MANAGEMENT
+
+No new task was created.
+No follow-up task was proposed.
