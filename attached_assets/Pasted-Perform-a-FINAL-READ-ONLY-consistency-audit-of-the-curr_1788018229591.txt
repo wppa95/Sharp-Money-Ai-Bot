@@ -1,0 +1,389 @@
+Perform a FINAL READ-ONLY consistency audit of the current Sharp Money Bot implementation.
+
+Do NOT make any code changes.
+
+Do NOT create a task.
+Do NOT propose a follow-up task.
+Do NOT close or modify tasks.
+
+Do NOT perform live or production verification.
+
+Do NOT:
+
+* query Railway production
+* query production databases
+* send Telegram commands
+* send test alerts
+* wait for production cycles
+* fabricate production data
+* restart Railway
+
+This is a code-path/configuration/test audit only.
+
+1. ACTIVE MONITORING MODEL
+
+Confirm the current architecture is internally consistent:
+
+Monitoring
+→ active provider universe
+→ bounded FPR rotation
+→ evaluation/rescoring
+→ persistent tracking
+→ grading/evidence
+→ canonical delivery gate
+→ Telegram only when eligible
+
+Confirm:
+
+* FPR is the sole full-pool rotation.
+* Active Underdog props come from the latest active source-ID state.
+* PropLineHistory does not limit the active Underdog pool.
+* Previously scanned props remain eligible.
+* Previously rejected/non-actionable props remain eligible.
+* Previously delivered props remain eligible.
+* Cold-start props remain eligible.
+* New props remain active after their first scan.
+* Line movers receive priority.
+* Remaining active props receive guaranteed rotation coverage.
+* Cursor advances.
+* Cursor wraps.
+* New props entering mid-rotation are incorporated.
+* Event-started/removed props leave active monitoring without losing history.
+* No second competing full-pool rotation exists.
+
+2. PRIZEPICKS / UNDERDOG SEPARATION
+
+Confirm there is no provider leakage.
+
+PrizePicks must use:
+
+* PrizePicks/PropLine observations
+* PrizePicks source IDs
+* PrizePicks event identity
+* PrizePicks sport discovery
+* PrizePicks tracking
+* PrizePicks grading
+* PrizePicks delivery state
+
+Underdog must use its own equivalent provider-specific data.
+
+Confirm:
+
+* PP does not inherit Underdog ACTIVE_SPORTS.
+* PP does not inherit Underdog recommendations.
+* PP does not inherit Underdog source IDs.
+* PP does not inherit Underdog dedup state.
+* PP alternate lines remain distinct.
+* PP line movement remains detectable.
+* PP supports authoritative discovered non-football sports.
+* Legacy PrizePicks paths delegate to the current PP pipeline rather than creating a second pipeline.
+* No duplicate PrizePicks scheduler exists.
+
+3. FOOTBALL EXCLUSION
+
+Confirm football/gridiron is consistently excluded upstream where intended so it does not waste provider/API processing.
+
+Confirm aliases including:
+
+* NFL
+* NCAAF
+* CFB
+* FCS
+* CFL
+* UFL
+* USFL
+* XFL
+* NCAA Football
+* arena football
+* indoor football
+* other gridiron variants
+
+are blocked from active monitoring/provider processing where the current scope requires it.
+
+Confirm:
+
+* Soccer remains allowed.
+* Historical football records are not deleted.
+* Football cannot reach Telegram.
+* No provider-specific path can accidentally re-enable football.
+* Player-history enrichment does not process excluded football rows unnecessarily.
+
+4. OBSERVATION / TRACKING POPULATIONS
+
+Confirm reporting terminology and populations are internally consistent.
+
+These must remain distinct:
+
+* Active tracked props
+* Historical observations
+* Directional opportunities
+* Delivered alerts
+* Pending grading
+* Resolved outcomes
+* HIT
+* MISS
+* PUSH
+
+Confirm:
+
+* Tracking is not limited to Telegram delivery.
+* Every persisted observation can remain part of historical analysis.
+* Directional opportunities can be graded even if never delivered.
+* Delivery counts are not used as tracking counts.
+* Historical observations are not incorrectly reported as current active props.
+* Current active counts use the latest provider/source-ID state.
+* Provider populations remain separate.
+* Sport populations remain accurate.
+* Removed/started props are excluded from active tracking but remain historical.
+
+5. REMOVE OBSOLETE FRAMEWORK CONCEPTS
+
+Confirm the current monitoring/evaluation framework contains NO active dependency on:
+
+* Watchlist
+* Near-Miss
+* PASS
+* S-tier
+* A-tier
+* B-tier
+* C-tier
+* Tier 1
+* Tier 2
+
+These must not:
+
+* gate evaluation
+* gate rescanning
+* gate tracking
+* gate grading
+* gate evidence
+* determine active-pool eligibility
+* determine Telegram delivery
+
+If compatibility code or historical labels still exists, confirm it cannot influence current monitoring, evaluation, tracking, grading, or delivery.
+
+6. NON-ACTIONABLE PROPS
+
+Confirm non-actionable props continue through the normal lifecycle:
+
+* remain active
+* remain in FPR rotation
+* continue rescanning
+* continue evaluation
+* continue tracking
+* can accumulate evidence
+* can eventually be graded
+
+Confirm:
+
+Non-actionable ≠ excluded from monitoring.
+
+7. DELIVERY GATE
+
+Confirm there is one canonical delivery gate.
+
+It must enforce:
+
+* valid actionable direction
+* strict pregame state
+* football suppression
+* provider-specific identity
+* provider-specific data
+* existing evidence requirements
+* existing safety protections
+* delivery deduplication
+* atomic claim/release lifecycle
+
+Confirm:
+
+* STARTED/LIVE/IN_PROGRESS/FINAL/COMPLETED states cannot reach Telegram.
+* Future timestamps alone cannot override explicit live state.
+* Unknown state is conservatively handled under strict production validation.
+* Missing timestamp is not automatically considered safely pregame.
+* A prop more than 24 hours away is NOT rejected merely because it is >24 hours away.
+* Approaching-start props can receive priority without requiring a separate watcher.
+* Exact repeated opportunities are suppressed.
+* Meaningful line/direction/event/source/provider changes remain eligible.
+* Failed/filtered/rate-limited/exceptional delivery claims are released.
+* Successful deliveries remain suppressed.
+
+8. DELIVERY RESULT / RECOVERY
+
+Confirm the recent runtime fix remains correct.
+
+There must be no unsupported DeliveryResult.reason access.
+
+Confirm:
+
+* DeliveryResult is handled according to its actual contract.
+* Normal filtered/rate-limited/failed delivery results do not falsely trigger monitoring recovery.
+* Successful delivery does not increment monitoring failure streaks.
+* Genuine monitoring failures remain distinguishable.
+* Recovery logic does not treat expected delivery outcomes as scan failures.
+
+9. SCHEDULER OWNERSHIP
+
+Confirm the scheduler contains only the intended jobs.
+
+Expected architecture:
+
+* one Underdog monitor
+* one FPR/full-pool rotation
+* required independent market/provider jobs
+* CLV seeder/harvester
+* grading
+* player-history/evidence collection
+* budget/maintenance jobs as currently intended
+
+Confirm:
+
+* Stable Refresh is NOT independently scheduled.
+* No duplicate FPR exists.
+* No duplicate Underdog monitor exists.
+* No duplicate PrizePicks monitor exists.
+* Legacy connector/consensus/steam/CLV-check jobs remain inactive if intentionally disabled.
+* Monitoring jobs retain max_instances=1.
+* No competing watcher was introduced.
+
+10. DASHBOARD / HEALTH / FUNNEL
+
+Confirm the reporting surfaces use the corrected provider-separated populations.
+
+Confirm /health and /status expose a distinct PrizePicks pipeline without borrowing Underdog values.
+
+Confirm /funnel, /stats, /tracking, /reconcile, /dashboard, /grade, /performance, /backtest, /calibration, /picks, /slip, /player, and /slipstats do not contradict each other.
+
+Specifically confirm:
+
+* tracked ≠ directional ≠ delivered
+* pending ≠ unresolved tracking population
+* resolved outcomes are delivery-independent
+* HIT/MISS/PUSH are based on actual outcomes
+* PP and UD remain separated
+* football remains excluded from active processing
+* soccer remains included
+* obsolete Watchlist/PASS/tier concepts are not current framework gates
+* current reporting does not silently fall back to a smaller or incorrect population when normalized history exists
+
+11. EVIDENCE / GRADING
+
+Confirm:
+
+* Provider-backed evidence remains preferred where available.
+* Graded-prop evidence supplements missing provider history.
+* No fabricated evidence is generated.
+* Duplicate dates are prevented.
+* Cross-player/stat contamination is prevented.
+* Provider and graded evidence remain distinguishable.
+* Progressive history remains based on real samples.
+* Missing history remains N/A rather than fake 0%.
+* Undelivered tracked opportunities remain gradeable.
+* HIT/MISS/PUSH remains delivery-independent.
+
+12. TEST COVERAGE
+
+Review the existing regression coverage and confirm tests exist for the major contracts above.
+
+Do not modify tests.
+
+Run only the relevant existing local tests if needed to confirm the audit.
+
+Then run:
+
+* full existing test suite
+* Python compilation
+* git diff --check
+
+Do NOT perform live verification.
+
+13. CHANGE-SCOPE AUDIT
+
+Review the current implementation/diff and confirm no recent change accidentally modified unrelated behavior.
+
+Pay particular attention to:
+
+* scoring formulas
+* BQ/MQ
+* confidence calculations
+* evidence providers
+* FPR architecture
+* adaptive batching
+* monitoring cadence
+* scheduler architecture
+* provider identity
+* PrizePicks discovery
+* Underdog behavior
+* historical data
+* Telegram formatting
+* soccer support
+* pregame protection
+
+If any unrelated regression or contradictory logic is discovered, report it clearly.
+
+Do NOT fix it during this audit.
+
+FINAL REPORT
+
+Return exactly these sections:
+
+CONSISTENCY RESULT
+
+PASS or FAIL.
+
+ACTIVE MONITORING
+
+Summarize whether the active-universe/FPR/rescanning lifecycle is internally consistent.
+
+PROVIDER SEPARATION
+
+Summarize PP vs UD separation.
+
+FOOTBALL
+
+Summarize upstream exclusion and Telegram suppression, including soccer preservation.
+
+TRACKING / GRADING
+
+Summarize whether observations, directional opportunities, grading, and outcomes remain properly separated.
+
+OBSOLETE FRAMEWORK
+
+Confirm whether Watchlist/Near-Miss/PASS/S-A-B-C/Tier 1/Tier 2 are completely absent from active logic.
+
+DELIVERY GATE
+
+Summarize the canonical delivery rules and confirm no legacy gate conflicts remain.
+
+RECOVERY
+
+Confirm the DeliveryResult contract/recovery fix.
+
+SCHEDULER
+
+Confirm scheduler ownership, single FPR rotation, no Stable Refresh background job, and max_instances=1.
+
+REPORTING
+
+Confirm dashboard/health/funnel/stats/tracking/reconcile consistency and separate PrizePicks pipeline visibility.
+
+TESTED
+
+* Focused tests: X passed
+* Full suite: X passed
+* Compilation: PASS/FAIL
+* Diff check: PASS/FAIL
+
+FINDINGS
+
+List any contradictions, remaining risks, or inconsistencies found.
+
+LIVE VERIFICATION
+
+NO LIVE/PRODUCTION VERIFICATION WAS PERFORMED.
+
+TASK MANAGEMENT
+
+No new task was created.
+No follow-up task was proposed.
+
+Do NOT make changes during this audit.
