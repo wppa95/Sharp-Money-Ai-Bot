@@ -5551,6 +5551,13 @@ class Database:
             resolved = 0
             delivered = 0
             provider_delivered: dict[str, int] = {}
+            directional_by_provider: dict[str, int] = {}
+            directional_by_sport: dict[str, int] = {}
+            pending_by_provider: dict[str, int] = {}
+            resolved_by_provider: dict[str, int] = {}
+            result_counts: dict[str, int] = {}
+            result_counts_by_provider: dict[str, dict[str, int]] = {}
+            result_counts_by_sport: dict[str, dict[str, int]] = {}
             resolved_results = {
                 "HIT", "MISS", "PUSH", "VOID", "CANCELLED",
                 "INJURY_VOID", "GAME_INTERRUPTED",
@@ -5578,11 +5585,29 @@ class Database:
                         recommendation_key, {}
                     ).get(result_key, 0) + 1
                 )
+                directional_by_provider[provider_key] = (
+                    directional_by_provider.get(provider_key, 0) + 1
+                )
+                sport_key = str(sport or "UNKNOWN")
+                directional_by_sport[sport_key] = (
+                    directional_by_sport.get(sport_key, 0) + 1
+                )
+                result_counts[result_key] = result_counts.get(result_key, 0) + 1
+                provider_results = result_counts_by_provider.setdefault(provider_key, {})
+                provider_results[result_key] = provider_results.get(result_key, 0) + 1
+                sport_results = result_counts_by_sport.setdefault(sport_key, {})
+                sport_results[result_key] = sport_results.get(result_key, 0) + 1
                 total += 1
                 if result_key == "PENDING":
                     pending += 1
+                    pending_by_provider[provider_key] = (
+                        pending_by_provider.get(provider_key, 0) + 1
+                    )
                 elif result_key in resolved_results:
                     resolved += 1
+                    resolved_by_provider[provider_key] = (
+                        resolved_by_provider.get(provider_key, 0) + 1
+                    )
 
             # Delivery is queried separately because the tracking query above
             # intentionally keeps only the fields needed for outcome counts.
@@ -5685,15 +5710,27 @@ class Database:
             "active_by_provider": active_by_provider,
             "active_by_sport": active_by_sport,
             "tracked": tracked,
+            "active_tracked": tracked,
             "tracked_observations": sum(tracked_observations_by_provider.values()),
+            "historical_observations": sum(tracked_observations_by_provider.values()),
             "tracked_observations_by_provider": tracked_observations_by_provider,
+            "historical_observations_by_provider": tracked_observations_by_provider,
             "total":    total,
             "directional_total": total,
+            "directional_by_provider": directional_by_provider,
+            "directional_by_sport": directional_by_sport,
             "actionable": total,
+            "actionable_total": total,
             "delivered": delivered,
             "provider_delivered": provider_delivered,
+            "delivered_by_provider": provider_delivered,
             "resolved": resolved,
             "pending":  pending,
+            "pending_by_provider": pending_by_provider,
+            "resolved_by_provider": resolved_by_provider,
+            "result_counts": result_counts,
+            "result_counts_by_provider": result_counts_by_provider,
+            "result_counts_by_sport": result_counts_by_sport,
         }
 
     # ── Player Block Management ───────────────────────────────────────────────
