@@ -13,12 +13,9 @@ A directional pick requires REAL player game-result data.  Market-movement
 
 Tier definitions
 ────────────────
-  S — All available windows (L5/L10/L20/L30/Season) show consistent edge
-       (≥ 0.65 OVER or ≤ 0.35 UNDER), primary window has ≥ 8 games.
-  A — Strong primary window (≥ 0.62 / ≤ 0.38), no contradicting window,
-       season supports direction when available.
-  B — Playable edge (≥ 0.60 / ≤ 0.40), no strong contradiction.
-  PASS — Insufficient data, conflicting windows, or hit rate in 40–60% zone.
+The decision object has no direction when the evidence gates are not met.
+Tier labels remain optional reporting metadata for directional evaluations; they
+are not qualification or delivery gates.
 
 Public API
 ──────────
@@ -63,9 +60,9 @@ _MIN_CONFIDENCE: int = 10
 class UDBetDecision:
     """Complete betting evaluation for one Underdog prop."""
 
-    recommendation: str   # "OVER" | "UNDER" | "PASS"
-    decision_tier:  str   # "S"    | "A"     | "B"    | "PASS"
-    confidence:     int   # 0–95  (always 0 for PASS)
+    recommendation: Optional[str]   # "OVER" | "UNDER" | None
+    decision_tier:  Optional[str]   # reporting metadata for directional picks
+    confidence:     int              # 0–95 (0 when no direction exists)
     reason:         str
 
     # ── Real game-result windows (None = window not available) ────────────────
@@ -112,6 +109,26 @@ class UDBetDecision:
     # ── Constructors ─────────────────────────────────────────────────────────
 
     @classmethod
+    def make_no_direction(
+        cls,
+        reason: str,
+        hit_rates: "Optional[PlayerHitRates]" = None,
+        avg_vs_line_pct: Optional[float] = None,
+        at_historical_low: bool = False,
+    ) -> "UDBetDecision":
+        """Construct a monitored evaluation with no directional result."""
+        w = _windows_from_hit_rates(hit_rates)
+        return cls(
+            recommendation     = None,
+            decision_tier      = None,
+            confidence         = 0,
+            reason             = reason,
+            avg_vs_line_pct    = avg_vs_line_pct,
+            at_historical_low  = at_historical_low,
+            **w,
+        )
+
+    @classmethod
     def make_pass(
         cls,
         reason: str,
@@ -119,16 +136,12 @@ class UDBetDecision:
         avg_vs_line_pct: Optional[float] = None,
         at_historical_low: bool = False,
     ) -> "UDBetDecision":
-        """Construct a PASS decision, optionally inheriting window data."""
-        w = _windows_from_hit_rates(hit_rates)
-        return cls(
-            recommendation     = "PASS",
-            decision_tier      = "PASS",
-            confidence         = 0,
-            reason             = reason,
-            avg_vs_line_pct    = avg_vs_line_pct,
-            at_historical_low  = at_historical_low,
-            **w,
+        """Compatibility alias; current decisions store no direction, not PASS."""
+        return cls.make_no_direction(
+            reason=reason,
+            hit_rates=hit_rates,
+            avg_vs_line_pct=avg_vs_line_pct,
+            at_historical_low=at_historical_low,
         )
 
     @classmethod
@@ -157,7 +170,7 @@ class UDBetDecision:
     # ── Display helpers ───────────────────────────────────────────────────────
 
     def recommendation_emoji(self) -> str:
-        return {"OVER": "🟢", "UNDER": "🔴", "PASS": "⚪"}.get(self.recommendation, "❓")
+        return {"OVER": "🟢", "UNDER": "🔴"}.get(self.recommendation, "⚪")
 
     def tier_display(self) -> str:
         return {
@@ -165,11 +178,10 @@ class UDBetDecision:
             "A":    "🔷 A-Tier",
             "B":    "🔹 B-Tier",
             "C":    "▪️ C-Tier",
-            "PASS": "—",
         }.get(self.decision_tier, "—")
 
     def confidence_display(self) -> str:
-        if self.recommendation == "PASS":
+        if self.recommendation not in ("OVER", "UNDER"):
             return "—"
         return f"{self.confidence}/100"
 
@@ -262,7 +274,7 @@ def make_ud_bet_decision(
     if not hasattr(hit_rates, "has_real_data"):
         hit_rates = None
     if hit_rates is None or not hit_rates.has_real_data:
-        return UDBetDecision.make_pass(
+        return UDBetDecision.make_no_direction(
             reason             = (
                 "No player game history available — "
                 "market signals retained for monitoring, but are not sufficient "
@@ -276,7 +288,7 @@ def make_ud_bet_decision(
     # ── Gate 2: sufficient sample size ───────────────────────────────────────
     primary = _primary_window(hit_rates)
     if primary is None:
-        return UDBetDecision.make_pass(
+        return UDBetDecision.make_no_direction(
             reason             = (
                 f"Insufficient sample ({hit_rates.total_games} result(s) — "
                 f"need ≥{_MIN_GAMES_PRIMARY})"
@@ -295,7 +307,7 @@ def make_ud_bet_decision(
     elif rate <= (1.0 - _b):
         direction = "UNDER"
     else:
-        return UDBetDecision.make_pass(
+        return UDBetDecision.make_no_direction(
             reason             = (
                 f"Hit rate {rate:.0%} is inconclusive — "
                 f"no clear directional edge (need ≥{_b:.0%} or ≤{1-_b:.0%})"
@@ -308,7 +320,7 @@ def make_ud_bet_decision(
     # ── Gate 4: no contradicting window ──────────────────────────────────────
     contradiction = _check_contradictions(hit_rates, direction)
     if contradiction:
-        return UDBetDecision.make_pass(
+        return UDBetDecision.make_no_direction(
             reason             = contradiction,
             hit_rates          = hit_rates,
             avg_vs_line_pct    = avg_vs_line_pct,

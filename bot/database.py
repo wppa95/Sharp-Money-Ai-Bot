@@ -5744,7 +5744,14 @@ class Database:
                     PropOpportunityLog.sport,
                     PropOpportunityLog.recommendation,
                     PropOpportunityLog.result,
+                    func.count(),
                 ).where(directional)
+                .group_by(
+                    PropOpportunityLog.provider,
+                    PropOpportunityLog.sport,
+                    PropOpportunityLog.recommendation,
+                    PropOpportunityLog.result,
+                )
             )
             total = 0
             pending = 0
@@ -5762,51 +5769,52 @@ class Database:
                 "HIT", "MISS", "PUSH", "VOID", "CANCELLED",
                 "INJURY_VOID", "GAME_INTERRUPTED",
             }
-            for provider, sport, rec, res in directional_rows.all():
+            for provider, sport, rec, res, row_count in directional_rows.all():
                 if not _is_supported_tracking_sport(sport):
                     continue
+                row_count = int(row_count or 0)
                 provider_key = str(provider or "Underdog")
                 recommendation_key = str(rec or "").upper()
                 result_key = str(res or "PENDING").upper()
                 counts.setdefault(recommendation_key, {})[result_key] = (
-                    counts.setdefault(recommendation_key, {}).get(result_key, 0) + 1
+                    counts.setdefault(recommendation_key, {}).get(result_key, 0) + row_count
                 )
                 by_sport.setdefault(sport, {}).setdefault(
                     recommendation_key, {}
                 )[result_key] = (
                     by_sport.setdefault(sport, {}).setdefault(
                         recommendation_key, {}
-                    ).get(result_key, 0) + 1
+                    ).get(result_key, 0) + row_count
                 )
                 by_provider.setdefault(provider_key, {}).setdefault(
                     recommendation_key, {}
                 )[result_key] = (
                     by_provider.setdefault(provider_key, {}).setdefault(
                         recommendation_key, {}
-                    ).get(result_key, 0) + 1
+                    ).get(result_key, 0) + row_count
                 )
                 directional_by_provider[provider_key] = (
-                    directional_by_provider.get(provider_key, 0) + 1
+                    directional_by_provider.get(provider_key, 0) + row_count
                 )
                 sport_key = str(sport or "UNKNOWN")
                 directional_by_sport[sport_key] = (
-                    directional_by_sport.get(sport_key, 0) + 1
+                    directional_by_sport.get(sport_key, 0) + row_count
                 )
-                result_counts[result_key] = result_counts.get(result_key, 0) + 1
+                result_counts[result_key] = result_counts.get(result_key, 0) + row_count
                 provider_results = result_counts_by_provider.setdefault(provider_key, {})
-                provider_results[result_key] = provider_results.get(result_key, 0) + 1
+                provider_results[result_key] = provider_results.get(result_key, 0) + row_count
                 sport_results = result_counts_by_sport.setdefault(sport_key, {})
-                sport_results[result_key] = sport_results.get(result_key, 0) + 1
-                total += 1
+                sport_results[result_key] = sport_results.get(result_key, 0) + row_count
+                total += row_count
                 if result_key == "PENDING":
-                    pending += 1
+                    pending += row_count
                     pending_by_provider[provider_key] = (
-                        pending_by_provider.get(provider_key, 0) + 1
+                        pending_by_provider.get(provider_key, 0) + row_count
                     )
                 elif result_key in resolved_results:
-                    resolved += 1
+                    resolved += row_count
                     resolved_by_provider[provider_key] = (
-                        resolved_by_provider.get(provider_key, 0) + 1
+                        resolved_by_provider.get(provider_key, 0) + row_count
                     )
 
             # Delivery is queried separately because the tracking query above
@@ -5815,17 +5823,24 @@ class Database:
                 select(
                     PropOpportunityLog.provider,
                     PropOpportunityLog.sport,
+                    func.count(),
                 ).where(
                     directional,
                     PropOpportunityLog.alert_sent == True,  # noqa: E712
+                ).group_by(
+                    PropOpportunityLog.provider,
+                    PropOpportunityLog.sport,
                 )
             )
-            for provider, sport in delivered_rows.all():
+            for provider, sport, row_count in delivered_rows.all():
                 if not _is_supported_tracking_sport(sport):
                     continue
                 provider_key = str(provider or "Underdog")
-                delivered += 1
-                provider_delivered[provider_key] = provider_delivered.get(provider_key, 0) + 1
+                row_count = int(row_count or 0)
+                delivered += row_count
+                provider_delivered[provider_key] = (
+                    provider_delivered.get(provider_key, 0) + row_count
+                )
 
             # Persistent observations are a separate population from
             # directional opportunities and from Telegram deliveries. Count
@@ -5878,6 +5893,7 @@ class Database:
                 select(
                     PropLineHistory.provider,
                     PropLineHistory.sport,
+                    func.count(PropLineHistory.id),
                 ).where(
                     PropLineHistory.id.in_(current_ids),
                     or_(
@@ -5888,19 +5904,25 @@ class Database:
                         PropLineHistory.game_time.is_(None),
                         PropLineHistory.game_time > now,
                     ),
+                ).group_by(
+                    PropLineHistory.provider,
+                    PropLineHistory.sport,
                 )
             )
             active_by_provider: dict[str, int] = {}
             active_by_sport: dict[str, int] = {}
-            for provider, sport in current_rows.all():
+            for provider, sport, row_count in current_rows.all():
                 if not _is_supported_tracking_sport(sport):
                     continue
                 provider_key = str(provider or "Unknown")
                 sport_key = str(sport or "UNKNOWN")
+                row_count = int(row_count or 0)
                 active_by_provider[provider_key] = (
-                    active_by_provider.get(provider_key, 0) + 1
+                    active_by_provider.get(provider_key, 0) + row_count
                 )
-                active_by_sport[sport_key] = active_by_sport.get(sport_key, 0) + 1
+                active_by_sport[sport_key] = (
+                    active_by_sport.get(sport_key, 0) + row_count
+                )
             tracked = sum(active_by_provider.values())
 
         return {
