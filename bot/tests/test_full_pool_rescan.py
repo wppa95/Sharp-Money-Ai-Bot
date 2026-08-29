@@ -1109,9 +1109,9 @@ class TestFPRJob:
         # deliver_underdog should NOT have been called
         delivery_mock.deliver_underdog.assert_not_awaited()
 
-    # ── Test 10 continued: NFL/MLB processed in their rotation slot ────────────
+    # ── Test 10 continued: football is excluded while MLB is processed ─────────
     async def test_nfl_mlb_eventually_processed(self):
-        """NFL/MLB props appear in sorted pool and are scored — test 10."""
+        """FPR preserves supported sports but excludes football — test 10."""
         pool = {
             ("NFL Player", "Passing Yards", 22.5): _make_snap(player="NFL Player", sport="NFL"),
             ("MLB Player", "Strikeouts",    22.5): _make_snap(player="MLB Player", sport="MLB"),
@@ -1143,7 +1143,7 @@ class TestFPRJob:
         ):
             await _full_pool_rescan_job(ctx)
 
-        assert "NFL Player" in processed, "NFL player must be processed"
+        assert "NFL Player" not in processed, "NFL player must stay out of FPR"
         assert "MLB Player" in processed, "MLB player must be processed"
 
     # ── Test 20: API totals NOT shown in display (log format check) ───────────

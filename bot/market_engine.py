@@ -52,6 +52,7 @@ from engine.player_prop_market import (
     _release_prop_delivery_claim,
 )
 from engine.score_validation import clamp_score
+from engine.sport_policy import is_football_related_sport
 from engine.telegram_rate_limiter import get_rate_limiter
 from providers import FailureType, get_health_monitor
 from engine.delivery_gates import (
@@ -385,7 +386,10 @@ async def _get_prizepicks_scan_sports(provider) -> tuple[str, ...]:
     )
     discover = getattr(provider, "discover_sports", None)
     if not callable(discover):
-        return configured
+        return tuple(
+            sport for sport in configured
+            if not is_football_related_sport(sport)
+        )
     try:
         discovered = await discover()
     except Exception as exc:  # noqa: BLE001
@@ -393,7 +397,10 @@ async def _get_prizepicks_scan_sports(provider) -> tuple[str, ...]:
             "prizepicks_cycle: active-sport discovery failed; using configured fallback: %s",
             type(exc).__name__,
         )
-        return configured
+        return tuple(
+            sport for sport in configured
+            if not is_football_related_sport(sport)
+        )
 
     sports: list[str] = []
     seen: set[str] = set()
@@ -403,11 +410,18 @@ async def _get_prizepicks_scan_sports(provider) -> tuple[str, ...]:
             or getattr(item, "sport", None)
             or item
         ).strip()
-        if canonical and canonical.upper() not in seen:
+        if (
+            canonical
+            and not is_football_related_sport(canonical)
+            and canonical.upper() not in seen
+        ):
             seen.add(canonical.upper())
             sports.append(canonical)
     if discovered is None:
-        return configured
+        return tuple(
+            sport for sport in configured
+            if not is_football_related_sport(sport)
+        )
     # A successful but empty catalog means there is no currently advertised
     # PP slate.  Do not issue requests against guessed static sports.
     return tuple(sports)
@@ -847,6 +861,8 @@ async def _get_odds_api_confirmation(
         and _propline_provider is not None
         and getattr(_propline_provider, "is_available", lambda: False)()
     )
+    if normalized_market == "player_prop" and is_football_related_sport(sport):
+        return None
     if not getattr(config, "ODDS_API_ENABLED", True) and not pp_available:
         return None
     if normalized_market == "player_prop" and _analysis_engine is None and not pp_available:
@@ -1268,6 +1284,12 @@ async def _run_prizepicks_independent_cycle(
             return
         global _prizepicks_sport_cursor
         sport = configured_sports[_prizepicks_sport_cursor % len(configured_sports)]
+        if is_football_related_sport(sport):
+            logger.debug(
+                "prizepicks_cycle: football sport filtered before fetch: %s",
+                sport,
+            )
+            return
         _prizepicks_sport_cursor = (_prizepicks_sport_cursor + 1) % len(configured_sports)
         props = None
         logger.info("prizepicks_cycle_started: provider=PrizePicks sport=%s", sport)
@@ -1351,6 +1373,16 @@ async def _run_prizepicks_independent_cycle(
     else:
         sport = _fetched_sport or ""
         props = _fetched_props
+
+    # Compatibility providers may return a mixed-sport batch.  Keep the
+    # provider-wide custom endpoint usable while ensuring football never
+    # reaches persistence, scoring, evidence, or delivery.
+    props = [
+        prop for prop in props
+        if not is_football_related_sport(getattr(prop, "sport", ""))
+    ]
+    if is_football_related_sport(sport):
+        props = []
 
     if not props:
         logger.info(
@@ -2688,7 +2720,11 @@ async def underdog_job(context) -> None:
     if _health:
         _health.record_provider_fetch("Underdog")
 
-    ud_snaps = [s for s in snapshots if s.sportsbook == "Underdog"]
+    ud_snaps = [
+        s for s in snapshots
+        if s.sportsbook == "Underdog"
+        and not is_football_related_sport(getattr(s, "sport", ""))
+    ]
     # Game markets share the pick'em feed but not the player-prop scoring
     # model. Persist them in the existing canonical snapshot history so
     # rotation/removal remains observable, then keep them out of prop scoring.
@@ -4892,6 +4928,11 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 (player, stat, float(getattr(snap, "line_value", 0.0) or 0.0)): snap
                 for (player, stat), snap in active_pool.items()
             }
+        active_pool = {
+            key: snap
+            for key, snap in active_pool.items()
+            if not is_football_related_sport(getattr(snap, "sport", ""))
+        }
         pool_keys: list   = sorted(
             active_pool,
             key=lambda key: (
@@ -5695,6 +5736,11 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 active_pool.setdefault(("Underdog", *_ud_key), _ud_snap)
         else:
             active_pool = await db.get_all_active_underdog_snapshots_by_line()
+        active_pool = {
+            key: snap
+            for key, snap in active_pool.items()
+            if not is_football_related_sport(getattr(snap, "sport", ""))
+        }
         fpr_pool_size = len(active_pool)
         if fpr_pool_size == 0:
             _fpr_execution_running = False

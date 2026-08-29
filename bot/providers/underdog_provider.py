@@ -22,6 +22,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from providers.prop_provider import PlayerProp, PropProviderBase
+from engine.sport_policy import is_football_related_sport
 
 
 # ── Stat type normalization ───────────────────────────────────────────────────
@@ -181,7 +182,10 @@ class UnderdogProvider(PropProviderBase):
             if getattr(snap, "removed", False):
                 continue
             prop = ud_snapshot_to_player_prop(snap)
-            if self._sport_filter is None or prop.sport in self._sport_filter:
+            if (
+                not is_football_related_sport(prop.sport)
+                and (self._sport_filter is None or prop.sport in self._sport_filter)
+            ):
                 props.append(prop)
         return props
 

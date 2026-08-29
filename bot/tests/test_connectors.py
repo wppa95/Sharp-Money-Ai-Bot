@@ -319,23 +319,23 @@ class TestUnderdogConnector:
             **UNDERDOG_MONEYLINE_RESPONSE,
             "moneyline_lines": [
                 {
-                    **UNDERDOG_MONEYLINE_RESPONSE["moneyline_lines"][0],
+            **UNDERDOG_MONEYLINE_RESPONSE["moneyline_lines"][1],
                     "outcomes": [
-                        {"id": "out-nfl-kc", "team_name": "Kansas City Chiefs", "price": -155},
-                        {"id": "out-nfl-lv", "team_name": "Las Vegas Raiders", "price": 135},
+                        {"team": "Los Angeles Dodgers", "american_odds": -155},
+                        {"team": "New York Mets", "american_odds": 135},
                     ],
                 },
             ],
         }
         c._fetch_projections = AsyncMock(return_value=c._parse(changed))
         snapshots = await c.fetch()
-        chiefs = next(s for s in snapshots if s.team == "Kansas City Chiefs")
-        assert chiefs.is_moneyline is True
-        assert chiefs.market_type == "Moneyline"
-        assert chiefs.line is None
-        assert chiefs.odds == -155
-        assert chiefs.opening_odds == -125
-        assert chiefs.odds_change == -30
+        dodgers = next(s for s in snapshots if s.team == "Los Angeles Dodgers")
+        assert dodgers.is_moneyline is True
+        assert dodgers.market_type == "Moneyline"
+        assert dodgers.line is None
+        assert dodgers.odds == -155
+        assert dodgers.opening_odds == -145
+        assert dodgers.odds_change == -10
 
     @pytest.mark.asyncio
     async def test_disabled_connector_returns_empty(self):

@@ -59,10 +59,10 @@ async def test_player_history_yields_when_underdog_claims_slot_after_active_read
 @pytest.mark.asyncio
 async def test_player_history_stops_before_db_write_when_underdog_claims_after_fetch():
     """A completed stats request must not trigger writes into the hot scan."""
-    snapshot = SimpleNamespace(player="Player One", sport="NFL", selection="Passing Yards 10.5")
+    snapshot = SimpleNamespace(player="Player One", sport="NBA", selection="Points 10.5")
     db = MagicMock()
     db.get_active_underdog_snapshot_per_prop = AsyncMock(
-        return_value={("Player One", "Passing Yards"): snapshot}
+        return_value={("Player One", "Points"): snapshot}
     )
     db.upsert_player_result = AsyncMock()
     context = SimpleNamespace(bot_data={"db": db})
@@ -77,7 +77,7 @@ async def test_player_history_stops_before_db_write_when_underdog_claims_after_f
         await player_history_collector_job(context)
 
     fake_provider.fetch_results.assert_awaited_once_with(
-        "Player One", "NFL", "passing yards"
+            "Player One", "NBA", "points"
     )
     db.upsert_player_result.assert_not_awaited()
 

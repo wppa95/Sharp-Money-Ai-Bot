@@ -6,6 +6,8 @@ import logging
 import re
 import time
 
+from engine.sport_policy import is_football_related_sport
+
 logger = logging.getLogger(__name__)
 
 # The scheduler cadence remains 240 seconds. Reserve a safety margin so the
@@ -133,7 +135,10 @@ async def player_history_collector_job(context) -> None:
                     stat = re.sub(r"\s+-?\d+(?:\.\d+)?\s*$", "", selection)
                     stat = stat or selection
                 sport = (getattr(s, "sport", None) or "UNKNOWN").upper()
-                if sport not in _SUPPORTED_HISTORY_SPORTS:
+                if (
+                    sport not in _SUPPORTED_HISTORY_SPORTS
+                    or is_football_related_sport(sport)
+                ):
                     continue  # No provider data path — skip to avoid wasting API calls
                 key = (player.strip(), sport, (stat or "").lower().strip())
                 if key[0] and key[2] and key not in seen:
@@ -179,7 +184,10 @@ async def player_history_collector_job(context) -> None:
                     )
                 for s in plh:
                     sport = (getattr(s, "sport", None) or "UNKNOWN").upper()
-                    if sport not in _SUPPORTED_HISTORY_SPORTS:
+                    if (
+                        sport not in _SUPPORTED_HISTORY_SPORTS
+                        or is_football_related_sport(sport)
+                    ):
                         continue  # No provider data path — skip
                     key = (
                         (s.player_name or "").strip(),

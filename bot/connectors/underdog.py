@@ -24,6 +24,7 @@ from typing import Optional
 import aiohttp
 
 from .base import BaseConnector, ConnectorStatus, MarketSnapshot
+from engine.sport_policy import is_football_related_sport
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +102,23 @@ class UnderdogConnector(BaseConnector):
         if projections is None:
             return []
 
+        # Drop football before movement state, removal markers, snapshots, or
+        # any downstream monitoring work. Historical database rows are not
+        # touched; this only limits future active observations.
+        projections = [
+            projection
+            for projection in projections
+            if not is_football_related_sport(projection.sport)
+        ]
+        # A process that was running before the scope change may still have
+        # football entries in its movement cache. Remove those in-memory
+        # entries silently instead of manufacturing [REMOVED] observations.
+        self._previous = {
+            external_id: projection
+            for external_id, projection in self._previous.items()
+            if not is_football_related_sport(projection.sport)
+        }
+        self._last_seen.intersection_update(self._previous)
         current_ids = {p.external_id for p in projections}
         removed_ids = self._last_seen - current_ids
 

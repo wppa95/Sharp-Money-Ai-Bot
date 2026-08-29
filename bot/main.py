@@ -29,6 +29,7 @@ from database import Database, OddsRecord
 from engine import AnalysisEngine
 from engine.season_check import SeasonChecker
 from engine.analysis import _SPORT_TO_ODDS_API_KEY, PlayerPropLine
+from engine.sport_policy import is_football_related_sport
 from alert_scope_filter import is_ev_line_in_scope
 from models import (
     MarketType,
@@ -356,7 +357,10 @@ async def post_init(application: Application) -> None:
 
     # ── Multi-platform connector registry ─────────────────────────────────────
     registry = ConnectorRegistry()
-    active_sports = config.active_sports
+    active_sports = [
+        sport for sport in config.active_sports
+        if not is_football_related_sport(sport)
+    ]
 
     registry.register(UnderdogConnector(
         # active_sports=None: accept every sport the Underdog API returns.

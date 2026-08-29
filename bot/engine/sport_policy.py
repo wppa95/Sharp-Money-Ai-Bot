@@ -10,7 +10,10 @@ _FOOTBALL_ALIASES = frozenset(
     {
         "AFL",
         "AFLW",
+        "AUSSIE_RULES",
+        "AUSTRALIAN_RULES",
         "AMERICAN_FOOTBALL",
+        "AMERICANFOOTBALL",
         "CANADIAN_FOOTBALL",
         "CFB",
         "CFL",
@@ -21,6 +24,7 @@ _FOOTBALL_ALIASES = frozenset(
         "NCAA",
         "NCAAF",
         "NFL",
+        "RUGBY",
         "UFL",
         "USFL",
         "XFL",
@@ -39,4 +43,12 @@ def is_football_related_sport(sport: Optional[object]) -> bool:
     key = canonical_sport_key(sport)
     if not key:
         return False
-    return key in _FOOTBALL_ALIASES or "FOOTBALL" in key
+    return (
+        key in _FOOTBALL_ALIASES
+        or "FOOTBALL" in key
+        or key.startswith("RUGBY")
+        or key.startswith("AUSSIE_RULES")
+        or key.startswith("AUSTRALIAN_RULES")
+        or key.endswith("_AFL")
+        or key.endswith("_AFLW")
+    )
