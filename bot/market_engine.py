@@ -1784,25 +1784,43 @@ async def _run_prizepicks_independent_cycle(
             direction=str(getattr(candidate["decision"], "recommendation", "") or ""),
         ):
             continue
-        result = await delivery.deliver_underdog(
-            player_name=player,
-            team=str(getattr(candidate["prop"], "team", "") or ""),
-            sport=sport,
-            stat_type=stat,
-            old_line=candidate["previous"],
-            new_line=line,
-            game_time=getattr(candidate["prop"], "game_time", None),
-            game_status=getattr(candidate["prop"], "provider_status", None),
-            score=candidate["score"],
-            validation=candidate["validation"],
-            decision=candidate["decision"],
-            market_quality=candidate["market_quality"],
-            market_pressure=candidate["market_pressure"],
-            pp_line=line,
-            standing=True,
-            strict_pregame=True,
-            source="PrizePicks",
-        )
+        try:
+            result = await delivery.deliver_underdog(
+                player_name=player,
+                team=str(getattr(candidate["prop"], "team", "") or ""),
+                sport=sport,
+                stat_type=stat,
+                old_line=candidate["previous"],
+                new_line=line,
+                game_time=getattr(candidate["prop"], "game_time", None),
+                game_status=getattr(candidate["prop"], "provider_status", None),
+                score=candidate["score"],
+                validation=candidate["validation"],
+                decision=candidate["decision"],
+                market_quality=candidate["market_quality"],
+                market_pressure=candidate["market_pressure"],
+                pp_line=line,
+                standing=True,
+                strict_pregame=True,
+                source="PrizePicks",
+            )
+        except Exception as exc:  # noqa: BLE001
+            _release_prop_delivery_claim(
+                _prop_market_alerted, player, sport, stat, line,
+                provider="PrizePicks",
+                source_id=str(getattr(candidate["prop"], "external_id", "") or ""),
+                event_id=str(
+                    getattr(candidate["prop"], "event_id", "")
+                    or getattr(candidate["prop"], "game_id", "")
+                    or ""
+                ),
+                direction=str(getattr(candidate["decision"], "recommendation", "") or ""),
+            )
+            logger.warning(
+                "prizepicks_cycle: delivery failed; claim released for %s/%s: %s",
+                player, stat, type(exc).__name__,
+            )
+            continue
         if result.sent:
             delivered += 1
             try:
@@ -4186,29 +4204,51 @@ async def underdog_job(context) -> None:
                     continue
 
                 _dq_delivery  = AlertDelivery(db, bot, chat_ids)
-                _dq_result    = await _dq_delivery.deliver_underdog(
-                    player_name         = _dq_player,
-                    team                = _dq_snap.team or "",
-                    sport               = _dq_snap.sport,
-                    stat_type           = _dq_st,
-                    old_line            = _dq_prev or _dq_line_val,
-                    new_line            = _dq_line_val,
-                    game_time           = _dq_snap.game_time,
-                    game_status         = (
-                        getattr(_dq_snap, "game_status", None)
-                        or getattr(_dq_snap, "provider_status", None)
-                    ),
-                    score               = _dq_score,
-                    new_prop            = _dq_is_new,
-                    validation          = _dq_val,
-                    decision            = _dq_dec,
-                    market_quality      = _dq_mq,
-                    market_pressure     = _dq_mp,
-                    intelligence_trace  = _dq_intel,
-                    market_confirmation = _dq_odds,
-                    standing            = (_dq_path == "standing"),
-                    strict_pregame      = True,
-                )
+                try:
+                    _dq_result    = await _dq_delivery.deliver_underdog(
+                        player_name         = _dq_player,
+                        team                = _dq_snap.team or "",
+                        sport               = _dq_snap.sport,
+                        stat_type           = _dq_st,
+                        old_line            = _dq_prev or _dq_line_val,
+                        new_line            = _dq_line_val,
+                        game_time           = _dq_snap.game_time,
+                        game_status         = (
+                            getattr(_dq_snap, "game_status", None)
+                            or getattr(_dq_snap, "provider_status", None)
+                        ),
+                        score               = _dq_score,
+                        new_prop            = _dq_is_new,
+                        validation          = _dq_val,
+                        decision            = _dq_dec,
+                        market_quality      = _dq_mq,
+                        market_pressure     = _dq_mp,
+                        intelligence_trace  = _dq_intel,
+                        market_confirmation = _dq_odds,
+                        standing            = (_dq_path == "standing"),
+                        strict_pregame      = True,
+                    )
+                except Exception as _dq_delivery_exc:
+                    _release_prop_delivery_claim(
+                        _prop_market_alerted,
+                        _dq_player,
+                        _dq_sport,
+                        _dq_st,
+                        _dq_line_val,
+                        provider=getattr(_dq_snap, "provider", None) or "Underdog",
+                        source_id=str(_dq_ext_id or ""),
+                        event_id=str(
+                            getattr(_dq_snap, "event", "")
+                            or getattr(_dq_snap, "game_id", "")
+                            or ""
+                        ),
+                        direction=str(_dq_direction or ""),
+                    )
+                    logger.warning(
+                        "underdog_job: delivery failed; claim released for %s/%s: %s",
+                        _dq_player, _dq_st, type(_dq_delivery_exc).__name__,
+                    )
+                    _dq_result = DeliveryResult(sent=False)
 
                 if _dq_result.sent:
                     _dq["_sent"] = True
@@ -5223,28 +5263,54 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 continue
 
             _sr_delivery = AlertDelivery(db, bot, chat_ids)
-            _sr_result   = await _sr_delivery.deliver_underdog(
-                player_name         = _sr_player,
-                team                = _sr_snap.team or "",
-                sport               = _sr_sport,
-                stat_type           = _sr_stat,
-                old_line            = _sr_line,
-                new_line            = _sr_line,
-                game_time           = _sr_snap.game_time,
-                game_status         = (
-                    getattr(_sr_snap, "game_status", None)
-                    or getattr(_sr_snap, "provider_status", None)
-                ),
-                score               = _sr_score,
-                validation          = _sr_val,
-                decision            = _sr_dec,
-                market_quality      = _sr_mq,
-                market_pressure     = _sr_mp,
-                standing            = True,
-                strict_pregame      = True,
-                intelligence_trace  = _sr_intel_trace,
-                market_confirmation = _sr_odds_confirm,
-            )
+            try:
+                _sr_result   = await _sr_delivery.deliver_underdog(
+                    player_name         = _sr_player,
+                    team                = _sr_snap.team or "",
+                    sport               = _sr_sport,
+                    stat_type           = _sr_stat,
+                    old_line            = _sr_line,
+                    new_line            = _sr_line,
+                    game_time           = _sr_snap.game_time,
+                    game_status         = (
+                        getattr(_sr_snap, "game_status", None)
+                        or getattr(_sr_snap, "provider_status", None)
+                    ),
+                    score               = _sr_score,
+                    validation          = _sr_val,
+                    decision            = _sr_dec,
+                    market_quality      = _sr_mq,
+                    market_pressure     = _sr_mp,
+                    standing            = True,
+                    strict_pregame      = True,
+                    intelligence_trace  = _sr_intel_trace,
+                    market_confirmation = _sr_odds_confirm,
+                )
+            except Exception as _sr_delivery_exc:
+                _release_prop_delivery_claim(
+                    _prop_market_alerted,
+                    _sr_player,
+                    _sr_sport,
+                    _sr_stat,
+                    _sr_line,
+                    provider="Underdog",
+                    source_id=str(
+                        getattr(_sr_snap, "external_id", None)
+                        or getattr(_sr_snap, "id", None)
+                        or ""
+                    ),
+                    event_id=str(
+                        getattr(_sr_snap, "event", "")
+                        or getattr(_sr_snap, "game_id", "")
+                        or ""
+                    ),
+                    direction=str(getattr(_sr_dec, "recommendation", "") or ""),
+                )
+                logger.warning(
+                    "stable_refresh: delivery failed; claim released for %s/%s: %s",
+                    _sr_player, _sr_stat, type(_sr_delivery_exc).__name__,
+                )
+                _sr_result = DeliveryResult(sent=False)
             if _sr_result.sent:
                 sr_sent += 1
                 # _record_prop_alerted already called by _try_claim_delivery_slot.
@@ -5464,26 +5530,53 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                          _wl_mq_ok = False
                     if _wl_mq_ok:
                      _wl_delivery = AlertDelivery(db, bot, chat_ids)
-                     _wl_result   = await _wl_delivery.deliver_underdog(
-                        player_name    = _wl_player,
-                        team           = _wl_snap.team or "",
-                        sport          = _wl_sport,
-                        stat_type      = _wl_stat,
-                        old_line       = _wl_cur_line,
-                        new_line       = _wl_cur_line,
-                        game_time      = _wl_snap.game_time,
-                        game_status    = (
-                            getattr(_wl_snap, "game_status", None)
-                            or getattr(_wl_snap, "provider_status", None)
-                        ),
-                        score          = _wl_score,
-                        validation     = _wl_val,
-                        decision       = _wl_dec,
-                        market_quality = _wl_mq,
-                        market_pressure= _wl_mp,
-                        standing       = True,
-                        strict_pregame = True,
-                    )
+                     try:
+                      _wl_result   = await _wl_delivery.deliver_underdog(
+                         player_name    = _wl_player,
+                         team           = _wl_snap.team or "",
+                         sport          = _wl_sport,
+                         stat_type      = _wl_stat,
+                         old_line       = _wl_cur_line,
+                         new_line       = _wl_cur_line,
+                         game_time      = _wl_snap.game_time,
+                         game_status    = (
+                             getattr(_wl_snap, "game_status", None)
+                             or getattr(_wl_snap, "provider_status", None)
+                         ),
+                         score          = _wl_score,
+                         validation     = _wl_val,
+                         decision       = _wl_dec,
+                         market_quality = _wl_mq,
+                         market_pressure= _wl_mp,
+                         standing       = True,
+                         strict_pregame = True,
+                      )
+                     except Exception as _wl_delivery_exc:
+                      _release_prop_delivery_claim(
+                          _prop_market_alerted,
+                          _wl_player,
+                          _wl_sport,
+                          _wl_stat,
+                          _wl_cur_line,
+                          provider="Underdog",
+                          source_id=str(
+                              getattr(_wl_snap, "external_id", None)
+                              or getattr(_wl_snap, "id", None)
+                              or ""
+                          ),
+                          event_id=str(
+                              getattr(_wl_snap, "event", "")
+                              or getattr(_wl_snap, "game_id", "")
+                              or ""
+                          ),
+                          direction=str(getattr(_wl_dec, "recommendation", "") or ""),
+                      )
+                      logger.warning(
+                          "stable_refresh: watchlist delivery failed; claim released "
+                          "for %s/%s: %s",
+                          _wl_player, _wl_stat, type(_wl_delivery_exc).__name__,
+                      )
+                      _wl_result = DeliveryResult(sent=False)
                     if _wl_mq_ok and _wl_result.sent:
                         wl_promoted += 1
                         # _record_prop_alerted already called by _try_claim_delivery_slot.
@@ -6211,7 +6304,8 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                          _fpr_mq_ok = False
                     if _fpr_mq_ok:
                      _fpr_delivery = AlertDelivery(db, bot, chat_ids)
-                     _fpr_result   = await _fpr_delivery.deliver_underdog(
+                      try:
+                       _fpr_result   = await _fpr_delivery.deliver_underdog(
                         player_name     = _fpr_player,
                         team            = getattr(_fpr_snap, "team", "") or "",
                         sport           = _fpr_sport,
@@ -6234,7 +6328,38 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         standing        = True,
                         strict_pregame   = True,
                         source          = _fpr_provider,
-                    )
+                       )
+                      except Exception as _fpr_delivery_exc:
+                       _release_prop_delivery_claim(
+                           _prop_market_alerted,
+                           _fpr_player,
+                           _fpr_sport,
+                           _fpr_stat,
+                           _fpr_line,
+                           provider=_fpr_provider,
+                           source_id=str(
+                               getattr(_fpr_snap, "external_id", None)
+                               or getattr(_fpr_snap, "id", None)
+                               or ""
+                           ),
+                           event_id=str(
+                               getattr(_fpr_snap, "event", "")
+                               or getattr(_fpr_snap, "game_id", "")
+                               or ""
+                           ),
+                           direction=str(
+                               getattr(_fpr_dec, "recommendation", "") or ""
+                           ),
+                       )
+                       logger.warning(
+                           "full_pool_rescan: delivery failed; claim released for "
+                           "%s/%s/%s: %s",
+                           _fpr_provider,
+                           _fpr_player,
+                           _fpr_stat,
+                           type(_fpr_delivery_exc).__name__,
+                       )
+                       _fpr_result = DeliveryResult(sent=False)
                     if _fpr_mq_ok and _fpr_result.sent:
                         fpr_sent      += 1
                         fpr_actionable += 1

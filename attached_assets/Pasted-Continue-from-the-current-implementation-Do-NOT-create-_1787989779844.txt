@@ -1,0 +1,374 @@
+Continue from the current implementation.
+
+Do NOT create a new task.
+Do NOT propose a follow-up task.
+If an existing task directly covers this work, you may close it after implementation and validation.
+
+Restarts are allowed if required.
+
+Do NOT perform live/production verification.
+Do NOT send Telegram commands.
+Do NOT send test alerts.
+Do NOT fabricate production data.
+
+FIX ACTIONABLE ALERT SPAM / MEANINGFUL OPPORTUNITY DEDUPLICATION
+
+The monitoring system must continue rescanning every active prop, but Telegram delivery must NOT repeatedly alert on the same unchanged opportunity.
+
+These are separate concerns:
+
+MONITORING = continuous rescanning of the full active universe.
+
+DELIVERY = only notify when there is a meaningful new actionable opportunity.
+
+1. CORE REQUIREMENT
+
+Repeated rescans of the same unchanged prop must NOT generate repeated Telegram alerts.
+
+Example:
+
+Max Muncy — Batter Strikeouts — UNDER 1.5
+
+If the bot rescans the same:
+
+* provider
+* source ID
+* event
+* player
+* market/stat
+* line
+* direction
+* actionable state
+
+it should NOT send another identical alert.
+
+The prop must continue being monitored and rescored internally.
+
+Only the duplicate delivery should be suppressed.
+
+2. MEANINGFUL CHANGES MUST BE ALLOWED
+
+A meaningful opportunity change should create a new delivery opportunity.
+
+Examples:
+
+* 0.5 → 1.5 line movement
+* 1.5 → 2.5 line movement
+* UNDER → OVER
+* OVER → UNDER
+* different provider
+* different source ID
+* different event
+* materially changed actionable state
+
+These should be treated as distinct opportunities when the existing identity model indicates they are distinct.
+
+Do NOT suppress legitimate new opportunities merely because the player and market are the same.
+
+3. PROVIDER SEPARATION
+
+The deduplication identity must remain provider-aware.
+
+Underdog and PrizePicks must never suppress each other’s alerts.
+
+For example:
+
+🐶 Underdog — Player X — Points 20.5 — OVER
+
+and
+
+🟣 PrizePicks — Player X — Points 20.5 — OVER
+
+are separate delivery opportunities.
+
+Provider must remain part of the identity.
+
+4. SOURCE-ID / EVENT-ID IDENTITY
+
+Use the existing provider/source/event identity model.
+
+Where available, delivery identity should distinguish:
+
+* provider
+* source ID
+* event ID
+* player
+* sport
+* market/stat
+* line
+* direction
+
+Do NOT revert to player + market alone.
+
+Do NOT create a second incompatible identity system.
+
+5. RESCAN BEHAVIOR
+
+A repeated rescan must:
+
+* evaluate the prop
+* update/persist tracking
+* update evidence/history where applicable
+* update grading state
+* update current state
+
+But it must NOT automatically create another Telegram delivery.
+
+This remains true even if:
+
+* the prop is rescanned 10 times
+* the prop is rescanned 50 times
+* the prop is rescanned 100 times
+
+One unchanged actionable opportunity should produce one delivery opportunity.
+
+6. LINE MOVEMENT
+
+When a line changes, the new line must be eligible for a new alert.
+
+Example:
+
+Initial:
+
+🐶 UNDERDOG
+Max Muncy
+Batter Strikeouts 0.5
+UNDER
+
+Later:
+
+🐶 UNDERDOG
+Max Muncy
+Batter Strikeouts 1.5
+UNDER
+
+The second state must be eligible for delivery because the opportunity materially changed.
+
+Do not let the old dedup claim permanently suppress the new line.
+
+7. DIRECTION CHANGES
+
+If:
+
+UNDER → OVER
+
+or:
+
+OVER → UNDER
+
+the changed directional opportunity must be eligible for delivery.
+
+The previous direction must not permanently suppress the new direction.
+
+8. FAILED DELIVERY / CLAIM RETENTION
+
+Preserve the existing atomic delivery-claim behavior.
+
+Claims may be acquired before sending to prevent concurrent duplicates.
+
+If delivery is:
+
+* filtered
+* rate-limited
+* rejected
+* otherwise unsuccessful
+
+the claim must be released so the opportunity can be retried.
+
+Only successful delivery should create durable suppression.
+
+Do NOT regress the existing failed-delivery claim-release fix.
+
+9. PRE-GAME PROTECTION
+
+Preserve strict pregame-only delivery.
+
+Started/live/in-progress/final events must remain blocked from actionable Telegram delivery.
+
+Do not change the timing safety logic.
+
+10. FOOTBALL
+
+Preserve the existing upstream football exclusion.
+
+Football and football-related sports must not generate Telegram alerts.
+
+Do not change historical records.
+
+11. ALERT FORMATTING
+
+Preserve provider-specific alert formatting.
+
+PrizePicks:
+
+🟣 PRIZEPICKS PICK
+
+Underdog:
+
+🐶 UNDERDOG PICK
+
+Do NOT reintroduce:
+
+ACTIONABLE BET PICK
+
+Do NOT reintroduce:
+
+verify before placing
+
+The alerts should remain clean and final.
+
+12. TRACKING MUST NOT BE REDUCED
+
+This is critical.
+
+Fixing alert spam must NOT reduce monitoring or tracking.
+
+Every active prop must still:
+
+* remain in FPR
+* be rescanned
+* be persisted
+* be eligible for grading
+* contribute to history
+
+Only duplicate Telegram delivery should be suppressed.
+
+13. DO NOT CONFUSE RESCAN WITH DELIVERY
+
+The system should behave conceptually like:
+
+ACTIVE PROP
+→ RESCAN
+→ TRACK
+→ RESCORE
+→ EVIDENCE
+→ GRADING
+
+and separately:
+
+ACTIONABLE STATE CHANGE
+→ DELIVERY ELIGIBILITY
+→ DEDUP CHECK
+→ TELEGRAM
+
+A rescan alone is NOT a delivery event.
+
+14. COMMAND / REPORTING IMPACT
+
+Do not make /tracking, /grade, /stats, /performance, /backtest, /funnel, or /reconcile depend on Telegram delivery counts.
+
+The alert deduplication system is delivery-specific.
+
+Persistent tracking and grading remain independent.
+
+15. TESTS
+
+Add/update focused regression tests proving:
+
+* Same unchanged opportunity rescanned repeatedly produces one delivery.
+* 10 repeated rescans produce one delivery.
+* 50 repeated rescans produce one delivery.
+* 100 repeated rescans produce one delivery.
+* Line movement creates a new delivery opportunity.
+* Direction change creates a new delivery opportunity.
+* Event change creates a new delivery opportunity.
+* Source-ID change creates a new delivery opportunity.
+* Provider change creates a new delivery opportunity.
+* Alternate PrizePicks lines remain distinct.
+* Underdog and PrizePicks do not suppress each other.
+* Failed delivery releases the claim.
+* Rate-limited delivery releases the claim.
+* Filtered delivery releases the claim.
+* Successful delivery remains suppressed.
+* Rescanning continues after delivery.
+* Previously delivered props remain in FPR.
+* Previously rejected/non-actionable props remain in FPR.
+* Cold-start props remain in FPR.
+* Pregame-only protection remains intact.
+* Football remains excluded.
+* Provider-specific alert labels remain intact.
+* No generic ACTIONABLE BET PICK label returns.
+* No “verify before placing” wording returns.
+* Tracking remains independent of delivery.
+
+Run:
+
+1. Focused alert-dedup/provider regression tests.
+2. Full existing test suite.
+3. Python compilation.
+4. git diff –check.
+
+16. NO LIVE VERIFICATION
+
+Do NOT perform live/production verification.
+
+Do NOT:
+
+* query production data
+* send Telegram commands
+* send test alerts
+* wait for live events
+* fabricate production records
+
+Local regression tests and static/code-path verification are sufficient.
+
+A restart is allowed if required.
+
+17. NO UNRELATED CHANGES
+
+Do NOT change:
+
+* FPR architecture
+* active source-ID lifecycle
+* monitoring cadence
+* adaptive batching
+* scheduler
+* max_instances=1
+* provider ingestion
+* provider evidence
+* player identity
+* grading formulas
+* BQ/MQ
+* confidence
+* football exclusion
+* soccer monitoring
+* reporting populations
+* Stable Refresh removal
+
+Make the smallest targeted change necessary.
+
+18. TASK MANAGEMENT
+
+Do NOT create a new task.
+
+Do NOT propose a follow-up task.
+
+If an existing task directly covers this work, close that existing task after successful implementation and validation.
+
+FINAL REPORT
+
+IMPLEMENTED
+
+Exactly what changed.
+
+TESTED
+
+* Focused tests: X passed
+* Full suite: X passed
+* Compilation: PASS/FAIL
+* Diff check: PASS/FAIL
+
+PRESERVED
+
+Confirm monitoring, FPR, universal tracking, provider separation, grading, evidence, pregame protection, football exclusion, provider-specific alert formatting, scheduler, adaptive batching, max_instances=1, and historical data.
+
+LIVE VERIFICATION
+
+NO LIVE/PRODUCTION VERIFICATION WAS PERFORMED.
+
+TASK MANAGEMENT
+
+No new task was created.
+If an existing task directly covered this work, it may be closed.
+
+DO NOT CREATE A NEW TASK.
