@@ -1,0 +1,382 @@
+Continue from the current implementation.
+
+Do NOT create a new task.
+Do NOT propose a follow-up task.
+If an existing task directly covers this work, you may close it after implementation and validation.
+
+Restarts are allowed when required.
+
+Do NOT perform live/production verification.
+Do NOT send Telegram commands.
+Do NOT send test alerts.
+Do NOT fabricate production data.
+
+ACTIVE PROP RESCANNING — FINAL MONITORING CORRECTION
+
+Fix the active player-prop monitoring lifecycle so that every currently active, supported non-football prop remains eligible for continuous rescanning until its event starts or the provider removes it.
+
+The purpose is to ensure the bot does not miss opportunities simply because a prop:
+
+* did not move
+* was already evaluated
+* was previously rejected
+* was previously delivered
+* is a stable line
+* has weak evidence
+* is cold-start
+* is not currently directional
+
+1. AUTHORITATIVE ACTIVE UNIVERSE
+
+The active monitoring universe must come from the latest active provider/source-ID state.
+
+For Underdog:
+
+* latest active Underdog source IDs
+* current active state
+* event/game timing
+* removal state
+* alternate active lines where applicable
+
+For PrizePicks:
+
+* latest active PropLine source IDs
+* current active state
+* event/game timing
+* removal state
+* alternate lines where applicable
+
+Historical snapshot rows must remain historical records.
+
+Do NOT use historical snapshot count as the active monitoring universe.
+
+Do NOT use only candidate records.
+
+Do NOT use only line movers.
+
+Do NOT use only new props.
+
+Do NOT use only previously actionable props.
+
+2. FPR MUST BE THE SOLE FULL-POOL ROTATION
+
+Keep FPR as the only full-pool rotation mechanism.
+
+Required lifecycle:
+
+ACTIVE SOURCE-ID UNIVERSE
+→ bounded FPR batch
+→ evaluate/rescore
+→ persist observation
+→ advance cursor
+→ next batch
+→ continue
+→ wrap
+→ next rotation
+
+Do NOT create another full-pool cursor.
+
+Do NOT create another competing background rotation.
+
+Stable Refresh has already been removed as an independent background job. Keep it that way.
+
+3. EVERY ACTIVE PROP MUST ROTATE
+
+Every active supported prop must eventually be rescanned.
+
+This includes:
+
+* unchanged props
+* previously scored props
+* previously rejected props
+* previously delivered props
+* non-actionable props
+* cold-start props
+* props with missing evidence
+* props with no previous line movement
+
+Delivery deduplication must NOT remove anything from the monitoring universe.
+
+A prop remaining unchanged does NOT mean it can be permanently skipped.
+
+4. PRIORITY ORDER
+
+Within the single FPR rotation, prioritize:
+
+1. Newly discovered props
+2. Line movers
+3. Urgent movement/actionable changes
+4. Remaining active props requiring coverage
+5. Previously scanned stable props
+
+However, priority must NOT cause starvation.
+
+The remaining active universe must continue advancing toward complete coverage.
+
+After the cursor reaches the end, start another rotation.
+
+5. NEW PROPS
+
+New props must:
+
+* persist immediately
+* enter the active universe
+* receive priority
+* be evaluated
+* remain active after their first evaluation
+* return in future FPR rotations
+* remain monitored until event start/removal
+
+The new-prop fast path must NOT replace the full-pool rotation.
+
+6. LINE MOVERS
+
+Line movement must:
+
+* be detected from prior active state
+* trigger prompt rescoring
+* remain active after rescoring
+* return in subsequent rotations
+
+A line mover must not be removed from FPR after its fast-path rescore.
+
+7. EVENT START / REMOVAL
+
+When an event starts or a provider removes a prop:
+
+* remove it from the active monitoring universe
+* preserve all historical snapshots
+* preserve grading eligibility
+* preserve HIT/MISS/PUSH processing where applicable
+
+Inactive monitoring state must never mean historical deletion.
+
+8. PROVIDER SEPARATION
+
+Do not mix Underdog and PrizePicks identities.
+
+Every active prop must retain:
+
+* provider
+* source ID
+* event ID where available
+* player
+* sport
+* market/stat
+* line
+* direction where applicable
+
+Same provider + same source ID + same event should represent the same underlying opportunity while line changes update the current state appropriately.
+
+Alternate lines must remain distinct when they have distinct source IDs.
+
+9. FOOTBALL EXCLUSION
+
+Preserve the upstream football exclusion already implemented.
+
+Do NOT allow:
+
+* NFL
+* NCAAF
+* CFB
+* FCS
+* CFL
+* AFL
+* AFLW
+* other football/gridiron variants
+
+into active monitoring, scoring, evidence, or FPR.
+
+Do NOT delete historical football records.
+
+Soccer/association football remains supported.
+
+10. TRACKING
+
+Every active non-football prop that enters the monitoring system must continue producing persistent observations as it is rescanned.
+
+Tracking must remain independent of:
+
+* Telegram delivery
+* directional qualification
+* line movement
+* evidence availability
+
+Do not reduce tracking to actionable picks.
+
+11. GRADING
+
+Persisted directional tracked opportunities must remain eligible for eventual:
+
+* HIT
+* MISS
+* PUSH
+
+grading.
+
+Do not require Telegram delivery for grading.
+
+Do not change the existing provider-backed evidence or graded-prop evidence lifecycle.
+
+12. PRE-GAME ONLY DELIVERY
+
+Preserve the strict pregame delivery protection.
+
+Started/live/in-progress/final events must not produce current actionable alerts.
+
+Monitoring/tracking can preserve historical information, but Telegram actionable delivery remains pregame only.
+
+13. REPORTING
+
+Make sure /funnel exposes enough information to demonstrate that the rotation is actually advancing.
+
+Where the current reporting architecture already supports these values, expose:
+
+* active source-ID pool
+* FPR batch size
+* cursor position
+* rotation number
+* rescored count
+* unique source IDs rescored
+* sports covered
+* coverage percentage
+* remaining active coverage
+
+Do not create a separate monitoring system just for these metrics.
+
+14. PERFORMANCE
+
+Keep the existing adaptive batching.
+
+Do NOT reintroduce a fixed 500 ceiling.
+
+Do NOT increase concurrency.
+
+Keep:
+
+max_instances=1
+
+The objective is to maximize sustainable throughput while continuously covering the active universe.
+
+Do not sacrifice full-pool coverage simply because a subset of props are stable.
+
+15. TESTS
+
+Add/update focused regression tests proving:
+
+* Active universe comes from latest provider source-ID state.
+* Historical snapshot rows do not determine active eligibility.
+* New props enter rotation.
+* New props remain after first scan.
+* Line movers receive priority.
+* Line movers remain in rotation.
+* Unchanged props eventually get rescanned.
+* Previously rejected props remain eligible.
+* Previously delivered props remain eligible.
+* Non-actionable props remain eligible.
+* Cold-start props remain eligible.
+* Cursor advances.
+* Cursor wraps.
+* Multiple rotations work.
+* New props entering mid-rotation are incorporated.
+* Multiple non-football sports receive coverage.
+* Same small group cannot consume every batch.
+* Event-started props leave active rotation.
+* Historical records remain after event start.
+* Removal markers supersede active state.
+* Alternate lines remain distinct where source IDs differ.
+* Provider identity remains separated.
+* Football never enters FPR.
+* Soccer remains supported.
+* Every persisted active observation remains trackable.
+* Directional grading remains independent of delivery.
+* HIT/MISS/PUSH protection remains intact.
+* Pregame delivery protection remains intact.
+* FPR remains the sole full-pool rotation.
+* No Stable Refresh background rotation exists.
+* max_instances=1 remains intact.
+
+Run:
+
+1. Focused FPR/active-universe regression tests.
+2. Full existing test suite.
+3. Python compilation.
+4. git diff --check.
+
+16. NO LIVE VERIFICATION
+
+Do NOT perform live/production verification.
+
+Do NOT:
+
+* send Telegram commands
+* send test alerts
+* query production data
+* fabricate production data
+* wait for natural events/results
+
+Local tests and static/code-path verification are sufficient.
+
+A restart is allowed if required to apply the implementation.
+
+17. NO UNRELATED CHANGES
+
+Do NOT change:
+
+* scoring formulas
+* BQ/MQ
+* confidence
+* provider evidence
+* player identity
+* grading logic
+* Telegram formatting
+* PrizePicks discovery architecture
+* Underdog ingestion architecture
+* football exclusion
+* soccer scope
+* provider separation
+* Stable Refresh removal
+* scheduler architecture
+* adaptive batching
+* historical data
+* unrelated providers
+
+Make the smallest targeted changes necessary.
+
+18. TASK MANAGEMENT
+
+Do NOT create a new task.
+
+Do NOT propose a follow-up task.
+
+If an existing task directly covers this work, close that existing task after successful implementation and local validation.
+
+FINAL REPORT
+
+Report:
+
+IMPLEMENTED
+
+Exactly what changed.
+
+TESTED
+
+* Focused tests: X passed
+* Full suite: X passed
+* Compilation: PASS/FAIL
+* Diff check: PASS/FAIL
+
+PRESERVED
+
+Confirm active provider separation, Underdog, PrizePicks, FPR, universal tracking, grading, evidence, pregame protection, football exclusion, soccer monitoring, Stable Refresh removal, scheduler, adaptive batching, max_instances=1, and historical data.
+
+LIVE VERIFICATION
+
+NO LIVE/PRODUCTION VERIFICATION WAS PERFORMED.
+
+TASK MANAGEMENT
+
+No new task was created.
+If an existing task directly covered this work, it may be closed.
+
+DO NOT CREATE A NEW TASK.
