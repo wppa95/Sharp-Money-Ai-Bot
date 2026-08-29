@@ -398,6 +398,93 @@ class TestFPRJob:
 
         assert processed == ["Future Player"]
 
+    async def test_live_row_is_evaluated_and_logged_but_not_delivered(self, monkeypatch):
+        """Delivery is pregame-only; stale/direct FPR rows still get evaluated."""
+        snap = _make_snap(
+            player="Live Player",
+            sport="NBA",
+            game_time=datetime.datetime.utcnow() - datetime.timedelta(minutes=10),
+        )
+        db = _make_db(pool={("Live Player", "Points", 22.5): snap})
+        ctx = _make_context(db)
+        health = _make_health(cursor=0)
+
+        from market_engine import _full_pool_rescan_job
+        monkeypatch.setenv("ALLOWED_USER_IDS", "123")
+
+        with (
+            patch("market_engine.get_health_tracker", return_value=health),
+            patch("market_engine._is_game_live_or_past", return_value=True),
+            patch("market_engine._fetch_and_compute_hit_rates", new=AsyncMock(return_value=None)),
+            patch("engine.ud_scoring.score_ud_prop", return_value=_make_score()) as score,
+            patch("engine.player_validator.validate_player_prop", return_value=_make_validation()),
+            patch(
+                "engine.ud_bet_decision.make_ud_bet_decision",
+                return_value=_make_decision(rec="OVER"),
+            ),
+            patch("engine.ud_scoring.compute_market_quality", return_value=MagicMock()),
+            patch("engine.ud_scoring.detect_market_pressure", return_value=MagicMock()),
+            patch("market_engine.AlertDelivery") as delivery,
+        ):
+            await _full_pool_rescan_job(ctx)
+
+        score.assert_called_once()
+        db.get_ud_prop_history.assert_awaited_once()
+        db.log_prop_opportunity.assert_awaited_once()
+        delivery.assert_not_called()
+
+    async def test_fpr_filters_football_and_futures_before_scoring(self, monkeypatch):
+        """FPR excludes non-player futures and gridiron aliases upstream."""
+        soccer = _make_snap(
+            player="Soccer Player",
+            sport="SOCCER",
+            stat="Goals",
+            ext_id="soccer-1",
+        )
+        football = _make_snap(
+            player="UFL Player",
+            sport="UFL",
+            stat="Passing Yards",
+            ext_id="ufl-1",
+        )
+        futures = _make_snap(
+            player="Future Player",
+            sport="NBA",
+            stat="Championship Winner",
+            ext_id="future-1",
+        )
+        db = _make_db(
+            pool={
+                ("Soccer Player", "Goals", 1.5): soccer,
+                ("UFL Player", "Passing Yards", 22.5): football,
+                ("Future Player", "Championship Winner", 1.0): futures,
+            }
+        )
+        ctx = _make_context(db)
+        health = _make_health(cursor=0)
+
+        from market_engine import _full_pool_rescan_job
+        monkeypatch.delenv("ALLOWED_USER_IDS", raising=False)
+
+        with (
+            patch("market_engine.get_health_tracker", return_value=health),
+            patch("market_engine._is_game_live_or_past", return_value=False),
+            patch("market_engine._fetch_and_compute_hit_rates", new=AsyncMock(return_value=None)),
+            patch("engine.ud_scoring.score_ud_prop", return_value=_make_score()) as score,
+            patch("engine.player_validator.validate_player_prop", return_value=_make_validation()),
+            patch(
+                "engine.ud_bet_decision.make_ud_bet_decision",
+                return_value=_make_decision(rec="PASS"),
+            ),
+        ):
+            await _full_pool_rescan_job(ctx)
+
+        score.assert_called_once()
+        db.get_ud_prop_history.assert_awaited_once()
+        stats = health.set_fpr_stats.call_args.args[0]
+        assert stats["pool_size"] == 1
+        assert stats["fpr_rescored"] == 1
+
     async def test_mixed_primary_provider_pool_stays_in_one_rotation(self, monkeypatch):
         """PrizePicks rows join legacy Underdog rows without a second FPR."""
         monkeypatch.delenv("ALLOWED_USER_IDS", raising=False)

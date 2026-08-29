@@ -5746,7 +5746,9 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
       increments and the cursor resets to 0 automatically.
     • Removed/inactive props are excluded by the canonical provider-neutral
       active PropLineHistory pool.
-    • All existing alert gates (dedup, direction, BQ, tier, live-game) apply.
+    • Existing delivery protections (dedup, direction, quality, and live-game)
+      apply only at the Telegram boundary; they do not remove active props from
+      the rotation or prevent their evaluation.
     """
     from engine.player_validator import validate_player_prop as _fpr_validate
     from engine.ud_bet_decision import make_ud_bet_decision as _fpr_decide
@@ -5881,7 +5883,10 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         active_pool = {
             key: snap
             for key, snap in active_pool.items()
-            if not is_football_related_sport(getattr(snap, "sport", ""))
+            if (
+                not is_football_related_sport(getattr(snap, "sport", ""))
+                and not _is_futures_stat(getattr(snap, "stat_type", ""))
+            )
         }
         fpr_pool_size = len(active_pool)
         if fpr_pool_size == 0:
@@ -6228,11 +6233,6 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             )
 
             try:
-                # Active-pool queries also apply this filter, but keep the
-                # guard here so a stale in-memory/test pool can never rescore
-                # or deliver a prop after its event has started.
-                if _is_game_live_or_past(_fpr_snap, now):
-                    continue
                 if _fpr_history_bulk_loaded:
                     _fpr_hist = _fpr_history_by_prop.get(
                         (
@@ -6331,12 +6331,16 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
 
                 # Scan-time eligibility is non-blocking. Props without a
                 # direction remain in the monitoring stream for the next rotation.
-                _fpr_qualifies = (
+                _fpr_has_direction = (
                     _fpr_dec is not None
                     and _fpr_dec.recommendation in ("OVER", "UNDER")
                 )
 
-                if _fpr_qualifies and chat_ids:
+                # Evaluation and persistence remain independent of delivery.
+                # A stale/direct-call pool row may already be live; score it and
+                # preserve its directional opportunity, but never send it.
+                _fpr_game_live = _is_game_live_or_past(_fpr_snap, now)
+                if _fpr_has_direction and chat_ids and not _fpr_game_live:
                     _fpr_mq       = _fpr_cmq(_fpr_stat, _fpr_line, _fpr_score)
                     _fpr_mp       = _fpr_dmp(None, _fpr_hist)
                     # ── Tier delivery gate [full-pool-rescan] ────────────────
@@ -6480,7 +6484,9 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                                 getattr(_fpr_dec, "recommendation", "") or ""
                             ),
                         )
-                elif not _fpr_qualifies:
+                elif not _fpr_has_direction:
+                    fpr_not_delivered += 1
+                elif _fpr_game_live:
                     fpr_not_delivered += 1
 
                 fpr_rescored += 1

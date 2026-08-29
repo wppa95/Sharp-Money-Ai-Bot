@@ -32,6 +32,12 @@ from providers.underdog_provider import UnderdogProvider
         "gridiron",
         "aussie_rules_afl",
         "rugby_union",
+        "UFL",
+        "USFL",
+        "XFL",
+        "NCAA Football",
+        "arena football",
+        "indoor football",
     ],
 )
 def test_football_aliases_are_blocked(sport):

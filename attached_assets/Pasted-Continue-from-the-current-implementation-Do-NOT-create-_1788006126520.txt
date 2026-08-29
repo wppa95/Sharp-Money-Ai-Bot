@@ -1,0 +1,501 @@
+Continue from the current implementation.
+
+Do NOT create a new task.
+Do NOT propose a follow-up task.
+If an existing task directly covers this work, you may close it after implementation and validation.
+
+Restarts are allowed if required.
+
+Do NOT perform live/production verification.
+Do NOT send Telegram commands.
+Do NOT send test alerts.
+Do NOT fabricate production data.
+
+FINALIZE ACTIVE PROP RESCANNING AND REMOVE LEGACY QUALIFICATION FRAMEWORK
+
+Make only the smallest targeted changes necessary.
+
+Do NOT redesign the architecture.
+
+1. EVERY ACTIVE PROP MUST BE CONTINUOUSLY RESCANNED
+
+The authoritative active monitoring universe remains the latest active provider/source-ID state.
+
+Every supported active prop must remain eligible for continuous FPR rescanning until:
+
+* its event starts, or
+* the provider removes it from the active feed.
+
+This applies regardless of:
+
+* whether the line moved
+* whether it is new
+* whether it was previously evaluated
+* whether it was previously delivered
+* whether it has a valid direction
+* whether it has provider evidence
+* whether it is cold-start
+* whether it was previously rejected/non-actionable
+
+No classification or delivery result may remove an active prop from the monitoring universe.
+
+2. FPR PRIORITY — REMAINING ACTIVE PROPS ARE #1
+
+The primary FPR behavior should be continuous fair rotation of the remaining active universe.
+
+Use this priority model:
+
+1. Remaining active props / normal full-pool rotation
+
+Every active prop receives guaranteed rotation coverage.
+
+2. New props and line movers
+
+New props and line movers should naturally receive prompt attention when they enter or change within the active universe.
+
+They must NOT create a competing queue that can permanently starve the normal active pool.
+
+The goal is not to repeatedly rescan the same new/moving props.
+
+The goal is:
+
+continuously scan the entire active universe while naturally picking up new props and movement as they occur.
+
+Urgent changes may be handled promptly where the existing architecture already supports that behavior, but they must not replace or interrupt the guaranteed full-pool rotation.
+
+3. FPR REMAINS THE SOLE FULL-POOL ROTATION
+
+Keep exactly one full-pool rotation:
+
+Active source-ID universe
+→ bounded FPR batch
+→ rescore
+→ advance cursor
+→ next batch
+→ wrap
+→ repeat
+
+Do NOT create:
+
+* another full-pool cursor
+* another full-pool scheduler
+* another monitoring queue
+* another Stable Refresh background job
+* another competing rotation system
+
+FPR remains the sole full-pool rotation.
+
+4. NO PROP MAY STARVE
+
+The primary acceptance condition is fair continuous coverage.
+
+Prevent:
+
+* provider ordering starvation
+* new-prop starvation
+* stable-prop starvation
+* sport starvation
+* previously rejected-prop starvation
+* cold-start starvation
+
+A prop that has not moved must still eventually be rescanned.
+
+A prop that has already generated an alert must still eventually be rescanned.
+
+A prop that has never generated an alert must still eventually be rescanned.
+
+5. REMOVE LEGACY QUALIFICATION FRAMEWORK
+
+Remove the old qualification/classification framework from the monitoring lifecycle.
+
+Specifically remove:
+
+* Watchlist
+* Near-Miss
+* PASS
+* S-tier
+* A-tier
+* B-tier
+* C-tier
+
+These must NOT be:
+
+* generated
+* assigned
+* used as monitoring gates
+* used as rotation gates
+* used as rescan exclusions
+* used as tracking gates
+* used as grading gates
+* used as evidence gates
+* used as delivery prerequisites
+* counted as current monitoring populations
+* displayed as current monitoring classifications
+
+Do NOT replace them with another tier system.
+
+The unified monitoring/evaluation pipeline is the source of truth.
+
+6. NON-ACTIONABLE PROPS MUST KEEP GETTING RESCANNED
+
+A prop being non-actionable must NOT remove it from FPR.
+
+Examples:
+
+* no direction yet
+* weak movement
+* insufficient evidence
+* cold-start
+* previously rejected
+* no alert generated
+* no Telegram delivery
+
+All remain normal active props.
+
+They continue through:
+
+Active → FPR → Rescan → Re-evaluate → Rescan again
+
+until event start/removal.
+
+Do NOT require a prop to become actionable before it can be rescanned.
+
+7. TRACKING IS INDEPENDENT
+
+Every active supported prop remains persistently tracked regardless of classification or delivery.
+
+Tracking must include:
+
+* normal active props
+* unchanged props
+* line movers
+* new props
+* non-actionable props
+* cold-start props
+* props without evidence
+* previously delivered props
+
+Tracking must NOT depend on Telegram delivery.
+
+8. GRADING IS INDEPENDENT
+
+Persisted directional opportunities remain eligible for:
+
+* HIT
+* MISS
+* PUSH
+
+grading regardless of Telegram delivery.
+
+Preserve provider-aware identity:
+
+* Provider
+* Source ID
+* Event ID
+* Player
+* Sport
+* Market/stat
+* Line
+* Direction
+* Timestamp
+
+Do not duplicate grades for repeated rescans.
+
+9. PREGAME ONLY FOR ACTIONABLE DELIVERY
+
+Preserve strict pregame protection.
+
+Telegram must not deliver current actionable props after:
+
+* STARTED
+* LIVE
+* IN_PROGRESS
+* FINAL
+* COMPLETED
+* equivalent live/postgame states
+
+A prop can remain historically tracked after the event starts.
+
+The 24-hour window is a priority signal only.
+
+Props more than 24 hours away remain eligible.
+
+Do NOT create a separate 24-hour watcher.
+
+10. FOOTBALL
+
+Preserve upstream football exclusion.
+
+Football-related sports must be excluded before expensive downstream monitoring work.
+
+At minimum:
+
+* NFL
+* NCAAF
+* CFB
+* FCS
+* CFL
+* AFL
+* AFLW
+* UFL
+* USFL
+* XFL
+* other gridiron variants
+
+Do NOT delete historical football records.
+
+Do NOT exclude soccer.
+
+Soccer remains supported.
+
+11. PRIZEPICKS
+
+Preserve authoritative PrizePicks sport discovery.
+
+Do NOT limit PrizePicks to NBA/MLB.
+
+Do NOT inherit Underdog ACTIVE_SPORTS.
+
+Preserve PP source-ID identity.
+
+Alternate lines remain distinct opportunities.
+
+12. UNDERDOG
+
+Preserve the latest active Underdog source-ID universe.
+
+Historical snapshots remain historical.
+
+New props remain active after first scan.
+
+Line movers remain active after rescoring.
+
+Unchanged props remain active and continue rotating.
+
+Event-started/removed props leave active monitoring while historical records remain.
+
+13. PROVIDER SEPARATION
+
+Underdog and PrizePicks remain independent for:
+
+* ingestion
+* sport scope
+* source IDs
+* events
+* tracking
+* evidence
+* grading
+* delivery
+* deduplication
+* reporting
+
+One provider must never suppress an equivalent opportunity from the other provider.
+
+14. REPORTING
+
+Do not regress the corrected accounting model.
+
+Do NOT display Watchlist/PASS/S/A/B/C populations.
+
+Reports should distinguish:
+
+* Active tracked props
+* Historical observations
+* Directional opportunities
+* Delivered alerts
+* Pending grading
+* Resolved
+* HIT
+* MISS
+* PUSH
+
+Provider populations remain separate.
+
+15. SCHEDULER
+
+Keep:
+
+* one Underdog monitoring path
+* one FPR rotation
+* required independent jobs only
+* Stable Refresh unscheduled
+* legacy duplicate monitoring jobs inactive
+* max_instances=1
+
+Do not create another monitoring watcher or rotation.
+
+16. TESTS
+
+Add/update focused regression tests proving:
+
+Active rotation
+
+* Every active source ID remains eligible for FPR.
+* Remaining active props are the primary rotation population.
+* New props do not create a competing full-pool queue.
+* Line movers do not create a competing full-pool queue.
+* Unchanged props continue to rotate.
+* Previously delivered props continue to rotate.
+* Previously rejected/non-actionable props continue to rotate.
+* Cold-start props continue to rotate.
+* Props without direction continue to rotate.
+* Props without evidence continue to rotate.
+* No active prop is permanently starved.
+* Cursor advances.
+* Cursor wraps.
+* Multiple rotations work.
+* Multiple sports receive coverage.
+
+Legacy framework removal
+
+Prove there is no active monitoring dependency on:
+
+* Watchlist
+* Near-Miss
+* PASS
+* S-tier
+* A-tier
+* B-tier
+* C-tier
+
+They must not gate:
+
+* monitoring
+* rescanning
+* evaluation
+* evidence
+* tracking
+* grading
+* delivery
+
+Do not replace them with another classification gate.
+
+Tracking/grading
+
+* Non-actionable props remain tracked.
+* Non-actionable props remain rescannable.
+* Undelivered directional props remain gradeable.
+* Repeated rescans do not duplicate grades.
+* HIT/MISS/PUSH remain correct.
+* Provider identity remains isolated.
+
+Pregame
+
+* Future props remain eligible.
+* 24-hour props remain eligible.
+* Approaching-start props remain eligible.
+* Started/live/final props cannot reach Telegram.
+
+Scope
+
+* Football excluded upstream.
+* Soccer preserved.
+* PrizePicks scope remains authoritative and independent.
+* Underdog scope remains independent.
+
+Run:
+
+1. Focused FPR/monitoring/framework-removal regressions.
+2. Full existing test suite.
+3. Python compilation.
+4. git diff –check.
+
+17. NO LIVE VERIFICATION
+
+Do NOT perform live or production verification.
+
+Do NOT:
+
+* query Railway production data
+* query production database
+* send Telegram commands
+* send test alerts
+* wait for games
+* wait for events
+* fabricate production data
+
+Local regression tests and static/code-path verification are sufficient.
+
+A restart is allowed if required.
+
+18. NO UNRELATED CHANGES
+
+Do NOT change:
+
+* scoring formulas
+* BQ/MQ
+* confidence
+* evidence architecture
+* grading architecture
+* provider identity
+* dashboard accounting
+* deduplication architecture
+* FPR architecture
+* monitoring cadence
+* adaptive batching
+* max_instances=1
+* historical data
+* OddsAPI behavior
+* Stable Refresh removal
+* PrizePicks identity
+* Underdog identity
+
+Make the smallest targeted changes necessary.
+
+19. TASK MANAGEMENT
+
+Do NOT create a new task.
+
+Do NOT propose a follow-up task.
+
+If an existing task directly covers this work, close it after successful implementation and validation.
+
+FINAL REPORT
+
+IMPLEMENTED
+
+Exactly what changed.
+
+TESTED
+
+* Focused tests: X passed
+* Full suite: X passed
+* Compilation: PASS/FAIL
+* Diff check: PASS/FAIL
+
+PRESERVED
+
+Confirm:
+
+* continuous active-prop rescanning
+* remaining active props as the primary FPR rotation
+* FPR as sole full-pool rotation
+* no starvation
+* Watchlist/Near-Miss/PASS removal
+* S/A/B/C removal
+* non-actionable prop rescanning
+* universal tracking
+* delivery-independent grading
+* pregame protection
+* football exclusion
+* soccer support
+* PrizePicks discovery
+* Underdog source-ID lifecycle
+* provider separation
+* reporting/accounting
+* scheduler safety
+* adaptive batching
+* max_instances=1
+* Stable Refresh removal
+* historical data
+
+LIVE VERIFICATION
+
+NO LIVE/PRODUCTION VERIFICATION WAS PERFORMED.
+
+TASK MANAGEMENT
+
+No new task was created.
+If an existing task directly covered this work, it may be closed.
+
+DO NOT CREATE A NEW TASK.
