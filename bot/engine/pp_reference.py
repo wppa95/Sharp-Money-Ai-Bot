@@ -12,13 +12,14 @@ confirmed PrizePicks data. The disclaimer is mandatory.
 
 Design
 ──────
-  1.  High-scoring Underdog props (tier S/A from the main scoring engine)
-      are fed into match_underdog_to_pp() after the main alert loop.
+  1.  Directional Underdog props are fed into match_underdog_to_pp() after
+      the main alert loop; legacy tier labels are not a delivery gate.
   2.  Each prop is scored for PP-proxy confidence (0–100) based on four
       dimensions: player name quality, stat normalisation, sport support,
       and data recency.
   3.  Props that meet or exceed DEFAULT_CONFIDENCE_THRESHOLD (80) produce
-      a PPReferenceMatch that can be formatted and broadcast.
+      a PPReferenceMatch for monitoring; Telegram still requires the
+      canonical direction-and-evidence gate.
   4.  If PropLineHistory contains actual PP rows (from manual import via
       /pp_import), they are used to boost confidence and improve the
       inferred PP line; otherwise Underdog data stands alone as the proxy.
