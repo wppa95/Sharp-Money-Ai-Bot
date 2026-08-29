@@ -4863,41 +4863,54 @@ class Database:
             # evidence.  Provider rows remain authoritative when one already
             # exists for the same player × sport × stat × date.
             evidence_result = str(result or "").upper()
+            # Outcomes are terminal. A retry, duplicate scheduler run, or
+            # stale settlement response must not overwrite recorded history.
+            opp_row = await s.get(PropOpportunityLog, opp_id)
+            if opp_row is None:
+                return
+            existing_result = str(opp_row.result or "").upper()
+            if existing_result not in {"", "PENDING"}:
+                return
             if evidence_result in {"HIT", "MISS", "PUSH"}:
-                opp_row = await s.get(PropOpportunityLog, opp_id)
-                if opp_row is not None:
-                    player_name = display_player_name(opp_row.player_name)
-                    sport = (opp_row.sport or "").upper().strip()
-                    stat_type = (opp_row.stat_type or "").lower().strip()
-                    evidence_date = (
-                        opp_row.game_time.strftime("%Y-%m-%d")
-                        if opp_row.game_time
-                        else datetime.utcnow().strftime("%Y-%m-%d")
+                player_name = display_player_name(opp_row.player_name)
+                sport = (opp_row.sport or "").upper().strip()
+                stat_type = (opp_row.stat_type or "").lower().strip()
+                evidence_date = (
+                    opp_row.game_time.strftime("%Y-%m-%d")
+                    if opp_row.game_time
+                    else datetime.utcnow().strftime("%Y-%m-%d")
+                )
+                evidence_game_id = str(opp_row.game_id or "")
+                existing = await s.execute(
+                    select(PlayerGameResult).where(
+                        PlayerGameResult.player_name == player_name,
+                        PlayerGameResult.sport == sport,
+                        PlayerGameResult.stat_type == stat_type,
+                        PlayerGameResult.game_date == evidence_date,
+                        PlayerGameResult.game_id == evidence_game_id,
                     )
-                    evidence_game_id = str(opp_row.game_id or "")
-                    existing = await s.execute(
-                        select(PlayerGameResult).where(
-                            PlayerGameResult.player_name == player_name,
-                            PlayerGameResult.sport == sport,
-                            PlayerGameResult.stat_type == stat_type,
-                            PlayerGameResult.game_date == evidence_date,
-                            PlayerGameResult.game_id == evidence_game_id,
-                        )
-                    )
-                    if existing.scalar_one_or_none() is None:
-                        s.add(PlayerGameResult(
-                            player_name=player_name,
-                            sport=sport,
-                            stat_type=stat_type,
-                            game_date=evidence_date,
-                            opponent=opp_row.team or None,
-                            actual_value=actual_value,
-                            source="graded_prop",
-                            game_id=evidence_game_id,
-                        ))
+                )
+                if existing.scalar_one_or_none() is None:
+                    s.add(PlayerGameResult(
+                        player_name=player_name,
+                        sport=sport,
+                        stat_type=stat_type,
+                        game_date=evidence_date,
+                        opponent=opp_row.team or None,
+                        actual_value=actual_value,
+                        source="graded_prop",
+                        game_id=evidence_game_id,
+                    ))
             await s.execute(
                 _sa_update(PropOpportunityLog)
-                .where(PropOpportunityLog.id == opp_id)
+                .where(
+                    PropOpportunityLog.id == opp_id,
+                    or_(
+                        PropOpportunityLog.result == "PENDING",
+                        PropOpportunityLog.result.is_(None),
+                        PropOpportunityLog.result == "",
+                    ),
+                )
                 .values(**values)
             )
             await s.commit()
@@ -4963,12 +4976,6 @@ class Database:
                     PropOpportunityLog.alert_sent    == True,   # noqa: E712
                     PropOpportunityLog.alert_sent_at >= cutoff,
                     PropOpportunityLog.recommendation.in_(["OVER", "UNDER"]),
-                    # Historical delivery rows stay stored, while the Telegram
-                    # current-alert display excludes known live/finished games.
-                    or_(
-                        PropOpportunityLog.game_time.is_(None),
-                        PropOpportunityLog.game_time > datetime.utcnow(),
-                    ),
                 )
                 .order_by(desc(PropOpportunityLog.alert_sent_at))
                 .limit(limit)
@@ -5398,15 +5405,20 @@ class Database:
         """
         normalised_stat = stat_type.lower().strip()
         async with self.session() as s:
+            filters = [
+                PlayerGameResult.player_name == player_name,
+                PlayerGameResult.sport       == sport,
+                PlayerGameResult.stat_type   == normalised_stat,
+                PlayerGameResult.game_date   == game_date,
+            ]
+            # Some stat providers do not expose an event ID. Requiring an
+            # empty game_id in that case silently misses valid official stats.
+            if game_id:
+                filters.append(PlayerGameResult.game_id == str(game_id))
             result = await s.execute(
                 select(PlayerGameResult)
-                .where(
-                    PlayerGameResult.player_name == player_name,
-                    PlayerGameResult.sport       == sport,
-                    PlayerGameResult.stat_type   == normalised_stat,
-                    PlayerGameResult.game_date   == game_date,
-                    PlayerGameResult.game_id     == str(game_id or ""),
-                )
+                .where(*filters)
+                .order_by(PlayerGameResult.id.desc())
                 .limit(1)
             )
             return result.scalar_one_or_none()
@@ -5484,6 +5496,23 @@ class Database:
                 .where(directional)
             )
             total = total_row.scalar() or 0
+
+            # Persistent observations are a separate population from
+            # directional opportunities and from Telegram deliveries. Count
+            # them independently so a reporting command cannot imply that
+            # only evaluated or sent props were monitored.
+            observation_rows = await s.execute(
+                select(
+                    PropLineHistory.provider,
+                    func.count(PropLineHistory.id),
+                )
+                .where(PropLineHistory.provider.in_(("Underdog", "PrizePicks")))
+                .group_by(PropLineHistory.provider)
+            )
+            tracked_observations_by_provider = {
+                str(provider or "Unknown"): int(count or 0)
+                for provider, count in observation_rows.all()
+            }
 
             pending_row = await s.execute(
                 select(func.count(PropOpportunityLog.id))
@@ -5572,6 +5601,8 @@ class Database:
             "active_by_provider": active_by_provider,
             "active_by_sport": active_by_sport,
             "tracked": tracked,
+            "tracked_observations": sum(tracked_observations_by_provider.values()),
+            "tracked_observations_by_provider": tracked_observations_by_provider,
             "total":    total,
             "directional_total": total,
             "actionable": total,
@@ -5921,20 +5952,63 @@ class Database:
         self,
         player_name: str,
         limit: int = 20,
-    ) -> list[PropOpportunityLog]:
+    ) -> list:
         """
-        Return recent PropOpportunityLog rows for a player (P11).
-        Uses ILIKE for case-insensitive partial match.
+        Return the recent provider-neutral tracking history for a player.
+
+        The result intentionally combines persistent PropLineHistory
+        observations with directional PropOpportunityLog rows. Tracking is not
+        contingent on a direction or on Telegram delivery.  Historical callers
+        can continue to use the shared fields (player_name, line_value, sport,
+        result, and so on); observation-only rows expose recommendation=None and
+        result=PENDING.
         """
+        from types import SimpleNamespace
         pattern = f"%{player_name.strip()}%"
         async with self.session() as s:
-            result = await s.execute(
+            opportunity_result = await s.execute(
                 select(PropOpportunityLog)
                 .where(PropOpportunityLog.player_name.ilike(pattern))
                 .order_by(desc(PropOpportunityLog.detected_at))
-                .limit(limit)
+                .limit(max(1, min(int(limit) * 4, 500)))
             )
-            return list(result.scalars().all())
+            opportunities = list(opportunity_result.scalars().all())
+            history_result = await s.execute(
+                select(PropLineHistory)
+                .where(PropLineHistory.player_name.ilike(pattern))
+                .order_by(desc(PropLineHistory.fetched_at))
+                .limit(max(1, min(int(limit) * 4, 500)))
+            )
+            observations = list(history_result.scalars().all())
+
+        rows = list(opportunities)
+        for observation in observations:
+            rows.append(SimpleNamespace(
+                id=None,
+                external_id=observation.external_id or "",
+                player_name=observation.player_name,
+                team=observation.team or "",
+                sport=observation.sport,
+                stat_type=observation.stat_type,
+                line_value=observation.line_value,
+                recommendation=getattr(observation, "bet_recommendation", None),
+                provider=observation.provider,
+                result="PENDING",
+                actual_value=None,
+                detected_at=observation.fetched_at,
+                game_time=observation.game_time,
+                alert_sent=False,
+                tracked_observation=True,
+            ))
+        rows.sort(
+            key=lambda row: (
+                getattr(row, "detected_at", None)
+                or getattr(row, "fetched_at", None)
+                or datetime.min
+            ),
+            reverse=True,
+        )
+        return rows[:max(1, int(limit))]
 
     async def get_pick_accuracy_by_sport(self, limit_sports: int = 10) -> list[dict]:
         """
