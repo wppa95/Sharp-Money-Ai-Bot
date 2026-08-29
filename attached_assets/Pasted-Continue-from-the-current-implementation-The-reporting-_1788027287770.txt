@@ -1,0 +1,144 @@
+Continue from the current implementation.
+
+The reporting compatibility cleanup is complete.
+
+Focused reporting tests, command reliability tests, compilation, and diff checks are passing. The only remaining issue is that the full suite reports failures attributed to test-order/module-scoped SQLite fixture behavior plus one legacy expectation that conflicts with the clarified tracking rule.
+
+Fix ONLY those remaining test-suite failures.
+
+Do NOT redesign or change production behavior unless a failure proves the current implementation is actually incorrect.
+
+Do NOT create a new task.
+Do NOT propose a follow-up task.
+Do NOT perform live or production verification.
+
+1. TEST-ORDER / SQLITE FAILURES
+
+Investigate the reported module-scoped in-memory SQLite fixture/test-order failures.
+
+Determine whether the failures are caused by:
+
+* shared fixture state
+* test ordering
+* stale database state
+* fixture lifecycle
+* transaction cleanup
+* connection reuse
+* test isolation
+
+Make the smallest test-only correction necessary so the full suite can run reliably regardless of test order.
+
+Do NOT weaken assertions.
+Do NOT skip tests.
+Do NOT mark failures as expected.
+Do NOT change production database behavior.
+
+2. LEGACY TRACKED-VALUE EXPECTATION
+
+Fix the one legacy test whose expected top-level tracked value conflicts with the clarified reporting model.
+
+The current reporting distinction is:
+
+* Candidate records = evaluation volume
+* Persistent observations = tracked observations
+* Active tracked props = current active tracking population
+* Directional opportunities = directional population
+* Delivered = successfully delivered alerts
+
+The test should assert the correct current contract.
+
+Do NOT modify production logic merely to satisfy an obsolete expectation.
+
+3. PRESERVE CURRENT REPORTING CONTRACT
+
+Do NOT undo the reporting compatibility cleanup.
+
+Preserve:
+
+* Normalized history as authoritative
+* Provider-separated populations
+* Active vs historical separation
+* Candidate/evaluation volume distinction
+* Directional vs delivered separation
+* Football exclusion from current tracking/evaluation
+* Historical football ledger preservation
+* Soccer support
+* Multi-provider dashboard tracking
+* FPR reporting
+* Continuous active-prop rotation
+* Classification-neutral FPR behavior
+
+4. DO NOT CHANGE UNRELATED SYSTEMS
+
+Do NOT modify:
+
+* Scoring
+* BQ/MQ
+* Confidence
+* Evidence providers
+* Player identity
+* Provider discovery
+* Underdog ingestion
+* PrizePicks ingestion
+* FPR architecture
+* Deduplication
+* Delivery gate
+* Telegram rules
+* Football suppression
+* Scheduler architecture
+* Stable Refresh scheduler removal
+* Adaptive batching
+* max_instances=1
+* Railway behavior
+* Production configuration
+
+Only change what is required to make the existing test suite reliable and aligned with the current reporting contract.
+
+5. VALIDATION
+
+Run:
+
+1. The previously failing opportunity-log tests independently.
+2. The affected reporting/command suites.
+3. The full existing test suite.
+4. Python compilation.
+5. git diff –check.
+
+The goal is a genuinely green full suite.
+
+Do NOT hide failures or reduce test coverage to achieve green.
+
+If a failure is genuinely unrelated and cannot safely be corrected within this scope, report the exact failure rather than changing unrelated production behavior.
+
+FINAL REPORT
+
+IMPLEMENTED
+
+Exactly what was changed.
+
+TEST ISOLATION
+
+Explain the SQLite/test-order issue and the minimal correction.
+
+REPORTING TEST
+
+Explain the corrected legacy tracked-value expectation.
+
+TESTED
+
+Report:
+
+* Previously failing tests
+* Focused suites
+* Full suite
+* Compilation
+* git diff –check
+
+LIVE VERIFICATION
+
+NO LIVE/PRODUCTION VERIFICATION WAS PERFORMED.
+
+TASK MANAGEMENT
+
+No new task was created.
+No follow-up task was proposed.

@@ -53,11 +53,14 @@ async def test_legacy_candidate_labels_are_counted_only_as_neutral_tracked_rows(
 
     summary = await db.get_funnel_summary()
 
-    assert summary == {
-        "since_hours": 24,
-        "tracked": 2,
-        "by_sport": [{"sport": "NBA", "tracked": 2}],
-    }
+    assert summary["since_hours"] == 24
+    assert summary["tracked"] == 0
+    assert summary["active_tracked"] == 0
+    assert summary["tracked_observations"] == 0
+    assert summary["evaluated"] == 2
+    assert summary["by_sport"] == [
+        {"sport": "NBA", "tracked": 2, "evaluated": 2},
+    ]
 
 
 @pytest.mark.asyncio

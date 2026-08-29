@@ -19,9 +19,9 @@ import pytest
 from database import Database, PropOpportunityLog, PlayerGameResult
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 async def db():
-    """In-memory DB for isolation."""
+    """Fresh in-memory DB per test so async loops cannot share connections."""
     database = Database("sqlite+aiosqlite:///:memory:")
     await database.init()
     yield database
