@@ -13,3 +13,16 @@ capacity without adding a distinct current user-facing capability.
 **How to apply:** When changing scheduler registrations, preserve the required
 monitoring, CLV, grading, evidence, health, budget, pruning, and season jobs;
 keep monitoring jobs single-instance; and audit legacy job names for duplicates.
+
+The sportsbook player-prop poller is a required, separate OddsAPI confirmation
+source rather than a second pick'em monitor. It must remain registered only once
+and use explicit single-instance protection.
+
+**Why:** Removing that poller would deprive the existing PrizePicks/CLV
+confirmation path of its supporting sportsbook observations, while an
+unprotected repeat could overlap the provider monitor.
+
+**How to apply:** Keep the player-prop fetch job separate from Underdog and
+PrizePicks monitoring, but configure `max_instances=1`; leave legacy
+PrizePicks, connector, consensus, CLV-check, and Stable Refresh registrations
+disabled.

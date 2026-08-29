@@ -1,0 +1,427 @@
+Continue from the current implementation.
+
+Do NOT create a new task.
+Do NOT propose a follow-up task.
+If an existing task directly covers this work, you may close it after implementation and validation.
+
+Restarts are allowed if required.
+
+Do NOT perform live/production verification.
+Do NOT send Telegram commands.
+Do NOT send test alerts.
+Do NOT fabricate production data.
+
+CLEAN UP REDUNDANT BACKGROUND WORK AND PREVENT UNNECESSARY API PROCESSING
+
+Make only the smallest targeted changes necessary.
+
+The goal is to ensure the bot spends its resources on useful supported pregame player-prop monitoring rather than redundant background work or football-related processing.
+
+Do NOT redesign the architecture.
+
+1. FPR REMAINS THE SOLE FULL-POOL ROTATION
+
+Preserve the current architecture:
+
+Active provider source-ID universe
+→ FPR bounded batch
+→ rescore
+→ advance cursor
+→ next batch
+→ wrap
+→ repeat
+
+Do NOT create another full-pool cursor.
+
+Do NOT create another full-pool monitoring job.
+
+Do NOT reintroduce Stable Refresh as an independent background job.
+
+FPR remains the sole full-pool rotation.
+
+2. REMOVE REDUNDANT BACKGROUND JOBS
+
+Audit all scheduler registrations and identify jobs that duplicate work already performed by the unified monitoring/FPR pipeline.
+
+Remove only jobs that are genuinely redundant or obsolete.
+
+In particular, ensure there is no independent:
+
+* Stable Refresh scheduler
+* duplicate Underdog monitor
+* duplicate full-pool rotation
+* legacy player-prop scan duplicating the unified pipeline
+* obsolete PrizePicks scan competing with the shared provider cadence
+* duplicate consensus/player-prop processing that rescans the same provider universe unnecessarily
+* any other background job whose work is already performed by the current unified monitoring pipeline
+
+Do NOT remove jobs that perform genuinely separate required work, such as:
+
+* CLV
+* grading
+* player-history/evidence collection
+* heartbeat
+* budget monitoring
+* pruning
+* season/market status
+* required sportsbook polling
+
+Use the existing architecture to determine whether work is actually duplicated.
+
+3. FOOTBALL MUST BE DROPPED AS EARLY AS POSSIBLE
+
+Preserve the existing football exclusion.
+
+Football-related sports must not consume expensive downstream processing.
+
+Exclude before:
+
+* scoring
+* evidence enrichment
+* FPR
+* unnecessary persistence
+* expensive player-history work
+
+Football aliases include, at minimum:
+
+* NFL
+* NCAAF
+* CFB
+* FCS
+* CFL
+* AFL
+* AFLW
+* UFL
+* USFL
+* XFL
+* other gridiron/football variants
+
+Do NOT delete historical football records.
+
+Do NOT allow soccer to be classified as football.
+
+Soccer/association football remains supported.
+
+4. PROVIDER-SPECIFIC FILTERING
+
+Football filtering must remain provider-independent.
+
+Apply the same exclusion boundary to:
+
+Underdog
+
+Drop football before expensive downstream processing.
+
+PrizePicks
+
+Drop football before expensive downstream processing.
+
+Do NOT let Underdog ACTIVE_SPORTS determine PrizePicks scope.
+
+Do NOT let PrizePicks scope determine Underdog scope.
+
+Each provider retains its authoritative source catalog.
+
+5. ALL SUPPORTED NON-FOOTBALL SPORTS
+
+Preserve all legitimate non-football sports returned by the providers.
+
+Do NOT limit PrizePicks to NBA/MLB.
+
+Do NOT hard-code a small list if the provider’s authoritative catalog supports additional sports.
+
+Provider catalogs remain authoritative.
+
+Sports without legitimate provider data should not be fabricated.
+
+6. PREGAME ONLY FOR DELIVERY
+
+Preserve strict pregame protection.
+
+Telegram delivery must never occur for:
+
+* STARTED
+* LIVE
+* IN_PROGRESS
+* FINAL
+* COMPLETED
+* equivalent live/postgame states
+
+Historical tracking/grading remains intact where appropriate.
+
+Do NOT create a separate live watcher.
+
+7. 24-HOUR PRIORITY WITHOUT 24-HOUR WATCHER
+
+Keep the current behavior:
+
+* Props should be monitored as soon as legitimately available.
+* Props approaching their event start should receive higher priority.
+* A prop more than 24 hours away must not be excluded merely because it is outside the 24-hour window.
+* Do NOT create a separate 24-hour background job.
+
+Use the existing FPR priority ordering.
+
+8. FPR PRIORITY ORDER
+
+Preserve:
+
+1. New props
+2. Line movers
+3. Actionable/urgent props
+4. Games approaching start
+5. Remaining active props
+
+The remainder must never starve.
+
+Cursor advancement and wraparound must remain intact.
+
+9. CONTINUOUS RESCANNING
+
+Every active supported prop must remain eligible for rescanning.
+
+Do NOT limit rescanning to:
+
+* line movers
+* new props
+* actionable props
+* delivered props
+* candidate records
+* historical records only
+
+Unchanged props must continue to receive periodic rescans through FPR.
+
+Previously rejected/non-actionable/cold-start props remain eligible.
+
+Delivery deduplication remains downstream.
+
+10. API/RESOURCE EFFICIENCY
+
+Do not change unrelated API quota or pacing rules.
+
+Instead, prevent waste by ensuring excluded records never reach expensive processing.
+
+Verify through local tests/code-path inspection that:
+
+football
+→ excluded early
+→ no scoring
+→ no evidence
+→ no FPR
+→ no unnecessary downstream processing
+
+Do the same for obsolete duplicate jobs:
+
+duplicate job
+→ removed from scheduler
+→ no competing scan
+
+11. SCHEDULER SAFETY
+
+Keep:
+
+* max_instances=1
+* no overlapping monitoring jobs
+* one Underdog monitoring path
+* one FPR full-pool rotation
+* one shared provider monitoring cadence where already established
+
+Do NOT solve performance by increasing concurrency.
+
+12. PRESERVE TRACKING / GRADING
+
+Do NOT reduce tracking just because processing is being cleaned up.
+
+Every supported non-football active prop remains:
+
+* tracked
+* persisted
+* rescanned
+* eligible for grading
+* eligible for evidence
+* eligible for HIT/MISS/PUSH
+
+Telegram delivery remains independent.
+
+13. PRESERVE REPORTING
+
+Do NOT change the corrected accounting model.
+
+Reports must continue distinguishing:
+
+* active tracked
+* historical observations
+* directional
+* delivered
+* pending
+* resolved
+* HIT
+* MISS
+* PUSH
+
+Provider populations remain separate.
+
+Football remains excluded from current supported monitoring populations.
+
+14. TESTS
+
+Add/update focused regression tests proving:
+
+Scheduler
+
+* No Stable Refresh background job.
+* No duplicate Underdog monitor.
+* No duplicate FPR rotation.
+* Obsolete provider scan jobs remain inactive.
+* Required independent jobs remain registered.
+* Monitoring jobs retain max_instances=1.
+
+Football exclusion
+
+* NFL excluded early.
+* NCAAF excluded early.
+* CFB excluded early.
+* FCS excluded early.
+* CFL excluded early.
+* AFL excluded early.
+* AFLW excluded early.
+* UFL excluded early.
+* USFL excluded early.
+* XFL excluded early.
+* Other football aliases excluded.
+* Soccer remains supported.
+
+Downstream protection
+
+Prove excluded football records do not reach:
+
+* scoring
+* evidence enrichment
+* FPR
+* expensive player-history processing
+* current supported tracking populations
+
+Historical football records must remain intact.
+
+Provider independence
+
+* PP does not inherit Underdog ACTIVE_SPORTS.
+* Underdog does not inherit PP scope.
+* PP authoritative discovery remains authoritative.
+* Multiple PP non-football sports remain supported.
+
+FPR
+
+* New props prioritized.
+* Line movers prioritized.
+* Approaching-start props prioritized.
+* Remaining active props continue rotating.
+* Stable props cannot starve.
+* Cursor advances.
+* Cursor wraps.
+* Multiple rotations work.
+* No second full-pool cursor exists.
+* Stable Refresh is not scheduled.
+
+Pregame
+
+* Future props remain eligible.
+* Props outside 24 hours remain eligible.
+* Approaching-start props receive priority.
+* Started/live/final props cannot reach Telegram.
+
+15. NO LIVE VERIFICATION
+
+Do NOT perform live or production verification.
+
+Do NOT:
+
+* query production data
+* send Telegram commands
+* send test alerts
+* wait for games
+* wait for live events
+* fabricate production data
+
+Local regression tests and static/code-path verification are sufficient.
+
+A restart is allowed if required.
+
+16. NO UNRELATED CHANGES
+
+Do NOT change:
+
+* scoring
+* BQ/MQ
+* confidence
+* evidence architecture
+* player identity
+* grading architecture
+* deduplication architecture
+* FPR architecture
+* provider identity
+* dashboard accounting
+* monitoring cadence
+* adaptive batching
+* max_instances=1
+* historical data
+* OddsAPI behavior
+* PrizePicks identity
+* Underdog identity
+* Telegram formatting
+
+Make the smallest targeted changes necessary.
+
+17. TASK MANAGEMENT
+
+Do NOT create a new task.
+
+Do NOT propose a follow-up task.
+
+If an existing task directly covers this work, close it after successful implementation and validation.
+
+FINAL REPORT
+
+IMPLEMENTED
+
+Exactly what changed.
+
+TESTED
+
+* Focused tests: X passed
+* Full suite: X passed
+* Compilation: PASS/FAIL
+* Diff check: PASS/FAIL
+
+PRESERVED
+
+Confirm:
+
+* FPR as sole full-pool rotation
+* continuous active-prop rescanning
+* PrizePicks all-sport discovery
+* Underdog provider independence
+* football exclusion
+* soccer support
+* pregame protection
+* universal tracking
+* grading
+* evidence
+* deduplication
+* reporting/accounting
+* scheduler safety
+* adaptive batching
+* max_instances=1
+* historical data
+* Stable Refresh removal
+
+LIVE VERIFICATION
+
+NO LIVE/PRODUCTION VERIFICATION WAS PERFORMED.
+
+TASK MANAGEMENT
+
+No new task was created.
+If an existing task directly covered this work, it may be closed.
+
+DO NOT CREATE A NEW TASK.

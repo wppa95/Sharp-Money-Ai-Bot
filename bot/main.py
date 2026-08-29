@@ -29,7 +29,6 @@ from database import Database, OddsRecord
 from engine import AnalysisEngine
 from engine.season_check import SeasonChecker
 from engine.analysis import _SPORT_TO_ODDS_API_KEY, PlayerPropLine
-from engine.sport_policy import is_football_related_sport
 from alert_scope_filter import is_ev_line_in_scope
 from models import (
     MarketType,
@@ -91,9 +90,6 @@ from connectors import (
 from market_engine import (
     init_market_engine,
     init_odds_confirmation,
-    connector_poll_job,
-    consensus_check_job,
-    clv_check_job,
     underdog_job,
     _start_prizepicks_cycle,
 )
@@ -356,11 +352,6 @@ async def post_init(application: Application) -> None:
 
     # ── Multi-platform connector registry ─────────────────────────────────────
     registry = ConnectorRegistry()
-    active_sports = [
-        sport for sport in config.active_sports
-        if not is_football_related_sport(sport)
-    ]
-
     registry.register(UnderdogConnector(
         # active_sports=None: accept every sport the Underdog API returns.
         # Underdog only lists currently-active props, so out-of-season sports
@@ -396,6 +387,7 @@ async def post_init(application: Application) -> None:
             interval=config.PLAYER_PROP_POLL_INTERVAL,
             first=60,
             name="player_props_fetcher",
+            job_kwargs={"max_instances": 1, "misfire_grace_time": 120},
         )
         # Legacy _prizepicks_job remains disabled.  The authorized PropLine
         # PrizePicks cycle runs as a guarded companion task inside underdog_job.
