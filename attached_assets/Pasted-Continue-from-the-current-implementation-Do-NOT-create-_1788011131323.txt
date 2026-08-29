@@ -1,0 +1,278 @@
+Continue from the current implementation.
+
+Do NOT create a new task.
+Do NOT propose a follow-up task.
+
+Do NOT perform live or production verification.
+Do NOT send Telegram commands.
+Do NOT send test alerts.
+Do NOT fabricate production data.
+
+Make only the smallest targeted changes necessary.
+
+FIX DELIVERY RESULT RECOVERY ERROR + PRIZEPICKS PIPELINE REPORTING
+
+1. FIX DeliveryResult.reason RUNTIME ERROR
+
+There is a runtime/recovery error currently appearing as:
+
+fail_streak=4: 'DeliveryResult' object has no attribute 'reason'
+
+Fix the root cause.
+
+Inspect the actual DeliveryResult contract and all callers that process delivery results, including:
+
+* monitoring-cycle result handling
+* delivery result handling
+* failure detection
+* recovery logic
+* fail-streak tracking
+* health reporting
+
+Do NOT assume .reason exists.
+
+Use the actual existing DeliveryResult fields/contract.
+
+Do NOT add a fake compatibility property simply to hide the error unless the result model genuinely requires that property.
+
+Required behavior
+
+Correctly distinguish:
+
+* successful delivery
+* filtered delivery
+* rate-limited delivery
+* unsuccessful delivery
+* unexpected delivery exception
+* genuine monitoring/scan failure
+
+A normal/expected delivery result must NOT falsely increment the monitoring failure streak.
+
+A completed scan with successful persistence must NOT be classified as a failed monitoring cycle because health/recovery attempted to inspect a nonexistent delivery-result field.
+
+Preserve legitimate recovery behavior for actual monitoring failures.
+
+2. PRESERVE DELIVERY CLAIM RETRY BEHAVIOR
+
+Do NOT regress the existing delivery-claim fixes.
+
+Keep:
+
+* atomic claim before delivery
+* release when delivery is filtered
+* release when rate-limited
+* release when unsuccessful
+* release when an unexpected exception occurs
+* successful delivery remains suppressed
+* exact provider/source/event/line/direction-aware identity
+
+Only fix the result handling/recovery error.
+
+3. ADD DEDICATED PRIZEPICKS PIPELINE REPORTING
+
+The health/status reporting currently shows PrizePicks as a market provider, but it does not clearly expose a dedicated PrizePicks pipeline.
+
+Add a provider-separated PrizePicks pipeline section to the existing health/status reporting.
+
+It should clearly distinguish PrizePicks from Underdog.
+
+Where the existing data is available, expose the same meaningful pipeline stages used for Underdog, such as:
+
+PrizePicks Pipeline
+
+* Last scan
+* Observations/props processed
+* Evaluated
+* Tracked/persisted
+* Directional opportunities
+* Actionable
+* Delivered
+* Last DB write
+* Provider status/error state
+
+Use the existing normalized PrizePicks/PropLine tracking data.
+
+Do NOT create a second tracking system.
+
+Do NOT make up values when data is unavailable.
+
+If a metric is unavailable, display an appropriate existing empty/unavailable state rather than copying Underdog’s value.
+
+4. PROVIDER SEPARATION
+
+PrizePicks metrics must come only from PrizePicks/PropLine data.
+
+Underdog metrics must come only from Underdog data.
+
+Do NOT:
+
+* copy Underdog counts into PrizePicks
+* combine provider observations
+* inherit Underdog ACTIVE_SPORTS
+* merge provider identities
+* merge provider pipeline counters
+
+The two pipelines must remain independently auditable.
+
+5. FOOTBALL
+
+Preserve the existing upstream football exclusion.
+
+Football remains excluded from active processing while historical football records remain intact.
+
+Do NOT exclude soccer.
+
+Do NOT alter the existing football/soccer scope logic except where required to keep reporting accurate.
+
+6. PRESERVE MONITORING/FPR
+
+Do NOT change:
+
+* FPR architecture
+* continuous active-prop rescanning
+* remaining active props as primary rotation
+* cursor advancement/wrapping
+* new/mover handling
+* non-actionable prop rescanning
+* tracking
+* grading
+* evidence
+* PrizePicks discovery
+* Underdog source-ID lifecycle
+* provider separation
+* pregame protection
+* alert deduplication
+* football exclusion
+* soccer support
+
+7. PRESERVE SCHEDULER
+
+Do NOT change scheduler architecture.
+
+Keep:
+
+* one Underdog monitor
+* one FPR rotation
+* Stable Refresh unscheduled
+* required independent jobs only
+* max_instances=1
+
+Do not add another monitoring watcher or PrizePicks background job.
+
+PrizePicks remains part of the existing shared provider cadence.
+
+8. TESTS
+
+Add focused regression tests proving:
+
+DeliveryResult/recovery
+
+* No nonexistent .reason access
+* Successful DeliveryResult does not increment fail streak
+* Filtered delivery handled correctly
+* Rate-limited delivery handled correctly
+* Unsuccessful delivery handled correctly
+* Unexpected delivery exception handled correctly
+* Genuine monitoring failure still triggers recovery
+* Successful scan + DB persistence is not falsely marked failed
+* Health reporting reflects actual failure state
+* Delivery claim release behavior remains intact
+
+PrizePicks pipeline
+
+* Dedicated PP pipeline metrics exist
+* PP observations come from normalized PP/PropLine data
+* PP tracking counts are provider-specific
+* PP evaluation counts are provider-specific
+* PP delivery counts are provider-specific
+* PP DB-write/status reporting is provider-specific
+* Underdog values never populate PP metrics
+* Empty PP data produces a clean unavailable/empty state
+* Existing reporting/accounting tests remain green
+
+Run:
+
+1. Focused delivery/recovery/health tests
+2. Focused PrizePicks reporting tests
+3. Full existing test suite
+4. Python compilation
+5. git diff --check
+
+9. NO LIVE VERIFICATION
+
+Do NOT:
+
+* query Railway production
+* query production database
+* send Telegram commands
+* send test alerts
+* wait for production cycles
+* fabricate production data
+* perform live verification
+
+Local tests and static/code-path verification are sufficient.
+
+A local restart is allowed only if needed for tests.
+
+10. NO UNRELATED CHANGES
+
+Do NOT change:
+
+* scoring formulas
+* BQ/MQ
+* confidence
+* evidence architecture
+* grading architecture
+* FPR architecture
+* tracking architecture
+* deduplication architecture
+* monitoring cadence
+* adaptive batching
+* provider identity
+* Telegram formatting
+* alert rules
+* historical data
+* PrizePicks sport discovery
+* Underdog behavior
+* football/soccer scope
+
+11. TASK MANAGEMENT
+
+Do NOT create a new task.
+Do NOT propose a follow-up task.
+
+If an existing task directly covers this work, it may be closed after successful validation.
+
+FINAL REPORT
+
+IMPLEMENTED
+
+Exactly what changed.
+
+ROOT CAUSE
+
+Explain the actual cause of the DeliveryResult.reason error.
+
+PRIZEPICKS PIPELINE
+
+Explain exactly where each PP metric now comes from and confirm it is provider-separated from Underdog.
+
+TESTED
+
+* Focused tests: X passed
+* Full suite: X passed
+* Compilation: PASS/FAIL
+* Diff check: PASS/FAIL
+
+PRESERVED
+
+Confirm all existing FPR, monitoring, tracking, grading, evidence, deduplication, pregame, provider-separation, football exclusion, soccer, scheduler, and historical-data behavior was preserved.
+
+LIVE VERIFICATION
+
+NO LIVE/PRODUCTION VERIFICATION WAS PERFORMED.
+
+TASK MANAGEMENT
+
+No new task was created.
+If an existing task directly covered this work, it may be closed.

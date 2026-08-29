@@ -1529,6 +1529,16 @@ async def _run_prizepicks_independent_cycle(
         )
         return
 
+    try:
+        from engine.health import get_health_tracker as _get_pp_health_tracker
+        _pp_health = _get_pp_health_tracker()
+        if _pp_health is not None:
+            _pp_health.record_provider_database_write(
+                "PrizePicks", "prop_line_history"
+            )
+    except Exception:
+        logger.debug("prizepicks_cycle: provider write telemetry unavailable")
+
     actionable: list[dict] = []
     _pp_candidate_rows: list[dict] = []
     enrichment_budget = 250
@@ -4348,7 +4358,7 @@ async def underdog_job(context) -> None:
                     _dq_deferred_log.append(
                         f"{_dq_player}/{_dq_st} [tier={_dq.get('tier', '?')}]"
                         f" bq={_dq.get('bq',0):.0f} path={_dq_path}]:"
-                        f"{_dq_result.reason}"
+                        f"{str(_dq_result)}"
                     )
                                     
 

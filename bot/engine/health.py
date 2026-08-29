@@ -477,6 +477,27 @@ class HealthTracker:
             self._state["last_error_ts"] = _now_iso()
             self._save()
 
+    def record_provider_database_write(
+        self, provider: str, operation: str = "write"
+    ) -> None:
+        """Record the last normalized-data write for one provider.
+
+        Provider-specific timestamps are kept separate from the legacy global
+        database-write marker so health reports cannot attribute Underdog work
+        to PrizePicks (or vice versa).
+        """
+        with self._lock:
+            providers: dict = self._state.setdefault("providers", {})
+            entry: dict = providers.setdefault(provider, {})
+            entry["last_db_write"] = _now_iso()
+            entry["last_db_write_ts"] = _now_ts()
+            entry["last_db_write_operation"] = str(operation or "write")
+            self._save()
+
+    def provider_last_db_write_str(self, provider: str) -> str:
+        """Return the age of the last provider-specific database write."""
+        return _age_str(self.get_provider_info(provider).get("last_db_write_ts"))
+
     def get_provider_info(self, provider: str) -> dict:
         return self._state.get("providers", {}).get(provider, {})
 

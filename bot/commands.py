@@ -154,6 +154,92 @@ def _format_status_count(value: object) -> str:
         return "unavailable"
 
 
+async def _provider_reconciliation(provider: str) -> Optional[dict]:
+    """Read one provider's normalized pipeline counters without blocking commands."""
+    if _db is None:
+        return None
+    try:
+        report = await _bounded(
+            _db.get_telegram_reconciliation(since_hours=24),
+            timeout=_PROVIDER_REPORT_TIMEOUT_SECONDS,
+        )
+        if not isinstance(report, dict):
+            return None
+        by_provider = report.get("by_provider")
+        if not isinstance(by_provider, dict):
+            return None
+        row = by_provider.get(provider)
+        return row if isinstance(row, dict) else None
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("provider pipeline report unavailable for %s: %s", provider, exc)
+        return None
+
+
+def _append_provider_pipeline(
+    lines: list[str],
+    *,
+    provider: str,
+    health_tracker: object | None,
+    reconciliation: Optional[dict],
+) -> None:
+    """Append an honest, provider-isolated normalized pipeline section."""
+    info: dict = {}
+    if health_tracker is not None:
+        try:
+            candidate = health_tracker.get_provider_info(provider)
+            if isinstance(candidate, dict):
+                info = candidate
+        except Exception:
+            info = {}
+
+    last_scan = "unavailable"
+    status = "awaiting first successful fetch"
+    if info:
+        try:
+            last_scan = health_tracker.provider_last_fetch_str(provider)
+        except Exception:
+            last_scan = "unavailable"
+        streak = int(info.get("error_streak", 0) or 0)
+        if streak:
+            status = f"error ({streak} consecutive failure{'s' if streak != 1 else ''})"
+        elif info.get("last_fetch_ts") is not None:
+            status = "ok"
+
+    last_db_write = "not recorded"
+    if info and health_tracker is not None:
+        try:
+            last_db_write = health_tracker.provider_last_db_write_str(provider)
+        except Exception:
+            last_db_write = "unavailable"
+
+    lines.extend((
+        f"<b>📈 { _html.escape(provider) } Pipeline</b>",
+        f"  Status:              {_html.escape(status)}",
+        f"  Last scan:           {_html.escape(str(last_scan))}",
+        f"  Last DB write:       {_html.escape(str(last_db_write))}",
+    ))
+
+    if not reconciliation:
+        lines.append("  No normalized observations in the last 24h.")
+        lines.append("  Observed / tracked / evaluated / actionable / delivered: unavailable")
+        return
+
+    def _metric(key: str) -> str:
+        return _format_status_count(reconciliation.get(key))
+
+    lines.extend((
+        f"  Observed:            {_metric('observed')}",
+        f"  Tracked active:      {_metric('tracked')}",
+        f"  Evaluated:           {_metric('evaluated')}",
+        # For the current PropLine pipeline, directional persistence is the
+        # actionable gate. Keep this explicit rather than borrowing UD data.
+        f"  Directional/actionable: {_metric('actionable_persisted')}",
+        f"  Delivered alerts:    {_metric('delivered_alerts')}",
+    ))
+
+
 def _primary_player_prop_provider_lines(
     health_monitor: object | None = None,
 ) -> list[str]:
@@ -505,6 +591,16 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     f"  ⚪ <b>{_html.escape(provider)}</b> — "
                     f"{_market_provider_labels[provider]}  ·  not yet fetched"
                 )
+
+        # PrizePicks is an independent normalized PropLine pipeline.  Read
+        # only its own reconciliation row; never infer these values from UD.
+        pp_reconciliation = await _provider_reconciliation("PrizePicks")
+        _append_provider_pipeline(
+            lines,
+            provider="PrizePicks",
+            health_tracker=ht,
+            reconciliation=pp_reconciliation,
+        )
 
         # ── Stat provider health (historical enrichment) ──────────────────────
         lines.append("")
@@ -860,6 +956,12 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             _mon = get_health_monitor()
         except ImportError:
             _mon = None
+        try:
+            from engine.health import get_health_tracker as _get_ht_pipeline
+            _ht_pipeline = _get_ht_pipeline()
+        except Exception:
+            _ht_pipeline = None
+        pp_reconciliation = await _provider_reconciliation("PrizePicks")
 
         # DB-backed daily alert count — resets at UTC midnight; survives restart.
         # Historical records are preserved in PropOpportunityLog; use /alerts for history.
@@ -910,6 +1012,13 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     f"  {h.status_emoji} <b>{_html.escape(name)}</b>  {_html.escape(h.status.value)}"
                     f"  ·  last ✓: {_html.escape(last_ok)}{fail_note}"
                 )
+        lines.append("")
+        _append_provider_pipeline(
+            lines,
+            provider="PrizePicks",
+            health_tracker=_ht_pipeline,
+            reconciliation=pp_reconciliation,
+        )
         lines.append("")
 
         # ── Stat provider health (historical enrichment) ──────────────────────
