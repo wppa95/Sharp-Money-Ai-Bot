@@ -28,6 +28,57 @@ from datetime import datetime
 from typing import Optional, Tuple
 
 
+_BLOCKED_EVENT_STATUSES = frozenset({
+    "started",
+    "live",
+    "in_progress",
+    "in-progress",
+    "final",
+    "completed",
+    "closed",
+    "ended",
+})
+_PREGAME_EVENT_STATUSES = frozenset({
+    "scheduled",
+    "pre_game",
+    "pre-game",
+    "pregame",
+    "upcoming",
+    "open",
+    "not_started",
+    "not-started",
+})
+
+
+def is_event_pregame(
+    game_time: Optional[datetime],
+    *,
+    game_status: Optional[str] = None,
+) -> Tuple[bool, str]:
+    """Return whether an event is safely known to be pregame.
+
+    A missing start time is safe only when the provider explicitly identifies
+    the event as pregame.  Unknown event state is retained for tracking but
+    cannot reach Telegram.
+    """
+    status = str(game_status or "").strip().lower().replace(" ", "_")
+    if status in _BLOCKED_EVENT_STATUSES:
+        return False, f"Event status is {status}"
+    if status in _PREGAME_EVENT_STATUSES:
+        return True, ""
+    if game_time is None:
+        return False, "Event start/state is unknown"
+
+    now = datetime.utcnow()
+    gt = game_time.replace(tzinfo=None) if game_time.tzinfo is not None else game_time
+    try:
+        if gt <= now:
+            return False, "🔴 Game already in progress"
+    except Exception:
+        return False, "Event start/state is unknown"
+    return True, ""
+
+
 def is_game_alertable(
     game_time: Optional[datetime],
     *,

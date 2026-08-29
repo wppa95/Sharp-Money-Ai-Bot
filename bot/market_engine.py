@@ -586,9 +586,15 @@ def _is_game_live_or_past(snap: object, now: datetime) -> bool:
     Internal scanning may continue regardless; this gate only controls
     Telegram delivery of 🎯 ACTIONABLE BET PICK alerts.
     """
-    _BLOCKED_STATUSES = {"live", "in_progress", "final", "completed", "closed"}
-    _status = getattr(snap, "game_status", None)
-    if isinstance(_status, str) and _status.lower() in _BLOCKED_STATUSES:
+    _BLOCKED_STATUSES = {
+        "started", "live", "in_progress", "in-progress",
+        "final", "completed", "closed", "ended",
+    }
+    _status = (
+        getattr(snap, "game_status", None)
+        or getattr(snap, "provider_status", None)
+    )
+    if isinstance(_status, str) and _status.lower().replace(" ", "_") in _BLOCKED_STATUSES:
         return True
     _gt = getattr(snap, "game_time", None)
     if _gt is not None:

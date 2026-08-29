@@ -1529,8 +1529,15 @@ def _is_season_future(stat_type: str) -> bool:
     return False
 
 
-def _is_upcoming_game(game_time: Optional[datetime]) -> bool:
-    """Unknown start times remain displayable; known live/past games do not."""
+def _is_upcoming_game(
+    game_time: Optional[datetime],
+    game_status: Optional[str] = None,
+) -> bool:
+    """Return True only when the event is safely known to be pregame."""
+    from engine.timing import is_event_pregame
+
+    safe, _reason = is_event_pregame(game_time, game_status=game_status)
+    return safe
     if game_time is None:
         return True
     now = datetime.now(timezone.utc)
@@ -1763,7 +1770,10 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if not _is_season_future(p.stat_type)
         and _is_active_display_sport(p.sport)
         and not is_telegram_suppressed_sport(p.sport)
-        and _is_upcoming_game(getattr(p, "game_time", None))
+        and _is_upcoming_game(
+            getattr(p, "game_time", None),
+            getattr(p, "provider_status", None),
+        )
     ]
 
     if sport_filter:
@@ -1779,7 +1789,10 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if not _is_season_future(p.stat_type)
         and _is_current_provider_sport(p.sport, "PrizePicks")
         and not is_telegram_suppressed_sport(p.sport)
-        and _is_upcoming_game(getattr(p, "game_time", None))
+        and _is_upcoming_game(
+            getattr(p, "game_time", None),
+            getattr(p, "provider_status", None),
+        )
         and (not sport_filter or p.sport.upper() == sport_filter)
     ]
     provider_props: list[tuple[str, Any]] = [
@@ -2659,7 +2672,10 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not _is_season_future(p.stat_type)
         and _is_active_display_sport(p.sport)
         and not is_telegram_suppressed_sport(p.sport)
-        and _is_upcoming_game(getattr(p, "game_time", None))
+        and _is_upcoming_game(
+            getattr(p, "game_time", None),
+            getattr(p, "provider_status", None),
+        )
     ]
     try:
         pp_props = await _report_read(
@@ -2673,7 +2689,10 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not _is_season_future(p.stat_type)
         and _is_current_provider_sport(p.sport, "PrizePicks")
         and not is_telegram_suppressed_sport(p.sport)
-        and _is_upcoming_game(getattr(p, "game_time", None))
+        and _is_upcoming_game(
+            getattr(p, "game_time", None),
+            getattr(p, "provider_status", None),
+        )
     ]
     provider_props = [
         *[("Underdog", p) for p in ud_props],

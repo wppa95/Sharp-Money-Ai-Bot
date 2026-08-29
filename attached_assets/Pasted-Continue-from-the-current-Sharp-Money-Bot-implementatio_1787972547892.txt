@@ -1,0 +1,522 @@
+Continue from the current Sharp Money Bot implementation.
+
+Make ONLY the targeted changes below.
+
+Do NOT redesign the architecture.
+Do NOT create another monitoring or tracking system.
+Do NOT change provider ingestion.
+Do NOT change the completed provider-specific alert formatting/deduplication work.
+Do NOT change the completed universal tracking/grading work.
+
+🚫 NO LIVE / PRODUCTION VERIFICATION
+
+DO NOT RUN LIVE VERIFICATION FOR THIS REQUEST.
+
+Do NOT:
+
+* Restart Railway
+* Deploy Railway
+* Send Telegram commands
+* Send /testalert
+* Wait for natural alerts
+* Wait for games to finish
+* Generate synthetic production data
+* Generate synthetic alerts
+* Modify production configuration for testing
+
+Use only:
+
+SOURCE INSPECTION → IMPLEMENTATION → FOCUSED TESTS → FULL SUITE → COMPILE → DIFF CHECK
+
+⸻
+
+1. PREGAME-ONLY TELEGRAM OPPORTUNITIES
+
+Only props for events that have NOT started may reach Telegram.
+
+The bot must reject Telegram delivery when:
+
+* event/game has already started
+* event is live/in progress
+* event has ended
+* provider explicitly marks the event as started/live/final
+
+This applies to BOTH:
+
+* 🐶 Underdog
+* 🟣 PrizePicks
+
+Do NOT remove these props from tracking or grading.
+
+The rule is:
+
+In-game = no Telegram
+
+but:
+
+In-game = still tracked + retained for grading/history.
+
+⸻
+
+2. 24-HOUR PRE-GAME MONITORING
+
+For active pregame props:
+
+Begin monitoring as soon as the prop becomes available.
+
+If event start time is known, the bot should prioritize active props within approximately:
+
+24 hours before event start
+
+and continue monitoring until:
+
+event start/removal.
+
+Do NOT wait until a prop becomes a line mover.
+
+Do NOT monitor only the latest newly detected props.
+
+Do NOT monitor only actionable candidates.
+
+Do NOT require a previous alert.
+
+⸻
+
+3. CONTINUOUS RESCANNING
+
+Every active pregame prop must remain eligible for continuous rescanning.
+
+This includes:
+
+* unchanged props
+* previously scored props
+* previously rejected props
+* previously delivered props
+* weak props
+* missing-evidence props
+* cold-start props
+* props whose line has not moved
+* props that previously produced no direction
+
+The full active universe must continue through the existing FPR rotation.
+
+The lifecycle must remain:
+
+Active provider source-ID universe
+→ bounded FPR batch
+→ evaluate/rescore
+→ persist
+→ advance cursor
+→ next batch
+→ repeat
+→ wrap
+→ repeat until event start/removal
+
+Do NOT create another cursor or rotation system.
+
+⸻
+
+4. LINE MOVEMENT IS NOT THE ONLY RESCAN TRIGGER
+
+A line movement should receive priority.
+
+However:
+
+No line movement must NOT mean no rescan.
+
+The following must all remain eligible for rescanning:
+
+* unchanged
+* stable
+* previously rejected
+* previously delivered
+* previously non-directional
+* cold-start
+* missing evidence
+
+This is necessary so the bot does not miss opportunities that become actionable without a large line move.
+
+⸻
+
+5. PRIORITY ORDER
+
+Within the existing FPR framework, preserve this priority:
+
+1. Newly discovered active props
+2. Significant line movers
+3. Urgent/meaningful changes
+4. Active props approaching event start
+5. Remaining active pregame universe
+6. Previously scanned props returning through normal rotation
+
+Priority must NOT create starvation.
+
+The remainder of the active universe must continue receiving guaranteed FPR coverage.
+
+⸻
+
+6. EVENT-START LIFECYCLE
+
+When the event starts:
+
+Remove the prop from the active Telegram opportunity pool.
+
+Do NOT delete it.
+
+Keep:
+
+* historical snapshots
+* tracking records
+* evidence
+* grading eligibility
+* final result linkage
+
+Once the final result becomes available:
+
+Grade the prop normally as:
+
+* HIT
+* MISS
+* PUSH
+
+where applicable.
+
+⸻
+
+7. START-TIME DATA HANDLING
+
+Use the best available event start information from the existing provider data.
+
+Handle:
+
+* exact event start timestamp
+* event timezone
+* missing start time
+* provider status
+* live/in-progress status
+* final status
+
+Do NOT fabricate a start time.
+
+If event start cannot be established reliably, preserve tracking but do not bypass the pregame safety rule to send an uncertain live-state prop.
+
+⸻
+
+8. PROVIDER SEPARATION
+
+Apply the pregame lifecycle independently to:
+
+Underdog
+
+and:
+
+PrizePicks
+
+Do NOT let Underdog event state overwrite PrizePicks event state.
+
+Do NOT let PrizePicks event state overwrite Underdog event state.
+
+Provider/source/event identity must remain intact.
+
+⸻
+
+9. FOOTBALL REMAINS SUPPRESSED
+
+Football continues to be:
+
+MONITORED + TRACKED + GRADED
+
+but:
+
+NEVER TELEGRAM DELIVERED.
+
+This remains true regardless of whether the prop is:
+
+* pregame
+* directional
+* strong
+* newly discovered
+* line moved
+* previously alerted
+
+Do not remove football tracking.
+
+⸻
+
+10. DIRECTION-ONLY QUALIFICATION REMAINS
+
+After the pregame check passes, the only qualification requirement for Telegram player-prop opportunity selection is:
+
+valid OVER or UNDER direction.
+
+Do NOT reintroduce:
+
+* S/A/B/C
+* PASS
+* Watchlist
+* Near-Miss
+* tier gates
+* obsolete evidence gates
+* obsolete confidence gates
+
+Operational safety checks remain allowed.
+
+⸻
+
+11. ALERT DEDUPLICATION REMAINS DELIVERY-ONLY
+
+Do not allow pregame filtering or deduplication to remove the underlying prop from:
+
+* tracking
+* FPR
+* history
+* grading
+
+Deduplication remains downstream.
+
+Same provider/source/event/player/market/line/direction:
+
+→ suppress duplicate delivery.
+
+Meaningful line/direction/event change:
+
+→ may create a new delivery.
+
+⸻
+
+12. /PICKS
+
+/picks should show current pregame directional opportunities only.
+
+Do NOT show:
+
+* live props
+* started events
+* completed events
+* football props
+
+But /picks must not become the underlying tracking universe.
+
+A tracked prop can exist without appearing in /picks.
+
+⸻
+
+13. /SLIP
+
+/slip should only select from eligible current pregame directional opportunities.
+
+Do NOT allow:
+
+* live props
+* started events
+* completed events
+* football props
+
+into slips.
+
+Preserve existing slip construction and risk controls.
+
+Do not redesign the slip system.
+
+⸻
+
+14. ALERT HISTORY
+
+/alerts should show actual delivered alerts.
+
+It should not be used as the source of truth for tracking.
+
+Provider identity must remain:
+
+* 🐶 UNDERDOG PICK
+* 🟣 PRIZEPICKS PICK
+
+⸻
+
+15. DASHBOARD / FUNNEL
+
+Current active monitoring displays should distinguish:
+
+Active pregame
+
+Currently eligible for opportunity evaluation/delivery.
+
+Historical/inactive
+
+Tracked but no longer eligible for current Telegram delivery.
+
+Do not count started events as active Telegram opportunities.
+
+Do not delete them from historical tracking.
+
+Preserve provider and sport breakdowns.
+
+⸻
+
+16. TESTS
+
+Add focused regression tests proving:
+
+Pregame
+
+* Pregame Underdog prop can qualify for delivery.
+* Pregame PrizePicks prop can qualify for delivery.
+* Started Underdog prop cannot reach Telegram.
+* Started PrizePicks prop cannot reach Telegram.
+* Live/in-progress props cannot reach Telegram.
+* Final props cannot reach Telegram.
+* Unknown/unsafe event state cannot bypass the pregame protection.
+
+Monitoring
+
+* Active unchanged props remain in FPR.
+* Stable props continue rescanning.
+* Previously rejected props continue rescanning.
+* Previously delivered props continue rescanning.
+* Cold-start props continue rescanning.
+* Non-directional props remain tracked and eligible for future rescoring.
+* Line movers receive priority.
+* New props receive priority.
+* Approaching-start props receive priority.
+* Remaining active props continue receiving coverage.
+* FPR cursor advances.
+* FPR wraps.
+* No second rotation system exists.
+
+Lifecycle
+
+* Event start removes a prop from active delivery eligibility.
+* Historical snapshots remain after event start.
+* Tracking remains after event start.
+* Grading remains available after event start.
+* Final outcomes can resolve to HIT/MISS/PUSH.
+* Provider-specific event state remains isolated.
+
+Football
+
+* Football remains tracked.
+* Football remains gradeable.
+* Football remains excluded from Telegram and slips.
+
+Provider separation
+
+* Underdog event state cannot affect PrizePicks.
+* PrizePicks event state cannot affect Underdog.
+* Provider/source/event identity remains distinct.
+
+Direction
+
+* OVER remains eligible when pregame.
+* UNDER remains eligible when pregame.
+* No tier/classification gate blocks a valid direction.
+
+Run:
+
+1. Focused pregame/FPR/provider regression tests.
+2. Full existing test suite.
+3. Python compilation.
+4. git diff --check.
+
+Do NOT weaken existing tests.
+
+⸻
+
+17. PRESERVE EVERYTHING ALREADY COMPLETED
+
+Do NOT regress:
+
+* PrizePicks all-sport discovery
+* PrizePicks source-ID identity
+* PrizePicks alternate-line handling
+* PrizePicks observation persistence
+* Underdog active source-ID FPR lifecycle
+* Universal tracking
+* Universal grading
+* HIT/MISS/PUSH
+* Progressive history
+* Provider-specific alerts
+* 🐶 UNDERDOG PICK
+* 🟣 PRIZEPICKS PICK
+* Alert deduplication
+* Direction-only qualification
+* Football Telegram suppression
+* No “verify before placing” language
+* Pregame-only protection already implemented
+* Unified cadence
+* Adaptive batching
+* max_instances=1
+* Clean restart
+* Existing safety protections
+* Railway configuration
+* OddsAPI
+* Unrelated providers
+
+Only fix gaps directly related to the pregame opportunity lifecycle and continuous rescanning.
+
+⸻
+
+18. FINAL REPORT
+
+Report exactly:
+
+IMPLEMENTED
+
+Every actual change made.
+
+TESTED
+
+* Focused tests: X passed
+* Full suite: X passed
+* Compilation: PASS/FAIL
+* Diff check: PASS/FAIL
+
+UNVERIFIED LIVE
+
+NO LIVE VERIFICATION WAS PERFORMED.
+
+PRESERVED
+
+Confirm:
+
+* Underdog monitoring preserved.
+* PrizePicks monitoring preserved.
+* Universal tracking preserved.
+* Universal grading preserved.
+* FPR remains the sole full-pool rotation.
+* Football remains monitored/tracked/graded but blocked from Telegram.
+* Provider separation preserved.
+* Direction-only qualification preserved.
+* Alert deduplication remains delivery-only.
+* Pregame protection preserved.
+* Railway was not restarted.
+* Railway was not deployed.
+* No production data was fabricated.
+* No test alerts were sent.
+
+🔴 FINAL INSTRUCTION
+
+DO NOT RUN LIVE VERIFICATION.
+
+DO NOT RESTART RAILWAY.
+
+DO NOT DEPLOY RAILWAY.
+
+DO NOT SEND TELEGRAM COMMANDS.
+
+DO NOT WAIT FOR NATURAL ALERTS.
+
+Make the smallest targeted changes necessary.
+
+The desired lifecycle is:
+
+AVAILABLE PROP
+→ PREGAME MONITORING
+→ CONTINUOUS FPR RESCAN
+→ DIRECTION
+→ TELEGRAM ELIGIBILITY
+→ DELIVERY DEDUP
+→ EVENT START
+→ HISTORICAL TRACKING
+→ FINAL GRADING
+
+while the complete provider prop universe remains tracked independently of Telegram delivery.
