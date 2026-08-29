@@ -233,10 +233,13 @@ def _append_provider_pipeline(
         f"  Observed:            {_metric('observed')}",
         f"  Tracked active:      {_metric('tracked')}",
         f"  Evaluated:           {_metric('evaluated')}",
-        # For the current PropLine pipeline, directional persistence is the
-        # actionable gate. Keep this explicit rather than borrowing UD data.
-        f"  Directional/actionable: {_metric('actionable_persisted')}",
+        f"  Directional:         {_metric('directional')}",
+        f"  Actionable persisted: {_metric('actionable_persisted')}",
         f"  Delivered alerts:    {_metric('delivered_alerts')}",
+        f"  Pending grading:     {_metric('pending')}",
+        f"  Resolved:            {_metric('resolved')}",
+        f"  Results (H/M/P):     "
+        f"{_metric('hit')}/{_metric('miss')}/{_metric('push')}",
     ))
 
 
@@ -592,9 +595,17 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     f"{_market_provider_labels[provider]}  ·  not yet fetched"
                 )
 
-        # PrizePicks is an independent normalized PropLine pipeline.  Read
-        # only its own reconciliation row; never infer these values from UD.
+        # Each provider has its own normalized pipeline counters. Never infer
+        # one provider's volume or grading state from the other.
+        ud_reconciliation = await _provider_reconciliation("Underdog")
         pp_reconciliation = await _provider_reconciliation("PrizePicks")
+        _append_provider_pipeline(
+            lines,
+            provider="Underdog",
+            health_tracker=ht,
+            reconciliation=ud_reconciliation,
+        )
+        lines.append("")
         _append_provider_pipeline(
             lines,
             provider="PrizePicks",

@@ -1480,6 +1480,7 @@ class Database:
                 "observed": 0,
                 "evaluated": 0,
                 "tracked": 0,
+                "directional": 0,
                 "actionable_persisted": 0,
                 "delivery_attempts": 0,
                 "delivered_alerts": 0,
@@ -1489,6 +1490,11 @@ class Database:
                 "failed_attempts": 0,
                 "rate_limited": 0,
                 "dedup_suppressed": 0,
+                "pending": 0,
+                "resolved": 0,
+                "hit": 0,
+                "miss": 0,
+                "push": 0,
             }
 
         by_provider: dict[str, dict] = {}
@@ -1635,12 +1641,18 @@ class Database:
             # Candidate rows are the broad evaluation stream.
             try:
                 candidate_rows = await s.execute(
-                    select(PropCandidateLog.provider, func.count(PropCandidateLog.id))
+                select(
+                    PropCandidateLog.provider,
+                    PropCandidateLog.sport,
+                    func.count(PropCandidateLog.id),
+                )
                     .where(PropCandidateLog.scan_ts >= cutoff)
-                    .group_by(PropCandidateLog.provider)
+                .group_by(PropCandidateLog.provider, PropCandidateLog.sport)
                 )
                 candidate_providers: set[str] = set()
-                for provider_name, count in candidate_rows.all():
+                for provider_name, sport, count in candidate_rows.all():
+                    if not _is_supported_tracking_sport(sport):
+                        continue
                     provider = _provider(provider_name)
                     candidate_providers.add(provider)
                     _ensure(provider)["evaluated"] += int(count or 0)
@@ -1653,7 +1665,9 @@ class Database:
                 select(
                     PropOpportunityLog.provider,
                     PropOpportunityLog.detected_at,
+                    PropOpportunityLog.sport,
                     PropOpportunityLog.recommendation,
+                    PropOpportunityLog.result,
                     PropOpportunityLog.alert_sent,
                     PropOpportunityLog.alert_sent_at,
                 ).where(
@@ -1663,7 +1677,12 @@ class Database:
                     )
                 )
             )
-            for provider_name, detected_at, recommendation, alert_sent, alert_sent_at in pol_rows.all():
+            for (
+                provider_name, detected_at, sport, recommendation, result,
+                alert_sent, alert_sent_at,
+            ) in pol_rows.all():
+                if not _is_supported_tracking_sport(sport):
+                    continue
                 provider = _provider(provider_name or "Underdog")
                 row = _ensure(provider)
                 if detected_at is not None and detected_at >= cutoff:
@@ -1674,6 +1693,21 @@ class Database:
                         row["evaluated"] += 1
                     if str(recommendation or "").upper() in {"OVER", "UNDER"}:
                         row["actionable_persisted"] += 1
+                        row["directional"] += 1
+                        result_key = str(result or "PENDING").upper()
+                        if result_key == "PENDING":
+                            row["pending"] += 1
+                        elif result_key in {
+                            "HIT", "MISS", "PUSH", "VOID", "CANCELLED",
+                            "INJURY_VOID", "GAME_INTERRUPTED",
+                        }:
+                            row["resolved"] += 1
+                        if result_key == "HIT":
+                            row["hit"] += 1
+                        elif result_key == "MISS":
+                            row["miss"] += 1
+                        elif result_key == "PUSH":
+                            row["push"] += 1
                     _add_bucket(
                         provider,
                         detected_at,
@@ -1690,13 +1724,18 @@ class Database:
             # Legacy independent PrizePicks edge rows.
             pp_rows = await s.execute(
                 select(
+                    PPEdgeRecord.sport,
                     PPEdgeRecord.detected_at,
                     PPEdgeRecord.alert_sent,
                 ).where(PPEdgeRecord.detected_at >= cutoff)
             )
-            for detected_at, alert_sent in pp_rows.all():
+            for sport, detected_at, alert_sent in pp_rows.all():
+                if not _is_supported_tracking_sport(sport):
+                    continue
                 row = _ensure("PrizePicks")
                 row["actionable_persisted"] += 1
+                row["directional"] += 1
+                row["pending"] += 1
                 if alert_sent:
                     row["delivered_alerts"] += 1
                     legacy_deliveries += 1
@@ -1712,10 +1751,12 @@ class Database:
             # rows must remain visible if an older configuration delivered one.
             for model in (EVRecord, SteamRecord):
                 legacy_rows = await s.execute(
-                    select(model.detected_at, model.alert_sent)
+                    select(model.sport, model.detected_at, model.alert_sent)
                     .where(model.detected_at >= cutoff)
                 )
-                for detected_at, alert_sent in legacy_rows.all():
+                for sport, detected_at, alert_sent in legacy_rows.all():
+                    if not _is_supported_tracking_sport(sport):
+                        continue
                     row = _ensure("Sportsbook")
                     row["evaluated"] += 1
                     row["actionable_persisted"] += 1
@@ -1752,6 +1793,8 @@ class Database:
                 external_id, line_value, outcome, recipients_sent,
                 recipients_failed, attempted_at,
             ) in audit_rows.all():
+                if not _is_supported_tracking_sport(sport):
+                    continue
                 provider = _provider(provider_name)
                 row = _ensure(provider)
                 outcome = str(outcome or "failed").lower()
@@ -1783,12 +1826,27 @@ class Database:
         duplicate_delivery_events = sum(
             max(0, count - 1) for count in audit_identity_counts.values()
         )
+        pending_total = sum(row.get("pending", 0) for row in by_provider.values())
+        resolved_total = sum(row.get("resolved", 0) for row in by_provider.values())
+        directional_total = sum(
+            row.get("directional", 0) for row in by_provider.values()
+        )
+        result_counts = {
+            "HIT": sum(row.get("hit", 0) for row in by_provider.values()),
+            "MISS": sum(row.get("miss", 0) for row in by_provider.values()),
+            "PUSH": sum(row.get("push", 0) for row in by_provider.values()),
+        }
 
         return {
             "since_hours": since_hours,
             "bucket_minutes": bucket_minutes,
             "window_start": cutoff,
             "by_provider": by_provider,
+            "directional": directional_total,
+            "actionable": directional_total,
+            "pending": pending_total,
+            "resolved": resolved_total,
+            "result_counts": result_counts,
             "time_buckets": [
                 {
                     "bucket": bucket,
@@ -4767,13 +4825,18 @@ class Database:
                 .group_by(PropLineHistory.provider, PropLineHistory.sport)
             )
             tracked_observations_by_provider: dict[str, int] = {}
+            observation_by_sport: dict[str, int] = {}
             for provider, sport, count in observation_provider_res.all():
                 if not _is_supported_tracking_sport(sport):
                     continue
                 provider_key = str(provider or "Unknown")
+                sport_key = str(sport or "UNKNOWN")
                 tracked_observations_by_provider[provider_key] = (
                     tracked_observations_by_provider.get(provider_key, 0)
                     + int(count or 0)
+                )
+                observation_by_sport[sport_key] = (
+                    observation_by_sport.get(sport_key, 0) + int(count or 0)
                 )
             tracked_observations = sum(tracked_observations_by_provider.values())
             has_normalized_history = tracked_observations > 0
@@ -4791,15 +4854,33 @@ class Database:
                     .order_by(func.count(PropCandidateLog.id).desc())
                 )
                 by_sport = [
-                    {"sport": sport or "UNKNOWN", "tracked": int(count or 0)}
+                    {
+                        "sport": sport or "UNKNOWN",
+                        "tracked": 0,
+                        "evaluated": int(count or 0),
+                    }
                     for sport, count in sport_res.all()
                     if _is_supported_tracking_sport(sport)
                 ]
-                candidate_total = sum(row["tracked"] for row in by_sport)
+                candidate_total = sum(row["evaluated"] for row in by_sport)
                 return {
                     "since_hours": since_hours,
-                    "tracked": candidate_total,
+                    "tracked": 0,
+                    "active_tracked": 0,
+                    "tracked_observations": 0,
+                    "historical_observations": 0,
+                    "evaluated": candidate_total,
+                    "directional_total": 0,
+                    "actionable_total": 0,
+                    "delivered": 0,
+                    "pending": 0,
+                    "resolved": 0,
+                    "active_by_provider": {},
+                    "active_by_sport": {},
+                    "observations_by_sport": {},
+                    "provider_breakdown": {},
                     "by_sport": by_sport,
+                    "source": "candidate_log_legacy_fallback",
                 }
 
             by_sport_counts: dict[str, int] = {}
@@ -4850,6 +4931,13 @@ class Database:
             resolved_total = 0
             directional_by_provider: dict[str, int] = {}
             delivered_by_provider: dict[str, int] = {}
+            pending_by_provider: dict[str, int] = {}
+            resolved_by_provider: dict[str, int] = {}
+            directional_by_sport: dict[str, int] = {}
+            delivered_by_sport: dict[str, int] = {}
+            result_counts: dict[str, int] = {}
+            result_counts_by_provider: dict[str, dict[str, int]] = {}
+            result_counts_by_sport: dict[str, dict[str, int]] = {}
             for provider, sport, recommendation, result, alert_sent in opportunity_rows.all():
                 if not _is_supported_tracking_sport(sport):
                     continue
@@ -4858,29 +4946,114 @@ class Database:
                 directional_by_provider[provider_key] = (
                     directional_by_provider.get(provider_key, 0) + 1
                 )
+                sport_key = str(sport or "UNKNOWN")
+                directional_by_sport[sport_key] = (
+                    directional_by_sport.get(sport_key, 0) + 1
+                )
+                result_key = str(result or "PENDING").upper()
+                result_counts[result_key] = result_counts.get(result_key, 0) + 1
+                provider_results = result_counts_by_provider.setdefault(provider_key, {})
+                provider_results[result_key] = provider_results.get(result_key, 0) + 1
+                sport_results = result_counts_by_sport.setdefault(sport_key, {})
+                sport_results[result_key] = sport_results.get(result_key, 0) + 1
                 if alert_sent:
                     delivered_total += 1
                     delivered_by_provider[provider_key] = (
                         delivered_by_provider.get(provider_key, 0) + 1
                     )
-                if str(result or "").upper() == "PENDING":
+                    delivered_by_sport[sport_key] = (
+                        delivered_by_sport.get(sport_key, 0) + 1
+                    )
+                if result_key == "PENDING":
                     pending_total += 1
-                elif str(result or "").upper() in {
+                    pending_by_provider[provider_key] = (
+                        pending_by_provider.get(provider_key, 0) + 1
+                    )
+                elif result_key in {
                     "HIT", "MISS", "PUSH", "VOID", "CANCELLED",
                     "INJURY_VOID", "GAME_INTERRUPTED",
                 }:
                     resolved_total += 1
+                    resolved_by_provider[provider_key] = (
+                        resolved_by_provider.get(provider_key, 0) + 1
+                    )
+
+            evaluated_by_provider: dict[str, int] = {}
+            evaluated_by_sport: dict[str, int] = {}
+            evaluated_total = 0
+            candidate_res = await s.execute(
+                select(
+                    PropCandidateLog.provider,
+                    PropCandidateLog.sport,
+                    func.count(PropCandidateLog.id),
+                )
+                .where(PropCandidateLog.scan_ts >= cutoff)
+                .group_by(PropCandidateLog.provider, PropCandidateLog.sport)
+            )
+            for provider, sport, count in candidate_res.all():
+                if not _is_supported_tracking_sport(sport):
+                    continue
+                provider_key = str(provider or "Unknown")
+                sport_key = str(sport or "UNKNOWN")
+                count_value = int(count or 0)
+                evaluated_total += count_value
+                evaluated_by_provider[provider_key] = (
+                    evaluated_by_provider.get(provider_key, 0) + count_value
+                )
+                evaluated_by_sport[sport_key] = (
+                    evaluated_by_sport.get(sport_key, 0) + count_value
+                )
+
+            provider_breakdown: dict[str, dict] = {}
+            all_providers = (
+                set(active_by_provider)
+                | set(tracked_observations_by_provider)
+                | set(evaluated_by_provider)
+                | set(directional_by_provider)
+            )
+            for provider in sorted(all_providers):
+                provider_breakdown[provider] = {
+                    "active_tracked": active_by_provider.get(provider, 0),
+                    "historical_observations": tracked_observations_by_provider.get(
+                        provider, 0
+                    ),
+                    "evaluated": evaluated_by_provider.get(provider, 0),
+                    "directional": directional_by_provider.get(provider, 0),
+                    "actionable": directional_by_provider.get(provider, 0),
+                    "delivered": delivered_by_provider.get(provider, 0),
+                    "pending": pending_by_provider.get(provider, 0),
+                    "resolved": resolved_by_provider.get(provider, 0),
+                    "result_counts": result_counts_by_provider.get(provider, {}),
+                }
         return {
             "since_hours": since_hours,
             "tracked": tracked_count,
+            "active_tracked": tracked_count,
             "tracked_observations": tracked_observations,
+            "historical_observations": tracked_observations,
             "tracked_observations_by_provider": tracked_observations_by_provider,
+            "historical_observations_by_provider": tracked_observations_by_provider,
+            "observations_by_sport": observation_by_sport,
+            "active_by_provider": active_by_provider,
+            "active_by_sport": active_by_sport,
+            "evaluated": evaluated_total,
+            "evaluated_by_provider": evaluated_by_provider,
+            "evaluated_by_sport": evaluated_by_sport,
             "directional_total": directional_total,
+            "actionable_total": directional_total,
             "delivered": delivered_total,
             "pending": pending_total,
             "resolved": resolved_total,
             "directional_by_provider": directional_by_provider,
             "delivered_by_provider": delivered_by_provider,
+            "pending_by_provider": pending_by_provider,
+            "resolved_by_provider": resolved_by_provider,
+            "directional_by_sport": directional_by_sport,
+            "delivered_by_sport": delivered_by_sport,
+            "result_counts": result_counts,
+            "result_counts_by_provider": result_counts_by_provider,
+            "result_counts_by_sport": result_counts_by_sport,
+            "provider_breakdown": provider_breakdown,
             "by_sport": by_sport,
             "by_provider": [
                 {"provider": provider, "tracked": count}
