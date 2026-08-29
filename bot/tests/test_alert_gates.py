@@ -324,6 +324,7 @@ class TestCmdFunnelSportBreakdown:
         assert "Rescored: <b>6,535</b>" in msg
         assert "Canonical active props: <b>6,352</b>" in msg
         assert "Candidate records tracked: <b>25,000</b>" in msg
+        assert "Full-Pool Rescan Rotation" in msg
 
     @pytest.mark.asyncio
     async def test_funnel_breakdown_includes_scan_actionable_and_removed(self):

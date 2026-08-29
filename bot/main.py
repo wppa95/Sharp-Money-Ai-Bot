@@ -37,14 +37,6 @@ from models import (
     Sport,
 )
 from alerts import AlertDelivery, broadcast_alert, format_pp_alert
-from database import PrizePicksRecord, PPEdgeRecord
-from prizepicks import (
-    PrizePicksClient,
-    PPEdgeOpportunity,
-    PP_LEAGUE_IDS,
-    PP_STAT_TO_ODDS_API,
-    compare_pp_to_sportsbook,
-)
 from commands import (
     cmd_start,
     cmd_help,
@@ -92,6 +84,7 @@ from market_engine import (
     init_odds_confirmation,
     underdog_job,
     _start_prizepicks_cycle,
+    _run_prizepicks_independent_cycle,
 )
 from providers import init_health_monitor
 from providers.odds_cache import init_odds_cache
@@ -1585,179 +1578,18 @@ async def _player_props_job(context) -> None:
 # ── PrizePicks monitoring job ─────────────────────────────────────────────────
 
 async def _prizepicks_job(context) -> None:
+    """Compatibility entry point for the retired legacy PrizePicks job.
+
+    PrizePicks must use the provider-independent PropLine companion pipeline.
+    Keeping this callback as a delegating shim prevents an old scheduler
+    registration or external callback from reviving the former sportsbook-edge
+    path, which had different scope, identity, and delivery rules.
     """
-    Fetch PrizePicks projections, store line history, compare against any
-    available sportsbook player-prop odds, and alert on edges that exceed
-    config.MIN_PP_EDGE.
-
-    Pipeline per projection:
-      1. Fetch PP lines for each configured league.
-      2. Store every line as a PrizePicksRecord (line history).
-      3. Look up matching sportsbook player-prop OddsRecords in the DB
-         (populated by _poll_odds_job when player-prop markets are fetched).
-      4. When a match exists: compute edge via compare_pp_to_sportsbook().
-      5. Filter by MIN_PP_EDGE and MIN_PP_FAIR_PROB thresholds.
-      6. Deduplicate and alert.
-    """
-    if _db is None:
-        logger.debug("_prizepicks_job: DB not ready, skipping")
-        return
-
-    bot      = context.bot
-    chat_ids = list(config.allowed_user_ids)
-    now      = datetime.utcnow()
-    since    = now - timedelta(minutes=30)   # sportsbook odds freshness window
-
-    async with PrizePicksClient() as pp_client:
-        for league_name in config.prizepicks_leagues:
-            league_id = PP_LEAGUE_IDS.get(league_name)
-            if league_id is None:
-                logger.warning("_prizepicks_job: unknown league %r, skipping", league_name)
-                continue
-
-            lines = await pp_client.fetch_projections(league_id)
-            if not lines:
-                logger.debug("_prizepicks_job: no lines for %s", league_name)
-                continue
-
-            logger.info("_prizepicks_job: %d projections for %s", len(lines), league_name)
-
-            for pp_line in lines:
-                # ── 1. Persist raw line ──────────────────────────────────────
-                await _db.save_pp_line(PrizePicksRecord(
-                    external_id=pp_line.external_id,
-                    player_name=pp_line.player_name,
-                    team=pp_line.team,
-                    sport=pp_line.sport,
-                    stat_type=pp_line.stat_type,
-                    line_value=pp_line.line_value,
-                    start_time=pp_line.start_time,
-                    game_description=pp_line.game_description,
-                    fetched_at=now,
-                ))
-
-                # ── 2. Find sportsbook player-prop match ─────────────────────
-                odds_api_market = PP_STAT_TO_ODDS_API.get(pp_line.stat_type)
-                if not odds_api_market:
-                    continue   # stat type not mapped yet
-
-                sb_records = await _db.find_player_prop_odds(
-                    player_name=pp_line.player_name,
-                    market_type=odds_api_market,
-                    since=since,
-                )
-                if not sb_records:
-                    continue   # no sportsbook data for this player/stat yet
-
-                over_rec  = next((r for r in sb_records if "over"  in r.selection.lower()), None)
-                under_rec = next((r for r in sb_records if "under" in r.selection.lower()), None)
-                if not over_rec or not under_rec:
-                    continue   # need both sides for vig removal
-
-                sb_line = over_rec.line if over_rec.line is not None else pp_line.line_value
-
-                # ── 3. Compute edge ──────────────────────────────────────────
-                try:
-                    opp = compare_pp_to_sportsbook(
-                        pp_line,
-                        sportsbook=over_rec.sportsbook,
-                        sb_line=sb_line,
-                        sb_over_odds=over_rec.american_odds,
-                        sb_under_odds=under_rec.american_odds,
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("_prizepicks_job: edge calc error for %s: %s", pp_line.player_name, exc)
-                    continue
-
-                # ── 4. Threshold filter ──────────────────────────────────────
-                adj_prob = (
-                    opp.adjusted_fair_prob_over
-                    if opp.best_side == "OVER"
-                    else opp.adjusted_fair_prob_under
-                )
-                if opp.best_edge < config.MIN_PP_EDGE:
-                    continue
-                if adj_prob < config.MIN_PP_FAIR_PROB:
-                    continue
-
-                # ── 5. Dedup ─────────────────────────────────────────────────
-                if await _db.has_recent_pp_alert(
-                    pp_line.player_name, pp_line.stat_type,
-                    within_seconds=config.PP_DEDUP_WINDOW,
-                ):
-                    logger.debug(
-                        "_prizepicks_job: deduped %s %s", pp_line.player_name, pp_line.stat_type
-                    )
-                    continue
-
-                # ── 6. Line movement tracking ────────────────────────────────
-                opening_line, prev_line = await _db.get_pp_edge_line_history(
-                    pp_line.player_name, pp_line.stat_type
-                )
-                if opening_line is None:
-                    opening_line = pp_line.line_value  # first record — current is baseline
-                if (prev_line is not None
-                        and abs(pp_line.line_value - prev_line) >= config.MIN_PP_LINE_CHANGE):
-                    direction = "up" if pp_line.line_value > prev_line else "down"
-                    logger.info(
-                        "PP line move signal: %s %s %.1f→%.1f (%s, Δ%.1f) — signal, not auto-pick",
-                        pp_line.player_name, pp_line.stat_type,
-                        prev_line, pp_line.line_value, direction,
-                        abs(pp_line.line_value - prev_line),
-                    )
-
-                # ── 7. Score (PPAnalysisScore) ───────────────────────────────
-                from engine.pp_scoring import score_pp_edge
-                resolved_history = await _db.get_resolved_pp_history(
-                    pp_line.player_name, pp_line.stat_type
-                )
-                pp_score = score_pp_edge(
-                    opp,
-                    history=resolved_history,
-                    opening_line=opening_line,
-                    now=now,
-                )
-
-                # ── 8. Deliver via AlertDelivery (scope + timing + cap + broadcast) ─
-                delivery   = AlertDelivery(_db, bot, chat_ids)
-                result     = await delivery.deliver_pp(
-                    opp,
-                    score=pp_score,
-                    strict_pregame=True,
-                )
-
-                # ── 9. Store edge record (alert_sent reflects actual outcome) ─
-                await _db.save_pp_edge(PPEdgeRecord(
-                    player_name     = pp_line.player_name,
-                    team            = pp_line.team,
-                    sport           = pp_line.sport,
-                    stat_type       = pp_line.stat_type,
-                    pp_line_value   = pp_line.line_value,
-                    sportsbook      = opp.sportsbook,
-                    sb_line_value   = opp.sportsbook_line,
-                    sb_over_odds    = opp.sportsbook_over_odds,
-                    sb_under_odds   = opp.sportsbook_under_odds,
-                    fair_prob_over  = opp.adjusted_fair_prob_over,
-                    fair_prob_under = opp.adjusted_fair_prob_under,
-                    edge_over       = opp.edge_over,
-                    edge_under      = opp.edge_under,
-                    best_side       = opp.best_side,
-                    best_edge       = opp.best_edge,
-                    alert_sent      = result.sent,
-                    tier            = pp_score.tier,
-                    confidence      = float(pp_score.total),
-                    result          = "PENDING",
-                    opening_line    = opening_line,
-                    prev_line       = prev_line,
-                    detected_at     = now,
-                    game_time       = getattr(pp_line, "start_time", None),
-                ))
-
-                if result.filtered:
-                    logger.debug(
-                        "PP alert filtered: %s | %s | %s",
-                        pp_line.player_name, pp_line.stat_type, result.filtered_reason,
-                    )
+    logger.warning(
+        "_prizepicks_job is a compatibility shim; delegating to the "
+        "independent PrizePicks pipeline"
+    )
+    await _run_prizepicks_independent_cycle(context)
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────

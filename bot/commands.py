@@ -4612,10 +4612,10 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     _fpr_uncovered = fpr_stats.get(
                         "uncovered_props", max(0, _fpr_pool - _fpr_covered)
                     )
+                    _fpr_done     = fpr_stats.get("rotation_complete", False)
                     _fpr_next_rot  = fpr_stats.get(
                         "next_rotation", _fpr_rot + (1 if _fpr_done else 0)
                     )
-                    _fpr_done     = fpr_stats.get("rotation_complete", False)
                     _fpr_status   = "✅ complete — next started" if _fpr_done else "🔄 in progress"
                     lines += [
                         "",

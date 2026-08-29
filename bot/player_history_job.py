@@ -20,9 +20,8 @@ _CYCLE_TIME_BUDGET_SECONDS = 210.0
 # BADMINTON) would always return [] — filtering them avoids wasting API-call
 # budget on sports that can never produce DB rows.
 _SUPPORTED_HISTORY_SPORTS = frozenset({
-    "MLB", "NBA", "NFL",
+    "MLB", "NBA",
     "WNBA", "NHL", "CS", "DOTA", "TENNIS",
-    "NCAAF", "CFB",   # CFB is the Underdog identifier for NCAAF
     "MLS", "NCAAB", "FIFA",
     "SOCCER",         # Requires FOOTBALL_DATA_API_KEY; returns [] gracefully without it
 })
