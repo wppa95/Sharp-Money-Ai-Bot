@@ -3096,7 +3096,7 @@ async def cmd_reconcile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             f"<i>UTC window: last {hours} hours · hourly buckets</i>",
             "",
             "<b>Source → pipeline → delivery</b>",
-            "<code>Provider       Observed  Evaluated  Actionable  "
+            "<code>Provider       Tracked  Observed  Evaluated  Actionable  "
             "Delivered  Recipients</code>",
         ]
         for provider, row in sorted(report.get("by_provider", {}).items()):
@@ -3104,6 +3104,7 @@ async def cmd_reconcile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             recipients = row.get("audit_recipients", 0) or row.get("delivered_recipients", 0)
             lines.append(
                 f"<code>{_html.escape(provider[:13]):<13} "
+                f"{row.get('tracked', 0):>7,} "
                 f"{row.get('observed', 0):>8,} "
                 f"{row.get('evaluated', 0):>10,} "
                 f"{row.get('actionable_persisted', 0):>10,} "
@@ -3509,7 +3510,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         ]
 
         lines.append(
-            "  Current active tracking universe: <b>"
+            "  Tracked opportunities: <b>"
             + (
                 f"{tracked_opportunities:,}"
                 if tracked_opportunities is not None
@@ -3517,6 +3518,11 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             + "</b>"
         )
+        if isinstance(tracking, dict):
+            lines.append(
+                "  Current active tracking universe: <b>"
+                f"{int(tracking.get('tracked', 0) or 0):,}</b>"
+            )
 
         tracking_counts = tracking.get("counts", {}) if isinstance(tracking, dict) else {}
         directional_total = (
@@ -3845,7 +3851,9 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     lines: list[str] = [
         "📊 <b>Prop Opportunity Tracker</b>",
-        f"<i>Active tracked props: {int(data.get('tracked', 0) or 0)}  ·  "
+        f"<i>Tracked observations: "
+        f"{int(data.get('tracked_observations', data.get('tracked', 0)) or 0)}  ·  "
+        f"Active tracked props: {int(data.get('tracked', 0) or 0)}  ·  "
         f"Directional opportunities: {total}  ·  Pending grading: {pending}</i>",
         "",
     ]
@@ -3915,6 +3923,32 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                     f"  <b>{sport}:</b>  {s_correct}/{s_graded} "
                     f"({_hit_rate(s_correct, s_graded)})"
                 )
+
+    by_provider = data.get("by_provider", {})
+    if by_provider:
+        lines += ["", "━━━━━━━━━━━━━━━━━━", "<b>By Provider</b>"]
+        for provider, provider_data in sorted(by_provider.items()):
+            p_correct = (
+                _n(provider_data, "OVER", "HIT")
+                + _n(provider_data, "UNDER", "MISS")
+            )
+            p_graded = sum(
+                _n(provider_data, rec, res)
+                for rec in ("OVER", "UNDER")
+                for res in ("HIT", "MISS", "PUSH")
+            )
+            p_pending = sum(
+                _n(provider_data, rec, "PENDING")
+                for rec in ("OVER", "UNDER")
+            )
+            lines.append(
+                f"  <b>{provider}:</b> tracked "
+                f"{int((data.get('tracked_observations_by_provider', {}) or {}).get(provider, 0) or 0)}"
+                f" · directional {sum(_n(provider_data, rec, res) for rec in ('OVER', 'UNDER') for res in ('HIT', 'MISS', 'PUSH', 'PENDING'))}"
+                f" · delivered {int((data.get('provider_delivered', {}) or {}).get(provider, 0) or 0)}"
+                f" · {p_correct}/{p_graded} correct"
+                f" · {p_pending} pending"
+            )
 
     lines += [
         "",
@@ -4538,6 +4572,7 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             f"<i>All active props remain in the monitored universe; delivery is separate.</i>",
             "",
             f"📥 Canonical active props: <b>{active:,}</b>",
+            f"🧾 Candidate records tracked: <b>{tracked:,}</b>",
             f"🧾 Persistent observations: <b>{tracked_observations:,}</b>",
             f"🎯 Directional OVER/UNDER records: <b>{directional_total:,}</b>",
             f"🔬 Rescored: <b>{sc_rescored:,}</b>",

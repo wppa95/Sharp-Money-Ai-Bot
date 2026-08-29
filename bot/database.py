@@ -4775,8 +4775,6 @@ class Database:
                 return {
                     "since_hours": since_hours,
                     "tracked": candidate_total,
-                    "tracked_observations": candidate_total,
-                    "tracked_observations_by_provider": {},
                     "by_sport": by_sport,
                 }
 
