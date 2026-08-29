@@ -199,9 +199,22 @@ class DashboardReport:
             + self.total_pp_alerts
         )
 
+    def _normalized_activity(self, provider: str, legacy_total: int) -> int:
+        """Return normalized provider activity, falling back for old reports."""
+        values = self.tracking_by_provider.get(provider)
+        if not isinstance(values, dict):
+            return int(legacy_total or 0)
+        if "observed" in values:
+            return int(values.get("observed") or 0)
+        if "active" in values:
+            return int(values.get("active") or 0)
+        return int(legacy_total or 0)
+
     def to_telegram(self) -> str:
         """Render the full dashboard as Telegram HTML (safe for message.reply_text)."""
         ts = self.generated_at.strftime("%b %d, %Y  %H:%M UTC")
+        ud_activity = self._normalized_activity("Underdog", self.total_ud_alerts)
+        pp_activity = self._normalized_activity("PrizePicks", self.total_pp_alerts)
         parts: list[str] = [
             f"📊 <b>Performance Dashboard</b>",
             f"<i>{ts}</i>",
@@ -211,9 +224,9 @@ class DashboardReport:
         # ── Activity summary (provider-separated) ────────────────────────────
         parts += [
             "📬 <b>Activity Summary</b>",
-            f"  Underdog activity: <b>{self.total_ud_alerts:,}</b>"
+            f"  Underdog activity: <b>{ud_activity:,}</b>"
             f"  ·  today: <b>{self.today_ud_alerts:,}</b>",
-            f"  PrizePicks activity: <b>{self.total_pp_alerts:,}</b>"
+            f"  PrizePicks activity: <b>{pp_activity:,}</b>"
             f"  ·  today: <b>{self.today_pp_alerts:,}</b>",
             "",
         ]

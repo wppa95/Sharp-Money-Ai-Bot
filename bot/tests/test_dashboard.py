@@ -259,6 +259,152 @@ class TestDashboardReport:
         assert msg.count("<code>") == msg.count("</code>")
 
 
+class TestDashboardNormalizedActivity:
+    """Activity Summary must use normalized provider populations."""
+
+    def test_normalized_activity_is_provider_separated(self):
+        report = DashboardReport(
+            total_ud_alerts=89_188,
+            total_pp_alerts=0,
+            tracking_by_provider={
+                "Underdog": {"active": 4_860, "observed": 5_124},
+                "PrizePicks": {"active": 240, "observed": 265},
+            },
+        )
+
+        message = report.to_telegram()
+
+        assert "Underdog activity: <b>5,124</b>" in message
+        assert "PrizePicks activity: <b>265</b>" in message
+        assert "Underdog activity: <b>89,188</b>" not in message
+
+    def test_legacy_activity_is_only_a_fallback(self):
+        report = DashboardReport(
+            total_ud_alerts=12,
+            total_pp_alerts=7,
+        )
+
+        message = report.to_telegram()
+
+        assert "Underdog activity: <b>12</b>" in message
+        assert "PrizePicks activity: <b>7</b>" in message
+
+    def test_empty_normalized_provider_stays_zero(self):
+        report = DashboardReport(
+            total_ud_alerts=99,
+            total_pp_alerts=88,
+            tracking_by_provider={
+                "Underdog": {"active": 0, "observed": 0},
+                "PrizePicks": {"active": 0, "observed": 0},
+            },
+        )
+
+        message = report.to_telegram()
+
+        assert "Underdog activity: <b>0</b>" in message
+        assert "PrizePicks activity: <b>0</b>" in message
+
+    def test_historical_and_recent_tracking_sections_remain_intact(self):
+        report = DashboardReport(
+            tracked_observations=5_389,
+            recent_tracked_props=[{
+                "provider": "PrizePicks",
+                "player_name": "PP Player",
+                "stat_type": "Points",
+                "line_value": 20.5,
+                "sport": "NBA",
+            }],
+        )
+
+        message = report.to_telegram()
+
+        assert "Historical observations: <code>5,389</code>" in message
+        assert "Recently Tracked Props" in message
+        assert "PRIZEPICKS PICK" in message
+
+
+@pytest.mark.asyncio
+async def test_dashboard_gather_uses_normalized_activity_and_preserves_legacy_history(
+    empty_db,
+):
+    """Normalized provider history wins without deleting legacy snapshots."""
+    from sqlalchemy import func, select
+    from database import PropLineHistory, UnderdogSnapshotRecord
+
+    now = datetime.utcnow()
+    async with empty_db.session() as session:
+        session.add_all([
+            PropLineHistory(
+                provider="Underdog",
+                sport="MLB",
+                player_name="UD Player 1",
+                team="TEAM",
+                stat_type="Hits",
+                line_value=0.5,
+                external_id="ud-history-1",
+                game_time=now + timedelta(hours=2),
+                fetched_at=now,
+                removed=False,
+            ),
+            PropLineHistory(
+                provider="Underdog",
+                sport="MLB",
+                player_name="UD Player 2",
+                team="TEAM",
+                stat_type="Hits",
+                line_value=1.5,
+                external_id="ud-history-2",
+                game_time=now + timedelta(hours=2),
+                fetched_at=now,
+                removed=False,
+            ),
+            PropLineHistory(
+                provider="PrizePicks",
+                sport="NBA",
+                player_name="PP Player",
+                team="TEAM",
+                stat_type="Points",
+                line_value=20.5,
+                external_id="pp-history-1",
+                game_time=now + timedelta(hours=2),
+                fetched_at=now,
+                removed=False,
+            ),
+            UnderdogSnapshotRecord(
+                external_id="legacy-ud-1",
+                player_name="Legacy UD Player",
+                team="TEAM",
+                sport="MLB",
+                stat_type="Hits",
+                line_value=0.5,
+                game_time=now + timedelta(hours=2),
+                fetched_at=now,
+                removed=False,
+            ),
+        ])
+        await session.commit()
+
+    report = await DashboardEngine.gather(empty_db)
+    activity = report.to_telegram()
+
+    assert report.tracking_by_provider["Underdog"]["observed"] == 2
+    assert report.tracking_by_provider["PrizePicks"]["observed"] == 1
+    assert "Underdog activity: <b>2</b>" in activity
+    assert "PrizePicks activity: <b>1</b>" in activity
+    assert "Underdog activity: <b>1</b>" not in activity
+    assert len(report.recent_tracked_props) == 3
+
+    async with empty_db.session() as session:
+        normalized_count = (
+            await session.execute(select(func.count(PropLineHistory.id)))
+        ).scalar_one()
+        legacy_count = (
+            await session.execute(select(func.count(UnderdogSnapshotRecord.id)))
+        ).scalar_one()
+    assert normalized_count == 3
+    assert legacy_count == 1
+
+
 # ── DashboardEngine integration tests ─────────────────────────────────────────
 
 class TestDashboardEngineEmpty:

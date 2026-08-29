@@ -1,0 +1,146 @@
+Continue from the current implementation.
+
+Fix ONLY the /dashboard Activity Summary inconsistency identified in the deployed bot.
+
+Do NOT redesign anything.
+Do NOT change production monitoring behavior.
+Do NOT change provider ingestion, FPR, grading, delivery, scoring, scheduler behavior, or database schema unless absolutely necessary.
+
+Problem
+
+The dashboard currently mixes legacy activity metrics with the normalized tracking model.
+
+Example from the current deployed dashboard:
+
+* Underdog activity: 89,188
+* PrizePicks activity: 0
+
+while the same dashboard correctly reports:
+
+* Underdog normalized history: 5,124
+* PrizePicks normalized history: 265
+* Active tracked props: 4,860+
+* PrizePicks recently tracked props are present
+* Underdog recently tracked props are present
+
+This makes the top Activity Summary misleading.
+
+Required Fix
+
+Make the /dashboard Activity Summary use the same normalized, provider-separated source of truth already used by:
+
+* /tracking
+* /stats
+* /funnel
+* /grade
+* Recently Tracked Props
+
+The Activity Summary must correctly distinguish provider populations.
+
+Underdog
+
+Report the normalized Underdog tracking/activity population rather than the legacy 89,188 snapshot counter.
+
+PrizePicks
+
+Report the normalized PrizePicks/PropLine tracking/activity population rather than incorrectly showing 0 when normalized PP history exists.
+
+Important
+
+Do NOT delete or modify the legacy Underdog snapshot data.
+
+Legacy data can remain available for compatibility or historical reporting, but it must not be presented as the primary normalized Activity Summary when the normalized provider history exists.
+
+Do NOT create a second tracking system.
+
+Reuse the existing normalized provider-separated reporting source.
+
+Preserve
+
+Do not change:
+
+* Underdog ingestion
+* PrizePicks ingestion
+* Provider discovery
+* FPR/full-pool rotation
+* Active source-ID lifecycle
+* Continuous rescanning
+* Football exclusion
+* Soccer support
+* Evidence providers
+* Graded-prop evidence
+* HIT/MISS/PUSH grading
+* /grade
+* /tracking
+* /stats
+* /funnel
+* /picks
+* /alerts
+* /slip
+* /slipstats
+* Delivery gate
+* Deduplication
+* Pregame protection
+* Scoring
+* BQ/MQ
+* Confidence
+* Scheduler
+* Stable Refresh scheduler removal
+* Adaptive batching
+* max_instances=1
+* Clean restart behavior
+* Historical records
+
+Tests
+
+Add/update focused regression coverage proving:
+
+1. Dashboard Activity Summary reports normalized Underdog activity.
+2. Dashboard Activity Summary reports normalized PrizePicks activity.
+3. PrizePicks does not display 0 when normalized PP history exists.
+4. Legacy Underdog snapshot counts do not override normalized tracking counts.
+5. Provider populations remain separated.
+6. Recently Tracked Props remains unchanged.
+7. Empty normalized provider history produces a clean zero/empty state.
+8. Historical data remains intact.
+
+Run:
+
+* Focused dashboard/reporting tests
+* Full existing test suite
+* Python compilation
+* git diff --check
+
+Do NOT perform live/production verification.
+
+Do NOT restart Railway.
+
+Do NOT deploy Railway.
+
+Do NOT send Telegram commands or test alerts.
+
+Do NOT create a new task or follow-up task.
+
+Final Response
+
+Report exactly:
+
+IMPLEMENTED
+
+What changed.
+
+TESTED
+
+Focused tests, full suite, compilation, and diff check.
+
+PRESERVED
+
+Confirm unrelated monitoring/provider/FPR/delivery/grading behavior was untouched.
+
+LIVE VERIFICATION
+
+NO LIVE/PRODUCTION VERIFICATION WAS PERFORMED.
+
+TASK MANAGEMENT
+
+No new task was created or proposed.
