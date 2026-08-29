@@ -1811,6 +1811,12 @@ async def _run_prizepicks_independent_cycle(
                 standing=True,
                 strict_pregame=True,
                 source="PrizePicks",
+                source_id=str(getattr(candidate["prop"], "external_id", "") or ""),
+                event_id=str(
+                    getattr(candidate["prop"], "event_id", "")
+                    or getattr(candidate["prop"], "game_id", "")
+                    or ""
+                ),
             )
         except Exception as exc:  # noqa: BLE001
             _release_prop_delivery_claim(

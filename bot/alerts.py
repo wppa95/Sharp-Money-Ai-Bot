@@ -20,6 +20,8 @@ from __future__ import annotations
 import logging
 import inspect
 import re
+import time
+from threading import Lock
 from html import unescape
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -40,6 +42,28 @@ if TYPE_CHECKING:
     from database import Database
 
 logger = logging.getLogger(__name__)
+
+
+def _prop_claim_key(
+    *,
+    provider: str,
+    source: str,
+    event_id: str,
+    player_name: str,
+    sport: str,
+    stat_type: str,
+    direction: str,
+) -> tuple[str, ...]:
+    """Build the identity used by compatibility delivery claims."""
+    return (
+        str(provider or "").strip().upper(),
+        str(source or "").strip().upper(),
+        str(event_id or "").strip(),
+        str(player_name or "").strip().casefold(),
+        str(sport or "").strip().upper(),
+        str(stat_type or "").strip().casefold(),
+        str(direction or "").strip().upper(),
+    )
 
 
 # ── Known sharp / respected sportsbooks ───────────────────────────────────────
@@ -978,6 +1002,75 @@ class AlertDelivery:
         self._min_steam   = min_steam      if min_steam      is not None else config.MIN_STEAM_SCORE
         self._ev_dedup    = ev_dedup_window    if ev_dedup_window    is not None else config.EV_DEDUP_WINDOW
         self._steam_dedup = steam_dedup_window if steam_dedup_window is not None else config.STEAM_DEDUP_WINDOW
+        # Compatibility delivery methods can be called outside market_engine's
+        # shared claim lock. Keep a per-delivery-instance claim store so a
+        # concurrent caller cannot send the same provider/source/event pick
+        # twice, while avoiding cross-test and cross-bot global state.
+        self._prop_delivery_claims: dict[tuple[str, ...], tuple[float, float]] = {}
+        self._prop_delivery_claim_lock = Lock()
+
+    def _try_claim_prop_delivery(
+        self,
+        *,
+        provider: str,
+        source: str,
+        event_id: str,
+        player_name: str,
+        sport: str,
+        stat_type: str,
+        direction: str,
+        line_value: float,
+    ) -> bool:
+        """Atomically claim a compatibility prop delivery slot."""
+        key = _prop_claim_key(
+            provider=provider,
+            source=source,
+            event_id=event_id,
+            player_name=player_name,
+            sport=sport,
+            stat_type=stat_type,
+            direction=direction,
+        )
+        now = time.time()
+        with self._prop_delivery_claim_lock:
+            current = self._prop_delivery_claims.get(key)
+            if current is not None:
+                claimed_at, claimed_line = current
+                if (
+                    now - claimed_at < config.UD_ALERT_DEDUP_WINDOW
+                    and abs(float(line_value) - float(claimed_line))
+                    < config.MIN_UNDERDOG_LINE_CHANGE
+                ):
+                    return False
+            self._prop_delivery_claims[key] = (now, float(line_value))
+            return True
+
+    def _release_prop_delivery_claim(
+        self,
+        *,
+        provider: str,
+        source: str,
+        event_id: str,
+        player_name: str,
+        sport: str,
+        stat_type: str,
+        direction: str,
+        line_value: float,
+    ) -> None:
+        """Release a compatibility claim unless another line replaced it."""
+        key = _prop_claim_key(
+            provider=provider,
+            source=source,
+            event_id=event_id,
+            player_name=player_name,
+            sport=sport,
+            stat_type=stat_type,
+            direction=direction,
+        )
+        with self._prop_delivery_claim_lock:
+            current = self._prop_delivery_claims.get(key)
+            if current is not None and abs(float(current[1]) - float(line_value)) < 1e-9:
+                self._prop_delivery_claims.pop(key, None)
 
     async def _audit_telegram_attempt(
         self,
@@ -1157,9 +1250,8 @@ class AlertDelivery:
           3. format_pp_alert.
           4. Broadcast to all registered chat IDs.
 
-        Provider-aware atomic claims remain the responsibility of the active
-        market-engine delivery queue. This compatibility method still uses
-        the same canonical direction/evidence policy before it can send.
+        The active market-engine queue has a shared claim lock; this
+        compatibility method also claims atomically before its send.
         """
         # Compatibility hook for non-Underdog alert paths.
         _pp_sport = getattr(getattr(opp, "pp_line", None), "sport", None) or ""
@@ -1221,6 +1313,23 @@ class AlertDelivery:
                 filtered_reason="Canonical direction/evidence gate",
             )
 
+        _pp_line_value = float(getattr(opp.pp_line, "line_value", 0) or 0)
+        _pp_event_id = (
+            getattr(opp.pp_line, "event_id", "")
+            or getattr(opp.pp_line, "game_id", "")
+        )
+        if not self._try_claim_prop_delivery(
+            provider="PrizePicks",
+            source="PrizePicks",
+            event_id=str(_pp_event_id or ""),
+            player_name=getattr(opp.pp_line, "player_name", ""),
+            sport=_pp_sport,
+            stat_type=getattr(opp.pp_line, "stat_type", ""),
+            direction=_pp_direction,
+            line_value=_pp_line_value,
+        ):
+            return DeliveryResult(sent=False, deduped=True)
+
         # Global limiter is deliberately applied after all source-specific
         # qualification and caps.  It counts one alert, not one recipient.
         if self._chat_ids:
@@ -1232,6 +1341,16 @@ class AlertDelivery:
                 float(getattr(score, "total", 0) or 0),
             )
             if not rate.allowed:
+                self._release_prop_delivery_claim(
+                    provider="PrizePicks",
+                    source="PrizePicks",
+                    event_id=str(_pp_event_id or ""),
+                    player_name=getattr(opp.pp_line, "player_name", ""),
+                    sport=_pp_sport,
+                    stat_type=getattr(opp.pp_line, "stat_type", ""),
+                    direction=_pp_direction,
+                    line_value=_pp_line_value,
+                )
                 return DeliveryResult(
                     sent=False,
                     rate_limited=True,
@@ -1239,9 +1358,33 @@ class AlertDelivery:
                 )
 
         # 3. Format and send
-        message = format_pp_alert(opp)
-        counts  = await broadcast_alert(self._bot, self._chat_ids, message)
+        try:
+            message = format_pp_alert(opp)
+            counts  = await broadcast_alert(self._bot, self._chat_ids, message)
+        except Exception:
+            self._release_prop_delivery_claim(
+                provider="PrizePicks",
+                source="PrizePicks",
+                event_id=str(_pp_event_id or ""),
+                player_name=getattr(opp.pp_line, "player_name", ""),
+                sport=_pp_sport,
+                stat_type=getattr(opp.pp_line, "stat_type", ""),
+                direction=_pp_direction,
+                line_value=_pp_line_value,
+            )
+            raise
         alert_sent = counts["sent"] > 0
+        if not alert_sent:
+            self._release_prop_delivery_claim(
+                provider="PrizePicks",
+                source="PrizePicks",
+                event_id=str(_pp_event_id or ""),
+                player_name=getattr(opp.pp_line, "player_name", ""),
+                sport=_pp_sport,
+                stat_type=getattr(opp.pp_line, "stat_type", ""),
+                direction=_pp_direction,
+                line_value=_pp_line_value,
+            )
         if alert_sent:
             get_rate_limiter().record_sent()
         await self._audit_telegram_attempt(
@@ -1305,6 +1448,8 @@ class AlertDelivery:
         game_status: Optional[str] = None,
         strict_pregame: bool = False,
         source: str = "Underdog",
+        source_id: Optional[str] = None,
+        event_id: Optional[str] = None,
     ) -> "DeliveryResult":
         """
         Full Underdog prop alert pipeline:
@@ -1312,12 +1457,8 @@ class AlertDelivery:
           1. Scope check.
           2. Game timing filter — skipped only for removals.
           3. Daily Underdog cap check (disabled by default; set DAILY_UNDERDOG_LIMIT > 0).
-          4. Format and broadcast.
-             - market_move_only=True → format_market_move_detected (📈 MARKET MOVE)
-             - new_prop=True         → format_underdog_new_prop_alert (🚨 PROP LIVE)
-             - removed=True          → format_underdog_change_alert   (🚫 REMOVED)
-             - default               → format_underdog_change_alert   (🎯 BET PICK)
-          5. Broadcast to all registered chat IDs.
+          4. Canonical direction-and-evidence gate.
+          5. Format and broadcast only after an atomic claim.
         """
         source = source.strip() or "Underdog"
         source_upper = source.upper()
@@ -1327,24 +1468,6 @@ class AlertDelivery:
                 filtered=True,
                 filtered_reason="Football-related betting output is disabled",
             )
-        # Moneylines are retained and scored for monitoring, but only an
-        # explicitly Strong-moneyline designation may reach Telegram. Keep this
-        # before normal new/removal/movement-only exceptions so none bypass it.
-        _strong_moneyline = False
-        if is_moneyline or stat_type.strip().lower() == "moneyline":
-            _strength = str(
-                getattr(decision, "moneyline_strength", "")
-                or getattr(decision, "strength", "")
-                or getattr(decision, "recommendation", "")
-                or ""
-            ).strip().upper().replace(" ", "_")
-            if _strength not in {"STRONG", "STRONG_BET"}:
-                return DeliveryResult(
-                    sent=False, filtered=True,
-                    filtered_reason="Moneyline requires Strong qualification",
-                )
-            _strong_moneyline = True
-
         from alert_normalizer import normalize_underdog
         from alert_scope_filter import check
         from alerts_multiplatform import (
@@ -1392,41 +1515,48 @@ class AlertDelivery:
                 logger.info("Underdog alert capped: %s | %s | %s", player_name, stat_type, reason)
                 return DeliveryResult(sent=False, filtered=True, filtered_reason=reason)
 
-        # Canonical Telegram qualification gate. Removals and internal
-        # market-move diagnostics retain their existing separate handling;
-        # actionable picks require a valid direction.
-        if (
-            decision is not None
-            and not removed
-            and not market_move_only
-            and not _strong_moneyline
+        # Every prop Telegram path uses the same canonical gate. Market
+        # movement, removal, new-prop, and moneyline labels are monitoring
+        # context; none is an actionable direction/evidence substitute.
+        _bq = float(getattr(score, "total", 0) or 0)
+        _mq = float(getattr(market_quality, "score", 0) or 0)
+        _direction = str(getattr(decision, "recommendation", "") or "").upper()
+        if not _canonical_tier_delivery_gate(
+            sport=sport,
+            direction=_direction,
+            bq_score=_bq,
+            mq_score=_mq,
+            evidence_available=_has_strong_underdog_evidence(
+                score=score,
+                validation=validation,
+                decision=decision,
+                intelligence_trace=intelligence_trace,
+            ),
+            confidence=getattr(decision, "confidence", None),
         ):
-            _bq = float(getattr(score, "total", 0) or 0)
-            _mq = float(getattr(market_quality, "score", 0) or 0)
-            _direction = str(getattr(decision, "recommendation", "") or "").upper()
-            if not _canonical_tier_delivery_gate(
-                sport=sport,
-                direction=_direction,
-                bq_score=_bq,
-                mq_score=_mq,
-                evidence_available=_has_strong_underdog_evidence(
-                    score=score,
-                    validation=validation,
-                    decision=decision,
-                    intelligence_trace=intelligence_trace,
-                ),
-                confidence=getattr(decision, "confidence", None),
-            ):
-                return DeliveryResult(
-                    sent=False,
-                    filtered=True,
-                    filtered_reason="Tier delivery qualification gate",
-                )
+            return DeliveryResult(
+                sent=False,
+                filtered=True,
+                filtered_reason="Canonical direction/evidence gate",
+            )
+
+        _ud_line_value = float(new_line or 0)
+        if not self._try_claim_prop_delivery(
+            provider="Underdog",
+            source=source,
+            event_id=str(event_id or ""),
+            player_name=player_name,
+            sport=sport,
+            stat_type=stat_type,
+            direction=_direction,
+            line_value=_ud_line_value,
+        ):
+            return DeliveryResult(sent=False, deduped=True)
 
 
         # The limiter is shared by Underdog and PrizePicks, so a simultaneous
         # provider surge cannot bypass protection by taking another path.
-        _actionable = decision is not None and not removed and not market_move_only
+        _actionable = True
         if self._chat_ids and _actionable:
             limiter = get_rate_limiter()
             limiter.record_qualified()
@@ -1448,6 +1578,16 @@ class AlertDelivery:
                 is_meaningful_change=_meaningful,
             )
             if not rate.allowed:
+                self._release_prop_delivery_claim(
+                    provider="Underdog",
+                    source=source,
+                    event_id=str(event_id or ""),
+                    player_name=player_name,
+                    sport=sport,
+                    stat_type=stat_type,
+                    direction=_direction,
+                    line_value=_ud_line_value,
+                )
                 return DeliveryResult(
                     sent=False,
                     rate_limited=True,
@@ -1504,11 +1644,35 @@ class AlertDelivery:
             )
 
         # 5. Broadcast
-        counts     = await broadcast_alert(self._bot, self._chat_ids, message, sport=sport)
+        try:
+            counts = await broadcast_alert(self._bot, self._chat_ids, message, sport=sport)
+        except Exception:
+            self._release_prop_delivery_claim(
+                provider="Underdog",
+                source=source,
+                event_id=str(event_id or ""),
+                player_name=player_name,
+                sport=sport,
+                stat_type=stat_type,
+                direction=_direction,
+                line_value=_ud_line_value,
+            )
+            raise
         discord_sent = False
         if not removed and not market_move_only:
             discord_sent = await send_discord_alert(message)
         alert_sent = counts["sent"] > 0
+        if not alert_sent:
+            self._release_prop_delivery_claim(
+                provider="Underdog",
+                source=source,
+                event_id=str(event_id or ""),
+                player_name=player_name,
+                sport=sport,
+                stat_type=stat_type,
+                direction=_direction,
+                line_value=_ud_line_value,
+            )
         if alert_sent and _actionable:
             get_rate_limiter().record_sent()
         await self._audit_telegram_attempt(

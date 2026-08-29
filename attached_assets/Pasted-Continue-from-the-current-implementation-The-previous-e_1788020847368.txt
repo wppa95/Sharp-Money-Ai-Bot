@@ -1,0 +1,293 @@
+Continue from the current implementation.
+
+The previous evidence/tier-neutrality fixes are now implemented and validated.
+
+Make ONLY the remaining targeted delivery-gate cleanup below.
+
+Do NOT redesign anything.
+Do NOT create a new task.
+Do NOT propose a follow-up task.
+Do NOT perform live or production verification.
+
+Do NOT:
+
+* query Railway production
+* query production databases
+* send Telegram commands
+* send test alerts
+* restart Railway
+* deploy Railway
+* wait for production cycles
+
+Local inspection, regression tests, compilation, and diff checks are sufficient.
+
+1. MAKE THE CANONICAL DELIVERY GATE UNIVERSAL
+
+The latest audit found that some callable legacy delivery methods can still bypass the canonical delivery policy.
+
+Every callable Telegram delivery path must ultimately use the same canonical delivery gate.
+
+Audit and correct:
+
+* Underdog delivery
+* PrizePicks delivery
+* FPR delivery
+* Stable Refresh compatibility delivery
+* ranked/actionable delivery
+* legacy direct broadcaster methods
+* any other callable Telegram delivery method
+
+No callable Telegram path should contain an independent qualification policy.
+
+2. FIX deliver_pp()
+
+deliver_pp() currently maintains its own local direction/timing logic.
+
+Change it so it delegates to the canonical delivery policy.
+
+It must enforce the same requirements as the canonical path:
+
+* Valid OVER or UNDER direction
+* Legitimate supporting evidence
+* Strict pregame validation
+* Football suppression
+* Provider/source/event-aware identity
+* Existing safety protections
+* Atomic delivery claim
+* Correct claim release on unsuccessful delivery
+* Claim release on unexpected delivery exception
+* Retain suppression only after successful delivery
+
+Do NOT create a second PrizePicks-specific gate.
+
+PrizePicks remains provider-separated, but delivery policy must be centralized.
+
+3. STABLE REFRESH COMPATIBILITY PATH
+
+Stable Refresh is no longer a scheduled background job.
+
+Preserve that.
+
+However, if its callable delivery method can still send Telegram, it must not contain an independent legacy qualification policy.
+
+Route callable Stable Refresh delivery through the canonical delivery gate.
+
+Do NOT restore Stable Refresh as a scheduler job.
+
+Do NOT redesign Stable Refresh.
+
+4. LEGACY DIRECT BROADCASTERS
+
+Audit dormant/compatibility broadcaster methods such as:
+
+* player_prop_market
+* pregame_watch
+* pp_reference
+* any other callable Telegram broadcaster discovered during inspection
+
+They must not be able to bypass the canonical delivery policy.
+
+If they are retained for compatibility, make their delivery path delegate to the canonical gate.
+
+Do NOT delete compatibility APIs unless absolutely necessary.
+
+Do NOT add a new delivery framework.
+
+5. REMOVE ANY REMAINING ACTIVE LEGACY QUALIFICATION
+
+Search the complete Telegram delivery surface for remaining active dependencies on:
+
+* S-tier
+* A-tier
+* B-tier
+* C-tier
+* PASS
+* Watchlist
+* Near-Miss
+* Tier 1
+* Tier 2
+* decision_tier
+
+These may remain as historical/compatibility metadata only if they cannot influence current evaluation or delivery.
+
+They must NOT:
+
+* qualify a Telegram alert
+* disqualify a Telegram alert
+* prioritize an alert
+* suppress an alert
+* bypass evidence
+* bypass pregame protection
+
+Current delivery qualification must use the canonical rules.
+
+6. PRESERVE THE RECENT FIXES
+
+Do NOT regress:
+
+Evidence
+
+Market-only signals remain monitoring context only.
+
+No player-result evidence = no Telegram recommendation.
+
+Direction
+
+Only valid OVER/UNDER recommendations can reach delivery.
+
+Pregame
+
+Strict event-state protection remains intact.
+
+Football
+
+Football/gridiron remains completely blocked from Telegram.
+
+Soccer remains allowed.
+
+Deduplication
+
+Preserve provider/source/event/player/sport/market/line/direction-aware identity.
+
+Claims
+
+Preserve atomic claim/release behavior.
+
+Successful delivery retains suppression.
+
+Failed, filtered, rate-limited, or exception delivery releases the claim.
+
+Provider separation
+
+PrizePicks and Underdog remain completely independent.
+
+7. DO NOT CHANGE MONITORING
+
+Do NOT modify:
+
+* Underdog active-pool lifecycle
+* FPR architecture
+* FPR cursor
+* FPR rotation
+* new-prop priority
+* line-mover priority
+* continuous rescanning
+* non-actionable rescanning
+* PrizePicks discovery
+* provider catalog behavior
+* scheduler cadence
+* max_instances=1
+* adaptive batching
+* football upstream filtering
+* tracking
+* grading
+* evidence providers
+* scoring formulas
+* BQ/MQ
+* confidence calculations
+* reporting populations
+* historical data
+
+This is delivery-gate cleanup only.
+
+8. TESTS
+
+Add/update focused regression coverage proving:
+
+Canonical gate
+
+* Every callable Telegram delivery path reaches the canonical gate.
+* No callable path has an independent qualification policy.
+* Missing evidence blocks delivery everywhere.
+* Invalid direction blocks delivery everywhere.
+* Football blocks delivery everywhere.
+* Started/live/final events block delivery everywhere.
+
+Legacy framework
+
+* S/A/B/C cannot influence delivery.
+* PASS cannot influence delivery.
+* Watchlist/Near-Miss cannot influence delivery.
+* Tier 1/Tier 2 cannot influence delivery.
+* decision_tier cannot influence delivery.
+
+PrizePicks
+
+* deliver_pp() uses the canonical gate.
+* PP remains provider-separated.
+* PP evidence is required.
+* PP claim/release behavior remains correct.
+
+Stable Refresh
+
+* Stable Refresh remains unscheduled.
+* Callable delivery cannot bypass the canonical gate.
+
+Legacy broadcasters
+
+* Compatibility broadcasters cannot bypass the canonical gate.
+* No independent legacy qualification remains active.
+
+Do NOT weaken existing tests.
+
+9. VALIDATION
+
+Run:
+
+1. Focused delivery/provider/pregame/legacy-framework regression tests.
+2. Full existing test suite.
+3. Python compilation.
+4. git diff –check.
+
+Do NOT perform live verification.
+
+FINAL REPORT
+
+IMPLEMENTED
+
+Exactly what changed.
+
+CANONICAL DELIVERY
+
+Confirm every callable Telegram path now uses the same delivery policy.
+
+EVIDENCE
+
+Confirm legitimate supporting evidence is mandatory for delivery.
+
+LEGACY FRAMEWORK
+
+Confirm S/A/B/C, PASS, Watchlist/Near-Miss, Tier 1/Tier 2, and decision_tier no longer influence current delivery.
+
+PRIZEPICKS
+
+Confirm deliver_pp() uses the canonical gate and remains provider-separated.
+
+PREGAME
+
+Confirm strict pregame protection remains intact.
+
+FOOTBALL
+
+Confirm football remains blocked and soccer remains allowed.
+
+CLAIMS
+
+Confirm failed/filtered/rate-limited/exception deliveries release claims and successful deliveries retain suppression.
+
+PRESERVED
+
+Confirm monitoring, FPR, rescanning, tracking, grading, evidence, provider separation, scheduler ownership, max_instances=1, and historical data were not changed.
+
+TESTED
+
+Report focused tests, full suite, compilation, and diff-check results.
+
+LIVE VERIFICATION
+
+NO LIVE/PRODUCTION VERIFICATION WAS PERFORMED.
+
+TASK MANAGEMENT
+
+No new task was created.
+No follow-up task was proposed.

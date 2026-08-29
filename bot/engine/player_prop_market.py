@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import logging
 import time
+from threading import Lock
 from dataclasses import dataclass, field
 
 
@@ -41,8 +42,12 @@ def _line_label(line: float) -> str:
 import config as _config
 from datetime import datetime, timedelta
 from typing import Any, Optional
+from engine.delivery_gates import tier_delivery_gate as _canonical_tier_delivery_gate
+from engine.sport_policy import is_football_related_sport
+from engine.timing import is_game_alertable
 
 logger = logging.getLogger(__name__)
+_PROP_CLAIM_LOCK = Lock()
 
 # ── Provider registry ─────────────────────────────────────────────────────────
 
@@ -613,6 +618,52 @@ def _release_prop_delivery_claim(
         _last_ts, _last_line = current
         if abs(float(_last_line) - float(line)) < 1e-9:
             alerted_set.pop(key, None)
+
+
+def _try_claim_prop_delivery(
+    alerted_set: dict,
+    player: str,
+    sport: str,
+    stat_type: str,
+    line: float,
+    *,
+    dedup_window_seconds: int,
+    min_line_change: float,
+    provider: Optional[str] = None,
+    source_id: Optional[str] = None,
+    event_id: Optional[str] = None,
+    direction: Optional[str] = None,
+) -> bool:
+    """Atomically check and pre-claim a compatibility delivery slot."""
+    with _PROP_CLAIM_LOCK:
+        if _is_prop_deduped(
+            alerted_set,
+            player,
+            sport,
+            stat_type,
+            line,
+            dedup_window_seconds=dedup_window_seconds,
+            min_line_change=min_line_change,
+            provider=provider,
+            source_id=source_id,
+            event_id=event_id,
+            direction=direction,
+        ):
+            return False
+        _record_prop_alerted(
+            alerted_set,
+            player,
+            sport,
+            stat_type,
+            line,
+            provider=provider,
+            source_id=source_id,
+            event_id=event_id,
+            direction=direction,
+        )
+        return True
+
+
 async def run_player_prop_market_cycle(
     *,
     db:            Any,
@@ -626,8 +677,8 @@ async def run_player_prop_market_cycle(
     """
     Run the Player Prop Market Engine over the current cycle's high-scoring props.
 
-    Qualification is a valid OVER/UNDER direction only.  Score, proxy
-    confidence, evidence, and legacy tier labels are informational.
+    Qualification requires the canonical OVER/UNDER plus evidence gate.
+    Score, proxy confidence, and legacy tier labels are informational.
 
     For each qualifying candidate:
     1. Fetch PP PropLineHistory rows (one DB query for the batch).
@@ -645,7 +696,10 @@ async def run_player_prop_market_cycle(
     def _admits(p: dict) -> bool:
         return (p.get("direction") or "").strip().upper() in {"OVER", "UNDER"}
 
-    candidates = [p for p in scored_props if _admits(p)]
+    candidates = [
+        p for p in scored_props
+        if _admits(p) and not is_football_related_sport(str(p.get("sport") or ""))
+    ]
     if not candidates:
         logger.debug("player_prop_market: no directional props — skipping")
         return 0
@@ -685,16 +739,36 @@ async def run_player_prop_market_cycle(
             logger.debug("player_prop_market: alert suppressed (%s scope) — %s / %s", sport, player, stat_type)
             continue
 
-        if _is_prop_deduped(
-            alerted_set,
-            player, sport, stat_type, line,
-            dedup_window_seconds = _config.config.UD_ALERT_DEDUP_WINDOW,
-            min_line_change      = _config.config.MIN_UNDERDOG_LINE_CHANGE,
-            **dedup_identity,
+        _evidence_available = bool(
+            p.get("evidence_available")
+            or getattr(p.get("validation"), "has_supporting_data", False)
+        )
+        if not _canonical_tier_delivery_gate(
+            sport=sport,
+            direction=str(p.get("direction") or ""),
+            bq_score=float(p.get("total") or p.get("score_total") or 0),
+            mq_score=float(p.get("market_quality_score") or 0),
+            evidence_available=_evidence_available,
         ):
             logger.debug(
-                "player_prop_market: deduped — %s / %s / %s @ %.1f",
-                player, stat_type, sport, line,
+                "player_prop_market: canonical gate blocked — %s / %s / %s",
+                player, stat_type, sport,
+            )
+            continue
+
+        timing_allowed, timing_reason = is_game_alertable(
+            p.get("game_time"),
+            min_minutes=0,
+            max_minutes=10**9,
+            urgent_edge=0,
+            edge=0,
+            game_status=p.get("game_status") or p.get("provider_status"),
+            require_known=True,
+        )
+        if not timing_allowed:
+            logger.debug(
+                "player_prop_market: timing blocked — %s / %s / %s: %s",
+                player, stat_type, sport, timing_reason,
             )
             continue
 
@@ -712,18 +786,27 @@ async def run_player_prop_market_cycle(
         if comp is None:
             continue
 
+        if not _try_claim_prop_delivery(
+            alerted_set,
+            player, sport, stat_type, line,
+            dedup_window_seconds = _config.config.UD_ALERT_DEDUP_WINDOW,
+            min_line_change      = _config.config.MIN_UNDERDOG_LINE_CHANGE,
+            **dedup_identity,
+        ):
+            logger.debug(
+                "player_prop_market: deduped — %s / %s / %s @ %.1f",
+                player, stat_type, sport, line,
+            )
+            continue
+
         try:
             message = format_player_prop_market_alert(comp)
             counts  = await broadcast_alert(bot, chat_ids, message, sport=sport)
-            if counts.get("sent", 0) > 0:
-                _record_prop_alerted(
-                    alerted_set,
-                    player,
-                    sport,
-                    stat_type,
-                    line,
-                    **dedup_identity,
+            if counts.get("sent", 0) <= 0:
+                _release_prop_delivery_claim(
+                    alerted_set, player, sport, stat_type, line, **dedup_identity
                 )
+            else:
                 alerts_sent += 1
                 logger.info(
                     "player_prop_market alert sent: %s / %s / %s  "
@@ -734,6 +817,9 @@ async def run_player_prop_market_cycle(
                     comp.best_line or 0.0,
                 )
         except Exception as exc:
+            _release_prop_delivery_claim(
+                alerted_set, player, sport, stat_type, line, **dedup_identity
+            )
             logger.warning(
                 "player_prop_market: failed to send alert for %s / %s: %s",
                 player, stat_type, exc,

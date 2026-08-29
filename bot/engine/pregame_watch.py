@@ -11,8 +11,8 @@ Workflow:
   Each cycle:
     - Scan for new props and record opening lines (morning_scan)
     - Re-fetch current lines, compute movement (pregame_scan)
-    - Alert on first-detection of qualifying props (conf ≥ 60)
-    - Re-alert when significant movement occurs on tracked props
+    - Retain first-detection and movement state for monitoring
+    - Telegram delivery remains disabled until directional evidence is attached
     - Clear stale entries for games that have started
 
   Alert format:  🟣 PREGAME PLAYER PROP OPPORTUNITY
@@ -24,6 +24,8 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Optional
+from engine.delivery_gates import tier_delivery_gate as _canonical_tier_delivery_gate
+from engine.sport_policy import is_football_related_sport
 
 
 def _line_label(line: float) -> str:
@@ -355,8 +357,9 @@ class PregameWatchEngine:
         now:      Optional[datetime] = None,
     ) -> int:
         """
-        Continuous scan — fires for qualifying props not yet alerted, and
-        re-fires when significant line movement is detected.
+        Continuous scan — tracks qualifying props not yet alerted, and
+        rechecks significant line movement. Telegram output is subject to the
+        canonical direction-and-evidence gate.
 
         Alert conditions:
           • First detection of the prop with proxy_match_confidence ≥ 60
@@ -401,6 +404,7 @@ class PregameWatchEngine:
             return 0
 
         from alerts import broadcast_alert
+        from engine.timing import is_game_alertable
 
         for key, entry in targets:
             # Telegram suppression does not affect monitoring or watch state.
@@ -411,6 +415,8 @@ class PregameWatchEngine:
                     (_sport or "").upper() in {"NBA", "MLB", "NFL", "NCAA", "NCAAF", "CFB"}
                 )
             if is_telegram_suppressed_sport(entry.sport):
+                continue
+            if is_football_related_sport(entry.sport):
                 continue
 
             player, stat, _ = key
@@ -467,6 +473,33 @@ class PregameWatchEngine:
             if comp is None:
                 continue   # below confidence threshold
 
+            # Pregame watch currently has no directional decision or player
+            # result evidence attached to its comparison. Keep the legacy
+            # broadcaster behind the same canonical gate; it therefore remains
+            # monitoring-only until a real decision/evidence payload is wired.
+            _watch_direction = str(getattr(comp, "direction", "") or "").upper()
+            _watch_evidence = bool(getattr(comp, "evidence_available", False))
+            if not _canonical_tier_delivery_gate(
+                sport=entry.sport,
+                direction=_watch_direction,
+                bq_score=0,
+                mq_score=0,
+                evidence_available=_watch_evidence,
+            ):
+                continue
+            timing_allowed, timing_reason = is_game_alertable(
+                entry.game_start,
+                min_minutes=30,
+                max_minutes=120,
+                urgent_edge=8.0,
+                edge=0,
+                game_status=getattr(ud_row, "game_status", None) if ud_row else None,
+                require_known=True,
+            )
+            if not timing_allowed:
+                logger.debug("pregame_watch: timing blocked %s: %s", alert_key, timing_reason)
+                continue
+
             # Alert conditions
             is_first_alert   = alert_key not in self._alerted_set
             prev_alerted_val = self._movement_alerted.get(alert_key)
@@ -475,25 +508,38 @@ class PregameWatchEngine:
                 and prev_alerted_val != ud_line_val
             )
 
-                # Temporarily disabled — pregame alerts fire on market presence alone
-                # and produce spam. Re-enable only after wiring make_ud_bet_decision.
-            if True:
-                continue
             if not chat_ids or not (is_first_alert or has_new_movement):
                 continue
 
+            _previously_alerted = alert_key in self._alerted_set
+            _previous_movement = self._movement_alerted.get(alert_key)
+            # Claim before the await; failed, filtered, throttled, or
+            # exceptional sends restore the prior suppression state.
+            self._alerted_set.add(alert_key)
+            self._movement_alerted[alert_key] = ud_line_val
             try:
                 msg    = format_pregame_watch_alert(entry, comp)
                 counts = await broadcast_alert(bot, chat_ids, msg, sport=entry.sport)
                 if counts.get("sent", 0) > 0:
                     alerts_sent += 1
-                    self._alerted_set.add(alert_key)
-                    self._movement_alerted[alert_key] = ud_line_val
                     logger.info(
                         "pregame_watch: alert sent — %s / %s  conf=%d  movement=%s",
                         player, stat, comp.proxy_match_confidence, entry.movement_summary(),
                     )
+                else:
+                    if not _previously_alerted:
+                        self._alerted_set.discard(alert_key)
+                    if _previous_movement is None:
+                        self._movement_alerted.pop(alert_key, None)
+                    else:
+                        self._movement_alerted[alert_key] = _previous_movement
             except Exception as exc:
+                if not _previously_alerted:
+                    self._alerted_set.discard(alert_key)
+                if _previous_movement is None:
+                    self._movement_alerted.pop(alert_key, None)
+                else:
+                    self._movement_alerted[alert_key] = _previous_movement
                 logger.warning("pregame_watch: alert failed for %s / %s: %s", player, stat, exc)
 
         return alerts_sent

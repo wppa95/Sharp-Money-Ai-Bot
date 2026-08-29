@@ -35,6 +35,12 @@ from datetime import datetime, timedelta
 from typing import Any, Optional
 
 import config as _config
+from engine.delivery_gates import tier_delivery_gate as _canonical_tier_delivery_gate
+from engine.player_prop_market import (
+    _release_prop_delivery_claim,
+    _try_claim_prop_delivery,
+)
+from engine.sport_policy import is_football_related_sport
 
 logger = logging.getLogger(__name__)
 
@@ -307,10 +313,12 @@ async def run_pp_reference_cycle(
     if now is None:
         now = datetime.utcnow()
 
-    # Filter to high-quality candidates only
+    # Only a current directional, evidence-backed pick can reach Telegram.
+    # Tier labels are retained as reporting metadata and are not a gate.
     candidates = [
         p for p in scored_props
-        if p.get("tier") in ("S", "A")
+        if str(p.get("direction") or "").strip().upper() in {"OVER", "UNDER"}
+        and not is_football_related_sport(str(p.get("sport") or ""))
     ]
     if not candidates:
         logger.debug("pp_reference: no S/A tier props in this cycle — skipping")
@@ -329,6 +337,23 @@ async def run_pp_reference_cycle(
         stat_type = p.get("stat_type", "")
         sport     = p.get("sport", "")
         line      = float(p.get("line") or 0.0)
+        direction = str(p.get("direction") or "").strip().upper()
+        evidence_available = bool(
+            p.get("evidence_available")
+            or getattr(p.get("validation"), "has_supporting_data", False)
+        )
+        if not _canonical_tier_delivery_gate(
+            sport=sport,
+            direction=direction,
+            bq_score=float(p.get("total") or p.get("score_total") or 0),
+            mq_score=float(p.get("market_quality_score") or 0),
+            evidence_available=evidence_available,
+        ):
+            logger.debug(
+                "pp_reference: canonical gate blocked — %s / %s / %s",
+                player, stat_type, sport,
+            )
+            continue
 
         _dedup_key  = (player, sport, stat_type)
         _now_ts     = time.time()
@@ -356,18 +381,41 @@ async def run_pp_reference_cycle(
         if match is None:
             continue
 
+        _dedup_identity = {
+            "provider": p.get("provider") or "PrizePicks",
+            "source_id": p.get("source_id") or p.get("external_id") or "",
+            "event_id": p.get("event_id") or p.get("game_id") or "",
+            "direction": direction,
+        }
+        if not _try_claim_prop_delivery(
+            alerted_set,
+            player,
+            sport,
+            stat_type,
+            line,
+            dedup_window_seconds=_config.config.UD_ALERT_DEDUP_WINDOW,
+            min_line_change=_config.config.MIN_UNDERDOG_LINE_CHANGE,
+            **_dedup_identity,
+        ):
+            continue
+
         try:
             message = format_pp_reference_alert(match)
-            # Pass sport so broadcast_alert's Tier 2 backstop can enforce the block.
             counts  = await broadcast_alert(bot, chat_ids, message, sport=sport)
-            if counts.get("sent", 0) > 0:
-                alerted_set[_dedup_key] = (_now_ts, line)
+            if counts.get("sent", 0) <= 0:
+                _release_prop_delivery_claim(
+                    alerted_set, player, sport, stat_type, line, **_dedup_identity
+                )
+            else:
                 alerts_sent += 1
                 logger.info(
                     "pp_reference alert sent: %s / %s / %s  conf=%d  src=%s",
                     player, stat_type, sport, match.confidence, match.pp_source,
                 )
         except Exception as exc:
+            _release_prop_delivery_claim(
+                alerted_set, player, sport, stat_type, line, **_dedup_identity
+            )
             logger.warning(
                 "pp_reference: failed to send alert for %s / %s: %s",
                 player, stat_type, exc,
