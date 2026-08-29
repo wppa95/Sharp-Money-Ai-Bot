@@ -33,6 +33,7 @@ from __future__ import annotations
 import asyncio
 import gc
 import inspect
+import json
 import logging
 import time
 from collections import defaultdict
@@ -1403,6 +1404,7 @@ async def _run_prizepicks_independent_cycle(
     from engine.ud_bet_decision import make_ud_bet_decision
 
     actionable: list[dict] = []
+    _pp_candidate_rows: list[dict] = []
     enrichment_budget = 250
     enrichment_used = 0
     evaluated = 0
@@ -1493,15 +1495,32 @@ async def _run_prizepicks_independent_cycle(
             )
         evaluated += 1
 
-        if decision is None or decision.recommendation not in ("OVER", "UNDER"):
-            continue
-        directional += 1
         external_id = str(
             getattr(prop, "external_id", "")
             or getattr(prop, "event_id", "")
             or getattr(prop, "game_id", "")
             or f"{player}:{sport}:{stat}"
         )
+        _pp_candidate_rows.append({
+            "scan_ts": datetime.utcnow(),
+            "player_name": player,
+            "team": str(getattr(prop, "team", "") or ""),
+            "sport": sport,
+            "stat_type": stat,
+            "line_value": line,
+            "provider": "PrizePicks",
+            "score_total": getattr(score, "total", None),
+            "score_tier": getattr(decision, "decision_tier", None),
+            "confidence": getattr(decision, "confidence", None),
+            "gate_decision": "EVALUATED",
+            "rejection_reason": None,
+            "reason_codes": json.dumps(_compute_reason_codes(score, decision)),
+            "snapshot_external_id": external_id[:64],
+        })
+
+        if decision is None or decision.recommendation not in ("OVER", "UNDER"):
+            continue
+        directional += 1
         setattr(prop, "score_tier", getattr(decision, "decision_tier", None))
         setattr(prop, "bet_recommendation", decision.recommendation)
         setattr(prop, "bet_confidence", decision.confidence)
@@ -1586,6 +1605,21 @@ async def _run_prizepicks_independent_cycle(
             sport, len(unique_props), evaluated, len(actionable),
         )
         return
+
+    if _pp_candidate_rows:
+        try:
+            candidate_logger = getattr(db, "log_prop_candidate_batch", None)
+            if asyncio.iscoroutinefunction(candidate_logger):
+                candidate_count = await candidate_logger(_pp_candidate_rows)
+                logger.debug(
+                    "prizepicks_cycle: logged %d evaluated candidates to PropCandidateLog",
+                    candidate_count,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "prizepicks_cycle: candidate telemetry write failed: %s",
+                type(exc).__name__,
+            )
 
     chat_ids = list(config.allowed_user_ids)
     if not chat_ids:

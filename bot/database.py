@@ -1469,6 +1469,7 @@ class Database:
             return {
                 "observed": 0,
                 "evaluated": 0,
+                "tracked": 0,
                 "actionable_persisted": 0,
                 "delivery_attempts": 0,
                 "delivered_alerts": 0,
@@ -1527,9 +1528,12 @@ class Database:
 
         async with self.session() as s:
             # Raw observations are source volume, not alert volume.
+            # Underdog's legacy snapshot table remains the raw per-scan source.
+            # PrizePicks/PropLine is persisted in the provider-neutral history
+            # table, so counting PrizePicksRecord here makes live PP activity
+            # appear as zero even after a successful normalized write.
             for model, timestamp_column, provider_name in (
                 (UnderdogSnapshotRecord, UnderdogSnapshotRecord.fetched_at, "Underdog"),
-                (PrizePicksRecord, PrizePicksRecord.fetched_at, "PrizePicks"),
             ):
                 try:
                     n = await s.execute(
@@ -1538,6 +1542,30 @@ class Database:
                     _ensure(provider_name)["observed"] += int(n.scalar() or 0)
                 except Exception as exc:
                     logger.debug("telegram reconciliation observation query skipped: %s", exc)
+
+            # PropLineHistory is the persistent current tracking universe for
+            # both primary providers.  It supplies PP observations directly
+            # and exposes tracked counts independently from delivery.
+            try:
+                tracked_rows = await s.execute(
+                    select(
+                        PropLineHistory.provider,
+                        func.count(PropLineHistory.id),
+                    )
+                    .where(
+                        PropLineHistory.fetched_at >= cutoff,
+                        PropLineHistory.removed == False,  # noqa: E712
+                    )
+                    .group_by(PropLineHistory.provider)
+                )
+                for provider_name, count in tracked_rows.all():
+                    provider = _provider(provider_name)
+                    row = _ensure(provider)
+                    row["tracked"] += int(count or 0)
+                    if provider == "PrizePicks":
+                        row["observed"] += int(count or 0)
+            except Exception as exc:
+                logger.debug("prop-history tracking query skipped: %s", exc)
 
             # Candidate rows are the broad evaluation stream.
             try:

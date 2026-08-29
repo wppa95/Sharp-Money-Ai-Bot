@@ -4188,7 +4188,8 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     f"  ·  Evaluated: <code>{int(_row.get('evaluated', 0) or 0):,}</code>",
                     f"    Actionable persisted: "
                     f"<code>{int(_row.get('actionable_persisted', 0) or 0):,}</code>"
-                    f"  ·  Delivered: <code>{int(_delivered or 0):,}</code>",
+                    f"  ·  Delivered: <code>{int(_delivered or 0):,}</code>"
+                    f"  ·  Tracked: <code>{int(_row.get('tracked', 0) or 0):,}</code>",
                 ]
 
         # ── Section 1: Scan Pipeline (from ScanCycleLog) ─────────────────────────────
