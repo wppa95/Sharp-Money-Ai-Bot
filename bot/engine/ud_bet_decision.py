@@ -1,15 +1,15 @@
 """
 engine/ud_bet_decision.py — Universal betting decision engine.
 
-Produces an OVER / UNDER / PASS recommendation with a quality tier (S / A / B)
+Produces an OVER / UNDER recommendation, or an internal no-direction result,
 for every Underdog prop that has reached the scoring + validation gates.
 
 Design principle
 ────────────────
 A directional pick requires REAL player game-result data.  Market-movement
-signals (line position vs history, move direction) are shown as supplementary
-evidence but CANNOT on their own generate an OVER or UNDER.  Without real
-game history the engine always returns PASS.
+    signals (line position vs history, move direction) are shown as supplementary
+    monitoring information but CANNOT on their own generate an OVER or UNDER.
+    Without real game history the engine returns no direction.
 
 Tier definitions
 ────────────────
@@ -46,11 +46,6 @@ _MIN_GAMES_S_TIER:  int   = 8    # primary window must have this many for S-tier
 _S_RATE:  float = 0.65
 _A_RATE:  float = 0.62
 _B_RATE:  float = 0.60
-
-# Tier-1 (non-MLB/NBA/NFL) uses a relaxed direction threshold so that
-# "Weak" directional props (rate 0.55–0.60) still reach the scoring
-# pipeline.  They must pass all downstream quality/confidence/delivery
-# gates — only the initial PASS-vs-direction gate is relaxed.
 
 # A window is "contradicting" an OVER pick if its rate < this value
 _CONTRA_FLOOR: float = 0.40
@@ -237,7 +232,7 @@ def make_ud_bet_decision(
     Evaluate OVER / UNDER / PASS for a qualified Underdog prop.
 
     Real game results (``hit_rates``) are required for any directional pick.
-    Market-movement signals are supplementary context only.
+    Market-movement signals are retained as supplementary context only.
 
     Parameters
     ----------
@@ -246,7 +241,9 @@ def make_ud_bet_decision(
     current_line: Current prop line value.
     prev_line:    Previous line if this is a line-change event.
     hit_rates:    PlayerHitRates computed from real game results.
-                  If None or has_real_data=False, always returns PASS.
+                   If None or has_real_data=False, no directional result is
+                   returned; the internal no-direction state retains market
+                   context for monitoring and later enrichment.
     """
     # ── Market supplement values ──────────────────────────────────────────────
     avg_vs_line_pct: Optional[float] = None
@@ -265,47 +262,11 @@ def make_ud_bet_decision(
     if not hasattr(hit_rates, "has_real_data"):
         hit_rates = None
     if hit_rates is None or not hit_rates.has_real_data:
-        # Market-signal bypass: high-confidence props (score ≥ 70) with a clear
-        # directional signal from line movement should NOT be silently dropped as
-        # decision_pass — they should produce a market pick so they reach Telegram.
-        # Gate 1 PASS (decision_pass) is reserved for low-confidence props only
-        # (score < 70) where market signals are also inconclusive.
-        # avg_vs_line_pct: (avg_line − current_line) / avg_line
-        #   > 0  → line moved DOWN from historical avg → OVER opportunity
-        #   < 0  → line moved UP from historical avg   → UNDER opportunity
-        _mkt_dir: Optional[str] = None
-        _score_total = getattr(score, "total", None)
-        if (
-            score is not None
-            and isinstance(_score_total, (int, float))
-            and _score_total >= 70
-            and getattr(score, "tier", None) in ("S", "A", "B", "C")
-            and avg_vs_line_pct is not None
-            and abs(avg_vs_line_pct) >= 0.02  # ≥2% line movement required for signal
-        ):
-            _mkt_dir = "OVER" if avg_vs_line_pct > 0 else "UNDER"
-
-        if _mkt_dir is not None:
-            _mkt_conf = int(score.total)  # market-only confidence follows the composite score
-            _move_dir = "down" if _mkt_dir == "OVER" else "up"
-            return UDBetDecision.make_pick(
-                recommendation    = _mkt_dir,
-                decision_tier     = score.tier,
-                confidence        = _mkt_conf,
-                reason            = (
-                    f"Market pick: line moved {_move_dir} {abs(avg_vs_line_pct):.0%} "
-                    f"from historical avg — {score.total:.0f}/100 score "
-                    f"(no game history yet)"
-                ),
-                hit_rates         = None,
-                avg_vs_line_pct   = avg_vs_line_pct,
-                at_historical_low = at_low,
-            )
-
         return UDBetDecision.make_pass(
             reason             = (
                 "No player game history available — "
-                "market signals alone are not sufficient for a bet"
+                "market signals retained for monitoring, but are not sufficient "
+                "for a directional recommendation"
             ),
             hit_rates          = hit_rates,
             avg_vs_line_pct    = avg_vs_line_pct,
@@ -327,11 +288,7 @@ def make_ud_bet_decision(
 
     rate = primary.hit_rate
 
-    # ── Gate 3: must cross direction threshold in primary window ─────────────
-    # Tier-1 sports use a relaxed threshold (_B_RATE_TIER1 = 0.55) so that
-    # "Weak" directional props can reach the scoring / delivery pipeline.
-    # Tier-2 (MLB/NBA/NFL) keeps the stricter _B_RATE = 0.60.
-    # Empty sport ("") keeps old Tier-2 behavior for backward compatibility.
+    # ── Gate 3: must cross the direction threshold in the primary window ────
     _b = _B_RATE
     if rate >= _b:
         direction = "OVER"

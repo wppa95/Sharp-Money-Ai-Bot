@@ -56,8 +56,6 @@ from engine.sport_policy import is_football_related_sport
 from engine.telegram_rate_limiter import get_rate_limiter
 from providers import FailureType, get_health_monitor
 from engine.delivery_gates import (
-    TIER2_SPORTS as _CANONICAL_TIER2_SPORTS,
-    is_tier2_sport as _canonical_is_tier2_sport,
     tier_delivery_gate as _canonical_tier_delivery_gate,
 )
 from database import (
@@ -2267,19 +2265,6 @@ async def consensus_check_job(context) -> None:
 
 # ── Delivery priority helpers (used by underdog_job ranked-delivery phase) ────
 
-_DELIVERY_TIER_BASE: dict[str, float] = {
-    "S": 10000.0, "A": 5000.0, "B": 1000.0, "C": 200.0, "PASS": 0.0,
-}
-
-
-# Sports cohorts used only for deterministic delivery ordering.  They do not
-# change whether a valid directional candidate qualifies for delivery.
-_TIER2_SPORTS: frozenset[str] = _CANONICAL_TIER2_SPORTS
-
-
-def _is_tier2_sport(sport: str) -> bool:
-    return _canonical_is_tier2_sport(sport)
-
 
 def _has_strong_delivery_evidence(
     *,
@@ -2390,10 +2375,7 @@ def _cand_priority(c: dict) -> float:
 
 def _apply_delivery_diversification(queue: list) -> list:
     """
-    Split candidates into the configured sport cohorts, rank within each group
-    by change priority with a soft diversification penalty, then place the
-    non-NBA/MLB/NFL cohort before the NBA/MLB/NFL cohort in the final
-    delivery order.
+    Rank all candidates by change priority with a soft diversification penalty.
 
     The delivery loop applies the total-window cap (10 per 5 minutes) via the
     rate limiter; this function only determines the within-group ordering.
@@ -2417,19 +2399,8 @@ def _apply_delivery_diversification(queue: list) -> list:
         )
         return group
 
-    # Split by the canonical exact alias predicate.  Do not use substring
-    # matching: CFL is intentionally Tier 1.
-    t1 = [c for c in queue if not _is_tier2_sport(c.get("sport") or "")]
-    t2 = [c for c in queue if _is_tier2_sport(c.get("sport") or "")]
-
-    # Rank within each tier independently.
-    _rank_group(t1)
-    _rank_group(t2)
-
-    # Preserve the existing deterministic cohort order.
-    result = t1 + t2
     queue.clear()
-    queue.extend(result)
+    queue.extend(_rank_group(list(queue)))
     return queue
 
 
@@ -3184,8 +3155,7 @@ async def underdog_job(context) -> None:
                     # OddsAPI market confirmation — optional, non-blocking
                     _np_odds_confirm: Optional[dict] = None
                     if (decision is not None
-                            and decision.decision_tier in ("S", "A")
-                            and decision.recommendation != "PASS"):
+                            and decision.recommendation in ("OVER", "UNDER")):
                         try:
                             _np_odds_confirm = await _get_odds_api_confirmation(
                                 snap.sport or "UNKNOWN",
@@ -3247,7 +3217,6 @@ async def underdog_job(context) -> None:
                             "bq":                 float(score.total if score else 0),
                             "mq":                 float(getattr(market_quality, "score", 0) if market_quality else 0),
                             "is_meaningful_change": False,  # new props have no prev line
-                            "is_tier1":           not _is_tier2_sport(snap.sport or "UNKNOWN"),
                             "_sent":              False,
                         })
                         _dq_collected = True
@@ -3648,8 +3617,7 @@ async def underdog_job(context) -> None:
                     # OddsAPI market confirmation — non-blocking, S/A tier only, non-removal
                     if (not is_removed
                             and decision is not None
-                            and decision.decision_tier in ("S", "A")
-                            and decision.recommendation != "PASS"):
+                            and decision.recommendation in ("OVER", "UNDER")):
                         try:
                             _lc_odds_confirm = await _get_odds_api_confirmation(
                                 snap.sport or "UNKNOWN",
@@ -3718,7 +3686,6 @@ async def underdog_job(context) -> None:
                             "bq":                 float(score.total if score else 0),
                             "mq":                 float(getattr(market_quality, "score", 0) if market_quality else 0),
                             "is_meaningful_change": _lc_is_mc,
-                    "is_tier1":           not _is_tier2_sport(snap.sport or "UNKNOWN"),
                             "_sent":              False,
                         })
                         _dq_collected = True
@@ -4037,8 +4004,7 @@ async def underdog_job(context) -> None:
                         pass
                 # OddsAPI market confirmation is optional and non-blocking.
                 _s_odds_confirm: Optional[dict] = None
-                if (_sdec.decision_tier in ("S", "A")
-                        and _sdec.recommendation != "PASS"):
+                if _sdec.recommendation in ("OVER", "UNDER"):
                     try:
                         _s_odds_confirm = await _get_odds_api_confirmation(
                             _ssport,
@@ -4106,7 +4072,6 @@ async def underdog_job(context) -> None:
                     "bq":                 float(_sscore.total if _sscore else 0),
                     "mq":                 float(getattr(_smq, "score", 0) if _smq else 0),
                     "is_meaningful_change": False,  # standing = stable line
-                    "is_tier1":           not _is_tier2_sport(_ssport),
                     "_sent":              False,
                 })
 
@@ -4162,7 +4127,6 @@ async def underdog_job(context) -> None:
                 _dq_prev      = _dq.get("prev_line")
                 _dq_is_reent  = _dq.get("is_reentry", False)
                 _dq_is_new    = (_dq_path == "new" or _dq_is_reent)
-                _dq_is_t1     = not _is_tier2_sport(_dq_sport)
 
                 # ── Tier delivery gate backstop ───────────────────────────────
                 # Belt-and-suspenders: any candidate that slipped through the
@@ -4328,15 +4292,13 @@ async def underdog_job(context) -> None:
                         _MARKET_FIRST_ALERT[_mfa_key] = now
                     logger.info(
                         "🎯 PICK CREATED | Player: %s | Sport: %s | Market: %s"
-                        " | Line: %.1f | Direction: %s | Tier: %s | Confidence: %d"
-                        " | Quality: %s | Telegram: SENT | Path: %s | T1: %s",
+                        " | Line: %.1f | Direction: %s | Confidence: %d"
+                        " | Quality: %s | Telegram: SENT | Path: %s",
                         _dq_player, _dq_sport, _dq_st, _dq_line_val,
                         _dq_dec.recommendation if _dq_dec else "UNKNOWN",
-                        _dq_score.tier if _dq_score else "UNKNOWN",
                         _dq_score.total if _dq_score else 0,
                         getattr(_dq_score, "bet_quality_label", "—") if _dq_score else "—",
                         _dq_path,
-                        "yes" if _dq_is_t1 else "no",
                     )
                 else:
                     _release_prop_delivery_claim(
@@ -5241,7 +5203,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     pass
 
             _sr_odds_confirm: Optional[dict] = None
-            if _sr_dec.decision_tier in ("S", "A") and _sr_dec.recommendation != "PASS":
+            if _sr_dec.recommendation in ("OVER", "UNDER"):
                 try:
                     _sr_odds_confirm = await _get_odds_api_confirmation(
                         _sr_sport, _sr_player, _sr_stat, _sr_dec.recommendation, _sr_line,
