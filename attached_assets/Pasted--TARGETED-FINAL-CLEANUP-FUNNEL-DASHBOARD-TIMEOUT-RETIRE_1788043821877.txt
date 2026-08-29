@@ -1,0 +1,639 @@
+🔴 TARGETED FINAL CLEANUP — FUNNEL, DASHBOARD TIMEOUT & RETIRED FRAMEWORK
+
+Continue from the current implementation and the completed READ-ONLY live audit.
+
+Make ONLY the targeted changes below.
+
+Do NOT redesign the architecture.
+Do NOT create a new monitoring system.
+Do NOT create another rotation.
+Do NOT change provider ingestion.
+Do NOT change FPR behavior except where explicitly stated below.
+Do NOT change scoring formulas.
+Do NOT change BQ/MQ calculations.
+Do NOT change confidence calculations.
+Do NOT change legitimate safety protections.
+Do NOT delete historical database records.
+Do NOT restart or deploy Railway as part of this task.
+Do NOT create a new task or follow-up task.
+
+⸻
+
+1. FIX /FUNNEL LABELING AND ACCOUNTING
+
+The live audit confirmed the underlying scan accounting is valid, but several labels are misleading.
+
+Current behavior included:
+
+* 12 scans
+* Fetched: 50,201
+* Removed: 1,327
+* Futures: 1,068
+* Active props observed (scan total): 47,806
+* Unchanged: 47,651
+* New: 145
+* Line moved: 421
+* Scored: 5,622
+* FPR: 5,056 / 5,056
+
+The calculation:
+
+50,201 - 1,327 - 1,068 = 47,806
+
+is correct.
+
+DO NOT change that calculation.
+
+Instead, make the terminology accurately describe what is being counted.
+
+Rename:
+
+Active props observed (scan total)
+
+to a label that clearly means:
+
+Cumulative non-removed, non-futures prop observations across scans
+
+For example:
+
+Prop observations (cumulative scan total)
+
+Do NOT call this a current active-prop count.
+
+⸻
+
+2. FIX THE MISLEADING “UNCHANGED” LABEL
+
+The audit confirmed that the existing counter definitions allow a prop with a small/sub-threshold line movement to be counted as both:
+
+* line_changed
+* unchanged/not-alerted
+
+Therefore:
+
+Unchanged (stable lines)
+
+is misleading.
+
+Rename it to something such as:
+
+Not re-alerted
+
+or:
+
+Not re-alerted / below movement threshold
+
+The label must make clear that this is an alert/re-alert classification, NOT proof that every line remained unchanged.
+
+Do NOT change the underlying monitoring logic unless absolutely necessary.
+
+⸻
+
+3. MAKE SCAN COUNTERS CLEARLY NON-MUTUALLY-EXCLUSIVE
+
+Add a concise explanation in /funnel that:
+
+* Scan totals represent observation/scoring events.
+* They are not necessarily unique props.
+* New/movement/re-alert counters can overlap depending on their definitions.
+* FPR coverage represents the current active rotation population.
+* Tracking populations are separate from scan-event totals.
+
+Do not add unnecessary verbosity.
+
+The goal is to prevent someone reading:
+
+47,806
+
+and:
+
+5,056
+
+from assuming they are supposed to match.
+
+⸻
+
+4. FIX “STRONG ACTIONABLE CANDIDATES”
+
+The audit found that:
+
+Strong actionable candidates
+
+currently displays the same value as:
+
+Delivered to Telegram
+
+That is misleading.
+
+Do one of the following, whichever matches the existing data model:
+
+Preferred
+
+Make Strong actionable candidates use the actual qualified/actionable candidate population.
+
+AND keep:
+
+Delivered to Telegram
+
+as the actual successfully delivered count.
+
+If the underlying system no longer maintains a separate “strong candidate” population, rename the field to:
+
+Delivered to Telegram
+
+instead of pretending it represents a separate candidate population.
+
+Do NOT invent a new metric.
+
+⸻
+
+5. CLEAN UP PROVIDER PIPELINE REDUNDANCY
+
+The live /funnel provider section currently repeats related fields such as:
+
+* Observed
+* Evaluated
+* Active tracked
+* Observed again
+
+Keep the underlying provider accounting intact.
+
+Clean up only the presentation so every metric has one clear meaning.
+
+Do NOT remove useful provider metrics.
+
+Underdog and PrizePicks must remain completely separate.
+
+⸻
+
+6. /DASHBOARD TIMEOUT
+
+The live /dashboard command timed out and returned:
+
+⚠️ Dashboard is taking too long to load.
+
+This must be investigated.
+
+Identify the slow query/subsystem causing the timeout.
+
+Make the smallest targeted performance fix necessary.
+
+Prioritize:
+
+* Avoiding unnecessarily large database scans
+* Avoiding repeated expensive queries
+* Using existing normalized/provider-separated populations
+* Reusing already available current-run data where appropriate
+* Preserving the existing hourly Recently Tracked Props behavior
+
+Do NOT redesign the dashboard.
+
+Do NOT introduce a second tracking system.
+
+Do NOT change the underlying tracking schema unless absolutely necessary.
+
+The dashboard must return useful data within the existing command timeout.
+
+If one subsystem is genuinely unavailable/slow, preserve the existing honest partial-result behavior rather than blocking the entire dashboard.
+
+⸻
+
+7. RETIRED CLASSIFICATION FRAMEWORK — REMOVE ACTIVE INFLUENCE
+
+The READ-ONLY audit found:
+
+* Watchlist/Near-Miss mostly inert
+* Rejected no longer current decision state
+* PASS still exists as a live no-direction result
+* S/A/B/C still generated/persisted/displayed
+* decision_tier still stored/displayed
+* Old tier helpers remain executable in compatibility paths
+
+The current monitoring model must NOT use these concepts as qualification or delivery gates.
+
+Remove from ACTIVE DECISION LOGIC:
+
+* Watchlist
+* Near-Miss
+* PASS as an active qualification state
+* Rejected as a current decision blocker
+* S-tier
+* A-tier
+* B-tier
+* C-tier
+* Tier 1
+* Tier 2
+* decision_tier
+
+The current model should use:
+
+Monitoring → Evaluation → OVER/UNDER direction → evidence → legitimate safety checks → delivery
+
+There must be no classification gate between evaluation and directional eligibility.
+
+⸻
+
+8. IMPORTANT — DO NOT DELETE HISTORICAL DATA
+
+Historical rows containing:
+
+* PASS
+* REJECTED
+* Watchlist
+* Near-Miss
+* S/A/B/C
+* Tier information
+* decision_tier
+
+must NOT be deleted.
+
+Historical reporting may retain those values where required for historical integrity.
+
+The requirement is to remove their influence from the CURRENT framework.
+
+⸻
+
+9. REMOVE PASS AS A CURRENT DECISION CLASSIFICATION
+
+PASS should no longer be used as an active qualification/status framework.
+
+If a prop has:
+
+* no valid OVER/UNDER direction
+
+then it simply remains:
+
+non-directional monitoring data
+
+It must:
+
+* remain monitored
+* remain in FPR
+* remain rescannable
+* remain trackable
+* remain gradeable when appropriate
+
+But it should not require or emit a PASS classification.
+
+Do not convert it into a fake directional opportunity.
+
+Do not fabricate evidence.
+
+⸻
+
+10. REMOVE S/A/B/C AND TIER DEPENDENCIES
+
+Remove remaining executable dependencies where they affect:
+
+* directional qualification
+* FPR ordering
+* monitoring eligibility
+* rescanning
+* evidence eligibility
+* delivery eligibility
+
+FPR must remain classification-neutral.
+
+The rotation must continue to use the canonical active universe and cursor fairness.
+
+Do NOT replace S/A/B/C with another classification gate.
+
+⸻
+
+11. DELIVERY GATE
+
+The canonical delivery gate must remain:
+
+Required
+
+* Valid OVER or UNDER direction
+* Legitimate supporting evidence
+
+Plus legitimate operational safety:
+
+* Pregame/event-start protection
+* Football exclusion
+* Provider validity
+* Fresh/stale-line protection
+* Provider-aware identity
+* Duplicate/effective-alert protection
+* Atomic claim/release behavior
+* Flood/rate protections
+* Other legitimate safety checks
+
+NOT REQUIRED
+
+Delivery must NOT require:
+
+* S-tier
+* A-tier
+* B-tier
+* C-tier
+* Tier 1
+* Tier 2
+* PASS
+* Watchlist
+* Near-Miss
+* Rejected
+* decision_tier
+
+⸻
+
+12. AUDIT ALL CALLABLE DELIVERY PATHS
+
+Ensure no callable delivery method still contains an independent legacy classification gate.
+
+Audit:
+
+* Main Underdog delivery
+* PrizePicks delivery
+* FPR delivery
+* /picks
+* /slip
+* /alerts
+* Stable Refresh compatibility path
+* Any dormant/legacy direct broadcaster that remains callable
+
+If a compatibility method remains necessary, make it delegate to the canonical delivery gate rather than maintaining its own qualification rules.
+
+Do NOT create duplicate delivery logic.
+
+⸻
+
+13. FOOTBALL REMAINS EXCLUDED
+
+Preserve the existing hard football exclusion.
+
+Football/gridiron includes, where already supported by the centralized detector:
+
+* NFL
+* NCAAF
+* CFB
+* FCS
+* CFL
+* UFL
+* USFL
+* XFL
+* AFL
+* AFLW
+* Arena Football
+* Indoor Football
+* NCAA Football
+* Other football/gridiron aliases
+
+Football must remain:
+
+* excluded before expensive downstream work where currently implemented
+* monitored only if the architecture intentionally retains any upstream feed visibility
+* not eligible for betting delivery
+* not eligible for /picks
+* not eligible for /slip
+* not eligible for Telegram betting alerts
+
+Do NOT regress soccer/FIFA/MLS or other supported non-football sports.
+
+⸻
+
+14. PRESERVE ALL SUPPORTED NON-FOOTBALL SPORTS
+
+Do NOT accidentally narrow the active sport universe.
+
+Preserve legitimate supported non-football monitoring for:
+
+* MLB
+* NBA
+* WNBA
+* NHL
+* Tennis
+* CFB-related exclusions only where football applies
+* FIFA
+* Soccer
+* MLS
+* CS
+* CS2
+* DOTA
+* LOL
+* VAL
+* PGA
+* BKFC
+* MMA
+* Boxing
+* KBO
+* NPB
+* Racing
+* Motorcycle
+* USAC
+* Outlaws
+* HighLimit
+* and any other legitimately supported non-football sport/provider returned by the active catalogs.
+
+The exact provider catalog remains authoritative.
+
+Do NOT fabricate sports that are unavailable.
+
+⸻
+
+15. PRESERVE FPR
+
+FPR remains the SOLE full-pool rotation.
+
+Preserve:
+
+* Active source-ID universe
+* Cursor progression
+* Cursor wrapping
+* New-prop priority
+* Line-mover priority
+* Remaining active-prop fairness
+* Continuous rescanning
+* Previously evaluated props
+* Previously delivered props
+* Previously rejected/non-actionable props
+* Cold-start props
+* Multiple sports
+* Provider separation
+* Alternate active lines
+* Event-start removal
+* Historical snapshot retention
+
+Do NOT add another rotation.
+
+⸻
+
+16. TESTS
+
+Add/update focused regression tests proving:
+
+Funnel
+
+* Cumulative observation terminology is correct.
+* Current active pool is not confused with cumulative scan observations.
+* Not-realerted terminology replaces misleading unchanged terminology.
+* New/movement counters retain their actual definitions.
+* Strong actionable candidate count is not falsely equal to delivered count.
+* FPR active pool is clearly distinguished from scan totals.
+* Sport columns remain aligned.
+* Sport sorting remains Active highest → lowest.
+
+Dashboard
+
+* Dashboard returns within the existing timeout under normal current data volume.
+* Recently Tracked Props remains hourly.
+* Multiple supported sports remain visible.
+* Both Underdog and PrizePicks remain visible.
+* Normalized data remains authoritative.
+* Partial results remain honest when a subsystem is slow.
+
+Retired framework
+
+* No current PASS classification is generated.
+* No current Watchlist/Near-Miss classification is generated.
+* No current S/A/B/C qualification gate exists.
+* No Tier 1/Tier 2 gate exists.
+* decision_tier does not control current qualification.
+* Rejected does not block current monitoring/delivery.
+* Non-directional props remain monitored and rescannable.
+* Non-directional props do not become fake directional opportunities.
+* FPR remains classification-neutral.
+* Delivery requires direction + legitimate evidence + safety protections.
+* No retired classification can block delivery.
+
+Delivery
+
+* Main Underdog path uses canonical delivery gate.
+* PrizePicks path uses canonical delivery gate.
+* FPR delivery uses canonical delivery gate.
+* /picks respects current active directional/evidence rules.
+* /slip respects current active directional/evidence rules.
+* Compatibility delivery paths do not bypass or replace the canonical gate.
+* Duplicate suppression remains intact.
+
+Historical integrity
+
+* Historical PASS/REJECTED/Watchlist/tier rows remain intact.
+* Historical data is not deleted.
+* Historical grading remains intact.
+
+Do NOT weaken existing tests.
+
+Run the focused suites and then the full suite.
+
+⸻
+
+17. VALIDATION
+
+Required:
+
+* Focused tests pass.
+* Full suite passes.
+* Python compilation passes.
+* git diff --check passes.
+
+Do not create a task.
+
+Do not create a follow-up task.
+
+Do not deploy Railway.
+
+Do not restart Railway.
+
+⸻
+
+18. REQUIRED FINAL REPORT
+
+Report:
+
+CHANGES
+
+Exactly what was changed.
+
+FUNNEL
+
+How scan totals, FPR totals, tracking totals, directional totals, and delivery totals are now distinguished.
+
+DASHBOARD
+
+What caused the timeout and what targeted fix was made.
+
+RETIRED FRAMEWORK
+
+Explicitly state whether these still influence current behavior:
+
+* Watchlist
+* Near-Miss
+* PASS
+* Rejected
+* S/A/B/C
+* Tier 1
+* Tier 2
+* decision_tier
+
+DELIVERY GATE
+
+State the exact current delivery requirements.
+
+TESTS
+
+Focused and full-suite results.
+
+PRESERVED
+
+Confirm:
+
+* Underdog
+* PrizePicks/PropLine
+* FPR
+* continuous rescanning
+* football exclusion
+* soccer/FIFA/MLS
+* MLB
+* NBA
+* WNBA
+* NHL
+* Tennis
+* CS/CS2
+* DOTA
+* LOL
+* VAL
+* PGA
+* BKFC
+* MMA
+* Boxing
+* KBO
+* NPB
+* Racing
+* Motorcycle
+* USAC
+* Outlaws
+* HighLimit
+* other legitimate non-football provider sports
+* evidence
+* grading
+* historical records
+* pregame protection
+* deduplication
+* scheduler
+* adaptive batching
+* max_instances=1
+
+No unrelated behavior should change.
+
+🔴 FINAL RULE
+
+Do not report this as complete unless the retired framework is actually removed from ACTIVE decision/delivery influence.
+
+Historical metadata may remain.
+
+The current framework must be:
+
+Monitor → Evaluate → Direction → Evidence → Safety → Deliver
+
+No Watchlist.
+No Near-Miss.
+No PASS.
+No Rejected blocker.
+No S/A/B/C gate.
+No Tier 1/Tier 2 gate.
+No decision_tier gate.
+
+And non-directional props must continue to be monitored and rescanned rather than being discarded.
