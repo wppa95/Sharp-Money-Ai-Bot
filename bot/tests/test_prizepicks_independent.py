@@ -43,6 +43,31 @@ def _opportunity(provider: str) -> dict:
 
 
 class TestIndependentPrizePicks:
+    async def test_authoritative_discovery_controls_scope_without_underdog_inheritance(
+        self, monkeypatch
+    ):
+        discovered = [
+            SimpleNamespace(canonical_key="NHL"),
+            SimpleNamespace(canonical_key="SOCCER"),
+            SimpleNamespace(canonical_key="WNBA"),
+            SimpleNamespace(canonical_key="NFL"),
+        ]
+
+        class FakeProvider:
+            async def discover_sports(self):
+                return discovered
+
+        # Even an explicit compatibility fallback and Underdog scope must not
+        # narrow an authoritative PrizePicks catalog.
+        monkeypatch.setattr(
+            market_engine.config, "PRIZEPICKS_LEAGUES_RAW", "NBA,MLB"
+        )
+        monkeypatch.setattr(market_engine.config, "ACTIVE_SPORTS_RAW", "NBA,MLB")
+
+        sports = await market_engine._get_prizepicks_scan_sports(FakeProvider())
+
+        assert sports == ("NHL", "SOCCER", "WNBA")
+
     async def test_cycles_round_robin_one_configured_sport_with_scoped_fetch(
         self, monkeypatch
     ):
@@ -199,6 +224,11 @@ class TestIndependentPrizePicks:
 
         db = FakeDB()
         monkeypatch.setattr(market_engine, "_propline_provider", FakeProvider())
+        # Providers without authoritative discovery must opt into an explicit
+        # compatibility scope; the production default is provider-discovered.
+        monkeypatch.setattr(
+            market_engine.config, "PRIZEPICKS_LEAGUES_RAW", "NBA"
+        )
         monkeypatch.setattr(market_engine, "_fetch_and_compute_hit_rates", fake_enrichment)
         monkeypatch.setattr(market_engine, "AlertDelivery", FakeDelivery)
         monkeypatch.setattr(market_engine, "_try_claim_delivery_slot", claim_slot)

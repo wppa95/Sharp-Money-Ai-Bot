@@ -68,3 +68,17 @@ collapsing them during upsert silently removes active source projections.
 
 **How to apply:** Use the PP source ID for normalized upsert/latest-row grouping;
 retain the existing provider-specific Underdog identity semantics.
+
+PrizePicks must not have an implicit NBA/MLB production scope. Its official
+provider catalog is authoritative; only custom endpoints without catalog
+support may use an explicitly configured compatibility fallback. Full-pool
+priority may favor new rows, movers, actionable/urgent rows, and approaching
+games, but every active row must still advance through the single FPR cursor.
+
+**Why:** A fixed two-sport default hides legitimate provider-supplied sports,
+while an out-of-window priority row can otherwise repeatedly consume a small
+batch and leave stable rows unrescanned.
+
+**How to apply:** Keep `PRIZEPICKS_LEAGUES` empty unless a custom endpoint
+requires it, filter football before persistence/downstream work, and preserve
+cursor-boundary progress whenever priority work is selected.

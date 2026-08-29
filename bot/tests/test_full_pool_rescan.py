@@ -363,6 +363,41 @@ class TestFPRJob:
         # prop was already delivered recently.
         db.get_ud_prop_history.assert_awaited()
 
+    async def test_future_props_beyond_24_hours_remain_in_fpr_universe(self):
+        """FPR does not treat a legitimate future prop as out of scope."""
+        snap = _make_snap(
+            player="Future Player",
+            sport="SOCCER",
+            game_time=datetime.datetime.utcnow() + datetime.timedelta(hours=48),
+        )
+        db = _make_db(pool={("Future Player", "Goals", 1.5): snap})
+        ctx = _make_context(db)
+        health = _make_health(cursor=0)
+        processed = []
+
+        async def _fake_history(player, stat, limit=30):
+            processed.append(player)
+            return []
+
+        db.get_ud_prop_history = _fake_history
+
+        from market_engine import _full_pool_rescan_job
+
+        with (
+            patch("market_engine.get_health_tracker", return_value=health),
+            patch("market_engine._fetch_and_compute_hit_rates", new=AsyncMock(return_value=None)),
+            patch("market_engine._is_game_live_or_past", return_value=False),
+            patch("market_engine._is_prop_deduped", return_value=True),
+            patch("engine.ud_scoring.score_ud_prop", return_value=_make_score()),
+            patch("engine.player_validator.validate_player_prop", return_value=_make_validation()),
+            patch("engine.ud_bet_decision.make_ud_bet_decision", return_value=_make_decision()),
+            patch("engine.ud_scoring.compute_market_quality", return_value=MagicMock()),
+            patch("engine.ud_scoring.detect_market_pressure", return_value=MagicMock()),
+        ):
+            await _full_pool_rescan_job(ctx)
+
+        assert processed == ["Future Player"]
+
     async def test_mixed_primary_provider_pool_stays_in_one_rotation(self, monkeypatch):
         """PrizePicks rows join legacy Underdog rows without a second FPR."""
         monkeypatch.delenv("ALLOWED_USER_IDS", raising=False)

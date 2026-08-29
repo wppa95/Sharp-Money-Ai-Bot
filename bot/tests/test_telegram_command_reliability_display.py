@@ -412,6 +412,7 @@ async def test_prizepicks_companion_cycle_records_success_health():
 
     with (
         patch.object(market_engine, "_propline_provider", provider),
+        patch.object(market_engine.config, "PRIZEPICKS_LEAGUES_RAW", "NBA"),
         patch.object(market_engine, "get_health_monitor", return_value=monitor),
     ):
         await market_engine._run_prizepicks_independent_cycle(context)
@@ -430,6 +431,7 @@ async def test_prizepicks_companion_cycle_records_failure_health():
 
     with (
         patch.object(market_engine, "_propline_provider", provider),
+        patch.object(market_engine.config, "PRIZEPICKS_LEAGUES_RAW", "NBA"),
         patch.object(market_engine, "get_health_monitor", return_value=monitor),
     ):
         await market_engine._run_prizepicks_independent_cycle(context)

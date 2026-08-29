@@ -134,8 +134,11 @@ class Config:
         )
 
     # ── PrizePicks monitoring ─────────────────────────────────────────────────
-    # Leagues to monitor (comma-separated PrizePicks league names).
-    PRIZEPICKS_LEAGUES_RAW: str = os.environ.get("PRIZEPICKS_LEAGUES", "NBA,MLB")
+    # Optional compatibility fallback for custom PrizePicks endpoints that do
+    # not expose the authoritative provider sports catalog.  The official
+    # provider catalog controls scope when available; an empty value must not
+    # silently narrow PrizePicks to a guessed NBA/MLB subset.
+    PRIZEPICKS_LEAGUES_RAW: str = os.environ.get("PRIZEPICKS_LEAGUES", "")
     # Seconds between PrizePicks projection polls (default 5 min).
     PRIZEPICKS_POLL_INTERVAL: int = int(os.environ.get("PRIZEPICKS_POLL_INTERVAL", "300"))
     # Minimum edge % vs sportsbook fair probability to trigger a PP alert.

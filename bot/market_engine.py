@@ -5930,8 +5930,9 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         def _fpr_sort_key(item):
             """Stable ordering for the unified full-pool rotation.
 
-            New observations and line movements are prompt-priority signals,
-            not second queues.  They remain inside the same persisted cursor
+            New observations, line movements, actionable signals, and games
+            approaching their start time are prompt-priority signals, not
+            second queues.  They remain inside the same persisted cursor
             rotation so ordinary stable props cannot be starved.
             ``is True`` is intentional here: test doubles and legacy rows can
             expose truthy sentinel attributes that are not actual movement
@@ -5959,10 +5960,46 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     and _first_seen == _last_seen
                 )
             )
+            _recommendation = str(
+                getattr(snap, "bet_recommendation", None)
+                or getattr(snap, "recommendation", None)
+                or ""
+            ).upper()
+            _score_tier = str(
+                getattr(snap, "score_tier", None)
+                or getattr(snap, "decision_tier", None)
+                or ""
+            ).upper()
+            _score_total = getattr(snap, "score_total", None)
+            try:
+                _score_total = float(_score_total)
+            except (TypeError, ValueError):
+                _score_total = 0.0
+            is_actionable = (
+                _recommendation in {"OVER", "UNDER"}
+                or _score_tier in {"S", "A"}
+                or _score_total >= 70.0
+            )
+            _game_time = getattr(snap, "game_time", None)
+            is_approaching = False
+            if isinstance(_game_time, datetime):
+                try:
+                    _game_time = (
+                        _game_time.replace(tzinfo=None)
+                        if _game_time.tzinfo is not None
+                        else _game_time
+                    )
+                    _minutes_to_start = (_game_time - now).total_seconds() / 60.0
+                    is_approaching = 0.0 <= _minutes_to_start <= 24.0 * 60.0
+                except (TypeError, ValueError):
+                    is_approaching = False
             external_id = str(getattr(snap, "external_id", None) or "")
             return (
-                0 if is_mover else 1,
                 0 if is_new else 1,
+                0 if is_mover else 1,
+                0 if is_actionable else 1,
+                0 if is_approaching else 1,
+                0 if sport not in config.fpr_low_priority_sports else 1,
                 sport,
                 provider,
                 player,
@@ -5998,30 +6035,56 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         cursor_window = pool_keys[
             fpr_cursor:min(fpr_cursor + fpr_limit, fpr_pool_size)
         ]
-        mover_keys = [
+        new_keys = [
             key for key, snap in sorted_items
             if _fpr_sort_key((key, snap))[0] == 0
         ]
+        mover_keys = [
+            key for key, snap in sorted_items
+            if (
+                _fpr_sort_key((key, snap))[0] != 0
+                and _fpr_sort_key((key, snap))[1] == 0
+            )
+        ]
         regular_keys = [key for key, snap in sorted_items
-                        if _fpr_sort_key((key, snap))[0] != 0]
-        if mover_keys and regular_keys:
-            mover_limit = min(
-                len(mover_keys),
+                        if (
+                            _fpr_sort_key((key, snap))[0] != 0
+                            and _fpr_sort_key((key, snap))[1] != 0
+                        )]
+        if (new_keys or mover_keys) and regular_keys:
+            priority_limit = min(
+                len(new_keys) + len(mover_keys),
                 fpr_limit if fpr_limit == 1 else max(1, fpr_limit // 2),
             )
-            # Preserve progress at the cursor boundary: a mover currently
-            # under the cursor must be selected before a mover elsewhere.
-            # Otherwise an outside mover could repeatedly consume the only
-            # priority slot while the cursor's first row remains untouched.
-            window_movers = [
+            # New observations are the highest-priority prompt work.  Movers
+            # still preserve the cursor boundary: a mover currently under the
+            # cursor is selected before a mover elsewhere, preventing an
+            # outside mover from repeatedly consuming the only priority slot.
+            window_new = [
                 key for key in cursor_window
                 if _fpr_sort_key((key, pool_snaps[key]))[0] == 0
             ]
+            outside_new = [key for key in new_keys if key not in cursor_window]
+            window_movers = [
+                key for key in cursor_window
+                if (
+                    _fpr_sort_key((key, pool_snaps[key]))[0] != 0
+                    and _fpr_sort_key((key, pool_snaps[key]))[1] == 0
+                )
+            ]
             outside_movers = [key for key in mover_keys if key not in cursor_window]
-            priority_keys = (window_movers + outside_movers)[:mover_limit]
+            priority_keys = (
+                window_new
+                + outside_new
+                + window_movers
+                + outside_movers
+            )[:priority_limit]
             regular_batch = [
                 key for key in cursor_window
-                if _fpr_sort_key((key, pool_snaps[key]))[0] != 0
+                if (
+                    _fpr_sort_key((key, pool_snaps[key]))[0] != 0
+                    and _fpr_sort_key((key, pool_snaps[key]))[1] != 0
+                )
             ][:fpr_limit - len(priority_keys)]
             batch_keys = priority_keys + regular_batch
             # Fill any unused capacity from this cursor window without
@@ -6031,16 +6094,22 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 if key not in batch_keys
             )
             batch_keys = batch_keys[:fpr_limit]
+            # A prompt row outside the cursor window must never consume the
+            # only batch slot while leaving the cursor at the same position.
+            # Always process the cursor boundary when it would otherwise be
+            # skipped; this guarantees stable rows eventually get covered.
+            if cursor_window and cursor_window[0] not in batch_keys:
+                batch_keys = [cursor_window[0]] + batch_keys[:-1]
             fpr_line_movers = sum(
                 1 for key in batch_keys
-                if _fpr_sort_key((key, pool_snaps[key]))[0] == 0
+                if _fpr_sort_key((key, pool_snaps[key]))[1] == 0
             )
         else:
             # The normal bounded cursor slice is also the all-movers fallback.
             batch_keys = cursor_window
             fpr_line_movers = sum(
                 1 for key in batch_keys
-                if _fpr_sort_key((key, pool_snaps[key]))[0] == 0
+                if _fpr_sort_key((key, pool_snaps[key]))[1] == 0
             )
 
         # Advance through the contiguous canonical prefix that was actually

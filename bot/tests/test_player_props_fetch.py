@@ -163,11 +163,12 @@ def test_player_prop_sports_raw_override():
     assert set(sports) == {"NBA", "MLB", "EPL", "MLS"}
 
 
-def test_prizepicks_leagues_default_is_nba_mlb():
+def test_prizepicks_leagues_default_is_provider_discovered():
     cfg = Config()
     leagues = cfg.prizepicks_leagues
-    assert "NBA" in leagues
-    assert "MLB" in leagues
+    # Official PropLine discovery controls scope.  An empty compatibility
+    # fallback must not fabricate a fixed NBA/MLB-only universe.
+    assert leagues == []
     assert "NFL" not in leagues
 
 
