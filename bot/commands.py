@@ -3618,13 +3618,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             _db.get_tracking_summary(),
         ])
         tracked_observations = (
-            int(
-                tracking.get(
-                    "tracked_observations",
-                    tracking.get("tracked", tracking.get("total", 0)),
-                )
-                or 0
-            )
+            int(tracking.get("historical_observations", tracking.get("tracked_observations", 0)) or 0)
             if isinstance(tracking, dict)
             else None
         )
@@ -3640,7 +3634,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         ]
 
         lines.append(
-            "  Tracked observations: <b>"
+            "  Historical observations: <b>"
             + (
                 f"{tracked_observations:,}"
                 if tracked_observations is not None
@@ -3650,8 +3644,8 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         if isinstance(tracking, dict):
             lines.append(
-                "  Current active tracking universe: <b>"
-                f"{int(tracking.get('tracked', 0) or 0):,}</b>"
+                "  Active tracked props: <b>"
+                f"{int(tracking.get('active_tracked', tracking.get('tracked', 0)) or 0):,}</b>"
             )
 
         tracking_counts = tracking.get("counts", {}) if isinstance(tracking, dict) else {}
@@ -3679,10 +3673,10 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         lines += [
             "",
             "<b>Directional populations (all-time)</b>",
-            f"  Directional: <b>{directional_total if directional_total is not None else 'unavailable'}</b>",
-            f"  Delivered:   <b>{delivered if delivered is not None else 'unavailable'}</b>",
-            f"  Pending:     <b>{pending if pending is not None else 'unavailable'}</b>",
-            f"  Resolved:    <b>{resolved_total if resolved_total is not None else 'unavailable'}</b>",
+            f"  Directional opportunities: <b>{directional_total if directional_total is not None else 'unavailable'}</b>",
+            f"  Delivered alerts:         <b>{delivered if delivered is not None else 'unavailable'}</b>",
+            f"  Pending grading:           <b>{pending if pending is not None else 'unavailable'}</b>",
+            f"  Resolved outcomes:         <b>{resolved_total if resolved_total is not None else 'unavailable'}</b>",
         ]
 
         if tracking_counts:
@@ -3699,7 +3693,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 + tracking_counts.get("UNDER", {}).get("PUSH", 0)
             )
             total_res = wins + losses + pushes
-            hit_rate = wins / total_res * 100 if total_res > 0 else 0.0
+            hit_rate = wins / (wins + losses) * 100 if (wins + losses) > 0 else 0.0
             lines += [
                 f"  Resolved:    <b>{total_res}</b>  W:{wins}  L:{losses}  P:{pushes}",
                 f"  Hit rate:    <code>{hit_rate:.0f}%</code>",
@@ -3707,24 +3701,40 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         elif isinstance(tracking, dict):
             lines.append("  <i>Result breakdown unavailable right now.</i>")
 
-        if isinstance(tracking, dict) and (
-            tracking.get("tracked_observations_by_provider")
-            or tracking.get("active_by_provider")
-        ):
+        if isinstance(tracking, dict):
             lines.append("")
-            lines.append("<b>Tracked observations by provider</b>")
-            _obs_by_provider = tracking.get(
-                "tracked_observations_by_provider",
-                tracking.get("active_by_provider", {}),
-            )
-            for provider, count in sorted(_obs_by_provider.items()):
-                lines.append(f"  {provider}: <b>{int(count):,}</b>")
+            lines.append("<b>Provider populations</b>")
+            _active = tracking.get("active_by_provider", {}) or {}
+            _observed = tracking.get("historical_observations_by_provider", tracking.get(
+                "tracked_observations_by_provider", {}
+            )) or {}
+            _directional = tracking.get("directional_by_provider", {}) or {}
+            _delivered = tracking.get("delivered_by_provider", tracking.get(
+                "provider_delivered", {}
+            )) or {}
+            _pending = tracking.get("pending_by_provider", {}) or {}
+            _resolved = tracking.get("resolved_by_provider", {}) or {}
+            _providers = set(_active) | set(_observed) | set(_directional) | set(_delivered)
+            for provider in sorted(_providers):
+                result_counts = (tracking.get("result_counts_by_provider", {}) or {}).get(provider, {})
+                lines.append(
+                    f"  <b>{_html.escape(provider)}:</b> "
+                    f"active {int(_active.get(provider, 0) or 0):,} · "
+                    f"observed {int(_observed.get(provider, 0) or 0):,} · "
+                    f"directional {int(_directional.get(provider, 0) or 0):,} · "
+                    f"delivered {int(_delivered.get(provider, 0) or 0):,} · "
+                    f"pending {int(_pending.get(provider, 0) or 0):,} · "
+                    f"resolved {int(_resolved.get(provider, 0) or 0):,} · "
+                    f"H/M/P {int(result_counts.get('HIT', 0) or 0)}/"
+                    f"{int(result_counts.get('MISS', 0) or 0)}/"
+                    f"{int(result_counts.get('PUSH', 0) or 0)}"
+                )
 
         lines += [
             "",
-            "<b>All-time</b>  ("
-            + (f"{total_ud:,}" if total_ud is not None else "unavailable")
-            + " Underdog snapshots; legacy provider table)",
+            "<i>Active tracked props are the current non-removed provider universe. "
+            "Historical observations, directional opportunities, deliveries, and grading "
+            "are reported as separate populations.</i>",
         ]
 
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
@@ -3964,6 +3974,8 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     by_sport = data.get("by_sport", {})
     total    = data.get("total", 0)
     pending  = data.get("pending", 0)
+    active_by_sport = data.get("active_by_sport", {}) or {}
+    observations_by_sport = data.get("observations_by_sport", {}) or {}
 
     def _n(d: dict, *keys) -> int:
         """Safely walk nested dict and return int."""
@@ -3981,12 +3993,29 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     lines: list[str] = [
         "📊 <b>Prop Opportunity Tracker</b>",
-        f"<i>Tracked observations: "
-        f"{int(data.get('tracked_observations', data.get('tracked', 0)) or 0)}  ·  "
-        f"Active tracked props: {int(data.get('tracked', 0) or 0)}  ·  "
+        f"<i>Historical observations: "
+        f"{int(data.get('historical_observations', data.get('tracked_observations', 0)) or 0)}  ·  "
+        f"Active tracked props: {int(data.get('active_tracked', data.get('tracked', 0)) or 0)}  ·  "
         f"Directional opportunities: {total}  ·  Pending grading: {pending}</i>",
         "",
     ]
+
+    # Current tracking is shown independently from directional grading. This
+    # keeps a sport with observations but no OVER/UNDER rows visible.
+    tracking_sports = (
+        set(active_by_sport)
+        | set(observations_by_sport)
+        | set(by_sport)
+    )
+    if tracking_sports:
+        lines += ["<b>Current tracking by sport</b>"]
+        for sport in sorted(tracking_sports):
+            lines.append(
+                f"  <b>{_html.escape(str(sport))}:</b> "
+                f"active {int(active_by_sport.get(sport, 0) or 0):,} · "
+                f"observations {int(observations_by_sport.get(sport, 0) or 0):,} · "
+                f"directional {int((data.get('directional_by_sport', {}) or {}).get(sport, 0) or 0):,}"
+            )
 
     # ── Directional picks (OVER + UNDER) ───────────────────────────────────────
     play_recs = ("OVER", "UNDER")
@@ -4014,7 +4043,7 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if play_graded > 0:
         lines += [
             f"  Correct picks: <code>{play_correct}</code>  "
-            f"({_hit_rate(play_correct, play_graded)})",
+            f"({_hit_rate(play_correct, play_graded - play_push)})",
             f"  ➖ Push:       <code>{play_push}</code>",
             f"  ⏳ Pending:    <code>{play_pending}</code>",
         ]
@@ -4050,34 +4079,54 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             )
             if s_graded > 0:
                 lines.append(
-                    f"  <b>{sport}:</b>  {s_correct}/{s_graded} "
-                    f"({_hit_rate(s_correct, s_graded)})"
+                    f"  <b>{sport}:</b>  {s_correct}/{s_graded - _n(sport_data, 'OVER', 'PUSH') - _n(sport_data, 'UNDER', 'PUSH')} "
+                    f"({_hit_rate(s_correct, s_graded - _n(sport_data, 'OVER', 'PUSH') - _n(sport_data, 'UNDER', 'PUSH'))})"
                 )
 
-    by_provider = data.get("by_provider", {})
-    if by_provider:
+    by_provider = data.get("by_provider", {}) or {}
+    _active_by_provider = data.get("active_by_provider", {}) or {}
+    _observed_by_provider = data.get(
+        "historical_observations_by_provider",
+        data.get("tracked_observations_by_provider", {}),
+    ) or {}
+    _directional_by_provider = data.get("directional_by_provider", {}) or {}
+    _delivered_by_provider = data.get(
+        "delivered_by_provider", data.get("provider_delivered", {})
+    ) or {}
+    _pending_by_provider = data.get("pending_by_provider", {}) or {}
+    _resolved_by_provider = data.get("resolved_by_provider", {}) or {}
+    _provider_names = (
+        set(by_provider)
+        | set(_active_by_provider)
+        | set(_observed_by_provider)
+        | set(_directional_by_provider)
+    )
+    if _provider_names:
         lines += ["", "━━━━━━━━━━━━━━━━━━", "<b>By Provider</b>"]
-        for provider, provider_data in sorted(by_provider.items()):
+        for provider in sorted(_provider_names):
+            provider_data = by_provider.get(provider, {})
             p_correct = (
                 _n(provider_data, "OVER", "HIT")
                 + _n(provider_data, "UNDER", "MISS")
             )
-            p_graded = sum(
+            p_resolved = sum(
                 _n(provider_data, rec, res)
                 for rec in ("OVER", "UNDER")
-                for res in ("HIT", "MISS", "PUSH")
+                for res in ("HIT", "MISS")
             )
             p_pending = sum(
                 _n(provider_data, rec, "PENDING")
                 for rec in ("OVER", "UNDER")
             )
             lines.append(
-                f"  <b>{provider}:</b> tracked "
-                f"{int((data.get('tracked_observations_by_provider', {}) or {}).get(provider, 0) or 0)}"
-                f" · directional {sum(_n(provider_data, rec, res) for rec in ('OVER', 'UNDER') for res in ('HIT', 'MISS', 'PUSH', 'PENDING'))}"
-                f" · delivered {int((data.get('provider_delivered', {}) or {}).get(provider, 0) or 0)}"
-                f" · {p_correct}/{p_graded} correct"
-                f" · {p_pending} pending"
+                f"  <b>{_html.escape(provider)}:</b> "
+                f"active {int(_active_by_provider.get(provider, 0) or 0):,}"
+                f" · observed {int(_observed_by_provider.get(provider, 0) or 0):,}"
+                f" · directional {int(_directional_by_provider.get(provider, 0) or 0):,}"
+                f" · delivered {int(_delivered_by_provider.get(provider, 0) or 0):,}"
+                f" · pending {int(_pending_by_provider.get(provider, 0) or 0):,}"
+                f" · resolved {int(_resolved_by_provider.get(provider, 0) or 0):,}"
+                f" · {p_correct}/{p_resolved} correct"
             )
 
     lines += [
@@ -4460,13 +4509,22 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         scan_summary: dict = _scan_result if isinstance(_scan_result, dict) else {}
         summary = summary if isinstance(summary, dict) else {}
 
-        tracked   = int(summary.get("tracked", 0) or 0)
-        tracked_observations = int(
-            summary.get("tracked_observations", tracked) or 0
+        tracked   = int(
+            summary.get("active_tracked", summary.get("tracked", 0)) or 0
         )
+        tracked_observations = int(
+            summary.get(
+                "historical_observations",
+                summary.get("tracked_observations", 0),
+            )
+            or 0
+        )
+        evaluated_total = int(summary.get("evaluated", 0) or 0)
         directional_total = int(
             summary.get("directional_total", summary.get("total", 0)) or 0
         )
+        pending_total = int(summary.get("pending", 0) or 0)
+        resolved_total = int(summary.get("resolved", 0) or 0)
         delivered_total = int(summary.get("delivered", 0) or 0)
 
         def _fmt_rate(num: int, denom: int) -> str:
@@ -4531,10 +4589,16 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     f"  <b>{_provider}</b>",
                     f"    Observed: <code>{int(_row.get('observed', 0) or 0):,}</code>"
                     f"  ·  Evaluated: <code>{int(_row.get('evaluated', 0) or 0):,}</code>",
-                    f"    Actionable persisted: "
-                    f"<code>{int(_row.get('actionable_persisted', 0) or 0):,}</code>"
-                    f"  ·  Delivered: <code>{int(_delivered or 0):,}</code>"
-                    f"  ·  Tracked: <code>{int(_row.get('tracked', 0) or 0):,}</code>",
+                    f"    Active tracked: <code>{int(_row.get('tracked', 0) or 0):,}</code>"
+                    f"  ·  Observed: <code>{int(_row.get('observed', 0) or 0):,}</code>",
+                    f"    Evaluated: <code>{int(_row.get('evaluated', 0) or 0):,}</code>"
+                    f"  ·  Directional: <code>{int(_row.get('directional', _row.get('actionable_persisted', 0)) or 0):,}</code>",
+                    f"    Actionable persisted: <code>{int(_row.get('actionable_persisted', 0) or 0):,}</code>"
+                    f"  ·  Delivered: <code>{int(_delivered or 0):,}</code>",
+                    f"    Pending: <code>{int(_row.get('pending', 0) or 0):,}</code>"
+                    f"  ·  Resolved: <code>{int(_row.get('resolved', 0) or 0):,}</code>"
+                    f"  ·  H/M/P: <code>{int(_row.get('hit', 0) or 0)}/"
+                    f"{int(_row.get('miss', 0) or 0)}/{int(_row.get('push', 0) or 0)}</code>",
                 ]
 
         # ── Section 1: Scan Pipeline (from ScanCycleLog) ─────────────────────────────
@@ -4677,12 +4741,10 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 "<i>Scan cycle metrics appear here once the first scan completes.</i>",
             ]
 
-        # ── Section 2: Candidate Funnel (from PropCandidateLog) ──────────────────────
-        # ScanCycleLog.active is cumulative observations across all scans, not
-        # the current active universe.  Prefer the canonical FPR pool size so
-        # this section cannot imply that only the latest candidate rows are
-        # active or eligible for rescanning.
-        active = fpr_stats.get("pool_size", 0) or tracked
+        # ── Section 2: Reporting populations ───────────────────────────────────
+        # The normalized history is the source of truth for current tracking.
+        # Candidate rows are evaluations, not tracked props.
+        active = tracked
         # Include the full-pool rotation in the aggregate evaluation count.
         # FPR evaluates unchanged and previously handled active props too; it
         # must not disappear from the funnel merely because it is persisted in
@@ -4696,43 +4758,60 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         lines += [
             "",
             _thick,
-            "🔭 <b>Candidate Funnel</b>",
+            "🔭 <b>Tracking &amp; Grading Funnel</b>",
             _thick,
             "",
-            f"<i>All active props remain in the monitored universe; delivery is separate.</i>",
+            f"<i>Current tracking, windowed evaluation, delivery, and grading are separate populations.</i>",
             "",
-            f"📥 Canonical active props: <b>{active:,}</b>",
-            f"🧾 Candidate records tracked: <b>{tracked:,}</b>",
-            f"🧾 Persistent observations: <b>{tracked_observations:,}</b>",
-            f"🎯 Directional OVER/UNDER records: <b>{directional_total:,}</b>",
+            f"📥 Active tracked props: <b>{active:,}</b>",
+            f"🧾 Historical observations: <b>{tracked_observations:,}</b>",
+            f"🔬 Evaluated candidates: <b>{evaluated_total:,}</b>",
+            f"🎯 Directional OVER/UNDER opportunities: <b>{directional_total:,}</b>",
+            f"✅ Actionable persisted: <b>{int(summary.get('actionable_total', directional_total) or 0):,}</b>",
             f"🔬 Rescored: <b>{sc_rescored:,}</b>",
             f"📈 Line movers: <b>{sc_movers:,}</b>",
             f"📤 Delivered alerts: <b>{delivered_total:,}</b>",
+            f"⏳ Pending grading: <b>{pending_total:,}</b>",
+            f"🏁 Resolved outcomes: <b>{resolved_total:,}</b>",
+            f"   └─ HIT / MISS / PUSH: <b>{int((summary.get('result_counts', {}) or {}).get('HIT', 0) or 0):,} / "
+            f"{int((summary.get('result_counts', {}) or {}).get('MISS', 0) or 0):,} / "
+            f"{int((summary.get('result_counts', {}) or {}).get('PUSH', 0) or 0):,}</b>",
             "",
-            "<i>Actionable evaluation uses the existing direction, quality, evidence,",
-            "deduplication, and live-game safeguards.</i>",
+            "<i>Direction is the persisted actionable population; delivery is recorded separately.</i>",
+            "<i>Quality, evidence, deduplication, and live-game safeguards still govern delivery.</i>",
             "<i>Use /alerts to see Telegram-delivered picks.</i>",
         ]
 
         # Per-sport breakdown
-        if by_sport:
+        normalized_by_sport = summary.get("active_by_sport", {}) or {}
+        normalized_directional_by_sport = summary.get("directional_by_sport", {}) or {}
+        normalized_delivered_by_sport = summary.get("delivered_by_sport", {}) or {}
+        if normalized_by_sport or normalized_directional_by_sport or by_sport:
             lines += [
                 "",
                 "─" * 16,
                 "",
                 "⚽ <b>Sport Funnel Breakdown</b>",
                 "",
-                f"{'Sport':<12} {'Active':>8} {'Action':>8} {'Removed':>8}",
-                "─" * 39,
+                f"{'Sport':<12} {'Active':>8} {'Observed':>9} {'Directional':>12} {'Delivered':>10}",
+                "─" * 57,
             ]
-            for row in by_sport:
+            _sports = (
+                set(normalized_by_sport)
+                | set(summary.get("observations_by_sport", {}) or {})
+                | set(normalized_directional_by_sport)
+                | set(normalized_delivered_by_sport)
+                | {row.get("sport") for row in by_sport}
+            )
+            for sport in sorted(s for s in _sports if s):
                 # Escape dynamic sport name to prevent HTML parse errors
-                sp    = _html.escape((row.get("sport") or "?")[:11])
-                sc    = row.get("tracked", 0)
-                sa    = row.get("actionable", 0)
-                sr    = row.get("removed", 0)
+                sp = _html.escape(str(sport)[:11])
+                sc = normalized_by_sport.get(sport, 0)
+                so = (summary.get("observations_by_sport", {}) or {}).get(sport, 0)
+                sa = normalized_directional_by_sport.get(sport, 0)
+                sd = normalized_delivered_by_sport.get(sport, 0)
                 lines.append(
-                    f"<code>{sp:<12} {sc:>8} {sa:>8} {sr:>8}</code>"
+                    f"<code>{sp:<12} {sc:>8} {so:>9} {sa:>12} {sd:>10}</code>"
                 )
         else:
             lines += ["", "<i>Sport breakdown accumulates as the bot scans props.</i>"]
