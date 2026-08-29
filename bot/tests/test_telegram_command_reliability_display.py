@@ -255,15 +255,12 @@ async def test_status_survives_counter_cancellation_during_outer_deadline():
 async def test_dashboard_activity_section_keeps_provider_counts_separate():
     update, context = _update_and_context()
     db = MagicMock()
-    db.count_underdog_records = AsyncMock(return_value=100)
-    db.count_prop_line_history = AsyncMock(
-        side_effect=lambda provider=None: {
-            "Underdog": 70,
-            "PrizePicks": 30,
-        }[provider]
+    report = DashboardReport(
+        provider_pipeline={
+            "Underdog": {"observed": 70, "active": 50},
+            "PrizePicks": {"observed": 30, "active": 20},
+        }
     )
-    db.get_recent_tracked_props = AsyncMock(return_value=[])
-    report = DashboardReport()
 
     with (
         patch("commands._check_allowed", return_value=True),
@@ -274,11 +271,12 @@ async def test_dashboard_activity_section_keeps_provider_counts_separate():
         await commands.cmd_dashboard(update, context)
 
     messages = [call.args[0] for call in update.message.reply_text.await_args_list]
-    activity = messages[-1]
-    assert "Underdog snapshots:  <code>100</code>" in activity
-    assert "PrizePicks (PropLine) history: <code>30</code>" in activity
-    assert "🐶 <b>Underdog</b>" in activity
-    assert "🟣 <b>PrizePicks</b>" in activity
+    activity = messages[1]
+    assert "Underdog" in activity
+    assert "Observed: <code>70</code>" in activity
+    assert "PrizePicks" in activity
+    assert "Observed: <code>30</code>" in activity
+    assert activity.count("Provider Pipeline") == 1
 
 
 @pytest.mark.asyncio
@@ -316,8 +314,10 @@ def test_dashboard_report_does_not_merge_provider_breakdowns():
 
     message = report.to_telegram()
 
-    assert "Underdog activity: <b>12</b>  ·  today: <b>2</b>" in message
-    assert "PrizePicks activity: <b>7</b>  ·  today: <b>3</b>" in message
+    assert "Underdog" in message
+    assert "Observed: <code>12</code>" in message
+    assert "PrizePicks" in message
+    assert "Observed: <code>7</code>" in message
     assert "UD <code>  5</code> · PP <code>  4</code> · EV <code>  1</code>" in message
     assert "UD <code>2</code> · PP <code>3</code> · EV <code>1</code>" in message
 
@@ -362,6 +362,126 @@ async def test_funnel_renders_provider_pipeline_separately():
     assert "Observed: <code>40</code>  ·  Evaluated: <code>30</code>" in message
 
 
+@pytest.mark.asyncio
+async def test_funnel_sport_breakdown_uses_aligned_columns_and_active_sort():
+    update, context = _update_and_context()
+    db = MagicMock()
+    db.get_scan_cycle_summary = AsyncMock(return_value={"cycles": 0})
+    db.get_funnel_summary = AsyncMock(return_value={
+        "active_tracked": 4_321,
+        "historical_observations": 9_876,
+        "evaluated": 0,
+        "directional_total": 0,
+        "delivered": 0,
+        "pending": 0,
+        "resolved": 0,
+        "result_counts": {},
+        "active_by_sport": {
+            "NBA": 123,
+            "MLB": 1_234,
+            "Soccer": 1_234,
+            "FIFA": 0,
+            "NFL": 9_999,
+        },
+        "observations_by_sport": {
+            "NBA": 456,
+            "MLB": 5_678,
+            "Soccer": 5_678,
+            "FIFA": 7,
+            "NFL": 9_999,
+        },
+        "directional_by_sport": {"NBA": 12, "MLB": 90, "Soccer": 0, "FIFA": 0},
+        "delivered_by_sport": {"NBA": 3, "MLB": 45, "Soccer": 0, "FIFA": 0},
+    })
+    db.get_telegram_reconciliation = AsyncMock(return_value={"by_provider": {}})
+
+    with (
+        patch("commands._check_allowed", return_value=True),
+        patch("commands._db", db),
+    ):
+        await commands.cmd_funnel(update, context)
+
+    message = update.message.reply_text.await_args.args[0]
+    table = message.split("Sport Funnel Breakdown", 1)[1]
+    row_lines = [line for line in table.splitlines() if line.startswith("<code>")]
+
+    assert re.search(
+        r"Sport\s+Active\s+Observed\s+Directional\s+Delivered", table
+    )
+    assert len(row_lines) == 4
+    assert [line.split()[0].removeprefix("<code>") for line in row_lines] == [
+        "MLB", "Soccer", "NBA", "FIFA",
+    ]
+    assert "<code>MLB" in row_lines[0]
+    assert "1,234" not in row_lines[0]
+    assert "FIFA" in row_lines[-1]
+    assert "NFL" not in table
+    assert re.search(r"<code>MLB\s+1234\s+5678\s+90\s+45</code>", table)
+
+
+@pytest.mark.asyncio
+async def test_funnel_provider_populations_and_zero_directional_sport_stay_separate():
+    update, context = _update_and_context()
+    db = MagicMock()
+    db.get_scan_cycle_summary = AsyncMock(return_value={"cycles": 0})
+    db.get_funnel_summary = AsyncMock(return_value={
+        "active_tracked": 3,
+        "historical_observations": 6,
+        "evaluated": 4,
+        "directional_total": 2,
+        "actionable_total": 2,
+        "delivered": 1,
+        "pending": 1,
+        "resolved": 0,
+        "result_counts": {},
+        "active_by_sport": {"Soccer": 3},
+        "observations_by_sport": {"Soccer": 6},
+        "directional_by_sport": {},
+        "delivered_by_sport": {},
+    })
+    db.get_telegram_reconciliation = AsyncMock(return_value={
+        "by_provider": {
+            "Underdog": {
+                "observed": 5,
+                "tracked": 3,
+                "evaluated": 4,
+                "directional": 2,
+                "actionable_persisted": 2,
+                "audit_delivered_alerts": 1,
+                "pending": 1,
+                "resolved": 0,
+                "hit": 0,
+                "miss": 0,
+                "push": 0,
+            },
+            "PrizePicks": {
+                "observed": 9,
+                "tracked": 7,
+                "evaluated": 8,
+                "directional": 6,
+                "actionable_persisted": 6,
+                "audit_delivered_alerts": 4,
+                "pending": 2,
+                "resolved": 3,
+                "hit": 2,
+                "miss": 1,
+                "push": 0,
+            },
+        }
+    })
+
+    with (
+        patch("commands._check_allowed", return_value=True),
+        patch("commands._db", db),
+    ):
+        await commands.cmd_funnel(update, context)
+
+    message = update.message.reply_text.await_args.args[0]
+    assert "Underdog" in message and "PrizePicks" in message
+    assert "Observed: <code>5</code>  ·  Evaluated: <code>4</code>" in message
+    assert "Observed: <code>9</code>  ·  Evaluated: <code>8</code>" in message
+    assert "Soccer" in message
+    assert "Soccer" in message.split("Sport Funnel Breakdown", 1)[1]
 @pytest.mark.asyncio
 async def test_alert_history_preserves_uppercase_provider_pick_labels():
     update, context = _update_and_context()
@@ -711,11 +831,10 @@ async def test_dashboard_keeps_provider_activity_when_one_count_read_times_out()
     ):
         await asyncio.wait_for(commands.cmd_dashboard(update, context), timeout=0.2)
 
-    activity = update.message.reply_text.await_args_list[-1].args[0]
-    assert "Underdog snapshots/history: <i>unavailable</i>" in activity
-    assert "PrizePicks (PropLine) history: <code>30</code>" in activity
-    assert "🐶 <b>Underdog</b>" in activity
-    assert "🟣 <b>PrizePicks</b>" in activity
+    activity = update.message.reply_text.await_args_list[1].args[0]
+    assert "Provider Pipeline" in activity
+    assert "Underdog" in activity
+    assert "PrizePicks" in activity
 
 
 @pytest.mark.asyncio

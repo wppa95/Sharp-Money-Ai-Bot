@@ -1,0 +1,270 @@
+Continue from the current implementation.
+
+Make ONLY the targeted dashboard/reporting presentation fixes below.
+
+Do NOT change the underlying monitoring, provider ingestion, FPR, tracking, grading, evidence, scoring, delivery, or scheduler logic.
+
+1. CONSOLIDATE DUPLICATE PIPELINE DISPLAY
+
+/dashboard currently displays the provider pipeline/activity information in two places.
+
+Remove the duplicate presentation and consolidate it into ONE authoritative pipeline section.
+
+The single pipeline section should clearly show, separately for Underdog and PrizePicks/PropLine:
+
+* Provider status
+* Last fetch
+* Last successful activity
+* Observed
+* Active tracked
+* Evaluated
+* Directional/actionable
+* Actionable persisted
+* Delivered
+* Pending grading
+* Resolved
+* HIT/MISS/PUSH where available
+
+Do not duplicate these same pipeline metrics elsewhere on the dashboard.
+
+Use the existing normalized provider-separated data as the source of truth.
+
+Do not remove any underlying data or calculations.
+
+2. FIX /FUNNEL COLUMN ALIGNMENT
+
+The Sport Funnel Breakdown currently has values that do not consistently line up with the column headers.
+
+Make the table formatting deterministic and readable.
+
+Columns must remain:
+
+* Sport
+* Active
+* Observed
+* Directional
+* Delivered
+
+Every value must render underneath the correct header, including multi-digit values.
+
+Do not change the underlying numbers.
+
+3. SORT FUNNEL HIGHEST → LOWEST
+
+Sort the Sport Funnel Breakdown by:
+
+Active props — highest to lowest
+
+Use a deterministic secondary sort for ties.
+
+Do NOT use alphabetical ordering as the primary sort.
+
+4. PRESERVE ALL SUPPORTED NON-FOOTBALL SPORTS
+
+This is critical.
+
+The following supported non-football sports must remain eligible for monitoring, tracking, reporting, and funnel visibility:
+
+* MLB
+* NBA
+* WNBA
+* NHL
+* NPB
+* KBO
+* MILB
+* Tennis
+* FIFA
+* Soccer
+* MLS
+* CS
+* CS2
+* LOL
+* League of Legends
+* VAL
+* VALORANT
+* DOTA
+* Dota 2
+* CFB is NOT included — football/gridiron remains excluded
+* PGA
+* Golf
+* MMA
+* Boxing
+* BKFC
+* AFL
+* AFLW
+* CFL is NOT included — football/gridiron remains excluded
+* F1 / Formula 1
+* NASCAR
+* MotoGP / Motorcycle
+* Table Tennis
+* Badminton
+* Rugby
+* Cricket
+* Handball
+* Volleyball
+* Beach Volleyball
+* Esports
+* and any other legitimate non-football sport/provider currently supported by the existing system.
+
+Important football boundary
+
+Do NOT interpret names such as:
+
+* NFL
+* NCAAF
+* NCAA Football
+* CFB
+* FCS
+* CFL
+* UFL
+* USFL
+* XFL
+* Arena Football
+* Indoor Football
+* or other football/gridiron aliases
+
+as supported sports.
+
+The existing centralized football/gridiron exclusion remains authoritative.
+
+Do NOT remove legitimate soccer/FIFA/MLS coverage simply because football is excluded.
+
+Soccer remains supported.
+
+Do not invent new provider support merely because a sport is listed above. Preserve only sports that already have legitimate existing support in the current implementation.
+
+5. ZERO-DIRECTIONAL SPORTS MUST REMAIN VISIBLE
+
+Do not hide a legitimate supported non-football sport merely because it currently has:
+
+* 0 directional opportunities
+* 0 delivered alerts
+* 0 observations
+* no evidence
+* no actionable picks
+
+If it has an active tracked population, it should remain represented in the funnel.
+
+6. PROVIDER SEPARATION
+
+Keep Underdog and PrizePicks/PropLine populations completely provider-separated.
+
+Do not merge their tracking, directional, delivery, or grading populations.
+
+7. FUNNEL ACCOUNTING CONSISTENCY
+
+Where the funnel summary and Sport Funnel Breakdown represent the same population, derive them from the same normalized source of truth.
+
+Do NOT change the established meaning of:
+
+* Active tracked
+* Historical observations
+* Evaluated candidates
+* Directional opportunities
+* Rescored
+* Line movers
+* Delivered
+* Pending
+* Resolved
+
+This is a reporting consistency/display fix only.
+
+8. PRESERVE EVERYTHING ELSE
+
+Do NOT change:
+
+* Underdog ingestion
+* PrizePicks ingestion
+* PrizePicks discovery
+* FPR/full-pool rotation
+* Active source-ID lifecycle
+* Continuous rescanning
+* New-prop priority
+* Line-mover priority
+* Non-actionable prop rescanning
+* Football exclusion
+* Soccer support
+* Evidence providers
+* Graded-prop evidence
+* HIT/MISS/PUSH grading
+* Delivery gate
+* Deduplication
+* Pregame protection
+* Scoring
+* BQ/MQ
+* Confidence
+* Scheduler
+* Adaptive batching
+* max_instances=1
+* Stable Refresh scheduler removal
+* Clean restart behavior
+* Historical data
+* /status
+* /tracking
+* /stats
+* /picks
+* /alerts
+* /grade
+* /slip
+* /slipstats
+
+Do not redesign the architecture.
+
+9. TESTS
+
+Add/update focused regression tests proving:
+
+1. /dashboard has only one authoritative pipeline display.
+2. Underdog and PrizePicks pipeline metrics remain separately represented.
+3. All pipeline metrics remain available after consolidation.
+4. /funnel columns align correctly.
+5. Multi-digit values remain aligned.
+6. Sport rows sort Active highest → lowest.
+7. Ties use deterministic ordering.
+8. Legitimate zero-directional sports remain visible.
+9. Supported non-football sports remain visible.
+10. Football/gridiron remains excluded.
+11. Soccer/FIFA/MLS remain supported and are not accidentally filtered as football.
+12. Provider populations remain separated.
+13. Funnel summary accounting remains consistent.
+14. Recently Tracked Props remains unchanged.
+15. Existing dashboard/reporting tests remain green.
+
+Run:
+
+* Focused dashboard/funnel/reporting tests
+* Full existing test suite
+* Python compilation
+* git diff --check
+
+Do NOT perform live/production verification.
+
+Do NOT restart Railway.
+
+Do NOT deploy Railway.
+
+Do NOT send Telegram commands or test alerts.
+
+Do NOT create a new task or follow-up task.
+
+Final Response
+
+IMPLEMENTED
+
+Exactly what changed.
+
+TESTED
+
+Focused tests, full suite, compilation, and diff check.
+
+PRESERVED
+
+Confirm underlying monitoring, provider, FPR, tracking, grading, evidence, delivery, scoring, and scheduler behavior was untouched.
+
+LIVE VERIFICATION
+
+NO LIVE/PRODUCTION VERIFICATION WAS PERFORMED.
+
+TASK MANAGEMENT
+
+No new task was created or proposed.

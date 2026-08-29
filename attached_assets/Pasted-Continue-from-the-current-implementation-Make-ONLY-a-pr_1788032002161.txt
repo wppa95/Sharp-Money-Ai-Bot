@@ -1,0 +1,118 @@
+Continue from the current implementation.
+
+Make ONLY a presentation/reporting cleanup to remove the duplicate pipeline display.
+
+Problem
+
+/dashboard currently displays the pipeline/provider activity in two places.
+
+The same underlying Underdog and PrizePicks pipeline information is being shown in multiple sections, creating duplicate/confusing reporting.
+
+Required Fix
+
+Consolidate the duplicate pipeline display into ONE authoritative pipeline section.
+
+The single pipeline section should clearly show:
+
+* Underdog provider status
+* PrizePicks/PropLine provider status
+* Last fetch
+* Last successful activity
+* Observed
+* Active tracked
+* Evaluated
+* Directional/actionable
+* Persisted actionable opportunities
+* Delivered
+* Pending grading
+* Resolved
+* HIT/MISS/PUSH where available
+
+Keep Underdog and PrizePicks clearly separated.
+
+Do not duplicate the same pipeline metrics elsewhere on the dashboard.
+
+Important
+
+This is a DISPLAY/REPORTING cleanup only.
+
+Do NOT change:
+
+* Provider ingestion
+* Provider discovery
+* Underdog monitoring
+* PrizePicks monitoring
+* FPR
+* Active-pool rotation
+* Rescanning
+* Tracking
+* Grading
+* Evidence
+* Delivery
+* Deduplication
+* Pregame protection
+* Football exclusion
+* Soccer support
+* Scoring
+* BQ/MQ
+* Confidence
+* Scheduler
+* Adaptive batching
+* max_instances=1
+* Historical data
+* Database schema
+
+Do not change the underlying calculations or data sources.
+
+The existing normalized provider-separated data remains the source of truth.
+
+Regression Tests
+
+Add/update focused tests proving:
+
+1. Dashboard contains only one authoritative pipeline display.
+2. Underdog and PrizePicks remain separately represented.
+3. All existing pipeline metrics remain available.
+4. Removing the duplicate display does not remove any underlying data.
+5. Empty/failed provider states still render correctly.
+6. Recently Tracked Props remains unchanged.
+7. /status and /funnel behavior remains unchanged.
+
+Run:
+
+* Focused dashboard/reporting tests
+* Full existing test suite
+* Python compilation
+* git diff --check
+
+Do NOT perform live/production verification.
+
+Do NOT restart Railway.
+
+Do NOT deploy Railway.
+
+Do NOT send Telegram commands or test alerts.
+
+Do NOT create a new task or follow-up task.
+
+Final Response
+
+IMPLEMENTED
+
+Exactly what changed.
+
+TESTED
+
+Focused tests, full suite, compilation, and diff check.
+
+PRESERVED
+
+Confirm all monitoring, provider, FPR, tracking, grading, delivery, and scheduler behavior was untouched.
+
+LIVE VERIFICATION
+
+NO LIVE/PRODUCTION VERIFICATION WAS PERFORMED.
+
+TASK MANAGEMENT
+
+No new task was created or proposed.

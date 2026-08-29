@@ -153,6 +153,7 @@ class DashboardReport:
     outcome_pushes: int = 0
     tracking_by_provider: dict = field(default_factory=dict)
     tracking_by_sport: dict = field(default_factory=dict)
+    provider_pipeline: dict = field(default_factory=dict)
 
     # ── EV performance ────────────────────────────────────────────────────────
     avg_ev_pct:         Optional[float] = None   # avg expected_value from ev_records
@@ -213,48 +214,70 @@ class DashboardReport:
     def to_telegram(self) -> str:
         """Render the full dashboard as Telegram HTML (safe for message.reply_text)."""
         ts = self.generated_at.strftime("%b %d, %Y  %H:%M UTC")
-        ud_activity = self._normalized_activity("Underdog", self.total_ud_alerts)
-        pp_activity = self._normalized_activity("PrizePicks", self.total_pp_alerts)
         parts: list[str] = [
             f"📊 <b>Performance Dashboard</b>",
             f"<i>{ts}</i>",
             "",
         ]
 
-        # ── Activity summary (provider-separated) ────────────────────────────
+        # Activity Summary is intentionally consolidated into this one
+        # normalized, provider-separated pipeline section.
+        # ── Single provider pipeline (normalized, provider-separated) ───────
+        # This is the only dashboard presentation of provider pipeline
+        # populations. ``provider_pipeline`` is populated by gather(); the
+        # tracking map remains a compatibility fallback for older callers.
         parts += [
-            "📬 <b>Activity Summary</b>",
-            f"  Underdog activity: <b>{ud_activity:,}</b>"
-            f"  ·  today: <b>{self.today_ud_alerts:,}</b>",
-            f"  PrizePicks activity: <b>{pp_activity:,}</b>"
-            f"  ·  today: <b>{self.today_pp_alerts:,}</b>",
+            "📡 <b>Provider Pipeline</b>  <i>(normalized)</i>",
             "",
         ]
+        for provider, legacy_total, today_total in (
+            ("Underdog", self.total_ud_alerts, self.today_ud_alerts),
+            ("PrizePicks", self.total_pp_alerts, self.today_pp_alerts),
+        ):
+            values = self.provider_pipeline.get(provider)
+            if not isinstance(values, dict):
+                values = self.tracking_by_provider.get(provider, {})
+            if not isinstance(values, dict):
+                values = {}
 
-        parts += [
-            "🧾 <b>Tracking Populations</b>",
-            f"  Active tracked props: <code>{self.active_tracked_props:,}</code>",
-            f"  Historical observations: <code>{self.tracked_observations:,}</code>",
-            f"  Directional opportunities: <code>{self.directional_opportunities:,}</code>",
-            f"  Telegram delivered: <code>{self.delivered_opportunities:,}</code>",
-            f"  Pending grading: <code>{self.pending_opportunities:,}</code>"
-            f"  ·  Resolved: <code>{self.resolved_opportunities:,}</code>",
-            f"  Outcomes: <code>{self.outcome_hits:,} HIT · {self.outcome_misses:,} MISS · "
-            f"{self.outcome_pushes:,} PUSH</code>",
-        ]
-        if self.tracking_by_provider:
-            parts.append("  By provider:")
-            for provider, values in sorted(self.tracking_by_provider.items()):
-                parts.append(
-                    f"    {provider}: active <code>{values.get('active', values.get('tracked', 0)):,}</code>"
-                    f" · observed <code>{values.get('observed', 0):,}</code>"
-                    f" · directional <code>{values.get('directional', 0):,}</code>"
-                    f" · delivered <code>{values.get('delivered', 0):,}</code>"
-                    f" · pending <code>{values.get('pending', 0):,}</code>"
-                    f" · resolved <code>{values.get('resolved', 0):,}</code>"
-                    f" · {values.get('hit', 0)}H-{values.get('miss', 0)}M-"
-                    f"{values.get('push', 0)}P"
-                )
+            status = values.get("status")
+            if not status and self.system_panel is not None:
+                status = (self.system_panel.provider_status or {}).get(provider)
+            status = str(status or "unavailable")
+            last_fetch = str(values.get("last_fetch") or "unavailable")
+            last_success = str(values.get("last_success") or "unavailable")
+            active = values.get("active", values.get("tracked", 0))
+            observed = values.get("observed", legacy_total)
+            evaluated = values.get("evaluated", 0)
+            directional = values.get(
+                "directional", values.get("actionable_persisted", 0)
+            )
+            actionable = values.get(
+                "actionable_persisted", values.get("actionable", directional)
+            )
+            delivered = values.get("delivered", values.get("delivered_alerts", 0))
+            pending = values.get("pending", 0)
+            resolved = values.get("resolved", 0)
+            hit = values.get("hit", 0)
+            miss = values.get("miss", 0)
+            push = values.get("push", 0)
+            parts += [
+                f"  <b>{provider}</b>",
+                f"    Status: <code>{status}</code>"
+                f"  ·  Last fetch: <code>{last_fetch}</code>",
+                f"    Last successful activity: <code>{last_success}</code>",
+                f"    Observed: <code>{int(observed or 0):,}</code>"
+                f"  ·  Active tracked: <code>{int(active or 0):,}</code>",
+                f"    Evaluated: <code>{int(evaluated or 0):,}</code>"
+                f"  ·  Directional/actionable: <code>{int(directional or 0):,}</code>",
+                f"    Actionable persisted: <code>{int(actionable or 0):,}</code>"
+                f"  ·  Delivered: <code>{int(delivered or 0):,}</code>",
+                f"    Pending grading: <code>{int(pending or 0):,}</code>"
+                f"  ·  Resolved: <code>{int(resolved or 0):,}</code>",
+                f"    HIT / MISS / PUSH: <code>{int(hit or 0):,} / "
+                f"{int(miss or 0):,} / {int(push or 0):,}</code>"
+                f"  ·  Today: <code>{int(today_total or 0):,}</code>",
+            ]
         parts.append("")
 
         if self.tracking_by_sport:
@@ -535,6 +558,7 @@ class DashboardEngine:
         await cls._gather_daily_trend(db, report)
         cls._compute_best_worst(report)
         await cls._gather_system_panel(db, report)
+        await cls._gather_provider_pipeline(db, report)
         await cls._gather_intelligence_panel(db, report)
 
         return report
@@ -857,6 +881,89 @@ class DashboardEngine:
             r.system_panel = sp
         except Exception:
             pass
+
+    @staticmethod
+    async def _gather_provider_pipeline(db: "Database", r: DashboardReport) -> None:
+        """Build the single provider-separated dashboard pipeline view."""
+        try:
+            reconciliation = await db.get_telegram_reconciliation(since_hours=24)
+            by_provider = (
+                reconciliation.get("by_provider", {})
+                if isinstance(reconciliation, dict)
+                else {}
+            )
+        except Exception:
+            by_provider = {}
+
+        known_providers = (
+            {"Underdog", "PrizePicks"}
+            | set(r.tracking_by_provider)
+            | set(by_provider)
+        )
+        pipeline: dict[str, dict] = {}
+        health_monitor = None
+        health_tracker = None
+        try:
+            from providers import get_health_monitor
+            health_monitor = get_health_monitor()
+        except Exception:
+            pass
+        try:
+            from engine.health import get_health_tracker
+            health_tracker = get_health_tracker()
+        except Exception:
+            pass
+
+        for provider in sorted(known_providers):
+            base = r.tracking_by_provider.get(provider, {})
+            if not isinstance(base, dict):
+                base = {}
+            normalized = by_provider.get(provider, {})
+            if not isinstance(normalized, dict):
+                normalized = {}
+            values = {
+                "observed": base.get("observed", normalized.get("observed", 0)),
+                "active": base.get(
+                    "active", base.get("tracked", normalized.get("tracked", 0))
+                ),
+                "evaluated": normalized.get("evaluated", 0),
+                "directional": base.get(
+                    "directional", normalized.get("directional", 0)
+                ),
+                "actionable_persisted": normalized.get(
+                    "actionable_persisted", base.get("directional", 0)
+                ),
+                "delivered": base.get(
+                    "delivered", normalized.get("delivered_alerts", 0)
+                ),
+                "pending": base.get("pending", normalized.get("pending", 0)),
+                "resolved": base.get("resolved", normalized.get("resolved", 0)),
+                "hit": base.get("hit", normalized.get("hit", 0)),
+                "miss": base.get("miss", normalized.get("miss", 0)),
+                "push": base.get("push", normalized.get("push", 0)),
+            }
+
+            if health_monitor is not None:
+                try:
+                    health = health_monitor.get_health(provider)
+                    values["status"] = getattr(
+                        getattr(health, "status", None), "value", None
+                    ) or str(getattr(health, "status", "unavailable"))
+                    values["last_success"] = health.format_last_success()
+                except Exception:
+                    pass
+            if health_tracker is not None:
+                try:
+                    values["last_fetch"] = health_tracker.provider_last_fetch_str(provider)
+                except Exception:
+                    pass
+            if "status" not in values and r.system_panel is not None:
+                values["status"] = (
+                    r.system_panel.provider_status or {}
+                ).get(provider, "unavailable")
+            pipeline[provider] = values
+
+        r.provider_pipeline = pipeline
 
     @staticmethod
     async def _gather_intelligence_panel(db: "Database", r: DashboardReport) -> None:

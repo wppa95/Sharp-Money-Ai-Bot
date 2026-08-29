@@ -3010,24 +3010,13 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             parse_mode=ParseMode.HTML,
         )
 
-    # ── Player Prop Market section ────────────────────────────────────────────
+    # ── Supplemental stat-provider status ─────────────────────────────────────
+    # Provider pipeline, activity counts, and recent props are rendered once by
+    # DashboardReport. Keep only enrichment-provider status here.
     try:
-        pm_lines: list[str] = ["🎯 <b>Player Prop Activity — Live</b>", ""]
-
-        # ── Provider status ───────────────────────────────────────────────────
-        # Market providers (live prop lines)
-        pm_lines.append("<b>📡 Market Providers</b>")
-        try:
-            from providers import get_health_monitor
-            _dashboard_mon = get_health_monitor()
-        except Exception:
-            _dashboard_mon = None
-        pm_lines.extend(_primary_player_prop_provider_lines(_dashboard_mon))
-        pm_lines.extend(_primary_provider_runtime_lines(_dashboard_mon))
-        pm_lines.append("")
+        pm_lines: list[str] = ["📊 <b>Stat Providers</b>", ""]
 
         # Stat providers (historical enrichment for hit-rate pipeline)
-        pm_lines.append("<b>📊 Stat Providers</b>")
         try:
             from engine.health import get_health_tracker as _get_ht_dash
             _ht_dash = _get_ht_dash()
@@ -3052,67 +3041,6 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             pm_lines.append(f"  {'⚪' if _slp_on_dash else '⏸️'} <b>Sleeper</b>  NFL enrichment")
         pm_lines.append("  ⚪ <b>ESPN</b>  on-demand gamelog (NBA/NFL/WNBA/MLB)")
         pm_lines.append("  ⚪ <b>NHL API</b>  on-demand skater/goalie logs")
-
-        # ── Provider-separated prop counts from DB ────────────────────────────
-        pm_lines.append("")
-        pm_lines.append("<b>📊 Player Prop Activity</b>")
-        try:
-            total_ud, ud_history, pp_history = await _independent_report_reads([
-                _db.count_underdog_records(),
-                _db.count_prop_line_history(provider="Underdog"),
-                _db.count_prop_line_history(provider="PrizePicks"),
-            ])
-            if total_ud is None or ud_history is None:
-                pm_lines.append("  Underdog snapshots/history: <i>unavailable</i>")
-            else:
-                pm_lines.append(
-                    f"  Underdog snapshots:  <code>{total_ud:,}</code> total"
-                    f"  ·  history: <code>{ud_history:,}</code>"
-                )
-            pm_lines.append(
-                "  PrizePicks (PropLine) history: "
-                + (f"<code>{pp_history:,}</code>" if pp_history is not None else "<i>unavailable</i>")
-            )
-        except Exception:
-            pm_lines.append("  <i>Prop counts unavailable</i>")
-
-        # ── Recent props tracked, kept separate by provider ───────────────────
-        pm_lines.append("")
-        pm_lines.append("<b>🔔 Recently Tracked Props</b>  <i>(last hour · all sports)</i>")
-        try:
-            _recent_by_provider = await _independent_report_reads([
-                _db.get_recent_tracked_props("Underdog", since_hours=1, limit=100),
-                _db.get_recent_tracked_props("PrizePicks", since_hours=1, limit=100),
-            ])
-        except Exception:
-            _recent_by_provider = (None, None)
-        for (_provider, _icon), recent_props in zip(
-            (("Underdog", "🐶"), ("PrizePicks", "🟣")),
-            _recent_by_provider,
-        ):
-            pm_lines.append(f"  {_icon} <b>{_provider}</b>")
-            try:
-                # Read the persistent tracking stream, not delivered-alert history.
-                if recent_props is None:
-                    raise RuntimeError("tracking query unavailable")
-                if recent_props:
-                    for _r in recent_props[:3]:
-                        _lc = getattr(_r, "lifecycle_state", None) or "—"
-                        _lc_icon = {
-                            "ACTIVE_ALERTED": "✅",
-                            "DISCOVERED": "🔍",
-                            "REMOVED": "🚫",
-                        }.get(_lc, "⚪")
-                        pm_lines.append(
-                            f"    {_lc_icon} <b>{_r.player_name}</b>  {_r.stat_type}  "
-                            f"<code>{float(_r.line_value):.1f}</code>  ·  <i>{_r.sport}</i>"
-                        )
-                    if len(recent_props) > 3:
-                        pm_lines.append(f"    <i>…and {len(recent_props) - 3} more.</i>")
-                else:
-                    pm_lines.append("    <i>No props tracked in this window.</i>")
-            except Exception:
-                pm_lines.append("    <i>Tracking data unavailable.</i>")
 
         # ── Bot health ────────────────────────────────────────────────────────
         pm_lines += [
@@ -4636,7 +4564,18 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         _fpr_by_sport = fpr_stats.get("fpr_by_sport", {})
         _scan_actionable_by_sport = scan_summary.get("actionable_by_sport", {})
         _scan_removed_by_sport = scan_summary.get("removed_by_sport", {})
-        _breakdown_sports = set(_scan_actionable_by_sport) | set(_scan_removed_by_sport)
+        from engine.sport_policy import is_football_related_sport as _is_football_sport
+
+        def _report_sport_allowed(sport: object) -> bool:
+            return bool(str(sport or "").strip()) and not _is_football_sport(sport)
+
+        _breakdown_sports = {
+            sport
+            for sport in (
+                set(_scan_actionable_by_sport) | set(_scan_removed_by_sport)
+            )
+            if _report_sport_allowed(sport)
+        }
         by_sport = (
             [
                 {
@@ -4646,7 +4585,11 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     "removed": _scan_removed_by_sport.get(sport, 0),
                 }
                 for sport in sorted(
-                    set(_fpr_by_sport) | _breakdown_sports,
+                    {
+                        sport
+                        for sport in set(_fpr_by_sport) | _breakdown_sports
+                        if _report_sport_allowed(sport)
+                    },
                     key=lambda sport: (
                         -_fpr_by_sport.get(sport, 0),
                         sport,
@@ -4848,7 +4791,7 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 ]
                 for row in by_sport:
                     sport = row.get("sport")
-                    if not sport:
+                    if not _report_sport_allowed(sport):
                         continue
                     sp = _html.escape(str(sport)[:11])
                     lines.append(
@@ -4863,18 +4806,26 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     f"{'Sport':<12} {'Active':>8} {'Observed':>9} {'Directional':>12} {'Delivered':>10}",
                     "─" * 57,
                 ]
+                normalized_observed_by_sport = (
+                    summary.get("observations_by_sport", {}) or {}
+                )
                 _sports = (
                     set(normalized_by_sport)
-                    | set(summary.get("observations_by_sport", {}) or {})
+                    | set(normalized_observed_by_sport)
                     | set(normalized_directional_by_sport)
                     | set(normalized_delivered_by_sport)
-                    | {row.get("sport") for row in by_sport}
                 )
-                for sport in sorted(s for s in _sports if s):
+                for sport in sorted(
+                    (sport for sport in _sports if _report_sport_allowed(sport)),
+                    key=lambda sport: (
+                        -int(normalized_by_sport.get(sport, 0) or 0),
+                        str(sport).upper(),
+                    ),
+                ):
                     # Escape dynamic sport name to prevent HTML parse errors
                     sp = _html.escape(str(sport)[:11])
                     sc = normalized_by_sport.get(sport, 0)
-                    so = (summary.get("observations_by_sport", {}) or {}).get(sport, 0)
+                    so = normalized_observed_by_sport.get(sport, 0)
                     sa = normalized_directional_by_sport.get(sport, 0)
                     sd = normalized_delivered_by_sport.get(sport, 0)
                     lines.append(
