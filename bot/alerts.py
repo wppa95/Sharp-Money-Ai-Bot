@@ -1144,17 +1144,19 @@ class AlertDelivery:
         score: "Optional[PPAnalysisScore]" = None,
         *,
         strict_pregame: bool = False,
+        evidence_available: bool = False,
     ) -> "DeliveryResult":
         """
         Full PrizePicks alert pipeline:
           0. Scope filter.
           1. Game timing filter — block games already started or outside window.
-          2. Require a valid OVER/UNDER direction.
+          2. Require a valid OVER/UNDER direction and legitimate evidence.
           3. format_pp_alert.
           4. Broadcast to all registered chat IDs.
 
-        No DB-level dedup is applied here — dedup is handled upstream in
-        _prizepicks_job by checking for recent PPEdgeRecords in the DB.
+        Provider-aware atomic claims remain the responsibility of the active
+        market-engine delivery queue. This compatibility method still uses
+        the same canonical direction/evidence policy before it can send.
         """
         # Compatibility hook for non-Underdog alert paths.
         _pp_sport = getattr(getattr(opp, "pp_line", None), "sport", None) or ""
@@ -1199,16 +1201,21 @@ class AlertDelivery:
             )
             return DeliveryResult(sent=False, filtered=True, filtered_reason=timing_reason)
 
-        # 2. Direction is the only qualification decision.  Scope, timing,
-        # deduplication, flood protection, and delivery failures remain
-        # independent safety/integrity protections.
+        # 2. Canonical actionable qualification. Scope, timing, deduplication,
+        # flood protection, and delivery failures remain independent
+        # safety/integrity protections.
         _pp_direction = str(getattr(opp, "best_side", "") or "").strip().upper()
-        tier_str = getattr(score, "tier", "?") if score is not None else "?"
-        if _pp_direction not in {"OVER", "UNDER"}:
+        if not _canonical_tier_delivery_gate(
+            sport=_pp_sport,
+            direction=_pp_direction,
+            bq_score=float(getattr(score, "total", 0) or 0),
+            mq_score=0,
+            evidence_available=evidence_available,
+        ):
             return DeliveryResult(
                 sent=False,
                 filtered=True,
-                filtered_reason="No valid OVER/UNDER direction",
+                filtered_reason="Canonical direction/evidence gate",
             )
 
         # Global limiter is deliberately applied after all source-specific
@@ -1256,8 +1263,8 @@ class AlertDelivery:
         pp     = opp.pp_line
         log_fn = logger.info if alert_sent else logger.warning
         log_fn(
-            "PP alert: %s | %s | %s | edge=+%.1f%% | tier=%s → %s",
-            pp.player_name, pp.stat_type, opp.best_side, opp.best_edge, tier_str, result,
+            "PP alert: %s | %s | %s | edge=+%.1f%% → %s",
+            pp.player_name, pp.stat_type, opp.best_side, opp.best_edge, result,
         )
         return result
 

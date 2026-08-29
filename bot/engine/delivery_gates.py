@@ -1,21 +1,8 @@
-"""Shared delivery qualification rules for actionable Underdog alerts."""
+"""Shared delivery qualification rules for actionable prop alerts."""
 
 from __future__ import annotations
 
 from typing import Optional
-
-
-# Tier 2 is an exact alias set.  Every other value, including unknown future
-# sports and CFL, is Tier 1.  Exact aliases avoid accidentally classifying a
-# sport merely because its name contains "football".
-TIER2_SPORTS: frozenset[str] = frozenset(
-    {"MLB", "NBA", "NFL", "FOOTBALL", "CFB", "NCAA", "NCAAF"}
-)
-
-
-def is_tier2_sport(sport: Optional[str]) -> bool:
-    """Return whether a sport uses the stricter Telegram delivery gate."""
-    return (sport or "").strip().upper() in TIER2_SPORTS
 
 
 def tier_delivery_gate(
@@ -26,11 +13,14 @@ def tier_delivery_gate(
     evidence_available: bool = False,
     confidence: Optional[float] = None,
 ) -> bool:
-    """Return whether an actionable prop may reach Telegram.
+    """Return whether an actionable prop has legitimate delivery evidence.
 
-    Qualification is directional only.  The remaining arguments are retained
-    for call-site compatibility and reporting, but score/tier/evidence values
-    must not become hidden delivery gates.  Timing, scope, stale-line,
-    provider, deduplication, and rate-limit protections run independently.
+    Score, confidence, tier, and sport-tier values are retained for call-site
+    compatibility and reporting only. Timing, scope, football suppression,
+    stale-line, provider identity, deduplication, and rate-limit protections
+    run independently at their respective delivery boundaries.
     """
-    return (direction or "").strip().upper() in {"OVER", "UNDER"}
+    return (
+        (direction or "").strip().upper() in {"OVER", "UNDER"}
+        and bool(evidence_available)
+    )
