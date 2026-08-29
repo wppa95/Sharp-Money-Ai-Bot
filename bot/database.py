@@ -5895,6 +5895,22 @@ class Database:
             "historical_observations": sum(tracked_observations_by_provider.values()),
             "tracked_observations_by_provider": tracked_observations_by_provider,
             "historical_observations_by_provider": tracked_observations_by_provider,
+            "observations_by_sport": {
+                str(sport or "UNKNOWN"): int(count or 0)
+                for sport, count in (
+                    await s.execute(
+                        select(
+                            PropLineHistory.sport,
+                            func.count(PropLineHistory.id),
+                        )
+                        .where(
+                            PropLineHistory.provider.in_(("Underdog", "PrizePicks"))
+                        )
+                        .group_by(PropLineHistory.sport)
+                    )
+                ).all()
+                if _is_supported_tracking_sport(sport)
+            },
             "total":    total,
             "directional_total": total,
             "directional_by_provider": directional_by_provider,

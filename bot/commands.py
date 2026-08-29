@@ -598,11 +598,19 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         # Each provider has its own normalized pipeline counters. Never infer
         # one provider's volume or grading state from the other.
         ud_reconciliation = await _provider_reconciliation("Underdog")
+        ud_reconciliation = await _provider_reconciliation("Underdog")
         pp_reconciliation = await _provider_reconciliation("PrizePicks")
         _append_provider_pipeline(
             lines,
             provider="Underdog",
             health_tracker=ht,
+            reconciliation=ud_reconciliation,
+        )
+        lines.append("")
+        _append_provider_pipeline(
+            lines,
+            provider="Underdog",
+            health_tracker=_ht_pipeline,
             reconciliation=ud_reconciliation,
         )
         lines.append("")
@@ -3215,21 +3223,23 @@ async def cmd_reconcile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             "🔎 <b>Telegram Alert Reconciliation</b>",
             f"<i>UTC window: last {hours} hours · hourly buckets</i>",
             "",
-            "<b>Source → pipeline → delivery</b>",
-            "<code>Provider       Tracked  Observed  Evaluated  Actionable  "
-            "Delivered  Recipients</code>",
+            "<b>Provider populations (current tracking + report window)</b>",
+            "<code>Provider       Active   Observed  Evaluated  Directional  "
+            "Actionable  Delivered  Pending  Resolved  H/M/P</code>",
         ]
         for provider, row in sorted(report.get("by_provider", {}).items()):
             delivered = row.get("audit_delivered_alerts", 0) or row.get("delivered_alerts", 0)
-            recipients = row.get("audit_recipients", 0) or row.get("delivered_recipients", 0)
             lines.append(
                 f"<code>{_html.escape(provider[:13]):<13} "
                 f"{row.get('tracked', 0):>7,} "
                 f"{row.get('observed', 0):>8,} "
                 f"{row.get('evaluated', 0):>10,} "
+                f"{row.get('directional', row.get('actionable_persisted', 0)):>11,} "
                 f"{row.get('actionable_persisted', 0):>10,} "
                 f"{delivered:>9,} "
-                f"{recipients:>10,}</code>"
+                f"{row.get('pending', 0):>7,} "
+                f"{row.get('resolved', 0):>8,} "
+                f"{row.get('hit', 0)}/{row.get('miss', 0)}/{row.get('push', 0)}</code>"
             )
 
         lines += [
