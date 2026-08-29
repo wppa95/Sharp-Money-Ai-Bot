@@ -4534,8 +4534,6 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     f"    Observed: <code>{int(_row.get('observed', 0) or 0):,}</code>"
                     f"  ·  Evaluated: <code>{int(_row.get('evaluated', 0) or 0):,}</code>",
                     f"    Active tracked: <code>{int(_row.get('tracked', 0) or 0):,}</code>"
-                    f"  ·  Observed: <code>{int(_row.get('observed', 0) or 0):,}</code>",
-                    f"    Evaluated: <code>{int(_row.get('evaluated', 0) or 0):,}</code>"
                     f"  ·  Directional: <code>{int(_row.get('directional', _row.get('actionable_persisted', 0)) or 0):,}</code>",
                     f"    Actionable persisted: <code>{int(_row.get('actionable_persisted', 0) or 0):,}</code>"
                     f"  ·  Delivered: <code>{int(_delivered or 0):,}</code>",
@@ -4647,8 +4645,8 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 f"📥 Fetched from Underdog:          <b>{sc_fetched:,}</b>",
                 f"🚫 Removed from feed:              <b>{sc_removed:,}</b>",
                 f"🔮 Futures/awards skipped:         <b>{sc_futures:,}</b>",
-                f"👁 Active props observed (scan total): <b>{sc_active:,}</b>",
-                f"   └─ Unchanged (stable lines):    <b>{sc_unchanged:,}</b>",
+                    f"👁 Prop observations (cumulative scan total): <b>{sc_active:,}</b>",
+                    f"   └─ Not re-alerted / below movement threshold: <b>{sc_unchanged:,}</b>",
                 f"   └─ New first-appearance:        <b>{sc_new:,}</b>",
                 f"   └─ Line moved (re-scored):      <b>{sc_lc:,}</b>",
                 f"   └─ Cold-start re-scanned:       <b>{sc_cold:,}</b>",
@@ -4658,8 +4656,11 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 f"   ├─ Line moved:                  <b>{sc_lc:,}</b>",
                 f"   ├─ Cold-start:                  <b>{sc_cold:,}</b>",
                 f"   └─ Full-pool rotation:           <b>{fpr_rescored:,}</b>",
-                f"🎯 Strong actionable candidates:   <b>{sc_delivered:,}</b>",
+                    f"🎯 Qualified directional candidates: <b>{int(scan_summary.get('qualified', 0) or 0):,}</b>",
                 f"📤 Delivered to Telegram:          <b>{sc_delivered:,}</b>",
+                    "ℹ️ Scan figures are observation/scoring events, not necessarily unique props;",
+                    "   new, movement, and not-realerted counters can overlap.",
+                    "   FPR is the current active rotation; tracking totals are separate.",
             ]
             # ── Full-Pool Rescan Rotation block ──────────────────────────────────
             try:
