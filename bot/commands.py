@@ -3487,11 +3487,11 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             _db.count_underdog_records(),
             _db.get_tracking_summary(),
         ])
-        tracked_opportunities = (
+        tracked_observations = (
             int(
                 tracking.get(
-                    "tracked",
-                    tracking.get("total", 0),
+                    "tracked_observations",
+                    tracking.get("tracked", 0),
                 )
                 or 0
             )
@@ -3510,10 +3510,10 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         ]
 
         lines.append(
-            "  Tracked opportunities: <b>"
+            "  Tracked observations: <b>"
             + (
-                f"{tracked_opportunities:,}"
-                if tracked_opportunities is not None
+                f"{tracked_observations:,}"
+                if tracked_observations is not None
                 else "unavailable"
             )
             + "</b>"

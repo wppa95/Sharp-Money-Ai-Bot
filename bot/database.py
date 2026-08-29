@@ -1530,40 +1530,41 @@ class Database:
             row["audit_recipients"] += audit_recipients
 
         async with self.session() as s:
-            # Raw observations are source volume, not alert volume.
-            # Underdog's legacy snapshot table remains the raw per-scan source.
-            # PrizePicks/PropLine is persisted in the provider-neutral history
-            # table, so counting PrizePicksRecord here makes live PP activity
-            # appear as zero even after a successful normalized write.
-            for model, timestamp_column, provider_name in (
-                (UnderdogSnapshotRecord, UnderdogSnapshotRecord.fetched_at, "Underdog"),
-            ):
-                try:
-                    n = await s.execute(
-                        select(func.count()).select_from(model).where(timestamp_column >= cutoff)
-                    )
-                    _ensure(provider_name)["observed"] += int(n.scalar() or 0)
-                except Exception as exc:
-                    logger.debug("telegram reconciliation observation query skipped: %s", exc)
-
             # PropLineHistory is the persistent tracking universe for both
-            # primary providers.  Count every PP row as an observation (the
-            # table is append-only for monitoring), but count only the latest
-            # row per provider-owned source identity as currently tracked.
+            # primary providers. Count every normalized row as an observation;
+            # this is deliberately independent of evaluation and delivery.
+            # The legacy Underdog snapshot table is used only as a compatibility
+            # fallback for installations that have no normalized UD history.
             try:
-                pp_observed = await s.execute(
-                    select(func.count()).select_from(PropLineHistory).where(
-                        PropLineHistory.provider == "PrizePicks",
+                observed_rows = await s.execute(
+                    select(
+                        PropLineHistory.provider,
+                        func.count(PropLineHistory.id),
+                    ).where(
+                        PropLineHistory.provider.in_(("Underdog", "PrizePicks")),
                         PropLineHistory.fetched_at >= cutoff,
-                    )
+                    ).group_by(PropLineHistory.provider)
                 )
-                _ensure("PrizePicks")["observed"] += int(pp_observed.scalar() or 0)
+                normalized_observed = {
+                    _provider(provider_name): int(count or 0)
+                    for provider_name, count in observed_rows.all()
+                }
+                for provider_name, count in normalized_observed.items():
+                    _ensure(provider_name)["observed"] += count
+                if normalized_observed.get("Underdog", 0) == 0:
+                    legacy_ud_observed = await s.execute(
+                        select(func.count()).select_from(UnderdogSnapshotRecord).where(
+                            UnderdogSnapshotRecord.fetched_at >= cutoff
+                        )
+                    )
+                    legacy_count = int(legacy_ud_observed.scalar() or 0)
+                    if legacy_count:
+                        _ensure("Underdog")["observed"] += legacy_count
 
                 tracked_ids = (
                     select(func.max(PropLineHistory.id))
                     .where(
                         PropLineHistory.provider.in_(("Underdog", "PrizePicks")),
-                        PropLineHistory.fetched_at >= cutoff,
                     )
                     .group_by(
                         PropLineHistory.provider,
@@ -4794,11 +4795,56 @@ class Database:
                     key=lambda item: (-item[1], item[0]),
                 )
             ]
+
+            # Directional opportunities and delivery are separate populations
+            # from the active observation universe. Scope these to the report
+            # window, while keeping the current active universe all-time.
+            opportunity_rows = await s.execute(
+                select(
+                    PropOpportunityLog.provider,
+                    PropOpportunityLog.recommendation,
+                    PropOpportunityLog.result,
+                    PropOpportunityLog.alert_sent,
+                ).where(
+                    PropOpportunityLog.detected_at >= cutoff,
+                    PropOpportunityLog.recommendation.in_(("OVER", "UNDER")),
+                )
+            )
+            directional_total = 0
+            delivered_total = 0
+            pending_total = 0
+            resolved_total = 0
+            directional_by_provider: dict[str, int] = {}
+            delivered_by_provider: dict[str, int] = {}
+            for provider, recommendation, result, alert_sent in opportunity_rows.all():
+                provider_key = str(provider or "Underdog")
+                directional_total += 1
+                directional_by_provider[provider_key] = (
+                    directional_by_provider.get(provider_key, 0) + 1
+                )
+                if alert_sent:
+                    delivered_total += 1
+                    delivered_by_provider[provider_key] = (
+                        delivered_by_provider.get(provider_key, 0) + 1
+                    )
+                if str(result or "").upper() == "PENDING":
+                    pending_total += 1
+                elif str(result or "").upper() in {
+                    "HIT", "MISS", "PUSH", "VOID", "CANCELLED",
+                    "INJURY_VOID", "GAME_INTERRUPTED",
+                }:
+                    resolved_total += 1
         return {
             "since_hours": since_hours,
             "tracked": len(current_rows),
             "tracked_observations": tracked_observations,
             "tracked_observations_by_provider": tracked_observations_by_provider,
+            "directional_total": directional_total,
+            "delivered": delivered_total,
+            "pending": pending_total,
+            "resolved": resolved_total,
+            "directional_by_provider": directional_by_provider,
+            "delivered_by_provider": delivered_by_provider,
             "by_sport": by_sport,
             "by_provider": [
                 {"provider": provider, "tracked": count}

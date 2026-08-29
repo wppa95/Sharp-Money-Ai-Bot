@@ -1,0 +1,431 @@
+Continue from the current implementation.
+
+Do NOT create a new task.
+Do NOT propose a follow-up task.
+If an existing task directly covers this work, you may close it after implementation and validation.
+
+Restarts are allowed if required.
+
+Do NOT perform live/production verification.
+Do NOT send Telegram commands.
+Do NOT send test alerts.
+Do NOT fabricate production data.
+
+CORRECT UNIVERSAL TRACKING / GRADING / HISTORY ACCOUNTING
+
+The monitoring system must maintain a complete historical record of the prop universe independently from actionable Telegram delivery.
+
+The current reporting must never make it appear that only a few hundred props are being tracked when thousands of active props and their snapshots are actually being monitored.
+
+1. PERSISTENT TRACKING IS THE PRIMARY POPULATION
+
+Every prop snapshot that enters supported monitoring must be persisted and remain part of historical tracking.
+
+This includes:
+
+* New props
+* Existing props
+* Unchanged props
+* Line movers
+* Previously evaluated props
+* Previously rejected props
+* Non-directional props
+* Cold-start props
+* Props without provider evidence
+* Props never delivered to Telegram
+
+Tracking must NOT depend on:
+
+* Direction
+* Qualification
+* Actionability
+* Telegram delivery
+* Alert deduplication
+
+2. ACTIVE VS HISTORICAL POPULATIONS
+
+Reporting must clearly distinguish:
+
+Active tracked props
+
+The latest currently active provider/source-ID universe.
+
+Historical observations
+
+All persisted snapshots/observations collected over time.
+
+Directional opportunities
+
+Tracked records where a valid OVER/UNDER direction exists.
+
+Delivered alerts
+
+Only opportunities actually delivered to Telegram.
+
+Pending grading
+
+Tracked directional opportunities whose event has finished but whose result has not yet been resolved.
+
+Resolved
+
+Directional opportunities with a final result.
+
+HIT / MISS / PUSH
+
+Resolved outcomes.
+
+Do NOT collapse these populations into one number.
+
+Do NOT use delivered alerts as a proxy for tracked props.
+
+3. PROVIDER SEPARATION
+
+Keep PrizePicks and Underdog completely separated in all accounting.
+
+Every report should be able to distinguish:
+
+* Underdog observations
+* PrizePicks observations
+* Underdog active props
+* PrizePicks active props
+* Underdog directional opportunities
+* PrizePicks directional opportunities
+* Underdog delivered alerts
+* PrizePicks delivered alerts
+* Underdog grading
+* PrizePicks grading
+
+Never allow one provider’s records to inflate or replace another provider’s population.
+
+4. SOURCE OF TRUTH
+
+Use the normalized persistent prop-history/observation data as the primary source for tracking reports.
+
+Do NOT use:
+
+* candidate-log counts
+* Telegram delivery counts
+* actionable-only counts
+* legacy EV records
+
+as the primary tracked population when normalized provider history exists.
+
+Legacy fallback behavior may remain only where necessary for databases that genuinely lack normalized history.
+
+5. ALL SPORTS
+
+Tracking and grading must include every supported non-football sport.
+
+Do NOT hard-code:
+
+* NFL
+* NBA
+* MLB
+* any single sport
+
+as the tracking population.
+
+Preserve the existing upstream football exclusion.
+
+Football-related sports may remain in historical legacy data but must not enter the current active monitoring/tracking pipeline.
+
+Soccer remains supported.
+
+6. EVERY SNAPSHOT MUST BE GRADEABLE WHEN DIRECTIONAL
+
+A persisted snapshot does not need to be actionable to be tracked.
+
+If it contains a valid directional opportunity, it must remain eligible for eventual grading when the event result becomes available.
+
+Telegram delivery is irrelevant to grading eligibility.
+
+For example:
+
+A prop can be:
+
+Tracked → Directional → Not delivered → Event finishes → Graded → HIT/MISS/PUSH
+
+This must work.
+
+7. GRADING IDENTITY
+
+Preserve provider-aware identity for grading.
+
+Use the existing identity information:
+
+* Provider
+* Source ID
+* Event ID
+* Player
+* Sport
+* Market/stat
+* Line
+* Direction
+* Timestamp
+
+Do NOT merge different players, events, providers, or source IDs.
+
+Do NOT create duplicate grades for repeated rescans of the same opportunity.
+
+Do NOT allow one player’s result to contaminate another player’s history.
+
+8. OUTCOME STORAGE
+
+When results become available, preserve:
+
+* Provider
+* Player
+* Sport
+* Market/stat
+* Line
+* Direction
+* Event/date
+* Actual result/value
+* HIT
+* MISS
+* PUSH
+* Timestamp
+
+Preserve the distinction between:
+
+Provider-backed game evidence
+
+and
+
+Bot-graded prop outcomes.
+
+Provider-backed results remain preferred when available.
+
+Graded prop results supplement missing history.
+
+Never fabricate an outcome.
+
+9. PROGRESSIVE HISTORY
+
+Continue feeding legitimate resolved prop outcomes into the existing progressive evidence lifecycle.
+
+Support:
+
+* L5
+* L10
+* L20
+* L30
+* Season
+
+Rules remain:
+
+* 0 samples → N/A
+* insufficient samples → partial history where appropriate
+* sufficient real results → populate larger windows
+* 30+ real results → full L5/L10/L20/L30/Season history
+
+Do not turn missing data into fake 0% values.
+
+10. COMMAND REPORTING
+
+Audit and correct the population accounting for:
+
+* /stats
+* /tracking
+* /funnel
+* /reconcile
+* /grade
+* /performance
+* /backtest
+* /calibration
+* /player
+* /slipstats
+* /dashboard
+* alert history where applicable
+
+The reports must clearly identify what each count represents.
+
+For example:
+
+Tracked ≠ Directional ≠ Delivered ≠ Resolved.
+
+Do not display a small actionable population as though it represents the entire tracked universe.
+
+11. RECENTLY TRACKED PROPS
+
+The dashboard’s Recently Tracked Props section must use persistent tracking data.
+
+It must:
+
+* include ALL supported sports
+* include both Underdog and PrizePicks
+* not be hard-coded to NFL
+* not be limited to Telegram-delivered props
+* reflect recent persistent observations
+* retain provider labels
+* refresh using the existing dashboard/reporting cadence
+
+Do not create a second tracking database.
+
+12. ALERT HISTORY
+
+Alert history should represent actual delivery history.
+
+It must NOT be used as the source of truth for total tracking.
+
+A prop can exist in tracking/history without ever appearing in alert history.
+
+13. BACKTEST / PERFORMANCE
+
+Backtest and performance reports must prefer resolved tracked opportunities over legacy actionable-only or EV-only populations when normalized resolved tracking data exists.
+
+Provider separation must remain intact.
+
+UNDER grading must remain correct:
+
+* OVER → actual > line = HIT
+* UNDER → actual < line = HIT
+* PUSH → actual = line where applicable
+
+Do not treat an undelivered opportunity as ungradeable.
+
+14. FOOTBALL
+
+Preserve the existing upstream football exclusion.
+
+Do NOT re-enable football monitoring.
+
+Do NOT delete historical football records.
+
+Do NOT allow football records to silently contaminate current supported-sport tracking totals.
+
+15. DO NOT CHANGE CORE MONITORING
+
+Do NOT change:
+
+* FPR architecture
+* active source-ID lifecycle
+* continuous rescanning
+* priority ordering
+* provider ingestion
+* provider evidence
+* player identity
+* scoring formulas
+* BQ/MQ
+* confidence
+* Telegram deduplication
+* pregame protection
+* football exclusion
+* soccer support
+* scheduler
+* adaptive batching
+* max_instances=1
+* Stable Refresh removal
+* historical data
+
+This request is specifically about population accounting, tracking, grading, and reporting clarity.
+
+16. TESTS
+
+Add/update focused regression tests proving:
+
+* Every persisted snapshot contributes to tracking.
+* Active tracked population is separate from historical observation count.
+* Directional opportunities are separate from tracked observations.
+* Delivered alerts are separate from tracking.
+* Undelivered directional props remain gradeable.
+* Repeated rescans do not create duplicate grades.
+* Provider separation is preserved.
+* Source-ID separation is preserved.
+* Event-ID separation is preserved.
+* Player/stat identity is preserved.
+* HIT/MISS/PUSH outcomes persist.
+* UNDER grading remains correct.
+* Resolved tracked opportunities feed performance.
+* Resolved tracked opportunities feed backtesting.
+* Progressive L5/L10/L20/L30/Season history uses real results.
+* Missing evidence remains N/A rather than fabricated.
+* All supported sports are represented.
+* Football remains excluded from current monitoring.
+* Soccer remains supported.
+* Dashboard Recently Tracked Props includes multiple providers and sports.
+* /stats does not confuse tracked with delivered.
+* /tracking reports the complete tracked population.
+* /funnel separates observations, directional records, and delivery.
+* /reconcile uses persistent normalized populations.
+* /grade grades undelivered directional opportunities.
+* /performance uses resolved tracked opportunities.
+* /backtest uses resolved tracked opportunities.
+* /calibration uses the correct resolved population.
+* /player reflects provider-aware tracked history.
+* /slipstats remains delivery/slip-specific rather than becoming the tracking source.
+
+Run:
+
+1. Focused tracking/grading/reporting regression tests.
+2. Full existing test suite.
+3. Python compilation.
+4. git diff –check.
+
+17. NO LIVE VERIFICATION
+
+Do NOT perform live or production verification.
+
+Do NOT:
+
+* query production data
+* send Telegram commands
+* send test alerts
+* wait for games/events
+* fabricate production records
+
+Local regression tests and static/code-path verification are sufficient.
+
+A restart is allowed if required.
+
+18. NO UNRELATED CHANGES
+
+Make the smallest targeted changes necessary.
+
+Do not redesign the architecture.
+
+Do not create another tracking system.
+
+Do not change provider behavior.
+
+Do not change alert thresholds.
+
+Do not change scoring.
+
+Do not change the monitoring cadence.
+
+19. TASK MANAGEMENT
+
+Do NOT create a new task.
+
+Do NOT propose a follow-up task.
+
+If an existing task directly covers this work, close that existing task after successful implementation and validation.
+
+FINAL REPORT
+
+IMPLEMENTED
+
+Exactly what changed.
+
+TESTED
+
+* Focused tests: X passed
+* Full suite: X passed
+* Compilation: PASS/FAIL
+* Diff check: PASS/FAIL
+
+PRESERVED
+
+Confirm FPR, continuous rescanning, provider separation, universal tracking, grading, evidence, pregame protection, football exclusion, soccer support, scheduler, adaptive batching, max_instances=1, Stable Refresh removal, deduplication, and historical data.
+
+LIVE VERIFICATION
+
+NO LIVE/PRODUCTION VERIFICATION WAS PERFORMED.
+
+TASK MANAGEMENT
+
+No new task was created.
+If an existing task directly covered this work, it may be closed.
+
+DO NOT CREATE A NEW TASK.
