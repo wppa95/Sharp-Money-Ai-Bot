@@ -5530,6 +5530,21 @@ class Database:
                 )
             )
             delivered = delivered_row.scalar() or 0
+            delivered_provider_rows = await s.execute(
+                select(
+                    PropOpportunityLog.provider,
+                    func.count(PropOpportunityLog.id),
+                )
+                .where(
+                    directional,
+                    PropOpportunityLog.alert_sent == True,  # noqa: E712
+                )
+                .group_by(PropOpportunityLog.provider)
+            )
+            provider_delivered = {
+                str(provider or "Underdog"): int(count or 0)
+                for provider, count in delivered_provider_rows.all()
+            }
 
             resolved_results = (
                 "HIT", "MISS", "PUSH", "VOID", "CANCELLED",
@@ -5607,6 +5622,7 @@ class Database:
             "directional_total": total,
             "actionable": total,
             "delivered": delivered,
+            "provider_delivered": provider_delivered,
             "resolved": resolved,
             "pending":  pending,
         }
