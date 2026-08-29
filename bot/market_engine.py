@@ -5714,7 +5714,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 _prev_line = getattr(snap, "prev_line", None)
                 try:
                     is_mover = (
-                        _prev_line is not None
+                        isinstance(_prev_line, (int, float))
                         and abs(float(_prev_line) - float(line)) >= 0.01
                     )
                 except (TypeError, ValueError):
@@ -5724,8 +5724,8 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             is_new = bool(
                 getattr(snap, "new_prop", False) is True
                 or (
-                    _first_seen is not None
-                    and _last_seen is not None
+                    isinstance(_first_seen, datetime)
+                    and isinstance(_last_seen, datetime)
                     and _first_seen == _last_seen
                 )
             )

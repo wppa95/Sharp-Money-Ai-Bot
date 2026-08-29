@@ -1734,7 +1734,11 @@ async def _prizepicks_job(context) -> None:
 
                 # ── 8. Deliver via AlertDelivery (scope + timing + cap + broadcast) ─
                 delivery   = AlertDelivery(_db, bot, chat_ids)
-                result     = await delivery.deliver_pp(opp, score=pp_score)
+                result     = await delivery.deliver_pp(
+                    opp,
+                    score=pp_score,
+                    strict_pregame=True,
+                )
 
                 # ── 9. Store edge record (alert_sent reflects actual outcome) ─
                 await _db.save_pp_edge(PPEdgeRecord(

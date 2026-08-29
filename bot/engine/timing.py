@@ -86,6 +86,8 @@ def is_game_alertable(
     max_minutes: int,
     urgent_edge: float,
     edge: float,
+    game_status: Optional[str] = None,
+    require_known: bool = False,
 ) -> Tuple[bool, str]:
     """
     Decide whether an alert is within the acceptable timing window.
@@ -104,6 +106,12 @@ def is_game_alertable(
     (False, "<human-readable reason>")   → suppress the alert
     """
     if game_time is None:
+        if require_known:
+            status = str(game_status or "").strip().lower().replace(" ", "_")
+            if status in _BLOCKED_EVENT_STATUSES:
+                return False, f"Event status is {status}"
+            if status not in _PREGAME_EVENT_STATUSES:
+                return False, "Event start/state is unknown"
         return True, ""
 
     # Normalise to naive UTC

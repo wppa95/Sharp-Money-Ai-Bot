@@ -1142,6 +1142,8 @@ class AlertDelivery:
         self,
         opp: "PPEdgeOpportunity",
         score: "Optional[PPAnalysisScore]" = None,
+        *,
+        strict_pregame: bool = False,
     ) -> "DeliveryResult":
         """
         Full PrizePicks alert pipeline:
@@ -1168,7 +1170,7 @@ class AlertDelivery:
 
         from alert_normalizer import normalize_pp
         from alert_scope_filter import check
-        from engine.timing import is_event_pregame, is_game_alertable
+        from engine.timing import is_game_alertable
 
         # 0. Scope filter
         norm_obj = normalize_pp(opp, score=score)
@@ -1178,25 +1180,17 @@ class AlertDelivery:
 
         # 1. Game timing filter
         game_time = getattr(opp.pp_line, "start_time", None)
-        pregame, pregame_reason = is_event_pregame(
-            game_time,
-            game_status=(
-                getattr(opp.pp_line, "provider_status", None)
-                or getattr(opp.pp_line, "game_status", None)
-            ),
-        )
-        if not pregame:
-            return DeliveryResult(
-                sent=False,
-                filtered=True,
-                filtered_reason=pregame_reason,
-            )
         allowed, timing_reason = is_game_alertable(
             game_time,
             min_minutes=config.ALERT_WINDOW_MIN_MINUTES,
             max_minutes=config.ALERT_WINDOW_MAX_MINUTES,
             urgent_edge=config.URGENT_EDGE_THRESHOLD,
             edge=opp.best_edge,
+            game_status=(
+                getattr(opp.pp_line, "provider_status", None)
+                or getattr(opp.pp_line, "game_status", None)
+            ),
+            require_known=strict_pregame,
         )
         if not allowed:
             logger.debug(
@@ -1299,6 +1293,7 @@ class AlertDelivery:
         high_priority: bool = False,  # Legacy priority-display compatibility flag
         is_moneyline: bool = False,
         game_status: Optional[str] = None,
+        strict_pregame: bool = False,
         source: str = "Underdog",
     ) -> "DeliveryResult":
         """
@@ -1347,7 +1342,7 @@ class AlertDelivery:
             format_underdog_new_prop_alert,
             format_market_move_detected,
         )
-        from engine.timing import is_event_pregame, is_game_alertable
+        from engine.timing import is_game_alertable
 
         # 0 & 1. Normalize + scope check
         norm_obj = normalize_underdog(player_name, stat_type, sport, is_removed=removed)
@@ -1358,16 +1353,6 @@ class AlertDelivery:
         # 2. Game timing filter.  Removal records may arrive after the event,
         # but no new or re-entry prop may bypass the started-event check.
         if not removed:
-            pregame, pregame_reason = is_event_pregame(
-                game_time,
-                game_status=game_status,
-            )
-            if not pregame:
-                return DeliveryResult(
-                    sent=False,
-                    filtered=True,
-                    filtered_reason=pregame_reason,
-                )
             line_change = abs(new_line - old_line)
             allowed, timing_reason = is_game_alertable(
                 game_time,
@@ -1375,6 +1360,8 @@ class AlertDelivery:
                 max_minutes=config.ALERT_WINDOW_MAX_MINUTES,
                 urgent_edge=config.URGENT_EDGE_THRESHOLD,
                 edge=line_change * 2.0,
+                game_status=game_status,
+                require_known=strict_pregame,
             )
             if not allowed:
                 logger.debug(
