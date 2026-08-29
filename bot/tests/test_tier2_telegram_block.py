@@ -1,4 +1,4 @@
-"""Regressions for restored Tier 1/Tier 2 delivery semantics."""
+"""Regressions for provider-neutral canonical delivery semantics."""
 
 from __future__ import annotations
 
@@ -13,24 +13,15 @@ os.environ.setdefault("TELEGRAM_TOKEN", "test:token")
 import market_engine as me
 
 
-def test_tier2_classification_is_not_a_suppression_flag():
-    assert me._is_tier2_sport("NBA")
-    assert me._is_tier2_sport("MLB")
-    assert me._is_tier2_sport("NFL")
-    assert not me._is_tier2_sport("NHL")
-
-
-def test_tier2_gate_does_not_use_sabc_labels():
-    # A C-labelled decision can still be delivered when the independent
-    # quality/confidence/evidence requirements are met.
+def test_gate_does_not_use_sabc_labels_beyond_evidence():
     assert me._tier_delivery_gate(
         "NBA", "OVER", 85, 85, True, "C", confidence=90
     )
 
 
-def test_tier1_gate_does_not_require_sabc_labels_or_quality_floor():
-    assert me._tier_delivery_gate(
-        "TENNIS", "UNDER", 0, 0, True, "PASS", confidence=0
+def test_gate_requires_evidence_regardless_of_legacy_labels():
+    assert not me._tier_delivery_gate(
+        "TENNIS", "UNDER", 100, 100, False, "S", confidence=100
     )
 
 
@@ -50,6 +41,7 @@ def test_alert_boundary_uses_the_same_shared_gate():
     alerts_source = Path(__file__).parents[1].joinpath("alerts.py").read_text()
     assert "_canonical_tier_delivery_gate" in alerts_source
     assert "_has_strong_underdog_evidence" in alerts_source
+    assert "evidence_available=evidence_available" in alerts_source
 
 
 def test_temporary_suppression_blocks_are_gone_from_prop_paths():

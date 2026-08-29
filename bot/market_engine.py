@@ -2399,8 +2399,9 @@ def _apply_delivery_diversification(queue: list) -> list:
         )
         return group
 
+    result = _rank_group(list(queue))
     queue.clear()
-    queue.extend(_rank_group(list(queue)))
+    queue.extend(result)
     return queue
 
 

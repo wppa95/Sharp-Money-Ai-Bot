@@ -1,4 +1,4 @@
-"""Regression tests for the canonical direction-only delivery gate."""
+"""Regression tests for the canonical direction-and-evidence delivery gate."""
 
 from __future__ import annotations
 
@@ -14,27 +14,11 @@ os.environ.setdefault("TELEGRAM_TOKEN", "test:token")
 import market_engine as me
 
 
-def test_tier2_sports_use_exact_canonical_aliases():
-    assert me._TIER2_SPORTS == frozenset(
-        {"MLB", "NFL", "NBA", "FOOTBALL", "CFB", "NCAA", "NCAAF"}
-    )
-    assert me._is_tier2_sport("mlb")
-    assert me._is_tier2_sport("NFL")
-    assert me._is_tier2_sport("NBA")
-    assert me._is_tier2_sport("football")
-    assert me._is_tier2_sport("CFB")
-    assert me._is_tier2_sport("NCAA")
-    assert me._is_tier2_sport("NCAAF")
-    assert not me._is_tier2_sport("WNBA")
-    assert not me._is_tier2_sport("SOCCER")
-    assert not me._is_tier2_sport("CFL")
-    assert not me._is_tier2_sport("future-football-league")
-
-
 @pytest.mark.parametrize("sport", ["WNBA", "NHL", "SOCCER", "CS", "TENNIS", "MLB", "NFL"])
 @pytest.mark.parametrize("direction", ["OVER", "UNDER"])
-def test_every_direction_is_eligible_without_evidence_or_quality(sport, direction):
-    assert me._tier_delivery_gate(sport, direction, 0, 0, False, "PASS", confidence=0)
+def test_direction_requires_evidence(sport, direction):
+    assert not me._tier_delivery_gate(sport, direction, 0, 0, False, "PASS", confidence=0)
+    assert me._tier_delivery_gate(sport, direction, 0, 0, True, "PASS", confidence=0)
 
 
 def test_direction_is_always_required():
@@ -47,3 +31,10 @@ def test_all_scan_paths_call_the_canonical_wrapper():
     assert source.count("_tier_delivery_gate(") >= 7
     assert "engine.delivery_gates" in source
     assert "_full_pool_rescan_job" in source
+
+
+def test_legacy_tier_names_do_not_appear_in_delivery_gate_source():
+    source = inspect.getsource(me._tier_delivery_gate)
+    assert "decision_tier" not in source
+    assert "score_tier" not in source
+    assert "TIER2" not in source
