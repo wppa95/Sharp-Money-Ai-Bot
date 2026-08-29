@@ -30,8 +30,8 @@ def test_missing_history_never_creates_direction_from_market_signal():
     )
 
     assert isinstance(result, UDBetDecision)
-    assert result.recommendation == "PASS"
-    assert result.decision_tier == "PASS"
+    assert result.recommendation is None
+    assert result.decision_tier is None
     assert result.confidence == 0
     assert result.l5_games is None
     assert result.l5_hit_rate is None
@@ -48,7 +48,7 @@ def test_missing_history_is_not_turned_into_fake_zero_rate_data():
         hit_rates=[],
     )
 
-    assert result.recommendation == "PASS"
+    assert result.recommendation is None
     assert result.l5_games is None
     assert result.l5_over is None
     assert result.l5_under is None
@@ -81,4 +81,4 @@ def test_missing_history_behavior_does_not_depend_on_score_tier():
         for tier in ("S", "A", "B", "C", "PASS", "legacy")
     ]
 
-    assert all(result.recommendation == "PASS" for result in results)
+    assert all(result.recommendation is None for result in results)

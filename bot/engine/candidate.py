@@ -188,9 +188,9 @@ class Candidate:
     confidence:  Optional[ConfidenceDimensions] = None
 
     # ── Decision ───────────────────────────────────────────────────────────────
-    tier:            str = "PASS"     # S / A / B / PASS / BLOCK
+    tier:            Optional[str] = "PASS"  # S / A / B / PASS / BLOCK / None
     risk_level:      str = "MEDIUM"   # LOW / MEDIUM / HIGH / CRITICAL
-    decision:        str = "PASS"     # OVER / UNDER / PASS / BLOCK
+    decision:        Optional[str] = "PASS"  # OVER / UNDER / PASS / BLOCK / None
     decision_reason: str = ""
     decision_trace:  dict = field(default_factory=dict)  # serialisable artifacts
 
@@ -211,12 +211,12 @@ class Candidate:
     # ─────────────────────────────────────────────────────────────────────────
 
     def __post_init__(self) -> None:
-        if self.decision not in VALID_DECISIONS:
+        if self.decision is not None and self.decision not in VALID_DECISIONS:
             raise ValueError(
                 f"Candidate.decision must be one of {sorted(VALID_DECISIONS)}, "
                 f"got {self.decision!r}"
             )
-        if self.tier not in VALID_TIERS:
+        if self.tier is not None and self.tier not in VALID_TIERS:
             raise ValueError(
                 f"Candidate.tier must be one of {sorted(VALID_TIERS)}, "
                 f"got {self.tier!r}"
@@ -442,15 +442,15 @@ def candidate_from_ud_decision(
         betting_edge      ← decision.confidence
         overall           ← decision.confidence
     """
-    tier   = getattr(decision, "decision_tier",  "PASS")
+    tier   = getattr(decision, "decision_tier",  None)
     conf   = int(getattr(decision, "confidence", 0))
-    rec    = getattr(decision, "recommendation", "PASS")
+    rec    = getattr(decision, "recommendation",  None)
     reason = str(getattr(decision, "reason", ""))
 
     if score is not None:
         dims = dims_from_ud_components(score, decision)
     else:
-        data_conf = {"S": 80, "A": 70, "B": 60, "PASS": 30}.get(tier, 50)
+        data_conf = {"S": 80, "A": 70, "B": 60}.get(tier, 50)
         dims = ConfidenceDimensions(
             data_confidence   = data_conf,
             market_confidence = 50,
@@ -476,9 +476,9 @@ def candidate_from_ud_decision(
         provider          = "Underdog",
         game_time         = game_time,
         confidence        = dims,
-        tier              = tier if tier in VALID_TIERS else "PASS",
-        risk_level        = {"S": "LOW", "A": "LOW", "B": "MEDIUM", "PASS": "HIGH"}.get(tier, "MEDIUM"),
-        decision          = rec if rec in VALID_DECISIONS else "PASS",
+        tier              = tier if tier in VALID_TIERS else None,
+        risk_level        = {"S": "LOW", "A": "LOW", "B": "MEDIUM"}.get(tier, "MEDIUM"),
+        decision          = rec if rec in VALID_DECISIONS else None,
         decision_reason   = reason,
         decision_trace    = trace,
         raw_snapshot_id   = snapshot_id,

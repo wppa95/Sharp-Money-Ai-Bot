@@ -441,10 +441,22 @@ class DashboardEngine:
         """
         report = DashboardReport()
 
-        # Run all independent queries (best-effort)
-        await cls._gather_totals(db, report)
+        # Start the independent top-level reads together.  Each database
+        # helper owns its session, so this shortens the dashboard's critical
+        # path without sharing a session or changing report semantics.
+        _top_level = await asyncio.gather(
+            cls._gather_totals(db, report),
+            db.get_tracking_summary(),
+            asyncio.gather(
+                db.get_recent_tracked_props("Underdog", since_hours=1, limit=100),
+                db.get_recent_tracked_props("PrizePicks", since_hours=1, limit=100),
+                return_exceptions=True,
+            ),
+            return_exceptions=True,
+        )
+        tracking = _top_level[1]
+        provider_rows = _top_level[2]
         try:
-            tracking = await db.get_tracking_summary()
             if isinstance(tracking, dict):
                 report.tracked_observations = int(
                     tracking.get(
@@ -524,11 +536,8 @@ class DashboardEngine:
         except Exception:
             pass
         try:
-            provider_rows = await asyncio.gather(
-                db.get_recent_tracked_props("Underdog", since_hours=1, limit=100),
-                db.get_recent_tracked_props("PrizePicks", since_hours=1, limit=100),
-                return_exceptions=True,
-            )
+            if isinstance(provider_rows, Exception):
+                provider_rows = []
             report.recent_tracked_props = []
             for provider, rows in zip(("Underdog", "PrizePicks"), provider_rows):
                 if isinstance(rows, Exception):

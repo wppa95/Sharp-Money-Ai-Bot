@@ -588,7 +588,7 @@ class TestDecisionEngineIntegration:
         )
 
     def test_pass_when_no_real_data(self):
-        """Decision remains PASS when has_real_data=False (confirms gate still works)."""
+        """Decision has no direction when has_real_data=False."""
         hit_rates = PlayerHitRates(
             player_name  = "unknown",
             stat_type    = "kills on map 1",
@@ -613,4 +613,4 @@ class TestDecisionEngineIntegration:
         )
 
         assert decision is not None
-        assert decision.recommendation == "PASS"
+        assert decision.recommendation is None

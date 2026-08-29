@@ -6283,13 +6283,16 @@ class Database:
 
         `query` is either:
           - A numeric string → lookup by id
-          - A player-name substring → most recent matching row (non-PASS)
+          - A player-name substring → most recent matching directional row
         """
         from datetime import timedelta
         if query.isdigit():
             async with self.session() as s:
                 result = await s.execute(
-                    select(PropOpportunityLog).where(PropOpportunityLog.id == int(query))
+                    select(PropOpportunityLog).where(
+                        PropOpportunityLog.id == int(query),
+                        PropOpportunityLog.recommendation.in_(("OVER", "UNDER")),
+                    )
                 )
                 return result.scalar_one_or_none()
         # Fuzzy name match
@@ -6301,7 +6304,7 @@ class Database:
                 .where(
                     PropOpportunityLog.player_name.ilike(pattern),
                     PropOpportunityLog.detected_at >= cutoff,
-                    PropOpportunityLog.recommendation != "PASS",
+                    PropOpportunityLog.recommendation.in_(("OVER", "UNDER")),
                 )
                 .order_by(desc(PropOpportunityLog.detected_at))
                 .limit(1)

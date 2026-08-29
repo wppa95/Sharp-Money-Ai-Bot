@@ -222,7 +222,10 @@ class TestBug119FunnelAndStatusCounters:
     def test_funnel_uses_unified_lifecycle_label(self):
         """/funnel must use neutral lifecycle labels, not retired classifications."""
         src = self._load_commands_source()
-        assert "Tracked opportunities" in src or "Active props" in src
+        assert (
+            "Prop observations (cumulative scan total)" in src
+            or "Tracked opportunities" in src
+        )
 
     def test_status_uses_db_backed_alert_count(self):
         """/status must call count_today_actionable_alerts (DB-backed).

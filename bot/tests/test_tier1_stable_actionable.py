@@ -142,7 +142,7 @@ class TestDirectionGatePresent:
         import inspect, market_engine as _me
         src = inspect.getsource(_me.underdog_job)
         assert "decision_pass" not in src
-        assert '_sdec.recommendation == "PASS"' in src
+        assert '_sdec.recommendation not in ("OVER", "UNDER")' in src
 
 
 # ─────────────────────────────────────────────────────────────────────────────

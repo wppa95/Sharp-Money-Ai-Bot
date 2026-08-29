@@ -555,12 +555,12 @@ def _format_95_priority_alert(
     shared direction-only gate rather than this legacy formatter.
     """
     sport  = getattr(snap, "sport", None) or "UNKNOWN"
-    rec    = getattr(decision, "recommendation", "PASS") if decision is not None else "PASS"
+    rec    = getattr(decision, "recommendation", None) if decision is not None else None
     conf   = getattr(decision, "confidence", 0)      if decision is not None else 0
     stars  = _bq_stars(int(conf))  # V3.4: stars from Bet Quality, not raw score.total
 
     dir_line = ""
-    if rec not in ("PASS", None):
+    if rec in ("OVER", "UNDER"):
         dir_line = f"\n📈 <b>{rec}</b>   Confidence: {conf}"
 
     gt_line = ""
@@ -3955,7 +3955,7 @@ async def underdog_job(context) -> None:
                     hit_rates    = _shits,
                     sport        = _ssport,
                 )
-                if _sdec is None or _sdec.recommendation == "PASS":
+                if _sdec is None or _sdec.recommendation not in ("OVER", "UNDER"):
                     continue
 
                 # Only directional evaluations enter the opportunity/evidence

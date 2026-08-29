@@ -232,6 +232,12 @@ class TestCandidateFromUdDecision:
         c = candidate_from_ud_decision("P", "MLB", "Hits", 1.5, _ud_decision("PASS", "PASS", 0))
         assert c.decision == "PASS"
 
+    def test_no_direction_does_not_create_pass_classification(self):
+        c = candidate_from_ud_decision("P", "MLB", "Hits", 1.5, _ud_decision(None, None, 0))
+        assert c.decision is None
+        assert c.tier is None
+        assert not c.is_actionable
+
     def test_sport_uppercased(self):
         c = candidate_from_ud_decision("P", "mlb", "Hits", 1.5, _ud_decision())
         assert c.sport == "MLB"

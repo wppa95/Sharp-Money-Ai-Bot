@@ -126,13 +126,13 @@ def _hit_rates(
     )
 
 
-# ── PASS gate tests ───────────────────────────────────────────────────────────
+# ── No-direction gate tests ────────────────────────────────────────────────────
 
 class TestPassGates:
     def test_pass_when_hit_rates_none(self):
         d = make_ud_bet_decision(_score(), _validation(), 25.5)
-        assert d.recommendation == "PASS"
-        assert d.decision_tier  == "PASS"
+        assert d.recommendation is None
+        assert d.decision_tier  is None
         assert d.confidence     == 0
 
     def test_pass_reason_mentions_no_history(self):
@@ -144,10 +144,10 @@ class TestPassGates:
     def test_pass_when_no_real_data(self):
         hr = _hit_rates(has_real_data=False, l5_r=None, l10_r=None)
         d  = make_ud_bet_decision(_score(), _validation(), 25.5, hit_rates=hr)
-        assert d.recommendation == "PASS"
+        assert d.recommendation is None
 
     def test_pass_when_only_4_games(self):
-        """Window with 4 games < _MIN_GAMES_PRIMARY — should always PASS."""
+        """Window with 4 games < _MIN_GAMES_PRIMARY — should have no direction."""
         hr = PlayerHitRates(
             player_name="P", stat_type="pts", current_line=25.5,
             l5=WindowStats(4, 4, 0, 1.0, 30.0),
@@ -155,33 +155,33 @@ class TestPassGates:
             has_real_data=True, total_games=4,
         )
         d = make_ud_bet_decision(_score(), _validation(), 25.5, hit_rates=hr)
-        assert d.recommendation == "PASS"
+        assert d.recommendation is None
         low = d.reason.lower()
         assert "insufficient" in low or "need" in low or "sample" in low
 
     def test_pass_when_hit_rate_exactly_50_pct(self):
         hr = _hit_rates(l5_r=0.50, l10_r=0.50)
         d  = make_ud_bet_decision(_score(), _validation(), 25.5, hit_rates=hr)
-        assert d.recommendation == "PASS"
+        assert d.recommendation is None
 
     def test_pass_when_hit_rate_55_pct(self):
         """55% is in the inconclusive zone (below _B_RATE 60%)."""
         hr = _hit_rates(l5_r=0.55, l10_r=0.55)
         d  = make_ud_bet_decision(_score(), _validation(), 25.5, hit_rates=hr)
-        assert d.recommendation == "PASS"
+        assert d.recommendation is None
 
     def test_pass_when_l5_contradicts_l10(self):
-        """L5=80% but L10=35% → contradicting windows → PASS."""
+        """L5=80% but L10=35% → contradicting windows → no direction."""
         hr = _hit_rates(l5_r=0.80, l10_r=0.35)
         d  = make_ud_bet_decision(_score(), _validation(), 25.5, hit_rates=hr)
-        assert d.recommendation == "PASS"
+        assert d.recommendation is None
         assert "conflict" in d.reason.lower()
 
     def test_pass_when_under_pick_has_high_contradicting_window(self):
-        """L5=20% but L10=65% → contradicting windows for UNDER → PASS."""
+        """L5=20% but L10=65% → contradicting windows for UNDER → no direction."""
         hr = _hit_rates(l5_r=0.20, l10_r=0.65)
         d  = make_ud_bet_decision(_score(), _validation(), 25.5, hit_rates=hr)
-        assert d.recommendation == "PASS"
+        assert d.recommendation is None
 
 
 # ── OVER pick tests ───────────────────────────────────────────────────────────
@@ -206,10 +206,10 @@ class TestOverPicks:
         assert d.recommendation == "OVER"
 
     def test_just_below_b_tier_is_pass(self):
-        """59% < 60% → PASS."""
+        """59% < 60% → no direction."""
         hr = _hit_rates(l5_r=0.59, l10_r=0.59)
         d  = make_ud_bet_decision(_score(), _validation(), 25.5, hit_rates=hr)
-        assert d.recommendation == "PASS"
+        assert d.recommendation is None
 
 
 # ── UNDER pick tests ──────────────────────────────────────────────────────────
@@ -234,10 +234,10 @@ class TestUnderPicks:
         assert d.confidence > 0
 
     def test_just_above_under_threshold_is_pass(self):
-        """41% > 40% → PASS."""
+        """41% > 40% → no direction."""
         hr = _hit_rates(l5_r=0.41, l10_r=0.41)
         d  = make_ud_bet_decision(_score(), _validation(), 25.5, hit_rates=hr)
-        assert d.recommendation == "PASS"
+        assert d.recommendation is None
 
 
 # ── Tier classification ───────────────────────────────────────────────────────
@@ -308,9 +308,9 @@ class TestTierClassification:
         assert d.recommendation == "OVER"
         assert d.decision_tier  == "B"
 
-    def test_pass_tier_when_no_data(self):
+    def test_no_tier_when_no_data(self):
         d = make_ud_bet_decision(_score(), _validation(), 25.5)
-        assert d.decision_tier == "PASS"
+        assert d.decision_tier is None
 
 
 # ── Confidence ────────────────────────────────────────────────────────────────
