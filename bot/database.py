@@ -2178,6 +2178,14 @@ class Database:
         from datetime import timedelta
         cutoff = datetime.utcnow() - timedelta(hours=since_hours)
         async with self.session() as s:
+            source_identity = case(
+                (
+                    PropLineHistory.external_id.isnot(None)
+                    & (PropLineHistory.external_id != ""),
+                    PropLineHistory.external_id,
+                ),
+                else_=PropLineHistory.game_id,
+            )
             subq = (
                 select(func.max(PropLineHistory.id))
                 .where(
@@ -2188,6 +2196,7 @@ class Database:
                     PropLineHistory.player_name,
                     PropLineHistory.sport,
                     PropLineHistory.stat_type,
+                    source_identity,
                 )
                 .scalar_subquery()
             )
@@ -2205,6 +2214,14 @@ class Database:
         from datetime import timedelta
         cutoff = datetime.utcnow() - timedelta(hours=since_hours)
         async with self.session() as s:
+            source_identity = case(
+                (
+                    PropLineHistory.external_id.isnot(None)
+                    & (PropLineHistory.external_id != ""),
+                    PropLineHistory.external_id,
+                ),
+                else_=PropLineHistory.game_id,
+            )
             subq = (
                 select(func.max(PropLineHistory.id))
                 .where(
@@ -2215,6 +2232,7 @@ class Database:
                     PropLineHistory.player_name,
                     PropLineHistory.sport,
                     PropLineHistory.stat_type,
+                    source_identity,
                 )
                 .scalar_subquery()
             )
@@ -2347,7 +2365,17 @@ class Database:
 
         # Load latest PropLineHistory row per (player_name, sport, stat_type) for Underdog
         async with self.session() as s:
-            # Subquery: max id per prop identity
+            source_identity = case(
+                (
+                    and_(
+                        PropLineHistory.external_id.isnot(None),
+                        PropLineHistory.external_id != "",
+                    ),
+                    PropLineHistory.external_id,
+                ),
+                else_=PropLineHistory.game_id,
+            )
+            # Subquery: max id per provider source identity
             subq = (
                 select(func.max(PropLineHistory.id))
                 .where(PropLineHistory.provider == "Underdog")
@@ -2355,6 +2383,7 @@ class Database:
                     PropLineHistory.player_name,
                     PropLineHistory.sport,
                     PropLineHistory.stat_type,
+                    source_identity,
                 )
                 .scalar_subquery()
             )
@@ -2362,7 +2391,12 @@ class Database:
                 select(PropLineHistory).where(PropLineHistory.id.in_(subq))
             )
             latest_rows = {
-                (r.player_name, r.sport, r.stat_type): r
+                (
+                    r.player_name,
+                    r.sport,
+                    r.stat_type,
+                    r.external_id or r.game_id or "",
+                ): r
                 for r in result.scalars().all()
             }
 
@@ -2370,14 +2404,21 @@ class Database:
         # ── Build insert/update batches (no DB I/O yet) ──────────────────────
         snap_by_key: dict[tuple, list] = {}
         for snap in snaps:
-            key = (snap.player_name or "", snap.sport or "", snap.stat_type or "")
+            key = (
+                snap.player_name or "",
+                snap.sport or "",
+                snap.stat_type or "",
+                getattr(snap, "external_id", None)
+                or getattr(snap, "game_id", None)
+                or "",
+            )
             snap_by_key.setdefault(key, []).append(snap)
 
         new_rows:    list[PropLineHistory]          = []
         update_jobs: list[tuple[int, dict]]         = []   # (existing_id, update_vals)
 
         for key, key_snaps in snap_by_key.items():
-            player_name, sport, stat_type = key
+            player_name, sport, stat_type, source_identity = key
             # Use the LATEST snapshot for this batch as the authoritative state
             latest_snap = key_snaps[-1]
             existing    = latest_rows.get(key)
@@ -4339,7 +4380,7 @@ class Database:
             source_identity = case(
                 (
                     and_(
-                        PropLineHistory.provider == "PrizePicks",
+                        PropLineHistory.external_id.isnot(None),
                         PropLineHistory.external_id != "",
                     ),
                     PropLineHistory.external_id,
