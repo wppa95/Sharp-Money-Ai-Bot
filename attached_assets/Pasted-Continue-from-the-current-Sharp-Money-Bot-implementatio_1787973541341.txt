@@ -1,0 +1,555 @@
+Continue from the current Sharp Money Bot implementation.
+
+Make ONLY the targeted changes below.
+
+Do NOT redesign the architecture.
+Do NOT create another monitoring, tracking, or alert system.
+Do NOT change provider ingestion.
+Do NOT change the completed pregame safety work.
+Do NOT change the completed universal tracking/grading work.
+
+🚫 NO LIVE / PRODUCTION VERIFICATION
+
+DO NOT RUN LIVE VERIFICATION FOR THIS REQUEST.
+
+Do NOT:
+
+* Restart Railway
+* Deploy Railway
+* Send Telegram commands
+* Send /testalert
+* Wait for natural alerts
+* Wait for games
+* Generate synthetic production data
+* Generate synthetic alerts
+* Modify production configuration
+
+Verification must be automated only:
+
+INSPECT → FIX → FOCUSED TESTS → FULL SUITE → COMPILE → DIFF CHECK
+
+⸻
+
+1. CONTINUOUS MONITORING MUST NOT EQUAL CONTINUOUS ALERTING
+
+The bot must continue rescanning every eligible active pregame prop through the existing FPR rotation.
+
+However:
+
+A prop being rescanned does NOT mean it should generate another Telegram alert.
+
+Separate these concepts completely:
+
+Monitoring frequency
+
+from:
+
+Alert delivery frequency.
+
+Every active prop can continue being evaluated without being repeatedly delivered.
+
+⸻
+
+2. DEFINE THE ALERT OPPORTUNITY IDENTITY
+
+An alert opportunity must be provider-specific.
+
+Use the strongest available identity:
+
+* Provider
+* Source ID
+* Event ID
+* Player
+* Sport
+* Market/stat
+* Current line
+* Direction
+
+Do not use only:
+
+* player name
+* player + market
+* player + line
+
+because that can incorrectly merge unrelated events or providers.
+
+⸻
+
+3. EXACT DUPLICATE = SUPPRESS
+
+If the bot has already delivered:
+
+same provider + same source ID + same event + same player + same sport + same market + same line + same direction
+
+then another evaluation of that exact opportunity must NOT generate another Telegram alert.
+
+It can still:
+
+* be rescanned
+* be rescored
+* remain tracked
+* receive evidence
+* receive grading
+* update historical records
+
+Only delivery is suppressed.
+
+⸻
+
+4. MEANINGFUL NEW OPPORTUNITY = ALLOW
+
+A new alert may be generated when there is a legitimate opportunity change.
+
+Examples:
+
+Line change
+
+0.5 UNDER
+
+→ 1.5 UNDER
+
+may produce a new alert.
+
+Direction change
+
+0.5 UNDER
+
+→ 0.5 OVER
+
+may produce a new alert.
+
+Event change
+
+Same player/market but different event/game
+
+→ new opportunity.
+
+Provider change
+
+Underdog opportunity
+
+vs.
+
+PrizePicks opportunity
+
+→ separate opportunities.
+
+Do NOT permanently suppress the player.
+
+⸻
+
+5. IMPORTANT: DO NOT SPAM LINE MOVEMENT
+
+A line changing should permit a new opportunity, but the same exact opportunity must not repeatedly alert.
+
+Example:
+
+Max Muncy:
+
+0.5 UNDER → alert
+
+Bot rescans:
+
+0.5 UNDER → no alert
+
+Bot rescans again:
+
+0.5 UNDER → no alert
+
+Line changes:
+
+1.5 UNDER → new alert
+
+Bot rescans:
+
+1.5 UNDER → no duplicate
+
+This is the desired behavior.
+
+⸻
+
+6. DO NOT BLOCK NEW OPPORTUNITIES
+
+Do NOT implement a global cooldown that prevents legitimate new opportunities.
+
+Do NOT use:
+
+* player-level cooldown
+* market-level cooldown
+* sport-level cooldown
+* provider-wide cooldown
+* permanent player suppression
+
+unless an existing safety mechanism already specifically requires it.
+
+The goal is:
+
+duplicate opportunity suppression
+
+not:
+
+alert suppression.
+
+⸻
+
+7. MULTIPLE LEGITIMATE LINES
+
+PrizePicks and Underdog may have multiple legitimate lines.
+
+For example:
+
+PrizePicks:
+
+* 0.5
+* 1.5
+
+Underdog:
+
+* 0.5
+* 1.5
+
+Do not merge them merely because the player and market are the same.
+
+Respect:
+
+* provider
+* source ID
+* event
+* line
+* direction
+
+as opportunity identity.
+
+⸻
+
+8. DELIVERY DEDUP MUST REMAIN DOWNSTREAM
+
+The existing architecture should remain:
+
+INGESTION
+→ PERSISTENCE
+→ MONITORING
+→ EVALUATION
+→ TRACKING
+→ GRADING
+
+then separately:
+
+ALERT ELIGIBILITY
+→ DELIVERY DEDUP
+→ TELEGRAM
+
+Do NOT move deduplication upstream in a way that prevents tracking or grading.
+
+A suppressed alert remains a fully tracked prop.
+
+⸻
+
+9. ALERT HISTORY
+
+/alerts must show actual delivered alerts.
+
+If the same opportunity is evaluated 50 times but delivered once:
+
+/alerts = 1 delivered alert
+
+while:
+
+tracking = all underlying observations/evaluations
+
+Do not make alert history look like monitoring history.
+
+⸻
+
+10. /PICKS
+
+/picks should show current eligible directional opportunities.
+
+It should not repeatedly duplicate the same exact opportunity merely because it has been rescanned.
+
+If a new meaningful line/direction/event opportunity exists, it can appear.
+
+Preserve:
+
+* pregame-only protection
+* football suppression
+* provider identity
+* direction-only qualification
+
+⸻
+
+11. /SLIP
+
+/slip must operate on the current eligible opportunity universe.
+
+Do not let alert deduplication remove an opportunity from the underlying current-pick universe.
+
+The fact that an alert was previously sent does NOT mean the prop disappears from:
+
+* /picks
+* /slip
+* tracking
+* grading
+
+unless it is otherwise ineligible.
+
+⸻
+
+12. FOOTBALL
+
+Football remains:
+
+MONITORED + TRACKED + GRADED
+
+but:
+
+NEVER TELEGRAM DELIVERED
+
+for BOTH:
+
+* Underdog
+* PrizePicks
+
+Do not allow duplicate-control changes to accidentally bypass football suppression.
+
+⸻
+
+13. PREGAME
+
+Preserve the completed strict pregame protection.
+
+No alert may be delivered for:
+
+* STARTED
+* LIVE
+* IN_PROGRESS
+* FINAL
+* COMPLETED
+* other confirmed in-game states
+
+Unknown/unsafe state must not bypass production pregame validation.
+
+Tracking and grading remain intact after event start.
+
+⸻
+
+14. PROVIDER SEPARATION
+
+Deduplication must remain provider-specific.
+
+This:
+
+🐶 Underdog — Max Muncy — Batter Strikeouts — 1.5 UNDER
+
+and:
+
+🟣 PrizePicks — Max Muncy — Batter Strikeouts — 1.5 UNDER
+
+must remain separate opportunities.
+
+Do not cross-suppress them.
+
+⸻
+
+15. SOURCE-ID HANDLING
+
+Preserve the source-ID behavior already implemented.
+
+For the same provider/source ID:
+
+* same line/direction/event → duplicate
+* meaningful line change → new opportunity
+* direction change → new opportunity where appropriate
+
+For distinct source IDs:
+
+keep them distinct.
+
+Do not collapse alternate PrizePicks lines.
+
+⸻
+
+16. TRACKING / GRADING MUST BE UNAFFECTED
+
+This change must not alter the completed universal tracking system.
+
+Even when an alert is suppressed:
+
+* observation persists
+* prop remains tracked
+* prop remains eligible for FPR
+* prop remains eligible for rescoring
+* evidence remains available
+* grading remains available
+* HIT/MISS/PUSH remains available
+* historical analysis remains available
+
+Alert suppression is ONLY a delivery decision.
+
+⸻
+
+17. TESTS
+
+Add focused regression tests proving:
+
+Exact duplicate suppression
+
+* Same provider/source/event/player/market/line/direction does not alert twice.
+* Repeated rescans do not generate duplicate alerts.
+* 50 repeated evaluations still produce one delivered opportunity.
+
+New opportunities
+
+* Line change can create a new alert.
+* Direction change can create a new alert.
+* Event change can create a new alert.
+* Provider change remains independent.
+* New source ID remains independent.
+* Legitimate alternate PP lines remain distinct.
+
+No global suppression
+
+* Same player can generate a legitimate new opportunity.
+* Same market can generate a legitimate new opportunity.
+* Same player/market can alert again after a meaningful line change.
+* Different event can alert independently.
+
+Tracking independence
+
+* Suppressed alert remains tracked.
+* Suppressed alert remains gradeable.
+* Suppressed alert remains in history.
+* Suppressed alert remains eligible for future rescanning.
+* Delivery count does not become tracking count.
+
+Provider
+
+* Underdog and PrizePicks do not cross-deduplicate.
+* Provider labels remain correct.
+
+Football
+
+* Football remains tracked.
+* Football remains gradeable.
+* Football remains blocked from Telegram.
+
+Pregame
+
+* Pregame opportunity can alert.
+* Started/live/final opportunity cannot alert.
+
+Commands/reporting
+
+* /alerts reflects delivered alerts only.
+* /picks reflects current eligible opportunities.
+* /slip reflects current eligible opportunities.
+* Tracking reports remain independent of alert delivery.
+
+Run:
+
+1. Focused alert/dedup/provider/pregame tests.
+2. Full existing test suite.
+3. Python compilation.
+4. git diff --check.
+
+Do NOT weaken existing tests.
+
+⸻
+
+18. PRESERVE EVERYTHING ALREADY COMPLETED
+
+Do NOT regress:
+
+* Underdog active source-ID/FPR lifecycle
+* Continuous full-pool rescanning
+* PrizePicks dynamic sport discovery
+* PrizePicks all-sport support
+* PrizePicks source-ID identity
+* PrizePicks alternate-line handling
+* PrizePicks observation persistence
+* Universal snapshot tracking
+* Universal grading
+* HIT/MISS/PUSH
+* Progressive player history
+* Provider-specific alert labels
+* 🐶 UNDERDOG PICK
+* 🟣 PRIZEPICKS PICK
+* Direction-only qualification
+* Football monitoring/tracking/grading
+* Football Telegram suppression
+* Pregame-only protection
+* No “verify before placing” language
+* Clean restart
+* Unified cadence
+* Adaptive batching
+* max_instances=1
+* Existing safety protections
+* Railway configuration
+* OddsAPI
+* Unrelated providers
+
+Only fix duplicate alert delivery behavior.
+
+⸻
+
+19. FINAL REPORT
+
+Report exactly:
+
+IMPLEMENTED
+
+Every actual change made.
+
+TESTED
+
+* Focused tests: X passed
+* Full suite: X passed
+* Compilation: PASS/FAIL
+* Diff check: PASS/FAIL
+
+UNVERIFIED LIVE
+
+NO LIVE VERIFICATION WAS PERFORMED.
+
+PRESERVED
+
+Confirm:
+
+* Continuous monitoring preserved.
+* FPR preserved as the full-pool rotation.
+* Universal tracking preserved.
+* Universal grading preserved.
+* Provider separation preserved.
+* Provider-specific alert labels preserved.
+* Direction-only qualification preserved.
+* Pregame protection preserved.
+* Football remains monitored/tracked/graded but blocked from Telegram.
+* Alert deduplication remains delivery-only.
+* Railway was not restarted.
+* Railway was not deployed.
+* No production data was fabricated.
+* No test alerts were sent.
+
+🔴 FINAL INSTRUCTION
+
+DO NOT RUN LIVE VERIFICATION.
+
+DO NOT RESTART RAILWAY.
+
+DO NOT DEPLOY RAILWAY.
+
+DO NOT SEND TELEGRAM COMMANDS.
+
+DO NOT WAIT FOR NATURAL ALERTS.
+
+Make the smallest targeted changes necessary.
+
+The desired behavior is:
+
+Every active pregame prop continues being rescanned.
+
+Exact same opportunity → no repeated alert.
+
+Meaningful new opportunity → new alert allowed.
+
+Tracking/grading never stops because an alert was suppressed.
