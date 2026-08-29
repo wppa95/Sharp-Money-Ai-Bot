@@ -259,6 +259,9 @@ async def test_underdog_cap_disabled_when_limit_is_zero():
                 "Test Player", "TeamA", "NBA", "Points",
                 25.5, 26.0,
                 game_time=None,
+                score=MagicMock(total=75),
+                validation=MagicMock(has_supporting_data=True),
+                decision=MagicMock(recommendation="OVER", confidence=80),
             )
 
     assert result.sent is True
@@ -284,6 +287,9 @@ async def test_underdog_allowed_when_under_cap():
             "Test Player", "TeamA", "NBA", "Points",
             25.5, 26.0,
             game_time=None,
+            score=MagicMock(total=75),
+            validation=MagicMock(has_supporting_data=True),
+            decision=MagicMock(recommendation="OVER", confidence=80),
         )
 
     assert result.sent is True

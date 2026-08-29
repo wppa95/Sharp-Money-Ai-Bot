@@ -6,7 +6,7 @@ Coverage:
   - Confidence scoring for each dimension (player, stat, sport, recency)
   - Confidence threshold enforcement (≥80 fires, <80 suppressed)
   - format_pp_reference_alert: content checks, disclaimer presence
-  - run_pp_reference_cycle: only S/A tier props, dedup behaviour
+  - run_pp_reference_cycle: canonical evidence gate, tier-neutral delivery, dedup
 """
 
 from __future__ import annotations
@@ -500,6 +500,9 @@ class TestRunPpReferenceCycle:
             "line":      line,
             "tier":      tier,
             "total":     85,
+            "direction": "OVER",
+            "evidence_available": True,
+            "game_time": datetime.utcnow() + timedelta(hours=1),
         }
 
     @pytest.mark.asyncio
@@ -539,8 +542,8 @@ class TestRunPpReferenceCycle:
         assert count == 1
 
     @pytest.mark.asyncio
-    async def test_b_tier_prop_not_sent(self):
-        """B-tier props are below the quality bar for PP reference alerts."""
+    async def test_b_tier_prop_is_not_blocked_by_legacy_label(self):
+        """B-tier metadata cannot block an evidence-backed direction."""
         db   = self._make_db()
         bot  = self._make_bot()
         seen: dict = {}
@@ -555,11 +558,11 @@ class TestRunPpReferenceCycle:
                 now          = _NOW,
             )
 
-        assert count == 0
-        mock_bc.assert_not_called()
+        assert count == 1
+        mock_bc.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_pass_tier_prop_not_sent(self):
+    async def test_pass_label_is_not_blocked_when_directional_and_evidenced(self):
         db   = self._make_db()
         bot  = self._make_bot()
         seen: dict = {}
@@ -574,7 +577,7 @@ class TestRunPpReferenceCycle:
                 now          = _NOW,
             )
 
-        assert count == 0
+        assert count == 1
 
     @pytest.mark.asyncio
     async def test_dedup_prevents_second_alert_same_prop_line(self):
@@ -640,8 +643,8 @@ class TestRunPpReferenceCycle:
                 now          = _NOW,
             )
 
-        # New key format: (player, sport, stat) → (timestamp, line)
-        assert ("LeBron James", "NBA", "points") in seen
+        # Provider/source/event/direction identity is retained in the claim.
+        assert ("LeBron James", "NBA", "points", "PrizePicks", "", "", "OVER") in seen
 
     @pytest.mark.asyncio
     async def test_empty_scored_props_returns_zero(self):
@@ -660,25 +663,30 @@ class TestRunPpReferenceCycle:
         assert count == 0
 
     @pytest.mark.asyncio
-    async def test_no_high_tier_props_returns_zero(self):
+    async def test_legacy_tier_labels_do_not_gate_delivery(self):
         db   = self._make_db()
         bot  = self._make_bot()
         seen: dict = {}
 
         props = [
             self._make_scored_prop(tier="B"),
-            self._make_scored_prop(tier="PASS"),
+            self._make_scored_prop(player="Steph Curry", tier="PASS"),
         ]
 
-        count = await run_pp_reference_cycle(
-            db           = db,
-            bot          = bot,
-            chat_ids     = [123],
-            scored_props = props,
-            alerted_set  = seen,
-            now          = _NOW,
-        )
-        assert count == 0
+        with patch(
+            "alerts.broadcast_alert",
+            new_callable=AsyncMock,
+            return_value={"sent": 1, "failed": 0},
+        ):
+            count = await run_pp_reference_cycle(
+                db           = db,
+                bot          = bot,
+                chat_ids     = [123],
+                scored_props = props,
+                alerted_set  = seen,
+                now          = _NOW,
+            )
+        assert count == 2
 
     @pytest.mark.asyncio
     async def test_broadcast_failure_does_not_raise(self):

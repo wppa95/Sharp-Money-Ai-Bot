@@ -6,7 +6,7 @@ Covers:
   - _compute_proxy_confidence (all 4 scoring dimensions)
   - build_player_prop_market_comparison (full + below-threshold + re-entry)
   - format_player_prop_market_alert (structure, labels, confidence display)
-  - run_player_prop_market_cycle (dedup, direction-only admission, alert sent)
+  - run_player_prop_market_cycle (dedup, direction/evidence admission, alert sent)
   - _is_b_plus (legacy compatibility helper)
   - Provider priority (PP > UD)
   - Movement calculation
@@ -540,7 +540,10 @@ class TestRunCycle:
     def _make_bot(self):
         return MagicMock()
 
-    def _scored_prop(self, tier="S", line=5.5, prev_line=5.0, avg=0, sta=0):
+    def _scored_prop(
+        self, tier="S", line=5.5, prev_line=5.0, avg=0, sta=0,
+        evidence_available=True,
+    ):
         """Build a minimal scored_prop dict.
 
         avg / sta default to 0 so a B-tier prop is a weak-B (suppressed) unless
@@ -556,16 +559,18 @@ class TestRunCycle:
             "avg":       avg,
             "sta":       sta,
             "total":     50,
+            "evidence_available": evidence_available,
+            "game_time": datetime.utcnow() + timedelta(hours=1),
         }
 
-    def test_no_sa_props_sends_zero_alerts(self):
-        """Weak B-tier and PASS props are skipped entirely."""
+    def test_missing_evidence_sends_zero_alerts(self):
+        """Directional props without legitimate evidence stay monitoring-only."""
         db   = self._make_db()
         bot  = self._make_bot()
         # Explicit weak-B: avg=2, sta=1 — both below B+ thresholds
         props = [
-            self._scored_prop(tier="B", avg=2, sta=1),
-            self._scored_prop(tier="PASS"),
+            self._scored_prop(tier="B", avg=2, sta=1, evidence_available=False),
+            self._scored_prop(tier="PASS", evidence_available=False),
         ]
         alerted: dict = {}
 
@@ -813,6 +818,8 @@ class TestRunCycleBPlus:
             "avg":       avg,
             "sta":       sta,
             "total":     52,
+            "evidence_available": True,
+            "game_time": datetime.utcnow() + timedelta(hours=1),
         }
 
     def test_weak_b_directional_prop_is_admitted(self):
