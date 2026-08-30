@@ -303,14 +303,18 @@ async def run_pp_reference_cycle(
     """
     Run the PP reference engine over the current cycle's high-scoring props.
 
-    Only props with tier in ("S", "A") are considered.  Each candidate is
-    matched against PropLineHistory PP rows (one DB query for the full batch)
-    and a reference alert is broadcast for every match that (a) meets the
-    confidence threshold and (b) has not been alerted in this session.
+    Each directional, evidence-backed candidate is matched against
+    PropLineHistory PP rows (one DB query for the full batch). A reference
+    alert is broadcast only when the candidate remains fresh, provider-valid,
+    pregame, and not already claimed within the deduplication window.
 
     Returns the number of reference alerts sent.
     """
-    from alerts import broadcast_alert, format_pp_reference_alert  # local to avoid circular
+    from alerts import (  # local to avoid circular
+        _is_fresh_delivery_line,
+        broadcast_alert,
+        format_pp_reference_alert,
+    )
 
     if now is None:
         now = datetime.utcnow()
@@ -340,6 +344,20 @@ async def run_pp_reference_cycle(
         sport     = p.get("sport", "")
         line      = float(p.get("line") or 0.0)
         direction = str(p.get("direction") or "").strip().upper()
+        provider = str(p.get("provider") or "PrizePicks").strip()
+        if provider.upper() not in {"UNDERDOG", "PRIZEPICKS"}:
+            logger.debug(
+                "pp_reference: invalid provider blocked — %s / %s / %s",
+                provider, player, stat_type,
+            )
+            continue
+        fetched_at = p.get("fetched_at")
+        if not _is_fresh_delivery_line(fetched_at):
+            logger.debug(
+                "pp_reference: stale provider line blocked — %s / %s / %s",
+                player, stat_type, provider,
+            )
+            continue
         evidence_available = bool(
             p.get("evidence_available")
             or getattr(p.get("validation"), "has_supporting_data", False)
@@ -390,7 +408,7 @@ async def run_pp_reference_cycle(
             sport               = sport,
             stat_type           = stat_type,
             line_value          = line,
-            fetched_at          = now,   # treat as fresh (already filtered to current cycle)
+            fetched_at          = fetched_at if isinstance(fetched_at, datetime) else now,
             prop_history_rows   = pp_rows,
             now                 = now,
             confidence_threshold = confidence_threshold,
@@ -399,7 +417,7 @@ async def run_pp_reference_cycle(
             continue
 
         _dedup_identity = {
-            "provider": p.get("provider") or "PrizePicks",
+            "provider": provider,
             "source_id": p.get("source_id") or p.get("external_id") or "",
             "event_id": p.get("event_id") or p.get("game_id") or "",
             "direction": direction,

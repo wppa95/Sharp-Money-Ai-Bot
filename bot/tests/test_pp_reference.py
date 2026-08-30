@@ -492,6 +492,8 @@ class TestRunPpReferenceCycle:
         stat_type="points",
         line=25.5,
         tier="A",
+        provider="PrizePicks",
+        fetched_at=None,
     ) -> dict:
         return {
             "player":    player,
@@ -503,6 +505,8 @@ class TestRunPpReferenceCycle:
             "direction": "OVER",
             "evidence_available": True,
             "game_time": datetime.utcnow() + timedelta(hours=1),
+            "provider": provider,
+            "fetched_at": fetched_at,
         }
 
     @pytest.mark.asyncio
@@ -578,6 +582,35 @@ class TestRunPpReferenceCycle:
             )
 
         assert count == 1
+
+    @pytest.mark.asyncio
+    async def test_stale_or_invalid_provider_line_cannot_broadcast(self):
+        db = self._make_db()
+        bot = self._make_bot()
+        props = [
+            self._make_scored_prop(
+                fetched_at=datetime.utcnow() - timedelta(hours=7),
+            ),
+            self._make_scored_prop(
+                player="Steph Curry",
+                provider="UnknownBook",
+                fetched_at=datetime.utcnow(),
+            ),
+        ]
+
+        with patch("alerts.broadcast_alert", new_callable=AsyncMock) as mock_bc:
+            mock_bc.return_value = {"sent": 1, "failed": 0}
+            count = await run_pp_reference_cycle(
+                db=db,
+                bot=bot,
+                chat_ids=[123],
+                scored_props=props,
+                alerted_set={},
+                now=datetime.utcnow(),
+            )
+
+        assert count == 0
+        mock_bc.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_dedup_prevents_second_alert_same_prop_line(self):

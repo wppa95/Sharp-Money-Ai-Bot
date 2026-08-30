@@ -20,10 +20,18 @@ legitimate evidence. Evidence detectors may accept real history, explicit
 supporting validation, or a populated evidence/intelligence trace, but ordinary
 decision metadata is not evidence.
 
+Direct compatibility betting broadcasters must also preserve typed line
+freshness, provider validation, pregame timing, provider-owned identity,
+deduplication, and claim release. Generic Telegram transport remains available
+for operational notices such as health or quota warnings; those messages are
+not betting-alert paths and must not be forced through prop qualification.
+
 **Why:** A market-only bypass turned line movement into an actionable alert without
 player-result support, violating the separation between monitoring and betting
 recommendations.
 
 **How to apply:** Keep evaluating, persisting observations, and rescanning
 evidence-missing props. Gate all direct and queued delivery paths through the
-shared direction-and-evidence check.
+shared direction-and-evidence check, then apply provider, freshness, timing,
+identity, deduplication, claim/release, and rate safeguards at the delivery
+boundary. Keep non-betting operational broadcasts explicitly separate.

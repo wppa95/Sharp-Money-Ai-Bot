@@ -16,8 +16,9 @@ Design principles:
   - "Best available line" = the highest-confidence live line regardless of source
   - Proxy Match Confidence measures provider agreement / proxy reliability —
     NOT betting confidence. Labelled explicitly as "Proxy Match Confidence".
-  - Alert qualification is a valid OVER/UNDER direction only.  Score,
-    confidence, evidence, and legacy tier labels remain informational.
+  - Alert qualification requires a valid OVER/UNDER direction plus legitimate
+    player-result evidence. Score, confidence, and legacy tier labels remain
+    informational.
   - Per-session dedup key: (player_name, sport, stat_type, line_str)
   - Old format_pp_reference_alert remains as dead code; this module owns the
     active alert path. No duplicate alert paths exist.
@@ -688,7 +689,7 @@ async def run_player_prop_market_cycle(
 
     Returns the number of alerts sent.
     """
-    from alerts import broadcast_alert  # local to avoid circular
+    from alerts import _is_fresh_delivery_line, broadcast_alert  # local to avoid circular
 
     if now is None:
         now = datetime.utcnow()
@@ -718,6 +719,20 @@ async def run_player_prop_market_cycle(
         sport     = p.get("sport", "")
         line      = float(p.get("line") or 0.0)
         prev_line = p.get("prev_line")   # may be None
+        provider = str(p.get("provider") or "PrizePicks").strip()
+        if provider.upper() not in {"UNDERDOG", "PRIZEPICKS"}:
+            logger.debug(
+                "player_prop_market: invalid provider blocked — %s / %s / %s",
+                provider, player, stat_type,
+            )
+            continue
+        fetched_at = p.get("fetched_at")
+        if not _is_fresh_delivery_line(fetched_at):
+            logger.debug(
+                "player_prop_market: stale provider line blocked — %s / %s / %s",
+                player, stat_type, provider,
+            )
+            continue
         # Preserve the compact legacy key for old callers that do not provide
         # source/event identity, but use the provider-owned identity whenever
         # the scored observation has one.  This keeps alternate lines and
@@ -727,7 +742,7 @@ async def run_player_prop_market_cycle(
         dedup_identity = {}
         if source_id or event_id:
             dedup_identity = {
-                "provider": p.get("provider") or "PrizePicks",
+                "provider": provider,
                 "source_id": source_id,
                 "event_id": event_id,
                 "direction": p.get("direction") or "",
@@ -778,7 +793,7 @@ async def run_player_prop_market_cycle(
             stat_type     = stat_type,
             ud_line       = line,
             previous_line = prev_line,
-            fetched_at    = now,
+            fetched_at    = fetched_at if isinstance(fetched_at, datetime) else now,
             pp_rows       = pp_rows,
             min_confidence = confidence_threshold,
             now           = now,

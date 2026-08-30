@@ -1,0 +1,389 @@
+Continue from the current Sharp Money Bot implementation.
+
+This is the FINAL STRICT AUDIT/CLEANUP for the retired qualification framework and delivery gate.
+
+Do NOT redesign anything.
+Do NOT rewrite working systems.
+Do NOT change unrelated behavior.
+Do NOT change scoring, BQ, MQ, confidence, provider ingestion, FPR rotation, tracking, grading, scheduler, or database schema unless absolutely required for this specific cleanup.
+
+Do NOT create a checkpoint until this audit and any required targeted fixes are complete.
+
+1. RETIRED FRAMEWORK MUST BE COMPLETELY INERT
+
+Audit the entire callable/current code path and verify that none of these can influence current monitoring, evaluation, qualification, FPR rotation, grading eligibility, or delivery:
+
+* Watchlist
+* Near-Miss
+* PASS
+* Rejected
+* S-tier
+* A-tier
+* B-tier
+* C-tier
+* Tier 1
+* Tier 2
+* decision_tier
+* legacy alert-tier mappings
+
+Historical records containing these values may remain intact.
+
+Do NOT delete historical data.
+
+The requirement is that these are historical/compatibility metadata only and cannot block or qualify current behavior.
+
+2. NO CURRENT PASS CLASSIFICATION
+
+Current no-direction evaluations must remain simply:
+
+No valid direction
+
+They must NOT generate or persist an active PASS decision.
+
+They must remain eligible for:
+
+* monitoring
+* FPR rotation
+* rescanning
+* tracking
+* future evaluation
+* future evidence enrichment
+
+Do not fabricate a direction.
+
+3. NO REJECTED BLOCKER
+
+A current prop must never be removed from monitoring because it was previously rejected or non-actionable.
+
+Previously rejected/non-actionable props must continue through the active FPR lifecycle.
+
+Historical rejection metadata can remain readable.
+
+4. NO S/A/B/C OR TIER GATES
+
+Verify there is no executable current logic that requires a specific:
+
+* S/A/B/C classification
+* Tier 1
+* Tier 2
+* decision_tier
+
+for:
+
+* evaluation
+* rescanning
+* evidence
+* direction
+* delivery
+* grading
+
+If any such dependency remains, remove only that dependency.
+
+Do not replace it with another classification gate.
+
+5. CANONICAL DELIVERY GATE MUST BE UNIVERSAL
+
+Every callable path capable of producing a betting alert must ultimately use the same delivery policy.
+
+Required:
+
+Valid OVER/UNDER
++
+Legitimate supporting evidence
++
+Existing safety protections
+
+Safety protections include:
+
+* pregame/event-start protection
+* football exclusion
+* provider validation
+* current/fresh line validation
+* provider/source identity
+* duplicate/effective-alert suppression
+* atomic claim/release
+* rate/flood protections
+* other legitimate operational safeguards
+
+The following MUST NOT be able to bypass the canonical policy:
+
+* Underdog delivery
+* PrizePicks delivery
+* FPR delivery
+* deliver_pp()
+* Stable Refresh compatibility delivery
+* Watchlist/actionable compatibility paths
+* /picks
+* /slip
+* /alerts
+* dormant/direct broadcaster paths
+
+If a compatibility path remains callable, make it delegate to the canonical policy rather than maintaining a separate qualification gate.
+
+6. EVIDENCE MUST ACTUALLY BE REQUIRED
+
+Do not merely pass evidence information into the delivery gate.
+
+Verify that legitimate evidence is actually required.
+
+These must NOT qualify as evidence:
+
+* score metadata
+* tier metadata
+* decision metadata
+* confidence alone
+* market movement alone
+* provider identity alone
+* generic non-result fields
+
+A market-only signal without player-result evidence must remain monitoring context only.
+
+Do NOT reintroduce the market-signal bypass.
+
+7. FOOTBALL HARD EXCLUSION
+
+Preserve the existing football safety rule.
+
+Football/gridiron must NEVER reach betting delivery through any path.
+
+Preserve monitoring/tracking/history behavior as already implemented.
+
+Keep supported non-football sports, including:
+
+* MLB
+* NBA
+* WNBA
+* NHL
+* Tennis
+* FIFA
+* Soccer
+* MLS
+* CS
+* CS2
+* DOTA
+* LOL
+* VAL
+* PGA
+* BKFC
+* MMA
+* Boxing
+* KBO
+* NPB
+* Racing
+* Motorcycle
+* USAC
+* Outlaws
+* HighLimit
+* and every other legitimate supported non-football provider sport
+
+Do not fabricate unsupported sports.
+
+8. PREGAME PROTECTION
+
+Preserve:
+
+* pregame eligibility
+* event-start blocking
+* stale-line protection
+
+Started/live props may remain in historical tracking/grading but cannot create new betting alerts.
+
+9. DEDUPLICATION
+
+Preserve provider-aware alert identity:
+
+* Provider
+* Source ID
+* Event ID
+* Player
+* Sport
+* Market/stat
+* Line
+* Direction
+
+Repeated identical effective alerts remain suppressed.
+
+Meaningful line/direction/source/event/provider changes remain eligible for a new alert.
+
+Do not disable monitoring when delivery is deduplicated.
+
+10. FPR MUST REMAIN CLASSIFICATION-NEUTRAL
+
+Do not let any retired classification influence FPR ordering.
+
+Preserve:
+
+* active source-ID universe
+* bounded batches
+* cursor progression
+* cursor wrapping
+* new props
+* line movers
+* remaining active props
+* continuous rescanning
+* no starvation
+* multiple sports
+* provider separation
+
+Do not create another rotation.
+
+11. HISTORICAL INTEGRITY
+
+Do NOT delete or rewrite historical:
+
+* PASS
+* REJECTED
+* Watchlist/Near-Miss
+* S/A/B/C
+* tier
+* decision metadata
+
+Historical data must remain readable where needed.
+
+Only current behavior must become classification-neutral.
+
+12. REGRESSION TESTS
+
+Add/update focused tests proving:
+
+Retired framework
+
+* Current PASS is not generated.
+* Current Watchlist/Near-Miss is not generated.
+* Current Rejected does not block monitoring.
+* S/A/B/C cannot gate evaluation or delivery.
+* Tier 1/Tier 2 cannot gate evaluation or delivery.
+* decision_tier cannot gate evaluation or delivery.
+* Historical metadata remains readable.
+
+Evidence
+
+* Valid direction without legitimate evidence cannot deliver.
+* Market movement alone cannot create an actionable pick.
+* Confidence alone cannot qualify delivery.
+* Metadata cannot masquerade as evidence.
+
+Universal delivery
+
+* Underdog uses canonical delivery gate.
+* PrizePicks uses canonical delivery gate.
+* deliver_pp() uses canonical delivery gate.
+* FPR uses canonical delivery gate.
+* Stable Refresh compatibility cannot bypass it.
+* Dormant/direct delivery paths cannot bypass it.
+* /picks respects current direction/evidence rules.
+* /slip respects current direction/evidence rules.
+
+Safety
+
+* Football cannot reach any betting delivery path.
+* Live/in-game props cannot generate new alerts.
+* Stale lines cannot deliver.
+* Duplicate effective alerts remain suppressed.
+* Claim release still works after unsuccessful/exceptional delivery.
+
+13. VALIDATION
+
+Run:
+
+* focused strict-audit regression suite
+* full existing bot test suite
+* Python compilation
+* git diff –check
+
+Do NOT weaken unrelated tests.
+
+Do NOT deploy Railway.
+Do NOT restart Railway.
+Do NOT send Telegram test alerts.
+Do NOT use /testalert.
+
+14. LIVE VERIFICATION
+
+If production/Telegram access is available without restarting or deploying, inspect the existing live command paths.
+
+Do not fabricate results.
+
+If live verification cannot be performed from this environment, explicitly report:
+
+LIVE VERIFICATION: UNVERIFIED
+
+Do not claim live success based on local tests.
+
+15. FINAL REPORT
+
+Return exactly:
+
+CHANGES
+
+What was actually changed.
+
+RETIRED FRAMEWORK
+
+For each of these state whether it still influences current behavior:
+
+* Watchlist
+* Near-Miss
+* PASS
+* Rejected
+* S/A/B/C
+* Tier 1
+* Tier 2
+* decision_tier
+
+DELIVERY GATE
+
+State exactly what is required for delivery.
+
+EVIDENCE
+
+Confirm whether metadata/market movement can bypass evidence requirements.
+
+TESTS
+
+Focused results, full-suite results, compilation, diff check.
+
+PRESERVED
+
+Confirm the existing:
+
+* FPR lifecycle
+* continuous rescanning
+* provider separation
+* Underdog
+* PrizePicks/PropLine
+* football exclusion
+* soccer/FIFA/MLS
+* supported non-football sports
+* evidence providers
+* grading
+* tracking
+* deduplication
+* pregame protection
+* stale-line protection
+* scheduler
+* adaptive batching
+* max_instances=1
+* historical data
+
+LIVE VERIFICATION
+
+Clearly state PASS or UNVERIFIED.
+
+🔴 FINAL ACCEPTANCE
+
+Do NOT create a checkpoint unless:
+
+Monitor → Evaluate → Direction → Evidence → Safety → Deliver
+
+is the only active qualification/delivery framework.
+
+No retired classification may qualify or block current delivery.
+
+No market-only bypass may create a pick.
+
+No metadata may masquerade as evidence.
+
+Historical metadata may remain.
+
+Do not change anything unrelated.

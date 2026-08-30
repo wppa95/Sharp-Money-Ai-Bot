@@ -14,6 +14,7 @@ os.environ.setdefault("TELEGRAM_TOKEN", "test:token")
 
 import market_engine as me
 from alerts import AlertDelivery, _is_fresh_delivery_line
+from engine import player_prop_market, pp_reference, pregame_watch
 
 
 @pytest.mark.parametrize("sport", ["WNBA", "NHL", "SOCCER", "CS", "TENNIS", "MLB", "NFL"])
@@ -63,3 +64,25 @@ def test_live_scan_paths_pass_observation_timestamp_to_delivery():
         me._full_pool_rescan_job,
     ):
         assert "fetched_at" in inspect.getsource(fn)
+
+
+def test_direct_compatibility_broadcasters_keep_canonical_safety_boundaries():
+    for fn in (
+        player_prop_market.run_player_prop_market_cycle,
+        pp_reference.run_pp_reference_cycle,
+        pregame_watch.PregameWatchEngine.pregame_scan,
+    ):
+        source = inspect.getsource(fn)
+        assert "_canonical_tier_delivery_gate" in source
+        assert "_is_fresh_delivery_line" in source
+        assert "is_game_alertable" in source
+        assert "provider" in source
+        assert "broadcast_alert" in source
+
+    for fn in (
+        player_prop_market.run_player_prop_market_cycle,
+        pp_reference.run_pp_reference_cycle,
+    ):
+        source = inspect.getsource(fn)
+        assert "_try_claim_prop_delivery" in source
+        assert "_release_prop_delivery_claim" in source

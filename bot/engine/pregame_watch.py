@@ -403,7 +403,7 @@ class PregameWatchEngine:
             logger.warning("pregame_watch.pregame_scan: UD DB error: %s", exc)
             return 0
 
-        from alerts import broadcast_alert
+        from alerts import _is_fresh_delivery_line, broadcast_alert
         from engine.timing import is_game_alertable
 
         for key, entry in targets:
@@ -425,11 +425,29 @@ class PregameWatchEngine:
             # Update current Underdog line
             ud_row = ud_index.get((player, stat))
             if ud_row:
+                ud_provider = str(getattr(ud_row, "provider", None) or "Underdog").strip()
+                if ud_provider.upper() != "UNDERDOG":
+                    logger.debug(
+                        "pregame_watch: invalid provider blocked — %s / %s / %s",
+                        ud_provider, player, stat,
+                    )
+                    continue
+                ud_fetched_at = getattr(ud_row, "fetched_at", None)
+                if not _is_fresh_delivery_line(ud_fetched_at):
+                    logger.debug(
+                        "pregame_watch: stale provider line blocked — %s / %s",
+                        player, stat,
+                    )
+                    continue
                 entry.current_lines["Underdog"] = WatchLine(
                     provider   = "Underdog",
                     emoji      = "🐶",
                     line_value = float(ud_row.line_value or 0),
-                    fetched_at = now,
+                    fetched_at = (
+                        ud_fetched_at
+                        if isinstance(ud_fetched_at, datetime)
+                        else now
+                    ),
                 )
 
             # Compute movement vs opening lines
@@ -451,6 +469,16 @@ class PregameWatchEngine:
                 ud_line_val = entry.opening_lines["Underdog"].line_value
 
             if ud_line_val is None:
+                continue
+            selected_ud_line = (
+                entry.current_lines.get("Underdog")
+                or entry.opening_lines.get("Underdog")
+            )
+            if (
+                selected_ud_line is None
+                or selected_ud_line.provider.upper() != "UNDERDOG"
+                or not _is_fresh_delivery_line(selected_ud_line.fetched_at)
+            ):
                 continue
 
             # Build market comparison — Underdog + PrizePicks only

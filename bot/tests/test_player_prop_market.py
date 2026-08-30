@@ -542,7 +542,7 @@ class TestRunCycle:
 
     def _scored_prop(
         self, tier="S", line=5.5, prev_line=5.0, avg=0, sta=0,
-        evidence_available=True,
+        evidence_available=True, provider="PrizePicks", fetched_at=None,
     ):
         """Build a minimal scored_prop dict.
 
@@ -561,6 +561,8 @@ class TestRunCycle:
             "total":     50,
             "evidence_available": evidence_available,
             "game_time": datetime.utcnow() + timedelta(hours=1),
+            "provider": provider,
+            "fetched_at": fetched_at,
         }
 
     def test_missing_evidence_sends_zero_alerts(self):
@@ -588,6 +590,36 @@ class TestRunCycle:
             ))
         assert sent == 0
         m.assert_not_called()
+
+    def test_stale_or_invalid_provider_line_cannot_broadcast(self):
+        db = self._make_db()
+        bot = self._make_bot()
+        props = [
+            self._scored_prop(
+                fetched_at=datetime.utcnow() - timedelta(hours=7),
+            ),
+            {
+                **self._scored_prop(
+                    provider="UnknownBook",
+                    fetched_at=datetime.utcnow(),
+                ),
+                "player": "Other Player",
+            },
+        ]
+
+        with patch("alerts.broadcast_alert", new_callable=AsyncMock) as mock_bc:
+            mock_bc.return_value = {"sent": 1}
+            sent = _run(run_player_prop_market_cycle(
+                db=db,
+                bot=bot,
+                chat_ids=[123],
+                scored_props=props,
+                alerted_set={},
+                now=datetime.utcnow(),
+            ))
+
+        assert sent == 0
+        mock_bc.assert_not_called()
 
     def test_s_tier_prop_sends_alert(self):
         """S-tier props with sufficient confidence trigger broadcast."""
