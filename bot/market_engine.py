@@ -4203,6 +4203,7 @@ async def underdog_job(context) -> None:
                             getattr(_dq_snap, "game_status", None)
                             or getattr(_dq_snap, "provider_status", None)
                         ),
+                        fetched_at          = getattr(_dq_snap, "fetched_at", None),
                         score               = _dq_score,
                         new_prop            = _dq_is_new,
                         validation          = _dq_val,
@@ -5207,6 +5208,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         getattr(_sr_snap, "game_status", None)
                         or getattr(_sr_snap, "provider_status", None)
                     ),
+                    fetched_at          = getattr(_sr_snap, "fetched_at", None),
                     score               = _sr_score,
                     validation          = _sr_val,
                     decision            = _sr_dec,
@@ -5950,6 +5952,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                              getattr(_fpr_snap, "game_status", None)
                              or getattr(_fpr_snap, "provider_status", None)
                          ),
+                        fetched_at      = getattr(_fpr_snap, "fetched_at", None),
                          score           = _fpr_score,
                          validation      = _fpr_val,
                          decision        = _fpr_dec,

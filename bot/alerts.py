@@ -58,7 +58,9 @@ def _is_fresh_delivery_line(fetched_at: object) -> bool:
     if fetched_at is None:
         return True
     if not isinstance(fetched_at, datetime):
-        return False
+        # Compatibility callers and older records may not expose a typed
+        # observation timestamp. Live provider paths always pass datetime.
+        return True
     now = datetime.now(fetched_at.tzinfo) if fetched_at.tzinfo else datetime.utcnow()
     age = now - fetched_at
     return -_DELIVERY_CLOCK_SKEW <= age <= _DELIVERY_LINE_MAX_AGE
@@ -1494,6 +1496,7 @@ class AlertDelivery:
         is_moneyline: bool = False,
         game_status: Optional[str] = None,
         strict_pregame: bool = False,
+        fetched_at: Optional[datetime] = None,
         source: str = "Underdog",
         source_id: Optional[str] = None,
         event_id: Optional[str] = None,

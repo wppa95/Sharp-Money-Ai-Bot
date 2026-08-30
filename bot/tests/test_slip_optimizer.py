@@ -213,14 +213,12 @@ class TestOptimizeSlip:
         result = optimize_slip(candidates, n_legs=10)
         assert len(result.legs) <= 6
 
-    def test_best_tier_selected_first(self):
-        s_pick = _make_rec(player_name="S Pick", team="T1", tier="S", confidence=88.0)
-        b_pick = _make_rec(player_name="B Pick", team="T2", tier="B", confidence=60.0)
+    def test_confidence_not_legacy_tier_selects_first_leg(self):
+        s_pick = _make_rec(player_name="S Pick", team="T1", tier="S", confidence=60.0)
+        b_pick = _make_rec(player_name="B Pick", team="T2", tier="B", confidence=90.0)
         a_pick = _make_rec(player_name="A Pick", team="T3", tier="A", confidence=73.0)
-        result = optimize_slip([b_pick, a_pick, s_pick], n_legs=3)
-        if len(result.legs) >= 1:
-            # First leg should be S tier (sorted by tier_rank then confidence)
-            assert result.legs[0].tier == "S"
+        result = optimize_slip([s_pick, a_pick, b_pick], n_legs=3)
+        assert result.legs[0] is b_pick
 
     def test_soft_blocked_adds_warning(self):
         # Two players from same team → soft block (corr ~0.65)
