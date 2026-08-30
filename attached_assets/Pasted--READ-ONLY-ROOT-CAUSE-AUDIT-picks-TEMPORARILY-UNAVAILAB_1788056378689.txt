@@ -1,0 +1,478 @@
+🔴 READ-ONLY ROOT-CAUSE AUDIT — /picks TEMPORARILY UNAVAILABLE
+
+Do NOT modify any code.
+
+Do NOT restart the bot.
+
+Do NOT deploy.
+
+Do NOT create a task or checkpoint.
+
+Do NOT send /testalert or fabricate/force a pick.
+
+Do NOT change scoring, delivery gates, database schema, scheduler behavior, FPR, ingestion, or provider behavior.
+
+This is a READ-ONLY ROOT-CAUSE AUDIT ONLY.
+
+We just performed live Telegram verification against the running Railway bot.
+
+The current /picks response is:
+
+⚠️ Picks are temporarily unavailable because monitoring data is busy. Please retry shortly; the scan continues independently.
+
+We sent /picks twice consecutively and received the same response both times.
+
+This means the issue is reproducible.
+
+⸻
+
+1. LIVE EVIDENCE
+
+Immediately before the /picks tests, /health reported:
+
+Underdog
+
+* Status: ok
+* Last scan: 4m ago
+* Observed: 19,226
+* Tracked active: 24,613
+* Evaluated: 517
+* Directional/actionable: 723
+* Actionable persisted: 723
+* Delivered alerts: 0
+* Pending grading: 723
+* Resolved: 0
+
+PrizePicks
+
+* Status: ok
+* Last scan: 2m ago
+* Observed: 3,023
+* Tracked active: 574
+* Evaluated: 3,023
+* Directional/actionable: 0
+* Actionable persisted: 0
+* Delivered alerts: 0
+* Pending grading: 0
+* Resolved: 0
+
+The bot heartbeat was healthy.
+
+Underdog and PrizePicks fetches were healthy.
+
+⸻
+
+2. /tracking EVIDENCE
+
+Immediately afterward, /tracking reported:
+
+* Historical observations: 35,090
+* Active tracked props: 25,187
+* Directional opportunities: 21,675
+* Pending grading: 21,675
+
+Provider populations:
+
+PrizePicks
+
+* Active: 574
+* Observed: 3,223
+* Directional: 20
+* Delivered: 10
+* Pending: 20
+* Resolved: 0
+
+Underdog
+
+* Active: 24,613
+* Observed: 31,867
+* Directional: 21,655
+* Delivered: 472
+* Pending: 21,655
+* Resolved: 0
+
+Therefore there is clearly substantial persisted directional data.
+
+⸻
+
+3. /grade EVIDENCE
+
+/grade reported:
+
+* Tracked props: 25,187
+* Stored picks: 21,675
+* Pending: 21,675
+* Resolved: 0
+
+This confirms the directional opportunities are persisted and gradeable.
+
+⸻
+
+4. ROOT-CAUSE QUESTION
+
+Determine exactly why /picks returns the busy-data fallback despite:
+
+* Healthy provider fetches
+* Healthy monitoring heartbeat
+* 25,187 active tracked props
+* 21,675 persisted directional opportunities
+* 21,675 pending grading records
+* 723 current Underdog directional opportunities
+* 20 current PrizePicks directional opportunities according to tracking
+* Previously delivered alerts existing in the system
+
+Do NOT assume the busy response is correct merely because it is a timeout safeguard.
+
+Identify the precise condition that triggers it.
+
+⸻
+
+5. TRACE THE COMPLETE /picks EXECUTION PATH
+
+Read-only trace the actual production code path for /picks.
+
+Document:
+
+1. Telegram command handler.
+2. Database acquisition.
+3. Any locks.
+4. Any semaphore.
+5. Any monitoring-busy flag.
+6. Any timeout.
+7. Any asyncio.wait_for.
+8. Any database transaction.
+9. Any database connection pool interaction.
+10. Any concurrent monitoring task interaction.
+11. Any provider fetch interaction.
+12. Any current-row query.
+13. Any FPR/monitoring interaction.
+14. Any retry behavior.
+15. Exact condition that causes the busy fallback.
+16. Exact timeout duration.
+17. Whether the command waits for monitoring work to finish.
+18. Whether /picks can be blocked by the active monitoring scan even though monitoring itself is healthy.
+
+Do not make changes.
+
+⸻
+
+6. DETERMINE WHETHER THIS IS A DATABASE CONTENT PROBLEM OR RESOURCE-CONTENTION PROBLEM
+
+Explicitly determine which category applies:
+
+A. Database/content problem
+
+Examples:
+
+* Missing rows
+* Missing event times
+* Missing provider state
+* Invalid provider records
+* Invalid current-state filtering
+
+B. Resource/locking problem
+
+Examples:
+
+* Database lock
+* Connection pool exhaustion
+* Long-running transaction
+* Monitoring transaction blocking /picks
+* SQLite writer/read contention
+* Async connection/event-loop contention
+* Application-level monitoring lock
+* Semaphore contention
+* Timeout waiting for a shared resource
+
+C. Query/performance problem
+
+Examples:
+
+* /picks query scans too many rows
+* Inefficient grouping/deduplication
+* Excessive provider reconciliation
+* Unbounded history lookup
+* Missing indexes
+* Query waits long enough to trigger timeout
+
+D. Logic problem
+
+Examples:
+
+* Busy flag incorrectly remains set
+* /picks treats normal monitoring activity as unavailable
+* Incorrect timeout state
+* Incorrect current-run state detection
+
+Identify the actual category and evidence.
+
+⸻
+
+7. IMPORTANT: DO NOT CONFUSE /picks WITH TELEGRAM DELIVERY
+
+Confirm whether /picks is supposed to be:
+
+* A research/display command
+* Or the canonical Telegram delivery gate
+
+The current intended architecture is:
+
+/picks = current active directional research view.
+
+Telegram delivery has separate:
+
+* evidence requirements
+* stale-line protection
+* pregame protection
+* football exclusion
+* provider validation
+* deduplication
+* atomic delivery claim
+* rate/flood protections
+
+Do not recommend weakening those delivery safeguards.
+
+The audit is specifically about why /picks cannot return its research results.
+
+⸻
+
+8. DETERMINE WHETHER /picks IS DOING UNNECESSARY WORK
+
+Check whether /picks is unnecessarily performing expensive operations such as:
+
+* Full provider reconciliation
+* Full historical scans
+* Full FPR scans
+* Full player-history enrichment
+* Large unbounded queries
+* Re-running monitoring logic
+* Waiting for monitoring completion
+* Fetching providers again when current persisted rows already exist
+
+If it is doing unnecessary work, identify it.
+
+Do NOT modify it.
+
+⸻
+
+9. CURRENT DATA VS PERSISTED DATA
+
+Determine why:
+
+/tracking and /grade
+
+can immediately read:
+
+* 25,187 tracked props
+* 21,675 stored directional opportunities
+
+while:
+
+/picks
+
+cannot return a response and instead reports that monitoring data is busy.
+
+Specifically determine whether /picks is unnecessarily dependent on:
+
+* current PropLineHistory state
+* active provider rows
+* event-state resolution
+* a shared monitoring lock
+* a shared database resource
+* provider refresh
+* current scan completion
+
+Document the exact dependency.
+
+⸻
+
+10. CHECK FOR REGRESSION FROM THE RECENT /picks FIX
+
+The recent /picks correction implemented:
+
+* Reliable Underdog and PrizePicks event time/status preservation
+* No fabricated event metadata
+* Hard exclusion of live/started/unknown-state events
+* Direction resolution before candidate limits
+* Provider-aware source identity/deduplication
+* Fair round-robin provider selection
+* Separation from Telegram delivery eligibility
+
+Determine whether any of those changes introduced or exposed the current busy response.
+
+Do NOT change them.
+
+Only identify whether they are involved.
+
+⸻
+
+11. CHECK FOR LOCK/TIMEOUT INTERACTION WITH MONITORING
+
+The live /health output shows:
+
+* Underdog monitor last run: 5m ago
+* Underdog last scan: 4m ago
+* PrizePicks last scan: 2m ago
+* Heartbeat: healthy
+
+Determine whether /picks is waiting on the same resource used by the monitor.
+
+Specifically inspect:
+
+* database locks
+* application locks
+* semaphores
+* shared async tasks
+* transaction scope
+* connection pool behavior
+* SQLite contention if SQLite is used
+* any “monitoring busy” state
+* timeout values
+
+Determine whether normal monitoring activity is incorrectly preventing /picks.
+
+⸻
+
+12. CHECK WHY /picks CAN’T READ DATA THAT /tracking AND /grade CAN READ
+
+Compare their actual query paths.
+
+Provide a read-only table:
+
+Command	Primary data source	Main query	Shared lock/resource	Timeout	Why it succeeds/fails
+/picks	?	?	?	?	?
+/tracking	?	?	?	?	?
+/grade	?	?	?	?	?
+
+Do not guess.
+
+Use the actual implementation.
+
+⸻
+
+13. DETERMINE THE SMALLEST SAFE FUTURE FIX
+
+Do NOT implement it.
+
+After identifying the root cause, describe the smallest targeted correction that would allow /picks to reliably return current active directional props without:
+
+* weakening pregame protection
+* weakening stale-line protection
+* weakening football exclusion
+* weakening provider validation
+* weakening evidence rules
+* weakening deduplication
+* weakening delivery safety
+* changing scoring
+* changing monitoring cadence
+* changing FPR
+* changing scheduler behavior
+* changing database schema unless absolutely necessary
+
+Do not propose an architecture rewrite.
+
+⸻
+
+14. LIVE DATA LIMITATION
+
+You have already established that this environment cannot directly act as the user’s Telegram account.
+
+Therefore:
+
+* Use the Telegram results above as authoritative live observations.
+* Use the code-path audit to determine the cause.
+* Do not claim additional production database counts unless actually available.
+* Do not simulate another Telegram response.
+* Do not fabricate lock/query timings.
+
+Clearly distinguish:
+
+LIVE OBSERVED
+
+from:
+
+CODE-PATH DETERMINED
+
+from:
+
+UNVERIFIED
+
+⸻
+
+15. REQUIRED FINAL REPORT
+
+Return a concise but technically precise report containing:
+
+ROOT CAUSE
+
+Exactly what causes /picks to return:
+
+“Picks are temporarily unavailable because monitoring data is busy.”
+
+LIVE OBSERVED
+
+List what the actual Telegram commands proved.
+
+CODE-PATH DETERMINED
+
+Explain the exact /picks execution path and failure condition.
+
+RESOURCE CONTENTION
+
+State whether a lock, semaphore, transaction, database contention, timeout, or query-performance issue is involved.
+
+DATA AVAILABILITY
+
+Explain why /tracking and /grade can read persisted directional opportunities while /picks cannot.
+
+REGRESSION STATUS
+
+State whether the recent /picks fix caused or exposed the issue.
+
+SMALLEST SAFE FIX
+
+Describe only the minimal correction. Do not implement it.
+
+UNVERIFIED
+
+List anything that could not be proven from the available live/code evidence.
+
+⸻
+
+🔴 ABSOLUTE RESTRICTIONS
+
+READ-ONLY ONLY.
+
+No code changes.
+
+No tests that mutate data.
+
+No restart.
+
+No deployment.
+
+No Telegram test alert.
+
+No /testalert.
+
+No fabricated props.
+
+No threshold changes.
+
+No scoring changes.
+
+No delivery-gate changes.
+
+No database changes.
+
+No task creation.
+
+No checkpoint.
+
+No architecture redesign.
+
+Do not weaken any safety protection.
+
+The sole objective is:
+
+Determine exactly why /picks is hitting the busy fallback while /tracking and /grade can successfully read the persisted directional opportunity population.
