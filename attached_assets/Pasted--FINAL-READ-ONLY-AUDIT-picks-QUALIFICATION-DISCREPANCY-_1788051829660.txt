@@ -1,0 +1,426 @@
+🔴 FINAL READ-ONLY AUDIT — /picks QUALIFICATION DISCREPANCY
+
+Continue from the current Sharp Money Bot implementation and perform a READ-ONLY audit only.
+
+DO NOT CHANGE ANYTHING
+
+Do NOT:
+
+* Modify code
+* Modify tests
+* Modify database schema
+* Modify database data
+* Modify configuration
+* Modify scoring
+* Modify evidence logic
+* Modify delivery gates
+* Modify FPR
+* Modify scheduler behavior
+* Restart the bot
+* Deploy or redeploy
+* Send Telegram commands
+* Send /testalert
+* Create a task
+* Create a checkpoint
+* Change any thresholds
+* Force or fabricate a qualifying pick
+
+This is an investigation only.
+
+⸻
+
+1. LIVE DISCREPANCY TO EXPLAIN
+
+The running bot currently shows:
+
+/tracking
+
+* Active tracked props: ~5,088
+* Directional opportunities: ~22+
+* Pending grading: same population
+* Underdog directional opportunities: 2+
+* PrizePicks directional opportunities: 20
+
+/grade
+
+* Tracked props: ~5,088
+* Stored picks: ~24
+* Pending: ~24
+* Resolved: 0
+
+/picks
+
+No qualifying player props available right now.
+
+/alerts
+
+No player prop alerts sent in the last 24 h.
+
+The bot is actively running, so these numbers may increase between commands.
+
+The objective is to determine exactly why the current persisted directional opportunities are not appearing in /picks.
+
+⸻
+
+2. TRACE /PICKS END-TO-END
+
+Trace the actual /picks execution path from the Telegram command handler through every query/filter/helper it uses.
+
+Determine:
+
+1. Which database table/query supplies /picks.
+2. Which records it considers.
+3. Whether it reads prop_opportunity_log, normalized tracking data, another table, or a combination.
+4. Which fields are required.
+5. Which filters are applied.
+6. Which provider filters are applied.
+7. Which sport filters are applied.
+8. Which event/game-status filters are applied.
+9. Which timestamp/freshness filters are applied.
+10. Which evidence filters are applied.
+11. Whether delivery state is required.
+12. Whether alert_sent is required.
+13. Whether grading state is required.
+14. Whether pending status affects visibility.
+15. Whether provider identity affects visibility.
+16. Whether football exclusion affects visibility.
+17. Whether futures/season-long filtering affects visibility.
+18. Whether stale-line protection affects visibility.
+19. Whether deduplication state affects visibility.
+20. Whether any legacy classification/tier/PASS/watchlist/rejected logic still affects /picks.
+
+Do not assume the shared delivery gate is the same thing as the /picks query.
+
+Prove what the code actually does.
+
+⸻
+
+3. COMPARE /PICKS AGAINST THE 24 PENDING OPPORTUNITIES
+
+Using read-only inspection, compare the current persisted directional opportunities against the exact conditions /picks requires.
+
+For each applicable exclusion reason, report counts:
+
+* Invalid direction
+* Missing evidence
+* Invalid provider
+* Football
+* Started/live event
+* Stale line
+* Futures/season market
+* Missing required identity
+* Missing current source row
+* Dedup exclusion
+* Already delivered
+* Other qualification filter
+* Legacy classification/tier/PASS/watchlist/rejected dependency
+* Unknown/unexplainable
+
+The counts should reconcile to the number of persisted opportunities being considered.
+
+Do NOT alter any records to make them appear.
+
+⸻
+
+4. CRITICAL EVIDENCE QUESTION
+
+Determine whether the current directional opportunities have legitimate supporting player-result evidence.
+
+Specifically distinguish:
+
+A. Genuine evidence
+
+Examples:
+
+* Provider-backed player results
+* Legitimate stored gamelog/history
+* Existing graded-prop evidence
+
+B. Metadata only
+
+Examples:
+
+* Score
+* BQ
+* MQ
+* Confidence
+* Tier
+* Decision metadata
+* Market movement
+* Line movement
+
+Metadata alone must NOT count as evidence.
+
+Determine whether the current /picks candidates are being rejected because they lack genuine evidence.
+
+⸻
+
+5. DETERMINE WHETHER /PICKS IS USING THE CANONICAL DELIVERY POLICY
+
+The current policy is:
+
+Betting qualification
+
+* Valid OVER or UNDER direction
+* Legitimate supporting player-result evidence
+* Existing legitimate safety protections
+
+Safety protections include:
+
+* Pregame/event-start protection
+* Football/gridiron exclusion
+* Valid Underdog or PrizePicks provider
+* Fresh provider line
+* Provider/source/event identity
+* Effective-alert deduplication
+* Atomic delivery claim/release
+* Rate/flood protections
+
+Determine whether /picks:
+
+Option A
+
+Uses the same canonical policy correctly.
+
+Option B
+
+Uses a stricter duplicate qualification policy.
+
+Option C
+
+Uses a weaker/incorrect policy.
+
+Option D
+
+Uses a separate legacy policy.
+
+If it uses a separate policy, identify exactly where and why.
+
+⸻
+
+6. CHECK FOR RETIRED FRAMEWORK DEPENDENCIES
+
+Read-only search all /picks dependencies for active use of:
+
+* Watchlist
+* Near-Miss
+* PASS
+* Rejected
+* S-tier
+* A-tier
+* B-tier
+* C-tier
+* Tier 1
+* Tier 2
+* decision_tier
+
+Determine whether any of these can cause a persisted directional opportunity to disappear from /picks.
+
+Do NOT modify them.
+
+Report every active dependency found.
+
+Compatibility metadata that is completely non-influential should be identified as such.
+
+⸻
+
+7. PROVIDER SEPARATION
+
+Verify /picks handles both providers independently:
+
+Underdog
+
+* Current active props
+* Current directional opportunities
+* Pregame validation
+* Evidence
+* Provider identity
+
+PrizePicks / PropLine
+
+* Current active props
+* Current directional opportunities
+* Pregame validation
+* Evidence
+* Provider identity
+
+Determine whether one provider can incorrectly suppress the other.
+
+Specifically investigate the current situation where:
+
+* PrizePicks has ~20 directional opportunities
+* Underdog has ~2+
+* /picks displays zero
+
+⸻
+
+8. LIVE/CURRENT DATA QUESTION
+
+Determine whether /picks intentionally requires a current active source row.
+
+If so, determine whether the persisted directional opportunities currently have:
+
+* Current active source IDs
+* Current active provider rows
+* Current event IDs
+* Current lines
+* Current observation timestamps
+
+Determine whether a directional opportunity can be persisted successfully but then become invisible to /picks because the underlying source row changed or disappeared.
+
+Do not change anything.
+
+⸻
+
+9. ALERT VS /PICKS DISTINCTION
+
+Determine whether this is expected:
+
+Directional opportunity exists
+→ fails evidence/safety
+→ remains pending/grading
+→ does not appear in /picks
+→ does not get delivered
+→ remains gradeable
+
+OR whether the intended behavior is:
+
+Directional opportunity exists
+→ valid current pregame + evidence
+→ appears in /picks
+→ potentially reaches delivery
+
+Identify which current behavior the code implements.
+
+⸻
+
+10. RECONCILIATION
+
+Produce a concise read-only reconciliation such as:
+
+Persisted directional opportunities: X
+Visible in /picks: Y
+Excluded from /picks: Z
+Excluded because:
+  Missing evidence: X
+  Started/live: X
+  Stale line: X
+  Invalid provider: X
+  Football: X
+  Futures: X
+  Legacy gate: X
+  Other: X
+
+The exclusion counts should be based on actual current persisted data where safely queryable.
+
+If production database access is unavailable, explicitly say:
+
+PRODUCTION DATA UNAVAILABLE — CODE-PATH AUDIT ONLY
+
+Do not invent counts.
+
+⸻
+
+11. IMPORTANT: DO NOT CONFUSE /PICKS WITH TELEGRAM DELIVERY
+
+The purpose of this audit is to determine whether /picks is correctly showing currently valid directional opportunities.
+
+Do not automatically assume:
+
+not delivered = should not appear in /picks
+
+The two may legitimately have different purposes.
+
+Determine the actual intended/current contract from the implementation.
+
+⸻
+
+12. REQUIRED OUTPUT
+
+Return:
+
+/PICKS ROOT CAUSE
+
+State exactly why the current persisted directional opportunities are not appearing.
+
+CURRENT FILTER CHAIN
+
+List the actual filters in execution order.
+
+EXCLUSION COUNTS
+
+Only provide real counts obtained from read-only inspection.
+
+EVIDENCE STATUS
+
+State whether current directional opportunities have legitimate evidence or only metadata.
+
+LEGACY DEPENDENCIES
+
+State whether Watchlist/PASS/Rejected/S-A-B-C/Tier/decision_tier influence /picks.
+
+PROVIDER STATUS
+
+State whether Underdog and PrizePicks are both handled correctly.
+
+CONCLUSION
+
+Choose one:
+
+* ✅ /picks behavior is correct and the pending opportunities legitimately fail the canonical requirements.
+* ⚠️ /picks has a stricter duplicate/incorrect filter that needs a targeted fix.
+* ❌ /picks is using obsolete qualification logic.
+* ❓ Unable to determine without production data.
+
+If a fix is required, DO NOT IMPLEMENT IT during this audit.
+
+Only identify the exact smallest targeted correction that would be required.
+
+⸻
+
+13. PRESERVE CURRENT SYSTEMS
+
+Verify without modifying that these remain untouched:
+
+* Underdog ingestion
+* PrizePicks ingestion/discovery
+* FPR/full-pool rotation
+* Active source-ID lifecycle
+* Continuous rescanning
+* Provider separation
+* Football exclusion
+* Soccer/FIFA/MLS support
+* Other supported non-football sports
+* Evidence providers
+* Grading
+* Delivery gate
+* Deduplication
+* Pregame protection
+* Stale-line protection
+* Scoring
+* BQ/MQ
+* Confidence
+* Scheduler
+* Adaptive batching
+* max_instances=1
+* Clean restart
+* Historical tracking
+
+⸻
+
+🔴 FINAL RULE
+
+This is READ-ONLY.
+
+No code changes.
+No tests changed.
+No restart.
+No deployment.
+No Telegram commands.
+No /testalert.
+No production data mutation.
+No checkpoint.
+
+Do not fix anything yet.
+
+First determine exactly why the persisted directional opportunities are absent from /picks, and report the smallest targeted fix only if one is actually required.
