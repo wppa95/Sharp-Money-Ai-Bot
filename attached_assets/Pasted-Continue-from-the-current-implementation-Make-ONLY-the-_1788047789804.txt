@@ -1,0 +1,318 @@
+Continue from the current implementation.
+
+Make ONLY the remaining targeted cleanup required below.
+
+Do NOT redesign the architecture.
+Do NOT change scoring formulas.
+Do NOT change provider ingestion.
+Do NOT change FPR rotation.
+Do NOT change tracking/grading/evidence.
+Do NOT change scheduler behavior.
+Do NOT create a checkpoint until implementation and validation are complete.
+
+1. REMOVE OBSOLETE QUALIFICATION FRAMEWORK FROM ACTIVE LOGIC
+
+The latest audit confirmed that these legacy concepts still exist in executable code:
+
+* Watchlist
+* Near-Miss
+* PASS
+* Rejected
+* S/A/B/C tiers
+* Tier 1 / Tier 2
+* decision_tier
+* legacy alert-tier mappings
+
+They must no longer influence the current monitoring, evaluation, qualification, or delivery framework.
+
+Current rule
+
+The active model is:
+
+Monitor → Evaluate → Direction → Evidence → Safety checks → Delivery
+
+A current prop is actionable only when it has:
+
+* Valid OVER or UNDER direction
+* Legitimate supporting evidence
+* Valid provider/current line
+* Valid pregame/event timing
+* Existing deduplication/flood/safety protections
+
+Nothing else should act as a qualification gate.
+
+2. WATCHLIST / NEAR-MISS
+
+Remove Watchlist/Near-Miss from active executable decision logic.
+
+They must NOT:
+
+* qualify a prop
+* reject a prop
+* prioritize a prop
+* deprioritize a prop
+* affect FPR rotation
+* affect delivery
+* affect /picks
+* affect /slip
+* affect /alerts
+* affect /dashboard
+* affect /funnel
+
+Historical Watchlist/Near-Miss records may remain readable for compatibility/history, but they must be inert.
+
+3. PASS
+
+PASS must NOT be generated as an active current decision state.
+
+A prop with no valid direction should simply remain:
+
+monitored/evaluated with no direction
+
+Do not convert no-direction evaluations into PASS.
+
+Historical PASS records may remain readable, but they must not influence:
+
+* current evaluation
+* FPR rotation
+* qualification
+* delivery
+* grading eligibility
+
+4. REJECTED
+
+Remove REJECTED as a current decision/qualification state.
+
+Do not use rejection status to remove a prop from the active monitoring universe.
+
+A non-actionable prop remains a normal monitored prop and continues through FPR rescanning.
+
+Historical rejection records may remain for historical reporting only.
+
+5. S/A/B/C AND TIER 1/TIER 2
+
+Remove all active decision dependencies on:
+
+* S-tier
+* A-tier
+* B-tier
+* C-tier
+* Tier 1
+* Tier 2
+* decision_tier
+
+These must not determine whether a prop:
+
+* enters FPR
+* remains in FPR
+* gets evaluated
+* gets rescored
+* becomes directional
+* gets evidence
+* gets graded
+* reaches the canonical delivery gate
+
+Do not replace these with another tier system.
+
+6. MARKET-SIGNAL BYPASS
+
+Preserve the recent fix:
+
+Strong line movement without legitimate player-result evidence is monitoring context only.
+
+It must NOT create an actionable OVER/UNDER recommendation by itself.
+
+Do not reintroduce any market-only bypass.
+
+7. CANONICAL DELIVERY GATE
+
+Make the canonical delivery gate universal across every callable delivery path.
+
+Every path capable of producing a betting alert must ultimately enforce:
+
+1. Valid OVER/UNDER direction
+2. Legitimate supporting evidence
+3. Pregame/event timing protection
+4. Football suppression
+5. Provider/source identity
+6. Fresh-line/stale protection
+7. Deduplication/claim/release
+8. Existing rate/flood/safety protections
+
+Specifically audit and correct:
+
+* Main Underdog delivery
+* PrizePicks delivery
+* deliver_pp()
+* Stable Refresh compatibility delivery
+* FPR delivery
+* Watchlist/actionable compatibility paths
+* /picks
+* /slip
+* /alerts
+* Any dormant/direct broadcaster that remains callable
+
+Do not create multiple competing gates.
+
+8. FOOTBALL SAFETY
+
+Preserve the existing hard football exclusion.
+
+Football-related sports must remain:
+
+* monitored
+* tracked
+* historically gradeable
+
+but must never produce betting output through ANY delivery path.
+
+This includes NFL, NCAAF/CFB, FCS, CFL, UFL, XFL, USFL, AFL, AFLW, arena/indoor football and other football/gridiron aliases.
+
+Soccer must remain supported and must NOT be classified as football.
+
+9. FPR NEUTRALITY
+
+FPR must remain classification-neutral.
+
+Rotation order must NOT depend on:
+
+* S/A/B/C
+* Tier 1/Tier 2
+* Watchlist
+* Near-Miss
+* PASS
+* Rejected
+* confidence
+* evidence
+* delivery state
+* recommendation quality
+
+Preserve:
+
+* new-prop priority
+* line-mover priority
+* actionable/urgent priority
+* games approaching start
+* remaining active props
+* cursor advancement
+* bounded batches
+* continuous rotation
+* no starvation
+
+10. PRESERVE HISTORICAL DATA
+
+Do NOT delete historical records.
+
+Historical PASS, tier, rejection, Watchlist/Near-Miss, and decision metadata may remain readable where required for historical reporting/calibration.
+
+The requirement is that they become non-influential, not that historical data be destroyed.
+
+11. TESTS
+
+Add/update focused regressions proving:
+
+* No current Watchlist/Near-Miss decision logic
+* No current PASS generation
+* No current REJECTED decision state
+* No S/A/B/C qualification gate
+* No Tier 1/Tier 2 qualification gate
+* decision_tier cannot affect delivery
+* Market-only signal cannot create direction
+* Delivery always requires OVER/UNDER + legitimate evidence
+* deliver_pp() uses the canonical delivery policy
+* Stable Refresh compatibility cannot bypass the canonical gate
+* Dormant/direct delivery paths cannot bypass the canonical gate
+* Football cannot reach Telegram through any callable delivery path
+* Soccer remains supported
+* Non-actionable props remain in continuous FPR rotation
+* Historical legacy metadata remains readable
+* Existing provider separation remains intact
+* Existing pregame protection remains intact
+* Existing deduplication remains intact
+
+Run:
+
+* focused regression suite
+* full existing bot suite
+* Python compilation
+* diff check
+
+Do not weaken unrelated tests.
+
+12. LIVE VERIFICATION
+
+Do NOT use /testalert.
+
+Do NOT fabricate data.
+
+Do NOT force an alert.
+
+If production/Telegram access is unavailable from the development environment, explicitly report live verification as UNVERIFIED.
+
+Where live verification is available, verify:
+
+* /funnel
+* /dashboard
+* /health
+* /status
+* /picks
+* /alerts
+* /grade
+* /tracking
+* /stats
+
+Confirm the active outputs contain no obsolete Watchlist/PASS/Tier/S/A/B/C qualification behavior.
+
+13. PRESERVE ALL COMPLETED WORK
+
+Do NOT regress:
+
+* Underdog active source-ID lifecycle
+* Continuous FPR full-pool rotation
+* Non-actionable rescanning
+* PrizePicks provider discovery
+* PrizePicks/Underdog provider separation
+* Football exclusion
+* Soccer support
+* Provider evidence
+* Graded-prop evidence
+* HIT/MISS/PUSH grading
+* Persistent tracking
+* Dashboard recent tracking
+* Funnel accounting
+* Shared monitoring cadence
+* Adaptive batching
+* max_instances=1
+* Clean restart
+* Pregame protection
+* Alert deduplication
+* Telegram 409 protection
+* Partial-result protection
+* Command timeout protection
+* Existing scoring/BQ/MQ/confidence behavior
+
+Make the smallest targeted changes necessary.
+
+FINAL ACCEPTANCE
+
+Do not create a checkpoint until all applicable items are verified.
+
+The final active framework must contain NO:
+
+* Watchlist gate
+* Near-Miss gate
+* PASS gate
+* Rejected gate
+* S/A/B/C gate
+* Tier 1 gate
+* Tier 2 gate
+* decision_tier gate
+* market-only directional bypass
+
+The only current qualification path should be:
+
+Valid Direction + Legitimate Evidence + Existing Safety Protections → Delivery
+
+Historical metadata can remain, but it must be inert.
+
+No unrelated behavior should change.
