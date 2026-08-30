@@ -52,6 +52,7 @@ class UnderdogProjection:
     line_value:  Optional[float]
     game_id:     str = ""
     game_time:   Optional[datetime] = None
+    provider_status: str = ""
     fetched_at:  datetime = field(default_factory=datetime.utcnow)
     odds: int = 0
     market_type: str = "Pick'em"
@@ -299,9 +300,14 @@ class UnderdogConnector(BaseConnector):
         # Build game lookup: id → game dict
         games: dict[str, dict] = {}
         for game in data.get("games", []):
-            gid = game.get("id", "")
-            if gid:
-                games[gid] = game
+            for raw_id in (
+                game.get("id"),
+                game.get("match_id"),
+                game.get("game_id"),
+            ):
+                gid = str(raw_id or "").strip()
+                if gid:
+                    games[gid] = game
 
         for line in data.get("over_under_lines", []):
             try:
@@ -355,6 +361,13 @@ class UnderdogConnector(BaseConnector):
                     line_value  = float(stat_value),
                     game_id     = match_id,
                     game_time   = game_time,
+                    provider_status = str(
+                        line.get("status")
+                        or over_under.get("status")
+                        or g_data.get("status")
+                        or g_data.get("state")
+                        or ""
+                    ),
                     fetched_at  = datetime.utcnow(),
                 ))
             except (KeyError, TypeError, ValueError) as exc:

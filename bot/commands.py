@@ -1709,6 +1709,78 @@ def _is_current_provider_sport(
     return _is_active_display_sport(sport)
 
 
+def _pick_source_identity(provider: str, prop: Any) -> tuple[str, ...]:
+    """Provider-owned identity for current /picks rows."""
+    source_id = str(
+        getattr(prop, "external_id", None)
+        or getattr(prop, "game_id", None)
+        or ""
+    ).strip().lower()
+    return (
+        str(provider or "").strip().lower(),
+        str(getattr(prop, "player_name", "")).strip().lower(),
+        str(getattr(prop, "sport", "")).strip().upper(),
+        str(getattr(prop, "stat_type", "")).strip().lower(),
+        source_id,
+    )
+
+
+def _fair_provider_limit(
+    rows: list[tuple[str, Any]],
+    limit: int,
+) -> list[tuple[str, Any]]:
+    """Round-robin current directional rows so one provider cannot crowd out another."""
+    if limit <= 0 or not rows:
+        return []
+    buckets: dict[str, list[tuple[str, Any]]] = {}
+    for row in rows:
+        buckets.setdefault(row[0], []).append(row)
+    selected: list[tuple[str, Any]] = []
+    while len(selected) < limit:
+        added = False
+        for provider_rows in buckets.values():
+            if provider_rows:
+                selected.append(provider_rows.pop(0))
+                added = True
+                if len(selected) >= limit:
+                    break
+        if not added:
+            break
+    return selected
+
+
+def _select_directional_provider_rows(
+    ud_props: list[Any],
+    pp_props: list[Any],
+    rec_map: dict[tuple[str, str, str], tuple[Optional[str], Optional[int]]],
+    limit: int,
+) -> list[tuple[str, Any]]:
+    """Resolve direction, preserve provider identity, then apply a fair cap."""
+    directional_by_identity: dict[tuple[str, ...], tuple[str, Any]] = {}
+    for provider, prop in (
+        *[("Underdog", row) for row in ud_props],
+        *[("PrizePicks", row) for row in pp_props],
+    ):
+        effective_rec = getattr(prop, "bet_recommendation", None)
+        if provider == "Underdog":
+            live_rec, _ = rec_map.get(
+                (prop.player_name, prop.sport, prop.stat_type),
+                (None, None),
+            )
+            if live_rec is not None:
+                effective_rec = live_rec
+        if effective_rec not in ("OVER", "UNDER"):
+            continue
+        directional_by_identity[_pick_source_identity(provider, prop)] = (
+            provider,
+            prop,
+        )
+    return _fair_provider_limit(
+        list(directional_by_identity.values()),
+        limit,
+    )
+
+
 # ── /picks tier constants ─────────────────────────────────────────────────────
 # New PPAnalysisScore vocabulary (S/A/B/PASS) plus legacy AlertTier values for
 # any records written before the scoring engine was introduced.
@@ -1902,9 +1974,9 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     # PrizePicks is actionable on its own; it is not merely Underdog
     # enrichment. Keep the provider in the candidate identity so matching
     # player/stat rows remain separate in this analyst view.
-    logger.info("cmd_picks: fetching provider props (limit=%d sport=%s)", limit * 3, sport_filter)
+    logger.info("cmd_picks: fetching current provider props (sport=%s)", sport_filter)
     ud_props = await _bounded(_db.get_top_ud_props_for_picks(
-        limit=limit * 3,
+        limit=None,
         since_hours=_since_hours,
         sports=config.active_sports,
     ))
@@ -1938,19 +2010,26 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
         and (not sport_filter or p.sport.upper() == sport_filter)
     ]
-    provider_props: list[tuple[str, Any]] = [
-        *[("Underdog", p) for p in ud_props],
-        *[("PrizePicks", p) for p in pp_props],
-    ]
-    provider_props = list({
-        (
-            provider,
-            str(getattr(prop, "player_name", "")).strip().lower(),
-            str(getattr(prop, "sport", "")).upper(),
-            str(getattr(prop, "stat_type", "")).strip().lower(),
-        ): (provider, prop)
-        for provider, prop in provider_props
-    }.values())[: limit * 3]
+    # Resolve direction before deduplication or limiting. /picks is a current
+    # directional research view, not a second Telegram delivery gate.
+    _rec_map: dict = {}
+    try:
+        _rec_map = await _bounded(_db.get_ud_recommendations_bulk(
+            [
+                (p.player_name, p.sport, p.stat_type)
+                for p in ud_props
+            ],
+            since_hours=24,
+        ))
+    except Exception as _rec_exc:
+        logger.warning("cmd_picks: recommendation lookup failed: %s", _rec_exc)
+
+    provider_props = _select_directional_provider_rows(
+        ud_props,
+        pp_props,
+        _rec_map,
+        limit,
+    )
 
     if not provider_props:
         hint = f" for {sport_filter}" if sport_filter else ""
@@ -1964,8 +2043,9 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     logger.info(
-        "cmd_picks: provider fetch done — UD=%d PP=%d (sport=%s)",
-        len(ud_props), len(pp_props), sport_filter,
+        "cmd_picks: provider fetch done — current UD=%d PP=%d directional=%d "
+        "(sport=%s)",
+        len(ud_props), len(pp_props), len(provider_props), sport_filter,
     )
 
     # ── 2. Build comparisons without inventing a cross-provider match ────────
@@ -2051,41 +2131,10 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     _hit_rates = [(None, None) if isinstance(r, Exception) else r for r in _hr_raw]
     logger.info("cmd_picks: hit-rate gather complete")
 
-    # ── 4b. Fetch bet recommendations + alternate lines concurrently ──────────
+    # ── 4b. Fetch alternate lines concurrently ────────────────────────────────
     from engine.player_prop_market import _line_label as _ll
 
-    logger.info("cmd_picks: fetching recommendations + alternate lines")
-    _rec_map: dict = {}
-    try:
-        _rec_map = await _bounded(_db.get_ud_recommendations_bulk(
-            [
-                (plh.player_name, plh.sport, plh.stat_type)
-                for plh, _ in picks
-                if (getattr(plh, "provider", None) or "Underdog") == "Underdog"
-            ],
-            since_hours=24,
-        ))
-        if not _rec_map and picks:
-            logger.warning(
-                "cmd_picks: get_ud_recommendations_bulk returned empty for %d props "
-                "(stat_type mismatch or no recent snapshots within 24h)",
-                len(picks),
-            )
-        else:
-            _missing = [
-                (plh.player_name, plh.stat_type)
-                for plh, _ in picks
-                if (plh.player_name, plh.sport, plh.stat_type) not in _rec_map
-            ]
-            if _missing:
-                logger.warning(
-                    "cmd_picks: no recommendation found for %d/%d props: %s",
-                    len(_missing), len(picks),
-                    "; ".join(f"{p}/{s}" for p, s in _missing[:5]),
-                )
-    except Exception as _rec_exc:
-        logger.warning("cmd_picks: recommendation lookup failed: %s", _rec_exc)
-
+    logger.info("cmd_picks: fetching alternate lines")
     _alt_raw = await _bounded(_asyncio.gather(
         *[
             _db.get_all_ud_lines_for_prop(

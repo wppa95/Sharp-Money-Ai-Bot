@@ -3773,6 +3773,11 @@ async def underdog_job(context) -> None:
                 line_value    = snap.line or 0.0,
                 game_id       = snap.event,
                 game_time     = snap.game_time,
+                provider_status = (
+                    getattr(snap, "game_status", None)
+                    or getattr(snap, "provider_status", None)
+                    or None
+                ),
                 line_moved    = line_changed,
                 prev_line     = prev_line,
                 line_delta    = (

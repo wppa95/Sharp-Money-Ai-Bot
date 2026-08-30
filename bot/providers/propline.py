@@ -268,9 +268,17 @@ def normalize_propline_prizepicks_record(
     if isinstance(event, dict):
         event_label = _clean(_first(event, "name", "display_name", "description"))
         event_id = _clean(_first(event, "id", "event_id", "game_id"))
+        event_time = _parse_datetime(
+            _first(event, "game_time", "start_time", "event_start", "commence_time")
+        )
+        event_status = _clean(
+            _first(event, "status", "state", "event_status", "game_status")
+        )
     else:
         event_label = _clean(event)
         event_id = _clean(_first(raw_record, "event_id", "game_id", "match_id"))
+        event_time = None
+        event_status = ""
 
     source_id = _clean(
         _first(raw_record, "external_id", "source_id", "prop_id", "projection_id", "id")
@@ -291,7 +299,7 @@ def normalize_propline_prizepicks_record(
     direction = _normalize_direction(
         _first(raw_record, "direction", "side", "selection", "over_under")
     )
-    provider_status = _clean(
+    provider_status = event_status or _clean(
         _first(raw_record, "status", "availability", "projection_status")
     )
 
@@ -304,7 +312,7 @@ def normalize_propline_prizepicks_record(
         line_value=line_value,
         game_time=_parse_datetime(
             _first(raw_record, "game_time", "start_time", "event_start", "commence_time")
-        ),
+        ) or event_time,
         external_id=source_id,
         game_id=event_id or event_label,
         fetched_at=observed_at,

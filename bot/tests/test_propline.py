@@ -92,6 +92,8 @@ def test_normalization_preserves_prizepicks_identity_and_metadata():
     assert prop.direction == "OVER"
     assert prop.event_id == "game-1"
     assert prop.external_id == "projection-1"
+    assert prop.game_time == datetime(2026, 8, 28, 0, 0)
+    assert prop.provider_status == "available"
     assert prop.source_timestamp == datetime(2026, 8, 27, 17, 59)
 
 

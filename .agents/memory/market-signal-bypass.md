@@ -26,6 +26,12 @@ deduplication, and claim release. Generic Telegram transport remains available
 for operational notices such as health or quota warnings; those messages are
 not betting-alert paths and must not be forced through prop qualification.
 
+`/picks` is a separate current directional research view. It requires a current
+provider-owned row, a safely known pregame state, and `OVER`/`UNDER`, but not
+Telegram delivery or canonical evidence. Resolve direction before provider-aware
+deduplication and fair result limiting so non-directional rows or provider order
+cannot hide valid current opportunities.
+
 **Why:** A market-only bypass turned line movement into an actionable alert without
 player-result support, violating the separation between monitoring and betting
 recommendations.
@@ -34,4 +40,6 @@ recommendations.
 evidence-missing props. Gate all direct and queued delivery paths through the
 shared direction-and-evidence check, then apply provider, freshness, timing,
 identity, deduplication, claim/release, and rate safeguards at the delivery
-boundary. Keep non-betting operational broadcasts explicitly separate.
+boundary. Preserve genuine provider event time/status on current rows and keep
+unknown state excluded. Keep non-betting operational broadcasts explicitly
+separate.

@@ -268,6 +268,7 @@ class UnderdogSnapshotRecord(Base):
     line_value  = Column(Float,       nullable=False)
     game_id     = Column(String(64),  nullable=False, default="")
     game_time   = Column(DateTime,    nullable=True)
+    provider_status = Column(String(32), nullable=True)
     line_moved  = Column(Boolean,     default=False, nullable=False)
     prev_line   = Column(Float,       nullable=True)
     # line_delta: new_line - prev_line; positive = line went up, negative = down
@@ -313,6 +314,7 @@ class PropLineHistory(Base):
     stat_type   = Column(String(64),  nullable=False)
     line_value  = Column(Float,       nullable=False)
     game_time   = Column(DateTime,    nullable=True)
+    provider_status = Column(String(32), nullable=True)
     external_id = Column(String(64),  nullable=False, default="")
     game_id     = Column(String(64),  nullable=False, default="")
     fetched_at  = Column(DateTime,    default=datetime.utcnow, nullable=False)
@@ -699,6 +701,7 @@ class Database:
         await self._migrate_prop_opportunity_log_v5()
         await self._migrate_prop_line_history_v4()
         await self._migrate_prop_line_history_v5()
+        await self._migrate_prop_line_history_v6()
         await self._migrate_player_game_results_v1()
         await self._migrate_prop_opportunity_log_v6()
         await self._migrate_slip_journal_leg_v1()
@@ -961,7 +964,7 @@ class Database:
 
     async def get_top_ud_props_for_picks(
         self,
-        limit: int = 10,
+        limit: Optional[int] = 10,
         since_hours: int = 24,
         sports: Optional[Iterable[str]] = None,
     ) -> "list[PropLineHistory]":
@@ -992,6 +995,14 @@ class Database:
             ]
             if sports is not None:
                 filters.append(PropLineHistory.sport.in_(normalized_sports))
+            source_identity = case(
+                (
+                    PropLineHistory.external_id.isnot(None)
+                    & (PropLineHistory.external_id != ""),
+                    PropLineHistory.external_id,
+                ),
+                else_=PropLineHistory.game_id,
+            )
             subq = (
                 select(func.max(PropLineHistory.id))
                 .where(*filters)
@@ -999,16 +1010,21 @@ class Database:
                     PropLineHistory.player_name,
                     PropLineHistory.sport,
                     PropLineHistory.stat_type,
+                    source_identity,
                 )
                 .scalar_subquery()
             )
-            result = await s.execute(
+            query = (
                 select(PropLineHistory)
                 .where(PropLineHistory.id.in_(subq))
                 .order_by(desc(PropLineHistory.fetched_at))
-                .limit(limit * 10)  # overfetch to allow sport filtering
             )
+            if limit is not None:
+                query = query.limit(limit * 10)  # overfetch to allow sport filtering
+            result = await s.execute(query)
         rows = list(result.scalars().all())
+        if limit is None:
+            return rows
 
         # ── Sport-balanced selection ───────────────────────────────────────────
         # A flat [:limit] on fetched_at DESC lets high-volume sports (MLB, DOTA)
@@ -1053,18 +1069,9 @@ class Database:
         if not player_stat_triples:
             return {}
         from datetime import timedelta
-        from sqlalchemy import or_, and_
         cutoff = datetime.utcnow() - timedelta(hours=since_hours)
-
-        # Build a filter for each triple so we can do one round-trip.
-        conditions = [
-            and_(
-                UnderdogSnapshotRecord.player_name == pn,
-                UnderdogSnapshotRecord.sport       == sp,
-                UnderdogSnapshotRecord.stat_type   == st,
-            )
-            for pn, sp, st in player_stat_triples
-        ]
+        wanted = set(player_stat_triples)
+        sports = {sport for _, sport, _ in wanted}
 
         async with self.session() as s:
             # Subquery: max(id) per (player_name, sport, stat_type), non-removed
@@ -1073,7 +1080,7 @@ class Database:
                 .where(
                     UnderdogSnapshotRecord.removed    == False,  # noqa: E712
                     UnderdogSnapshotRecord.fetched_at >= cutoff,
-                    or_(*conditions),
+                    UnderdogSnapshotRecord.sport.in_(sports),
                 )
                 .group_by(
                     UnderdogSnapshotRecord.player_name,
@@ -1094,6 +1101,7 @@ class Database:
                 r.bet_recommendation, r.bet_confidence
             )
             for r in rows
+            if (r.player_name, r.sport, r.stat_type) in wanted
         }
 
     async def get_latest_downstream_intelligence(
@@ -2183,10 +2191,11 @@ class Database:
                 )
                 line_value = float(getattr(prop, "line_value", 0.0) or 0.0)
                 observed_at = (
-                    getattr(prop, "source_timestamp", None)
-                    or getattr(prop, "fetched_at", None)
+                    getattr(prop, "fetched_at", None)
+                    or getattr(prop, "source_timestamp", None)
                     or datetime.utcnow()
                 )
+                provider_status = getattr(prop, "provider_status", None) or None
                 row = latest.get(key)
                 if row is None:
                     row = PropLineHistory(
@@ -2197,6 +2206,7 @@ class Database:
                         stat_type=key[2],
                         line_value=line_value,
                         game_time=getattr(prop, "game_time", None),
+                        provider_status=provider_status,
                         external_id=getattr(prop, "external_id", "") or "",
                         game_id=(
                             getattr(prop, "event_id", "")
@@ -2229,6 +2239,7 @@ class Database:
                         stat_type=key[2],
                         line_value=line_value,
                         game_time=getattr(prop, "game_time", None),
+                        provider_status=provider_status,
                         external_id=getattr(prop, "external_id", "") or "",
                         game_id=(
                             getattr(prop, "event_id", "")
@@ -2278,6 +2289,11 @@ class Database:
                 row.line_value = line_value
                 row.team = getattr(prop, "team", "") or row.team
                 row.game_time = getattr(prop, "game_time", None) or row.game_time
+                row.provider_status = (
+                    provider_status
+                    if refresh_metadata
+                    else provider_status or row.provider_status
+                )
                 row.external_id = getattr(prop, "external_id", "") or row.external_id
                 row.game_id = (
                     getattr(prop, "event_id", "")
@@ -2459,6 +2475,7 @@ class Database:
             # Bet direction synced from UnderdogSnapshotRecord (v1.4)
             "ALTER TABLE prop_line_history ADD COLUMN bet_recommendation TEXT",
             "ALTER TABLE prop_line_history ADD COLUMN bet_confidence INTEGER",
+            "ALTER TABLE prop_line_history ADD COLUMN provider_status TEXT",
         ]
         async with self._engine.begin() as conn:
             for sql in new_cols:
@@ -2644,6 +2661,7 @@ class Database:
                     stat_type    = stat_type,
                     line_value   = new_line,
                     game_time    = latest_snap.game_time,
+                    provider_status = getattr(latest_snap, "provider_status", None),
                     external_id  = getattr(latest_snap, "external_id", None) or getattr(latest_snap, "id", None) or "",
                     game_id      = latest_snap.game_id     or "",
                     fetched_at   = now_ts,
@@ -2676,6 +2694,16 @@ class Database:
                     "change_count": change_delta,
                     "removed":    is_removed,
                 }
+                if latest_snap.game_time is not None:
+                    uvals["game_time"] = latest_snap.game_time
+                _snap_status = getattr(latest_snap, "provider_status", None)
+                if _snap_status:
+                    uvals["provider_status"] = _snap_status
+                _snap_external_id = getattr(latest_snap, "external_id", None)
+                if _snap_external_id:
+                    uvals["external_id"] = _snap_external_id
+                if latest_snap.game_id:
+                    uvals["game_id"] = latest_snap.game_id
                 if line_changed:
                     uvals["prev_line"] = old_line
                 # Always propagate score_tier when the snapshot has a value
@@ -2724,6 +2752,7 @@ class Database:
         external_id: str            = "",
         game_id:     str            = "",
         game_time:   "Optional[datetime]" = None,
+        provider_status: str         = "",
         removed:     bool           = False,
         fetched_at:  "Optional[datetime]" = None,
     ) -> tuple["PropLineHistory", str]:
@@ -2780,6 +2809,7 @@ class Database:
                 stat_type   = stat_type,
                 line_value  = line_value,
                 game_time   = game_time,
+                provider_status = provider_status or None,
                 external_id = external_id,
                 game_id     = game_id,
                 fetched_at  = now_ts,
@@ -2822,6 +2852,14 @@ class Database:
             "fetched_at": now_ts,
             "team":       team or existing.team,
         }
+        if game_time is not None:
+            update_vals["game_time"] = game_time
+        if provider_status:
+            update_vals["provider_status"] = provider_status
+        if external_id:
+            update_vals["external_id"] = external_id
+        if game_id:
+            update_vals["game_id"] = game_id
         try:
             update_vals["last_seen"]    = now_ts
             update_vals["change_count"] = change_count
@@ -3303,6 +3341,7 @@ class Database:
             "ALTER TABLE underdog_snapshots ADD COLUMN bet_confidence INTEGER",
             "ALTER TABLE underdog_snapshots ADD COLUMN bet_reason TEXT",
             "ALTER TABLE underdog_snapshots ADD COLUMN bet_evidence_json TEXT",
+            "ALTER TABLE underdog_snapshots ADD COLUMN provider_status TEXT",
         ]
         async with self._engine.begin() as conn:
             for sql in new_cols:
@@ -3986,6 +4025,19 @@ class Database:
                     "ALTER TABLE prop_line_history ADD COLUMN score_total REAL"
                 ))
                 logger.info("_migrate_prop_line_history_v5: added score_total column")
+            except Exception:
+                pass  # already exists
+
+    async def _migrate_prop_line_history_v6(self) -> None:
+        """Preserve provider event state on current prop rows (idempotent)."""
+        async with self._engine.begin() as conn:
+            try:
+                await conn.execute(text(
+                    "ALTER TABLE prop_line_history ADD COLUMN provider_status TEXT"
+                ))
+                logger.info(
+                    "_migrate_prop_line_history_v6: added provider_status column"
+                )
             except Exception:
                 pass  # already exists
 
