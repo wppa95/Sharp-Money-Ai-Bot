@@ -24,7 +24,7 @@ import time
 from threading import Lock
 from html import unescape
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Optional, Union
 
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
@@ -42,6 +42,26 @@ if TYPE_CHECKING:
     from database import Database
 
 logger = logging.getLogger(__name__)
+
+_DELIVERY_LINE_MAX_AGE = timedelta(hours=6)
+_DELIVERY_CLOCK_SKEW = timedelta(minutes=5)
+
+
+def _is_fresh_delivery_line(fetched_at: object) -> bool:
+    """Return whether a provider line is recent enough for a betting alert.
+
+    Missing timestamps remain compatible with older direct callers; live
+    provider paths pass their observation timestamp and are rejected when it
+    is materially stale.  The current-scan map remains the stronger freshness
+    check for the main Underdog job.
+    """
+    if fetched_at is None:
+        return True
+    if not isinstance(fetched_at, datetime):
+        return False
+    now = datetime.now(fetched_at.tzinfo) if fetched_at.tzinfo else datetime.utcnow()
+    age = now - fetched_at
+    return -_DELIVERY_CLOCK_SKEW <= age <= _DELIVERY_LINE_MAX_AGE
 
 
 def _prop_claim_key(
@@ -649,11 +669,16 @@ async def send_alert(
     chat_id: Union[int, str],
     message: str,
     keyboard: Optional[list[list[InlineKeyboardButton]]] = None,
+    *,
+    sport: Optional[str] = None,
 ) -> bool:
     """Send a formatted alert message. Returns True on success."""
     # All live Telegram paths eventually pass through this low-level sender.
     # Keep internal scoring vocabulary out of user-facing alerts, including
     # legacy/direct broadcast callers that do not use the current formatters.
+    if is_football_related_sport(sport):
+        logger.info("send_alert: football betting output suppressed: sport=%s", sport)
+        return False
     message = _sanitize_user_alert_message(message)
     markup = InlineKeyboardMarkup(keyboard) if keyboard else None
     try:
@@ -720,7 +745,7 @@ async def broadcast_alert(
     message = _sanitize_user_alert_message(message)
     sent = failed = 0
     for cid in chat_ids:
-        if await send_alert(bot, cid, message):
+        if await send_alert(bot, cid, message, sport=sport):
             sent += 1
         else:
             failed += 1
@@ -1155,7 +1180,12 @@ class AlertDelivery:
         message = format_ev_alert(opp, risk_factors=risk_factors)
 
         # 4. Send
-        counts = await broadcast_alert(self._bot, self._chat_ids, message)
+        counts = await broadcast_alert(
+            self._bot,
+            self._chat_ids,
+            message,
+            sport=getattr(opp, "sport", None),
+        )
         alert_sent = counts["sent"] > 0
 
         # 5. Log
@@ -1269,6 +1299,18 @@ class AlertDelivery:
         from alert_scope_filter import check
         from engine.timing import is_game_alertable
 
+        if not _is_fresh_delivery_line(getattr(opp.pp_line, "fetched_at", None)):
+            logger.debug(
+                "PP alert freshness-blocked: %s | %s",
+                getattr(opp.pp_line, "player_name", "?"),
+                getattr(opp.pp_line, "stat_type", "?"),
+            )
+            return DeliveryResult(
+                sent=False,
+                filtered=True,
+                filtered_reason="PrizePicks line is stale",
+            )
+
         # 0. Scope filter
         norm_obj = normalize_pp(opp, score=score)
         scope    = check(norm_obj)
@@ -1360,7 +1402,12 @@ class AlertDelivery:
         # 3. Format and send
         try:
             message = format_pp_alert(opp)
-            counts  = await broadcast_alert(self._bot, self._chat_ids, message)
+            counts  = await broadcast_alert(
+                self._bot,
+                self._chat_ids,
+                message,
+                sport=_pp_sport,
+            )
         except Exception:
             self._release_prop_delivery_claim(
                 provider="PrizePicks",
@@ -1462,6 +1509,12 @@ class AlertDelivery:
         """
         source = source.strip() or "Underdog"
         source_upper = source.upper()
+        if source_upper not in {"UNDERDOG", "PRIZEPICKS"}:
+            return DeliveryResult(
+                sent=False,
+                filtered=True,
+                filtered_reason=f"Unsupported prop provider/source: {source}",
+            )
         if is_football_related_sport(sport):
             return DeliveryResult(
                 sent=False,
@@ -1476,6 +1529,19 @@ class AlertDelivery:
             format_market_move_detected,
         )
         from engine.timing import is_game_alertable
+
+        if not _is_fresh_delivery_line(fetched_at):
+            logger.debug(
+                "UD alert freshness-blocked: %s | %s | %s",
+                player_name,
+                stat_type,
+                sport,
+            )
+            return DeliveryResult(
+                sent=False,
+                filtered=True,
+                filtered_reason="Underdog line is stale",
+            )
 
         # 0 & 1. Normalize + scope check
         norm_obj = normalize_underdog(player_name, stat_type, sport, is_removed=removed)
@@ -1571,11 +1637,6 @@ class AlertDelivery:
         if self._chat_ids and _actionable:
             limiter = get_rate_limiter()
             limiter.record_qualified()
-            _ud_tier = (
-                getattr(decision, "decision_tier", None)
-                or getattr(score, "tier", None)
-                or "B"
-            )
             _ud_conf = float(getattr(decision, "confidence", 0) or 0)
             _ud_bq = float(getattr(score, "total", 0) or 0)
             _meaningful = (
@@ -1583,7 +1644,7 @@ class AlertDelivery:
                 or abs(new_line - old_line) >= 2 * config.MIN_UNDERDOG_LINE_CHANGE
             )
             rate = limiter.check(
-                str(_ud_tier),
+                _direction,
                 _ud_conf,
                 _ud_bq,
                 is_meaningful_change=_meaningful,

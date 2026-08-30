@@ -12,7 +12,7 @@ Correlation heuristics (rule-based, no ML required):
   5. Different sport / truly independent→ 0.00
 
 Greedy selection algorithm:
-  • Sort candidates by (tier_rank, -confidence) — best first.
+  • Sort candidates by confidence — best first.
   • Seed with the top candidate.
   • For each remaining slot, pick the candidate with the lowest
     max-correlation against the already-selected set.
@@ -54,10 +54,6 @@ _STAT_PAIR_DELTA: dict[frozenset, float] = {
     frozenset({"Strikeouts",    "Hits"}):              -0.05,  # negative: inverse stats
     frozenset({"Rushing Yards", "Receiving Yards"}):   -0.05,
 }
-
-# Tier order for sorting (lower = better)
-_TIER_RANK: dict[str, int] = {"S": 0, "A": 1, "B": 2, "PASS": 3}
-
 
 # ── Data models ───────────────────────────────────────────────────────────────
 
@@ -170,7 +166,7 @@ def optimize_slip(
 
     Steps
     -----
-    1. Sort candidates by (tier_rank, -confidence) — best quality first.
+    1. Sort candidates by confidence — best available evidence first.
     2. Seed the slip with the top candidate.
     3. For each open slot, score remaining candidates:
            pick_score = conf_norm  -  max_corr_with_selected * 2.0
@@ -196,10 +192,7 @@ def optimize_slip(
 
     pool = sorted(
         candidates,
-        key=lambda r: (
-            _TIER_RANK.get(r.tier or "PASS", 3),
-            -(r.confidence or 0),
-        ),
+        key=lambda r: -(r.confidence or 0),
     )
 
     selected:  list["PPEdgeRecord"]              = []
