@@ -1,0 +1,391 @@
+🔴 TARGETED /PICKS FIX — CURRENT EVENT STATE + FAIR PROVIDER SELECTION
+
+Continue from the read-only audit findings.
+
+Implement ONLY the smallest targeted fixes required to correct /picks.
+
+Do NOT redesign the architecture.
+
+Do NOT weaken pregame protection.
+
+Do NOT change scoring, confidence, BQ/MQ, evidence providers, FPR, monitoring, grading, scheduler, or Telegram delivery rules.
+
+Do NOT create a checkpoint until implementation and validation are complete.
+
+⸻
+
+1. PRESERVE RELIABLE EVENT TIME / STATUS
+
+The audit found that /picks currently returns zero because all current provider rows fail the safe pregame check:
+
+Rows excluded because both game_time and a recognized pregame provider status were unavailable: 275
+
+This includes directional PrizePicks rows.
+
+Fix the upstream current-row data preservation so that when reliable provider event/game timing or status is available, it is retained on the current PropLineHistory representation used by /picks.
+
+Preserve, where legitimately available:
+
+* Event/game ID
+* Event/game start time
+* Provider event status
+* Pregame/live/final state
+* Provider/source identity
+* Current line
+* Observation/fetched timestamp
+
+Do NOT fabricate event times or statuses.
+
+Do NOT infer a game is pregame merely because its status is missing.
+
+The existing safety rule remains:
+
+Unknown event state must remain safely excluded from new betting output.
+
+The goal is to prevent legitimate provider event information from being lost before /picks evaluates it.
+
+Apply this consistently to:
+
+* Underdog
+* PrizePicks / PropLine
+
+Do not change unrelated ingestion behavior.
+
+⸻
+
+2. FIX /PICKS CANDIDATE SELECTION
+
+The audit found another structural issue:
+
+/picks currently:
+
+1. Fetches Underdog rows.
+2. Fetches PrizePicks rows.
+3. Combines Underdog first.
+4. Deduplicates.
+5. Truncates the combined population to 30.
+6. Only afterward determines effective OVER/UNDER direction.
+
+This can allow non-directional Underdog rows to consume the candidate limit and potentially crowd PrizePicks directional opportunities out.
+
+Fix this selection order.
+
+The /picks view should:
+
+1. Fetch valid current provider rows.
+2. Apply legitimate source/provider/current-state/pregame safety filters.
+3. Determine effective OVER/UNDER direction.
+4. Remove rows without a valid direction.
+5. Deduplicate using provider-aware identity.
+6. Then apply the display/result limit.
+7. Preserve fair representation of both providers.
+
+Do NOT create a second delivery gate.
+
+Do NOT require:
+
+* S/A/B/C
+* Tier 1/Tier 2
+* Watchlist
+* Near-Miss
+* PASS
+* Rejected
+* Confidence threshold
+* Score threshold
+* Telegram delivery
+* alert_sent
+* Canonical evidence qualification
+
+/picks remains a current directional research/display view.
+
+⸻
+
+3. PROVIDER FAIRNESS
+
+Do not allow Underdog to crowd PrizePicks out simply because Underdog rows are inserted first.
+
+Both primary providers must remain independently represented when they have valid current directional opportunities:
+
+🐶 Underdog
+
+🟣 PrizePicks / PropLine
+
+Provider identity must remain intact.
+
+Do not relabel one provider as the other.
+
+If there are valid directional opportunities from both providers, /picks should be capable of displaying both.
+
+Do not fabricate opportunities just to make both providers appear.
+
+⸻
+
+4. PRE-GAME SAFETY MUST REMAIN HARD
+
+Do NOT weaken this rule.
+
+A current provider row must have a safely known valid pregame state.
+
+Started/live/in-game props remain excluded from new betting recommendations.
+
+Unknown event state remains excluded.
+
+Historical tracking/grading remains untouched.
+
+Therefore:
+
+Reliable provider event data → eligible for /picks if directional.
+
+Started/live → excluded.
+
+Unknown event state → excluded.
+
+Historical opportunity without a current valid source row → remains gradeable but does not become a new /picks recommendation.
+
+⸻
+
+5. DO NOT CONFUSE /PICKS WITH TELEGRAM DELIVERY
+
+Keep these populations separate.
+
+/picks should show current valid directional research opportunities.
+
+Telegram delivery continues to require the existing canonical:
+
+* OVER/UNDER
+* Legitimate supporting evidence
+* Existing safety protections
+
+Do not modify the Telegram delivery gate during this task.
+
+Do not make /picks require Telegram eligibility.
+
+Do not make /picks automatically send anything.
+
+⸻
+
+6. RETIRED FRAMEWORK MUST REMAIN NON-INFLUENTIAL
+
+Confirm through regression tests that none of these influence /picks inclusion:
+
+* Watchlist
+* Near-Miss
+* Rejected
+* S-tier
+* A-tier
+* B-tier
+* C-tier
+* Tier 1
+* Tier 2
+* decision_tier
+
+PASS may remain only as historical/compatibility metadata.
+
+Rows without a valid OVER/UNDER direction may be excluded because they are non-directional.
+
+That is direction enforcement, not a retired classification gate.
+
+⸻
+
+7. TRACKING / GRADING MUST NOT CHANGE
+
+Do NOT change:
+
+* Persistent prop tracking
+* Historical observations
+* Directional opportunity persistence
+* HIT/MISS/PUSH grading
+* Player history
+* Provider evidence
+* Progressive graded evidence
+* FPR rotation
+* Continuous rescanning
+* Active source-ID lifecycle
+
+A row being excluded from /picks must remain tracked and gradeable where applicable.
+
+⸻
+
+8. REGRESSION TESTS
+
+Add focused tests proving:
+
+Event state
+
+* Reliable Underdog event time/status survives into current source rows.
+* Reliable PrizePicks event time/status survives into current source rows.
+* Pregame rows can reach /picks.
+* Started/live rows remain excluded.
+* Unknown event state remains excluded.
+* No fabricated event times/statuses are created.
+
+Direction
+
+* Direction is resolved before the /picks result cap.
+* Non-directional rows do not consume the directional result limit.
+* Valid OVER rows survive.
+* Valid UNDER rows survive.
+
+Provider fairness
+
+* Underdog directional rows survive.
+* PrizePicks directional rows survive.
+* Underdog cannot crowd out PrizePicks merely because it is processed first.
+* Provider labels remain correct.
+* Provider-aware deduplication remains intact.
+
+Retired framework
+
+Prove /picks inclusion does not depend on:
+
+* Watchlist
+* Near-Miss
+* Rejected
+* S/A/B/C
+* Tier 1
+* Tier 2
+* decision_tier
+
+Separation
+
+Prove:
+
+* /picks remains separate from Telegram delivery.
+* /picks does not require alert_sent.
+* /picks does not require canonical evidence.
+* /picks does not send alerts.
+
+⸻
+
+9. VALIDATION
+
+Run:
+
+* Focused /picks regression suite.
+* Existing provider/current-state tests.
+* Existing pregame tests.
+* Existing provider separation tests.
+* Full bot test suite.
+* Python compilation.
+* git diff --check.
+
+Do not weaken existing tests.
+
+⸻
+
+10. LIVE VERIFICATION
+
+After implementation, perform only the minimum safe verification necessary.
+
+If production/live access is available, verify:
+
+/picks
+
+* Current valid pregame Underdog directional opportunities can appear.
+* Current valid pregame PrizePicks directional opportunities can appear.
+* Both provider identities remain distinct.
+* Started/live props remain excluded.
+* Unknown event state remains excluded.
+* Non-directional rows do not crowd out directional rows.
+* /picks no longer incorrectly returns zero solely because reliable provider event information was lost.
+
+Do NOT use /testalert.
+
+Do NOT fabricate props.
+
+Do NOT force an alert.
+
+Do NOT change thresholds.
+
+If live production verification is unavailable, explicitly report:
+
+LIVE VERIFICATION UNAVAILABLE
+
+and report the exact focused/full test results instead.
+
+⸻
+
+11. PRESERVE EVERYTHING ELSE
+
+Do NOT change:
+
+* Underdog ingestion architecture
+* PrizePicks ingestion architecture
+* FPR/full-pool rotation
+* Active source-ID lifecycle
+* Continuous rescanning
+* Football/gridiron exclusion
+* Soccer/FIFA/MLS support
+* Other supported non-football sports
+* Provider evidence
+* Graded-prop evidence
+* Tracking
+* Grading
+* Scoring
+* BQ/MQ
+* Confidence
+* Telegram delivery
+* Alert deduplication
+* Pregame protection
+* Stale-line protection
+* Scheduler
+* Adaptive batching
+* max_instances=1
+* Clean restart
+* Historical data
+* Railway
+* Database schema unless absolutely necessary
+
+Make the smallest targeted change possible.
+
+⸻
+
+12. FINAL REPORT
+
+Return:
+
+Changes
+
+Exactly what was changed.
+
+Tests
+
+Focused results, full suite, compilation, diff check.
+
+/PICKS behavior
+
+Explain the corrected candidate-selection flow.
+
+Event-state handling
+
+Explain how legitimate provider event data is preserved without weakening safety.
+
+Provider fairness
+
+Explain how Underdog and PrizePicks are prevented from crowding each other out.
+
+Retired framework
+
+Confirm Watchlist/Near-Miss/PASS/Rejected/S-A-B-C/Tier/decision_tier do not act as /picks gates.
+
+Live verification
+
+Report exactly what was actually verified.
+
+Do NOT claim live success if it was not actually verified.
+
+🔴 FINAL RULE
+
+This is a targeted /picks correction only.
+
+Do not redesign the bot.
+
+Do not modify Telegram delivery policy.
+
+Do not weaken pregame protection.
+
+Do not fabricate event data.
+
+Do not force picks.
+
+Do not create a checkpoint until the implementation and validation are complete.
