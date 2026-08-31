@@ -55,11 +55,6 @@ async def _bounded(coro, timeout: Optional[float] = None):
     """
     timeout_value = _COMMAND_TIMEOUT_SECONDS if timeout is None else timeout
     task = asyncio.ensure_future(coro)
-    done, _pending = await asyncio.wait({task}, timeout=timeout_value)
-    if task in done:
-        return task.result()
-
-    task.cancel()
 
     def _consume_finished(report_task: asyncio.Future) -> None:
         if report_task.cancelled():
@@ -68,6 +63,19 @@ async def _bounded(coro, timeout: Optional[float] = None):
             report_task.exception()
         except Exception:
             pass
+
+    try:
+        done, _pending = await asyncio.wait({task}, timeout=timeout_value)
+    except asyncio.CancelledError:
+        # An outer report deadline may cancel a nested _bounded() call. Ensure
+        # its separately-created DB task does not survive the cancelled command.
+        task.cancel()
+        task.add_done_callback(_consume_finished)
+        raise
+    if task in done:
+        return task.result()
+
+    task.cancel()
 
     # Consume a late exception without awaiting slow database cleanup.
     task.add_done_callback(_consume_finished)
@@ -1725,6 +1733,21 @@ def _pick_source_identity(provider: str, prop: Any) -> tuple[str, ...]:
     )
 
 
+def _ud_recommendation_identity(prop: Any) -> tuple[str, str, str, str]:
+    """Source-aware identity used for bounded Underdog recommendation reads."""
+    source_id = str(
+        getattr(prop, "external_id", None)
+        or getattr(prop, "game_id", None)
+        or ""
+    ).strip()
+    return (
+        str(getattr(prop, "player_name", "")),
+        str(getattr(prop, "sport", "")),
+        str(getattr(prop, "stat_type", "")),
+        source_id,
+    )
+
+
 def _fair_provider_limit(
     rows: list[tuple[str, Any]],
     limit: int,
@@ -1752,7 +1775,7 @@ def _fair_provider_limit(
 def _select_directional_provider_rows(
     ud_props: list[Any],
     pp_props: list[Any],
-    rec_map: dict[tuple[str, str, str], tuple[Optional[str], Optional[int]]],
+    rec_map: dict[tuple[str, str, str, str], tuple[Optional[str], Optional[int]]],
     limit: int,
 ) -> list[tuple[str, Any]]:
     """Resolve direction, preserve provider identity, then apply a fair cap."""
@@ -1764,11 +1787,11 @@ def _select_directional_provider_rows(
         effective_rec = getattr(prop, "bet_recommendation", None)
         if provider == "Underdog":
             live_rec, _ = rec_map.get(
-                (prop.player_name, prop.sport, prop.stat_type),
+                _ud_recommendation_identity(prop),
                 (None, None),
             )
-            if live_rec is not None:
-                effective_rec = live_rec
+            if str(live_rec or "").strip().upper() in ("OVER", "UNDER"):
+                    effective_rec = str(live_rec).strip().upper()
         if effective_rec not in ("OVER", "UNDER"):
             continue
         directional_by_identity[_pick_source_identity(provider, prop)] = (
@@ -1946,6 +1969,7 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Inner implementation of /picks — wrapped by cmd_picks try/except."""
+    _perf_started = time.monotonic()
     args = context.args or []
     limit = 10
     sport_filter: Optional[str] = None
@@ -1974,12 +1998,15 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     # PrizePicks is actionable on its own; it is not merely Underdog
     # enrichment. Keep the provider in the candidate identity so matching
     # player/stat rows remain separate in this analyst view.
+    _provider_overfetch = max(limit * 4, 40)
     logger.info("cmd_picks: fetching current provider props (sport=%s)", sport_filter)
+    _stage_started = time.monotonic()
     ud_props = await _bounded(_db.get_top_ud_props_for_picks(
-        limit=None,
+        limit=_provider_overfetch,
         since_hours=_since_hours,
-        sports=config.active_sports,
+        sports=[sport_filter] if sport_filter else config.active_sports,
     ))
+    _ud_query_seconds = time.monotonic() - _stage_started
     ud_props = [
         p for p in ud_props
         if not _is_season_future(p.stat_type)
@@ -1995,13 +2022,22 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         ud_props = [p for p in ud_props if p.sport.upper() == sport_filter]
 
     try:
-        pp_rows = await _bounded(_db.get_latest_props_for_provider("PrizePicks", since_hours=_since_hours))
+        _stage_started = time.monotonic()
+        pp_rows = await _bounded(_db.get_latest_props_for_provider(
+            "PrizePicks",
+            since_hours=_since_hours,
+            limit=_provider_overfetch,
+            directional_first=True,
+        ))
+        _pp_query_seconds = time.monotonic() - _stage_started
     except Exception:
         pp_rows = []
+        _pp_query_seconds = time.monotonic() - _stage_started
 
     pp_props = [
         p for p in pp_rows
-        if not _is_season_future(p.stat_type)
+        if getattr(p, "removed", False) is not True
+        and not _is_season_future(p.stat_type)
         and _is_current_provider_sport(p.sport, "PrizePicks")
         and not is_telegram_suppressed_sport(p.sport)
         and _is_upcoming_game(
@@ -2014,22 +2050,24 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     # directional research view, not a second Telegram delivery gate.
     _rec_map: dict = {}
     try:
+        _stage_started = time.monotonic()
         _rec_map = await _bounded(_db.get_ud_recommendations_bulk(
-            [
-                (p.player_name, p.sport, p.stat_type)
-                for p in ud_props
-            ],
+            [_ud_recommendation_identity(p) for p in ud_props],
             since_hours=24,
         ))
+        _rec_query_seconds = time.monotonic() - _stage_started
     except Exception as _rec_exc:
         logger.warning("cmd_picks: recommendation lookup failed: %s", _rec_exc)
+        _rec_query_seconds = time.monotonic() - _stage_started
 
+    _direction_started = time.monotonic()
     provider_props = _select_directional_provider_rows(
         ud_props,
         pp_props,
         _rec_map,
         limit,
     )
+    _direction_seconds = time.monotonic() - _direction_started
 
     if not provider_props:
         hint = f" for {sport_filter}" if sport_filter else ""
@@ -2044,8 +2082,10 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     logger.info(
         "cmd_picks: provider fetch done — current UD=%d PP=%d directional=%d "
-        "(sport=%s)",
+        "(sport=%s; ud=%.3fs pp=%.3fs rec=%.3fs direction=%.3fs)",
         len(ud_props), len(pp_props), len(provider_props), sport_filter,
+        _ud_query_seconds, _pp_query_seconds, _rec_query_seconds,
+        _direction_seconds,
     )
 
     # ── 2. Build comparisons without inventing a cross-provider match ────────
@@ -2135,14 +2175,15 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     from engine.player_prop_market import _line_label as _ll
 
     logger.info("cmd_picks: fetching alternate lines")
+    async def _get_alt_lines(plh):
+        if (getattr(plh, "provider", None) or "Underdog") != "Underdog":
+            return []
+        return await _db.get_all_ud_lines_for_prop(
+            plh.player_name, plh.sport, plh.stat_type, since_hours=24
+        )
+
     _alt_raw = await _bounded(_asyncio.gather(
-        *[
-            _db.get_all_ud_lines_for_prop(
-                plh.player_name, plh.sport, plh.stat_type, since_hours=24
-            )
-            for plh, _ in picks
-            if (getattr(plh, "provider", None) or "Underdog") == "Underdog"
-        ],
+        *[_get_alt_lines(plh) for plh, _ in picks],
         return_exceptions=True,
     ))
     _alt_lines: list[list[float]] = [
@@ -2191,9 +2232,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         _key = plh.sport.upper()
         # Resolve effective recommendation: live snapshot overrides synced column
         _eff_rec = getattr(plh, "bet_recommendation", None)
-        _live_r, _ = _rec_map.get(
-            (plh.player_name, plh.sport, plh.stat_type), (None, None)
-        )
+        _live_r, _ = _rec_map.get(_ud_recommendation_identity(plh), (None, None))
         if (
             (getattr(plh, "provider", None) or "Underdog") == "Underdog"
             and _live_r is not None
@@ -2255,13 +2294,13 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         # Bet direction — primary: synced column on PropLineHistory (always fresh)
         # Secondary: live UnderdogSnapshotRecord via _rec_map (handles same-cycle updates)
         bet_rec  = getattr(plh, "bet_recommendation", None)
-        rec_key  = (plh.player_name, plh.sport, plh.stat_type)
+        rec_key  = _ud_recommendation_identity(plh)
         _live_rec, _live_conf = _rec_map.get(rec_key, (None, None))
         if _live_rec is None and _rec_map:
             # Case-insensitive fallback (normalisation drift between tables)
-            _rec_key_lower = (plh.player_name.lower(), plh.sport.lower(), plh.stat_type.lower())
-            for (_rp, _rs, _rst), _rv in _rec_map.items():
-                if (_rp.lower(), _rs.lower(), _rst.lower()) == _rec_key_lower:
+            _rec_key_lower = tuple(str(part).lower() for part in rec_key)
+            for _stored_key, _rv in _rec_map.items():
+                if tuple(str(part).lower() for part in _stored_key) == _rec_key_lower:
                     _live_rec, _live_conf = _rv
                     break
         # Prefer live snapshot if available; fall back to synced column
@@ -2433,9 +2472,13 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     # Telegram HTML message; chunked to stay under the 4096-char API limit.
     full_text = "\n\n".join(out)
-    logger.info("cmd_picks: formatted output %d chars, sending (%d props)", len(full_text), len(picks))
+    logger.info(
+        "cmd_picks: formatted output %d chars, sending (%d props; enrichment=%.3fs)",
+        len(full_text), len(picks),
+        time.monotonic() - _direction_started - _direction_seconds,
+    )
     await _send_in_chunks(update, full_text, parse_mode=ParseMode.HTML)
-    logger.info("cmd_picks: send complete")
+    logger.info("cmd_picks: send complete total=%.3fs", time.monotonic() - _perf_started)
 
 
 async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

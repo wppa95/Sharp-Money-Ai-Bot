@@ -1558,8 +1558,8 @@ class AlertDelivery:
             line_change = abs(new_line - old_line)
             allowed, timing_reason = is_game_alertable(
                 game_time,
-                min_minutes=config.ALERT_WINDOW_MIN_MINUTES,
-                max_minutes=config.ALERT_WINDOW_MAX_MINUTES,
+                min_minutes=0,
+                max_minutes=1440,
                 urgent_edge=config.URGENT_EDGE_THRESHOLD,
                 edge=line_change * 2.0,
                 game_status=game_status,
@@ -1622,7 +1622,7 @@ class AlertDelivery:
 
         _ud_line_value = float(new_line or 0)
         if not self._try_claim_prop_delivery(
-            provider="Underdog",
+            provider=source,
             source=source,
             event_id=str(event_id or ""),
             player_name=player_name,
@@ -1654,7 +1654,7 @@ class AlertDelivery:
             )
             if not rate.allowed:
                 self._release_prop_delivery_claim(
-                    provider="Underdog",
+                    provider=source,
                     source=source,
                     event_id=str(event_id or ""),
                     player_name=player_name,
@@ -1723,7 +1723,7 @@ class AlertDelivery:
             counts = await broadcast_alert(self._bot, self._chat_ids, message, sport=sport)
         except Exception:
             self._release_prop_delivery_claim(
-                provider="Underdog",
+                provider=source,
                 source=source,
                 event_id=str(event_id or ""),
                 player_name=player_name,
@@ -1739,7 +1739,7 @@ class AlertDelivery:
         alert_sent = counts["sent"] > 0
         if not alert_sent:
             self._release_prop_delivery_claim(
-                provider="Underdog",
+                provider=source,
                 source=source,
                 event_id=str(event_id or ""),
                 player_name=player_name,
