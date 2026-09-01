@@ -461,8 +461,8 @@ async def test_priority_stat_high_line_goes_to_digest_not_immediate():
 
 
 @pytest.mark.asyncio
-async def test_priority_stat_at_half_line_triggers_immediate_alert():
-    """A priority stat AT 0.5 line + history + real OVER pick triggers an immediate alert."""
+async def test_priority_stat_at_half_line_still_requires_real_game_results():
+    """A priority stat cannot bypass the real-game evidence gate."""
     snaps = [_snap("Aaron Judge", "Home Runs", 0.5)]
     db = _make_db(known_keys=set(), prop_history=_fake_history(6))
 
@@ -471,9 +471,7 @@ async def test_priority_stat_at_half_line_triggers_immediate_alert():
 
     delivery = await _run_job(snaps, db, deliver_result=sent, hit_rates=_make_hit_rates())
 
-    # Priority category and half-line make this immediate; Tier 1 does not
-    # impose a separate S/A/B/C quality label.
-    delivery.deliver_underdog.assert_called_once()
+    delivery.deliver_underdog.assert_not_called()
 
 
 @pytest.mark.asyncio

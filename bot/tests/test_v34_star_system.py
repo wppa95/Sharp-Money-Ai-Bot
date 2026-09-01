@@ -270,7 +270,7 @@ class TestOverrideAlertBqStars:
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestStrongUnderSignal:
-    """Strong UNDER signal display — UNDER + underlying score ≤ 30."""
+    """Informational direction labels are not rendered in Telegram alerts."""
 
     def _change_alert(self, rec="UNDER", score_total=28, conf=80, sport="WNBA"):
         import alerts_multiplatform as am
@@ -316,23 +316,21 @@ class TestStrongUnderSignal:
 
     # ── Trigger conditions ───────────────────────────────────────────────────
     def test_under_score_30_triggers_signal(self):
-        """UNDER + BQ ≥ 70 (Tier 1) → STRONG UNDER in alert (replaces old score ≤ 30 condition)."""
+        """UNDER + BQ ≥ 70 still renders only the canonical PICK/Quality."""
         msg = self._change_alert(rec="UNDER", score_total=30, conf=80)
-        assert "STRONG UNDER" in msg, (
-            "Tier 1 UNDER + BQ ≥ 70 must show STRONG UNDER label"
-        )
+        assert "STRONG UNDER" not in msg
 
     def test_under_score_29_triggers_signal(self):
         msg = self._change_alert(rec="UNDER", score_total=29, conf=80)
-        assert "STRONG UNDER" in msg
+        assert "STRONG UNDER" not in msg
 
     def test_under_score_20_triggers_signal(self):
         msg = self._change_alert(rec="UNDER", score_total=20, conf=75)
-        assert "STRONG UNDER" in msg
+        assert "STRONG UNDER" not in msg
 
     def test_under_score_0_triggers_signal(self):
         msg = self._change_alert(rec="UNDER", score_total=0, conf=70)
-        assert "STRONG UNDER" in msg
+        assert "STRONG UNDER" not in msg
 
     # ── Non-trigger conditions ───────────────────────────────────────────────
     def test_under_score_31_no_signal(self):
@@ -343,9 +341,9 @@ class TestStrongUnderSignal:
         )
 
     def test_under_bq_30_triggers_sensitivity_signal(self):
-        """UNDER + quality 30 keeps the compact informational signal."""
+        """UNDER + quality 30 does not add an informational signal label."""
         msg = self._change_alert(rec="UNDER", score_total=60, conf=30)
-        assert "UNDER SIGNAL" in msg
+        assert "UNDER SIGNAL" not in msg
         assert "BQ" not in msg
 
     def test_under_bq_29_does_not_trigger_sensitivity_signal(self):
@@ -367,16 +365,14 @@ class TestStrongUnderSignal:
 
     # ── New prop alert also shows signal ─────────────────────────────────────
     def test_new_prop_under_score_28_triggers_signal(self):
-        """New-prop alert with a directional UNDER keeps the informational signal."""
+        """New-prop alert with a directional UNDER omits the informational signal."""
         msg = self._new_prop_alert(rec="UNDER", score_total=28, conf=80)
-        assert "UNDER SIGNAL" in msg, (
-            "format_underdog_new_prop_alert must show the informational UNDER signal"
-        )
+        assert "UNDER SIGNAL" not in msg
 
     def test_new_prop_under_bq_30_triggers_sensitivity_signal(self):
         msg = self._new_prop_alert(rec="UNDER", score_total=60, conf=30)
-        assert "UNDER SIGNAL" in msg
-        assert "informational market signal" in msg
+        assert "UNDER SIGNAL" not in msg
+        assert "informational market signal" not in msg
 
     def test_new_prop_over_score_28_no_signal(self):
         msg = self._new_prop_alert(rec="OVER", score_total=28)
@@ -389,11 +385,11 @@ class TestStrongUnderSignal:
         assert "80/100" in msg, "BQ 80 must still appear unchanged in the alert"
 
     def test_signal_does_not_affect_over_logic(self):
-        """OVER alerts must never get the STRONG UNDER label; UNDER at BQ ≥ 70 must get it."""
+        """Neither direction gets an informational signal label."""
         msg_over  = self._change_alert(rec="OVER",  score_total=28, conf=80)
         msg_under = self._change_alert(rec="UNDER", score_total=28, conf=80)
         assert "STRONG UNDER" not in msg_over
-        assert "STRONG UNDER" in msg_under
+        assert "STRONG UNDER" not in msg_under
 
 
 # ═══════════════════════════════════════════════════════════════════════════

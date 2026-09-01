@@ -807,9 +807,11 @@ def format_underdog_change_alert(
             _bq_int = int(conf)
             # _bq_stars remains the source of truth for the displayed quality stars.
             pick_line += f"\n{_format_quality_line(decision, score)}"
-            _priority_lbl = _bq_priority_label(_bq_int, direction=rec, sport=sport)
-            if _priority_lbl:
-                pick_line += f"\n{_priority_lbl}"
+            # Telegram has one user-facing classification.  Retain the
+            # positive quality cue, but never append ACTIONABLE or directional
+            # signal labels beside the canonical PICK.
+            if _bq_int >= 80:
+                pick_line += "\n💪 STRONG BET"
         _is_tier1_sport = sport.upper() not in {"MLB", "NFL"}
 
     # Market quality one-liner
