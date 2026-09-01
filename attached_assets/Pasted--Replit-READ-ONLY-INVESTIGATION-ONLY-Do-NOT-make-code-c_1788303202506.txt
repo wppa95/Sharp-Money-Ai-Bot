@@ -1,0 +1,209 @@
+@Replit
+
+READ-ONLY INVESTIGATION ONLY.
+
+Do NOT make code changes.
+Do NOT restart the bot.
+Do NOT deploy.
+Do NOT modify scoring, thresholds, evidence rules, PLAY qualification, scheduler/cadence, or database logic.
+
+We have a serious Telegram delivery/reporting discrepancy.
+
+Current /funnel output says:
+
+Underdog
+  Observed: 6,001
+  Evaluated: 5
+  Directional: 2
+  Actionable persisted: 2
+  Delivered: 5
+  Pending: 2
+
+PrizePicks
+  Observed: 78
+  Evaluated: 39
+  Directional: 0
+  Actionable persisted: 0
+  Delivered: 0
+
+Full Monitoring Pipeline:
+  Qualified directional candidates: 5
+  Delivered to Telegram: 5
+
+Tracking & Grading Funnel:
+  Evaluated candidates: 44
+  Directional OVER/UNDER opportunities: 2
+  Actionable persisted: 2
+  Delivered alerts: 2
+  Pending grading: 2
+
+BUT I RECEIVED ZERO TELEGRAM ALERTS.
+
+This must be investigated before making any changes.
+
+## PRIMARY QUESTION
+
+Find out exactly why the system is reporting Telegram delivery when no Telegram messages were actually received.
+
+Trace ONE complete path:
+
+provider observation
+→ evaluation
+→ directional
+→ actionable
+→ Telegram delivery attempt
+→ Telegram API response
+→ delivery persistence
+→ /funnel counter
+
+Determine exactly where the "delivered" count is coming from.
+
+## CHECK ALL OF THESE
+
+1. Identify the exact database/query/function producing:
+
+"Delivered: 5"
+
+under the Underdog provider pipeline.
+
+2. Identify the exact database/query/function producing:
+
+"Delivered to Telegram: 5"
+
+in Full Monitoring Pipeline.
+
+3. Identify the exact database/query/function producing:
+
+"Delivered alerts: 2"
+
+in Tracking & Grading Funnel.
+
+4. Determine why those populations disagree.
+
+5. Determine whether "Delivered" actually means:
+   - Telegram API send succeeded
+   - alert was queued
+   - alert was attempted
+   - alert was persisted
+   - alert was qualified
+   - alert was merely counted as actionable
+   - or something else.
+
+6. Inspect the Telegram send function and determine whether Telegram API requests were actually made during the period represented by this /funnel report.
+
+7. Inspect Telegram API responses for those alleged deliveries.
+
+8. Determine whether the Telegram API returned:
+   - success
+   - failure
+   - timeout
+   - blocked request
+   - invalid chat ID
+   - unauthorized/bad token
+   - rate limit
+   - other error.
+
+9. Verify whether the configured Telegram destination/chat ID is the expected destination.
+
+10. Verify whether the bot is actually sending to the same Telegram chat/channel where I expect the alerts.
+
+11. Check whether messages were suppressed by:
+   - deduplication
+   - delivery guard
+   - user allowlist
+   - alert routing
+   - silent/failure handling
+   - retry logic
+   - cooldown
+   - stale delivery state
+   - test-alert separation.
+
+12. Determine whether the "Delivered: 5" value could be counting historical delivery records rather than messages sent during the current /funnel window.
+
+13. Determine whether the "Delivered: 5" value includes old PLAYs, legacy records, or records from a previous runtime session.
+
+14. Check whether the recent clean restart caused any reporting population mismatch.
+
+## IMPORTANT V4 RULE
+
+Telegram is a TRUE PLAY-ONLY feed.
+
+Only a genuinely qualified PLAY should reach Telegram.
+
+These are NOT Telegram deliveries:
+
+- observations
+- tracking records
+- new prop detection
+- line movement by itself
+- scoring
+- rescoring
+- directional signals that fail PLAY qualification
+- historical records
+- full-pool observations
+- stable-refresh observations
+- pending grading
+- legacy records
+- /testalert records.
+
+Also:
+
+QUALITY IS NOT AN INDEPENDENT TELEGRAM DELIVERY GATE.
+
+Do not introduce a new quality threshold while investigating this.
+
+## IMPORTANT COUNTER REQUIREMENT
+
+A counter labeled:
+
+"Delivered to Telegram"
+
+must mean an actual successful Telegram delivery for a qualified PLAY.
+
+It must NOT mean:
+
+"qualified"
+"persisted"
+"queued"
+"attempted"
+"delivery record exists"
+
+unless the UI explicitly labels it that way.
+
+If Telegram API success cannot be established, it must not be counted as delivered.
+
+## DO NOT CHANGE ANYTHING YET
+
+First provide a READ-ONLY root-cause report containing:
+
+A. What the 5 "Delivered" records actually represent.
+
+B. What the 2 "Delivered alerts" records actually represent.
+
+C. Whether any Telegram API send requests actually occurred.
+
+D. How many Telegram API sends succeeded.
+
+E. How many failed.
+
+F. The exact failure reason if any.
+
+G. Whether the alleged 5 deliveries are historical/legacy/current-session records.
+
+H. Whether the funnel is mixing populations.
+
+I. Whether Telegram itself is healthy.
+
+J. The exact code/query/reporting path responsible for each counter.
+
+K. The minimum fix required.
+
+Do not implement the fix until the root cause is identified.
+
+Do not restart.
+
+Do not deploy.
+
+Do not modify anything.
+
+READ-ONLY investigation only.
