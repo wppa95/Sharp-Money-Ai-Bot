@@ -15,6 +15,14 @@ PropLine could still be processing an older cycle while Underdog started the
 next one. Shared ownership makes cadence and completion explicit without
 slowing either provider or changing the authorized client's pacing.
 
+The result-metadata fetch adapter must follow the same one-sport limit as the
+legacy scoped adapter; exposing fetch success metadata is not permission to
+expand a cycle into an all-sports sweep.
+
+**Why:** Expanding only the production result adapter held the shared scheduler
+job open across multiple sports and prevented its completion telemetry from
+being recorded promptly.
+
 **How to apply:** Keep one active companion task per shared cycle, await it
 alongside Underdog, and rely on the existing single-instance scheduler for
 overlap protection. Keep the configured-sport round robin and provider pacing;
