@@ -2004,6 +2004,26 @@ class Database:
             result = await s.execute(q.order_by(MarketSnapshotRecord.recorded_at))
             return list(result.scalars().all())
 
+    async def get_recent_market_snapshots(
+        self,
+        since_hours: int = 24,
+        limit: int = 5000,
+    ) -> list["MarketSnapshotRecord"]:
+        """Return recent persisted non-pick'em market observations for reports."""
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(hours=max(1, int(since_hours)))
+        async with self.session() as s:
+            result = await s.execute(
+                select(MarketSnapshotRecord)
+                .where(
+                    MarketSnapshotRecord.recorded_at >= cutoff,
+                    MarketSnapshotRecord.is_pickem == False,  # noqa: E712
+                )
+                .order_by(desc(MarketSnapshotRecord.recorded_at))
+                .limit(max(1, min(int(limit), 10000)))
+            )
+            return list(result.scalars().all())
+
     async def count_snapshot_records(self) -> int:
         async with self.session() as s:
             result = await s.execute(select(func.count()).select_from(MarketSnapshotRecord))
@@ -5247,6 +5267,7 @@ class Database:
                 select(PropOpportunityLog)
                 .where(
                     PropOpportunityLog.result    == "PENDING",
+                    PropOpportunityLog.recommendation.in_(("OVER", "UNDER")),
                     PropOpportunityLog.game_time.isnot(None),
                     PropOpportunityLog.game_time <  cutoff,
                 )

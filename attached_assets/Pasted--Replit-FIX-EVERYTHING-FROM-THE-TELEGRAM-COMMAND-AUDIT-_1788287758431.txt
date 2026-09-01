@@ -1,0 +1,191 @@
+@Replit
+
+FIX EVERYTHING FROM THE TELEGRAM COMMAND AUDIT NOW.
+
+Do NOT do another diagnostic/read-only investigation.
+Do NOT ask for approval between fixes.
+Do NOT use the Replit Agent.
+
+Make the fixes directly, while preserving the core betting engine.
+
+HARD CONSTRAINTS:
+- Do NOT change scoring logic.
+- Do NOT change scoring thresholds.
+- Do NOT change OVER/UNDER direction logic.
+- Do NOT change alert qualification rules.
+- Do NOT change monitoring cadence.
+- Do NOT change PropLine pacing.
+- Do NOT change PropLine request budget.
+- Do NOT change provider sports coverage.
+- Do NOT change the core Underdog/PrizePicks monitoring pipeline.
+- Do NOT remove working providers.
+- Do NOT fabricate data.
+- Do NOT replace real data with placeholders.
+
+FIX THESE:
+
+1. /slip — HIGH PRIORITY
+Fix the stale/static candidate pool.
+
+/slip must use CURRENT actionable prop opportunities, not stale NBA seed/history data.
+
+Fix:
+- stale NBA candidates appearing while current monitoring is MLB-heavy
+- incorrect 1176h+ game countdowns
+- stale/future event timestamps
+- confidence/sharp defaulting to exactly 40/100
+- movement defaulting to 0.0
+- weak 1-star candidates being labeled "Recommended (Safest)"
+- correlation filtering against stale candidates
+
+Use the same current actionable opportunity population that the live monitoring system is actually producing.
+
+Only recommend candidates that are current, valid, and have real data.
+
+If there are not enough valid current candidates, say so instead of filling the slip with stale/default candidates.
+
+Do NOT alter the scoring model itself.
+
+2. /picks
+Fix the temporary-unavailable response.
+
+/picks must work when current monitoring data/actionable opportunities exist.
+
+Do not return "monitoring data is busy" merely because another scan is running.
+
+3. /dashboard
+Fix the timeout.
+
+Optimize the command/query path so it returns current dashboard information without scanning unnecessarily large observation populations.
+
+Do not change the underlying business logic or metrics.
+
+4. /system
+Fix the blank response.
+
+Make /system return a useful system-status summary consistent with the bot's actual state.
+
+If the command is intentionally unsupported, remove it from /help instead. Prefer implementing it.
+
+5. /market
+Fix the command so it reflects actual market snapshot data when such records exist.
+
+If there genuinely are no snapshots, keep the accurate empty-state response.
+
+Do NOT create fake snapshots or activate an unrelated collector.
+
+6. /reconcile
+Fix large-window queries such as /reconcile 24 so they work reliably.
+
+Keep /reconcile 1 behavior intact.
+
+Do not change delivery accounting semantics.
+
+7. /player
+Fix intermittent player-history failures/timeouts.
+
+/player must reliably return history for valid monitored players such as Max Muncy and Shohei Ohtani.
+
+Optimize the query/path without changing history semantics.
+
+8. PROP OPPORTUNITY TRACKER / /grade
+Fix the reporting/accounting semantics.
+
+Clearly separate:
+- observations
+- tracked props
+- evaluated candidates
+- qualified/actionable opportunities
+- persisted actionable picks
+- delivered alerts
+- pending grading
+- resolved outcomes
+
+Do NOT allow observation-level records to be presented as thousands of actual actionable picks.
+
+Pending grading must represent actual actionable/pick records awaiting results, not every historical observation.
+
+Do NOT change grading logic. Fix the population/reporting layer.
+
+9. /funnel
+Fix the Sport Funnel Breakdown so Observed contains the actual observed count instead of showing 0 for every sport.
+
+Make the different Delivered counts consistent and clearly population-scoped.
+
+Do not alter the underlying monitoring counters.
+
+10. /status
+Simplify the bettor-facing output.
+
+Remove:
+- full PrizePicks Pipeline section
+- unnecessary Stat Providers section
+- detailed scheduler internals
+- raw Database Records dump
+
+Keep concise provider health and meaningful bot status.
+
+Do not display "OddsAPI last fetch: never" as an error when OddsAPI is intentionally idle/reserved.
+
+Do not say Active Sports cache is unavailable when active sports can be determined from the actual provider data.
+
+11. /health
+Clean it up.
+
+Keep:
+- uptime
+- heartbeat
+- core monitoring/provider health
+- concise pipeline health
+- latest error/recovery status when relevant
+
+Remove unnecessary maintenance-job detail and duplicate pipeline output.
+
+Replace the duplicate bottom Underdog block with:
+
+📡 Recent Pipeline Activity
+
+🐶 Underdog
+  Last scan: <time> · props=<count> · alerts=<count>
+
+🟣 PrizePicks
+  Last scan: <time> · props=<count> · alerts=<count>
+
+12. /providers
+Show the actual providers being used by the production prop-monitoring system.
+
+Do not imply that only MLB/ESPN/DOTA/Tennis enrichment exists if provider-discovered sports are supported.
+
+Do not remove providers; fix the presentation so it reflects actual usage.
+
+13. /config
+Clean up misleading implementation details.
+
+Keep the real configuration values that matter to the user.
+
+Do not falsely imply that only a narrow set of sports is supported.
+
+Verify displayed provider/enrichment status against actual runtime state.
+
+14. /slip grade
+Fix state handling.
+
+An empty OPEN slip must NOT say:
+"NO CASH"
+
+It should accurately indicate that the slip is OPEN/EMPTY and has not been graded.
+
+Preserve actual graded-loss/win semantics for completed slips.
+
+15. /performance vs /slipstats
+Fix the reporting inconsistency.
+
+Both commands must use clearly defined populations.
+
+If they intentionally represent different populations, label them explicitly.
+
+If they are supposed to represent the same 80 resolved plays, make the calculations consistent.
+
+Do NOT manipulate results just to make the percentages match.
+
+16. /alerts

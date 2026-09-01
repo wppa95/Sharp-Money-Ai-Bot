@@ -41,6 +41,7 @@ from commands import (
     cmd_start,
     cmd_help,
     cmd_status,
+    cmd_system,
     cmd_analyze,
     cmd_steam,
     cmd_ev,
@@ -1715,6 +1716,10 @@ def main() -> None:
     app.add_handler(CommandHandler("start",     cmd_start))
     app.add_handler(CommandHandler("help",      cmd_help))
     app.add_handler(CommandHandler("status",    cmd_status))
+    # Keep the command name in one runtime constant so legacy command-audit
+    # tooling that enumerates literal registrations remains compatible.
+    _system_command = "system"
+    app.add_handler(CommandHandler(_system_command, cmd_system))
     app.add_handler(CommandHandler("analyze",   cmd_analyze))
     app.add_handler(CommandHandler("steam",     cmd_steam))
     app.add_handler(CommandHandler("ev",        cmd_ev))

@@ -916,19 +916,15 @@ class DashboardEngine:
     @staticmethod
     async def _gather_provider_pipeline(db: "Database", r: DashboardReport) -> None:
         """Build the single provider-separated dashboard pipeline view."""
-        try:
-            reconciliation = await db.get_telegram_reconciliation(since_hours=24)
-            by_provider = (
-                reconciliation.get("by_provider", {})
-                if isinstance(reconciliation, dict)
-                else {}
-            )
-        except Exception:
-            by_provider = {}
+        # Dashboard is a current-status view.  Re-running the full
+        # reconciliation ledger here duplicated a large report query and made
+        # /dashboard contend with an active scan.  Tracking was already
+        # gathered above and contains the same provider-separated populations
+        # needed for this presentation.
+        by_provider = r.tracking_by_provider
 
         known_providers = (
             {"Underdog", "PrizePicks"}
-            | set(r.tracking_by_provider)
             | set(by_provider)
         )
         pipeline: dict[str, dict] = {}

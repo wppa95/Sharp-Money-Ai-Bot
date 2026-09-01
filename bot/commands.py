@@ -12,7 +12,7 @@ import json as _json
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from telegram import Update
 from telegram.constants import ParseMode
@@ -39,10 +39,12 @@ logger = logging.getLogger(__name__)
 
 # ── Bot startup time for uptime tracking ──────────────────────────────────────
 _START_TIME = time.monotonic()
-_DASHBOARD_TIMEOUT_SECONDS = 3.0
+_DASHBOARD_TIMEOUT_SECONDS = 8.0
 _PROVIDER_REPORT_TIMEOUT_SECONDS = 2.0
 _COMMAND_TIMEOUT_SECONDS = 3.0
+_PICKS_TIMEOUT_SECONDS = 12.0
 _STATUS_DB_READ_TIMEOUT_SECONDS = 1.0
+_CURRENT_PROP_MAX_FUTURE_HOURS = 24 * 14
 
 
 async def _bounded(coro, timeout: Optional[float] = None):
@@ -983,7 +985,49 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             _ht_pipeline = _get_ht_pipeline()
         except Exception:
             _ht_pipeline = None
+
+        # /status is intentionally a concise bettor-facing health view.  The
+        # detailed provider pipeline, scheduler internals, and raw DB counts
+        # belong in /health, /funnel, and /reconcile respectively.
         pp_reconciliation = await _provider_reconciliation("PrizePicks")
+        lines: list[str] = [
+            f"🤖 <b>Sharp Money Bot</b>  ·  Uptime: {_uptime_str()}",
+            f"📬 Alerts today: {_format_status_count(_alerts_today)}",
+            "",
+            "📡 <b>Market Providers</b>",
+            *_primary_player_prop_provider_lines(_mon),
+            (
+                f"  History: Underdog: {_format_status_count(ud_history)}"
+                f" · PrizePicks (PropLine): {_format_status_count(pp_history)}"
+            ),
+        ]
+        if pp_reconciliation:
+            lines += [
+                "",
+                "📈 <b>PrizePicks Pipeline</b> (current report)",
+                f"  Observed: {_format_status_count(pp_reconciliation.get('observed'))}",
+                f"  Delivered alerts: "
+                f"{_format_status_count(pp_reconciliation.get('delivered_alerts'))}",
+            ]
+        if _ht_pipeline is not None:
+            lines.append(
+                f"  Heartbeat: {_html.escape(_ht_pipeline.heartbeat_age_str())}"
+            )
+            try:
+                last_scan = _ht_pipeline.last_underdog_scan_age_str()
+                lines.append(
+                    f"  Latest Underdog scan: {_html.escape(str(last_scan))}"
+                )
+            except Exception:
+                pass
+        if _status_counts_degraded:
+            lines += [
+                "",
+                "⚠️ Some database counters are temporarily unavailable; "
+                "monitoring continues.",
+            ]
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+        return
 
         # DB-backed daily alert count — resets at UTC midnight; survives restart.
         # Historical records are preserved in PropOpportunityLog; use /alerts for history.
@@ -1142,6 +1186,48 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     except Exception as exc:
         logger.exception("cmd_status: unexpected error: %s", exc)
         await update.message.reply_text("⚠️ /status failed. Check bot logs.")
+
+
+async def cmd_system(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/system — concise runtime status for the bot process."""
+    if not _check_allowed(update):
+        await update.message.reply_text("⛔ Unauthorized.")
+        return
+    try:
+        from engine.health import get_health_tracker
+        from providers import get_health_monitor
+
+        ht = get_health_tracker()
+        monitor = get_health_monitor()
+        lines = [
+            "⚙️ <b>System Status</b>",
+            f"  Uptime: {_uptime_str()}",
+            (
+                f"  Heartbeat: {_html.escape(ht.heartbeat_age_str())}"
+                if ht is not None
+                else "  Heartbeat: unavailable"
+            ),
+            "",
+            "📡 <b>Runtime providers</b>",
+            *_primary_player_prop_provider_lines(monitor),
+        ]
+        if ht is not None:
+            ud_info = ht.get_provider_info("Underdog") or {}
+            pp_info = ht.get_provider_info("PrizePicks") or {}
+            for name, info in (("Underdog", ud_info), ("PrizePicks", pp_info)):
+                if info:
+                    age = ht.provider_last_fetch_str(name)
+                    streak = int(info.get("error_streak", 0) or 0)
+                    lines.append(
+                        f"  {name} last fetch: {_html.escape(str(age))}"
+                        + (f" · {streak} consecutive failures" if streak else "")
+                    )
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+    except Exception as exc:
+        logger.exception("cmd_system: unexpected error: %s", exc)
+        await update.message.reply_text(
+            "⚠️ System status is temporarily unavailable. Monitoring continues."
+        )
 
 
 async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1417,7 +1503,19 @@ async def cmd_market(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         from alerts_multiplatform import format_consensus_summary
         from config import config
 
-        all_snaps = [s for snaps in _snapshot_cache.values() for s in snaps]
+        # Reports should survive a process restart when persisted observations
+        # exist. The in-memory cache remains a fallback for a just-started
+        # process whose latest cycle has not been written yet.
+        all_snaps = []
+        if _db is not None and hasattr(_db, "get_recent_market_snapshots"):
+            all_snaps = await _report_read(
+                _db.get_recent_market_snapshots(since_hours=24, limit=5000),
+                fallback=[],
+                timeout=_PROVIDER_REPORT_TIMEOUT_SECONDS,
+            )
+        all_snaps = all_snaps or [
+            s for snaps in _snapshot_cache.values() for s in snaps
+        ]
 
         if not all_snaps:
             await update.message.reply_text(
@@ -1717,6 +1815,44 @@ def _is_current_provider_sport(
     return _is_active_display_sport(sport)
 
 
+def _has_current_prop_data(prop: Any, now: Optional[datetime] = None) -> bool:
+    """Keep user-facing pick/slip views on current, scored rows only.
+
+    This is a presentation gate. It does not affect scanning, scoring, alert
+    qualification, cadence, or persisted tracking.
+    """
+    now = now or datetime.utcnow()
+    try:
+        line = float(getattr(prop, "line_value", None))
+        if line != line or line in (float("inf"), float("-inf")):
+            return False
+    except (TypeError, ValueError):
+        return False
+    fetched_at = getattr(prop, "fetched_at", None)
+    game_time = getattr(prop, "game_time", None)
+    if not isinstance(fetched_at, datetime) or not isinstance(game_time, datetime):
+        return False
+    fetched = fetched_at.replace(tzinfo=None) if fetched_at.tzinfo else fetched_at
+    game = game_time.replace(tzinfo=None) if game_time.tzinfo else game_time
+    from datetime import timedelta
+    if fetched > now + timedelta(minutes=5):
+        return False
+    if game <= now or game > now + timedelta(hours=_CURRENT_PROP_MAX_FUTURE_HOURS):
+        return False
+    score = getattr(prop, "score_total", None)
+    confidence = getattr(prop, "bet_confidence", None)
+    tier = str(getattr(prop, "score_tier", "") or "").upper()
+    try:
+        score_ok = score is not None and float(score) == float(score)
+    except (TypeError, ValueError):
+        score_ok = False
+    try:
+        confidence_ok = confidence is not None and float(confidence) == float(confidence)
+    except (TypeError, ValueError):
+        confidence_ok = False
+    return score_ok or confidence_ok or tier in {"S", "A", "B"}
+
+
 def _pick_source_identity(provider: str, prop: Any) -> tuple[str, ...]:
     """Provider-owned identity for current /picks rows."""
     source_id = str(
@@ -1877,17 +2013,32 @@ class PropPickAdapter:
         self.sportsbook  = getattr(plh, "provider", None) or "Underdog"
         self.comp        = comp
 
-            #Confidence → tier
-        conf = comp.proxy_match_confidence if comp else 40
-        self.confidence = float(conf)
+        # Prefer a verified comparison confidence, then persisted engine
+        # output. Never manufacture the old ``40`` fallback for report views.
+        conf = (
+            getattr(comp, "proxy_match_confidence", None)
+            if comp is not None
+            else None
+        )
+        if conf is None:
+            conf = getattr(plh, "bet_confidence", None)
+        if conf is None:
+            conf = getattr(plh, "score_total", None)
+        try:
+            self.confidence = float(conf) if conf is not None else None
+        except (TypeError, ValueError):
+            self.confidence = None
+        if self.confidence is not None and self.confidence != self.confidence:
+            self.confidence = None
 
-        if conf >= 86:
+        conf_for_tier = self.confidence if self.confidence is not None else -1
+        if conf_for_tier >= 86:
             self.tier = "S"
-        elif conf >= 70:
+        elif conf_for_tier >= 70:
             self.tier = "A"
-        elif conf >= 60:
+        elif conf_for_tier >= 60:
             self.tier = "B"
-        elif conf >= 50:
+        elif conf_for_tier >= 50:
             self.tier = "C"
         else:
             self.tier = "D"
@@ -1899,8 +2050,8 @@ class PropPickAdapter:
         self.opening_line  = None  # not tracked in PropLineHistory; no move note in slip
 
         # Edge proxy: use absolute line movement scaled to a % signal
-        movement = (comp.movement if comp else None) or 0.0
-        self.best_edge = abs(movement) * 2.0 if movement else 0.0
+        movement = comp.movement if comp is not None else None
+        self.best_edge = abs(movement) * 2.0 if movement is not None else None
 
         # Direction: market-information label, not a betting call
         # Direction placeholder — updated from DB recommendation in cmd_picks/cmd_slip
@@ -1949,11 +2100,19 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.info("cmd_picks: command received from user %s",
                 update.effective_user.id if update.effective_user else "?")
     try:
-      return await _bounded(_cmd_picks_inner(update, context))
+      picks_timeout = (
+          _PICKS_TIMEOUT_SECONDS
+          if _COMMAND_TIMEOUT_SECONDS == 3.0
+          else _COMMAND_TIMEOUT_SECONDS
+      )
+      return await _bounded(
+          _cmd_picks_inner(update, context),
+          timeout=picks_timeout,
+      )
     except asyncio.TimeoutError:
         logger.warning(
             "cmd_picks: report exceeded %.1fs; returning unavailable state",
-            _COMMAND_TIMEOUT_SECONDS,
+            _PICKS_TIMEOUT_SECONDS,
         )
         await update.message.reply_text(
             "⚠️ Picks are temporarily unavailable because monitoring data is busy. "
@@ -2010,6 +2169,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     ud_props = [
         p for p in ud_props
         if not _is_season_future(p.stat_type)
+        and _has_current_prop_data(p, now)
         and _is_active_display_sport(p.sport)
         and not is_telegram_suppressed_sport(p.sport)
         and _is_upcoming_game(
@@ -2791,11 +2951,20 @@ async def _cmd_slip_journal(
             )
 
         lines += [""]
-        lines.append(
-            f"{'✅ CASH' if summary['all_hit'] else '❌ NO CASH'} — "
-            f"{summary['hit']}H / {summary['miss']}M / {summary['push']}P"
-            f"{' / ' + str(summary['pending']) + ' pending' if summary['pending'] else ''}"
-        )
+        if not legs:
+            lines.append("🟡 <b>OPEN / EMPTY</b> — no legs have been added yet.")
+            lines.append("<i>This slip has not been graded.</i>")
+        elif summary["pending"] > 0:
+            lines.append(
+                f"🟡 <b>OPEN / PENDING</b> — "
+                f"{summary['hit']}H / {summary['miss']}M / {summary['push']}P"
+                f" / {summary['pending']} pending"
+            )
+        else:
+            lines.append(
+                f"{'✅ CASH' if summary['all_hit'] else '❌ NO CASH'} — "
+                f"{summary['hit']}H / {summary['miss']}M / {summary['push']}P"
+            )
         if payout is not None and open_slip.stake:
             roi_str = f"+{summary['roi_pct']:.1f}%" if (summary.get("roi_pct") or 0) >= 0 else f"{summary['roi_pct']:.1f}%"
             lines.append(f"${open_slip.stake:.2f} → ${payout:.2f}  ·  ROI {roi_str}")
@@ -2922,6 +3091,7 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     pp_props = [
         p for p in pp_props
         if not _is_season_future(p.stat_type)
+        and _has_current_prop_data(p, now)
         and _is_current_provider_sport(p.sport, "PrizePicks")
         and not is_telegram_suppressed_sport(p.sport)
         and _is_upcoming_game(
@@ -3043,7 +3213,10 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 parse_mode=ParseMode.HTML,
             )
             return
-        label = "✅ Recommended (Safest)" if single_size == 2 else ""
+        # A two-leg slip is not automatically safer than the underlying
+        # candidates. Do not attach a recommendation label without a separate
+        # risk model.
+        label = ""
         lines: list[str] = [
             f"🎯 <b>Sharp Money Prop Slips — {today}</b>",
             "",
@@ -3056,7 +3229,7 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             "",
         ]
         for size in sorted(slips):
-            label = "✅ Recommended (Safest)" if size == 2 else ""
+            label = ""
             lines.extend(_render_slip_section(size, slips[size], label))
             lines.append("")
 
@@ -3227,6 +3400,7 @@ async def cmd_reconcile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 bucket_minutes=60,
             ),
             fallback=None,
+            timeout=max(8.0, min(20.0, 4.0 + hours / 8.0)),
         )
         if report is None:
             await update.message.reply_text(
@@ -4963,6 +5137,7 @@ async def cmd_player(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         rows = await _report_read(
             _db.get_player_prop_history(name_query, limit=20),
             fallback=None,
+            timeout=8.0,
         )
         if rows is None:
             await update.message.reply_text(

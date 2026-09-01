@@ -1,0 +1,281 @@
+@Replit
+
+We have completed a full Telegram command audit. I want to fix EVERYTHING we found, but first do a READ-ONLY root-cause investigation of the issues below.
+
+IMPORTANT CONSTRAINTS:
+- Do NOT change scoring logic.
+- Do NOT change scoring thresholds.
+- Do NOT change alert qualification rules.
+- Do NOT change OVER/UNDER direction logic.
+- Do NOT change monitoring cadence.
+- Do NOT change PropLine request pacing or request budgets.
+- Do NOT change provider scope/coverage.
+- Do NOT change the core Underdog/PrizePicks monitoring pipeline.
+- Do NOT restart or deploy during the investigation.
+- Do NOT use the Replit Agent.
+- Do NOT make code changes during this investigation.
+
+Audit findings to investigate:
+
+1. /slip — HIGH PRIORITY
+Repeated /slip returns stale NBA candidates despite the current monitoring pool being heavily MLB.
+Observed:
+- Cade Cunningham assists OVER 9.5
+- Jayson Tatum assists OVER 5.5
+- Jalen Brunson assists OVER 6.5
+- LeBron James assists UNDER 6.5
+- Shai Gilgeous-Alexander points UNDER 29.5
+- Victor Wembanyama points OVER 26
+Repeated output is effectively identical.
+Also observed:
+- game countdown around 1176h+
+- confidence exactly 40/100
+- sharp exactly 40/100
+- movement exactly 0.0
+- 2-Man labeled "Recommended (Safest)" despite 1-star/40 confidence
+- candidate pool appears stale/static
+
+Determine:
+- exact source table/query feeding /slip
+- why stale NBA candidates are selected
+- why game timestamps/countdowns are wrong
+- why confidence/sharp/movement fall back to 40/100/0.0
+- whether candidate freshness/date/game-status filtering is broken
+- whether /slip is using historical/static seed data instead of current actionable opportunities
+- why "Recommended (Safest)" can appear for weak/default candidates
+- whether correlation filtering is being applied to the correct current population
+- exact root cause(s) and safest fix
+
+2. /picks — HIGH PRIORITY
+/picks currently returns:
+"⚠️ Picks are temporarily unavailable because monitoring data is busy. Please retry shortly; the scan continues independently."
+
+Determine why it reports unavailable despite active actionable monitoring data and Telegram alerts.
+
+3. /dashboard — HIGH PRIORITY
+/dashboard times out and returns:
+"⚠️ Dashboard is taking too long to load..."
+
+Determine:
+- exact slow query/function
+- whether it is querying observation-level populations instead of actionable populations
+- whether a query is scanning too much historical data
+- whether timeout is caused by SQLite locking/contention
+- safest optimization without changing business logic
+
+4. /system — HIGH PRIORITY
+/system previously returned nothing at all.
+
+Determine whether:
+- command is unimplemented
+- handler is failing silently
+- command registration is missing
+- exception/output handling is broken
+
+It must eventually either return a useful system summary or be removed from /help if intentionally unsupported.
+
+5. /market
+/market returns:
+"No market snapshot data available yet.
+Data accumulates as Underdog props are polled and scored."
+
+Determine whether market snapshots are actually being written.
+If records exist, determine why /market cannot see them.
+If no records exist, determine whether the collector is intentionally inactive or broken.
+
+Do NOT activate a new collector as part of this investigation.
+
+6. /reconcile 24
+/reconcile 1 works and shows 32 durable delivery rows, but /reconcile 24 returns:
+"⚠️ Reconciliation is temporarily unavailable. Live monitoring is unaffected."
+
+Determine why the larger window fails.
+Likely query/performance/SQLite issue needs to be identified.
+
+7. /player
+/player Max Muncy previously returned:
+"⚠️ Player history is temporarily unavailable."
+
+/player Shohei Ohtani works.
+
+Determine why player-specific history queries can fail/time out.
+Check query performance, player normalization, data volume, and SQLite contention.
+
+8. PROP OPPORTUNITY TRACKER / /grade ACCOUNTING
+There are major population-definition discrepancies.
+
+Observed tracker:
+- Historical observations: 45,152
+- Active tracked props: 27,562
+- Directional opportunities: 21,937
+- Pending grading: 21,857
+
+Yet /funnel 1 showed:
+- Qualified directional candidates: 44
+- Actionable persisted: 13
+- Delivered: 28
+
+And /health showed:
+- UD evaluated: 86
+- Directional/actionable: 26
+- Actionable persisted: 26
+- Delivered: 23
+- Pending grading: 26
+
+/grade also reports:
+- 21,852 picks pending
+- 80 resolved
+- 33W / 47L
+
+Determine exactly what each of these populations means:
+- observation
+- tracked
+- evaluated
+- directional
+- qualified
+- actionable
+- persisted
+- delivered
+- pending grading
+- resolved
+
+Determine why directional counts can exceed observations in some sport breakdowns.
+
+Determine why pending grading is ~21k when only a small number of actual actionable alerts exist.
+
+Determine why /funnel, /health, /grade, /performance, /slipstats, and the tracker appear to be using different populations.
+
+Do NOT change grading/scoring logic. First identify the data-model/reporting-definition problem.
+
+9. /funnel 1
+Sport Funnel Breakdown currently shows Observed=0 for every sport even though provider pipeline shows thousands of observations.
+
+Determine why the sport-level Observed field is zero.
+Also determine the definitions behind:
+- provider Delivered
+- full monitoring Delivered
+- tracking Delivered
+- sport Delivered
+
+Explain whether these are genuinely different populations or reporting bugs.
+
+10. /status
+Clean up the presentation after the underlying definitions are understood.
+
+Current problems:
+- full PrizePicks Pipeline section is unnecessary
+- Stat Providers section is too detailed/misleading
+- Scheduler internals are too detailed
+- Database Records dump is unnecessary
+- "OddsAPI last fetch: never" is misleading if OddsAPI is intentionally idle/reserved
+- "Active Sports cache not yet populated" is misleading when actual active sports are known elsewhere
+
+Determine the minimum accurate bettor-facing /status output.
+
+11. /health
+Current /health has:
+- too many maintenance jobs
+- duplicate Underdog Pipeline section
+- unnecessary Stat Providers section
+- large internal pipeline accounting
+- SQLite error details that are too technical for normal health output
+
+The bottom duplicate section should ultimately become:
+
+📡 Recent Pipeline Activity
+
+🐶 Underdog
+  Last scan: <time> · props=<count> · alerts=<count>
+
+🟣 PrizePicks
+  Last scan: <time> · props=<count> · alerts=<count>
+
+Determine what should remain in /health and what belongs in internal diagnostics.
+
+12. /providers
+Current output lists:
+- MLB Stats API
+- WNBA ESPN gamelog
+- DOTA OpenDota
+- TENNIS JeffSackmann CSV
+
+But the user requirement is that ALL provider-accessible sports remain accessible; we do not want a curated list that implies only these sports are supported.
+
+Determine which providers are actually being used by the current production prop-monitoring pipeline and which are merely optional/on-demand enrichment.
+
+Do NOT remove or disable any provider during investigation.
+
+13. /config
+Verify every displayed "active" enrichment provider is actually active/used.
+
+Also investigate:
+- "Rotation: one PrizePicks sport every 120s"
+- "CS2 current PrizePicks lines: PropLine"
+
+These may be implementation details or misleadingly narrow descriptions.
+
+Do not change the underlying configuration.
+
+14. /slip grade
+Current result for an OPEN empty slip:
+"❌ NO CASH — 0H / 0M / 0P"
+
+This is misleading because no picks were graded and no loss occurred.
+
+Determine the proper state semantics for:
+- OPEN
+- POPULATED
+- GRADED
+- WON/LOST/etc.
+
+15. /performance vs /slipstats
+/performance reports:
+33W / 47L = 41.2%
+
+/slipstats reports:
+Underdog MLB 45H / 35M = 56%
+
+Both appear to reference the same 80 resolved plays, so determine exactly why they differ.
+
+Do not simply make the numbers equal unless the underlying population definitions prove they should be.
+
+16. /alerts
+/alerts currently looks functional and should NOT be changed unless required by a root cause discovered elsewhere.
+
+17. TELEGRAM ALERTS
+Do not alter the existing alert scoring/direction/qualification behavior as part of this command audit.
+The existing alert formatting cleanup is already working.
+
+DATABASE LOCK INVESTIGATION:
+/health shows:
+_prune_prop_history_job
+sqlite3.OperationalError: database is locked
+
+It recovered, but determine:
+- what transaction held the lock
+- which job/process collided with prune
+- whether multiple writers are involved
+- whether the issue is transient or recurring
+- whether WAL/busy timeout/transaction scope/job overlap is involved
+
+Do NOT change database settings yet.
+
+DELIVERABLE:
+
+Return a READ-ONLY investigation report containing:
+
+A. Root cause for each issue
+B. Exact file/function/query responsible
+C. Severity: HIGH / MEDIUM / LOW
+D. Whether it is a presentation bug, data/reporting bug, query-performance bug, or actual logic bug
+E. Safest fix
+F. Any risks of changing it
+G. A consolidated implementation plan ordered by priority
+
+Do not make any code changes.
+Do not restart.
+Do not deploy.
+
+After the investigation report, stop and wait for approval.
+
+restart to apply the changes and checkpoint.

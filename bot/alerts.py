@@ -591,6 +591,7 @@ def format_help_message() -> str:
         "<b>⚙️ System</b>",
         f"  /start          — Welcome message and chat ID",
         f"  /status         — Bot uptime, provider health, database counts",
+        f"  /system         — Concise runtime system status",
         f"  /health         — Background job health",
         f"  /providers      — Player prop provider status",
         f"  /config         — Active configuration and alert scope",
