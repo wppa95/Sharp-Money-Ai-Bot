@@ -14,7 +14,8 @@ load_dotenv()
 class Config:
     # ── Telegram ──────────────────────────────────────────────────────────────
     TELEGRAM_BOT_TOKEN: str = field(
-        default_factory=lambda: os.environ.get("TELEGRAM_TOKEN", "")
+        default_factory=lambda: os.environ.get("TELEGRAM_BOT_TOKEN")
+        or os.environ.get("TELEGRAM_TOKEN", "")
     )
     # Comma-separated list of Telegram user IDs allowed to use the bot.
     # Leave empty to allow all users (not recommended for production).
