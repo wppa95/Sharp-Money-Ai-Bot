@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -831,28 +833,31 @@ def test_request_budget_is_centralized_across_clients_and_counts_every_request()
 async def test_propline_observation_reaches_existing_confirmation_boundary(monkeypatch):
     import market_engine
 
-    prop = PlayerProp(
-        provider="PrizePicks",
-        sport="NBA",
-        player_name="Alex Example",
-        team="Example City",
-        stat_type="points",
-        line_value=24.5,
-        direction="OVER",
-        event="Example City at Test Town",
-        event_id="game-1",
-        external_id="projection-1",
-        fetched_at=datetime.utcnow(),
-    )
-
     class _Provider:
-        def is_available(self):
-            return True
-
         async def fetch_props(self):
-            return [prop]
+            raise AssertionError("confirmation must not fetch PropLine")
 
+    history_db = SimpleNamespace(
+        get_prop_line_history=AsyncMock(
+            return_value=[
+                SimpleNamespace(
+                    provider="PrizePicks",
+                    sport="NBA",
+                    player_name="Alex Example",
+                    team="Example City",
+                    stat_type="points",
+                    line_value=24.5,
+                    event="Example City at Test Town",
+                    game_id="game-1",
+                    external_id="projection-1",
+                    fetched_at=datetime.utcnow(),
+                    removed=False,
+                )
+            ]
+        )
+    )
     monkeypatch.setattr(market_engine, "_propline_provider", _Provider())
+    monkeypatch.setattr(market_engine, "_confirmation_db", history_db)
     monkeypatch.setattr(market_engine.config, "ODDS_API_ENABLED", False)
 
     result = await market_engine._get_odds_api_confirmation(
@@ -867,4 +872,5 @@ async def test_propline_observation_reaches_existing_confirmation_boundary(monke
     assert result is not None
     assert result["source"] == "PrizePicks"
     assert result["matched_books"] == ["PrizePicks"]
+    history_db.get_prop_line_history.assert_awaited_once()
     assert result["confirmed"] is True

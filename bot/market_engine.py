@@ -309,11 +309,10 @@ _registry: Optional[ConnectorRegistry] = None
 
 # ── OddsAPI confirmation engine ───────────────────────────────────────────────
 # Set once at startup via init_odds_confirmation(); used by
-# _get_odds_api_confirmation() to call fetch_player_prop_lines().
+# _get_odds_api_confirmation() to read already-persisted provider data.
 _analysis_engine: Optional[object] = None
 _confirmation_db: Optional[Database] = None
 _propline_provider: Optional[object] = None
-_propline_last_persisted_at: Optional[datetime] = None
 _SPORTSBOOK_CONFIRMATION_BOOKS = frozenset({"draftkings", "fanduel"})
 
 
@@ -329,14 +328,14 @@ def _sportsbook_confirmation_enabled() -> bool:
 def init_odds_confirmation(engine: object, db: Optional[Database] = None) -> None:
     """Store the existing analysis/DB services used for confirmation.
 
-    The optional DB reference is only used for already-polled h2h/totals rows;
-    it never creates another polling cycle.  One-argument callers remain
-    supported for the existing player-prop tests and integrations.
+    The optional DB reference is used for already-polled h2h/totals rows and
+    persisted PrizePicks snapshots; it never creates another polling cycle.
+    One-argument callers remain supported for the existing sportsbook tests
+    and integrations.
     """
-    global _analysis_engine, _confirmation_db, _propline_provider, _propline_last_persisted_at
+    global _analysis_engine, _confirmation_db, _propline_provider
     _analysis_engine = engine
     _confirmation_db = db
-    _propline_last_persisted_at = None
     try:
         from providers.propline import PropLinePrizePicksProvider
         _propline_provider = PropLinePrizePicksProvider()
@@ -854,10 +853,11 @@ async def _get_odds_api_confirmation(
     sportsbook_confirmation_enabled = _sportsbook_confirmation_enabled()
     if not sportsbook_confirmation_enabled and normalized_market in {"moneyline", "total"}:
         return None
+    source_db = db or _confirmation_db
     pp_available = bool(
         normalized_market == "player_prop"
-        and _propline_provider is not None
-        and getattr(_propline_provider, "is_available", lambda: False)()
+        and source_db is not None
+        and callable(getattr(source_db, "get_prop_line_history", None))
     )
     if normalized_market == "player_prop" and is_football_related_sport(sport):
         return None
@@ -891,55 +891,69 @@ async def _get_odds_api_confirmation(
         import asyncio as _asyncio
         if normalized_market == "player_prop":
             # PropLine is an additional, read-only PrizePicks corroboration
-            # source.  It reuses this existing confirmation call rather than
-            # creating a PrizePicks scheduler or polling loop.
+            # source. Confirmation must consume the snapshots written by the
+            # companion scan; it must never start a second provider request.
             if pp_available:
                 try:
-                    _fetch_for_sport = getattr(
-                        _propline_provider, "fetch_props_for_sport", None
-                    )
-                    _pp_fetch = (
-                        _fetch_for_sport(sport)
-                        if callable(_fetch_for_sport)
-                        else _propline_provider.fetch_props()
-                    )
-                    pp_props = await _asyncio.wait_for(
-                        _pp_fetch, timeout=5.0
-                    )
-                    global _propline_last_persisted_at
-                    if pp_props and db is not None and hasattr(
-                        db, "upsert_prop_line_history_batch"
-                    ):
-                        _pp_marker = max(
-                            (getattr(prop, "fetched_at", None) for prop in pp_props),
-                            default=None,
+                    try:
+                        pp_history = await _asyncio.wait_for(
+                            source_db.get_prop_line_history(
+                                "PrizePicks",
+                                player_name,
+                                sport,
+                                stat_type,
+                                limit=30,
+                            ),
+                            timeout=5.0,
                         )
-                        if _pp_marker is not None and _pp_marker != _propline_last_persisted_at:
-                            try:
-                                await _asyncio.wait_for(
-                                    db.upsert_prop_line_history_batch("PrizePicks", pp_props),
-                                    timeout=5.0,
-                                )
-                                _propline_last_persisted_at = _pp_marker
-                            except Exception as _pp_db_exc:
-                                logger.debug(
-                                    "PropLine PrizePicks history sync skipped: %s",
-                                    type(_pp_db_exc).__name__,
-                                )
+                    except TypeError:
+                        # Preserve compatibility with lightweight test doubles
+                        # and older database adapters.
+                        pp_history = await _asyncio.wait_for(
+                            source_db.get_prop_line_history(
+                                "PrizePicks",
+                                player_name,
+                                sport,
+                                stat_type,
+                            ),
+                            timeout=5.0,
+                        )
                     pp_observations = []
-                    for prop in pp_props:
-                        if line is not None and abs(float(prop.line_value) - float(line)) > 0.51:
+                    # History is newest-first. Keep only the latest state for
+                    # each source projection so an older active row cannot
+                    # resurrect a projection whose newest row was removed.
+                    latest_by_source: dict[str, object] = {}
+                    for row in pp_history or []:
+                        source_key = str(
+                            getattr(row, "external_id", None)
+                            or getattr(row, "game_id", None)
+                            or ""
+                        )
+                        latest_by_source.setdefault(
+                            source_key or f"row:{len(latest_by_source)}",
+                            row,
+                        )
+                    for prop in latest_by_source.values():
+                        if getattr(prop, "removed", False) is True:
+                            continue
+                        prop_line = getattr(prop, "line_value", None)
+                        if prop_line is None:
+                            continue
+                        if line is not None and abs(float(prop_line) - float(line)) > 0.51:
                             continue
                         pp_observations.append(
                             observation_from_record(
                                 prop,
                                 provider="PrizePicks",
-                                sport=prop.sport,
+                                sport=getattr(prop, "sport", sport),
                                 market_type="player_prop",
-                                player=prop.player_name,
-                                stat_type=prop.stat_type,
-                                direction=prop.direction,
-                                line=prop.line_value,
+                                player=getattr(prop, "player_name", player_name),
+                                stat_type=getattr(prop, "stat_type", stat_type),
+                                # PropLine stores a projection line, not a
+                                # sportsbook side. The requested side is the
+                                # only safe direction to attach here.
+                                direction=direction,
+                                line=prop_line,
                             )
                         )
                     pp_result = confirm_market(

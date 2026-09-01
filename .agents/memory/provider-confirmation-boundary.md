@@ -17,6 +17,19 @@ confirmation boundary. Keep failures, missing data, ambiguous identity, and
 stale rows explicitly unconfirmed, and leave the existing monitoring pipeline
 as the sole owner of scoring, persistence, and delivery.
 
+For PropLine/PrizePicks specifically, confirmation reads recent persisted
+`PropLineHistory` snapshots and never calls the live provider fetch methods.
+The temporary shared request allowance is capped at 1,000 requests while the
+client's normal 120-second pacing remains authoritative.
+
+**Why:** Confirmation runs from multiple Underdog alert paths. A live fetch
+there multiplies provider traffic, can exhaust a temporary allowance, and
+creates a competing polling cycle.
+
+**How to apply:** Keep PropLine HTTP requests inside the existing companion
+scan. Treat missing, stale, removed, or ambiguous persisted snapshots as no
+confirmation rather than refreshing them inline.
+
 The sportsbook corroboration path may be disabled independently of the
 pick'em providers. When it is disabled, keep the DK/FD normalization and
 matching helpers intact behind an explicit opt-in, while PropLine PrizePicks

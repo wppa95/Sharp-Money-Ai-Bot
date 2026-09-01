@@ -135,7 +135,7 @@ class PropLineRequestBudget:
     separate clients from racing past the shared daily limit.
     """
 
-    def __init__(self, limit: int = 5_000, *, day_factory: Callable[[], Any] | None = None) -> None:
+    def __init__(self, limit: int = 1_000, *, day_factory: Callable[[], Any] | None = None) -> None:
         self.limit = max(1, int(limit))
         self._day_factory = day_factory or (lambda: datetime.utcnow().date())
         self._day = self._day_factory()
@@ -168,7 +168,10 @@ class PropLineRequestBudget:
         self._count = 0
 
 
-PROPLINE_DAILY_REQUEST_LIMIT = 5_000
+# Temporary provider allowance: the existing 120-second pacing remains the
+# primary protection, while this shared cap keeps all PropLine clients within
+# the requested roughly-12-hour allowance.
+PROPLINE_DAILY_REQUEST_LIMIT = 1_000
 _DEFAULT_PROPLINE_REQUEST_BUDGET = PropLineRequestBudget(PROPLINE_DAILY_REQUEST_LIMIT)
 
 

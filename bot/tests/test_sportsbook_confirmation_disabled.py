@@ -8,9 +8,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from providers.prop_provider import PlayerProp
-
-
 @pytest.fixture
 def disabled_confirmation(monkeypatch):
     import config
@@ -83,25 +80,29 @@ async def test_propline_prizepicks_confirmation_remains_available(
 ):
     import market_engine as me
 
+    history = [
+        SimpleNamespace(
+            provider="PrizePicks",
+            sport="NBA",
+            player_name="LeBron James",
+            team="LAL",
+            stat_type="points",
+            line_value=25.5,
+            external_id="projection-1",
+            game_id="game-1",
+            fetched_at=datetime.utcnow(),
+            removed=False,
+        )
+    ]
+    db = SimpleNamespace(get_prop_line_history=AsyncMock(return_value=history))
     provider = MagicMock()
     provider.is_available.return_value = True
     provider.fetch_props_for_sport = AsyncMock(
-        return_value=[
-            PlayerProp(
-                provider="PrizePicks",
-                sport="NBA",
-                player_name="LeBron James",
-                team="LAL",
-                stat_type="points",
-                line_value=25.5,
-                direction="OVER",
-                fetched_at=datetime.utcnow(),
-            )
-        ]
+        side_effect=AssertionError("confirmation must not fetch PropLine")
     )
     with patch.object(me, "_propline_provider", provider), patch.object(
         me, "_analysis_engine", None
-    ):
+    ), patch.object(me, "_confirmation_db", db):
         result = await me._get_odds_api_confirmation(
             "NBA", "LeBron James", "points", "OVER", 25.5
         )
@@ -109,7 +110,8 @@ async def test_propline_prizepicks_confirmation_remains_available(
     assert result is not None
     assert result["confirmed"] is True
     assert result["num_books"] == 1
-    provider.fetch_props_for_sport.assert_awaited_once_with("NBA")
+    db.get_prop_line_history.assert_awaited_once()
+    provider.fetch_props_for_sport.assert_not_called()
 
 
 @pytest.mark.asyncio
