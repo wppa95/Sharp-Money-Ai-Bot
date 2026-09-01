@@ -39,6 +39,7 @@ import time
 from collections import defaultdict
 from dataclasses import replace
 from datetime import datetime, timedelta
+from functools import wraps
 from types import SimpleNamespace
 from typing import Optional
 
@@ -406,11 +407,6 @@ _PLAYER_RESULT_CACHE_MAX = 5_000
 _prizepicks_cycle_task: Optional[asyncio.Task] = None
 _prizepicks_processing_tasks: set[asyncio.Task] = set()
 _prizepicks_processing_lock: Optional[asyncio.Lock] = None
-_prizepicks_last_started_at: Optional[float] = None
-# Heartbeat runs once per minute.  Keep a small scheduling margin below the
-# provider's 120-second request pacing so clock jitter cannot defer a handoff
-# by a third heartbeat; the client still enforces the full provider interval.
-_PRIZEPICKS_CYCLE_INTERVAL_SECONDS = 110.0
 _PRIZEPICKS_DEDUP_PREFIX = "PrizePicks::"
 _prizepicks_sport_cursor = 0
 
@@ -534,7 +530,7 @@ async def reset_monitoring_runtime_state() -> None:
     global _cycle_sequence, _active_jobs, _registry, _player_stats_provider
     global _player_result_fetch_cache, _prizepicks_cycle_task
     global _prizepicks_processing_tasks, _prizepicks_processing_lock
-    global _prizepicks_last_started_at, _prizepicks_sport_cursor
+    global _prizepicks_sport_cursor
     global _cold_start_done, _MARKET_FIRST_ALERT, _priority_override_sent
     global _ud_full_scan_running, _fpr_deferred_pending, _fpr_deferred_context
     global _fpr_handoff_task, _fpr_execution_running, _prop_market_alerted
@@ -563,7 +559,6 @@ async def reset_monitoring_runtime_state() -> None:
     _prizepicks_cycle_task = None
     _prizepicks_processing_tasks.clear()
     _prizepicks_processing_lock = None
-    _prizepicks_last_started_at = None
     _prizepicks_sport_cursor = 0
     _cold_start_done = False
     _MARKET_FIRST_ALERT.clear()
@@ -1339,38 +1334,6 @@ async def _fetch_and_compute_hit_rates(
 def _prizepicks_dedup_player(player_name: str) -> str:
     """Keep the legacy three-part dedup map provider-scoped."""
     return f"{_PRIZEPICKS_DEDUP_PREFIX}{player_name}"
-
-
-def _start_prizepicks_cycle(context, *, force: bool = False) -> bool:
-    """Start at most one PropLine cycle without adding another scheduler job.
-
-    The Underdog scan can legitimately run longer than its nominal two-minute
-    interval.  The heartbeat calls this helper as a handoff opportunity so
-    PropLine cadence does not inherit that scan duration.  ``force`` is used
-    by the first Underdog trigger to start the initial cycle immediately.
-    """
-    global _prizepicks_cycle_task, _prizepicks_last_started_at
-
-    if _prizepicks_cycle_task is not None and not _prizepicks_cycle_task.done():
-        return False
-
-    now = time.monotonic()
-    # ``force`` is only an initial-start escape hatch.  Underdog invokes this
-    # helper from every scan, so allowing it to bypass the interval would
-    # create an immediate second fetch that then collides with PropLine's
-    # provider pacing.
-    if (
-        _prizepicks_last_started_at is not None
-        and now - _prizepicks_last_started_at < _PRIZEPICKS_CYCLE_INTERVAL_SECONDS
-    ):
-        return False
-
-    _prizepicks_last_started_at = now
-    _prizepicks_cycle_task = asyncio.create_task(
-        _run_prizepicks_independent_cycle(context, background_processing=True),
-        name="prizepicks_companion_cycle",
-    )
-    return True
 
 
 def _track_prizepicks_processing_task(task: asyncio.Task) -> None:
@@ -2718,8 +2681,67 @@ async def clv_check_job(context) -> None:
             break  # one alert per market key per cycle
 
 
-# ── Underdog pick'em job ───────────────────────────────────────────────────────
+# ── Shared Underdog + PropLine monitoring cycle ────────────────────────────────
 
+def _shared_monitoring_cycle(cycle_branch):
+    """Run Underdog and PropLine from one trigger and await both branches."""
+
+    @wraps(cycle_branch)
+    async def _run_shared_cycle(context, *args, **kwargs):
+        global _prizepicks_cycle_task
+
+        # The PropLine branch is created at the exact same scheduler trigger as
+        # the Underdog branch.  It is awaited below, so it cannot become an
+        # independent cadence or outlive the shared cycle.
+        _prizepicks_cycle_task = asyncio.create_task(
+            _run_prizepicks_independent_cycle(context),
+            name="shared_monitoring_propline",
+        )
+        cycle_completed = False
+        try:
+            result = await cycle_branch(context, *args, **kwargs)
+        except asyncio.CancelledError:
+            _prizepicks_cycle_task.cancel()
+            await asyncio.gather(_prizepicks_cycle_task, return_exceptions=True)
+            raise
+        except BaseException:
+            # The provider branch still belongs to this cycle. Wait for it
+            # before allowing the scheduler to consider the cycle finished.
+            pp_result = await asyncio.gather(
+                _prizepicks_cycle_task, return_exceptions=True
+            )
+            if pp_result and isinstance(pp_result[0], BaseException):
+                logger.exception(
+                    "shared_monitoring_cycle: both branches failed",
+                    exc_info=pp_result[0],
+                )
+            raise
+        else:
+            pp_result = await asyncio.gather(
+                _prizepicks_cycle_task, return_exceptions=True
+            )
+            if pp_result and isinstance(pp_result[0], BaseException):
+                logger.error(
+                    "shared_monitoring_cycle: PropLine branch failed: %s",
+                    pp_result[0],
+                )
+            cycle_completed = True
+            return result
+        finally:
+            if _prizepicks_cycle_task is not None:
+                _prizepicks_cycle_task = None
+            if cycle_completed:
+                health = get_health_tracker()
+                if health is not None:
+                    health.record_monitoring_cycle_complete()
+                logger.info("shared_monitoring_cycle: completed")
+
+    return _run_shared_cycle
+
+
+# ── Underdog pick'em branch ────────────────────────────────────────────────────
+
+@_shared_monitoring_cycle
 async def underdog_job(context) -> None:
     """
     Fetch Underdog Fantasy pick'em projections and alert on prop changes.
@@ -2741,7 +2763,7 @@ async def underdog_job(context) -> None:
     if db is None:
         return
 
-    global _cold_start_done, _ud_scan_state, _ud_known_keys, _ud_scan_db_id, _prizepicks_cycle_task
+    global _cold_start_done, _ud_scan_state, _ud_known_keys, _ud_scan_db_id
     is_cold_start = not _cold_start_done   # True only on the very first successful fetch
     _new_db_context = _ud_scan_db_id != id(db)
     if _new_db_context:
@@ -2781,11 +2803,6 @@ async def underdog_job(context) -> None:
         _job_activity_end("underdog")
         return
     _ud_full_scan_running = True
-
-    # PrizePicks is not registered as another scheduler job.  Start the first
-    # cycle immediately; the existing heartbeat continues the cadence if this
-    # long-running Underdog scan outlives its nominal two-minute interval.
-    _start_prizepicks_cycle(context, force=True)
 
     # ── Evict stale dedup entries ─────────────────────────────────────────────
     # _prop_market_alerted keys are (player, sport, stat_type); values are

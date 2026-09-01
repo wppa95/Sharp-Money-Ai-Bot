@@ -1005,7 +1005,6 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         # /status is intentionally a concise bettor-facing health view.  The
         # detailed provider pipeline, scheduler internals, and raw DB counts
         # belong in /health, /funnel, and /reconcile respectively.
-        pp_reconciliation = await _provider_reconciliation("PrizePicks")
         lines: list[str] = [
             f"🤖 <b>Sharp Money Bot</b>  ·  Uptime: {_uptime_str()}",
             f"📬 Alerts today: {_format_status_count(_alerts_today)}",
@@ -1017,22 +1016,14 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 f" · PrizePicks (PropLine): {_format_status_count(pp_history)}"
             ),
         ]
-        if pp_reconciliation:
-            lines += [
-                "",
-                "📈 <b>PrizePicks Pipeline</b> (current report)",
-                f"  Observed: {_format_status_count(pp_reconciliation.get('observed'))}",
-                f"  Delivered alerts: "
-                f"{_format_status_count(pp_reconciliation.get('delivered_alerts'))}",
-            ]
         if _ht_pipeline is not None:
             lines.append(
                 f"  Heartbeat: {_html.escape(_ht_pipeline.heartbeat_age_str())}"
             )
             try:
-                last_scan = _ht_pipeline.last_underdog_scan_age_str()
+                last_cycle = _ht_pipeline.last_monitoring_cycle_age_str()
                 lines.append(
-                    f"  Latest Underdog scan: {_html.escape(str(last_scan))}"
+                    f"📊 Latest monitoring cycle: {_html.escape(str(last_cycle))}"
                 )
             except Exception:
                 pass

@@ -97,6 +97,9 @@ _RUNTIME_SESSION_KEYS = frozenset({
     "last_telegram_send",
     "last_telegram_send_ts",
     "last_alert_generated",
+    "last_monitoring_cycle",
+    "last_monitoring_cycle_ts",
+    "monitoring_cycle_count",
     "last_scan_checkpoint_ts",
     "last_scan_checkpoint_at",
     "stable_refresh_cursor",
@@ -418,6 +421,25 @@ class HealthTracker:
             self._state["last_underdog_props"]   = props_count
             self._state["last_underdog_alerts"]  = alerts_sent
             self._save()
+
+    def record_monitoring_cycle_complete(self) -> None:
+        """Record completion after both shared provider branches finish."""
+        with self._lock:
+            self._state["last_monitoring_cycle"] = _now_iso()
+            self._state["last_monitoring_cycle_ts"] = _now_ts()
+            self._state["monitoring_cycle_count"] = (
+                int(self._state.get("monitoring_cycle_count", 0) or 0) + 1
+            )
+            self._save()
+
+    def last_monitoring_cycle_age_str(self) -> str:
+        """Return the age of the latest completed shared monitoring cycle."""
+        return _age_str(self._state.get("last_monitoring_cycle_ts"))
+
+    def monitoring_cycle_count(self) -> int:
+        """Return the number of completed shared cycles in this session."""
+        with self._lock:
+            return int(self._state.get("monitoring_cycle_count", 0) or 0)
 
     def record_database_write(self, operation: str = "write") -> None:
         """Record a successful database write operation."""

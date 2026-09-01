@@ -1,0 +1,220 @@
+@Replit
+
+IMPORTANT CORRECTION:
+
+Underdog and PropLine/PrizePicks are supposed to run on the SAME MONITORING CADENCE in V4.
+
+This is not only a reporting issue.
+
+The actual runtime behavior must be:
+
+ONE SHARED MONITORING CYCLE
+├── Underdog
+└── PropLine/PrizePicks
+
+Both provider branches should be triggered as part of the same scheduled monitoring cycle and should repeat on the same cadence.
+
+If the configured monitoring cadence is 5 minutes, both should participate in every 5-minute monitoring cycle.
+
+Do NOT allow this situation:
+
+Underdog → completes
+Underdog → starts next cycle
+PropLine → still processing an older cycle
+
+That creates two independent monitoring rhythms, which is NOT the V4 design.
+
+## REQUIRED BEHAVIOR
+
+At each monitoring-cycle trigger:
+
+1. Start the shared monitoring cycle.
+2. Run Underdog monitoring.
+3. Run PropLine/PrizePicks companion processing.
+4. They may execute concurrently/parallel where appropriate.
+5. Wait for both required branches to finish.
+6. Mark the shared cycle complete.
+7. The next shared cycle begins on the same cadence.
+
+The providers do NOT need to execute sequentially.
+
+They DO need to be triggered by the same shared cadence.
+
+Example:
+
+12:00 → UD + PP
+12:05 → UD + PP
+12:10 → UD + PP
+12:15 → UD + PP
+
+Not:
+
+12:00 → UD
+12:02 → PP
+12:05 → UD
+12:07 → PP
+
+And not:
+
+12:00 → UD
+12:05 → UD
+12:10 → UD
+12:12 → PP
+
+## IMPORTANT
+
+Inspect the existing scheduler architecture first.
+
+Find why Underdog and PropLine currently have different effective scan timing.
+
+Determine whether:
+- they are attached to different scheduler jobs,
+- one provider is running from an independent loop,
+- PropLine internal pacing/discovery is being incorrectly treated as its monitoring cadence,
+- a long-running provider task is causing drift,
+- or the shared monitoring cycle is not actually controlling both providers.
+
+Fix the root cause.
+
+Do NOT simply change the displayed timestamps.
+
+Do NOT add arbitrary sleeps.
+
+Do NOT slow one provider down just to make the UI look synchronized.
+
+Do NOT create a second scheduler architecture.
+
+## CADENCE RULE
+
+Use the existing V4 monitoring cadence as the single source of truth.
+
+Both Underdog and PropLine/PrizePicks must be triggered from that same cadence.
+
+If the existing cadence is approximately 5 minutes, preserve that cadence.
+
+Do not change the cadence itself unless the existing implementation is demonstrably configured incorrectly.
+
+The important requirement is:
+
+ONE CADENCE
+ONE MONITORING CYCLE
+TWO PROVIDER BRANCHES
+
+## CYCLE COMPLETION
+
+A shared monitoring cycle is only complete when the required work from BOTH branches has completed:
+
+Underdog complete
++
+PropLine required work complete
+=
+Shared cycle complete
+
+If one branch takes longer, the cycle remains in progress.
+
+Prevent overlapping shared cycles if the previous cycle is still running.
+
+Use the existing max_instances/overlap protection rather than inventing another mechanism.
+
+## STATUS
+
+Also fix /status so it reflects the actual architecture.
+
+Remove:
+
+📈 PrizePicks Pipeline (current report)
+
+Remove:
+
+Latest Underdog scan
+
+Replace with:
+
+📊 Latest monitoring cycle: X ago
+
+That timestamp must represent the latest COMPLETED shared cycle.
+
+Keep:
+
+💓 Heartbeat: X ago
+
+Heartbeat is process health, not monitoring-cycle completion.
+
+The provider section may remain:
+
+📡 Market Providers
+  🟢 Underdog — Primary Player Props
+  ⚪ PrizePicks — PropLine — Companion Data
+  History: ...
+
+But there must be NO separate user-facing PrizePicks pipeline.
+
+## DO NOT CHANGE
+
+Do not change:
+
+- scoring formulas
+- scoring thresholds
+- evidence rules
+- direction logic
+- PLAY qualification
+- Telegram routing
+- PropLine request budget
+- PropLine internal request pacing
+- discovery cache timing
+- historical database
+- learning/grading
+- persistent delivery history
+
+Only correct the monitoring orchestration/cadence and status reporting.
+
+## TESTS
+
+Add regression tests proving:
+
+- Underdog and PropLine are triggered by the same monitoring cadence.
+- Every shared cycle triggers both provider branches.
+- Both branches may execute concurrently.
+- One branch finishing early does not complete the shared cycle.
+- Both branches must complete before shared-cycle completion.
+- A long-running branch cannot create an independent second cadence.
+- The next cycle does not start while the previous shared cycle is still active.
+- Restart creates a clean new shared cycle.
+- No stale cycle/cursor state is inherited after restart.
+- /status shows one shared monitoring cycle.
+- /status contains no old PrizePicks Pipeline section.
+- /status contains no "Latest Underdog scan".
+- Heartbeat remains independent.
+- Existing full test suite remains passing.
+
+## LIVE VERIFICATION
+
+After the fix:
+
+1. Restart the bot.
+2. Confirm exactly one bot process.
+3. Confirm exactly one scheduler owner.
+4. Observe multiple monitoring cycles.
+5. Verify every cycle triggers BOTH Underdog and PropLine.
+6. Verify both use the same cadence.
+7. Verify they can run concurrently.
+8. Verify a slow branch does not create a separate provider cadence.
+9. Verify shared cycle completion waits for both.
+10. Verify /status shows only the shared monitoring-cycle timestamp.
+11. Verify the old PP pipeline section is gone.
+12. Verify Telegram remains PLAY-only.
+13. Run the full test suite.
+
+The V4 architecture must be:
+
+SHARED SCHEDULER CADENCE
+        ↓
+SHARED MONITORING CYCLE
+      ↙   ↘
+ UNDERDOG  PROPLINE
+      ↘   ↙
+  CYCLE COMPLETE
+        ↓
+ NEXT SHARED CYCLE
+
+restart to apply the changes and checkpoint.

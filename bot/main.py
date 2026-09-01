@@ -85,7 +85,6 @@ from market_engine import (
     init_odds_confirmation,
     reset_monitoring_runtime_state,
     underdog_job,
-    _start_prizepicks_cycle,
     _run_prizepicks_independent_cycle,
 )
 from providers import init_health_monitor
@@ -802,17 +801,13 @@ async def _grade_opportunities_job(context) -> None:
 
 
 async def _heartbeat_job(context) -> None:
-    """Run every 60 s for health bookkeeping and the PropLine cadence handoff."""
+    """Run every 60 s for process-health bookkeeping only."""
     ht = get_health_tracker()
     try:
         if ht is not None:
             ht.record_job_started("heartbeat_job")
             ht.update_heartbeat()
             ht.record_job_run("heartbeat_job")
-        # This is a cadence handoff, not a second APScheduler job.  It keeps
-        # the authorized PrizePicks/PropLine feed at <=120s even while the
-        # heavy Underdog scan is still running.
-        _start_prizepicks_cycle(context)
     except Exception as _exc:
         logger.exception("_heartbeat_job: error: %s", _exc)
         if ht is not None:
