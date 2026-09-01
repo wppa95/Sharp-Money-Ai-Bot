@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 from datetime import datetime, timedelta
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -72,7 +74,7 @@ def test_live_underdog_direction_overrides_synced_value_before_cap():
     selected = commands._select_directional_provider_rows(
         [ud],
         [],
-        {("Live Direction", "NBA", "Points"): ("UNDER", 70)},
+        {("Live Direction", "NBA", "Points", "ud-live"): ("UNDER", 70)},
         1,
     )
     assert selected == [("Underdog", ud)]
@@ -286,8 +288,178 @@ async def test_underdog_picks_query_preserves_distinct_source_ids(db):
         await session.commit()
 
     rows = await db.get_top_ud_props_for_picks(
-        limit=None,
+        limit=10,
         since_hours=4,
         sports=["NBA"],
     )
     assert {row.external_id for row in rows} == {"line-low", "line-high"}
+
+
+@pytest.mark.asyncio
+async def test_picks_requests_bounded_provider_populations(monkeypatch):
+    class BoundedDB:
+        def __init__(self):
+            self.ud_kwargs = None
+            self.pp_kwargs = None
+            self.rec_identities = None
+
+        async def get_top_ud_props_for_picks(self, **kwargs):
+            self.ud_kwargs = kwargs
+            return []
+
+        async def get_latest_props_for_provider(self, provider, **kwargs):
+            assert provider == "PrizePicks"
+            self.pp_kwargs = kwargs
+            return []
+
+        async def get_ud_recommendations_bulk(self, identities, since_hours):
+            self.rec_identities = identities
+            return {}
+
+    fake_db = BoundedDB()
+    monkeypatch.setattr(commands, "_db", fake_db)
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock()))
+    context = SimpleNamespace(args=[])
+
+    await commands._cmd_picks_inner(update, context)
+
+    assert fake_db.ud_kwargs["limit"] == 40
+    assert fake_db.ud_kwargs["limit"] is not None
+    assert fake_db.pp_kwargs["limit"] == 40
+    assert fake_db.pp_kwargs["directional_first"] is True
+    assert fake_db.rec_identities == []
+
+
+@pytest.mark.asyncio
+async def test_recommendation_lookup_is_source_bounded(db):
+    now = datetime.utcnow()
+    requested = UnderdogSnapshotRecord(
+        external_id="wanted-source",
+        player_name="Bounded Player",
+        team="TEAM",
+        sport="NBA",
+        stat_type="Points",
+        line_value=20.5,
+        game_id="wanted-game",
+        game_time=now + timedelta(hours=1),
+        removed=False,
+        bet_recommendation="OVER",
+        bet_confidence=72,
+        fetched_at=now,
+    )
+    unrelated = [
+        UnderdogSnapshotRecord(
+            external_id=f"unrelated-{index}",
+            player_name=f"Unrelated {index}",
+            team="TEAM",
+            sport="NBA",
+            stat_type="Points",
+            line_value=10.5,
+            game_id=f"game-{index}",
+            game_time=now + timedelta(hours=1),
+            removed=False,
+            bet_recommendation="UNDER",
+            bet_confidence=60,
+            fetched_at=now,
+        )
+        for index in range(100)
+    ]
+    async with db.session() as session:
+        session.add_all([requested, *unrelated])
+        await session.commit()
+
+    result = await db.get_ud_recommendations_bulk([
+        ("Bounded Player", "NBA", "Points", "wanted-source"),
+    ])
+
+    assert result == {
+        ("Bounded Player", "NBA", "Points", "wanted-source"): ("OVER", 72)
+    }
+
+
+@pytest.mark.asyncio
+async def test_outer_deadline_cancels_nested_database_task():
+    child_started = asyncio.Event()
+    child_cancelled = asyncio.Event()
+
+    async def database_read():
+        child_started.set()
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            child_cancelled.set()
+            raise
+
+    async def report():
+        return await commands._bounded(database_read(), timeout=60)
+
+    with pytest.raises(asyncio.TimeoutError):
+        await commands._bounded(report(), timeout=0.01)
+
+    await asyncio.wait_for(child_started.wait(), timeout=0.2)
+    await asyncio.wait_for(child_cancelled.wait(), timeout=0.2)
+
+
+@pytest.mark.asyncio
+async def test_representative_bounded_picks_path_finishes_under_deadline(monkeypatch):
+    now = datetime.utcnow()
+    pp_rows = [
+        SimpleNamespace(
+            provider="PrizePicks",
+            player_name=f"Player {index}",
+            sport="NBA",
+            stat_type="Points",
+            bet_recommendation="OVER" if index % 2 == 0 else "UNDER",
+            external_id=f"pp-{index}",
+            game_id=f"game-{index}",
+            game_time=now + timedelta(hours=2),
+            provider_status="scheduled",
+            line_value=20.5 + index,
+            prev_line=None,
+            fetched_at=now,
+            team="TEAM",
+            score_tier=None,
+            score_confidence=None,
+            score_total=None,
+            market_quality_score=None,
+        )
+        for index in range(40)
+    ]
+
+    class RepresentativeDB:
+        async def get_top_ud_props_for_picks(self, **kwargs):
+            assert kwargs["limit"] == 40
+            return []
+
+        async def get_latest_props_for_provider(self, provider, **kwargs):
+            assert provider == "PrizePicks"
+            assert kwargs["limit"] == 40
+            return pp_rows
+
+        async def get_ud_recommendations_bulk(self, identities, since_hours):
+            assert identities == []
+            return {}
+
+        async def get_player_results(self, *args, **kwargs):
+            return []
+
+        async def get_all_ud_lines_for_prop(self, *args, **kwargs):
+            raise AssertionError("PrizePicks rows must not query Underdog lines")
+
+        async def get_latest_downstream_intelligence(self, *args, **kwargs):
+            return {}
+
+    monkeypatch.setattr(commands, "_db", RepresentativeDB())
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock()))
+    context = SimpleNamespace(args=[])
+
+    await commands._bounded(
+        commands._cmd_picks_inner(update, context),
+        timeout=commands._COMMAND_TIMEOUT_SECONDS,
+    )
+
+    sent_text = "\n".join(
+        str(call.args[0]) for call in update.message.reply_text.await_args_list
+    )
+    assert "PRIZEPICKS PICK" in sent_text
+    assert "temporarily unavailable" not in sent_text

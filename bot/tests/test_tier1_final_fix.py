@@ -30,7 +30,8 @@ class TestPicksDBQueryTier1BAllowed:
     def test_b_tier_included_for_non_strict_sports(self):
         src = self._src()
         assert "score_tier.isnot(None)" not in src
-        assert "bet_recommendation" not in src
+        assert "score_tier ==" not in src
+        assert "score_tier.in_" not in src
 
     def test_mlb_excluded_from_b_tier(self):
         src = self._src()
@@ -60,7 +61,8 @@ class TestPicksDBQueryTier1BAllowed:
         """No decision label is required for the analyst-facing query."""
         src = self._src()
         assert "score_tier.isnot(None)" not in src
-        assert "PropLineHistory.id.in_(" in src
+        assert "latest_by_source" in src
+        assert "raw_limit" in src
 
     def test_mlb_b_tier_excluded_logic(self):
         """Simulate: MLB B-tier prop must NOT pass the filter."""

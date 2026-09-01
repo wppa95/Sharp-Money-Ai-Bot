@@ -1,0 +1,491 @@
+🔴 FIX /PICKS TIMEOUT — TARGETED PERFORMANCE FIX ONLY
+
+Continue from the current implementation and the completed read-only root-cause audit.
+
+The root cause has been identified:
+
+/picks is timing out because the corrected direction-before-cap logic currently materializes an unnecessarily large current-provider population and performs an expensive broad Underdog recommendation query inside the hard 3-second command deadline.
+
+Fix this without reverting the functional /picks corrections.
+
+Do NOT redesign the architecture.
+
+Do NOT increase the /picks timeout as the primary solution.
+
+Do NOT weaken pregame protection.
+
+Do NOT weaken stale-line protection.
+
+Do NOT weaken provider validation.
+
+Do NOT weaken football exclusion.
+
+Do NOT restore the old cap-before-direction behavior.
+
+Do NOT change Telegram delivery rules.
+
+Do NOT change scoring, BQ, MQ, confidence, grading, FPR, tracking, evidence, scheduler, or database schema unless absolutely required.
+
+Do NOT restart Railway.
+
+Do NOT deploy Railway.
+
+Do NOT create a checkpoint until implementation and validation are complete.
+
+⸻
+
+1. CORE GOAL
+
+Make /picks reliably return current valid directional opportunities within the existing command deadline.
+
+The desired flow is:
+
+Current provider rows
+→ provider/state/sport/pregame safety filters
+→ efficient directional filtering
+→ bounded provider-specific overfetch
+→ provider-aware deduplication
+→ fair Underdog/PrizePicks selection
+→ final display limit
+→ render
+
+The command must NOT scan the entire current Underdog universe just to discover a small number of directional opportunities.
+
+⸻
+
+2. PRESERVE DIRECTION-BEFORE-CAP BEHAVIOR
+
+The previous /picks correction was functionally correct because non-directional rows must not consume the final result slots.
+
+Keep this behavior.
+
+Do NOT:
+
+fetch 30 rows → filter direction → return fewer than 30
+
+That was the previous crowd-out problem.
+
+Instead:
+
+efficiently identify directional candidates first → bounded overfetch → fair provider selection → final limit
+
+The final result limit must be applied after effective direction resolution.
+
+⸻
+
+3. BOUND THE PROVIDER QUERIES
+
+Do not use:
+
+limit=None
+
+for the normal /picks request path.
+
+Use a reasonable bounded directional overfetch independently for:
+
+* Underdog
+* PrizePicks
+
+The overfetch must be large enough to preserve:
+
+* provider fairness
+* sport balancing
+* source-identity deduplication
+* direction filtering
+* current-state filtering
+
+but small enough to complete comfortably inside the existing command deadline.
+
+Do not introduce an arbitrary tiny cap that can hide valid opportunities.
+
+Use the existing requested result limit to derive the bounded overfetch.
+
+⸻
+
+4. FILTER DIRECTION AS EARLY AS SAFELY POSSIBLE
+
+Where the persisted current provider row already contains a valid effective recommendation:
+
+* OVER
+* UNDER
+
+allow the database query to preferentially retrieve directional rows.
+
+Do not require historical Telegram delivery.
+
+Do not require alert_sent.
+
+Do not require evidence for /picks visibility.
+
+Do not require score/tier/confidence/BQ/MQ.
+
+The /picks view remains a research display.
+
+The canonical Telegram delivery gate remains separate.
+
+⸻
+
+5. PRESERVE UNDERDOG SNAPSHOT OVERRIDE
+
+Underdog currently has legitimate behavior where a recent synchronized snapshot recommendation can override the PropLineHistory recommendation.
+
+Do NOT remove that behavior.
+
+However:
+
+Do not scan every recent Underdog snapshot across every sport.
+
+Only resolve snapshot overrides for the already bounded current Underdog candidate identities.
+
+The sequence should be:
+
+bounded current Underdog candidates
+→ identify their player/sport/stat/source identities
+→ retrieve only the relevant recent recommendation records
+→ apply effective recommendation
+→ remove anything that is not OVER/UNDER
+→ continue to fair provider selection.
+
+⸻
+
+6. PRIZEPICKS REMAINS INDEPENDENT
+
+Keep PrizePicks completely independent from Underdog.
+
+PrizePicks must:
+
+* Query its own current PropLineHistory rows.
+* Preserve its own source identity.
+* Preserve its own recommendation.
+* Apply the same current-state and pregame protections.
+* Participate fairly in the final result population.
+
+Do not allow Underdog processing order to crowd PrizePicks out.
+
+Do not allow PrizePicks processing order to crowd Underdog out.
+
+⸻
+
+7. PRESERVE ALL SAFETY FILTERS
+
+The performance fix must NOT bypass any of these:
+
+Provider
+
+* Valid Underdog or PrizePicks provider identity.
+
+Current state
+
+* Removed rows excluded.
+* Current source identity preserved.
+* Latest applicable provider row selected.
+
+Pregame
+
+* Started/live/final events excluded.
+* Unknown event state remains excluded.
+* Reliable provider event time/status remains preferred.
+* Do not fabricate event metadata.
+
+Sport
+
+* Football/gridiron remains excluded from betting output.
+* Soccer/FIFA/MLS and all supported non-football sports remain eligible.
+
+Freshness
+
+* Preserve the existing typed stale-line/current-provider freshness protections where applicable.
+
+Deduplication
+
+* Preserve provider-aware identity.
+* Preserve source/external ID distinction.
+* Preserve effective-alert deduplication.
+
+⸻
+
+8. DO NOT USE HISTORICAL DIRECTIONAL ROWS AS A SUBSTITUTE
+
+Do not solve the timeout by simply changing /picks to read all historical PropOpportunityLog directional rows.
+
+That would be incorrect.
+
+/picks must continue representing current active provider opportunities.
+
+Historical opportunity records remain useful for:
+
+* /tracking
+* /stats
+* /grade
+* performance
+* historical analysis
+
+but they are not a replacement for current /picks source data.
+
+⸻
+
+9. REMOVE THE EXPENSIVE BROAD RECOMMENDATION SCAN
+
+The audit identified the broad Underdog recommendation query as the clearest expensive operation.
+
+Do not query recent Underdog snapshots for every selected sport and then filter identities in Python.
+
+Restrict recommendation lookup to the already bounded candidate identities.
+
+If the existing recommendation helper cannot do this efficiently, make the smallest targeted change necessary so it accepts the bounded candidate identities.
+
+Do not rewrite the recommendation subsystem.
+
+⸻
+
+10. CANCELLATION SAFETY
+
+Preserve the existing 3-second outer command deadline.
+
+Also fix the nested cancellation behavior identified in the audit:
+
+If the outer /picks deadline cancels the command while a child database task is still running, ensure that child task is explicitly cancelled/cleaned up.
+
+Do not leave expensive database tasks running after /picks has already returned the timeout response.
+
+This is important because repeated /picks requests must not accumulate abandoned database work.
+
+⸻
+
+11. PERFORMANCE REQUIREMENT
+
+The goal is not merely “make the timeout less frequent.”
+
+Measure the relevant stages.
+
+Where practical, capture:
+
+* current Underdog query duration
+* current PrizePicks query duration
+* recommendation lookup duration
+* direction filtering duration
+* enrichment duration
+* total /picks duration
+
+The normal /picks path should have meaningful headroom below the existing 3-second deadline.
+
+Do not increase the deadline just to make the measurements pass.
+
+⸻
+
+12. PRESERVE CURRENT /PICKS SEMANTICS
+
+After optimization, /picks must still:
+
+* Show current active provider rows.
+* Show valid OVER/UNDER opportunities.
+* Exclude non-directional rows.
+* Exclude started/live events.
+* Exclude unknown event state.
+* Exclude football betting output.
+* Keep Underdog and PrizePicks distinct.
+* Preserve provider-aware identity.
+* Preserve fair provider selection.
+* Preserve source identity.
+* Preserve current line.
+* Preserve meaningful current recommendation.
+* Remain independent from Telegram delivery.
+
+⸻
+
+13. RETIRED FRAMEWORK MUST REMAIN RETIRED
+
+The following must NOT become /picks gates:
+
+* Watchlist
+* Near-Miss
+* PASS
+* Rejected
+* S-tier
+* A-tier
+* B-tier
+* C-tier
+* Tier 1
+* Tier 2
+* decision_tier
+* confidence threshold
+* score threshold
+* Telegram delivery
+* alert_sent
+* historical delivery state
+
+PASS may remain compatibility/historical metadata, but /picks should exclude it only because it is not OVER or UNDER.
+
+⸻
+
+14. TESTS
+
+Add/update focused regression tests proving:
+
+Performance
+
+* /picks does not request an unbounded current Underdog population.
+* /picks does not perform a sport-wide Underdog recommendation scan.
+* Recommendation lookup is restricted to bounded candidate identities.
+* Nested database tasks are cancelled when the outer command deadline fires.
+* Normal /picks completes within the intended command deadline under representative data volume.
+
+Functional correctness
+
+* Direction is resolved before the final result cap.
+* Non-directional rows cannot consume final result slots.
+* Valid Underdog directional rows appear.
+* Valid PrizePicks directional rows appear.
+* Underdog cannot crowd PrizePicks out.
+* PrizePicks cannot crowd Underdog out.
+* Provider identities remain distinct.
+* Source identity remains distinct.
+* Football remains excluded.
+* Started/live events remain excluded.
+* Unknown event state remains excluded.
+* Current provider freshness protections remain active.
+* Snapshot recommendation overrides still work for bounded Underdog candidates.
+* No historical-only opportunity is incorrectly surfaced as a current /picks result.
+
+Retired framework
+
+* No Watchlist gate.
+* No Near-Miss gate.
+* No PASS gate other than requiring actual OVER/UNDER direction.
+* No Rejected gate.
+* No S/A/B/C gate.
+* No Tier 1/Tier 2 gate.
+* No decision_tier gate.
+* No confidence/score gate.
+
+Do not weaken existing tests.
+
+⸻
+
+15. FULL VALIDATION
+
+Run:
+
+1. Focused /picks regression suite.
+2. Provider/pregame/stale-line regression suite.
+3. Retired-framework strict-audit suite.
+4. Full existing bot test suite.
+5. Python compilation.
+6. git diff --check.
+
+Report exact counts.
+
+⸻
+
+16. LIVE VERIFICATION
+
+Do NOT claim production verification unless it actually occurs.
+
+If Railway cannot be restarted/deployed for this task, perform whatever non-production runtime verification is available locally.
+
+If production /picks cannot be executed from this environment, explicitly report:
+
+LIVE PRODUCTION VERIFICATION: UNAVAILABLE
+
+Do not fabricate Telegram output.
+
+Do not use /testalert.
+
+Do not fabricate a pick.
+
+Do not change thresholds to force a result.
+
+⸻
+
+17. CRITICAL ACCEPTANCE TEST
+
+The implementation must demonstrate that the recent functional fix remains intact while the expensive path is removed.
+
+The desired behavior is:
+
+Current Underdog rows
+→ bounded directional candidate retrieval
+→ bounded recommendation reconciliation
+→ effective OVER/UNDER
+→ provider-aware fair merge
+
+and independently:
+
+Current PrizePicks rows
+→ bounded directional candidate retrieval
+→ current pregame/state validation
+→ effective OVER/UNDER
+→ provider-aware fair merge
+
+then:
+
+fair provider merge
+→ final result limit
+→ /picks
+
+No unbounded full-provider scan should be required for a normal /picks request.
+
+⸻
+
+18. DO NOT CHANGE UNRELATED SYSTEMS
+
+Preserve unchanged:
+
+* Underdog ingestion
+* PrizePicks ingestion
+* FPR/full-pool rotation
+* Active source-ID lifecycle
+* Continuous rescanning
+* Tracking
+* Grading
+* Evidence
+* Player identity
+* Football monitoring/tracking exclusion
+* Soccer/FIFA/MLS support
+* Other supported non-football sports
+* Scoring
+* BQ/MQ
+* Confidence
+* Telegram delivery gate
+* Deduplication
+* Pregame protection
+* Stale-line protection
+* Scheduler
+* Adaptive batching
+* max_instances=1
+* Stable Refresh
+* Clean restart
+* Historical data
+* Database schema
+* Railway configuration
+
+Only change the /picks performance path and the minimum supporting code required.
+
+⸻
+
+19. NO CHECKPOINT YET
+
+Do NOT create a checkpoint/task completion marker until:
+
+* Focused tests pass.
+* Full suite passes.
+* The bounded query path is verified.
+* Cancellation cleanup is verified.
+* No legacy qualification gate was reintroduced.
+* No unrelated behavior changed.
+
+If production live verification is unavailable, say so explicitly rather than marking the task fully verified.
+
+FINAL INSTRUCTION
+
+Fix the /picks timeout at the query/path level.
+
+Do not simply increase the timeout.
+
+Do not restore the old cap-before-direction bug.
+
+Do not weaken any safety protection.
+
+Do not change unrelated systems.
+
+The target is a fast, bounded, provider-fair /picks query that preserves the recent functional corrections and reliably returns current directional opportunities without exceeding the existing command deadline.

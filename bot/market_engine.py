@@ -1298,7 +1298,7 @@ async def _run_prizepicks_independent_cycle(
             )
             fetch_for_sport = getattr(_propline_provider, "fetch_props_for_sport", None)
             if callable(fetch_result_for_sport):
-                fetch_result = await fetch_result_for_sport(sport)
+                fetch_result = await fetch_result_for_sport(sport, bookmaker="prizepicks")
                 props = fetch_result.props
                 fetch_succeeded = bool(fetch_result.succeeded)
                 fetch_error = str(getattr(fetch_result, "error", "") or "")

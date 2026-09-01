@@ -13,6 +13,8 @@ The client never invents an API path or sends credentials to another host.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import os
 import re
@@ -20,6 +22,7 @@ import time
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Optional
+from urllib.parse import quote
 
 import aiohttp
 
@@ -120,6 +123,55 @@ class PropLineRateLimitError(PropLineError):
         self.retry_after = max(1.0, float(retry_after))
 
 
+class PropLineNotFoundError(PropLineError):
+    """PropLine returned a 404 for an event that may have rotated."""
+
+
+class PropLineRequestBudget:
+    """Process-wide-safe daily request counter for PropLine calls.
+
+    The counter is deliberately synchronous: each client reserves a request
+    while holding its own async lock, and the short synchronous mutation keeps
+    separate clients from racing past the shared daily limit.
+    """
+
+    def __init__(self, limit: int = 5_000, *, day_factory: Callable[[], Any] | None = None) -> None:
+        self.limit = max(1, int(limit))
+        self._day_factory = day_factory or (lambda: datetime.utcnow().date())
+        self._day = self._day_factory()
+        self._count = 0
+
+    @property
+    def count(self) -> int:
+        self._reset_if_needed()
+        return self._count
+
+    @property
+    def remaining(self) -> int:
+        return max(0, self.limit - self.count)
+
+    def _reset_if_needed(self) -> None:
+        today = self._day_factory()
+        if today != self._day:
+            self._day = today
+            self._count = 0
+
+    def reserve(self) -> bool:
+        self._reset_if_needed()
+        if self._count >= self.limit:
+            return False
+        self._count += 1
+        return True
+
+    def reset(self) -> None:
+        self._day = self._day_factory()
+        self._count = 0
+
+
+PROPLINE_DAILY_REQUEST_LIMIT = 5_000
+_DEFAULT_PROPLINE_REQUEST_BUDGET = PropLineRequestBudget(PROPLINE_DAILY_REQUEST_LIMIT)
+
+
 @dataclass(frozen=True)
 class PropLineFetchResult:
     """Fetch result with provider metadata kept separate from normalized props."""
@@ -133,6 +185,52 @@ class PropLineFetchResult:
     succeeded: bool = False
     error: str = ""
     failure_kind: str = ""
+    # A result is publishable only when the provider returned the full
+    # requested snapshot.  This is separate from ``succeeded`` so a valid
+    # empty snapshot can be represented without treating a partial response as
+    # current truth.
+    complete: bool = False
+    discovered_event_count: int = 0
+    fetched_event_count: int = 0
+    failed_event_ids: tuple[str, ...] = ()
+    retained_last_success: bool = False
+    partial_props: tuple[PlayerProp, ...] = ()
+
+    @property
+    def snapshot_complete(self) -> bool:
+        """Compatibility/readability alias for callers tracking completeness."""
+        return self.complete
+
+    @property
+    def retained(self) -> bool:
+        return self.retained_last_success
+
+
+@dataclass(frozen=True)
+class PropLineEvent:
+    """Stable event metadata returned by PropLine event discovery."""
+
+    sport_key: str
+    event_id: str
+    home_team: str = ""
+    away_team: str = ""
+    start_time: Optional[datetime] = None
+    label: str = ""
+
+
+@dataclass(frozen=True)
+class PropLineSnapshotState:
+    """Last fetch state for one PropLine request scope."""
+
+    complete: bool
+    discovered_event_count: int = 0
+    fetched_event_count: int = 0
+    failed_event_ids: tuple[str, ...] = ()
+    last_successful_at: Optional[datetime] = None
+
+    @property
+    def snapshot_complete(self) -> bool:
+        return self.complete
 
 
 @dataclass(frozen=True)
@@ -179,6 +277,92 @@ def _parse_datetime(value: Any) -> Optional[datetime]:
     if parsed.tzinfo is not None:
         parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
     return parsed
+
+
+def _identity_part(value: Any) -> str:
+    """Create a stable, case-insensitive identity component."""
+    return re.sub(r"\s+", " ", _clean(value)).strip().lower()
+
+
+def propline_event_identity(
+    event: Any,
+    *,
+    sport_key: str = "",
+) -> str:
+    """Return a stable event identity without relying on Python's hash()."""
+    if isinstance(event, PropLineEvent):
+        if event.event_id:
+            return f"event:{_identity_part(event.event_id)}"
+        home, away, start = event.home_team, event.away_team, event.start_time
+        sport_key = event.sport_key or sport_key
+    elif isinstance(event, dict):
+        event_id = _clean(_first(event, "id", "event_id", "game_id", "match_id"))
+        if event_id:
+            return f"event:{_identity_part(event_id)}"
+        home = _first(event, "home_team", "home", "home_name")
+        away = _first(event, "away_team", "away", "away_name")
+        start = _first(event, "commence_time", "start_time", "event_start", "game_time")
+        sport_key = _first(event, "sport_key", "sport", "league") or sport_key
+    else:
+        return f"event:{_identity_part(event)}"
+    start_time = _parse_datetime(start)
+    start_value = start_time.isoformat() if start_time else _identity_part(start)
+    return ":".join(
+        (
+            "event",
+            _identity_part(sport_key),
+            _identity_part(home),
+            _identity_part(away),
+            start_value,
+        )
+    )
+
+
+def propline_player_identity(player: Any, *, player_id: str = "") -> str:
+    """Return a stable player identity, preferring the provider identifier."""
+    if isinstance(player, dict):
+        player_id = _clean(_first(player, "id", "player_id", "athlete_id")) or player_id
+        player = _first(player, "name", "display_name", "full_name")
+    return f"player:{_identity_part(player_id or player)}"
+
+
+def propline_market_identity(
+    market: Any,
+    *,
+    stat_type: str = "",
+    direction: str = "",
+) -> str:
+    """Return a stable player-market identity; line movement is not identity."""
+    if isinstance(market, dict):
+        market = _first(market, "key", "market_key", "market", "name", "stat", "stat_type")
+    normalized_market = _normalize_stat(market or stat_type)
+    normalized_direction = _normalize_direction(direction)
+    return ":".join(
+        (
+            "market",
+            _identity_part(normalized_market),
+            _identity_part(normalized_direction),
+        )
+    )
+
+
+def propline_prop_identity(
+    *,
+    sport_key: str,
+    event: Any,
+    player: Any,
+    market: Any,
+    player_id: str = "",
+    direction: str = "",
+) -> str:
+    """Return a stable event/player/market key for deduplication and history."""
+    return "|".join(
+        (
+            propline_event_identity(event, sport_key=sport_key),
+            propline_player_identity(player, player_id=player_id),
+            propline_market_identity(market, direction=direction),
+        )
+    )
 
 
 def _normalize_sport(value: Any) -> str:
@@ -280,9 +464,30 @@ def normalize_propline_prizepicks_record(
         event_time = None
         event_status = ""
 
+    raw_direction = _first(raw_record, "direction", "side", "selection", "over_under")
+    direction = _normalize_direction(raw_direction)
+    stable_event = propline_event_identity(
+        event if isinstance(event, dict) else {
+            "id": event_id,
+            "name": event_label,
+            "start_time": _first(
+                raw_record, "game_time", "start_time", "event_start", "commence_time"
+            ),
+            "sport_key": sport,
+        },
+        sport_key=sport,
+    )
+    stable_player = propline_player_identity(
+        player, player_id=player_id
+    )
+    stable_market = propline_market_identity(
+        _first(raw_record, "market_type", "market", "market_key", "category", "type"),
+        stat_type=stat_type,
+        direction=direction,
+    )
     source_id = _clean(
         _first(raw_record, "external_id", "source_id", "prop_id", "projection_id", "id")
-    )
+    ) or "|".join((stable_event, stable_player, stable_market))
     provider_timestamp = _parse_datetime(
         _first(
             raw_record,
@@ -296,9 +501,6 @@ def normalize_propline_prizepicks_record(
     )
     observed_at = fetched_at or datetime.utcnow()
     team = _clean(_nested_value(raw_record, "team", "team_name"))
-    direction = _normalize_direction(
-        _first(raw_record, "direction", "side", "selection", "over_under")
-    )
     provider_status = event_status or _clean(
         _first(raw_record, "status", "availability", "projection_status")
     )
@@ -314,7 +516,7 @@ def normalize_propline_prizepicks_record(
             _first(raw_record, "game_time", "start_time", "event_start", "commence_time")
         ) or event_time,
         external_id=source_id,
-        game_id=event_id or event_label,
+        game_id=event_id or stable_event,
         fetched_at=observed_at,
         direction=direction,
         player_id=player_id,
@@ -339,6 +541,96 @@ def _extract_records(payload: Any) -> list[dict[str, Any]]:
             if nested:
                 return nested
     return []
+
+
+def _pagination_details(payload: Any) -> tuple[Optional[str], Optional[bool], Optional[int]]:
+    """Read common cursor/page metadata without assuming one API envelope."""
+    if not isinstance(payload, dict):
+        return None, None, None
+    metadata: dict[str, Any] = dict(payload)
+    for key in ("pagination", "paging", "meta"):
+        nested = payload.get(key)
+        if isinstance(nested, dict):
+            metadata.update(nested)
+
+    next_cursor = _first(
+        metadata,
+        "next_cursor",
+        "nextCursor",
+        "next_page_token",
+        "nextPageToken",
+        "continuation",
+        "continuation_token",
+    )
+    links = metadata.get("links")
+    if not next_cursor and isinstance(links, dict):
+        next_cursor = _first(links, "next", "next_cursor", "next_url")
+    if isinstance(next_cursor, dict):
+        next_cursor = _first(next_cursor, "cursor", "token", "url")
+    next_cursor = _clean(next_cursor) or None
+
+    has_more = _first(metadata, "has_more", "hasMore", "more")
+    if has_more is not None:
+        has_more = bool(has_more)
+    total_pages = _first(metadata, "total_pages", "totalPages", "page_count")
+    try:
+        total_pages = int(total_pages) if total_pages is not None else None
+    except (TypeError, ValueError):
+        total_pages = None
+    return next_cursor, has_more, total_pages
+
+
+def _page_fingerprint(payload: Any) -> str:
+    """Detect a provider repeating a page, even when it changes cursors."""
+    try:
+        encoded = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
+    except (TypeError, ValueError):
+        encoded = repr(payload)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _official_event_records(payload: Any) -> list[dict[str, Any]]:
+    """Flatten event discovery envelopes while retaining event metadata."""
+    return _extract_records(payload)
+
+
+def _official_events(payload: Any, sport_key: str) -> list[PropLineEvent]:
+    events: list[PropLineEvent] = []
+    seen: set[str] = set()
+    for raw in _official_event_records(payload):
+        event_id = _clean(_first(raw, "id", "event_id", "game_id", "match_id"))
+        home = _clean(_first(raw, "home_team", "home", "home_name"))
+        away = _clean(_first(raw, "away_team", "away", "away_name"))
+        start = _parse_datetime(
+            _first(raw, "commence_time", "start_time", "event_start", "game_time")
+        )
+        label = _clean(_first(raw, "name", "display_name", "description")) or (
+            f"{away} at {home}" if away and home else away or home or event_id
+        )
+        identity = propline_event_identity(
+            {
+                "id": event_id,
+                "home_team": home,
+                "away_team": away,
+                "start_time": start,
+                "sport_key": sport_key,
+            },
+            sport_key=sport_key,
+        )
+        if identity in seen:
+            continue
+        seen.add(identity)
+        events.append(
+            PropLineEvent(
+                sport_key=sport_key,
+                event_id=event_id or identity.removeprefix("event:"),
+                home_team=home,
+                away_team=away,
+                start_time=start,
+                label=label,
+            )
+        )
+    return events
 
 
 _OFFICIAL_MARKETS = (
@@ -490,6 +782,11 @@ def _official_sports_records(payload: Any) -> list[PropLineSport]:
 
 def _official_odds_records(payload: Any) -> list[dict[str, Any]]:
     """Flatten the documented PropLine odds response into normalizer records."""
+    if isinstance(payload, dict) and payload.get("bookmakers") is not None:
+        payload = [payload]
+    elif isinstance(payload, dict):
+        nested = _extract_records(payload)
+        payload = nested
     if not isinstance(payload, list):
         return []
 
@@ -568,6 +865,7 @@ class PropLineClient:
         timeout_seconds: float = 15.0,
         sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep,
         clock: Callable[[], float] = time.monotonic,
+        request_budget: Optional[PropLineRequestBudget] = None,
     ) -> None:
         self.api_key = api_key if api_key is not None else os.getenv("PROPLINE_API_KEY", "")
         self.api_url = (
@@ -592,12 +890,16 @@ class PropLineClient:
         self._cache_clock_by_scope: dict[str, float] = {}
         self._sports_cache: tuple[PropLineSport, ...] = ()
         self._sports_cache_clock_at: Optional[float] = None
+        self.request_budget = request_budget or _DEFAULT_PROPLINE_REQUEST_BUDGET
         self._request_day = datetime.utcnow().date()
         self._request_count = 0
-        # Stay below PropLine's documented 1,000-request daily free limit even
-        # if callers invoke this client more often than the normal 5-minute
-        # pacing interval.
-        self.daily_request_limit = 900
+        self._last_success_by_scope: dict[str, PropLineFetchResult] = {}
+        self._snapshot_state_by_scope: dict[str, PropLineSnapshotState] = {}
+        self._events_cache_by_sport: dict[str, tuple[PropLineEvent, ...]] = {}
+        self._events_cache_clock_by_sport: dict[str, float] = {}
+        # Keep the historical attribute as a read/write compatibility shim,
+        # while the actual limit is owned by the shared budget.
+        self.daily_request_limit = self.request_budget.limit
 
     @property
     def is_configured(self) -> bool:
@@ -624,13 +926,138 @@ class PropLineClient:
         )
 
     def _reset_daily_budget_if_needed(self) -> None:
+        self.request_budget._reset_if_needed()
         today = datetime.utcnow().date()
         if today != self._request_day:
             self._request_day = today
             self._request_count = 0
 
+    @property
+    def total_request_count(self) -> int:
+        """Requests reserved by the shared daily PropLine budget."""
+        return self.request_budget.count
+
+    @property
+    def remaining_request_budget(self) -> int:
+        return self.request_budget.remaining
+
+    def _reserve_request(self) -> bool:
+        self._reset_daily_budget_if_needed()
+        if not self.request_budget.reserve():
+            return False
+        self._request_count += 1
+        return True
+
+    async def _request_json(self, url: str, params: dict[str, str]) -> Any:
+        """Perform one authorized request and account for it centrally."""
+        now = self._clock()
+        if now < self._backoff_until:
+            raise PropLineRateLimitError(
+                "PropLine rate-limit backoff active",
+                retry_after=max(1.0, self._backoff_until - now),
+            )
+        if self._last_request_at is not None:
+            delay = self.min_request_interval - (now - self._last_request_at)
+            if delay > 0:
+                await self._sleep(delay)
+        self._last_request_at = self._clock()
+        if not self._reserve_request():
+            raise PropLineError("PropLine daily request budget exhausted")
+
+        session = self._session
+        owns_local_session = session is None
+        if session is None:
+            session = aiohttp.ClientSession()
+        try:
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "X-API-Key": self.api_key,
+                "Accept": "application/json",
+            }
+            timeout = aiohttp.ClientTimeout(total=self.timeout_seconds)
+            async with session.get(
+                url, headers=headers, params=params, timeout=timeout
+            ) as response:
+                if response.status == 404:
+                    raise PropLineNotFoundError(f"PropLine resource not found (HTTP {response.status})")
+                if response.status == 429:
+                    retry_after = _retry_after_seconds(response)
+                    self._backoff_until = self._clock() + retry_after
+                    raise PropLineRateLimitError(
+                        f"PropLine rate limited (HTTP {response.status})",
+                        retry_after=retry_after,
+                    )
+                if response.status in {408, 425, 502, 503, 504}:
+                    retry_after = min(900.0, max(30.0, 2.0 * self.min_request_interval))
+                    self._backoff_until = self._clock() + retry_after
+                    raise PropLineError(
+                        f"PropLine temporarily unavailable (HTTP {response.status})"
+                    )
+                if response.status >= 400:
+                    raise PropLineError(f"PropLine request failed (HTTP {response.status})")
+                return await response.json(content_type=None)
+        except (aiohttp.ClientError, asyncio.TimeoutError):
+            raise
+        finally:
+            if owns_local_session:
+                await session.close()
+
+    async def _paginate_json(
+        self,
+        url: str,
+        params: dict[str, str],
+        *,
+        extractor: Callable[[Any], list[dict[str, Any]]],
+    ) -> tuple[list[dict[str, Any]], bool, str]:
+        """Follow provider pagination until exhaustion, with loop protection.
+
+        There is intentionally no arbitrary page-count ceiling.  A repeated
+        cursor/request or repeated response page is the only stop condition
+        besides normal provider exhaustion.
+        """
+        base_params = dict(params)
+        current_params = dict(params)
+        page_number = 1
+        seen_requests: set[str] = set()
+        seen_pages: set[str] = set()
+        records: list[dict[str, Any]] = []
+
+        while True:
+            request_signature = json.dumps(
+                [url, sorted(current_params.items())], separators=(",", ":")
+            )
+            if request_signature in seen_requests:
+                return records, False, "PropLine pagination loop detected"
+            seen_requests.add(request_signature)
+
+            payload = await self._request_json(url, current_params)
+            page_signature = _page_fingerprint(payload)
+            if page_signature in seen_pages:
+                return records, False, "PropLine pagination repeated a response page"
+            seen_pages.add(page_signature)
+            records.extend(extractor(payload))
+
+            next_cursor, has_more, total_pages = _pagination_details(payload)
+            if next_cursor:
+                current_params = dict(base_params)
+                current_params["cursor"] = next_cursor
+                continue
+            if total_pages is not None and page_number < total_pages:
+                page_number += 1
+                current_params = dict(base_params)
+                current_params["page"] = str(page_number)
+                continue
+            if has_more:
+                page_number += 1
+                current_params = dict(base_params)
+                current_params["page"] = str(page_number)
+                continue
+            return records, True, ""
+
     def _official_request(
-        self, sport_key: Optional[str],
+            self,
+            sport_key: Optional[str],
+            bookmaker: str = "prizepicks",
     ) -> tuple[str, dict[str, str], str]:
         base_url = self.api_url.rstrip("/")
         if base_url == DEFAULT_PROPLINE_API_URL:
@@ -641,19 +1068,310 @@ class PropLineClient:
                 f"{base_url}/v1/sports/{official_sport}/odds",
                 {
                     "markets": ",".join(_OFFICIAL_MARKETS),
-                    "bookmakers": "prizepicks",
+                    "bookmakers": bookmaker,
                 },
-                official_sport,
+                f"{official_sport}:{bookmaker.lower()}",
             )
         return (
             self.api_url,
             {"provider": "prizepicks", "market": "player_props"},
-            sport_key or "__custom__",
+            f"{sport_key or '__custom__'}:{bookmaker.lower()}",
         )
 
     def _official_sports_request(self) -> tuple[str, dict[str, str]]:
         return f"{self.api_url.rstrip('/')}/v1/sports", {}
 
+    def _official_events_request(self, sport_key: str) -> tuple[str, dict[str, str]]:
+        official_sport = _clean(sport_key)
+        if not official_sport:
+            raise PropLineError("PropLine sport key is required for event discovery")
+        return f"{self.api_url.rstrip('/')}/v1/sports/{quote(official_sport, safe='')}/events", {}
+
+    def _official_event_odds_request(
+        self,
+        sport_key: str,
+        event_id: str,
+        bookmaker: str = "prizepicks",
+    ) -> tuple[str, dict[str, str], str]:
+        official_sport = _clean(sport_key)
+        official_event = _clean(event_id)
+        if not official_sport or not official_event:
+            raise PropLineError("PropLine sport and event keys are required for event odds")
+        return (
+            f"{self.api_url.rstrip('/')}/v1/sports/{quote(official_sport, safe='')}"
+            f"/events/{quote(official_event, safe='')}/odds",
+            {
+                "markets": ",".join(_OFFICIAL_MARKETS),
+                "bookmakers": bookmaker,
+            },
+            f"{official_sport}:event:{official_event}:{bookmaker.lower()}",
+        )
+
+    async def _discover_events_locked(
+        self,
+        sport_key: str,
+        *,
+        refresh: bool = False,
+    ) -> tuple[list[PropLineEvent], bool, str]:
+        canonical_scope = _clean(sport_key).lower()
+        now = self._clock()
+        if (
+            not refresh
+            and self.cache_ttl > 0
+            and canonical_scope in self._events_cache_by_sport
+            and (now - self._events_cache_clock_by_sport.get(canonical_scope, 0)) < self.cache_ttl
+        ):
+            return list(self._events_cache_by_sport[canonical_scope]), True, ""
+        if self.api_url.rstrip("/") != DEFAULT_PROPLINE_API_URL:
+            return [], False, "PropLine event discovery requires the official endpoint"
+        try:
+            url, params = self._official_events_request(sport_key)
+            raw_events, complete, error = await self._paginate_json(
+                url, params, extractor=_official_event_records
+            )
+        except PropLineRateLimitError as exc:
+            return [], False, str(exc)
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            return [], False, f"PropLine event discovery failed: {type(exc).__name__}"
+        except PropLineError as exc:
+            return [], False, str(exc)
+        if not complete:
+            return [], False, error or "PropLine event discovery incomplete"
+        events = _official_events(raw_events, sport_key)
+        self._events_cache_by_sport[canonical_scope] = tuple(events)
+        self._events_cache_clock_by_sport[canonical_scope] = self._clock()
+        return events, True, ""
+
+    async def discover_events(
+        self,
+        sport_key: str,
+        *,
+        refresh: bool = False,
+    ) -> list[PropLineEvent]:
+        """Discover every event for a sport, following cursors/pages safely."""
+        if not self.is_configured:
+            return []
+        async with self._lock:
+            events, complete, error = await self._discover_events_locked(
+                sport_key, refresh=refresh
+            )
+            if not complete:
+                logger.warning("PropLine event discovery incomplete: %s", error)
+                return list(self._events_cache_by_sport.get(_clean(sport_key).lower(), ()))
+            return events
+
+    @staticmethod
+    def _event_can_be_matched(target: Any, candidate: PropLineEvent) -> bool:
+        if isinstance(target, PropLineEvent):
+            target_id = target.event_id
+            target_home, target_away, target_start = (
+                target.home_team, target.away_team, target.start_time
+            )
+        elif isinstance(target, dict):
+            target_id = _clean(_first(target, "id", "event_id", "game_id", "match_id"))
+            target_home = _clean(_first(target, "home_team", "home", "home_name"))
+            target_away = _clean(_first(target, "away_team", "away", "away_name"))
+            target_start = _parse_datetime(
+                _first(target, "commence_time", "start_time", "event_start", "game_time")
+            )
+        else:
+            return False
+        if target_id and target_id == candidate.event_id:
+            return True
+        if not (target_home and target_away and target_start and candidate.start_time):
+            return False
+        return (
+            _identity_part(target_home) == _identity_part(candidate.home_team)
+            and _identity_part(target_away) == _identity_part(candidate.away_team)
+            and target_start == candidate.start_time
+        )
+
+    async def fetch_event_props(
+        self,
+        sport_key: str,
+        event: Any,
+        *,
+        bookmaker: str = "prizepicks",
+    ) -> PropLineFetchResult:
+        """Fetch one event's player props; rediscover once if its id is stale."""
+        if not self.is_configured:
+            return PropLineFetchResult(
+                [], datetime.utcnow(), error="PropLine is not configured",
+                failure_kind="disabled",
+            )
+        if self.api_url.rstrip("/") != DEFAULT_PROPLINE_API_URL:
+            return PropLineFetchResult(
+                [], datetime.utcnow(),
+                error="PropLine event odds require the official endpoint",
+                failure_kind="configuration",
+            )
+        if isinstance(event, PropLineEvent):
+            event_id = event.event_id
+        elif isinstance(event, dict):
+            event_id = _clean(_first(event, "id", "event_id", "game_id", "match_id"))
+        else:
+            event_id = _clean(event)
+        if not event_id:
+            return PropLineFetchResult(
+                [], datetime.utcnow(), error="PropLine event id is required",
+                failure_kind="configuration",
+            )
+
+        async with self._lock:
+            result = await self._fetch_event_props_locked(
+                sport_key, event_id, bookmaker=bookmaker
+            )
+            if result.failure_kind != "not_found":
+                return result
+
+            # Event ids can rotate between discovery and odds retrieval.  Only
+            # retry after matching immutable event fields, never by guessing a
+            # new id or retrying an arbitrary event.
+            events, complete, _ = await self._discover_events_locked(
+                sport_key, refresh=True
+            )
+            if not complete:
+                return result
+            replacement = next(
+                (candidate for candidate in events if self._event_can_be_matched(event, candidate)),
+                None,
+            )
+            if replacement is None or replacement.event_id == event_id:
+                return result
+            return await self._fetch_event_props_locked(
+                sport_key, replacement.event_id, bookmaker=bookmaker
+            )
+
+    async def _fetch_event_props_locked(
+        self,
+        sport_key: str,
+        event_id: str,
+        *,
+        bookmaker: str,
+    ) -> PropLineFetchResult:
+        url, params, scope = self._official_event_odds_request(
+            sport_key, event_id, bookmaker=bookmaker
+        )
+        try:
+            raw_records, complete, error = await self._paginate_json(
+                url, params, extractor=_official_odds_records
+            )
+        except PropLineNotFoundError as exc:
+            return self._failed_result(scope, str(exc), "not_found")
+        except PropLineRateLimitError as exc:
+            return self._failed_result(scope, str(exc), "quota")
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            return self._failed_result(scope, f"PropLine request failed: {type(exc).__name__}", "http")
+        except PropLineError as exc:
+            return self._failed_result(
+                scope, str(exc), "quota" if "budget" in str(exc).lower() else "http"
+            )
+        fetched_at = datetime.utcnow()
+        props = [
+            prop for record in raw_records
+            if (prop := normalize_propline_prizepicks_record(record, fetched_at=fetched_at))
+            is not None
+        ]
+        if not complete:
+            return self._failed_result(
+                scope, error or "PropLine event snapshot incomplete", "incomplete",
+                partial_props=props, discovered_event_count=1,
+                fetched_event_count=1,
+            )
+        result = PropLineFetchResult(
+            props, fetched_at, succeeded=True, complete=True,
+            discovered_event_count=1, fetched_event_count=1,
+        )
+        self._last_success_by_scope[scope] = result
+        self._snapshot_state_by_scope[scope] = PropLineSnapshotState(
+            complete=True, discovered_event_count=1, fetched_event_count=1,
+            last_successful_at=fetched_at,
+        )
+        return result
+
+    async def fetch_event_odds(
+        self,
+        sport_key: str,
+        event: Any,
+        *,
+        bookmaker: str = "prizepicks",
+    ) -> PropLineFetchResult:
+        """Explicit alias for callers that name the endpoint rather than props."""
+        return await self.fetch_event_props(
+            sport_key, event, bookmaker=bookmaker
+        )
+
+    async def fetch_event_scoped_props(
+        self,
+        *,
+        sport_key: str,
+        bookmaker: str = "prizepicks",
+    ) -> PropLineFetchResult:
+        """Build one complete snapshot from paginated discovery + event odds."""
+        if not self.is_configured:
+            return PropLineFetchResult(
+                [], datetime.utcnow(), error="PropLine is not configured",
+                failure_kind="disabled",
+            )
+        if self.api_url.rstrip("/") != DEFAULT_PROPLINE_API_URL:
+            return PropLineFetchResult(
+                [], datetime.utcnow(),
+                error="PropLine event-scoped requests require the official endpoint",
+                failure_kind="configuration",
+            )
+        scope = f"{_clean(sport_key)}:{bookmaker.lower()}"
+        events = await self.discover_events(sport_key)
+        # An empty, complete catalog is a valid empty snapshot.
+        if not events:
+            state = self.snapshot_state(scope)
+            if state and not state.complete:
+                return self._failed_result(
+                    scope, "PropLine event discovery returned no complete events",
+                    "incomplete",
+                )
+            result = PropLineFetchResult(
+                [], datetime.utcnow(), succeeded=True, complete=True,
+            )
+            self._last_success_by_scope[scope] = result
+            self._snapshot_state_by_scope[scope] = PropLineSnapshotState(
+                complete=True, last_successful_at=result.fetched_at,
+            )
+            return result
+
+        all_props: list[PlayerProp] = []
+        failed_ids: list[str] = []
+        fetched_count = 0
+        for event in events:
+            result = await self.fetch_event_props(
+                sport_key, event, bookmaker=bookmaker
+            )
+            if result.succeeded and result.complete:
+                all_props.extend(result.props)
+                fetched_count += 1
+            else:
+                failed_ids.append(event.event_id)
+        if failed_ids:
+            return self._failed_result(
+                scope,
+                "PropLine event-scoped snapshot incomplete",
+                "incomplete",
+                partial_props=all_props,
+                discovered_event_count=len(events),
+                fetched_event_count=fetched_count,
+                failed_event_ids=tuple(failed_ids),
+            )
+        fetched_at = datetime.utcnow()
+        result = PropLineFetchResult(
+            all_props, fetched_at, succeeded=True, complete=True,
+            discovered_event_count=len(events),
+            fetched_event_count=fetched_count,
+        )
+        self._last_success_by_scope[scope] = result
+        self._snapshot_state_by_scope[scope] = PropLineSnapshotState(
+            complete=True, discovered_event_count=len(events),
+            fetched_event_count=fetched_count, last_successful_at=fetched_at,
+        )
+        return result
     async def discover_sports(self) -> list[PropLineSport]:
         """Return active sports from PropLine without creating a polling loop."""
         if not self.is_configured:
@@ -672,51 +1390,13 @@ class PropLineClient:
                 and (now - self._sports_cache_clock_at) < self.cache_ttl
             ):
                 return list(self._sports_cache)
-            if self._request_count >= self.daily_request_limit:
-                logger.warning("PropLine daily request budget exhausted; skipping sports discovery")
-                return []
-            if now < self._backoff_until:
-                logger.warning("PropLine rate-limit backoff active; skipping sports discovery")
-                return []
-            if self._last_request_at is not None:
-                delay = self.min_request_interval - (now - self._last_request_at)
-                if delay > 0:
-                    await self._sleep(delay)
-            self._last_request_at = self._clock()
-
-            session = self._session
-            owns_local_session = session is None
-            if session is None:
-                session = aiohttp.ClientSession()
             try:
-                self._request_count += 1
-                headers = {
-                    "Authorization": f"Bearer {self.api_key}",
-                    "X-API-Key": self.api_key,
-                    "Accept": "application/json",
-                }
-                timeout = aiohttp.ClientTimeout(total=self.timeout_seconds)
                 url, params = self._official_sports_request()
-                async with session.get(url, headers=headers, params=params, timeout=timeout) as response:
-                    if response.status == 429:
-                        retry_after = _retry_after_seconds(response)
-                        self._backoff_until = self._clock() + retry_after
-                        raise PropLineRateLimitError(
-                            f"PropLine rate limited (HTTP {response.status})",
-                            retry_after=retry_after,
-                        )
-                    if response.status in {408, 425, 502, 503, 504}:
-                        retry_after = min(900.0, max(30.0, 2.0 * self.min_request_interval))
-                        self._backoff_until = self._clock() + retry_after
-                        raise PropLineError(f"PropLine temporarily unavailable (HTTP {response.status})")
-                    if response.status >= 400:
-                        raise PropLineError(f"PropLine sports discovery failed (HTTP {response.status})")
-                    payload = await response.json(content_type=None)
+                raw_sports, complete, pagination_error = await self._paginate_json(
+                    url, params, extractor=_extract_records
+                )
             except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
                 logger.warning("PropLine sports discovery failed: %s", type(exc).__name__)
-                return []
-            except PropLineRateLimitError as exc:
-                logger.warning("PropLine sports discovery rate limited; backing off for %.0fs", exc.retry_after)
                 return []
             except PropLineError as exc:
                 logger.warning("PropLine sports discovery error: %s", exc)
@@ -724,11 +1404,11 @@ class PropLineClient:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("PropLine sports discovery response error: %s", type(exc).__name__)
                 return []
-            finally:
-                if owns_local_session:
-                    await session.close()
 
-            sports = _official_sports_records(payload)
+            if not complete:
+                logger.warning("PropLine sports discovery incomplete: %s", pagination_error)
+                return list(self._sports_cache)
+            sports = _official_sports_records(raw_sports)
             self._sports_cache = tuple(sports)
             self._sports_cache_clock_at = self._clock()
             return list(sports)
@@ -742,8 +1422,12 @@ class PropLineClient:
         return _CANONICAL_TO_OFFICIAL_SPORT.get(canonical)
 
     async def fetch_prizepicks_props(
-        self, *, sport_key: Optional[str] = None,
-    ) -> PropLineFetchResult:
+            self,
+            *,
+            sport_key: Optional[str] = None,
+            bookmaker: str = "prizepicks",
+            event_scoped: bool = False,
+        ) -> PropLineFetchResult:
         if not self.is_configured:
             logger.info("PropLine PrizePicks provider disabled: credentials or endpoint missing")
             return PropLineFetchResult(
@@ -760,9 +1444,17 @@ class PropLineClient:
                 error="PropLine sport key is required", failure_kind="configuration",
             )
 
+        if event_scoped:
+            return await self.fetch_event_scoped_props(
+                sport_key=_clean(sport_key),
+                bookmaker=bookmaker,
+            )
+
         async with self._lock:
-            self._reset_daily_budget_if_needed()
-            url, params, scope = self._official_request(sport_key)
+            url, params, scope = self._official_request(
+                sport_key,
+                bookmaker=bookmaker,
+            )
             now = self._clock()
             if self._cache_is_fresh(now, scope):
                 cached = self._cache_by_scope[scope]
@@ -772,113 +1464,115 @@ class PropLineClient:
                     from_cache=True,
                     succeeded=True,
                 )
-            if self._request_count >= self.daily_request_limit:
-                logger.warning("PropLine daily request budget exhausted; skipping request")
-                return PropLineFetchResult(
-                    [], datetime.utcnow(), from_cache=False,
-                    error="PropLine daily request budget exhausted", failure_kind="quota",
-                )
-            if now < self._backoff_until:
-                logger.warning("PropLine rate-limit backoff active; reusing fresh cache if available")
-                cached = self._cache_by_scope.get(scope)
-                if cached is not None:
-                    return PropLineFetchResult(
-                        list(cached.props),
-                        cached.fetched_at,
-                        from_cache=True,
-                        succeeded=True,
-                    )
-                return PropLineFetchResult(
-                    [], datetime.utcnow(), from_cache=False,
-                    error="PropLine rate-limit backoff active", failure_kind="quota",
-                )
-            if self._last_request_at is not None:
-                delay = self.min_request_interval - (now - self._last_request_at)
-                if delay > 0:
-                    await self._sleep(delay)
-            self._last_request_at = self._clock()
-
-            session = self._session
-            owns_local_session = session is None
-            if session is None:
-                session = aiohttp.ClientSession()
             try:
-                self._request_count += 1
-                headers = {
-                    "Authorization": f"Bearer {self.api_key}",
-                    "X-API-Key": self.api_key,
-                    "Accept": "application/json",
-                }
-                timeout = aiohttp.ClientTimeout(total=self.timeout_seconds)
-                async with session.get(url, headers=headers, params=params, timeout=timeout) as response:
-                    if response.status == 429:
-                        retry_after = _retry_after_seconds(response)
-                        self._backoff_until = self._clock() + retry_after
-                        raise PropLineRateLimitError(
-                            f"PropLine rate limited (HTTP {response.status})",
-                            retry_after=retry_after,
-                        )
-                    if response.status in {408, 425, 502, 503, 504}:
-                        retry_after = min(900.0, max(30.0, 2.0 * self.min_request_interval))
-                        self._backoff_until = self._clock() + retry_after
-                        raise PropLineError(f"PropLine temporarily unavailable (HTTP {response.status})")
-                    if response.status >= 400:
-                        raise PropLineError(f"PropLine request failed (HTTP {response.status})")
-                    payload = await response.json(content_type=None)
+                raw_records, complete, pagination_error = await self._paginate_json(
+                    url,
+                    params,
+                    extractor=(
+                        _official_odds_records
+                        if url.startswith(f"{DEFAULT_PROPLINE_API_URL}/v1/")
+                        else _extract_records
+                    ),
+                )
             except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
                 logger.warning("PropLine PrizePicks request failed: %s", type(exc).__name__)
-                return PropLineFetchResult(
-                    [], datetime.utcnow(), from_cache=False,
-                    error=f"PropLine request failed: {type(exc).__name__}",
-                    failure_kind=(
-                        "timeout" if isinstance(exc, asyncio.TimeoutError) else "http"
-                    ),
+                return self._failed_result(
+                    scope,
+                    f"PropLine request failed: {type(exc).__name__}",
+                    "timeout" if isinstance(exc, asyncio.TimeoutError) else "http",
                 )
             except PropLineRateLimitError as exc:
                 logger.warning("PropLine PrizePicks rate limited; backing off for %.0fs", exc.retry_after)
-                return PropLineFetchResult(
-                    [], datetime.utcnow(), from_cache=False,
-                    error=str(exc), failure_kind="quota",
-                )
+                return self._failed_result(scope, str(exc), "quota")
             except PropLineError as exc:
                 logger.warning("PropLine PrizePicks provider error: %s", exc)
-                return PropLineFetchResult(
-                    [], datetime.utcnow(), from_cache=False,
-                    error=str(exc), failure_kind="http",
-                )
+                kind = "quota" if "budget" in str(exc).lower() else "http"
+                return self._failed_result(scope, str(exc), kind)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("PropLine PrizePicks unexpected response error: %s", type(exc).__name__)
-                return PropLineFetchResult(
-                    [], datetime.utcnow(), from_cache=False,
-                    error=f"PropLine response error: {type(exc).__name__}",
-                    failure_kind="unknown",
+                return self._failed_result(
+                    scope,
+                    f"PropLine response error: {type(exc).__name__}",
+                    "unknown",
                 )
-            finally:
-                if owns_local_session:
-                    await session.close()
 
             fetched_at = datetime.utcnow()
-            records = (
-                _official_odds_records(payload)
-                if url.startswith(f"{DEFAULT_PROPLINE_API_URL}/v1/")
-                else _extract_records(payload)
-            )
             props = [
                 prop
-                for record in records
+                for record in raw_records
                 if (prop := normalize_propline_prizepicks_record(record, fetched_at=fetched_at))
                 is not None
             ]
+            if not complete:
+                logger.warning("PropLine snapshot incomplete: %s", pagination_error)
+                return self._failed_result(
+                    scope,
+                    pagination_error or "PropLine snapshot incomplete",
+                    "incomplete",
+                    partial_props=props,
+                )
             self._cache = PropLineFetchResult(
-                props, fetched_at, from_cache=False, succeeded=True
+                props, fetched_at, from_cache=False, succeeded=True, complete=True
             )
             self._cache_clock_at = self._clock()
             self._cache_scope = scope
             self._cache_by_scope[scope] = self._cache
             self._cache_clock_by_scope[scope] = self._cache_clock_at
-            return PropLineFetchResult(
-                list(props), fetched_at, from_cache=False, succeeded=True
+            result = PropLineFetchResult(
+                list(props), fetched_at, from_cache=False,
+                succeeded=True, complete=True,
             )
+            self._last_success_by_scope[scope] = result
+            self._snapshot_state_by_scope[scope] = PropLineSnapshotState(
+                complete=True,
+                last_successful_at=fetched_at,
+            )
+            return result
+
+    def _failed_result(
+        self,
+        scope: str,
+        error: str,
+        failure_kind: str,
+        *,
+        partial_props: Optional[list[PlayerProp]] = None,
+        discovered_event_count: int = 0,
+        fetched_event_count: int = 0,
+        failed_event_ids: tuple[str, ...] = (),
+    ) -> PropLineFetchResult:
+        """Return retained truth, never a partial snapshot, after a failure."""
+        previous = self._last_success_by_scope.get(scope)
+        retained_props = list(previous.props) if previous is not None else []
+        result = PropLineFetchResult(
+            retained_props,
+            datetime.utcnow(),
+            from_cache=False,
+            succeeded=False,
+            error=error,
+            failure_kind=failure_kind,
+            complete=False,
+            discovered_event_count=discovered_event_count,
+            fetched_event_count=fetched_event_count,
+            failed_event_ids=failed_event_ids,
+            retained_last_success=previous is not None,
+            partial_props=tuple(partial_props or ()),
+        )
+        self._snapshot_state_by_scope[scope] = PropLineSnapshotState(
+            complete=False,
+            discovered_event_count=discovered_event_count,
+            fetched_event_count=fetched_event_count,
+            failed_event_ids=failed_event_ids,
+            last_successful_at=previous.fetched_at if previous else None,
+        )
+        return result
+
+    def snapshot_state(self, scope: str = "") -> Optional[PropLineSnapshotState]:
+        """Return completeness/retention metadata for a prior request scope."""
+        if scope:
+            return self._snapshot_state_by_scope.get(scope)
+        if not self._snapshot_state_by_scope:
+            return None
+        return next(reversed(self._snapshot_state_by_scope.values()))
 
 
 def _retry_after_seconds(response: Any) -> float:
@@ -893,13 +1587,15 @@ class PropLinePrizePicksProvider(PropProviderBase):
     """PropProviderBase adapter for PropLine's PrizePicks-only feed."""
 
     def __init__(
-        self,
-        *,
-        sport_filter: Optional[list[str]] = None,
-        client: Optional[PropLineClient] = None,
-    ) -> None:
-        self._sport_filter = {s.upper() for s in sport_filter} if sport_filter else None
-        self.client = client or PropLineClient()
+            self,
+            *,
+            sport_filter: Optional[list[str]] = None,
+            client: Optional[PropLineClient] = None,
+            bookmaker: str = "prizepicks",
+        ) -> None:
+            self._sport_filter = {s.upper() for s in sport_filter} if sport_filter else None
+            self.bookmaker = bookmaker.strip().lower()
+            self.client = client or PropLineClient()
 
     @property
     def provider_name(self) -> str:
@@ -985,7 +1681,11 @@ class PropLinePrizePicksProvider(PropProviderBase):
         result = await self.fetch_props_for_sport_result(sport)
         return result.props
 
-    async def fetch_props_for_sport_result(self, sport: str) -> PropLineFetchResult:
+    async def fetch_props_for_sport_result(
+            self,
+            sport: str,
+            bookmaker: str = "prizepicks",
+        ) -> PropLineFetchResult:
         """Fetch one sport and retain whether PropLine itself accepted the request."""
         if not self.is_available():
             logger.info("PropLine PrizePicks provider is disabled")
@@ -1017,7 +1717,10 @@ class PropLinePrizePicksProvider(PropProviderBase):
                 error=f"PropLine sport is unsupported: {canonical_sport}",
                 failure_kind="configuration",
             )
-        result = await self.client.fetch_prizepicks_props(sport_key=official_sport)
+        result = await self.client.fetch_prizepicks_props(
+            sport_key=official_sport,
+            bookmaker=bookmaker,
+        )
         # The same official endpoint can have multiple aliases in the bot
         # namespace (for example CFB/NCAAF and SOCCER/EPL).  The requested
         # canonical identity is authoritative for confirmation matching.

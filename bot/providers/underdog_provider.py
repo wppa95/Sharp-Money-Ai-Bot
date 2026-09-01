@@ -146,13 +146,15 @@ class UnderdogProvider(PropProviderBase):
     """
 
     def __init__(
-        self,
-        *,
-        snapshots:     Optional[list[Any]] = None,    # list[UnderdogSnapshotRecord]
-        sport_filter:  Optional[list[str]] = None,
-    ) -> None:
-        self._snapshots    = snapshots    or []
-        self._sport_filter = sport_filter
+            self,
+            *,
+            snapshots:     Optional[list[Any]] = None,    # list[UnderdogSnapshotRecord]
+            sport_filter:  Optional[list[str]] = None,
+            propline_client: Optional[Any] = None,
+        ) -> None:
+            self._snapshots       = snapshots or []
+            self._sport_filter    = sport_filter
+            self._propline_client = propline_client or PropLineClient()
 
     # ── PropProviderBase interface ────────────────────────────────────────────
 

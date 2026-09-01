@@ -292,10 +292,12 @@ class TestP2AlertsCountIntact:
 class TestP3PicksDisplayQuality:
     """Verify /picks quality gates are correct after P1 fix."""
 
-    def test_db_requires_s_a_tier(self):
+    def test_db_query_is_bounded_without_a_tier_gate(self):
         import database as db_mod
         src = inspect.getsource(db_mod.Database.get_top_ud_props_for_picks)
-        assert ".in_(" in src
+        assert "raw_limit" in src
+        assert ".limit(raw_limit)" in src
+        assert "score_tier" not in src
 
     def test_no_null_tier_in_picks_query(self):
         import database as db_mod
@@ -452,16 +454,12 @@ class TestPhaseBoundaries:
         src = inspect.getsource(me)
         assert "Underdog" in src
 
-    def test_score_tier_filter_not_lowered(self):
-        """DB filter must still require S/A — not B, PASS, or NULL."""
+    def test_score_tier_filter_remains_retired(self):
+        """The analyst-facing current-row query must not filter by legacy tier."""
         import database as db_mod
         src = inspect.getsource(db_mod.Database.get_top_ud_props_for_picks)
-        # Must use .in_(["S","A"]) — not a lower threshold
-        in_start = src.find(".in_(")
-        assert in_start >= 0
-        in_block = src[in_start:in_start + 60]
-        assert '"B"' not in in_block and "'B'" not in in_block
-        assert "PASS" not in in_block
+        assert "score_tier" not in src
+        assert "decision_tier" not in src
 
     def test_no_credentials_in_health(self):
         import commands as cmd_mod

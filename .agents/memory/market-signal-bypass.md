@@ -32,6 +32,12 @@ Telegram delivery or canonical evidence. Resolve direction before provider-aware
 deduplication and fair result limiting so non-directional rows or provider order
 cannot hide valid current opportunities.
 
+Keep `/picks` reads bounded from the requested display limit. Reconcile
+Underdog overrides by exact source identity only, and constrain optional
+intelligence to selected candidates; broad sport/history grouping can exhaust
+the command's three-second deadline. Nested report cancellation must propagate
+to child database tasks.
+
 **Why:** A market-only bypass turned line movement into an actionable alert without
 player-result support, violating the separation between monitoring and betting
 recommendations.
@@ -42,4 +48,5 @@ shared direction-and-evidence check, then apply provider, freshness, timing,
 identity, deduplication, claim/release, and rate safeguards at the delivery
 boundary. Preserve genuine provider event time/status on current rows and keep
 unknown state excluded. Keep non-betting operational broadcasts explicitly
-separate.
+separate. For `/picks`, bound current-row overfetch before reconciliation while
+applying the final display cap only after effective direction resolution.

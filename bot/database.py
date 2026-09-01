@@ -976,55 +976,53 @@ class Database:
         inactive high-volume sports cannot crowd out the live slate.
         """
         from datetime import timedelta
-        from sqlalchemy import or_, and_
         cutoff = datetime.utcnow() - timedelta(hours=since_hours)
         normalized_sports = {
             str(sport).strip().upper()
             for sport in (sports or ())
             if str(sport).strip()
         }
+        if limit is None:
+            raise ValueError("/picks current-row retrieval requires a bounded limit")
+
+        # Read one bounded newest-first slice, then balance sports in memory.
+        # Deduplicate only after reading the latest row for each provider source
+        # so a removal marker cannot resurrect an older directional row.
+        raw_limit = max(limit * 20, 400)
         async with self.session() as s:
             filters = [
-                PropLineHistory.provider   == "Underdog",
+                PropLineHistory.provider == "Underdog",
                 PropLineHistory.fetched_at >= cutoff,
-                PropLineHistory.removed.isnot(True),
-                or_(
-                    PropLineHistory.game_time.is_(None),
-                    PropLineHistory.game_time > datetime.utcnow(),
-                ),
             ]
             if sports is not None:
                 filters.append(PropLineHistory.sport.in_(normalized_sports))
-            source_identity = case(
-                (
-                    PropLineHistory.external_id.isnot(None)
-                    & (PropLineHistory.external_id != ""),
-                    PropLineHistory.external_id,
-                ),
-                else_=PropLineHistory.game_id,
-            )
-            subq = (
-                select(func.max(PropLineHistory.id))
-                .where(*filters)
-                .group_by(
-                    PropLineHistory.player_name,
-                    PropLineHistory.sport,
-                    PropLineHistory.stat_type,
-                    source_identity,
-                )
-                .scalar_subquery()
-            )
-            query = (
+            result = await s.execute(
                 select(PropLineHistory)
-                .where(PropLineHistory.id.in_(subq))
-                .order_by(desc(PropLineHistory.fetched_at))
+                .where(*filters)
+                .order_by(desc(PropLineHistory.id))
+                .limit(raw_limit)
             )
-            if limit is not None:
-                query = query.limit(limit * 10)  # overfetch to allow sport filtering
-            result = await s.execute(query)
-        rows = list(result.scalars().all())
-        if limit is None:
-            return rows
+            raw_rows = list(result.scalars().all())
+
+        latest_by_source: dict[tuple[str, str, str, str], PropLineHistory] = {}
+        for row in sorted(raw_rows, key=lambda item: item.id, reverse=True):
+            source_id = str(row.external_id or row.game_id or "")
+            identity = (row.player_name, row.sport, row.stat_type, source_id)
+            latest_by_source.setdefault(identity, row)
+
+        now = datetime.utcnow()
+        rows = [
+            row
+            for row in latest_by_source.values()
+            if row.removed is not True
+            and (row.game_time is None or row.game_time > now)
+        ]
+        rows.sort(
+            key=lambda row: (
+                0 if row.bet_recommendation in ("OVER", "UNDER") else 1,
+                -(row.id or 0),
+            )
+        )
 
         # ── Sport-balanced selection ───────────────────────────────────────────
         # A flat [:limit] on fetched_at DESC lets high-volume sports (MLB, DOTA)
@@ -1039,23 +1037,32 @@ class Database:
         _n_sports   = max(len(_buckets), 1)
         _per_sport  = max(3, ceil(limit / _n_sports))
         _balanced: list = []
+        _selected_ids: set[int] = set()
         for _sport_rows in _buckets.values():
-            _balanced.extend(_sport_rows[:_per_sport])
-        # Re-sort the balanced set by fetched_at DESC so freshest data leads
-        _balanced.sort(key=lambda r: r.fetched_at, reverse=True)
+            for _row in _sport_rows[:_per_sport]:
+                _balanced.append(_row)
+                _selected_ids.add(_row.id)
+        # Fill unused slots from the remaining direction-first population.
+        for _row in rows:
+            if len(_balanced) >= limit:
+                break
+            if _row.id not in _selected_ids:
+                _balanced.append(_row)
+                _selected_ids.add(_row.id)
 
         logger.info(
             "UD picks query: raw=%d  sports=%d  per_sport_cap=%d  balanced=%d  returning=%d",
-            len(rows), _n_sports, _per_sport, len(_balanced), min(len(_balanced), limit),
+            len(raw_rows), _n_sports, _per_sport, len(_balanced),
+            min(len(_balanced), limit),
         )
 
         return _balanced[:limit]
 
     async def get_ud_recommendations_bulk(
         self,
-        player_stat_triples: "list[tuple[str, str, str]]",
+        player_stat_identities: "list[tuple[str, str, str, str]]",
         since_hours: int = 24,
-    ) -> "dict[tuple[str, str, str], tuple[str | None, int | None]]":
+    ) -> "dict[tuple[str, str, str, str], tuple[str | None, int | None]]":
         """
         Return the most-recent bet_recommendation + bet_confidence from
         UnderdogSnapshotRecord for each (player_name, sport, stat_type) triple.
@@ -1066,43 +1073,52 @@ class Database:
         Returns a dict keyed by (player_name, sport, stat_type) →
         (bet_recommendation, bet_confidence).  Missing props get (None, None).
         """
-        if not player_stat_triples:
+        if not player_stat_identities:
             return {}
         from datetime import timedelta
         cutoff = datetime.utcnow() - timedelta(hours=since_hours)
-        wanted = set(player_stat_triples)
-        sports = {sport for _, sport, _ in wanted}
-
-        async with self.session() as s:
-            # Subquery: max(id) per (player_name, sport, stat_type), non-removed
-            subq = (
-                select(func.max(UnderdogSnapshotRecord.id))
-                .where(
-                    UnderdogSnapshotRecord.removed    == False,  # noqa: E712
-                    UnderdogSnapshotRecord.fetched_at >= cutoff,
-                    UnderdogSnapshotRecord.sport.in_(sports),
-                )
-                .group_by(
-                    UnderdogSnapshotRecord.player_name,
-                    UnderdogSnapshotRecord.sport,
-                    UnderdogSnapshotRecord.stat_type,
-                )
-                .scalar_subquery()
+        wanted = {
+            (
+                str(player),
+                str(sport),
+                str(stat),
+                str(source_id or ""),
             )
+            for player, sport, stat, source_id in player_stat_identities
+        }
+
+        out: dict[tuple[str, str, str, str], tuple[str | None, int | None]] = {}
+        source_ids = {identity[3] for identity in wanted if identity[3]}
+        if not source_ids:
+            return out
+        async with self.session() as s:
             result = await s.execute(
                 select(UnderdogSnapshotRecord).where(
-                    UnderdogSnapshotRecord.id.in_(subq)
+                    UnderdogSnapshotRecord.external_id.in_(source_ids),
+                    UnderdogSnapshotRecord.fetched_at >= cutoff,
                 )
             )
-            rows = result.scalars().all()
+            rows = list(result.scalars().all())
 
-        return {
-            (r.player_name, r.sport, r.stat_type): (
-                r.bet_recommendation, r.bet_confidence
+        latest: dict[
+            tuple[str, str, str, str], UnderdogSnapshotRecord
+        ] = {}
+        for row in rows:
+            identity = (
+                row.player_name,
+                row.sport,
+                row.stat_type,
+                row.external_id,
             )
-            for r in rows
-            if (r.player_name, r.sport, r.stat_type) in wanted
-        }
+            if identity not in wanted:
+                continue
+            previous = latest.get(identity)
+            if previous is None or row.id > previous.id:
+                latest[identity] = row
+        for identity, row in latest.items():
+            if row.removed is not True:
+                out[identity] = (row.bet_recommendation, row.bet_confidence)
+        return out
 
     async def get_latest_downstream_intelligence(
         self,
@@ -1115,9 +1131,13 @@ class Database:
         import json as _json
         from datetime import timedelta
 
+        requested = {
+            (str(player), str(sport), str(stat))
+            for player, sport, stat in player_stat_triples
+        }
         wanted = {
             (str(player).lower(), str(sport).upper(), str(stat).lower())
-            for player, sport, stat in player_stat_triples
+            for player, sport, stat in requested
         }
         cutoff = datetime.utcnow() - timedelta(hours=since_hours)
         async with self.session() as s:
@@ -1126,9 +1146,14 @@ class Database:
                 .where(
                     PropOpportunityLog.detected_at >= cutoff,
                     PropOpportunityLog.downstream_intelligence_json.isnot(None),
+                    tuple_(
+                        PropOpportunityLog.player_name,
+                        PropOpportunityLog.sport,
+                        PropOpportunityLog.stat_type,
+                    ).in_(requested),
                 )
                 .order_by(desc(PropOpportunityLog.detected_at))
-                .limit(2000)
+                .limit(max(len(requested) * 20, 100))
             )
             rows = list(result.scalars().all())
 
@@ -2379,7 +2404,11 @@ class Database:
             return list(result.scalars().all())
 
     async def get_latest_props_for_provider(
-        self, provider: str, since_hours: int = 6
+        self,
+        provider: str,
+        since_hours: int = 6,
+        limit: Optional[int] = None,
+        directional_first: bool = False,
     ) -> "list[PropLineHistory]":
         """Return the latest persistent snapshot for each provider prop.
 
@@ -2390,6 +2419,48 @@ class Database:
         cutoff = datetime.utcnow() - timedelta(hours=since_hours)
         now = datetime.utcnow()
         async with self.session() as s:
+            if limit is not None:
+                raw_limit = max(limit * 10, 200)
+                result = await s.execute(
+                    select(PropLineHistory)
+                    .where(
+                        PropLineHistory.provider == provider,
+                        PropLineHistory.fetched_at >= cutoff,
+                    )
+                    .order_by(desc(PropLineHistory.id))
+                    .limit(raw_limit)
+                )
+                raw_rows = list(result.scalars().all())
+                latest_by_source: dict[
+                    tuple[str, str, str, str], PropLineHistory
+                ] = {}
+                for row in raw_rows:
+                    source_id = str(row.external_id or row.game_id or "")
+                    identity = (
+                        row.player_name,
+                        row.sport,
+                        row.stat_type,
+                        source_id,
+                    )
+                    latest_by_source.setdefault(identity, row)
+                rows = [
+                    row
+                    for row in latest_by_source.values()
+                    if row.removed is not True
+                ]
+                rows.sort(
+                    key=lambda row: (
+                        (
+                            0
+                            if directional_first
+                            and row.bet_recommendation in ("OVER", "UNDER")
+                            else 1
+                        ),
+                        -(row.id or 0),
+                    )
+                )
+                return rows[:limit]
+
             source_identity = case(
                 (
                     PropLineHistory.external_id.isnot(None)
@@ -2412,11 +2483,29 @@ class Database:
                 )
                 .scalar_subquery()
             )
-            result = await s.execute(
+            query = (
                 select(PropLineHistory)
                 .where(PropLineHistory.id.in_(subq))
-                .order_by(desc(PropLineHistory.fetched_at))
+                .order_by(
+                    *(
+                        [
+                            case(
+                                (
+                                    PropLineHistory.bet_recommendation.in_(
+                                        ("OVER", "UNDER")
+                                    ),
+                                    0,
+                                ),
+                                else_=1,
+                            )
+                        ]
+                        if directional_first
+                        else []
+                    ),
+                    desc(PropLineHistory.fetched_at),
+                )
             )
+            result = await s.execute(query)
             return list(result.scalars().all())
 
     async def get_recent_tracked_props(
