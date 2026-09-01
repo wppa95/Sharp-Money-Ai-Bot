@@ -889,9 +889,10 @@ async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
         # Extend the Telegram-picks header block with the overall grading section.
         lines = tg_lines + [
-            "<b>Overall Grading</b>",
+            "<b>All Directional Grading</b>",
             "",
-            f"Total graded plays: <b>{total}</b>",
+            f"Total graded directional evaluations: <b>{total}</b>",
+            "<i>This includes historical/legacy evaluations, whether or not they were sent to Telegram.</i>",
             "",
         ]
 

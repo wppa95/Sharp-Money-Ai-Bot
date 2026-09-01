@@ -810,24 +810,7 @@ def format_underdog_change_alert(
             _priority_lbl = _bq_priority_label(_bq_int, direction=rec, sport=sport)
             if _priority_lbl:
                 pick_line += f"\n{_priority_lbl}"
-        # Raw formatters retain this internal presentation for compatibility;
-        # alerts.py removes it at Telegram/Discord delivery time.
         _is_tier1_sport = sport.upper() not in {"MLB", "NFL"}
-        if (
-            rec == "UNDER"
-            and _is_tier1_sport
-            and conf is not None
-            and int(conf) >= 70
-        ):
-            strong_under_line = (
-                "🔥 <b>STRONG UNDER</b>  "
-                "<i>(informational signal)</i>"
-            )
-        elif rec == "UNDER" and conf is not None and int(conf) >= 30:
-            strong_under_line = (
-                "🔴 <b>UNDER SIGNAL</b>  "
-                "<i>(informational signal)</i>"
-            )
 
     # Market quality one-liner
     mq_line = _format_market_quality_line(market_quality) if not removed else ""
@@ -947,11 +930,8 @@ def format_market_move_detected(
         "<i>This is a market signal, not yet a bet pick.</i>",
         game_str,
         "",
-        (
-            f"🕐 <b>Line as of:</b> "
-            f"<i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>"
-            if not removed else ""
-        ),
+        f"🕐 <b>Line as of:</b> "
+        f"<i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>",
         "",
         _thick,
     ]
@@ -1007,23 +987,20 @@ def format_underdog_new_prop_alert(
     # qualification gate.
     # _bq_stars is applied inside _format_quality_line so quality stars still
     # come from decision confidence rather than the raw market score.
-    _np_rec = getattr(decision, "recommendation", None) if decision is not None else None
-    _np_bq  = getattr(decision, "confidence", None)     if decision is not None else None
-    _np_strong_under = ""
-    if _np_rec == "UNDER" and _np_bq is not None and int(_np_bq) >= 30:
-        _np_strong_under = (
-            "🔴 <b>UNDER SIGNAL</b>  "
-            "<i>(informational market signal)</i>"
-        )
-
     # Reason bullets
-    reasons = ["New prop detected"]
+    reasons = ["Qualified current-line player evidence"]
     if line_value <= low_line_threshold:
         reasons.append(f"Low starting line ({line_value} ≤ {low_line_threshold})")
     if score is not None and getattr(score, "stars", 0) >= 3:
         reasons.append("Score qualifies for current market review")
-    if validation is not None and getattr(validation, "has_supporting_data", False):
-        reasons.append(f"Supporting history available ({getattr(validation, 'n_history', 0)} snapshots)")
+    if (
+        validation is not None
+        and getattr(validation, "has_supporting_data", False)
+        and str(getattr(validation, "data_source", "")).lower() == "real"
+    ):
+        reasons.append(
+            f"Supporting game history available ({getattr(validation, 'n_real_games', 0)} games)"
+        )
 
     avail_block = _format_available_lines_block(
         ud_line=line_value,
@@ -1041,7 +1018,6 @@ def format_underdog_new_prop_alert(
         + (f"\n{game_str}" if game_str else "")
         + (f"\n{quality_line}" if quality_line else "")
         + (f"\n{history_block}" if history_block else "")
-        + (f"\n{_np_strong_under}" if _np_strong_under else "")
         + (f"\n{market_line}" if market_line else "")
         + (f"\n{pressure_block}" if pressure_block else "")
     )
