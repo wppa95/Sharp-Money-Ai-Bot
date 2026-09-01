@@ -5693,8 +5693,8 @@ class Database:
                     elif res == "MISS": entry["L"] += n
                     else:              entry["P"] += n
                 elif rec == "UNDER":
-                    if res == "MISS":  entry["W"] += n  # under cleared = over failed
-                    elif res == "HIT": entry["L"] += n
+                    if res == "HIT":   entry["W"] += n
+                    elif res == "MISS": entry["L"] += n
                     else:              entry["P"] += n
             for v in acc.values():
                 t = v["W"] + v["L"]
@@ -5793,8 +5793,8 @@ class Database:
                     elif res == "MISS": entry["L"] += n
                     else:              entry["P"] += n
                 elif rec == "UNDER":
-                    if res == "MISS":   entry["W"] += n
-                    elif res == "HIT":  entry["L"] += n
+                    if res == "HIT":    entry["W"] += n
+                    elif res == "MISS": entry["L"] += n
                     else:              entry["P"] += n
             player_trend = [
                 {
