@@ -91,6 +91,15 @@ async def _independent_report_reads(
     """Run optional report reads together and return unavailable per slow read."""
     timeout_value = _COMMAND_TIMEOUT_SECONDS if timeout is None else timeout
     tasks = [asyncio.ensure_future(read) for read in reads]
+
+    def _consume_finished(report_task: asyncio.Future) -> None:
+        if report_task.cancelled():
+            return
+        try:
+            report_task.exception()
+        except Exception:
+            pass
+
     done, _pending = await asyncio.wait(tasks, timeout=timeout_value)
     values: list = []
     for task in tasks:
