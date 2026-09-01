@@ -645,11 +645,15 @@ def _format_intelligence_block(trace: "Optional[dict]") -> str:
     historical = trace.get("historical", {}) or {}
     windows    = historical.get("windows", {}) or {}
     _hr_parts: list[str] = []
-    for wk in ("l5", "l10", "l20"):
-        w = windows.get(wk)
-        if w and isinstance(w, dict) and (w.get("n") or 0) >= 3:
-            pct = round((w.get("hit_rate") or 0) * 100)
-            _hr_parts.append(f"<b>{wk.upper()}:</b> {pct}%")
+    # Only actual completed-game results may be presented as hit rates.
+    # Hand-authored/legacy traces without a source remain compatible, while
+    # production polling-observation traces are explicitly suppressed.
+    if trace.get("history_source") != "polling_observation":
+        for wk, minimum in (("l5", 5), ("l10", 10), ("l20", 20), ("l30", 30)):
+            w = windows.get(wk)
+            if w and isinstance(w, dict) and (w.get("n") or 0) >= minimum:
+                pct = round((w.get("hit_rate") or 0) * 100)
+                _hr_parts.append(f"<b>{wk.upper()}:</b> {pct}%")
     _ss = historical.get("sample_strength")
 
     if not role_label and not match_label and not _hr_parts:
@@ -873,7 +877,6 @@ def format_underdog_change_alert(
             avail_block.lstrip("\n"),
             "",
             pick_line,
-            *([strong_under_line] if strong_under_line else []),
         ]
         if decision is not None:
             decision_reason = _clean_reason(getattr(decision, "reason", ""))

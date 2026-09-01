@@ -133,11 +133,13 @@ def compute_hit_rates(
         reverse=True,
     )
 
-    def _window_stats(subset: list) -> Optional[WindowStats]:
-        if not subset:
+    def _window_stats(subset: list, required_games: int) -> Optional[WindowStats]:
+        # A rolling window is only valid when the complete requested sample is
+        # available.  Never label 15 games as L20 or 16 games as L30.
+        if len(subset) < required_games:
             return None
         values = [r.actual_value for r in subset if r.actual_value is not None]
-        if not values:
+        if len(values) < required_games:
             return None
         n   = len(values)
         # Push (actual == line exactly) counted as UNDER
@@ -152,11 +154,11 @@ def compute_hit_rates(
             average     = round(avg, 2),
         )
 
-    l5_stats  = _window_stats(sorted_results[:5])
-    l10_stats = _window_stats(sorted_results[:10])
-    l20_stats = _window_stats(sorted_results[:20])
-    l30_stats = _window_stats(sorted_results[:30])
-    season_stats = _window_stats(sorted_results)
+    l5_stats  = _window_stats(sorted_results[:5], 5)
+    l10_stats = _window_stats(sorted_results[:10], 10)
+    l20_stats = _window_stats(sorted_results[:20], 20)
+    l30_stats = _window_stats(sorted_results[:30], 30)
+    season_stats = _window_stats(sorted_results, 1)
 
     # H2H — only compute when opponent known and sufficient matchups exist
     h2h_stats: Optional[WindowStats] = None

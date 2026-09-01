@@ -179,11 +179,11 @@ class PlayerHistoryProvider:
         ]
         real_records.sort(key=lambda x: x.date, reverse=True)
 
-        l5 = _window_from_values(real_records[:5], current_line)
-        l10 = _window_from_values(real_records[:10], current_line)
-        l20 = _window_from_values(real_records[:20], current_line)
-        l30 = _window_from_values(real_records[:30], current_line)
-        season = _window_from_values(real_records, current_line)
+        l5 = _window_from_values(real_records[:5], current_line, required_games=5)
+        l10 = _window_from_values(real_records[:10], current_line, required_games=10)
+        l20 = _window_from_values(real_records[:20], current_line, required_games=20)
+        l30 = _window_from_values(real_records[:30], current_line, required_games=30)
+        season = _window_from_values(real_records, current_line, required_games=1)
 
         h2h = None
         if opponent:
@@ -195,10 +195,10 @@ class PlayerHistoryProvider:
         proxy_n = 0
         if ud_history:
             proxy_n = len(ud_history)
-            proxy_l5 = _proxy_move_rate(ud_history[:5])
-            proxy_l10 = _proxy_move_rate(ud_history[:10])
-            proxy_l20 = _proxy_move_rate(ud_history[:20])
-            proxy_l30 = _proxy_move_rate(ud_history[:30])
+            proxy_l5 = _proxy_move_rate(ud_history[:5], required_snaps=5)
+            proxy_l10 = _proxy_move_rate(ud_history[:10], required_snaps=10)
+            proxy_l20 = _proxy_move_rate(ud_history[:20], required_snaps=20)
+            proxy_l30 = _proxy_move_rate(ud_history[:30], required_snaps=30)
 
         result = PlayerHistorySnapshot(
             player_name=player_name,
@@ -294,11 +294,13 @@ def get_player_history_provider() -> PlayerHistoryProvider:
     return _provider
 
 
-def _window_from_values(records, current_line) -> Optional[HistoryWindow]:
-    if len(records) < _MIN_WINDOW:
+def _window_from_values(
+    records, current_line, *, required_games: int = _MIN_WINDOW
+) -> Optional[HistoryWindow]:
+    if len(records) < required_games:
         return None
     values = [r.value for r in records if r.value is not None]
-    if not values:
+    if len(values) < required_games:
         return None
     n = len(values)
     oc = sum(1 for v in values if v > current_line)
@@ -309,8 +311,8 @@ def _window_from_values(records, current_line) -> Optional[HistoryWindow]:
     )
 
 
-def _proxy_move_rate(window) -> Optional[float]:
-    if len(window) < _MIN_WINDOW:
+def _proxy_move_rate(window, *, required_snaps: int = _MIN_WINDOW) -> Optional[float]:
+    if len(window) < required_snaps:
         return None
     moved = sum(1 for r in window if getattr(r, "line_moved", False))
     return round(moved / len(window), 3)

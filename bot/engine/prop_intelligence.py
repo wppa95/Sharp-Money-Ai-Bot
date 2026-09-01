@@ -835,6 +835,9 @@ def compute_prop_intelligence(
         "sport":       sport,
         "stat_type":   stat_type,
         "line":        line,
+        # This engine consumes provider polling observations.  It must never
+        # be rendered as completed-game hit-rate evidence.
+        "history_source": "polling_observation",
         "historical": {
             "sample_strength":       historical.sample_strength,
             "n":                     historical.overall.n,

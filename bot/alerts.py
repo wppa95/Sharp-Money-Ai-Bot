@@ -645,9 +645,13 @@ def _has_strong_underdog_evidence(
     intelligence_trace: object = None,
 ) -> bool:
     """Mirror the delivery evidence check without importing market_engine."""
-    if bool(getattr(validation, "has_supporting_data", False)):
-        return True
-    if int(getattr(score, "n_history", 0) or 0) >= 5:
+    # Polling snapshots are monitoring evidence, not completed player games.
+    # Only real game-result evidence can qualify a Telegram PLAY.
+    if (
+        bool(getattr(validation, "has_supporting_data", False))
+        and str(getattr(validation, "data_source", "")).lower() == "real"
+        and int(getattr(validation, "n_real_games", 0) or 0) >= 5
+    ):
         return True
     for obj in (decision, intelligence_trace):
         if isinstance(obj, dict):
@@ -655,13 +659,29 @@ def _has_strong_underdog_evidence(
                 obj.get(key) not in (None, {}, [], "")
                 for key in ("evidence", "bet_evidence", "intelligence_trace")
             ):
-                return True
+                # Stored decision evidence must explicitly identify real game
+                # results; generic proxy/intelligence traces are insufficient.
+                evidence = obj.get("evidence") or obj.get("bet_evidence")
+                if isinstance(evidence, dict):
+                    source = str(
+                        evidence.get("data_source")
+                        or evidence.get("source")
+                        or ""
+                    ).lower()
+                    if source in {"real", "game_results", "player_game_results"}:
+                        return True
             continue
         if obj is not None:
             for attr in ("evidence", "bet_evidence", "intelligence_trace"):
                 value = getattr(obj, attr, None)
-                if value not in (None, {}, [], ""):
-                    return True
+                if isinstance(value, dict):
+                    source = str(
+                        value.get("data_source")
+                        or value.get("source")
+                        or ""
+                    ).lower()
+                    if source in {"real", "game_results", "player_game_results"}:
+                        return True
     return False
 
 
@@ -715,7 +735,23 @@ def _sanitize_user_alert_message(message: str) -> str:
         text,
         flags=re.IGNORECASE,
     )
-    text = re.sub(r"\bSTRONG UNDER(?: SIGNAL)?\b", "UNDER SIGNAL", text, flags=re.IGNORECASE)
+    # These are internal routing/signal labels, never user-facing Telegram
+    # classifications.  Keep the actual PICK and Quality lines intact.
+    text = re.sub(
+        r"(?:🔥\s*)?<b>\s*(?:STRONG UNDER|UNDER SIGNAL|OVER SIGNAL)\s*</b>"
+        r"(?:\s*<i>\s*\(informational signal\)\s*</i>)?",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"\b(?:STRONG UNDER|UNDER SIGNAL|OVER SIGNAL)\b"
+        r"\s*(?:\(informational signal\))?",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"\bACTIONABLE(?: BET PICK)?\b", "", text, flags=re.IGNORECASE)
     text = re.sub(r"\bdecision_pass\b", "no-direction", text, flags=re.IGNORECASE)
     text = re.sub(r"\bnot_immediate\b", "not yet actionable", text, flags=re.IGNORECASE)
     # PASS is an internal recommendation state, not a user-facing outcome.
