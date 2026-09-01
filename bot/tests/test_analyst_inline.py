@@ -268,7 +268,7 @@ def _make_score(stars=4, total=70):
     return s
 
 
-def test_new_prop_alert_contains_analyst_block_for_directional():
+def test_new_prop_alert_omits_duplicate_analyst_block_for_directional():
     from alerts_multiplatform import format_underdog_new_prop_alert
     trace = {
         "historical": {"sample_strength": 60, "n": 15, "hit_rate": 0.72, "variance": 1.0, "windows": {}},
@@ -280,7 +280,8 @@ def test_new_prop_alert_contains_analyst_block_for_directional():
         score=_make_score(), decision=_make_decision(),
         intelligence_trace=trace,
     )
-    assert "Analyst" in msg
+    assert "Analyst" not in msg
+    assert "Quality:" in msg
 
 
     def test_change_alert_contains_pick_for_directional():

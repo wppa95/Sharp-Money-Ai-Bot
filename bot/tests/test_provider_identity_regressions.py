@@ -116,8 +116,8 @@ def test_prizepicks_edge_alert_has_provider_specific_heading_and_line():
 
 def test_change_alert_preserves_source_heading_and_line_label():
     for provider, heading, line_label in (
-        ("Underdog", "🐶 <b>UNDERDOG PICK</b>", "Underdog Line"),
-        ("PrizePicks", "🟣 <b>PRIZEPICKS PICK</b>", "PrizePicks Line"),
+        ("Underdog", "🐶 <b>UNDERDOG PICK</b>", "LINE</b> · Underdog"),
+        ("PrizePicks", "🟣 <b>PRIZEPICKS PICK</b>", "LINE</b> · PrizePicks"),
     ):
         message = format_underdog_change_alert(
             player_name="LeBron James",

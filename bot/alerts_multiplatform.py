@@ -13,6 +13,8 @@ New alert types:
 from __future__ import annotations
 
 from datetime import datetime
+from html import escape
+import re
 from typing import Optional
 
 
@@ -340,63 +342,23 @@ def _format_decision_block(
         # Non-directional evaluations are internal scan results, not alerts.
         return ""
     emoji     = getattr(decision, "recommendation_emoji", lambda: "⚪")()
-    conf      = getattr(decision, "confidence_display",   lambda: "—")()
-    reason    = getattr(decision, "reason", "")
-    avg_disp  = getattr(decision, "avg_vs_line_display",  lambda: "N/A")()
+    reason = _clean_reason(getattr(decision, "reason", ""))
 
-    win_fn = getattr(decision, "window_display", None)
-
-    def _w(g, o, u, r, a) -> str:
-        """Render one evidence row."""
-        if win_fn and callable(win_fn):
-            return win_fn(g, o, u, r, a)
-        if g is None or r is None:
-            return "N/A"
-        rate_str = f"{r:.0%}"
-        avg_str  = f"  avg {a:.1f}" if a is not None else ""
-        return f"{o}/{g} ({rate_str}){avg_str}"
-
-    def _a(name):
-        return getattr(decision, name, None)
-
-    is_pick = True
-
-    # Suggested Play — shown first so the actionable line is immediately visible.
     play_line = (
-        f"\n📌 <b>Suggested Play:</b>   {rec} <code>{line:.1f}</code>"
-        if (is_pick and line is not None) else ""
+        f"\n📌 <b>Suggested Play:</b> {rec} <code>{line:.1f}</code>"
+        if line is not None else ""
     )
-
-    # Bet Quality = How strong is the actual recommendation?
-    # Kept separate from Market Quality (how reliable is the market data).
-    conf_line = (
-        f"\n   <b>Bet Quality:</b>    {conf}"
-        f"  <i>(how strong is the actual recommendation)</i>"
-        if is_pick else ""
+    reason_block = (
+        f"\n\n💬 <b>Reason:</b>\n   <i>{reason}</i>"
+        if reason else ""
     )
-
-    if is_pick:
-        evidence_block = (
-            f"\n\n📊 <b>Evidence:</b>"
-            f"\n   <b>L5:</b>          {_w(_a('l5_games'),     _a('l5_over'),     _a('l5_under'),     _a('l5_hit_rate'),     _a('l5_avg'))}"
-            f"\n   <b>L10:</b>         {_w(_a('l10_games'),    _a('l10_over'),    _a('l10_under'),    _a('l10_hit_rate'),    _a('l10_avg'))}"
-            f"\n   <b>L20:</b>         {_w(_a('l20_games'),    _a('l20_over'),    _a('l20_under'),    _a('l20_hit_rate'),    _a('l20_avg'))}"
-            f"\n   <b>L30:</b>         {_w(_a('l30_games'),    _a('l30_over'),    _a('l30_under'),    _a('l30_hit_rate'),    _a('l30_avg'))}"
-            f"\n   <b>Season:</b>      {_w(_a('season_games'), _a('season_over'), _a('season_under'), _a('season_hit_rate'), _a('season_avg'))}"
-            f"\n   <b>H2H:</b>         {_w(_a('h2h_games'),    _a('h2h_over'),    _a('h2h_under'),    _a('h2h_hit_rate'),    _a('h2h_avg'))}"
-            f"\n   <b>Avg vs line:</b> {avg_disp}"
-        )
-    else:
-        evidence_block = ""
-
-    reason_block = f"\n\n💬 <b>Reason:</b>\n   <i>{reason}</i>" if reason else ""
 
     return (
         f"\n\n{_div()}"
         f"\n🎯 <b>Recommendation:</b>  {emoji} {rec}"
         f"{play_line}"
-        f"{conf_line}"
-        f"{evidence_block}"
+        f"\n   {_format_quality_line(decision, None)}"
+        f"{_format_history_block(decision)}"
         f"{reason_block}"
     )
 
@@ -414,7 +376,7 @@ def _format_market_quality_block(market_quality: Optional[object]) -> str:
     reasons = getattr(market_quality, "reasons", ())
     if label is None:
         return ""
-    label_str  = label.value if hasattr(label, "value") else str(label)
+    label_str  = _display_label(label)
     filled     = round(score / 10)
     bar        = "█" * filled + "░" * (10 - filled)
     icon       = {"ELITE": "🥇", "STRONG": "🥈", "HIGH": "🥈", "MEDIUM": "🥉", "LOW": "⚠️"}.get(label_str, "📊")
@@ -484,6 +446,127 @@ def _format_available_lines_block(
     if ud_line is not None:
         lines.append(f"\n🐶 Underdog:    <code>{ud_line:.1f}</code>")
     return "".join(lines)
+
+
+def _display_label(value: object) -> str:
+    """Return a human-readable enum/string label without its Python type name."""
+    raw = getattr(value, "value", value)
+    text = str(raw or "").strip()
+    return text.rsplit(".", 1)[-1]
+
+
+def _numeric_attr(obj: Optional[object], name: str) -> Optional[float]:
+    """Read a numeric display value without rendering mock/sentinel objects."""
+    value = getattr(obj, name, None) if obj is not None else None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value
+    return None
+
+
+def _history_window_label(
+    label: str,
+    games: Optional[float],
+    l30_games: Optional[float] = None,
+) -> str:
+    """Use a sample label when a so-called season value is only a short sample."""
+    if label != "Season" or games is None:
+        return label
+    if games <= 30 and (l30_games is None or games <= l30_games):
+        return f"{int(games)}-game sample"
+    return label
+
+
+def _format_history_block(decision: Optional[object]) -> str:
+    """Render one compact hit-history block from the existing decision values."""
+    if decision is None:
+        return ""
+
+    l30_games = _numeric_attr(decision, "l30_games")
+    windows = (
+        ("L5", "l5_hit_rate", "l5_games", "l5_over"),
+        ("L10", "l10_hit_rate", "l10_games", "l10_over"),
+        ("L20", "l20_hit_rate", "l20_games", "l20_over"),
+        ("L30", "l30_hit_rate", "l30_games", "l30_over"),
+        ("Season", "season_hit_rate", "season_games", "season_over"),
+        ("H2H", "h2h_hit_rate", "h2h_games", "h2h_over"),
+    )
+    rows: list[str] = []
+    for label, rate_name, games_name, over_name in windows:
+        rate = _numeric_attr(decision, rate_name)
+        games = _numeric_attr(decision, games_name)
+        over = _numeric_attr(decision, over_name)
+        shown_label = _history_window_label(label, games, l30_games)
+        if rate is None or games is None or games <= 0:
+            continue
+        if over is not None:
+            value = f"{rate:.0%} ({int(over)}/{int(games)})"
+        else:
+            value = f"{rate:.0%} ({int(games)} games)"
+        rows.append(f"   <b>{shown_label}:</b> {value}")
+
+    if not rows:
+        return "\n\n📈 <b>HISTORY</b>\n   <b>L5:</b> N/A — no history available"
+    return "\n\n📈 <b>HISTORY</b>\n" + "\n".join(rows)
+
+
+def _format_quality_line(
+    decision: Optional[object],
+    score: Optional[object],
+) -> str:
+    """Show the existing confidence value with a plain bettor-facing label."""
+    confidence = _numeric_attr(decision, "confidence")
+    if confidence is None:
+        confidence = _numeric_attr(score, "total")
+    if confidence is None:
+        confidence_display = getattr(decision, "confidence_display", None)
+        if callable(confidence_display):
+            try:
+                confidence_display = confidence_display()
+            except Exception:
+                confidence_display = None
+        match = re.search(r"(\d+(?:\.\d+)?)\s*/\s*100", str(confidence_display or ""))
+        if match:
+            confidence = float(match.group(1))
+    if confidence is None:
+        return ""
+
+    quality = int(confidence)
+    stars = _bq_stars(quality)
+    return f"<b>Quality:</b> <code>{quality}/100</code> {stars}"
+
+
+def _format_market_quality_line(market_quality: Optional[object]) -> str:
+    """Render market quality without leaking the enum's Python class name."""
+    if market_quality is None:
+        return ""
+    label = _display_label(getattr(market_quality, "label", None))
+    score = _numeric_attr(market_quality, "score")
+    if not label and score is None:
+        return ""
+    suffix = f" · {int(score)}/100" if score is not None else ""
+    return f"\n\n📊 <b>MARKET</b>\n   {label or 'Market'}{suffix}"
+
+
+def _clean_reason(reason: object) -> str:
+    """Remove history rows repeated in the dedicated HISTORY section."""
+    text = " ".join(str(reason or "").split())
+    if not text:
+        return ""
+    pieces = re.split(r"\s*[•·]\s*", text)
+    history_prefix = re.compile(
+        r"^(?:L(?:5|10|20|30)|Season(?:\s+avg\s+vs\s+line)?|H2H)\s*:",
+        re.IGNORECASE,
+    )
+    internal_label = re.compile(r"\b(?:S|A|B|C)[- ]?tier\b", re.IGNORECASE)
+    kept = [
+        piece.strip()
+        for piece in pieces
+        if piece.strip()
+        and not history_prefix.match(piece.strip())
+        and not internal_label.search(piece.strip())
+    ]
+    # Reasons are generated internally, but are rendered as Telegram text.
+    return escape(" · ".join(kept)[:160])
 
 
 def _format_analyst_inline_block(
@@ -663,7 +746,7 @@ def format_underdog_change_alert(
             else "🟣 <b>PRIZEPICKS PICK</b>"
         )
         movement_block = (
-            f"📊 <b>{source} Line</b>\n"
+            f"📊 <b>LINE</b> · {escape(source)}\n"
             f"  {source_emoji} <code>{new_line:.1f}</code>  {_line_label(new_line)}"
         )
     else:
@@ -676,13 +759,13 @@ def format_underdog_change_alert(
         )
         change_sign    = "+" if change >= 0 else ""
         movement_block = (
-            f"📊 <b>{source} Line</b>\n"
+            f"📊 <b>LINE</b> · {escape(source)}\n"
             f"  {source_emoji} <code>{new_line:.1f}</code>  {_line_label(new_line)}\n"
             f"  Previous:         <code>{old_line:.1f}</code>\n"
             f"  {direction_icon} Move:  <code>{change_sign}{change:.1f}</code>"
         )
 
-    opponent_str = f"\n  <b>vs:</b>      {opponent}" if opponent else ""
+    opponent_str = f"\n  <b>vs:</b>      {escape(str(opponent))}" if opponent else ""
     game_str = (
         f"\n  🕐 <b>Game starts:</b>  {_format_game_time_et(game_time)}"
         if game_time else ""
@@ -697,54 +780,7 @@ def format_underdog_change_alert(
             f"  <i>(total move: {total_move_sign}{new_line - opening_line:.1f})</i>"
         )
 
-    # Grade + movement score vs bet confidence separation.
-    # V3.4: stars and displayed BQ come from decision.confidence, not score.total.
-    grade_str = ""
-    if score is not None:
-        total     = getattr(score, "total",          0)
-        n_hist    = getattr(score, "n_history",      0)
-        move_vel  = getattr(score, "move_velocity",  None)  # market movement component
-        # Stars and BQ label from decision.confidence when available; fall back to score
-        _bq_conf_g = getattr(decision, "confidence", None) if decision is not None else None
-        if _bq_conf_g is not None:
-            s_disp    = _bq_stars(int(_bq_conf_g))
-            _bq_label = f"BQ {int(_bq_conf_g)}/100"
-        else:
-            s_disp    = getattr(score, "stars_display", "?" * 5)
-            _bq_label = f"{total}/100"
-
-        grade_str = f"\n\n📊 <b>Grade:</b>  {s_disp}  <code>{_bq_label}</code>  <i>(n={n_hist})</i>"
-
-        if not removed and move_vel is not None:
-            grade_str += (
-                f"\n\n📉 <b>Market Movement Score:</b>  <code>{move_vel}/100</code>"
-                f"  <i>(how significant is the line move)</i>"
-                f"\n🎯 <b>Bet Confidence:</b>         <code>{total}/100</code>"
-                f"  <i>(composite: history + movement)</i>"
-                f"\n<i>Market activity ≠ betting edge.</i>"
-            )
-
-    # Validation block
-    validation_str = ""
-    if validation is not None and getattr(validation, "has_supporting_data", False):
-        validation_str = (
-            f"\n💡 <b>History:</b>  "
-            f"<code>{getattr(validation, 'rate_summary', lambda: '')()}</code>"
-        )
-
-    # Available lines block (all 4 providers)
-    avail_block = _format_available_lines_block(
-        ud_line = new_line if not removed else old_line,
-        pp_line = pp_line,
-        dk_line = dk_line,
-        fd_line = fd_line,
-    )
-
     _thick = "━" * 18
-    _removal_reason_str = ""
-    if removed:
-        _reason = removal_reason or "Market no longer available from provider"
-        _removal_reason_str = f"\n  <b>Removal Reason:</b>  {_reason}"
 
     # ── Compact alert (decision-first) ──────────────────────────────────────
     change = (new_line - old_line) if not removed else 0.0
@@ -758,16 +794,16 @@ def format_underdog_change_alert(
 
     pick_line = ""
     strong_under_line = ""
-    edge_line = ""
     if rec in ("OVER", "UNDER") and not removed:
         pick_emoji = "🟢" if rec == "OVER" else "🔴"
         pick_line = f"📌 <b>PICK:</b>  {pick_emoji} <b>{rec} {new_line:.1f}</b>"
         if conf is not None:
             _bq_int = int(conf)
-            pick_line += f"   ·   Bet Quality <code>{_bq_int}/100</code>  {_bq_stars(_bq_int)}"
+            # _bq_stars remains the source of truth for the displayed quality stars.
+            pick_line += f"\n{_format_quality_line(decision, score)}"
             _priority_lbl = _bq_priority_label(_bq_int, direction=rec, sport=sport)
             if _priority_lbl:
-                pick_line += f"   ·   {_priority_lbl}"
+                pick_line += f"\n{_priority_lbl}"
         # Raw formatters retain this internal presentation for compatibility;
         # alerts.py removes it at Telegram/Discord delivery time.
         _is_tier1_sport = sport.upper() not in {"MLB", "NFL"}
@@ -779,50 +815,22 @@ def format_underdog_change_alert(
         ):
             strong_under_line = (
                 "🔥 <b>STRONG UNDER</b>  "
-                "<i>(BQ ≥ 70 — informational signal)</i>"
+                "<i>(informational signal)</i>"
             )
         elif rec == "UNDER" and conf is not None and int(conf) >= 30:
             strong_under_line = (
-                "🔴 <b>Strong UNDER Signal</b>  "
-                "<i>(BQ ≥ 30 — informational signal)</i>"
+                "🔴 <b>UNDER SIGNAL</b>  "
+                "<i>(informational signal)</i>"
             )
-
-        # Full hit-history breakdown — show every available window on actionable alerts.
-        if not removed:
-            reason = (
-                (getattr(decision, "reason", None) or "").strip()
-                if decision is not None else ""
-            )
-
-            _history_windows = [
-                ("L5", getattr(decision, "l5_hit_rate", None), getattr(decision, "l5_games", None)),
-                ("L10", getattr(decision, "l10_hit_rate", None), getattr(decision, "l10_games", None)),
-                ("L20", getattr(decision, "l20_hit_rate", None), getattr(decision, "l20_games", None)),
-                ("L30", getattr(decision, "l30_hit_rate", None), getattr(decision, "l30_games", None)),
-                ("Season", getattr(decision, "season_hit_rate", None), getattr(decision, "season_games", None)),
-            ]
-
-            history_bits = []
-            for _label, _rate, _games in _history_windows:
-                if _rate is not None and _games and isinstance(_rate, (int, float)):
-                    history_bits.append(f"{_label}: {_rate:.0%} ({_games}g)")
-                else:
-                    history_bits.append(f"{_label}: N/A")
-
-            edge_line = "📊 <b>Hit History:</b>  " + "  ·  ".join(history_bits)
-
-            if reason:
-                edge_line += f"\n📌 <b>Reason:</b>  {reason.split('•')[0].strip()[:120]}"
 
     # Market quality one-liner
-    mq_line = ""
-    if market_quality is not None and not removed:
-        mq_label = getattr(market_quality, "label", None) or getattr(market_quality, "tier", "")
-        mq_score = getattr(market_quality, "score", None)
-        if mq_label or mq_score is not None:
-            mq_line = f"📈 <b>Market:</b>  {mq_label or ''}"
-            if mq_score is not None:
-                mq_line += f"  <code>{int(mq_score)}/100</code>"
+    mq_line = _format_market_quality_line(market_quality) if not removed else ""
+    avail_block = _format_available_lines_block(
+        ud_line=new_line if not removed else old_line,
+        pp_line=pp_line,
+        dk_line=dk_line,
+        fd_line=fd_line,
+    ) if not removed else ""
 
     if removed:
         body_lines = [
@@ -830,11 +838,11 @@ def format_underdog_change_alert(
             header,
             _thick,
             "",
-            f"{sport_icon} <b>{sport} — {stat_type}</b>",
-            f"👤 <b>{player_name}</b>",
+            f"{sport_icon} <b>{escape(str(sport))} — {escape(str(stat_type))}</b>",
+            f"👤 <b>{escape(str(player_name))}</b>",
             "",
-            f"{source_emoji} {source} Last line: <code>{old_line:.1f}</code>",
-            f"Removal: {removal_reason or 'Market no longer available'}",
+            f"{source_emoji} {escape(source)} Last line: <code>{old_line:.1f}</code>",
+            f"Removal: {escape(removal_reason or 'Market no longer available')}",
             "",
             f"{EMOJI['clock']} <i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>",
             "",
@@ -846,23 +854,32 @@ def format_underdog_change_alert(
         if market_confirmation is not None:
             _cn = market_confirmation.get("notes", "")
             if _cn:
-                _confirm_line = f"📡 <b>Market Check:</b>  {_cn}"
+                _confirm_line = f"📡 <b>Market Check:</b>  {escape(str(_cn))}"
 
         body_lines = [
             _thick,
             header,
             _thick,
             "",
-            f"{sport_icon} <b>{sport} — {stat_type}</b>",
-            f"👤 <b>{player_name}</b>",
+            f"{sport_icon} <b>{escape(str(sport))} — {escape(str(stat_type))}</b>",
+            f"👤 <b>{escape(str(player_name))}</b>",
             "",
             movement_block,
+            opponent_str,
+            game_str,
+            opening_str,
+            avail_block.lstrip("\n"),
             "",
             pick_line,
             *([strong_under_line] if strong_under_line else []),
         ]
-        if edge_line:
-            body_lines += ["", edge_line]
+        if decision is not None:
+            decision_reason = _clean_reason(getattr(decision, "reason", ""))
+            history = _format_history_block(decision)
+            if history:
+                body_lines += [history]
+            if decision_reason:
+                body_lines += [f"\n💬 <b>Reason:</b>\n   <i>{decision_reason}</i>"]
         if mq_line:
             body_lines += [mq_line]
         if _confirm_line:
@@ -876,7 +893,7 @@ def format_underdog_change_alert(
         ]
 
     # Drop empty strings from optional lines
-    parts = [ln for ln in body_lines if ln is not None]
+    parts = [ln for ln in body_lines if ln is not None and ln != ""]
     return "\n".join(parts)
 
 
@@ -975,76 +992,53 @@ def format_underdog_new_prop_alert(
         "NHL": "🏒", "UFC": "🥊", "WNBA": "🏀",
     }.get(sport, "🎯")
 
-    opponent_str = f"\n  <b>vs:</b>          {opponent}" if opponent else ""
+    opponent_str = f"  <b>vs:</b> {escape(str(opponent))}" if opponent else ""
     game_str = (
-        f"\n  🕐 <b>Game starts:</b>  {_format_game_time_et(game_time)}"
+        f"  🕐 <b>Game starts:</b> {_format_game_time_et(game_time)}"
         if game_time else ""
     )
 
-    # Grade block — stars and BQ are informational; legacy tier labels are
-    # deliberately omitted from user-facing prop alerts.
-    grade_str = ""
-    if score is not None:
-        tier   = getattr(score, "tier",         "?")
-        total  = getattr(score, "total",         0)
-        n_hist = getattr(score, "n_history",     0)
-        _bq_conf_np = getattr(decision, "confidence", None) if decision is not None else None
-        if _bq_conf_np is not None:
-            s_disp    = _bq_stars(int(_bq_conf_np))
-            _bq_label = f"BQ {int(_bq_conf_np)}/100"
-        else:
-            s_disp    = getattr(score, "stars_display", "?" * 5)
-            _bq_label = f"{total}/100"
-        grade_str = (
-            f"\n\n📊 <b>Grade:</b>  {s_disp}  "
-            f"<code>{_bq_label}</code>"
-            f"  <i>(n={n_hist})</i>"
-        )
-
-    # Validation block — only show when supporting history is available
-    validation_str = ""
-    if validation is not None and getattr(validation, "has_supporting_data", False):
-        validation_str = (
-            f"\n💡 <b>History:</b>  "
-            f"<code>{getattr(validation, 'rate_summary', lambda: '')()}</code>"
-        )
-
     # Quality labels are informational only; direction is the sole
     # qualification gate.
+    # _bq_stars is applied inside _format_quality_line so quality stars still
+    # come from decision confidence rather than the raw market score.
     _np_rec = getattr(decision, "recommendation", None) if decision is not None else None
     _np_bq  = getattr(decision, "confidence", None)     if decision is not None else None
-    _np_sport_up = (sport or "").upper()
     _np_strong_under = ""
     if _np_rec == "UNDER" and _np_bq is not None and int(_np_bq) >= 30:
         _np_strong_under = (
-            "🔴 <b>Strong UNDER Signal</b>  "
+            "🔴 <b>UNDER SIGNAL</b>  "
             "<i>(informational market signal)</i>"
         )
 
-    # L5 history block — always shown; falls back to N/A when no history available.
-    _np_l5     = getattr(decision, "l5_hit_rate", None) if decision is not None else None
-    _np_l5g    = getattr(decision, "l5_games",    None) if decision is not None else None
-    _np_l5_str = (
-        f"📊 <b>L5:</b>  {_np_l5:.0%} ({_np_l5g}g)"
-        if (_np_l5 is not None and _np_l5g)
-        else "📊 <b>L5:</b>  N/A — no history available"
-    )
-
     # Reason bullets
-    reasons = ["• New prop detected"]
+    reasons = ["New prop detected"]
     if line_value <= low_line_threshold:
-        reasons.append(f"• Low starting line ({line_value} ≤ {low_line_threshold})")
+        reasons.append(f"Low starting line ({line_value} ≤ {low_line_threshold})")
     if score is not None and getattr(score, "stars", 0) >= 3:
-        reasons.append("• Score qualifies for current market review")
+        reasons.append("Score qualifies for current market review")
     if validation is not None and getattr(validation, "has_supporting_data", False):
-        reasons.append(f"• Supporting history available ({getattr(validation, 'n_history', 0)} snapshots)")
+        reasons.append(f"Supporting history available ({getattr(validation, 'n_history', 0)} snapshots)")
 
-    # Available lines block (PrizePicks + Underdog only)
     avail_block = _format_available_lines_block(
-        ud_line = line_value,
-        pp_line = pp_line,
-        dk_line = dk_line,
-        fd_line = fd_line,
+        ud_line=line_value,
+        pp_line=pp_line,
+        dk_line=dk_line,
+        fd_line=fd_line,
+    )
+    quality_line = _format_quality_line(decision, score)
+    history_block = _format_history_block(decision)
+    market_line = _format_market_quality_line(market_quality)
+    pressure_block = _format_market_pressure_block(market_pressure)
+    context_line = (
+        f"  <b>First Seen:</b>    {datetime.utcnow().strftime('%H:%M UTC')}"
+        + (f"\n{opponent_str}" if opponent_str else "")
+        + (f"\n{game_str}" if game_str else "")
+        + (f"\n{quality_line}" if quality_line else "")
+        + (f"\n{history_block}" if history_block else "")
+        + (f"\n{_np_strong_under}" if _np_strong_under else "")
+        + (f"\n{market_line}" if market_line else "")
+        + (f"\n{pressure_block}" if pressure_block else "")
     )
 
     _thick = "━" * 18
@@ -1057,38 +1051,18 @@ def format_underdog_new_prop_alert(
         ),
         _thick,
         "",
-        f"{sport_icon} <b>{sport} — {stat_type}</b>",
-        f"👤 <b>{player_name}</b>",
+            f"{sport_icon} <b>{escape(str(sport))} — {escape(str(stat_type))}</b>",
+            f"👤 <b>{escape(str(player_name))}</b>",
         "",
         _div(),
         avail_block.lstrip("\n"),
         "",
         _div(),
-        f"  {source_emoji} <b>{source} Line:</b>  <code>{line_value:.1f}</code>  {_line_label(line_value)}",
-        f"  <b>First Seen:</b>    {datetime.utcnow().strftime('%H:%M UTC')}"
-        + opponent_str
-        + game_str
-        + grade_str
-        + f"\n{_np_l5_str}"
-        + (_np_strong_under and f"\n{_np_strong_under}" or "")
-        + validation_str
-        + _format_decision_block(decision, line=line_value)
-        + _format_market_quality_block(market_quality)
-        + _format_market_pressure_block(market_pressure)
-        + _format_intelligence_block(intelligence_trace)
-        + _format_analyst_inline_block(
-            player_name        = player_name,
-            stat_type          = stat_type,
-            sport              = sport or "UNKNOWN",
-            line               = line_value,
-            score              = score,
-            decision           = decision,
-            intelligence_trace = intelligence_trace,
-        ),
+        f"  {source_emoji} <b>LINE · {escape(source)}:</b>  <code>{line_value:.1f}</code>  {_line_label(line_value)}",
+        context_line,
         "",
-        "<b>Reason:</b>",
-        "\n".join(reasons),
-        *([f"📡 <b>Market Check:</b>  {market_confirmation['notes']}"]
+        "<b>Reason:</b>\n" + " · ".join(escape(reason) for reason in reasons),
+        *([f"📡 <b>Market Check:</b>  {escape(str(market_confirmation['notes']))}"]
           if market_confirmation and market_confirmation.get("notes") else []),
         "",
         f"{EMOJI['clock']} <b>Line as of:</b> "

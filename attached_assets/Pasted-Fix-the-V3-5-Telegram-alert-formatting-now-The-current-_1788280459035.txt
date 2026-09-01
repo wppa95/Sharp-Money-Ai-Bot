@@ -1,0 +1,100 @@
+Fix the V3.5 Telegram alert formatting now.
+
+The current alerts are too messy and expose internal implementation/scoring terminology. Use the existing alert/pick logic exactly as-is.
+
+DO NOT change:
+
+* scoring calculations
+* qualification logic
+* thresholds
+* pick selection
+* EV
+* Sharp Money
+* Funnel logic
+* deduplication
+* scheduler
+* PropLine
+* Underdog fetching
+* database logic
+
+This is a PRESENTATION/FORMAT cleanup only.
+
+Fix these issues in the user-facing Telegram alert:
+
+1. Never expose Python enum names such as:
+    MarketQualityLabel.MEDIUM
+    Display the human-readable label only, e.g. MEDIUM.
+2. Do not call a 30/100 pick “Bet Quality” without making the presentation misleading. Keep the existing score unchanged, but present the score cleanly.
+3. Remove redundant information. The current alert repeats the L5 result in both Hit History and Reason.
+4. Fix misleading labels such as:
+    Season: 67% (30g)
+    If the underlying value is a 30-game sample, label it as a 30-game sample. Do not call it Season unless it actually represents a season-level value.
+5. Make the alert compact and easy to scan in Telegram.
+6. Keep the useful betting information:
+    * Sport / market
+    * Player
+    * Current line
+    * Previous line
+    * Movement
+    * OVER/UNDER pick
+    * Existing quality/confidence information
+    * Relevant hit-history evidence
+    * Clear reason for the pick
+    * Availability
+    * Timestamp
+7. Replace implementation/debug-style wording with clean bettor-facing language.
+8. Do not invent new statistics or change existing values.
+9. Preserve the existing emoji/color conventions where they communicate useful information.
+
+Use this general structure:
+
+━━━━━━━━━━━━━━━━━━
+🐶 UNDERDOG PICK
+━━━━━━━━━━━━━━━━━━
+
+⚾ MLB — Batter Strikeouts
+👤 Max Muncy
+
+📊 LINE
+🐶 0.5 🟢 Goblin Discount
+Previous: 1.5
+Move: -1.0
+
+🎯 PICK
+🟢 OVER 0.5
+Quality: 30/100 ★☆☆☆☆
+
+📈 HISTORY
+L5: 60% (3/5)
+L10: 60% (6/10)
+L20: 65% (13/20)
+L30: 67% (20/30)
+
+📊 MARKET
+Medium · 65/100
+
+💡 WHY
+[Concise existing reason generated from the current data. Do not invent reasoning.]
+
+🟢 AVAILABLE NOW
+🕐 2026-09-01 16:31 UTC
+
+━━━━━━━━━━━━━━━━━━
+
+The exact numbers above are only an example of formatting. Use the actual existing values at runtime.
+
+IMPORTANT:
+
+* Do not change the underlying scoring or qualification system.
+* Do not change what qualifies as a pick.
+* Do not change thresholds.
+* Do not change alert frequency.
+* Do not make live PropLine requests.
+* Do not restart or deploy unless required to validate the formatting change.
+
+After the change, show me:
+
+1. Exact files changed
+2. A before/after example using existing test/mock data
+3. Tests run and results
+4. Confirmation that scoring, qualification, and pick-selection code was not modified.

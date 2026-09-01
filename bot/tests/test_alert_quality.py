@@ -342,8 +342,8 @@ def test_market_quality_block_none_returns_empty():
     assert _format_market_quality_block(None) == ""
 
 
-def test_decision_block_bet_quality_label_present():
-    """The Bet Quality label must appear in the recommendation block."""
+def test_decision_block_uses_bettor_facing_quality_label():
+    """The recommendation block uses the public Quality label, not BQ copy."""
     from alerts_multiplatform import _format_decision_block
     import types
 
@@ -363,8 +363,49 @@ def test_decision_block_bet_quality_label_present():
         h2h_games=None, h2h_over=None, h2h_under=None, h2h_hit_rate=None, h2h_avg=None,
     )
     result = _format_decision_block(decision)
-    assert "Bet Quality" in result
-    assert "how strong is the actual recommendation" in result.lower()
+    assert "Quality:" in result
+    assert "82/100" in result
+    assert "Bet Quality" not in result
+    assert "BQ" not in result
+    assert "A-tier" not in result
+    assert result.count("L5") == 1
+
+
+def test_market_quality_line_normalizes_enum_label():
+    from alerts_multiplatform import _format_market_quality_line
+
+    result = _format_market_quality_line(_make_market_quality("MEDIUM", 61))
+    assert "MEDIUM" in result
+    assert "MarketQualityLabel." not in result
+
+
+def test_history_uses_sample_label_for_short_season_window():
+    from alerts_multiplatform import _format_history_block
+    import types
+
+    decision = types.SimpleNamespace(
+        l30_games=30, season_games=30, season_over=18, season_hit_rate=0.60,
+        l5_games=None, l5_over=None, l5_hit_rate=None,
+        l10_games=None, l10_over=None, l10_hit_rate=None,
+        l20_games=None, l20_over=None, l20_hit_rate=None,
+        h2h_games=None, h2h_over=None, h2h_hit_rate=None,
+    )
+    result = _format_history_block(decision)
+    assert "30-game sample" in result
+    assert "<b>Season:</b>" not in result
+
+
+def test_clean_reason_removes_repeated_history_and_internal_tier():
+    from alerts_multiplatform import _clean_reason
+
+    result = _clean_reason(
+        "L5: 80% (4/5) • Season: 70% (35/50) • A-tier • "
+        "Line is 10% below historical average"
+    )
+    assert "Line is 10% below historical average" in result
+    assert "L5:" not in result
+    assert "Season:" not in result
+    assert "A-tier" not in result
 
 
 # ─────────────────────────────────────────────────────────────────────────────

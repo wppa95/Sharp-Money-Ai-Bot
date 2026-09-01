@@ -343,10 +343,10 @@ class TestStrongUnderSignal:
         )
 
     def test_under_bq_30_triggers_sensitivity_signal(self):
-        """UNDER + BQ 30 triggers the existing deeper sensitivity implication."""
+        """UNDER + quality 30 keeps the compact informational signal."""
         msg = self._change_alert(rec="UNDER", score_total=60, conf=30)
-        assert "Strong UNDER Signal" in msg
-        assert "BQ ≥ 30" in msg
+        assert "UNDER SIGNAL" in msg
+        assert "BQ" not in msg
 
     def test_under_bq_29_does_not_trigger_sensitivity_signal(self):
         """BQ below 30 does not trigger the UNDER sensitivity implication."""
@@ -367,15 +367,15 @@ class TestStrongUnderSignal:
 
     # ── New prop alert also shows signal ─────────────────────────────────────
     def test_new_prop_under_score_28_triggers_signal(self):
-        """New-prop alert with Tier 1 UNDER + BQ ≥ 70 must show STRONG UNDER label."""
+        """New-prop alert with a directional UNDER keeps the informational signal."""
         msg = self._new_prop_alert(rec="UNDER", score_total=28, conf=80)
-        assert "Strong UNDER Signal" in msg, (
+        assert "UNDER SIGNAL" in msg, (
             "format_underdog_new_prop_alert must show the informational UNDER signal"
         )
 
     def test_new_prop_under_bq_30_triggers_sensitivity_signal(self):
         msg = self._new_prop_alert(rec="UNDER", score_total=60, conf=30)
-        assert "Strong UNDER Signal" in msg
+        assert "UNDER SIGNAL" in msg
         assert "informational market signal" in msg
 
     def test_new_prop_over_score_28_no_signal(self):
@@ -435,14 +435,12 @@ class TestGradeBlockBqStars:
         )
 
     def test_grade_shows_bq_value(self):
-        """BQ value (95/100) must appear in the alert when confidence=95.
-
-        The compact LC format shows BQ in the pick_line as 'Bet Quality 95/100',
-        not in a separate grade block.  Both 'Bet Quality' and '95/100' must be present.
-        """
+        """Quality value (95/100) must appear with the existing star mapping."""
         msg = self._change_alert_grade(score_total=52, conf=95)
         assert "95/100" in msg, "95/100 must appear in the alert"
-        assert "Bet Quality" in msg or "BQ" in msg, "Alert must show BQ label"
+        assert "Quality:" in msg, "Alert must show the public quality label"
+        assert "Bet Quality" not in msg
+        assert "BQ" not in msg
 
     def test_grade_stars_match_bq_not_raw(self):
         """Stars in grade must be determined by BQ=80, not raw score=52."""

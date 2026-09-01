@@ -564,7 +564,7 @@ def test_format_new_prop_no_low_line_reason_when_above_threshold():
 
 
 def test_format_new_prop_includes_grade_when_score_present():
-    """When a UDPropScore is passed, the grade block appears in the message."""
+    """When a UDPropScore is passed, the public quality line appears."""
     from alerts_multiplatform import format_underdog_new_prop_alert
 
     score = MagicMock()
@@ -584,9 +584,10 @@ def test_format_new_prop_includes_grade_when_score_present():
         score=score,
         low_line_threshold=1.0,
     )
-    assert "Grade" in msg
-    assert "A" in msg
-    assert "80" in msg
+    assert "Quality:" in msg
+    assert "80/100" in msg
+    assert "★★★★☆" in msg
+    assert "Bet Quality" not in msg
 
 
 # ── deliver_underdog: new_prop bypasses timing filter ─────────────────────────

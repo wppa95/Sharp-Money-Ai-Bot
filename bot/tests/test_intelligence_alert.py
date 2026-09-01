@@ -192,7 +192,9 @@ def test_new_prop_alert_intelligence_trace_rendered():
         intelligence_trace=trace,
     )
     assert "Starter" not in msg
-    assert "Favorable" in msg
+    # Intelligence is retained as an engine input, but not duplicated in the
+    # compact user-facing alert.
+    assert "Favorable" not in msg
 
 
 def test_new_prop_alert_intelligence_trace_none_no_error():

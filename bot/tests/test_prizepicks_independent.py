@@ -291,7 +291,7 @@ class TestIndependentPrizePicks:
         )
 
         assert "PRIZEPICKS PICK" in message
-        assert "PrizePicks Line" in message
+        assert "LINE</b> · PrizePicks" in message
         assert "UNDERDOG PROP LIVE" not in message
 
     def test_provider_adapter_preserves_prizepicks_identity(self):
