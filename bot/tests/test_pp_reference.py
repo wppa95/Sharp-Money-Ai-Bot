@@ -474,7 +474,7 @@ class TestFormatPpReferenceAlert:
 # ── run_pp_reference_cycle ────────────────────────────────────────────────────
 
 class TestRunPpReferenceCycle:
-    """Test the batch cycle helper that wires into underdog_job."""
+    """Cross-provider matches remain context and never become Telegram alerts."""
 
     def _make_db(self, pp_rows=None):
         db = MagicMock()
@@ -510,12 +510,12 @@ class TestRunPpReferenceCycle:
         }
 
     @pytest.mark.asyncio
-    async def test_s_tier_prop_triggers_reference_alert(self):
+    async def test_s_tier_prop_does_not_trigger_reference_alert(self):
         db   = self._make_db()
         bot  = self._make_bot()
         seen: dict = {}
 
-        with patch("alerts.broadcast_alert", new_callable=AsyncMock, return_value={"sent": 1, "failed": 0}):
+        with patch("alerts.broadcast_alert", new_callable=AsyncMock) as mock_bc:
             count = await run_pp_reference_cycle(
                 db           = db,
                 bot          = bot,
@@ -525,15 +525,16 @@ class TestRunPpReferenceCycle:
                 now          = _NOW,
             )
 
-        assert count == 1
+        assert count == 0
+        mock_bc.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_a_tier_prop_triggers_reference_alert(self):
+    async def test_a_tier_prop_does_not_trigger_reference_alert(self):
         db   = self._make_db()
         bot  = self._make_bot()
         seen: dict = {}
 
-        with patch("alerts.broadcast_alert", new_callable=AsyncMock, return_value={"sent": 1, "failed": 0}):
+        with patch("alerts.broadcast_alert", new_callable=AsyncMock) as mock_bc:
             count = await run_pp_reference_cycle(
                 db           = db,
                 bot          = bot,
@@ -543,16 +544,17 @@ class TestRunPpReferenceCycle:
                 now          = _NOW,
             )
 
-        assert count == 1
+        assert count == 0
+        mock_bc.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_b_tier_prop_is_not_blocked_by_legacy_label(self):
-        """B-tier metadata cannot block an evidence-backed direction."""
+    async def test_b_tier_prop_remains_context_only(self):
+        """B-tier metadata does not create an independent Telegram message."""
         db   = self._make_db()
         bot  = self._make_bot()
         seen: dict = {}
 
-        with patch("alerts.broadcast_alert", new_callable=AsyncMock, return_value={"sent": 1, "failed": 0}) as mock_bc:
+        with patch("alerts.broadcast_alert", new_callable=AsyncMock) as mock_bc:
             count = await run_pp_reference_cycle(
                 db           = db,
                 bot          = bot,
@@ -562,16 +564,16 @@ class TestRunPpReferenceCycle:
                 now          = _NOW,
             )
 
-        assert count == 1
-        mock_bc.assert_called_once()
+        assert count == 0
+        mock_bc.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_pass_label_is_not_blocked_when_directional_and_evidenced(self):
+    async def test_pass_label_does_not_create_reference_alert(self):
         db   = self._make_db()
         bot  = self._make_bot()
         seen: dict = {}
 
-        with patch("alerts.broadcast_alert", new_callable=AsyncMock, return_value={"sent": 1, "failed": 0}) as mock_bc:
+        with patch("alerts.broadcast_alert", new_callable=AsyncMock) as mock_bc:
             count = await run_pp_reference_cycle(
                 db           = db,
                 bot          = bot,
@@ -581,7 +583,8 @@ class TestRunPpReferenceCycle:
                 now          = _NOW,
             )
 
-        assert count == 1
+        assert count == 0
+        mock_bc.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_stale_or_invalid_provider_line_cannot_broadcast(self):
@@ -638,7 +641,7 @@ class TestRunPpReferenceCycle:
 
     @pytest.mark.asyncio
     async def test_new_line_fires_after_old_line_deduped(self):
-        """Significant line move (≥ MIN_CHANGE) → fires even within window."""
+        """A moved companion line still does not create an independent alert."""
         import time as _time
         db   = self._make_db()
         bot  = self._make_bot()
@@ -646,7 +649,7 @@ class TestRunPpReferenceCycle:
         seen: dict = {("LeBron James", "NBA", "points"): (_time.time() - 10, 25.5)}
         prop = self._make_scored_prop(tier="A", line=26.0)
 
-        with patch("alerts.broadcast_alert", new_callable=AsyncMock, return_value={"sent": 1, "failed": 0}):
+        with patch("alerts.broadcast_alert", new_callable=AsyncMock) as mock_bc:
             count = await run_pp_reference_cycle(
                 db           = db,
                 bot          = bot,
@@ -656,17 +659,18 @@ class TestRunPpReferenceCycle:
                 now          = _NOW,
             )
 
-        assert count == 1
+        assert count == 0
+        mock_bc.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_dedup_key_added_after_send(self):
-        """Successful send populates alerted_set so next call is deduped."""
+        """No delivery claim is made for context-only matching."""
         db   = self._make_db()
         bot  = self._make_bot()
         seen: dict = {}
         prop = self._make_scored_prop(tier="S")
 
-        with patch("alerts.broadcast_alert", new_callable=AsyncMock, return_value={"sent": 1, "failed": 0}):
+        with patch("alerts.broadcast_alert", new_callable=AsyncMock):
             await run_pp_reference_cycle(
                 db           = db,
                 bot          = bot,
@@ -676,8 +680,7 @@ class TestRunPpReferenceCycle:
                 now          = _NOW,
             )
 
-        # Provider/source/event/direction identity is retained in the claim.
-        assert ("LeBron James", "NBA", "points", "PrizePicks", "", "", "OVER") in seen
+        assert seen == {}
 
     @pytest.mark.asyncio
     async def test_empty_scored_props_returns_zero(self):
@@ -697,6 +700,7 @@ class TestRunPpReferenceCycle:
 
     @pytest.mark.asyncio
     async def test_legacy_tier_labels_do_not_gate_delivery(self):
+        """Legacy tier labels remain irrelevant to context-only matching."""
         db   = self._make_db()
         bot  = self._make_bot()
         seen: dict = {}
@@ -706,11 +710,7 @@ class TestRunPpReferenceCycle:
             self._make_scored_prop(player="Steph Curry", tier="PASS"),
         ]
 
-        with patch(
-            "alerts.broadcast_alert",
-            new_callable=AsyncMock,
-            return_value={"sent": 1, "failed": 0},
-        ):
+        with patch("alerts.broadcast_alert", new_callable=AsyncMock) as mock_bc:
             count = await run_pp_reference_cycle(
                 db           = db,
                 bot          = bot,
@@ -719,7 +719,8 @@ class TestRunPpReferenceCycle:
                 alerted_set  = seen,
                 now          = _NOW,
             )
-        assert count == 2
+        assert count == 0
+        mock_bc.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_broadcast_failure_does_not_raise(self):
@@ -761,12 +762,12 @@ class TestRunPpReferenceCycle:
                 now          = _NOW,
             )
 
-        # Should still send as underdog_proxy
-        assert count == 1
+        # DB failure must not turn a proxy match into a Telegram alert.
+        assert count == 0
 
     @pytest.mark.asyncio
-    async def test_multiple_props_multiple_alerts(self):
-        """Multiple S/A tier props each trigger their own reference alert."""
+    async def test_multiple_props_remain_context_only(self):
+        """Multiple companion matches still produce no independent alerts."""
         db   = self._make_db()
         bot  = self._make_bot()
         seen: dict = {}
@@ -776,7 +777,7 @@ class TestRunPpReferenceCycle:
             self._make_scored_prop(player="Steph Curry",  tier="A", line=29.5, stat_type="points"),
         ]
 
-        with patch("alerts.broadcast_alert", new_callable=AsyncMock, return_value={"sent": 1, "failed": 0}):
+        with patch("alerts.broadcast_alert", new_callable=AsyncMock) as mock_bc:
             count = await run_pp_reference_cycle(
                 db           = db,
                 bot          = bot,
@@ -786,7 +787,8 @@ class TestRunPpReferenceCycle:
                 now          = _NOW,
             )
 
-        assert count == 2
+        assert count == 0
+        mock_bc.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_low_confidence_prop_not_sent(self):

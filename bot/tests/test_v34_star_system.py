@@ -380,9 +380,10 @@ class TestStrongUnderSignal:
 
     # ── Signal is display-only; BQ unchanged ────────────────────────────────
     def test_signal_does_not_change_bq_display(self):
-        """BQ value in alert must be unchanged regardless of strong UNDER signal."""
+        """Quality remains internal regardless of the directional result."""
         msg = self._change_alert(rec="UNDER", score_total=28, conf=80)
-        assert "80/100" in msg, "BQ 80 must still appear unchanged in the alert"
+        assert "80/100" not in msg
+        assert "Quality:" not in msg
 
     def test_signal_does_not_affect_over_logic(self):
         """Neither direction gets an informational signal label."""
