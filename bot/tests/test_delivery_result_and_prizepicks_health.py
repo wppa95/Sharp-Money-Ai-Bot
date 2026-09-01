@@ -141,7 +141,7 @@ async def test_health_includes_provider_isolated_prizepicks_pipeline(tmp_path: P
 
 
 @pytest.mark.asyncio
-async def test_status_includes_prizepicks_pipeline_without_merging_ud():
+async def test_status_uses_shared_monitoring_cycle_without_merging_ud():
     update, context = _update_and_context()
     db = MagicMock()
     db.count_today_actionable_alerts = AsyncMock(return_value=0)
@@ -174,7 +174,8 @@ async def test_status_includes_prizepicks_pipeline_without_merging_ud():
         await commands.cmd_status(update, context)
 
     text = update.message.reply_text.await_args.args[0]
-    assert "PrizePicks Pipeline" in text
-    assert "Observed:" in text and "5" in text
-    assert "Delivered alerts:" in text and "1" in text
+    assert "PrizePicks Pipeline" not in text
+    assert "Latest Underdog scan" not in text
+    assert "Latest monitoring cycle" not in text
     assert "Observed:            99" not in text
+    assert "History: Underdog: 15 · PrizePicks (PropLine): 5" in text

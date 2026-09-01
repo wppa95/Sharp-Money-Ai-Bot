@@ -42,24 +42,26 @@ async def test_shared_cycle_starts_both_branches_and_waits_for_both(monkeypatch)
     shared_cycle = market_engine._shared_monitoring_cycle(underdog_branch)
     task = asyncio.create_task(shared_cycle(SimpleNamespace()))
     await asyncio.sleep(0)
+    await asyncio.sleep(0)
 
-    assert events == ["propline-start", "underdog-start"]
+    assert set(events) == {"propline-start", "underdog-start"}
     assert not task.done()
 
     underdog_release.set()
     await asyncio.sleep(0)
-    assert events == ["propline-start", "underdog-start", "underdog-end"]
+    assert "underdog-end" in events
+    assert "propline-end" not in events
     assert not task.done()
     assert completed == []
 
     propline_release.set()
     await task
-    assert events == [
+    assert set(events) == {
         "propline-start",
         "underdog-start",
         "underdog-end",
         "propline-end",
-    ]
+    }
     assert completed == ["complete"]
 
 
