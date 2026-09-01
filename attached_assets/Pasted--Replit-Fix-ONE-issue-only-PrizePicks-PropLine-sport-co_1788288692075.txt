@@ -1,0 +1,41 @@
+@Replit
+
+Fix ONE issue only: PrizePicks/PropLine sport coverage.
+
+The current configuration says:
+"Rotation: one PrizePicks sport every 120s"
+
+I do NOT want a one-sport-per-cycle rotation.
+
+Requirement:
+- Each PropLine monitoring cycle must maximize data coverage across ALL provider-available sports.
+- Do not intentionally select only one sport per cycle.
+- Do not hardcode a limited sport list.
+- Discover available sports dynamically from PropLine.
+- Within the existing request budget and API pacing/rate limits, fetch as many available sports as possible during each cycle.
+- Prioritize broad coverage so we have the best possible chance of detecting every available line across every sport.
+- If the API budget/pacing prevents all sports from being fetched in one cycle, use an intelligent rotating queue that continues from where the previous cycle stopped, rather than resetting and selecting only one sport.
+- Ensure every available sport gets coverage over time and no sport is permanently starved.
+- Preserve the existing configured request budget.
+- Preserve API pacing/rate-limit protection.
+- Do NOT increase the request budget.
+- Do NOT change the overall monitoring cadence.
+- Do NOT change Underdog monitoring.
+- Do NOT change scoring, thresholds, direction logic, alert qualification, or Telegram alert behavior.
+- Do NOT modify unrelated commands or reporting.
+
+Also update any misleading config/status text that currently says or implies "one PrizePicks sport every 120s" so it accurately describes the new broad-coverage behavior.
+
+Add focused tests proving:
+1. More than one PropLine sport can be fetched in a cycle when budget permits.
+2. Available sports are dynamically discovered.
+3. The configured request budget remains enforced.
+4. API pacing/rate-limit protection remains enforced.
+5. When all sports cannot fit in one cycle, subsequent cycles continue coverage without starving sports.
+6. No existing Underdog behavior changes.
+
+Run the relevant tests, then restart the bot and verify it starts normally.
+
+Do not make any other changes.
+
+restart to apply the changes and checkpoint.

@@ -4128,7 +4128,7 @@ async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         "<b>Player Prop Market Providers</b>",
         *_primary_player_prop_provider_lines(_config_mon),
         *_primary_provider_runtime_lines(_config_mon),
-        f"  Rotation: one PrizePicks sport every <code>{config.UNDERDOG_POLL_INTERVAL}s</code>",
+        f"  Coverage: all discovered PrizePicks sports per cycle, within pacing/budget",
         f"  CS2 current PrizePicks lines: <b>PropLine</b>",
         "",
         "<b>Historical Enrichment Sources</b>",

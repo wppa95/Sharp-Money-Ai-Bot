@@ -1364,72 +1364,100 @@ async def _run_prizepicks_independent_cycle(
     if not getattr(_propline_provider, "is_available", lambda: False)():
         return
 
-    # Fetch one active sport per shared Underdog cycle.  The official PropLine
-    # catalog is preferred so newly supported sports are monitored without a
-    # code/config change.  One sport per cycle preserves the provider pacing
-    # and keeps the request budget bounded.
+    # Discover the current PropLine catalog, then fetch as many sports as the
+    # existing provider pacing and request budget permit.  The cursor only
+    # advances by attempted sports, so a budget-limited cycle resumes where it
+    # stopped instead of repeatedly favoring the first catalog entries.
     if _fetched_props is None:
         configured_sports = await _get_prizepicks_scan_sports(_propline_provider)
         if not configured_sports:
             logger.info("prizepicks_cycle: no active PrizePicks sports; skipping")
             return
         global _prizepicks_sport_cursor
-        sport = configured_sports[_prizepicks_sport_cursor % len(configured_sports)]
-        if is_football_related_sport(sport):
-            logger.debug(
-                "prizepicks_cycle: football sport filtered before fetch: %s",
-                sport,
-            )
-            return
-        _prizepicks_sport_cursor = (_prizepicks_sport_cursor + 1) % len(configured_sports)
-        props = None
-        logger.info("prizepicks_cycle_started: provider=PrizePicks sport=%s", sport)
+        start_cursor = _prizepicks_sport_cursor % len(configured_sports)
+        fetch_result_for_sport = getattr(
+            _propline_provider, "fetch_props_for_sport_result", None
+        )
+        fetch_for_sport = getattr(_propline_provider, "fetch_props_for_sport", None)
+        props = []
+        fetched_sports: list[str] = []
+        failed_sports: list[str] = []
+        fetch_error = ""
+        fetch_failure_kind = ""
+        fetch_succeeded = False
 
-        try:
-            fetch_result_for_sport = getattr(
-                _propline_provider, "fetch_props_for_sport_result", None
-            )
-            fetch_for_sport = getattr(_propline_provider, "fetch_props_for_sport", None)
-            if callable(fetch_result_for_sport):
-                fetch_result = await fetch_result_for_sport(sport, bookmaker="prizepicks")
-                props = fetch_result.props
-                fetch_succeeded = bool(fetch_result.succeeded)
-                fetch_error = str(getattr(fetch_result, "error", "") or "")
-                fetch_failure_kind = str(
-                    getattr(fetch_result, "failure_kind", "") or ""
-                )
-            elif callable(fetch_for_sport):
-                props = await fetch_for_sport(sport)
-                # Legacy integrations return only props and cannot distinguish an
-                # empty successful response from an internal provider failure.
-                fetch_succeeded = True
-                fetch_error = ""
-                fetch_failure_kind = ""
-            else:
-                # Compatibility for lightweight providers/integrations that only
-                # implement the provider-wide fetch method.
-                props = await _propline_provider.fetch_props()
-                fetch_succeeded = True
-                fetch_error = ""
-                fetch_failure_kind = ""
-        except Exception as exc:  # noqa: BLE001
-            if provider_health is not None:
-                failure_type = (
-                    FailureType.TIMEOUT
+        # Providers exposing result metadata are the production path. Legacy
+        # test/custom adapters retain one-sport compatibility.
+        sports_to_fetch = (
+            len(configured_sports) if callable(fetch_result_for_sport) else 1
+        )
+        for offset in range(sports_to_fetch):
+            sport = configured_sports[(start_cursor + offset) % len(configured_sports)]
+            if is_football_related_sport(sport):
+                continue
+            try:
+                if callable(fetch_result_for_sport):
+                    fetch_result = await fetch_result_for_sport(
+                        sport, bookmaker="prizepicks"
+                    )
+                    sport_props = list(getattr(fetch_result, "props", []) or [])
+                    current_succeeded = bool(getattr(fetch_result, "succeeded", False))
+                    current_error = str(getattr(fetch_result, "error", "") or "")
+                    current_failure_kind = str(
+                        getattr(fetch_result, "failure_kind", "") or ""
+                    )
+                elif callable(fetch_for_sport):
+                    sport_props = list(await fetch_for_sport(sport) or [])
+                    current_succeeded = True
+                    current_error = ""
+                    current_failure_kind = ""
+                else:
+                    sport_props = list(await _propline_provider.fetch_props() or [])
+                    current_succeeded = True
+                    current_error = ""
+                    current_failure_kind = ""
+            except Exception as exc:  # noqa: BLE001
+                current_succeeded = False
+                sport_props = []
+                current_error = str(exc)
+                current_failure_kind = (
+                    "timeout"
                     if isinstance(exc, (asyncio.TimeoutError, TimeoutError))
-                    else FailureType.HTTP_ERROR
+                    else "http"
                 )
-                provider_health.record_failure("PrizePicks", str(exc), failure_type)
-            _health = get_health_tracker()
-            if _health:
-                _health.record_provider_error("PrizePicks", str(exc))
-            logger.info(
-                "prizepicks_cycle: provider=PrizePicks sport=%s fetch_succeeded=false "
-                "observations=0 persisted=0 evaluated=0 actionable=0 delivered=0",
-                sport,
-            )
-            logger.warning("prizepicks_cycle: authorized feed failed: %s", type(exc).__name__)
-            return
+
+            attempted = offset + 1
+            if current_succeeded:
+                fetch_succeeded = True
+                fetched_sports.append(sport)
+                props.extend(sport_props)
+            else:
+                failed_sports.append(sport)
+                fetch_error = current_error or fetch_error
+                fetch_failure_kind = current_failure_kind or fetch_failure_kind
+                # A quota/budget/rate-limit response cannot be improved by
+                # spending more requests in this cycle. Leave later sports for
+                # the next cursor position.
+                failure_text = f"{current_failure_kind} {current_error}".lower()
+                if any(
+                    marker in failure_text
+                    for marker in ("quota", "budget", "rate", "429", "backoff")
+                ):
+                    _prizepicks_sport_cursor = (
+                        start_cursor + attempted
+                    ) % len(configured_sports)
+                    break
+
+            _prizepicks_sport_cursor = (
+                start_cursor + attempted
+            ) % len(configured_sports)
+
+        sport = ",".join(fetched_sports or failed_sports) or configured_sports[start_cursor]
+        logger.info(
+            "prizepicks_cycle_started: provider=PrizePicks sports=%s discovered=%d",
+            sport,
+            len(configured_sports),
+        )
         if fetch_succeeded and provider_health is not None:
             provider_health.record_success("PrizePicks")
         if fetch_succeeded:
@@ -1456,7 +1484,7 @@ async def _run_prizepicks_independent_cycle(
                     "PrizePicks", fetch_error or "PropLine fetch failed"
                 )
             logger.info(
-                "prizepicks_cycle: provider=PrizePicks sport=%s fetch_succeeded=false "
+                "prizepicks_cycle: provider=PrizePicks sports=%s fetch_succeeded=false "
                 "observations=0 persisted=0 evaluated=0 actionable=0 delivered=0",
                 sport,
             )
