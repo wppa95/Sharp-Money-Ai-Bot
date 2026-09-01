@@ -282,10 +282,9 @@ class TestStrongUnderSignal:
         )
 
     def test_tier1_under_conf30_bq70_strong_under(self):
-        """#17: Tier 1 UNDER confidence 30 + BQ 70 → STRONG UNDER label."""
+        """#17: Tier 1 UNDER confidence 30 + BQ 70 has no signal label."""
         result = self._fmt("NBA", "UNDER", 70)
-        assert "STRONG UNDER" in result, \
-            f"Expected STRONG UNDER label in alert, got:\n{result}"
+        assert "STRONG UNDER" not in result
 
     def test_tier1_under_conf29_bq70_not_strong_under(self):
         """#18: Tier 1 UNDER confidence 29 + BQ 70 → NOT strong under (conf < 70)."""

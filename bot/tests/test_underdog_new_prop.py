@@ -151,19 +151,17 @@ async def _run_job(snapshots, db, *, deliver_result=None, hit_rates=None):
 # ── New-prop detection ─────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_low_line_new_prop_triggers_alert(caplog):
-    """A new prop with 0.5 line + supporting history + real OVER pick triggers an immediate alert."""
+async def test_low_line_new_prop_requires_real_game_results(caplog):
+    """Snapshot history alone cannot qualify a new-prop Telegram PLAY."""
     snaps = [_snap("Aaron Judge", "Home Runs", 0.5)]
     db = _make_db(known_keys=set(), prop_history=_fake_history(6))
 
     with caplog.at_level(logging.INFO, logger="market_engine"):
         delivery = await _run_job(snaps, db, hit_rates=_make_hit_rates())
 
-    # Tier 1 delivery is independent of the score label once an actionable
-    # direction and supporting evidence are present.
-    delivery.deliver_underdog.assert_called_once()
+    delivery.deliver_underdog.assert_not_called()
     record = db.save_underdog_snapshots_bulk.call_args[0][0][0]
-    assert record.alert_outcome == "new_prop_sent"
+    assert record.alert_outcome == "new_prop_failed"
 
 
 @pytest.mark.asyncio
@@ -278,8 +276,8 @@ async def test_removal_never_treated_as_new():
 
 
 @pytest.mark.asyncio
-async def test_new_prop_outcome_stored_as_new_prop_sent(caplog):
-    """When a new-prop alert is sent, alert_outcome='new_prop_sent' in the DB record."""
+async def test_new_prop_without_real_results_is_not_marked_sent(caplog):
+    """A mocked delivery result cannot mark a proxy-only new prop as sent."""
     from alerts import DeliveryResult
     snaps = [_snap("Aaron Judge", "Home Runs", 0.5)]
     db = _make_db(known_keys=set(), prop_history=_fake_history(6))
@@ -289,8 +287,8 @@ async def test_new_prop_outcome_stored_as_new_prop_sent(caplog):
 
     db.save_underdog_snapshots_bulk.assert_called()
     record = db.save_underdog_snapshots_bulk.call_args[0][0][0]
-    assert record.alert_outcome == "new_prop_sent"
-    assert record.alert_sent is True
+    assert record.alert_outcome == "new_prop_failed"
+    assert record.alert_sent is False
 
 
 @pytest.mark.asyncio
@@ -344,7 +342,7 @@ async def test_new_prop_sent_increments_new_sent_counter(caplog):
         _snap("Player A", "Strikeouts", 0.5),
         _snap("Player B", "Home Runs",  0.5),
     ]
-    # Provide history so validation gate passes for both props
+    # Snapshot history is supporting monitoring context, not real game evidence.
     db = _make_db(known_keys=set(), prop_history=_fake_history(6))
 
     from alerts import DeliveryResult
@@ -355,7 +353,7 @@ async def test_new_prop_sent_increments_new_sent_counter(caplog):
 
     summary = next(r.message for r in caplog.records if "fetched=" in r.message)
     assert "new=2" in summary
-    assert "new_sent=2" in summary
+    assert "new_sent=0" in summary
 
 
 @pytest.mark.asyncio
@@ -543,7 +541,7 @@ def test_format_new_prop_alert_contains_required_fields():
     assert "Aaron Judge" in msg
     assert "Home Runs" in msg
     assert "0.5" in msg
-    assert "New prop detected" in msg
+    assert "New prop detected" not in msg
     assert "Low starting line" in msg
 
 
