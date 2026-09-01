@@ -22,6 +22,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from providers.prop_provider import PlayerProp, PropProviderBase
+from providers.propline import PropLineClient
 from engine.sport_policy import is_football_related_sport
 
 

@@ -98,3 +98,4 @@
 - [FPR cursor fairness](fpr-cursor-fairness.md) — stable identity order is the rotation; new/moving props get bounded prompt capacity without consuming cursor coverage.
 - [Async SQLite test fixtures](async-sqlite-test-fixtures.md) — module-scoped in-memory DB fixtures can lose tables across pytest event loops; use function-scoped fixtures for isolation.
 - [PropLine pagination safety](propline-pagination.md) — shared request budgeting, loop-safe pagination, complete-snapshot retention, and immutable-field event rediscovery protect the authorized feed.
+- [Workflow manager stale-path failure](workflow-manager-stale-path.md) — managed workflow operations can fail before launch when the workspace index references a deleted secondary-skill path.
