@@ -161,6 +161,35 @@ class TestIndependentPrizePicks:
 
         assert calls == ["NBA", "MLB"]
 
+    async def test_result_fetch_adapter_also_stays_one_sport_per_cycle(
+        self, monkeypatch
+    ):
+        calls = []
+
+        class FakeProvider:
+            def is_available(self):
+                return True
+
+            async def fetch_props_for_sport_result(self, sport, bookmaker=None):
+                calls.append((sport, bookmaker))
+                return PropLineFetchResult([], datetime.utcnow(), succeeded=True)
+
+        class FakeDB:
+            async def get_prop_line_history(self, *args, **kwargs):
+                return []
+
+        monkeypatch.setattr(market_engine, "_propline_provider", FakeProvider())
+        monkeypatch.setattr(market_engine, "_prizepicks_sport_cursor", 0)
+        monkeypatch.setattr(
+            market_engine.config, "PRIZEPICKS_LEAGUES_RAW", "NBA,MLB,WNBA"
+        )
+
+        await market_engine._run_prizepicks_independent_cycle(
+            SimpleNamespace(bot_data={"db": FakeDB()}, bot=object())
+        )
+
+        assert calls == [("NBA", "prizepicks")]
+
     async def test_failed_propline_fetch_is_not_recorded_as_provider_success(
         self, monkeypatch, caplog
     ):

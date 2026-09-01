@@ -1410,11 +1410,12 @@ async def _run_prizepicks_independent_cycle(
         fetch_failure_kind = ""
         fetch_succeeded = False
 
-        # Providers exposing result metadata are the production path. Legacy
-        # test/custom adapters retain one-sport compatibility.
-        sports_to_fetch = (
-            len(configured_sports) if callable(fetch_result_for_sport) else 1
-        )
+        # A shared scheduler trigger owns exactly one PropLine sport.  The
+        # cursor advances after this attempt so the next shared cycle resumes
+        # round-robin coverage without turning the companion into an
+        # all-sports polling loop.  Result metadata is still preferred for the
+        # production adapter; legacy adapters retain the same one-sport scope.
+        sports_to_fetch = 1
         for offset in range(sports_to_fetch):
             sport = configured_sports[(start_cursor + offset) % len(configured_sports)]
             if is_football_related_sport(sport):
