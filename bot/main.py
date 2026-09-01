@@ -321,9 +321,10 @@ async def post_init(application: Application) -> None:
     logger.info("Odds API shared cache initialised (TTL=%ds)", config.ODDS_API_CACHE_TTL)
     init_quota_pacer(
         quota_limit=config.ODDS_API_QUOTA_LIMIT,
-        deadline=config.ODDS_API_DEADLINE_UTC,
+        daily_limit=config.ODDS_API_DAILY_LIMIT,
         min_interval_seconds=config.ODDS_API_MIN_REQUEST_INTERVAL,
-        max_interval_seconds=config.ODDS_API_MAX_REQUEST_INTERVAL,
+        timezone_name=config.ODDS_API_PACING_TIMEZONE,
+        state_path=config.ODDS_API_PACING_STATE_FILE,
     )
 
     # ── API usage tracker + budget enforcement ────────────────────────────────
@@ -371,8 +372,9 @@ async def post_init(application: Application) -> None:
     # Register background jobs
     jq = application.job_queue
     if jq:
-        # The OddsAPI poller has its own normalized sport scope and adaptive
-        # quota pacing.  It never reads ACTIVE_SPORTS for provider selection.
+        # The OddsAPI poller has its own normalized sport scope and strict
+        # restart-safe pacing. It never reads ACTIVE_SPORTS for provider
+        # selection.
         jq.run_repeating(
             _poll_odds_job,
             interval=config.ODDS_POLL_INTERVAL,
@@ -864,7 +866,10 @@ async def _poll_odds_job(context) -> None:
                 )
                 continue
         if pacer is not None and not await pacer.wait_for_slot():
-            logger.warning("_poll_odds_job: quota pacer blocked the remaining cycle")
+            logger.info(
+                "_poll_odds_job: Odds API request skipped — %s",
+                pacer.block_reason(),
+            )
             break
         lines = await _engine.fetch_live_odds(sport, markets="h2h,totals")
         allowed_book_names = {book.replace(" ", "") for book in allowed_books}
@@ -885,7 +890,7 @@ async def _poll_odds_job(context) -> None:
             all_lines.extend(lines)
 
     if pacer is not None:
-        logger.info("OddsAPI quota pacing: %s", pacer.telemetry().summary)
+        logger.info("%s", pacer.telemetry().summary)
 
     if not all_lines:
         logger.debug("_poll_odds_job: no lines returned from API")

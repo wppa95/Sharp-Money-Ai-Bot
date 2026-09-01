@@ -52,13 +52,22 @@ class Config:
         "MLB,NBA,NHL,NCAAF,NCAAB,UFC,WNBA,EPL,LaLiga,SerieA,"
         "Bundesliga,Ligue1,MLS,UCL",
     )
-    ODDS_API_QUOTA_LIMIT: int = int(os.environ.get("ODDS_API_QUOTA_LIMIT", "30000"))
-    ODDS_API_DEADLINE_UTC: str = os.environ.get(
-        "ODDS_API_DEADLINE_UTC", "2026-08-31T00:00:00Z"
-    )
+    # The current OddsAPI plan allows 500 requests/month.  The strict daily
+    # pacing values below are the hard request-admission policy.
+    ODDS_API_QUOTA_LIMIT: int = int(os.environ.get("ODDS_API_QUOTA_LIMIT", "500"))
+    ODDS_API_DAILY_LIMIT: int = int(os.environ.get("ODDS_API_DAILY_LIMIT", "16"))
     ODDS_API_MIN_REQUEST_INTERVAL: float = float(
-        os.environ.get("ODDS_API_MIN_REQUEST_INTERVAL", "1")
+        os.environ.get("ODDS_API_MIN_REQUEST_INTERVAL", str(45 * 60))
     )
+    ODDS_API_PACING_TIMEZONE: str = os.environ.get(
+        "ODDS_API_PACING_TIMEZONE", "America/Chicago"
+    )
+    ODDS_API_PACING_STATE_FILE: str = os.environ.get(
+        "ODDS_API_PACING_STATE_FILE",
+        os.path.join(os.path.dirname(__file__), "data", "odds_api_pacing.json"),
+    )
+    # Retained for compatibility with older configuration readers.  Strict
+    # pacing does not use an adaptive maximum interval or deadline.
     ODDS_API_MAX_REQUEST_INTERVAL: int = int(
         os.environ.get("ODDS_API_MAX_REQUEST_INTERVAL", "900")
     )

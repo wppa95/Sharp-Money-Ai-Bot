@@ -24,7 +24,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 os.environ.setdefault("TELEGRAM_TOKEN", "test:token")
 
 import pytest
-from datetime import datetime
+from datetime import datetime, timezone
+from unittest.mock import patch
 
 from providers.game_results import (
     GameResult,
@@ -32,6 +33,7 @@ from providers.game_results import (
     OddsApiResultsProvider,
     grade_pp_pick,
 )
+from providers.quota_pacing import OddsApiQuotaPacer
 
 
 # ---------------------------------------------------------------------------
@@ -102,6 +104,27 @@ class TestParseEmptyList:
         provider = OddsApiResultsProvider(api_key="test")
         results = provider._parse([], "basketball_nba")
         assert results == []
+
+
+class TestOddsApiResultsPacing:
+    @pytest.mark.asyncio
+    async def test_scores_request_respects_shared_cooldown(self, tmp_path):
+        now = datetime(2026, 9, 1, 15, tzinfo=timezone.utc)
+        pacer = OddsApiQuotaPacer(
+            state_path=str(tmp_path / "pacing.json"),
+            now_fn=lambda: now,
+        )
+        assert pacer.reserve_request_slot() is True
+
+        provider = OddsApiResultsProvider(api_key="test")
+        with (
+            patch("providers.game_results.get_quota_pacer", return_value=pacer),
+            patch(
+                "providers.game_results.aiohttp.ClientSession",
+                side_effect=AssertionError("cooldown must prevent HTTP"),
+            ),
+        ):
+            assert await provider.fetch_scores("basketball_nba") == []
 
 
 class TestParseCompletedGame:

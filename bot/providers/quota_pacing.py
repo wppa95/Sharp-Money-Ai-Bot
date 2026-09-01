@@ -1,24 +1,32 @@
-"""Adaptive pacing and telemetry for legitimate OddsAPI polling.
+"""Strict, restart-safe pacing for legitimate OddsAPI polling.
 
-The provider's quota headers are authoritative when available.  This module
-only controls the cadence of the existing useful polling path; it never
-creates requests by itself and never changes Underdog scheduling.
+The OddsAPI plan is limited to 16 requests per local calendar day with at
+least 45 minutes between requests.  This module owns that policy centrally;
+it never creates requests by itself and never changes Underdog scheduling.
 """
 
 from __future__ import annotations
 
-import asyncio
+import json
 import logging
+import os
 import time
 from collections import deque
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from math import ceil
-from typing import Optional
+from datetime import date, datetime, time as datetime_time, timedelta, timezone
+from threading import RLock
+from typing import Callable, Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_DEADLINE = datetime(2026, 8, 31, tzinfo=timezone.utc)
+_DEFAULT_DEADLINE = datetime(2099, 1, 1, tzinfo=timezone.utc)
+_DEFAULT_DAILY_LIMIT = 16
+_DEFAULT_MIN_INTERVAL_SECONDS = 45 * 60
+_DEFAULT_TIMEZONE = "America/Chicago"
+_DEFAULT_STATE_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "data", "odds_api_pacing.json"
+)
 _WINDOW_SECONDS = 3600.0
 
 
@@ -51,42 +59,84 @@ class QuotaTelemetry:
     latency_ms: Optional[float]
     status: str
     backoff_seconds: float
+    daily_count: int = 0
+    daily_limit: int = _DEFAULT_DAILY_LIMIT
+    min_interval_seconds: float = _DEFAULT_MIN_INTERVAL_SECONDS
+    last_request_at: Optional[datetime] = None
+    next_eligible_at: Optional[datetime] = None
+    last_request_age_seconds: Optional[float] = None
+    seconds_until_eligible: float = 0.0
+    pacing_timezone: str = _DEFAULT_TIMEZONE
 
     @property
     def summary(self) -> str:
-        used = f"{self.quota_used:,}" if self.quota_used is not None else "?"
-        remaining = (
-            f"{self.quota_remaining:,}" if self.quota_remaining is not None else "?"
-        )
-        latency = f"{self.latency_ms:.0f}ms" if self.latency_ms is not None else "?"
+        if self.last_request_age_seconds is None:
+            last_request = "never"
+        elif self.last_request_age_seconds < 60:
+            last_request = f"{self.last_request_age_seconds:.0f}s ago"
+        else:
+            last_request = f"{self.last_request_age_seconds / 60:.1f}m ago"
+
+        if self.seconds_until_eligible <= 0 and self.status == "READY":
+            next_request = "now"
+        elif self.next_eligible_at is None:
+            next_request = "provider quota reset"
+        elif self.seconds_until_eligible < 3600:
+            next_request = f"in {self.seconds_until_eligible / 60:.1f}m"
+        else:
+            next_request = self.next_eligible_at.astimezone().strftime(
+                "%Y-%m-%d %H:%M %Z"
+            )
+
         return (
-            f"used={used} remaining={remaining} "
-            f"cost={self.quota_cost_per_request:.1f}/request "
-            f"current={self.current_calls_per_hour:.1f}/h "
-            f"required={self.required_calls_per_hour:.1f}/h "
-            f"({self.required_calls_per_minute:.2f}/min) "
-            f"deadline={self.deadline_utc} latency={latency} "
+            f"Odds API: Daily usage: {self.daily_count}/{self.daily_limit}; "
+            f"Last request: {last_request}; "
+            f"Next eligible request: {next_request}; "
+            f"Daily limit: {self.daily_limit}; "
+            f"Minimum interval: {self.min_interval_seconds / 60:.0f}m; "
             f"status={self.status}"
         )
 
 
 class OddsApiQuotaPacer:
-    """Pace poller requests toward the remaining quota without bursting."""
+    """Enforce the hard daily cap and minimum interval for OddsAPI requests."""
 
     def __init__(
         self,
         *,
-        quota_limit: int = 30_000,
+        quota_limit: int = 500,
         deadline: str | datetime | None = None,
-        min_interval_seconds: float = 1.0,
+        min_interval_seconds: float = _DEFAULT_MIN_INTERVAL_SECONDS,
         max_interval_seconds: float = 900.0,
+        daily_limit: int = _DEFAULT_DAILY_LIMIT,
+        timezone_name: str = _DEFAULT_TIMEZONE,
+        state_path: str | None = None,
+        now_fn: Callable[[], datetime] | None = None,
     ) -> None:
+        # quota_limit/deadline/max_interval_seconds remain accepted for
+        # compatibility with older callers, but the plan's daily policy is the
+        # authoritative pacing rule.
         self.quota_limit = max(0, int(quota_limit))
         self.deadline = parse_deadline(deadline)
-        self.min_interval_seconds = max(0.1, float(min_interval_seconds))
-        self.max_interval_seconds = max(
-            self.min_interval_seconds, float(max_interval_seconds)
-        )
+        self.daily_limit = max(0, int(daily_limit))
+        self.min_interval_seconds = max(0.0, float(min_interval_seconds))
+        self.max_interval_seconds = max(self.min_interval_seconds, float(max_interval_seconds))
+        try:
+            self._timezone = ZoneInfo(timezone_name)
+            self.timezone_name = timezone_name
+        except ZoneInfoNotFoundError:
+            logger.warning(
+                "OddsAPI pacing timezone %r is invalid; using UTC", timezone_name
+            )
+            self._timezone = timezone.utc
+            self.timezone_name = "UTC"
+        self._state_path = state_path or _DEFAULT_STATE_PATH
+        self._clock = now_fn or (lambda: datetime.now(timezone.utc))
+        self._state_lock = RLock()
+        self._state_date: str = ""
+        self._daily_count = 0
+        self._last_request_wall: Optional[datetime] = None
+        self._pending_reservations = 0
         self._request_times: deque[float] = deque()
         self._last_request_at: Optional[float] = None
         self._quota_used: Optional[int] = None
@@ -99,6 +149,68 @@ class OddsApiQuotaPacer:
         self._backoff_until = 0.0
         self._backoff_seconds = 0.0
         self._consecutive_errors = 0
+        self._load_state()
+
+    def _now(self) -> datetime:
+        current = self._clock()
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=timezone.utc)
+        return current.astimezone(timezone.utc)
+
+    def _local_date(self, current: Optional[datetime] = None) -> str:
+        return (current or self._now()).astimezone(self._timezone).date().isoformat()
+
+    def _reset_daily_state_if_needed(self, current: Optional[datetime] = None) -> None:
+        today = self._local_date(current)
+        if self._state_date != today:
+            self._state_date = today
+            self._daily_count = 0
+            self._last_request_wall = None
+
+    def _load_state(self) -> None:
+        """Load only the current day's enforcement state after a restart."""
+        with self._state_lock:
+            try:
+                with open(self._state_path) as fh:
+                    state = json.load(fh)
+                current = self._now()
+                state_date = str(state.get("date", ""))
+                if state_date == self._local_date(current):
+                    self._state_date = state_date
+                    self._daily_count = max(0, int(state.get("daily_count", 0)))
+                    raw_last = state.get("last_request_at")
+                    if raw_last:
+                        parsed = datetime.fromisoformat(str(raw_last))
+                        if parsed.tzinfo is None:
+                            parsed = parsed.replace(tzinfo=timezone.utc)
+                        self._last_request_wall = parsed.astimezone(timezone.utc)
+                else:
+                    self._state_date = self._local_date(current)
+            except FileNotFoundError:
+                self._state_date = self._local_date()
+            except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+                logger.warning("OddsAPI pacing state could not be loaded: %s", exc)
+                self._state_date = self._local_date()
+
+    def _save_state(self) -> None:
+        """Atomically persist the minimal state needed across normal restarts."""
+        directory = os.path.dirname(self._state_path) or "."
+        os.makedirs(directory, exist_ok=True)
+        temp_path = f"{self._state_path}.{os.getpid()}.tmp"
+        payload = {
+            "date": self._state_date,
+            "daily_count": self._daily_count,
+            "last_request_at": (
+                self._last_request_wall.isoformat()
+                if self._last_request_wall is not None
+                else None
+            ),
+        }
+        with open(temp_path, "w") as fh:
+            json.dump(payload, fh, indent=2)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(temp_path, self._state_path)
 
     def update_quota(
         self,
@@ -107,12 +219,13 @@ class OddsApiQuotaPacer:
         used: Optional[int] = None,
     ) -> None:
         """Store authoritative values from OddsAPI response headers."""
-        previous_used = self._quota_used
-        previous_remaining = self._quota_remaining
-        if remaining is not None:
-            self._quota_remaining = max(0, int(remaining))
-        if used is not None:
-            self._quota_used = max(0, int(used))
+        with self._state_lock:
+            previous_used = self._quota_used
+            previous_remaining = self._quota_remaining
+            if remaining is not None:
+                self._quota_remaining = max(0, int(remaining))
+            if used is not None:
+                self._quota_used = max(0, int(used))
         deltas = []
         if used is not None and previous_used is not None:
             deltas.append(int(used) - previous_used)
@@ -123,11 +236,14 @@ class OddsApiQuotaPacer:
             self._quota_cost_per_request = float(positive_deltas[-1])
 
     def record_request_started(self) -> None:
-        """Record one actual outgoing HTTP request, not a cache hit."""
+        """Record request timing after :meth:`reserve_request_slot` succeeds."""
         now = time.monotonic()
         self._request_times.append(now)
         self._last_request_at = now
         self._prune(now)
+        with self._state_lock:
+            if self._pending_reservations:
+                self._pending_reservations -= 1
 
     def record_request_finished(self, started_at: float) -> None:
         self._last_latency_ms = max(0.0, (time.monotonic() - started_at) * 1000.0)
@@ -141,7 +257,7 @@ class OddsApiQuotaPacer:
         status: int = 0,
         quota_exhausted: bool = False,
     ) -> None:
-        """Record latency and apply safe backoff for a failed request."""
+        """Record latency for a failed request without bypassing strict pacing."""
         self._last_latency_ms = max(0.0, (time.monotonic() - started_at) * 1000.0)
         # A 422 is a permanent request-shape/market error, not a transient
         # provider failure.  Retrying it only delays the useful game-line
@@ -152,16 +268,10 @@ class OddsApiQuotaPacer:
         self.record_error(status, quota_exhausted=quota_exhausted)
 
     def record_error(self, status: int = 0, *, quota_exhausted: bool = False) -> None:
-        """Apply bounded backoff after 429s and transient provider failures."""
+        """Retain failure telemetry; the fixed interval remains authoritative."""
         self._consecutive_errors += 1
-        if quota_exhausted or self._quota_remaining == 0:
-            delay = self.max_interval_seconds
-        elif status == 429:
-            delay = min(900.0, 60.0 * (2 ** min(self._consecutive_errors - 1, 3)))
-        else:
-            delay = min(300.0, 15.0 * (2 ** min(self._consecutive_errors - 1, 4)))
-        self._backoff_seconds = delay
-        self._backoff_until = time.monotonic() + delay
+        self._backoff_seconds = 0.0
+        self._backoff_until = 0.0
 
     def hours_remaining(self, now: Optional[datetime] = None) -> float:
         current = now or datetime.now(timezone.utc)
@@ -202,44 +312,114 @@ class OddsApiQuotaPacer:
         )
 
     def can_request(self) -> bool:
-        """Return false only when the deadline/quota/backoff makes a call unsafe."""
-        if self._quota_remaining is not None and self._quota_remaining <= 0:
-            return False
-        if self.hours_remaining() <= 0:
-            return False
-        return time.monotonic() >= self._backoff_until
+        """Return whether one new outgoing request may be reserved now."""
+        with self._state_lock:
+            current = self._now()
+            self._reset_daily_state_if_needed(current)
+            if self._daily_count >= self.daily_limit:
+                return False
+            if self._quota_remaining is not None and self._quota_remaining <= 0:
+                return False
+            if (
+                self._last_request_wall is not None
+                and (current - self._last_request_wall).total_seconds()
+                < self.min_interval_seconds
+            ):
+                return False
+            return True
+
+    def block_reason(self) -> str:
+        """Return a stable diagnostic for why a request is currently blocked."""
+        with self._state_lock:
+            current = self._now()
+            self._reset_daily_state_if_needed(current)
+            if self._daily_count >= self.daily_limit:
+                return "daily limit reached"
+            if self._quota_remaining is not None and self._quota_remaining <= 0:
+                return "provider quota exhausted"
+            if self._last_request_wall is not None:
+                remaining = self.min_interval_seconds - (
+                    current - self._last_request_wall
+                ).total_seconds()
+                if remaining > 0:
+                    return f"minimum interval active ({remaining:.0f}s remaining)"
+            return ""
+
+    def reserve_request_slot(self) -> bool:
+        """Atomically claim one daily request slot before making HTTP."""
+        with self._state_lock:
+            current = self._now()
+            self._reset_daily_state_if_needed(current)
+            if not self.can_request():
+                return False
+            self._daily_count += 1
+            self._last_request_wall = current
+            self._pending_reservations += 1
+            self._save_state()
+            return True
 
     async def wait_for_slot(self) -> bool:
-        """Wait for the next paced slot and return whether it may be used."""
-        if not self.can_request():
-            return False
-        now = time.monotonic()
-        delay = max(0.0, self._backoff_until - now)
-        if self._last_request_at is not None:
-            delay = max(
-                delay,
-                self.required_interval_seconds() - (now - self._last_request_at),
-            )
-        if delay > 0:
-            await asyncio.sleep(delay)
+        """Compatibility async check; never sleeps inside a scheduled poll."""
         return self.can_request()
 
+    @property
+    def daily_count(self) -> int:
+        with self._state_lock:
+            self._reset_daily_state_if_needed()
+            return self._daily_count
+
+    @property
+    def last_request_wall(self) -> Optional[datetime]:
+        with self._state_lock:
+            return self._last_request_wall
+
+    def next_eligible_at(self) -> Optional[datetime]:
+        with self._state_lock:
+            current = self._now()
+            self._reset_daily_state_if_needed(current)
+            if self._quota_remaining is not None and self._quota_remaining <= 0:
+                return None
+            local_now = current.astimezone(self._timezone)
+            if self._daily_count >= self.daily_limit:
+                next_day = local_now.date() + timedelta(days=1)
+                return datetime.combine(
+                    next_day, datetime_time.min, tzinfo=self._timezone
+                ).astimezone(timezone.utc)
+            if self._last_request_wall is None:
+                return current
+            return self._last_request_wall + timedelta(seconds=self.min_interval_seconds)
+
     def telemetry(self) -> QuotaTelemetry:
-        hours = self.hours_remaining()
-        required = self.required_calls_per_hour()
-        current = self.current_calls_per_hour()
-        if self._quota_remaining is None:
-            status = "WAITING_FOR_QUOTA"
-        elif self._quota_remaining <= 0:
-            status = "EXHAUSTED"
-        elif hours <= 0:
-            status = "DEADLINE_PASSED"
-        elif current > required * 1.10:
-            status = "AHEAD"
-        elif required > 0 and current < required * 0.90:
-            status = "BEHIND"
-        else:
-            status = "ON_PACE"
+        current_time = self._now()
+        with self._state_lock:
+            self._reset_daily_state_if_needed(current_time)
+            next_at = self.next_eligible_at()
+            age = (
+                max(0.0, (current_time - self._last_request_wall).total_seconds())
+                if self._last_request_wall is not None
+                else None
+            )
+            wait = (
+                max(0.0, (next_at - current_time).total_seconds())
+                if next_at is not None
+                else 0.0
+            )
+            # The no-history case returns the current instant as the next
+            # eligible time; avoid reporting a false cooldown from clock
+            # movement between the two reads.
+            if wait <= 1.0 and self._last_request_wall is None:
+                wait = 0.0
+            if self._daily_count >= self.daily_limit:
+                status = "DAILY_LIMIT"
+            elif self._quota_remaining is not None and self._quota_remaining <= 0:
+                status = "EXHAUSTED"
+            elif wait > 0:
+                status = "COOLDOWN"
+            else:
+                status = "READY"
+            hours = self.hours_remaining(current_time)
+            required = 0.0
+            current = self.current_calls_per_hour()
         return QuotaTelemetry(
             quota_used=self._quota_used,
             quota_remaining=self._quota_remaining,
@@ -251,7 +431,15 @@ class OddsApiQuotaPacer:
             hours_remaining=hours,
             latency_ms=self._last_latency_ms,
             status=status,
-            backoff_seconds=max(0.0, self._backoff_until - time.monotonic()),
+            backoff_seconds=0.0,
+            daily_count=self._daily_count,
+            daily_limit=self.daily_limit,
+            min_interval_seconds=self.min_interval_seconds,
+            last_request_at=self._last_request_wall,
+            next_eligible_at=next_at,
+            last_request_age_seconds=age,
+            seconds_until_eligible=wait,
+            pacing_timezone=self.timezone_name,
         )
 
 

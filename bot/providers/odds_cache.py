@@ -149,15 +149,15 @@ class OddsApiCache:
 
             self._misses += 1
 
-            # ── Budget guard ──────────────────────────────────────────────────
-            # Check usage budget + active-sport filter before making the HTTP
-            # call.  Runs inside the lock so the check and the record are atomic
-            # for this (sport_key, markets, regions) slot.
+            # ── Request admission ────────────────────────────────────────────
+            # The strict pacer is checked before the legacy monthly tracker so
+            # every real cache miss, including player-prop fetches, shares one
+            # process-wide daily cap and cooldown.
             try:
                 from .usage_tracker import get_usage_tracker, infer_call_priority
                 _tracker = get_usage_tracker()
+                _priority = infer_call_priority(sport_key, markets)
                 if _tracker is not None:
-                    _priority = infer_call_priority(sport_key, markets)
                     _allowed, _reason = _tracker.should_allow(
                         _PROVIDER_NAME, _priority, sport_key=sport_key,
                     )
@@ -167,10 +167,24 @@ class OddsApiCache:
                             sport_key, _reason,
                         )
                         return []
-                    # Record the outgoing request (may return a newly-crossed threshold)
-                    _tracker.record_request(_PROVIDER_NAME, _priority, sport_key=sport_key)
             except ImportError:
-                pass
+                _tracker = None
+                _priority = None
+            pacer = get_quota_pacer()
+            if pacer is not None and not pacer.reserve_request_slot():
+                logger.info(
+                    "OddsApiCache: request for %s blocked by strict pacing — %s",
+                    sport_key,
+                    pacer.block_reason(),
+                )
+                return []
+            if _tracker is not None and _priority is not None:
+                # Record only after strict admission succeeds; this preserves
+                # the existing monthly diagnostics without counting skipped
+                # calls as outgoing requests.
+                _tracker.record_request(
+                    _PROVIDER_NAME, _priority, sport_key=sport_key
+                )
             # ─────────────────────────────────────────────────────────────────
 
             data = await self._fetch(sport_key, api_key, markets, regions, odds_format)

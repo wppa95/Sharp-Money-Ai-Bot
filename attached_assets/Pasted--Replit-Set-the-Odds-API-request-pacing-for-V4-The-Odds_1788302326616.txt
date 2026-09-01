@@ -1,0 +1,70 @@
+@Replit
+
+Set the Odds API request pacing for V4.
+
+The Odds API plan has a 500-request monthly limit.
+
+Implement:
+
+- HARD DAILY LIMIT: 16 requests/day
+- MINIMUM INTERVAL: 45 minutes between Odds API requests
+- Maximum of 1 Odds API request per 45-minute window
+- Once 16 requests have been used that day, do not make any additional Odds API requests until the daily counter resets
+- Unused requests do NOT roll over
+- The 16/day limit must be enforced even if the 45-minute interval would allow more requests
+- Make the daily limit and interval centralized configuration values, not scattered/hardcoded
+- Persist only whatever minimal state is required to enforce the current day's request count and last-request timestamp safely across normal process restarts
+- Do not let a restart reset the daily request budget and accidentally exceed the provider limit
+- Handle the daily reset correctly at the configured timezone/day boundary
+
+IMPORTANT:
+
+This Odds API cadence is independent of the shared Underdog + PropLine monitoring cadence.
+
+Do NOT make Odds API calls every monitoring cycle.
+
+Do NOT tie Odds API requests to the 5-minute shared monitoring cycle.
+
+The intended behavior is approximately:
+
+09:00 → Odds API call
+09:45 → Odds API call
+10:30 → Odds API call
+11:15 → Odds API call
+...
+
+BUT the hard 16/day cap always wins.
+
+Also add logging/diagnostics showing:
+
+Odds API:
+  Daily usage: X/16
+  Last request: X ago
+  Next eligible request: X
+  Daily limit: 16
+  Minimum interval: 45m
+
+Add regression tests proving:
+
+- 16/day hard cap
+- 45-minute minimum interval
+- No request before 45 minutes
+- Request allowed at/after 45 minutes
+- 17th request is blocked
+- Daily counter resets correctly
+- Restart does not reset today's request count
+- Restart does not bypass the 45-minute cooldown
+- Odds API remains independent from Underdog/PropLine cadence
+- Existing provider/scoring/Telegram logic is unaffected
+
+Do not change:
+- Underdog cadence
+- PropLine cadence
+- PropLine budget
+- scoring
+- thresholds
+- evidence rules
+- PLAY qualification
+- Telegram routing
+
+restart to apply the changes and checkpoint.

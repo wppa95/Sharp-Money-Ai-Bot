@@ -513,10 +513,19 @@ def _fmt_provider_status_line(provider_name: str, display_name: str) -> str:
                     pacer = get_quota_pacer()
                     if pacer is not None:
                         telemetry = pacer.telemetry()
+                        next_request = (
+                            "now"
+                            if telemetry.seconds_until_eligible <= 0
+                            and telemetry.status == "READY"
+                            else (
+                                f"{telemetry.seconds_until_eligible / 60:.0f}m"
+                                if telemetry.seconds_until_eligible > 0
+                                else "provider reset"
+                            )
+                        )
                         pace = (
-                            f" · pace {telemetry.status.lower()} "
-                            f"{telemetry.current_calls_per_hour:.1f}/"
-                            f"{telemetry.required_calls_per_hour:.1f}h"
+                            f" · {telemetry.daily_count}/{telemetry.daily_limit} today"
+                            f" · next {next_request}"
                         )
                 except ImportError:
                     pass

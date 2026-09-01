@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import abc
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
@@ -24,6 +25,7 @@ import aiohttp
 
 from .base import FailureType, ProviderHealth, ProviderStatus
 from .health_monitor import get_health_monitor
+from .quota_pacing import get_quota_pacer
 
 logger = logging.getLogger(__name__)
 
@@ -158,11 +160,33 @@ class OddsApiResultsProvider(GameResultsProvider):
             "daysFrom": days_from,
         }
         mon = get_health_monitor()
+        pacer = get_quota_pacer()
+        if pacer is not None and not pacer.reserve_request_slot():
+            logger.info(
+                "OddsApiResultsProvider: scores request for %s blocked by strict pacing — %s",
+                sport_key,
+                pacer.block_reason(),
+            )
+            return []
+        started_at = time.monotonic()
+        if pacer is not None:
+            pacer.record_request_started()
 
         try:
             timeout = aiohttp.ClientTimeout(total=30)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(url, params=params) as resp:
+                    if pacer is not None:
+                        try:
+                            remaining = int(resp.headers.get("x-requests-remaining"))
+                        except (TypeError, ValueError):
+                            remaining = None
+                        try:
+                            used = int(resp.headers.get("x-requests-used"))
+                        except (TypeError, ValueError):
+                            used = None
+                        pacer.update_quota(remaining=remaining, used=used)
+
                     if resp.status == 401:
                         try:
                             body = await resp.json(content_type=None)
@@ -177,6 +201,12 @@ class OddsApiResultsProvider(GameResultsProvider):
                         )
                         if mon:
                             mon.record_failure(_PROVIDER_NAME, f"401 {error_code or message}", ftype)
+                        if pacer is not None:
+                            pacer.record_request_failed(
+                                started_at,
+                                status=resp.status,
+                                quota_exhausted=ftype == FailureType.QUOTA,
+                            )
                         logger.warning(
                             "OddsApiResultsProvider: 401 for %s — %s", sport_key, message
                         )
@@ -186,6 +216,10 @@ class OddsApiResultsProvider(GameResultsProvider):
                         err = f"HTTP {resp.status}"
                         if mon:
                             mon.record_failure(_PROVIDER_NAME, err, FailureType.HTTP_ERROR)
+                        if pacer is not None:
+                            pacer.record_request_failed(
+                                started_at, status=resp.status
+                            )
                         logger.warning(
                             "OddsApiResultsProvider: HTTP %d for %s", resp.status, sport_key
                         )
@@ -194,6 +228,8 @@ class OddsApiResultsProvider(GameResultsProvider):
                     data: list[dict] = await resp.json()
                     if mon:
                         mon.record_success(_PROVIDER_NAME)
+                    if pacer is not None:
+                        pacer.record_request_finished(started_at)
 
                     results = self._parse(data, sport_key)
                     logger.info(
@@ -207,12 +243,16 @@ class OddsApiResultsProvider(GameResultsProvider):
             err = str(exc)
             if mon:
                 mon.record_failure(_PROVIDER_NAME, err, FailureType.HTTP_ERROR)
+            if pacer is not None:
+                pacer.record_request_failed(started_at)
             logger.warning("OddsApiResultsProvider fetch error (%s): %s", sport_key, exc)
             return []
         except Exception as exc:  # noqa: BLE001
             err = str(exc)
             if mon:
                 mon.record_failure(_PROVIDER_NAME, err, FailureType.UNKNOWN)
+            if pacer is not None:
+                pacer.record_request_failed(started_at)
             logger.warning("OddsApiResultsProvider unexpected error (%s): %s", sport_key, exc)
             return []
 
