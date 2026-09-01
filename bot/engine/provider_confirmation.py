@@ -78,7 +78,10 @@ def normalize_name(value: Any) -> str:
 
 
 def normalize_stat(value: Any) -> str:
-    raw = _clean(value).lower()
+    # Composite player-prop labels may differ only by spacing around the
+    # separator across providers (for example, "Points + Assists" versus
+    # "points+assists"). Treat those as the same market key.
+    raw = re.sub(r"\s*\+\s*", "+", _clean(value).lower())
     if raw in _PLAYER_MARKET_TO_STAT:
         raw = _PLAYER_MARKET_TO_STAT[raw]
     return _STAT_ALIASES.get(raw, raw)

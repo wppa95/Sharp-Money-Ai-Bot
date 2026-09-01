@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 from types import SimpleNamespace
 
@@ -62,6 +62,45 @@ class TestIndependentPrizePicks:
             {"source": "OddsAPI", "confirmed": True, "avg_line": 14.5}
         ) is None
         assert market_engine._prizepicks_line_from_confirmation(None) is None
+
+    async def test_current_pool_matching_normalizes_stat_labels_and_keeps_line_difference(
+        self,
+    ):
+        class CurrentPoolDB:
+            async def get_all_active_prop_line_history_by_line(self, providers=None):
+                return {
+                    (
+                        "PrizePicks",
+                        "Kiki Rice",
+                        "WNBA",
+                        "points",
+                        15.5,
+                        "pp-event-1",
+                    ): SimpleNamespace(
+                        provider="PrizePicks",
+                        player_name="Kiki Rice",
+                        sport="WNBA",
+                        stat_type="points",
+                        line_value=15.5,
+                        game_id="pp-event-1",
+                        external_id="pp-prop-1",
+                        fetched_at=datetime.utcnow(),
+                        removed=False,
+                    )
+                }
+
+        result = await market_engine._get_odds_api_confirmation(
+            "WNBA",
+            "Kiki Rice",
+            "Points",
+            "UNDER",
+            16.5,
+            db=CurrentPoolDB(),
+        )
+
+        assert result is not None
+        assert result["source"] == "PrizePicks"
+        assert result["avg_line"] == 15.5
 
     async def test_authoritative_discovery_controls_scope_without_underdog_inheritance(
         self, monkeypatch

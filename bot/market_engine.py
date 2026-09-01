@@ -901,10 +901,12 @@ async def _get_odds_api_confirmation(
     if not sportsbook_confirmation_enabled and normalized_market in {"moneyline", "total"}:
         return None
     source_db = db or _confirmation_db
+    pp_history_reader = getattr(source_db, "get_prop_line_history", None)
+    pp_pool_reader = getattr(source_db, "get_all_active_prop_line_history_by_line", None)
     pp_available = bool(
         normalized_market == "player_prop"
         and source_db is not None
-        and callable(getattr(source_db, "get_prop_line_history", None))
+        and (callable(pp_history_reader) or callable(pp_pool_reader))
     )
     if normalized_market == "player_prop" and is_football_related_sport(sport):
         return None
@@ -942,29 +944,61 @@ async def _get_odds_api_confirmation(
             # companion scan; it must never start a second provider request.
             if pp_available:
                 try:
-                    try:
-                        pp_history = await _asyncio.wait_for(
-                            source_db.get_prop_line_history(
-                                "PrizePicks",
-                                player_name,
-                                sport,
-                                stat_type,
-                                limit=30,
-                            ),
-                            timeout=5.0,
-                        )
-                    except TypeError:
-                        # Preserve compatibility with lightweight test doubles
-                        # and older database adapters.
-                        pp_history = await _asyncio.wait_for(
-                            source_db.get_prop_line_history(
-                                "PrizePicks",
-                                player_name,
-                                sport,
-                                stat_type,
-                            ),
-                            timeout=5.0,
-                        )
+                    if callable(pp_pool_reader):
+                        # The shared current pool is already source-aware,
+                        # freshness-bounded, and removal-safe. Filter its rows
+                        # by normalized identity because provider-normalized
+                        # stat labels do not preserve UD capitalization or
+                        # composite-stat spacing.
+                        try:
+                            current_pool = await _asyncio.wait_for(
+                                pp_pool_reader(providers=("PrizePicks",)),
+                                timeout=5.0,
+                            )
+                        except TypeError:
+                            current_pool = await _asyncio.wait_for(
+                                pp_pool_reader(),
+                                timeout=5.0,
+                            )
+                        wanted_player = normalize_name(player_name)
+                        wanted_sport = str(sport or "").strip().upper()
+                        wanted_stat = _normalize_prop_stat(stat_type)
+                        pp_history = [
+                            prop
+                            for prop in (current_pool or {}).values()
+                            if normalize_name(getattr(prop, "player_name", ""))
+                            == wanted_player
+                            and str(getattr(prop, "sport", "") or "").strip().upper()
+                            == wanted_sport
+                            and _normalize_prop_stat(getattr(prop, "stat_type", ""))
+                            == wanted_stat
+                        ]
+                    elif callable(pp_history_reader):
+                        try:
+                            pp_history = await _asyncio.wait_for(
+                                pp_history_reader(
+                                    "PrizePicks",
+                                    player_name,
+                                    sport,
+                                    stat_type,
+                                    limit=30,
+                                ),
+                                timeout=5.0,
+                            )
+                        except TypeError:
+                            # Preserve compatibility with lightweight test
+                            # doubles and older database adapters.
+                            pp_history = await _asyncio.wait_for(
+                                pp_history_reader(
+                                    "PrizePicks",
+                                    player_name,
+                                    sport,
+                                    stat_type,
+                                ),
+                                timeout=5.0,
+                            )
+                    else:
+                        pp_history = []
                     pp_observations = []
                     # History is newest-first. Keep only the latest state for
                     # each source projection so an older active row cannot
@@ -985,8 +1019,6 @@ async def _get_odds_api_confirmation(
                             continue
                         prop_line = getattr(prop, "line_value", None)
                         if prop_line is None:
-                            continue
-                        if line is not None and abs(float(prop_line) - float(line)) > 0.51:
                             continue
                         pp_observations.append(
                             observation_from_record(
