@@ -335,7 +335,7 @@ class TestConfidenceVsBQ:
         assert d.confidence < config.UD_MIN_CONF_S
 
     def test_confidence_headline_is_decision_confidence(self):
-        """Alert must display actual confidence, never BQ as headline."""
+        """Decision confidence remains internal to the PLAY presentation."""
         from alerts_multiplatform import format_underdog_change_alert
         decision = _decision("A", 60, "OVER")
         decision.l5_hit_rate = None
@@ -353,8 +353,8 @@ class TestConfidenceVsBQ:
             score       = score,
             decision    = decision,
         )
-        # Should show 60/100 (confidence), not some fabricated number
-        assert "60/100" in result
+        assert "Quality:" not in result
+        assert "60/100" not in result
 
 
 # ─── 7. L5 fallback ───────────────────────────────────────────────────────────

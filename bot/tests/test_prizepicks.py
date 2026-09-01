@@ -591,7 +591,7 @@ class TestFormatPPAlert:
     def test_alert_type_header(self):
         opp = self._make_opp()
         msg = format_pp_alert(opp)
-        assert "PRIZEPICKS" in msg
+        assert "SHARP MONEY PLAY" in msg
 
     def test_html_opens_and_closes_bold(self):
         opp = self._make_opp()

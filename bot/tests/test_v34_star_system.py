@@ -417,31 +417,26 @@ class TestGradeBlockBqStars:
         )
 
     def test_grade_shows_bq_four_stars_for_conf95(self):
-        """Grade block must show ★★★★☆ when BQ=95, NOT ★★☆☆☆ from raw score 52."""
+        """Quality stars are not rendered in a Telegram PLAY."""
         msg = self._grade_alert = self._change_alert_grade(score_total=52, conf=95)
-        assert "★★★★☆" in msg, (
-            "Grade block must show ★★★★☆ (BQ 95 stars), not ★★☆☆☆ (raw score 52 stars)"
-        )
+        assert "★★★★☆" not in msg
 
     def test_grade_does_not_show_two_stars_for_bq95(self):
-        """★★☆☆☆ (raw score 52 stars) must not appear when BQ=95."""
+        """Raw score stars are not rendered in a Telegram PLAY."""
         msg = self._change_alert_grade(score_total=52, conf=95)
-        assert "★★☆☆☆" not in msg, (
-            "Raw score stars ★★☆☆☆ must not appear when BQ gives different star count"
-        )
+        assert "★★☆☆☆" not in msg
 
     def test_grade_shows_bq_value(self):
-        """Quality value (95/100) must appear with the existing star mapping."""
+        """Quality values remain internal to scoring/reporting."""
         msg = self._change_alert_grade(score_total=52, conf=95)
-        assert "95/100" in msg, "95/100 must appear in the alert"
-        assert "Quality:" in msg, "Alert must show the public quality label"
-        assert "Bet Quality" not in msg
-        assert "BQ" not in msg
+        assert "95/100" not in msg
+        assert "Quality:" not in msg
 
     def test_grade_stars_match_bq_not_raw(self):
-        """Stars in grade must be determined by BQ=80, not raw score=52."""
+        """Quality stars do not appear even when Strong Bet is applicable."""
         msg = self._change_alert_grade(score_total=52, conf=80)
-        assert "★★★★☆" in msg, "BQ 80 must give ★★★★☆ in grade block"
+        assert "★★★★☆" not in msg
+        assert "💪 STRONG BET" in msg
 
 
 # ═══════════════════════════════════════════════════════════════════════════

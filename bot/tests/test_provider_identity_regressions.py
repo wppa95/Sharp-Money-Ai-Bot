@@ -108,16 +108,16 @@ def test_prizepicks_edge_alert_has_provider_specific_heading_and_line():
     )
 
     message = format_pp_alert(opportunity)
-    assert "🟣 <b>PRIZEPICKS PICK</b>" in message
+    assert "📊 <b>SHARP MONEY PLAY</b>" in message
     assert "PrizePicks Line" in message
     assert "ACTIONABLE BET PICK" not in message
     assert "verify before placing" not in message.lower()
 
 
 def test_change_alert_preserves_source_heading_and_line_label():
-    for provider, heading, line_label in (
-        ("Underdog", "🐶 <b>UNDERDOG PICK</b>", "LINE</b> · Underdog"),
-        ("PrizePicks", "🟣 <b>PRIZEPICKS PICK</b>", "LINE</b> · PrizePicks"),
+    for provider, line_label in (
+        ("Underdog", "LINE</b> · Underdog"),
+        ("PrizePicks", "LINE</b> · PrizePicks"),
     ):
         message = format_underdog_change_alert(
             player_name="LeBron James",
@@ -128,5 +128,5 @@ def test_change_alert_preserves_source_heading_and_line_label():
             new_line=25.5,
             source=provider,
         )
-        assert heading in message
+        assert "📊 <b>SHARP MONEY PLAY</b>" in message
         assert line_label in message
