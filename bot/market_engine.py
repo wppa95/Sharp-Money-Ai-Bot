@@ -523,6 +523,67 @@ _fpr_handoff_task: asyncio.Task | None = None
 _fpr_execution_running: bool = False
 
 
+async def reset_monitoring_runtime_state() -> None:
+    """Destroy disposable market-monitoring state before a new session starts.
+
+    SQLite remains the source of historical knowledge and delivery dedup
+    records are restored later by ``_init_state_from_db``.  This function only
+    clears process-local scans/cursors and cancels child tasks that could
+    otherwise survive an in-process application restart.
+    """
+    global _cycle_sequence, _active_jobs, _registry, _player_stats_provider
+    global _player_result_fetch_cache, _prizepicks_cycle_task
+    global _prizepicks_processing_tasks, _prizepicks_processing_lock
+    global _prizepicks_last_started_at, _prizepicks_sport_cursor
+    global _cold_start_done, _MARKET_FIRST_ALERT, _priority_override_sent
+    global _ud_full_scan_running, _fpr_deferred_pending, _fpr_deferred_context
+    global _fpr_handoff_task, _fpr_execution_running, _prop_market_alerted
+    global _ud_scan_state, _ud_known_keys, _ud_scan_db_id, _prop_dedup_lock
+    global _snapshot_cache, _analysis_engine, _confirmation_db, _propline_provider
+
+    current = asyncio.current_task()
+    tasks = {
+        task
+        for task in (
+            [_prizepicks_cycle_task, _fpr_handoff_task]
+            + list(_prizepicks_processing_tasks)
+        )
+        if task is not None and task is not current and not task.done()
+    }
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    _cycle_sequence = 0
+    _active_jobs.clear()
+    _registry = None
+    _player_stats_provider = None
+    _player_result_fetch_cache.clear()
+    _prizepicks_cycle_task = None
+    _prizepicks_processing_tasks.clear()
+    _prizepicks_processing_lock = None
+    _prizepicks_last_started_at = None
+    _prizepicks_sport_cursor = 0
+    _cold_start_done = False
+    _MARKET_FIRST_ALERT.clear()
+    _priority_override_sent.clear()
+    _ud_full_scan_running = False
+    _fpr_deferred_pending = False
+    _fpr_deferred_context = None
+    _fpr_handoff_task = None
+    _fpr_execution_running = False
+    _prop_market_alerted.clear()
+    _ud_scan_state.clear()
+    _ud_known_keys.clear()
+    _ud_scan_db_id = None
+    _prop_dedup_lock = asyncio.Lock()
+    _snapshot_cache.clear()
+    _analysis_engine = None
+    _confirmation_db = None
+    _propline_provider = None
+
+
 def _queue_deferred_fpr(context: object) -> None:
     """Remember one FPR trigger to run after the current full scan."""
     global _fpr_deferred_pending, _fpr_deferred_context

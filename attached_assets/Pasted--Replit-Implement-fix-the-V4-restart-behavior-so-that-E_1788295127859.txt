@@ -1,0 +1,253 @@
+@Replit
+
+Implement/fix the V4 restart behavior so that EVERY bot restart/reset creates a completely NEW monitoring runtime session while preserving the existing persistent database.
+
+This is an important V4 architecture rule:
+
+PERSIST THE DATA.
+RESET THE SESSION.
+
+## 1. DATABASE MUST BE PRESERVED
+
+Do NOT delete, clear, recreate, or reset the persistent database on restart.
+
+Preserve all historical/persistent data, including:
+
+- Historical completed game results
+- Player performance history
+- Historical line/evidence data
+- Provider history
+- Underdog history
+- PropLine/PrizePicks history
+- PLAY history
+- Grading records
+- Learning data
+- Performance data
+- Historical/legacy records
+- Any persistent data required for current-line evaluation
+
+The new runtime session must be able to use this existing database as historical knowledge.
+
+## 2. EVERY RESTART MUST CREATE A CLEAN NEW MONITORING SESSION
+
+When the bot stops and starts again, DO NOT resume the previous runtime session.
+
+The new process must initialize a completely fresh monitoring session.
+
+Reset/clear all runtime-only state, including:
+
+- Underdog scan-cycle state
+- PropLine discovery/rotation cursor
+- PropLine batch position
+- Stable-refresh progress
+- Full-pool rescan cursor/rotation state
+- Batch offsets
+- Stale provider cursors
+- In-memory evaluation state
+- Pending/in-flight scan tasks
+- Interrupted async work
+- Previous scheduler execution state
+- Stale monitoring job state
+- Any runtime state that would cause the new process to resume an unfinished scan
+- Any previous session's partially completed monitoring cycle
+
+The new process must NOT say, in effect:
+
+"Continue where the previous bot stopped."
+
+It must behave as:
+
+"Start a brand-new monitoring session using the existing database as historical context."
+
+## 3. PERSISTENT DATA VS RUNTIME SESSION
+
+Use this architectural distinction:
+
+PERSISTENT DATABASE
+= survives restart
+
+RUNTIME MONITORING SESSION
+= destroyed and recreated on every restart
+
+The database is the source of historical knowledge.
+
+The runtime session is disposable.
+
+Do not confuse persistent historical records with unfinished runtime work.
+
+## 4. STARTUP SEQUENCE
+
+On startup:
+
+1. Start the new bot process.
+2. Initialize a NEW monitoring session.
+3. Reset all runtime scan/cursor/batch/in-flight state.
+4. Ensure no stale scheduler jobs from the previous process are resumed.
+5. Ensure only the new process owns the scheduler.
+6. Load the existing persistent database/history.
+7. Perform fresh provider discovery.
+8. Start a fresh Underdog monitoring cycle.
+9. Start fresh PropLine discovery/processing using the current provider state.
+10. Continue normal monitoring.
+
+The first monitoring cycle after restart must be a fresh cycle, not the continuation of an interrupted previous cycle.
+
+## 5. DO NOT LOSE HISTORICAL KNOWLEDGE
+
+Although runtime state is reset, the new session MUST still be able to use the persistent database for:
+
+- Current-line historical game-level evidence
+- L5/L10/L20/L30 calculations
+- Player history
+- Previous provider observations where legitimately used as historical context
+- Grading
+- Learning
+- Performance
+- PLAY history
+
+Historical data should inform the new session.
+
+Unfinished runtime work should NOT.
+
+## 6. PREVENT DUPLICATE/STALE SCHEDULER STATE
+
+On every startup verify:
+
+- Exactly one bot process is running.
+- Exactly one scheduler instance is active.
+- No scheduler jobs from the previous process are being resumed.
+- No duplicate Underdog monitoring job exists.
+- No duplicate PropLine monitoring job exists.
+- No stale task/cursor state is inherited.
+- No unfinished async task from the previous process can continue executing.
+- max_instances=1 behavior remains enforced where applicable.
+
+Do NOT introduce a second scheduler architecture.
+
+Do NOT change the monitoring cadence.
+
+## 7. DO NOT RESET THE DATABASE TO ACHIEVE A CLEAN SESSION
+
+A clean session does NOT mean:
+
+- deleting observations
+- deleting history
+- deleting grading
+- deleting learning data
+- deleting PLAY records
+- clearing provider history
+- clearing the database
+
+The database must remain intact.
+
+Only runtime/session state should reset.
+
+## 8. IMPORTANT WITH CURRENT V4 PLAY/EVIDENCE LOGIC
+
+The fresh session must still enforce the existing V4 rules:
+
+CURRENT LINE
+→ CURRENT GAME-LEVEL HISTORY
+→ CURRENT EVIDENCE
+→ CURRENT DIRECTION
+→ CURRENT PLAY EVALUATION
+→ PLAY GATE
+→ TELEGRAM ONLY IF QUALIFIED
+
+Do not allow stale runtime evaluations from before the restart to be delivered as new PLAYs.
+
+Do not allow old in-memory line/evaluation state to override the current database/provider state.
+
+Do not change:
+
+- scoring formulas
+- scoring thresholds
+- evidence calculations
+- direction logic
+- PLAY qualification rules
+- monitoring cadence
+- provider request budgets
+
+## 9. TELEGRAM AFTER RESTART
+
+A restart must NOT cause the bot to resend the previous session's PLAY alerts simply because the runtime session was recreated.
+
+At the same time, a genuinely NEW qualified PLAY discovered after restart must still be eligible for Telegram under the existing V4 rules.
+
+Use persistent historical/delivery records to prevent duplicate PLAY delivery where appropriate, while keeping the runtime session completely fresh.
+
+## 10. STATUS/REPORTING
+
+Make sure /status, /health, /system, /funnel, and related reporting correctly distinguish:
+
+- current runtime session
+- persistent historical database data
+
+Do not make persistent historical counts look like the current monitoring session.
+
+For example, an "Alerts today" value should remain based on the correct persistent population, but uptime/session information should reset when the process restarts.
+
+If a counter temporarily cannot be read during startup, it may report unavailable briefly, but it should recover without treating the previous runtime session as the current session.
+
+## 11. REGRESSION TESTS
+
+Add focused tests proving:
+
+- Database survives restart.
+- Historical game results survive restart.
+- PLAY/grading/learning records survive restart.
+- New runtime session starts with clean scan state.
+- Old Underdog cursor is not resumed.
+- Old PropLine cursor is not resumed.
+- Old batch offsets are not resumed.
+- Old stable-refresh progress is not resumed.
+- Old full-pool rotation state is not resumed.
+- Old in-flight tasks are not resumed.
+- Scheduler starts cleanly.
+- Only one scheduler/job instance is active.
+- A restart does not resend the previous session's PLAYs solely because the bot restarted.
+- A genuinely new qualified PLAY after restart can still alert.
+- Historical database data remains available to the new session for evidence/history calculations.
+- Session uptime resets while persistent data remains intact.
+
+## 12. VERIFICATION
+
+Before completion verify:
+
+1. Stop the bot.
+2. Confirm runtime monitoring state is destroyed.
+3. Start the bot.
+4. Confirm a NEW monitoring session is created.
+5. Confirm the database/history remains intact.
+6. Confirm the new session does not resume the previous scan.
+7. Confirm fresh provider discovery occurs.
+8. Confirm fresh Underdog monitoring begins.
+9. Confirm fresh PropLine processing begins.
+10. Confirm exactly one bot process is running.
+11. Confirm exactly one scheduler is active.
+12. Confirm no stale cursor/batch/task state is inherited.
+13. Confirm historical evidence remains available.
+14. Confirm PLAY history remains available.
+15. Confirm grading/learning data remains available.
+16. Confirm previous PLAYs are not resent solely because of restart.
+17. Confirm new qualified PLAYs remain alertable.
+18. Confirm /status and /health correctly reflect the new session.
+19. Confirm full test suite remains passing.
+
+Do not delete or reset the persistent database.
+
+Do not change scoring.
+
+Do not change thresholds.
+
+Do not change monitoring cadence.
+
+Do not change provider budgets.
+
+The final V4 architecture must be:
+
+PERSISTENT DATABASE = LONG-TERM KNOWLEDGE
+
+RUNTIME SESSION = CLEAN SLATE ON EVERY RESTART
+
+restart to apply the changes and checkpoint.

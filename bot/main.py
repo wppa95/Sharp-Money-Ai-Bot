@@ -83,6 +83,7 @@ from connectors import (
 from market_engine import (
     init_market_engine,
     init_odds_confirmation,
+    reset_monitoring_runtime_state,
     underdog_job,
     _start_prizepicks_cycle,
     _run_prizepicks_independent_cycle,
@@ -260,6 +261,13 @@ async def post_init(application: Application) -> None:
     # ── Health tracker (must be first — jobs reference it) ────────────────────
     _ht = init_health_tracker()
     _ht.record_startup()
+    # Every process/application restart gets a disposable monitoring session.
+    # Persistent evidence, grading, learning, and PLAY history remain in SQLite.
+    await reset_monitoring_runtime_state()
+    logger.info(
+        "New monitoring session initialised — session=%s; persistent history preserved",
+        _ht.monitoring_session_id(),
+    )
     logger.info(
         "HealthTracker initialised — startup #%d", _ht.restart_count()
     )
@@ -606,6 +614,10 @@ async def post_shutdown(application: Application) -> None:
     ht = get_health_tracker()
     if ht is not None:
         ht.record_shutdown("clean_shutdown")
+    try:
+        await reset_monitoring_runtime_state()
+    except Exception as _reset_exc:
+        logger.warning("Runtime session cleanup failed during shutdown: %s", _reset_exc)
     if _db:
         await _db.close()
     # Stop the health-check server if it started

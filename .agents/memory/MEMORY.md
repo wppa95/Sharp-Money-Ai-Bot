@@ -102,3 +102,4 @@
 - [Telegram alert presentation](telegram-alert-presentation.md) — user-facing prop alerts use plain quality/market labels and one deduplicated history section.
 - [Command reporting boundaries](command-reporting-boundaries.md) — reports separate populations; current picks require fresh future rows and persisted engine output, never synthetic display defaults.
 - [V4 evidence populations](v4-evidence-populations.md) — only completed player games qualify PLAYs or fill named hit-rate windows; provider observations remain monitoring context.
+- [Restart session isolation](restart-session-isolation.md) — reset runtime cursors, checkpoints, telemetry, and child tasks on restart; preserve SQLite evidence and delivery history.

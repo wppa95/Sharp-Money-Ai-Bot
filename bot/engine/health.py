@@ -74,6 +74,44 @@ _RESTART_HISTORY_LIMIT = 20
 _JOB_HISTORY_LIMIT     = 5
 _CRASH_HISTORY_LIMIT   = 20   # how many crash records to keep in crash_history
 
+# Runtime/session fields are useful for live diagnostics but must never be
+# used to resume monitoring after a process restart. Persistent evidence,
+# grading, learning, and PLAY history live in SQLite and are not included.
+_RUNTIME_SESSION_KEYS = frozenset({
+    "jobs",
+    "providers",
+    "heartbeat",
+    "heartbeat_ts",
+    "last_underdog_scan",
+    "last_underdog_scan_ts",
+    "last_underdog_props",
+    "last_underdog_alerts",
+    "last_db_write",
+    "last_db_write_ts",
+    "last_db_operation",
+    "last_pipeline_fail",
+    "last_job_started",
+    "last_job_started_at",
+    "last_error",
+    "last_error_ts",
+    "last_telegram_send",
+    "last_telegram_send_ts",
+    "last_alert_generated",
+    "last_scan_checkpoint_ts",
+    "last_scan_checkpoint_at",
+    "stable_refresh_cursor",
+    "wl_refresh_cursor",
+    "opportunity_grader_cursor",
+    "fpr_cursor",
+    "fpr_rotation",
+    "stable_refresh_stats",
+    "last_stable_refresh",
+    "last_stable_refresh_ts",
+    "fpr_stats",
+    "last_fpr_run",
+    "last_fpr_run_ts",
+})
+
 # Maps the shutdown reason written by the previous session to the startup
 # reason label recorded at the beginning of the new session.
 _SHUTDOWN_TO_STARTUP: dict[str, str] = {
@@ -241,11 +279,19 @@ class HealthTracker:
             self._state["last_startup"]        = now_iso
             self._state["last_startup_ts"]     = now_ts
             self._state["last_startup_reason"] = startup_reason
+            self._state["monitoring_session_id"] = self._state["restart_count"]
+            self._state["monitoring_session_started"] = now_iso
+            self._state["monitoring_session_started_ts"] = now_ts
 
             # Clear the pending shutdown fields — consumed
             self._state.pop("pending_shutdown_reason", None)
             self._state.pop("last_shutdown_at",        None)
             self._state.pop("last_shutdown_ts",        None)
+
+            # Start with a clean disposable runtime. Runtime checkpoints are
+            # deliberately discarded rather than retained as a resume source.
+            for key in _RUNTIME_SESSION_KEYS:
+                self._state.pop(key, None)
 
             self._save()
 
@@ -344,9 +390,8 @@ class HealthTracker:
     def record_scan_checkpoint(self) -> None:
         """Persist a checkpoint timestamp after each successful Underdog scan.
 
-        Loaded on the next startup by get_scan_checkpoint_age_minutes() so the
-        bot can determine whether to do a full cold-start rescore or a fast
-        resume (skip rescoring existing props whose scores are still fresh).
+        This remains diagnostic session state only. A new startup clears it and
+        always begins its own fresh monitoring pass.
         """
         import time as _time
         with self._lock:
@@ -355,12 +400,7 @@ class HealthTracker:
             self._save()
 
     def get_scan_checkpoint_age_minutes(self) -> Optional[float]:
-        """Return minutes since last scan checkpoint, or None if none exists.
-
-        Used during cold-start to decide whether a fast resume is safe:
-          age < threshold  → scores are fresh; skip cold-start rescore
-          age >= threshold → scores may be stale; do full cold-start rescore
-        """
+        """Return minutes since the current session's scan checkpoint."""
         import time as _time
         with self._lock:
             ts = self._state.get("last_scan_checkpoint_ts")
@@ -513,6 +553,15 @@ class HealthTracker:
     def current_uptime_secs(self) -> Optional[float]:
         ts = self._state.get("last_startup_ts")
         return (_now_ts() - ts) if ts is not None else None
+
+    def monitoring_session_id(self) -> Optional[int]:
+        """Return the current disposable monitoring session identifier."""
+        value = self._state.get("monitoring_session_id")
+        return int(value) if value is not None else None
+
+    def monitoring_session_started(self) -> Optional[str]:
+        """Return the current disposable session start time."""
+        return self._state.get("monitoring_session_started")
 
     # ── Global summary ────────────────────────────────────────────────────────
 
