@@ -1,0 +1,39 @@
+Verify the V3.5 PropLine/PrizePicks monitoring cadence.
+
+The intended behavior is that PrizePicks via PropLine is fetched alongside Underdog on the normal monitoring cycle, approximately every 1–2 minutes.
+
+Do NOT accept “awaiting first successful fetch” as the final state.
+
+Do not change scoring, qualification, thresholds, alerts, Funnel, database architecture, or Underdog.
+
+Verify exactly:
+
+1. What scheduler/job invokes the PropLine live fetch.
+2. Its actual interval.
+3. Whether it runs alongside the Underdog monitor.
+4. Whether PropLine is being skipped because of the current 429/backoff state.
+5. Whether the recent confirmation change accidentally removed the normal live PropLine monitoring path or only removed duplicate confirmation fetching.
+6. How many PropLine HTTP requests one normal monitoring cycle requires.
+7. Whether the temporary 1,000-request allowance can sustain the intended 1–2 minute monitoring cadence for the remaining ~12 hours.
+8. Whether pagination could cause the request budget to be exhausted too quickly.
+
+Do not repeatedly call the live API to test this. Use code/log inspection first. If one live request is necessary, use only the minimum required.
+
+The desired architecture is:
+Underdog monitor → normal 1–2 minute cycle
+PropLine/PrizePicks monitor → normal 1–2 minute cycle
+Both operate alongside each other without creating duplicate schedulers.
+
+If PropLine is currently being blocked by the provider’s 429, preserve the backoff behavior rather than hammering the API.
+
+If the live monitoring path was accidentally removed by the recent confirmation fix, restore ONLY the monitoring path. Confirmation must continue using persisted PropLineHistory and must NOT perform a second live fetch.
+
+At the end, report:
+
+* actual PropLine scheduler interval
+* whether it is currently being invoked
+* why the status says awaiting first successful fetch
+* requests required per cycle
+* whether any code change is actually needed
+
+If a code change is needed, restart the existing Sharp Money Bot workflow to apply the changes and create a checkpoint.
