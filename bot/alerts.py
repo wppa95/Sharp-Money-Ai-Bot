@@ -742,7 +742,7 @@ def _sanitize_user_alert_message(message: str) -> str:
         flags=re.IGNORECASE,
     )
     # These are internal routing/signal labels, never user-facing Telegram
-    # classifications.  Keep the actual PICK and Quality lines intact.
+    # classifications.  Keep the actual PICK line intact.
     text = re.sub(
         r"(?:🔥\s*)?<b>\s*(?:STRONG UNDER|UNDER SIGNAL|OVER SIGNAL)\s*</b>"
         r"(?:\s*<i>\s*\(informational signal\)\s*</i>)?",
@@ -758,6 +758,17 @@ def _sanitize_user_alert_message(message: str) -> str:
         flags=re.IGNORECASE,
     )
     text = re.sub(r"\bACTIONABLE(?: BET PICK)?\b", "", text, flags=re.IGNORECASE)
+    # Quality remains an internal/reporting metric, never a Telegram PLAY
+    # field. Strip both the current HTML form and legacy plain-text variants
+    # at the final boundary so direct/older formatter callers stay compliant.
+    text = re.sub(
+        r"(?:^|\n)\s*(?:<b>\s*)?Quality:\s*(?:</b>\s*)?"
+        r"(?:<code>\s*)?\d+(?:\.\d+)?\s*/\s*100(?:\s*</code>)?"
+        r"(?:\s*[★☆]+)?\s*(?=\n|$)",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
     text = re.sub(r"\bdecision_pass\b", "no-direction", text, flags=re.IGNORECASE)
     text = re.sub(r"\bnot_immediate\b", "not yet actionable", text, flags=re.IGNORECASE)
     # PASS is an internal recommendation state, not a user-facing outcome.
@@ -907,7 +918,7 @@ def format_pp_alert(
     under_fmt = format_odds(opp.sportsbook_under_odds)
 
     parts = [
-        f"🟣 <b>PRIZEPICKS PICK</b>",
+        f"📊 <b>SHARP MONEY PLAY</b>",
         "",
         f"{s_icon} <b>{pp.sport} — {pp.stat_type}</b>",
         f"👤 <b>{pp.player_name}</b> ({pp.team})",
@@ -917,7 +928,7 @@ def format_pp_alert(
         f"📉 <b>SB Odds:</b>     O {over_fmt} / U {under_fmt}",
         "",
         f"⚖️  <b>Fair Prob:</b>   {format_probability(adj_prob)} at PP line",
-        f"{side_icon} <b>Best Side:</b>  {opp.best_side}",
+        f"📌 <b>PICK:</b>  {side_icon} <b>{opp.best_side} {pp.line_value}</b>",
         f"💰 <b>Edge:</b>        {opp.best_edge:+.2f}%",
     ]
 

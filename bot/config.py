@@ -242,12 +242,11 @@ class Config:
 
     # Underdog thresholds
     # Minimum absolute line change (units) to pass through to the scoring layer.
-    # The grading model then applies a separate quality gate (UD_MIN_STARS_TO_ALERT).
+    # Retained for scoring/diagnostics and compatibility; it is not an
+    # independent Telegram PLAY gate.
     MIN_UNDERDOG_LINE_CHANGE: float = float(os.environ.get("MIN_UNDERDOG_LINE_CHANGE", "0.5"))
-    # Minimum star rating (1–5) required to send an Underdog alert.
-    # 3★ = B-tier (moderate confidence, sufficient data quality).
-    # B-tier passes only when the per-tier confidence gate (UD_MIN_CONF_B) also clears.
-    # Set to 1 to disable star gating entirely; set to 4 to restore A-tier-only behaviour.
+    # Minimum star rating used by the new-prop immediate-evaluation heuristic.
+    # It does not independently block an evidence-backed Telegram PLAY.
     UD_MIN_STARS_TO_ALERT:    int   = int(os.environ.get("UD_MIN_STARS_TO_ALERT", "3"))
     # Relaxed star floor for non-strict sports (all sports except MLB/NFL).
     # Lowered to 2★ so the pipeline surfaces more non-MLB/NFL opportunities
@@ -419,11 +418,9 @@ class Config:
     # during stress-testing while leaving MLB/NFL thresholds untouched.
     UD_NON_STRICT_MIN_CONF_A: int = int(os.environ.get("UD_NON_STRICT_MIN_CONF_A", "75"))
     UD_NON_STRICT_MIN_CONF_B: int = int(os.environ.get("UD_NON_STRICT_MIN_CONF_B", "45"))
-    # Minimum bet_quality_score (= decision.confidence) for strict sports (MLB/NFL).
-    # A strict-sport pick must pass BOTH S-tier classification AND this BQ floor.
-    # Default 95: MLB/NFL require very high confidence before Telegram delivery.
-    # Raised from 85 → 95 (fix #117: BQ=85 picks were reaching Telegram).
-    # Set via UD_STRICT_SPORT_MIN_BET_QUALITY env var to override.
+    # Legacy compatibility setting.  Quality/BQ is available to scoring,
+    # ranking, and reporting, but never independently blocks a valid
+    # evidence-backed Telegram PLAY.
     UD_STRICT_SPORT_MIN_BET_QUALITY: int = int(
         os.environ.get("UD_STRICT_SPORT_MIN_BET_QUALITY", "95")
     )

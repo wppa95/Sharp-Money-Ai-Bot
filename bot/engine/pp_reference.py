@@ -416,44 +416,14 @@ async def run_pp_reference_cycle(
         if match is None:
             continue
 
-        _dedup_identity = {
-            "provider": provider,
-            "source_id": p.get("source_id") or p.get("external_id") or "",
-            "event_id": p.get("event_id") or p.get("game_id") or "",
-            "direction": direction,
-        }
-        if not _try_claim_prop_delivery(
-            alerted_set,
-            player,
-            sport,
-            stat_type,
-            line,
-            dedup_window_seconds=_config.config.UD_ALERT_DEDUP_WINDOW,
-            min_line_change=_config.config.MIN_UNDERDOG_LINE_CHANGE,
-            **_dedup_identity,
-        ):
-            continue
-
-        try:
-            message = format_pp_reference_alert(match)
-            counts  = await broadcast_alert(bot, chat_ids, message, sport=sport)
-            if counts.get("sent", 0) <= 0:
-                _release_prop_delivery_claim(
-                    alerted_set, player, sport, stat_type, line, **_dedup_identity
-                )
-            else:
-                alerts_sent += 1
-                logger.info(
-                    "pp_reference alert sent: %s / %s / %s  conf=%d  src=%s",
-                    player, stat_type, sport, match.confidence, match.pp_source,
-                )
-        except Exception as exc:
-            _release_prop_delivery_claim(
-                alerted_set, player, sport, stat_type, line, **_dedup_identity
-            )
-            logger.warning(
-                "pp_reference: failed to send alert for %s / %s: %s",
-                player, stat_type, exc,
-            )
+        # Cross-provider matching is corroboration context only.  It must
+        # never create an independent Telegram message: the canonical
+        # Underdog PLAY formatter displays any verified companion line beside
+        # the playable source line.
+        logger.debug(
+            "pp_reference: matched companion data (no independent Telegram alert): "
+            "%s / %s / %s conf=%d src=%s",
+            player, stat_type, sport, match.confidence, match.pp_source,
+        )
 
     return alerts_sent

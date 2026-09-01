@@ -1,0 +1,493 @@
+@Replit
+
+Make the following final Telegram PLAY presentation and gate clarification changes.
+
+Do NOT change the scoring formulas, existing evidence calculations, monitoring cadence, provider polling, line-movement logic, or any other V4 behavior except where explicitly stated below.
+
+## 1. PLAY GATE — EVIDENCE/HISTORY IS THE FUNDAMENTAL GATE
+
+IMPORTANT:
+
+Quality is NOT the primary gate blocker for a Telegram PLAY.
+
+The fundamental gate for a PLAY should be valid, sufficient CURRENT-LINE EVIDENCE/HISTORY.
+
+A PLAY should require:
+
+- Valid current Underdog line
+- Valid current-line historical game-level evidence
+- Sufficient evidence/history to support the evaluation
+- Correct current-line hit rates
+- Fresh current-line direction/evaluation
+- Existing V4 PLAY qualification requirements that are based on evidence/history
+
+Do NOT introduce or preserve a separate Quality-score gate that blocks an otherwise valid evidence-backed PLAY solely because its Quality score is below some arbitrary threshold.
+
+Quality can remain an internal model/evaluation metric and may be used for:
+- internal ranking
+- analysis
+- learning
+- reporting
+- diagnostics
+
+But Quality must NOT independently block a valid evidence-backed PLAY from Telegram unless that behavior is explicitly required by an existing V4 qualification rule.
+
+Core principle:
+
+EVIDENCE/HISTORY = PLAY GATE
+
+QUALITY = INTERNAL EVALUATION METRIC
+
+Do not invent a new Quality threshold.
+
+Do not change the existing evidence/history requirements.
+
+Do not change the scoring formula.
+
+Do not change the existing direction logic.
+
+Do not change the existing PLAY qualification logic except to remove an unintended Quality-only blocker if one exists.
+
+## 2. REMOVE QUALITY FROM TELEGRAM PLAY DISPLAY
+
+The Telegram PLAY alert is too cluttered.
+
+Remove this from all user-facing Telegram PLAY alerts:
+
+Quality: XX/100
+
+Quality must remain available internally and in analytical/reporting commands where appropriate.
+
+It should NOT be displayed in the Telegram PLAY alert.
+
+The Telegram alert should communicate the PLAY and the evidence clearly without exposing unnecessary model diagnostics.
+
+## 3. REPLACE THE MISLEADING "UNDERDOG PICK" HEADER
+
+The bot uses both Underdog and PropLine/PrizePicks data.
+
+Therefore:
+
+🐶 UNDERDOG PICK
+
+is misleading as the overall alert header because it can imply the analysis is based exclusively on Underdog.
+
+Replace the overall user-facing header with:
+
+📊 SHARP MONEY PLAY
+
+This identifies the message as the bot's actual qualified PLAY.
+
+Still clearly identify the sportsbook/source of the playable line inside the alert.
+
+For example:
+
+📊 SHARP MONEY PLAY
+⚾ MLB — Hits + Runs + RBIs
+👤 Player
+
+🐶 Underdog: 1.5
+Previous: 0.5
+Move: +1.0
+
+📌 PICK: UNDER 1.5
+💪 STRONG BET
+
+L5: 0/5
+L10: 2/10
+L20: 8/20
+L30: 11/30
+
+Reason: Line is 50% above historical average
+
+The exact available evidence/history should continue to be displayed according to the existing V4 rules.
+
+## 4. TELEGRAM MUST REMAIN PLAY-ONLY
+
+Telegram should ONLY receive a message when there is a genuine qualified PLAY under the existing V4 PLAY rules.
+
+Do NOT send Telegram alerts for:
+
+- player detected
+- new prop detected
+- tracked observation
+- historical evidence available
+- line movement by itself
+- informational market signal
+- informational OVER signal
+- informational UNDER signal
+- non-qualified directional opportunity
+- rescoring that does not create a qualified PLAY
+- stable-refresh observations
+- full-pool observations
+- unchanged observations
+- internal monitoring updates
+
+The bot can monitor/evaluate/score everything internally.
+
+Telegram is the clean PLAY feed.
+
+## 5. TELEGRAM PLAY CLASSIFICATION MUST BE SINGULAR
+
+A Telegram PLAY should have ONE clear user-facing classification.
+
+Do NOT display both:
+
+ACTIONABLE
+
+and
+
+STRONG BET
+
+as separate labels.
+
+ACTIONABLE can remain an internal database/population/state classification.
+
+It must NOT appear as a separate user-facing Telegram label.
+
+For applicable qualified PLAYs, use:
+
+💪 STRONG BET
+
+as the user-facing classification.
+
+Do NOT show:
+
+🟢 ACTIONABLE
+
+in the Telegram PLAY.
+
+Do NOT duplicate the same concept using multiple classifications.
+
+## 6. REMOVE INFORMATIONAL SIGNAL LABELS FROM TELEGRAM
+
+A qualified PLAY must never also be labeled as an informational signal.
+
+Remove from Telegram:
+
+- OVER SIGNAL
+- UNDER SIGNAL
+- OVER SIGNAL (informational signal)
+- UNDER SIGNAL (informational signal)
+- STRONG UNDER
+- any other internal informational directional label
+
+Direction should only appear through:
+
+📌 PICK: OVER X.X
+
+or
+
+📌 PICK: UNDER X.X
+
+The user should not have to interpret competing labels.
+
+## 7. TELEGRAM FORMAT SHOULD BE CLEAN AND READABLE
+
+The final Telegram PLAY should prioritize:
+
+1. SHARP MONEY PLAY
+2. Sport / market
+3. Player
+4. Playable sportsbook/source line
+5. Previous line / movement when applicable
+6. PICK
+7. STRONG BET when applicable
+8. Concise actual-game history
+9. Concise reason
+
+Avoid unnecessary model diagnostics.
+
+Do NOT display:
+
+- Quality score
+- ACTIONABLE
+- informational signal labels
+- duplicate classifications
+- internal routing/state terminology
+- debug information
+- unnecessary model metadata
+
+The objective is a clean, readable PLAY alert.
+
+## 8. LINE MOVEMENT STILL REQUIRES FRESH EVALUATION
+
+Do not weaken the existing line-movement/evidence integrity fixes.
+
+Every material line movement must trigger a fresh evaluation against the NEW line.
+
+The pipeline remains:
+
+CURRENT LINE
+→ CURRENT GAME-LEVEL HISTORY
+→ CURRENT EDGE
+→ CURRENT DIRECTION
+→ CURRENT PLAY EVALUATION
+→ PLAY GATE
+→ TELEGRAM ONLY IF QUALIFIED
+
+Never reuse old-line evidence.
+
+Never reuse old-line hit rates.
+
+Never reuse old-line direction.
+
+Never reuse old-line reason.
+
+Never reuse old-line evaluation simply because the player/stat identity is unchanged.
+
+## 9. MOVEMENT DOES NOT DETERMINE DIRECTION
+
+A line movement is an evaluation trigger, NOT a betting direction.
+
+Examples:
+
+0.5 → 1.5 can produce OVER 1.5 or UNDER 1.5.
+
+1.5 → 0.5 can produce OVER 0.5 or UNDER 0.5.
+
+4.5 → 3.5 can produce OVER 3.5 or UNDER 3.5.
+
+Direction must come from fresh current-line evidence.
+
+Do NOT change the existing direction/scoring model.
+
+## 10. HISTORY MUST REMAIN GAME-LEVEL
+
+Keep the existing V4 history fix.
+
+L5/L10/L20/L30 must use actual completed games with valid player-stat results.
+
+Do NOT count:
+
+- provider polling snapshots
+- line snapshots
+- repeated monitoring observations
+- tracking records
+- repeated scans
+
+as separate games.
+
+Sample sizes must be honest.
+
+If only 16 valid games exist:
+
+- L5 may be shown
+- L10 may be shown
+- L15 may be shown if supported
+- L20 must be marked insufficient
+- L30 must be marked insufficient
+
+Never label an 8/15 sample as L20.
+
+Never label a 16-game sample as L30.
+
+Never call polling observations a 30-game sample.
+
+## 11. CURRENT-LINE HISTORY MUST MATCH THE PLAY
+
+Historical hit rates must always be recalculated against the CURRENT line.
+
+Example:
+
+If the prop moves:
+
+0.5 → 1.5
+
+the history must determine how the player performed relative to 1.5.
+
+Do not reuse the old 0.5-line hit rate.
+
+The following must all belong to the same current-line evaluation:
+
+- current line
+- historical game results
+- hit rates
+- edge
+- direction
+- PLAY
+- reason
+
+## 12. PROP LINE / PRIZEPICKS DATA
+
+Continue using PropLine/PrizePicks data as a companion data source.
+
+Do not imply that the entire PLAY is exclusively an Underdog signal.
+
+The PLAY source line should still be explicitly identified.
+
+For example:
+
+🐶 Underdog: 1.5
+
+PropLine/PrizePicks data can contribute to the analysis/evidence without replacing the playable Underdog line.
+
+Do not change provider polling cadence or request budgets.
+
+## 13. POPULATION INTEGRITY
+
+Keep the V4 population separation:
+
+Observed
+→ Evaluated
+→ Active
+→ Directional
+→ Qualified PLAY
+→ Telegram Delivered PLAY
+→ Pending PLAY
+→ Completed/Graded PLAY
+
+Do not let observations or informational signals inflate PLAY counts.
+
+Directional ≠ PLAY.
+
+Actionable/internal state ≠ Telegram delivered.
+
+Delivered ≠ graded.
+
+Historical/legacy graded observations ≠ current V4 Telegram PLAYs.
+
+Keep these populations consistent across:
+
+- /funnel
+- /tracking
+- /performance
+- /grade
+- /slipstats
+- /dashboard
+- learning/rollups
+
+## 14. LEARNING ROLLUPS
+
+Continue the existing fix that distinguishes:
+
+- current qualified Telegram PLAYs
+- delivered Telegram PLAYs
+- historical/legacy graded observations
+
+🎯 TELEGRAM ACTIONABLE PICKS must count ONLY actual qualified PLAY alerts delivered to Telegram.
+
+Do not populate this from:
+- ordinary observations
+- directional signals
+- historical tracking
+- legacy observations
+- internal scoring records
+
+Preserve historical grading data but label the population accurately.
+
+Do not let historical/legacy records make it appear that current V4 Telegram PLAYs were sent when they were not.
+
+## 15. COMMANDS / REPORTING
+
+Do not regress the previous command audit/fixes.
+
+Ensure these continue to work:
+
+/help
+/status
+/health
+/system
+/providers
+/config
+/funnel
+/tracking
+/dashboard
+/performance
+/grade
+/backtest
+/picks
+/slip
+/slipstats
+/market
+/reconcile
+/player
+/analyze
+/testalert
+/slip create
+/slip grade
+
+Keep /help synchronized with the actual registered command set.
+
+Keep parent/subcommand parsing working.
+
+Keep reporting populations consistent with the V4 PLAY boundary.
+
+Do not allow /testalert to inflate real PLAY statistics if it is only a test.
+
+## 16. REGRESSION TESTS
+
+Add/update focused tests for:
+
+### PLAY gate
+- Valid evidence-backed PLAY is not blocked solely by Quality.
+- Insufficient evidence/history blocks the PLAY.
+- Quality remains available internally.
+- Quality does not appear in Telegram.
+
+### Telegram
+- Qualified PLAY produces Telegram alert.
+- Non-qualified observation does not.
+- Line movement without qualified PLAY does not.
+- Informational OVER signal does not alert.
+- Informational UNDER signal does not alert.
+- Qualified PLAY contains no informational signal label.
+- Qualified PLAY does not display ACTIONABLE as a separate label.
+- Qualified PLAY displays STRONG BET when applicable.
+- Duplicate unchanged PLAY does not alert.
+- Genuine new qualified PLAY after line movement can alert.
+- Telegram header is SHARP MONEY PLAY, not UNDERDOG PICK.
+
+### Evidence/history
+- New line causes fresh current-line calculation.
+- Old-line hit rates cannot leak into new evaluation.
+- Actual completed games are used.
+- Provider snapshots are not treated as games.
+- L20/L30 cannot exceed available valid games.
+
+### Population integrity
+- Observations do not count as PLAYs.
+- Directional signals do not count as PLAYs.
+- Historical/legacy grading does not count as current Telegram PLAYs.
+- Delivered PLAY population is accurate.
+- Learning rollups use the correct population.
+
+## 17. VERIFICATION
+
+Before completion verify:
+
+1. Quality is no longer a Telegram display field.
+2. Quality does not independently block a valid evidence-backed PLAY.
+3. Evidence/history remains the fundamental PLAY gate.
+4. Telegram contains only qualified PLAYs.
+5. Telegram header says SHARP MONEY PLAY.
+6. The playable sportsbook/source line is clearly identified.
+7. ACTIONABLE is not shown as a separate Telegram classification.
+8. STRONG BET is the single user-facing classification when applicable.
+9. Informational OVER/UNDER signals never appear on PLAY alerts.
+10. Line movement triggers fresh current-line evaluation.
+11. Movement never directly determines betting direction.
+12. Historical hit rates use actual game-level results.
+13. Sample sizes remain honest.
+14. Old-line evidence cannot leak into new evaluations.
+15. Learning rollups maintain correct populations.
+16. Existing Telegram commands remain functional.
+17. Existing scoring formulas remain unchanged.
+18. Existing scoring thresholds remain unchanged.
+19. Existing monitoring cadence remains unchanged.
+20. Existing V4 provider/budget behavior remains unchanged.
+21. Full test suite remains passing.
+
+Do not redesign unrelated systems.
+
+Do not change scoring formulas.
+
+Do not change scoring thresholds.
+
+Do not change monitoring cadence.
+
+Do not introduce a new Quality gate.
+
+The goal is a cleaner Telegram PLAY feed where the only fundamental blocker is whether there is sufficient, valid, current-line evidence/history to support the PLAY.
+
+restart to apply the changes and checkpoint.

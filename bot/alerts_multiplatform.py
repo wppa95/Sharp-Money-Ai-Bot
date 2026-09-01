@@ -326,9 +326,9 @@ def _format_decision_block(
     line: Optional[float] = None,
 ) -> str:
     """
-    Format the full OVER / UNDER evaluation block for Underdog alerts.
+     Format the full OVER / UNDER evaluation block for internal/legacy callers.
 
-    Shows confidence, all per-window hit-rate statistics, and a reason.
+     Shows confidence, all per-window hit-rate statistics, and a reason.
     When *line* is supplied and the recommendation is OVER or UNDER, a
     "📌 Suggested Play: OVER/UNDER X.X" line is added immediately after the
     recommendation so the actionable play is always visible at a glance.
@@ -746,11 +746,7 @@ def format_underdog_change_alert(
         header         = f"🚫 <b>{source_upper} PROP REMOVED</b>"
         movement_block = f"  🐶 <b>Last Line:</b>  <code>{old_line:.1f}</code>"
     elif standing:
-        header         = (
-            "🐶 <b>UNDERDOG PICK</b>"
-            if source_upper == "UNDERDOG"
-            else "🟣 <b>PRIZEPICKS PICK</b>"
-        )
+        header         = "📊 <b>SHARP MONEY PLAY</b>"
         movement_block = (
             f"📊 <b>LINE</b> · {escape(source)}\n"
             f"  {source_emoji} <code>{new_line:.1f}</code>  {_line_label(new_line)}"
@@ -758,11 +754,7 @@ def format_underdog_change_alert(
     else:
         change         = new_line - old_line
         direction_icon = "📈" if change > 0 else "📉"
-        header         = (
-            "🐶 <b>UNDERDOG PICK</b>"
-            if source_upper == "UNDERDOG"
-            else "🟣 <b>PRIZEPICKS PICK</b>"
-        )
+        header         = "📊 <b>SHARP MONEY PLAY</b>"
         change_sign    = "+" if change >= 0 else ""
         movement_block = (
             f"📊 <b>LINE</b> · {escape(source)}\n"
@@ -792,30 +784,24 @@ def format_underdog_change_alert(
     change = (new_line - old_line) if not removed else 0.0
     change_sign = "+" if change >= 0 else ""
 
-    # Pick / quality from decision.  Tier remains internal metadata only.
+    # Pick from decision.  Quality and tier remain internal metadata only.
     rec = getattr(decision, "recommendation", None) if decision else None
     conf = getattr(decision, "confidence", None) if decision else None
     if conf is None and score is not None:
         conf = getattr(score, "total", None)
 
     pick_line = ""
-    strong_under_line = ""
     if rec in ("OVER", "UNDER") and not removed:
         pick_emoji = "🟢" if rec == "OVER" else "🔴"
         pick_line = f"📌 <b>PICK:</b>  {pick_emoji} <b>{rec} {new_line:.1f}</b>"
         if conf is not None:
             _bq_int = int(conf)
-            # _bq_stars remains the source of truth for the displayed quality stars.
-            pick_line += f"\n{_format_quality_line(decision, score)}"
-            # Telegram has one user-facing classification.  Retain the
-            # positive quality cue, but never append ACTIONABLE or directional
-            # signal labels beside the canonical PICK.
-            if _bq_int >= 80:
+            # Keep the existing quality-to-priority mapping internal.  The
+            # result is intentionally not rendered in Telegram.
+            _bq_star_count = _bq_stars(_bq_int).count("★")
+            if _bq_star_count >= 4:
                 pick_line += "\n💪 STRONG BET"
-        _is_tier1_sport = sport.upper() not in {"MLB", "NFL"}
 
-    # Market quality one-liner
-    mq_line = _format_market_quality_line(market_quality) if not removed else ""
     avail_block = _format_available_lines_block(
         ud_line=new_line if not removed else old_line,
         pp_line=pp_line,
@@ -870,8 +856,6 @@ def format_underdog_change_alert(
                 body_lines += [history]
             if decision_reason:
                 body_lines += [f"\n💬 <b>Reason:</b>\n   <i>{decision_reason}</i>"]
-        if mq_line:
-            body_lines += [mq_line]
         if _confirm_line:
             body_lines += [_confirm_line]
         body_lines += [
@@ -986,9 +970,8 @@ def format_underdog_new_prop_alert(
     )
 
     # Quality labels are informational only; direction is the sole
-    # qualification gate.
-    # _bq_stars is applied inside _format_quality_line so quality stars still
-    # come from decision confidence rather than the raw market score.
+    # qualification gate.  Quality is retained for internal scoring/reporting
+    # but deliberately omitted from the Telegram PLAY presentation.
     # Reason bullets
     reasons = ["Qualified current-line player evidence"]
     if line_value <= low_line_threshold:
@@ -1010,28 +993,18 @@ def format_underdog_new_prop_alert(
         dk_line=dk_line,
         fd_line=fd_line,
     )
-    quality_line = _format_quality_line(decision, score)
     history_block = _format_history_block(decision)
-    market_line = _format_market_quality_line(market_quality)
-    pressure_block = _format_market_pressure_block(market_pressure)
     context_line = (
         f"  <b>First Seen:</b>    {datetime.utcnow().strftime('%H:%M UTC')}"
         + (f"\n{opponent_str}" if opponent_str else "")
         + (f"\n{game_str}" if game_str else "")
-        + (f"\n{quality_line}" if quality_line else "")
         + (f"\n{history_block}" if history_block else "")
-        + (f"\n{market_line}" if market_line else "")
-        + (f"\n{pressure_block}" if pressure_block else "")
     )
 
     _thick = "━" * 18
     parts = [
         _thick,
-        (
-            "🐶 <b>UNDERDOG PICK</b>"
-            if source_upper == "UNDERDOG"
-            else "🟣 <b>PRIZEPICKS PICK</b>"
-        ),
+        "📊 <b>SHARP MONEY PLAY</b>",
         _thick,
         "",
             f"{sport_icon} <b>{escape(str(sport))} — {escape(str(stat_type))}</b>",
@@ -1043,6 +1016,24 @@ def format_underdog_new_prop_alert(
         _div(),
         f"  {source_emoji} <b>LINE · {escape(source)}:</b>  <code>{line_value:.1f}</code>  {_line_label(line_value)}",
         context_line,
+        *(
+            [
+                f"📌 <b>PICK:</b>  "
+                f"{'🟢' if getattr(decision, 'recommendation', '') == 'OVER' else '🔴'} "
+                f"<b>{escape(str(getattr(decision, 'recommendation', '')))} {line_value:.1f}</b>"
+            ]
+            if getattr(decision, "recommendation", "") in ("OVER", "UNDER")
+            else []
+        ),
+        *(
+            ["💪 STRONG BET"]
+            if (
+                getattr(decision, "recommendation", "") in ("OVER", "UNDER")
+                and isinstance(getattr(decision, "confidence", None), (int, float))
+                and _bq_stars(int(getattr(decision, "confidence"))).count("★") >= 4
+            )
+            else []
+        ),
         "",
         "<b>Reason:</b>\n" + " · ".join(escape(reason) for reason in reasons),
         *([f"📡 <b>Market Check:</b>  {escape(str(market_confirmation['notes']))}"]
