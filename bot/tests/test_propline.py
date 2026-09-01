@@ -8,8 +8,12 @@ from datetime import datetime, timedelta
 import pytest
 
 from providers.propline import (
+    PropLineRequestBudget,
     PropLineClient,
     PropLinePrizePicksProvider,
+    propline_event_identity,
+    propline_market_identity,
+    propline_player_identity,
     normalize_propline_prizepicks_record,
 )
 from providers.prop_provider import PlayerProp
@@ -555,6 +559,272 @@ def test_player_prop_extra_metadata_is_optional_for_existing_providers():
     )
     assert prop.direction == ""
     assert prop.source_timestamp is None
+
+
+def test_sports_pagination_follows_all_cursors_without_a_page_ceiling():
+    session = _QueueSession(
+        [
+            _Response(
+                200,
+                {
+                    "data": [{"key": "basketball_nba", "active": True}],
+                    "pagination": {"next_cursor": "cursor-1"},
+                },
+            ),
+            _Response(
+                200,
+                {
+                    "data": [
+                        {"key": "hockey_nhl", "active": True},
+                        {"key": "tennis", "active": True},
+                    ],
+                    "pagination": {"next_cursor": "cursor-2"},
+                },
+            ),
+            _Response(200, {"data": [{"key": "golf", "active": True}]}),
+        ]
+    )
+    budget = PropLineRequestBudget(10)
+    client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://api.prop-line.com",
+        session=session,
+        min_request_interval=0,
+        request_budget=budget,
+    )
+
+    sports = asyncio.run(client.discover_sports())
+
+    assert [sport.canonical_key for sport in sports] == ["NBA", "NHL", "TENNIS", "GOLF"]
+    assert [call[1]["params"] for call in session.calls] == [
+        {},
+        {"cursor": "cursor-1"},
+        {"cursor": "cursor-2"},
+    ]
+    assert budget.count == 3
+
+
+def test_sports_pagination_stops_on_repeated_page_and_marks_no_partial_catalog():
+    session = _QueueSession(
+        [
+            _Response(
+                200,
+                {
+                    "data": [{"key": "basketball_nba", "active": True}],
+                    "pagination": {"next_cursor": "cursor-1"},
+                },
+            ),
+            _Response(
+                200,
+                {
+                    "data": [{"key": "basketball_nba", "active": True}],
+                    "pagination": {"next_cursor": "cursor-2"},
+                },
+            ),
+        ]
+    )
+    client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://api.prop-line.com",
+        session=session,
+        min_request_interval=0,
+        cache_ttl=0,
+        request_budget=PropLineRequestBudget(10),
+    )
+
+    assert asyncio.run(client.discover_sports()) == []
+    assert len(session.calls) == 2
+
+
+def _event(event_id, home, away, start="2026-08-28T00:00:00Z"):
+    return {
+        "id": event_id,
+        "sport_key": "basketball_nba",
+        "home_team": home,
+        "away_team": away,
+        "commence_time": start,
+    }
+
+
+def _event_odds(event_id, player="Alex Example", direction="Over"):
+    return [
+        {
+            "id": event_id,
+            "sport_key": "basketball_nba",
+            "bookmakers": [
+                {
+                    "key": "prizepicks",
+                    "markets": [
+                        {
+                            "key": "player_points",
+                            "outcomes": [
+                                {
+                                    "description": player,
+                                    "player_id": "player-1",
+                                    "name": direction,
+                                    "point": 24.5,
+                                    "dfs_odds_type": "standard",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+
+
+def test_event_discovery_and_event_scoped_odds_build_complete_snapshot():
+    session = _QueueSession(
+        [
+            _Response(
+                200,
+                {
+                    "events": [_event("game-1", "Test Town", "Example City")],
+                    "pagination": {"has_more": True},
+                },
+            ),
+            _Response(200, {"events": [_event("game-2", "Other Town", "Another City")]}),
+            _Response(200, _event_odds("game-1")),
+            _Response(200, _event_odds("game-2", "Second Player", "Under")),
+        ]
+    )
+    client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://api.prop-line.com",
+        session=session,
+        min_request_interval=0,
+        request_budget=PropLineRequestBudget(10),
+    )
+
+    result = asyncio.run(
+        client.fetch_event_scoped_props(sport_key="basketball_nba")
+    )
+
+    assert result.succeeded is True
+    assert result.complete is True
+    assert result.discovered_event_count == 2
+    assert result.fetched_event_count == 2
+    assert {prop.player_name for prop in result.props} == {"Alex Example", "Second Player"}
+    assert [call[0] for call in session.calls] == [
+        "https://api.prop-line.com/v1/sports/basketball_nba/events",
+        "https://api.prop-line.com/v1/sports/basketball_nba/events",
+        "https://api.prop-line.com/v1/sports/basketball_nba/events/game-1/odds",
+        "https://api.prop-line.com/v1/sports/basketball_nba/events/game-2/odds",
+    ]
+
+
+def test_incomplete_event_snapshot_retains_last_complete_snapshot():
+    session = _QueueSession(
+        [
+            _Response(200, {"events": [_event("game-1", "Test Town", "Example City")]}),
+            _Response(200, _event_odds("game-1")),
+            _Response(200, {"events": [_event("game-1", "Test Town", "Example City")]}),
+            _Response(503, {}),
+        ]
+    )
+    client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://api.prop-line.com",
+        session=session,
+        min_request_interval=0,
+        cache_ttl=0,
+        request_budget=PropLineRequestBudget(10),
+    )
+
+    first = asyncio.run(client.fetch_event_scoped_props(sport_key="basketball_nba"))
+    second = asyncio.run(client.fetch_event_scoped_props(sport_key="basketball_nba"))
+
+    assert first.complete is True
+    assert second.succeeded is False
+    assert second.complete is False
+    assert second.retained_last_success is True
+    assert [prop.player_name for prop in second.props] == ["Alex Example"]
+    assert second.failed_event_ids == ("game-1",)
+
+
+def test_event_404_rediscovery_matches_home_away_start_before_retrying():
+    session = _QueueSession(
+        [
+            _Response(404, {}),
+            _Response(
+                200,
+                {"events": [_event("rotated-game", "Test Town", "Example City")]},
+            ),
+            _Response(200, _event_odds("rotated-game")),
+        ]
+    )
+    client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://api.prop-line.com",
+        session=session,
+        min_request_interval=0,
+        request_budget=PropLineRequestBudget(10),
+    )
+    stale_event = _event("old-game", "Test Town", "Example City")
+
+    result = asyncio.run(
+        client.fetch_event_props("basketball_nba", stale_event)
+    )
+
+    assert result.succeeded is True
+    assert result.complete is True
+    assert [call[0] for call in session.calls] == [
+        "https://api.prop-line.com/v1/sports/basketball_nba/events/old-game/odds",
+        "https://api.prop-line.com/v1/sports/basketball_nba/events",
+        "https://api.prop-line.com/v1/sports/basketball_nba/events/rotated-game/odds",
+    ]
+
+
+def test_stable_identities_prefer_ids_and_normalize_fallback_components():
+    assert propline_event_identity({"id": "GAME-1"}) == "event:game-1"
+    assert propline_player_identity({"id": "P-1", "name": "Alex Example"}) == "player:p-1"
+    assert propline_market_identity("player_points", direction="Over") == "market:points:over"
+    first = propline_event_identity(
+        {
+            "home_team": "Test Town",
+            "away_team": "Example City",
+            "start_time": "2026-08-28T00:00:00Z",
+        },
+        sport_key="basketball_nba",
+    )
+    second = propline_event_identity(
+        {
+            "home_team": " Test   Town ",
+            "away_team": "Example City",
+            "start_time": "2026-08-28T00:00:00+00:00",
+        },
+        sport_key="basketball_nba",
+    )
+    assert first == second
+
+
+def test_request_budget_is_centralized_across_clients_and_counts_every_request():
+    budget = PropLineRequestBudget(1)
+    first_session = _Session(_Response(200, []))
+    second_session = _Session(_Response(200, []))
+    first = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://api.prop-line.com",
+        session=first_session,
+        min_request_interval=0,
+        request_budget=budget,
+    )
+    second = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://api.prop-line.com",
+        session=second_session,
+        min_request_interval=0,
+        request_budget=budget,
+    )
+
+    assert asyncio.run(first.fetch_prizepicks_props(sport_key="basketball_nba")).succeeded
+    blocked = asyncio.run(second.fetch_prizepicks_props(sport_key="basketball_nba"))
+
+    assert budget.count == 1
+    assert blocked.succeeded is False
+    assert blocked.failure_kind == "quota"
+    assert second_session.calls == []
 
 
 @pytest.mark.asyncio

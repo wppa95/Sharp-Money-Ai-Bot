@@ -217,6 +217,10 @@ class PropLineEvent:
     start_time: Optional[datetime] = None
     label: str = ""
 
+    @property
+    def identity(self) -> str:
+        return propline_event_identity(self)
+
 
 @dataclass(frozen=True)
 class PropLineSnapshotState:
@@ -335,7 +339,10 @@ def propline_market_identity(
     """Return a stable player-market identity; line movement is not identity."""
     if isinstance(market, dict):
         market = _first(market, "key", "market_key", "market", "name", "stat", "stat_type")
-    normalized_market = _normalize_stat(market or stat_type)
+    market_text = _clean(market or stat_type).lower()
+    if market_text.startswith("player_"):
+        market_text = market_text.removeprefix("player_")
+    normalized_market = _normalize_stat(market_text)
     normalized_direction = _normalize_direction(direction)
     return ":".join(
         (
@@ -532,7 +539,7 @@ def _extract_records(payload: Any) -> list[dict[str, Any]]:
         return [item for item in payload if isinstance(item, dict)]
     if not isinstance(payload, dict):
         return []
-    for key in ("data", "props", "lines", "projections", "results", "items"):
+    for key in ("data", "props", "lines", "projections", "results", "items", "events"):
         value = payload.get(key)
         if isinstance(value, list):
             return [item for item in value if isinstance(item, dict)]
@@ -897,9 +904,6 @@ class PropLineClient:
         self._snapshot_state_by_scope: dict[str, PropLineSnapshotState] = {}
         self._events_cache_by_sport: dict[str, tuple[PropLineEvent, ...]] = {}
         self._events_cache_clock_by_sport: dict[str, float] = {}
-        # Keep the historical attribute as a read/write compatibility shim,
-        # while the actual limit is owned by the shared budget.
-        self.daily_request_limit = self.request_budget.limit
 
     @property
     def is_configured(self) -> bool:
@@ -940,6 +944,15 @@ class PropLineClient:
     @property
     def remaining_request_budget(self) -> int:
         return self.request_budget.remaining
+
+    @property
+    def daily_request_limit(self) -> int:
+        """Compatibility view of the centralized daily request limit."""
+        return self.request_budget.limit
+
+    @daily_request_limit.setter
+    def daily_request_limit(self, value: int) -> None:
+        self.request_budget.limit = max(1, int(value))
 
     def _reserve_request(self) -> bool:
         self._reset_daily_budget_if_needed()
@@ -1031,11 +1044,12 @@ class PropLineClient:
             seen_requests.add(request_signature)
 
             payload = await self._request_json(url, current_params)
-            page_signature = _page_fingerprint(payload)
+            page_records = extractor(payload)
+            page_signature = _page_fingerprint(page_records)
             if page_signature in seen_pages:
                 return records, False, "PropLine pagination repeated a response page"
             seen_pages.add(page_signature)
-            records.extend(extractor(payload))
+            records.extend(page_records)
 
             next_cursor, has_more, total_pages = _pagination_details(payload)
             if next_cursor:
@@ -1320,15 +1334,18 @@ class PropLineClient:
                 failure_kind="configuration",
             )
         scope = f"{_clean(sport_key)}:{bookmaker.lower()}"
-        events = await self.discover_events(sport_key)
+        async with self._lock:
+            events, discovery_complete, discovery_error = await self._discover_events_locked(
+                sport_key
+            )
+        if not discovery_complete:
+            return self._failed_result(
+                scope,
+                discovery_error or "PropLine event discovery incomplete",
+                "incomplete",
+            )
         # An empty, complete catalog is a valid empty snapshot.
         if not events:
-            state = self.snapshot_state(scope)
-            if state and not state.complete:
-                return self._failed_result(
-                    scope, "PropLine event discovery returned no complete events",
-                    "incomplete",
-                )
             result = PropLineFetchResult(
                 [], datetime.utcnow(), succeeded=True, complete=True,
             )
@@ -1463,6 +1480,9 @@ class PropLineClient:
                     cached.fetched_at,
                     from_cache=True,
                     succeeded=True,
+                    complete=cached.complete,
+                    discovered_event_count=cached.discovered_event_count,
+                    fetched_event_count=cached.fetched_event_count,
                 )
             try:
                 raw_records, complete, pagination_error = await self._paginate_json(
@@ -1647,7 +1667,7 @@ class PropLinePrizePicksProvider(PropProviderBase):
         if self.client.api_url.rstrip("/") != DEFAULT_PROPLINE_API_URL:
             # Preserve the custom authorized-endpoint contract.  Discovery is
             # only valid on the official host; never guess a path elsewhere.
-            result = await self.client.fetch_prizepicks_props()
+            result = await self.client.fetch_prizepicks_props(bookmaker=self.bookmaker)
             return [
                 prop for prop in result.props
                 if not is_football_related_sport(prop.sport)
@@ -1671,7 +1691,8 @@ class PropLinePrizePicksProvider(PropProviderBase):
         props: list[PlayerProp] = []
         for sport in discovered:
             result = await self.client.fetch_prizepicks_props(
-                sport_key=sport.official_key
+                sport_key=sport.official_key,
+                bookmaker=self.bookmaker,
             )
             props.extend(result.props)
         return props
@@ -1684,7 +1705,8 @@ class PropLinePrizePicksProvider(PropProviderBase):
     async def fetch_props_for_sport_result(
             self,
             sport: str,
-            bookmaker: str = "prizepicks",
+            bookmaker: Optional[str] = None,
+            event_scoped: bool = False,
         ) -> PropLineFetchResult:
         """Fetch one sport and retain whether PropLine itself accepted the request."""
         if not self.is_available():
@@ -1719,7 +1741,8 @@ class PropLinePrizePicksProvider(PropProviderBase):
             )
         result = await self.client.fetch_prizepicks_props(
             sport_key=official_sport,
-            bookmaker=bookmaker,
+            bookmaker=bookmaker or self.bookmaker,
+            event_scoped=event_scoped,
         )
         # The same official endpoint can have multiple aliases in the bot
         # namespace (for example CFB/NCAAF and SOCCER/EPL).  The requested
@@ -1731,6 +1754,25 @@ class PropLinePrizePicksProvider(PropProviderBase):
             succeeded=result.succeeded,
             error=result.error,
             failure_kind=result.failure_kind,
+            complete=result.complete,
+            discovered_event_count=result.discovered_event_count,
+            fetched_event_count=result.fetched_event_count,
+            failed_event_ids=result.failed_event_ids,
+            retained_last_success=result.retained_last_success,
+            partial_props=result.partial_props,
+        )
+
+    async def fetch_props_for_sport_event_scoped(
+        self,
+        sport: str,
+        *,
+        bookmaker: Optional[str] = None,
+    ) -> PropLineFetchResult:
+        """Opt into complete event-discovery/event-odds snapshots explicitly."""
+        return await self.fetch_props_for_sport_result(
+            sport,
+            bookmaker=bookmaker or self.bookmaker,
+            event_scoped=True,
         )
 
     def normalize_stat(self, raw: str) -> str:

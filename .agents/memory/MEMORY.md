@@ -97,3 +97,4 @@
 - [Scheduler ownership](scheduler-ownership.md) — FPR owns the only scheduled full-pool rotation; Stable Refresh remains unscheduled compatibility code.
 - [FPR cursor fairness](fpr-cursor-fairness.md) — stable identity order is the rotation; new/moving props get bounded prompt capacity without consuming cursor coverage.
 - [Async SQLite test fixtures](async-sqlite-test-fixtures.md) — module-scoped in-memory DB fixtures can lose tables across pytest event loops; use function-scoped fixtures for isolation.
+- [PropLine pagination safety](propline-pagination.md) — shared request budgeting, loop-safe pagination, complete-snapshot retention, and immutable-field event rediscovery protect the authorized feed.

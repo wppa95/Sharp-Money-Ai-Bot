@@ -23,9 +23,17 @@ from .usage_tracker import (
 from .propline import (
     PropLineClient,
     PropLineError,
+    PropLineEvent,
+    PropLineFetchResult,
     PropLineRateLimitError,
+    PropLineRequestBudget,
+    PropLineSnapshotState,
     PropLinePrizePicksProvider,
     normalize_propline_prizepicks_record,
+    propline_event_identity,
+    propline_market_identity,
+    propline_player_identity,
+    propline_prop_identity,
 )
 
 __all__ = [
@@ -47,7 +55,15 @@ __all__ = [
     "infer_call_priority",
     "PropLineClient",
     "PropLineError",
+    "PropLineEvent",
+    "PropLineFetchResult",
     "PropLineRateLimitError",
+    "PropLineRequestBudget",
+    "PropLineSnapshotState",
     "PropLinePrizePicksProvider",
     "normalize_propline_prizepicks_record",
+    "propline_event_identity",
+    "propline_market_identity",
+    "propline_player_identity",
+    "propline_prop_identity",
 ]
