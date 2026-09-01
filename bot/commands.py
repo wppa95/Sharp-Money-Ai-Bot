@@ -96,6 +96,10 @@ async def _independent_report_reads(
     for task in tasks:
         if task not in done:
             task.cancel()
+            # A canceled aiosqlite operation may finish after the command
+            # response. Consume any late exception without blocking the
+            # reporting command or leaking an unhandled task warning.
+            task.add_done_callback(_consume_finished)
             values.append(None)
             continue
         try:

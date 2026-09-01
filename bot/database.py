@@ -6,6 +6,7 @@ Stores odds history, alerts, and EV opportunities for historical tracking.
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import os
@@ -25,6 +26,8 @@ logger = logging.getLogger(__name__)
 
 _UNDERDOG_BULK_MAX_RETRIES = 2
 _UNDERDOG_BULK_RETRY_DELAYS = (0.25, 0.75)
+_DB_WRITE_MAX_RETRIES = 2
+_DB_WRITE_RETRY_DELAYS = (0.15, 0.5)
 _PRIZEPICKS_EXTERNAL_PREFIX = "PrizePicks::"
 
 
@@ -48,6 +51,34 @@ def _is_sqlite_lock_error(exc: BaseException) -> bool:
     """Return whether an exception is a transient SQLite writer lock."""
     message = str(exc).lower()
     return "database is locked" in message or "database table is locked" in message
+
+
+def _retry_sqlite_write(func):
+    """Retry a complete write operation after a transient SQLite lock.
+
+    The wrapped method owns its session, so each retry starts with a fresh
+    transaction and cannot reuse a failed session/transaction state.
+    """
+    @functools.wraps(func)
+    async def _wrapped(self, *args, **kwargs):
+        for attempt in range(_DB_WRITE_MAX_RETRIES + 1):
+            try:
+                return await func(self, *args, **kwargs)
+            except Exception as exc:
+                if not _is_sqlite_lock_error(exc) or attempt >= _DB_WRITE_MAX_RETRIES:
+                    raise
+                delay = _DB_WRITE_RETRY_DELAYS[
+                    min(attempt, len(_DB_WRITE_RETRY_DELAYS) - 1)
+                ]
+                logger.warning(
+                    "%s: SQLite lock; retry %d/%d in %.2fs",
+                    func.__name__,
+                    attempt + 1,
+                    _DB_WRITE_MAX_RETRIES,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+    return _wrapped
 
 
 def _is_supported_tracking_sport(sport: Optional[object]) -> bool:
@@ -732,6 +763,7 @@ class Database:
             return deleted
     # ── Odds ────────────────────────────────────────────────────────────────
 
+    @_retry_sqlite_write
     async def save_odds(self, record: OddsRecord) -> OddsRecord:
         async with self.session() as s:
             s.add(record)
@@ -741,6 +773,7 @@ class Database:
 
     # ── Steam ────────────────────────────────────────────────────────────────
 
+    @_retry_sqlite_write
     async def save_steam(self, record: SteamRecord) -> SteamRecord:
         async with self.session() as s:
             s.add(record)
@@ -759,6 +792,7 @@ class Database:
 
     # ── EV ───────────────────────────────────────────────────────────────────
 
+    @_retry_sqlite_write
     async def save_ev(self, record: EVRecord) -> EVRecord:
         async with self.session() as s:
             s.add(record)
@@ -3960,6 +3994,7 @@ class Database:
 
     # ── Player game results ──────────────────────────────────────────────────
 
+    @_retry_sqlite_write
     async def upsert_player_result(self, raw: object) -> None:
         """
         Insert or update a PlayerGameResult row.
@@ -4366,6 +4401,7 @@ class Database:
             "downstream_intelligence": downstream_intelligence,
         }])
         return
+    @_retry_sqlite_write
     async def log_prop_opportunity_bulk(
         self,
         opportunities: "list[dict]",
@@ -5278,6 +5314,7 @@ class Database:
             result = await s.execute(stmt.limit(max(1, min(int(limit), 500))))
             return list(result.scalars().all())
 
+    @_retry_sqlite_write
     async def grade_opportunity(
         self,
         opp_id:       int,
@@ -5371,6 +5408,7 @@ class Database:
             )
             await s.commit()
 
+    @_retry_sqlite_write
     async def mark_opportunity_alert_sent(
         self,
         external_id: str,
