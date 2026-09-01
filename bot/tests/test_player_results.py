@@ -89,7 +89,7 @@ class TestComputeHitRates:
         hr = compute_hit_rates(recs, 2.5)
         assert hr.l5 is not None
         assert hr.l5.over_count == 2    # only strict > 2.5
-        assert hr.l5.under_count == 1
+        assert hr.l5.under_count == 3  # exact-line push plus two strict unders
 
     def test_l5_l10_windows_use_most_recent(self):
         # 15 games; first 5 all OVER (values=3), last 10 mixed
