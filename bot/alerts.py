@@ -758,6 +758,15 @@ def _sanitize_user_alert_message(message: str) -> str:
         flags=re.IGNORECASE,
     )
     text = re.sub(r"\bACTIONABLE(?: BET PICK)?\b", "", text, flags=re.IGNORECASE)
+    # Normalize legacy provider-specific PLAY headers at the final boundary.
+    # The playable source is still shown in the line block below the
+    # product-level header.
+    text = re.sub(
+        r"(?:🐶|🟣)\s*<b>\s*(?:UNDERDOG|PRIZEPICKS)\s+PICK\s*</b>",
+        "📊 <b>SHARP MONEY PLAY</b>",
+        text,
+        flags=re.IGNORECASE,
+    )
     # Quality remains an internal/reporting metric, never a Telegram PLAY
     # field. Strip both the current HTML form and legacy plain-text variants
     # at the final boundary so direct/older formatter callers stay compliant.
