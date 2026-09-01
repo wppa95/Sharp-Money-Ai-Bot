@@ -893,6 +893,8 @@ async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             "",
             f"Total graded directional evaluations: <b>{total}</b>",
             "<i>This includes historical/legacy evaluations, whether or not they were sent to Telegram.</i>",
+            f"Current delivered PLAYs graded: <b>{rollups.get('telegram_graded', 0)}</b>",
+            f"Historical/legacy graded evaluations: <b>{rollups.get('historical_legacy_graded', 0)}</b>",
             "",
         ]
 
@@ -1594,8 +1596,9 @@ async def cmd_performance(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 _lines = [
                     "📊 <b>Performance History</b>",
                     "",
-                    "🎯 <b>Actionable prop performance</b>",
-                    f"Resolved plays: <b>{_total}</b>",
+                    "📚 <b>Historical/legacy directional performance</b>",
+                    f"Resolved directional evaluations: <b>{_total}</b>",
+                    "<i>These records are not necessarily Telegram-delivered PLAYs.</i>",
                 ]
                 for _source, _source_perf in sorted(_tg_perf.get("by_provider", {}).items()):
                     _lines.append(

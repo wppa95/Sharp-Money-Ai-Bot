@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from database import UnderdogSnapshotRecord
     from providers.player_history import PlayerHistorySnapshot
 
-_MIN_WINDOW = 3
+_MIN_WINDOW = 5
 
 
 @dataclass(frozen=True)
@@ -106,16 +106,19 @@ def validate_player_prop(
 ) -> PlayerPropValidation:
     n_proxy = len(history)
 
-    def _proxy_rate(window: "list[UnderdogSnapshotRecord]") -> Optional[float]:
-        if len(window) < _MIN_WINDOW:
+    def _proxy_rate(
+        window: "list[UnderdogSnapshotRecord]",
+        required_snapshots: int,
+    ) -> Optional[float]:
+        if len(window) < required_snapshots:
             return None
         moved = sum(1 for r in window if getattr(r, "line_moved", False))
         return round(moved / len(window), 3)
 
-    proxy_l5 = _proxy_rate(history[:5])
-    proxy_l10 = _proxy_rate(history[:10])
-    proxy_l20 = _proxy_rate(history[:20])
-    proxy_l30 = _proxy_rate(history[:30])
+    proxy_l5 = _proxy_rate(history[:5], 5)
+    proxy_l10 = _proxy_rate(history[:10], 10)
+    proxy_l20 = _proxy_rate(history[:20], 20)
+    proxy_l30 = _proxy_rate(history[:30], 30)
 
     values = [r.line_value for r in history if getattr(r, "line_value", None) is not None]
     avg_line = round(sum(values) / len(values), 3) if values else None

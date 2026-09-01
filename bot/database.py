@@ -5806,11 +5806,19 @@ class Database:
                 for k, v in sorted(_player_acc.items(), key=lambda kv: -kv[1]["total"])[:10]
             ]
 
-            # ── total_graded ──────────────────────────────────────────────────
+            # ── population counts ─────────────────────────────────────────────
             total_row = await s.execute(
                 select(func.count(PropOpportunityLog.id)).where(graded_filter, play_filter)
             )
             total_graded = total_row.scalar() or 0
+            telegram_graded_row = await s.execute(
+                select(func.count(PropOpportunityLog.id)).where(
+                    graded_filter,
+                    play_filter,
+                    PropOpportunityLog.alert_sent == True,  # noqa: E712
+                )
+            )
+            telegram_graded = telegram_graded_row.scalar() or 0
 
             intel_row = await s.execute(
                 select(
@@ -5829,6 +5837,11 @@ class Database:
             "by_error_type": by_error_type,
             "player_trend": player_trend,
             "total_graded": total_graded,
+            # ``total_graded`` is intentionally delivery-independent so
+            # historical evaluation data remains available.  These explicit
+            # counters prevent it from being mistaken for Telegram PLAY data.
+            "telegram_graded": telegram_graded,
+            "historical_legacy_graded": max(0, total_graded - telegram_graded),
             "intelligence": {
                 "sample_size": int(_intel_n or 0),
                 "sharp_confidence_avg": round(float(_avg_sharp), 1) if _avg_sharp is not None else None,

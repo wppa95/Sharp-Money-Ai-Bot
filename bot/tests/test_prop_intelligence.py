@@ -249,7 +249,7 @@ class TestHistoricalIntelligence:
     def test_l20_none_below_threshold(self):
         snaps = _snaps_at_line(10, line=25.5)
         hist = compute_historical_intelligence(snaps, line=25.5)
-        assert hist.l20 is None   # need >= 15
+        assert hist.l20 is None   # need >= 20
 
     def test_l20_populated_when_enough(self):
         snaps = _snaps_at_line(20, line=25.5)
@@ -259,7 +259,7 @@ class TestHistoricalIntelligence:
     def test_l30_none_below_threshold(self):
         snaps = _snaps_at_line(15, line=25.5)
         hist = compute_historical_intelligence(snaps, line=25.5)
-        assert hist.l30 is None   # need >= 20
+        assert hist.l30 is None   # need >= 30
 
     def test_hit_rate_from_validation_json(self):
         vj = _vj(n=20, rate_below=0.30)  # 30% below → 70% above = 0.70 hit rate

@@ -85,7 +85,7 @@ class TestComputeHitRates:
 
     def test_push_counted_as_under(self):
         """Exact-line value is a push, counted as UNDER."""
-        recs = _recs([2.5, 3.0, 3.0], line=2.5)
+        recs = _recs([2.5, 3.0, 3.0, 1.0, 2.0], line=2.5)
         hr = compute_hit_rates(recs, 2.5)
         assert hr.l5 is not None
         assert hr.l5.over_count == 2    # only strict > 2.5
@@ -107,14 +107,13 @@ class TestComputeHitRates:
         hr = compute_hit_rates([], 2.5)
         assert hr.l5 is None
 
-    def test_l5_populated_with_1_game(self):
+    def test_l5_is_insufficient_with_1_game(self):
         recs = _recs([3.0], line=2.5)
         hr = compute_hit_rates(recs, 2.5)
-        assert hr.l5 is not None
-        assert hr.l5.games == 1
+        assert hr.l5 is None
 
     def test_average_computed_correctly(self):
-        recs = _recs([2.0, 4.0, 3.0], line=2.5)
+        recs = _recs([2.0, 4.0, 3.0, 1.0, 5.0], line=2.5)
         hr = compute_hit_rates(recs, 2.5)
         assert hr.l5 is not None
         assert abs(hr.l5.average - 3.0) < 0.01
@@ -154,12 +153,14 @@ class TestComputeHitRates:
             _Rec("P", "NBA", "points", "2026-07-01", 1.0),  # oldest
             _Rec("P", "NBA", "points", "2026-07-10", 3.0),  # newest
             _Rec("P", "NBA", "points", "2026-07-05", 3.0),
+            _Rec("P", "NBA", "points", "2026-07-03", 3.0),
+            _Rec("P", "NBA", "points", "2026-07-02", 3.0),
         ]
         hr = compute_hit_rates(recs, 2.5)
         # Sorted newest first: 07-10 (3.0), 07-05 (3.0), 07-01 (1.0)
-        # L5 includes all 3 → 2 over
+        # L5 includes all 5 → 4 over
         assert hr.l5 is not None
-        assert hr.l5.over_count == 2
+        assert hr.l5.over_count == 4
 
     # ── H2H tests ─────────────────────────────────────────────────────────────
 

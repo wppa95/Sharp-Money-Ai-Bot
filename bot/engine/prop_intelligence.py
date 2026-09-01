@@ -465,10 +465,10 @@ def compute_historical_intelligence(
         hr       = (1.0 - float(rate)) if rate is not None else -1.0
         return _build_window_stats(w_lines, w_deltas, line, hr)
 
-    l5_ws  = _ws(5,  'l5',  3)
-    l10_ws = _ws(10, 'l10', 7)
-    l20_ws = _ws(20, 'l20', 15)
-    l30_ws = _ws(30, 'l30', 20)
+    l5_ws  = _ws(5,  'l5',  5)
+    l10_ws = _ws(10, 'l10', 10)
+    l20_ws = _ws(20, 'l20', 20)
+    l30_ws = _ws(30, 'l30', 30)
 
     # data_confidence_delta
     min_s = adapter.min_samples if adapter else 5
