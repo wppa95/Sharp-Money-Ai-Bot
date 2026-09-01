@@ -1454,7 +1454,10 @@ async def _run_prizepicks_independent_cycle(
 
         sport = ",".join(fetched_sports or failed_sports) or configured_sports[start_cursor]
         logger.info(
-            "prizepicks_cycle_started: provider=PrizePicks sports=%s discovered=%d",
+            "prizepicks_cycle_started: provider=PrizePicks sport=%s sports=%s discovered=%d",
+            fetched_sports[0] if fetched_sports else (
+                failed_sports[0] if failed_sports else sport
+            ),
             sport,
             len(configured_sports),
         )
@@ -1484,8 +1487,12 @@ async def _run_prizepicks_independent_cycle(
                     "PrizePicks", fetch_error or "PropLine fetch failed"
                 )
             logger.info(
-                "prizepicks_cycle: provider=PrizePicks sports=%s fetch_succeeded=false "
-                "observations=0 persisted=0 evaluated=0 actionable=0 delivered=0",
+                "prizepicks_cycle: provider=PrizePicks sport=%s sports=%s "
+                "fetch_succeeded=false observations=0 persisted=0 evaluated=0 "
+                "actionable=0 delivered=0",
+                fetched_sports[0] if fetched_sports else (
+                    failed_sports[0] if failed_sports else sport
+                ),
                 sport,
             )
             return
@@ -2405,23 +2412,36 @@ def _has_strong_delivery_evidence(
     This is deliberately a delivery-only check.  It does not change scoring,
     persistence, grading, or whether a prop is evaluated.
     """
-    if bool(getattr(validation, "has_supporting_data", False)):
-        return True
-    if int(getattr(score, "n_history", 0) or 0) >= 5:
+    if (
+        bool(getattr(validation, "has_supporting_data", False))
+        and str(getattr(validation, "data_source", "")).lower() == "real"
+        and int(getattr(validation, "n_real_games", 0) or 0) >= 5
+    ):
         return True
     for obj in (decision, intelligence_trace):
         if isinstance(obj, dict):
-            if any(
-                obj.get(key) not in (None, {}, [], "")
-                for key in ("evidence", "bet_evidence", "intelligence_trace")
-            ):
-                return True
+            for key in ("evidence", "bet_evidence", "intelligence_trace"):
+                evidence = obj.get(key)
+                if isinstance(evidence, dict):
+                    source = str(
+                        evidence.get("data_source")
+                        or evidence.get("source")
+                        or ""
+                    ).lower()
+                    if source in {"real", "game_results", "player_game_results"}:
+                        return True
             continue
         if obj is not None:
             for attr in ("evidence", "bet_evidence", "intelligence_trace"):
                 value = getattr(obj, attr, None)
-                if value not in (None, {}, [], ""):
-                    return True
+                if isinstance(value, dict):
+                    source = str(
+                        value.get("data_source")
+                        or value.get("source")
+                        or ""
+                    ).lower()
+                    if source in {"real", "game_results", "player_game_results"}:
+                        return True
     return False
 
 
