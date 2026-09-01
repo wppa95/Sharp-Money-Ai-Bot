@@ -1,0 +1,98 @@
+@Replit
+
+FINAL TELEGRAM PRESENTATION CLEANUP — REMOVE MARKET QUALITY
+
+Make this small presentation-only change.
+
+Do NOT change scoring, thresholds, evidence/history, PLAY qualification, direction logic, line-movement logic, provider logic, monitoring cadence, or any internal model calculations.
+
+## Remove Market Quality from Telegram
+
+Remove ALL Market Quality information from user-facing Telegram PLAY alerts.
+
+This includes any variations such as:
+
+Market Quality: XX/100
+MARKET ELITE
+MARKET STRONG
+Market: STRONG
+Market Quality stars
+Any other market-quality score, tier, or label
+
+Market Quality must remain available internally for:
+- scoring
+- ranking
+- diagnostics
+- analysis
+- reporting
+- learning
+
+But it must NOT appear in Telegram PLAY alerts.
+
+## Telegram PLAY should remain clean
+
+The user-facing structure should be:
+
+📊 SHARP MONEY PLAY
+⚾ MLB — Hits + Runs + RBIs
+👤 Player
+
+🐶 Underdog: 1.5
+Previous: 0.5
+Move: +1.0
+
+📌 PICK: UNDER 1.5
+💪 STRONG BET
+
+L5: 0/5
+L10: 2/10
+L20: 8/20
+L30: 11/30
+
+Reason: Line is 50% above historical average
+
+The exact evidence/history shown should continue following the existing V4 evidence rules.
+
+## Telegram should contain NO model-quality metrics
+
+Remove from Telegram:
+
+- Quality
+- Market Quality
+- Quality stars
+- Market Quality stars
+- ACTIONABLE
+- OVER SIGNAL
+- UNDER SIGNAL
+- STRONG UNDER
+- duplicate classifications
+- internal routing/state labels
+- debug/model metadata
+
+Keep all of these available internally where needed.
+
+## Important
+
+Do NOT remove Market Quality from the underlying system.
+
+Do NOT change how Market Quality is calculated.
+
+Do NOT change scoring formulas.
+
+Do NOT change thresholds.
+
+Do NOT change PLAY qualification.
+
+Do NOT change evidence/history calculations.
+
+Do NOT change OVER/UNDER direction logic.
+
+Do NOT change line-movement behavior.
+
+This is ONLY a Telegram presentation/sanitization change.
+
+Add a regression test confirming that a qualified Telegram PLAY never contains Market Quality or any Market Quality label/score.
+
+Run the focused Telegram tests and full suite.
+
+restart to apply the changes and checkpoint.

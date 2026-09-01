@@ -727,9 +727,9 @@ async def send_alert(
 def _sanitize_user_alert_message(message: str) -> str:
     """Remove retired classification labels at the final Telegram boundary.
 
-    This is deliberately narrow: evidence, direction, line movement, quality
-    scores, provider identity, and safety disclaimers are preserved.  Internal
-    tier/recommendation values remain available to the engine and database.
+    This is deliberately narrow: evidence, direction, line movement, provider
+    identity, and safety disclaimers are preserved. Internal tier,
+    recommendation, and quality values remain available to the engine/database.
     """
     text = str(message or "")
     text = re.sub(r"\b(?:S|A|B|C)[- ]?Tier\b", "", text, flags=re.IGNORECASE)
@@ -778,6 +778,38 @@ def _sanitize_user_alert_message(message: str) -> str:
         text,
         flags=re.IGNORECASE,
     )
+    # Market Quality is also internal-only.  Remove the complete legacy
+    # section, including its explanatory continuation line, without touching
+    # ordinary market/source line text.
+    _lines = text.splitlines()
+    _clean_lines: list[str] = []
+    _skip_market_detail = False
+    for _line in _lines:
+        _plain = re.sub(r"<[^>]+>", "", _line).strip()
+        if _skip_market_detail:
+            _skip_market_detail = False
+            if re.search(
+                r"(?:ELITE|STRONG|HIGH|MEDIUM|LOW|\d+\s*/\s*100|"
+                r"How reliable is the market data)",
+                _plain,
+                flags=re.IGNORECASE,
+            ):
+                continue
+        if re.search(r"\bMarket Quality\s*:", _plain, flags=re.IGNORECASE):
+            continue
+        if re.search(
+            r"\bMarket\s*:\s*(?:ELITE|STRONG|HIGH|MEDIUM|LOW)\b",
+            _plain,
+            flags=re.IGNORECASE,
+        ):
+            continue
+        if re.search(r"\bMARKET\s+(?:ELITE|STRONG|HIGH|MEDIUM|LOW)\b", _plain, flags=re.IGNORECASE):
+            continue
+        if re.fullmatch(r"MARKET", _plain, flags=re.IGNORECASE):
+            _skip_market_detail = True
+            continue
+        _clean_lines.append(_line)
+    text = "\n".join(_clean_lines)
     text = re.sub(r"\bdecision_pass\b", "no-direction", text, flags=re.IGNORECASE)
     text = re.sub(r"\bnot_immediate\b", "not yet actionable", text, flags=re.IGNORECASE)
     # PASS is an internal recommendation state, not a user-facing outcome.

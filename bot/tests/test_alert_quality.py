@@ -379,6 +379,54 @@ def test_market_quality_line_normalizes_enum_label():
     assert "MarketQualityLabel." not in result
 
 
+def test_qualified_play_omits_all_market_quality_display():
+    """Market Quality stays internal and never appears in a Telegram PLAY."""
+    from alerts_multiplatform import format_underdog_change_alert
+    from engine.ud_scoring import MarketQuality, MarketQualityLabel
+    import types
+
+    decision = types.SimpleNamespace(
+        recommendation="UNDER",
+        confidence=82,
+        reason="Line is above the historical average",
+        l5_games=5,
+        l5_over=0,
+        l5_hit_rate=0.0,
+        l10_games=10,
+        l10_over=2,
+        l10_hit_rate=0.2,
+        l20_games=None,
+        l20_over=None,
+        l20_hit_rate=None,
+        l30_games=None,
+        l30_over=None,
+        l30_hit_rate=None,
+    )
+    market_quality = MarketQuality(
+        label=MarketQualityLabel("STRONG"),
+        score=90,
+        reasons=("Stable market",),
+    )
+
+    message = format_underdog_change_alert(
+        player_name="Test Player",
+        team="TEST",
+        sport="MLB",
+        stat_type="Hits + Runs + RBIs",
+        old_line=0.5,
+        new_line=1.5,
+        decision=decision,
+        market_quality=market_quality,
+    )
+
+    assert "SHARP MONEY PLAY" in message
+    assert "PICK:" in message
+    assert "Market Quality" not in message
+    assert "MARKET" not in message
+    assert "MARKET STRONG" not in message
+    assert "90/100" not in message
+
+
 def test_history_uses_sample_label_for_short_season_window():
     from alerts_multiplatform import _format_history_block
     import types

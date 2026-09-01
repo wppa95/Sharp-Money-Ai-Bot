@@ -44,6 +44,18 @@ X→Y` note is appended to the analyst block. Never upgrades; only downgrades.
 "how strong is the actual recommendation". Separates informational market-data
 context from actionable recommendation strength.
 
+Market Quality remains available to scoring, ranking, diagnostics, analysis,
+reporting, and learning, but must not be rendered in Telegram PLAY alerts.
+Presentation and final-boundary sanitization should remove its score, stars,
+label, and legacy `MARKET` variants without changing the underlying calculation.
+
+**Why:** The Telegram feed is a clean qualified-PLAY channel; model-quality
+diagnostics make the message harder to read and can be mistaken for evidence.
+
+**How to apply:** Keep Market Quality in internal objects and reports. In every
+PLAY formatter and the final Telegram sanitizer, preserve source/evidence,
+direction, line movement, and reason while omitting Market Quality output.
+
 ### 5. Role risk (existing + gate)
 The existing `_intelligence_adjusted_tier()` in `candidate.py` already does a
 1-step downgrade for Bench+Volatile. The new gate adds a second enforcement layer
