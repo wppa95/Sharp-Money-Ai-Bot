@@ -41,3 +41,15 @@ abstractions or coupling that pause to the Underdog or PropLine pipelines.
 **How to apply:** Gate sportsbook confirmation before any DK/FD fetch or
 persisted-row lookup. Do not use the sportsbook flags alone as proof that
 confirmation is active.
+
+For PrizePicks display matching, read the freshness-bounded current
+PropLineHistory pool and compare normalized player, sport, and stat identity.
+Provider line differences are informational output, not an identity rejection;
+only stale, removed, or ambiguous source rows remain unconfirmed.
+
+**Why:** Stored provider labels vary in capitalization and composite-stat
+spacing, while different lines are the exact cross-provider comparison users
+need to see.
+
+**How to apply:** Never use exact raw stat text or a near-equal line threshold
+as the prerequisite for showing a verified PrizePicks line beside Underdog.
