@@ -1,0 +1,85 @@
+Fix the V3.5 PropLine/PrizePicks live scanning now.
+
+GOAL:
+PrizePicks via PropLine must scan successfully alongside the existing Underdog prop monitoring on the normal V3.5 monitoring cycle.
+
+The PropLine API secret currently contains a temporary 1,000-request credential. This credential must last until the 5,000-request credential becomes available again in approximately 12 hours.
+
+IMPORTANT BUDGET RULE:
+
+* Pace the temporary 1,000-request allowance across the full approximately 12-hour window.
+* Do NOT burn through the 1,000 requests during testing.
+* Do NOT make repeated live requests.
+* Use only the minimum live requests necessary to identify and fix the current PropLine problem.
+* Keep the normal V3.5 monitoring cadence.
+* Do not increase request frequency.
+* Do not change the API secret.
+* Do not use the exhausted 5,000-request credential until I switch the secret back later today.
+
+PropLine already exists in V3.5 and the recent PropLine extension is already implemented.
+
+DO NOT change:
+
+* Underdog scanning
+* scheduler cadence
+* monitoring architecture
+* scoring
+* qualification
+* thresholds
+* Sharp Money
+* Funnel logic
+* Telegram alerts or alert formatting
+* database architecture
+* OddsAPI quota systems
+* other providers
+
+FIRST:
+Inspect the existing V3.5 PropLine integration and determine why the status shows:
+
+PrizePicks — PropLine
+awaiting first successful fetch
+
+while Underdog is actively scanning.
+
+FIX THE ACTUAL CAUSE ONLY.
+
+Verify:
+
+1. PropLine credentials are loaded correctly.
+2. PropLine is invoked during the normal monitoring cycle.
+3. The old 900-request local limit is not blocking the provider.
+4. The temporary 1,000-request allowance is respected.
+5. Requests are paced so the allowance lasts approximately 12 hours.
+6. The provider is not incorrectly returning an empty snapshot because of cache, backoff, or budget state.
+7. 429/backoff handling works correctly.
+8. Last-successful-snapshot retention remains intact.
+9. Incomplete snapshots cannot wipe the active PrizePicks pool.
+10. PropLine results reach the existing PrizePicks pipeline.
+11. PropLine runs alongside Underdog without creating another scheduler or changing the existing cadence.
+
+LIVE TEST:
+Use the absolute minimum number of live PropLine requests needed to verify the issue.
+
+Do NOT repeatedly poll the API.
+
+After a successful fetch, verify that the bot status changes from:
+
+awaiting first successful fetch
+
+to a recent successful fetch timestamp, and that PrizePicks observations begin entering the existing pipeline.
+
+If the live request fails, identify the exact cause and fix only that cause.
+
+After the fix:
+
+1. Confirm exactly one bot process is running.
+2. Confirm Underdog monitoring remains active.
+3. Confirm PropLine/PrizePicks successfully fetches.
+4. Report the exact root cause.
+5. Report exact files changed.
+6. Report PropLine requests used.
+7. Confirm the 1,000-request allowance is being paced across the remaining ~12-hour window.
+8. Confirm PrizePicks observations are entering the pipeline.
+9. Run relevant tests and report results.
+
+Restart the existing Sharp Money Bot workflow to apply the changes, then create a checkpoint.
