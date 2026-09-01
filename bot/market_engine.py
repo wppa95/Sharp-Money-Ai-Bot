@@ -2711,9 +2711,10 @@ def _shared_monitoring_cycle(cycle_branch):
                 _prizepicks_cycle_task, return_exceptions=True
             )
             if pp_result and isinstance(pp_result[0], BaseException):
-                logger.exception(
-                    "shared_monitoring_cycle: both branches failed",
-                    exc_info=pp_result[0],
+                logger.error(
+                    "shared_monitoring_cycle: PropLine branch failed while "
+                    "Underdog branch raised: %s",
+                    pp_result[0],
                 )
             raise
         else:
