@@ -1,0 +1,116 @@
+We now have live evidence that the PrizePicks pipeline itself is working, so focus specifically on the cross-provider matching/display problem.
+
+Current status:
+
+🟢 Underdog: OK · last fetch 3s ago
+🟢 PrizePicks/PropLine: OK · last fetch 1m ago
+📥 PrizePicks observed: 191
+🔬 PrizePicks evaluated: 191
+📊 PrizePicks tracked active: 417
+💾 PrizePicks database rows: 4,241
+🎯 PrizePicks directional/actionable: 0
+📤 PrizePicks delivered: 0
+
+At the same time, fresh Underdog alerts are being generated, but EVERY alert currently says:
+
+🟣 PrizePicks: Unavailable for this prop
+
+This is happening across the current Underdog alerts, not just one or two props.
+
+Therefore:
+
+DO NOT investigate PropLine authentication, API availability, cadence, or the 1,000-request budget as the primary issue. Those are confirmed working.
+
+READ-ONLY INVESTIGATION FIRST. Do not change code until the exact failure point is identified.
+
+Trace the actual cross-provider flow:
+
+PropLine live observations
+→ normalized PrizePicks records
+→ PropLineHistory
+→ current PrizePicks pool
+→ provider matching
+→ Underdog prop
+→ pp_line / PrizePicks comparison
+→ AlertDelivery
+→ Telegram formatter
+
+Use REAL CURRENT DATA from the running system.
+
+Determine:
+
+1. How many current PrizePicks observations are available right now.
+2. Which sports they cover.
+3. Which current MLB PrizePicks props exist.
+4. Whether current PrizePicks records contain player ID/name, sport, market/stat, event/game ID, line, and provider/source.
+5. Take an actual current Underdog alert prop and search for its corresponding PrizePicks record.
+6. Test several different players/markets, not just Max Muncy.
+7. Determine the exact reason the PrizePicks record fails to match the Underdog prop.
+8. Verify whether player IDs differ between providers.
+9. Verify whether player-name normalization differs.
+10. Verify whether market/stat keys differ.
+11. Verify whether sport/league identifiers differ.
+12. Verify whether provider event/game IDs differ and whether the matcher incorrectly requires them to be identical.
+13. Verify whether the matcher incorrectly requires identical lines. IT MUST NOT require the PP line to equal the UD line; different provider lines are exactly what we want to display.
+14. Verify whether the PrizePicks records are being persisted correctly but aren’t being loaded by the normal Underdog alert path.
+15. Verify whether the previous provider-line fix is actually being executed for NEW-PROP and LINE-CHANGE alerts.
+16. Verify whether pp_line is missing before AlertDelivery or is being lost inside AlertDelivery.
+17. Verify whether the formatter is receiving pp_line=None because matching failed upstream.
+18. Identify the exact function/condition where the PrizePicks data stops flowing into the Underdog alert.
+
+IMPORTANT:
+
+Do NOT fabricate a PrizePicks line.
+
+Do NOT match solely on player name.
+
+Do NOT require identical lines.
+
+Do NOT force a match when the player/market/event cannot be reliably identified.
+
+The desired behavior is:
+
+📊 Available Lines
+🟣 PrizePicks: [actual verified PP line]
+🐶 Underdog: [actual UD line]
+
+If PP genuinely has no matching projection, then:
+
+🟣 PrizePicks: Unavailable for this prop
+
+But we need to prove which situation is occurring.
+
+FULL SPORT COVERAGE:
+
+Also verify the complete PropLine active sport catalog and actual rotation.
+
+Confirm:
+
+* Total active sports advertised by PropLine.
+* Sports actually being fetched.
+* Sports producing normalized observations.
+* Sports being persisted.
+* Sports entering the provider matcher.
+* Sports capable of being displayed alongside Underdog alerts.
+
+Make sure there is no accidental hardcoded whitelist or limited sport selection.
+
+DO NOT CHANGE:
+
+* Underdog scoring
+* Direction logic
+* Qualification thresholds
+* Alert scoring
+* Monitoring cadence
+* PropLine pacing
+* 1,000-request temporary budget
+* Database architecture
+* Telegram formatting beyond the already-approved provider-line behavior
+
+If the investigation identifies a specific matching/data-flow bug, make ONLY the narrow fix required.
+
+Then:
+
+* Run the relevant tests.
+* Restart the existing Sharp Money Bot workflow to apply the changes.
+* Create a checkpoint.
