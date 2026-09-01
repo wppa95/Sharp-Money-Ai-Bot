@@ -363,7 +363,7 @@ class TestFormatFunctionMarketConfirmationParam:
         result = format_underdog_change_alert(
             "LeBron James", "LAL", "NBA", "points", 24.5, 25.5
         )
-        assert "UNDERDOG PICK" in result and "Line" in result
+        assert "SHARP MONEY PLAY" in result and "Line" in result
 
     def test_change_alert_no_confirmation_block_when_none(self):
         from alerts_multiplatform import format_underdog_change_alert
@@ -388,7 +388,7 @@ class TestFormatFunctionMarketConfirmationParam:
         result = format_underdog_new_prop_alert(
             "LeBron James", "LAL", "NBA", "points", 25.5
         )
-        assert "UNDERDOG PICK" in result
+        assert "SHARP MONEY PLAY" in result
 
     def test_deliver_underdog_signature_accepts_market_confirmation(self):
         """deliver_underdog() must accept market_confirmation kwarg."""

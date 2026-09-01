@@ -37,10 +37,6 @@ from typing import Any, Optional
 
 import config as _config
 from engine.delivery_gates import tier_delivery_gate as _canonical_tier_delivery_gate
-from engine.player_prop_market import (
-    _release_prop_delivery_claim,
-    _try_claim_prop_delivery,
-)
 from engine.sport_policy import is_football_related_sport
 from engine.timing import is_game_alertable
 
@@ -310,11 +306,7 @@ async def run_pp_reference_cycle(
 
     Returns the number of reference alerts sent.
     """
-    from alerts import (  # local to avoid circular
-        _is_fresh_delivery_line,
-        broadcast_alert,
-        format_pp_reference_alert,
-    )
+    from alerts import _is_fresh_delivery_line  # local to avoid circular
 
     if now is None:
         now = datetime.utcnow()

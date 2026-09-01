@@ -349,7 +349,7 @@ class TestIndependentPrizePicks:
             source="PrizePicks",
         )
 
-        assert "PRIZEPICKS PICK" in message
+        assert "SHARP MONEY PLAY" in message
         assert "LINE</b> · PrizePicks" in message
         assert "UNDERDOG PROP LIVE" not in message
 

@@ -281,7 +281,7 @@ def test_new_prop_alert_omits_duplicate_analyst_block_for_directional():
         intelligence_trace=trace,
     )
     assert "Analyst" not in msg
-    assert "Quality:" in msg
+    assert "Quality:" not in msg
 
 
     def test_change_alert_contains_pick_for_directional():

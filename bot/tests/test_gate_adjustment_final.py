@@ -77,12 +77,11 @@ def test_direct_compatibility_broadcasters_keep_canonical_safety_boundaries():
         assert "_is_fresh_delivery_line" in source
         assert "is_game_alertable" in source
         assert "provider" in source
-        assert "broadcast_alert" in source
+        # Reference matching is context-only; it must not independently
+        # broadcast a Telegram message.
+        if fn is not pp_reference.run_pp_reference_cycle:
+            assert "broadcast_alert" in source
 
-    for fn in (
-        player_prop_market.run_player_prop_market_cycle,
-        pp_reference.run_pp_reference_cycle,
-    ):
-        source = inspect.getsource(fn)
-        assert "_try_claim_prop_delivery" in source
-        assert "_release_prop_delivery_claim" in source
+    source = inspect.getsource(player_prop_market.run_player_prop_market_cycle)
+    assert "_try_claim_prop_delivery" in source
+    assert "_release_prop_delivery_claim" in source
