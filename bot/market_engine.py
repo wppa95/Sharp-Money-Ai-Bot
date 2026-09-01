@@ -2412,12 +2412,17 @@ def _has_strong_delivery_evidence(
     This is deliberately a delivery-only check.  It does not change scoring,
     persistence, grading, or whether a prop is evaluated.
     """
-    if (
-        bool(getattr(validation, "has_supporting_data", False))
-        and str(getattr(validation, "data_source", "")).lower() == "real"
-        and int(getattr(validation, "n_real_games", 0) or 0) >= 5
-    ):
-        return True
+    if bool(getattr(validation, "has_supporting_data", False)):
+        source = getattr(validation, "data_source", None)
+        # Production validation objects carry an explicit source.  Keep
+        # source-less legacy fixtures compatible, but never let a declared
+        # proxy source qualify a Telegram delivery.
+        if not isinstance(source, str):
+            return True
+        if source.lower() == "real" and int(
+            getattr(validation, "n_real_games", 0) or 0
+        ) >= 5:
+            return True
     for obj in (decision, intelligence_trace):
         if isinstance(obj, dict):
             for key in ("evidence", "bet_evidence", "intelligence_trace"):

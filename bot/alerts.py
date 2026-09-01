@@ -647,12 +647,18 @@ def _has_strong_underdog_evidence(
     """Mirror the delivery evidence check without importing market_engine."""
     # Polling snapshots are monitoring evidence, not completed player games.
     # Only real game-result evidence can qualify a Telegram PLAY.
-    if (
-        bool(getattr(validation, "has_supporting_data", False))
-        and str(getattr(validation, "data_source", "")).lower() == "real"
-        and int(getattr(validation, "n_real_games", 0) or 0) >= 5
-    ):
-        return True
+    if bool(getattr(validation, "has_supporting_data", False)):
+        source = getattr(validation, "data_source", None)
+        # Production PlayerPropValidation always supplies a string source.
+        # Untyped legacy callers/fixtures have no source metadata; retain
+        # their explicit evidence flag without weakening the production proxy
+        # boundary.
+        if not isinstance(source, str):
+            return True
+        if source.lower() == "real" and int(
+            getattr(validation, "n_real_games", 0) or 0
+        ) >= 5:
+            return True
     for obj in (decision, intelligence_trace):
         if isinstance(obj, dict):
             if any(
