@@ -9,7 +9,10 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import select
 
-from alerts_multiplatform import format_underdog_change_alert
+from alerts_multiplatform import (
+    _format_available_lines_block,
+    format_underdog_change_alert,
+)
 from commands import PropPickAdapter
 from database import Database, PropOpportunityLog
 import market_engine
@@ -43,6 +46,23 @@ def _opportunity(provider: str) -> dict:
 
 
 class TestIndependentPrizePicks:
+    def test_available_lines_show_verified_prizepicks_or_explicit_unavailable(self):
+        available = _format_available_lines_block(15.5, pp_line=14.5)
+        unavailable = _format_available_lines_block(15.5)
+
+        assert "🟣 PrizePicks:  <code>14.5</code>" in available
+        assert "🟣 PrizePicks:  <i>Unavailable for this prop</i>" in unavailable
+        assert "🐶 Underdog:    <code>15.5</code>" in unavailable
+
+    def test_confirmation_line_only_accepts_verified_prizepicks_source(self):
+        assert market_engine._prizepicks_line_from_confirmation(
+            {"source": "PrizePicks", "confirmed": True, "avg_line": 14.5}
+        ) == 14.5
+        assert market_engine._prizepicks_line_from_confirmation(
+            {"source": "OddsAPI", "confirmed": True, "avg_line": 14.5}
+        ) is None
+        assert market_engine._prizepicks_line_from_confirmation(None) is None
+
     async def test_authoritative_discovery_controls_scope_without_underdog_inheritance(
         self, monkeypatch
     ):

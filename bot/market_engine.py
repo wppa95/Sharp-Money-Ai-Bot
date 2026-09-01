@@ -50,6 +50,7 @@ from engine.player_prop_market import (
     _is_prop_deduped,
     _record_prop_alerted,
     _release_prop_delivery_claim,
+    normalize_stat as _normalize_prop_stat,
 )
 from engine.score_validation import clamp_score
 from engine.sport_policy import is_football_related_sport
@@ -143,6 +144,52 @@ async def _broadcast_consensus_alert(
         except Exception as exc:
             logger.warning("Consensus Telegram audit write failed: %s", exc)
     return counts
+
+
+def _prizepicks_line_from_confirmation(
+    confirmation: Optional[dict],
+) -> Optional[float]:
+    """Return only a verified PrizePicks line from a confirmation result."""
+    if not isinstance(confirmation, dict):
+        return None
+    if str(confirmation.get("source", "")).strip().lower() != "prizepicks":
+        return None
+    if not confirmation.get("confirmed"):
+        return None
+    value = confirmation.get("avg_line")
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _active_prizepicks_lines(
+    active_pool: dict,
+) -> dict[tuple[str, str, str], float]:
+    """Index current, non-removed PrizePicks observations for FPR display."""
+    indexed: dict[tuple[str, str, str], tuple[datetime, float]] = {}
+    for row in active_pool.values():
+        if str(getattr(row, "provider", "") or "").strip().lower() != "prizepicks":
+            continue
+        if bool(getattr(row, "removed", False)):
+            continue
+        try:
+            line = float(getattr(row, "line_value", None))
+        except (TypeError, ValueError):
+            continue
+        key = (
+            normalize_name(getattr(row, "player_name", "")),
+            str(getattr(row, "sport", "") or "").upper(),
+            _normalize_prop_stat(getattr(row, "stat_type", "")),
+        )
+        if not key[0] or not key[1] or not key[2]:
+            continue
+        observed_at = getattr(row, "fetched_at", None) or datetime.min
+        previous = indexed.get(key)
+        if previous is None or observed_at >= previous[0]:
+            indexed[key] = (observed_at, line)
+    return {key: value for key, (_observed_at, value) in indexed.items()}
+
 
 logger = logging.getLogger(__name__)
 
@@ -3234,6 +3281,7 @@ async def underdog_job(context) -> None:
                             "market_pressure":    market_pressure,
                             "intel_trace":        _np_intel_trace,
                             "odds_confirm":       _np_odds_confirm,
+                            "pp_line":            _prizepicks_line_from_confirmation(_np_odds_confirm),
                             "is_reentry":         False,
                             "ext_id":             _np_ext_id,
                             "record":             None,   # linked after record construction
@@ -3703,6 +3751,7 @@ async def underdog_job(context) -> None:
                             "market_pressure":    market_pressure,
                             "intel_trace":        _lc_intel_trace,
                             "odds_confirm":       _lc_odds_confirm,
+                            "pp_line":            _prizepicks_line_from_confirmation(_lc_odds_confirm),
                             "is_reentry":         bool(is_reentry_qualified),
                             "ext_id":             _lc_ext_id_q,
                             "record":             None,   # linked after record construction
@@ -4094,6 +4143,7 @@ async def underdog_job(context) -> None:
                     "market_pressure":    _smp,
                     "intel_trace":        _s_intel_trace,
                     "odds_confirm":       _s_odds_confirm,
+                    "pp_line":            _prizepicks_line_from_confirmation(_s_odds_confirm),
                     "is_reentry":         False,
                     "ext_id":             _s_ext_id_q,
                     "record":             None,   # standing path has no new snapshot record
@@ -4151,6 +4201,7 @@ async def underdog_job(context) -> None:
                 _dq_mp        = _dq["market_pressure"]
                 _dq_intel     = _dq["intel_trace"]
                 _dq_odds      = _dq["odds_confirm"]
+                _dq_pp_line   = _dq.get("pp_line")
                 _dq_record    = _dq.get("record")
                 _dq_ext_id    = _dq["ext_id"]
                 _dq_sport     = _dq["sport"]
@@ -4229,6 +4280,7 @@ async def underdog_job(context) -> None:
                         decision            = _dq_dec,
                         market_quality      = _dq_mq,
                         market_pressure     = _dq_mp,
+                        pp_line             = _dq_pp_line,
                         intelligence_trace  = _dq_intel,
                         market_confirmation = _dq_odds,
                         source_id           = str(_dq_ext_id or ""),
@@ -5233,6 +5285,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     decision            = _sr_dec,
                     market_quality      = _sr_mq,
                     market_pressure     = _sr_mp,
+                     pp_line             = _prizepicks_line_from_confirmation(_sr_odds_confirm),
                     standing            = True,
                     strict_pregame      = True,
                     intelligence_trace  = _sr_intel_trace,
@@ -5567,6 +5620,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 and not _is_futures_stat(getattr(snap, "stat_type", ""))
             )
         }
+        _fpr_prizepicks_lines = _active_prizepicks_lines(active_pool)
         fpr_pool_size = len(active_pool)
         if fpr_pool_size == 0:
             _fpr_execution_running = False
@@ -5809,6 +5863,17 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 _fpr_line_val,
                 _fpr_source_id,
             ) = _fpr_parts(_fpr_key, _fpr_snap)
+            _fpr_pp_line = (
+                _fpr_line_val
+                if _fpr_provider == "PrizePicks"
+                else _fpr_prizepicks_lines.get(
+                    (
+                        normalize_name(_fpr_player),
+                        _fpr_sport.upper(),
+                        _normalize_prop_stat(_fpr_stat),
+                    )
+                )
+            )
             _fpr_line = float(
                 getattr(_fpr_snap, "line_value", None) or _fpr_line_val
             )
@@ -5977,9 +6042,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                          decision        = _fpr_dec,
                          market_quality  = _fpr_mq,
                          market_pressure = _fpr_mp,
-                         pp_line         = (
-                             _fpr_line if _fpr_provider == "PrizePicks" else None
-                         ),
+                          pp_line         = _fpr_pp_line,
                          standing        = True,
                          strict_pregame   = True,
                          source          = _fpr_provider,

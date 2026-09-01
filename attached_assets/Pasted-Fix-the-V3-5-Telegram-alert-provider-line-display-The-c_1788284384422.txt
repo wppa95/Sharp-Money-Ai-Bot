@@ -1,0 +1,55 @@
+Fix the V3.5 Telegram alert provider-line display.
+
+The current alerts are generating valid Underdog picks with evidence, including esports, but the alert itself is missing the PrizePicks/PropLine line.
+
+Example:
+
+DOTA — Kills on Maps 1+2
+Underdog: 15.5
+PICK: UNDER 15.5
+
+The alert should also show the PrizePicks/PropLine line when a matching PrizePicks prop is available.
+
+This is a DISPLAY/PROVIDER-COMPARISON issue, not a request to change the pick direction.
+
+Inspect the existing flow:
+
+PropLine/PrizePicks observations
+→ persisted PropLineHistory
+→ matching against the Underdog prop
+→ provider comparison data
+→ Telegram alert formatter
+
+Determine exactly why the PrizePicks line is not reaching the alert.
+
+Verify:
+
+1. Whether the matching PrizePicks prop exists in PropLineHistory.
+2. Whether player, sport, market/stat type, and prop identity matching is working.
+3. Whether the alert builder receives the PrizePicks comparison data.
+4. Whether the formatter is simply omitting the PrizePicks field.
+5. Whether esports props are supported by the same provider matching path.
+6. Whether the issue affects all sports or only certain sports.
+7. Check several current alerts, not just one.
+
+IMPORTANT:
+
+* Do NOT change the pick direction.
+* Do NOT force PrizePicks lines into alerts when no matching line exists.
+* Do NOT fabricate or infer a PrizePicks line.
+* Only display a PrizePicks line when there is a verified matching PropLine observation.
+* Do NOT change scoring.
+* Do NOT change qualification thresholds.
+* Do NOT change monitoring cadence.
+* Do NOT change PropLine request pacing or the 1,000-request budget.
+* Do NOT change Underdog behavior.
+
+Desired alert behavior:
+
+📊 Available Line
+🐶 Underdog: 15.5
+🟢 PrizePicks: [verified matching line]
+
+If no matching PrizePicks prop exists, clearly indicate that PrizePicks is unavailable for that specific prop rather than displaying an incorrect value.
+
+Inspect first and identify the exact cause. If a code change is required, make only the narrow fix, run the relevant tests, restart the existing Sharp Money Bot workflow to apply the changes, and create a checkpoint.

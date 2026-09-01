@@ -443,6 +443,8 @@ def _format_available_lines_block(
 
     if pp_line is not None:
         lines.append(f"\n🟣 PrizePicks:  <code>{pp_line:.1f}</code>")
+    else:
+        lines.append("\n🟣 PrizePicks:  <i>Unavailable for this prop</i>")
     if ud_line is not None:
         lines.append(f"\n🐶 Underdog:    <code>{ud_line:.1f}</code>")
     return "".join(lines)
