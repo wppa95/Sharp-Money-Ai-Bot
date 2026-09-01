@@ -168,7 +168,7 @@ def compute_hit_rates(
             if r.opponent is not None and _fuzzy_team_match(r.opponent, opponent)
         ]
         if len(h2h_subset) >= h2h_min_games:
-            h2h_stats = _window_stats(h2h_subset)
+            h2h_stats = _window_stats(h2h_subset, h2h_min_games)
 
     # Determine player_name / stat_type from first record
     first = sorted_results[0]

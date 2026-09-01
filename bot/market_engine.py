@@ -1487,8 +1487,8 @@ async def _run_prizepicks_independent_cycle(
                     "PrizePicks", fetch_error or "PropLine fetch failed"
                 )
             logger.info(
-                "prizepicks_cycle: provider=PrizePicks sport=%s sports=%s "
-                "fetch_succeeded=false observations=0 persisted=0 evaluated=0 "
+                "prizepicks_cycle: provider=PrizePicks sport=%s fetch_succeeded=false "
+                "sports=%s observations=0 persisted=0 evaluated=0 "
                 "actionable=0 delivered=0",
                 fetched_sports[0] if fetched_sports else (
                     failed_sports[0] if failed_sports else sport
