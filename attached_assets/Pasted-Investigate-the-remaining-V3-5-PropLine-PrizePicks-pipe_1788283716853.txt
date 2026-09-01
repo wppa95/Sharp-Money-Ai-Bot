@@ -1,0 +1,51 @@
+Investigate the remaining V3.5 PropLine/PrizePicks pipeline issue.
+
+We confirmed the new PropLine key works and the provider is returning data, but:
+
+* PrizePicks observations = 0
+* Persisted PrizePicks rows since restart = 0
+* The verified fetch returned an active MLB slate
+* MLB should NOT be the only sport being monitored
+
+The intended V3.5 behavior is for PropLine/PrizePicks to monitor all supported active player-prop sports, alongside Underdog, on the normal monitoring cycle.
+
+READ THE EXISTING CODE FIRST. Do not make speculative changes.
+
+Determine exactly:
+
+1. Why the authenticated PropLine response produces zero normalized PrizePicks observations.
+2. What bookmaker/provider filtering is being applied.
+3. What sport filtering is being applied.
+4. Why the live PropLine cycle selected MLB and whether it is supposed to rotate through all supported active sports.
+5. Whether the existing active-sports configuration is incorrectly restricted for PropLine.
+6. Whether PrizePicks-specific filtering/normalization is rejecting the returned data.
+7. Whether PropLine is actually returning PrizePicks player props for the requested sports.
+8. Whether the problem is upstream data availability or our normalization/filtering logic.
+
+IMPORTANT:
+
+* Do not change Underdog.
+* Do not change scoring.
+* Do not change qualification thresholds.
+* Do not change Telegram alerts.
+* Do not change the normal ~2-minute cadence.
+* Do not create another scheduler.
+* Do not repeatedly call PropLine.
+* Preserve the 1,000-request temporary budget and 120-second pacing.
+* Use read-only/code inspection first.
+* Only make a code change if the inspection identifies a specific V3.5 bug.
+
+The desired result is:
+
+PropLine/PrizePicks
+→ all supported active player-prop sports
+→ normal ~2-minute companion monitoring
+→ normalize PrizePicks props
+→ persist PropLineHistory
+→ existing PrizePicks pipeline
+
+Do not assume MLB-only is correct.
+
+At the end, report the exact root cause, which sports are currently configured for PropLine, why observations are zero, and whether a code change is required.
+
+If a code change is required, restart the existing Sharp Money Bot workflow to apply the changes and create a checkpoint.
