@@ -112,30 +112,93 @@ class _ScheduledExecutionCoordinator:
 
     def __init__(self) -> None:
         self._running: set[str] = set()
+        self._tasks: set[asyncio.Task] = set()
+
+    def _claim(self, name: str) -> bool:
+        if name in self._running:
+            logger.info(
+                "scheduled_execution: ignoring overlapping trigger for %s",
+                name,
+            )
+            return False
+        self._running.add(name)
+        return True
+
+    async def _execute_claimed(self, name: str, callback, context, *args, **kwargs):
+        try:
+            return await callback(context, *args, **kwargs)
+        finally:
+            self._running.discard(name)
 
     def wrap(self, name: str, callback):
         @wraps(callback)
         async def _coordinated(context, *args, **kwargs):
-            if name in self._running:
-                logger.info(
-                    "scheduled_execution: ignoring overlapping trigger for %s",
-                    name,
-                )
+            if not self._claim(name):
                 return None
-            self._running.add(name)
-            try:
-                return await callback(context, *args, **kwargs)
-            finally:
-                self._running.discard(name)
+            return await self._execute_claimed(
+                name, callback, context, *args, **kwargs
+            )
 
         return _coordinated
+
+    def launch(self, name: str, callback):
+        """Return a short-lived scheduler callback for a tracked real task."""
+        @wraps(callback)
+        async def _launcher(context, *args, **kwargs):
+            # Claim before create_task().  The launcher has no await between
+            # this check and the task creation, so a second trigger cannot
+            # claim the same name before the real task starts.
+            if not self._claim(name):
+                return None
+            try:
+                task = asyncio.create_task(
+                    self._execute_claimed(
+                        name, callback, context, *args, **kwargs
+                    ),
+                    name=f"scheduled:{name}",
+                )
+            except BaseException:
+                self._running.discard(name)
+                raise
+            self._tasks.add(task)
+            task.add_done_callback(self._task_finished)
+            return None
+
+        return _launcher
+
+    def _task_finished(self, task: asyncio.Task) -> None:
+        self._tasks.discard(task)
+        if task.cancelled():
+            return
+        try:
+            error = task.exception()
+        except asyncio.CancelledError:
+            return
+        if error is not None:
+            logger.error(
+                "scheduled_execution: task failed (%s): %s",
+                task.get_name(),
+                error,
+                exc_info=(type(error), error, error.__traceback__),
+            )
+
+    async def shutdown(self) -> None:
+        """Cancel and await all real scheduler tasks before runtime reset."""
+        tasks = list(self._tasks)
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._tasks.clear()
+        self._running.clear()
 
 
 _scheduled_execution_coordinator = _ScheduledExecutionCoordinator()
 
 
 def _coordinated_job(name: str, callback):
-    return _scheduled_execution_coordinator.wrap(name, callback)
+    return _scheduled_execution_coordinator.launch(name, callback)
 
 
 def _configured_odds_api_sports() -> list[tuple[str, Sport]]:
@@ -295,6 +358,7 @@ async def post_init(application: Application) -> None:
     _ht.record_startup()
     # Every process/application restart gets a disposable monitoring session.
     # Persistent evidence, grading, learning, and PLAY history remain in SQLite.
+    await _scheduled_execution_coordinator.shutdown()
     await reset_monitoring_runtime_state()
     logger.info(
         "New monitoring session initialised — session=%s; persistent history preserved",
@@ -639,6 +703,7 @@ async def post_shutdown(application: Application) -> None:
     if ht is not None:
         ht.record_shutdown("clean_shutdown")
     try:
+        await _scheduled_execution_coordinator.shutdown()
         await reset_monitoring_runtime_state()
     except Exception as _reset_exc:
         logger.warning("Runtime session cleanup failed during shutdown: %s", _reset_exc)
