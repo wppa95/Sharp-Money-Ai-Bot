@@ -1,0 +1,151 @@
+READ-ONLY LIVE MONITORING LIFECYCLE AUDIT — DO NOT MODIFY CODE
+
+The scheduler overlap-protection fix has already been implemented and tested.
+
+Now perform a READ-ONLY audit of the live monitoring lifecycle.
+
+DO NOT:
+
+* modify code
+* restart the bot
+* deploy
+* change scheduler cadence
+* change scoring/qualification
+* change alerts/Telegram
+* change PropLine behavior
+* change Underdog source behavior
+* change database/schema
+* change API limits
+* change provider priority
+* implement fallback behavior
+
+Objective
+
+Verify from the actual production/runtime path that a long-running Underdog monitoring run behaves correctly after the scheduler launcher change.
+
+I specifically need to prove:
+
+SCHEDULED TRIGGER
+→ lightweight launcher
+→ coordinator ownership
+→ real Underdog monitoring run
+→ data collection
+→ persistence/processing
+→ run completion
+→ coordinator release
+→ next normal scheduled trigger
+→ new independent run
+
+Inspect and report
+
+1. Real execution path
+
+Trace the current production path from:
+
+scheduler trigger
+→ _coordinated_job()
+→ launcher
+→ _ScheduledExecutionCoordinator
+→ actual underdog_monitor / underdog_job
+→ Underdog fetch
+→ processing/scoring
+→ persistence
+→ completion
+
+Identify the exact functions/files involved.
+
+2. Active-run independence
+
+Determine whether the following is true:
+
+* Run #1 starts.
+* Run #1 can remain active for an extended period.
+* The next scheduled trigger occurs while Run #1 is still active.
+* Run #2 does NOT cancel Run #1.
+* Run #2 does NOT start another real copy.
+* Run #2 does NOT enter a queue.
+* Run #2 does NOT replay after Run #1 finishes.
+* Run #1 continues processing its already-collected data normally.
+* Run #1 eventually reaches its normal completion/finally cleanup.
+* Coordinator ownership is released.
+* A later normal scheduled trigger can start a fresh run.
+
+3. Data collected by an active run
+
+Inspect whether data collected during Run #1 is processed/persisted independently of the next scheduler trigger.
+
+Specifically verify:
+
+* fetched Underdog snapshots
+* line/movement processing
+* persistence
+* removal handling if applicable
+* scoring/evaluation
+* downstream processing
+
+Determine whether any of these depend on Run #2 beginning or completing.
+
+4. Runtime evidence
+
+Inspect recent live logs/runtime state and report concrete evidence for:
+
+* monitoring run start
+* monitoring run progress
+* monitoring run completion
+* coordinator ownership acquisition/release
+* overlapping scheduler trigger while a run is active, if naturally observed
+* absence of duplicate real monitoring execution
+* absence of maximum number of running instances reached
+* absence of detached-task warnings
+* absence of unhandled task exceptions
+
+Do NOT artificially trigger or stress the system unless it can be done strictly read-only and without modifying runtime state.
+
+5. Cancellation/restart boundary
+
+Without restarting the bot, inspect the shutdown/reset implementation and verify:
+
+* active monitoring tasks are tracked
+* shutdown cancellation reaches the real monitoring task
+* cancellation is awaited
+* coordinator state is released
+* _ud_full_scan_running is cleared appropriately
+* _fpr_execution_running is cleared appropriately
+* PropLine child tasks are cleaned up
+* no unfinished async execution is persisted as a resume checkpoint
+* next startup begins fresh runtime execution
+
+Do not actually restart.
+
+6. Persistent-state distinction
+
+Explicitly distinguish:
+
+A. durable historical/monitoring data restored from SQLite
+
+from
+
+B. unfinished asynchronous execution state
+
+Confirm whether startup restores only A and does NOT resume B.
+
+7. Required conclusion
+
+Give a PASS / FAIL / PARTIAL determination for each:
+
+* Scheduler launcher lifecycle
+* Active-run independence
+* Data processing independence
+* Coordinator cleanup
+* Shutdown cancellation
+* Restart/session isolation
+* No queued backlog
+* No duplicate real monitoring execution
+
+If any item cannot be proven from current runtime evidence, say exactly what is unproven rather than assuming it.
+
+Required output
+
+Return ONLY the read-only audit.
+
+Do not make any changes.
