@@ -107,6 +107,76 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# ── Telegram command surface ─────────────────────────────────────────────────
+# Keep the production command map in one place.  This is the source used by
+# the running Application, not just documentation or a test-only inventory.
+# ``learning`` is retained as the existing legacy alias for ``rollups``.
+TELEGRAM_COMMAND_HANDLERS = (
+    ("picks", cmd_picks),
+    ("slip", cmd_slip),
+    ("dashboard", cmd_dashboard),
+    ("alerts", cmd_alerts),
+    ("funnel", cmd_funnel),
+    ("reconcile", cmd_reconcile),
+    ("grade", cmd_grade),
+    ("grades", cmd_grade),
+    ("player", cmd_player),
+    ("slipstats", cmd_slipstats),
+    ("analyze", cmd_analyze),
+    ("market", cmd_market),
+    ("steam", cmd_steam),
+    ("ev", cmd_ev),
+    ("clv", cmd_clv),
+    ("performance", cmd_performance),
+    ("backtest", cmd_backtest),
+    ("stats", cmd_stats),
+    ("calibration", cmd_calibration),
+    ("tracking", cmd_tracking),
+    ("analyst", cmd_analyst),
+    ("rollups", cmd_rollups),
+    ("refinement", cmd_refinement),
+    ("start", cmd_start),
+    ("status", cmd_status),
+    ("system", cmd_system),
+    ("health", cmd_health),
+    ("providers", cmd_providers),
+    ("config", cmd_config),
+    ("blocks", cmd_blocks),
+    ("block", cmd_block),
+    ("backfill", cmd_backfill),
+    ("pp_import", cmd_pp_import),
+    ("testalert", cmd_testalert),
+    ("help", cmd_help),
+    ("learning", cmd_learning),
+)
+
+
+def register_command_handlers(application: Application) -> Application:
+    """Attach the complete production command surface to *application*.
+
+    Registration is deliberately centralized so the same map can be verified
+    in tests and used by the actual polling Application.  Callback behavior,
+    authorization, argument parsing, and database semantics remain in
+    ``commands.py``.
+    """
+    for command, callback in TELEGRAM_COMMAND_HANDLERS:
+        application.add_handler(CommandHandler(command, callback))
+    application.add_error_handler(error_handler)
+    return application
+
+
+def build_application() -> Application:
+    """Build a polling Application with every command and the shared error path."""
+    application = (
+        Application.builder()
+        .token(config.TELEGRAM_BOT_TOKEN)
+        .post_init(post_init)
+        .post_shutdown(post_shutdown)
+        .build()
+    )
+    return register_command_handlers(application)
+
+
 class _ScheduledExecutionCoordinator:
     """Coalesce overlapping triggers without creating queued executions."""
 
@@ -1796,58 +1866,7 @@ def main() -> None:
     # the entire lifetime of the process.
     _register_atexit_fallback()
 
-    app = (
-        Application.builder()
-        .token(config.TELEGRAM_BOT_TOKEN)
-        .post_init(post_init)
-        .post_shutdown(post_shutdown)
-        .build()
-    )
-
-    # Register command handlers
-    app.add_handler(CommandHandler("testalert", cmd_testalert))
-    app.add_handler(CommandHandler("picks",     cmd_picks))
-    app.add_handler(CommandHandler("slip",      cmd_slip))
-    app.add_handler(CommandHandler("dashboard", cmd_dashboard))
-    app.add_handler(CommandHandler("alerts",    cmd_alerts))
-    app.add_handler(CommandHandler("reconcile", cmd_reconcile))
-    app.add_handler(CommandHandler("grade",     cmd_grade))
-    app.add_handler(CommandHandler("grades",    cmd_grade))
-    app.add_handler(CommandHandler("start",     cmd_start))
-    app.add_handler(CommandHandler("help",      cmd_help))
-    app.add_handler(CommandHandler("status",    cmd_status))
-    # Keep the command name in one runtime constant so legacy command-audit
-    # tooling that enumerates literal registrations remains compatible.
-    _system_command = "system"
-    app.add_handler(CommandHandler(_system_command, cmd_system))
-    app.add_handler(CommandHandler("analyze",   cmd_analyze))
-    app.add_handler(CommandHandler("steam",     cmd_steam))
-    app.add_handler(CommandHandler("ev",        cmd_ev))
-    app.add_handler(CommandHandler("clv",         cmd_clv))
-    app.add_handler(CommandHandler("market",      cmd_market))
-    app.add_handler(CommandHandler("performance", cmd_performance))
-    app.add_handler(CommandHandler("backtest",    cmd_backtest))
-    app.add_handler(CommandHandler("providers",   cmd_providers))
-    app.add_handler(CommandHandler("stats",       cmd_stats))
-    app.add_handler(CommandHandler("config",       cmd_config))
-    app.add_handler(CommandHandler("calibration",  cmd_calibration))
-    app.add_handler(CommandHandler("pp_import",    cmd_pp_import))
-    app.add_handler(CommandHandler("health",       cmd_health))
-
-    app.add_handler(CommandHandler("tracking",     cmd_tracking))
-    # ── Framework v3.0 commands ───────────────────────────────────────────────
-    app.add_handler(CommandHandler("analyst",    cmd_analyst))
-    app.add_handler(CommandHandler("rollups",    cmd_rollups))
-    app.add_handler(CommandHandler("learning",   cmd_learning))
-    app.add_handler(CommandHandler("blocks",     cmd_blocks))
-    app.add_handler(CommandHandler("block",      cmd_block))
-    app.add_handler(CommandHandler("refinement", cmd_refinement))
-    app.add_handler(CommandHandler("funnel",     cmd_funnel))
-    app.add_handler(CommandHandler("backfill",   cmd_backfill))
-    # ── P11/P12 commands ─────────────────────────────────────────────────────
-    app.add_handler(CommandHandler("player",     cmd_player))
-    app.add_handler(CommandHandler("slipstats",  cmd_slipstats))
-    app.add_error_handler(error_handler)
+    app = build_application()
 
     logger.info("Starting polling — press Ctrl+C to stop.")
 
