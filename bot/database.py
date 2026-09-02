@@ -728,33 +728,6 @@ class SlipJournalLeg(Base):
 
 # ── Database manager ──────────────────────────────────────────────────────────
 
-class _LockedSessionContext:
-    """Serialize SQLite session lifetimes while preserving async session use."""
-
-    def __init__(self, session: AsyncSession, lock: asyncio.Lock) -> None:
-        self._session = session
-        self._lock = lock
-        self._acquired = False
-
-    async def __aenter__(self) -> AsyncSession:
-        await self._lock.acquire()
-        self._acquired = True
-        try:
-            return await self._session.__aenter__()
-        except BaseException:
-            self._lock.release()
-            self._acquired = False
-            raise
-
-    async def __aexit__(self, exc_type, exc, tb):
-        try:
-            return await self._session.__aexit__(exc_type, exc, tb)
-        finally:
-            if self._acquired:
-                self._lock.release()
-                self._acquired = False
-
-
 class Database:
     """Async database manager. Call `init()` once at startup."""
 
@@ -762,8 +735,6 @@ class Database:
         self._url = url
         self._engine = None
         self._session_factory = None
-        self._session_lock = asyncio.Lock()
-        self._closed = False
 
     async def init(self) -> None:
         """Create engine, run migrations, and ensure tables exist."""
@@ -831,9 +802,7 @@ class Database:
     def session(self) -> AsyncSession:
         if self._session_factory is None:
             raise RuntimeError("Database.init() has not been called.")
-        if self._closed:
-            raise RuntimeError("Database has been closed.")
-        return _LockedSessionContext(self._session_factory(), self._session_lock)
+        return self._session_factory()
     async def prune_prop_line_history(self, keep_days: int = 14) -> int:
         """Delete PropLineHistory rows older than keep_days. Returns rows deleted."""
         from datetime import timedelta
@@ -7190,11 +7159,6 @@ class Database:
         return result_list[:limit_sports]
 
     async def close(self) -> None:
-        self._closed = True
-        await self._session_lock.acquire()
-        try:
-            if self._engine:
-                await self._engine.dispose()
-        finally:
-            self._session_lock.release()
+        if self._engine:
+            await self._engine.dispose()
             logger.info("Database connection closed.")
