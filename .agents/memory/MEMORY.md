@@ -106,3 +106,4 @@
 - [Restart session isolation](restart-session-isolation.md) — reset runtime cursors, checkpoints, telemetry, and child tasks on restart; preserve SQLite evidence and delivery history.
 - [Telegram reconciliation identity](telegram-reconciliation-identity.md) — Underdog audits need source identity and delivery path; player/stat/line cannot deterministically join sends to picks.
 - [Managed SQLite CANTOPEN contention](managed-sqlite-cantopen.md) — Absolute path, valid permissions, and isolated inserts can succeed while live concurrent bot scans still fail to open SQLite.
+- [Telegram command bootstrap](telegram-command-bootstrap.md) — Invalid bot credentials fail polling before handlers run; verify bootstrap before debugging individual commands.
