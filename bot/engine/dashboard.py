@@ -781,6 +781,10 @@ class DashboardEngine:
         try:
             from sqlalchemy import select, func
             from database import PropLineHistory
+            r.ud_tracked_snapshots = int(
+                (r.tracking_by_provider.get("Underdog") or {}).get("observed", 0)
+                or 0
+            )
             async with db.session() as s:
                 score_res = await s.execute(
                     select(func.avg(PropLineHistory.score_total))
