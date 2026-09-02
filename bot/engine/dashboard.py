@@ -464,21 +464,27 @@ class DashboardEngine:
         """
         report = DashboardReport()
 
-        # Start the independent top-level reads together.  Each database
-        # helper owns its session, so this shortens the dashboard's critical
-        # path without sharing a session or changing report semantics.
-        _top_level = await asyncio.gather(
-            cls._gather_totals(db, report),
-            db.get_tracking_summary(),
-            asyncio.gather(
-                db.get_recent_tracked_props("Underdog", since_hours=1, limit=100),
-                db.get_recent_tracked_props("PrizePicks", since_hours=1, limit=100),
-                return_exceptions=True,
-            ),
-            return_exceptions=True,
-        )
-        tracking = _top_level[1]
-        provider_rows = _top_level[2]
+        # Keep report reads on one async path.  SQLite WAL permits readers
+        # during writes, but launching eleven independent sessions at once
+        # competes with the scanner's bulk snapshot transaction and can leave
+        # every report task waiting until the Telegram command timeout.  The
+        # individual helpers already isolate failures, so serialization only
+        # changes scheduling; it does not change report semantics.
+        await cls._gather_totals(db, report)
+        try:
+            tracking = await db.get_tracking_summary()
+        except Exception as exc:
+            tracking = exc
+        provider_rows = []
+        for provider in ("Underdog", "PrizePicks"):
+            try:
+                provider_rows.append(
+                    await db.get_recent_tracked_props(
+                        provider, since_hours=1, limit=100
+                    )
+                )
+            except Exception as exc:
+                provider_rows.append(exc)
         if not isinstance(tracking, dict):
             report.unavailable.add("tracking")
         try:
@@ -591,21 +597,20 @@ class DashboardEngine:
             )
         except Exception:
             report.recent_tracked_props = []
-        # These report sections read independent tables and do not depend on
-        # one another.  Running them together keeps a busy SQLite database
-        # from making the dashboard wait for a long serialized chain of
-        # read-only queries.
-        await asyncio.gather(
-            cls._gather_ev_performance(db, report),
-            cls._gather_clv_performance(db, report),
-            cls._gather_ud_breakdown(db, report),
-            cls._gather_by_sport(db, report),
-            cls._gather_by_market(db, report),
-            cls._gather_daily_trend(db, report),
-            cls._gather_system_panel(db, report),
-            cls._gather_intelligence_panel(db, report),
-            return_exceptions=True,
-        )
+        # Run the remaining sections in order for the same reason as the
+        # top-level reads: bounded database concurrency is more reliable than
+        # parallel SQLite sessions while the monitoring writer is active.
+        for gatherer in (
+            cls._gather_ev_performance,
+            cls._gather_clv_performance,
+            cls._gather_ud_breakdown,
+            cls._gather_by_sport,
+            cls._gather_by_market,
+            cls._gather_daily_trend,
+            cls._gather_system_panel,
+            cls._gather_intelligence_panel,
+        ):
+            await gatherer(db, report)
         cls._compute_best_worst(report)
         await cls._gather_provider_pipeline(db, report)
 
@@ -616,16 +621,20 @@ class DashboardEngine:
     @staticmethod
     async def _gather_totals(db: "Database", r: DashboardReport) -> None:
         try:
-            values = await asyncio.gather(
-                db.count_ev_records(),
-                db.count_steam_records(),
-                db.count_underdog_records(),
-                db.count_pp_edge_records(),
-                db.count_clv_records(),
-                db.count_today_underdog_alerts(),
-                db.count_today_pp_alerts(),
-                return_exceptions=True,
-            )
+            values = []
+            for reader in (
+                db.count_ev_records,
+                db.count_steam_records,
+                db.count_underdog_records,
+                db.count_pp_edge_records,
+                db.count_clv_records,
+                db.count_today_underdog_alerts,
+                db.count_today_pp_alerts,
+            ):
+                try:
+                    values.append(await reader())
+                except Exception as exc:
+                    values.append(exc)
             fields = (
                 "total_ev_alerts",
                 "total_steam_alerts",

@@ -3201,7 +3201,7 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         _slip_rec_map = await _report_read(
             _db.get_ud_recommendations_bulk(
                 [
-                    (plh.player_name, plh.sport, plh.stat_type)
+                    _ud_recommendation_identity(plh)
                     for provider, plh in provider_props
                     if provider == "Underdog"
                 ],
@@ -3210,7 +3210,7 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             fallback={},
         )
         for _cand in _candidates:
-            _k = (_cand.player_name, _cand.sport, _cand.stat_type)
+            _k = _ud_recommendation_identity(_cand)
             _lr, _ = _slip_rec_map.get(_k, (None, None))
             if _cand.sportsbook == "Underdog" and _lr in ("OVER", "UNDER"):
                 _cand.best_side = _lr
