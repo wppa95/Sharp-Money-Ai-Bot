@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from unittest.mock import patch
 
 from logging_utils import CredentialRedactionFilter, install_credential_redaction
 

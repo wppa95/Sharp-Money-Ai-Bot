@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import re
 import logging
+import re
 import traceback
 from collections.abc import Iterable
 from typing import Any
@@ -12,7 +12,7 @@ from typing import Any
 class CredentialRedactionFilter:
     """Redact credentials from log messages and exception text.
 
-    The filter is intentionally attached to the stdout handler rather than
+    The filter is applied at record creation and the stdout handler rather than
     changing provider or HTTP client behavior. This keeps request diagnostics
     available while ensuring captured workflow logs never contain credentials.
     """
