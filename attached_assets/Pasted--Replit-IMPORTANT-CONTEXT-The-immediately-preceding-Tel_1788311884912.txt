@@ -1,0 +1,1287 @@
+@Replit
+
+IMPORTANT CONTEXT:
+
+The immediately preceding Telegram delivery reconciliation task has JUST been completed successfully.
+
+That completed work reported:
+
+- stable event_id added to TelegramDeliveryAudit
+- provider source ID persisted
+- event ID persisted
+- delivery path persisted
+- exact opportunity marked immediately after successful Telegram send
+- failed sends excluded from delivered counts
+- observational records excluded
+- rate-limited records excluded
+- non-PLAY records excluded
+- existing deduplication preserved
+- existing qualification preserved
+- existing routing preserved
+- existing monitoring cadence preserved
+- existing provider behavior preserved
+- regression coverage added
+- focused delivery/reconciliation tests: 138 passed
+- full bot test suite: 4,825 passed
+- bot restarted successfully
+- exactly one python bot/main.py process confirmed
+- active SQLite database confirmed to contain event_id
+- clean startup and scheduler execution confirmed
+- automatic checkpoint completed
+
+BUILD ON THAT IMPLEMENTATION.
+
+Do NOT undo, replace, duplicate, or regress the completed Telegram reconciliation work.
+
+The task below is the remaining V4 reporting, tracking, grading, delivery-integrity, and restart-validation work.
+
+This is ONE coherent fix.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+0. ABSOLUTE DO-NOT-CHANGE RULE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Do NOT change:
+
+- scoring model
+- scoring weights
+- scoring thresholds
+- evidence rules
+- historical-data rules
+- direction logic
+- OVER/UNDER qualification logic
+- PLAY qualification criteria
+- Telegram PLAY-only qualification
+- line-movement thresholds
+- live-game safeguards
+- monitoring cadence
+- shared Underdog + PropLine cadence
+- FPR/stable-refresh/full-pool rotation behavior
+- PropLine request budget
+- PropLine provider rotation
+- Odds API 16/day limit
+- Odds API 45-minute minimum interval
+- Odds API pacing persistence
+- provider polling architecture
+- existing provider behavior
+- existing routing behavior
+- existing restart architecture
+- persistent historical data
+- grading methodology
+- HIT/MISS/PUSH definitions
+- existing alert direction
+- existing alert-selection logic
+
+The purpose of this task is to make the EXISTING system report and persist what it is already doing correctly.
+
+ESCALATION / STOP RULE:
+
+If a correct implementation genuinely requires changing anything listed above, STOP before making that change.
+
+Do NOT make the change unilaterally.
+
+Instead report:
+
+1. exactly which protected item must change,
+2. why it is technically required,
+3. what behavior would be affected,
+4. the smallest possible change required.
+
+Do not silently work around this rule.
+
+If a database/schema/model migration is required:
+
+- preserve all existing data
+- create a backup/snapshot or ensure a reversible migration path BEFORE modifying persisted structures
+- do not delete historical records
+- do not reset grading history
+- do not reset learning history
+- do not reset delivery history
+- do not destroy existing event_id/source linkage from the completed reconciliation task
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. OBSERVED SYMPTOMS / REGRESSION ANCHORS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Use these actual observations as regression anchors.
+
+Persistent tracker previously showed:
+
+- Historical observations: 49,250
+- Active tracked props: 26,825
+- Directional opportunities: 22,156
+- Pending grading: 22,076
+
+/grade previously showed:
+
+- Resolved: 80
+- HIT: 33
+- MISS: 47
+- PUSH: 0
+- Pending: 22,076
+- Hit rate: 41%
+
+Provider tracker previously showed:
+
+PrizePicks:
+
+- active: 387
+- observed: 4,744
+- directional: 20
+- delivered: 10
+- pending: 20
+- resolved: 0
+
+Underdog:
+
+- active: 26,438
+- observed: 44,506
+- directional: 22,136
+- delivered: 667
+- pending: 22,056
+- resolved: 80
+
+But /alerts last 24h showed:
+
+- 8 alerts total
+- all 8 Underdog
+- 0 PrizePicks
+
+Therefore the provider-level "delivered" counters cannot automatically be assumed to represent actual successful Telegram deliveries.
+
+They must be reconciled against authoritative Telegram delivery records.
+
+Another observed inconsistency:
+
+Current-session /funnel showed:
+
+- Qualified directional candidates: 36
+- Delivered to Telegram: 24
+
+while the persistent tracking section showed:
+
+- Active tracked props: 0
+- Historical observations: 0
+- Evaluated candidates: 0
+- Directional opportunities: 0
+- Actionable persisted: 0
+- Delivered alerts: 0
+
+The persistent database clearly contained substantial historical tracking data, so these zeros were not valid representations of persistent state.
+
+Fix the reporting source.
+
+Do NOT simply hide the discrepancy.
+
+Another critical regression anchor:
+
+"Rescored 5,026"
+
+must NEVER become:
+
+- PLAY count
+- actionable count
+- delivered count
+- Telegram alert count
+- directional opportunity count
+
+Rescoring is an evaluation operation.
+
+Another observed status issue:
+
+/status showed:
+
+"Some database counters are temporarily unavailable; monitoring continues."
+
+A database/query failure must never be represented as numeric zero.
+
+Previous Telegram delivery audit also showed:
+
+- five Underdog PLAY sends accepted by Telegram
+- four opportunity rows marked at original send time
+- Max Muncy Total Bases marked later
+- delivery audits previously lacked source ID/path
+
+The preceding reconciliation task has now addressed the stable event/source linkage. Preserve that work and complete the remaining reporting/reconciliation integrity.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2. DEFINE THE POPULATIONS — NEVER MIX THEM
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Maintain these populations as distinct concepts:
+
+A. OBSERVATION
+
+A market/prop observation captured from a provider.
+
+B. EVALUATED / RESCORED
+
+A prop evaluated or rescored by the analysis pipeline.
+
+C. DIRECTIONAL OPPORTUNITY
+
+A prop for which the model produced an actual OVER or UNDER direction.
+
+D. QUALIFIED PLAY
+
+A directional opportunity that satisfies the existing PLAY qualification rules.
+
+E. TELEGRAM DELIVERED PLAY
+
+A qualified PLAY for which Telegram successfully accepted the message and that successful delivery is authoritatively persisted.
+
+These are NOT interchangeable.
+
+Specifically:
+
+OBSERVATION != EVALUATED
+
+EVALUATED != DIRECTIONAL
+
+DIRECTIONAL != PLAY
+
+PLAY != DELIVERED
+
+RESCORED != PLAY
+
+RESCORED != DELIVERED
+
+Do not inflate one population using another.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3. PERSISTENT TRACKER REMAINS AUTHORITATIVE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The persistent opportunity tracker and grading history must remain intact.
+
+Do NOT replace persistent history with current-session counters.
+
+Do NOT wipe or rebuild historical data simply to make dashboard numbers look correct.
+
+Persistent data must continue to preserve:
+
+- historical observations
+- provider history
+- line history
+- evaluation history
+- directional opportunities
+- qualified PLAY history
+- delivery history
+- Telegram delivery audit history
+- grading history
+- HIT/MISS/PUSH outcomes
+- learning/performance history
+
+Runtime state may reset on restart as already designed.
+
+Persistent historical knowledge must survive.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+4. FIX /FUNNEL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/funnel must use the correct authoritative populations.
+
+Do NOT allow a fresh runtime session to make persistent tracking appear empty.
+
+Clearly separate:
+
+CURRENT SESSION
+
+from:
+
+PERSISTENT TRACKING / GRADING
+
+If both are shown, label them clearly.
+
+Persistent values must come from persistent records.
+
+Current-cycle/current-session values must come from current runtime execution.
+
+Do not substitute one for the other.
+
+For example, if the database contains:
+
+49,250 historical observations
+
+then /funnel must NOT report:
+
+Historical observations: 0
+
+simply because the current runtime session has not populated an in-memory collection.
+
+Likewise:
+
+22,156 directional opportunities
+
+must not become zero because the runtime restarted.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+5. NO FALSE ZEROES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Mandatory rule:
+
+If a database query/counter cannot be retrieved because of:
+
+- temporary DB failure
+- timeout
+- unavailable connection
+- query exception
+- incomplete initialization
+
+DO NOT display:
+
+0
+
+Display:
+
+UNKNOWN
+
+or:
+
+UNAVAILABLE
+
+or another explicit unavailable state.
+
+A failed query is not zero.
+
+Apply this to:
+
+- /status
+- /funnel
+- /grade
+- /performance
+- /dashboard
+- /learning
+- /slipstats
+- provider reporting
+- Telegram delivery reporting
+
+Never convert "unable to retrieve" into "0".
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+6. TELEGRAM DELIVERY AUTHORITY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Preserve and build on the completed Telegram reconciliation implementation.
+
+A Telegram PLAY is CONFIRMED DELIVERED only when:
+
+1. the underlying record is an actual qualified PLAY,
+2. the Telegram send is attempted,
+3. Telegram API returns success,
+4. successful delivery is persisted,
+5. the delivery is tied to the exact PLAY/opportunity/provider/source event.
+
+The completed reconciliation task already added stable event_id and exact source/event linkage.
+
+Use those identifiers as authoritative linkage.
+
+Do NOT mark a PLAY delivered merely because:
+
+- a send was attempted
+- a queue task was created
+- a notification object was created
+- a delivery timestamp exists
+- a provider record says delivered
+- an opportunity was marked "sent"
+- a worker processed the item
+
+"Delivered" means successful Telegram API acceptance plus authoritative persisted bookkeeping.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+7. DELIVERY RECORD TRACEABILITY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Preserve the new stable:
+
+- event_id
+- provider source ID
+- event ID
+- delivery path
+- exact opportunity linkage
+
+from the completed task.
+
+Every successful Telegram PLAY delivery must be traceable:
+
+Telegram delivery
+→ exact PLAY
+→ exact opportunity
+→ exact provider/source event
+→ exact evaluation that produced the PLAY.
+
+Use stable IDs.
+
+Do NOT rely on:
+
+- timestamp-only joins
+- player name alone
+- market name alone
+- line alone
+- approximate timestamps
+- fuzzy matching
+
+If existing stable identifiers already solve the linkage, use them.
+
+Do not create redundant identity systems unnecessarily.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+8. STORAGE-LEVEL DELIVERY DEDUP
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Application-level deduplication is not sufficient by itself.
+
+Ensure there is a database/storage-level uniqueness or idempotency safeguard for Telegram PLAY delivery records.
+
+The uniqueness key must represent the same logical delivery event/version of a PLAY.
+
+The goal:
+
+- retries cannot create duplicate delivery rows
+- concurrent workers cannot create duplicate delivery rows
+- scheduler overlap cannot create duplicate delivery rows
+- Telegram retry logic cannot create duplicate bookkeeping
+- reconciliation cannot create duplicate delivery records
+
+Application-level dedup should remain.
+
+Storage-level uniqueness is the final guard.
+
+Do NOT duplicate existing historical delivery records.
+
+Do NOT remove the completed event_id implementation.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+9. PROVIDER DELIVERED COUNTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Provider-level:
+
+"Delivered"
+
+must be calculated from authoritative successful Telegram PLAY delivery records tied to that provider.
+
+It must NOT mean:
+
+- provider PLAY generated
+- provider opportunity persisted
+- provider alert queued
+- provider send attempted
+- provider record marked sent
+- provider directional opportunity count
+
+If the historical tracker says:
+
+PrizePicks delivered: 10
+
+but only zero successful Telegram PLAY deliveries can be proven for PrizePicks, then:
+
+Confirmed PrizePicks delivered = 0
+
+and the unprovable historical records must be preserved separately as:
+
+UNKNOWN / UNVERIFIED
+
+if necessary.
+
+Do NOT manufacture ten Telegram alerts to make counts match.
+
+Likewise, do not assume the historical Underdog "667 delivered" count is authoritative without reconciliation.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+10. UNKNOWN / UNVERIFIED DELIVERY STATE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Historical records whose delivery cannot be definitively proven must NOT be silently converted into successful deliveries.
+
+Use an explicit:
+
+UNKNOWN / UNVERIFIED
+
+state where required.
+
+UNKNOWN/UNVERIFIED records:
+
+- remain preserved
+- remain available as a separate historical bucket where appropriate
+- do NOT count toward confirmed Delivered
+- do NOT count toward actual Telegram-delivered PLAY performance
+- do NOT count toward provider confirmed delivery totals
+- do NOT count toward HIT/MISS/PUSH grading denominators
+- do NOT count as successful Telegram alerts
+- do NOT automatically become confirmed deliveries
+
+Do not delete them simply because they cannot be verified.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+11. FIX /ALERTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/alerts must show actual confirmed Telegram-delivered PLAYs.
+
+It must NOT reconstruct alerts from:
+
+- directional opportunities
+- tracking records
+- provider "delivered" flags
+- attempted sends
+- historical opportunity timestamps
+
+The /alerts list must be based on authoritative successful Telegram PLAY delivery records.
+
+If a PLAY was not successfully delivered to Telegram, it must not appear in confirmed Telegram alert history.
+
+Do not alter old data merely to make the UI match.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+12. /ALERTS = LAST 24 HOURS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Remove any hardcoded 3-hour alert-history/reporting window.
+
+Default /alerts history must be:
+
+LAST 24 HOURS
+
+using actual successful Telegram delivery timestamps.
+
+This is a REPORTING/HISTORY window only.
+
+Do NOT change monitoring cadence.
+
+Do NOT create a 24-hour monitoring job.
+
+Monitoring remains continuous on the existing shared cadence.
+
+The 24-hour window is rolling:
+
+current time minus 24 hours
+
+not:
+
+midnight-to-midnight.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+13. TIMEZONE CONSISTENCY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Any metric using:
+
+- today
+- alerts today
+- daily count
+- current day
+- daily provider totals
+
+must use one explicit configured timezone consistently.
+
+Prefer the existing configured timezone already present in the system.
+
+Do NOT create multiple competing definitions of "today."
+
+If an existing pacing/reporting timezone is already available, use that consistently rather than introducing unnecessary configuration.
+
+The rolling last-24-hours window is separate from "today":
+
+- rolling 24 hours = timestamp-based
+- today = configured calendar-day timezone
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+14. /GRADE REMAINS AUTHORITATIVE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/grade must continue using persistent grading records.
+
+Do NOT rebuild grading from Telegram messages.
+
+Do NOT count UNKNOWN/UNVERIFIED delivery records in grading denominators.
+
+Do not change existing grading methodology.
+
+Definitions remain:
+
+OVER:
+- HIT if actual > line
+- MISS if actual < line
+- PUSH if actual == line
+
+UNDER:
+- HIT if actual < line
+- MISS if actual > line
+- PUSH if actual == line
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+15. HISTORY / L5 / L10 / L20 / L30
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Preserve existing evidence-integrity rules.
+
+L5/L10/L20/L30 must use actual completed games with valid player-stat results.
+
+Do NOT count:
+
+- line snapshots
+- polling observations
+- repeated scans
+- tracking records
+- rescoring events
+- provider observations
+
+as completed games.
+
+Denominators must equal actual valid completed games.
+
+If only 15 valid games exist, do not fabricate L20/L30.
+
+Current-line hit rates must use the current evaluated line.
+
+Every material line movement invalidates the prior evaluation and requires fresh current-line evidence according to the existing rules.
+
+Do NOT change these rules.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+16. TELEGRAM REMAINS PLAY-ONLY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Telegram must remain a true PLAY-only feed.
+
+Do NOT send Telegram messages for:
+
+- observations
+- tracking
+- new prop detection by itself
+- historical evidence
+- line movement by itself
+- non-qualified directional opportunities
+- rescoring
+- FPR/stable refresh
+- full-pool observations
+- unchanged observations
+- informational signals
+
+Only qualified PLAYs should generate user-facing Telegram alerts.
+
+Movement is an evaluation trigger.
+
+Movement is NOT direction.
+
+Direction must continue coming from the existing evaluation/scoring/evidence system.
+
+Quality remains internal only and is NOT an independent Telegram delivery gate.
+
+Market Quality remains internal and must NOT be rendered as a Telegram field.
+
+ACTIONABLE may remain an internal concept but must not become a separate user-facing alert classification.
+
+PICK remains the actual betting direction.
+
+STRONG BET may remain the optional user-facing classification.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+17. FPR / RESCANNING / RESCORING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+FPR rotation, stable refresh, full-pool rotation, and rescoring must not inflate:
+
+- PLAY count
+- directional opportunity count
+- Telegram delivery count
+
+unless the existing qualification logic genuinely creates a new qualified PLAY.
+
+Example:
+
+Rescored 5,026
+
+means:
+
+5,026 evaluation/rescoring operations.
+
+It does NOT mean:
+
+5,026 plays
+5,026 alerts
+5,026 deliveries
+
+Do not modify FPR behavior to make reporting easier.
+
+Fix reporting population definitions instead.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+18. CURRENT VS CUMULATIVE DELIVERY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Clearly distinguish:
+
+- deliveries during current runtime/session
+- deliveries during current day
+- deliveries during rolling 24 hours
+- cumulative historical confirmed deliveries
+- UNKNOWN/UNVERIFIED historical delivery records
+
+Do not mix these numbers.
+
+For example:
+
+"Delivered this session"
+
+must not be presented as:
+
+"Total historical delivered."
+
+"Qualified this cycle"
+
+must not be presented as:
+
+"Total PLAYs."
+
+Use clear labels.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+19. /PERFORMANCE /DASHBOARD /LEARNING /SLIPSTATS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Audit all reporting surfaces.
+
+Each metric must use the correct authoritative population.
+
+Do NOT mix:
+
+- observations
+- evaluations
+- directional opportunities
+- PLAYs
+- Telegram deliveries
+- grading outcomes
+
+into one ambiguous metric.
+
+If a metric represents actual Telegram-delivered PLAYs:
+
+source it from authoritative delivery records.
+
+If a metric represents persistent opportunities:
+
+source it from persistent opportunity records.
+
+If a metric represents grading:
+
+source it from grading records.
+
+If a metric represents current-session activity:
+
+source it from current-session telemetry.
+
+Do not use one population as a proxy for another.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+20. /TESTALERT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/testalert must NEVER inflate production PLAY statistics.
+
+Test messages must remain clearly separated from production delivery records.
+
+A test alert must NOT affect:
+
+- production PLAY counts
+- actionable counts
+- provider delivered counts
+- grading
+- performance
+- hit rate
+- learning
+- production /alerts history
+
+unless explicitly classified as test data.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+21. REPORTING MUST NEVER MUTATE DATA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+These commands:
+
+- /status
+- /funnel
+- /alerts
+- /grade
+- /performance
+- /dashboard
+- /learning
+- /slipstats
+
+must behave as read/report operations.
+
+They must NOT:
+
+- create fake delivery records
+- mark records delivered
+- change grading state
+- create PLAYs
+- reconcile by inventing missing data
+- mutate historical results simply to make counts align
+
+Reconciliation may write ONLY when based on authoritative evidence and must be idempotent.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+22. SAFE HISTORICAL RECONCILIATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Reconcile existing historical delivery records using the newly completed event/source linkage.
+
+For each historical delivery candidate, classify:
+
+CONFIRMED DELIVERED
+
+FAILED / NOT DELIVERED
+
+UNKNOWN / UNVERIFIED
+
+Use:
+
+- stable event_id
+- provider source ID
+- event ID
+- exact opportunity linkage
+- actual Telegram delivery result
+- existing delivery audit information
+
+Do not use timestamp-only matching.
+
+Do not duplicate records.
+
+Do not convert ambiguous records into confirmed deliveries.
+
+Preserve all original historical information.
+
+If historical delivery cannot be proven safely:
+
+leave it UNKNOWN / UNVERIFIED.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+23. BACKUP / REVERSIBILITY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Before any persisted-model/schema change:
+
+- create a backup/snapshot or ensure a clearly reversible migration path
+- verify existing data can be restored
+- preserve existing event_id/source IDs
+- preserve delivery history
+- preserve grading history
+- preserve learning history
+- preserve historical observations
+
+No destructive migration.
+
+No reset.
+
+No delete-and-rebuild approach.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+24. REGRESSION TESTS — USE THE ACTUAL FAILURES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Add/maintain explicit regression tests for the actual observed failures.
+
+TEST 1 — Successful Telegram PLAY
+
+- qualified PLAY exists
+- Telegram API succeeds
+- delivery record persisted
+- stable event_id exists
+- exact opportunity/source linkage exists
+- /alerts can retrieve it
+- provider delivered count includes it
+
+TEST 2 — Telegram send failure
+
+- no confirmed delivery
+- /alerts does not show it
+- provider confirmed delivery count excludes it
+
+TEST 3 — Attempt without successful Telegram confirmation
+
+- not delivered
+
+TEST 4 — Delayed bookkeeping
+
+- exact stable IDs reconcile correctly
+- no timestamp-only matching
+- no duplicate delivery record
+
+TEST 5 — Duplicate retry
+
+- storage-level uniqueness prevents duplicate delivery rows
+
+TEST 6 — Concurrent delivery
+
+- only one logical successful delivery record remains
+
+TEST 7 — UNKNOWN historical delivery
+
+- remains UNKNOWN/UNVERIFIED
+- excluded from confirmed delivery totals
+- excluded from grading denominators
+
+TEST 8 — /alerts rolling 24 hours
+
+- confirmed deliveries within last 24 hours appear
+- deliveries older than 24 hours do not appear
+- no 3-hour cutoff remains
+
+TEST 9 — Current-session vs persistent tracker
+
+- restart does not make persistent tracker values zero
+- persistent history remains visible
+
+TEST 10 — Rescoring
+
+- thousands of rescored props do not increase PLAY count
+- thousands of rescored props do not increase Telegram delivery count
+
+TEST 11 — /testalert
+
+- test messages cannot inflate production metrics
+
+TEST 12 — DB counter failure
+
+- unavailable counter becomes UNKNOWN/UNAVAILABLE
+- never false zero
+
+TEST 13 — Provider reconciliation
+
+- provider confirmed delivered count equals authoritative Telegram deliveries
+- historical unverified flags do not become confirmed delivery
+
+TEST 14 — Stable source linkage
+
+- delivery points to exact provider/source event
+- exact opportunity is marked
+- no unrelated opportunity can be marked by timestamp/player/market coincidence
+
+TEST 15 — Duplicate historical reconciliation
+
+- running reconciliation twice produces the same result
+- no duplicate delivery records
+
+TEST 16 — Restart delivery safety
+
+- restart does not resend old PLAYs
+- delivery dedup survives restart
+- persistent delivery history remains
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+25. REGRESSION NUMBERS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Where practical, use these observed values to ensure the reporting architecture does not collapse populations:
+
+- 49,250 historical observations
+- 26,825 active tracked props
+- 22,156 directional opportunities
+- 22,076 pending grading
+- 80 resolved
+- 33 HIT
+- 47 MISS
+- PrizePicks tracker delivered 10
+- /alerts showed 0 PrizePicks
+- Underdog tracker delivered 667
+- current-session qualified 36
+- current-session delivered 24
+- Rescored 5,026
+
+These are regression anchors, NOT numbers to hardcode.
+
+Do not make the application display these exact values unless they are actually present in authoritative data after reconciliation.
+
+The goal is to prevent populations from being incorrectly merged.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+26. FULL TEST SUITE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+After implementation:
+
+1. run focused delivery/bookkeeping/reporting tests
+2. run persistent tracker tests
+3. run reconciliation tests
+4. run UNKNOWN-state tests
+5. run /alerts 24-hour tests
+6. run restart tests
+7. run storage-level dedup/concurrency tests
+8. run full bot test suite
+
+Do not stop after only focused tests.
+
+All existing tests must continue passing.
+
+If an existing test expects the old incorrect behavior, update the test to the correct V4 behavior.
+
+Do NOT weaken implementation merely to satisfy an outdated test.
+
+Do not modify tests to hide a real regression.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+27. TWO RESTART VALIDATION CYCLES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+After all implementation and tests:
+
+RESTART CYCLE #1
+
+Verify:
+
+- exactly one bot process
+- exactly one scheduler owner
+- health endpoint OK
+- monitoring starts cleanly
+- persistent tracker data remains
+- grading history remains
+- delivery history remains
+- event_id/source linkage remains
+- no stale runtime cursors
+- no stale scan state
+- no old PLAY resend
+- /funnel persistent counts remain populated
+- /grade remains populated
+- /alerts reflects confirmed delivery records
+- provider delivery counts reconcile correctly
+
+Then perform:
+
+RESTART CYCLE #2
+
+Repeat the same validation.
+
+The second restart specifically proves that:
+
+- delivery dedup survives multiple restarts
+- persistent data remains authoritative
+- old PLAYs are not resent
+- current-session counters do not overwrite persistent counters
+- UNKNOWN records remain UNKNOWN
+- reporting remains correct after another clean runtime reset
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+28. SHARED MONITORING CADENCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Do NOT change monitoring cadence.
+
+Underdog and PropLine remain on the same shared monitoring trigger/cadence already implemented.
+
+Do NOT:
+
+- create a separate 24-hour alert job
+- change scheduler cadence
+- slow one provider to synchronize completion timestamps
+- redesign scheduler behavior
+- remove max_instances protection
+
+The 24-hour requirement applies ONLY to /alerts reporting history.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+29. PROPLINE BUDGET
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Do NOT change:
+
+Current PropLine request budget:
+
+1,000/day
+
+Future:
+
+5,000/day
+
+controlled by one configuration value.
+
+Do not change:
+
+- provider rotation
+- shared cadence
+- internal request pacing
+- discovery behavior
+- monitoring behavior
+
+Do not introduce additional provider calls merely to repair reporting.
+
+Use persisted data wherever possible.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+30. ODDS API PACING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Do NOT change:
+
+- 16 requests/day maximum
+- 45-minute minimum interval
+- restart-safe pacing state
+- monthly 500-request budget assumption
+
+Do not introduce extra Odds API calls to repair reporting.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+31. NO SHORTCUTS / NO MASKING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Do NOT make the dashboard look correct by:
+
+- hardcoding numbers
+- copying one counter into another
+- suppressing discrepancies
+- converting UNKNOWN into zero
+- converting observations into PLAYs
+- converting evaluations into PLAYs
+- converting rescored props into PLAYs
+- converting attempted sends into deliveries
+- treating provider flags as Telegram confirmation
+- inventing historical delivery records
+- deleting historical records
+- resetting the database
+- resetting grading history
+- resetting learning history
+- creating fake alerts
+- sending duplicate Telegram alerts
+- changing thresholds
+- changing scoring
+- changing evidence rules
+- changing direction logic
+- changing monitoring cadence
+
+If underlying data is genuinely inconsistent:
+
+represent the inconsistency honestly.
+
+Reconcile only where authoritative evidence exists.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+32. IMPLEMENTATION APPROACH
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+You may implement internally in reviewable slices if that makes the work safer.
+
+However, the final deployed state must satisfy ONE coherent acceptance set.
+
+Do not leave partial/incomplete reporting behavior deployed if it would expose false numbers.
+
+Priority order:
+
+1. preserve completed Telegram reconciliation implementation
+2. persistent population correctness
+3. authoritative delivery records
+4. storage-level delivery deduplication
+5. historical reconciliation / UNKNOWN handling
+6. reporting source correction
+7. /alerts rolling 24-hour history
+8. false-zero elimination
+9. regression tests
+10. two-cycle restart validation
+
+Do not redesign unrelated systems.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+33. FINAL ACCEPTANCE CRITERIA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The fix is accepted only if ALL are true:
+
+- Completed Telegram reconciliation implementation remains intact.
+- Stable event_id remains intact.
+- Provider source/event linkage remains intact.
+- Exact opportunity marking after successful Telegram send remains intact.
+- Persistent tracker data survives restart.
+- /funnel no longer incorrectly reports persistent populations as zero.
+- Current-session and persistent populations are clearly separated.
+- Observations are not counted as directional opportunities.
+- Evaluations/rescoring are not counted as directional opportunities unless the existing logic actually creates one.
+- Directional opportunities are not counted as PLAYs.
+- PLAYs are not counted as delivered unless Telegram delivery succeeded.
+- Telegram delivery records are tied to exact stable PLAY/opportunity/source identifiers.
+- Delivery bookkeeping is idempotent.
+- Storage-level deduplication prevents duplicate delivery rows.
+- Provider delivered counts reflect confirmed Telegram deliveries.
+- Historical unverified records remain UNKNOWN/UNVERIFIED.
+- UNKNOWN/UNVERIFIED records do not enter confirmed delivery totals.
+- UNKNOWN/UNVERIFIED records do not enter grading denominators.
+- /alerts is sourced from confirmed Telegram-delivered PLAYs.
+- /alerts defaults to rolling last 24 hours.
+- No hardcoded 3-hour alert window remains.
+- 24-hour /alerts history does not alter monitoring cadence.
+- /grade remains based on persistent grading records.
+- /testalert cannot inflate production metrics.
+- Rescoring does not inflate PLAY/delivery counts.
+- DB failures do not appear as false zeroes.
+- "Today" uses one consistent configured timezone.
+- Existing scoring remains unchanged.
+- Existing thresholds remain unchanged.
+- Existing evidence rules remain unchanged.
+- Existing direction logic remains unchanged.
+- Existing PLAY qualification remains unchanged.
+- Existing monitoring cadence remains unchanged.
+- Existing shared Underdog + PropLine cadence remains unchanged.
+- Existing FPR/stable-refresh/full-pool behavior remains unchanged.
+- Existing PropLine budget remains unchanged.
+- Existing Odds API pacing remains unchanged.
+- Existing restart architecture remains unchanged except where strictly required for bookkeeping integrity.
+- Historical data is not deleted.
+- Existing delivery history is not destroyed.
+- No duplicate Telegram alerts are generated by the fix.
+- Full test suite passes.
+- Restart cycle #1 passes.
+- Restart cycle #2 passes.
+- Exactly one bot process is running.
+- Exactly one scheduler owner is running.
+- Health is OK.
+- Final reporting values come from authoritative sources rather than cosmetic substitutions.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+34. FINAL REPORT REQUIRED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+When finished, report:
+
+- exact files changed
+- exact schema/model changes
+- backup/reversibility method, if any
+- migration status
+- focused tests and results
+- full test suite result
+- reconciliation results
+- confirmed Telegram delivery total
+- UNKNOWN/UNVERIFIED delivery total
+- provider-by-provider confirmed delivery totals
+- /alerts verification
+- /funnel verification
+- /grade verification
+- /performance/dashboard/learning/slipstats verification
+- storage-level dedup verification
+- two restart-cycle results
+- process count
+- scheduler-owner count
+- health status
+
+Also explicitly confirm:
+
+1. no scoring changes
+2. no threshold changes
+3. no evidence-rule changes
+4. no direction-rule changes
+5. no PLAY-qualification changes
+6. no monitoring-cadence changes
+7. no shared-cadence changes
+8. no PropLine budget changes
+9. no Odds API pacing changes
+
+MOST IMPORTANT:
+
+DO NOT "FIX" THE NUMBERS BY MAKING THEM MATCH.
+
+FIX THE DATA FLOW AND AUTHORITATIVE SOURCES SO THE NUMBERS BECOME CORRECT NATURALLY.
+
+If any protected DO-NOT-CHANGE item had to be touched, do not proceed silently. Report it according to the escalation rule above.
+
+restart to apply the changes and checkpoint the changes.
