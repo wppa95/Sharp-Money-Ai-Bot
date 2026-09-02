@@ -419,7 +419,7 @@ class TestSlipSubcommandRouting:
                     ("Source A", "NBA", "Points", "projection-123"): ("OVER", 88)
                 }
 
-        update = self._make_update([])
+        update, _ = self._make_update([])
         ctx = MagicMock()
         ctx.args = []
         with (
