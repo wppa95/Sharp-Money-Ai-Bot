@@ -31,6 +31,7 @@ from engine import AnalysisEngine
 from engine.season_check import SeasonChecker
 from engine.analysis import _SPORT_TO_ODDS_API_KEY, PlayerPropLine
 from alert_scope_filter import is_ev_line_in_scope
+from logging_utils import CredentialRedactionFilter
 from models import (
     MarketType,
     OddsLine,
@@ -98,11 +99,15 @@ from engine.health import init_health_tracker, get_health_tracker
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
+_stdout_handler = logging.StreamHandler(sys.stdout)
+_stdout_handler.addFilter(
+    CredentialRedactionFilter(secrets=(config.TELEGRAM_BOT_TOKEN,))
+)
 logging.basicConfig(
     format="%(asctime)s | %(levelname)-8s | %(name)s — %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     level=getattr(logging, config.LOG_LEVEL.upper(), logging.INFO),
-    handlers=[logging.StreamHandler(sys.stdout)],
+    handlers=[_stdout_handler],
 )
 logger = logging.getLogger(__name__)
 
