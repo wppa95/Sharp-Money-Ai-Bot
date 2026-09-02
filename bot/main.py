@@ -113,7 +113,12 @@ logging.basicConfig(
 # Some environments install a dedicated handler on HTTP client loggers before
 # application startup, so protect those records at the logger boundary too.
 for _logger_name in ("httpx", "httpcore", "telegram.request"):
-    logging.getLogger(_logger_name).addFilter(_log_redaction_filter)
+    _http_logger = logging.getLogger(_logger_name)
+    _http_logger.addFilter(_log_redaction_filter)
+    # HTTPX INFO request lines contain the Telegram bot credential in the URL.
+    # Keep warnings/errors available, but do not capture credential-bearing
+    # request URLs in workflow logs.
+    _http_logger.setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 

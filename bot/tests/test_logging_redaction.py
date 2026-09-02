@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 
+import main
 from logging_utils import CredentialRedactionFilter, install_credential_redaction
 
 
@@ -113,3 +114,8 @@ def test_record_factory_redacts_before_a_logger_handler_receives_record():
 
     assert "factory-secret" not in record.getMessage()
     assert "/bot[REDACTED]/getMe" in record.getMessage()
+
+
+def test_http_client_request_loggers_do_not_emit_credential_bearing_info_lines():
+    for logger_name in ("httpx", "httpcore", "telegram.request"):
+        assert logging.getLogger(logger_name).getEffectiveLevel() >= logging.WARNING
