@@ -1,0 +1,144 @@
+PHASE 1 — READ-ONLY AUDIT ONLY
+
+Perform a complete READ-ONLY inspection of the current Sharp Money Bot before implementing Phase 1.
+
+Do NOT make any code changes.
+Do NOT deploy.
+Do NOT restart.
+Do NOT modify configuration, database, schema, scheduler, providers, scoring, alerts, or Telegram behavior.
+
+The purpose is to establish exactly what is already implemented so Phase 1 can be applied without duplicating or breaking existing functionality.
+
+1. Provider Architecture
+
+Inspect and document exactly how player-prop data currently enters the bot.
+
+Specifically determine:
+
+* Whether Underdog currently has its own direct/source connector.
+* Whether PrizePicks currently has its own direct/source connector.
+* Whether PropLine is used as an underlying/alternate data source.
+* Whether Underdog uses its own source first and falls back to PropLine when available.
+* Whether PrizePicks uses PropLine.
+* The exact provider/source priority and fallback behavior.
+* Which provider/source is authoritative when both are available.
+* Whether provider identity is preserved after normalization.
+* Whether any third sportsbook/provider is currently being used.
+
+Do not change this behavior during the audit.
+
+2. PropLine Integration
+
+Inspect:
+
+* PropLine client/request path.
+* All PropLine endpoints currently used.
+* Centralized request limiter.
+* Current hard hourly limit.
+* Current request spacing.
+* 429/Retry-After handling.
+* Missing-key behavior.
+* Whether every PropLine request passes through the centralized limiter.
+* Whether any bypass path exists.
+
+Verify the recently implemented 208/hour / ~17.3-second cadence is actually present.
+
+3. Underdog Source
+
+Inspect the complete Underdog ingestion path.
+
+Determine:
+
+* Direct Underdog source/connector.
+* PropLine fallback, if present.
+* How source selection works.
+* What happens when direct Underdog data is unavailable.
+* What happens when PropLine data is unavailable.
+* Whether duplicate data from multiple sources is deduplicated correctly.
+* Stable provider/player/prop identity handling.
+* Current line snapshot behavior.
+
+4. Scheduler & Monitoring
+
+Inspect the current monitoring architecture.
+
+Determine:
+
+* Monitoring interval.
+* First-run behavior.
+* Scheduler jobs.
+* Monitoring coordinator.
+* Overlap protection.
+* Whether framework max_instances exists anywhere.
+* Whether queued/skipped invocations can accumulate.
+* Whether stopped runs can remain alive/wait for completion.
+* Restart/session-state behavior.
+* Whether the system starts a clean runtime session after restart.
+
+Do not change anything.
+
+5. Database & Persistence
+
+Inspect:
+
+* Current database architecture.
+* Current relevant tables.
+* Prop/snapshot persistence.
+* Underdog persistence path.
+* SQLite connection/pool configuration.
+* Current CANTOPEN handling.
+* Current lock handling.
+* Any persistence failures that could affect monitoring.
+
+Do not modify the database or schema.
+
+6. Telegram/Foundation Commands
+
+Inspect the currently implemented commands and identify which are already functional versus placeholders.
+
+Do not implement anything.
+
+7. Phase 1 Gap Analysis
+
+Compare the current implementation against the Phase 1 requirements and classify every item as:
+
+* ALREADY IMPLEMENTED
+* PARTIALLY IMPLEMENTED
+* MISSING
+* CONFLICTING
+
+Pay particular attention to the provider architecture because I believe Underdog may already have its own source and may use PropLine when available.
+
+8. Scope Verification
+
+Also verify that the recent PropLine cadence and scheduler reliability changes are intact:
+
+* 208 requests/hour maximum.
+* ~17.3-second maximum-utilization spacing.
+* No burst/catch-up.
+* Centralized limiter.
+* No framework max_instances.
+* No queued scheduler backlog.
+* Application-level overlap protection.
+
+Final Report
+
+Do not change anything.
+
+Report:
+
+PHASE 1 READ-ONLY AUDIT
+
+1. Current provider/source architecture
+2. Underdog direct-source behavior
+3. PropLine fallback behavior
+4. PrizePicks source behavior
+5. Current monitoring architecture
+6. Current scheduler/coordinator behavior
+7. Current database/persistence architecture
+8. Current Telegram commands
+9. Phase 1 requirements — ALREADY IMPLEMENTED / PARTIAL / MISSING / CONFLICTING
+10. Any specific issues that must be fixed before Phase 1 can be considered complete
+11. Exact files/modules involved
+
+STOP after the read-only audit.
