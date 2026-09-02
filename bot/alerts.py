@@ -1204,6 +1204,7 @@ class AlertDelivery:
         sport: Optional[str],
         stat_type: Optional[str],
         external_id: Optional[str],
+        event_id: Optional[str],
         line_value: Optional[float],
         outcome: str,
         recipients_sent: int,
@@ -1222,6 +1223,7 @@ class AlertDelivery:
                 sport=sport,
                 stat_type=stat_type,
                 external_id=external_id,
+                event_id=event_id,
                 line_value=line_value,
                 outcome=outcome,
                 recipients_sent=recipients_sent,
@@ -1231,6 +1233,46 @@ class AlertDelivery:
                 await result
         except Exception as exc:
             logger.warning("Telegram delivery audit write failed: %s", exc)
+
+    async def _mark_play_delivered(
+        self,
+        *,
+        provider: str,
+        external_id: Optional[str],
+        stat_type: Optional[str],
+    ) -> None:
+        """Mark the exact opportunity immediately after a successful PLAY send."""
+        if not external_id or not stat_type:
+            logger.warning(
+                "PLAY delivery succeeded without source identity: provider=%s stat=%s",
+                provider,
+                stat_type,
+            )
+            return
+        method = getattr(self._db, "mark_opportunity_alert_sent", None)
+        if method is None:
+            return
+        try:
+            result = method(external_id, stat_type, provider=provider)
+            if inspect.isawaitable(result):
+                result = await result
+            if result == 0:
+                logger.warning(
+                    "PLAY delivery source did not match an opportunity: "
+                    "provider=%s external_id=%s stat=%s",
+                    provider,
+                    external_id,
+                    stat_type,
+                )
+        except Exception as exc:
+            logger.warning(
+                "PLAY delivery bookkeeping failed: provider=%s external_id=%s "
+                "stat=%s error=%s",
+                provider,
+                external_id,
+                stat_type,
+                type(exc).__name__,
+            )
 
     # ── EV delivery ───────────────────────────────────────────────────────────
 
@@ -1539,11 +1581,22 @@ class AlertDelivery:
             sport=_pp_sport,
             stat_type=getattr(opp.pp_line, "stat_type", None),
             external_id=getattr(opp.pp_line, "external_id", None),
+            event_id=str(
+                getattr(opp.pp_line, "event_id", "")
+                or getattr(opp.pp_line, "game_id", "")
+                or ""
+            ),
             line_value=getattr(opp.pp_line, "line_value", None),
             outcome="sent" if alert_sent else "failed",
             recipients_sent=counts["sent"],
             recipients_failed=counts["failed"],
         )
+        if alert_sent:
+            await self._mark_play_delivered(
+                provider="PrizePicks",
+                external_id=getattr(opp.pp_line, "external_id", None),
+                stat_type=getattr(opp.pp_line, "stat_type", None),
+            )
 
         result  = DeliveryResult(
             sent             = alert_sent,
@@ -1595,6 +1648,7 @@ class AlertDelivery:
         source: str = "Underdog",
         source_id: Optional[str] = None,
         event_id: Optional[str] = None,
+        delivery_path: Optional[str] = None,
     ) -> "DeliveryResult":
         """
         Full Underdog prop alert pipeline:
@@ -1845,23 +1899,38 @@ class AlertDelivery:
             )
         if alert_sent and _actionable:
             get_rate_limiter().record_sent()
+        _alert_kind = (
+            "REMOVAL" if removed
+            else "MARKET_MOVE" if market_move_only
+            else "ACTIONABLE_PICK"
+        )
         await self._audit_telegram_attempt(
             provider=source,
-            alert_kind=(
-                "REMOVAL" if removed
-                else "MARKET_MOVE" if market_move_only
-                else "ACTIONABLE_PICK"
+            alert_kind=_alert_kind,
+            delivery_path=(
+                delivery_path
+                or (
+                    "prizepicks"
+                    if str(source).strip().lower() == "prizepicks"
+                    else "underdog"
+                )
             ),
-            delivery_path="underdog",
             player_name=player_name,
             sport=sport,
             stat_type=stat_type,
-            external_id=None,
+            external_id=source_id,
+            event_id=event_id,
             line_value=new_line,
             outcome="sent" if alert_sent else "failed",
             recipients_sent=counts["sent"],
             recipients_failed=counts["failed"],
         )
+        if alert_sent and _alert_kind == "ACTIONABLE_PICK":
+            await self._mark_play_delivered(
+                provider=source,
+                external_id=source_id,
+                stat_type=stat_type,
+            )
 
         
 

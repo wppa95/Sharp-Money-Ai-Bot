@@ -1970,6 +1970,7 @@ async def _run_prizepicks_independent_cycle(
                     or getattr(candidate["prop"], "game_id", "")
                     or ""
                 ),
+                delivery_path="prizepicks",
             )
         except Exception as exc:  # noqa: BLE001
             _release_prop_delivery_claim(
@@ -4454,6 +4455,12 @@ async def underdog_job(context) -> None:
                             or getattr(_dq_snap, "game_id", "")
                             or ""
                         ),
+                        delivery_path       = (
+                            "new" if _dq_path == "new"
+                            else "line_change" if _dq_path == "lc"
+                            else "standing" if _dq_path == "standing"
+                            else "underdog"
+                        ),
                         standing            = (_dq_path == "standing"),
                         strict_pregame      = True,
                     )
@@ -5465,6 +5472,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                          or getattr(_sr_snap, "game_id", "")
                          or ""
                      ),
+                     delivery_path       = "standing",
                 )
             except Exception as _sr_delivery_exc:
                 _release_prop_delivery_claim(
@@ -6221,6 +6229,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                               or getattr(_fpr_snap, "game_id", "")
                               or ""
                           ),
+                          delivery_path   = "full_pool",
                       )
                      except Exception as _fpr_delivery_exc:
                       _release_prop_delivery_claim(

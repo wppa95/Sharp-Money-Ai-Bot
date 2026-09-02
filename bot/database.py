@@ -184,6 +184,7 @@ class TelegramDeliveryAudit(Base):
     sport             = Column(String(32), nullable=True, index=True)
     stat_type         = Column(String(64), nullable=True)
     external_id       = Column(String(128), nullable=True, index=True)
+    event_id          = Column(String(128), nullable=True, index=True)
     line_value        = Column(Float, nullable=True)
     outcome           = Column(String(24), nullable=False)  # sent|failed|rate_limited
     recipients_sent   = Column(Integer, nullable=False, default=0)
@@ -735,6 +736,7 @@ class Database:
         await self._migrate_prop_line_history_v6()
         await self._migrate_player_game_results_v1()
         await self._migrate_prop_opportunity_log_v6()
+        await self._migrate_telegram_delivery_audit_v1()
         await self._migrate_slip_journal_leg_v1()
         await self._migrate_scan_cycle_log_v1()
         # player_risk_records is created by create_all (new table); no column migration needed
@@ -920,6 +922,19 @@ class Database:
                     await conn.execute(text(sql))
                 except Exception:
                     pass   # column already exists — safe to ignore
+
+    async def _migrate_telegram_delivery_audit_v1(self) -> None:
+        """Add source event identity to existing Telegram audit tables."""
+        async with self._engine.begin() as conn:
+            try:
+                await conn.execute(
+                    text(
+                        "ALTER TABLE telegram_delivery_audit "
+                        "ADD COLUMN event_id VARCHAR(128)"
+                    )
+                )
+            except Exception:
+                pass  # Column already exists; migration is idempotent.
 
     async def save_pp_line(self, record: "PrizePicksRecord") -> "PrizePicksRecord":
         async with self.session() as s:
@@ -1499,6 +1514,7 @@ class Database:
         sport: Optional[str] = None,
         stat_type: Optional[str] = None,
         external_id: Optional[str] = None,
+        event_id: Optional[str] = None,
         line_value: Optional[float] = None,
         outcome: str,
         recipients_sent: int = 0,
@@ -1515,6 +1531,7 @@ class Database:
                 sport=sport,
                 stat_type=stat_type,
                 external_id=external_id,
+                event_id=event_id,
                 line_value=line_value,
                 outcome=str(outcome or "failed"),
                 recipients_sent=int(recipients_sent or 0),
@@ -1841,11 +1858,13 @@ class Database:
             audit_rows = await s.execute(
                 select(
                     TelegramDeliveryAudit.provider,
+                    TelegramDeliveryAudit.alert_kind,
                     TelegramDeliveryAudit.delivery_path,
                     TelegramDeliveryAudit.player_name,
                     TelegramDeliveryAudit.sport,
                     TelegramDeliveryAudit.stat_type,
                     TelegramDeliveryAudit.external_id,
+                    TelegramDeliveryAudit.event_id,
                     TelegramDeliveryAudit.line_value,
                     TelegramDeliveryAudit.outcome,
                     TelegramDeliveryAudit.recipients_sent,
@@ -1856,25 +1875,29 @@ class Database:
             audit_identity_counts: dict[tuple, int] = {}
             audit_count = 0
             for (
-                provider_name, delivery_path, player_name, sport, stat_type,
-                external_id, line_value, outcome, recipients_sent,
-                recipients_failed, attempted_at,
+                provider_name, alert_kind, delivery_path, player_name, sport,
+                stat_type, external_id, event_id, line_value, outcome,
+                recipients_sent, recipients_failed, attempted_at,
             ) in audit_rows.all():
                 identity = (
-                    _provider(provider_name), delivery_path, player_name, sport,
-                    stat_type, external_id, line_value,
+                    _provider(provider_name), alert_kind, delivery_path,
+                    external_id, event_id, stat_type, line_value,
                 )
                 audit_identity_counts[identity] = audit_identity_counts.get(identity, 0) + 1
+                is_play_delivery = (
+                    str(alert_kind or "").strip().upper() == "ACTIONABLE_PICK"
+                )
+                outcome = str(outcome or "failed").lower()
                 if not _is_supported_tracking_sport(sport):
                     # Preserve a provider row for delivery-ledger integrity
                     # reporting, while excluding football from current
                     # tracking/evaluation populations.
                     provider = _provider(provider_name)
                     row = _ensure(provider)
-                    outcome = str(outcome or "failed").lower()
                     row["delivery_attempts"] += 1
-                    row["audit_recipients"] += int(recipients_sent or 0)
-                    if outcome == "sent":
+                    if is_play_delivery:
+                        row["audit_recipients"] += int(recipients_sent or 0)
+                    if outcome == "sent" and is_play_delivery:
                         row["audit_delivered_alerts"] += 1
                         audited_deliveries += 1
                     elif outcome == "rate_limited":
@@ -1886,10 +1909,10 @@ class Database:
                     continue
                 provider = _provider(provider_name)
                 row = _ensure(provider)
-                outcome = str(outcome or "failed").lower()
                 row["delivery_attempts"] += 1
-                row["audit_recipients"] += int(recipients_sent or 0)
-                if outcome == "sent":
+                if is_play_delivery:
+                    row["audit_recipients"] += int(recipients_sent or 0)
+                if outcome == "sent" and is_play_delivery:
                     row["audit_delivered_alerts"] += 1
                     audited_deliveries += 1
                 elif outcome == "rate_limited":
@@ -1902,8 +1925,12 @@ class Database:
                     provider,
                     attempted_at,
                     delivery_attempts=1,
-                    audit_delivered_alerts=1 if outcome == "sent" else 0,
-                    audit_recipients=int(recipients_sent or 0),
+                    audit_delivered_alerts=(
+                        1 if outcome == "sent" and is_play_delivery else 0
+                    ),
+                    audit_recipients=(
+                        int(recipients_sent or 0) if is_play_delivery else 0
+                    ),
                 )
                 audit_count += 1
 
@@ -5414,7 +5441,7 @@ class Database:
         external_id: str,
         stat_type:   str,
         provider:    Optional[str] = None,
-    ) -> None:
+    ) -> int:
         """
         Mark an existing PropOpportunityLog row as a delivered Telegram actionable pick.
 
@@ -5429,7 +5456,7 @@ class Database:
         """
         from sqlalchemy import update as _sa_update
         async with self.session() as s:
-            await s.execute(
+            result = await s.execute(
                 _sa_update(PropOpportunityLog)
                 .where(
                     PropOpportunityLog.external_id == _stored_opportunity_external_id(
@@ -5447,6 +5474,7 @@ class Database:
                 )
             )
             await s.commit()
+            return int(result.rowcount or 0)
 
     async def get_alerted_opportunity_log(
         self,

@@ -1,0 +1,107 @@
+@Replit
+
+Implement follow-up task #170 now.
+
+We already completed the investigation. Do NOT perform another diagnosis or read-only investigation.
+
+Fix the delivery bookkeeping/audit discrepancy directly.
+
+Confirmed facts:
+- Telegram destination is correct.
+- Five Underdog PLAY sends were accepted by Telegram.
+- Four opportunity rows were marked at the original send time.
+- The Max Muncy / Total Bases row was marked later during a subsequent send.
+- Delivery audits currently lack the stable source ID / delivery-path information required for reliable reconciliation.
+
+## FIX
+
+Make every successful Telegram PLAY delivery persist an authoritative, traceable delivery record tied directly to the exact PLAY/opportunity/source record.
+
+Do not use timestamp-only matching.
+
+Persist the stable identifiers necessary to reconcile:
+
+PLAY
+→ opportunity/source
+→ Telegram delivery attempt
+→ Telegram API success
+→ delivery timestamp
+
+Make the delivery record at the actual successful send point so it cannot be incorrectly attached later to another opportunity.
+
+## FUNNEL
+
+Ensure:
+
+"Delivered"
+
+means ONLY an actual successful Telegram API delivery of a qualified PLAY.
+
+Make these populations reconcile correctly:
+
+- Actionable persisted
+- Delivered
+- Delivered to Telegram
+- Delivered alerts
+
+Do not count queued, attempted, directional, observational, historical, legacy, or failed records as delivered.
+
+## DUPLICATE PROTECTION
+
+Preserve existing delivery history.
+
+Do not resend existing PLAYs.
+
+Do not change PLAY qualification or deduplication behavior.
+
+A new qualified PLAY must still be able to alert normally.
+
+/testalert must remain excluded from real PLAY delivery statistics.
+
+## DO NOT CHANGE
+
+Do not change:
+
+- scoring
+- thresholds
+- evidence rules
+- direction logic
+- PLAY qualification
+- Quality logic
+- monitoring cadence
+- Underdog/PropLine cadence
+- Odds API pacing
+- provider budgets
+- Telegram routing logic
+
+This is ONLY the delivery bookkeeping/audit fix.
+
+## TESTS
+
+Add/update regression tests for:
+
+- successful PLAY send creates one authoritative delivery record
+- delivery record contains the exact stable PLAY/source identifier
+- failed sends are not marked delivered
+- delayed bookkeeping cannot misattribute a delivery
+- existing delivery records are not reassigned
+- funnel delivery counters reconcile
+- restart does not create duplicate delivery records
+- existing delivery history still suppresses duplicate PLAYs
+- /testalert remains excluded
+- full test suite passes
+
+## VERIFY
+
+After implementation:
+
+- Run focused delivery/funnel tests.
+- Run the full test suite.
+- Confirm delivery records reconcile to exact PLAY/source IDs.
+- Confirm funnel delivered counts reconcile.
+- Confirm no duplicate alerts are generated.
+- Confirm Telegram routing and PLAY qualification are unchanged.
+
+Implement the fix, restart, verify, and checkpoint.
+
+restart to apply the changes and checkpoint.

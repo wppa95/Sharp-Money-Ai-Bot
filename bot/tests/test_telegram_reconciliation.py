@@ -113,6 +113,217 @@ async def test_reconciliation_separates_provider_and_recipient_counts(db):
     assert report["exact_recipient_count_available"] is True
 
 
+async def _log_actionable_opportunity(
+    db,
+    *,
+    external_id: str,
+    player_name: str = "Traceable Player",
+    stat_type: str = "Hits",
+    provider: str = "Underdog",
+):
+    from database import PropOpportunityLog
+
+    now = datetime.utcnow()
+    async with db.session() as session:
+        session.add(PropOpportunityLog(
+            external_id=external_id,
+            player_name=player_name,
+            team="TEAM",
+            sport="MLB",
+            stat_type=stat_type,
+            line_value=0.5,
+            recommendation="OVER",
+            decision_tier="A",
+            confidence=85,
+            provider=provider,
+            detected_at=now,
+            alert_sent=False,
+        ))
+        await session.commit()
+
+
+async def _deliver_traceable_play(db, *, source_id: str, event_id: str, path: str):
+    from alerts import AlertDelivery
+
+    delivery = AlertDelivery(db, MagicMock(), [123])
+    with (
+        patch(
+            "alerts.broadcast_alert",
+            new_callable=AsyncMock,
+            return_value={"sent": 1, "failed": 0},
+        ),
+        patch("alerts.send_discord_alert", new_callable=AsyncMock, return_value=False),
+    ):
+        return await delivery.deliver_underdog(
+            player_name="Traceable Player",
+            team="TEAM",
+            sport="MLB",
+            stat_type="Hits",
+            old_line=0.5,
+            new_line=1.5,
+            validation=SimpleNamespace(has_supporting_data=True),
+            decision=SimpleNamespace(
+                recommendation="OVER",
+                confidence=85,
+                decision_tier="A",
+            ),
+            score=SimpleNamespace(total=90, stars=4),
+            source_id=source_id,
+            event_id=event_id,
+            delivery_path=path,
+        )
+
+
+@pytest.mark.asyncio
+async def test_successful_play_persists_exact_source_and_event_and_marks_opportunity(db):
+    from alerts import DeliveryResult
+    from database import PropOpportunityLog, TelegramDeliveryAudit
+    from sqlalchemy import select
+
+    await _log_actionable_opportunity(db, external_id="play-source-1")
+    result = await _deliver_traceable_play(
+        db,
+        source_id="play-source-1",
+        event_id="game-1",
+        path="line_change",
+    )
+
+    assert isinstance(result, DeliveryResult)
+    assert result.sent is True
+    async with db.session() as session:
+        audit = (
+            await session.execute(
+                select(TelegramDeliveryAudit).where(
+                    TelegramDeliveryAudit.external_id == "play-source-1"
+                )
+            )
+        ).scalar_one()
+        opportunity = (
+            await session.execute(
+                select(PropOpportunityLog).where(
+                    PropOpportunityLog.external_id == "play-source-1"
+                )
+            )
+        ).scalar_one()
+
+    assert audit.event_id == "game-1"
+    assert audit.delivery_path == "line_change"
+    assert audit.alert_kind == "ACTIONABLE_PICK"
+    assert audit.outcome == "sent"
+    assert opportunity.alert_sent is True
+    report = await db.get_telegram_reconciliation(since_hours=24)
+    ud = report["by_provider"]["Underdog"]
+    assert ud["actionable_persisted"] == 1
+    assert ud["delivered_alerts"] == 1
+    assert ud["audit_delivered_alerts"] == 1
+    assert ud["audit_recipients"] == 1
+    assert report["audited_deliveries"] == 1
+
+
+@pytest.mark.asyncio
+async def test_successful_play_marks_only_the_exact_source_opportunity(db):
+    from database import PropOpportunityLog
+    from sqlalchemy import select
+
+    await _log_actionable_opportunity(db, external_id="play-source-a")
+    await _log_actionable_opportunity(db, external_id="play-source-b")
+    await _deliver_traceable_play(
+        db,
+        source_id="play-source-a",
+        event_id="game-a",
+        path="new",
+    )
+
+    async with db.session() as session:
+        rows = list(
+            (
+                await session.execute(
+                    select(PropOpportunityLog).order_by(PropOpportunityLog.external_id)
+                )
+            ).scalars()
+        )
+    assert [(row.external_id, bool(row.alert_sent)) for row in rows] == [
+        ("play-source-a", True),
+        ("play-source-b", False),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_failed_play_is_audited_but_not_marked_delivered(db):
+    from database import PropOpportunityLog, TelegramDeliveryAudit
+    from alerts import AlertDelivery
+    from sqlalchemy import select
+
+    await _log_actionable_opportunity(db, external_id="failed-play")
+    delivery = AlertDelivery(db, MagicMock(), [123])
+    with (
+        patch(
+            "alerts.broadcast_alert",
+            new_callable=AsyncMock,
+            return_value={"sent": 0, "failed": 1},
+        ),
+        patch("alerts.send_discord_alert", new_callable=AsyncMock, return_value=False),
+    ):
+        result = await delivery.deliver_underdog(
+            "Traceable Player", "TEAM", "MLB", "Hits", 0.5, 1.5,
+            validation=SimpleNamespace(has_supporting_data=True),
+            decision=SimpleNamespace(
+                recommendation="OVER", confidence=85, decision_tier="A"
+            ),
+            score=SimpleNamespace(total=90, stars=4),
+            source_id="failed-play",
+            event_id="failed-game",
+            delivery_path="standing",
+        )
+
+    assert result.sent is False
+    async with db.session() as session:
+        audit = (
+            await session.execute(
+                select(TelegramDeliveryAudit).where(
+                    TelegramDeliveryAudit.external_id == "failed-play"
+                )
+            )
+        ).scalar_one()
+        opportunity = (
+            await session.execute(
+                select(PropOpportunityLog).where(
+                    PropOpportunityLog.external_id == "failed-play"
+                )
+            )
+        ).scalar_one()
+    assert audit.outcome == "failed"
+    assert opportunity.alert_sent is False
+    report = await db.get_telegram_reconciliation(since_hours=24)
+    assert report["audited_deliveries"] == 0
+
+
+@pytest.mark.asyncio
+async def test_non_play_success_is_not_counted_as_delivered_play(db):
+    now = datetime.utcnow()
+    await db.log_telegram_delivery(
+        provider="Underdog",
+        alert_kind="MARKET_MOVE",
+        delivery_path="line_change",
+        player_name="Observed Player",
+        sport="MLB",
+        stat_type="Hits",
+        external_id="observed-source",
+        event_id="observed-game",
+        line_value=0.5,
+        outcome="sent",
+        recipients_sent=1,
+        attempted_at=now,
+    )
+
+    report = await db.get_telegram_reconciliation(since_hours=24)
+    ud = report["by_provider"]["Underdog"]
+    assert ud["delivery_attempts"] == 1
+    assert ud["audit_delivered_alerts"] == 0
+    assert ud["audit_recipients"] == 0
+    assert report["audited_deliveries"] == 0
+
+
 @pytest.mark.asyncio
 async def test_reconciliation_counts_prizepicks_history_as_observed_and_tracked(db):
     """Normalized PP rows must appear in provider telemetry without an alert."""
