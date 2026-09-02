@@ -801,7 +801,8 @@ class DashboardEngine:
     async def _gather_by_sport(db: "Database", r: DashboardReport) -> None:
         try:
             from sqlalchemy import select, func
-            from database import EVRecord, UnderdogSnapshotRecord, PPEdgeRecord
+            from database import EVRecord, PPEdgeRecord, PropOpportunityLog
+            from sqlalchemy import or_
 
             sport_map: dict[str, SportPerf] = {}
 
