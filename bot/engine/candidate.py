@@ -315,23 +315,6 @@ class Candidate:
         new_trace = {**self.decision_trace, "analyst": narrative_dict}
         return _dc_replace(self, decision_trace=new_trace)
 
-    def with_external_research(self, research: Any) -> "Candidate":
-        """
-        Return a new Candidate with an external research result in the trace.
-
-        External research is analyst context only.  It must never change the
-        quantitative confidence dimensions, decision, tier, or recommendation.
-        The result accepts any object exposing ``to_dict()`` so the Candidate
-        contract does not import the Agent Reach adapter.
-        """
-        research_dict = (
-            research.to_dict()
-            if hasattr(research, "to_dict") else dict(research)
-            if isinstance(research, dict) else {}
-        )
-        new_trace = {**self.decision_trace, "external_research": research_dict}
-        return _dc_replace(self, decision_trace=new_trace)
-
     def to_dict(self) -> dict:
         return {
             "player_name":    self.player_name,

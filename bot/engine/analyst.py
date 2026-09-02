@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import html
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Mapping, Optional
 
 if TYPE_CHECKING:
     from engine.candidate import Candidate
@@ -84,6 +84,57 @@ def _g(obj: Any, *keys, default: Any = None) -> Any:
         if cur is default:
             return default
     return cur
+
+
+def build_historical_market_evidence(candidate: Any) -> dict[str, Any]:
+    """
+    Project already-stored quantitative/history artifacts for analyst display.
+
+    No DB or provider call occurs here. Missing values remain absent/unknown;
+    this function never invents a source, result, or hit rate.
+    """
+    trace = getattr(candidate, "decision_trace", {}) or {}
+    evidence: dict[str, Any] = {
+        "category": "historical_market",
+        "available": False,
+        "items": [],
+    }
+    items: list[dict[str, Any]] = []
+
+    pi = trace.get("prop_intelligence")
+    if isinstance(pi, Mapping):
+        hist = pi.get("historical")
+        if isinstance(hist, Mapping):
+            item = {
+                key: hist[key]
+                for key in ("n", "sample_strength", "hit_rate", "avg_vs_line", "variance")
+                if key in hist and hist[key] is not None
+            }
+            if item:
+                item["source"] = "stored_prop_intelligence"
+                items.append(item)
+        for window in ("l5", "l10", "l20", "l30", "season"):
+            windows = hist.get("windows", {}) if isinstance(hist, Mapping) else {}
+            window_data = windows.get(window) if isinstance(windows, Mapping) else None
+            if isinstance(window_data, Mapping):
+                items.append({
+                    "source": "stored_prop_intelligence",
+                    "window": window,
+                    **{
+                        key: window_data[key]
+                        for key in ("n", "hit_rate", "avg_vs_line", "variance")
+                        if key in window_data and window_data[key] is not None
+                    },
+                })
+
+    for key in ("line_history", "market_comparison", "cross_source", "odds_confirmation", "clv"):
+        value = trace.get(key)
+        if value not in (None, "", {}, [], ()):
+            items.append({"source": key, "value": value})
+
+    evidence["items"] = items
+    evidence["available"] = bool(items)
+    return evidence
 
 
 def _confidence_label(conf: int) -> str:
@@ -190,29 +241,6 @@ def _build_recommended_because(candidate: "Candidate") -> str:
     if "ev_pct" in trace and (trace["ev_pct"] or 0) > 0:
         parts.append(f"EV signal: +{trace['ev_pct']:.2f}% expected value.")
 
-    # External research is explicitly separate from quantitative and
-    # historical/market evidence.  Only stored findings are rendered; this
-    # pure function never performs network or tool calls.
-    external = trace.get("external_research")
-    if isinstance(external, dict):
-        status = external.get("status", "unknown")
-        findings = external.get("findings") or []
-        if findings:
-            parts.append(
-                "External evidence: " + " ".join(
-                    _external_finding_text(finding)
-                    for finding in findings[:3]
-                    if isinstance(finding, dict)
-                )
-            )
-        elif status in ("unavailable", "failed", "skipped", "partial"):
-            parts.append(
-                f"External evidence unavailable ({_external_status_reason(external)}); "
-                "the recommendation is based on quantitative and historical/market evidence."
-            )
-        elif status == "success":
-            parts.append("External evidence: Agent Reach returned no corroborating findings.")
-
     return " ".join(parts) if parts else (
         f"{candidate.decision} on {candidate.stat_type} ({candidate.line:.1f}) "
         f"for {candidate.player_name}."
@@ -271,12 +299,6 @@ def _build_risk_because(candidate: "Candidate", risk: Optional[Any] = None) -> s
             parts.append("Recommendation: reduce stake due to portfolio correlation.")
         elif adj == "AVOID":
             parts.append("Recommendation: avoid this pick due to high portfolio risk.")
-
-    external = trace.get("external_research")
-    if isinstance(external, dict) and external.get("status") in (
-        "unavailable", "failed", "skipped"
-    ):
-        parts.append(f"External research status: {_external_status_reason(external)}.")
 
     return " ".join(parts) if parts else "Standard market risk — no additional risk flags."
 
@@ -383,32 +405,6 @@ def _build_final_recommendation(candidate: "Candidate") -> str:
         f"in {sport} at {overall}/100 confidence ({tier_str}-tier, "
         f"{candidate.risk_level.capitalize()} risk)."
     )
-
-
-def _external_finding_text(finding: dict) -> str:
-    """Format a bounded, source-labelled stored finding without inventing facts."""
-    source = str(finding.get("source", "external"))
-    title = str(finding.get("title", "")).strip()
-    summary = str(finding.get("summary", "")).strip()
-    if summary:
-        summary = summary[:240]
-    if title and summary:
-        return f"[{source}] {title}: {summary}."
-    return f"[{source}] {title or summary or 'finding'}."
-
-
-def _external_status_reason(external: dict) -> str:
-    """Return an explicit, bounded status reason from stored adapter output."""
-    skipped = external.get("skipped_reason")
-    if skipped:
-        return str(skipped)[:180]
-    failures = external.get("failures")
-    if isinstance(failures, dict) and failures:
-        source, reason = next(iter(failures.items()))
-        return f"{source}: {str(reason)[:140]}"
-    if external.get("status") == "partial":
-        return "some Agent Reach sources returned no usable findings"
-    return str(external.get("status", "unknown"))
 
 
 # ── Public entry point ─────────────────────────────────────────────────────────
