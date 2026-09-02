@@ -1,0 +1,102 @@
+READ-ONLY FINAL MONITORING LIFECYCLE VERIFICATION — CLOSE THE REMAINING PARTIAL
+
+Do NOT modify code.
+Do NOT restart the bot.
+Do NOT deploy.
+Do NOT change scheduler cadence.
+Do NOT trigger artificial/stress executions.
+Do NOT change scoring, alerts, providers, PropLine, Underdog, or database behavior.
+
+The previous lifecycle audit marked only one item PARTIAL:
+
+Active-run independence = PARTIAL
+
+The reason was that cycle 4 showed an overlapping trigger being ignored, but the captured runtime evidence did not include:
+
+overlap ignored
+→ same active cycle completes
+→ coordinator releases ownership
+→ subsequent normal scheduled trigger starts a new cycle
+
+Objective
+
+Perform a READ-ONLY runtime observation of the existing live bot until a naturally occurring monitoring cycle provides enough evidence to close this gap.
+
+Do not manufacture an overlap or alter runtime state.
+
+Capture the following sequence
+
+For one naturally occurring Underdog monitoring cycle:
+
+1. Record cycle start:
+    * cycle ID
+    * timestamp
+    * scheduler/job name
+    * coordinator ownership
+2. While that same cycle is still active, observe the next normal scheduled trigger if it naturally occurs.
+3. If the next trigger occurs while the cycle is active, capture evidence that:
+    * coordinator sees the job already running
+    * overlapping trigger is ignored
+    * no second Underdog cycle starts
+    * no framework maximum number of running instances reached message occurs
+4. Continue observing WITHOUT intervention until the original cycle reaches normal completion.
+
+Capture:
+
+* cycle completion
+* persistence/final bookkeeping
+* shared monitoring cycle completion
+* coordinator ownership release
+
+5. Continue observing until the following normal Underdog scheduler trigger occurs.
+
+Capture:
+
+* new cycle ID
+* new cycle start
+* confirmation that it is a fresh execution
+* confirmation that the previous cycle was not replayed or queued
+
+Important
+
+If a naturally occurring overlap does NOT happen during the observation window, do NOT manufacture one.
+
+Instead report:
+
+* exact cycle(s) observed
+* whether the overlap condition occurred
+* what was directly proven
+* what remains unproven
+
+Do not mark PASS merely from code inspection if live evidence is required.
+
+Also verify
+
+During the observed cycle confirm:
+
+* data collected by the active cycle is processed independently
+* snapshot persistence completes within that cycle
+* final bookkeeping completes
+* the next scheduler trigger does not control completion of the prior cycle
+* no duplicate real monitoring execution occurs
+* no queued scheduler execution appears afterward
+* coordinator ownership is released after completion
+
+Required conclusion
+
+Update these determinations:
+
+* Scheduler launcher lifecycle: PASS/PARTIAL/FAIL
+* Active-run independence: PASS/PARTIAL/FAIL
+* Data processing independence: PASS/PARTIAL/FAIL
+* Coordinator cleanup: PASS/PARTIAL/FAIL
+* No queued backlog: PASS/PARTIAL/FAIL
+* No duplicate real monitoring execution: PASS/PARTIAL/FAIL
+
+Most importantly, determine whether the original PARTIAL can now be upgraded to PASS based on direct runtime evidence.
+
+Return ONLY the read-only verification report.
+
+NO CODE CHANGES.
+NO RESTART.
+NO DEPLOY.
