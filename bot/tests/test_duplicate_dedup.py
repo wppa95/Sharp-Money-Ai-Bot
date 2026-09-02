@@ -117,21 +117,12 @@ class TestTwoDeliveryPaths:
 
 class TestConcurrentDuplicate:
 
-    def test_05_max_instances_1_prevents_overlapping_full_scans(self):
-        """v3.6 underdog_job is registered with max_instances=1 in main.py.
-
-        The _ud_full_scan_running flag remains a defensive in-job guard, while
-        APScheduler prevents overlapping full scans at the scheduler level.
-        """
+    def test_05_coordinator_prevents_overlapping_full_scans(self):
+        """The scheduler uses the shared coalescing coordinator."""
         import main as _main_mod
         src = inspect.getsource(_main_mod)
-        assert "max_instances" in src, (
-            "max_instances not found in main.py — scheduler concurrency config missing"
-        )
-        # v3.6 uses a single scheduler instance for the full scan.
-        assert '"max_instances": 1' in src or "'max_instances': 1" in src, (
-            "underdog_job must be registered with max_instances=1 in main.py"
-        )
+        assert "_ScheduledExecutionCoordinator" in src
+        assert "_coordinated_job(" in src
 
     def test_06_ud_full_scan_running_flag_guards_heavy_path(self):
         """_ud_full_scan_running module flag must exist so the second instance

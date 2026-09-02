@@ -19,6 +19,7 @@ import logging
 import os
 import re
 import time
+from collections import deque
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Optional
@@ -168,11 +169,113 @@ class PropLineRequestBudget:
         self._count = 0
 
 
-# Temporary provider allowance: the existing 120-second pacing remains the
-# primary protection, while this shared cap keeps all PropLine clients within
-# the requested roughly-12-hour allowance.
+# PropLine's hard provider allowance.  The limiter below is the only request
+# admission point, so separate client instances cannot burst independently.
+PROPLINE_MAX_REQUESTS_PER_HOUR = 208
+PROPLINE_MIN_REQUEST_INTERVAL = 3600.0 / PROPLINE_MAX_REQUESTS_PER_HOUR
 PROPLINE_DAILY_REQUEST_LIMIT = 1_000
 _DEFAULT_PROPLINE_REQUEST_BUDGET = PropLineRequestBudget(PROPLINE_DAILY_REQUEST_LIMIT)
+
+
+class PropLineRequestLimiter:
+    """Shared rolling-hour limiter with continuous, non-bursting pacing."""
+
+    def __init__(
+        self,
+        limit: int = PROPLINE_MAX_REQUESTS_PER_HOUR,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep,
+    ) -> None:
+        self.configured_limit = min(
+            PROPLINE_MAX_REQUESTS_PER_HOUR,
+            max(1, int(limit)),
+        )
+        self.provider_limit = PROPLINE_MAX_REQUESTS_PER_HOUR
+        self._clock = clock
+        self._sleep = sleep
+        self._lock = asyncio.Lock()
+        self._request_times: deque[float] = deque()
+        self._next_request_at = 0.0
+        self._blocked_until = 0.0
+
+    @property
+    def effective_limit(self) -> int:
+        return min(self.configured_limit, self.provider_limit)
+
+    @property
+    def min_interval(self) -> float:
+        return 3600.0 / self.effective_limit
+
+    def configure_min_interval(self, interval: float) -> None:
+        """Honor a caller's slower configured pace without raising the cap."""
+        interval = max(0.0, float(interval))
+        if interval <= PROPLINE_MIN_REQUEST_INTERVAL:
+            return
+        configured_limit = max(1, int(3600.0 // interval))
+        self.configured_limit = min(self.configured_limit, configured_limit)
+
+    def observe_provider_limit(self, headers: Any) -> None:
+        """Adopt a lower limit advertised by the provider, never a higher one."""
+        if not headers:
+            return
+        normalized = {
+            str(name).lower(): value
+            for name, value in getattr(headers, "items", lambda: ())()
+        }
+        for name in (
+            "x-ratelimit-limit",
+            "x-rate-limit-limit",
+            "ratelimit-limit",
+        ):
+            raw = normalized.get(name)
+            if raw is not None:
+                match = re.search(r"\d+", str(raw))
+                if match:
+                    reported = int(match.group())
+                    if 0 < reported < self.provider_limit:
+                        self.provider_limit = reported
+                break
+
+    async def acquire(self) -> None:
+        """Wait for one slot; reservations are spaced across the hour."""
+        async with self._lock:
+            while True:
+                now = self._clock()
+                cutoff = now - 3600.0
+                while self._request_times and self._request_times[0] <= cutoff:
+                    self._request_times.popleft()
+
+                delay = max(0.0, self._blocked_until - now)
+                delay = max(delay, self._next_request_at - now)
+                if len(self._request_times) >= self.effective_limit:
+                    delay = max(
+                        delay,
+                        self._request_times[0] + 3600.0 - now,
+                    )
+                if delay > 0:
+                    await self._sleep(delay)
+                    continue
+
+                reserved_at = self._clock()
+                self._request_times.append(reserved_at)
+                self._next_request_at = reserved_at + self.min_interval
+                return
+
+    def defer(self, retry_after: float) -> None:
+        """Share a provider cooldown across every client instance."""
+        self._blocked_until = max(
+            self._blocked_until,
+            self._clock() + max(1.0, float(retry_after)),
+        )
+
+    def reset(self) -> None:
+        self._request_times.clear()
+        self._next_request_at = 0.0
+        self._blocked_until = 0.0
+
+
+_DEFAULT_PROPLINE_REQUEST_LIMITER = PropLineRequestLimiter()
 
 
 @dataclass(frozen=True)
@@ -870,12 +973,13 @@ class PropLineClient:
         api_key: Optional[str] = None,
         api_url: Optional[str] = None,
         session: Any = None,
-        min_request_interval: float = 120.0,
+        min_request_interval: float = PROPLINE_MIN_REQUEST_INTERVAL,
         cache_ttl: float = 240.0,
         timeout_seconds: float = 15.0,
         sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep,
         clock: Callable[[], float] = time.monotonic,
         request_budget: Optional[PropLineRequestBudget] = None,
+        request_limiter: Optional[PropLineRequestLimiter] = None,
     ) -> None:
         self.api_key = api_key if api_key is not None else os.getenv("PROPLINE_API_KEY", "")
         self.api_url = (
@@ -907,6 +1011,8 @@ class PropLineClient:
         self._snapshot_state_by_scope: dict[str, PropLineSnapshotState] = {}
         self._events_cache_by_sport: dict[str, tuple[PropLineEvent, ...]] = {}
         self._events_cache_clock_by_sport: dict[str, float] = {}
+        self.request_limiter = request_limiter or _DEFAULT_PROPLINE_REQUEST_LIMITER
+        self.request_limiter.configure_min_interval(self.min_request_interval)
 
     @property
     def is_configured(self) -> bool:
@@ -966,19 +1072,18 @@ class PropLineClient:
 
     async def _request_json(self, url: str, params: dict[str, str]) -> Any:
         """Perform one authorized request and account for it centrally."""
+        if not self.api_key:
+            raise PropLineError("PropLine API key is missing")
         now = self._clock()
         if now < self._backoff_until:
             raise PropLineRateLimitError(
                 "PropLine rate-limit backoff active",
                 retry_after=max(1.0, self._backoff_until - now),
             )
-        if self._last_request_at is not None:
-            delay = self.min_request_interval - (now - self._last_request_at)
-            if delay > 0:
-                await self._sleep(delay)
-        self._last_request_at = self._clock()
         if not self._reserve_request():
             raise PropLineError("PropLine daily request budget exhausted")
+        await self.request_limiter.acquire()
+        self._last_request_at = self._clock()
 
         session = self._session
         owns_local_session = session is None
@@ -994,18 +1099,24 @@ class PropLineClient:
             async with session.get(
                 url, headers=headers, params=params, timeout=timeout
             ) as response:
+                self.request_limiter.observe_provider_limit(response.headers)
                 if response.status == 404:
                     raise PropLineNotFoundError(f"PropLine resource not found (HTTP {response.status})")
                 if response.status == 429:
                     retry_after = _retry_after_seconds(response)
                     self._backoff_until = self._clock() + retry_after
+                    self.request_limiter.defer(retry_after)
                     raise PropLineRateLimitError(
                         f"PropLine rate limited (HTTP {response.status})",
                         retry_after=retry_after,
                     )
                 if response.status in {408, 425, 502, 503, 504}:
-                    retry_after = min(900.0, max(30.0, 2.0 * self.min_request_interval))
+                    retry_after = min(
+                        900.0,
+                        max(30.0, 2.0 * self.request_limiter.min_interval),
+                    )
                     self._backoff_until = self._clock() + retry_after
+                    self.request_limiter.defer(retry_after)
                     raise PropLineError(
                         f"PropLine temporarily unavailable (HTTP {response.status})"
                     )

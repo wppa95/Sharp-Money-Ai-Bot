@@ -76,22 +76,19 @@ def test_poll_interval_default_120s():
     ), "UNDERDOG_POLL_INTERVAL default must be '120'"
 
 
-# ── 2. max_instances=1 (single full-scan design) ─────────────────────────────
+# ── 2. scheduled execution coordinator ───────────────────────────────────────
 
 
-def test_max_instances_1_in_underdog_monitor():
-    """v3.6 underdog_monitor allows only one full scan at a time."""
+def test_coordinator_in_underdog_monitor():
+    """underdog_monitor uses the shared coalescing coordinator."""
     src = _src("main.py")
-    assert '"max_instances": 1' in src or "'max_instances': 1" in src, \
-        "max_instances=1 must be present in main.py"
+    assert '_coordinated_job("underdog_monitor", underdog_job)' in src
 
 
-def test_max_instances_not_raised_above_1():
-    """The underdog monitor must not permit overlapping scans."""
+def test_no_scheduler_max_instances_override():
+    """Overlap protection must not be delegated to max_instances."""
     src = _src("main.py")
-    for bad in ('"max_instances": 2', '"max_instances": 3', '"max_instances": 4',
-                "'max_instances': 2", "'max_instances': 3"):
-        assert bad not in src, f"Found forbidden {bad} in main.py — max 1 allowed"
+    assert "max_instances" not in src
 
 
 # ── 3. Full prop feed monitored ───────────────────────────────────────────────
@@ -293,25 +290,20 @@ def test_no_fast_resume_in_config():
         "FAST_RESUME found in config.py — fast resume not fully removed"
 
 
-# ── 14. Scheduler skips observable ───────────────────────────────────────────
+# ── 14. Scheduler trigger coalescing ─────────────────────────────────────────
 
 
-def test_misfire_grace_time_set():
-    """misfire_grace_time must be configured in main.py so skips are recorded."""
+def test_scheduler_does_not_configure_misfire_skips():
+    """Triggers are coalesced by the coordinator, not recorded as skips."""
     src = _src("main.py")
-    assert "misfire_grace_time" in src, \
-        "misfire_grace_time not found in main.py — scheduler skips will be silently dropped"
+    assert "misfire_grace_time" not in src
 
 
-def test_max_instances_1_with_scan_running_flag():
-    """max_instances=1 and the in-job flag prevent duplicate heavy scans."""
+def test_coordinator_and_scan_running_flag_prevent_duplicate_heavy_scans():
+    """The coordinator and in-job flag protect the heavy path."""
     import market_engine as me
     src = _src("main.py")
-    assert "max_instances" in src, \
-        "max_instances not present in main.py — concurrent instance config missing"
-    # Confirm it is exactly 1
-    assert '"max_instances": 1' in src or "'max_instances': 1" in src, \
-        "max_instances must be 1 in v3.6"
+    assert "_coordinated_job" in src
     # The flag must guard the heavy path
     import inspect
     me_src = inspect.getsource(me)

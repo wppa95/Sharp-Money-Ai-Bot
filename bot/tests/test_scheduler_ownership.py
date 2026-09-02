@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 from pathlib import Path
 
+import pytest
 
 MAIN_SOURCE = Path(__file__).resolve().parents[1] / "main.py"
 
@@ -79,7 +81,7 @@ def test_required_independent_jobs_remain_registered():
     } <= names
 
 
-def test_monitoring_jobs_are_single_instance():
+def test_scheduled_jobs_use_coordinator_without_max_instances():
     jobs = dict(_scheduled_jobs())
 
     for name in (
@@ -91,4 +93,43 @@ def test_monitoring_jobs_are_single_instance():
         "player_history_collector",
     ):
         kwargs = _job_kwargs(jobs[name])
-        assert kwargs["max_instances"].value == 1
+        assert "max_instances" not in kwargs
+
+    source = MAIN_SOURCE.read_text()
+    assert "_ScheduledExecutionCoordinator" in source
+    assert "_coordinated_job(" in source
+
+
+@pytest.mark.asyncio
+async def test_coordinator_coalesces_active_trigger_and_allows_next_trigger():
+    from main import _ScheduledExecutionCoordinator
+
+    coordinator = _ScheduledExecutionCoordinator()
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls = 0
+
+    async def callback(_context):
+        nonlocal calls
+        calls += 1
+        started.set()
+        await release.wait()
+
+    wrapped = coordinator.wrap("test_workflow", callback)
+    first = asyncio.create_task(wrapped(None))
+    await started.wait()
+    second = asyncio.create_task(wrapped(None))
+    await asyncio.sleep(0)
+
+    assert calls == 1
+    assert second.done()
+    release.set()
+    await first
+
+    # A later trigger is not queued or lost after the active execution ends.
+    release.clear()
+    third = asyncio.create_task(wrapped(None))
+    await asyncio.sleep(0)
+    assert calls == 2
+    release.set()
+    await third

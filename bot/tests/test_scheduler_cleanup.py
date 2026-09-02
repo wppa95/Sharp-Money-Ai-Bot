@@ -65,7 +65,10 @@ def test_fpr_is_the_only_registered_full_pool_rotation():
         (name, function)
         for name, function, _ in jobs
         if "pool" in name.lower() or "rescan" in name.lower()
-    ] == [("full_pool_rescan", "_full_pool_rescan_job")]
+    ] == [(
+        "full_pool_rescan",
+        "_coordinated_job('full_pool_rescan', _full_pool_rescan_job)",
+    )]
 
 
 def test_required_monitoring_and_maintenance_jobs_remain_registered():
@@ -98,12 +101,11 @@ def test_registered_job_names_are_unique_and_no_legacy_monitors_are_active():
     assert "steam_checker" not in names
 
 
-def test_monitoring_jobs_keep_single_instance_scheduler_protection():
+def test_monitoring_jobs_use_coalescing_coordinator():
     jobs = {
         name: call for name, _, call in _registered_repeating_jobs()
     }
 
     for name in ("odds_poller", "underdog_monitor", "full_pool_rescan"):
         kwargs = _job_kwargs(jobs[name])
-        assert isinstance(kwargs["max_instances"], ast.Constant)
-        assert kwargs["max_instances"].value == 1
+        assert "max_instances" not in kwargs

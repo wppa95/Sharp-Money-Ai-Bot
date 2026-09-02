@@ -11,6 +11,7 @@ post_shutdown lifecycle hooks — do NOT wrap run_polling() in asyncio.run().
 from __future__ import annotations
 
 import asyncio
+from functools import wraps
 import logging
 import os
 import sys
@@ -104,6 +105,37 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger(__name__)
+
+
+class _ScheduledExecutionCoordinator:
+    """Coalesce overlapping triggers without creating queued executions."""
+
+    def __init__(self) -> None:
+        self._running: set[str] = set()
+
+    def wrap(self, name: str, callback):
+        @wraps(callback)
+        async def _coordinated(context, *args, **kwargs):
+            if name in self._running:
+                logger.info(
+                    "scheduled_execution: ignoring overlapping trigger for %s",
+                    name,
+                )
+                return None
+            self._running.add(name)
+            try:
+                return await callback(context, *args, **kwargs)
+            finally:
+                self._running.discard(name)
+
+        return _coordinated
+
+
+_scheduled_execution_coordinator = _ScheduledExecutionCoordinator()
+
+
+def _coordinated_job(name: str, callback):
+    return _scheduled_execution_coordinator.wrap(name, callback)
 
 
 def _configured_odds_api_sports() -> list[tuple[str, Sport]]:
@@ -377,21 +409,19 @@ async def post_init(application: Application) -> None:
         # restart-safe pacing. It never reads ACTIVE_SPORTS for provider
         # selection.
         jq.run_repeating(
-            _poll_odds_job,
+            _coordinated_job("odds_poller", _poll_odds_job),
             interval=config.ODDS_POLL_INTERVAL,
             first=10,
             name="odds_poller",
-            job_kwargs={"max_instances": 1, "misfire_grace_time": 120},
         )
         # jq.run_repeating(_steam_check_job,    interval=config.STEAM_CHECK_INTERVAL,      first=15,  name="steam_checker")
         # Store DK/FD player-prop markets separately from the h2h/totals EV
         # poller. Only the enabled sportsbook books are retained.
         jq.run_repeating(
-            _player_props_job,
+            _coordinated_job("player_props_fetcher", _player_props_job),
             interval=config.PLAYER_PROP_POLL_INTERVAL,
             first=60,
             name="player_props_fetcher",
-            job_kwargs={"max_instances": 1, "misfire_grace_time": 120},
         )
         # Legacy _prizepicks_job remains disabled.  The authorized PropLine
         # PrizePicks cycle runs as a guarded companion task inside underdog_job.
@@ -400,55 +430,47 @@ async def post_init(application: Application) -> None:
         # jq.run_repeating(clv_check_job,       interval=config.CLV_CHECK_INTERVAL,        first=35,  name="clv_checker")
         # ─────────────────────────────────────────────────────────────────────
         jq.run_repeating(
-            underdog_job,
+            _coordinated_job("underdog_monitor", underdog_job),
             interval=config.UNDERDOG_POLL_INTERVAL,
             first=45,
             name="underdog_monitor",
-            # Explicit single-instance protection: if a scan is still running when
-            # the next trigger fires, APScheduler skips the new trigger rather than
-            # spawning a second concurrent scan.  misfire_grace_time=60 lets a
-            # trigger that fires up to 60 s late still execute (avoids missed scans
-            # during brief process pauses).
-            job_kwargs={"max_instances": 1, "misfire_grace_time": 60},
         )
         # Full-Pool Rescan Rotation is the sole bounded background rotation.
         # It consumes the canonical active (player, stat, line) universe.
         from market_engine import _full_pool_rescan_job
         jq.run_repeating(
-            _full_pool_rescan_job,
+            _coordinated_job("full_pool_rescan", _full_pool_rescan_job),
             interval=config.FPR_INTERVAL,
             first=150,
             name="full_pool_rescan",
-            job_kwargs={"max_instances": 1, "misfire_grace_time": 120},
         )
         # CLV seed job — every 15 minutes (creates AlertCLVSeed entries for alerts)
-        jq.run_repeating(_clv_seed_job,        interval=900,                                first=120, name="clv_seeder")
+        jq.run_repeating(_coordinated_job("clv_seeder", _clv_seed_job), interval=900, first=120, name="clv_seeder")
         # CLV harvest job — every hour (processes seeds after game_time passes)
-        jq.run_repeating(_clv_harvest_job,          interval=3600,  first=300,  name="clv_harvester")
+        jq.run_repeating(_coordinated_job("clv_harvester", _clv_harvest_job), interval=3600, first=300, name="clv_harvester")
         # Opportunity grader — hourly (grades completed prop opportunities).
         # A bounded, rotating worker must never overlap itself while provider
         # lookups are in flight.
         jq.run_repeating(
-            _grade_opportunities_job,
+            _coordinated_job("opportunity_grader", _grade_opportunities_job),
             interval=3600,
             # Run once shortly after startup, then continue on the hourly
             # cadence.  A restart should not defer grading for a full hour.
             first=60,
             name="opportunity_grader",
-            job_kwargs={"max_instances": 1, "misfire_grace_time": 120},
         )
         from player_history_job import player_history_collector_job
-        jq.run_repeating(player_history_collector_job, interval=240, first=60, name="player_history_collector", job_kwargs={"max_instances": 1, "misfire_grace_time": 120})
+        jq.run_repeating(_coordinated_job("player_history_collector", player_history_collector_job), interval=240, first=60, name="player_history_collector")
         # API budget check — every 15 minutes
-        jq.run_repeating(_budget_check_job,    interval=900,                                first=900, name="budget_checker")
+        jq.run_repeating(_coordinated_job("budget_checker", _budget_check_job), interval=900, first=900, name="budget_checker")
         # PropLineHistory prune — once per day (keeps last 14 days)
-        jq.run_repeating(_prune_prop_history_job, interval=86400, first=600, name="prop_history_pruner")
+        jq.run_repeating(_coordinated_job("prop_history_pruner", _prune_prop_history_job), interval=86400, first=600, name="prop_history_pruner")
         # Heartbeat — every 60 s (keeps HealthTracker alive timestamp current)
-        jq.run_repeating(_heartbeat_job,       interval=60,                                 first=30,  name="heartbeat")
+        jq.run_repeating(_coordinated_job("heartbeat", _heartbeat_job), interval=60, first=30, name="heartbeat")
         # Season / market-status refresh (skip when interval is 0 = disabled)
         if config.SEASON_CHECK_INTERVAL > 0:
             jq.run_repeating(
-                _season_check_job,
+                _coordinated_job("season_checker", _season_check_job),
                 interval=config.SEASON_CHECK_INTERVAL,
                 first=config.SEASON_CHECK_INTERVAL,  # first eager load already done above
                 name="season_checker",

@@ -9,15 +9,37 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+import providers.propline as propline_module
 from providers.propline import (
     PropLineRequestBudget,
     PropLineClient,
     PropLinePrizePicksProvider,
+    PropLineRequestLimiter,
     propline_event_identity,
     propline_market_identity,
     propline_player_identity,
     normalize_propline_prizepicks_record,
 )
+
+
+@pytest.fixture(autouse=True)
+def isolated_propline_limiter(monkeypatch):
+    """Keep HTTP-fixture tests fast while exercising the real limiter."""
+    virtual_time = [0.0]
+
+    async def advance(seconds: float):
+        virtual_time[0] += seconds
+
+    limiter = PropLineRequestLimiter(
+        clock=lambda: virtual_time[0],
+        sleep=advance,
+    )
+    monkeypatch.setattr(
+        propline_module,
+        "_DEFAULT_PROPLINE_REQUEST_LIMITER",
+        limiter,
+    )
+    return limiter
 from providers.prop_provider import PlayerProp
 from engine.provider_confirmation import (
     ConfirmationObservation,
@@ -462,10 +484,42 @@ def test_client_handles_rate_limit_with_backoff():
 def test_client_default_pacing_supports_one_request_per_120_second_cycle():
     client = PropLineClient(api_key="test-only-key")
 
-    assert client.min_request_interval == 120.0
-    # At this rate the companion's one request each 120-second cycle makes
-    # 720 daily requests, safely below the provider's 1,000-request limit.
-    assert 24 * 60 * 60 / client.min_request_interval < 1000
+    assert client.min_request_interval == pytest.approx(3600 / 208)
+    assert client.request_limiter.effective_limit == 208
+
+
+def test_shared_limiter_caps_rate_and_continuously_spaces_requests():
+    clock = [0.0]
+    sleeps = []
+
+    async def advance(seconds: float):
+        sleeps.append(seconds)
+        clock[0] += seconds
+
+    limiter = PropLineRequestLimiter(limit=999, clock=lambda: clock[0], sleep=advance)
+
+    async def exercise():
+        for _ in range(208):
+            await limiter.acquire()
+        before = list(limiter._request_times)
+        await limiter.acquire()
+        return before
+
+    before = asyncio.run(exercise())
+
+    assert limiter.configured_limit == 208
+    assert len(before) == 208
+    assert all(delay == pytest.approx(3600 / 208) for delay in sleeps)
+    assert clock[0] >= 3600 / 208 * 208
+
+
+def test_provider_lower_limit_is_adopted_by_shared_limiter():
+    limiter = PropLineRequestLimiter()
+    limiter.observe_provider_limit({"X-RateLimit-Limit": "100"})
+    limiter.observe_provider_limit({"X-RateLimit-Limit": "999"})
+
+    assert limiter.effective_limit == 100
+    assert limiter.min_interval == pytest.approx(36.0)
 
 
 def test_discovery_reuses_fresh_cache_instead_of_repeating_request():

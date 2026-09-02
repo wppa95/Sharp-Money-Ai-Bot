@@ -298,17 +298,12 @@ class TestLegacyBQConfig:
 # Scheduler explicit max_instances  — Priority #18
 # ─────────────────────────────────────────────────────────────────────────────
 
-class TestSchedulerMaxInstances:
-    """Verify underdog_monitor has explicit single-instance protection.
+class TestSchedulerCoordinator:
+    """Verify underdog_monitor uses coalescing single-instance protection."""
 
-    max_instances=1 prevents overlapping full scans and duplicate deliveries.
-    """
-
-    def test_underdog_job_kwargs_max_instances(self):
+    def test_underdog_job_uses_coordinator(self):
         """
-        main.py must schedule underdog_monitor with max_instances=2 explicitly.
-        This lets a fast fetch run at the 2-min cadence even when the primary
-        full scan takes longer than the interval.
+        The coordinator ignores overlapping triggers without a scheduler skip.
         """
         import ast
         import pathlib
@@ -332,29 +327,12 @@ class TestSchedulerMaxInstances:
             name_val = getattr(name_kw.value, "s", None) or getattr(name_kw.value, "value", None)
             if name_val != "underdog_monitor":
                 continue
-            # Found the underdog_monitor call — check job_kwargs
-            jk_kw = next(
-                (kw for kw in node.keywords if kw.arg == "job_kwargs"), None
-            )
-            assert jk_kw is not None, (
-                "underdog_monitor run_repeating() must have a job_kwargs= argument"
-            )
-            # job_kwargs must be a dict literal containing max_instances: 2
-            assert isinstance(jk_kw.value, ast.Dict), "job_kwargs must be a dict literal"
-            keys = [getattr(k, "s", None) or getattr(k, "value", None)
-                    for k in jk_kw.value.keys]
-            assert "max_instances" in keys, (
-                "job_kwargs must include max_instances"
-            )
-            max_idx = keys.index("max_instances")
-            max_val_node = jk_kw.value.values[max_idx]
-            max_val = getattr(max_val_node, "n", None) or getattr(max_val_node, "value", None)
-            assert max_val == 1, (
-                f"max_instances must be 1 (single-scan protection), got {max_val}"
-            )
+            callback = ast.unparse(node.args[0]) if node.args else ""
+            assert callback == "_coordinated_job('underdog_monitor', underdog_job)"
+            assert not any(kw.arg == "job_kwargs" for kw in node.keywords)
             found = True
             break
 
         assert found, (
-            "Could not find underdog_monitor run_repeating() call with job_kwargs in main.py"
+            "Could not find coordinated underdog_monitor run_repeating() call in main.py"
         )
