@@ -826,9 +826,15 @@ class DashboardEngine:
 
                 # UD alerts by sport
                 ud_res = await s.execute(
-                    select(UnderdogSnapshotRecord.sport, func.count())
-                    .where(UnderdogSnapshotRecord.alert_sent == True)  # noqa: E712
-                    .group_by(UnderdogSnapshotRecord.sport)
+                    select(PropOpportunityLog.sport, func.count())
+                    .where(
+                        or_(
+                            PropOpportunityLog.provider == "Underdog",
+                            PropOpportunityLog.provider.is_(None),
+                        ),
+                        PropOpportunityLog.alert_sent == True,  # noqa: E712
+                    )
+                    .group_by(PropOpportunityLog.sport)
                 )
                 for sport_val, cnt in ud_res.all():
                     if sport_val:
@@ -907,7 +913,8 @@ class DashboardEngine:
         """
         try:
             from sqlalchemy import select, func
-            from database import EVRecord, UnderdogSnapshotRecord, SteamRecord, PPEdgeRecord
+            from database import EVRecord, PropOpportunityLog, SteamRecord, PPEdgeRecord
+            from sqlalchemy import or_
 
             from reporting import current_reporting_day_bounds
             day_start, day_end = current_reporting_day_bounds()
@@ -929,13 +936,21 @@ class DashboardEngine:
                 )
                 dt.ev_count = ev_res.scalar() or 0
 
+                delivered_at = func.coalesce(
+                    PropOpportunityLog.alert_sent_at,
+                    PropOpportunityLog.detected_at,
+                )
                 ud_res = await s.execute(
                     select(func.count())
-                    .select_from(UnderdogSnapshotRecord)
+                    .select_from(PropOpportunityLog)
                     .where(
-                        UnderdogSnapshotRecord.alert_sent == True,  # noqa: E712
-                        UnderdogSnapshotRecord.fetched_at >= day_start,
-                        UnderdogSnapshotRecord.fetched_at < day_end,
+                        or_(
+                            PropOpportunityLog.provider == "Underdog",
+                            PropOpportunityLog.provider.is_(None),
+                        ),
+                        PropOpportunityLog.alert_sent == True,  # noqa: E712
+                        delivered_at >= day_start,
+                        delivered_at < day_end,
                     )
                 )
                 dt.ud_count = ud_res.scalar() or 0
