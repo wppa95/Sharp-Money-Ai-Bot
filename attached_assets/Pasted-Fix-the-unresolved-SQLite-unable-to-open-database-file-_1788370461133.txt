@@ -1,0 +1,93 @@
+Fix the unresolved SQLite unable to open database file issue.
+
+Use the existing SQLite architecture. Do NOT migrate to another database.
+
+Requirements
+
+First, add narrow diagnostics around the database access boundary so the exact failure stage is captured:
+
+* pool checkout
+* SQLite connection creation
+* WAL/shared-memory access
+* transaction begin
+* commit
+
+Preserve the original exception/traceback.
+
+Treat:
+
+sqlite3.OperationalError: unable to open database file
+
+as a distinct failure from:
+
+database is locked
+
+Targeted fix
+
+After adding the diagnostics, implement the smallest safe fix for the confirmed failure stage.
+
+If the failure is confirmed as a transient connection/open failure, use a bounded fresh-connection retry only for unable to open database file.
+
+Requirements for any retry:
+
+* Bounded attempts only.
+* Fresh connection/session for the retry.
+* Never reuse the failed connection.
+* No tight retry loop.
+* Preserve the original exception if all attempts fail.
+* Do not hide a persistent failure.
+* Do not treat it as database is locked.
+* Do not add a broad process-wide database lock.
+
+Do NOT:
+
+* change the database path
+* delete/reset/copy the database
+* delete the WAL/SHM files
+* migrate databases
+* change the schema
+* change monitoring cadence
+* change scheduler behavior
+* change PropLine pacing
+* change scoring
+* change alerts/Telegram
+* change unrelated functionality
+
+Tests
+
+Add focused tests for:
+
+1. unable to open database file is classified separately from database is locked.
+2. The original traceback is preserved.
+3. A transient connection/open failure succeeds on a bounded fresh-connection retry.
+4. Failed connections are never reused.
+5. Exhausted retries correctly propagate the failure.
+6. File-backed SQLite concurrent reads/writes remain correct.
+7. Concurrent bulk persistence does not silently drop records.
+8. Existing SQLite lock retry behavior remains unchanged.
+
+Run the focused SQLite tests and the complete existing test suite.
+
+Final verification
+
+Report:
+
+* Root cause confirmed.
+* Exact SQLite failure stage.
+* Fix implemented.
+* Files changed.
+* Focused test result.
+* Full test result.
+* Confirmation that no database migration/schema change occurred.
+* Confirmation that no unrelated functionality changed.
+
+After the code changes and tests pass, restart the application once so the fix becomes active.
+
+After restart verify:
+
+* exactly one bot process is running
+* database opens successfully
+* no immediate SQLite errors
+* application remains healthy
+
+Do not deploy.
