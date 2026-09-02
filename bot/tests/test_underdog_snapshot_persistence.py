@@ -2,14 +2,24 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
+import sqlite3
 import sys
+import traceback
 
 import pytest
+from sqlalchemy import func, select
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from database import Database
+from database import (
+    Database,
+    UnderdogSnapshotRecord,
+    _is_sqlite_cantopen_error,
+    _is_sqlite_lock_error,
+    _sqlite_error_kind,
+)
 
 
 class _FakeSession:
@@ -18,14 +28,21 @@ class _FakeSession:
         self.added: list[object] = []
         self.commits = 0
         self.exited = False
+        self.invalidated = False
 
     def add_all(self, records) -> None:
         self.added.extend(records)
+
+    async def flush(self) -> None:
+        return None
 
     async def commit(self) -> None:
         self.commits += 1
         if self.commit_error is not None:
             raise self.commit_error
+
+    async def invalidate(self) -> None:
+        self.invalidated = True
 
 
 class _SessionContext:
@@ -88,6 +105,113 @@ async def test_bulk_snapshot_save_does_not_retry_non_lock_failure():
         await database.save_underdog_snapshots_bulk([object()])
 
     assert session.commits == 1
+
+
+def test_sqlite_cantopen_is_distinct_from_lock():
+    cantopen = sqlite3.OperationalError("unable to open database file")
+    locked = sqlite3.OperationalError("database is locked")
+
+    assert _sqlite_error_kind(cantopen) == "cantopen"
+    assert _is_sqlite_cantopen_error(cantopen)
+    assert not _is_sqlite_lock_error(cantopen)
+    assert _sqlite_error_kind(locked) == "lock"
+    assert _is_sqlite_lock_error(locked)
+    assert not _is_sqlite_cantopen_error(locked)
+
+
+@pytest.mark.asyncio
+async def test_cantopen_transient_retry_uses_fresh_invalidated_session(monkeypatch):
+    first = _FakeSession(sqlite3.OperationalError("unable to open database file"))
+    second = _FakeSession()
+    sessions = iter((first, second))
+    database = Database("sqlite+aiosqlite:///:memory:")
+    database.session = lambda: _SessionContext(next(sessions))
+    monkeypatch.setattr("database._UNDERDOG_BULK_MAX_RETRIES", 2)
+    monkeypatch.setattr("database._UNDERDOG_CANTOPEN_RETRY_DELAYS", (0, 0))
+
+    result = await database.save_underdog_snapshots_bulk([object()])
+
+    assert result == {"records_written": 1, "retry_count": 1}
+    assert first.invalidated
+    assert first.commits == 1
+    assert second.commits == 1
+    assert first.exited and second.exited
+
+
+@pytest.mark.asyncio
+async def test_cantopen_preserves_original_traceback_and_stage(caplog, monkeypatch):
+    session = _FakeSession(sqlite3.OperationalError("unable to open database file"))
+    database = Database("sqlite+aiosqlite:///:memory:")
+    database.session = lambda: _SessionContext(session)
+    monkeypatch.setattr("database._UNDERDOG_BULK_MAX_RETRIES", 0)
+
+    with pytest.raises(sqlite3.OperationalError) as raised:
+        await database.save_underdog_snapshots_bulk([object()])
+
+    frames = traceback.extract_tb(raised.value.__traceback__)
+    assert any(frame.name == "commit" for frame in frames)
+    assert session.invalidated
+    assert "stage=commit" in caplog.text
+    assert "kind=cantopen" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_cantopen_exhausted_retries_propagate_and_never_reuse_sessions(
+    monkeypatch,
+):
+    sessions = [
+        _FakeSession(sqlite3.OperationalError("unable to open database file"))
+        for _ in range(3)
+    ]
+    original_sessions = list(sessions)
+    database = Database("sqlite+aiosqlite:///:memory:")
+    database.session = lambda: _SessionContext(sessions.pop(0))
+    monkeypatch.setattr("database._UNDERDOG_BULK_MAX_RETRIES", 2)
+    monkeypatch.setattr("database._UNDERDOG_CANTOPEN_RETRY_DELAYS", (0, 0))
+
+    with pytest.raises(sqlite3.OperationalError, match="unable to open database file"):
+        await database.save_underdog_snapshots_bulk([object()])
+
+    assert all(session.invalidated for session in original_sessions)
+    assert all(session.commits == 1 for session in original_sessions)
+    assert all(session.exited for session in original_sessions)
+
+
+def _snapshot(index: int) -> UnderdogSnapshotRecord:
+    return UnderdogSnapshotRecord(
+        external_id=f"concurrent-{index}",
+        player_name=f"Player {index}",
+        team="TST",
+        sport="NBA",
+        stat_type="Points",
+        line_value=10.5,
+        game_id=f"game-{index}",
+    )
+
+
+@pytest.mark.asyncio
+async def test_file_backed_concurrent_bulk_persistence_does_not_drop_records(tmp_path):
+    db_path = tmp_path / "concurrent.sqlite"
+    database = Database(f"sqlite+aiosqlite:///{db_path}")
+    await database.init()
+    try:
+        batches = [[_snapshot(batch * 10 + index) for index in range(10)] for batch in range(8)]
+        results = await asyncio.gather(
+            *(
+                database.save_underdog_snapshots_bulk(batch)
+                for batch in batches
+            )
+        )
+
+        async with database.session() as session:
+            count = await session.scalar(
+                select(func.count()).select_from(UnderdogSnapshotRecord)
+            )
+
+        assert sum(result["records_written"] for result in results) == 80
+        assert count == 80
+    finally:
+        await database.close()
 
 
 @pytest.mark.asyncio

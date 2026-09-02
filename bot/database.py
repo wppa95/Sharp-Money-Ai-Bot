@@ -22,6 +22,7 @@ from sqlalchemy import (
     UniqueConstraint,
     select, func, desc, text, delete, or_, and_, case, tuple_, update
 )
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 
@@ -29,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 _UNDERDOG_BULK_MAX_RETRIES = 2
 _UNDERDOG_BULK_RETRY_DELAYS = (0.25, 0.75)
+_UNDERDOG_CANTOPEN_RETRY_DELAYS = (0.5, 1.5)
 _DB_WRITE_MAX_RETRIES = 2
 _DB_WRITE_RETRY_DELAYS = (0.15, 0.5)
 _PRIZEPICKS_EXTERNAL_PREFIX = "PrizePicks::"
@@ -91,10 +93,107 @@ def _telegram_delivery_key(
     return f"{_TELEGRAM_DELIVERY_KEY_VERSION}:{digest}"
 
 
+def _sqlite_error_kind(exc: BaseException) -> Optional[str]:
+    """Classify the two transient SQLite failures handled by this module."""
+    message = str(exc).lower()
+    if "unable to open database file" in message:
+        return "cantopen"
+    if "database is locked" in message or "database table is locked" in message:
+        return "lock"
+    return None
+
+
 def _is_sqlite_lock_error(exc: BaseException) -> bool:
     """Return whether an exception is a transient SQLite writer lock."""
-    message = str(exc).lower()
-    return "database is locked" in message or "database table is locked" in message
+    return _sqlite_error_kind(exc) == "lock"
+
+
+def _is_sqlite_cantopen_error(exc: BaseException) -> bool:
+    """Return whether SQLite could not open the database file."""
+    return _sqlite_error_kind(exc) == "cantopen"
+
+
+def _log_sqlite_failure(
+    *,
+    operation: str,
+    stage: str,
+    exc: BaseException,
+) -> None:
+    """Log a SQLite failure with its original traceback intact."""
+    kind = _sqlite_error_kind(exc) or "other"
+    logger.error(
+        "SQLite access failure: operation=%s stage=%s kind=%s error=%s",
+        operation,
+        stage,
+        kind,
+        exc,
+        exc_info=True,
+    )
+
+
+def _install_sqlite_diagnostics(engine) -> None:
+    """Attach narrow SQLAlchemy lifecycle diagnostics to one SQLite engine.
+
+    These listeners observe the existing engine without changing its pooling,
+    transaction, or journal behavior.  The ``handle_error`` listener retains
+    SQLAlchemy's original exception/traceback; it only adds the stage context
+    to the log.
+    """
+    sync_engine = engine.sync_engine
+
+    def _on_connect(dbapi_connection, connection_record) -> None:
+        connection_record.info["sqlite_access_stage"] = "connection_creation"
+        logger.debug("SQLite access stage=connection_creation")
+
+    def _on_checkout(dbapi_connection, connection_record, connection_proxy) -> None:
+        connection_record.info["sqlite_access_stage"] = "pool_checkout"
+        logger.debug("SQLite access stage=pool_checkout")
+
+    def _on_invalidate(dbapi_connection, connection_record, exception) -> None:
+        if exception is not None:
+            _log_sqlite_failure(
+                operation="pool",
+                stage=connection_record.info.get(
+                    "sqlite_access_stage", "pool_checkout"
+                ),
+                exc=exception,
+            )
+        connection_record.info["sqlite_access_stage"] = "connection_invalidated"
+
+    def _on_begin(connection) -> None:
+        connection.info["sqlite_access_stage"] = "transaction_begin"
+        logger.debug("SQLite access stage=transaction_begin")
+
+    def _on_commit(connection) -> None:
+        connection.info["sqlite_access_stage"] = "commit"
+        logger.debug("SQLite access stage=commit")
+
+    def _on_handle_error(exception_context):
+        original = exception_context.original_exception
+        kind = _sqlite_error_kind(original)
+        if kind is None:
+            return
+
+        connection = exception_context.connection
+        stage = "connection_creation"
+        if connection is not None:
+            try:
+                stage = connection.info.get("sqlite_access_stage", "database_operation")
+            except Exception:
+                stage = "database_operation"
+        statement = exception_context.statement or "<no statement>"
+        _log_sqlite_failure(
+            operation=f"sql:{statement}",
+            stage=stage,
+            exc=original,
+        )
+
+    event.listen(sync_engine, "connect", _on_connect)
+    event.listen(sync_engine, "checkout", _on_checkout)
+    event.listen(sync_engine, "invalidate", _on_invalidate)
+    event.listen(sync_engine, "begin", _on_begin)
+    event.listen(sync_engine, "commit", _on_commit)
+    event.listen(sync_engine, "handle_error", _on_handle_error)
 
 
 def _retry_sqlite_write(func):
@@ -762,12 +861,21 @@ class Database:
         self._session_factory = async_sessionmaker(
             self._engine, class_=AsyncSession, expire_on_commit=False
         )
+        _install_sqlite_diagnostics(self._engine)
         async with self._engine.begin() as conn:
             # WAL journal mode: allows concurrent reads while a write is in
             # progress, eliminating most "database is locked" errors on SQLite.
             # Setting is persistent — only needs to be applied once per DB file.
             if self._url.startswith("sqlite"):
-                await conn.execute(text("PRAGMA journal_mode=WAL"))
+                try:
+                    await conn.execute(text("PRAGMA journal_mode=WAL"))
+                except Exception as exc:
+                    _log_sqlite_failure(
+                        operation="database.init",
+                        stage="wal_shared_memory_access",
+                        exc=exc,
+                    )
+                    raise
                 # NORMAL synchronous is safe and faster under WAL.
                 await conn.execute(text("PRAGMA synchronous=NORMAL"))
                 # busy_timeout (milliseconds): how long SQLite waits when another
@@ -3960,10 +4068,26 @@ class Database:
 
         retry_count = 0
         for attempt in range(_UNDERDOG_BULK_MAX_RETRIES + 1):
+            session = None
+            session_invalidated = False
+            stage = "pool_checkout"
             try:
-                async with self.session() as s:
-                    s.add_all(records)
-                    await s.commit()
+                session = self.session()
+                async with session as s:
+                    try:
+                        s.add_all(records)
+                        stage = "transaction_begin"
+                        # Flush separately so failures while acquiring the
+                        # transaction/connection are distinguishable from a
+                        # failure in the final commit.
+                        await s.flush()
+                        stage = "commit"
+                        await s.commit()
+                    except Exception as exc:
+                        if _is_sqlite_cantopen_error(exc):
+                            await s.invalidate()
+                            session_invalidated = True
+                        raise
                 if retry_count:
                     logger.info(
                         "save_underdog_snapshots_bulk: persisted %d records after %d retries",
@@ -3974,6 +4098,48 @@ class Database:
                     "retry_count": retry_count,
                 }
             except Exception as exc:
+                _log_sqlite_failure(
+                    operation="save_underdog_snapshots_bulk",
+                    stage=stage,
+                    exc=exc,
+                )
+                if (
+                    _is_sqlite_cantopen_error(exc)
+                    and session is not None
+                    and not session_invalidated
+                ):
+                    # A failure before the session context acquired a
+                    # connection still needs to invalidate the session object
+                    # before it is discarded. The next loop creates a new
+                    # session and cannot reuse this failed connection.
+                    await session.invalidate()
+                if _is_sqlite_cantopen_error(exc):
+                    if attempt >= _UNDERDOG_BULK_MAX_RETRIES:
+                        logger.error(
+                            "save_underdog_snapshots_bulk: exhausted CANTOPEN retries "
+                            "(%d retries, %d records): %s",
+                            _UNDERDOG_BULK_MAX_RETRIES,
+                            len(records),
+                            exc,
+                        )
+                        raise
+                    retry_count += 1
+                    delay = _UNDERDOG_CANTOPEN_RETRY_DELAYS[
+                        min(
+                            retry_count - 1,
+                            len(_UNDERDOG_CANTOPEN_RETRY_DELAYS) - 1,
+                        )
+                    ]
+                    logger.warning(
+                        "save_underdog_snapshots_bulk: SQLite CANTOPEN; "
+                        "fresh-session retry %d/%d in %.2fs (%d records)",
+                        retry_count,
+                        _UNDERDOG_BULK_MAX_RETRIES,
+                        delay,
+                        len(records),
+                    )
+                    await asyncio.sleep(delay)
+                    continue
                 if not _is_sqlite_lock_error(exc):
                     logger.error(
                         "save_underdog_snapshots_bulk: non-retryable failure "
