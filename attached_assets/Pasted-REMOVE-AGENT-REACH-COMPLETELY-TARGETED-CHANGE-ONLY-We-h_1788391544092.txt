@@ -1,0 +1,93 @@
+REMOVE AGENT REACH COMPLETELY — TARGETED CHANGE ONLY.
+
+We have completed a read-only diagnosis. Agent Reach is used only by the /analyst external-research subsystem and is not required by the core betting/monitoring pipeline.
+
+Remove Agent Reach completely from this build.
+
+REMOVE
+
+1. Remove the agent-reach dependency from pyproject.toml.
+2. Regenerate uv.lock properly with uv lock.
+3. Remove the Agent Reach implementation:
+    * bot/engine/agent_reach_research.py
+4. Remove Agent Reach-specific configuration from bot/config.py, including:
+    * AGENT_REACH_ENABLED
+    * AGENT_REACH_SOURCES
+    * AGENT_REACH_TIMEOUT_SECONDS
+    * AGENT_REACH_SOURCE_TIMEOUT_SECONDS
+    * AGENT_REACH_CACHE_TTL_SECONDS
+    * AGENT_REACH_COOLDOWN_SECONDS
+    * AGENT_REACH_MAX_CONCURRENCY
+    * AGENT_REACH_MAX_FINDINGS
+    * AGENT_REACH_WEB_URLS
+5. Remove all imports/references to Agent Reach throughout production code and tests.
+6. Remove Agent Reach-specific tests.
+7. Remove any Agent Reach-specific analyst/explanation/candidate plumbing that exists solely to support external Agent Reach research.
+8. Remove /analyst entirely if its purpose is exclusively Agent Reach external research.
+9. Remove /analyst from the Telegram command registry/help text and any command lists if it is removed.
+10. Remove any Agent Reach-specific environment-variable handling/documentation.
+
+IMPORTANT
+
+Do NOT replace Agent Reach with another service or dependency.
+
+Do NOT redesign /analyst.
+
+If /analyst contains meaningful functionality independent of Agent Reach, preserve that independent functionality and remove only the Agent Reach portion. If /analyst exists solely for Agent Reach research, remove the command completely.
+
+DO NOT CHANGE ANYTHING ELSE
+
+Do NOT modify:
+
+* monitoring
+* Underdog
+* PrizePicks
+* PropLine
+* provider separation
+* scoring
+* qualification
+* +EV
+* sharp-money logic
+* historical/statistical analysis
+* alerts
+* Telegram delivery
+* dashboard
+* scheduler
+* database logic
+* /slip
+* /picks
+* /funnel
+* any other command
+* Railway configuration except what is strictly required to eliminate Agent Reach
+* unrelated dependencies
+
+Do NOT upgrade unrelated packages.
+Do NOT manually edit lockfile hashes.
+Do NOT deploy.
+Do NOT restart the bot.
+
+VERIFY
+
+After the removal:
+
+1. Search the entire repository for:
+    * agent-reach
+    * agent_reach
+    * Agent Reach
+    * AGENT_REACH
+2. There should be no remaining Agent Reach references except historical Git metadata if applicable.
+3. Verify uv.lock regenerates successfully.
+4. Verify uv sync --locked --no-dev --no-install-project succeeds.
+5. Run only focused tests affected by this removal.
+6. Verify the project still compiles/imports successfully.
+
+Report:
+
+* files changed
+* Agent Reach references remaining (must be zero in active source/config)
+* whether /analyst was removed or partially preserved
+* lockfile verification
+* dependency sync verification
+* focused test result
+
+STOP after this targeted removal. Do not perform any unrelated cleanup or improvements.
