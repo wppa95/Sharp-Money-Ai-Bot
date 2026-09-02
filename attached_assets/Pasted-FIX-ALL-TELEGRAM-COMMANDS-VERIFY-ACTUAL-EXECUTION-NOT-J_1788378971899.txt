@@ -1,0 +1,299 @@
+FIX ALL TELEGRAM COMMANDS — VERIFY ACTUAL EXECUTION, NOT JUST REGISTRATION
+
+Do NOT do a read-only audit first.
+
+The previous work verified that handlers are registered, but that is NOT sufficient. We now know /status can respond while /funnel 1 reports:
+
+“Funnel data is UNAVAILABLE; the database query failed or timed out. This is not zero.”
+
+Therefore, I want the entire command system tested through the actual production command execution paths and fixed wherever necessary.
+
+Do NOT guess that a command works because its CommandHandler exists.
+
+⸻
+
+AUTHORITATIVE COMMAND LIST
+
+Player Prop Monitoring
+
+/picks
+/slip [N]
+/dashboard
+/alerts
+/funnel [h]
+/reconcile [h]
+/grade
+/grades
+/player NAME
+/slipstats
+
+Market Analysis
+
+/analyze ARGS
+/market
+/steam
+/ev
+/clv
+
+Performance
+
+/performance
+/backtest
+/stats
+/calibration
+/tracking
+/analyst
+/rollups
+/refinement
+
+System
+
+/start
+/status
+/system
+/health
+/providers
+/config
+/blocks
+/block ARGS
+/backfill
+/pp_import
+/testalert
+/help
+
+Also preserve the existing legacy /learning alias for /rollups.
+
+⸻
+
+CORE REQUIREMENT
+
+For EVERY command above, verify the complete production execution path:
+
+Telegram command
+→ CommandHandler
+→ authorization
+→ callback
+→ command logic
+→ database/API/service calls
+→ result generation
+→ response formatting
+→ Telegram response delivery
+
+A handler being registered does NOT count as verification.
+
+A mocked callback that bypasses the actual command logic does NOT count as verification.
+
+A command returning an error because its underlying production dependency is broken must be classified as BROKEN and the underlying issue fixed where it is part of the command system.
+
+⸻
+
+TEST EVERY COMMAND
+
+Actually invoke every command through the production application/handler path using safe test inputs.
+
+Use mocked Telegram transport only where necessary to prevent unwanted user-facing messages, BUT DO NOT mock away the command’s actual business logic, database queries, API calls, or service calls.
+
+Test:
+
+/picks
+/picks 5
+/picks MLB
+/picks TENNIS 5
+
+/slip
+/slip 3
+/slip 5
+
+/dashboard
+/alerts
+/funnel
+/funnel 1
+/funnel 24
+/reconcile
+/reconcile 1
+/reconcile 24
+/grade
+/grades
+/player Test Player
+/slipstats
+
+/analyze
+/market
+/steam
+/ev
+/clv
+
+/performance
+/backtest
+/stats
+/calibration
+/tracking
+/analyst
+/rollups
+/refinement
+
+/start
+/status
+/system
+/health
+/providers
+/config
+/blocks
+/block
+/backfill
+/pp_import
+/help
+
+For /testalert, DO NOT send a real alert. Verify only that the command callback and test-alert path can execute safely without delivering a real betting alert.
+
+For commands requiring dangerous/destructive/live actions such as /backfill or /pp_import, do NOT perform destructive or uncontrolled production operations. Exercise their validation/dispatch path and use the safest supported execution/test mode. If there is no safe execution mode, report that specifically rather than pretending it passed.
+
+⸻
+
+IMPORTANT: DATABASE FAILURES
+
+The /funnel 1 result currently says:
+
+“Funnel data is UNAVAILABLE; the database query failed or timed out. This is not zero.”
+
+This must NOT be accepted as a successful command.
+
+Trace and fix the actual database/query problem causing /funnel.
+
+Do the same for EVERY command.
+
+If multiple commands fail because they share the same database/query/service bottleneck, fix the shared root cause instead of patching each command independently.
+
+Do not simply increase a timeout without determining why the query is failing.
+
+⸻
+
+COMMAND RESULT CLASSIFICATION
+
+For every command classify it as:
+
+PASS
+
+* Actual command path executed successfully.
+* Expected response generated.
+* Response delivery succeeded.
+
+FIXED
+
+* Initially failed.
+* Root cause identified.
+* Fix applied.
+* Retested successfully.
+
+BLOCKED-SAFE
+
+* Cannot safely execute against production because execution would perform a destructive/live action.
+* Validation/dispatch path was still verified.
+
+FAIL
+
+* Still genuinely broken after attempted fix.
+
+Do NOT classify a command as PASS merely because:
+
+* handler is registered
+* callback exists
+* callback can be imported
+* unit test passes
+* mocked business logic returns successfully
+
+⸻
+
+PROVIDER SEPARATION REQUIREMENT
+
+While fixing the command system, DO NOT merge PrizePicks and Underdog.
+
+They are separate user-facing providers:
+
+PrizePicks
+and
+Underdog
+
+PropLine is an underlying data source, not a user-facing provider.
+
+Do not change provider architecture during this task unless a command is broken specifically because provider identity is being incorrectly handled.
+
+If a command displays provider information, it must preserve the distinction:
+
+🟢 Underdog — Primary Player Props
+
+⚪ PrizePicks — PropLine — Primary Player Props
+
+Do not relabel them as one provider.
+
+⸻
+
+DO NOT CHANGE
+
+Do not change:
+
+* scoring model
+* scoring thresholds
+* qualification thresholds
+* alert qualification logic
+* provider priority semantics
+* Underdog feed behavior
+* PrizePicks/PropLine feed behavior
+* PropLine rate limiter
+* scheduler cadence
+* scheduler overlap protection
+* SQLite architecture
+* database schema
+* monitoring lifecycle
+* bankroll logic
+* alert limits
+
+Only fix command execution and the underlying shared dependency issues that directly prevent commands from functioning.
+
+⸻
+
+TESTING
+
+After fixes:
+
+1. Run focused Telegram command tests.
+2. Add regression tests for every actual root cause discovered.
+3. Run the full test suite.
+4. Restart the existing bot once.
+5. Verify exactly one bot process.
+6. Verify Telegram polling.
+7. Verify /health.
+8. Verify representative commands through the live production application.
+9. Check logs for command exceptions, database timeouts, polling errors, and unhandled exceptions.
+
+Do not send real betting alerts.
+
+⸻
+
+REQUIRED FINAL REPORT
+
+Give me a table containing ALL 35 authoritative commands:
+
+Command | Initial Result | Root Cause | Fix | Final Result
+
+Do not omit any command.
+
+Also report:
+
+* /grades alias verification
+* /learning alias verification
+* argument parsing verification
+* database/query failures found
+* shared root causes found
+* exact files changed
+* focused tests
+* full test suite
+* restart result
+* live Telegram verification
+* exactly which commands were actually executed
+* any commands that remain FAIL
+* any commands classified BLOCKED-SAFE and why
+
+Most importantly:
+
+Do not tell me the commands work just because they are registered. Actually execute and verify them.
