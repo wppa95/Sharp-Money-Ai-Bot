@@ -780,16 +780,13 @@ class DashboardEngine:
     async def _gather_ud_breakdown(db: "Database", r: DashboardReport) -> None:
         try:
             from sqlalchemy import select, func
-            from database import UnderdogSnapshotRecord
+            from database import PropLineHistory
             async with db.session() as s:
-                tracked_res = await s.execute(
-                    select(func.count(UnderdogSnapshotRecord.id))
-                )
-                r.ud_tracked_snapshots = int(tracked_res.scalar() or 0)
                 score_res = await s.execute(
-                    select(func.avg(UnderdogSnapshotRecord.score_total))
+                    select(func.avg(PropLineHistory.score_total))
                     .where(
-                        UnderdogSnapshotRecord.score_total.isnot(None),
+                        PropLineHistory.provider == "Underdog",
+                        PropLineHistory.score_total.isnot(None),
                     )
                 )
                 r.ud_avg_score = score_res.scalar()
