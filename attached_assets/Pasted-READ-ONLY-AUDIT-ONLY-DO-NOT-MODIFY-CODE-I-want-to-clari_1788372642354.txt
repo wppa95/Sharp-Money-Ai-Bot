@@ -1,0 +1,47 @@
+READ-ONLY AUDIT ONLY — DO NOT MODIFY CODE
+
+I want to clarify two Phase 1 architecture points before any implementation.
+
+Do NOT change code, restart the bot, deploy, alter scheduler cadence, alter scoring/qualification/alerts, or change database behavior.
+
+1. Underdog → PropLine fallback
+
+Inspect the current production Underdog monitoring path and answer precisely:
+
+* Where does the Underdog monitor first obtain its data?
+* If the direct Underdog source is unavailable or fails, is there currently any code path that uses PropLine as a fallback for Underdog?
+* If not, identify the exact function/module where a fallback would logically belong.
+* Determine whether PropLine currently provides enough Underdog-specific data to safely act as a fallback without changing the authoritative-source rules.
+* Clearly distinguish:
+    A. Underdog direct source
+    B. PropLine as an alternate/fallback source for Underdog
+    C. PropLine’s existing PrizePicks path
+* Do NOT recommend replacing the direct Underdog source. The direct Underdog source remains authoritative whenever available.
+
+2. Scheduler overlap protection
+
+Inspect the exact scheduler implementation and determine:
+
+* Where APScheduler’s default per-job instance restriction is currently causing the “maximum number of running instances reached” behavior.
+* Which scheduler configuration/API is responsible for that behavior.
+* Whether it can be removed/neutralized without adding max_instances.
+* Confirm how the existing application-level coordinator can become the ONLY overlap/coalescing mechanism.
+* Confirm that an overlapping trigger will be ignored/coalesced rather than queued or rejected by framework instance limits.
+* Confirm that normal scheduler cadence remains unchanged.
+* Confirm that no duplicate scheduler jobs are created.
+* Confirm that an active run is allowed to finish independently of the next scheduled trigger.
+* Confirm that stop/restart cancels the active run cleanly, releases coordinator/runtime state, and the next startup begins with fresh runtime state.
+* Confirm there is no persistent resume/checkpoint behavior that can cause unfinished work to continue after restart.
+
+Required output
+
+Return ONLY a read-only audit with:
+
+1. Current Underdog → PropLine relationship
+2. Exact fallback insertion point, if appropriate
+3. Exact APScheduler overlap mechanism currently causing the framework-level restriction
+4. Minimal safe way to eliminate that framework restriction WITHOUT using max_instances
+5. Verification/tests that should be run after implementation
+6. Any risks or edge cases
+
+DO NOT IMPLEMENT ANYTHING YET.
