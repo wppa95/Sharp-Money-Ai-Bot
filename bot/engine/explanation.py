@@ -125,12 +125,6 @@ class ExplanationService:
         if pi_lines:
             lines += ["", "<b>🧮 Intelligence:</b>"] + [f"  {l}" for l in pi_lines]
 
-        # External research summary (from Agent Reach, stored at research time).
-        # Rendering remains read-only: no provider, network, or tool calls.
-        external_lines = _format_external_research_telegram(trace.get("external_research"))
-        if external_lines:
-            lines += ["", "<b>🌐 External research:</b>"] + [f"  {l}" for l in external_lines]
-
         # Analyst narrative (from Layer 9) — brief inline form
         analyst = trace.get("analyst")
         if isinstance(analyst, dict) and analyst.get("final_recommendation"):
@@ -215,35 +209,6 @@ def _format_prop_intelligence_telegram(pi: Optional[dict]) -> list[str]:
         sign = "+" if sig >= 0 else ""
         parts.append(f"Matchup: {_esc(matchup['label'])} (signal {sign}{sig})")
 
-    return parts
-
-
-def _format_external_research_telegram(research: Optional[dict]) -> list[str]:
-    """Render only stored Agent Reach evidence and explicit availability state."""
-    if not isinstance(research, dict):
-        return []
-    parts: list[str] = []
-    status = str(research.get("status", "unknown"))
-    findings = research.get("findings") or []
-    if findings:
-        parts.append(f"Status: <code>{_esc(status)}</code>")
-        for finding in findings[:3]:
-            if not isinstance(finding, dict):
-                continue
-            source = _esc(finding.get("source", "external"))
-            title = _esc(finding.get("title", "Untitled finding"))[:180]
-            summary = _esc(finding.get("summary", ""))[:260]
-            parts.append(f"[{source}] <b>{title}</b>" + (f": {summary}" if summary else ""))
-    else:
-        reason = research.get("skipped_reason")
-        failures = research.get("failures")
-        if isinstance(failures, dict) and failures:
-            source, failure = next(iter(failures.items()))
-            reason = f"{source}: {failure}"
-        parts.append(
-            f"Status: <code>{_esc(status)}</code> — "
-            f"{_esc(reason or 'No external findings were available.')}"
-        )
     return parts
 
 

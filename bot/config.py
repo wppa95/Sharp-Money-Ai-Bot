@@ -98,29 +98,6 @@ class Config:
     # configured guild/channel, while still keeping the listener scoped.
     DISCORD_ALLOWED_USER_IDS_RAW: str = os.environ.get("DISCORD_ALLOWED_USER_IDS", "")
 
-    # ── Agent Reach analyst research ─────────────────────────────────────────
-    # Agent Reach is an optional analyst-stage context source.  It never
-    # participates in quantitative scoring or alert eligibility.
-    AGENT_REACH_ENABLED: bool = os.environ.get("AGENT_REACH_ENABLED", "true").lower() not in (
-        "false", "0", "no", "off"
-    )
-    AGENT_REACH_SOURCES_RAW: str = os.environ.get("AGENT_REACH_SOURCES", "rss,exa_search")
-    AGENT_REACH_TIMEOUT_SECONDS: int = int(os.environ.get("AGENT_REACH_TIMEOUT_SECONDS", "20"))
-    AGENT_REACH_SOURCE_TIMEOUT_SECONDS: int = int(
-        os.environ.get("AGENT_REACH_SOURCE_TIMEOUT_SECONDS", "10")
-    )
-    AGENT_REACH_CACHE_TTL_SECONDS: int = int(
-        os.environ.get("AGENT_REACH_CACHE_TTL_SECONDS", "1800")
-    )
-    AGENT_REACH_COOLDOWN_SECONDS: int = int(
-        os.environ.get("AGENT_REACH_COOLDOWN_SECONDS", "900")
-    )
-    AGENT_REACH_MAX_CONCURRENCY: int = int(
-        os.environ.get("AGENT_REACH_MAX_CONCURRENCY", "2")
-    )
-    AGENT_REACH_MAX_FINDINGS: int = int(os.environ.get("AGENT_REACH_MAX_FINDINGS", "5"))
-    AGENT_REACH_WEB_URLS_RAW: str = os.environ.get("AGENT_REACH_WEB_URLS", "")
-
     @property
     def discord_configured(self) -> bool:
         return bool(
@@ -136,24 +113,6 @@ class Config:
             for uid in self.DISCORD_ALLOWED_USER_IDS_RAW.split(",")
             if uid.strip().isdigit()
         }
-
-    @property
-    def agent_reach_sources(self) -> tuple[str, ...]:
-        """Configured Agent Reach source names, preserving their priority order."""
-        return tuple(
-            source.strip()
-            for source in self.AGENT_REACH_SOURCES_RAW.split(",")
-            if source.strip()
-        )
-
-    @property
-    def agent_reach_web_urls(self) -> tuple[str, ...]:
-        """Explicit URLs allowed for Jina Reader (it is not a search backend)."""
-        return tuple(
-            url.strip()
-            for url in self.AGENT_REACH_WEB_URLS_RAW.split(",")
-            if url.strip()
-        )
 
     # ── PrizePicks monitoring ─────────────────────────────────────────────────
     # Optional compatibility fallback for custom PrizePicks endpoints that do
