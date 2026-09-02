@@ -625,14 +625,20 @@ class DashboardEngine:
             for reader in (
                 db.count_ev_records,
                 db.count_steam_records,
-                db.count_underdog_records,
+                DashboardEngine._count_underdog_deliveries,
                 db.count_pp_edge_records,
                 db.count_clv_records,
-                db.count_today_underdog_alerts,
+                DashboardEngine._count_today_underdog_deliveries,
                 db.count_today_pp_alerts,
             ):
                 try:
-                    values.append(await reader())
+                    if reader in (
+                        DashboardEngine._count_underdog_deliveries,
+                        DashboardEngine._count_today_underdog_deliveries,
+                    ):
+                        values.append(await reader(db))
+                    else:
+                        values.append(await reader())
                 except Exception as exc:
                     values.append(exc)
             fields = (
@@ -651,6 +657,53 @@ class DashboardEngine:
                     r.unavailable.add("totals")
         except Exception:
             r.unavailable.add("totals")
+
+    @staticmethod
+    async def _count_underdog_deliveries(db: "Database") -> int:
+        """Count delivered UD opportunities without scanning raw snapshots."""
+        from sqlalchemy import func, or_, select
+        from database import PropOpportunityLog
+
+        async with db.session() as s:
+            result = await s.execute(
+                select(func.count())
+                .select_from(PropOpportunityLog)
+                .where(
+                    or_(
+                        PropOpportunityLog.provider == "Underdog",
+                        PropOpportunityLog.provider.is_(None),
+                    ),
+                    PropOpportunityLog.alert_sent == True,  # noqa: E712
+                )
+            )
+            return int(result.scalar() or 0)
+
+    @staticmethod
+    async def _count_today_underdog_deliveries(db: "Database") -> int:
+        from sqlalchemy import func, or_, select
+        from database import PropOpportunityLog
+        from reporting import current_reporting_day_bounds
+
+        day_start, day_end = current_reporting_day_bounds()
+        delivered_at = func.coalesce(
+            PropOpportunityLog.alert_sent_at,
+            PropOpportunityLog.detected_at,
+        )
+        async with db.session() as s:
+            result = await s.execute(
+                select(func.count())
+                .select_from(PropOpportunityLog)
+                .where(
+                    or_(
+                        PropOpportunityLog.provider == "Underdog",
+                        PropOpportunityLog.provider.is_(None),
+                    ),
+                    PropOpportunityLog.alert_sent == True,  # noqa: E712
+                    delivered_at >= day_start,
+                    delivered_at < day_end,
+                )
+            )
+            return int(result.scalar() or 0)
 
     @staticmethod
     async def _gather_ev_performance(db: "Database", r: DashboardReport) -> None:
