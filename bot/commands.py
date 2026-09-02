@@ -4440,11 +4440,9 @@ async def cmd_analyst(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     await update.message.reply_text("⏳ Gathering analyst evidence…")
     try:
-        from engine.analyst import build_analyst_narrative
-        from engine.agent_reach_research import (
+        from engine.analyst import (
+            build_analyst_narrative,
             build_historical_market_evidence,
-            get_agent_reach_research_service,
-            research_candidate,
         )
         from engine.candidate import candidate_from_ud_decision
 
@@ -4473,7 +4471,7 @@ async def cmd_analyst(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
         lines: list[str] = [
             "🧠 <b>Recent Analyst Assessments</b>",
-            "<i>Evidence layers: quantitative · historical/market · external research</i>",
+            "<i>Evidence layers: quantitative · historical/market</i>",
             "",
         ]
         candidate_rows: list[tuple[object, object]] = []
@@ -4511,8 +4509,7 @@ async def cmd_analyst(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                         pass
 
                 # Keep the stored quantitative/history snapshot separate from
-                # external evidence.  Research is requested only from this
-                # analyst-stage command, never from the market scan loop.
+                # the narrative.  No live data is recalculated here.
                 from dataclasses import replace
                 history_evidence = build_historical_market_evidence(c)
                 c = replace(
@@ -4526,23 +4523,9 @@ async def cmd_analyst(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             except Exception as exc:
                 logger.debug("cmd_analyst: skip snap %s: %s", snap.player_name, exc)
 
-        service = get_agent_reach_research_service()
-        researched = await _bounded(asyncio.gather(
-            *(
-                research_candidate(candidate, service=service)
-                for _, candidate in candidate_rows
-            ),
-            return_exceptions=True,
-        ))
-        for (snap, original), enriched in zip(candidate_rows, researched):
-            c = original
-            if isinstance(enriched, Exception):
-                logger.warning("cmd_analyst: external research failed for %s: %s", snap.player_name, enriched)
-            else:
-                c = enriched
+        for snap, c in candidate_rows:
             narrative = build_analyst_narrative(c)
             c = c.with_analyst_narrative(narrative)
-            research_trace = c.decision_trace.get("external_research", {})
 
             lines.append(
                 f"<b>{_html.escape(snap.player_name)}</b>  ·  "
@@ -4552,19 +4535,6 @@ async def cmd_analyst(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             lines.append(
                 f"Direction: <b>{_html.escape(getattr(snap, 'bet_recommendation', ''))}</b>"
             )
-            if isinstance(research_trace, dict):
-                result_status = research_trace.get("status")
-                if result_status:
-                    try:
-                        # Rehydrate only for the concise status formatter; the
-                        # original trace remains the persisted evidence payload.
-                        status_text = (
-                            f"External research: {result_status} "
-                            f"({len(research_trace.get('findings') or [])} finding(s))"
-                        )
-                    except Exception:
-                        status_text = f"External research: {result_status}"
-                    lines.append(f"<i>{_html.escape(status_text)}</i>")
             lines.append("")
             lines.append(f"✅ {_html.escape(narrative.recommended_because[:200])}")
             lines.append(f"⚠️ {_html.escape(narrative.risk_because[:200])}")
