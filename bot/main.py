@@ -31,7 +31,7 @@ from engine import AnalysisEngine
 from engine.season_check import SeasonChecker
 from engine.analysis import _SPORT_TO_ODDS_API_KEY, PlayerPropLine
 from alert_scope_filter import is_ev_line_in_scope
-from logging_utils import CredentialRedactionFilter
+from logging_utils import install_credential_redaction
 from models import (
     MarketType,
     OddsLine,
@@ -100,7 +100,7 @@ from engine.health import init_health_tracker, get_health_tracker
 # ── Logging ───────────────────────────────────────────────────────────────────
 
 _stdout_handler = logging.StreamHandler(sys.stdout)
-_log_redaction_filter = CredentialRedactionFilter(
+_log_redaction_filter = install_credential_redaction(
     secrets=(config.TELEGRAM_BOT_TOKEN,)
 )
 _stdout_handler.addFilter(_log_redaction_filter)

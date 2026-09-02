@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import logging
 import traceback
 from collections.abc import Iterable
 from typing import Any
@@ -63,3 +64,17 @@ class CredentialRedactionFilter:
         if record.stack_info:
             record.stack_info = self.redact(record.stack_info, self._secrets)
         return True
+
+
+def install_credential_redaction(secrets: Iterable[str] = ()) -> CredentialRedactionFilter:
+    """Install record-level redaction before any logger handler sees a record."""
+    redaction_filter = CredentialRedactionFilter(secrets)
+    previous_factory = logging.getLogRecordFactory()
+
+    def redacting_factory(*args: Any, **kwargs: Any) -> Any:
+        record = previous_factory(*args, **kwargs)
+        redaction_filter.filter(record)
+        return record
+
+    logging.setLogRecordFactory(redacting_factory)
+    return redaction_filter

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
+from unittest.mock import patch
 
-from logging_utils import CredentialRedactionFilter
+from logging_utils import CredentialRedactionFilter, install_credential_redaction
 
 
 def _record(message: str, *args: object) -> logging.LogRecord:
@@ -93,3 +94,23 @@ def test_exception_text_is_redacted_before_formatter_reads_it():
     assert record.exc_text is not None
     assert "secret-token" not in record.exc_text
     assert "/bot[REDACTED]/getMe" in record.exc_text
+
+
+def test_record_factory_redacts_before_a_logger_handler_receives_record():
+    original_factory = logging.getLogRecordFactory()
+    try:
+        install_credential_redaction()
+        record = logging.getLogger("httpx").makeRecord(
+            "httpx",
+            logging.INFO,
+            __file__,
+            1,
+            "HTTP Request: %s",
+            ("https://api.telegram.org/bot123456:factory-secret/getMe",),
+            None,
+        )
+    finally:
+        logging.setLogRecordFactory(original_factory)
+
+    assert "factory-secret" not in record.getMessage()
+    assert "/bot[REDACTED]/getMe" in record.getMessage()
