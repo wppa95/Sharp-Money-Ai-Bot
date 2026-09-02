@@ -177,3 +177,43 @@ class TestDashboardEngineGatherSystemIntelligence:
     def test_gather_integration_method_is_async(self):
         import inspect
         assert inspect.iscoroutinefunction(DashboardEngine.gather)
+
+    async def test_gather_serializes_database_reads(self, monkeypatch):
+        """Report reads must not fan out into competing SQLite sessions."""
+        active = 0
+        max_active = 0
+
+        async def read(*args, **kwargs):
+            nonlocal active, max_active
+            active += 1
+            max_active = max(max_active, active)
+            await __import__("asyncio").sleep(0)
+            active -= 1
+            return {}
+
+        class FakeDB:
+            get_tracking_summary = read
+
+            async def get_recent_tracked_props(self, *args, **kwargs):
+                return []
+
+        async def section(db, report):
+            await read()
+
+        monkeypatch.setattr(DashboardEngine, "_gather_totals", section)
+        for name in (
+            "_gather_ev_performance",
+            "_gather_clv_performance",
+            "_gather_ud_breakdown",
+            "_gather_by_sport",
+            "_gather_by_market",
+            "_gather_daily_trend",
+            "_gather_system_panel",
+            "_gather_intelligence_panel",
+        ):
+            monkeypatch.setattr(DashboardEngine, name, section)
+
+        report = await DashboardEngine.gather(FakeDB())
+
+        assert report.provider_pipeline
+        assert max_active == 1

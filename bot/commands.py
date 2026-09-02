@@ -3209,8 +3209,8 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             ),
             fallback={},
         )
-        for _cand in _candidates:
-            _k = _ud_recommendation_identity(_cand)
+        for _cand, (_provider, _plh) in zip(_candidates, provider_props):
+            _k = _ud_recommendation_identity(_plh)
             _lr, _ = _slip_rec_map.get(_k, (None, None))
             if _cand.sportsbook == "Underdog" and _lr in ("OVER", "UNDER"):
                 _cand.best_side = _lr

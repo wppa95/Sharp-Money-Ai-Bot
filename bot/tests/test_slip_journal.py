@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import asyncio
 import pytest
+from datetime import datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
@@ -378,6 +380,61 @@ class TestSlipSubcommandRouting:
             await _cmd_slip_journal(update, ctx, ["grade"])
         msg = update.message.reply_text.call_args[0][0]
         assert "No slip" in msg
+
+    @pytest.mark.asyncio
+    async def test_numeric_slip_uses_source_aware_recommendation_identity(self):
+        """The live /slip path must not drop the Underdog source ID."""
+        from commands import cmd_slip
+
+        now = datetime.utcnow()
+        prop = SimpleNamespace(
+            player_name="Source A",
+            sport="NBA",
+            stat_type="Points",
+            provider="Underdog",
+            external_id="projection-123",
+            game_id="game-123",
+            team="TEAM",
+            game_time=now + timedelta(hours=2),
+            provider_status="scheduled",
+            fetched_at=now,
+            line_value=20.5,
+            prev_line=None,
+            bet_recommendation=None,
+            bet_confidence=88,
+            score_total=88,
+        )
+        identities = []
+
+        class SlipDB:
+            async def get_top_ud_props_for_picks(self, **kwargs):
+                return [prop]
+
+            async def get_latest_props_for_provider(self, provider, **kwargs):
+                return []
+
+            async def get_ud_recommendations_bulk(self, requested, **kwargs):
+                identities.extend(requested)
+                return {
+                    ("Source A", "NBA", "Points", "projection-123"): ("OVER", 88)
+                }
+
+        update = self._make_update([])
+        ctx = MagicMock()
+        ctx.args = []
+        with (
+            patch("commands._db", SlipDB()),
+            patch("engine.slip_builder.build_all_slips", return_value={}),
+            patch(
+                "engine.player_prop_market.build_player_prop_market_comparison",
+                return_value=None,
+            ),
+        ):
+            await cmd_slip(update, ctx)
+
+        assert identities == [("Source A", "NBA", "Points", "projection-123")]
+        msg = update.message.reply_text.call_args[0][0]
+        assert "not enough" in msg.lower()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
