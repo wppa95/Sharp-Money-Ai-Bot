@@ -1,0 +1,227 @@
+FIX THE ENTIRE TELEGRAM COMMAND SYSTEM
+
+All Telegram commands are currently reported as nonfunctional.
+
+Do NOT perform a read-only audit first. Diagnose and FIX the problem directly.
+
+Use this exact command list as the authoritative production command surface:
+
+🎯 Player Prop Monitoring
+
+/picks
+/slip [N]
+/dashboard
+/alerts
+/funnel [h]
+/reconcile [h]
+/grade
+/grades — alias for /grade
+/player NAME
+/slipstats
+
+📊 Market Analysis
+
+/analyze ARGS
+/market
+/steam
+/ev
+/clv
+
+📈 Performance
+
+/performance
+/backtest
+/stats
+/calibration
+/tracking
+/analyst
+/rollups
+/refinement
+
+⚙️ System
+
+/start
+/status
+/system
+/health
+/providers
+/config
+/blocks
+/block ARGS
+/backfill
+/pp_import
+/testalert
+/help
+
+FIX REQUIREMENTS
+
+Find the actual common/root cause first, then fix it at the correct shared layer.
+
+Do NOT blindly patch every command individually if one shared issue is causing the failure.
+
+Ensure:
+
+1. Telegram polling/update processing is actually running.
+2. The running Application has all required CommandHandlers attached.
+3. Every command above dispatches to its intended callback.
+4. Authorization works correctly for the configured allowed user(s).
+5. /start and /help work.
+6. All callbacks execute without uncaught exceptions.
+7. Responses are actually delivered to Telegram.
+8. Existing command functionality and database queries remain intact.
+9. Existing aliases remain intact.
+10. Argument parsing works correctly.
+
+Required argument behavior
+
+/picks
+
+* /picks
+* /picks 5
+* /picks MLB
+* /picks TENNIS 5
+
+/slip
+
+* /slip
+* /slip 3
+* /slip 5
+* valid range remains 2–6
+
+/funnel
+
+* /funnel
+* /funnel 1
+* /funnel 24
+
+/reconcile
+
+* /reconcile
+* /reconcile 1
+* /reconcile 24
+
+/player
+
+* /player NAME
+* missing name returns useful usage response
+
+/analyze
+
+* /analyze returns its usage/help response
+* valid existing arguments continue to work
+
+/block
+
+* valid existing arguments continue to work
+* missing/invalid arguments return useful usage response
+
+/grades
+
+* must dispatch to exactly the same production behavior as /grade
+
+DO NOT CHANGE
+
+Do not change:
+
+* Underdog provider behavior
+* PropLine behavior
+* PrizePicks behavior
+* provider priority
+* scoring
+* qualification thresholds
+* alert logic
+* Telegram alert logic
+* scheduler cadence
+* scheduler overlap protection
+* SQLite/database architecture
+* database schema
+* PropLine 208/hour limiter
+* API credentials
+* monitoring lifecycle
+* existing command semantics
+
+Only make changes necessary to restore the Telegram command system.
+
+TESTING
+
+After fixing:
+
+1. Run the existing Telegram/command tests.
+2. Add focused regression tests for the actual root cause.
+3. Verify handler registration for EVERY command listed above.
+4. Verify aliases.
+5. Verify argument parsing.
+6. Verify authorization.
+7. Verify callback execution.
+8. Verify response delivery/error handling.
+9. Run the FULL test suite.
+10. Restart the existing bot process once so the fix is loaded.
+11. Verify the live Telegram application starts correctly.
+12. Verify all handlers register successfully.
+13. Verify no polling/update-loop errors occur.
+
+Where practical, test representative commands from every category live:
+
+* /start
+* /help
+* /status
+* /health
+* /picks
+* /slip
+* /dashboard
+* /funnel
+* /reconcile
+* /grade
+* /grades
+* /player
+* /analyze
+* /market
+* /performance
+* /stats
+* /backtest
+* /providers
+* /config
+* /blocks
+* /block
+* /backfill
+* /testalert
+
+Do NOT send a real alert or create a real betting action merely for testing. /testalert remains test-only.
+
+IMPORTANT
+
+Do not declare success merely because handlers register.
+
+Confirm the actual production path:
+
+Telegram update
+→ command handler
+→ authorization
+→ callback
+→ command logic
+→ response
+→ Telegram
+
+If the common failure is infrastructure-level, fix that shared layer.
+
+If individual commands have separate issues after the common blocker is fixed, fix those as well so that EVERY command in the authoritative list is functional.
+
+FINAL REPORT
+
+After implementation, report:
+
+* root cause
+* exact files changed
+* what was fixed
+* command count verified
+* aliases verified
+* argument parsing verified
+* focused test results
+* full test results
+* restart result
+* live Telegram verification result
+* any command that remains nonfunctional
+
+Do not leave known broken commands unresolved.
+
+Proceed with the fix now.
