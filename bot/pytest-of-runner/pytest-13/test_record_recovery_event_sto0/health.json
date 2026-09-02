@@ -1,0 +1,16 @@
+{
+  "last_recovery_event": {
+    "job": "underdog_job",
+    "reason": "fail_streak=3: connection timeout",
+    "ts": "2026-09-02 03:25:43 UTC",
+    "ts_unix": 1788319543.889645
+  },
+  "recovery_history": [
+    {
+      "job": "underdog_job",
+      "reason": "fail_streak=3: connection timeout",
+      "ts": "2026-09-02 03:25:43 UTC",
+      "ts_unix": 1788319543.889645
+    }
+  ]
+}

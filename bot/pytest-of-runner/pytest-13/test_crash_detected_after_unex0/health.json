@@ -1,0 +1,23 @@
+{
+  "restart_count": 2,
+  "restart_history": [
+    {
+      "ts": "2026-09-02 03:25:44 UTC",
+      "reason": "first_start",
+      "shutdown_at": null,
+      "session_secs": null
+    },
+    {
+      "ts": "2026-09-02 03:25:44 UTC",
+      "reason": "crash_detected",
+      "shutdown_at": "2026-09-02 03:25:44 UTC",
+      "session_secs": 0.00022101402282714844
+    }
+  ],
+  "last_startup": "2026-09-02 03:25:44 UTC",
+  "last_startup_ts": 1788319544.142076,
+  "last_startup_reason": "crash_detected",
+  "monitoring_session_id": 2,
+  "monitoring_session_started": "2026-09-02 03:25:44 UTC",
+  "monitoring_session_started_ts": 1788319544.142076
+}

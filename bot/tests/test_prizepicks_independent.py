@@ -361,6 +361,19 @@ class TestIndependentPrizePicks:
         await db.mark_opportunity_alert_sent(
             "shared-event-prop", "Points", provider="PrizePicks"
         )
+        for provider in ("Underdog", "PrizePicks"):
+            await db.log_telegram_delivery(
+                provider=provider,
+                delivery_path="standing",
+                player_name="LeBron James",
+                sport="NBA",
+                stat_type="Points",
+                external_id="shared-event-prop",
+                event_id=f"game-{provider.lower()}",
+                line_value=24.5,
+                outcome="sent",
+                recipients_sent=1,
+            )
 
         restored = await db.get_recent_alerted_props_for_dedup(since_hours=1)
 

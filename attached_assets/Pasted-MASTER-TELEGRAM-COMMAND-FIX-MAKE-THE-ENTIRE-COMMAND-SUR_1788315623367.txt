@@ -1,0 +1,837 @@
+MASTER TELEGRAM COMMAND FIX — MAKE THE ENTIRE COMMAND SURFACE WORK CORRECTLY
+
+We have completed the V4 delivery/bookkeeping master fix and verified:
+- 4,828/4,828 bot tests passed.
+- One managed bot process.
+- One in-process scheduler owner.
+- Clean startup.
+- /health returned HTTP 200.
+- Live runtime healthy after restart.
+
+Now fix the Telegram command layer as ONE coherent task.
+
+IMPORTANT:
+Every command listed below must:
+1. Actually execute its intended function.
+2. Return the exact information promised by its command description.
+3. Use the correct authoritative data source/population.
+4. Never substitute another command's output.
+5. Never silently turn a database failure into zero.
+6. Never show stale, fabricated, placeholder, or unrelated metrics.
+7. Never report unavailable data as zero.
+8. Use consistent reporting definitions and the canonical reporting timezone.
+9. Remain responsive without unnecessarily blocking the monitoring engine.
+10. Preserve all existing V4 architecture and completed fixes.
+
+DO NOT CHANGE:
+- scoring model
+- scoring thresholds
+- evidence rules
+- L5/L10/L20/L30 methodology
+- direction logic
+- PLAY qualification
+- Telegram PLAY-only delivery rules
+- delivery deduplication
+- authoritative Telegram delivery audit
+- provider routing
+- shared Underdog/PropLine monitoring cadence
+- PropLine request budget
+- Odds API 16/day limit
+- Odds API 45-minute minimum interval
+- restart/session-reset architecture
+- persistent historical data
+- FPR behavior
+- monitoring behavior
+- provider behavior
+- existing completed delivery/reconciliation implementation
+
+If any command fix genuinely requires changing one of the protected items above, STOP and report the conflict instead of changing it unilaterally.
+
+==================================================
+CANONICAL TELEGRAM COMMAND CONTRACT
+==================================================
+
+🤖 Sharp Money Bot — Commands
+
+🎯 Player Prop Monitoring
+  /picks          — Current directional player prop picks
+                    /picks 5 · /picks MLB · /picks TENNIS 5
+  /slip [N]       — Build a prop slip from top N picks (2–6)
+                    /slip 3 · /slip 5
+  /dashboard      — Player prop activity, provider status, alert history
+  /alerts         — Recent actionable pick alert history
+  /funnel [h]     — Monitoring and delivery pipeline by provider
+  /reconcile [h]  — Reconcile source volume with Telegram delivery
+  /grade          — Win/loss breakdown (/grades is an alias)
+  /player NAME    — Tracked history and hit rate for one player
+  /slipstats      — Pick and slip performance
+
+📊 Market Analysis
+  /analyze ARGS   — Analyze one line (shows usage when omitted)
+  /market         — Line movement and validation summary
+  /steam          — Recent steam moves
+  /ev             — Recent EV opportunities
+  /clv            — Closing Line Value history
+
+📈 Performance
+  /performance    — Pick performance by sport
+  /backtest       — Replay resolved picks through the model
+  /stats          — Pick generation stats and outcome summary
+  /calibration    — Model calibration against outcomes
+  /tracking       — Directional pick tracking summary
+  /analyst        — Latest analyst assessment
+  /rollups        — Learning rollups
+  /refinement     — Refinement rules and triggers
+
+⚙️ System
+  /start          — Welcome message and chat ID
+  /status         — Bot uptime, provider health, database counts
+  /system         — Concise runtime system status
+  /health         — Background job health
+  /providers      — Player prop provider status
+  /config         — Active configuration and alert scope
+  /blocks         — Active reliability blocks
+  /block ARGS     — Add or remove a reliability block
+  /backfill       — Grade eligible pending props
+  /pp_import      — Manual PrizePicks line import
+  /testalert      — Send a mock alert to verify delivery
+  /help            — This menu
+
+Primary Player Prop Providers
+  🟢 Underdog — Primary Player Props
+  🟢 PrizePicks — PropLine — Primary Player Props
+
+==================================================
+1. /PICKS
+==================================================
+
+Must return CURRENT directional player prop picks.
+
+Supported forms:
+- /picks
+- /picks 5
+- /picks MLB
+- /picks TENNIS 5
+
+Requirements:
+- Default result should be the current strongest directional picks.
+- Numeric argument controls result count.
+- Sport argument filters by sport.
+- Sport + count works together.
+- Only valid current directional opportunities.
+- Do not confuse observations with picks.
+- Do not include historical/graded picks merely because they exist in the database.
+- Do not include non-qualified observations.
+- Provider/source should be identifiable where relevant.
+- Never report stale picks as current without clearly indicating their state.
+
+==================================================
+2. /SLIP [N]
+==================================================
+
+Must build an actual prop slip from the current eligible picks.
+
+Supported:
+- /slip
+- /slip 2
+- /slip 3
+- /slip 4
+- /slip 5
+- /slip 6
+
+Requirements:
+- N must be 2–6.
+- Use current eligible picks.
+- Respect existing slip construction rules.
+- No same person on a slip.
+- Avoid correlated risk.
+- Do not manufacture picks to fill the requested number.
+- If insufficient valid picks exist, clearly say so.
+- Do not treat observations or non-qualified signals as picks.
+
+==================================================
+3. /DASHBOARD
+==================================================
+
+Must reliably return:
+- player prop activity
+- provider status
+- alert history
+
+The command currently sometimes times out and falls back to live provider activity.
+
+Fix it so the dashboard actually returns the promised dashboard.
+
+Requirements:
+- Do not block indefinitely.
+- Optimize database queries or execute independent sections safely.
+- If one metric fails, identify that metric as unavailable rather than replacing the entire dashboard.
+- Never display zero when the query failed.
+- Provider status must reflect actual current provider state.
+- Alert history must use authoritative confirmed Telegram-delivered PLAY records.
+- “Today” metrics must use the canonical reporting timezone.
+- Do not mix rolling 24h values into calendar-day “today” metrics.
+
+==================================================
+4. /ALERTS
+==================================================
+
+Must show recent actionable PICK ALERT history.
+
+IMPORTANT:
+“Today” means the current calendar day in the bot's canonical reporting timezone.
+
+Do NOT use a rolling last-24-hours window for today's alert count/list.
+
+Requirements:
+- Show confirmed successful Telegram-delivered PLAYs.
+- Exclude observations.
+- Exclude directional-but-not-qualified signals.
+- Exclude failed deliveries.
+- Exclude UNKNOWN deliveries.
+- Exclude /testalert.
+- Preserve exact delivery time.
+- Preserve exact delivered line for line-change alerts.
+- Normalize provider IDs correctly.
+- Preserve existing deduplication.
+- Label the time window as current day/today rather than “last 24h” when displaying today's history.
+
+==================================================
+5. /FUNNEL [H]
+==================================================
+
+Must return the monitoring and delivery pipeline by provider.
+
+Examples:
+- /funnel
+- /funnel 1
+- /funnel 3
+- /funnel 24
+
+Requirements:
+- H controls the requested reporting window.
+- Use actual persisted funnel data.
+- Separate provider populations correctly.
+- Underdog and PropLine/PrizePicks must not be conflated.
+- Show observations, evaluated candidates, directional opportunities, actionable PLAYs, delivered PLAYs, pending/resolved where applicable.
+- Distinguish current/session counters from cumulative persistent history.
+- Do not allow FPR rescoring to inflate PLAY counts.
+- Do not allow observations to inflate PLAY counts.
+- Do not allow duplicate deliveries to inflate delivered counts.
+- If the database query fails or times out, report UNAVAILABLE — never zero.
+- Fix the underlying query performance so normal use does not produce UNAVAILABLE.
+- Preserve the completed delivery reconciliation model.
+
+Known failure:
+`/funnel` recently returned:
+“Funnel data is UNAVAILABLE; the database query failed or timed out. This is not zero.”
+
+That must be resolved.
+
+==================================================
+6. /RECONCILE [H]
+==================================================
+
+Must reconcile source volume with Telegram delivery.
+
+Requirements:
+- Compare authoritative source/provider activity against authoritative successful Telegram delivery records.
+- Use stable identity/source/event linkage.
+- Do not use timestamp-only joins.
+- Distinguish:
+  - source observed
+  - qualified PLAY
+  - attempted delivery
+  - successful delivery
+  - failed delivery
+  - UNKNOWN/unverified
+- Explain discrepancies rather than silently forcing counts to match.
+- /testalert remains excluded from real PLAY delivery statistics.
+- Never convert UNKNOWN to successful delivery.
+- Never infer delivery merely because an opportunity exists.
+
+==================================================
+7. /GRADE AND /GRADES
+==================================================
+
+Both commands must work:
+- /grade
+- /grades
+
+/grades is an alias and must return the same correct grade report as /grade.
+
+Requirements:
+- Win/loss/push breakdown.
+- Correct denominators.
+- Only eligible resolved picks belong in resolved outcome statistics.
+- Pending picks remain pending.
+- UNKNOWN/UNVERIFIED must not be treated as HIT/MISS/PUSH.
+- Provider breakdown must be accurate.
+- Sport breakdown must be accurate.
+- OVER/UNDER results must use actual completed game results.
+- Do not mix observations with picks.
+- Do not use line snapshots as game results.
+- Do not grade incomplete games.
+- Do not silently report zero if database query fails.
+
+Known failure:
+`/grade` returned:
+“Grade data is UNAVAILABLE; the database query failed or timed out. This is not zero.”
+
+Fix the underlying query/performance issue.
+
+==================================================
+8. /PLAYER NAME
+==================================================
+
+Must return tracked history and hit rate for the requested player.
+
+Requirements:
+- Correct player matching.
+- Show relevant tracked history.
+- Show actual completed-game evidence where applicable.
+- Hit rate denominator must equal valid completed games.
+- Do not count polling observations as games.
+- Do not count line snapshots as games.
+- Do not fabricate L20/L30 when insufficient valid games exist.
+- Provider/source should remain identifiable where relevant.
+
+==================================================
+9. /SLIPSTATS
+==================================================
+
+Must report pick and slip performance.
+
+Requirements:
+- Clearly separate individual pick performance from slip performance.
+- Use actual resolved outcomes.
+- Correct denominators.
+- Pending remains pending.
+- UNKNOWN remains UNKNOWN.
+- Do not count /testalert.
+- Do not inflate stats with observations or rescoring.
+
+==================================================
+10. /ANALYZE ARGS
+==================================================
+
+Must analyze one line.
+
+When arguments are omitted, show the correct usage instructions.
+
+Requirements:
+- Parse supported arguments correctly.
+- Return the intended line analysis.
+- Do not substitute another command's report.
+- Preserve existing scoring/evidence/direction rules.
+- Do not change model logic.
+
+==================================================
+11. /MARKET
+==================================================
+
+Must show:
+- line movement
+- validation summary
+
+Requirements:
+- Movement is an evaluation trigger, not betting direction.
+- Do not infer OVER/UNDER solely from movement.
+- Use current and previous line correctly.
+- Preserve exact provider/source.
+- Validation must use valid evidence.
+
+==================================================
+12. /STEAM
+==================================================
+
+Must show recent steam moves.
+
+Requirements:
+- Actual steam records only.
+- Correct timestamps.
+- Correct provider/market.
+- No fabricated entries.
+- Do not treat ordinary line movement as steam unless the existing steam criteria are met.
+
+==================================================
+13. /EV
+==================================================
+
+Must show recent EV opportunities.
+
+Requirements:
+- Use the existing EV engine.
+- Do not change EV calculation.
+- Do not change qualification thresholds.
+- Show actual opportunities only.
+- Clearly distinguish EV opportunities from Telegram PLAYs.
+
+==================================================
+14. /CLV
+==================================================
+
+Must show Closing Line Value history.
+
+Requirements:
+- Use authoritative stored CLV records.
+- Correct current/closing lines.
+- Correct direction.
+- Do not substitute line movement for CLV.
+
+==================================================
+15. /PERFORMANCE
+==================================================
+
+Must show pick performance by sport.
+
+IMPORTANT:
+It must NOT return the /grade report.
+
+Known failure:
+`/performance` returned the Sharp Money Pick Grades output.
+
+Fix command routing and implementation so /performance actually returns performance by sport.
+
+Requirements:
+- Sport breakdown.
+- Pick counts.
+- Resolved outcomes.
+- HIT/MISS/PUSH where applicable.
+- Pending counts where appropriate.
+- Correct denominators.
+- No population mixing.
+
+==================================================
+16. /BACKTEST
+==================================================
+
+Must replay resolved picks through the model.
+
+Requirements:
+- Use resolved historical picks.
+- Report backtest results clearly.
+- Do not mutate live pick outcomes.
+- Do not alter the live model merely by running the command.
+- Do not count backtest records as real Telegram PLAYs.
+- Preserve historical data.
+
+==================================================
+17. /STATS
+==================================================
+
+Must show pick generation stats and outcome summary.
+
+Requirements:
+- Pick generation counts must be clearly distinguished from Telegram-delivered PLAY counts.
+- Outcome summary must use resolved picks.
+- Pending remains pending.
+- Do not count observations as generated picks.
+- Do not count rescoring as new picks unless a genuinely new qualified PLAY was created.
+
+==================================================
+18. /CALIBRATION
+==================================================
+
+Must show model calibration against actual outcomes.
+
+Requirements:
+- Use valid resolved outcomes.
+- Correct score buckets/metrics according to existing calibration implementation.
+- Do not treat pending/UNKNOWN as outcomes.
+- Do not change model calibration methodology unless necessary to make the command functional.
+
+==================================================
+19. /TRACKING
+==================================================
+
+Must show directional pick tracking summary.
+
+Requirements:
+- Clearly distinguish:
+  - active tracked props
+  - historical observations
+  - directional opportunities
+  - pending grading
+  - resolved outcomes
+- Do not confuse current-session counters with persistent historical counters.
+- Do not report directional opportunities as Telegram-delivered PLAYs.
+- Preserve population taxonomy.
+
+==================================================
+20. /ANALYST
+==================================================
+
+Must show latest analyst assessment.
+
+Requirements:
+- Return the actual latest analyst assessment.
+- If no assessment exists, clearly state that.
+- Do not substitute /performance, /grade, or another report.
+
+==================================================
+21. /ROLLUPS
+==================================================
+
+Must show learning rollups.
+
+Requirements:
+- Use persistent learning data.
+- Clearly identify population/time scope.
+- Do not mix test alerts with real PLAY learning.
+- Do not mutate learning data simply by viewing the report.
+
+==================================================
+22. /REFINEMENT
+==================================================
+
+Must show refinement rules and triggers.
+
+Requirements:
+- Display the actual configured refinement rules/triggers.
+- Do not invent or modify rules simply to populate the command.
+- Do not silently change scoring behavior.
+
+==================================================
+23. /START
+==================================================
+
+Must return:
+- welcome message
+- correct chat ID
+
+Requirements:
+- Chat ID must be the actual Telegram chat ID associated with the current conversation.
+- Do not expose unrelated IDs or secrets.
+
+==================================================
+24. /STATUS
+==================================================
+
+Must show:
+- uptime
+- provider health
+- database counts
+
+Requirements:
+- Keep current healthy behavior.
+- Fix temporary DB counter unavailability.
+- If a specific counter genuinely cannot be retrieved, label that specific counter unavailable rather than replacing unrelated metrics.
+- Provider state must reflect actual current state.
+- Latest monitoring cycle should be shown when available.
+- Do not fabricate cycle timestamps.
+
+==================================================
+25. /SYSTEM
+==================================================
+
+Must show concise runtime system status.
+
+Requirements:
+- Process state.
+- Scheduler state.
+- Basic runtime health.
+- Do not duplicate a completely different command report.
+- Do not expose secrets.
+
+==================================================
+26. /HEALTH
+==================================================
+
+Must show background job health.
+
+Requirements:
+- Scheduled job status.
+- Last run/health where available.
+- Failures where present.
+- Do not confuse process health with database reporting.
+- Preserve existing scheduler architecture.
+
+==================================================
+27. /PROVIDERS
+==================================================
+
+Must show player prop provider status.
+
+Requirements:
+- Underdog primary player props.
+- PrizePicks/PropLine player props.
+- Current availability/status.
+- Correct history status.
+- No stale provider claims.
+
+==================================================
+28. /CONFIG
+==================================================
+
+Must show active configuration and alert scope.
+
+Requirements:
+- Current active configuration.
+- Alert scope.
+- Relevant provider/budget configuration.
+- Do not expose API keys, tokens, passwords, or secrets.
+- Do not modify configuration merely by viewing it.
+
+==================================================
+29. /BLOCKS
+==================================================
+
+Must show active reliability blocks.
+
+Requirements:
+- Actual active blocks only.
+- Clear reason/status.
+- Do not invent blocks.
+- Read-only.
+
+==================================================
+30. /BLOCK ARGS
+==================================================
+
+Must correctly add/remove reliability blocks according to the existing command contract.
+
+Requirements:
+- Validate arguments.
+- Confirm resulting state.
+- Do not affect scoring unless the existing reliability-block mechanism is explicitly designed to do so.
+- Do not modify unrelated provider/monitoring settings.
+
+==================================================
+31. /BACKFILL
+==================================================
+
+Must grade eligible pending props.
+
+Requirements:
+- Only eligible pending props.
+- Use actual completed game results.
+- Do not grade incomplete games.
+- Do not convert UNKNOWN into an outcome.
+- Do not create duplicate grading records.
+- Do not alter historical outcomes already resolved.
+- Report how many were eligible, graded, skipped, and why.
+
+==================================================
+32. /PP_IMPORT
+==================================================
+
+Must correctly handle manual PrizePicks line import.
+
+Requirements:
+- Validate input.
+- Preserve provider identity.
+- Do not create fake delivery records.
+- Do not create Telegram PLAYs merely from import.
+- Imported lines remain subject to the normal evidence/qualification process.
+
+==================================================
+33. /TESTALERT
+==================================================
+
+Must remain a mock Telegram delivery test.
+
+CRITICAL:
+- /testalert must NEVER inflate:
+  - real PLAY counts
+  - today's actionable alerts
+  - /funnel delivered counts
+  - /reconcile successful PLAY counts
+  - /grade
+  - /performance
+  - /stats
+  - /tracking
+  - learning
+  - historical betting performance
+
+It may verify Telegram delivery, but must remain clearly marked as a test/mock alert.
+
+==================================================
+34. /HELP
+==================================================
+
+Must accurately describe the commands that actually exist.
+
+Do not leave commands advertised as functional if their implementation is missing.
+
+The help menu must remain consistent with the command routing.
+
+==================================================
+POPULATION DEFINITIONS — MANDATORY
+==================================================
+
+Use one canonical population taxonomy across all reports:
+
+1. OBSERVATION
+   Provider/source observation only.
+
+2. DIRECTIONAL OPPORTUNITY
+   Model produced a direction but it is not necessarily a qualified PLAY.
+
+3. QUALIFIED PLAY
+   Passed the actual PLAY qualification rules.
+
+4. TELEGRAM-DELIVERED PLAY
+   Qualified PLAY with confirmed successful Telegram delivery recorded in the authoritative delivery audit.
+
+5. RESOLVED OUTCOME
+   A qualified PLAY with a valid completed-game result and authoritative grading.
+
+Never silently convert one population into another.
+
+==================================================
+UNKNOWN / UNVERIFIED
+==================================================
+
+If identity-complete delivery evidence is missing:
+- status is UNKNOWN/UNVERIFIED
+- it must not count as successful delivery
+- it must not count as failed delivery unless failure is actually known
+- it must not count as HIT/MISS/PUSH
+- it must not inflate today's Telegram PLAY count
+
+Never convert UNKNOWN into zero.
+
+==================================================
+DATABASE FAILURE BEHAVIOR
+==================================================
+
+Current commands are showing query timeout failures.
+
+Fix the actual performance/routing issue rather than masking it.
+
+Requirements:
+- Queries must be efficient enough for normal Telegram use.
+- Use appropriate existing indexes/query patterns where necessary.
+- Avoid loading massive historical tables into memory when aggregation can be done in SQL.
+- Avoid N+1 query patterns.
+- Avoid blocking the monitoring loop unnecessarily.
+- Independent dashboard/report sections may be isolated so one slow query does not destroy the whole report.
+- Do not delete or rebuild historical data.
+- Do not fabricate fallback numbers.
+- If a query genuinely fails after reasonable safeguards, show UNAVAILABLE for that specific metric.
+
+==================================================
+REPORTING TIME
+==================================================
+
+Define one canonical reporting timezone for all commands that use:
+- today
+- current day
+- daily counts
+- alert history
+- daily delivery totals
+- daily funnel windows
+
+Do not mix UTC, local process time, and database timestamps inconsistently.
+
+Calendar-day reporting must be calendar-day reporting, not rolling 24 hours.
+
+==================================================
+KNOWN REGRESSION CASES TO PRESERVE
+==================================================
+
+These actual failures must become regression tests:
+
+1. /funnel returned:
+   “Funnel data is UNAVAILABLE; the database query failed or timed out. This is not zero.”
+
+2. /grade returned:
+   “Grade data is UNAVAILABLE; the database query failed or timed out. This is not zero.”
+
+3. /performance returned the /grade report instead of performance-by-sport.
+
+4. /dashboard timed out and returned fallback provider activity instead of the dashboard.
+
+5. /alerts used a rolling “last 24h” window instead of the current calendar day.
+
+6. Provider history temporarily showed PropLine unavailable despite later recovery.
+
+7. Authoritative delivery reconciliation must continue to distinguish successful, failed, and UNKNOWN records.
+
+==================================================
+TESTING REQUIREMENTS
+==================================================
+
+Before declaring this complete:
+
+- Add/update targeted tests for EVERY command group above.
+- Test command routing so one command cannot return another command's report.
+- Test database failure behavior.
+- Test successful database reporting.
+- Test current-day timezone boundaries.
+- Test yesterday vs today for /alerts.
+- Test provider population separation.
+- Test delivery population separation.
+- Test UNKNOWN/UNVERIFIED behavior.
+- Test /testalert exclusion.
+- Test duplicate delivery suppression.
+- Test exact delivered line preservation.
+- Test /grades alias.
+- Test /picks argument parsing.
+- Test /slip argument validation.
+- Test /funnel hour argument.
+- Test /reconcile hour argument.
+- Test player lookup.
+- Test all reporting commands return their intended report.
+
+Run the full bot test suite after targeted tests.
+
+Do NOT stop after focused tests.
+
+==================================================
+LIVE VERIFICATION
+==================================================
+
+After tests pass:
+
+- Restart the managed bot ONCE if required to apply the changes.
+- Confirm exactly one bot process.
+- Confirm exactly one scheduler owner.
+- Confirm clean startup.
+- Confirm /health = HTTP 200.
+- Confirm monitoring remains active.
+- Confirm provider status is healthy.
+- Confirm command handlers are registered.
+
+Do NOT perform SQLite backup/integrity/rollback work.
+Do NOT attempt checkpoint creation.
+Do NOT get diverted into UNKNOWN_NOT_GIT checkpoint issues.
+Do NOT pause the live bot merely to inspect the database.
+Do NOT create unrelated migrations.
+
+==================================================
+IMPORTANT IMPLEMENTATION RULE
+==================================================
+
+This is one coherent command-layer repair.
+
+Do not make cosmetic changes while leaving broken commands underneath.
+
+Do not make numbers “look right.”
+
+Do not hardcode values.
+
+Do not replace unavailable data with zero.
+
+Do not make /alerts show historical data merely to increase the count.
+
+Do not make /performance reuse /grade.
+
+Do not make /dashboard hide failures behind generic fallback text.
+
+Do not make /funnel or /grade return UNAVAILABLE during normal healthy operation.
+
+Fix the underlying command routing, query performance, population selection, and reporting logic.
+
+At completion, provide:
+1. Complete list of commands fixed.
+2. Any commands that were already correct.
+3. Targeted test results.
+4. Full-suite test result.
+5. Live runtime verification.
+6. Any remaining issue that genuinely could not be fixed.
+
+Do not attempt a checkpoint.
+
+restart to apply the changes and checkpoint the changes.

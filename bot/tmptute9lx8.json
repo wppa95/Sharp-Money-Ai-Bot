@@ -1,0 +1,40 @@
+{
+  "jobs": {
+    "underdog_job": {
+      "last_started": "2026-09-02 02:57:26 UTC",
+      "last_started_ts": 1788317846.777633,
+      "last_fail": "2026-09-02 02:57:26 UTC",
+      "last_fail_ts": 1788317846.779662,
+      "last_error": "DB connection lost",
+      "fail_count": 1,
+      "fail_streak": 1,
+      "recent_fails": [
+        {
+          "ts": "2026-09-02 02:57:26 UTC",
+          "error": "DB connection lost"
+        }
+      ]
+    }
+  },
+  "last_job_started": "underdog_job",
+  "last_job_started_at": "2026-09-02 02:57:26 UTC",
+  "providers": {
+    "Underdog": {
+      "last_fetch": "2026-09-02 02:57:26 UTC",
+      "last_fetch_ts": 1788317846.778323,
+      "fetch_count": 1,
+      "error_streak": 0
+    }
+  },
+  "last_error": "[pipeline:prop_scoring:market_engine.underdog_job] DB connection lost",
+  "last_error_ts": "2026-09-02 02:57:26 UTC",
+  "last_pipeline_fail": {
+    "stage": "prop_scoring",
+    "module": "market_engine.underdog_job",
+    "error": "DB connection lost",
+    "ts": "2026-09-02 02:57:26 UTC"
+  },
+  "last_monitoring_cycle": "2026-09-02 02:57:26 UTC",
+  "last_monitoring_cycle_ts": 1788317846.780375,
+  "monitoring_cycle_count": 1
+}

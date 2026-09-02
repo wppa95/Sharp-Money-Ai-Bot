@@ -385,15 +385,17 @@ def _uptime_str() -> str:
 
 
 def _fmt_user_ts(dt: Optional[datetime]) -> str:
-    """Format a UTC datetime for user-facing display.
+    """Format a stored UTC datetime in the canonical reporting timezone.
 
     Output format: ``Aug 08 · 5:05 PM``  (12-hour clock, no leading zero on hour)
 
-    This is purely a display helper — stored timestamps and internal logic
-    remain in UTC.  Returns "—" when dt is None.
+    Stored timestamps and internal logic remain in UTC.  Returns "—" when
+    dt is None.
     """
     if dt is None:
         return "—"
+    from reporting import to_reporting_timezone
+    dt = to_reporting_timezone(dt)
     # lstrip("0") removes leading zero; "or '12'" handles midnight (12 AM)
     hour_str = dt.strftime("%I").lstrip("0") or "12"
     return dt.strftime(f"%b %d · {hour_str}:%M %p")
@@ -858,19 +860,31 @@ async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await update.message.reply_text("⚠️ Database not available.")
             return
 
-        rollups, tg_perf = await _independent_report_reads([
+        rollups_raw, tg_perf_raw = await _independent_report_reads([
             db.get_learning_rollups(),
             db.get_telegram_pick_performance(),
         ])
-        rollups = rollups if isinstance(rollups, dict) else {}
-        tg_perf = tg_perf if isinstance(tg_perf, dict) else {}
+        rollups_available = isinstance(rollups_raw, dict)
+        tg_perf_available = isinstance(tg_perf_raw, dict)
+        rollups = rollups_raw if rollups_available else {}
+        tg_perf = tg_perf_raw if tg_perf_available else {}
+        if not rollups_available:
+            await update.message.reply_text(
+                "📊 <b>Learning Rollups</b>\n\n"
+                "<i>Historical learning data is UNAVAILABLE; the database "
+                "query failed or timed out. This is not zero.</i>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
         total   = rollups.get("total_graded", 0)
         intel   = rollups.get("intelligence", {})
 
         # ── 🎯 Telegram actionable picks block (always shown first) ───────────
         tg_lines = ["📊 <b>Learning Rollups</b>", "", "🎯 <b>TELEGRAM ACTIONABLE PICKS</b>"]
         tg_total = tg_perf.get("total", 0)
-        if tg_total == 0:
+        if not tg_perf_available:
+            tg_lines.append("  <i>Telegram PLAY performance: UNAVAILABLE.</i>")
+        elif tg_total == 0:
             tg_lines.append("  <i>No picks sent yet.</i>")
         else:
             tg_h    = tg_perf["hit"]
@@ -889,6 +903,14 @@ async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                     f"{source_perf['push']}P · {source_perf['pending']} pending"
                 )
         tg_lines.append("")
+        if not rollups_available:
+            tg_lines += [
+                "📚 <b>All Directional Grading</b>",
+                "  <i>Persistent learning rollups: UNAVAILABLE.</i>",
+                "  <i>The database query failed or timed out; this is not zero.</i>",
+            ]
+            await update.message.reply_text("\n".join(tg_lines), parse_mode=ParseMode.HTML)
+            return
         if intel.get("sample_size", 0):
             _cal = "calibrated sample" if intel.get("calibrated") else "descriptive only (<5)"
             tg_lines.extend([
@@ -960,6 +982,11 @@ async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     except Exception as exc:
         logger.exception("cmd_rollups: failed: %s", exc)
         await update.message.reply_text("⚠️ /rollups failed. Check bot logs.")
+
+
+async def cmd_learning(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/learning — explicit alias for the persistent learning report."""
+    await cmd_rollups(update, context)
 
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1559,6 +1586,58 @@ async def cmd_market(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         )
 
 
+async def _send_performance_by_sport(
+    update: Update,
+    db: Database,
+) -> None:
+    """Render delivery-independent directional performance by sport."""
+    await update.message.reply_text("⏳ Loading performance…")
+    summary = await _report_read(
+        db.get_directional_performance_summary(),
+        fallback=None,
+        timeout=_COMMAND_TIMEOUT_SECONDS,
+    )
+    if not isinstance(summary, dict):
+        await update.message.reply_text(
+            "📈 <b>Pick Performance by Sport</b>\n\n"
+            "<i>Performance data is UNAVAILABLE; the database query failed "
+            "or timed out. This is not zero.</i>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    by_sport = summary.get("by_sport", {}) or {}
+    lines = [
+        "📈 <b>Pick Performance by Sport</b>",
+        "<i>Directional opportunities; Telegram delivery is reported separately.</i>",
+        "",
+    ]
+    if not by_sport:
+        lines.append("<i>No directional opportunities have been recorded yet.</i>")
+    else:
+        for sport, row in sorted(by_sport.items()):
+            hit = int(row.get("hit", 0) or 0)
+            miss = int(row.get("miss", 0) or 0)
+            push = int(row.get("push", 0) or 0)
+            pending = int(row.get("pending", 0) or 0)
+            directional = int(row.get("directional", 0) or 0)
+            valid = hit + miss
+            rate = f"{hit / valid * 100:.0f}%" if valid else "—"
+            void = int(row.get("void", 0) or 0)
+            extra = f" · {void} void/other" if void else ""
+            lines.append(
+                f"<b>{_html.escape(str(sport))}</b> · {directional} picks\n"
+                f"  ✅ {hit}H  ❌ {miss}M  ➖ {push}P · "
+                f"{pending} pending · hit rate {rate}{extra}"
+            )
+    lines += [
+        "",
+        "<i>HIT/MISS/PUSH use valid completed-game results only. "
+        "Pending and unknown outcomes are excluded from the denominator.</i>",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+
 async def cmd_performance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/performance — Historical win rate, CLV and ROI broken down by sport, market and tier."""
     if not _check_allowed(update):
@@ -1567,105 +1646,25 @@ async def cmd_performance(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if _db is None:
         await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
         return
-
-    await update.message.reply_text("⏳ Loading performance…")
+    # Keep /performance distinct from /grade and /backtest.  This compact
+    # grouped query is the command's authoritative report population.
     try:
-        from engine.backtesting import BacktestEngine
-        from engine.ranking import RankingTier, RankingDecision
-
-        # Normalized tracked opportunities are the canonical performance
-        # population. Delivery is metadata only and must not remove a graded
-        # record from the report.
-        tracked_records = await _report_read(
-            _db.get_resolved_tracked_opportunities(limit=1000),
-            fallback=None,
-        )
-        if tracked_records:
-            report = await _bounded(asyncio.to_thread(
-                BacktestEngine().run_prop_opportunities,
-                tracked_records,
-            ))
-            msg = report.to_telegram()
-            msg += (
-                "\n\n<i>Source: resolved directional tracked opportunities "
-                "(delivery-independent; provider identity preserved).</i>"
-            )
-            await update.message.reply_text(msg, parse_mode="HTML")
-            return
-
-        records, _ud_rollups, _tg_perf = await _independent_report_reads([
-            _db.get_ev_records_with_results(limit=500, include_pending=False),
-            _db.get_learning_rollups(),
-            _db.get_telegram_pick_performance(),
-        ])
-        _ud_rollups = _ud_rollups if isinstance(_ud_rollups, dict) else {}
-        _tg_perf = _tg_perf if isinstance(_tg_perf, dict) else {}
-
-        if not records:
-            _total = _ud_rollups.get("total_graded", 0)
-            if _total:
-                _intel = _ud_rollups.get("intelligence", {})
-                _sport_rows = _ud_rollups.get("by_sport", {})
-                _lines = [
-                    "📊 <b>Performance History</b>",
-                    "",
-                    "📚 <b>Historical/legacy directional performance</b>",
-                    f"Resolved directional evaluations: <b>{_total}</b>",
-                    "<i>These records are not necessarily Telegram-delivered PLAYs.</i>",
-                ]
-                for _source, _source_perf in sorted(_tg_perf.get("by_provider", {}).items()):
-                    _lines.append(
-                        f"  {_source}: {_source_perf['hit']}H-{_source_perf['miss']}M-"
-                        f"{_source_perf['push']}P · {_source_perf['pending']} pending"
-                    )
-                for _sport, _row in sorted(_sport_rows.items()):
-                    _lines.append(
-                        f"  {_sport}: {_row['W']}W-{_row['L']}L-{_row['P']}P "
-                        f"({_row.get('win_pct', 0.0):.1f}%)"
-                    )
-                if _intel.get("sharp_confidence_avg") is not None:
-                    _lines.append(
-                        f"\nSharp Confidence avg: <b>{_intel['sharp_confidence_avg']}/100</b>"
-                        f"  · sample {_intel.get('sample_size', 0)}"
-                    )
-                _lines.append("\n<i>CLV and legacy sportsbook records appear when available.</i>")
-                await update.message.reply_text("\n".join(_lines), parse_mode="HTML")
-            else:
-                await update.message.reply_text(
-                    "📊 <b>Performance History</b>\n\n"
-                    "<i>No resolved actionable picks yet.  Win/loss results are recorded automatically"
-                    " once an event's final score is available.</i>",
-                    parse_mode="HTML",
-                )
-            return
-
-        engine = BacktestEngine()
-        report = await _bounded(asyncio.to_thread(engine.run, records))
-        msg = report.to_telegram()
-        _intel = _ud_rollups.get("intelligence", {})
-        if _ud_rollups.get("total_graded", 0):
-            msg += (
-                "\n\n🎯 <b>Underdog downstream sample</b>"
-                f"\n  Graded: {_ud_rollups['total_graded']}"
-                f"  · Sharp Confidence avg: "
-                f"{_intel.get('sharp_confidence_avg') if _intel.get('sharp_confidence_avg') is not None else '—'}/100"
-            )
-        if _tg_perf.get("by_provider"):
-            msg += "\n\n🎯 <b>Actionable picks by source</b>"
-            for _source, _source_perf in sorted(_tg_perf["by_provider"].items()):
-                msg += (
-                    f"\n  {_source}: {_source_perf['hit']}H-{_source_perf['miss']}M-"
-                    f"{_source_perf['push']}P · {_source_perf['pending']} pending"
-                )
-        await update.message.reply_text(msg, parse_mode="HTML")
-
-    except Exception as exc:
-        logger.exception("cmd_performance error: %s", exc)
+        return await _send_performance_by_sport(update, _db)
+    except asyncio.TimeoutError:
         await update.message.reply_text(
-            f"{EMOJI['warn']} Could not load performance data: {exc}",
-            parse_mode="HTML",
+            "📈 <b>Pick Performance by Sport</b>\n\n"
+            "<i>Performance data is UNAVAILABLE because the database is busy. "
+            "This is not zero.</i>",
+            parse_mode=ParseMode.HTML,
         )
-
+        return
+    except Exception as exc:
+        logger.exception("cmd_performance summary error: %s", exc)
+        await update.message.reply_text(
+            "⚠️ Performance data is temporarily unavailable. Please retry shortly.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
 
 async def cmd_backtest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/backtest [limit] — Run a full backtest on the last N resolved alerts."""
@@ -2149,11 +2148,39 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     args = context.args or []
     limit = 10
     sport_filter: Optional[str] = None
+    limit_seen = False
     for arg in args:
         if arg.isdigit():
-            limit = min(int(arg), 20)
+            parsed_limit = int(arg)
+            if parsed_limit < 1 or parsed_limit > 20:
+                await update.message.reply_text(
+                    "Usage: /picks [1–20] [sport]\n"
+                    "Examples: /picks 5 · /picks MLB · /picks TENNIS 5"
+                )
+                return
+            if limit_seen:
+                await update.message.reply_text("Usage: /picks [1–20] [sport]")
+                return
+            limit_seen = True
+            limit = parsed_limit
         else:
-            sport_filter = arg.upper()
+            candidate_sport = arg.upper()
+            if sport_filter is not None:
+                await update.message.reply_text("Usage: /picks [1–20] [sport]")
+                return
+            sport_filter = candidate_sport
+
+    if len(args) > 2 or (
+        sport_filter is not None
+        and sport_filter not in config.ud_alert_sports
+        and sport_filter not in config.active_sports
+    ):
+        await update.message.reply_text(
+            "Usage: /picks [1–20] [sport]\n"
+            "Supported sports: "
+            + ", ".join(sorted(set(config.active_sports) | set(config.ud_alert_sports)))
+        )
+        return
 
     from engine.timing import format_game_time_label as _fmt_gt
     from engine.downstream_intelligence import compute_sharp_confidence as _sharp_conf
@@ -3067,9 +3094,13 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     single_size: Optional[int] = None
     if args:
         try:
-            single_size = max(2, min(int(args[0]), 6))
-        except ValueError:
-            pass
+            single_size = int(args[0])
+        except (TypeError, ValueError):
+            await update.message.reply_text("Usage: /slip [2–6]")
+            return
+        if single_size < 2 or single_size > 6:
+            await update.message.reply_text("Usage: /slip [2–6]")
+            return
 
     from engine.slip_builder import build_all_slips
     from engine.player_prop_market import build_player_prop_market_comparison
@@ -3278,17 +3309,30 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             "cmd_dashboard: aggregation exceeded %.1fs",
             _DASHBOARD_TIMEOUT_SECONDS,
         )
-        await update.message.reply_text(
-            f"{EMOJI['warn']} Dashboard is taking too long to load. "
-            "Showing live provider activity below; unavailable metrics can be "
-            "retried independently."
+        # Keep the promised dashboard contract.  A timeout is not permission
+        # to substitute a provider-only status message for dashboard data.
+        from engine.dashboard import DashboardReport
+        report = DashboardReport(
+            unavailable={
+                "totals", "tracking", "ev", "clv", "sport", "market",
+                "daily", "system", "intelligence",
+            }
         )
-        # Do not return: provider activity and current tracking data are
-        # independent of the slow aggregate report.
+        await update.message.reply_text(
+            report.to_telegram(),
+            parse_mode=ParseMode.HTML,
+        )
     except Exception as exc:
         logger.exception("cmd_dashboard: DashboardEngine failed: %s", exc)
+        from engine.dashboard import DashboardReport
+        report = DashboardReport(
+            unavailable={
+                "totals", "tracking", "ev", "clv", "sport", "market",
+                "daily", "system", "intelligence",
+            }
+        )
         await update.message.reply_text(
-            f"{EMOJI['warn']} Dashboard unavailable; showing live activity.",
+            report.to_telegram(),
             parse_mode=ParseMode.HTML,
         )
 
@@ -3358,13 +3402,20 @@ async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     # rows written by subsequent scans reset that field to None/DISCOVERED.
     lines.append("🎯 <b>Actionable Pick Alerts</b>")
     try:
-        # 24-hour display window; historical records remain stored in PropOpportunityLog.
+        # Calendar-day window in the canonical reporting timezone; historical
+        # records remain stored in PropOpportunityLog.
+        from reporting import current_reporting_day_bounds
+        _day_start, _day_end = current_reporting_day_bounds()
         alerted_opps = await _bounded(
-            _db.get_alerted_opportunity_log(since_hours=24, limit=8)
+            _db.get_alerted_opportunity_log(
+                start_at=_day_start,
+                end_at=_day_end,
+                limit=8,
+            )
         )
         if alerted_opps:
             # "sent" = Telegram API accepted the send; no message ID stored.
-            lines.append(f"  <i>{len(alerted_opps)} shown (last 24h)</i>")
+            lines.append(f"  <i>{len(alerted_opps)} shown (today)</i>")
             lines.append("")
             for r in alerted_opps:
                 if is_telegram_suppressed_sport(getattr(r, "sport", None)):
@@ -3384,7 +3435,7 @@ async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     f"  ·  {_ts_str}"
                 )
         else:
-            lines.append("  <i>No player prop alerts sent in the last 24 h.</i>")
+            lines.append("  <i>No player prop alerts sent today.</i>")
             lines.append("  <i>New alerts appear here after delivery.</i>")
     except Exception as exc:
         logger.warning("cmd_alerts: prop history lookup failed: %s", exc)
@@ -3434,7 +3485,9 @@ async def cmd_reconcile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             "Actionable  Delivered  Pending  Resolved  H/M/P</code>",
         ]
         for provider, row in sorted(report.get("by_provider", {}).items()):
-            delivered = row.get("audit_delivered_alerts", 0) or row.get("delivered_alerts", 0)
+            # Only identity-complete confirmed PLAY audits count as delivered.
+            # Legacy/source flags are shown separately as UNKNOWN below.
+            delivered = row.get("audit_delivered_alerts", 0)
             lines.append(
                 f"<code>{_html.escape(provider[:13]):<13} "
                 f"{row.get('tracked', 0):>7,} "
@@ -3452,6 +3505,8 @@ async def cmd_reconcile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             "",
             "<b>Accounting interpretation</b>",
             f"  Durable audit rows: <code>{report.get('audit_rows', 0):,}</code>",
+            f"  UNKNOWN/UNVERIFIED deliveries: "
+            f"<code>{report.get('unverified_historical', 0):,}</code>",
             f"  Duplicate audited deliveries: "
             f"<code>{report.get('duplicate_delivery_events', 0):,}</code>",
         ]
@@ -3472,14 +3527,8 @@ async def cmd_reconcile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 "<code>UTC bucket          Provider       Alerts  Recipients</code>",
             ]
             for bucket in buckets[-24:]:
-                bucket_alerts = (
-                    bucket.get("audit_delivered_alerts", 0)
-                    or bucket.get("delivered_alerts", 0)
-                )
-                bucket_recipients = (
-                    bucket.get("audit_recipients", 0)
-                    or bucket.get("delivered_recipients", 0)
-                )
+                bucket_alerts = bucket.get("audit_delivered_alerts", 0)
+                bucket_recipients = bucket.get("audit_recipients", 0)
                 lines.append(
                     f"<code>{bucket['bucket'][:16]:<18} "
                     f"{_html.escape(bucket['provider'][:13]):<13} "
@@ -3537,11 +3586,28 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     PropOpportunityLog result values: HIT | MISS | PUSH | PENDING
     Mapped to display:  HIT→W  MISS→L  PUSH/REFUND→P
     """
-    tracking = await _bounded(_db.get_tracking_summary())
-    counts = tracking.get("counts", {}) if isinstance(tracking, dict) else {}
-    total_all = int(tracking.get("directional_total", tracking.get("total", 0)) or 0)
-    resolved_count = int(tracking.get("resolved", 0) or 0)
-    pending_count = int(tracking.get("pending", 0) or 0)
+    summary = await _report_read(
+        _db.get_directional_performance_summary(),
+        fallback=None,
+        timeout=_COMMAND_TIMEOUT_SECONDS,
+    )
+    if not isinstance(summary, dict):
+        await update.message.reply_text(
+            "⚠️ <b>Sharp Money Pick Grades</b>\n\n"
+            "<i>Grade data is UNAVAILABLE; the database query failed or "
+            "timed out. This is not zero.</i>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+    by_sport = summary.get("by_sport", {}) or {}
+    by_provider = summary.get("by_provider", {}) or {}
+    total_all = sum(int(row.get("directional", 0) or 0) for row in by_sport.values())
+    pending_count = sum(int(row.get("pending", 0) or 0) for row in by_sport.values())
+    resolved_count = sum(int(row.get("resolved", 0) or 0) for row in by_sport.values())
+    overall_w = sum(int(row.get("hit", 0) or 0) for row in by_sport.values())
+    overall_l = sum(int(row.get("miss", 0) or 0) for row in by_sport.values())
+    overall_p = sum(int(row.get("push", 0) or 0) for row in by_sport.values())
+    overall_res = overall_w + overall_l + overall_p
 
     lines: list[str] = ["📊 <b>Sharp Money Pick Grades</b>", ""]
 
@@ -3551,7 +3617,6 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             "<i>Results update automatically when games finish.</i>",
             "",
             "─ <b>Current snapshot</b> ─",
-            f"  Tracked props: <b>{int(tracking.get('tracked', 0) or 0)}</b>",
             f"  Stored picks:  <b>{total_all}</b>",
             f"  Pending:       <b>{pending_count}</b>",
             f"  Resolved:      <b>0</b>",
@@ -3561,29 +3626,7 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
         return
 
-    # Grading is reported for the unified tracked stream; delivery metadata
-    # does not create a separate monitoring class.
-    overall_w = int(counts.get("OVER", {}).get("HIT", 0)) + int(
-        counts.get("UNDER", {}).get("MISS", 0)
-    )
-    overall_l = int(counts.get("OVER", {}).get("MISS", 0)) + int(
-        counts.get("UNDER", {}).get("HIT", 0)
-    )
-    overall_p = int(counts.get("OVER", {}).get("PUSH", 0)) + int(
-        counts.get("UNDER", {}).get("PUSH", 0)
-    )
-
-    overall_res = overall_w + overall_l + overall_p
     overall_hit = overall_w / overall_res * 100 if overall_res > 0 else 0.0
-    pending_n   = pending_count
-
-    by_provider: dict[str, dict[str, int]] = {}
-    for provider, provider_counts in (tracking.get("by_provider", {}) or {}).items():
-        bucket = by_provider.setdefault(provider, {"HIT": 0, "MISS": 0, "PUSH": 0})
-        for rec in ("OVER", "UNDER"):
-            bucket["HIT"] += int(provider_counts.get(rec, {}).get("HIT", 0))
-            bucket["MISS"] += int(provider_counts.get(rec, {}).get("MISS", 0))
-            bucket["PUSH"] += int(provider_counts.get(rec, {}).get("PUSH", 0))
 
     lines += [
         "─ <b>Overall</b> " + "─" * 21,
@@ -3591,16 +3634,32 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         f"W:{overall_w}  L:{overall_l}  P:{overall_p}  "
         f"→ <code>{overall_hit:.0f}%</code> hit",
         "",
-        f"<i>{pending_n} picks still PENDING · results set when games finish.</i>",
-        f"<i>Tracked: {int(tracking.get('tracked_observations', tracking.get('tracked', 0)) or 0)} "
-        "persistent observations · delivery-independent.</i>",
+        f"<i>{pending_count} picks still PENDING · results set when games finish.</i>",
+        "<i>Only valid completed-game outcomes count in W/L/P; "
+        "delivery is not required for grading.</i>",
     ]
     if by_provider:
         lines += ["", "─ <b>By Provider</b> " + "─" * 15]
-        for provider, counts in sorted(by_provider.items()):
+        for provider, row in sorted(by_provider.items()):
             lines.append(
-                f"  {provider}: {counts['HIT']}H / {counts['MISS']}M / "
-                f"{counts['PUSH']}P"
+                f"  {_html.escape(str(provider))}: "
+                f"{int(row.get('hit', 0) or 0)}H / "
+                f"{int(row.get('miss', 0) or 0)}M / "
+                f"{int(row.get('push', 0) or 0)}P · "
+                f"{int(row.get('pending', 0) or 0)} pending"
+            )
+    if by_sport:
+        lines += ["", "─ <b>By Sport</b> " + "─" * 18]
+        for sport, row in sorted(by_sport.items()):
+            graded = int(row.get("hit", 0) or 0) + int(row.get("miss", 0) or 0)
+            rate = f"{int(row.get('hit', 0) or 0) / graded * 100:.0f}%" if graded else "—"
+            lines.append(
+                f"  {_html.escape(str(sport))}: "
+                f"{int(row.get('directional', 0) or 0)} picks · "
+                f"{int(row.get('hit', 0) or 0)}H/"
+                f"{int(row.get('miss', 0) or 0)}M/"
+                f"{int(row.get('push', 0) or 0)}P · "
+                f"{int(row.get('pending', 0) or 0)} pending · {rate}"
             )
 
 
@@ -4729,12 +4788,20 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 pass
 
         # Fetch scan pipeline summary (non-fatal: new method may not exist on old schema)
-        _scan_result, summary = await _independent_report_reads([
+        _scan_result, _summary_result = await _independent_report_reads([
             _db.get_scan_cycle_summary(since_hours=since_h),
             _db.get_funnel_summary(since_hours=since_h),
         ])
         scan_summary: dict = _scan_result if isinstance(_scan_result, dict) else {}
-        summary = summary if isinstance(summary, dict) else {}
+        if not isinstance(_summary_result, dict):
+            await update.message.reply_text(
+                "⚠️ <b>Scan Pipeline</b>\n\n"
+                "<i>Funnel data is UNAVAILABLE; the database query failed "
+                "or timed out. This is not zero.</i>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+        summary = _summary_result
 
         tracked   = int(
             summary.get("active_tracked", summary.get("tracked", 0)) or 0
@@ -4808,10 +4875,7 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             ]
             for _provider in ("Underdog", "PrizePicks"):
                 _row = provider_pipeline.get(_provider, {})
-                _delivered = (
-                    _row.get("audit_delivered_alerts", 0)
-                    or _row.get("delivered_alerts", 0)
-                )
+                _delivered = _row.get("audit_delivered_alerts", 0)
                 lines += [
                     f"  <b>{_provider}</b>",
                     f"    Observed: <code>{int(_row.get('observed', 0) or 0):,}</code>"

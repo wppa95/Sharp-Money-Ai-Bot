@@ -505,6 +505,7 @@ class TestJobHealthTracking:
                 with patch.object(me, "_ud_full_scan_running", False):
                     with patch("market_engine.get_health_tracker", return_value=health):
                         await me.underdog_job(ctx)
+                        assert me._ud_full_scan_running is False
 
         info = health.get_job_info("underdog_job")
         assert info.get("run_count", 0) >= 1, "record_job_run not called for empty response"

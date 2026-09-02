@@ -1,0 +1,47 @@
+{
+  "restart_count": 6,
+  "restart_history": [
+    {
+      "ts": "2026-09-02 03:25:44 UTC",
+      "reason": "first_start",
+      "shutdown_at": null,
+      "session_secs": null
+    },
+    {
+      "ts": "2026-09-02 03:25:44 UTC",
+      "reason": "clean_restart",
+      "shutdown_at": "2026-09-02 03:25:44 UTC",
+      "session_secs": 0.0002048015594482422
+    },
+    {
+      "ts": "2026-09-02 03:25:44 UTC",
+      "reason": "clean_restart",
+      "shutdown_at": "2026-09-02 03:25:44 UTC",
+      "session_secs": 0.000244140625
+    },
+    {
+      "ts": "2026-09-02 03:25:44 UTC",
+      "reason": "clean_restart",
+      "shutdown_at": "2026-09-02 03:25:44 UTC",
+      "session_secs": 0.0001690387725830078
+    },
+    {
+      "ts": "2026-09-02 03:25:44 UTC",
+      "reason": "clean_restart",
+      "shutdown_at": "2026-09-02 03:25:44 UTC",
+      "session_secs": 0.00017189979553222656
+    },
+    {
+      "ts": "2026-09-02 03:25:44 UTC",
+      "reason": "clean_restart",
+      "shutdown_at": "2026-09-02 03:25:44 UTC",
+      "session_secs": 0.00018215179443359375
+    }
+  ],
+  "last_startup": "2026-09-02 03:25:44 UTC",
+  "last_startup_ts": 1788319544.272586,
+  "last_startup_reason": "clean_restart",
+  "monitoring_session_id": 6,
+  "monitoring_session_started": "2026-09-02 03:25:44 UTC",
+  "monitoring_session_started_ts": 1788319544.272586
+}

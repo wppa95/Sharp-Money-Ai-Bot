@@ -1,0 +1,110 @@
+Proceed with ONE focused fix for the confirmed live SQLite persistence blocker.
+
+The final verification has confirmed:
+
+- Targeted tests: 126 passed
+- Full suite: 4,828 passed
+- Managed workflow: running
+- Bot processes: 1
+- Scheduler owners: 1
+- /health: HTTP 200
+- Monitoring: active but DEGRADED
+- Underdog upstream fetch: healthy
+- Underdog persistence: FAILED
+- First cycle intended 3,473 records but persisted 0
+- Confirmed error:
+  sqlite3.OperationalError: unable to open database file
+- 35 command handlers registered correctly
+- /grade and /grades aliases present
+- No duplicate scheduler process
+
+Do NOT redo the command-layer work. It is complete.
+
+Do NOT change scoring, thresholds, evidence methodology, L5/L10/L20/L30, direction logic, PLAY qualification, Telegram delivery, delivery audit, monitoring cadence, provider routing, PropLine budget, Odds API pacing, or restart architecture.
+
+FIX ONLY THE CONFIRMED DATABASE PERSISTENCE FAILURE.
+
+Before changing anything, identify the exact runtime database path and why the managed bot process cannot open it.
+
+Specifically verify:
+
+1. The exact database URL/path used by the managed production process.
+
+2. The process working directory from which that path is resolved.
+
+3. Whether the database parent directory exists.
+
+4. Whether the running process has permission to create/open/write the database and its SQLite journal/WAL/SHM files.
+
+5. Whether the path is accidentally relative and resolving somewhere different from the intended persistent database location.
+
+6. Whether startup and background Underdog jobs are resolving the database path differently.
+
+7. Whether an environment variable/configuration mismatch exists between the process that successfully starts the bot and the process performing snapshot persistence.
+
+8. Whether the SQLite file itself exists and is the intended existing database.
+
+IMPORTANT DATA SAFETY:
+
+- Do NOT delete the existing SQLite database.
+- Do NOT replace it with a new empty database.
+- Do NOT rebuild the database.
+- Do NOT reset historical data.
+- Do NOT migrate data unnecessarily.
+- Do NOT perform a backup/integrity/rollback workflow.
+- Do NOT modify historical rows.
+- Do NOT silently redirect the bot to a new database just to make the error disappear.
+
+If the database path needs to be corrected, point the application at the EXISTING intended persistent database.
+
+If the parent directory is missing, create only the required directory safely.
+
+If permissions/path resolution are the issue, correct only what is necessary for the managed runtime to access the existing database.
+
+If the application is using an unsafe relative path, make the runtime path deterministic while preserving the existing database location/data.
+
+Do NOT simply catch the exception and report success.
+
+The Underdog bulk persistence function must actually succeed.
+
+After the fix:
+
+1. Run focused database/persistence tests.
+2. Run the FULL bot test suite.
+3. Only if the tests are green, restart the managed workflow ONCE to apply the fix.
+4. Confirm exactly one bot process.
+5. Confirm exactly one scheduler owner.
+6. Confirm /health HTTP 200.
+7. Confirm Underdog upstream fetch is healthy.
+8. Confirm Underdog snapshot persistence actually writes records.
+9. Confirm the logs no longer show:
+   sqlite3.OperationalError: unable to open database file
+10. Confirm /status database counters work.
+11. Confirm /funnel works.
+12. Confirm /grade works.
+13. Confirm /performance works and returns performance-by-sport.
+14. Confirm /dashboard works.
+15. Confirm /tracking works.
+
+MOST IMPORTANT LIVE TEST:
+
+Do not declare success merely because the exception disappears.
+
+Verify an actual Underdog persistence cycle:
+- records fetched > 0
+- records attempted > 0
+- records successfully persisted > 0
+- database count increases appropriately
+- no persistence exception
+
+The previous cycle had:
+3,473 intended
+0 persisted
+
+That must no longer happen.
+
+Keep all command-layer fixes already completed.
+
+Do not attempt a checkpoint.
+
+restart to apply the changes and checkpoint the changes.

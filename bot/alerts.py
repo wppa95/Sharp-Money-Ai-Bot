@@ -586,6 +586,7 @@ def format_help_message() -> str:
         f"  /tracking       — Directional pick tracking summary",
         f"  /analyst        — Latest analyst assessment",
         f"  /rollups        — Learning rollups",
+        f"  /learning       — Learning rollups (alias)",
         f"  /refinement     — Refinement rules and triggers",
         "",
         "<b>⚙️ System</b>",
@@ -1076,6 +1077,10 @@ class DeliveryResult:
     rate_limited: bool = False   # True when blocked by global Telegram rate limiter
     recipients_sent: int = 0
     recipients_failed: int = 0
+    # True only when an actionable Telegram send has a durable, identity-linked
+    # confirmation record. Compatibility callers that construct a result
+    # manually remain accepted by engine bookkeeping via getattr(..., True).
+    authoritative_recorded: bool = False
 
     def __str__(self) -> str:
         if self.rate_limited:
@@ -1209,11 +1214,40 @@ class AlertDelivery:
         outcome: str,
         recipients_sent: int,
         recipients_failed: int,
-    ) -> None:
-        """Best-effort durable accounting; never changes delivery semantics."""
+    ) -> bool:
+        """Persist delivery accounting and report authoritative PLAY success."""
+        if (
+            str(alert_kind).upper() == "ACTIONABLE_PICK"
+            and str(outcome).lower() == "sent"
+        ):
+            record = getattr(self._db, "record_telegram_play_delivery", None)
+            if record is not None:
+                try:
+                    result = record(
+                        provider=provider,
+                        delivery_path=delivery_path,
+                        player_name=player_name,
+                        sport=sport,
+                        stat_type=stat_type,
+                        external_id=external_id,
+                        event_id=event_id,
+                        line_value=line_value,
+                        recipients_sent=recipients_sent,
+                        recipients_failed=recipients_failed,
+                    )
+                    if inspect.isawaitable(result):
+                        result = await result
+                    return bool(result)
+                except Exception as exc:
+                    logger.warning(
+                        "Authoritative Telegram PLAY record failed: %s",
+                        type(exc).__name__,
+                    )
+                    return False
+
         method = getattr(self._db, "log_telegram_delivery", None)
         if method is None:
-            return
+            return False
         try:
             result = method(
                 provider=provider,
@@ -1230,9 +1264,11 @@ class AlertDelivery:
                 recipients_failed=recipients_failed,
             )
             if inspect.isawaitable(result):
-                await result
+                result = await result
+            return bool(result) if isinstance(result, (bool, int)) else True
         except Exception as exc:
             logger.warning("Telegram delivery audit write failed: %s", exc)
+            return False
 
     async def _mark_play_delivered(
         self,
@@ -1573,7 +1609,7 @@ class AlertDelivery:
             )
         if alert_sent:
             get_rate_limiter().record_sent()
-        await self._audit_telegram_attempt(
+        _audit_ok = await self._audit_telegram_attempt(
             provider="PrizePicks",
             alert_kind="ACTIONABLE_PICK",
             delivery_path="prizepicks",
@@ -1591,7 +1627,11 @@ class AlertDelivery:
             recipients_sent=counts["sent"],
             recipients_failed=counts["failed"],
         )
-        if alert_sent:
+        if (
+            alert_sent
+            and not hasattr(self._db, "record_telegram_play_delivery")
+            and _audit_ok
+        ):
             await self._mark_play_delivered(
                 provider="PrizePicks",
                 external_id=getattr(opp.pp_line, "external_id", None),
@@ -1602,6 +1642,7 @@ class AlertDelivery:
             sent             = alert_sent,
             recipients_sent  = counts["sent"],
             recipients_failed= counts["failed"],
+            authoritative_recorded = _audit_ok if alert_sent else False,
         )
         pp     = opp.pp_line
         log_fn = logger.info if alert_sent else logger.warning
@@ -1904,7 +1945,7 @@ class AlertDelivery:
             else "MARKET_MOVE" if market_move_only
             else "ACTIONABLE_PICK"
         )
-        await self._audit_telegram_attempt(
+        _audit_ok = await self._audit_telegram_attempt(
             provider=source,
             alert_kind=_alert_kind,
             delivery_path=(
@@ -1925,7 +1966,12 @@ class AlertDelivery:
             recipients_sent=counts["sent"],
             recipients_failed=counts["failed"],
         )
-        if alert_sent and _alert_kind == "ACTIONABLE_PICK":
+        if (
+            alert_sent
+            and _alert_kind == "ACTIONABLE_PICK"
+            and not hasattr(self._db, "record_telegram_play_delivery")
+            and _audit_ok
+        ):
             await self._mark_play_delivered(
                 provider=source,
                 external_id=source_id,
@@ -1938,6 +1984,7 @@ class AlertDelivery:
             sent             = alert_sent,
             recipients_sent  = counts["sent"],
             recipients_failed= counts["failed"],
+            authoritative_recorded = _audit_ok if alert_sent else False,
         )
         if new_prop:
             event_str = f"NEW_PROP line={new_line}"

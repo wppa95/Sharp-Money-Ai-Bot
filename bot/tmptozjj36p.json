@@ -1,0 +1,42 @@
+{
+  "jobs": {
+    "underdog_job": {
+      "last_started": "2026-09-02 02:32:34 UTC",
+      "last_started_ts": 1788316354.532967,
+      "last_fail": "2026-09-02 02:32:34 UTC",
+      "last_fail_ts": 1788316354.744039,
+      "last_error": "snapshot persistence, bridge, or lifecycle stage failed",
+      "fail_count": 1,
+      "fail_streak": 1,
+      "recent_fails": [
+        {
+          "ts": "2026-09-02 02:32:34 UTC",
+          "error": "snapshot persistence, bridge, or lifecycle stage failed"
+        }
+      ]
+    }
+  },
+  "last_job_started": "underdog_job",
+  "last_job_started_at": "2026-09-02 02:32:34 UTC",
+  "providers": {
+    "Underdog": {
+      "last_fetch": "2026-09-02 02:32:34 UTC",
+      "last_fetch_ts": 1788316354.533656,
+      "fetch_count": 1,
+      "error_streak": 0
+    }
+  },
+  "last_scan_checkpoint_ts": 1788316354.6014254,
+  "last_scan_checkpoint_at": "2026-09-02 02:32:34 UTC",
+  "last_error": "[pipeline:lifecycle_bridge:market_engine] bridge or lifecycle update failed",
+  "last_error_ts": "2026-09-02 02:32:34 UTC",
+  "last_pipeline_fail": {
+    "stage": "lifecycle_bridge",
+    "module": "market_engine",
+    "error": "bridge or lifecycle update failed",
+    "ts": "2026-09-02 02:32:34 UTC"
+  },
+  "last_monitoring_cycle": "2026-09-02 02:32:34 UTC",
+  "last_monitoring_cycle_ts": 1788316354.744928,
+  "monitoring_cycle_count": 1
+}

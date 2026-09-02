@@ -50,25 +50,23 @@ class TestAlertsWording(unittest.TestCase):
         )
 
     def test_all_time_sent_removed_v35(self):
-        """V3.5: 'all-time sent' removed from /alerts display (24h window only)."""
+        """All-time sent is removed from /alerts (today's window only)."""
         src = self._alerts_src()
         self.assertNotIn(
             "all-time sent", src,
             "V3.5: 'all-time sent' must be removed from /alerts display"
         )
-        # V3.5 uses 24h window instead
-        self.assertIn("24h", src, "V3.5: /alerts must show '24h' window label")
+        self.assertIn(
+            "current_reporting_day_bounds", src,
+            "/alerts must use the canonical reporting-day boundary",
+        )
 
     def test_shown_label_includes_24h_window_v35(self):
-        """V3.5: The 'N shown' label must mention the 24h window (not 72h)."""
+        """The shown label must identify the current reporting day."""
         src = self._alerts_src()
         self.assertIn(
-            "shown (last 24h)", src,
-            "V3.5: Display window changed from 72h to 24h"
-        )
-        self.assertNotIn(
-            "shown (last 72h)", src,
-            "V3.5: Old 72h label must be removed"
+            "shown (today)", src,
+            "The display must identify today's reporting window",
         )
 
     def test_delivered_not_claimed_in_empty_case_v35(self):
@@ -109,10 +107,9 @@ class TestAlertsWording(unittest.TestCase):
         )
 
     def test_24h_window_explicit_in_query_v35(self):
-        """V3.5: since_hours=24 must appear — window changed from 72h to 24h."""
+        """The canonical reporting-day helper must define the query window."""
         src = self._alerts_src()
-        self.assertIn("since_hours=24", src, "V3.5: /alerts must use 24h window")
-        self.assertNotIn("since_hours=72", src, "V3.5: Old 72h window must be gone")
+        self.assertIn("current_reporting_day_bounds", src)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -129,35 +126,35 @@ class TestFmtUserTs(unittest.TestCase):
 
     def test_midnight_is_12am(self):
         result = self.fmt(0, 0)
-        self.assertEqual(result, "Aug 08 · 12:00 AM")
+        self.assertEqual(result, "Aug 07 · 7:00 PM")
 
     def test_noon_is_12pm(self):
         result = self.fmt(12, 0)
-        self.assertEqual(result, "Aug 08 · 12:00 PM")
+        self.assertEqual(result, "Aug 08 · 7:00 AM")
 
     def test_1357_is_157pm(self):
         result = self.fmt(13, 57)
-        self.assertEqual(result, "Aug 08 · 1:57 PM")
+        self.assertEqual(result, "Aug 08 · 8:57 AM")
 
     def test_1705_is_505pm(self):
         result = self.fmt(17, 5)
-        self.assertEqual(result, "Aug 08 · 5:05 PM")
+        self.assertEqual(result, "Aug 08 · 12:05 PM")
 
     def test_2359_is_1159pm(self):
         result = self.fmt(23, 59)
-        self.assertEqual(result, "Aug 08 · 11:59 PM")
+        self.assertEqual(result, "Aug 08 · 6:59 PM")
 
     # ── Additional edge cases ─────────────────────────────────────────────────
 
     def test_1am_no_leading_zero(self):
         result = self.fmt(1, 0)
-        self.assertIn("1:00 AM", result)
-        self.assertNotIn("01:", result)
+        self.assertIn("8:00 PM", result)
+        self.assertNotIn("08:", result)
 
     def test_9am_no_leading_zero(self):
         result = self.fmt(9, 30)
-        self.assertIn("9:30 AM", result)
-        self.assertNotIn("09:", result)
+        self.assertIn("4:30 AM", result)
+        self.assertNotIn("04:", result)
 
     def test_none_returns_dash(self):
         self.assertEqual(cmd_mod._fmt_user_ts(None), "—")
@@ -509,13 +506,10 @@ class TestRegressionGuards(unittest.TestCase):
         src = inspect.getsource(db_mod.Database.mark_opportunity_alert_sent)
         self.assertIn("utcnow", src)
 
-    def test_cmd_alerts_queries_24h_v35(self):
-        """V3.5: /alerts display window changed from 72h to 24h."""
+    def test_cmd_alerts_queries_reporting_day(self):
+        """The /alerts display window is the canonical reporting day."""
         src = inspect.getsource(cmd_mod.cmd_alerts)
-        self.assertIn("24", src, "V3.5: /alerts must use 24h window")
-        # since_hours=72 must be gone; since_hours=24 must be present
-        self.assertIn("since_hours=24", src, "V3.5: since_hours=24 required")
-        self.assertNotIn("since_hours=72", src, "V3.5: 72h window removed")
+        self.assertIn("current_reporting_day_bounds", src)
 
     def test_restarts_command_absent(self):
         self.assertFalse(hasattr(cmd_mod, "cmd_restarts"))

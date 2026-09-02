@@ -1,0 +1,19 @@
+{
+  "jobs": {
+    "test_job": {
+      "last_fail": "2026-09-02 02:30:18 UTC",
+      "last_fail_ts": 1788316218.580024,
+      "last_error": "boom",
+      "fail_count": 1,
+      "fail_streak": 1,
+      "recent_fails": [
+        {
+          "ts": "2026-09-02 02:30:18 UTC",
+          "error": "boom"
+        }
+      ]
+    }
+  },
+  "last_error": "[test_job] boom",
+  "last_error_ts": "2026-09-02 02:30:18 UTC"
+}

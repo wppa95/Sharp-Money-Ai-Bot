@@ -1,0 +1,96 @@
+Continue from the exact current state. Do not restart the work, revert anything, or begin a new diagnosis.
+
+The targeted command/lifecycle tests are already GREEN: 126 passed.
+The obsolete /performance backtest body has already been removed.
+
+The agent encountered an error while proceeding. Recover from the error and continue the SAME command-surface repair task.
+
+NEXT STEPS — DO THESE IN ORDER:
+
+1. Run the FULL bot test suite.
+2. If there are failures, fix only the failures relevant to the master Telegram command-surface requirements.
+3. Do not weaken, skip, delete, or rewrite tests simply to make them pass.
+4. Preserve all protected V4 behavior:
+   - scoring
+   - thresholds
+   - evidence methodology
+   - L5/L10/L20/L30 methodology
+   - direction logic
+   - PLAY qualification
+   - Telegram PLAY-only delivery
+   - delivery deduplication
+   - authoritative delivery audit
+   - provider routing
+   - shared Underdog/PropLine cadence
+   - PropLine request budget
+   - Odds API pacing
+   - restart/session-reset architecture
+   - persistent historical data
+   - FPR/monitoring behavior
+   - provider behavior
+
+5. Verify that every command returns its OWN intended report and that no command is incorrectly routed to another command.
+
+6. Specifically verify the known regressions:
+   - /funnel must return real funnel data rather than UNAVAILABLE during healthy operation.
+   - /grade must return real grade data rather than UNAVAILABLE during healthy operation.
+   - /performance must return performance-by-sport, NOT the /grade report and NOT the old backtest body.
+   - /dashboard must return the actual dashboard without timing out into a generic provider fallback.
+   - /alerts must use the current calendar day in the canonical reporting timezone, NOT a rolling 24-hour window.
+   - /status must not incorrectly report healthy database counters as temporarily unavailable.
+   - /reconcile must use authoritative successful Telegram delivery records and stable identity/event/source linkage.
+   - UNKNOWN/UNVERIFIED must never become successful delivery, failed delivery, or HIT/MISS/PUSH.
+   - /testalert must never inflate real PLAY, delivery, grading, performance, funnel, reconciliation, or learning populations.
+
+7. Verify argument parsing:
+   - /picks
+   - /picks 5
+   - /picks MLB
+   - /picks TENNIS 5
+   - /slip 2–6
+   - /funnel [h]
+   - /reconcile [h]
+   - /player NAME
+   - /analyze ARGS
+
+8. Verify aliases:
+   - /grade
+   - /grades
+
+9. Run the FULL bot test suite again after any fixes.
+
+10. Only after the full suite is green, perform the required managed-workflow verification:
+   - exactly one bot process
+   - exactly one scheduler owner
+   - clean startup
+   - /health HTTP 200
+   - monitoring active
+   - provider status healthy
+   - command handlers registered
+
+Do NOT:
+- attempt checkpoint creation
+- investigate UNKNOWN_NOT_GIT
+- perform SQLite backup/integrity/rollback work
+- pause the bot for database inspection
+- delete/rebuild historical data
+- change scoring
+- change thresholds
+- change monitoring cadence
+- change provider budgets
+- change Odds API pacing
+- create unrelated migrations
+- declare success based only on the 126 targeted tests
+
+If the full suite exposes an unrelated infrastructure error, report the exact error and continue with any safe command-layer work that can still be completed.
+
+At the end, report:
+- targeted tests: 126 passed
+- full-suite result
+- fixes made from any full-suite failures
+- managed-workflow verification
+- exact remaining blockers, if any
+
+Do not attempt a checkpoint.
+
+restart to apply the changes and checkpoint the changes.

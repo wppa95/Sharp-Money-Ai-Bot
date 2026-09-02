@@ -1,0 +1,111 @@
+STOP — DATABASE ARCHITECTURE CORRECTION
+
+We did NOT ask for a backup database, secondary database, replacement database, shadow database, or alternate SQLite database.
+
+The V4 bot must use ONE authoritative existing persistent database.
+
+Do NOT create, maintain, migrate to, or write to any second/backup/replacement database.
+
+FIRST, inspect the current database configuration and identify every SQLite database file currently being referenced or created by the application.
+
+Specifically identify:
+- the authoritative existing database
+- any newly created database
+- any backup database
+- any secondary/shadow database
+- any alternate SQLite path
+- any test database that could accidentally be used by production
+- every BOT_DATABASE_URL/database-path reference used by the managed runtime
+
+Then:
+
+1. Determine exactly what database the V4 bot was using BEFORE the recent SQLite fix.
+
+2. Preserve that original authoritative database and all of its historical data.
+
+3. Remove/revert ONLY the newly introduced production backup/secondary/replacement database behavior.
+
+4. Do NOT delete the original authoritative database.
+
+5. Do NOT delete historical data.
+
+6. Do NOT migrate or copy production data into another database.
+
+7. Do NOT merge databases.
+
+8. Do NOT create a new database as a workaround.
+
+9. Make the production bot use exactly ONE authoritative database.
+
+10. Ensure all monitoring jobs, command handlers, grading, tracking, learning, delivery audit, and reporting use that SAME database.
+
+11. Ensure the Underdog persistence path writes to that SAME authoritative database.
+
+IMPORTANT:
+
+The absolute path change to:
+
+/home/runner/workspace/bot/data/sharp_money.db
+
+must NOT automatically be assumed to be the correct production database.
+
+Verify whether that file is actually the original authoritative V4 database.
+
+If the original database was located elsewhere, restore the application to the original authoritative database path/configuration instead of creating another database.
+
+The recent SQLite concurrency changes must also be reviewed.
+
+Do not keep changes merely because tests pass.
+
+The objective is:
+
+ONE BOT
+ONE SCHEDULER
+ONE AUTHORITATIVE PRODUCTION DATABASE
+ONE CONSISTENT DATABASE PATH
+NO SECONDARY/SHADOW/BACKUP DATABASE
+
+After correcting the database configuration:
+
+- Run focused database configuration/persistence tests.
+- Run the full bot suite.
+- Confirm the managed runtime points to exactly one authoritative database.
+- Confirm the existing historical data is still present.
+- Confirm Underdog writes go into that same database.
+- Confirm no second production database is created or written to.
+
+Then restart the managed workflow ONCE only after the code/configuration is ready.
+
+LIVE VERIFICATION:
+
+Run a real concurrent Underdog monitoring cycle and confirm:
+
+Fetched > 0
+Intended > 0
+Persisted > 0
+
+Then verify the records were written into the ONE authoritative existing database.
+
+Also confirm:
+- /status
+- /funnel
+- /grade
+- /performance
+- /dashboard
+- /tracking
+
+all read from that same database.
+
+Do NOT perform a database backup.
+Do NOT create a backup database.
+Do NOT create a replacement database.
+Do NOT migrate databases.
+Do NOT reset the database.
+
+If a second database was already created by the recent changes, identify it and report exactly what created it BEFORE deleting or modifying anything related to it.
+
+Do not make assumptions about which database is authoritative.
+
+Do not attempt a checkpoint.
+
+restart to apply the changes and checkpoint the changes.

@@ -1,0 +1,34 @@
+{
+  "jobs": {
+    "underdog_job": {
+      "last_started": "2026-09-02 02:52:51 UTC",
+      "last_started_ts": 1788317571.712108,
+      "last_run": "2026-09-02 02:52:51 UTC",
+      "last_run_ts": 1788317571.87635,
+      "run_count": 1,
+      "fail_streak": 0
+    }
+  },
+  "last_job_started": "underdog_job",
+  "last_job_started_at": "2026-09-02 02:52:51 UTC",
+  "providers": {
+    "Underdog": {
+      "last_fetch": "2026-09-02 02:52:51 UTC",
+      "last_fetch_ts": 1788317571.712877,
+      "fetch_count": 1,
+      "error_streak": 0
+    }
+  },
+  "last_scan_checkpoint_ts": 1788317571.773698,
+  "last_scan_checkpoint_at": "2026-09-02 02:52:51 UTC",
+  "last_underdog_scan": "2026-09-02 02:52:51 UTC",
+  "last_underdog_scan_ts": 1788317571.876761,
+  "last_underdog_props": 1,
+  "last_underdog_alerts": 0,
+  "last_db_write": "2026-09-02 02:52:51 UTC",
+  "last_db_write_ts": 1788317571.87699,
+  "last_db_operation": "lifecycle_bridge",
+  "last_monitoring_cycle": "2026-09-02 02:52:51 UTC",
+  "last_monitoring_cycle_ts": 1788317571.877358,
+  "monitoring_cycle_count": 1
+}

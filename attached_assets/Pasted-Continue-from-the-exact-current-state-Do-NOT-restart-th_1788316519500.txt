@@ -1,0 +1,71 @@
+Continue from the exact current state. Do NOT restart the bot again and do NOT make any additional code changes.
+
+The implementation and tests are already complete:
+
+- 126 targeted command/lifecycle tests passed.
+- Full bot suite is GREEN: 4,828 passed.
+- The stale /alerts 24-hour test expectations were corrected to the canonical calendar-day contract.
+- The stale timestamp expectations were corrected for Chicago daylight-saving time (UTC−5 in August).
+- The managed Sharp Money Bot workflow has already been restarted successfully once.
+
+The agent encountered an error ONLY while performing the final live verification.
+
+Resume ONLY the final verification/reporting step.
+
+CHECK THE CURRENT LIVE STATE:
+
+1. Confirm exactly ONE Sharp Money Bot process is running.
+
+2. Confirm exactly ONE scheduler owner is active.
+
+3. Confirm startup completed cleanly.
+
+4. Confirm GET /health returns HTTP 200.
+
+5. Confirm monitoring is active.
+
+6. Confirm Underdog provider status.
+
+7. Confirm PrizePicks/PropLine provider status.
+
+8. Confirm all expected Telegram command handlers are registered.
+
+9. Confirm there are no startup exceptions, scheduler ownership errors, or duplicate bot processes.
+
+10. Do NOT restart again unless the current managed workflow is actually stopped or unhealthy.
+
+IMPORTANT:
+Do NOT change code.
+Do NOT rerun migrations.
+Do NOT modify database data.
+Do NOT perform SQLite backup/integrity/rollback work.
+Do NOT attempt checkpoint creation.
+Do NOT investigate UNKNOWN_NOT_GIT.
+Do NOT change scoring.
+Do NOT change thresholds.
+Do NOT change monitoring cadence.
+Do NOT change provider budgets.
+Do NOT change Odds API pacing.
+Do NOT change Telegram delivery logic.
+
+The full suite is already green at 4,828 passed. Do not disturb the completed implementation.
+
+If the live verification itself encounters an infrastructure/tool error, report the exact verification step that failed and the exact error. Do not make speculative code changes to work around it.
+
+Final report must contain only:
+
+- Targeted tests: 126 passed
+- Full suite: 4,828 passed
+- Managed workflow: current state
+- Bot process count
+- Scheduler owner count
+- /health status
+- Monitoring status
+- Underdog provider status
+- PropLine provider status
+- Command handler registration status
+- Any remaining blocker
+
+Do not attempt a checkpoint.
+
+restart to apply the changes and checkpoint the changes.

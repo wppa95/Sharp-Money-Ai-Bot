@@ -1992,9 +1992,10 @@ async def _run_prizepicks_independent_cycle(
         if result.sent:
             delivered += 1
             try:
-                await db.mark_opportunity_alert_sent(
-                    candidate["external_id"], stat, provider="PrizePicks"
-                )
+                if getattr(result, "authoritative_recorded", True):
+                    await db.mark_opportunity_alert_sent(
+                        candidate["external_id"], stat, provider="PrizePicks"
+                    )
                 await db.update_prop_lifecycle_state(
                     "PrizePicks", player, sport, stat, "ACTIVE_ALERTED",
                     first_alert_sent_at=datetime.utcnow(),
@@ -3015,6 +3016,7 @@ async def underdog_job(context) -> None:
         logger.debug("underdog_job: no Underdog pick'em snapshots in response")
         _cycle_timing.finish("active_pool")
         logger.info("underdog_cycle_timing: %s", _cycle_timing.summary(0, 0))
+        _release_underdog_scan_slot()
         _job_activity_end("underdog")
         if _health:
             _health.record_job_run("underdog_job")
@@ -4512,7 +4514,10 @@ async def underdog_job(context) -> None:
                         _lifecycle_alerted.append((_sp, _dq_sport, _dq_st))
                     # Performance tracking — path-specific for log clarity
                     try:
-                        await db.mark_opportunity_alert_sent(_dq_ext_id, _dq_st)
+                        if getattr(_dq_result, "authoritative_recorded", True):
+                            await db.mark_opportunity_alert_sent(
+                                _dq_ext_id, _dq_st, provider="Underdog"
+                            )
                     except Exception as _dq_mark_exc:
                         if _dq_path == "lc":
                             logger.warning(
@@ -5504,7 +5509,10 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 # _record_prop_alerted already called by _try_claim_delivery_slot.
                 try:
                     await db.mark_ud_snapshot_alert_sent(_sr_player, _sr_stat)
-                    await db.mark_opportunity_alert_sent(_sr_ext_id, _sr_stat)
+                    if getattr(_sr_result, "authoritative_recorded", True):
+                        await db.mark_opportunity_alert_sent(
+                            _sr_ext_id, _sr_stat, provider="Underdog"
+                        )
                 except Exception as _sr_mark_exc:
                     logger.debug(
                         "stable_refresh: mark_alert_sent failed: %s", _sr_mark_exc,
@@ -6266,11 +6274,12 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         fpr_sent      += 1
                         # _record_prop_alerted already called by _try_claim_delivery_slot.
                         try:
-                            await db.mark_opportunity_alert_sent(
-                                _fpr_ext_id,
-                                _fpr_stat,
-                                provider=_fpr_provider,
-                            )
+                            if getattr(_fpr_result, "authoritative_recorded", True):
+                                await db.mark_opportunity_alert_sent(
+                                    _fpr_ext_id,
+                                    _fpr_stat,
+                                    provider=_fpr_provider,
+                                )
                             await db.update_prop_lifecycle_state(
                                 _fpr_provider,
                                 _fpr_player,

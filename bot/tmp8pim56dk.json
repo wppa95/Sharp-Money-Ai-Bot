@@ -1,0 +1,16 @@
+{
+  "jobs": {
+    "job_a": {
+      "last_run": "2026-09-02 02:07:05 UTC",
+      "last_run_ts": 1788314825.049791,
+      "run_count": 1,
+      "fail_streak": 0
+    },
+    "job_b": {
+      "last_run": "2026-09-02 02:07:05 UTC",
+      "last_run_ts": 1788314825.049983,
+      "run_count": 1,
+      "fail_streak": 0
+    }
+  }
+}

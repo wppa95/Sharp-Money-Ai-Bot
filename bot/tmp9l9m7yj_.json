@@ -1,0 +1,34 @@
+{
+  "jobs": {
+    "underdog_job": {
+      "last_started": "2026-09-02 02:32:34 UTC",
+      "last_started_ts": 1788316354.512594,
+      "last_fail": "2026-09-02 02:32:34 UTC",
+      "last_fail_ts": 1788316354.51339,
+      "last_error": "API down",
+      "fail_count": 1,
+      "fail_streak": 1,
+      "recent_fails": [
+        {
+          "ts": "2026-09-02 02:32:34 UTC",
+          "error": "API down"
+        }
+      ]
+    }
+  },
+  "last_job_started": "underdog_job",
+  "last_job_started_at": "2026-09-02 02:32:34 UTC",
+  "providers": {
+    "Underdog": {
+      "last_error": "2026-09-02 02:32:34 UTC",
+      "last_error_msg": "API down",
+      "error_count": 1,
+      "error_streak": 1
+    }
+  },
+  "last_error": "[underdog_job] API down",
+  "last_error_ts": "2026-09-02 02:32:34 UTC",
+  "last_monitoring_cycle": "2026-09-02 02:32:34 UTC",
+  "last_monitoring_cycle_ts": 1788316354.514212,
+  "monitoring_cycle_count": 1
+}

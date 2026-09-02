@@ -1,0 +1,10 @@
+{
+  "last_pipeline_fail": {
+    "stage": "scoring",
+    "module": "market_engine",
+    "error": "NoneType error",
+    "ts": "2026-09-02 03:31:06 UTC"
+  },
+  "last_error": "[pipeline:scoring:market_engine] NoneType error",
+  "last_error_ts": "2026-09-02 03:31:06 UTC"
+}

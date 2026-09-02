@@ -1,0 +1,10 @@
+{
+  "providers": {
+    "Underdog": {
+      "last_fetch": "2026-09-02 02:30:18 UTC",
+      "last_fetch_ts": 1788316218.586623,
+      "fetch_count": 1,
+      "error_streak": 0
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "providers": {
+    "PrizePicks": {
+      "last_fetch": "2026-09-02 03:25:42 UTC",
+      "last_fetch_ts": 1788319542.125625,
+      "fetch_count": 1,
+      "error_streak": 0,
+      "last_db_write": "2026-09-02 03:25:42 UTC",
+      "last_db_write_ts": 1788319542.125882,
+      "last_db_write_operation": "write"
+    }
+  }
+}

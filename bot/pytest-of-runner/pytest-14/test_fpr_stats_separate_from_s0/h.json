@@ -1,0 +1,14 @@
+{
+  "fpr_stats": {
+    "rotation": 2,
+    "pool_size": 5000
+  },
+  "last_fpr_run": "2026-09-02 03:30:22 UTC",
+  "last_fpr_run_ts": 1788319822.528186,
+  "stable_refresh_stats": {
+    "pool_size": 9999,
+    "sr_rescored": 3
+  },
+  "last_stable_refresh": "2026-09-02 03:30:22 UTC",
+  "last_stable_refresh_ts": 1788319822.528356
+}

@@ -66,6 +66,7 @@ from commands import (
     cmd_tracking,
     cmd_analyst,
     cmd_rollups,
+    cmd_learning,
     cmd_blocks,
     cmd_block,
     cmd_refinement,
@@ -1750,6 +1751,7 @@ def main() -> None:
     # ── Framework v3.0 commands ───────────────────────────────────────────────
     app.add_handler(CommandHandler("analyst",    cmd_analyst))
     app.add_handler(CommandHandler("rollups",    cmd_rollups))
+    app.add_handler(CommandHandler("learning",   cmd_learning))
     app.add_handler(CommandHandler("blocks",     cmd_blocks))
     app.add_handler(CommandHandler("block",      cmd_block))
     app.add_handler(CommandHandler("refinement", cmd_refinement))

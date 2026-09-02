@@ -76,6 +76,7 @@ async def test_reconciliation_separates_provider_and_recipient_counts(db):
         sport="MLB",
         stat_type="Hits",
         external_id="ud-1",
+        event_id="game-ud-1",
         line_value=0.5,
         outcome="sent",
         recipients_sent=3,
@@ -389,7 +390,26 @@ async def test_reconciliation_prefers_normalized_underdog_history_over_legacy_ro
 
 @pytest.mark.asyncio
 async def test_reconciliation_flags_replayed_audit_identity(db):
+    from database import PropOpportunityLog
+
     now = datetime.utcnow()
+    async with db.session() as session:
+        session.add(PropOpportunityLog(
+            external_id="same-1",
+            player_name="Same Player",
+            team="UD",
+            sport="NFL",
+            stat_type="Passing Yards",
+            line_value=250.5,
+            recommendation="OVER",
+            decision_tier="A",
+            confidence=80,
+            provider="Underdog",
+            detected_at=now,
+            alert_sent=True,
+            alert_sent_at=now,
+        ))
+        await session.commit()
     for _ in range(2):
         await db.log_telegram_delivery(
             provider="Underdog",
@@ -398,6 +418,7 @@ async def test_reconciliation_flags_replayed_audit_identity(db):
             sport="NFL",
             stat_type="Passing Yards",
             external_id="same-1",
+            event_id="game-same-1",
             line_value=250.5,
             outcome="sent",
             recipients_sent=1,
@@ -406,8 +427,111 @@ async def test_reconciliation_flags_replayed_audit_identity(db):
 
     report = await db.get_telegram_reconciliation(since_hours=24)
 
-    assert report["duplicate_delivery_events"] == 1
-    assert report["by_provider"]["Underdog"]["audit_delivered_alerts"] == 2
+    # The storage-level delivery key makes the second identical successful
+    # insert a no-op, complementing the in-memory delivery claim.
+    assert report["duplicate_delivery_events"] == 0
+    assert report["by_provider"]["Underdog"]["audit_delivered_alerts"] == 1
+
+
+@pytest.mark.asyncio
+async def test_incomplete_success_audit_is_unknown_not_confirmed(db):
+    from database import PropOpportunityLog
+
+    now = datetime.utcnow()
+    async with db.session() as session:
+        session.add(PropOpportunityLog(
+            external_id="legacy-source",
+            player_name="Legacy Player",
+            team="UD",
+            sport="MLB",
+            stat_type="Hits",
+            line_value=0.5,
+            recommendation="OVER",
+            decision_tier="A",
+            confidence=80,
+            provider="Underdog",
+            detected_at=now,
+            alert_sent=True,
+            alert_sent_at=now,
+        ))
+        await session.commit()
+
+    await db.log_telegram_delivery(
+        provider="Underdog",
+        delivery_path="standing",
+        player_name="Legacy Player",
+        sport="MLB",
+        stat_type="Hits",
+        external_id="legacy-source",
+        # Missing event_id makes this an ambiguous legacy record.
+        line_value=0.5,
+        outcome="sent",
+        recipients_sent=1,
+        attempted_at=now,
+    )
+
+    report = await db.get_telegram_reconciliation(since_hours=24)
+    assert report["by_provider"]["Underdog"]["delivered_alerts"] == 0
+    assert report["by_provider"]["Underdog"]["audit_delivered_alerts"] == 0
+    assert report["unverified_historical"] >= 1
+    assert await db.get_alerted_opportunity_log(since_hours=24) == []
+    assert await db.get_recent_alerted_props_for_dedup(since_hours=24) == {}
+
+
+@pytest.mark.asyncio
+async def test_alert_history_is_newest_first_and_preserves_audit_line(db):
+    from database import PropOpportunityLog
+
+    now = datetime.utcnow()
+    async with db.session() as session:
+        session.add(PropOpportunityLog(
+            external_id="moving-source",
+            player_name="Moving Player",
+            team="UD",
+            sport="NBA",
+            stat_type="Points",
+            line_value=21.5,
+            recommendation="OVER",
+            decision_tier="A",
+            confidence=80,
+            provider="Underdog",
+            detected_at=now,
+            alert_sent=True,
+            alert_sent_at=now,
+        ))
+        await session.commit()
+
+    await db.log_telegram_delivery(
+        provider="Underdog",
+        delivery_path="line_change",
+        player_name="Moving Player",
+        sport="NBA",
+        stat_type="Points",
+        external_id="moving-source",
+        event_id="game-moving",
+        line_value=20.5,
+        outcome="sent",
+        recipients_sent=1,
+        attempted_at=now - timedelta(minutes=2),
+    )
+    await db.log_telegram_delivery(
+        provider="Underdog",
+        delivery_path="line_change",
+        player_name="Moving Player",
+        sport="NBA",
+        stat_type="Points",
+        external_id="moving-source",
+        event_id="game-moving",
+        line_value=21.5,
+        outcome="sent",
+        recipients_sent=1,
+        attempted_at=now,
+    )
+
+    rows = await db.get_alerted_opportunity_log(since_hours=24, limit=1)
+    assert len(rows) == 1
+    assert rows[0].line_value == 21.5
+    assert rows[0].alert_sent_at == now
 
 
 @pytest.mark.asyncio

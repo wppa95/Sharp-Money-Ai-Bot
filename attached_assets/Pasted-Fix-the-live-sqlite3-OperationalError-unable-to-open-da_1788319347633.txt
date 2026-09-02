@@ -1,0 +1,61 @@
+Fix the live sqlite3.OperationalError: unable to open database file problem WITHOUT removing, replacing, resetting, copying, migrating, or deleting the existing production database.
+
+The existing authoritative database MUST remain:
+
+/home/runner/workspace/bot/data/sharp_money.db
+
+DO NOT TOUCH OR DELETE ITS DATA.
+
+I do not want another database.
+I do not want a backup database.
+I do not want a replacement database.
+I do not want a migration.
+I do not want the database rebuilt.
+
+Just fix whatever is causing:
+
+sqlite3.OperationalError: unable to open database file
+
+during the real concurrent Underdog monitoring workload.
+
+The database path, permissions, existing data, and isolated SQLAlchemy access have already been verified as valid.
+
+The failure only occurs under the live concurrent workload.
+
+Fix the runtime database connection/write lifecycle so the existing bot can successfully write Underdog snapshots to the existing database.
+
+Do NOT hide/suppress the exception.
+Do NOT simply catch it and report success.
+Do NOT simply increase retries.
+Do NOT create another database.
+
+The actual write must succeed.
+
+After the fix:
+
+1. Run the focused database tests.
+2. Run the full bot suite.
+3. Restart the managed workflow ONCE if required.
+4. Confirm one bot process.
+5. Confirm one scheduler owner.
+6. Confirm /health HTTP 200.
+7. Run at least TWO real Underdog monitoring cycles.
+
+For each cycle verify:
+
+Fetched > 0
+Intended > 0
+Persisted > 0
+Existing database MAX(id) increases
+
+Confirm the error no longer appears:
+
+sqlite3.OperationalError: unable to open database file
+
+Then confirm /status, /funnel, /grade, /performance, /dashboard, and /tracking can read the existing database normally.
+
+DO NOT make any changes to scoring, thresholds, evidence, direction, PLAY qualification, Telegram delivery, monitoring cadence, provider routing, PropLine budget, Odds API pacing, or the completed command fixes.
+
+Do not attempt a checkpoint.
+
+restart to apply the changes and checkpoint the changes.

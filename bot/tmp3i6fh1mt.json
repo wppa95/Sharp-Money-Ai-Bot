@@ -1,0 +1,10 @@
+{
+  "jobs": {
+    "_clv_harvest_job": {
+      "last_run": "2026-09-02 03:25:56 UTC",
+      "last_run_ts": 1788319556.078368,
+      "run_count": 1,
+      "fail_streak": 0
+    }
+  }
+}

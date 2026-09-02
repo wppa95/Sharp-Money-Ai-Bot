@@ -1,0 +1,15 @@
+{
+  "providers": {
+    "Underdog": {
+      "last_error": "2026-09-02 02:09:09 UTC",
+      "last_error_msg": "err",
+      "error_count": 2,
+      "error_streak": 0,
+      "last_fetch": "2026-09-02 02:09:09 UTC",
+      "last_fetch_ts": 1788314949.479264,
+      "fetch_count": 1
+    }
+  },
+  "last_error": "[provider:Underdog] err",
+  "last_error_ts": "2026-09-02 02:09:09 UTC"
+}

@@ -81,6 +81,24 @@ async def _fetch_opp(db, external_id: str, stat_type: str):
         return r.scalar_one_or_none()
 
 
+async def _confirm_telegram_play(db, external_id: str, stat_type: str = "hits",
+                                 line: float = 0.5) -> None:
+    """Create the identity-complete audit required for V4 confirmation."""
+    await db.mark_opportunity_alert_sent(external_id, stat_type)
+    await db.log_telegram_delivery(
+        provider="Underdog",
+        delivery_path="standing",
+        player_name="Test Player",
+        sport="MLB",
+        stat_type=stat_type,
+        external_id=external_id,
+        event_id=f"game-{external_id}",
+        line_value=line,
+        outcome="sent",
+        recipients_sent=1,
+    )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Test 1: Evaluated prop NOT sent → alert_sent=False
 # ─────────────────────────────────────────────────────────────────────────────
@@ -284,7 +302,7 @@ class TestTelegramOnlyPerformance:
             await _log_opp(db, external_id=f"prop_{i}", stat_type="hits")
 
         # Only 1 is a Telegram pick
-        await db.mark_opportunity_alert_sent("prop_0", "hits")
+        await _confirm_telegram_play(db, "prop_0")
 
         perf = await db.get_telegram_pick_performance()
         assert perf["total"] == 1, (
@@ -299,7 +317,7 @@ class TestTelegramOnlyPerformance:
 
         # Mark all except non_tg as Telegram picks
         for ext_id in ids[:-1]:
-            await db.mark_opportunity_alert_sent(ext_id, "hits")
+            await _confirm_telegram_play(db, ext_id)
 
         # Grade three of them
         for ext_id, result, actual in [
@@ -326,7 +344,7 @@ class TestTelegramOnlyPerformance:
         for ext_id, rec, result, actual in picks:
             await _log_opp(db, external_id=ext_id, stat_type="hits",
                            recommendation=rec)
-            await db.mark_opportunity_alert_sent(ext_id, "hits")
+            await _confirm_telegram_play(db, ext_id)
             row = await _fetch_opp(db, ext_id, "hits")
             await db.grade_opportunity(row.id, result=result, actual_value=actual)
 
@@ -432,7 +450,7 @@ class TestPendingBehavior:
     async def test_pending_pick_not_in_graded_count(self, db):
         """Pending alerted pick is counted in 'pending' not in 'graded'."""
         await _log_opp(db, external_id="pend2", stat_type="hits")
-        await db.mark_opportunity_alert_sent("pend2", "hits")
+        await _confirm_telegram_play(db, "pend2")
         perf = await db.get_telegram_pick_performance()
         assert perf["pending"] == 1
         assert perf["graded"]  == 0

@@ -1,0 +1,40 @@
+{
+  "jobs": {
+    "underdog_job": {
+      "last_fail": "2026-09-02 03:31:06 UTC",
+      "last_fail_ts": 1788319866.09692,
+      "last_error": "connection timeout again",
+      "fail_count": 2,
+      "fail_streak": 0,
+      "recent_fails": [
+        {
+          "ts": "2026-09-02 03:31:06 UTC",
+          "error": "connection timeout"
+        },
+        {
+          "ts": "2026-09-02 03:31:06 UTC",
+          "error": "connection timeout again"
+        }
+      ],
+      "last_run": "2026-09-02 03:31:06 UTC",
+      "last_run_ts": 1788319866.097325,
+      "run_count": 1
+    }
+  },
+  "last_error": "[underdog_job] connection timeout again",
+  "last_error_ts": "2026-09-02 03:31:06 UTC",
+  "last_recovery_event": {
+    "job": "underdog_job",
+    "reason": "fail_streak=2: connection timeout again",
+    "ts": "2026-09-02 03:31:06 UTC",
+    "ts_unix": 1788319866.097581
+  },
+  "recovery_history": [
+    {
+      "job": "underdog_job",
+      "reason": "fail_streak=2: connection timeout again",
+      "ts": "2026-09-02 03:31:06 UTC",
+      "ts_unix": 1788319866.097581
+    }
+  ]
+}

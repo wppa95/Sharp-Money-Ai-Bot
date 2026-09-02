@@ -1,0 +1,10 @@
+{
+  "jobs": {
+    "test_job": {
+      "last_run": "2026-09-02 02:09:09 UTC",
+      "last_run_ts": 1788314949.459734,
+      "run_count": 1,
+      "fail_streak": 0
+    }
+  }
+}

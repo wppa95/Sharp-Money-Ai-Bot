@@ -74,7 +74,7 @@ class MarketPerf:
 
 @dataclass
 class DailyTrend:
-    """Alert counts for one UTC day."""
+    """Alert counts for one canonical reporting day."""
     date_str:    str     # "YYYY-MM-DD"
     ev_count:    int = 0
     ud_count:    int = 0
@@ -154,6 +154,9 @@ class DashboardReport:
     tracking_by_provider: dict = field(default_factory=dict)
     tracking_by_sport: dict = field(default_factory=dict)
     provider_pipeline: dict = field(default_factory=dict)
+    # A failed read must remain distinguishable from a real empty population.
+    # Keys are report sections such as tracking, totals, ev, clv, or sport.
+    unavailable: set[str] = field(default_factory=set, repr=False)
 
     # ── EV performance ────────────────────────────────────────────────────────
     avg_ev_pct:         Optional[float] = None   # avg expected_value from ev_records
@@ -214,6 +217,16 @@ class DashboardReport:
     def to_telegram(self) -> str:
         """Render the full dashboard as Telegram HTML (safe for message.reply_text)."""
         ts = self.generated_at.strftime("%b %d, %Y  %H:%M UTC")
+        tracking_unavailable = "tracking" in self.unavailable
+
+        def _count(value: object, *, section: str = "tracking") -> str:
+            if section in self.unavailable:
+                return "UNAVAILABLE"
+            try:
+                return f"{int(value or 0):,}"
+            except (TypeError, ValueError):
+                return "UNAVAILABLE"
+
         parts: list[str] = [
             f"📊 <b>Performance Dashboard</b>",
             f"<i>{ts}</i>",
@@ -261,26 +274,30 @@ class DashboardReport:
             hit = values.get("hit", 0)
             miss = values.get("miss", 0)
             push = values.get("push", 0)
+            metric_section = "tracking" if tracking_unavailable else "ok"
             parts += [
                 f"  <b>{provider}</b>",
                 f"    Status: <code>{status}</code>"
                 f"  ·  Last fetch: <code>{last_fetch}</code>",
                 f"    Last successful activity: <code>{last_success}</code>",
-                f"    Observed: <code>{int(observed or 0):,}</code>"
-                f"  ·  Active tracked: <code>{int(active or 0):,}</code>",
-                f"    Evaluated: <code>{int(evaluated or 0):,}</code>"
-                f"  ·  Directional/actionable: <code>{int(directional or 0):,}</code>",
-                f"    Actionable persisted: <code>{int(actionable or 0):,}</code>"
-                f"  ·  Delivered: <code>{int(delivered or 0):,}</code>",
-                f"    Pending grading: <code>{int(pending or 0):,}</code>"
-                f"  ·  Resolved: <code>{int(resolved or 0):,}</code>",
-                f"    HIT / MISS / PUSH: <code>{int(hit or 0):,} / "
-                f"{int(miss or 0):,} / {int(push or 0):,}</code>"
-                f"  ·  Today: <code>{int(today_total or 0):,}</code>",
+                f"    Observed: <code>{_count(observed, section=metric_section)}</code>"
+                f"  ·  Active tracked: <code>{_count(active, section=metric_section)}</code>",
+                f"    Evaluated: <code>{_count(evaluated, section=metric_section)}</code>"
+                f"  ·  Directional/actionable: <code>{_count(directional, section=metric_section)}</code>",
+                f"    Actionable persisted: <code>{_count(actionable, section=metric_section)}</code>"
+                f"  ·  Delivered: <code>{_count(delivered, section=metric_section)}</code>",
+                f"    Pending grading: <code>{_count(pending, section=metric_section)}</code>"
+                f"  ·  Resolved: <code>{_count(resolved, section=metric_section)}</code>",
+                f"    HIT / MISS / PUSH: <code>{_count(hit, section=metric_section)} / "
+                f"{_count(miss, section=metric_section)} / {_count(push, section=metric_section)}</code>"
+                f"  ·  Today: <code>{_count(today_total, section='totals' if 'totals' in self.unavailable else 'ok')}</code>",
             ]
         parts.append("")
 
-        if self.tracking_by_sport:
+        if tracking_unavailable:
+            parts.append("  By current sport: <i>UNAVAILABLE</i>")
+            parts.append("")
+        elif self.tracking_by_sport:
             parts.append("  By current sport:")
             for sport, values in sorted(self.tracking_by_sport.items()):
                 parts.append(
@@ -305,7 +322,9 @@ class DashboardReport:
 
         # ── CLV performance ───────────────────────────────────────────────────
         parts.append("💎 <b>Closing Line Value</b>")
-        if self.total_clv_records > 0:
+        if "clv" in self.unavailable:
+            parts.append("  <i>CLV data is UNAVAILABLE.</i>")
+        elif self.total_clv_records > 0:
             sign = "+" if (self.avg_clv_pct or 0) >= 0 else ""
             bc   = f"{self.clv_beat_close_rate * 100:.0f}%" if self.clv_beat_close_rate is not None else "—"
             parts += [
@@ -322,8 +341,10 @@ class DashboardReport:
         # ── By sport ──────────────────────────────────────────────────────────
         # All-time cumulative alert distribution across EV + Underdog + PrizePicks.
         # Differs from Today count — shows historical model performance by sport.
+        if "sport" in self.unavailable:
+            parts += ["🏆 <b>By Sport</b>", "  <i>UNAVAILABLE.</i>", ""]
         active_sports = [s for s in self.by_sport if s.total >= 1]
-        if active_sports:
+        if "sport" not in self.unavailable and active_sports:
             parts.append("🏆 <b>By Sport</b>  <i>(All-time)</i>")
             for sp in sorted(active_sports, key=lambda s: s.total, reverse=True)[:8]:
                 ev_str  = f"  EV {sp.avg_ev:+.1f}%"  if sp.avg_ev  is not None else ""
@@ -341,8 +362,10 @@ class DashboardReport:
             parts.append("")
 
         # ── By market ─────────────────────────────────────────────────────────
+        if "market" in self.unavailable:
+            parts += ["📈 <b>By Market</b>", "  <i>UNAVAILABLE.</i>", ""]
         active_markets = [m for m in self.by_market if m.count >= 1]
-        if active_markets:
+        if "market" not in self.unavailable and active_markets:
             parts.append("🏷 <b>By Market</b>")
             for m in sorted(active_markets, key=lambda m: m.count, reverse=True)[:6]:
                 ev_str = f"  avg EV {m.avg_ev:+.1f}%" if m.avg_ev is not None else ""
@@ -354,7 +377,7 @@ class DashboardReport:
             parts.append("")
 
         # ── Today's activity ──────────────────────────────────────────────────
-        # daily_trend now contains only today's UTC entry; show "Today" header.
+        # daily_trend now contains only today's reporting-day entry.
         # Historical trend data is preserved in DB for backtesting/reporting.
         trend_days = [d for d in self.daily_trend if d.total > 0]
         if trend_days:
@@ -456,6 +479,8 @@ class DashboardEngine:
         )
         tracking = _top_level[1]
         provider_rows = _top_level[2]
+        if not isinstance(tracking, dict):
+            report.unavailable.add("tracking")
         try:
             if isinstance(tracking, dict):
                 report.tracked_observations = int(
@@ -478,6 +503,13 @@ class DashboardEngine:
                 report.outcome_hits = int(result_counts.get("HIT", 0) or 0)
                 report.outcome_misses = int(result_counts.get("MISS", 0) or 0)
                 report.outcome_pushes = int(result_counts.get("PUSH", 0) or 0)
+                delivered_today = tracking.get("delivered_today_by_provider", {}) or {}
+                report.today_ud_alerts = int(
+                    delivered_today.get("Underdog", 0) or 0
+                )
+                report.today_pp_alerts = int(
+                    delivered_today.get("PrizePicks", 0) or 0
+                )
                 active_by_provider = tracking.get("active_by_provider", {}) or {}
                 observed_by_provider = (
                     tracking.get(
@@ -534,7 +566,7 @@ class DashboardEngine:
                         "delivered": int(delivered_by_sport.get(sport, 0) or 0),
                     }
         except Exception:
-            pass
+            report.unavailable.add("tracking")
         try:
             if isinstance(provider_rows, Exception):
                 provider_rows = []
@@ -606,8 +638,10 @@ class DashboardEngine:
             for field_name, value in zip(fields, values):
                 if not isinstance(value, Exception):
                     setattr(r, field_name, int(value or 0))
+                else:
+                    r.unavailable.add("totals")
         except Exception:
-            pass
+            r.unavailable.add("totals")
 
     @staticmethod
     async def _gather_ev_performance(db: "Database", r: DashboardReport) -> None:
@@ -644,7 +678,7 @@ class DashboardEngine:
             if denom >= 5:
                 r.ev_win_rate = r.ev_wins / denom
         except Exception:
-            pass
+            r.unavailable.add("ev")
 
     @staticmethod
     async def _gather_clv_performance(db: "Database", r: DashboardReport) -> None:
@@ -672,13 +706,13 @@ class DashboardEngine:
                 if r.total_clv_records > 0:
                     r.clv_beat_close_rate = beaten / r.total_clv_records
         except Exception:
-            pass
+            r.unavailable.add("clv")
 
         # Pending seeds
         try:
             r.clv_seeds_pending = await db.count_pending_clv_seeds()
         except Exception:
-            pass
+            r.unavailable.add("clv")
 
     @staticmethod
     async def _gather_ud_breakdown(db: "Database", r: DashboardReport) -> None:
@@ -698,7 +732,7 @@ class DashboardEngine:
                 )
                 r.ud_avg_score = score_res.scalar()
         except Exception:
-            pass
+            r.unavailable.add("ud")
 
     @staticmethod
     async def _gather_by_sport(db: "Database", r: DashboardReport) -> None:
@@ -748,7 +782,7 @@ class DashboardEngine:
 
             r.by_sport = sorted(sport_map.values(), key=lambda s: s.total, reverse=True)
         except Exception:
-            pass
+            r.unavailable.add("sport")
 
     @staticmethod
     async def _gather_by_market(db: "Database", r: DashboardReport) -> None:
@@ -797,13 +831,13 @@ class DashboardEngine:
 
             r.by_market = sorted(mkt_map.values(), key=lambda m: m.count, reverse=True)
         except Exception:
-            pass
+            r.unavailable.add("market")
 
     @staticmethod
     async def _gather_daily_trend(db: "Database", r: DashboardReport) -> None:
-        """Gather today's UTC activity counts for the dashboard.
+        """Gather today's canonical reporting-day activity counts.
 
-        Only queries today's UTC calendar day (not a 7-day window).
+        Only queries the current reporting calendar day (not a rolling window).
         Historical data remains stored in DB for backtesting; this display
         focuses on the current day's actionable activity.
         """
@@ -811,69 +845,64 @@ class DashboardEngine:
             from sqlalchemy import select, func
             from database import EVRecord, UnderdogSnapshotRecord, SteamRecord, PPEdgeRecord
 
-            now  = datetime.utcnow()
+            from reporting import current_reporting_day_bounds
+            day_start, day_end = current_reporting_day_bounds()
             days: list[DailyTrend] = []
 
             async with db.session() as s:
-                # Only query today's UTC calendar day (delta=0).
-                for delta in (0,):
-                    day_start = (now - timedelta(days=delta)).replace(
-                        hour=0, minute=0, second=0, microsecond=0
+                date_str = day_start.strftime("%m/%d")
+
+                dt = DailyTrend(date_str=date_str)
+
+                ev_res = await s.execute(
+                    select(func.count())
+                    .select_from(EVRecord)
+                    .where(
+                        EVRecord.alert_sent == True,  # noqa: E712
+                        EVRecord.detected_at >= day_start,
+                        EVRecord.detected_at < day_end,
                     )
-                    day_end  = day_start + timedelta(days=1)
-                    date_str = day_start.strftime("%m/%d")
+                )
+                dt.ev_count = ev_res.scalar() or 0
 
-                    dt = DailyTrend(date_str=date_str)
-
-                    ev_res = await s.execute(
-                        select(func.count())
-                        .select_from(EVRecord)
-                        .where(
-                            EVRecord.alert_sent == True,  # noqa: E712
-                            EVRecord.detected_at >= day_start,
-                            EVRecord.detected_at <  day_end,
-                        )
+                ud_res = await s.execute(
+                    select(func.count())
+                    .select_from(UnderdogSnapshotRecord)
+                    .where(
+                        UnderdogSnapshotRecord.alert_sent == True,  # noqa: E712
+                        UnderdogSnapshotRecord.fetched_at >= day_start,
+                        UnderdogSnapshotRecord.fetched_at < day_end,
                     )
-                    dt.ev_count = ev_res.scalar() or 0
+                )
+                dt.ud_count = ud_res.scalar() or 0
 
-                    ud_res = await s.execute(
-                        select(func.count())
-                        .select_from(UnderdogSnapshotRecord)
-                        .where(
-                            UnderdogSnapshotRecord.alert_sent == True,  # noqa: E712
-                            UnderdogSnapshotRecord.fetched_at >= day_start,
-                            UnderdogSnapshotRecord.fetched_at <  day_end,
-                        )
+                st_res = await s.execute(
+                    select(func.count())
+                    .select_from(SteamRecord)
+                    .where(
+                        SteamRecord.alert_sent == True,  # noqa: E712
+                        SteamRecord.detected_at >= day_start,
+                        SteamRecord.detected_at < day_end,
                     )
-                    dt.ud_count = ud_res.scalar() or 0
+                )
+                dt.steam_count = st_res.scalar() or 0
 
-                    st_res = await s.execute(
-                        select(func.count())
-                        .select_from(SteamRecord)
-                        .where(
-                            SteamRecord.alert_sent == True,  # noqa: E712
-                            SteamRecord.detected_at >= day_start,
-                            SteamRecord.detected_at <  day_end,
-                        )
+                pp_res = await s.execute(
+                    select(func.count())
+                    .select_from(PPEdgeRecord)
+                    .where(
+                        PPEdgeRecord.alert_sent == True,  # noqa: E712
+                        PPEdgeRecord.detected_at >= day_start,
+                        PPEdgeRecord.detected_at < day_end,
                     )
-                    dt.steam_count = st_res.scalar() or 0
+                )
+                dt.pp_count = pp_res.scalar() or 0
 
-                    pp_res = await s.execute(
-                        select(func.count())
-                        .select_from(PPEdgeRecord)
-                        .where(
-                            PPEdgeRecord.alert_sent == True,  # noqa: E712
-                            PPEdgeRecord.detected_at >= day_start,
-                            PPEdgeRecord.detected_at <  day_end,
-                        )
-                    )
-                    dt.pp_count = pp_res.scalar() or 0
-
-                    days.append(dt)
+                days.append(dt)
 
             r.daily_trend = days
         except Exception:
-            pass
+            r.unavailable.add("daily")
 
     @staticmethod
     async def _gather_system_panel(db: "Database", r: DashboardReport) -> None:

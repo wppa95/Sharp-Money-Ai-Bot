@@ -350,13 +350,13 @@ class TestRestartResumeCheckpoint:
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestAlertsDisplayWindow:
-    """/alerts must use 24h window and must NOT show all-time count."""
+    """/alerts must use the current reporting calendar day."""
 
-    def test_alerts_uses_24h_window(self):
+    def test_alerts_uses_calendar_day_window(self):
         import inspect, commands
         src = inspect.getsource(commands.cmd_alerts)
-        assert "since_hours=24" in src, (
-            "/alerts must query with since_hours=24 (not 72)"
+        assert "current_reporting_day_bounds" in src, (
+            "/alerts must query the canonical reporting calendar day"
         )
         assert "since_hours=72" not in src, (
             "Old 72h window must be removed from /alerts"
@@ -379,12 +379,12 @@ class TestAlertsDisplayWindow:
         )
         assert "72h" not in src, "72h text must not remain in /alerts"
 
-    def test_alerts_shows_24h_label(self):
-        """Alert display must include 'last 24h' label."""
+    def test_alerts_shows_today_label(self):
+        """Alert display must identify the current calendar day."""
         import inspect, commands
         src = inspect.getsource(commands.cmd_alerts)
-        assert "24h" in src or "24 h" in src, (
-            "/alerts must show '24h' window label in its display"
+        assert "shown (today)" in src and "sent today" in src, (
+            "/alerts must show a current-day label"
         )
 
 
@@ -435,8 +435,8 @@ class TestStatusDisplayCleaned:
             "count_today_actionable_alerts must still be called for daily count"
         )
 
-    def test_daily_counter_resets_at_utc_midnight(self):
-        """Daily counter uses UTC midnight boundary — resets automatically each day."""
+    def test_daily_counter_uses_shared_reporting_boundary(self):
+        """Daily counters use the shared canonical reporting-day helper."""
         import pathlib
         src = pathlib.Path(
             os.path.join(os.path.dirname(__file__), "..", "database.py")
@@ -444,8 +444,8 @@ class TestStatusDisplayCleaned:
         assert "count_today_actionable_alerts" in src, (
             "count_today_actionable_alerts must exist in database.py"
         )
-        assert "hour=0, minute=0, second=0" in src or "replace(hour=0" in src, (
-            "Daily counter must use UTC midnight boundary for reset"
+        assert "current_reporting_day_bounds" in src, (
+            "Daily counter must use the canonical reporting boundary"
         )
 
 

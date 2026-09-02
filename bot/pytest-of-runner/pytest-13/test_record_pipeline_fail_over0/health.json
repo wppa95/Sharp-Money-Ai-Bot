@@ -1,0 +1,10 @@
+{
+  "last_pipeline_fail": {
+    "stage": "stage_b",
+    "module": "mod_b",
+    "error": "err_b",
+    "ts": "2026-09-02 03:25:44 UTC"
+  },
+  "last_error": "[pipeline:stage_b:mod_b] err_b",
+  "last_error_ts": "2026-09-02 03:25:44 UTC"
+}

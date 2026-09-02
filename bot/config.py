@@ -23,7 +23,15 @@ class Config:
 
     # ── Database ──────────────────────────────────────────────────────────────
     DATABASE_URL: str = field(
-        default_factory=lambda: os.environ.get("BOT_DATABASE_URL", "sqlite+aiosqlite:///bot/data/sharp_money.db")
+        default_factory=lambda: os.environ.get(
+            "BOT_DATABASE_URL",
+            "sqlite+aiosqlite:///"
+            + os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "data",
+                "sharp_money.db",
+            ),
+        )
     )
 
     # ── Analysis Engine ───────────────────────────────────────────────────────
@@ -61,6 +69,10 @@ class Config:
     )
     ODDS_API_PACING_TIMEZONE: str = os.environ.get(
         "ODDS_API_PACING_TIMEZONE", "America/Chicago"
+    )
+    # All user-facing "today"/calendar-day reports use this timezone.
+    REPORTING_TIMEZONE: str = os.environ.get(
+        "REPORTING_TIMEZONE", "America/Chicago"
     )
     ODDS_API_PACING_STATE_FILE: str = os.environ.get(
         "ODDS_API_PACING_STATE_FILE",

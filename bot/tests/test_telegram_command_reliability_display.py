@@ -103,7 +103,7 @@ def test_every_registered_command_resolves_to_an_async_handler():
         main_source,
     )
 
-    assert len(registrations) == 34
+    assert len(registrations) == 35
     for command, handler_name in registrations:
         handler = getattr(commands, handler_name, None)
         assert handler is not None, f"/{command} has no {handler_name}"
@@ -151,7 +151,8 @@ async def test_dashboard_times_out_without_holding_command_worker():
 
     messages = [call.args[0] for call in update.message.reply_text.await_args_list]
     assert messages[0] == "⏳ Gathering stats…"
-    assert any("taking too long" in message for message in messages)
+    assert any("Performance Dashboard" in message for message in messages)
+    assert any("UNAVAILABLE" in message for message in messages)
 
 
 @pytest.mark.asyncio

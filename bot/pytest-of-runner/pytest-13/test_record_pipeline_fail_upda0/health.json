@@ -1,0 +1,10 @@
+{
+  "last_pipeline_fail": {
+    "stage": "delivery",
+    "module": "alerts",
+    "error": "Telegram timeout",
+    "ts": "2026-09-02 03:25:44 UTC"
+  },
+  "last_error": "[pipeline:delivery:alerts] Telegram timeout",
+  "last_error_ts": "2026-09-02 03:25:44 UTC"
+}

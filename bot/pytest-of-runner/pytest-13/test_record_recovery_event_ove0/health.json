@@ -1,0 +1,22 @@
+{
+  "last_recovery_event": {
+    "job": "job_b",
+    "reason": "error b",
+    "ts": "2026-09-02 03:25:43 UTC",
+    "ts_unix": 1788319543.894375
+  },
+  "recovery_history": [
+    {
+      "job": "job_a",
+      "reason": "error a",
+      "ts": "2026-09-02 03:25:43 UTC",
+      "ts_unix": 1788319543.8941
+    },
+    {
+      "job": "job_b",
+      "reason": "error b",
+      "ts": "2026-09-02 03:25:43 UTC",
+      "ts_unix": 1788319543.894375
+    }
+  ]
+}

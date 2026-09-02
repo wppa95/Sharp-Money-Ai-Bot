@@ -7,17 +7,20 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import hashlib
 import json
 import logging
 import os
 from datetime import datetime
+from types import SimpleNamespace
 from typing import Iterable, Optional
 
 from sqlalchemy import (
     Boolean, Column, DateTime, Float,
     Integer, String, Text,
+    Index,
     UniqueConstraint,
-    select, func, desc, text, delete, or_, and_, case, tuple_
+    select, func, desc, text, delete, or_, and_, case, tuple_, update
 )
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
@@ -29,6 +32,7 @@ _UNDERDOG_BULK_RETRY_DELAYS = (0.25, 0.75)
 _DB_WRITE_MAX_RETRIES = 2
 _DB_WRITE_RETRY_DELAYS = (0.15, 0.5)
 _PRIZEPICKS_EXTERNAL_PREFIX = "PrizePicks::"
+_TELEGRAM_DELIVERY_KEY_VERSION = "v1"
 
 
 def _stored_opportunity_external_id(external_id: str, provider: Optional[str]) -> str:
@@ -45,6 +49,46 @@ def _dedup_player_key(player_name: str, provider: Optional[str]) -> str:
     if str(provider or "").strip().lower() == "prizepicks":
         return f"{_PRIZEPICKS_EXTERNAL_PREFIX}{player_name}"
     return player_name
+
+
+def _telegram_delivery_key(
+    *,
+    provider: Optional[str],
+    alert_kind: Optional[str],
+    delivery_path: Optional[str],
+    external_id: Optional[str],
+    event_id: Optional[str],
+    stat_type: Optional[str],
+    line_value: Optional[float],
+) -> Optional[str]:
+    """Build the immutable identity for one successful PLAY version.
+
+    Missing identity is deliberately represented by ``None`` so legacy rows
+    remain preserved but cannot be mistaken for confirmed Telegram deliveries.
+    The line is part of the version because a legitimate line-change PLAY is a
+    distinct delivery from the previous line.
+    """
+    values = {
+        "provider": str(provider or "").strip(),
+        "alert_kind": str(alert_kind or "").strip().upper(),
+        "delivery_path": str(delivery_path or "").strip(),
+        "external_id": str(external_id or "").strip(),
+        "event_id": str(event_id or "").strip(),
+        "stat_type": str(stat_type or "").strip(),
+    }
+    if values["alert_kind"] != "ACTIONABLE_PICK":
+        return None
+    if not all(values.values()) or line_value is None:
+        return None
+    try:
+        line = f"{float(line_value):.6f}"
+    except (TypeError, ValueError):
+        return None
+    payload = "|".join(
+        [f"{key}={values[key]}" for key in sorted(values)] + [f"line={line}"]
+    )
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return f"{_TELEGRAM_DELIVERY_KEY_VERSION}:{digest}"
 
 
 def _is_sqlite_lock_error(exc: BaseException) -> bool:
@@ -185,11 +229,23 @@ class TelegramDeliveryAudit(Base):
     stat_type         = Column(String(64), nullable=True)
     external_id       = Column(String(128), nullable=True, index=True)
     event_id          = Column(String(128), nullable=True, index=True)
+    # Non-null only for identity-complete successful PLAY deliveries.  The
+    # partial unique index is the storage-level retry/concurrency guard.
+    delivery_key     = Column(String(256), nullable=True)
     line_value        = Column(Float, nullable=True)
     outcome           = Column(String(24), nullable=False)  # sent|failed|rate_limited
     recipients_sent   = Column(Integer, nullable=False, default=0)
     recipients_failed = Column(Integer, nullable=False, default=0)
     attempted_at      = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    __table_args__ = (
+        Index(
+            "uq_telegram_delivery_audit_key",
+            "delivery_key",
+            unique=True,
+            sqlite_where=text("delivery_key IS NOT NULL"),
+        ),
+    )
 
 
 # ── PrizePicks models ─────────────────────────────────────────────────────────
@@ -672,6 +728,33 @@ class SlipJournalLeg(Base):
 
 # ── Database manager ──────────────────────────────────────────────────────────
 
+class _LockedSessionContext:
+    """Serialize SQLite session lifetimes while preserving async session use."""
+
+    def __init__(self, session: AsyncSession, lock: asyncio.Lock) -> None:
+        self._session = session
+        self._lock = lock
+        self._acquired = False
+
+    async def __aenter__(self) -> AsyncSession:
+        await self._lock.acquire()
+        self._acquired = True
+        try:
+            return await self._session.__aenter__()
+        except BaseException:
+            self._lock.release()
+            self._acquired = False
+            raise
+
+    async def __aexit__(self, exc_type, exc, tb):
+        try:
+            return await self._session.__aexit__(exc_type, exc, tb)
+        finally:
+            if self._acquired:
+                self._lock.release()
+                self._acquired = False
+
+
 class Database:
     """Async database manager. Call `init()` once at startup."""
 
@@ -679,6 +762,8 @@ class Database:
         self._url = url
         self._engine = None
         self._session_factory = None
+        self._session_lock = asyncio.Lock()
+        self._closed = False
 
     async def init(self) -> None:
         """Create engine, run migrations, and ensure tables exist."""
@@ -737,6 +822,7 @@ class Database:
         await self._migrate_player_game_results_v1()
         await self._migrate_prop_opportunity_log_v6()
         await self._migrate_telegram_delivery_audit_v1()
+        await self._migrate_telegram_delivery_audit_v2()
         await self._migrate_slip_journal_leg_v1()
         await self._migrate_scan_cycle_log_v1()
         # player_risk_records is created by create_all (new table); no column migration needed
@@ -745,7 +831,9 @@ class Database:
     def session(self) -> AsyncSession:
         if self._session_factory is None:
             raise RuntimeError("Database.init() has not been called.")
-        return self._session_factory()
+        if self._closed:
+            raise RuntimeError("Database has been closed.")
+        return _LockedSessionContext(self._session_factory(), self._session_lock)
     async def prune_prop_line_history(self, keep_days: int = 14) -> int:
         """Delete PropLineHistory rows older than keep_days. Returns rows deleted."""
         from datetime import timedelta
@@ -935,6 +1023,65 @@ class Database:
                 )
             except Exception:
                 pass  # Column already exists; migration is idempotent.
+
+    async def _migrate_telegram_delivery_audit_v2(self) -> None:
+        """Add an idempotent key without deleting ambiguous historical rows."""
+        async with self._engine.begin() as conn:
+            try:
+                await conn.execute(
+                    text(
+                        "ALTER TABLE telegram_delivery_audit "
+                        "ADD COLUMN delivery_key VARCHAR(256)"
+                    )
+                )
+            except Exception:
+                pass
+
+        # Only complete, successful PLAY rows are eligible for confirmation.
+        # Keep the first occurrence of a duplicate key and leave later rows
+        # unkeyed; they remain available as historical UNKNOWN records.
+        async with self.session() as s:
+            rows = (
+                await s.execute(
+                    select(TelegramDeliveryAudit).where(
+                        TelegramDeliveryAudit.delivery_key.is_(None),
+                        TelegramDeliveryAudit.alert_kind == "ACTIONABLE_PICK",
+                        TelegramDeliveryAudit.outcome == "sent",
+                    )
+                )
+            ).scalars().all()
+            used: set[str] = set()
+            for row in rows:
+                key = _telegram_delivery_key(
+                    provider=row.provider,
+                    alert_kind=row.alert_kind,
+                    delivery_path=row.delivery_path,
+                    external_id=row.external_id,
+                    event_id=row.event_id,
+                    stat_type=row.stat_type,
+                    line_value=row.line_value,
+                )
+                if key and key not in used:
+                    row.delivery_key = key
+                    used.add(key)
+            await s.commit()
+
+        async with self._engine.begin() as conn:
+            try:
+                await conn.execute(
+                    text(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS "
+                        "uq_telegram_delivery_audit_key "
+                        "ON telegram_delivery_audit (delivery_key) "
+                        "WHERE delivery_key IS NOT NULL"
+                    )
+                )
+            except Exception as exc:
+                # Existing duplicate/legacy rows must never make startup fail.
+                logger.warning(
+                    "Telegram delivery uniqueness index unavailable: %s",
+                    type(exc).__name__,
+                )
 
     async def save_pp_line(self, record: "PrizePicksRecord") -> "PrizePicksRecord":
         async with self.session() as s:
@@ -1408,7 +1555,7 @@ class Database:
         in_tiers: Optional[list] = None,
     ) -> int:
         """
-        Count PP edge records that were alerted today (UTC midnight to now).
+        Count PP edge records that were alerted today in the reporting timezone.
 
         Parameters
         ----------
@@ -1418,9 +1565,8 @@ class Database:
                    Takes precedence over ``tier`` when both are supplied.
         None/None → count all tiers.
         """
-        today_start = datetime.utcnow().replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
+        from reporting import current_reporting_day_bounds
+        today_start, _today_end = current_reporting_day_bounds()
         async with self.session() as s:
             q = (
                 select(func.count())
@@ -1438,10 +1584,9 @@ class Database:
             return result.scalar() or 0
 
     async def count_today_underdog_alerts(self) -> int:
-        """Count Underdog snapshot records that were alerted today (UTC)."""
-        today_start = datetime.utcnow().replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
+        """Count Underdog snapshot records alerted today in reporting time."""
+        from reporting import current_reporting_day_bounds
+        today_start, _today_end = current_reporting_day_bounds()
         async with self.session() as s:
             result = await s.execute(
                 select(func.count())
@@ -1455,54 +1600,110 @@ class Database:
 
     async def count_today_actionable_alerts(self) -> int:
         """
-        Count 🎯 ACTIONABLE BET PICK alerts successfully delivered to Telegram today (UTC).
+        Count confirmed Telegram PLAYs delivered today in reporting time.
 
-        Uses PropOpportunityLog.alert_sent=True / alert_sent_at as the canonical
-        source of truth — set only when broadcast_alert() returns sent=True for
-        an actionable pick.  UnderdogSnapshotRecord.alert_sent is NOT used here
-        because it tracks internal market-move dedup writes, not Telegram delivery.
+        Uses the identity-complete delivery ledger joined to the exact
+        directional opportunity.  An opportunity flag by itself is not Telegram
+        confirmation.
         """
-        today_start = datetime.utcnow().replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
+        from reporting import current_reporting_day_bounds
+        today_start, _today_end = current_reporting_day_bounds()
+        async with self.session() as s:
+            audits = await self._confirmed_telegram_play_audits(
+                s, since=today_start
+            )
+            return len(audits)
+
+    async def get_directional_performance_summary(self) -> dict:
+        """Return compact provider/sport pick performance aggregates.
+
+        This is deliberately a grouped SQL read rather than the broad
+        monitoring summary.  It keeps `/performance` and `/grade` responsive
+        on large historical databases while preserving the V4 population
+        boundary: only OVER/UNDER opportunities are included.
+        """
         async with self.session() as s:
             result = await s.execute(
-                select(func.count())
-                .select_from(PropOpportunityLog)
-                .where(
-                    PropOpportunityLog.alert_sent    == True,    # noqa: E712
-                    PropOpportunityLog.alert_sent_at >= today_start,
-                    PropOpportunityLog.recommendation.in_(["OVER", "UNDER"]),
+                select(
+                    PropOpportunityLog.provider,
+                    PropOpportunityLog.sport,
+                    PropOpportunityLog.recommendation,
+                    PropOpportunityLog.result,
+                    func.count(),
+                )
+                .where(PropOpportunityLog.recommendation.in_(("OVER", "UNDER")))
+                .group_by(
+                    PropOpportunityLog.provider,
+                    PropOpportunityLog.sport,
+                    PropOpportunityLog.recommendation,
+                    PropOpportunityLog.result,
                 )
             )
-            return result.scalar() or 0
+
+        by_sport: dict[str, dict] = {}
+        by_provider: dict[str, dict] = {}
+        for provider, sport, recommendation, outcome, count in result.all():
+            if not _is_supported_tracking_sport(sport):
+                continue
+            provider_key = str(provider or "Underdog")
+            sport_key = str(sport or "UNKNOWN")
+            rec_key = str(recommendation or "").upper()
+            outcome_key = str(outcome or "PENDING").upper()
+            count = int(count or 0)
+            for target, key in ((by_sport, sport_key), (by_provider, provider_key)):
+                row = target.setdefault(
+                    key,
+                    {
+                        "directional": 0,
+                        "pending": 0,
+                        "resolved": 0,
+                        "hit": 0,
+                        "miss": 0,
+                        "push": 0,
+                        "void": 0,
+                        "raw": {},
+                    },
+                )
+                row["directional"] += count
+                row["raw"].setdefault(rec_key, {})[outcome_key] = (
+                    row["raw"].setdefault(rec_key, {}).get(outcome_key, 0) + count
+                )
+                if outcome_key == "PENDING":
+                    row["pending"] += count
+                elif outcome_key in {"HIT", "MISS", "PUSH"}:
+                    row["resolved"] += count
+                    if outcome_key == "PUSH":
+                        row["push"] += count
+                    elif (rec_key == "OVER" and outcome_key == "HIT") or (
+                        rec_key == "UNDER" and outcome_key == "MISS"
+                    ):
+                        row["hit"] += count
+                    else:
+                        row["miss"] += count
+                else:
+                    row["void"] += count
+        return {"by_sport": by_sport, "by_provider": by_provider}
 
     async def count_actionable_pick_records(self) -> int:
         """Total 🎯 ACTIONABLE BET PICK records ever delivered to Telegram.
 
-        Counts PropOpportunityLog rows where:
-          - alert_sent=True   (Telegram Bot API accepted the send_message call)
-          - recommendation in (OVER, UNDER)  (actionable direction — same filter
-            as get_alerted_opportunity_log so the "shown" and "all-time" counts
-            are drawn from the same universe)
+        Counts identity-complete successful Telegram PLAY audit rows joined to
+        their exact directional opportunity.
 
         Note: one row per (external_id, stat_type) due to the upsert model.
         A row whose recommendation was later overwritten (e.g. OVER → PASS) after
         alerting would otherwise inflate this count.  The OVER/UNDER filter keeps
         both counts consistent.
 
+        The legacy source population used ``recommendation.in_(["OVER",
+        "UNDER"])`` and ``alert_sent == True``.  Those fields remain
+        compatibility bookkeeping only; this method now counts the stricter
+        identity-complete audit population.
+
         "sent" = Telegram Bot API accepted the send; no message-ID receipt stored.
         """
         async with self.session() as s:
-            result = await s.execute(
-                select(func.count())
-                .select_from(PropOpportunityLog)
-                .where(
-                    PropOpportunityLog.alert_sent == True,          # noqa: E712
-                    PropOpportunityLog.recommendation.in_(["OVER", "UNDER"]),
-                )
-            )
-            return result.scalar() or 0
+            return len(await self._confirmed_telegram_play_audits(s))
 
     async def log_telegram_delivery(
         self,
@@ -1520,25 +1721,215 @@ class Database:
         recipients_sent: int = 0,
         recipients_failed: int = 0,
         attempted_at: Optional[datetime] = None,
-    ) -> None:
-        """Persist one outbound Telegram attempt without affecting delivery."""
+    ) -> int:
+        """Persist one outbound Telegram attempt without affecting delivery.
+
+        Confirmed PLAY rows use an immutable storage key and ``INSERT OR
+        IGNORE`` so retries and concurrent workers cannot create duplicate
+        confirmation rows. Other alert kinds remain append-only audit events.
+        """
+        provider = str(provider or "Unknown")
+        alert_kind = str(alert_kind or "ACTIONABLE_PICK")
+        delivery_path = str(delivery_path or "unknown")
+        delivery_key = _telegram_delivery_key(
+            provider=provider,
+            alert_kind=alert_kind,
+            delivery_path=delivery_path,
+            external_id=external_id,
+            event_id=event_id,
+            stat_type=stat_type,
+            line_value=line_value,
+        ) if str(outcome or "").lower() == "sent" else None
+        values = dict(
+            provider=provider,
+            alert_kind=alert_kind,
+            delivery_path=delivery_path,
+            player_name=player_name,
+            sport=sport,
+            stat_type=stat_type,
+            external_id=external_id,
+            event_id=event_id,
+            delivery_key=delivery_key,
+            line_value=line_value,
+            outcome=str(outcome or "failed"),
+            recipients_sent=int(recipients_sent or 0),
+            recipients_failed=int(recipients_failed or 0),
+            attempted_at=attempted_at or datetime.utcnow(),
+        )
         async with self.session() as s:
-            s.add(TelegramDeliveryAudit(
+            from sqlalchemy.dialects.sqlite import insert as _sqlite_insert
+            if delivery_key:
+                stmt = _sqlite_insert(TelegramDeliveryAudit).values(**values)
+                stmt = stmt.prefix_with("OR IGNORE")
+                result = await s.execute(stmt)
+            else:
+                result = await s.execute(
+                    _sqlite_insert(TelegramDeliveryAudit).values(**values)
+                )
+            await s.commit()
+            return int(result.rowcount or 0)
+
+    async def _confirmed_telegram_play_audits(
+        self,
+        s: AsyncSession,
+        *,
+        since: Optional[datetime] = None,
+    ) -> list[TelegramDeliveryAudit]:
+        """Return only identity-complete successful PLAY audits with a linked opportunity.
+
+        ``alert_sent`` is bookkeeping on an opportunity, not proof that Telegram
+        accepted a message.  Conversely, an audit row without an exact
+        provider/source/stat opportunity cannot prove which PLAY it delivered.
+        Keeping this join rule in one helper prevents individual reports from
+        quietly using different definitions of "delivered".
+        """
+        audit_filters = [
+            TelegramDeliveryAudit.delivery_key.isnot(None),
+            TelegramDeliveryAudit.alert_kind == "ACTIONABLE_PICK",
+            TelegramDeliveryAudit.outcome == "sent",
+            TelegramDeliveryAudit.provider.isnot(None),
+            TelegramDeliveryAudit.external_id.isnot(None),
+            TelegramDeliveryAudit.external_id != "",
+            TelegramDeliveryAudit.event_id.isnot(None),
+            TelegramDeliveryAudit.event_id != "",
+            TelegramDeliveryAudit.stat_type.isnot(None),
+            TelegramDeliveryAudit.stat_type != "",
+            TelegramDeliveryAudit.line_value.isnot(None),
+        ]
+        if since is not None:
+            audit_filters.append(TelegramDeliveryAudit.attempted_at >= since)
+
+        audits = (
+            await s.execute(
+                select(TelegramDeliveryAudit)
+                .where(*audit_filters)
+                .order_by(TelegramDeliveryAudit.attempted_at, TelegramDeliveryAudit.id)
+            )
+        ).scalars().all()
+        if not audits:
+            return []
+
+        opportunity_rows = (
+            await s.execute(
+                select(
+                    PropOpportunityLog.provider,
+                    PropOpportunityLog.external_id,
+                    PropOpportunityLog.stat_type,
+                ).where(
+                    PropOpportunityLog.recommendation.in_(("OVER", "UNDER")),
+                    PropOpportunityLog.alert_sent == True,  # noqa: E712
+                )
+            )
+        ).all()
+        linked = {
+            (
+                str(provider or "Underdog").strip() or "Underdog",
+                str(external_id or ""),
+                str(stat_type or ""),
+            )
+            for provider, external_id, stat_type in opportunity_rows
+        }
+        return [
+            audit
+            for audit in audits
+            if (
+                str(audit.provider or "Unknown").strip() or "Unknown",
+                _stored_opportunity_external_id(
+                    str(audit.external_id or ""), audit.provider
+                ),
+                str(audit.stat_type or ""),
+            ) in linked
+        ]
+
+    @_retry_sqlite_write
+    async def record_telegram_play_delivery(
+        self,
+        *,
+        provider: str,
+        delivery_path: str,
+        player_name: Optional[str],
+        sport: Optional[str],
+        stat_type: str,
+        external_id: str,
+        event_id: str,
+        line_value: float,
+        recipients_sent: int,
+        recipients_failed: int,
+        attempted_at: Optional[datetime] = None,
+    ) -> bool:
+        """Atomically persist a confirmed PLAY and mark its exact opportunity.
+
+        A PLAY without complete stable identity cannot be confirmed. Existing
+        rows are idempotent: a retry reuses the same audit row and only marks
+        the provider-scoped opportunity matching that source identity.
+        """
+        delivery_key = _telegram_delivery_key(
+            provider=provider,
+            alert_kind="ACTIONABLE_PICK",
+            delivery_path=delivery_path,
+            external_id=external_id,
+            event_id=event_id,
+            stat_type=stat_type,
+            line_value=line_value,
+        )
+        if delivery_key is None:
+            logger.warning(
+                "Cannot confirm Telegram PLAY without complete stable identity: "
+                "provider=%s external_id=%s event_id=%s stat=%s",
+                provider, external_id, event_id, stat_type,
+            )
+            return False
+
+        async with self.session() as s:
+            from sqlalchemy.dialects.sqlite import insert as _sqlite_insert
+            stmt = _sqlite_insert(TelegramDeliveryAudit).values(
                 provider=str(provider or "Unknown"),
-                alert_kind=str(alert_kind or "ACTIONABLE_PICK"),
+                alert_kind="ACTIONABLE_PICK",
                 delivery_path=str(delivery_path or "unknown"),
                 player_name=player_name,
                 sport=sport,
                 stat_type=stat_type,
                 external_id=external_id,
                 event_id=event_id,
+                delivery_key=delivery_key,
                 line_value=line_value,
-                outcome=str(outcome or "failed"),
+                outcome="sent",
                 recipients_sent=int(recipients_sent or 0),
                 recipients_failed=int(recipients_failed or 0),
                 attempted_at=attempted_at or datetime.utcnow(),
-            ))
+            ).prefix_with("OR IGNORE")
+            await s.execute(stmt)
+            audit = (
+                await s.execute(
+                    select(TelegramDeliveryAudit).where(
+                        TelegramDeliveryAudit.delivery_key == delivery_key,
+                        TelegramDeliveryAudit.outcome == "sent",
+                    )
+                )
+            ).scalar_one_or_none()
+            if audit is None:
+                await s.rollback()
+                return False
+            result = await s.execute(
+                update(PropOpportunityLog)
+                .where(
+                    PropOpportunityLog.external_id == _stored_opportunity_external_id(
+                        external_id, provider
+                    ),
+                    PropOpportunityLog.stat_type == stat_type,
+                    PropOpportunityLog.provider == provider,
+                )
+                .values(alert_sent=True, alert_sent_at=audit.attempted_at)
+            )
             await s.commit()
+            if int(result.rowcount or 0) == 0:
+                logger.warning(
+                    "Confirmed Telegram PLAY has no exact opportunity row: "
+                    "provider=%s external_id=%s stat=%s",
+                    provider, external_id, stat_type,
+                )
+                return False
+            return True
 
     async def get_telegram_reconciliation(
         self,
@@ -1568,6 +1959,7 @@ class Database:
                 "actionable_persisted": 0,
                 "delivery_attempts": 0,
                 "delivered_alerts": 0,
+                "unverified_historical": 0,
                 "delivered_recipients": 0,
                 "audit_delivered_alerts": 0,
                 "audit_recipients": 0,
@@ -1584,7 +1976,9 @@ class Database:
         by_provider: dict[str, dict] = {}
         buckets: dict[tuple[str, str], dict] = {}
         legacy_deliveries = 0
+        unverified_historical = 0
         audited_deliveries = 0
+        legacy_opportunity_candidates: list[tuple[str, str, str]] = []
 
         def _provider(name: Optional[str]) -> str:
             return str(name or "Unknown").strip() or "Unknown"
@@ -1750,6 +2144,8 @@ class Database:
                     PropOpportunityLog.provider,
                     PropOpportunityLog.detected_at,
                     PropOpportunityLog.sport,
+                    PropOpportunityLog.external_id,
+                    PropOpportunityLog.stat_type,
                     PropOpportunityLog.recommendation,
                     PropOpportunityLog.result,
                     PropOpportunityLog.alert_sent,
@@ -1762,7 +2158,8 @@ class Database:
                 )
             )
             for (
-                provider_name, detected_at, sport, recommendation, result,
+                provider_name, detected_at, sport, external_id, stat_type,
+                recommendation, result,
                 alert_sent, alert_sent_at,
             ) in pol_rows.all():
                 if not _is_supported_tracking_sport(sport):
@@ -1801,9 +2198,9 @@ class Database:
                         ),
                     )
                 if alert_sent and alert_sent_at is not None and alert_sent_at >= cutoff:
-                    row["delivered_alerts"] += 1
-                    legacy_deliveries += 1
-                    _add_bucket(provider, alert_sent_at, delivered_alerts=1)
+                    legacy_opportunity_candidates.append(
+                        (provider, str(external_id or ""), str(stat_type or ""))
+                    )
 
             # Legacy independent PrizePicks edge rows.
             pp_rows = await s.execute(
@@ -1821,7 +2218,8 @@ class Database:
                 row["directional"] += 1
                 row["pending"] += 1
                 if alert_sent:
-                    row["delivered_alerts"] += 1
+                    row["unverified_historical"] += 1
+                    unverified_historical += 1
                     legacy_deliveries += 1
                 _add_bucket(
                     "PrizePicks",
@@ -1845,7 +2243,8 @@ class Database:
                     row["evaluated"] += 1
                     row["actionable_persisted"] += 1
                     if alert_sent:
-                        row["delivered_alerts"] += 1
+                        row["unverified_historical"] += 1
+                        unverified_historical += 1
                         legacy_deliveries += 1
                     _add_bucket(
                         "Sportsbook",
@@ -1858,6 +2257,7 @@ class Database:
             audit_rows = await s.execute(
                 select(
                     TelegramDeliveryAudit.provider,
+                    TelegramDeliveryAudit.id,
                     TelegramDeliveryAudit.alert_kind,
                     TelegramDeliveryAudit.delivery_path,
                     TelegramDeliveryAudit.player_name,
@@ -1872,13 +2272,15 @@ class Database:
                     TelegramDeliveryAudit.attempted_at,
                 ).where(TelegramDeliveryAudit.attempted_at >= cutoff)
             )
+            audit_records = audit_rows.all()
             audit_identity_counts: dict[tuple, int] = {}
             audit_count = 0
             for (
-                provider_name, alert_kind, delivery_path, player_name, sport,
+                provider_name, audit_id, alert_kind, delivery_path, player_name, sport,
                 stat_type, external_id, event_id, line_value, outcome,
                 recipients_sent, recipients_failed, attempted_at,
-            ) in audit_rows.all():
+            ) in audit_records:
+                audit_count += 1
                 identity = (
                     _provider(provider_name), alert_kind, delivery_path,
                     external_id, event_id, stat_type, line_value,
@@ -1895,12 +2297,7 @@ class Database:
                     provider = _provider(provider_name)
                     row = _ensure(provider)
                     row["delivery_attempts"] += 1
-                    if is_play_delivery:
-                        row["audit_recipients"] += int(recipients_sent or 0)
-                    if outcome == "sent" and is_play_delivery:
-                        row["audit_delivered_alerts"] += 1
-                        audited_deliveries += 1
-                    elif outcome == "rate_limited":
+                    if outcome == "rate_limited":
                         row["rate_limited"] += 1
                     elif outcome == "deduped":
                         row["dedup_suppressed"] += 1
@@ -1910,12 +2307,7 @@ class Database:
                 provider = _provider(provider_name)
                 row = _ensure(provider)
                 row["delivery_attempts"] += 1
-                if is_play_delivery:
-                    row["audit_recipients"] += int(recipients_sent or 0)
-                if outcome == "sent" and is_play_delivery:
-                    row["audit_delivered_alerts"] += 1
-                    audited_deliveries += 1
-                elif outcome == "rate_limited":
+                if outcome == "rate_limited":
                     row["rate_limited"] += 1
                 elif outcome == "deduped":
                     row["dedup_suppressed"] += 1
@@ -1932,7 +2324,61 @@ class Database:
                         int(recipients_sent or 0) if is_play_delivery else 0
                     ),
                 )
-                audit_count += 1
+
+            confirmed_audits = await self._confirmed_telegram_play_audits(
+                s, since=cutoff
+            )
+            confirmed_ids = {int(audit.id) for audit in confirmed_audits}
+            confirmed_identities = {
+                (
+                    _provider(audit.provider),
+                    _stored_opportunity_external_id(
+                        str(audit.external_id or ""), audit.provider
+                    ),
+                    str(audit.stat_type or ""),
+                )
+                for audit in confirmed_audits
+            }
+            for provider, external_id, stat_type in legacy_opportunity_candidates:
+                if (
+                    provider,
+                    _stored_opportunity_external_id(external_id, provider),
+                    stat_type,
+                ) not in confirmed_identities:
+                    row = _ensure(provider)
+                    row["unverified_historical"] += 1
+                    unverified_historical += 1
+                    legacy_deliveries += 1
+
+            for (
+                provider_name, audit_id, alert_kind, delivery_path, player_name,
+                sport, stat_type, external_id, event_id, line_value, outcome,
+                recipients_sent, recipients_failed, attempted_at,
+            ) in audit_records:
+                if (
+                    str(outcome or "").lower() == "sent"
+                    and str(alert_kind or "").strip().upper() == "ACTIONABLE_PICK"
+                    and int(audit_id) not in confirmed_ids
+                ):
+                    row = _ensure(provider_name)
+                    row["unverified_historical"] += 1
+                    unverified_historical += 1
+
+            for audit in confirmed_audits:
+                provider = _provider(audit.provider)
+                row = _ensure(provider)
+                row["delivered_alerts"] += 1
+                row["audit_delivered_alerts"] += 1
+                row["audit_recipients"] += int(audit.recipients_sent or 0)
+                audited_deliveries += 1
+                _add_bucket(
+                    provider,
+                    audit.attempted_at,
+                    delivered_alerts=1,
+                    delivered_recipients=int(audit.recipients_sent or 0),
+                    audit_delivered_alerts=1,
+                    audit_recipients=int(audit.recipients_sent or 0),
+                )
 
         duplicate_delivery_events = sum(
             max(0, count - 1) for count in audit_identity_counts.values()
@@ -1969,6 +2415,7 @@ class Database:
             "audit_rows": audit_count,
             "audited_deliveries": audited_deliveries,
             "legacy_delivery_rows": legacy_deliveries,
+            "unverified_historical": unverified_historical,
             "duplicate_delivery_events": duplicate_delivery_events,
             "exact_recipient_count_available": audit_count > 0,
             "accounting_note": (
@@ -5200,14 +5647,6 @@ class Database:
                 provider_results[result_key] = provider_results.get(result_key, 0) + 1
                 sport_results = result_counts_by_sport.setdefault(sport_key, {})
                 sport_results[result_key] = sport_results.get(result_key, 0) + 1
-                if alert_sent:
-                    delivered_total += 1
-                    delivered_by_provider[provider_key] = (
-                        delivered_by_provider.get(provider_key, 0) + 1
-                    )
-                    delivered_by_sport[sport_key] = (
-                        delivered_by_sport.get(sport_key, 0) + 1
-                    )
                 if result_key == "PENDING":
                     pending_total += 1
                     pending_by_provider[provider_key] = (
@@ -5221,6 +5660,20 @@ class Database:
                     resolved_by_provider[provider_key] = (
                         resolved_by_provider.get(provider_key, 0) + 1
                     )
+
+            confirmed_audits = await self._confirmed_telegram_play_audits(
+                s, since=cutoff
+            )
+            for audit in confirmed_audits:
+                provider_key = str(audit.provider or "Underdog")
+                delivered_total += 1
+                delivered_by_provider[provider_key] = (
+                    delivered_by_provider.get(provider_key, 0) + 1
+                )
+                sport_key = str(audit.sport or "UNKNOWN")
+                delivered_by_sport[sport_key] = (
+                    delivered_by_sport.get(sport_key, 0) + 1
+                )
 
             evaluated_by_provider: dict[str, int] = {}
             evaluated_by_sport: dict[str, int] = {}
@@ -5254,6 +5707,7 @@ class Database:
                 | set(tracked_observations_by_provider)
                 | set(evaluated_by_provider)
                 | set(directional_by_provider)
+                | set(delivered_by_provider)
             )
             for provider in sorted(all_providers):
                 provider_breakdown[provider] = {
@@ -5480,29 +5934,75 @@ class Database:
         self,
         since_hours: int = 72,
         limit: int = 8,
+        start_at: Optional[datetime] = None,
+        end_at: Optional[datetime] = None,
     ) -> "list[PropOpportunityLog]":
         """
         Return recently delivered 🎯 ACTIONABLE BET PICK alerts, newest first.
 
-        Uses PropOpportunityLog.alert_sent=True as the canonical source of truth.
-        Unlike PropLineHistory.lifecycle_state (which is overwritten every time a
-        new snapshot is saved for the same prop), alert_sent is write-once and
-        is never cleared by subsequent scan cycles.
+        Uses identity-complete successful Telegram PLAY audit rows as the
+        canonical source of truth.  Legacy ``alert_sent`` rows without a
+        matching audit remain preserved but are not presented as confirmed
+        Telegram history.
         """
         from datetime import timedelta
-        cutoff = datetime.utcnow() - timedelta(hours=since_hours)
+        cutoff = start_at or (datetime.utcnow() - timedelta(hours=since_hours))
         async with self.session() as s:
-            result = await s.execute(
-                select(PropOpportunityLog)
-                .where(
-                    PropOpportunityLog.alert_sent    == True,   # noqa: E712
-                    PropOpportunityLog.alert_sent_at >= cutoff,
-                    PropOpportunityLog.recommendation.in_(["OVER", "UNDER"]),
-                )
-                .order_by(desc(PropOpportunityLog.alert_sent_at))
-                .limit(limit)
+            audit_rows = await self._confirmed_telegram_play_audits(
+                s, since=cutoff
             )
-            return list(result.scalars().all())
+            if end_at is not None:
+                audit_rows = [
+                    row for row in audit_rows
+                    if row.attempted_at is not None and row.attempted_at < end_at
+                ]
+            if not audit_rows:
+                return []
+
+            opportunities = (
+                await s.execute(
+                    select(PropOpportunityLog).where(
+                        PropOpportunityLog.alert_sent == True,  # noqa: E712
+                        PropOpportunityLog.recommendation.in_(["OVER", "UNDER"]),
+                    )
+                )
+            ).scalars().all()
+            by_identity = {
+                (
+                    str(row.provider or "Underdog"),
+                    _stored_opportunity_external_id(
+                        str(row.external_id or ""), row.provider
+                    ),
+                    str(row.stat_type or ""),
+                ): row
+                for row in opportunities
+            }
+            confirmed: list[PropOpportunityLog] = []
+            # The audit helper returns chronological rows for aggregation, but
+            # /alerts is a newest-first rolling delivery view.
+            for audit in reversed(audit_rows):
+                key = (
+                    str(audit.provider or "Underdog"),
+                    _stored_opportunity_external_id(
+                        audit.external_id or "", audit.provider
+                    ),
+                    str(audit.stat_type or ""),
+                )
+                row = by_identity.get(key)
+                if row is None:
+                    continue
+                # Detach the display object so a legitimate line-change
+                # delivery retains that audit's line and acceptance time.
+                display_row = SimpleNamespace(**{
+                    column.name: getattr(row, column.name)
+                    for column in PropOpportunityLog.__table__.columns
+                })
+                display_row.line_value = audit.line_value
+                display_row.alert_sent_at = audit.attempted_at
+                confirmed.append(display_row)
+                if len(confirmed) >= max(1, int(limit)):
+                    break
+            return confirmed
 
     async def get_recent_alerted_props_for_dedup(
         self,
@@ -5533,7 +6033,9 @@ class Database:
         from datetime import timedelta
         cutoff = datetime.utcnow() - timedelta(hours=since_hours)
         async with self.session() as s:
-            # Primary: PropOpportunityLog rows with alert_sent=True
+            # The delivery ledger is the only restart source.  Legacy
+            # alert_sent/lifecycle fields are intentionally not enough to
+            # suppress a new PLAY after a restart.
             pol_result = await s.execute(
                 select(
                     PropOpportunityLog.player_name,
@@ -5541,42 +6043,53 @@ class Database:
                     PropOpportunityLog.stat_type,
                     PropOpportunityLog.provider,
                     PropOpportunityLog.external_id,
-                    PropOpportunityLog.game_id,
                     PropOpportunityLog.recommendation,
-                    PropOpportunityLog.alert_sent_at,
-                    PropOpportunityLog.line_value,
+                ).where(
+                    PropOpportunityLog.alert_sent == True,  # noqa: E712
+                    PropOpportunityLog.recommendation.in_(("OVER", "UNDER")),
                 )
-                .where(
-                    PropOpportunityLog.alert_sent    == True,   # noqa: E712
-                    PropOpportunityLog.alert_sent_at >= cutoff,
-                    PropOpportunityLog.recommendation.in_(["OVER", "UNDER"]),
-                )
-                # Oldest first so later (newer) rows overwrite earlier ones,
-                # leaving the most-recent alert for each key in the dict.
-                .order_by(PropOpportunityLog.alert_sent_at)
+            )
+            direction_by_identity = {
+                (
+                    str(provider or "Underdog"),
+                    str(external_id or ""),
+                    str(stat_type or ""),
+                ): str(recommendation or "").upper()
+                for (
+                    player_name, sport, stat_type, provider, external_id,
+                    recommendation,
+                ) in pol_result.all()
+            }
+            audit_rows = await self._confirmed_telegram_play_audits(
+                s, since=cutoff
             )
             out: dict = {}
-            for row in pol_result.all():
-                player, sport, stat, provider, source_id, event_id, direction, sent_at, line = row
+            for audit in audit_rows:
+                sent_at = audit.attempted_at
                 if sent_at is None:
                     continue
                 if hasattr(sent_at, "timestamp"):
                     ts_unix = sent_at.timestamp()
                 else:
-                    # SQLite may return DATETIME projections as ISO strings
-                    # when the query selects individual columns.
                     ts_unix = datetime.fromisoformat(
                         str(sent_at).replace("Z", "+00:00")
                     ).timestamp()
-                line_f  = float(line or 0)
-                provider_name = str(provider or "Underdog").strip() or "Underdog"
-                source_key = str(source_id or "").strip()
-                event_key = str(event_id or "").strip()
-                direction_key = str(direction or "").strip().upper()
+                line_f = float(audit.line_value or 0)
+                provider_name = str(audit.provider or "Underdog").strip() or "Underdog"
+                source_key = str(audit.external_id or "").strip()
+                event_key = str(audit.event_id or "").strip()
+                direction_key = direction_by_identity.get(
+                    (
+                        provider_name,
+                        _stored_opportunity_external_id(source_key, provider_name),
+                        str(audit.stat_type or ""),
+                    ),
+                    "",
+                )
                 out[(
-                    str(player or "").strip(),
-                    sport or "UNKNOWN",
-                    stat,
+                    str(audit.player_name or "").strip(),
+                    audit.sport or "UNKNOWN",
+                    audit.stat_type,
                     provider_name,
                     source_key,
                     event_key,
@@ -5584,70 +6097,10 @@ class Database:
                 )] = (ts_unix, line_f)
                 # Compatibility with pre-identity recovery code.
                 out[(
-                    _dedup_player_key(player, provider),
-                    sport or "UNKNOWN",
-                    stat,
+                    _dedup_player_key(audit.player_name, provider_name),
+                    audit.sport or "UNKNOWN",
+                    audit.stat_type,
                 )] = (ts_unix, line_f)
-
-            # Fallback: PropLineHistory rows where first_alert_sent_at is set.
-            # Covers cases where log_prop_opportunity failed silently and left
-            # no PropOpportunityLog row to mark — the lifecycle state transition
-            # (update_prop_lifecycle_state → first_alert_sent_at) runs in a
-            # separate try/except block and is more reliable than the POL write.
-            # We only ADD keys that are NOT already in out (POL takes priority).
-            plh_result = await s.execute(
-                select(
-                    PropLineHistory.player_name,
-                    PropLineHistory.sport,
-                    PropLineHistory.stat_type,
-                    PropLineHistory.provider,
-                    PropLineHistory.external_id,
-                    PropLineHistory.game_id,
-                    PropLineHistory.bet_recommendation,
-                    PropLineHistory.first_alert_sent_at,
-                    PropLineHistory.line_value,
-                )
-                .where(
-                    PropLineHistory.first_alert_sent_at.isnot(None),
-                    PropLineHistory.first_alert_sent_at >= cutoff,
-                )
-                .order_by(PropLineHistory.first_alert_sent_at)
-            )
-            for row in plh_result.all():
-                player, sport, stat, provider, source_id, event_id, direction, sent_at, line = row
-                if sent_at is None:
-                    continue
-                if hasattr(sent_at, "timestamp"):
-                    ts_unix = sent_at.timestamp()
-                else:
-                    ts_unix = datetime.fromisoformat(
-                        str(sent_at).replace("Z", "+00:00")
-                    ).timestamp()
-                line_f  = float(line or 0)
-                provider_name = str(provider or "Underdog").strip() or "Underdog"
-                source_key = str(source_id or "").strip()
-                event_key = str(event_id or "").strip()
-                direction_key = str(direction or "").strip().upper()
-                extended_key = (
-                    str(player or "").strip(),
-                    sport or "UNKNOWN",
-                    stat,
-                    provider_name,
-                    source_key,
-                    event_key,
-                    direction_key,
-                )
-                # POL is authoritative when it exists for the same source
-                # identity; the fallback only fills missing normalized keys.
-                if extended_key not in out:
-                    out[extended_key] = (ts_unix, line_f)
-                legacy_key = (
-                    _dedup_player_key(player, provider),
-                    sport or "UNKNOWN",
-                    stat,
-                )
-                if legacy_key not in out:
-                    out[legacy_key] = (ts_unix, line_f)
 
             return out
 
@@ -5671,25 +6124,44 @@ class Database:
           hit_rate  — float (0.0–100.0) based on graded picks only
         """
         async with self.session() as s:
-            rows = await s.execute(
+            confirmed_audits = await self._confirmed_telegram_play_audits(s)
+            opportunity_rows = await s.execute(
                 select(
                     PropOpportunityLog.provider,
+                    PropOpportunityLog.external_id,
+                    PropOpportunityLog.stat_type,
                     PropOpportunityLog.result,
-                    func.count(PropOpportunityLog.id),
+                ).where(
+                    PropOpportunityLog.recommendation.in_(("OVER", "UNDER")),
+                    PropOpportunityLog.alert_sent == True,  # noqa: E712
                 )
-                .where(
-                    PropOpportunityLog.alert_sent       == True,    # noqa: E712
-                    PropOpportunityLog.recommendation.in_(["OVER", "UNDER"]),
-                )
-                .group_by(PropOpportunityLog.provider, PropOpportunityLog.result)
             )
+            result_by_identity = {
+                (
+                    str(provider or "Underdog"),
+                    str(external_id or ""),
+                    str(stat_type or ""),
+                ): str(result or "PENDING").upper()
+                for provider, external_id, stat_type, result
+                in opportunity_rows.all()
+            }
             buckets: dict = {}
             by_provider: dict = {}
-            for provider, result_val, n in rows.all():
-                buckets[result_val] = buckets.get(result_val, 0) + n
-                source = provider or "Underdog"
+            for audit in confirmed_audits:
+                source = str(audit.provider or "Underdog")
+                result_val = result_by_identity.get(
+                    (
+                        source,
+                        _stored_opportunity_external_id(
+                            str(audit.external_id or ""), source
+                        ),
+                        str(audit.stat_type or ""),
+                    ),
+                    "PENDING",
+                )
+                buckets[result_val] = buckets.get(result_val, 0) + 1
                 source_buckets = by_provider.setdefault(source, {})
-                source_buckets[result_val] = source_buckets.get(result_val, 0) + n
+                source_buckets[result_val] = source_buckets.get(result_val, 0) + 1
 
         hit     = buckets.get("HIT",  0)
         miss    = buckets.get("MISS", 0)
@@ -5828,6 +6300,7 @@ class Database:
                 ).where(
                     PropOpportunityLog.result      == "MISS",
                     PropOpportunityLog.error_type.isnot(None),
+                    play_filter,
                 ).group_by(PropOpportunityLog.error_type)
             )
             by_error_type = {row.error_type: row.n for row in err_rows.all()}
@@ -5877,14 +6350,36 @@ class Database:
                 select(func.count(PropOpportunityLog.id)).where(graded_filter, play_filter)
             )
             total_graded = total_row.scalar() or 0
-            telegram_graded_row = await s.execute(
-                select(func.count(PropOpportunityLog.id)).where(
-                    graded_filter,
-                    play_filter,
-                    PropOpportunityLog.alert_sent == True,  # noqa: E712
+            confirmed_audits = await self._confirmed_telegram_play_audits(s)
+            graded_identities = {
+                (
+                    str(provider or "Underdog"),
+                    str(external_id or ""),
+                    str(stat_type or ""),
                 )
+                for provider, external_id, stat_type, result
+                in (
+                    await s.execute(
+                        select(
+                            PropOpportunityLog.provider,
+                            PropOpportunityLog.external_id,
+                            PropOpportunityLog.stat_type,
+                            PropOpportunityLog.result,
+                        ).where(graded_filter, play_filter)
+                    )
+                ).all()
+            }
+            telegram_graded = sum(
+                1
+                for audit in confirmed_audits
+                if (
+                    str(audit.provider or "Underdog"),
+                    _stored_opportunity_external_id(
+                        str(audit.external_id or ""), audit.provider
+                    ),
+                    str(audit.stat_type or ""),
+                ) in graded_identities
             )
-            telegram_graded = telegram_graded_row.scalar() or 0
 
             intel_row = await s.execute(
                 select(
@@ -6060,28 +6555,27 @@ class Database:
 
             # Delivery is queried separately because the tracking query above
             # intentionally keeps only the fields needed for outcome counts.
-            delivered_rows = await s.execute(
-                select(
-                    PropOpportunityLog.provider,
-                    PropOpportunityLog.sport,
-                    func.count(),
-                ).where(
-                    directional,
-                    PropOpportunityLog.alert_sent == True,  # noqa: E712
-                ).group_by(
-                    PropOpportunityLog.provider,
-                    PropOpportunityLog.sport,
-                )
-            )
-            for provider, sport, row_count in delivered_rows.all():
-                if not _is_supported_tracking_sport(sport):
+            # A provider/opportunity flag alone is not Telegram confirmation.
+            delivered_by_sport: dict[str, int] = {}
+            from reporting import current_reporting_day_bounds
+            today_cutoff, _today_end = current_reporting_day_bounds()
+            delivered_today_by_provider: dict[str, int] = {}
+            for audit in await self._confirmed_telegram_play_audits(s):
+                if not _is_supported_tracking_sport(audit.sport):
                     continue
-                provider_key = str(provider or "Underdog")
-                row_count = int(row_count or 0)
-                delivered += row_count
+                provider_key = str(audit.provider or "Underdog")
+                sport_key = str(audit.sport or "UNKNOWN")
+                delivered += 1
                 provider_delivered[provider_key] = (
-                    provider_delivered.get(provider_key, 0) + row_count
+                    provider_delivered.get(provider_key, 0) + 1
                 )
+                delivered_by_sport[sport_key] = (
+                    delivered_by_sport.get(sport_key, 0) + 1
+                )
+                if audit.attempted_at is not None and audit.attempted_at >= today_cutoff:
+                    delivered_today_by_provider[provider_key] = (
+                        delivered_today_by_provider.get(provider_key, 0) + 1
+                    )
 
             # Persistent observations are a separate population from
             # directional opportunities and from Telegram deliveries. Count
@@ -6203,6 +6697,8 @@ class Database:
             "delivered": delivered,
             "provider_delivered": provider_delivered,
             "delivered_by_provider": provider_delivered,
+            "delivered_by_sport": delivered_by_sport,
+            "delivered_today_by_provider": delivered_today_by_provider,
             "resolved": resolved,
             "pending":  pending,
             "pending_by_provider": pending_by_provider,
@@ -6624,21 +7120,46 @@ class Database:
             "pushes": int, "total": int}]
         """
         async with self.session() as s:
-            rows = await s.execute(
+            confirmed_audits = await self._confirmed_telegram_play_audits(s)
+            opportunity_rows = await s.execute(
                 select(
                     PropOpportunityLog.sport,
                     PropOpportunityLog.provider,
+                    PropOpportunityLog.external_id,
+                    PropOpportunityLog.stat_type,
                     PropOpportunityLog.result,
-                    func.count(PropOpportunityLog.id).label("n"),
-                )
-                .where(PropOpportunityLog.result.in_(["HIT", "MISS", "PUSH"]))
-                .group_by(
-                    PropOpportunityLog.sport,
-                    PropOpportunityLog.provider,
-                    PropOpportunityLog.result,
+                ).where(
+                    PropOpportunityLog.result.in_(("HIT", "MISS", "PUSH")),
+                    PropOpportunityLog.recommendation.in_(("OVER", "UNDER")),
+                    PropOpportunityLog.alert_sent == True,  # noqa: E712
                 )
             )
-            raw = rows.all()
+            result_by_identity = {
+                (
+                    str(provider or "Underdog"),
+                    str(external_id or ""),
+                    str(stat_type or ""),
+                ): (sport or "?", str(result or "").upper())
+                for sport, provider, external_id, stat_type, result
+                in opportunity_rows.all()
+            }
+            raw = []
+            for audit in confirmed_audits:
+                identity = (
+                    str(audit.provider or "Underdog"),
+                    _stored_opportunity_external_id(
+                        str(audit.external_id or ""), audit.provider
+                    ),
+                    str(audit.stat_type or ""),
+                )
+                sport, result = result_by_identity.get(identity, ("?", "PENDING"))
+                if result in {"HIT", "MISS", "PUSH"}:
+                    raw.append(SimpleNamespace(
+                        sport=sport,
+                        provider=audit.provider,
+                        result=result,
+                        n=1,
+                    ))
 
         # Aggregate into per-sport dicts
         by_sport: dict[str, dict] = {}
@@ -6669,6 +7190,11 @@ class Database:
         return result_list[:limit_sports]
 
     async def close(self) -> None:
-        if self._engine:
-            await self._engine.dispose()
+        self._closed = True
+        await self._session_lock.acquire()
+        try:
+            if self._engine:
+                await self._engine.dispose()
+        finally:
+            self._session_lock.release()
             logger.info("Database connection closed.")

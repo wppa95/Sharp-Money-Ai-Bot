@@ -149,6 +149,15 @@ class TestDashboardReportToTelegram:
         assert "1h" in t
         assert "55%" in t or "55" in t
 
+    def test_failed_reads_are_shown_as_unavailable_not_zero(self):
+        r = _report(
+            unavailable={"tracking", "totals", "clv", "sport", "market"},
+            provider_pipeline={"Underdog": {}, "PrizePicks": {}},
+        )
+        text = r.to_telegram()
+        assert text.count("UNAVAILABLE") >= 5
+        assert "Delivered: <code>0</code>" not in text
+
 
 class TestDashboardEngineGatherSystemIntelligence:
     """Test that DashboardEngine.gather() calls system and intelligence panel methods."""

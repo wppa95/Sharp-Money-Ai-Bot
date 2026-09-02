@@ -1,0 +1,9 @@
+{
+  "providers": {
+    "PrizePicks": {
+      "last_db_write": "2026-09-02 03:25:42 UTC",
+      "last_db_write_ts": 1788319542.121517,
+      "last_db_write_operation": "prop_line_history"
+    }
+  }
+}
