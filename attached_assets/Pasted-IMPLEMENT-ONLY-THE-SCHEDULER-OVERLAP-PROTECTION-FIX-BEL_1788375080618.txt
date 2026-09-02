@@ -1,0 +1,166 @@
+IMPLEMENT ONLY THE SCHEDULER OVERLAP-PROTECTION FIX BELOW
+
+Use the previous READ-ONLY scheduler audit as the specification.
+
+Do NOT modify:
+
+* Underdog source/provider behavior
+* PropLine provider behavior
+* PrizePicks behavior
+* scoring or qualification
+* alerts or Telegram
+* database/schema
+* scheduler cadence/intervals
+* scheduler first-run timings
+* monitoring logic
+* API limiter/rate limits
+* provider priority
+* fallback behavior
+
+Objective
+
+Remove the practical APScheduler max_instances=1 bottleneck WITHOUT configuring or using max_instances.
+
+The application-level coordinator must become the effective overlap/coalescing mechanism.
+
+Required behavior
+
+For every existing scheduled job:
+
+1. Preserve the exact existing:
+    * job name
+    * interval
+    * first-run timing
+    * number of registrations
+    * underlying callback behavior
+2. APScheduler’s registered callback must return promptly rather than remaining active for the entire long-running monitoring operation.
+3. The real callback must execute as a tracked asyncio task under the existing application-level coordinator.
+4. If another scheduler trigger occurs while the same named job is already running:
+    * do NOT start another real execution
+    * do NOT queue it
+    * do NOT defer it for later
+    * do NOT replay it after the active run finishes
+    * simply ignore/coalesce the trigger at the application layer
+5. An active run must be allowed to finish independently of the next scheduled trigger.
+6. Different job names must remain independently executable.
+7. Track every launched real scheduler task so there are no detached background tasks.
+8. Capture/log exceptions from launched tasks instead of allowing silent task failures.
+9. On shutdown/restart:
+    * cancel active tracked scheduler tasks
+    * await them
+    * release coordinator state
+    * clear relevant runtime ownership/state
+    * leave no detached monitoring task behind
+10. The next process startup must begin with fresh runtime execution state.
+
+Critical APScheduler requirement
+
+Do NOT add:
+
+* max_instances
+* max_instances=...
+* a scheduler-wide max instance configuration
+* a custom executor
+* another scheduler
+* duplicate jobs
+
+Do not rely on APScheduler’s default max_instances=1 to control overlap.
+
+The implementation must ensure the actual long-running work is no longer represented to APScheduler as an active job instance.
+
+Coalescing requirement
+
+Do not create an unbounded queue.
+
+Prefer checking/claiming the application coordinator before launching the real asyncio task so an overlapping trigger can be discarded immediately.
+
+If APScheduler coalesce=True would still prevent triggers from reaching the application coordinator, determine whether the current implementation needs to neutralize that behavior for these registrations.
+
+Do NOT disable framework coalescing blindly if doing so could create a catch-up storm after an event-loop stall.
+
+The intended behavior is:
+
+scheduled trigger
+→ lightweight launcher
+→ application coordinator claims job name
+→ real async run executes
+
+while already active:
+
+scheduled trigger
+→ lightweight launcher
+→ coordinator sees job already active
+→ trigger ignored
+→ nothing queued
+
+Important lifecycle behavior
+
+Verify that:
+
+* a long-running Underdog monitoring run can finish normally even when another scheduled trigger occurs
+* the next trigger does not cancel the active run
+* the next trigger does not wait behind the active run
+* no second copy of the same run starts
+* after the active run completes, the coordinator releases the job name
+* the following normal scheduled trigger can execute normally
+
+For shutdown:
+
+* active real tasks are cancelled
+* cancellation is awaited
+* coordinator names are released
+* _ud_full_scan_running is cleared appropriately
+* _fpr_execution_running is cleared appropriately
+* PropLine child-task state is cleaned up
+* deferred FPR state is cleaned up
+* no detached asyncio task survives shutdown
+
+Tests
+
+Add/update focused tests covering:
+
+1. Same job triggered twice while first execution is blocked:
+    * first execution starts
+    * second execution does not start
+    * second trigger is not queued
+    * releasing first execution allows it to finish
+    * no automatic second execution occurs
+2. Different job names:
+    * job A can run while job B runs
+3. Long-running job:
+    * later scheduler trigger does not cancel it
+4. Exception:
+    * real task exception is captured/logged
+    * coordinator state is released
+5. Cancellation:
+    * task cancellation is awaited
+    * coordinator state is released
+6. Shutdown:
+    * all tracked tasks are cancelled/awaited
+    * no detached task remains
+7. Registration integrity:
+    * exactly one registration per existing job
+    * all existing intervals unchanged
+    * all existing first-run timings unchanged
+    * no max_instances configuration exists
+8. Existing no-fast-resume behavior remains intact.
+
+Run the focused scheduler/lifecycle tests first, then the full test suite.
+
+Output required
+
+Before making any unrelated changes, report:
+
+* exact files changed
+* exact scheduler wrapper/launcher mechanism used
+* how coordinator ownership is claimed
+* how overlapping triggers are discarded
+* how tasks are tracked
+* how exceptions are handled
+* how shutdown cancellation works
+* confirmation that no max_instances setting was added
+* confirmation that scheduler cadence/first-run timings are unchanged
+* focused test result
+* full test result
+
+Do NOT change anything else.
