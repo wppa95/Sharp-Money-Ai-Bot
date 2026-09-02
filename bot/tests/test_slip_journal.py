@@ -429,6 +429,8 @@ class TestSlipSubcommandRouting:
                 "engine.player_prop_market.build_player_prop_market_comparison",
                 return_value=None,
             ),
+            patch("commands._is_active_display_sport", return_value=True),
+            patch("commands._is_upcoming_game", return_value=True),
         ):
             await cmd_slip(update, ctx)
 
