@@ -4,15 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import re
 import time
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 import commands
+import main
 import market_engine
 from alerts import broadcast_alert, format_help_message
 from connectors import ConnectorRegistry
@@ -87,8 +86,7 @@ def _health_monitor(
 
 
 def test_help_lists_every_registered_command_and_no_unregistered_restarts():
-    main_source = (Path(__file__).resolve().parents[1] / "main.py").read_text()
-    registered = set(re.findall(r'CommandHandler\("([^"]+)"', main_source))
+    registered = {command for command, _callback in main.TELEGRAM_COMMAND_HANDLERS}
     help_text = format_help_message()
 
     assert registered
@@ -97,16 +95,13 @@ def test_help_lists_every_registered_command_and_no_unregistered_restarts():
 
 
 def test_every_registered_command_resolves_to_an_async_handler():
-    main_source = (Path(__file__).resolve().parents[1] / "main.py").read_text()
-    registrations = re.findall(
-        r'CommandHandler\("([^"]+)",\s*(cmd_[a-z_]+)\)',
-        main_source,
-    )
+    registrations = main.TELEGRAM_COMMAND_HANDLERS
 
-    assert len(registrations) == 35
-    for command, handler_name in registrations:
-        handler = getattr(commands, handler_name, None)
-        assert handler is not None, f"/{command} has no {handler_name}"
+    assert len(registrations) == 36  # 35 production commands + legacy /learning alias
+    assert len({command for command, _callback in registrations}) == len(registrations)
+    for command, handler in registrations:
+        assert command
+        assert handler is not None, f"/{command} has no callback"
         assert inspect.iscoroutinefunction(handler), f"/{command} handler is not async"
 
 
