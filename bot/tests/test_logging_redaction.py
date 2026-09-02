@@ -64,6 +64,14 @@ def test_sensitive_query_values_and_bearer_credentials_are_redacted():
     assert "Bearer [REDACTED]" in message
 
 
+def test_plain_bot_words_are_not_treated_as_credentials():
+    record = _record("Sharp Money Bot is ready")
+
+    CredentialRedactionFilter().filter(record)
+
+    assert record.getMessage() == "Sharp Money Bot is ready"
+
+
 def test_exception_text_is_redacted_before_formatter_reads_it():
     try:
         raise RuntimeError(

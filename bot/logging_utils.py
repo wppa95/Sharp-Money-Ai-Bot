@@ -20,7 +20,7 @@ class CredentialRedactionFilter:
     _SENSITIVE_QUERY_RE = re.compile(
         r"(?i)([?&](?:token|api[_-]?key|access[_-]?token|authorization)=)[^&\s\"']+"
     )
-    _BEARER_RE = re.compile(r"(?i)(\b(?:bearer|bot)\s+)[^\s\"']+")
+    _BEARER_RE = re.compile(r"(?i)(\bBearer\s+)[^\s\"']+")
     _REDACTED = "[REDACTED]"
 
     def __init__(self, secrets: Iterable[str] = ()) -> None:

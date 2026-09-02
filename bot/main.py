@@ -100,15 +100,20 @@ from engine.health import init_health_tracker, get_health_tracker
 # ── Logging ───────────────────────────────────────────────────────────────────
 
 _stdout_handler = logging.StreamHandler(sys.stdout)
-_stdout_handler.addFilter(
-    CredentialRedactionFilter(secrets=(config.TELEGRAM_BOT_TOKEN,))
+_log_redaction_filter = CredentialRedactionFilter(
+    secrets=(config.TELEGRAM_BOT_TOKEN,)
 )
+_stdout_handler.addFilter(_log_redaction_filter)
 logging.basicConfig(
     format="%(asctime)s | %(levelname)-8s | %(name)s — %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     level=getattr(logging, config.LOG_LEVEL.upper(), logging.INFO),
     handlers=[_stdout_handler],
 )
+# Some environments install a dedicated handler on HTTP client loggers before
+# application startup, so protect those records at the logger boundary too.
+for _logger_name in ("httpx", "httpcore", "telegram.request"):
+    logging.getLogger(_logger_name).addFilter(_log_redaction_filter)
 logger = logging.getLogger(__name__)
 
 
