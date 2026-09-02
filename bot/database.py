@@ -150,13 +150,21 @@ def _install_sqlite_diagnostics(engine) -> None:
         logger.debug("SQLite access stage=pool_checkout")
 
     def _on_invalidate(dbapi_connection, connection_record, exception) -> None:
-        if exception is not None:
+        if exception is not None and _sqlite_error_kind(exception) is not None:
             _log_sqlite_failure(
                 operation="pool",
                 stage=connection_record.info.get(
                     "sqlite_access_stage", "pool_checkout"
                 ),
                 exc=exception,
+            )
+        elif exception is not None:
+            logger.debug(
+                "SQLite connection invalidated: stage=%s exception_type=%s",
+                connection_record.info.get(
+                    "sqlite_access_stage", "pool_checkout"
+                ),
+                type(exception).__name__,
             )
         connection_record.info["sqlite_access_stage"] = "connection_invalidated"
 
