@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 import market_engine
+from alerts import _has_strong_underdog_evidence
+from engine.player_validator import PlayerPropValidation
 from providers.player_stats import RawGameResult
 
 
@@ -76,3 +78,28 @@ async def test_cs_uses_sufficient_propline_history_without_pandascore():
     assert result.n_supplemental_games == 5
     primary_provider.fetch_results.assert_not_awaited()
     history_provider.supplement_missing_results.assert_awaited_once()
+
+
+def test_propline_history_is_valid_delivery_evidence():
+    validation = PlayerPropValidation(
+        player_name="CS Player",
+        stat_type="Kills",
+        n_history=5,
+        l5_rate=0.8,
+        l10_rate=None,
+        l20_rate=None,
+        l30_rate=None,
+        avg_line=None,
+        min_line_seen=None,
+        rate_at_or_below=None,
+        season_hit_rate=0.8,
+        h2h_hit_rate=None,
+        has_supporting_data=True,
+        reason="Supporting data available",
+        data_source="propline",
+        n_real_games=0,
+        n_supplemental_games=5,
+        supplemental_sources=("propline_history",),
+    )
+
+    assert _has_strong_underdog_evidence(validation=validation) is True
