@@ -102,6 +102,65 @@ class TestLogPropOpportunity:
         assert row.confidence == 60
 
     @pytest.mark.asyncio
+    async def test_tracks_neutral_prop_before_directional_evaluation(
+        self, db: Database
+    ) -> None:
+        inserted = await db.track_prop_records([{
+            "external_id": "nba-event-1",
+            "player_name": "A. Guard",
+            "team": "NY",
+            "sport": "NBA",
+            "stat_type": "Points",
+            "line_value": 21.5,
+            "game_id": "nba-event-1",
+            "game_time": _past(8),
+            "provider": "Underdog",
+        }])
+        assert inserted == 1
+
+        pending = await db.get_pending_opportunities(cutoff_hours=4)
+        assert len(pending) == 1
+        assert pending[0].recommendation == "NONE"
+        assert pending[0].provider == "Underdog"
+
+        # Repeated ingestion must not erase a later directional decision.
+        await db.log_prop_opportunity(
+            external_id="nba-event-1",
+            player_name="A. Guard",
+            team="NY",
+            sport="NBA",
+            stat_type="Points",
+            line_value=21.5,
+            recommendation="OVER",
+            decision_tier="A",
+            confidence=75,
+            game_time=_past(8),
+            game_id="nba-event-1",
+            provider="Underdog",
+        )
+        await db.track_prop_records([{
+            "external_id": "nba-event-1",
+            "player_name": "A. Guard",
+            "team": "NY",
+            "sport": "NBA",
+            "stat_type": "Points",
+            "line_value": 21.5,
+            "game_id": "nba-event-1",
+            "game_time": _past(8),
+            "provider": "Underdog",
+        }])
+        async with db.session() as s:
+            from sqlalchemy import select
+            row = (
+                await s.execute(
+                    select(PropOpportunityLog).where(
+                        PropOpportunityLog.external_id == "nba-event-1"
+                    )
+                )
+            ).scalar_one()
+        assert row.recommendation == "OVER"
+
+    @pytest.mark.asyncio
     async def test_different_stat_types_are_separate_rows(self, db: Database) -> None:
         await _log(db, external_id="ext-multi", stat_type="Hits")
         await _log(db, external_id="ext-multi", stat_type="RBIs")
@@ -228,6 +287,35 @@ class TestGetGameResultForGrading:
             "Nobody Known", "MLB", "hits", "2020-01-01"
         )
         assert row is None
+
+    @pytest.mark.asyncio
+    async def test_falls_back_when_source_and_result_event_ids_differ(
+        self, db: Database
+    ) -> None:
+        game_date = "2026-08-31"
+        async with db.session() as s:
+            s.add(PlayerGameResult(
+                player_name="A. Guard",
+                sport="NBA",
+                stat_type="points",
+                game_date=game_date,
+                opponent="LA",
+                actual_value=24.0,
+                source="espn_gamelog",
+                game_id="espn-event-1",
+            ))
+            await s.commit()
+
+        row = await db.get_game_result_for_grading(
+            "A. Guard",
+            "NBA",
+            "Points",
+            game_date,
+            game_id="underdog-event-1",
+            provider="Underdog",
+        )
+        assert row is not None
+        assert row.actual_value == 24.0
 
 
 class TestGetTrackingSummary:
