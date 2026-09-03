@@ -5351,31 +5351,30 @@ class Database:
             return 0
 
         async with self.session() as s:
-            for start in range(0, len(prepared), 100):
-                rows = prepared[start:start + 100]
-                insert_stmt = _sqlite_insert(PropTrackingLog).values(rows)
-                # Tracking refreshes only the observation identity/metadata.
-                # Analytic fields, delivery fields, and grading fields remain
-                # owned by their respective pipelines.
-                update_columns = {
-                    column: getattr(insert_stmt.excluded, column)
-                    for column in (
-                        "player_name",
-                        "team",
-                        "sport",
-                        "line_value",
-                        "game_time",
-                        "game_id",
-                        "provider",
-                        "detected_at",
-                    )
-                }
-                stmt = insert_stmt.on_conflict_do_update(
-                    index_elements=["provider", "external_id", "stat_type"],
-                    set_=update_columns,
+            insert_stmt = _sqlite_insert(PropTrackingLog).values(prepared)
+            # Tracking refreshes only the observation identity/metadata.
+            # Analytic fields, delivery fields, and grading fields remain
+            # owned by their respective pipelines.  One transaction keeps
+            # universal tracking from spending a commit per 100 observations.
+            update_columns = {
+                column: getattr(insert_stmt.excluded, column)
+                for column in (
+                    "player_name",
+                    "team",
+                    "sport",
+                    "line_value",
+                    "game_time",
+                    "game_id",
+                    "provider",
+                    "detected_at",
                 )
-                await s.execute(stmt)
-                await s.commit()
+            }
+            stmt = insert_stmt.on_conflict_do_update(
+                index_elements=["provider", "external_id", "stat_type"],
+                set_=update_columns,
+            )
+            await s.execute(stmt)
+            await s.commit()
         return len(prepared)
 
     async def get_pending_tracked_props(

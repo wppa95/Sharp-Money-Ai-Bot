@@ -411,6 +411,9 @@ _prizepicks_processing_tasks: set[asyncio.Task] = set()
 _prizepicks_processing_lock: Optional[asyncio.Lock] = None
 _PRIZEPICKS_DEDUP_PREFIX = "PrizePicks::"
 _prizepicks_sport_cursor = 0
+_propline_request_cursor = 0
+_propline_pending_props: dict[tuple[str, str, str, str], object] = {}
+_propline_request_lock: Optional[asyncio.Lock] = None
 # Current PropLine observations are also available in-process while the
 # companion branch is running.  This is supplemental evidence only; it never
 # replaces an Underdog snapshot or creates a second alert path.
@@ -537,7 +540,8 @@ async def reset_monitoring_runtime_state() -> None:
     global _cycle_sequence, _active_jobs, _registry, _player_stats_provider
     global _player_result_fetch_cache, _prizepicks_cycle_task
     global _prizepicks_processing_tasks, _prizepicks_processing_lock
-    global _prizepicks_sport_cursor
+    global _prizepicks_sport_cursor, _propline_request_cursor
+    global _propline_pending_props, _propline_request_lock
     global _cold_start_done, _MARKET_FIRST_ALERT, _priority_override_sent
     global _ud_full_scan_running, _fpr_deferred_pending, _fpr_deferred_context
     global _fpr_handoff_task, _fpr_execution_running, _prop_market_alerted
@@ -568,6 +572,9 @@ async def reset_monitoring_runtime_state() -> None:
     _prizepicks_processing_tasks.clear()
     _prizepicks_processing_lock = None
     _prizepicks_sport_cursor = 0
+    _propline_request_cursor = 0
+    _propline_pending_props.clear()
+    _propline_request_lock = None
     _cold_start_done = False
     _MARKET_FIRST_ALERT.clear()
     _priority_override_sent.clear()
@@ -621,6 +628,84 @@ def _cache_propline_evidence(props: list[object]) -> None:
     ]
     for key in stale:
         _propline_current_observations.pop(key, None)
+
+
+def _propline_prop_key(prop: object) -> tuple[str, str, str, str]:
+    """Return a stable key for the latest PropLine observation buffer."""
+    return (
+        str(getattr(prop, "player_name", "") or "").strip().lower(),
+        str(getattr(prop, "sport", "") or "").strip().upper(),
+        str(getattr(prop, "stat_type", "") or "").strip().lower(),
+        str(
+            getattr(prop, "event_id", "")
+            or getattr(prop, "game_id", "")
+            or ""
+        ).strip(),
+    )
+
+
+async def propline_request_scan_job(context) -> None:
+    """Refresh one PropLine sport at the provider's continuous request pace.
+
+    This worker is fetch-only.  It does not score or deliver alerts.  The
+    shared 120-second PrizePicks branch consumes the latest buffered
+    observations, keeping request pacing independent from evaluation cadence.
+    """
+    global _propline_request_cursor, _propline_request_lock
+    provider = _propline_provider
+    if provider is None or not getattr(provider, "is_available", lambda: False)():
+        return
+    if _propline_request_lock is None:
+        _propline_request_lock = asyncio.Lock()
+
+    async with _propline_request_lock:
+        sports = await _get_prizepicks_scan_sports(provider)
+        if not sports:
+            logger.info("propline_request_scan: no active PrizePicks sports")
+            return
+        start = _propline_request_cursor % len(sports)
+        sport = sports[start]
+        _propline_request_cursor = (start + 1) % len(sports)
+        fetch_result = getattr(provider, "fetch_props_for_sport_result", None)
+        fetch_props = getattr(provider, "fetch_props_for_sport", None)
+        try:
+            if callable(fetch_result):
+                result = await fetch_result(sport, bookmaker="prizepicks")
+                props = list(getattr(result, "props", []) or [])
+                succeeded = bool(getattr(result, "succeeded", False))
+            elif callable(fetch_props):
+                props = list(await fetch_props(sport) or [])
+                succeeded = True
+            else:
+                props = []
+                succeeded = False
+            props = [
+                prop for prop in props
+                if not is_football_related_sport(getattr(prop, "sport", ""))
+            ]
+            if succeeded:
+                for prop in props:
+                    key = _propline_prop_key(prop)
+                    if key[0] and key[1] and key[2]:
+                        _propline_pending_props[key] = prop
+                _cache_propline_evidence(props)
+                logger.info(
+                    "propline_request_scan: sport=%s observations=%d pending=%d",
+                    sport,
+                    len(props),
+                    len(_propline_pending_props),
+                )
+            else:
+                logger.warning(
+                    "propline_request_scan: sport=%s provider returned no accepted snapshot",
+                    sport,
+                )
+        except Exception as exc:
+            logger.warning(
+                "propline_request_scan: sport=%s failed: %s",
+                sport,
+                type(exc).__name__,
+            )
 
 
 def _queue_deferred_fpr(context: object) -> None:
@@ -3065,13 +3150,23 @@ def _shared_monitoring_cycle(cycle_branch):
 
     @wraps(cycle_branch)
     async def _run_shared_cycle(context, *args, **kwargs):
-        global _prizepicks_cycle_task
+        global _prizepicks_cycle_task, _propline_pending_props
 
-        # The PropLine branch is created at the exact same scheduler trigger as
-        # the Underdog branch.  It is awaited below, so it cannot become an
-        # independent cadence or outlive the shared cycle.
+        # Consume the latest observations collected by the 17-second request
+        # worker.  A copy keeps the buffer safe while the next request scan
+        # refreshes it.
+        pending_props = list(_propline_pending_props.values())
+        _propline_pending_props.clear()
+
+        # The evaluation branch remains attached to the 120-second shared
+        # cycle.  It consumes paced observations when available and falls back
+        # to its existing one-sport fetch for isolated callers/tests.
         _prizepicks_cycle_task = asyncio.create_task(
-            _run_prizepicks_independent_cycle(context),
+            _run_prizepicks_independent_cycle(
+                context,
+                _fetched_props=pending_props if pending_props else None,
+                _fetched_sport="paced",
+            ),
             name="shared_monitoring_propline",
         )
         cycle_completed = False
@@ -3142,7 +3237,10 @@ async def underdog_job(context) -> None:
         return
 
     global _cold_start_done, _ud_scan_state, _ud_known_keys, _ud_scan_db_id
-    is_cold_start = not _cold_start_done   # True only on the very first successful fetch
+    # Cold-start scans and state restoration were removed.  Every cycle uses
+    # the same incremental/new-prop and line-change rules, including after a
+    # process restart; durable history remains available to normal scoring.
+    is_cold_start = False
     _new_db_context = _ud_scan_db_id != id(db)
     if _new_db_context:
         # Isolated callers/tests may provide a new database double for each
@@ -3215,22 +3313,6 @@ async def underdog_job(context) -> None:
             len(_mfa_stale), _MARKET_FIRST_ALERT_TTL_H, len(_MARKET_FIRST_ALERT),
         )
 
-    # On first run: restore module-level state from DB (market availability tracking)
-    if is_cold_start:
-        try:
-            await asyncio.wait_for(
-                _init_state_from_db(db),
-                timeout=_STATE_RESTORE_TIMEOUT_SECONDS,
-            )
-        except asyncio.TimeoutError:
-            # Recovery is a best-effort restart aid.  It must not prevent the
-            # live Underdog feed from starting when a large SQLite history is
-            # slow to read.
-            logger.warning(
-                "underdog_job: state recovery exceeded %.1fs; "
-                "continuing with live feed",
-                _STATE_RESTORE_TIMEOUT_SECONDS,
-            )
     _cycle_timing.finish("state_restore")
     _cycle_timing.start("fetch_parse")
 
@@ -6175,24 +6257,11 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
 
     _job_activity_start("fpr")
 
-    # The Underdog cold-start/full scan owns the database while it restores
-    # state and ingests the live feed.  Defer this rotation batch so the
-    # canonical FPR remains the only full-pool rotation once it starts.
-    if _ud_full_scan_running:
-        logger.info(
-            "full_pool_rescan: deferred while Underdog full scan is running"
-        )
-        _queue_deferred_fpr(context)
-        if _health:
-            _health.record_job_run("full_pool_rescan_job")
-        _job_activity_end("fpr")
-        return
-
-    # Claim the same serialized full-scan slot for the duration of the FPR
-    # batch.  This prevents the post-scan handoff from overlapping a new
-    # Underdog scan and keeps Stable Refresh from competing with this rotation.
+    # FPR is a bounded DB-backed rotation and no longer shares the Underdog
+    # fetch/scoring slot.  Both jobs are serialized independently by the
+    # scheduler coordinator, so a long live-feed cycle cannot defer or discard
+    # FPR progress.
     _fpr_execution_running = True
-    _ud_full_scan_running = True
 
     # ── Mutable cycle stats ───────────────────────────────────────────────────
     fpr_pool_size       = 0
