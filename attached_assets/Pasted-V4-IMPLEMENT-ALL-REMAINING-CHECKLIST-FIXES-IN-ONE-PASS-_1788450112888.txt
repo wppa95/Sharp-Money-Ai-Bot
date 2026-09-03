@@ -1,0 +1,356 @@
+V4 — IMPLEMENT ALL REMAINING CHECKLIST FIXES IN ONE PASS
+
+IMPORTANT: DO NOT STOP AFTER ANALYSIS. THIS IS AN IMPLEMENTATION TASK.
+
+Do NOT perform a read-only audit.
+Do NOT give me a diagnostic-only response.
+Do NOT restart repeatedly.
+Do NOT redesign working systems.
+Do NOT change working scoring, qualification thresholds, bankroll logic, monitoring cadence, scheduler architecture, restart behavior, PropLine pacing, or PropLine daily budget.
+Do NOT use Supabase.
+
+Make ONE coordinated implementation pass covering ALL remaining defects below.
+
+Keep the changes tightly scoped to the actual defects.
+
+After implementing, run the minimum focused tests needed to verify the fixes, then restart ONCE and report the result.
+
+SOURCE OF TRUTH — REMAINING V4 CHECKLIST:
+
+1. PROVIDER-SEPARATE TELEGRAM ALERTS
+
+PrizePicks and Underdog are EQUAL PRIMARY ACTIONABLE PROVIDERS.
+
+Every Telegram alert must represent exactly ONE provider opportunity.
+
+PP alert = PrizePicks opportunity only.
+UD alert = Underdog opportunity only.
+Never combine PP + UD in one alert.
+Never show a PP reference inside a UD alert.
+Never show a UD reference inside a PP alert.
+Same player/stat appearing on both providers remains TWO independent opportunities.
+
+Preserve provider identity through:
+evaluation
+qualification
+analyst
+selection
+persistence
+delivery
+monitoring
+grading
+
+PropLine is supplemental evidence for BOTH providers.
+PropLine is NEVER an actionable provider.
+PropLine must NEVER create synthetic PP/UD lines.
+
+2. NON-MLB RESULT RESOLUTION / GRADING
+
+Every valid tracked prop across ALL supported active sports must eventually resolve and grade when the relevant event/game is complete.
+
+Do NOT restrict result resolution to MLB.
+
+Preserve:
+provider
+player
+sport
+stat/market
+line
+event/game identity
+
+Resolve applicable outcomes as:
+WON
+LOST
+PUSH
+VOID
+UNRESOLVED
+INCOMPLETE
+
+according to the existing rules.
+
+Do NOT mark incomplete events as resolved.
+
+Neutral/non-actionable tracked observations may be graded for tracking purposes but must NOT contaminate actionable model calibration or actionable performance statistics.
+
+3. PENDING BACKLOG / SETTLEMENT
+
+Ensure completed events actually transition:
+
+PENDING -> RESULT -> GRADED
+
+Do not allow completed non-MLB or provider-specific records to remain indefinitely pending because of event-ID/provider-namespace differences.
+
+Use existing provider-scoped/event/date/stat/player fallback logic where necessary.
+
+Do NOT fabricate identities.
+Do NOT fabricate results.
+Do NOT redesign the tracking system.
+
+4. MULTI-SPORT ACTIONABLE EVALUATION -> ANALYST -> SELECTION -> DELIVERY
+
+THIS IS A CONFIRMED DEFECT.
+
+Current live evidence:
+
+MLB: directional 106 -> delivered 30
+NBA: directional 20 -> delivered 0
+TENNIS: directional 4 -> delivered 0
+PrizePicks: directional 24 -> persisted 24 -> delivered 0
+Underdog: directional 106 -> persisted 106 -> delivered 30
+
+The bot is producing actionable opportunities outside MLB, but they are not reaching Telegram.
+
+Fix the downstream pipeline so EVERY qualified actionable opportunity from EVERY active supported sport can flow through:
+
+Provider ingestion
+-> Tracking
+-> Evaluation
+-> Direction
+-> Qualification
+-> Analyst
+-> Strongest-pick selection
+-> Persistence
+-> Telegram delivery
+-> Monitoring
+-> Result
+-> Grade
+
+CRITICAL:
+
+Analyst MUST run BEFORE Telegram delivery.
+
+Analyst MUST NOT depend on an alert already having been delivered.
+
+A Telegram failure MUST NOT prevent Analyst assessment.
+
+Do NOT hardcode MLB as the only deliverable sport.
+
+Do NOT create sport-specific delivery exceptions unless required by an actual provider/API limitation.
+
+Do NOT change qualification thresholds merely to create more alerts.
+
+5. PRIZEPICKS / UNDERDOG PIPELINE PARITY
+
+PrizePicks and Underdog must have the same downstream treatment.
+
+Both must independently pass through:
+
+tracking
+evaluation
+direction
+qualification
+analyst
+strongest-pick selection
+persistence
+Telegram delivery
+monitoring
+result resolution
+grading
+performance tracking
+retry/error handling
+
+Current state:
+
+PrizePicks:
+94 observed -> 24 directional -> 24 persisted -> 0 delivered
+
+Underdog:
+4,852 observed -> 106 directional -> 106 persisted -> 30 delivered
+
+Fix the downstream PrizePicks delivery path without changing PrizePicks' independent provider identity.
+
+6. PROVIDER DATA / EVIDENCE COMPLETENESS
+
+PrizePicks and Underdog remain independent primary actionable providers.
+
+PropLine supplements missing supporting evidence for BOTH.
+
+Rules:
+
+PrizePicks actionable line remains PrizePicks' own line.
+Underdog actionable line remains Underdog's own line.
+PropLine may provide supporting history/evidence.
+PropLine must never become the actionable provider.
+Never merge PP and UD lines.
+Never merge PP and UD movement.
+Never merge provider histories.
+Never merge provider qualification.
+Never merge provider alert identity.
+Never merge provider grading.
+Never synthesize a primary-provider line from PropLine.
+
+Preserve the existing PropLine limits:
+
+5,000/day
+208/hour
+existing rolling limiter
+existing spacing
+no bursts/catch-up
+Retry-After behavior
+
+7. DIRECTION-SELECTION BALANCE
+
+Do NOT hardcode OVER or UNDER.
+
+Both directions must remain available based on the existing evidence/model.
+
+Do NOT alter the scoring model merely to force directional balance.
+
+Ensure the downstream pipeline does not accidentally discard one direction.
+
+8. PICK REASONING / EVIDENCE PROVENANCE INTEGRITY
+
+Fix only genuine provenance/calculation defects.
+
+For every actionable pick, the displayed reasoning must actually support the selected direction.
+
+Verify and fix where necessary:
+
+exact historical evidence source
+player identity
+event/game identity
+market/stat identity
+L5/L10/L20/L30 calculations
+historical average used
+exact percentage/movement calculation
+no cross-market contamination
+no stale/cache mismatch
+displayed reasoning mathematically matches the underlying data
+
+Example requiring protection:
+
+Jack Perkins Pitching Outs 15.5 UNDER had correct underlying L5/L10/L30 history, but the displayed "Line is 7% above historical average" did not obviously reconcile with the displayed averages.
+
+Do NOT replace correct evidence with invented data.
+
+Do NOT fabricate a calculation simply to make the explanation look consistent.
+
+9. SLIP BUILDER INTEGRITY
+
+The /slip command currently reported:
+
+"5 slip sizes built from 4 Underdog and PrizePicks props"
+
+while:
+
+2-Man had 2 legs
+3-Man had 3 legs
+4-Man had 4 legs
+5-Man had only 4 legs
+6-Man had only 4 legs
+
+Fix this.
+
+A 5-Man slip MUST contain 5 eligible legs.
+A 6-Man slip MUST contain 6 eligible legs.
+
+If insufficient eligible props exist:
+
+Do NOT label an undersized slip as 5-Man or 6-Man.
+Clearly report that there are insufficient eligible props.
+Never duplicate a leg merely to reach the requested size.
+Preserve provider separation.
+Preserve existing no-duplicate-player/no-correlation rules.
+Never weaken qualification just to fill a slip.
+
+10. SLIP METRIC INTEGRITY
+
+/slip currently displays Avg move 0.0 even when underlying selected props have actual movement.
+
+Fix the metric calculation/display.
+
+Slip metrics must be calculated from the actual selected legs:
+
+average movement
+average confidence
+any sharp/model metrics already displayed
+
+Do NOT display placeholder zeroes as meaningful values.
+
+If a metric is unavailable, explicitly display unavailable rather than 0.0.
+
+Do NOT alter the underlying scoring model.
+
+11. STALE / INVALID EVENT + ACTIONABLE PICK INTEGRITY
+
+Current /picks output has serious integrity problems.
+
+Example:
+
+NBA props were shown as actionable despite:
+
+Confidence 0/100
+BQ 21
+Market Quality 33 BELOW STRONG
+Evidence completeness 0
+Model projection unavailable
+historical evidence unavailable
+starts in approximately 1138h
+
+These MUST NOT be represented as valid actionable/qualified picks.
+
+Fix the actionable-pick gate so an opportunity must have:
+
+valid event/game identity
+legitimately upcoming/current event time
+valid primary-provider line
+required evidence
+valid qualification state
+internally consistent confidence/quality fields
+
+Reject stale/invalid events BEFORE actionable selection/delivery.
+
+A historical record must NEVER become actionable merely because historical data exists.
+
+Do not allow:
+
+confidence 0 to be presented as a qualified strong/actionable pick
+missing evidence to pass qualification
+unavailable projections to masquerade as valid actionable analysis
+stale timestamps to produce immediate actionable picks
+stars/labels that contradict the actual qualification state
+
+Apply this across ALL sports, not just NBA.
+
+ARCHITECTURAL CONSTRAINTS:
+
+Do NOT change monitoring cadence.
+Do NOT change scheduler/coordinator architecture.
+Do NOT change restart behavior.
+Do NOT change PropLine 5,000/day budget.
+Do NOT change PropLine 208/hour pacing.
+Do NOT change scoring formulas unless required to correct item 8.
+Do NOT change qualification thresholds unless required to enforce item 11.
+Do NOT change bankroll rules.
+Do NOT redesign tracking architecture unless required for items 2 and 3.
+Do NOT change provider separation.
+Do NOT change strongest-pick ranking principles.
+Do NOT change existing no-duplicate/correlation rules.
+Do NOT add Supabase.
+
+Implement these as ONE coordinated downstream/data-integrity fix.
+
+VALIDATION AFTER IMPLEMENTATION:
+
+1. Run focused tests for all affected paths.
+2. Run the existing full test suite if practical without excessive credit usage.
+3. Restart the bot ONCE.
+4. Confirm the bot starts with exactly one active process.
+5. Confirm PrizePicks and Underdog remain completely separate.
+6. Confirm non-MLB actionable opportunities can reach Analyst and Telegram.
+7. Confirm completed non-MLB results can reach grading.
+8. Confirm /slip never reports an undersized 5-Man or 6-Man slip as complete.
+9. Confirm /picks rejects stale/invalid/confidence-0 opportunities.
+10. Confirm the existing PropLine limits remain unchanged.
+11. Confirm OVER and UNDER are both still available according to evidence.
+12. Confirm actionable reasoning remains tied to the correct provider/player/event/market evidence.
+
+IMPORTANT:
+
+Do NOT make additional changes after this implementation pass.
+
+Do NOT start another unrelated refactor.
+
+Do NOT redesign working architecture.
+
+The objective is to FIX THE ENTIRE REMAINING CHECKLIST IN ONE CONTROLLED IMPLEMENTATION PASS while preserving everything already working in V4.
