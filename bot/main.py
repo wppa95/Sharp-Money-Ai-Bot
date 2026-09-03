@@ -813,6 +813,8 @@ _GRADE_FETCH_TIMEOUT_SECONDS = 20
 async def _grade_opportunities_job(context) -> None:
     """
     Every hour: grade completed tracked props from stored game results.
+    The job proactively calls ``fetch_results`` for every pending identity
+    before reading the persisted result rows.
 
     Finds PENDING rows in prop_opportunity_log whose event is old enough to
     resolve, looks up the actual player stat in player_game_results, and
