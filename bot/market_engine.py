@@ -3614,21 +3614,19 @@ async def underdog_job(context) -> None:
                     "underdog_job: tracking hook is not awaitable; "
                     "skipping compatibility stub"
                 )
-                _tracking_operation = None
-            if _tracking_operation is None:
-                raise StopAsyncIteration
-            _tracking_timeout = max(
-                1.0,
-                min(20.0, _cycle_deadline - time.monotonic()),
-            )
-            await _cycle_timing.await_db(
-                "write",
-                "track_prop_records",
-                asyncio.wait_for(
-                    _tracking_operation,
-                    timeout=_tracking_timeout,
-                ),
-            )
+            else:
+                _tracking_timeout = max(
+                    1.0,
+                    min(20.0, _cycle_deadline - time.monotonic()),
+                )
+                await _cycle_timing.await_db(
+                    "write",
+                    "track_prop_records",
+                    asyncio.wait_for(
+                        _tracking_operation,
+                        timeout=_tracking_timeout,
+                    ),
+                )
         except asyncio.TimeoutError:
             logger.warning(
                 "underdog_job: universal tracking write exceeded %.1fs; "
