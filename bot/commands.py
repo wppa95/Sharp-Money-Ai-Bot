@@ -3232,7 +3232,8 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     ud_props = [
         p for p in ud_props
         if not _is_season_future(p.stat_type)
-        and _has_current_prop_data(p, now)
+        # Direction may be supplied by the fresh snapshot lookup below.
+        and _has_current_prop_data(p, now, require_direction=False)
         and _is_active_display_sport(p.sport)
         and not is_telegram_suppressed_sport(p.sport)
         and _is_upcoming_game(
