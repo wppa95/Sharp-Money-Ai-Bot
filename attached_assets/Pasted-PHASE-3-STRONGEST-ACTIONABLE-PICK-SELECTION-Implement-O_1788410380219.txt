@@ -1,0 +1,222 @@
+PHASE 3 — STRONGEST ACTIONABLE PICK SELECTION
+
+Implement ONLY the strongest-pick selection layer discussed below.
+
+Do NOT redesign the scoring model.
+Do NOT change confidence calculations.
+Do NOT change qualification thresholds.
+Do NOT change PLAY rules.
+Do NOT change alert thresholds.
+Do NOT change bankroll/risk logic.
+Do NOT change PropLine pacing, retry behavior, or the 5,000/day cap / 208-hour cap.
+Do NOT change scheduler behavior.
+Do NOT change restart behavior.
+Do NOT merge PrizePicks and Underdog.
+
+CORE RULE
+
+After the existing analysis + qualification pipeline has identified actionable qualifying props, select the strongest actionable opportunity rather than allowing multiple weaker props for the same player to survive simply because they independently qualify.
+
+For each PRIMARY PROVIDER independently:
+
+PrizePicks:
+PP candidates → existing analysis → existing qualification → strongest-pick selection → existing PLAY/alert path
+
+Underdog:
+UD candidates → existing analysis → existing qualification → strongest-pick selection → existing PLAY/alert path
+
+PP and UD MUST remain completely independent.
+
+If the same player has a qualifying PP opportunity and a qualifying UD opportunity, BOTH may survive because they are separate provider opportunities.
+
+WITHIN ONE PROVIDER
+
+When multiple qualifying props belong to the same player:
+
+* Rank the qualifying opportunities by the EXISTING analysis outputs.
+* Keep the strongest actionable opportunity for that player.
+* Suppress weaker same-provider opportunities for that same player.
+* Do NOT suppress a stronger opportunity merely because another stat for the same player also qualifies.
+* Do NOT create new scoring formulas.
+* Do NOT invent a new confidence model.
+
+The ranking must use existing available signals/outputs only.
+
+Prefer the opportunity with the strongest existing evidence and strongest existing qualification signal.
+
+If the existing pipeline already exposes a confidence score, tier, edge/EV, line movement strength, historical support, or equivalent ranking signal, use those existing values rather than creating replacement metrics.
+
+TIES / NEAR-TIES
+
+Create a deterministic tie-break order using existing fields only.
+
+The tie-break must be stable so the same input produces the same selected prop.
+
+Do not use randomness.
+
+Do not select based on provider order, dictionary order, database row order, or whichever prop happens to be processed first.
+
+IMPORTANT:
+
+This is NOT a global “one pick per player” rule.
+
+It is:
+
+ONE STRONGEST PICK PER PLAYER PER PRIMARY PROVIDER.
+
+Therefore:
+
+Player X:
+
+* PP qualifying prop A
+* PP qualifying prop B
+* UD qualifying prop C
+
+Expected result:
+
+* PP A OR B survives — whichever is strongest.
+* UD C survives independently.
+
+If Player X has strong PP and strong UD opportunities for the same stat, BOTH remain valid because provider identity remains separate.
+
+DO NOT MERGE PROVIDER DATA
+
+Never:
+
+* merge PP and UD lines
+* merge PP and UD movement
+* merge PP and UD history
+* merge PP and UD qualification
+* merge provider identities
+* deduplicate PP against UD
+* treat a PP opportunity as replacing a UD opportunity
+* treat a UD opportunity as replacing a PP opportunity
+
+PROP TYPE / MARKET SAFETY
+
+The selector must operate only on already-qualified actionable opportunities.
+
+Do not broaden the market universe.
+
+Do not turn unsupported props into picks.
+
+Do not create synthetic lines.
+
+Do not alter the actual primary-provider line.
+
+Do not alter movement data.
+
+Do not alter PropLine provenance.
+
+PROP-LINE SAFETY
+
+PropLine remains supplemental evidence only.
+
+Do not make PropLine its own actionable provider.
+
+Do not create a PropLine pick.
+
+Do not let PropLine identity replace PP or UD identity.
+
+Do not alter the Phase 2 supplementation behavior.
+
+SELECTION PLACEMENT
+
+Place the selector at the narrowest appropriate point AFTER existing qualification has determined that a prop is actionable and BEFORE the existing PLAY/alert emission path.
+
+Do not interfere with evidence collection or analysis.
+
+Do not run selection before qualification.
+
+Do not change the qualification result itself.
+
+The purpose is simply:
+
+MORE QUALIFYING PROPS
+↓
+STRONGEST-PICK SELECTION
+↓
+FEWER WEAKER DUPLICATE SAME-PLAYER OPPORTUNITIES
+↓
+EXISTING PLAY / ALERT PATH
+
+TELEGRAM
+
+Do not redesign Telegram.
+
+Do not change Telegram delivery behavior.
+
+The selector should only determine which already-qualified opportunities reach the existing PLAY/alert path.
+
+A suppressed weaker prop should not generate an alert.
+
+A selected stronger prop should continue through the existing alert path unchanged.
+
+TESTING
+
+Add focused tests covering at minimum:
+
+1. Same player, same provider, two qualifying props → only strongest survives.
+2. Same player, PP + UD qualifying props → both survive.
+3. Different players → all qualifying strongest props survive.
+4. Three or more qualifying props for one player/provider → exactly one survives.
+5. Stronger prop processed later → it still wins; do not depend on processing order.
+6. Exact tie → deterministic winner.
+7. PropLine supplemental evidence does not become a separate pick.
+8. Existing primary-provider line remains unchanged.
+9. Existing qualification results remain unchanged.
+10. Existing scoring/confidence outputs remain unchanged.
+11. Suppressed props do not reach Telegram.
+12. Selected props continue through the existing PLAY/alert path.
+13. Existing risk/bankroll rules remain unchanged.
+
+REGRESSION / VERIFICATION
+
+Run:
+
+* focused Phase 3 tests
+* full test suite
+* Python compilation
+* git diff –check
+
+Then perform a clean restart.
+
+Verify:
+
+* startup reaches “Bot initialised and ready”
+* health endpoint OK
+* exactly one bot/main.py process
+* no duplicate scheduler
+* no stale process
+* existing scheduler behavior unchanged
+* PropLine 5,000/day cap unchanged
+* PropLine 208/hour pacing unchanged
+* no changes to scoring/qualification/alert thresholds
+* PP/UD remain independent
+
+REPORT
+
+Report:
+
+* exact files changed
+* exact location where strongest-pick selection was inserted
+* exact existing fields/signals used for ranking
+* deterministic tie-break order
+* proof PP and UD remain independent
+* proof PropLine remains supplemental only
+* focused test count/results
+* full suite count/results
+* compile result
+* diff-check result
+* clean restart result
+* process count
+* any limitations
+
+IMPORTANT:
+Implement ONLY this Phase 3 strongest-pick selection layer.
+
+Do not make unrelated fixes.
+Do not refactor unrelated code.
+Do not change scoring, qualification, alerts, Telegram, bankroll, risk, scheduler, PropLine pacing, or provider architecture.
+
+STOP after Phase 3 verification.
