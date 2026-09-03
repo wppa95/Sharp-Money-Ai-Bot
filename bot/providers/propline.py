@@ -3102,6 +3102,14 @@ class PropLineClient:
                 if (prop := normalize_propline_prizepicks_record(record, fetched_at=fetched_at))
                 is not None
             ]
+            logger.info(
+                "PropLine PrizePicks snapshot: sport=%s raw_records=%d "
+                "normalized_props=%d complete=%s",
+                sport_key or "__custom__",
+                len(raw_records),
+                len(props),
+                complete,
+            )
             if not complete:
                 logger.warning("PropLine snapshot incomplete: %s", pagination_error)
                 return self._failed_result(

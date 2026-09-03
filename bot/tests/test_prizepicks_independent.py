@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 import logging
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import select
@@ -189,6 +190,74 @@ class TestIndependentPrizePicks:
         )
 
         assert calls == [("NBA", "prizepicks")]
+
+    async def test_current_normalized_props_reach_universal_tracking(
+        self, monkeypatch, caplog
+    ):
+        prop = SimpleNamespace(
+            provider="PrizePicks",
+            player_name="Current Feed Player",
+            team="TM",
+            sport="NBA",
+            stat_type="points",
+            line_value=20.5,
+            game_time=None,
+            external_id="current-feed-prop",
+            event_id="current-feed-event",
+            fetched_at=datetime.utcnow(),
+        )
+
+        class FakeProvider:
+            def is_available(self):
+                return True
+
+            async def fetch_props_for_sport_result(self, sport, bookmaker=None):
+                assert sport == "NBA"
+                assert bookmaker == "prizepicks"
+                return PropLineFetchResult(
+                    [prop], datetime.utcnow(), succeeded=True, complete=True
+                )
+
+        class FakeDB:
+            def __init__(self):
+                self.saved = []
+                self.tracked = []
+
+            async def get_prop_line_history(self, *args, **kwargs):
+                return []
+
+            async def upsert_prop_line_history_batch(self, provider, props, **kwargs):
+                self.saved.append((provider, list(props), kwargs))
+                return len(props)
+
+            async def track_prop_records(self, records):
+                self.tracked.extend(records)
+
+        monkeypatch.setattr(market_engine, "_propline_provider", FakeProvider())
+        monkeypatch.setattr(market_engine, "_prizepicks_sport_cursor", 0)
+        monkeypatch.setattr(
+            market_engine.config, "PRIZEPICKS_LEAGUES_RAW", "NBA"
+        )
+        monkeypatch.setattr(
+            market_engine, "_fetch_and_compute_hit_rates", AsyncMock(return_value=None)
+        )
+        monkeypatch.setattr(market_engine, "get_health_tracker", lambda: None)
+        monkeypatch.setattr(market_engine, "get_health_monitor", lambda: None)
+
+        db = FakeDB()
+        with caplog.at_level(logging.INFO):
+            await market_engine._run_prizepicks_independent_cycle(
+                SimpleNamespace(bot_data={"db": db}, bot=object())
+            )
+
+        assert len(db.saved) == 2
+        assert db.saved[0][0] == "PrizePicks"
+        assert db.saved[0][2] == {"append_snapshot": True}
+        assert db.saved[1][0] == "PrizePicks"
+        assert db.saved[1][2] == {"refresh_metadata": True}
+        assert len(db.tracked) == 1
+        assert db.tracked[0]["provider"] == "PrizePicks"
+        assert "observations=1 persisted=1" in caplog.text
 
     async def test_failed_propline_fetch_is_not_recorded_as_provider_success(
         self, monkeypatch, caplog

@@ -110,3 +110,4 @@
 - [Telegram command bootstrap](telegram-command-bootstrap.md) — Invalid bot credentials fail polling before handlers run; verify bootstrap before debugging individual commands.
 - [Telegram log redaction](telegram-log-redaction.md) — Managed HTTP logger handlers may bypass app filters; verify captured workflow output and suppress credential-bearing request INFO logs.
 - [Serialized delivery evidence](serialized-delivery-evidence.md) — persisted provenance labels must carry a sufficient sample count before they can support directional delivery.
+- [PropLine zero-observation diagnosis](propline-zero-observations.md) — distinguish empty sport slates from normalization regressions with raw-vs-normalized counts.
