@@ -80,6 +80,7 @@ class PlayerHistorySnapshot:
     total_proxy_snaps: int
     records: list[PlayerHistoryRecord] = field(default_factory=list)
     supplemental_sources: tuple[str, ...] = ()
+    supplemental_records: list[PlayerHistoryRecord] = field(default_factory=list)
 
     def preferred_l5(self) -> Optional[float]:
         return self.l5.hit_rate if self.l5 else self.proxy_l5
@@ -122,9 +123,10 @@ class PlayerHistorySnapshot:
 
 
 class PlayerHistoryProvider:
-    def __init__(self) -> None:
+    def __init__(self, propline_client=None) -> None:
         self._fetch_cache: set[tuple[str, str, str, str, str]] = set()
-        self._supplement_cache: set[tuple[str, str, str, str]] = set()
+        self._supplement_cache: dict[tuple[str, str, str, str], list] = {}
+        self._propline_client = propline_client
 
     async def get_snapshot(
         self,
@@ -183,6 +185,33 @@ class PlayerHistoryProvider:
             for r in db_results
         ]
         real_records.sort(key=lambda x: x.date, reverse=True)
+        supplemental_records: list[PlayerHistoryRecord] = []
+        if (
+            str(source_provider or "").strip().lower() == "underdog"
+            and len(real_records) < max(1, int(min_samples))
+        ):
+            supplemental_results = await self.supplement_missing_results(
+                db,
+                player_name,
+                sport_u,
+                stat_type,
+                min_samples=min_samples,
+                instrumentation=instrumentation,
+            )
+            supplemental_records = [
+                PlayerHistoryRecord(
+                    player=r.player_name,
+                    sport=r.sport,
+                    stat=r.stat_type,
+                    game_id=r.game_id or r.game_date,
+                    date=r.game_date,
+                    opponent=r.opponent,
+                    value=float(r.actual_value),
+                    source=getattr(r, "source", "propline_history"),
+                )
+                for r in supplemental_results
+            ]
+            supplemental_records.sort(key=lambda x: x.date, reverse=True)
 
         l5 = _window_from_values(real_records[:5], current_line, required_games=5)
         l10 = _window_from_values(real_records[:10], current_line, required_games=10)
@@ -221,9 +250,10 @@ class PlayerHistoryProvider:
             records=real_records,
             supplemental_sources=tuple(sorted({
                 record.source
-                for record in real_records
+                for record in supplemental_records
                 if record.source.lower().startswith("propline")
             })),
+            supplemental_records=supplemental_records,
         )
         if instrumentation is not None:
             instrumentation.duration(
@@ -294,15 +324,6 @@ class PlayerHistoryProvider:
             # identity.  PropLine is consulted only when the existing player
             # result evidence is still below the validation sample threshold.
             # PrizePicks never enters this branch.
-            if provider_scope == "underdog":
-                await self.supplement_missing_results(
-                    db,
-                    player_name,
-                    sport,
-                    stat_type,
-                    min_samples=min_samples,
-                    instrumentation=instrumentation,
-                )
             self._fetch_cache.add(key)
             if raw:
                 logger.debug(
@@ -325,12 +346,17 @@ class PlayerHistoryProvider:
         *,
         min_samples: int = 5,
         instrumentation=None,
-    ) -> None:
-        """Fill only missing Underdog evidence from official PropLine history."""
+    ) -> list:
+        """Return missing Underdog evidence from official PropLine history.
+
+        The rows intentionally stay out of ``player_game_results`` for now.
+        That table is the primary result source used by pick calculations;
+        persistence of supplemental rows is a separate follow-up concern.
+        """
         today = datetime.utcnow().date().isoformat()
         key = (player_name, sport, stat_type.lower().strip(), today)
         if key in self._supplement_cache:
-            return
+            return list(self._supplement_cache[key])
         try:
             existing = await db.get_player_results(
                 player_name, sport, stat_type, limit=max(1, int(min_samples))
@@ -339,8 +365,8 @@ class PlayerHistoryProvider:
             existing = []
         required = max(1, int(min_samples))
         if len(existing) >= required:
-            self._supplement_cache.add(key)
-            return
+            self._supplement_cache[key] = []
+            return []
 
         supplemental = await self._fetch_propline_history(
             player_name,
@@ -348,19 +374,10 @@ class PlayerHistoryProvider:
             stat_type,
             instrumentation=instrumentation,
         )
-        for result in _merge_game_results(existing, supplemental):
-            if result in existing:
-                continue
-            if instrumentation is not None:
-                await instrumentation.await_db(
-                    "write", "upsert_player_result_propline",
-                    db.upsert_player_result(result),
-                )
-            else:
-                await db.upsert_player_result(result)
         if supplemental and instrumentation is not None:
             instrumentation.count("propline_supplemental_props")
-        self._supplement_cache.add(key)
+        self._supplement_cache[key] = list(supplemental)
+        return list(supplemental)
 
     async def _fetch_propline_history(
         self,
@@ -374,7 +391,9 @@ class PlayerHistoryProvider:
         from providers.player_stats import RawGameResult
         from providers.propline import PropLineClient, _normalize_stat, _parse_datetime
 
-        client = PropLineClient()
+        if self._propline_client is None:
+            self._propline_client = PropLineClient()
+        client = self._propline_client
         if not client.is_configured:
             return []
         official_sport = client.official_sport_for(sport)
