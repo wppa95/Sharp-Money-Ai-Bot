@@ -81,6 +81,13 @@ class PlayerHitRates:
     has_real_data: bool
     total_games:   int
 
+    # Evidence provenance.  Supplemental rows remain eligible for the existing
+    # decision engine, but callers can distinguish them from primary-provider
+    # game results without inspecting the input list.
+    data_source: str = "primary"
+    n_supplemental_games: int = 0
+    supplemental_sources: tuple[str, ...] = ()
+
 
 # ── Computation ───────────────────────────────────────────────────────────────
 

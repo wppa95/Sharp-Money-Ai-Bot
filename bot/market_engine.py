@@ -1367,6 +1367,8 @@ async def _fetch_and_compute_hit_rates(
             db_results = await db.get_player_results(player_name, sport, stat_type, limit=30)
         if cycle_timing is not None:
             cycle_timing.count("evidence_lookups")
+        primary_result_count = len(db_results)
+        supplemental_count = 0
         if supplemental_results is None and len(db_results) < config.UD_VALIDATION_MIN_SAMPLES:
             try:
                 from providers.player_history import get_player_history_provider
@@ -1389,6 +1391,7 @@ async def _fetch_and_compute_hit_rates(
                 )
         if supplemental_results:
             db_results = _merge_hit_rate_results(db_results, supplemental_results)
+            supplemental_count = max(0, len(db_results) - primary_result_count)
         if not db_results:
             if cycle_timing is not None:
                 cycle_timing.count("props_without_evidence")
@@ -1414,6 +1417,17 @@ async def _fetch_and_compute_hit_rates(
                 type(result).__name__, player_name, stat_type,
             )
             return None
+        if supplemental_count:
+            result = replace(
+                result,
+                data_source=(
+                    "propline"
+                    if primary_result_count == 0
+                    else "primary+propline"
+                ),
+                n_supplemental_games=supplemental_count,
+                supplemental_sources=("PropLine",),
+            )
         return result
 
     except Exception as exc:  # noqa: BLE001
