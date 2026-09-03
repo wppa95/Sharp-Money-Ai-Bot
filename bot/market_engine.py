@@ -4295,6 +4295,21 @@ async def underdog_job(context) -> None:
                     "get_ud_prop_history",
                     db.get_ud_prop_history(_sp, _st, limit=30),
                 )
+                _shistory_snap = None
+                try:
+                    from providers.player_history import get_player_history_provider
+                    _shistory_snap = await get_player_history_provider().get_snapshot(
+                        db,
+                        _sp,
+                        _ssport,
+                        _st,
+                        _line_val,
+                        ud_history=_shist,
+                        source_provider="Underdog",
+                        instrumentation=_cycle_timing,
+                    )
+                except Exception:
+                    _shistory_snap = None
                 _sscore = _cycle_timing.sync_operation("core_scoring", "score_ud_prop", score_ud_prop,
                     player_name  = _sp,
                     stat_type    = _st,
@@ -4309,6 +4324,7 @@ async def underdog_job(context) -> None:
                     current_line = _line_val,
                     history      = _shist,
                     min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
+                    history_snap = _shistory_snap,
                 )
                 if not _sval.has_supporting_data:
                     logger.debug(
@@ -4320,6 +4336,7 @@ async def underdog_job(context) -> None:
                 _shits = await _fetch_and_compute_hit_rates(
                     db, _sp, _ssport, _st, _line_val,
                     cycle_timing=_cycle_timing,
+                    source_provider="Underdog",
                 )
                 _sdec = make_ud_bet_decision(
                     score        = _sscore,
@@ -5444,6 +5461,21 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
 
             # ── Score + validate ──────────────────────────────────────────────
             _sr_hist  = await db.get_ud_prop_history(_sr_player, _sr_stat, limit=30)
+            _sr_history_snap = None
+            try:
+                from providers.player_history import get_player_history_provider
+                _sr_history_snap = await get_player_history_provider().get_snapshot(
+                    db,
+                    _sr_player,
+                    _sr_sport,
+                    _sr_stat,
+                    _sr_line,
+                    ud_history=_sr_hist,
+                    source_provider="Underdog",
+                    ensure_real_results=False,
+                )
+            except Exception:
+                _sr_history_snap = None
             _sr_score = _sr_score_fn(
                 player_name  = _sr_player,
                 stat_type    = _sr_stat,
@@ -5458,6 +5490,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 current_line = _sr_line,
                 history      = _sr_hist,
                 min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
+                history_snap = _sr_history_snap,
             )
 
             # ── Normal quality gates ──────────────────────────────────────────
@@ -5466,7 +5499,9 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 continue
 
             _sr_hits = await _fetch_and_compute_hit_rates(
-                db, _sr_player, _sr_sport, _sr_stat, _sr_line, allow_remote=False
+                db, _sr_player, _sr_sport, _sr_stat, _sr_line,
+                allow_remote=False,
+                source_provider="Underdog",
             )
             _sr_dec = _sr_decide(
                 score        = _sr_score,
@@ -6247,15 +6282,41 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 )
 
                 _fpr_val = _fpr_validate(
+                    # Full-pool rescans intentionally do not fetch primary
+                    # provider stats remotely; the snapshot still checks the
+                    # cached primary table and can supplement a genuine gap.
                     player_name  = _fpr_player,
                     stat_type    = _fpr_stat,
                     current_line = _fpr_line,
                     history      = _fpr_hist,
                     min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
                 )
+                _fpr_history_snap = None
+                try:
+                    from providers.player_history import get_player_history_provider
+                    _fpr_history_snap = await get_player_history_provider().get_snapshot(
+                        db,
+                        _fpr_player,
+                        _fpr_sport,
+                        _fpr_stat,
+                        _fpr_line,
+                        source_provider=_fpr_provider,
+                        ensure_real_results=False,
+                    )
+                except Exception:
+                    _fpr_history_snap = None
+                _fpr_val = _fpr_validate(
+                    player_name  = _fpr_player,
+                    stat_type    = _fpr_stat,
+                    current_line = _fpr_line,
+                    history      = _fpr_hist,
+                    min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
+                    history_snap = _fpr_history_snap,
+                )
                 _fpr_hits = await _fetch_and_compute_hit_rates(
                     db, _fpr_player, _fpr_sport, _fpr_stat, _fpr_line,
                     allow_remote=False,
+                    source_provider=_fpr_provider,
                     preloaded_results=_fpr_results_by_prop.get(
                         (_fpr_player, _fpr_sport, _fpr_stat.lower().strip())
                     ) if _fpr_results_by_prop else None,

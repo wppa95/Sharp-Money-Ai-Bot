@@ -179,20 +179,22 @@ class PlayerHistoryProvider:
         force_refresh: bool = False,
         source_provider: str = "Underdog",
         instrumentation=None,
+        ensure_real_results: bool = True,
     ) -> PlayerHistorySnapshot:
         sport_u = (sport or "UNKNOWN").upper()
         stat_l = stat_type.lower().strip()
 
-        await self._ensure_real_results(
-            db,
-            player_name,
-            sport_u,
-            stat_type,
-            source_provider=source_provider,
-            min_samples=min_samples,
-            force_refresh=force_refresh,
-            instrumentation=instrumentation,
-        )
+        if ensure_real_results:
+            await self._ensure_real_results(
+                db,
+                player_name,
+                sport_u,
+                stat_type,
+                source_provider=source_provider,
+                min_samples=min_samples,
+                force_refresh=force_refresh,
+                instrumentation=instrumentation,
+            )
         if instrumentation is not None:
             db_results = await instrumentation.await_db(
                 "read",
