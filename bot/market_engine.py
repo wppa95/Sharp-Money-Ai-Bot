@@ -6342,6 +6342,15 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         if _health:
             _health.record_job_run("full_pool_rescan_job")
         return
+    # Keep direct callers safe if they explicitly invoke the legacy FPR while
+    # a live feed scan owns the slot. The production scheduler no longer
+    # registers this database-backed job.
+    if _ud_full_scan_running:
+        _queue_deferred_fpr(context)
+        logger.info("full_pool_rescan: explicit direct request queued behind Underdog scan")
+        if _health:
+            _health.record_job_run("full_pool_rescan_job")
+        return
 
     _job_activity_start("fpr")
 
