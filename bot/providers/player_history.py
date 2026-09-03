@@ -428,6 +428,27 @@ class PlayerHistoryProvider:
         self._supplement_cache[key] = list(supplemental)
         return list(supplemental)
 
+    async def fetch_resolved_results(
+        self,
+        player_name: str,
+        sport: str,
+        stat_type: str,
+        *,
+        instrumentation=None,
+    ) -> list:
+        """Fetch resolved PropLine results for settlement reconciliation.
+
+        Unlike ``supplement_missing_results``, this intentionally does not
+        short-circuit when the primary history already has five rows: grading
+        needs the specific completed event, not merely a sufficient sample.
+        """
+        return await self._fetch_propline_history(
+            player_name,
+            sport,
+            stat_type,
+            instrumentation=instrumentation,
+        )
+
     async def _fetch_propline_history(
         self,
         player_name: str,

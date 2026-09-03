@@ -930,6 +930,53 @@ async def _grade_opportunities_job(context) -> None:
         except Exception as _prov_exc:
             logger.warning("_grade_opportunities_job: stat provider init failed: %s", _prov_exc)
 
+        # If the public stat provider has no row for a completed event, use
+        # PropLine's resolved history as a settlement fallback.  This is
+        # especially important for CS: PandaScore is optional when PropLine
+        # already exposes the event result.  The fallback is event-specific
+        # and read-only; it never grades an unresolved or guessed row.
+        _propline_grade_provider = None
+        _propline_grade_cache: dict[tuple[str, str, str], list] = {}
+        try:
+            from providers.player_history import get_player_history_provider
+            _propline_grade_provider = get_player_history_provider()
+        except Exception as _propline_init_exc:
+            logger.debug(
+                "_grade_opportunities_job: PropLine grading fallback unavailable: %s",
+                _propline_init_exc,
+            )
+
+        async def _fetch_propline_grade_results(_gopp):
+            if _propline_grade_provider is None:
+                return []
+            _key = (
+                str(_gopp.player_name),
+                str(_gopp.sport).upper(),
+                str(_gopp.stat_type or "").lower().strip(),
+            )
+            if _key not in _propline_grade_cache:
+                try:
+                    _propline_grade_cache[_key] = list(
+                        await asyncio.wait_for(
+                            _propline_grade_provider.fetch_resolved_results(
+                                _gopp.player_name,
+                                _gopp.sport,
+                                _gopp.stat_type,
+                            ),
+                            timeout=_GRADE_FETCH_TIMEOUT_SECONDS,
+                        )
+                    )
+                except Exception as _propline_grade_exc:
+                    logger.debug(
+                        "_grade_opportunities_job: PropLine settlement lookup "
+                        "failed for %s/%s: %s",
+                        _gopp.player_name,
+                        _gopp.stat_type,
+                        _propline_grade_exc,
+                    )
+                    _propline_grade_cache[_key] = []
+            return _propline_grade_cache[_key]
+
         graded   = 0
         no_data  = 0
         for opp in pending:
@@ -954,6 +1001,19 @@ async def _grade_opportunities_job(context) -> None:
                 opp.player_name, opp.sport, opp.stat_type, game_date,
                 **_result_lookup_kwargs,
             )
+            if result_row is None:
+                # A date is required to safely reconcile a PropLine result to
+                # this opportunity.  Never fall back by player/stat alone.
+                if game_date:
+                    for _propline_result in await _fetch_propline_grade_results(opp):
+                        await db.upsert_player_result(_propline_result)
+                    result_row = await db.get_game_result_for_grading(
+                        opp.player_name,
+                        opp.sport,
+                        opp.stat_type,
+                        game_date,
+                        **_result_lookup_kwargs,
+                    )
             if result_row is None:
                 no_data += 1
                 logger.debug(
