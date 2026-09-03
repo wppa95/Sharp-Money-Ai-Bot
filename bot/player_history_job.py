@@ -38,6 +38,36 @@ def _underdog_scan_running() -> bool:
         return False
 
 
+# A live Underdog scan can take longer than this job's four-minute cadence
+# when the SQLite pool is under load. Waiting for the current scan is
+# preferable to yielding every scheduled run indefinitely: otherwise non-MLB
+# sports never accumulate the real game results required for a pick.
+_SCAN_SLOT_POLL_SECONDS = 5.0
+_SCAN_SLOT_MAX_WAIT_SECONDS = 900.0
+
+
+async def _wait_for_underdog_scan_slot() -> bool:
+    """Wait for the live scan to release the shared database-heavy slot."""
+    waited = 0.0
+    while _underdog_scan_running() and waited < _SCAN_SLOT_MAX_WAIT_SECONDS:
+        await asyncio.sleep(_SCAN_SLOT_POLL_SECONDS)
+        waited += _SCAN_SLOT_POLL_SECONDS
+    if _underdog_scan_running():
+        logger.warning(
+            "player_history_collector_job: Underdog scan held slot for "
+            "%.0fs — yielding without starting provider work",
+            waited,
+        )
+        return False
+    if waited:
+        logger.info(
+            "player_history_collector_job: resumed after Underdog scan "
+            "released slot (waited %.0fs)",
+            waited,
+        )
+    return True
+
+
 def _fair_cycle_targets(
     targets: list[tuple[str, str, str]],
     limit: int,
@@ -77,12 +107,10 @@ async def player_history_collector_job(context) -> None:
         logger.warning("player_history_collector_job: db not ready")
         return
     ht = get_health_tracker()
-    # Player history is enrichment, not the live monitoring path.  Do not
-    # start another pool read while Underdog owns the shared scan slot.
-    if _underdog_scan_running():
-        logger.info(
-            "player_history_collector_job: Underdog scan active — yielding this cycle"
-        )
+    # Player history is enrichment, not the live monitoring path. Do not
+    # start another pool read while Underdog owns the shared scan slot, but
+    # wait for the current scan instead of throwing away every cadence tick.
+    if not await _wait_for_underdog_scan_slot():
         if ht:
             ht.record_job_started("player_history_collector_job")
             ht.record_job_run("player_history_collector_job")
