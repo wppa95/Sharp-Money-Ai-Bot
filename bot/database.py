@@ -3016,6 +3016,48 @@ class Database:
             )
             return list(result.scalars().all())
 
+    async def get_propline_line_movement_history(
+        self,
+        player_name: str,
+        sport: str,
+        stat_type: str,
+        limit: int = 30,
+        *,
+        external_id: str = "",
+        game_id: str = "",
+    ) -> "list[PropLineHistory]":
+        """Return chronological PropLine observations for one source identity.
+
+        A source ID or event ID is required so separate PrizePicks events or
+        alternate projections cannot be combined into one movement timeline.
+        The existing append-only ``PropLineHistory`` rows remain the sole data
+        source; this method only changes selection order and applies the
+        provider boundary.
+        """
+        source_id = str(external_id or "").strip()
+        event_id = str(game_id or "").strip()
+        if not source_id and not event_id:
+            return []
+        safe_limit = max(1, int(limit))
+        async with self.session() as s:
+            filters = [
+                PropLineHistory.provider == "PrizePicks",
+                PropLineHistory.player_name == player_name,
+                PropLineHistory.sport == sport,
+                PropLineHistory.stat_type == stat_type,
+            ]
+            if source_id:
+                filters.append(PropLineHistory.external_id == source_id)
+            else:
+                filters.append(PropLineHistory.game_id == event_id)
+            result = await s.execute(
+                select(PropLineHistory)
+                .where(*filters)
+                .order_by(PropLineHistory.fetched_at.asc(), PropLineHistory.id.asc())
+                .limit(safe_limit)
+            )
+            return list(result.scalars().all())
+
     async def get_latest_props_for_provider(
         self,
         provider: str,

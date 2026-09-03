@@ -17,6 +17,7 @@ from providers.propline import (
     PropLineClient,
     PropLinePrizePicksProvider,
     PropLineRequestLimiter,
+    build_propline_line_movement,
     propline_event_identity,
     propline_market_identity,
     propline_player_identity,
@@ -698,6 +699,83 @@ def test_player_prop_extra_metadata_is_optional_for_existing_providers():
     assert prop.direction == ""
     assert prop.source_timestamp is None
     assert prop.supplemental_source == ""
+
+
+def test_propline_line_movement_is_chronological_and_provider_scoped():
+    now = datetime(2026, 8, 28, 12, 0, 0)
+    rows = [
+        SimpleNamespace(
+            provider="PrizePicks",
+            player_name="Alex Example",
+            sport="NBA",
+            stat_type="points",
+            line_value=25.5,
+            external_id="projection-1",
+            game_id="game-1",
+            fetched_at=now + timedelta(minutes=20),
+            supplemental_source="PropLine",
+        ),
+        SimpleNamespace(
+            provider="Underdog",
+            player_name="Alex Example",
+            sport="NBA",
+            stat_type="points",
+            line_value=99.0,
+            external_id="ud-1",
+            game_id="game-1",
+            fetched_at=now + timedelta(minutes=30),
+        ),
+        SimpleNamespace(
+            provider="PrizePicks",
+            player_name="Alex Example",
+            sport="NBA",
+            stat_type="points",
+            line_value=24.5,
+            external_id="projection-1",
+            game_id="game-1",
+            fetched_at=now,
+            supplemental_source="PropLine",
+        ),
+    ]
+
+    history = build_propline_line_movement(rows)
+
+    assert history is not None
+    assert history.provider == "PrizePicks"
+    assert history.opening_line == 24.5
+    assert history.current_line == 25.5
+    assert history.total_delta == 1.0
+    assert history.change_count == 1
+    assert history.direction == "UP"
+    assert [point.line_value for point in history.points] == [24.5, 25.5]
+    assert history.points[-1].delta_from_previous == 1.0
+    assert history.supplemental_source == "PropLine"
+
+
+def test_propline_line_movement_rejects_mixed_source_identities():
+    now = datetime(2026, 8, 28, 12, 0, 0)
+    rows = [
+        SimpleNamespace(
+            provider="PrizePicks",
+            player_name="Alex Example",
+            sport="NBA",
+            stat_type="points",
+            line_value=24.5,
+            external_id="projection-1",
+            fetched_at=now,
+        ),
+        SimpleNamespace(
+            provider="PrizePicks",
+            player_name="Alex Example",
+            sport="NBA",
+            stat_type="points",
+            line_value=25.5,
+            external_id="projection-2",
+            fetched_at=now + timedelta(minutes=5),
+        ),
+    ]
+
+    assert build_propline_line_movement(rows) is None
 
 
 def test_propline_default_budget_matches_plan_without_changing_hourly_limit():

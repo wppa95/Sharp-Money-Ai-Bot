@@ -136,6 +136,37 @@ class TestPropLineHistory:
         assert len(hits) == 1
         assert len(runs) == 1
 
+    async def test_get_propline_movement_history_requires_identity_and_is_chronological(self, db):
+        now = datetime.utcnow()
+        await db.save_prop_line_history_bulk([
+            self._make_record(
+                provider="PrizePicks",
+                line_value=25.5,
+                fetched_at=now + timedelta(minutes=5),
+            ),
+            self._make_record(
+                provider="PrizePicks",
+                line_value=24.5,
+                fetched_at=now,
+            ),
+            self._make_record(
+                provider="Underdog",
+                line_value=99.0,
+                fetched_at=now + timedelta(minutes=10),
+            ),
+        ])
+
+        assert await db.get_propline_line_movement_history(
+            "Mike Trout", "MLB", "Hits"
+        ) == []
+        history = await db.get_propline_line_movement_history(
+            "Mike Trout", "MLB", "Hits",
+            external_id="ext-001",
+        )
+
+        assert [row.line_value for row in history] == [24.5, 25.5]
+        assert {row.provider for row in history} == {"PrizePicks"}
+
     async def test_count_filtered_by_provider(self, db):
         await db.save_prop_line_history(self._make_record(provider="Underdog"))
         await db.save_prop_line_history(self._make_record(provider="PrizePicks"))

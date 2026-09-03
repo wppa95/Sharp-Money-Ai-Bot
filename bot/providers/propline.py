@@ -22,7 +22,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable, Iterable, Optional
 from urllib.parse import quote
 
 import aiohttp
@@ -348,6 +348,139 @@ class PropLineSnapshotState:
     @property
     def snapshot_complete(self) -> bool:
         return self.complete
+
+
+@dataclass(frozen=True)
+class PropLineMovementPoint:
+    """One timestamped PropLine observation in a movement timeline."""
+
+    observed_at: datetime
+    line_value: float
+    delta_from_previous: Optional[float] = None
+    delta_from_opening: Optional[float] = None
+    external_id: str = ""
+    event_id: str = ""
+    provider: str = PROPLINE_PROVIDER_NAME
+    supplemental_source: str = ""
+
+
+@dataclass(frozen=True)
+class PropLineMovementHistory:
+    """Read-only line movement evidence for one PrizePicks source identity."""
+
+    provider: str
+    player_name: str
+    sport: str
+    stat_type: str
+    opening_line: float
+    current_line: float
+    total_delta: float
+    change_count: int
+    points: tuple[PropLineMovementPoint, ...]
+    supplemental_source: str = ""
+
+    @property
+    def direction(self) -> str:
+        """Return the observed movement direction without making a bet decision."""
+        if self.total_delta > 0:
+            return "UP"
+        if self.total_delta < 0:
+            return "DOWN"
+        return "FLAT"
+
+
+def build_propline_line_movement(
+    rows: Iterable[Any],
+    *,
+    provider: str = PROPLINE_PROVIDER_NAME,
+) -> Optional[PropLineMovementHistory]:
+    """Build a source-scoped movement timeline from persisted observations.
+
+    This is intentionally a pure evidence helper.  It never calls PropLine,
+    changes a provider line, or produces a recommendation.  Rows from another
+    provider are ignored so PrizePicks and Underdog history cannot be mixed.
+    Callers should pass rows selected for one source identity (external ID or
+    event ID); mixed source identities are rejected rather than combined.
+    """
+    expected_provider = _clean(provider)
+    candidates = [
+        row for row in rows
+        if _clean(getattr(row, "provider", "")) == expected_provider
+    ]
+    if not candidates:
+        return None
+
+    source_ids = {
+        _clean(getattr(row, "external_id", ""))
+        or _clean(getattr(row, "game_id", ""))
+        for row in candidates
+    }
+    source_ids.discard("")
+    if len(source_ids) > 1:
+        return None
+
+    normalized: list[tuple[datetime, Any, float]] = []
+    for row in candidates:
+        observed_at = getattr(row, "fetched_at", None)
+        if not isinstance(observed_at, datetime):
+            continue
+        try:
+            line_value = float(getattr(row, "line_value"))
+        except (TypeError, ValueError):
+            continue
+        normalized.append((observed_at, row, line_value))
+    if not normalized:
+        return None
+
+    normalized.sort(key=lambda item: item[0])
+    opening_line = normalized[0][2]
+    previous_line: Optional[float] = None
+    points: list[PropLineMovementPoint] = []
+    change_count = 0
+    supplemental_sources: set[str] = set()
+
+    for observed_at, row, line_value in normalized:
+        delta_from_previous = (
+            line_value - previous_line if previous_line is not None else None
+        )
+        if delta_from_previous is not None and abs(delta_from_previous) >= 0.01:
+            change_count += 1
+        supplemental_source = _clean(getattr(row, "supplemental_source", ""))
+        if supplemental_source:
+            supplemental_sources.add(supplemental_source)
+        points.append(
+            PropLineMovementPoint(
+                observed_at=observed_at,
+                line_value=line_value,
+                delta_from_previous=delta_from_previous,
+                delta_from_opening=line_value - opening_line,
+                external_id=_clean(getattr(row, "external_id", "")),
+                event_id=_clean(
+                    getattr(row, "event_id", "")
+                    or getattr(row, "game_id", "")
+                ),
+                provider=expected_provider,
+                supplemental_source=supplemental_source,
+            )
+        )
+        previous_line = line_value
+
+    current_line = points[-1].line_value
+    return PropLineMovementHistory(
+        provider=expected_provider,
+        player_name=_clean(getattr(normalized[0][1], "player_name", "")),
+        sport=_clean(getattr(normalized[0][1], "sport", "")),
+        stat_type=_clean(getattr(normalized[0][1], "stat_type", "")),
+        opening_line=opening_line,
+        current_line=current_line,
+        total_delta=current_line - opening_line,
+        change_count=change_count,
+        points=tuple(points),
+        supplemental_source=(
+            "PropLine" if "PropLine" in supplemental_sources
+            else (sorted(supplemental_sources)[0] if supplemental_sources else "")
+        ),
+    )
 
 
 @dataclass(frozen=True)
