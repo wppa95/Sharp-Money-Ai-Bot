@@ -99,6 +99,7 @@
 - [FPR cursor fairness](fpr-cursor-fairness.md) — stable identity order is the rotation; new/moving props get bounded prompt capacity without consuming cursor coverage.
 - [Async SQLite test fixtures](async-sqlite-test-fixtures.md) — module-scoped in-memory DB fixtures can lose tables across pytest event loops; use function-scoped fixtures for isolation.
 - [PropLine pagination safety](propline-pagination.md) — shared request budgeting, loop-safe pagination, complete-snapshot retention, and immutable-field event rediscovery protect the authorized feed.
+- [PropLine results boundary](propline-results-resolution.md) — official event results expose explicit resolutions; missing resolution is unresolved and terminal lines never become settlements.
 - [Workflow manager stale-path failure](workflow-manager-stale-path.md) — managed workflow operations can fail before launch when the workspace index references a deleted secondary-skill path.
 - [Telegram alert presentation](telegram-alert-presentation.md) — user-facing prop alerts use plain quality/market labels and one deduplicated history section.
 - [Command reporting boundaries](command-reporting-boundaries.md) — reports separate populations; current picks require fresh future rows and persisted engine output, never synthetic display defaults.
