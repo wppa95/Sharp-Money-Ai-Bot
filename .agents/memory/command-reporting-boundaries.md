@@ -14,3 +14,9 @@ Provider and event/source identity must travel with current-pick intelligence an
 **Why:** A player can have simultaneous provider-owned lines and event contexts, so a broad join can display evidence or narrative belonging to a different opportunity.
 
 **How to apply:** Use provider plus source/event identity for current-row enrichment, and never infer the current opponent from the newest unrelated completed game.
+
+Status readiness must distinguish missing real player-game evidence from a sport that has evidence but produced no qualifying directional opportunity in the reporting window; shadow-only or settlement rows are not readiness.
+
+**Why:** A configured multi-sport slate can be healthy and fully scanned while only one sport has usable evidence. Collapsing that state into “no picks” hides provider coverage failures, while treating shadow data as evidence would misrepresent actionable readiness.
+
+**How to apply:** Build readiness from source-level player-result coverage plus recent directional opportunity counts, and keep the report separate from delivery and market-observation totals.
