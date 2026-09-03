@@ -374,6 +374,8 @@ class PlayerHistoryProvider:
             stat_type,
             instrumentation=instrumentation,
         )
+        merged = _merge_game_results(existing, supplemental)
+        supplemental = merged[len(existing):]
         if supplemental and instrumentation is not None:
             instrumentation.count("propline_supplemental_props")
         self._supplement_cache[key] = list(supplemental)
