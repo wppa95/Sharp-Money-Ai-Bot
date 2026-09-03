@@ -15,9 +15,11 @@ from providers.propline import (
     PROPLINE_MAX_REQUESTS_PER_HOUR,
     PropLineRequestBudget,
     PropLineClient,
+    PropLineClosingLineEvidence,
     PropLinePrizePicksProvider,
     PropLineRequestLimiter,
     build_propline_line_movement,
+    build_propline_closing_line_evidence,
     build_propline_opening_line_evidence,
     propline_event_identity,
     propline_market_identity,
@@ -770,6 +772,86 @@ def test_propline_opening_evidence_rejects_non_prizepicks_rows():
     )
 
     assert build_propline_opening_line_evidence(row) is None
+
+
+def test_propline_closing_evidence_labels_last_observation_as_terminal():
+    now = datetime(2026, 8, 28, 12, 0, 0)
+    rows = [
+        SimpleNamespace(
+            provider="PrizePicks",
+            player_name="Alex Example",
+            sport="NBA",
+            stat_type="points",
+            line_value=24.5,
+            external_id="projection-1",
+            game_id="game-1",
+            fetched_at=now,
+            provider_status="available",
+            supplemental_source="PropLine",
+        ),
+        SimpleNamespace(
+            provider="PrizePicks",
+            player_name="Alex Example",
+            sport="NBA",
+            stat_type="points",
+            line_value=25.5,
+            external_id="projection-1",
+            game_id="game-1",
+            fetched_at=now + timedelta(minutes=20),
+            provider_status="available",
+            supplemental_source="PropLine",
+        ),
+    ]
+
+    evidence = build_propline_closing_line_evidence(rows)
+
+    assert isinstance(evidence, PropLineClosingLineEvidence)
+    assert evidence.is_verified_closing is False
+    assert evidence.label == "TERMINAL_LAST_OBSERVED"
+    assert evidence.evidence_basis == "last_persisted_observation"
+    assert evidence.line_value == 25.5
+    assert evidence.provider == "PrizePicks"
+    assert evidence.supplemental_source == "PropLine"
+
+
+def test_propline_closing_evidence_requires_explicit_closed_state():
+    row = SimpleNamespace(
+        provider="PrizePicks",
+        player_name="Alex Example",
+        sport="NBA",
+        stat_type="points",
+        line_value=25.5,
+        external_id="projection-1",
+        game_id="game-1",
+        fetched_at=datetime(2026, 8, 28, 12, 0, 0),
+        provider_status="final",
+        supplemental_source="PropLine",
+    )
+
+    evidence = build_propline_closing_line_evidence([row])
+
+    assert evidence is not None
+    assert evidence.is_verified_closing is True
+    assert evidence.label == "VERIFIED_CLOSING_LINE"
+    assert evidence.evidence_basis == "provider_closed_state"
+    assert evidence.provider_status == "final"
+
+
+def test_propline_closing_evidence_rejects_missing_or_mixed_identity():
+    base = dict(
+        provider="PrizePicks",
+        player_name="Alex Example",
+        sport="NBA",
+        stat_type="points",
+        line_value=25.5,
+        fetched_at=datetime(2026, 8, 28, 12, 0, 0),
+        provider_status="final",
+    )
+    assert build_propline_closing_line_evidence([SimpleNamespace(**base)]) is None
+    assert build_propline_closing_line_evidence([
+        SimpleNamespace(**base, external_id="projection-1"),
+        SimpleNamespace(**base, external_id="projection-2"),
+    ]) is None
 
 
 def test_propline_line_movement_rejects_mixed_source_identities():

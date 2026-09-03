@@ -3078,6 +3078,42 @@ class Database:
         )
         return rows[0] if rows else None
 
+    async def get_propline_terminal_line(
+        self,
+        player_name: str,
+        sport: str,
+        stat_type: str,
+        *,
+        external_id: str = "",
+        game_id: str = "",
+    ) -> Optional[PropLineHistory]:
+        """Return the latest persisted PrizePicks observation for one source."""
+        source_id = str(external_id or "").strip()
+        event_id = str(game_id or "").strip()
+        if not source_id and not event_id:
+            return None
+        async with self.session() as s:
+            filters = [
+                PropLineHistory.provider == "PrizePicks",
+                PropLineHistory.player_name == player_name,
+                PropLineHistory.sport == sport,
+                PropLineHistory.stat_type == stat_type,
+            ]
+            if source_id:
+                filters.append(PropLineHistory.external_id == source_id)
+            else:
+                filters.append(PropLineHistory.game_id == event_id)
+            result = await s.execute(
+                select(PropLineHistory)
+                .where(*filters)
+                .order_by(
+                    PropLineHistory.fetched_at.desc(),
+                    PropLineHistory.id.desc(),
+                )
+                .limit(1)
+            )
+            return result.scalar_one_or_none()
+
     async def get_latest_props_for_provider(
         self,
         provider: str,

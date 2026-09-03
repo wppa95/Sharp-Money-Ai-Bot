@@ -379,6 +379,40 @@ class PropLineOpeningLineEvidence:
     supplemental_source: str = ""
 
 
+PROPLINE_VERIFIED_CLOSING_LABEL = "VERIFIED_CLOSING_LINE"
+PROPLINE_TERMINAL_OBSERVED_LABEL = "TERMINAL_LAST_OBSERVED"
+PROPLINE_VERIFIED_CLOSING_BASIS = "provider_closed_state"
+PROPLINE_TERMINAL_OBSERVED_BASIS = "last_persisted_observation"
+_PROPLINE_CLOSED_STATUSES = {
+    "closed",
+    "complete",
+    "completed",
+    "final",
+    "resolved",
+    "settled",
+    "settlement",
+}
+
+
+@dataclass(frozen=True)
+class PropLineClosingLineEvidence:
+    """Last line evidence, explicitly distinguished from a verified close."""
+
+    observed_at: datetime
+    line_value: float
+    label: str
+    evidence_basis: str
+    is_verified_closing: bool
+    provider_status: str
+    provider: str
+    player_name: str
+    sport: str
+    stat_type: str
+    external_id: str = ""
+    event_id: str = ""
+    supplemental_source: str = ""
+
+
 @dataclass(frozen=True)
 class PropLineMovementHistory:
     """Read-only line movement evidence for one PrizePicks source identity."""
@@ -434,6 +468,90 @@ def build_propline_opening_line_evidence(
             or getattr(row, "game_id", "")
         ),
         supplemental_source=_clean(getattr(row, "supplemental_source", "")),
+    )
+
+
+def _propline_status_is_closed(status: Any) -> bool:
+    """Accept only explicit provider states that establish market completion."""
+    normalized = re.sub(r"[^a-z]+", "_", _clean(status).lower()).strip("_")
+    return normalized in _PROPLINE_CLOSED_STATUSES
+
+
+def build_propline_closing_line_evidence(
+    rows: Iterable[Any],
+    *,
+    provider: str = PROPLINE_PROVIDER_NAME,
+    event_status: str = "",
+) -> Optional[PropLineClosingLineEvidence]:
+    """Build close evidence without upgrading a last observation to a close.
+
+    The latest source-scoped persisted observation is always available as
+    terminal evidence.  It becomes a verified closing line only when the
+    caller or latest source row supplies an explicit closed/final state.
+    """
+    expected_provider = _clean(provider)
+    candidates = [
+        row for row in rows
+        if _clean(getattr(row, "provider", "")) == expected_provider
+    ]
+    if not candidates:
+        return None
+
+    source_ids = {
+        _clean(getattr(row, "external_id", ""))
+        or _clean(getattr(row, "game_id", ""))
+        for row in candidates
+    }
+    source_ids.discard("")
+    if len(source_ids) != 1:
+        return None
+
+    dated_rows = [
+        row for row in candidates
+        if isinstance(getattr(row, "fetched_at", None), datetime)
+    ]
+    if not dated_rows:
+        return None
+    latest = max(
+        dated_rows,
+        key=lambda row: (
+            getattr(row, "fetched_at"),
+            int(getattr(row, "id", 0) or 0),
+        ),
+    )
+    movement = build_propline_line_movement(
+        candidates,
+        provider=expected_provider,
+    )
+    if movement is None or not movement.points:
+        return None
+    latest_point = movement.points[-1]
+    source_status = _clean(
+        event_status or getattr(latest, "provider_status", "")
+    )
+    verified = _propline_status_is_closed(source_status)
+    return PropLineClosingLineEvidence(
+        observed_at=latest_point.observed_at,
+        line_value=latest_point.line_value,
+        label=(
+            PROPLINE_VERIFIED_CLOSING_LABEL
+            if verified
+            else PROPLINE_TERMINAL_OBSERVED_LABEL
+        ),
+        evidence_basis=(
+            PROPLINE_VERIFIED_CLOSING_BASIS
+            if verified
+            else PROPLINE_TERMINAL_OBSERVED_BASIS
+        ),
+        is_verified_closing=verified,
+        provider_status=source_status,
+        provider=expected_provider,
+        player_name=movement.player_name,
+        sport=movement.sport,
+        stat_type=movement.stat_type,
+        external_id=latest_point.external_id,
+        event_id=latest_point.event_id,
+        supplemental_source=latest_point.supplemental_source,
     )
 
 

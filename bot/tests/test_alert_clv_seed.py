@@ -173,6 +173,16 @@ class TestPropLineHistory:
         assert opening is not None
         assert opening.line_value == 24.5
         assert opening.provider == "PrizePicks"
+        terminal = await db.get_propline_terminal_line(
+            "Mike Trout", "MLB", "Hits",
+            external_id="ext-001",
+        )
+        assert terminal is not None
+        assert terminal.line_value == 25.5
+        assert terminal.provider == "PrizePicks"
+        assert await db.get_propline_terminal_line(
+            "Mike Trout", "MLB", "Hits"
+        ) is None
 
     async def test_count_filtered_by_provider(self, db):
         await db.save_prop_line_history(self._make_record(provider="Underdog"))
