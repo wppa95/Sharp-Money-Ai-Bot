@@ -5238,17 +5238,83 @@ class Database:
                 await s.commit()
         return len(prepared)
 
+    async def get_pending_tracked_props(
+        self,
+        cutoff_hours: int = 4,
+        after_id: Optional[int] = None,
+        limit: int = 500,
+    ) -> "list[PropTrackingLog]":
+        """Return old, unresolved universal tracking rows for settlement."""
+        from datetime import timedelta
+
+        cutoff = datetime.utcnow() - timedelta(hours=cutoff_hours)
+        async with self.session() as s:
+            stmt = (
+                select(PropTrackingLog)
+                .where(
+                    PropTrackingLog.result == "PENDING",
+                    or_(
+                        and_(
+                            PropTrackingLog.game_time.isnot(None),
+                            PropTrackingLog.game_time < cutoff,
+                        ),
+                        and_(
+                            PropTrackingLog.game_time.is_(None),
+                            PropTrackingLog.detected_at < cutoff,
+                            PropTrackingLog.game_id != "",
+                        ),
+                    ),
+                )
+                .order_by(PropTrackingLog.detected_at, PropTrackingLog.id)
+            )
+            if after_id is not None:
+                stmt = stmt.where(PropTrackingLog.id > int(after_id))
+            result = await s.execute(stmt.limit(max(1, min(int(limit), 500))))
+            return list(result.scalars().all())
+
+    @_retry_sqlite_write
+    async def grade_tracked_prop(
+        self,
+        tracking_id: int,
+        result: str,
+        actual_value: float,
+        void_reason: Optional[str] = None,
+    ) -> None:
+        """Set a terminal settlement on a universal tracking row once."""
+        from sqlalchemy import update as _sa_update
+
+        values: dict = {
+            "result": result,
+            "actual_value": actual_value,
+            "graded_at": datetime.utcnow(),
+            "settlement_source": "auto_grade",
+        }
+        if void_reason is not None:
+            values["void_reason"] = str(void_reason)[:64]
+        async with self.session() as s:
+            await s.execute(
+                _sa_update(PropTrackingLog)
+                .where(
+                    PropTrackingLog.id == tracking_id,
+                    or_(
+                        PropTrackingLog.result == "PENDING",
+                        PropTrackingLog.result.is_(None),
+                        PropTrackingLog.result == "",
+                    ),
+                )
+                .values(**values)
+            )
+            await s.commit()
+
     @_retry_sqlite_write
     async def log_prop_opportunity_bulk(
         self,
         opportunities: "list[dict]",
     ) -> int:
-        """Batch-upsert prop opportunities in bounded chunks.
+        """Batch-upsert directional prop opportunities in bounded chunks.
 
-        Directional rows use OVER/UNDER.  ``NONE`` is reserved for neutral
-        ingestion tracking rows and is accepted here for compatibility with
-        callers that batch both kinds of record.  Grading fields are
-        deliberately omitted from conflict updates.
+        The universal ingestion ledger uses ``track_prop_records`` instead.
+        Grading fields are deliberately omitted from conflict updates.
         """
         if not opportunities:
             return 0
@@ -5268,7 +5334,7 @@ class Database:
             _recommendation = str(
                 opportunity.get("recommendation") or ""
             ).upper()
-            if _recommendation not in ("OVER", "UNDER", "NONE"):
+            if _recommendation not in ("OVER", "UNDER"):
                 continue
 
             _external_id = opportunity.get("external_id")
