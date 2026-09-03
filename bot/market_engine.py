@@ -1297,6 +1297,8 @@ async def _fetch_and_compute_hit_rates(
     allow_remote: bool = True,
     cycle_timing: Optional[_CycleTiming] = None,
     preloaded_results: Optional[list] = None,
+    source_provider: str = "Underdog",
+    supplemental_results: Optional[list] = None,
 ) -> "Optional[object]":
     """
     Fetch fresh game results (at most once per calendar day per player/stat),
@@ -1365,6 +1367,28 @@ async def _fetch_and_compute_hit_rates(
             db_results = await db.get_player_results(player_name, sport, stat_type, limit=30)
         if cycle_timing is not None:
             cycle_timing.count("evidence_lookups")
+        if supplemental_results is None and len(db_results) < config.UD_VALIDATION_MIN_SAMPLES:
+            try:
+                from providers.player_history import get_player_history_provider
+                supplemental_results = await get_player_history_provider().supplement_missing_results(
+                    db,
+                    player_name,
+                    sport,
+                    stat_type,
+                    min_samples=config.UD_VALIDATION_MIN_SAMPLES,
+                    source_provider=source_provider,
+                    instrumentation=cycle_timing,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "_fetch_and_compute_hit_rates: supplemental history unavailable "
+                    "for %s/%s: %s",
+                    player_name,
+                    stat_type,
+                    exc,
+                )
+        if supplemental_results:
+            db_results = _merge_hit_rate_results(db_results, supplemental_results)
         if not db_results:
             if cycle_timing is not None:
                 cycle_timing.count("props_without_evidence")
@@ -1397,6 +1421,39 @@ async def _fetch_and_compute_hit_rates(
             "_fetch_and_compute_hit_rates: %s / %s: %s", player_name, stat_type, exc
         )
         return None
+
+
+def _merge_hit_rate_results(primary: list, supplemental: list) -> list:
+    """Merge primary and supplemental game rows without counting one game twice."""
+    seen: set[tuple[str, str]] = set()
+    merged: list = []
+    for row in [*primary, *supplemental]:
+        identity = (
+            str(
+                getattr(row, "game_id", "")
+                or getattr(row, "game_date", "")
+                or getattr(row, "date", "")
+                or ""
+            ).strip(),
+            str(
+                getattr(row, "stat_type", "")
+                or getattr(row, "stat", "")
+                or ""
+            ).lower().strip(),
+        )
+        if identity in seen:
+            continue
+        seen.add(identity)
+        merged.append(row)
+    merged.sort(
+        key=lambda row: str(
+            getattr(row, "game_date", "")
+            or getattr(row, "date", "")
+            or ""
+        ),
+        reverse=True,
+    )
+    return merged
 
 
 def _prizepicks_dedup_player(player_name: str) -> str:

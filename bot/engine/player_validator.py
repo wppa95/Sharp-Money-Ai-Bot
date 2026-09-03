@@ -47,6 +47,8 @@ class PlayerPropValidation:
     data_source: str = "proxy"   # "real" | "proxy" | "none"
     n_real_games: int = 0
     n_proxy_snaps: int = 0
+    n_supplemental_games: int = 0
+    supplemental_sources: tuple[str, ...] = ()
 
     def to_json(self) -> str:
         def _r(v: Optional[float]) -> Optional[float]:
@@ -68,6 +70,8 @@ class PlayerPropValidation:
                 "src": self.data_source,
                 "n_real": self.n_real_games,
                 "n_proxy": self.n_proxy_snaps,
+                "n_supp": self.n_supplemental_games,
+                "supp": list(self.supplemental_sources),
             },
             separators=(",", ":"),
         )
@@ -76,8 +80,8 @@ class PlayerPropValidation:
         if self.n_history == 0 and self.n_real_games == 0:
             return "no history"
         parts = []
-        if self.data_source == "real":
-            parts.append(f"n={self.n_real_games}")
+        if self.data_source in {"real", "propline", "real+propline"}:
+            parts.append(f"n={self.n_real_games + self.n_supplemental_games}")
             for label, val in (("L5", self.l5_rate), ("L10", self.l10_rate), ("L20", self.l20_rate)):
                 if val is not None:
                     parts.append(f"{label}={val:.0%}")
@@ -129,22 +133,38 @@ def validate_player_prop(
     )
 
     n_real = 0
+    n_supplemental = 0
+    supplemental_sources: tuple[str, ...] = ()
     season_hr: Optional[float] = None
     h2h_hr: Optional[float] = None
     data_source = "none"
     l5_rate = l10_rate = l20_rate = l30_rate = None
     n_history = 0
 
-    if history_snap is not None and history_snap.has_real_data:
+    has_snapshot_evidence = bool(
+        history_snap is not None
+        and (
+            history_snap.has_real_data
+            or getattr(history_snap, "has_supplemental_data", False)
+        )
+    )
+    if has_snapshot_evidence:
         n_real = history_snap.total_real_games
-        data_source = "real"
+        n_supplemental = getattr(history_snap, "total_supplemental_games", 0)
+        supplemental_sources = tuple(
+            getattr(history_snap, "supplemental_sources", ()) or ()
+        )
+        if n_supplemental:
+            data_source = "propline" if n_real == 0 else "real+propline"
+        else:
+            data_source = "real"
         l5_rate = history_snap.preferred_l5()
         l10_rate = history_snap.preferred_l10()
         l20_rate = history_snap.preferred_l20()
         l30_rate = history_snap.preferred_l30()
         season_hr = history_snap.season_hit_rate()
         h2h_hr = history_snap.h2h_hit_rate()
-        n_history = n_real
+        n_history = n_real + n_supplemental
     elif n_proxy > 0:
         data_source = "proxy"
         l5_rate = proxy_l5
@@ -156,14 +176,15 @@ def validate_player_prop(
     has_data = (
         n_history >= min_samples
         or n_proxy >= min_samples
-        or n_real >= min_samples
+        or n_real + n_supplemental >= min_samples
     )
 
-    if n_history == 0 and n_proxy == 0 and n_real == 0:
+    if n_history == 0 and n_proxy == 0 and n_real == 0 and n_supplemental == 0:
         reason = "No history — first appearance; digest only"
     elif not has_data:
         reason = (
-            f"Insufficient history (real={n_real}, proxy={n_proxy}, "
+            f"Insufficient history (real={n_real}, supplemental={n_supplemental}, "
+            f"proxy={n_proxy}, "
             f"need {min_samples}); digest only"
         )
     else:
@@ -196,4 +217,6 @@ def validate_player_prop(
         data_source=data_source,
         n_real_games=n_real,
         n_proxy_snaps=n_proxy,
+        n_supplemental_games=n_supplemental,
+        supplemental_sources=supplemental_sources,
     )

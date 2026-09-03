@@ -81,6 +81,7 @@ class PlayerHistorySnapshot:
     records: list[PlayerHistoryRecord] = field(default_factory=list)
     supplemental_sources: tuple[str, ...] = ()
     supplemental_records: list[PlayerHistoryRecord] = field(default_factory=list)
+    total_supplemental_games: int = 0
 
     def preferred_l5(self) -> Optional[float]:
         return self.l5.hit_rate if self.l5 else self.proxy_l5
@@ -101,14 +102,26 @@ class PlayerHistorySnapshot:
         return self.h2h.hit_rate if self.h2h else None
 
     def has_supporting_data(self, min_samples: int = 5) -> bool:
-        return self.total_real_games >= min_samples or self.total_proxy_snaps >= min_samples
+        return (
+            self.total_real_games + self.total_supplemental_games >= min_samples
+            or self.total_proxy_snaps >= min_samples
+        )
 
     def rate_summary(self) -> str:
-        if not self.has_real_data and not self.has_proxy_data:
+        if not self.has_real_data and not self.has_supplemental_data and not self.has_proxy_data:
             return "no history"
         parts = []
-        if self.has_real_data:
-            parts.append(f"real_n={self.total_real_games}")
+        if self.has_real_data or self.has_supplemental_data:
+            evidence_n = self.total_real_games + self.total_supplemental_games
+            if self.has_real_data and self.has_supplemental_data:
+                parts.append(
+                    f"real_n={self.total_real_games}"
+                    f"  supplemental_n={self.total_supplemental_games}"
+                )
+            elif self.has_real_data:
+                parts.append(f"real_n={self.total_real_games}")
+            else:
+                parts.append(f"supplemental_n={self.total_supplemental_games}")
             for label, win in (("L5", self.l5), ("L10", self.l10), ("L20", self.l20)):
                 if win is not None:
                     parts.append(f"{label}={win.hit_rate:.0%}")
@@ -125,7 +138,7 @@ class PlayerHistorySnapshot:
 class PlayerHistoryProvider:
     def __init__(self, propline_client=None) -> None:
         self._fetch_cache: set[tuple[str, str, str, str, str]] = set()
-        self._supplement_cache: dict[tuple[str, str, str, str], list] = {}
+        self._supplement_cache: dict[tuple[str, str, str, str, str], list] = {}
         self._propline_client = propline_client
 
     async def get_snapshot(
@@ -186,8 +199,9 @@ class PlayerHistoryProvider:
         ]
         real_records.sort(key=lambda x: x.date, reverse=True)
         supplemental_records: list[PlayerHistoryRecord] = []
+        provider_scope = str(source_provider or "").strip().lower()
         if (
-            str(source_provider or "").strip().lower() == "underdog"
+            provider_scope in {"underdog", "prizepicks"}
             and len(real_records) < max(1, int(min_samples))
         ):
             supplemental_results = await self.supplement_missing_results(
@@ -196,6 +210,7 @@ class PlayerHistoryProvider:
                 sport_u,
                 stat_type,
                 min_samples=min_samples,
+                source_provider=source_provider,
                 instrumentation=instrumentation,
             )
             supplemental_records = [
@@ -213,15 +228,16 @@ class PlayerHistoryProvider:
             ]
             supplemental_records.sort(key=lambda x: x.date, reverse=True)
 
-        l5 = _window_from_values(real_records[:5], current_line, required_games=5)
-        l10 = _window_from_values(real_records[:10], current_line, required_games=10)
-        l20 = _window_from_values(real_records[:20], current_line, required_games=20)
-        l30 = _window_from_values(real_records[:30], current_line, required_games=30)
-        season = _window_from_values(real_records, current_line, required_games=1)
+        analysis_records = _merge_history_records(real_records, supplemental_records)
+        l5 = _window_from_values(analysis_records[:5], current_line, required_games=5)
+        l10 = _window_from_values(analysis_records[:10], current_line, required_games=10)
+        l20 = _window_from_values(analysis_records[:20], current_line, required_games=20)
+        l30 = _window_from_values(analysis_records[:30], current_line, required_games=30)
+        season = _window_from_values(analysis_records, current_line, required_games=1)
 
         h2h = None
         if opponent:
-            h2h_recs = [r for r in real_records if r.is_h2h]
+            h2h_recs = [r for r in analysis_records if r.is_h2h]
             if len(h2h_recs) >= H2H_MIN_GAMES:
                 h2h = _window_from_values(h2h_recs, current_line)
 
@@ -254,6 +270,7 @@ class PlayerHistoryProvider:
                 if record.source.lower().startswith("propline")
             })),
             supplemental_records=supplemental_records,
+            total_supplemental_games=len(supplemental_records),
         )
         if instrumentation is not None:
             instrumentation.duration(
@@ -345,16 +362,20 @@ class PlayerHistoryProvider:
         stat_type: str,
         *,
         min_samples: int = 5,
+        source_provider: str = "Underdog",
         instrumentation=None,
     ) -> list:
-        """Return missing Underdog evidence from official PropLine history.
+        """Return missing primary-provider evidence from official PropLine history.
 
         The rows intentionally stay out of ``player_game_results`` for now.
         That table is the primary result source used by pick calculations;
         persistence of supplemental rows is a separate follow-up concern.
         """
         today = datetime.utcnow().date().isoformat()
-        key = (player_name, sport, stat_type.lower().strip(), today)
+        provider_scope = str(source_provider or "").strip().lower()
+        if provider_scope not in {"underdog", "prizepicks"}:
+            return []
+        key = (player_name, sport, stat_type.lower().strip(), today, provider_scope)
         if key in self._supplement_cache:
             return list(self._supplement_cache[key])
         try:
@@ -486,6 +507,27 @@ def _merge_game_results(existing: list, supplemental: list) -> list:
             continue
         seen.add(key)
     return list(existing) + merged
+
+
+def _merge_history_records(
+    primary: list[PlayerHistoryRecord],
+    supplemental: list[PlayerHistoryRecord],
+) -> list[PlayerHistoryRecord]:
+    """Merge primary and supplemental records without double-counting games."""
+    seen: set[tuple[str, str]] = set()
+    merged: list[PlayerHistoryRecord] = []
+    for record in [*primary, *supplemental]:
+        identity = (
+            str(getattr(record, "game_id", "") or "").strip()
+            or str(getattr(record, "date", "") or "").strip(),
+            str(getattr(record, "stat", "") or "").lower().strip(),
+        )
+        if identity in seen:
+            continue
+        seen.add(identity)
+        merged.append(record)
+    merged.sort(key=lambda record: record.date, reverse=True)
+    return merged
 
 
 _provider: Optional[PlayerHistoryProvider] = None
