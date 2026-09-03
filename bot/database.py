@@ -3058,6 +3058,26 @@ class Database:
             )
             return list(result.scalars().all())
 
+    async def get_propline_opening_line(
+        self,
+        player_name: str,
+        sport: str,
+        stat_type: str,
+        *,
+        external_id: str = "",
+        game_id: str = "",
+    ) -> Optional[PropLineHistory]:
+        """Return the first persisted PrizePicks observation for one source."""
+        rows = await self.get_propline_line_movement_history(
+            player_name,
+            sport,
+            stat_type,
+            limit=1,
+            external_id=external_id,
+            game_id=game_id,
+        )
+        return rows[0] if rows else None
+
     async def get_latest_props_for_provider(
         self,
         provider: str,

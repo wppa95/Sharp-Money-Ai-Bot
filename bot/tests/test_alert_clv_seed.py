@@ -166,6 +166,13 @@ class TestPropLineHistory:
 
         assert [row.line_value for row in history] == [24.5, 25.5]
         assert {row.provider for row in history} == {"PrizePicks"}
+        opening = await db.get_propline_opening_line(
+            "Mike Trout", "MLB", "Hits",
+            external_id="ext-001",
+        )
+        assert opening is not None
+        assert opening.line_value == 24.5
+        assert opening.provider == "PrizePicks"
 
     async def test_count_filtered_by_provider(self, db):
         await db.save_prop_line_history(self._make_record(provider="Underdog"))

@@ -365,6 +365,21 @@ class PropLineMovementPoint:
 
 
 @dataclass(frozen=True)
+class PropLineOpeningLineEvidence:
+    """The first observed line for one PropLine source identity."""
+
+    observed_at: datetime
+    line_value: float
+    provider: str
+    player_name: str
+    sport: str
+    stat_type: str
+    external_id: str = ""
+    event_id: str = ""
+    supplemental_source: str = ""
+
+
+@dataclass(frozen=True)
 class PropLineMovementHistory:
     """Read-only line movement evidence for one PrizePicks source identity."""
 
@@ -378,6 +393,7 @@ class PropLineMovementHistory:
     change_count: int
     points: tuple[PropLineMovementPoint, ...]
     supplemental_source: str = ""
+    opening_evidence: Optional[PropLineOpeningLineEvidence] = None
 
     @property
     def direction(self) -> str:
@@ -387,6 +403,38 @@ class PropLineMovementHistory:
         if self.total_delta < 0:
             return "DOWN"
         return "FLAT"
+
+
+def build_propline_opening_line_evidence(
+    row: Any,
+    *,
+    provider: str = PROPLINE_PROVIDER_NAME,
+) -> Optional[PropLineOpeningLineEvidence]:
+    """Convert one persisted first-observation row into opening evidence."""
+    expected_provider = _clean(provider)
+    if _clean(getattr(row, "provider", "")) != expected_provider:
+        return None
+    observed_at = getattr(row, "fetched_at", None)
+    if not isinstance(observed_at, datetime):
+        return None
+    try:
+        line_value = float(getattr(row, "line_value"))
+    except (TypeError, ValueError):
+        return None
+    return PropLineOpeningLineEvidence(
+        observed_at=observed_at,
+        line_value=line_value,
+        provider=expected_provider,
+        player_name=_clean(getattr(row, "player_name", "")),
+        sport=_clean(getattr(row, "sport", "")),
+        stat_type=_clean(getattr(row, "stat_type", "")),
+        external_id=_clean(getattr(row, "external_id", "")),
+        event_id=_clean(
+            getattr(row, "event_id", "")
+            or getattr(row, "game_id", "")
+        ),
+        supplemental_source=_clean(getattr(row, "supplemental_source", "")),
+    )
 
 
 def build_propline_line_movement(
@@ -466,6 +514,10 @@ def build_propline_line_movement(
         previous_line = line_value
 
     current_line = points[-1].line_value
+    opening_evidence = build_propline_opening_line_evidence(
+        normalized[0][1],
+        provider=expected_provider,
+    )
     return PropLineMovementHistory(
         provider=expected_provider,
         player_name=_clean(getattr(normalized[0][1], "player_name", "")),
@@ -480,6 +532,7 @@ def build_propline_line_movement(
             "PropLine" if "PropLine" in supplemental_sources
             else (sorted(supplemental_sources)[0] if supplemental_sources else "")
         ),
+        opening_evidence=opening_evidence,
     )
 
 

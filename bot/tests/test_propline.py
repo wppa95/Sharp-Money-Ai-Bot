@@ -18,6 +18,7 @@ from providers.propline import (
     PropLinePrizePicksProvider,
     PropLineRequestLimiter,
     build_propline_line_movement,
+    build_propline_opening_line_evidence,
     propline_event_identity,
     propline_market_identity,
     propline_player_identity,
@@ -750,6 +751,25 @@ def test_propline_line_movement_is_chronological_and_provider_scoped():
     assert [point.line_value for point in history.points] == [24.5, 25.5]
     assert history.points[-1].delta_from_previous == 1.0
     assert history.supplemental_source == "PropLine"
+    assert history.opening_evidence is not None
+    assert history.opening_evidence.observed_at == now
+    assert history.opening_evidence.line_value == 24.5
+    assert history.opening_evidence.external_id == "projection-1"
+    assert history.opening_evidence.event_id == "game-1"
+    assert history.opening_evidence.supplemental_source == "PropLine"
+
+
+def test_propline_opening_evidence_rejects_non_prizepicks_rows():
+    row = SimpleNamespace(
+        provider="Underdog",
+        player_name="Alex Example",
+        sport="NBA",
+        stat_type="points",
+        line_value=24.5,
+        fetched_at=datetime(2026, 8, 28, 12, 0, 0),
+    )
+
+    assert build_propline_opening_line_evidence(row) is None
 
 
 def test_propline_line_movement_rejects_mixed_source_identities():
