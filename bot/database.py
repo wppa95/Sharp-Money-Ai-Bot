@@ -11,7 +11,7 @@ import hashlib
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from typing import Iterable, Optional
 
@@ -4924,6 +4924,76 @@ class Database:
                 q = q.where(PlayerGameResult.sport == sport)
             result = await s.execute(q)
             return result.scalar() or 0
+
+    async def get_player_result_coverage_by_sport(
+        self,
+        sports: Optional[Iterable[str]] = None,
+    ) -> dict[str, dict[str, int]]:
+        """Return stored player-result counts split by sport and source.
+
+        The source split lets reports distinguish real historical evidence
+        from shadow-only imports such as weekly aggregate feeds.
+        """
+        q = select(
+            PlayerGameResult.sport,
+            PlayerGameResult.source,
+            func.count(),
+        ).group_by(
+            PlayerGameResult.sport,
+            PlayerGameResult.source,
+        )
+        if sports:
+            normalized_sports = {
+                str(sport).strip().upper()
+                for sport in sports
+                if str(sport).strip()
+            }
+            if normalized_sports:
+                q = q.where(PlayerGameResult.sport.in_(normalized_sports))
+        coverage: dict[str, dict[str, int]] = {}
+        async with self.session() as s:
+            result = await s.execute(q)
+            for sport, source, count in result.all():
+                sport_key = str(sport or "").strip().upper()
+                source_key = str(source or "unknown").strip().lower()
+                if sport_key:
+                    coverage.setdefault(sport_key, {})[source_key] = int(count or 0)
+        return coverage
+
+    async def get_directional_opportunity_counts_by_sport(
+        self,
+        since_hours: int = 24,
+        sports: Optional[Iterable[str]] = None,
+    ) -> dict[str, int]:
+        """Count recently logged OVER/UNDER opportunities by sport."""
+        cutoff = datetime.utcnow() - timedelta(hours=max(1, int(since_hours)))
+        q = (
+            select(
+                PropOpportunityLog.sport,
+                func.count(),
+            )
+            .where(
+                PropOpportunityLog.detected_at >= cutoff,
+                PropOpportunityLog.recommendation.in_(("OVER", "UNDER")),
+            )
+            .group_by(PropOpportunityLog.sport)
+        )
+        if sports:
+            normalized_sports = {
+                str(sport).strip().upper()
+                for sport in sports
+                if str(sport).strip()
+            }
+            if normalized_sports:
+                q = q.where(PropOpportunityLog.sport.in_(normalized_sports))
+        counts: dict[str, int] = {}
+        async with self.session() as s:
+            result = await s.execute(q)
+            for sport, count in result.all():
+                sport_key = str(sport or "").strip().upper()
+                if sport_key:
+                    counts[sport_key] = int(count or 0)
+        return counts
 
     # ── Prop Opportunity Tracking ────────────────────────────────────────────
 
