@@ -476,12 +476,17 @@ class PlayerHistoryProvider:
         settled = {"WON", "LOST", "PUSH", "VOID"}
         rows = []
         for entry in result.entries:
-            event_id = str(entry.get("event_id") or "").strip()
-            actual = entry.get("actual_value")
-            game_date = _parse_datetime(entry.get("commence_time"))
+            def _entry_value(name: str, default=None):
+                if isinstance(entry, dict):
+                    return entry.get(name, default)
+                return getattr(entry, name, default)
+
+            event_id = str(_entry_value("event_id") or "").strip()
+            actual = _entry_value("actual_value")
+            game_date = _parse_datetime(_entry_value("commence_time"))
             resolution = str(
-                entry.get("over_result")
-                or entry.get("under_result")
+                _entry_value("over_result")
+                or _entry_value("under_result")
                 or ""
             ).strip().upper()
             if (
