@@ -1847,7 +1847,8 @@ async def _run_prizepicks_independent_cycle(
         hit_rates = None
         if enrichment_used < enrichment_budget:
             hit_rates = await _fetch_and_compute_hit_rates(
-                db, player, sport, stat, line
+                db, player, sport, stat, line,
+                source_provider="PrizePicks",
             )
             enrichment_used += 1
         decision = None
@@ -3352,6 +3353,7 @@ async def underdog_job(context) -> None:
                 hit_rates = await _fetch_and_compute_hit_rates(
                     db, player, snap.sport or "UNKNOWN", stat_type, line_val,
                     cycle_timing=_cycle_timing,
+                    source_provider="Underdog",
                 )
                 decision = make_ud_bet_decision(
                     score        = score,
@@ -3637,6 +3639,7 @@ async def underdog_job(context) -> None:
                         hit_rates = await _fetch_and_compute_hit_rates(
                             db, player, snap.sport or "UNKNOWN", stat_type, snap.line or 0.0,
                             cycle_timing=_cycle_timing,
+                            source_provider="Underdog",
                         )
                         decision = make_ud_bet_decision(
                             score        = score,
@@ -4269,6 +4272,7 @@ async def underdog_job(context) -> None:
                 _shits = await _fetch_and_compute_hit_rates(
                     db, _sp, _ssport, _st, _line_val,
                     cycle_timing=_cycle_timing,
+                    source_provider="Underdog",
                 )
                 _sdec = make_ud_bet_decision(
                     score        = _sscore,
