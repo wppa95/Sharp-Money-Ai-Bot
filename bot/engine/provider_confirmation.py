@@ -167,6 +167,7 @@ class ConfirmationObservation:
     source_id: str = ""
     player_id: str = ""
     supplemental_source: str = ""
+    game_time: Optional[datetime] = None
 
     @property
     def market(self) -> str:
@@ -252,6 +253,14 @@ def observation_from_record(
             if supplemental_source is not None
             else _value(record, "supplemental_source", "")
         ),
+        game_time=(
+            _value(record, "game_time", _value(record, "start_time", None))
+            if isinstance(
+                _value(record, "game_time", _value(record, "start_time", None)),
+                datetime,
+            )
+            else None
+        ),
     )
 
 
@@ -262,11 +271,29 @@ def _same_sport(target: ConfirmationTarget, observation: ConfirmationObservation
 def _same_event(target: ConfirmationTarget, observation: ConfirmationObservation) -> bool:
     if target.event_id and observation.event_id:
         return target.event_id == observation.event_id
-    # Opaque provider IDs cannot be compared to OddsAPI's human event string.
+    # If either side has an event identity, do not treat a missing counterpart
+    # as a wildcard.  A source event ID is not safely comparable to a human
+    # label, but it is still evidence that requires a matching event context.
+    if target.event_id or observation.event_id:
+        if (
+            target.game_time is not None
+            and observation.game_time is not None
+            and abs((target.game_time - observation.game_time).total_seconds()) <= 15 * 60
+        ):
+            return True
+        if _has_human_event(target.event) and _has_human_event(observation.event):
+            return normalize_event(target.event) == normalize_event(observation.event)
+        return False
     # When both are human labels, require the complete normalized token set.
-    if not (_has_human_event(target.event) and _has_human_event(observation.event)):
-        return True
-    return normalize_event(target.event) == normalize_event(observation.event)
+    if _has_human_event(target.event) or _has_human_event(observation.event):
+        return (
+            _has_human_event(target.event)
+            and _has_human_event(observation.event)
+            and normalize_event(target.event) == normalize_event(observation.event)
+        )
+    # No event context on either side is acceptable for legacy sportsbook
+    # confirmations; PropLine rows with event IDs are handled above.
+    return True
 
 
 def _same_team(target: ConfirmationTarget, observation: ConfirmationObservation) -> bool:
@@ -304,6 +331,9 @@ def _matches_identity(
         return False
 
     if target.market == "player_prop":
+        if target.player_id and observation.player_id:
+            if target.player_id != observation.player_id:
+                return False
         if not _same_player(target.player, observation.player, candidate_names=candidate_names):
             return False
         if normalize_stat(target.stat_type) != normalize_stat(observation.stat_type):
