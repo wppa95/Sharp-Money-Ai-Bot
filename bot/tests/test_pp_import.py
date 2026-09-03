@@ -200,7 +200,7 @@ async def test_current_pool_ignores_historical_rows_but_history_remains_queryabl
     from reporting import current_reporting_day_bounds
 
     today_start, _today_end = current_reporting_day_bounds()
-    now = today_start + timedelta(hours=2)
+    now = datetime.utcnow()
     old_row = PropLineHistory(
         provider="PrizePicks",
         sport="NBA",
@@ -257,7 +257,7 @@ async def test_current_pool_removal_marker_wins_over_older_active_line(db):
     from reporting import current_reporting_day_bounds
 
     today_start, _today_end = current_reporting_day_bounds()
-    now = today_start + timedelta(hours=2)
+    now = datetime.utcnow()
     identity = dict(
         provider="PrizePicks",
         sport="NBA",
