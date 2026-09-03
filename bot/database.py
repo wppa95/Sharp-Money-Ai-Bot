@@ -537,6 +537,17 @@ class PropLineHistory(Base):
     # Tier 2 (NBA/MLB/NFL) requires score_total ≥ 75 for Telegram eligibility.
     score_total          = Column(Float,     nullable=True)
 
+    __table_args__ = (
+        # Current monitoring is bounded by provider and reporting-day
+        # timestamps.  Keep that slice indexable even after the append-only
+        # history table becomes large.
+        Index(
+            "ix_prop_line_history_provider_fetched_at",
+            "provider",
+            "fetched_at",
+        ),
+    )
+
 
 class AlertCLVSeed(Base):
     """
@@ -941,6 +952,7 @@ class Database:
         await self._migrate_prop_line_history_v4()
         await self._migrate_prop_line_history_v5()
         await self._migrate_prop_line_history_v6()
+        await self._migrate_prop_line_history_v7()
         await self._migrate_player_game_results_v1()
         await self._migrate_prop_opportunity_log_v6()
         await self._migrate_telegram_delivery_audit_v1()
@@ -5054,6 +5066,15 @@ class Database:
             except Exception:
                 pass  # already exists
 
+    async def _migrate_prop_line_history_v7(self) -> None:
+        """Index the bounded current-day monitoring slice (idempotent)."""
+        async with self._engine.begin() as conn:
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_prop_line_history_provider_fetched_at "
+                "ON prop_line_history (provider, fetched_at)"
+            ))
+
     async def _migrate_prop_opportunity_log(self) -> None:
         """Add error_type column to existing tables (learning label classification)."""
         async with self._engine.begin() as conn:
@@ -5821,12 +5842,15 @@ class Database:
         ))
         if not provider_names:
             return {}
-        from datetime import timedelta
+        from reporting import current_reporting_day_bounds
+
         now = datetime.utcnow()
-        # PropLineHistory is not an absence/removal log for every provider.
-        # Bound the current FPR universe to recently observed rows so a prop
-        # that disappeared from a provider feed cannot live forever.
-        freshness_cutoff = now - timedelta(hours=6)
+        # This method feeds current monitoring/FPR only.  Never group the
+        # append-only history table across all time: old observations are
+        # retained for grading and reports, but they cannot be today's active
+        # feed.  Use the configured reporting calendar day rather than UTC
+        # midnight so the monitoring universe matches user-facing reports.
+        today_start, today_end = current_reporting_day_bounds()
         async with self.session() as s:
             source_identity = case(
                 (
@@ -5840,7 +5864,11 @@ class Database:
             )
             subq = (
                 select(func.max(PropLineHistory.id))
-                .where(PropLineHistory.provider.in_(provider_names))
+                .where(
+                    PropLineHistory.provider.in_(provider_names),
+                    PropLineHistory.fetched_at >= today_start,
+                    PropLineHistory.fetched_at < today_end,
+                )
                 .group_by(
                     PropLineHistory.provider,
                     PropLineHistory.player_name,
@@ -5853,6 +5881,8 @@ class Database:
             result = await s.execute(
                 select(PropLineHistory).where(
                     PropLineHistory.id.in_(subq),
+                    PropLineHistory.fetched_at >= today_start,
+                    PropLineHistory.fetched_at < today_end,
                     PropLineHistory.removed.isnot(True),
                     PropLineHistory.fetched_at >= freshness_cutoff,
                     or_(

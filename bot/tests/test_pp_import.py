@@ -194,6 +194,98 @@ async def test_pp_source_id_line_move_updates_existing_active_projection(db):
     }
 
 
+@pytest.mark.asyncio
+async def test_current_pool_ignores_historical_rows_but_history_remains_queryable(db):
+    """FPR reads today's feed only while grading history stays append-only."""
+    from reporting import current_reporting_day_bounds
+
+    today_start, _today_end = current_reporting_day_bounds()
+    now = today_start + timedelta(hours=2)
+    old_row = PropLineHistory(
+        provider="PrizePicks",
+        sport="NBA",
+        player_name="Historical Player",
+        team="DET",
+        stat_type="Points",
+        line_value=18.5,
+        external_id="pp-history-1",
+        game_id="pp-game-1",
+        game_time=now + timedelta(hours=2),
+        fetched_at=today_start - timedelta(days=1),
+        first_seen=today_start - timedelta(days=1),
+        last_seen=today_start - timedelta(days=1),
+        removed=False,
+    )
+    await db.save_prop_line_history(old_row)
+
+    current_prop = SimpleNamespace(
+        player_name="Historical Player",
+        sport="NBA",
+        stat_type="Points",
+        line_value=19.5,
+        external_id="pp-history-1",
+        event_id="pp-game-1",
+        team="DET",
+        game_time=now + timedelta(hours=2),
+        source_timestamp=now,
+    )
+    await db.upsert_prop_line_history_batch(
+        "PrizePicks", [current_prop], append_snapshot=True
+    )
+
+    pool = await db.get_all_active_prop_line_history_by_line(
+        providers=("PrizePicks",)
+    )
+    assert set(pool) == {
+        ("PrizePicks", "Historical Player", "NBA", "Points", 19.5, "pp-history-1")
+    }
+
+    history = await db.get_prop_line_history(
+        "PrizePicks",
+        "Historical Player",
+        "NBA",
+        "Points",
+        external_id="pp-history-1",
+    )
+    assert len(history) == 2
+    assert {row.line_value for row in history} == {18.5, 19.5}
+
+
+@pytest.mark.asyncio
+async def test_current_pool_removal_marker_wins_over_older_active_line(db):
+    """A same-day removal marker cannot let an older line re-enter the pool."""
+    from reporting import current_reporting_day_bounds
+
+    today_start, _today_end = current_reporting_day_bounds()
+    now = today_start + timedelta(hours=2)
+    identity = dict(
+        provider="PrizePicks",
+        sport="NBA",
+        player_name="Removed Player",
+        team="DET",
+        stat_type="Points",
+        line_value=20.5,
+        external_id="pp-removed-1",
+        game_id="pp-game-2",
+        game_time=now + timedelta(hours=2),
+    )
+    await db.save_prop_line_history(
+        PropLineHistory(**identity, fetched_at=now, removed=False)
+    )
+    await db.save_prop_line_history(
+        PropLineHistory(
+            **identity,
+            fetched_at=now + timedelta(minutes=1),
+            removed=True,
+        )
+    )
+
+    pool = await db.get_all_active_prop_line_history_by_line(
+        providers=("PrizePicks",)
+    )
+    assert not pool
+
+
 # ── Parse tests ───────────────────────────────────────────────────────────────
 
 class TestParsePPImportLine:
