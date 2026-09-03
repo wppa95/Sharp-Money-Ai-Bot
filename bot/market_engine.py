@@ -1313,7 +1313,67 @@ async def _fetch_and_compute_hit_rates(
     cache_key = (player_name, sport, stat_type.lower().strip(), today)
 
     try:
-        if allow_remote and cache_key not in _player_result_fetch_cache:
+        # PropLine's resolved player history is an authoritative supplemental
+        # evidence source for the same pick'em market.  For CS in particular,
+        # do not make PandaScore a prerequisite when PropLine already has the
+        # validation sample we need.  PandaScore remains a useful fallback when
+        # PropLine is unavailable or incomplete.
+        _skip_primary_for_propline = False
+        if (
+            sport.upper() == "CS"
+            and allow_remote
+            and supplemental_results is None
+        ):
+            try:
+                _cs_existing = (
+                    list(preloaded_results)
+                    if preloaded_results is not None
+                    else await db.get_player_results(
+                        player_name, sport, stat_type, limit=30
+                    )
+                )
+                if len(_cs_existing) < config.UD_VALIDATION_MIN_SAMPLES:
+                    from providers.player_history import get_player_history_provider
+
+                    _cs_supplemental = (
+                        await get_player_history_provider().supplement_missing_results(
+                            db,
+                            player_name,
+                            sport,
+                            stat_type,
+                            min_samples=config.UD_VALIDATION_MIN_SAMPLES,
+                            source_provider=source_provider,
+                            instrumentation=cycle_timing,
+                        )
+                    )
+                    if len(_merge_hit_rate_results(
+                        _cs_existing, _cs_supplemental or []
+                    )) >= config.UD_VALIDATION_MIN_SAMPLES:
+                        supplemental_results = list(_cs_supplemental or [])
+                        _skip_primary_for_propline = True
+                        logger.debug(
+                            "player_results: PropLine satisfied CS evidence for "
+                            "%s / %s; PandaScore fallback skipped",
+                            player_name,
+                            stat_type,
+                        )
+            except Exception as exc:  # noqa: BLE001
+                # This is an optimization/fallback ordering decision.  If
+                # PropLine cannot be consulted, retain the normal primary API
+                # path and let the later supplemental attempt handle it.
+                logger.debug(
+                    "_fetch_and_compute_hit_rates: CS PropLine-first lookup "
+                    "unavailable for %s/%s: %s",
+                    player_name,
+                    stat_type,
+                    exc,
+                )
+
+        if (
+            allow_remote
+            and cache_key not in _player_result_fetch_cache
+            and not _skip_primary_for_propline
+        ):
             provider = _get_player_stats_provider()
             # Guard against unbounded growth: clear the whole set when it exceeds the
             # ceiling.  The date component in each key means old entries are already
