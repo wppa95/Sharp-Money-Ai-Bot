@@ -1,0 +1,410 @@
+IMPLEMENTATION TASK — EXPAND PROPLINE INTO THE SHARED DATA/EVIDENCE LAYER
+
+We have completed the read-only PropLine audit.
+
+Now implement the PropLine expansion incrementally.
+
+IMPORTANT: This is NOT a request to redesign the entire bot. Keep the implementation clean, modular, and narrowly scoped.
+
+==================================================
+CORE ARCHITECTURE
+
+PrizePicks and Underdog remain completely separate betting providers.
+
+PropLine is a shared supplemental sports-data source.
+
+PRIZEPICKS
+actual PrizePicks line
+↓
+PropLine supplemental data
+↓
+existing analysis
+
+UNDERDOG
+actual Underdog line
+↓
+PropLine supplemental data when useful/missing
+↓
+existing analysis
+
+PropLine MUST NOT replace the actual provider identity or actual sportsbook line.
+
+For Underdog:
+
+* Underdog remains authoritative for the Underdog line.
+* Underdog remains authoritative for Underdog market identity.
+* Underdog remains authoritative for Underdog provider identity.
+* Underdog remains authoritative for Underdog movement/state.
+* PropLine supplements missing/useful information.
+* Never silently convert a PropLine line into an Underdog line.
+* Never merge PrizePicks and Underdog into one provider.
+
+==================================================
+CRITICAL REQUEST BUDGET CHANGE
+
+Change the PropLine daily self-imposed request cap from:
+
+1,000/day
+
+to:
+
+5,000/day
+
+The PropLine plan allowance is 5,000 requests/day.
+
+Therefore:
+
+PROPLINE_DAILY_REQUEST_LIMIT = 5000
+
+The existing hard hourly limit MUST remain:
+
+208 requests/hour
+
+Do NOT increase the hourly limit in this task.
+
+Keep the existing process-wide rolling limiter, spacing, 429 handling, Retry-After handling, and provider lower-limit protection.
+
+Do NOT create request bursts.
+
+Do NOT implement catch-up bursts.
+
+Do NOT change the existing 208/hour pacing.
+
+==================================================
+PROP-LINE CAPABILITIES TO USE
+
+The goal is no longer merely current PrizePicks odds retrieval.
+
+Use PropLine as the shared evidence/data layer for BOTH PrizePicks and Underdog.
+
+Implement support for these capabilities where available:
+
+1. Current player props / odds
+2. Player statistics
+3. Player historical statistics
+4. Player trends / hit rates
+5. Prop results / resolution
+6. Historical line movement
+7. Opening lines
+8. Closing lines
+9. CLV
+10. Event/game context
+11. Stable PropLine player IDs
+12. PropLine event IDs
+13. Cross-book evidence where appropriate
+
+Use the official PropLine API documentation as authoritative:
+
+https://prop-line.com/llms-full.txt
+
+Do NOT invent endpoints or response structures.
+
+==================================================
+DATA OWNERSHIP RULE
+
+Every piece of PropLine data must retain provenance.
+
+At minimum distinguish:
+
+provider/source
+sport
+event
+player
+market/stat
+observed timestamp
+source/native ID where available
+
+For example:
+
+provider = underdog
+supplemental_source = propline
+
+or:
+
+provider = prizepicks
+supplemental_source = propline
+
+Do NOT overwrite provider identity.
+
+==================================================
+UNDERDOG SUPPLEMENTATION
+
+This is mandatory.
+
+PropLine must be usable to supplement Underdog when Underdog lacks useful evidence.
+
+For an Underdog observation, attempt to establish a safe PropLine match using:
+
+1. Stable player identity when available
+2. Sport
+3. Event/game identity
+4. Team/event context
+5. Normalized stat/market
+6. Controlled start-time matching
+7. Constrained player-name fallback only when necessary
+
+Reject ambiguous matches.
+
+Never create a cross-provider match merely because player names happen to be similar.
+
+The resulting relationship should conceptually be:
+
+Underdog observation
++
+PropLine supplemental evidence
+
+NOT:
+
+PropLine observation
+
+Underdog observation
+
+==================================================
+PROP-LINE PLAYER STATS
+
+Use PropLine player-stat data wherever it can provide useful evidence for a supported non-football sport.
+
+Prioritize:
+
+MLB
+NBA
+WNBA
+NHL
+Soccer
+Tennis
+Golf
+UFC/MMA
+CS2
+and other supported non-football sports.
+
+Do NOT restrict implementation to NBA/MLB.
+
+Preserve existing historical/stat providers as fallbacks unless there is a demonstrated reason to remove them.
+
+Do not remove existing providers in this task.
+
+==================================================
+HISTORICAL DATA
+
+Add PropLine historical evidence support for:
+
+* player history
+* trends
+* hit rates
+* historical odds movement
+* opening lines
+* closing lines
+* prop results/resolution
+* official statistics where available
+
+These should be treated as evidence sources.
+
+Do NOT automatically change scoring because the data now exists.
+
+==================================================
+CLV
+
+Add PropLine opening/closing/CLV data as supplemental evidence.
+
+Do NOT replace existing CLV logic blindly.
+
+Do not change grading rules in this task.
+
+Do not change alert thresholds.
+
+First make PropLine CLV data available with provenance so it can be validated against the existing pipeline.
+
+==================================================
+CURRENT MARKET COLLECTION
+
+Audit the current fixed PropLine market request list.
+
+Expand it deliberately to supported useful markets across supported non-football sports.
+
+Do NOT blindly request every documented market.
+
+For each newly supported market:
+
+* confirm the PropLine market key from official documentation
+* confirm response shape
+* confirm internal normalization
+* confirm result/stat availability
+* confirm it can safely enter the existing evidence pipeline
+
+The goal is substantially broader useful collection, not arbitrary data volume.
+
+==================================================
+SPORT COVERAGE
+
+The bot should maximize valid PropLine collection across supported non-football sports.
+
+Do not artificially restrict PropLine collection to NBA/MLB.
+
+Do not prioritize NBA merely because its historical provider is currently stronger.
+
+Supported sports should be discovered from PropLine where appropriate.
+
+Football remains outside the actionable betting universe.
+
+IMPORTANT:
+
+Football exclusion from actionability does NOT mean we should silently confuse data collection with actionability.
+
+Keep those concepts separate.
+
+==================================================
+COLLECTION VS ACTIONABILITY
+
+This is one of the most important requirements.
+
+Increasing PropLine data collection MUST NOT automatically increase alerts.
+
+The pipeline must remain:
+
+MORE VALID DATA
+→ MORE EVIDENCE
+→ EXISTING ANALYSIS
+→ EXISTING QUALIFICATION
+→ EXISTING PLAY RULES
+→ EXISTING ALERTS
+
+NOT:
+
+MORE DATA
+→ LOOSER FILTERS
+→ MORE PLAYS
+
+DO NOT change:
+
+* scoring
+* confidence thresholds
+* qualification thresholds
+* PLAY criteria
+* alert thresholds
+* risk rules
+* bankroll rules
+* Telegram behavior
+
+==================================================
+CADENCE / SCHEDULING
+
+Do NOT redesign the scheduler in this task.
+
+Do NOT reintroduce framework max_instances.
+
+Do NOT create overlapping jobs.
+
+Do NOT create unbounded queues.
+
+However, PropLine collection must no longer be artificially limited simply because it is attached to one Underdog cycle.
+
+Implement the cleanest bounded approach that allows PropLine to collect useful data continuously without blocking or degrading Underdog monitoring.
+
+If independent PropLine scheduling is required, keep it:
+
+* bounded
+* non-overlapping
+* request-budget aware
+* provider/source aware
+* isolated from Underdog failures
+
+Do not modify the existing Underdog monitoring cadence.
+
+==================================================
+REQUEST EFFICIENCY
+
+Use the PropLine documentation’s recommended discovery flow where appropriate:
+
+/sports
+→ /events
+→ /events/{event_id}/markets
+→ /events/{event_id}/odds
+
+But do NOT blindly perform expensive event-level requests everywhere.
+
+Use:
+
+* caching
+* TTLs
+* sport-level retrieval where efficient
+* event-level retrieval where valuable
+* targeted refreshes
+* request-budget awareness
+
+The goal is maximum useful information per request.
+
+==================================================
+IMPORTANT RESTART / RUNTIME RULE
+
+Do not introduce behavior that resumes stale PropLine work after restart.
+
+A restart must begin from clean runtime state.
+
+Do not resume:
+
+* stale cursor state
+* stale batch offsets
+* interrupted request queues
+* abandoned event batches
+* stale async tasks
+
+The existing scheduler/coordinator lifecycle behavior must remain intact.
+
+==================================================
+TESTING
+
+Before declaring success:
+
+1. Run focused PropLine tests.
+2. Test the 5,000/day budget.
+3. Test the 208/hour limiter remains unchanged.
+4. Test 429 / Retry-After behavior remains intact.
+5. Test PP provider identity remains PrizePicks.
+6. Test UD provider identity remains Underdog.
+7. Test PropLine supplemental provenance.
+8. Test safe player/event matching.
+9. Test ambiguous matches are rejected.
+10. Test missing UD data can be supplemented by PropLine.
+11. Test PropLine data does NOT bypass existing qualification.
+12. Test no new Telegram alert path is created.
+13. Test restart starts clean runtime state.
+14. Run the full test suite.
+
+==================================================
+DEPLOYMENT SAFETY
+
+Do NOT deploy until tests pass.
+
+Do NOT make unrelated changes.
+
+Do NOT modify database schema unless absolutely required.
+
+If a schema change is genuinely required, STOP and report exactly why before implementing it.
+
+Do NOT modify scoring or alert thresholds.
+
+Do NOT remove existing providers.
+
+==================================================
+IMPLEMENTATION PHASE CONTROL
+
+Do NOT attempt a giant rewrite.
+
+Implement in small logical commits/phases.
+
+At the end, report:
+
+A. Files changed
+B. PropLine endpoints now used
+C. New PP capabilities
+D. New UD supplemental capabilities
+E. Sports/markets now covered
+F. Request budget usage
+G. Matching/provenance design
+H. Tests passed
+I. Any remaining gaps
+J. Exact next step
+
+If the requested scope becomes too large for one safe implementation, STOP after the smallest complete phase and report what remains.
+
+The objective is maximum useful PropLine data collection and evidence for BOTH PrizePicks and Underdog, while preserving the existing betting decision and alert system.
