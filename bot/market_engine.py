@@ -2721,6 +2721,94 @@ async def _try_claim_delivery_slot(
         return True
 
 
+async def _deliver_full_pool_candidate(
+    candidate: dict,
+    *,
+    db,
+    bot,
+    chat_ids: list,
+) -> tuple[object, bool]:
+    """Deliver one already-selected FPR candidate using existing protections."""
+    from alerts import DeliveryResult
+
+    player = candidate["player"]
+    sport = candidate["sport"]
+    stat = candidate["stat_type"]
+    line = candidate["line_val"]
+    snap = candidate["snap"]
+    decision = candidate["decision"]
+    source_id = str(
+        getattr(snap, "external_id", None)
+        or getattr(snap, "id", None)
+        or ""
+    )
+    event_id = str(candidate.get("event_id", "") or "")
+    direction = str(getattr(decision, "recommendation", "") or "")
+
+    claimed = await _try_claim_delivery_slot(
+        player,
+        sport,
+        stat,
+        line,
+        provider=candidate["provider"],
+        source_id=source_id,
+        event_id=event_id,
+        direction=direction,
+    )
+    if not claimed:
+        return DeliveryResult(sent=False), False
+
+    try:
+        result = await AlertDelivery(db, bot, chat_ids).deliver_underdog(
+            player_name=player,
+            team=getattr(snap, "team", "") or "",
+            sport=sport,
+            stat_type=stat,
+            old_line=line,
+            new_line=line,
+            game_time=getattr(snap, "game_time", None),
+            game_status=(
+                getattr(snap, "game_status", None)
+                or getattr(snap, "provider_status", None)
+            ),
+            fetched_at=getattr(snap, "fetched_at", None),
+            score=candidate["score"],
+            validation=candidate["validation"],
+            decision=decision,
+            market_quality=candidate["market_quality"],
+            market_pressure=candidate["market_pressure"],
+            pp_line=candidate.get("pp_line"),
+            standing=True,
+            strict_pregame=True,
+            source=candidate["provider"],
+            source_id=source_id,
+            event_id=event_id,
+            delivery_path="full_pool",
+        )
+        return result, True
+    except Exception as exc:  # noqa: BLE001
+        _release_prop_delivery_claim(
+            _prop_market_alerted,
+            player,
+            sport,
+            stat,
+            line,
+            provider=candidate["provider"],
+            source_id=source_id,
+            event_id=event_id,
+            direction=direction,
+        )
+        logger.warning(
+            "full_pool_rescan: delivery failed; claim released for "
+            "%s/%s/%s: %s",
+            candidate["provider"],
+            player,
+            stat,
+            type(exc).__name__,
+        )
+        return DeliveryResult(sent=False), False
+
+
 def _cand_priority(c: dict) -> float:
     """Neutral delivery ordering; quality labels never select winners."""
     mc   = 200.0 if c.get("is_meaningful_change") else 0.0
@@ -6595,6 +6683,84 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 fpr_rescored        += 1
                 fpr_total_rescanned += 1
                 fpr_by_sport[_fpr_sport] = fpr_by_sport.get(_fpr_sport, 0) + 1
+
+        # Selection happens only after the complete qualified batch has been
+        # evaluated.  This prevents a stronger later-processed prop from
+        # losing to an earlier weaker prop for the same provider/player.
+        _fpr_selected = select_strongest_actionable_picks(
+            _fpr_delivery_candidates
+        )
+        _fpr_selected_ids = {id(candidate) for candidate in _fpr_selected}
+        for _fpr_candidate in _fpr_delivery_candidates:
+            if id(_fpr_candidate) not in _fpr_selected_ids:
+                fpr_not_delivered += 1
+                logger.debug(
+                    "strongest_pick: suppressed %s/%s/%s for provider=%s",
+                    _fpr_candidate["player"],
+                    _fpr_candidate["sport"],
+                    _fpr_candidate["stat_type"],
+                    _fpr_candidate["provider"],
+                )
+
+        for _fpr_candidate in _fpr_selected:
+            _fpr_result, _fpr_claimed = await _deliver_full_pool_candidate(
+                _fpr_candidate,
+                db=db,
+                bot=bot,
+                chat_ids=chat_ids,
+            )
+            if _fpr_result.sent:
+                fpr_sent += 1
+                try:
+                    if getattr(_fpr_result, "authoritative_recorded", True):
+                        await db.mark_opportunity_alert_sent(
+                            _fpr_candidate["ext_id"],
+                            _fpr_candidate["stat_type"],
+                            provider=_fpr_candidate["provider"],
+                        )
+                    await db.update_prop_lifecycle_state(
+                        _fpr_candidate["provider"],
+                        _fpr_candidate["player"],
+                        _fpr_candidate["sport"],
+                        _fpr_candidate["stat_type"],
+                        "ACTIVE_ALERTED",
+                        first_alert_sent_at=datetime.utcnow(),
+                    )
+                except Exception as _fpr_bookkeeping_exc:
+                    logger.debug(
+                        "full_pool_rescan: delivery bookkeeping failed "
+                        "for %s/%s/%s: %s",
+                        _fpr_candidate["provider"],
+                        _fpr_candidate["player"],
+                        _fpr_candidate["stat_type"],
+                        _fpr_bookkeeping_exc,
+                    )
+            else:
+                fpr_not_delivered += 1
+                if _fpr_claimed:
+                    _fpr_snap = _fpr_candidate["snap"]
+                    _release_prop_delivery_claim(
+                        _prop_market_alerted,
+                        _fpr_candidate["player"],
+                        _fpr_candidate["sport"],
+                        _fpr_candidate["stat_type"],
+                        _fpr_candidate["line_val"],
+                        provider=_fpr_candidate["provider"],
+                        source_id=str(
+                            getattr(_fpr_snap, "external_id", None)
+                            or getattr(_fpr_snap, "id", None)
+                            or ""
+                        ),
+                        event_id=_fpr_candidate.get("event_id", ""),
+                        direction=str(
+                            getattr(
+                                _fpr_candidate["decision"],
+                                "recommendation",
+                                "",
+                            )
+                            or ""
+                        ),
+                    )
 
         if _fpr_opportunity_rows:
             _fpr_bulk_opportunity = getattr(db, "log_prop_opportunity_bulk", None)
