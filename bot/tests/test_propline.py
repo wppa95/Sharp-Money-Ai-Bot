@@ -578,6 +578,108 @@ def test_discovery_rate_limit_protects_daily_budget_and_backoff():
     assert len(session.calls) == 1
 
 
+def test_documented_read_only_event_capabilities_keep_payload_and_query_params():
+    session = _QueueSession(
+        [
+            _Response(200, {"event_id": "16", "redacted": True, "upgrade_url": "https://upgrade"}),
+            _Response(200, {"bookmakers": []}),
+            _Response(200, {"steam": []}),
+        ]
+    )
+    client = PropLineClient(
+        api_key="test-only-key",
+        session=session,
+        min_request_interval=0,
+        cache_ttl=0,
+    )
+
+    context = asyncio.run(client.fetch_event_context("baseball_mlb", "16"))
+    history = asyncio.run(
+        client.fetch_odds_history(
+            "baseball_mlb",
+            "16",
+            markets=["pitcher_strikeouts", "batter_hits"],
+            from_time="2026-08-01T00:00:00Z",
+            changes_only=True,
+        )
+    )
+    movement = asyncio.run(
+        client.fetch_movement("baseball_mlb", "16", markets="totals", period="q1")
+    )
+
+    assert context.succeeded is True
+    assert context.redacted is True
+    assert context.upgrade_url == "https://upgrade"
+    assert history.succeeded is True
+    assert movement.payload == {"steam": []}
+    assert session.calls[0][0].endswith("/v1/sports/baseball_mlb/events/16/context")
+    assert session.calls[1][1]["params"] == {
+        "markets": "pitcher_strikeouts,batter_hits",
+        "from": "2026-08-01T00:00:00Z",
+        "changes_only": "true",
+    }
+    assert session.calls[2][1]["params"] == {
+        "markets": "totals",
+        "period": "q1",
+    }
+
+
+def test_player_games_are_cached_and_player_name_is_escaped():
+    session = _Session(
+        _Response(
+            200,
+            {
+                "player_name": "Aaron Judge",
+                "sport_key": "baseball_mlb",
+                "games": [],
+            },
+        )
+    )
+    client = PropLineClient(
+        api_key="test-only-key",
+        session=session,
+        min_request_interval=0,
+        cache_ttl=300,
+    )
+
+    first = asyncio.run(
+        client.fetch_player_games(
+            "baseball_mlb", "Aaron Judge", limit=10, opponent="BOS",
+            stat_type=["hits", "rbis"],
+        )
+    )
+    second = asyncio.run(
+        client.fetch_player_game_log("baseball_mlb", "Aaron Judge", limit=10, opponent="BOS",
+                                     stat_type=["hits", "rbis"])
+    )
+
+    assert first.succeeded is True
+    assert second.from_cache is True
+    assert len(session.calls) == 1
+    assert "/players/Aaron%20Judge/games" in session.calls[0][0]
+    assert session.calls[0][1]["params"] == {
+        "limit": "10",
+        "opponent": "BOS",
+        "stat_type": "hits,rbis",
+    }
+
+
+def test_read_only_capability_validation_does_not_spend_request_budget():
+    session = _Session(_Response(200, {}))
+    client = PropLineClient(
+        api_key="test-only-key",
+        session=session,
+        min_request_interval=0,
+    )
+
+    result = asyncio.run(client.fetch_market_hit_rates(days=61))
+
+    assert result.succeeded is False
+    assert result.failure_kind == "configuration"
+    assert client.total_request_count == 0
+    assert session.calls == []
+
+
 def test_unknown_sport_is_skipped_without_fabricating_an_official_key():
     client = PropLineClient(
         api_key="test-only-key",

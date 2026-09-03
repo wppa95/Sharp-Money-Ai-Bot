@@ -2715,6 +2715,29 @@ class PropLineClient:
             )
         return await self._fetch_read_only(endpoint, {}, cache_scope="freshness")
 
+    # Explicit event-prefixed aliases keep the public client vocabulary close
+    # to the documentation and make capability discovery straightforward.
+    async def fetch_event_odds_history(self, sport_key: str, event: Any, **kwargs):
+        return await self.fetch_odds_history(sport_key, event, **kwargs)
+
+    async def fetch_event_closing_lines(self, sport_key: str, event: Any, **kwargs):
+        return await self.fetch_closing_lines(sport_key, event, **kwargs)
+
+    async def fetch_event_movement(self, sport_key: str, event: Any, **kwargs):
+        return await self.fetch_movement(sport_key, event, **kwargs)
+
+    async def fetch_event_best_line(self, sport_key: str, event: Any, **kwargs):
+        return await self.fetch_best_line(sport_key, event, **kwargs)
+
+    async def fetch_event_ev(self, sport_key: str, event: Any, **kwargs):
+        return await self.fetch_ev(sport_key, event, **kwargs)
+
+    async def fetch_event_projections(self, sport_key: str, event: Any, **kwargs):
+        return await self.fetch_projections(sport_key, event, **kwargs)
+
+    async def fetch_player_game_log(self, sport_key: str, player_name: str, **kwargs):
+        return await self.fetch_player_games(sport_key, player_name, **kwargs)
+
     async def _fetch_event_endpoint(
         self,
         sport_key: str,
