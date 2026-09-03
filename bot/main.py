@@ -933,7 +933,8 @@ async def _grade_opportunities_job(context) -> None:
                 no_data += 1
                 logger.debug(
                     "_grade_opportunities_job: no result for %s | %s | %s | %s",
-                    opp.player_name, opp.sport, opp.stat_type, game_date,
+                    opp.player_name, opp.sport, opp.stat_type,
+                    game_date or "event identity",
                 )
                 continue
             actual = result_row.actual_value

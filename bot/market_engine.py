@@ -1847,6 +1847,40 @@ async def _run_prizepicks_independent_cycle(
         )
         return
 
+    # Universal grading ledger: record every valid PrizePicks observation before
+    # scoring/qualification.  This is deliberately independent of the
+    # directional opportunity path below.
+    _tracking_records = []
+    for _tracked_prop in unique_props.values():
+        _tracked_player = str(getattr(_tracked_prop, "player_name", "") or "").strip()
+        _tracked_sport = str(getattr(_tracked_prop, "sport", "") or "").upper().strip()
+        _tracked_stat = str(getattr(_tracked_prop, "stat_type", "") or "").strip()
+        _tracked_external, _tracked_event = _source_identity(_tracked_prop)
+        if not _tracked_external:
+            _tracked_external = (
+                f"{_tracked_player}:{_tracked_sport}:{_tracked_stat}:{_tracked_event}"
+            )
+        _tracking_records.append({
+            "external_id": _tracked_external,
+            "player_name": _tracked_player,
+            "team": str(getattr(_tracked_prop, "team", "") or ""),
+            "sport": _tracked_sport,
+            "stat_type": _tracked_stat,
+            "line_value": getattr(_tracked_prop, "line_value", None),
+            "game_time": getattr(_tracked_prop, "game_time", None),
+            "game_id": _tracked_event,
+            "provider": "PrizePicks",
+        })
+    _track_props = getattr(db, "track_prop_records", None)
+    if callable(_track_props):
+        try:
+            await _track_props(_tracking_records)
+        except Exception as _tracking_exc:  # noqa: BLE001
+            logger.warning(
+                "prizepicks_cycle: universal tracking write failed: %s",
+                type(_tracking_exc).__name__,
+            )
+
     try:
         from engine.health import get_health_tracker as _get_pp_health_tracker
         _pp_health = _get_pp_health_tracker()
