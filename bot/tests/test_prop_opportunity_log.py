@@ -61,7 +61,7 @@ class TestLogPropOpportunity:
     @pytest.mark.asyncio
     async def test_inserts_new_record(self, db: Database) -> None:
         await _log(db, external_id="ext-ins-001")
-        pending = await db.get_pending_opportunities(cutoff_hours=4)
+        pending = await db.get_pending_tracked_props(cutoff_hours=4)
         ext_ids = [r.external_id for r in pending]
         assert "ext-ins-001" in ext_ids
 

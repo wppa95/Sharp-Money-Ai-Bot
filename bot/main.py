@@ -856,6 +856,23 @@ async def _grade_opportunities_job(context) -> None:
                 )
             except TypeError:
                 pending = await db.get_pending_opportunities(cutoff_hours=4)
+
+        # Universal ingestion tracking is a separate settlement population.
+        # Keep legacy directional rows in the existing rotating query, then
+        # add unresolved neutral observations without changing opportunity
+        # reports or strongest-pick behavior.
+        _legacy_pending = list(pending or [])
+        _tracked_pending = []
+        _get_pending_tracked = getattr(db, "get_pending_tracked_props", None)
+        if callable(_get_pending_tracked):
+            try:
+                _tracked_pending = await _get_pending_tracked(
+                    cutoff_hours=4,
+                    limit=_GRADE_BATCH_SIZE,
+                )
+            except TypeError:
+                _tracked_pending = await _get_pending_tracked(cutoff_hours=4)
+        pending = _legacy_pending + list(_tracked_pending or [])
         if not pending:
             if _ht_start:
                 _ht_start.record_job_run("_grade_opportunities_job")
@@ -970,7 +987,14 @@ async def _grade_opportunities_job(context) -> None:
                     actual_value   = actual,
                     line_value     = opp.line_value,
                 )
-            await db.grade_opportunity(opp.id, outcome, actual, error_type=error_type)
+            if getattr(opp, "recommendation", None) is None:
+                _grade_tracked = getattr(db, "grade_tracked_prop", None)
+                if callable(_grade_tracked):
+                    await _grade_tracked(opp.id, outcome, actual)
+            else:
+                await db.grade_opportunity(
+                    opp.id, outcome, actual, error_type=error_type
+                )
             graded += 1
         if graded or no_data:
             logger.info(
@@ -979,9 +1003,9 @@ async def _grade_opportunities_job(context) -> None:
             )
         _ht_g = get_health_tracker()
         if _ht_g:
-            if hasattr(_ht_g, "set_opportunity_grader_cursor") and pending:
+            if hasattr(_ht_g, "set_opportunity_grader_cursor") and _legacy_pending:
                 _ht_g.set_opportunity_grader_cursor(
-                    max(int(getattr(_opp, "id", 0) or 0) for _opp in pending)
+                    max(int(getattr(_opp, "id", 0) or 0) for _opp in _legacy_pending)
                 )
             _ht_g.record_job_run("_grade_opportunities_job")
     except Exception:
