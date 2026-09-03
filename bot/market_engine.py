@@ -6245,6 +6245,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 )
 
         _fpr_opportunity_rows: list[dict] = []
+        _fpr_delivery_candidates: list[dict] = []
 
         # ── Score each prop in this batch ─────────────────────────────────────
         for _fpr_key in batch_keys:
