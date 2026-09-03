@@ -1,0 +1,520 @@
+READ-ONLY AUDIT ONLY. DO NOT MAKE ANY CODE CHANGES.
+
+We are redesigning the PropLine integration so PropLine can be used as the primary supplemental sports-data source for BOTH PrizePicks and Underdog.
+
+IMPORTANT ARCHITECTURE RULE:
+
+* PrizePicks and Underdog remain completely separate betting providers.
+* PropLine is NOT a user-facing sportsbook/provider.
+* PropLine is a shared supplemental data source.
+* The actual PP line remains a PrizePicks line.
+* The actual UD line remains an Underdog line.
+* PropLine may supplement missing data for either provider.
+* If Underdog already provides a piece of data, do NOT replace it with PropLine.
+* If Underdog is missing data needed for analysis, use PropLine where available.
+* Same rule for PrizePicks.
+* Do NOT merge PP and UD into one provider.
+* Do NOT change scoring, confidence, qualification, PLAY criteria, alert thresholds, Telegram behavior, risk rules, or betting logic.
+
+FULL PROP-LINE API DOCUMENTATION:
+
+https://prop-line.com/llms-full.txt
+
+Use the complete documentation above as the authoritative PropLine API reference.
+
+GOAL OF THIS AUDIT:
+
+Determine exactly what our bot currently does with PropLine versus what PropLine actually makes available.
+
+DO NOT IMPLEMENT ANYTHING YET.
+
+DO NOT:
+
+* modify files
+* install dependencies
+* regenerate lockfiles
+* restart the bot
+* deploy
+* change environment variables
+* change scheduler intervals
+* change scheduler/coordinator behavior
+* change the 208 requests/hour PropLine pacing
+* change the 5,000/day PropLine budget
+* change scoring
+* change alert logic
+* change provider identity
+* remove existing providers
+* refactor unrelated code
+
+==================================================
+
+1. CURRENT PROPLINE ENDPOINT USAGE
+    ==================================================
+
+Inspect the entire repository and identify every PropLine API endpoint currently used.
+
+For each endpoint report:
+
+* file
+* function/class
+* endpoint
+* purpose
+* frequency/caller
+* whether it is production-active
+* whether the response is persisted
+* whether the response feeds analysis
+* whether the response feeds alerts
+* whether the response is currently discarded
+
+Then identify PropLine endpoints documented in llms-full.txt that the bot does NOT currently use.
+
+==================================================
+2. PROPLINE SPORTS COVERAGE
+
+Determine exactly how the current implementation chooses PropLine sports.
+
+Specifically inspect:
+
+* sport discovery
+* sport aliases
+* configured sport lists
+* catalog discovery
+* event discovery
+* market discovery
+* any hardcoded sport filters
+* any compatibility/fallback lists
+* unsupported-sport filtering
+* football filtering
+
+Determine why the current implementation effectively processes only one PropLine/catalog sport during a shared monitoring cycle.
+
+Show the exact code path responsible.
+
+DO NOT change it.
+
+Also determine which PropLine-supported sports could currently be collected by our bot without changing alert policy.
+
+Remember:
+
+I DO NOT BET FOOTBALL.
+
+Football/NFL/NCAAF should remain outside the actionable betting universe.
+
+==================================================
+3. PROPLINE CURRENT-LINE DATA
+
+Audit how the bot currently obtains current PrizePicks lines through PropLine.
+
+Determine:
+
+* how sports are selected
+* how events are selected
+* how markets are selected
+* whether the bot uses /sports
+* whether it uses /events
+* whether it uses /events/{event_id}/markets
+* whether it uses /events/{event_id}/odds
+* whether it requests specific markets
+* whether it retrieves unnecessary data
+* whether it misses available markets
+* whether it misses available events
+* whether it misses available sports
+
+Determine the most efficient API discovery/collection flow supported by PropLine.
+
+==================================================
+4. PROPLINE DATA FOR UNDERDOG
+
+THIS IS CRITICAL.
+
+Audit the Underdog pipeline and determine where PropLine could supplement missing data.
+
+Underdog must remain the authoritative source for:
+
+* Underdog line
+* Underdog market identity
+* Underdog provider identity
+* Underdog movement
+* Underdog-specific market state
+
+But if Underdog is missing information needed for analysis, determine whether PropLine can provide it.
+
+Audit whether PropLine can supplement Underdog with:
+
+* player identity
+* stable player_id
+* event/game identity
+* game information
+* player statistics
+* historical player statistics
+* recent-game results
+* player trends
+* prop results
+* line history
+* closing lines
+* opening lines
+* CLV information
+* other useful evidence
+
+For every possible supplement, report:
+
+1. What Underdog currently provides.
+2. What Underdog is missing.
+3. What PropLine endpoint could provide it.
+4. Whether that data is available on our current PropLine plan.
+5. Whether we are already calling that endpoint.
+6. Where the data should eventually feed into the existing analysis pipeline.
+
+DO NOT implement any of this yet.
+
+==================================================
+5. PROPLINE PLAYER STATS
+
+Determine whether our current bot uses PropLine’s player-stat endpoints.
+
+Audit the complete available stat vocabulary.
+
+Compare:
+
+CURRENT BOT STAT SOURCES
+vs.
+PROPLINE AVAILABLE STATS
+
+Identify where PropLine could replace/supplement missing historical evidence.
+
+Pay particular attention to:
+
+MLB
+NBA
+WNBA
+NHL
+Soccer
+Tennis
+Golf
+UFC
+CS2
+and other supported non-football sports.
+
+Do NOT assume that because a sport has betting markets it also has complete historical player data.
+
+Clearly distinguish:
+
+* sport supported
+* current props supported
+* historical stats supported
+* player IDs supported
+* results supported
+* trends supported
+
+==================================================
+6. PROPLINE HISTORY / RESULTS / TRENDS
+
+Audit whether we currently use any of these capabilities:
+
+* historical line movement
+* opening lines
+* closing lines
+* CLV
+* player history
+* player trends
+* hit rates
+* prop results/resolution
+* official box-score stats
+* event results
+
+For each:
+
+USED / PARTIALLY USED / NOT USED
+
+Then explain exactly where it could improve the existing analysis without changing the decision rules.
+
+==================================================
+7. PLAYER IDENTITY
+
+Audit current player identity handling.
+
+Determine whether we use:
+
+* PropLine stable player_id
+* sportsbook/native player IDs
+* Underdog IDs
+* PrizePicks IDs
+* name matching
+* aliases
+* any manually generated IDs
+
+Identify collision/matching risks.
+
+Determine whether PropLine stable player IDs can be safely introduced as supplemental identity while preserving provider-specific IDs.
+
+DO NOT implement.
+
+==================================================
+8. EVENT / GAME IDENTITY
+
+Audit event identity across:
+
+* Underdog
+* PrizePicks
+* PropLine
+
+Determine whether we preserve:
+
+* provider
+* sport
+* event
+* player
+* market
+* source/native ID
+
+Identify where event identity is lost or reconstructed.
+
+DO NOT change it.
+
+==================================================
+9. PROPLINE REQUEST EFFICIENCY
+
+Audit our current request behavior against PropLine’s documented recommendations.
+
+Specifically check:
+
+* /sports discovery
+* /events discovery
+* event market discovery
+* market filtering
+* pagination
+* duplicate requests
+* repeated event requests
+* caching
+* TTLs
+* unnecessary full-board requests
+* failed requests
+* 429 handling
+* Retry-After
+* quota headers
+* daily request budget
+* request spacing
+
+Our current hard limit is:
+
+MAX = 208 PropLine requests/hour
+TARGET DAILY CEILING ≈ 4,992 requests/day
+PROP-LINE PLAN LIMIT = 5,000/day
+
+DO NOT change these limits.
+
+Determine how much useful coverage we can achieve inside that budget.
+
+==================================================
+10. PROPLINE COLLECTION CADENCE
+
+Audit the current relationship between:
+
+* Underdog monitoring
+* PrizePicks/PropLine collection
+* scheduler
+* monitoring coordinator
+* full-pool rescan
+
+We already intentionally fixed scheduler overlap behavior.
+
+DO NOT change that behavior.
+
+Determine:
+
+* how often PropLine is actually requested
+* why one sport is selected per shared cycle
+* whether a slow PropLine request delays Underdog monitoring
+* whether PropLine requests are dropped/deferred
+* whether there is a cursor/round-robin state
+* whether a failed/deferred sport gets tracked
+* whether later sports can starve
+* whether a separate PropLine collection loop would be technically cleaner
+* whether a bounded independent PropLine task could coexist safely with the existing scheduler/coordinator
+
+Again: AUDIT ONLY.
+
+==================================================
+11. DATA LOSS / FILTERING
+
+Identify every point where PropLine or Underdog data is:
+
+* rejected
+* filtered
+* discarded
+* deduplicated
+* normalized away
+* excluded because of missing history
+* excluded because of unsupported stat type
+* excluded because of sport policy
+* excluded because of football policy
+* excluded because it cannot become actionable
+
+Clearly distinguish:
+
+DATA COLLECTION
+
+from
+
+DATA ANALYSIS
+
+from
+
+ACTIONABILITY
+
+We want to maximize valid data collection WITHOUT increasing alerts.
+
+Football can remain excluded from the actionable pipeline because I do not bet football.
+
+==================================================
+12. CURRENT HISTORICAL DATA PROVIDERS
+
+Audit every current player-history/stat provider.
+
+Determine which sports currently rely on:
+
+* MLB Stats API
+* ESPN
+* Sleeper
+* NHL data
+* football-data
+* esports sources
+* tennis sources
+* other providers
+
+For every provider/sport combination determine:
+
+* why it exists
+* what data it supplies
+* whether PropLine now supplies the same data
+* whether PropLine is better/worse/equivalent
+* whether PropLine could become the primary source
+* whether the existing provider should remain as fallback
+
+DO NOT remove or replace anything during this audit.
+
+==================================================
+13. SPORT COVERAGE MATRIX
+
+Create a concise matrix containing at minimum:
+
+SPORT
+CURRENT PROP DATA
+CURRENT HISTORICAL DATA
+PROPLINE PROP DATA
+PROPLINE HISTORICAL DATA
+PROPLINE RESULTS
+PROPLINE PLAYER ID
+CURRENT GAP
+RECOMMENDED SOURCE
+
+Focus on non-football sports.
+
+Do not artificially restrict the analysis to NBA/MLB.
+
+==================================================
+14. COLLECTION VS ACTIONABILITY
+
+Verify that increasing PropLine collection will NOT automatically cause more Telegram alerts.
+
+We want:
+
+MORE VALID DATA
+→ MORE EVIDENCE
+→ EXISTING ANALYSIS ENGINE
+→ EXISTING QUALIFICATION
+→ EXISTING PLAY RULES
+
+NOT:
+
+MORE DATA
+→ LOOSER FILTERS
+→ MORE ALERTS
+
+Do not modify any thresholds.
+
+==================================================
+15. RECOMMENDED ARCHITECTURE
+
+After the audit, recommend the smallest clean architecture that would let us use PropLine properly.
+
+Preferred conceptual model:
+
+PRIZEPICKS
+actual PP market/line
+↓
+PropLine supplemental data
+↓
+existing analysis
+
+UNDERDOG
+actual UD market/line
+↓
+PropLine supplemental data when UD data is missing
+↓
+existing analysis
+
+PropLine should NOT become a replacement for the actual PP/UD provider identity.
+
+The recommendation should specifically address:
+
+* sport discovery
+* event discovery
+* market discovery
+* current lines
+* player stats
+* historical data
+* results
+* player IDs
+* event IDs
+* caching
+* request budgeting
+* cadence
+* fallback behavior
+* provider separation
+
+Keep it simple. I do NOT want a messy architecture or a huge telemetry subsystem.
+
+==================================================
+16. FINAL DELIVERABLE
+
+Return a READ-ONLY AUDIT REPORT with:
+
+A. Executive summary
+B. Current PropLine endpoints used
+C. Unused PropLine capabilities
+D. Underdog → PropLine supplementation opportunities
+E. PrizePicks → PropLine supplementation opportunities
+F. Sport coverage matrix
+G. Historical-data gaps
+H. Player/event identity findings
+I. Request/quota efficiency findings
+J. Cadence/scheduling findings
+K. Data-loss/filtering findings
+L. Exact files/functions responsible
+M. Recommended clean architecture
+N. PRIORITIZED implementation plan
+
+IMPORTANT:
+
+Do not implement anything.
+
+Do not restart.
+
+Do not deploy.
+
+Do not modify the database.
+
+Do not modify scoring.
+
+Do not modify alerts.
+
+Do not modify Telegram.
+
+Do not modify scheduler behavior.
+
+Do not change PropLine request limits.
+
+Only inspect, trace, compare, and report.
+
+The final recommendation must identify the SINGLE highest-value first implementation step so we can implement this incrementally without burning unnecessary Replit Agent credits.
