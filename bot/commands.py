@@ -2049,7 +2049,7 @@ class PropPickAdapter:
         "player_name", "stat_type", "sport", "team", "game_time",
         "game_description", "confidence", "tier", "best_edge",
         "best_side", "pp_line_value", "prev_line", "opening_line",
-        "sportsbook", "result", "detected_at", "comp",
+        "sportsbook", "external_id", "game_id", "result", "detected_at", "comp",
     )
 
     def __init__(
@@ -2068,6 +2068,8 @@ class PropPickAdapter:
         self.game_description = str(
             getattr(plh, "game_description", "") or ""
         ).strip()
+        self.external_id = str(getattr(plh, "external_id", "") or "").strip()
+        self.game_id = str(getattr(plh, "game_id", "") or "").strip()
         self.detected_at = plh.fetched_at
         self.result      = None
         self.sportsbook  = getattr(plh, "provider", None) or "Underdog"
@@ -2286,6 +2288,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         p for p in pp_rows
         if getattr(p, "removed", False) is not True
         and not _is_season_future(p.stat_type)
+        and _has_current_prop_data(p, now)
         and _is_current_provider_sport(p.sport, "PrizePicks")
         and not is_telegram_suppressed_sport(p.sport)
         and _is_upcoming_game(
@@ -2487,15 +2490,18 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         ):
             _eff_rec = _live_r
         # Skip props without a direction — user only wants actionable picks.
+        # The provider-owned current-data gate already rejected stale,
+        # unscored, invalid, and zero-confidence rows before this point.
         if _eff_rec not in ("OVER", "UNDER"):
             logger.debug(
                 "cmd_picks: skipping %s/%s — no actionable direction (rec=%s)",
                 plh.player_name, plh.stat_type, _eff_rec,
             )
             continue
-        # /picks is a research view, not a second delivery gate. Preserve all
-        # directional recommendations, including MLB UNDER and lower labels;
-        # the canonical Telegram boundary is enforced by AlertDelivery.
+        # Keep this view aligned with the same provider/event integrity
+        # contract as /slip.  Delivery remains independently gated by
+        # AlertDelivery; this only prevents malformed current rows from being
+        # presented as picks.
         if _key not in _sport_groups:
             _sport_groups[_key] = []
         _sport_groups[_key].append((_flat_idx, plh, comp))
@@ -2786,6 +2792,7 @@ def _render_slip_section(
     total_conf = 0.0
     conf_count = 0
     total_move = 0.0   # replaces avg_edge for PropPickAdapter legs
+    move_count = 0
     has_adapters = any(hasattr(r, "comp") for r in records)
 
     heading = f"🎯 <b>{size}-Man Slip</b>"
@@ -2795,7 +2802,7 @@ def _render_slip_section(
 
     for i, r in enumerate(records, 1):
         stars_str  = _stars_from_conf(r.confidence)
-        conf_label = f"{r.confidence:.0f}/100" if r.confidence is not None else "—"
+        conf_label = f"{r.confidence:.0f}/100" if r.confidence is not None else "unavailable"
         if r.confidence is not None:
             total_conf += r.confidence
             conf_count += 1
@@ -2803,17 +2810,27 @@ def _render_slip_section(
         best_line = getattr(r, "pp_line_value", None)
         line_str  = f"<code>{best_line:g}</code>" if best_line is not None else "—"
 
-        # Movement note — only for PropPickAdapter (prev_line available)
+        # Movement note — use the comparison when available, otherwise use
+        # the provider row's own persisted previous line.
         move_note = ""
         prev = getattr(r, "prev_line", None)
         if has_adapters:
             comp = getattr(r, "comp", None)
-            mv   = comp.movement if comp else None
+            mv = (
+                getattr(comp, "movement", None)
+                if comp is not None
+                else (
+                    float(best_line) - float(prev)
+                    if best_line is not None and prev is not None
+                    else None
+                )
+            )
             if mv is not None and mv != 0:
                 sign  = "+" if mv > 0 else ""
                 arrow = "↑" if mv > 0 else "↓"
                 move_note = f"  <code>{sign}{mv:.1f}{arrow}</code>"
                 total_move += abs(mv)
+                move_count += 1
         else:
             opening = getattr(r, "opening_line", None)
             if (opening is not None and best_line is not None
@@ -2823,7 +2840,11 @@ def _render_slip_section(
 
         _move_conf = None
         if has_adapters:
-            _move_conf = min(100.0, abs(float(getattr(comp, "movement", 0) or 0)) * 25.0) if comp else None
+            _move_conf = (
+                min(100.0, abs(float(mv)) * 25.0)
+                if mv is not None
+                else None
+            )
         _sharp = _sharp_conf(
             bet_confidence=r.confidence,
             movement_confidence=_move_conf,
@@ -2878,21 +2899,33 @@ def _render_slip_section(
             f"{_dec_leg}"
         )
 
-    avg_conf = total_conf / conf_count if conf_count else 0.0
+    avg_conf = total_conf / conf_count if conf_count else None
 
     if has_adapters:
-        avg_mv = total_move / actual if actual else 0.0
+        avg_mv = total_move / move_count if move_count else None
         summary = (
-            f"\n  Avg move <code>{avg_mv:.1f}</code>  ·  "
-            f"Avg conf <code>{avg_conf:.0f}/100</code>  ·  "
-            f"{actual} legs"
+            f"\n  Avg move <code>{avg_mv:.1f}</code>" if avg_mv is not None
+            else "\n  Avg move <code>unavailable</code>"
+        ) + (
+            f"  ·  Avg conf <code>{avg_conf:.0f}/100</code>" if avg_conf is not None
+            else "  ·  Avg conf <code>unavailable</code>"
+        ) + (
+            f"  ·  {actual} legs"
         )
     else:
-        edges     = [r.best_edge for r in records if getattr(r, "best_edge", None) is not None]
-        avg_edge  = sum(edges) / len(edges) if edges else 0.0
-        summary   = (
-            f"\n  Avg edge <code>+{avg_edge:.1f}%</code>  ·  "
-            f"Avg conf <code>{avg_conf:.0f}/100</code>  ·  "
+        edges = [
+            r.best_edge for r in records
+            if getattr(r, "best_edge", None) is not None
+        ]
+        avg_edge = sum(edges) / len(edges) if edges else None
+        summary = (
+            f"\n  Avg edge <code>+{avg_edge:.1f}%</code>"
+            if avg_edge is not None
+            else "\n  Avg edge <code>unavailable</code>"
+        ) + (
+            f"  ·  Avg conf <code>{avg_conf:.0f}/100</code>" if avg_conf is not None
+            else "  ·  Avg conf <code>unavailable</code>"
+        ) + (
             f"{actual} legs"
         )
 

@@ -74,8 +74,7 @@ def build_all_slips(
         else:
             logger.debug(
                 "slip_builder: %d-man slip skipped (requested %d, got %d legs)",
-                n, n,
-                n, len(slip.legs),
+                n, n, len(slip.legs),
             )
 
     return results
