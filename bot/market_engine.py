@@ -56,6 +56,7 @@ from engine.player_prop_market import (
 from engine.score_validation import clamp_score
 from engine.sport_policy import is_football_related_sport
 from engine.telegram_rate_limiter import get_rate_limiter
+from engine.strongest_pick import select_strongest_actionable_picks
 from providers import FailureType, get_health_monitor
 from engine.delivery_gates import (
     tier_delivery_gate as _canonical_tier_delivery_gate,
@@ -2094,6 +2095,7 @@ async def _run_prizepicks_independent_cycle(
         )
         return
 
+    actionable = select_strongest_actionable_picks(actionable)
     delivered = 0
     delivery = AlertDelivery(db, bot, chat_ids)
     for candidate in actionable:
@@ -3607,6 +3609,7 @@ async def underdog_job(context) -> None:
                         _np_ext_id = getattr(snap, "external_id", None) or getattr(snap, "id", None) or ""
                         _delivery_queue.append({
                             "path":               "new",
+                            "provider":            "Underdog",
                             "player":             player,
                             "snap":               snap,
                             "stat_type":          stat_type,
@@ -4080,6 +4083,7 @@ async def underdog_job(context) -> None:
                         _lc_ext_id_q = getattr(snap, "external_id", None) or getattr(snap, "id", None) or ""
                         _delivery_queue.append({
                             "path":               "lc",
+                            "provider":            "Underdog",
                             "player":             player,
                             "snap":               snap,
                             "stat_type":          stat_type,
@@ -4490,6 +4494,7 @@ async def underdog_job(context) -> None:
                 _s_ext_id_q = getattr(_ssnap, "external_id", None) or getattr(_ssnap, "id", None) or ""
                 _delivery_queue.append({
                     "path":               "standing",
+                    "provider":            "Underdog",
                     "player":             _sp,
                     "snap":               _ssnap,
                     "stat_type":          _st,
@@ -4545,6 +4550,7 @@ async def underdog_job(context) -> None:
         # first access; no candidate is hard-rejected — lower-priority ones are deferred
         # and remain available in /picks and the DB.
         if _delivery_queue and chat_ids:
+            _delivery_queue[:] = select_strongest_actionable_picks(_delivery_queue)
             _apply_delivery_diversification(_delivery_queue)
             _n_dq_deferred   = 0
             _dq_deferred_log: list[str] = []
