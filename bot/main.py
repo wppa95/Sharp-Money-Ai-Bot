@@ -631,10 +631,13 @@ async def post_init(application: Application) -> None:
             )
         logger.info(
             "Jobs scheduled — underdog: every %ds, FPR: every %ds, "
-            "season_check: every %ds, heartbeat: every 60s "
+            "grader: every %ds, history: every %ds, season_check: every %ds, "
+            "heartbeat: every 60s "
             "[PrizePicks/PropLine companion cycle enabled=%s; DK/FD delivery disabled]",
             config.UNDERDOG_POLL_INTERVAL,
             config.FPR_INTERVAL,
+            config.OPPORTUNITY_GRADER_INTERVAL,
+            config.PLAYER_HISTORY_POLL_INTERVAL,
             config.SEASON_CHECK_INTERVAL,
             _propline_enabled,
         )
