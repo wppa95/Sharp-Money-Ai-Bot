@@ -420,6 +420,39 @@ def _primary_provider_runtime_lines(health_monitor: object | None) -> list[str]:
             lines.append(f"    ⚪ {provider}: health unavailable")
     return lines
 
+
+def _prizepicks_feed_count_lines(health_tracker: object | None) -> list[str]:
+    """Render the latest raw and normalized PrizePicks counts by sport."""
+    if health_tracker is None:
+        return []
+    try:
+        if hasattr(health_tracker, "get_provider_feed_counts"):
+            counts_by_sport = health_tracker.get_provider_feed_counts("PrizePicks")
+        else:
+            info = health_tracker.get_provider_info("PrizePicks") or {}
+            counts_by_sport = info.get("feed_counts_by_sport") or {}
+    except Exception:
+        return []
+    if not isinstance(counts_by_sport, dict) or not counts_by_sport:
+        return []
+
+    lines = ["  <i>PrizePicks feed by sport</i>"]
+    for sport, counts in sorted(counts_by_sport.items()):
+        if not isinstance(counts, dict):
+            continue
+        raw = counts.get("raw_records", "—")
+        normalized = counts.get("normalized_props", "—")
+        state = str(counts.get("state", "") or "").strip().lower()
+        state_label = f" · {state}" if state else ""
+        lines.append(
+            f"    {_html.escape(str(sport))}: "
+            f"{_html.escape(str(raw))} raw records · "
+            f"{_html.escape(str(normalized))} normalized props"
+            f"{_html.escape(state_label)}"
+        )
+    return lines if len(lines) > 1 else []
+
+
 # ── Module-level references (set by main.py on startup) ───────────────────────
 _db: Optional[Database] = None
 _engine: Optional[AnalysisEngine] = None
@@ -1133,6 +1166,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 f"  History: Underdog: {_format_status_count(ud_history)}"
                 f" · PrizePicks (PropLine): {_format_status_count(pp_history)}"
             ),
+            *_prizepicks_feed_count_lines(_ht_pipeline),
             *_alert_readiness_lines(
                 _player_result_coverage,
                 _directional_opportunities,
@@ -4071,6 +4105,11 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             _mon = get_health_monitor()
         except Exception:
             _mon = None
+        try:
+            from engine.health import get_health_tracker
+            _ht_pipeline = get_health_tracker()
+        except Exception:
+            _ht_pipeline = None
 
         lines: list[str] = [
             "🔌 <b>Provider Status</b>",
@@ -4078,6 +4117,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             "<b>Player Prop Market Providers</b>",
             *_primary_player_prop_provider_lines(_mon),
             *_primary_provider_runtime_lines(_mon),
+            *_prizepicks_feed_count_lines(_ht_pipeline),
             "",
             "<b>Historical Enrichment by Sport</b>",
         ]

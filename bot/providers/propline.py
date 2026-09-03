@@ -303,6 +303,8 @@ class PropLineFetchResult:
     # empty snapshot can be represented without treating a partial response as
     # current truth.
     complete: bool = False
+    raw_record_count: int = 0
+    normalized_prop_count: int = 0
     discovered_event_count: int = 0
     fetched_event_count: int = 0
     failed_event_ids: tuple[str, ...] = ()
@@ -3060,6 +3062,8 @@ class PropLineClient:
                     from_cache=True,
                     succeeded=True,
                     complete=cached.complete,
+                    raw_record_count=cached.raw_record_count,
+                    normalized_prop_count=cached.normalized_prop_count,
                     discovered_event_count=cached.discovered_event_count,
                     fetched_event_count=cached.fetched_event_count,
                 )
@@ -3117,9 +3121,13 @@ class PropLineClient:
                     pagination_error or "PropLine snapshot incomplete",
                     "incomplete",
                     partial_props=props,
+                    raw_record_count=len(raw_records),
+                    normalized_prop_count=len(props),
                 )
             self._cache = PropLineFetchResult(
-                props, fetched_at, from_cache=False, succeeded=True, complete=True
+                props, fetched_at, from_cache=False, succeeded=True, complete=True,
+                raw_record_count=len(raw_records),
+                normalized_prop_count=len(props),
             )
             self._cache_clock_at = self._clock()
             self._cache_scope = scope
@@ -3128,6 +3136,8 @@ class PropLineClient:
             result = PropLineFetchResult(
                 list(props), fetched_at, from_cache=False,
                 succeeded=True, complete=True,
+                raw_record_count=len(raw_records),
+                normalized_prop_count=len(props),
             )
             self._last_success_by_scope[scope] = result
             self._snapshot_state_by_scope[scope] = PropLineSnapshotState(
@@ -3143,6 +3153,8 @@ class PropLineClient:
         failure_kind: str,
         *,
         partial_props: Optional[list[PlayerProp]] = None,
+        raw_record_count: int = 0,
+        normalized_prop_count: int = 0,
         discovered_event_count: int = 0,
         fetched_event_count: int = 0,
         failed_event_ids: tuple[str, ...] = (),
@@ -3158,6 +3170,8 @@ class PropLineClient:
             error=error,
             failure_kind=failure_kind,
             complete=False,
+            raw_record_count=raw_record_count,
+            normalized_prop_count=normalized_prop_count,
             discovered_event_count=discovered_event_count,
             fetched_event_count=fetched_event_count,
             failed_event_ids=failed_event_ids,
@@ -3342,6 +3356,8 @@ class PropLinePrizePicksProvider(PropProviderBase):
             error=result.error,
             failure_kind=result.failure_kind,
             complete=result.complete,
+            raw_record_count=result.raw_record_count,
+            normalized_prop_count=result.normalized_prop_count,
             discovered_event_count=result.discovered_event_count,
             fetched_event_count=result.fetched_event_count,
             failed_event_ids=result.failed_event_ids,

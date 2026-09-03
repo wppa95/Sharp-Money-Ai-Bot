@@ -68,6 +68,31 @@ def test_provider_database_write_isolated_and_persisted(tmp_path: Path):
     assert "last_db_write_ts" not in ud_info
 
 
+def test_prizepicks_feed_counts_keep_empty_separate_from_failed(tmp_path: Path):
+    tracker = HealthTracker(path=tmp_path / "health.json")
+    tracker.record_provider_feed_counts(
+        "PrizePicks", "NBA", 0, 0, succeeded=True
+    )
+    tracker.record_provider_feed_counts(
+        "PrizePicks", "MLB", 9, 4, succeeded=True
+    )
+    tracker.record_provider_feed_counts(
+        "PrizePicks", "WNBA", 0, 0, succeeded=False
+    )
+
+    counts = tracker.get_provider_feed_counts("PrizePicks")
+    assert counts["NBA"]["state"] == "empty"
+    assert counts["NBA"]["raw_records"] == 0
+    assert counts["NBA"]["normalized_props"] == 0
+    assert counts["MLB"]["state"] == "ok"
+    assert counts["WNBA"]["state"] == "failed"
+
+    rendered = "\n".join(commands._prizepicks_feed_count_lines(tracker))
+    assert "NBA: 0 raw records · 0 normalized props · empty" in rendered
+    assert "MLB: 9 raw records · 4 normalized props · ok" in rendered
+    assert "WNBA: 0 raw records · 0 normalized props · failed" in rendered
+
+
 def test_prizepicks_pipeline_renderer_does_not_borrow_underdog_counts():
     lines: list[str] = []
     commands._append_provider_pipeline(
@@ -179,3 +204,35 @@ async def test_status_uses_shared_monitoring_cycle_without_merging_ud():
     assert "Latest monitoring cycle" not in text
     assert "Observed:            99" not in text
     assert "History: Underdog: 15 · PrizePicks (PropLine): 5" in text
+
+
+@pytest.mark.asyncio
+async def test_status_shows_prizepicks_feed_counts_by_sport(tmp_path: Path):
+    update, context = _update_and_context()
+    db = MagicMock()
+    db.count_today_actionable_alerts = AsyncMock(return_value=0)
+    db.count_prop_line_history = AsyncMock(side_effect=lambda provider=None: {
+        None: 20,
+        "Underdog": 15,
+        "PrizePicks": 5,
+    }[provider])
+    tracker = HealthTracker(path=tmp_path / "health.json")
+    tracker.record_provider_feed_counts(
+        "PrizePicks", "NBA", 0, 0, succeeded=True
+    )
+    tracker.record_provider_feed_counts(
+        "PrizePicks", "MLB", 6, 3, succeeded=True
+    )
+
+    with (
+        patch.object(commands, "_check_allowed", return_value=True),
+        patch.object(commands, "_db", db),
+        patch("providers.get_health_monitor", return_value=MagicMock()),
+        patch("engine.health.get_health_tracker", return_value=tracker),
+    ):
+        await commands.cmd_status(update, context)
+
+    text = update.message.reply_text.await_args.args[0]
+    assert "PrizePicks feed by sport" in text
+    assert "NBA: 0 raw records · 0 normalized props · empty" in text
+    assert "MLB: 6 raw records · 3 normalized props · ok" in text

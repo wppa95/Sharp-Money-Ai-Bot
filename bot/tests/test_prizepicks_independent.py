@@ -166,6 +166,7 @@ class TestIndependentPrizePicks:
         self, monkeypatch
     ):
         calls = []
+        feed_counts = []
 
         class FakeProvider:
             def is_available(self):
@@ -174,6 +175,17 @@ class TestIndependentPrizePicks:
             async def fetch_props_for_sport_result(self, sport, bookmaker=None):
                 calls.append((sport, bookmaker))
                 return PropLineFetchResult([], datetime.utcnow(), succeeded=True)
+
+        class FakeHealthTracker:
+            def record_provider_fetch(self, provider):
+                pass
+
+            def record_provider_feed_counts(
+                self, provider, sport, raw_records, normalized_props, *, succeeded
+            ):
+                feed_counts.append(
+                    (provider, sport, raw_records, normalized_props, succeeded)
+                )
 
         class FakeDB:
             async def get_prop_line_history(self, *args, **kwargs):
@@ -184,12 +196,16 @@ class TestIndependentPrizePicks:
         monkeypatch.setattr(
             market_engine.config, "PRIZEPICKS_LEAGUES_RAW", "NBA,MLB,WNBA"
         )
+        monkeypatch.setattr(
+            market_engine, "get_health_tracker", lambda: FakeHealthTracker()
+        )
 
         await market_engine._run_prizepicks_independent_cycle(
             SimpleNamespace(bot_data={"db": FakeDB()}, bot=object())
         )
 
         assert calls == [("NBA", "prizepicks")]
+        assert feed_counts == [("PrizePicks", "NBA", 0, 0, True)]
 
     async def test_current_normalized_props_reach_universal_tracking(
         self, monkeypatch, caplog

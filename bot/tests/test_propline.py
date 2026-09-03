@@ -477,6 +477,10 @@ def test_client_reuses_fresh_cache_instead_of_repeating_request():
     assert second.from_cache is True
     assert first.succeeded is True
     assert second.succeeded is True
+    assert first.raw_record_count == 1
+    assert first.normalized_prop_count == 1
+    assert second.raw_record_count == 1
+    assert second.normalized_prop_count == 1
     assert len(session.calls) == 1
 
 

@@ -527,6 +527,55 @@ class HealthTracker:
             entry["error_streak"]  = 0
             self._save()
 
+    def record_provider_feed_counts(
+        self,
+        provider: str,
+        sport: str,
+        raw_records: int,
+        normalized_props: int,
+        *,
+        succeeded: bool,
+    ) -> None:
+        """Record the latest raw/normalized feed counts for one provider sport.
+
+        A successful zero-prop response is a normal ``empty`` state, not a
+        provider failure.  These are session-scoped runtime diagnostics and
+        are cleared with the other provider state on the next startup.
+        """
+        raw_count = max(0, int(raw_records or 0))
+        normalized_count = max(0, int(normalized_props or 0))
+        state = (
+            "failed"
+            if not succeeded
+            else "empty"
+            if normalized_count == 0
+            else "ok"
+        )
+        sport_key = str(sport or "").strip().upper() or "UNKNOWN"
+        now_iso = _now_iso()
+        now_ts = _now_ts()
+        with self._lock:
+            providers: dict = self._state.setdefault("providers", {})
+            entry: dict = providers.setdefault(provider, {})
+            by_sport = entry.setdefault("feed_counts_by_sport", {})
+            by_sport[sport_key] = {
+                "raw_records": raw_count,
+                "normalized_props": normalized_count,
+                "state": state,
+                "last_fetch": now_iso,
+                "last_fetch_ts": now_ts,
+            }
+            self._save()
+
+    def get_provider_feed_counts(self, provider: str) -> dict[str, dict]:
+        """Return the latest per-sport feed diagnostics for one provider."""
+        info = self.get_provider_info(provider)
+        return {
+            str(sport): dict(counts)
+            for sport, counts in (info.get("feed_counts_by_sport") or {}).items()
+            if isinstance(counts, dict)
+        }
+
     def record_provider_error(self, provider: str, error: str) -> None:
         with self._lock:
             providers: dict = self._state.setdefault("providers", {})

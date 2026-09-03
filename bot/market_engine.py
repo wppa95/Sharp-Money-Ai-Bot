@@ -1649,6 +1649,17 @@ async def _run_prizepicks_independent_cycle(
                     )
                     sport_props = list(getattr(fetch_result, "props", []) or [])
                     current_succeeded = bool(getattr(fetch_result, "succeeded", False))
+                    current_raw_count = int(
+                        getattr(fetch_result, "raw_record_count", len(sport_props)) or 0
+                    )
+                    current_normalized_count = int(
+                        getattr(
+                            fetch_result,
+                            "normalized_prop_count",
+                            len(sport_props),
+                        )
+                        or 0
+                    )
                     current_error = str(getattr(fetch_result, "error", "") or "")
                     current_failure_kind = str(
                         getattr(fetch_result, "failure_kind", "") or ""
@@ -1656,16 +1667,22 @@ async def _run_prizepicks_independent_cycle(
                 elif callable(fetch_for_sport):
                     sport_props = list(await fetch_for_sport(sport) or [])
                     current_succeeded = True
+                    current_raw_count = len(sport_props)
+                    current_normalized_count = len(sport_props)
                     current_error = ""
                     current_failure_kind = ""
                 else:
                     sport_props = list(await _propline_provider.fetch_props() or [])
                     current_succeeded = True
+                    current_raw_count = len(sport_props)
+                    current_normalized_count = len(sport_props)
                     current_error = ""
                     current_failure_kind = ""
             except Exception as exc:  # noqa: BLE001
                 current_succeeded = False
                 sport_props = []
+                current_raw_count = 0
+                current_normalized_count = 0
                 current_error = str(exc)
                 current_failure_kind = (
                     "timeout"
@@ -1673,6 +1690,15 @@ async def _run_prizepicks_independent_cycle(
                     else "http"
                 )
 
+            _health = get_health_tracker()
+            if _health and hasattr(_health, "record_provider_feed_counts"):
+                _health.record_provider_feed_counts(
+                    "PrizePicks",
+                    sport,
+                    current_raw_count,
+                    current_normalized_count,
+                    succeeded=current_succeeded,
+                )
             attempted = offset + 1
             if current_succeeded:
                 fetch_succeeded = True
