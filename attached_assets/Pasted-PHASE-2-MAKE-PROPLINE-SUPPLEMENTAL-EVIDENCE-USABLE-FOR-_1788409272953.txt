@@ -1,0 +1,201 @@
+PHASE 2 — MAKE PROPLINE SUPPLEMENTAL EVIDENCE USABLE FOR BOTH PRIMARY PROVIDERS
+
+Correction to the architecture:
+
+PrizePicks and Underdog are EQUAL PRIMARY ACTIONABLE PROVIDERS.
+
+Neither provider is primary over the other.
+
+They must remain completely separate and independently produce bet picks.
+
+PRIZEPICKS:
+PrizePicks data
+→ PP analysis
+→ PP qualification
+→ PP bet pick
+→ PP alert
+
+UNDERDOG:
+Underdog data
+→ UD analysis
+→ UD qualification
+→ UD bet pick
+→ UD alert
+
+If the same player/stat exists on both providers, these are still TWO separate opportunities and TWO separate picks.
+
+NEVER combine PP and UD into one logical pick.
+NEVER merge their lines.
+NEVER merge their movement.
+NEVER merge their provider identity.
+NEVER use a UD line as a PP line.
+NEVER use a PP line as a UD line.
+
+━━━━━━━━━━━━━━━━━━
+PHASE 2 GOAL
+━━━━━━━━━━━━━━━━━━
+
+Phase 1 is complete.
+
+PropLine can now safely collect supplemental historical/player-stat evidence.
+
+Currently that supplemental PropLine evidence is NOT being used by the existing analysis.
+
+Phase 2 should allow validated PropLine supplemental evidence to fill genuine data gaps for BOTH primary providers.
+
+For PrizePicks:
+
+* If PP’s required supporting evidence is missing/insufficient, PropLine may supplement it.
+* Preserve PP as the primary actionable provider.
+
+For Underdog:
+
+* If UD’s required supporting evidence is missing/insufficient, PropLine may supplement it.
+* Preserve UD as the primary actionable provider.
+
+The intended architecture is:
+
+PP primary data
+→ missing supporting evidence?
+→ PropLine supplements the gap
+→ existing PP analysis
+→ existing PP qualification
+→ PP pick
+
+AND SEPARATELY:
+
+UD primary data
+→ missing supporting evidence?
+→ PropLine supplements the gap
+→ existing UD analysis
+→ existing UD qualification
+→ UD pick
+
+PropLine is supplemental evidence only.
+
+━━━━━━━━━━━━━━━━━━
+IMPORTANT PROVIDER SEPARATION
+━━━━━━━━━━━━━━━━━━
+
+PropLine supplementation must remain scoped to the provider whose evidence is missing.
+
+Do NOT use PropLine supplementation to merge PP and UD.
+
+Do NOT allow evidence from a PP market to become UD evidence.
+
+Do NOT allow evidence from a UD market to become PP evidence.
+
+Do NOT create synthetic PP or UD lines.
+
+Do NOT create synthetic PP or UD movement.
+
+The actual actionable line must always remain the line belonging to that primary provider.
+
+━━━━━━━━━━━━━━━━━━
+ANALYSIS BEHAVIOR
+━━━━━━━━━━━━━━━━━━
+
+When the primary provider already has sufficient valid historical/player evidence:
+
+→ use the existing primary-provider evidence exactly as before.
+
+When the primary provider has insufficient/missing evidence:
+
+→ supplement only the missing evidence with validated PropLine records.
+
+Do NOT change the existing sample windows.
+
+Do NOT lower evidence requirements.
+
+Do NOT double-count the same underlying game/result when primary and supplemental data overlap.
+
+Do NOT use PropLine simply because it has more data when the primary provider already has sufficient evidence.
+
+Only use PropLine to fill a genuine evidence gap.
+
+Preserve provenance so analysis can distinguish:
+
+* primary provider evidence
+* supplemental PropLine evidence
+
+Do NOT write PropLine records into the primary player_game_results table.
+
+━━━━━━━━━━━━━━━━━━
+OPENDOTA
+━━━━━━━━━━━━━━━━━━
+
+If OpenDota cannot resolve a player and that causes a missing evidence gap:
+
+* Do not fabricate identity.
+* Do not force an unreliable name match.
+* Use PropLine only when player/event identity can be safely validated.
+* If identity cannot be established safely, leave the evidence unavailable.
+
+━━━━━━━━━━━━━━━━━━
+SCORING / PICKS / ALERTS
+━━━━━━━━━━━━━━━━━━
+
+Do NOT change:
+
+* scoring formula
+* confidence calculations
+* qualification thresholds
+* PLAY criteria
+* existing pick rules
+* alert thresholds
+* Telegram behavior
+* bankroll
+* risk rules
+
+The purpose of this phase is ONLY to make valid supplemental evidence available to the existing analysis.
+
+Do NOT intentionally increase alert volume.
+
+Do NOT implement the strongest-pick/one-player selection change in this phase.
+
+That will be a separate next fix.
+
+━━━━━━━━━━━━━━━━━━
+PROPLINE GUARDRAILS
+━━━━━━━━━━━━━━━━━━
+
+Use ONLY officially documented PropLine capabilities.
+
+Preserve:
+
+* 5,000/day self-cap
+* 208/hour hard pacing
+* retry/rate-limit behavior
+* provenance safeguards
+* provider separation
+
+Do NOT invent endpoints, response structures, player identities, events, opponents, lines, or results.
+
+━━━━━━━━━━━━━━━━━━
+VERIFICATION
+━━━━━━━━━━━━━━━━━━
+
+After implementation:
+
+* focused tests
+* full regression suite
+* compilation
+* git diff –check
+* clean startup/restart
+* exactly one bot process
+* no duplicate scheduler execution
+* PropLine pacing/cap unchanged
+
+Report:
+
+1. Exact files changed.
+2. How PropLine supplemental evidence now enters PP analysis.
+3. How PropLine supplemental evidence now enters UD analysis.
+4. How PP and UD remain completely separate.
+5. How duplicate game/result counting is prevented.
+6. How provenance is preserved.
+7. How OpenDota failures are handled.
+8. Test results.
+9. Any remaining limitations.
+
+Implement ONLY Phase 2 and stop.

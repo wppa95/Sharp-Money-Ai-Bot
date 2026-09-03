@@ -1,0 +1,139 @@
+PHASE 2 — MAKE PROPLINE SUPPLEMENTAL UD EVIDENCE USABLE
+
+Phase 1 is complete.
+
+Now implement Phase 2 only.
+
+Current state:
+
+* Underdog remains the primary/actionable provider.
+* PropLine can now safely collect supplemental historical/player-stat evidence for UD when UD’s own history is insufficient.
+* PropLine supplemental records are currently kept separately and are NOT included in L5/L10/L20, season, H2H, scoring, qualification, or pick decisions.
+
+Phase 2 goal:
+
+Allow the existing UD analysis to USE valid PropLine supplemental evidence when UD’s primary historical data is missing or below the required sample.
+
+Desired flow:
+
+UD direct data
+→ use UD evidence when available
+→ if required historical/player-stat evidence is missing or insufficient
+→ use validated PropLine supplemental evidence
+→ existing analysis receives the additional evidence
+→ existing scoring/qualification/PLAY logic remains unchanged
+→ UD remains the authoritative actionable provider
+
+IMPORTANT:
+
+PropLine data must supplement missing evidence, NOT replace UD data.
+
+Do NOT create:
+
+* synthetic UD lines
+* synthetic UD movement
+* synthetic UD markets
+* synthetic player identities
+* synthetic opponents
+* fabricated results
+
+Only use PropLine records that passed the existing Phase 1 validation.
+
+Preserve provenance so the analysis can distinguish:
+
+* primary UD evidence
+* supplemental PropLine evidence
+
+Do NOT write PropLine records into the primary player_game_results table.
+
+Do NOT merge PropLine and UD provider identities.
+
+Do NOT merge PP and UD.
+
+Analysis behavior
+
+When UD has sufficient valid primary history:
+→ use the existing UD history exactly as before.
+
+When UD primary history is insufficient:
+→ supplement only the missing portion with validated PropLine evidence.
+
+Do NOT double-count a game/result if the same underlying event already exists in UD history.
+
+Do NOT use PropLine merely because it has more data if UD already has sufficient valid evidence.
+
+Do NOT alter the required sample windows or thresholds.
+
+Do NOT change the scoring formula.
+
+Do NOT change confidence calculations.
+
+Do NOT change qualification thresholds.
+
+Do NOT change PLAY criteria.
+
+The only change is allowing validated PropLine supplemental evidence to fill an existing UD evidence gap.
+
+OpenDota
+
+If OpenDota cannot resolve a player and that is causing a UD historical-data gap:
+
+* Do not fabricate identity.
+* Do not force a name match.
+* Use PropLine only when player/event identity can be safely validated.
+* If identity cannot be established safely, leave the evidence unavailable.
+
+Alerts
+
+This fix must NOT intentionally increase alert volume.
+
+Additional evidence should improve completeness of analysis, but the existing qualification and alert rules remain unchanged.
+
+Do NOT implement the strongest-pick/one-player selection change in this phase. That is a separate Phase 3 fix.
+
+Guardrails
+
+Do NOT change:
+
+* scoring
+* confidence
+* qualification
+* PLAY rules
+* alert thresholds
+* Telegram behavior
+* bankroll
+* risk rules
+* PP behavior
+* PP/UD separation
+* scheduler
+* restart behavior
+* PropLine 5,000/day self-cap
+* PropLine 208/hour pacing
+* retry/rate-limit behavior
+
+No database schema changes unless absolutely required. If a schema change is required, STOP and report why instead of implementing it.
+
+Verification
+
+After implementation:
+
+* run focused tests
+* run full regression suite
+* compile
+* git diff –check
+* verify clean startup/restart
+* verify exactly one bot process
+* verify no duplicate scheduler execution
+* verify PropLine pacing/cap unchanged
+
+Report:
+
+1. Exact files changed.
+2. Exactly how PropLine evidence now enters UD analysis.
+3. How duplicate game/result counting is prevented.
+4. How provider/player/event provenance is preserved.
+5. How OpenDota failures are handled.
+6. Test results.
+7. Any remaining limitations.
+
+Implement ONLY Phase 2 and stop.
