@@ -414,6 +414,12 @@ class Config:
     UD_STRICT_SPORT_MIN_BET_QUALITY: int = int(
         os.environ.get("UD_STRICT_SPORT_MIN_BET_QUALITY", "95")
     )
+    # Maximum number of expensive new-prop evaluations in one live feed
+    # cycle. All observations are still persisted and counted; the remaining
+    # active props are covered by the bounded FPR rotation.
+    UNDERDOG_EVALUATION_BUDGET: int = int(
+        os.environ.get("UNDERDOG_EVALUATION_BUDGET", "100")
+    )
 
     # ── Alert sport suppression ───────────────────────────────────────────────
     # Sports whose Telegram alerts are temporarily suppressed.

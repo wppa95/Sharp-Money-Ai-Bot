@@ -3489,6 +3489,7 @@ async def underdog_job(context) -> None:
     _n_new_prop:      int       = 0   # first-appearance props detected this cycle
     _n_new_prop_sent:      int       = 0   # immediate new-prop alerts delivered
     _n_cold_start_scored: int       = 0   # props scored during the one-time cold-start pass
+    _n_observation_only:   int       = 0   # observed/tracked but deferred to FPR
     _n_standing_sent:      int       = 0   # standing opportunity alerts delivered (4A)
     _n_unchanged_skipped: int       = 0   # props with unchanged lines — stable, no re-score needed
     _n_lc_sent:            int       = 0   # line-change alerts delivered this cycle
@@ -3520,6 +3521,10 @@ async def underdog_job(context) -> None:
     # scan cycle so /picks and /slip can apply tier-aware delivery gates.
     # Key: (player, sport, stat_type) → (mq_score: int, bq_score: float).
     _plh_mq_scores:      dict                       = {}
+    _evaluation_budget = max(
+        0, int(getattr(config, "UNDERDOG_EVALUATION_BUDGET", 100))
+    )
+    _evaluation_used = 0
     # Per-sport pipeline stage counters — emitted in debug summary (#7 diagnostics)
     _sport_raw:           dict[str, int] = {}  # daily props: non-removed, non-futures
     _sport_futures:       dict[str, int] = {}  # season-long/futures props (tracked, not scored)
@@ -3715,6 +3720,16 @@ async def underdog_job(context) -> None:
             if is_new_prop:
                 # ── New-prop path ────────────────────────────────────────────────
                 _n_new_prop += 1
+                # A restart or a newly populated database can expose a large
+                # number of first-seen identities at once.  Tracking has
+                # already persisted the entire feed above; cap only the
+                # expensive history/evidence/decision work so this live cycle
+                # finishes within its cadence.  The FPR rotation evaluates
+                # the remaining active universe without losing observations.
+                if _evaluation_used >= _evaluation_budget:
+                    _n_observation_only += 1
+                    continue
+                _evaluation_used += 1
                 line_val = snap.line or 0.0
                 # Load history even for new props — needed for validation gate.
                 # Truly first-ever props return empty list → validation blocks alert.
@@ -5292,15 +5307,17 @@ async def underdog_job(context) -> None:
             logger.debug("underdog_job: checkpoint record skipped — %s", _ckpt_exc)
 
         logger.info(
-            "underdog_job: fetched=%d evaluated=%d cold_start=%d "
-            "actionable=%d removed=%d new=%d new_sent=%d",
+            "underdog_job: fetched=%d evaluated=%d observation_only=%d cold_start=%d "
+            "actionable=%d removed=%d new=%d new_sent=%d budget=%d",
             len(ud_snaps),
             _n_scored,
+            _n_observation_only,
             _n_cold_start_scored,
             _n_qualified,
             _n_removed,
             _n_new_prop,
             _n_new_prop_sent,
+            _evaluation_budget,
         )
         # ── Debug: scored prop detail — logged every cycle ────────────────────────
         _dbg_lines: list[str] = [
