@@ -124,6 +124,7 @@ class PlayerHistorySnapshot:
 class PlayerHistoryProvider:
     def __init__(self) -> None:
         self._fetch_cache: set[tuple[str, str, str, str, str]] = set()
+        self._supplement_cache: set[tuple[str, str, str, str]] = set()
 
     async def get_snapshot(
         self,
@@ -294,29 +295,14 @@ class PlayerHistoryProvider:
             # result evidence is still below the validation sample threshold.
             # PrizePicks never enters this branch.
             if provider_scope == "underdog":
-                try:
-                    existing = await db.get_player_results(
-                        player_name, sport, stat_type, limit=max(1, int(min_samples))
-                    )
-                except Exception:
-                    existing = []
-                if len(existing) < max(1, int(min_samples)):
-                    supplemental = await self._fetch_propline_history(
-                        player_name,
-                        sport,
-                        stat_type,
-                        instrumentation=instrumentation,
-                    )
-                    for r in _merge_game_results(existing, supplemental):
-                        if instrumentation is not None:
-                            await instrumentation.await_db(
-                                "write", "upsert_player_result_propline",
-                                db.upsert_player_result(r),
-                            )
-                        else:
-                            await db.upsert_player_result(r)
-                    if supplemental and instrumentation is not None:
-                        instrumentation.count("propline_supplemental_props")
+                await self.supplement_missing_results(
+                    db,
+                    player_name,
+                    sport,
+                    stat_type,
+                    min_samples=min_samples,
+                    instrumentation=instrumentation,
+                )
             self._fetch_cache.add(key)
             if raw:
                 logger.debug(
@@ -329,6 +315,52 @@ class PlayerHistoryProvider:
                 player_name, stat_type, exc,
             )
             self._fetch_cache.add(key)
+
+    async def supplement_missing_results(
+        self,
+        db,
+        player_name: str,
+        sport: str,
+        stat_type: str,
+        *,
+        min_samples: int = 5,
+        instrumentation=None,
+    ) -> None:
+        """Fill only missing Underdog evidence from official PropLine history."""
+        today = datetime.utcnow().date().isoformat()
+        key = (player_name, sport, stat_type.lower().strip(), today)
+        if key in self._supplement_cache:
+            return
+        try:
+            existing = await db.get_player_results(
+                player_name, sport, stat_type, limit=max(1, int(min_samples))
+            )
+        except Exception:
+            existing = []
+        required = max(1, int(min_samples))
+        if len(existing) >= required:
+            self._supplement_cache.add(key)
+            return
+
+        supplemental = await self._fetch_propline_history(
+            player_name,
+            sport,
+            stat_type,
+            instrumentation=instrumentation,
+        )
+        for result in _merge_game_results(existing, supplemental):
+            if result in existing:
+                continue
+            if instrumentation is not None:
+                await instrumentation.await_db(
+                    "write", "upsert_player_result_propline",
+                    db.upsert_player_result(result),
+                )
+            else:
+                await db.upsert_player_result(result)
+        if supplemental and instrumentation is not None:
+            instrumentation.count("propline_supplemental_props")
+        self._supplement_cache.add(key)
 
     async def _fetch_propline_history(
         self,
@@ -401,11 +433,9 @@ class PlayerHistoryProvider:
                 stat_type=stat_type.lower().strip(),
                 game_date=game_date.date().isoformat(),
                 actual_value=value,
-                opponent=(
-                    str(entry.get("away_team") or "").strip()
-                    or str(entry.get("home_team") or "").strip()
-                    or None
-                ),
+                # PropLine's history schema does not identify which side the
+                # player played for.  Do not guess an opponent from home/away.
+                opponent=None,
                 source="propline_history",
                 game_id=event_id,
             ))

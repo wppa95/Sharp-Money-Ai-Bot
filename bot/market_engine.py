@@ -1297,6 +1297,7 @@ async def _fetch_and_compute_hit_rates(
     allow_remote: bool = True,
     cycle_timing: Optional[_CycleTiming] = None,
     preloaded_results: Optional[list] = None,
+    source_provider: str = "",
 ) -> "Optional[object]":
     """
     Fetch fresh game results (at most once per calendar day per player/stat),
@@ -1346,6 +1347,16 @@ async def _fetch_and_compute_hit_rates(
                     )
                 else:
                     await db.upsert_player_result(r)
+            if source_provider and allow_remote:
+                from providers.player_history import get_player_history_provider
+                await get_player_history_provider().supplement_missing_results(
+                    db,
+                    player_name,
+                    sport,
+                    stat_type,
+                    min_samples=5,
+                    instrumentation=cycle_timing,
+                )
             _player_result_fetch_cache.add(cache_key)
             if raw_results:
                 logger.debug(
