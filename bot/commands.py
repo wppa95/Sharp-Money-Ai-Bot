@@ -3902,6 +3902,40 @@ async def _cmd_backfill_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         from engine.calibration import classify_miss
 
         provider = PlayerStatsProvider()
+        try:
+            from providers.player_history import get_player_history_provider
+            propline_history = get_player_history_provider()
+        except Exception:
+            propline_history = None
+        propline_results_cache: dict[tuple[str, str, str], list] = {}
+
+        async def _fetch_propline_results_for_grading(opp) -> list:
+            """Fetch resolved event history only when primary grading misses."""
+            if propline_history is None:
+                return []
+            key = (
+                str(opp.player_name),
+                str(opp.sport).upper(),
+                str(opp.stat_type or "").lower().strip(),
+            )
+            if key not in propline_results_cache:
+                try:
+                    propline_results_cache[key] = list(
+                        await propline_history.fetch_resolved_results(
+                            opp.player_name,
+                            opp.sport,
+                            opp.stat_type,
+                        )
+                    )
+                except Exception as exc:
+                    logger.debug(
+                        "backfill: PropLine settlement lookup failed for %s/%s: %s",
+                        opp.player_name,
+                        opp.stat_type,
+                        exc,
+                    )
+                    propline_results_cache[key] = []
+            return propline_results_cache[key]
 
         # All PENDING opportunities whose game already finished (4+ h ago)
         pending = await _db.get_pending_opportunities(cutoff_hours=4)
@@ -3957,6 +3991,16 @@ async def _cmd_backfill_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                 opp.player_name, opp.sport, opp.stat_type, game_date,
                 **_result_lookup_kwargs,
             )
+            if result_row is None:
+                for _propline_result in await _fetch_propline_results_for_grading(opp):
+                    await _db.upsert_player_result(_propline_result)
+                result_row = await _db.get_game_result_for_grading(
+                    opp.player_name,
+                    opp.sport,
+                    opp.stat_type,
+                    game_date,
+                    **_result_lookup_kwargs,
+                )
             if result_row is None:
                 no_data += 1
                 continue
