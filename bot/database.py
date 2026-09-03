@@ -614,14 +614,11 @@ class PlayerGameResult(Base):
 
 class PropOpportunityLog(Base):
     """
-    Player prop tracking rows used for evidence and grading.
+    Directional player prop opportunities used for evidence and grading.
 
     One row per (external_id, stat_type) pair, recorded immediately after
-    a valid prop is ingested.  Rows with recommendation ``NONE`` are neutral
-    tracking records: they are deliberately independent of scoring,
-    qualification, strongest-pick selection, and alert delivery.  A later
-    directional evaluation may enrich the same row without changing its
-    grading history.
+    evaluation produces an OVER or UNDER direction. Universal ingestion
+    tracking is stored separately in PropTrackingLog.
 
     ``result`` is stored from the OVER perspective for consistent analysis:
       "HIT"     → actual_value > line_value  (over cleared)
@@ -629,7 +626,7 @@ class PropOpportunityLog(Base):
       "PUSH"    → actual_value == line_value
       "PENDING" → game not yet complete / result not yet available
 
-    Interpretation per directional recommendation:
+    Interpretation per recommendation:
       PLAY OVER  + HIT  → ✅ correct pick
       PLAY OVER  + MISS → ❌ incorrect pick
       PLAY UNDER + MISS → ✅ correct pick  (under cleared = over failed)
@@ -644,8 +641,8 @@ class PropOpportunityLog(Base):
     sport          = Column(String(32),  nullable=False, index=True)
     stat_type      = Column(String(64),  nullable=False)
     line_value     = Column(Float,       nullable=False)
-    recommendation = Column(String(8),   nullable=False)   # OVER | UNDER | NONE
-    decision_tier  = Column(String(8),   nullable=False)   # score metadata / TRACKED
+    recommendation = Column(String(8),   nullable=False)   # OVER | UNDER
+    decision_tier  = Column(String(8),   nullable=False)   # Legacy score metadata
     confidence     = Column(Integer,     nullable=False, default=0)
     game_time      = Column(DateTime,    nullable=True)
     game_id        = Column(String(128), nullable=False, default="", index=True)
@@ -687,6 +684,42 @@ class PropOpportunityLog(Base):
         UniqueConstraint(
             "external_id", "stat_type",
             name="uq_prop_opportunity_log",
+        ),
+    )
+
+
+class PropTrackingLog(Base):
+    """
+    Universal prop-ingestion ledger used only for settlement tracking.
+
+    One row represents the latest observation for a provider-owned prop
+    identity. It is intentionally separate from PropOpportunityLog so
+    non-actionable observations can be graded without appearing in actionable
+    opportunity reports, calibration samples, or Telegram history.
+    """
+    __tablename__ = "prop_tracking_log"
+
+    id           = Column(Integer,     primary_key=True, autoincrement=True)
+    provider     = Column(String(32),  nullable=False, index=True)
+    external_id  = Column(String(128), nullable=False, index=True)
+    player_name  = Column(String(128), nullable=False, index=True)
+    team         = Column(String(64),  nullable=False, default="")
+    sport        = Column(String(32),  nullable=False, index=True)
+    stat_type    = Column(String(64),  nullable=False)
+    line_value   = Column(Float,       nullable=False)
+    game_time    = Column(DateTime,    nullable=True)
+    game_id      = Column(String(128), nullable=False, default="", index=True)
+    detected_at  = Column(DateTime,    default=datetime.utcnow, nullable=False)
+    result       = Column(String(16),  nullable=False, default="PENDING", index=True)
+    actual_value = Column(Float,       nullable=True)
+    graded_at    = Column(DateTime,    nullable=True)
+    settlement_source = Column(String(64), nullable=True)
+    void_reason = Column(String(64), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "provider", "external_id", "stat_type",
+            name="uq_prop_tracking_log_identity",
         ),
     )
 
@@ -5159,22 +5192,18 @@ class Database:
             game_id = str(record.get("game_id") or "").strip()
             if not external_id:
                 external_id = f"{player_name}:{sport}:{stat_type}:{game_id}"
-            external_id = _stored_opportunity_external_id(external_id, provider)
-            prepared_by_identity[(external_id, stat_type)] = {
+            prepared_by_identity[(provider, external_id, stat_type)] = {
+                "provider": provider,
                 "external_id": external_id,
                 "player_name": player_name,
                 "team": str(record.get("team") or ""),
                 "sport": sport,
                 "stat_type": stat_type,
                 "line_value": line_value,
-                "recommendation": "NONE",
-                "decision_tier": "TRACKED",
-                "confidence": 0,
                 "game_time": record.get("game_time"),
                 "game_id": game_id,
                 "detected_at": datetime.utcnow(),
                 "result": "PENDING",
-                "provider": provider,
             }
 
         prepared = list(prepared_by_identity.values())
@@ -5184,7 +5213,7 @@ class Database:
         async with self.session() as s:
             for start in range(0, len(prepared), 100):
                 rows = prepared[start:start + 100]
-                insert_stmt = _sqlite_insert(PropOpportunityLog).values(rows)
+                insert_stmt = _sqlite_insert(PropTrackingLog).values(rows)
                 # Tracking refreshes only the observation identity/metadata.
                 # Analytic fields, delivery fields, and grading fields remain
                 # owned by their respective pipelines.
@@ -5202,7 +5231,7 @@ class Database:
                     )
                 }
                 stmt = insert_stmt.on_conflict_do_update(
-                    index_elements=["external_id", "stat_type"],
+                    index_elements=["provider", "external_id", "stat_type"],
                     set_=update_columns,
                 )
                 await s.execute(stmt)
