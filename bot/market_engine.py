@@ -3653,33 +3653,15 @@ async def underdog_job(context) -> None:
             }
             recent_by_key = {}
             _cycle_timing.count("history_lookups_bypassed")
-        elif _new_db_context and isinstance(db, Database):
-            # A fresh process must not block the live cadence on durable
-            # recovery reads. Treat this feed as the comparison baseline:
-            # observations are already persisted above, and the next feed
-            # supplies the first real movement delta. This is the runtime
-            # replacement for the removed cold-start/state-restoration pass.
-            recent_by_key = {}
-            known_keys = set()
-            for _baseline_snap in ud_snaps:
-                if "[REMOVED]" in (_baseline_snap.selection or ""):
-                    continue
-                _baseline_player = _baseline_snap.player or "Unknown"
-                _baseline_stat = _extract_ud_stat_type(
-                    _baseline_snap.selection,
-                    _baseline_snap.player,
-                    _baseline_snap.line,
-                )
-                _baseline_key = (_baseline_player, _baseline_stat)
-                known_keys.add(_baseline_key)
-                recent_by_key[_baseline_key] = SimpleNamespace(
-                    line_value=float(_baseline_snap.line or 0.0),
-                    score_tier=None,
-                    score_total=None,
-                    alert_sent=False,
-                    fetched_at=now,
-                )
-            _cycle_timing.count("history_lookups_bypassed")
+        elif isinstance(db, Database):
+            # Monitoring comparisons stay in memory. SQLite is reserved for
+            # evidence/history/grading/tracking; reading the large snapshot
+            # archive to rediscover the active monitoring pool can hold the
+            # live cadence for minutes.
+            recent_by_key = _ud_scan_state
+            known_keys = _ud_known_keys
+            if _new_db_context:
+                _cycle_timing.count("history_lookups_bypassed")
             _cycle_timing.count("latest_snapshot_props_returned", len(recent_by_key))
             _cycle_timing.count("known_prop_keys_returned", len(known_keys))
         elif _new_db_context:

@@ -606,15 +606,9 @@ async def post_init(application: Application) -> None:
             first=5,
             name="propline_request_scan",
         )
-        # Full-Pool Rescan Rotation is the sole bounded background rotation.
-        # It consumes the canonical active (player, stat, line) universe.
-        from market_engine import _full_pool_rescan_job
-        jq.run_repeating(
-            _coordinated_job("full_pool_rescan", _full_pool_rescan_job),
-            interval=config.FPR_INTERVAL,
-            first=150,
-            name="full_pool_rescan",
-        )
+        # Do not schedule a database-backed full-pool monitoring scan. The
+        # live Underdog feed is the monitoring universe; SQLite remains for
+        # evidence, history, grading, and tracking only.
         # CLV seed job — every 15 minutes (creates AlertCLVSeed entries for alerts)
         jq.run_repeating(_coordinated_job("clv_seeder", _clv_seed_job), interval=900, first=120, name="clv_seeder")
         # CLV harvest job — every hour (processes seeds after game_time passes)
@@ -652,13 +646,12 @@ async def post_init(application: Application) -> None:
                 name="season_checker",
             )
         logger.info(
-            "Jobs scheduled — underdog: every %ds, FPR: every %ds, "
+            "Jobs scheduled — underdog: every %ds, FPR: disabled, "
             "grader: every %ds, history: every %ds, season_check: every %ds, "
             "heartbeat: every 60s "
             "[PrizePicks/PropLine companion cycle enabled=%s; "
             "PropLine requests every %.1fs; DK/FD delivery disabled]",
             config.UNDERDOG_POLL_INTERVAL,
-            config.FPR_INTERVAL,
             config.OPPORTUNITY_GRADER_INTERVAL,
             config.PLAYER_HISTORY_POLL_INTERVAL,
             config.SEASON_CHECK_INTERVAL,
