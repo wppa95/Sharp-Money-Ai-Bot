@@ -1831,7 +1831,12 @@ def _is_current_provider_sport(
     return _is_active_display_sport(sport)
 
 
-def _has_current_prop_data(prop: Any, now: Optional[datetime] = None) -> bool:
+def _has_current_prop_data(
+    prop: Any,
+    now: Optional[datetime] = None,
+    *,
+    require_direction: bool = True,
+) -> bool:
     """Keep user-facing pick/slip views on current, actionable rows only.
 
     This is a presentation gate. It does not affect scanning, scoring, alert
@@ -1876,11 +1881,12 @@ def _has_current_prop_data(prop: Any, now: Optional[datetime] = None) -> bool:
         return False
     if getattr(prop, "removed", False) is True:
         return False
-    recommendation = str(
-        getattr(prop, "bet_recommendation", "") or ""
-    ).upper()
-    if recommendation not in {"OVER", "UNDER"}:
-        return False
+    if require_direction:
+        recommendation = str(
+            getattr(prop, "bet_recommendation", "") or ""
+        ).upper()
+        if recommendation not in {"OVER", "UNDER"}:
+            return False
     tier = str(getattr(prop, "score_tier", "") or "").upper()
     if tier not in {"S", "A", "B"}:
         return False
@@ -2259,7 +2265,10 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     ud_props = [
         p for p in ud_props
         if not _is_season_future(p.stat_type)
-        and _has_current_prop_data(p, now)
+        # Underdog's same-cycle recommendation can be fresher than the
+        # synced PropLineHistory column; direction is resolved immediately
+        # after this provider fetch.
+        and _has_current_prop_data(p, now, require_direction=False)
         and _is_active_display_sport(p.sport)
         and not is_telegram_suppressed_sport(p.sport)
         and _is_upcoming_game(
