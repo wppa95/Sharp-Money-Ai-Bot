@@ -275,6 +275,11 @@ def _same_event(target: ConfirmationTarget, observation: ConfirmationObservation
     # event IDs must not be treated as a wildcard when the Underdog target
     # lacks the same provider-native ID.
     if observation.supplemental_source == "PropLine":
+        # Some existing Underdog confirmation callers do not expose event
+        # context.  Preserve that compatibility, but never weaken a target
+        # that does provide an event ID, label, or start time.
+        if not (target.event_id or target.event or target.game_time):
+            return True
         if (
             target.game_time is not None
             and observation.game_time is not None
