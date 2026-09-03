@@ -3255,6 +3255,14 @@ async def underdog_job(context) -> None:
     _cycle_sequence += 1
     _cycle_timing = _CycleTiming(_cycle_sequence)
     _job_activity_start("underdog")
+    # Reserve a safety margin for final persistence, lifecycle updates, and
+    # scheduler bookkeeping.  If enrichment is slower than expected, the
+    # cycle exits with the observations and partial counters it has already
+    # collected instead of holding the cadence indefinitely.
+    _cycle_deadline = time.monotonic() + max(
+        5.0,
+        min(105.0, float(getattr(config, "UNDERDOG_POLL_INTERVAL", 120)) - 15.0),
+    )
     _cycle_timing.start("state_restore")
     logger.info(
         "underdog_cycle_started: cycle_id=%d cold_start=%s active_jobs=%s",
@@ -3632,7 +3640,18 @@ async def underdog_job(context) -> None:
             _cycle_timing.count("latest_snapshot_props_returned", len(recent_by_key))
             _cycle_timing.count("known_prop_keys_returned", len(known_keys))
     
-        for snap in ud_snaps:
+        _cycle_budget_exhausted = False
+        for _snap_index, snap in enumerate(ud_snaps):
+            if time.monotonic() >= _cycle_deadline:
+                _n_observation_only += len(ud_snaps) - _snap_index
+                _cycle_budget_exhausted = True
+                logger.warning(
+                    "underdog_job: cycle deadline reached after %d/%d observations; "
+                    "releasing partial results",
+                    _snap_index,
+                    len(ud_snaps),
+                )
+                break
             is_removed = "[REMOVED]" in snap.selection
             if is_removed:
                 _n_removed += 1
@@ -5308,7 +5327,8 @@ async def underdog_job(context) -> None:
 
         logger.info(
             "underdog_job: fetched=%d evaluated=%d observation_only=%d cold_start=%d "
-            "actionable=%d removed=%d new=%d new_sent=%d budget=%d",
+            "actionable=%d removed=%d new=%d new_sent=%d budget=%d "
+            "deadline_reached=%s elapsed=%.1fs",
             len(ud_snaps),
             _n_scored,
             _n_observation_only,
@@ -5318,6 +5338,8 @@ async def underdog_job(context) -> None:
             _n_new_prop,
             _n_new_prop_sent,
             _evaluation_budget,
+            _cycle_budget_exhausted,
+            time.monotonic() - _cycle_timing.started_at,
         )
         # ── Debug: scored prop detail — logged every cycle ────────────────────────
         _dbg_lines: list[str] = [
