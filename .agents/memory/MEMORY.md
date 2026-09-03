@@ -111,3 +111,4 @@
 - [Telegram log redaction](telegram-log-redaction.md) — Managed HTTP logger handlers may bypass app filters; verify captured workflow output and suppress credential-bearing request INFO logs.
 - [Serialized delivery evidence](serialized-delivery-evidence.md) — persisted provenance labels must carry a sufficient sample count before they can support directional delivery.
 - [PropLine zero-observation diagnosis](propline-zero-observations.md) — distinguish empty sport slates from normalization regressions with raw-vs-normalized counts.
+- [Cadence runtime overlap](cadence-runtime-overlap.md) — live full-pool Underdog scans can exceed 2 minutes; interval triggers then skip while the shared slot remains held.
