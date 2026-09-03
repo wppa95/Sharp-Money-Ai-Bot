@@ -55,6 +55,33 @@ class TestIndependentPrizePicks:
         assert "🟣 PrizePicks:  <i>Unavailable for this prop</i>" in unavailable
         assert "🐶 Underdog:    <code>15.5</code>" in unavailable
 
+    def test_provider_alerts_do_not_mix_prizepicks_and_underdog_lines(self):
+        underdog_message = format_underdog_change_alert(
+            "Jake Bennett",
+            "DET",
+            "MLB",
+            "Walks Allowed",
+            0.5,
+            1.5,
+            pp_line=1.5,
+            source="Underdog",
+        )
+        prizepicks_message = format_underdog_change_alert(
+            "Jake Bennett",
+            "DET",
+            "MLB",
+            "Walks Allowed",
+            0.5,
+            1.5,
+            pp_line=1.5,
+            source="PrizePicks",
+        )
+
+        assert "🐶 Underdog:" in underdog_message
+        assert "PrizePicks" not in underdog_message
+        assert "🟣 PrizePicks:" in prizepicks_message
+        assert "Underdog" not in prizepicks_message
+
     def test_confirmation_line_only_accepts_verified_prizepicks_source(self):
         assert market_engine._prizepicks_line_from_confirmation(
             {"source": "PrizePicks", "confirmed": True, "avg_line": 14.5}

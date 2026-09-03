@@ -430,23 +430,45 @@ def _format_available_lines_block(
     pp_line: Optional[float] = None,
     dk_line: Optional[float] = None,
     fd_line: Optional[float] = None,
+    *,
+    provider: Optional[str] = None,
 ) -> str:
     """
     Render a 📊 Available Lines block for current player-prop providers.
+
+    Provider alerts are intentionally isolated: when ``provider`` is
+    Underdog or PrizePicks, only that provider's line is rendered.  Calls
+    without a provider retain the legacy comparison block for non-delivery
+    callers.
+
     DraftKings/FanDuel arguments remain accepted for legacy callers but are
     intentionally ignored so stale sportsbook rows cannot leak into current
     prop alerts.
     """
-    lines = ["\n\n📊 <b>Available Line</b>" if (
-        sum(v is not None for v in [pp_line, ud_line]) == 1
-    ) else "\n\n📊 <b>Available Lines</b>"]
-
-    if pp_line is not None:
-        lines.append(f"\n🟣 PrizePicks:  <code>{pp_line:.1f}</code>")
+    provider_upper = str(provider or "").strip().upper()
+    if provider_upper == "UNDERDOG":
+        display_lines = [("🐶", "Underdog", ud_line)]
+    elif provider_upper == "PRIZEPICKS":
+        display_lines = [("🟣", "PrizePicks", pp_line)]
     else:
-        lines.append("\n🟣 PrizePicks:  <i>Unavailable for this prop</i>")
-    if ud_line is not None:
-        lines.append(f"\n🐶 Underdog:    <code>{ud_line:.1f}</code>")
+        display_lines = [
+            ("🟣", "PrizePicks", pp_line),
+            ("🐶", "Underdog", ud_line),
+        ]
+
+    available_count = sum(value is not None for _, _, value in display_lines)
+    lines = [
+        "\n\n📊 <b>Available Line</b>"
+        if available_count == 1
+        else "\n\n📊 <b>Available Lines</b>"
+    ]
+    for emoji, label, value in display_lines:
+        if value is not None:
+            lines.append(f"\n{emoji} {label}:  <code>{value:.1f}</code>")
+        elif provider_upper not in {"UNDERDOG", "PRIZEPICKS"} or label == (
+            "PrizePicks" if provider_upper == "PRIZEPICKS" else "Underdog"
+        ):
+            lines.append(f"\n{emoji} {label}:  <i>Unavailable for this prop</i>")
     return "".join(lines)
 
 
@@ -807,6 +829,7 @@ def format_underdog_change_alert(
         pp_line=pp_line,
         dk_line=dk_line,
         fd_line=fd_line,
+        provider=source,
     ) if not removed else ""
 
     if removed:
@@ -992,6 +1015,7 @@ def format_underdog_new_prop_alert(
         pp_line=pp_line,
         dk_line=dk_line,
         fd_line=fd_line,
+        provider=source,
     )
     history_block = _format_history_block(decision)
     context_line = (
