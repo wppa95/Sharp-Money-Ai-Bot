@@ -1829,7 +1829,8 @@ async def _run_prizepicks_independent_cycle(
         try:
             from providers.player_history import get_player_history_provider
             history_snap = await get_player_history_provider().get_snapshot(
-                db, player, sport, stat, line, ud_history=history
+                db, player, sport, stat, line, ud_history=history,
+                source_provider="PrizePicks",
             )
         except Exception:
             pass
@@ -3319,6 +3320,7 @@ async def underdog_job(context) -> None:
                         stat_type,
                         line_val,
                         ud_history=np_history,
+                        source_provider="Underdog",
                         instrumentation=_cycle_timing,
                     )
                 except Exception:
@@ -3601,6 +3603,7 @@ async def underdog_job(context) -> None:
                             stat_type,
                             snap.line or 0.0,
                             ud_history=ud_history,
+                            source_provider="Underdog",
                             instrumentation=_cycle_timing,
                         )
                     except Exception:
@@ -3755,6 +3758,7 @@ async def underdog_job(context) -> None:
                             stat_type,
                             snap.line or 0.0,
                             ud_history=ud_history,
+                            source_provider="Underdog",
                             instrumentation=_cycle_timing,
                         )
                     except Exception:
