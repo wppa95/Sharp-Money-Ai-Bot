@@ -1470,6 +1470,8 @@ def _official_result_records(
     required_event_fields = {
         "id",
         "sport_key",
+        "home_team",
+        "away_team",
         "commence_time",
         "status",
         "home_score",
