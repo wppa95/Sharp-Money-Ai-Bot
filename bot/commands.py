@@ -1832,15 +1832,34 @@ def _is_current_provider_sport(
 
 
 def _has_current_prop_data(prop: Any, now: Optional[datetime] = None) -> bool:
-    """Keep user-facing pick/slip views on current, scored rows only.
+    """Keep user-facing pick/slip views on current, actionable rows only.
 
     This is a presentation gate. It does not affect scanning, scoring, alert
     qualification, cadence, or persisted tracking.
+
+    A directional label by itself is not enough for a current pick.  Reports
+    must have provider-owned identity, a fresh upcoming event, and persisted
+    scoring output with a non-zero confidence/quality signal.  This prevents
+    stale, partially-written, and confidence-zero rows from being selected by
+    /picks or /slip.
     """
     now = now or datetime.utcnow()
+    provider = str(getattr(prop, "provider", "") or "").strip().lower()
+    if provider not in {"underdog", "prizepicks"}:
+        return False
+    player = str(getattr(prop, "player_name", "") or "").strip()
+    sport = str(getattr(prop, "sport", "") or "").strip()
+    stat = str(getattr(prop, "stat_type", "") or "").strip()
+    source_id = str(
+        getattr(prop, "external_id", None)
+        or getattr(prop, "game_id", None)
+        or ""
+    ).strip()
+    if not player or not sport or not stat or not source_id:
+        return False
     try:
         line = float(getattr(prop, "line_value", None))
-        if line != line or line in (float("inf"), float("-inf")):
+        if line < 0 or line != line or line in (float("inf"), float("-inf")):
             return False
     except (TypeError, ValueError):
         return False
@@ -1855,18 +1874,38 @@ def _has_current_prop_data(prop: Any, now: Optional[datetime] = None) -> bool:
         return False
     if game <= now or game > now + timedelta(hours=_CURRENT_PROP_MAX_FUTURE_HOURS):
         return False
-    score = getattr(prop, "score_total", None)
-    confidence = getattr(prop, "bet_confidence", None)
+    if getattr(prop, "removed", False) is True:
+        return False
+    recommendation = str(
+        getattr(prop, "bet_recommendation", "") or ""
+    ).upper()
+    if recommendation not in {"OVER", "UNDER"}:
+        return False
     tier = str(getattr(prop, "score_tier", "") or "").upper()
-    try:
-        score_ok = score is not None and float(score) == float(score)
-    except (TypeError, ValueError):
-        score_ok = False
-    try:
-        confidence_ok = confidence is not None and float(confidence) == float(confidence)
-    except (TypeError, ValueError):
-        confidence_ok = False
-    return score_ok or confidence_ok or tier in {"S", "A", "B"}
+    if tier not in {"S", "A", "B"}:
+        return False
+    score = getattr(prop, "score_total", None)
+    quality = getattr(prop, "market_quality_score", None)
+    confidence = getattr(prop, "bet_confidence", None)
+
+    def _positive_finite(value: Any) -> bool:
+        try:
+            numeric = float(value)
+            return numeric > 0 and numeric == numeric and numeric not in (
+                float("inf"), float("-inf")
+            )
+        except (TypeError, ValueError):
+            return False
+
+    # Both the composite and market-quality fields are evidence that the row
+    # reached the provider scoring pipeline.  Confidence must also be present
+    # and positive; a direction copied onto a zero-confidence row is not an
+    # actionable pick.
+    return (
+        _positive_finite(score)
+        and _positive_finite(quality)
+        and _positive_finite(confidence)
+    )
 
 
 def _pick_source_identity(provider: str, prop: Any) -> tuple[str, ...]:
@@ -2023,7 +2062,12 @@ class PropPickAdapter:
         self.sport       = plh.sport
         self.team        = plh.team or ""
         self.game_time   = plh.game_time
-        self.game_description = f"vs {plh.team}" if plh.team else ""
+        # PropLineHistory only stores the player's team.  It does not contain
+        # an opponent, so never turn that team into a fabricated "vs" value;
+        # doing so makes unrelated legs look correlated.
+        self.game_description = str(
+            getattr(plh, "game_description", "") or ""
+        ).strip()
         self.detected_at = plh.fetched_at
         self.result      = None
         self.sportsbook  = getattr(plh, "provider", None) or "Underdog"
@@ -3122,6 +3166,7 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     ud_props = [
         p for p in ud_props
         if not _is_season_future(p.stat_type)
+        and _has_current_prop_data(p, now)
         and _is_active_display_sport(p.sport)
         and not is_telegram_suppressed_sport(p.sport)
         and _is_upcoming_game(

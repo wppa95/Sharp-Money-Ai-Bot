@@ -199,34 +199,50 @@ def optimize_slip(
     excluded:  list[tuple["PPEdgeRecord", str]]  = []
     warnings:  list[str]                         = []
 
-    for candidate in pool:
-        if len(selected) >= n_legs:
-            # Pool still has candidates — they are just unneeded, not excluded.
-            break
-
-        # First leg — no correlation to check.
+    remaining = list(pool)
+    while remaining and len(selected) < n_legs:
         if not selected:
-            selected.append(candidate)
+            selected.append(remaining.pop(0))
             continue
 
-        # Compute pairwise correlations with all already-selected legs.
-        corr_results   = [check_correlation(candidate, s) for s in selected]
-        max_corr_score = max(c.score for c in corr_results)
-        worst          = max(corr_results, key=lambda c: c.score)
+        scored: list[tuple[float, object, list[CorrelationResult], CorrelationResult]] = []
+        hard_blocked: list[tuple[object, list[CorrelationResult], CorrelationResult]] = []
+        for candidate in remaining:
+            corr_results = [check_correlation(candidate, s) for s in selected]
+            max_corr_score = max(c.score for c in corr_results)
+            worst = max(corr_results, key=lambda c: c.score)
+            if max_corr_score >= _HARD_BLOCK:
+                hard_blocked.append((candidate, corr_results, worst))
+                continue
+            conf_norm = (candidate.confidence or 0) / max_conf
+            pick_score = conf_norm - (max_corr_score * 2.0)
+            scored.append((pick_score, candidate, corr_results, worst))
 
-        if max_corr_score >= _HARD_BLOCK:
+        for candidate, _corr_results, worst in hard_blocked:
+            if candidate in remaining:
+                remaining.remove(candidate)
             excluded.append((
                 candidate,
-                f"Hard block — {worst.reason} (corr {max_corr_score:.2f})",
+                f"Hard block — {worst.reason} (corr {worst.score:.2f})",
             ))
-            continue
 
-        if max_corr_score >= _SOFT_BLOCK:
+        if not scored:
+            break
+
+        _pick_score, candidate, corr_results, worst = max(
+            scored,
+            key=lambda item: (
+                item[0],
+                item[1].confidence or 0,
+                -(item[1].best_edge or 0),
+            ),
+        )
+        remaining.remove(candidate)
+        if worst.score >= _SOFT_BLOCK:
             warnings.append(
                 f"⚠️ {candidate.player_name} · {candidate.stat_type} — "
-                f"{worst.reason} (corr {max_corr_score:.2f})"
+                f"{worst.reason} (corr {worst.score:.2f})"
             )
-
         selected.append(candidate)
 
     return OptimizedSlip(

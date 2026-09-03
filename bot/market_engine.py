@@ -2175,6 +2175,7 @@ async def _run_prizepicks_independent_cycle(
                     or getattr(candidate["prop"], "game_id", "")
                     or ""
                 ),
+                fetched_at=getattr(candidate["prop"], "fetched_at", None),
                 delivery_path="prizepicks",
             )
         except Exception as exc:  # noqa: BLE001

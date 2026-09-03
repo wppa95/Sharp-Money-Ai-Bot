@@ -62,7 +62,10 @@ def build_all_slips(
             logger.warning("slip_builder: optimize_slip(%d) failed — %s", n, exc)
             continue
 
-        if len(slip.legs) >= 2:
+        # The key is a contract: a 5-man entry must contain exactly five
+        # legs.  Keeping undersized optimizer output under a larger key makes
+        # the Telegram report claim a slip size that does not exist.
+        if len(slip.legs) == n:
             results[n] = slip
             logger.debug(
                 "slip_builder: %d-man slip built (%d legs, avg_edge=%.1f%%)",
@@ -70,7 +73,8 @@ def build_all_slips(
             )
         else:
             logger.debug(
-                "slip_builder: %d-man slip skipped (only %d legs returned)",
+                "slip_builder: %d-man slip skipped (requested %d, got %d legs)",
+                n, n,
                 n, len(slip.legs),
             )
 
