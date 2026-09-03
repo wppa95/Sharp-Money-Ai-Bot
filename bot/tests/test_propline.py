@@ -16,6 +16,8 @@ from providers.propline import (
     PropLineRequestBudget,
     PropLineClient,
     PropLineClosingLineEvidence,
+    PropLinePlayerHistoryEntry,
+    PropLinePlayerMarketTrend,
     PropLinePrizePicksProvider,
     PropLineResultEvidence,
     PropLineRequestLimiter,
@@ -1511,3 +1513,359 @@ async def test_same_cycle_propline_cache_supplements_underdog_without_new_reques
     assert result["confirmed"] is True
     history_db.get_prop_line_history.assert_awaited_once()
     market_engine._propline_current_observations.clear()
+
+
+def _player_history_payload(
+    *,
+    player_name="Alex Example",
+    sport_key="basketball_nba",
+    market="player_points",
+    **entry_overrides,
+):
+    entry = {
+        "event_id": "game-1",
+        "commence_time": "2026-08-28T00:00:00Z",
+        "home_team": "Test Town",
+        "away_team": "Example City",
+        "bookmaker": "prizepicks",
+        "bookmaker_title": "PrizePicks",
+        "line": 24.5,
+        "over_price": None,
+        "under_price": None,
+        "actual_value": 30,
+        "over_result": "won",
+        "under_result": "lost",
+        "resolved_at": "2026-08-28T03:00:00Z",
+    }
+    entry.update(entry_overrides)
+    return {
+        "player_name": player_name,
+        "sport_key": sport_key,
+        "market": market,
+        "entries": [entry],
+        "upgrade_url": None,
+    }
+
+
+def _player_trends_payload(
+    *,
+    player_name="Alex Example",
+    sport_key="basketball_nba",
+    market="player_points",
+    **market_overrides,
+):
+    market_record = {
+        "market": market,
+        "games_graded": 12,
+        "reference_bookmaker": "draftkings",
+        "reference_bookmaker_title": "DraftKings",
+        "recent_line": 24.5,
+        "avg_actual": 27.25,
+        "last_5": {
+            "window": 5,
+            "games": 5,
+            "over": 3,
+            "under": 1,
+            "push": 1,
+            "over_pct": 0.75,
+        },
+        "last_10": None,
+        "last_20": None,
+        "last_50": None,
+        "current_streak": {"result": "won", "length": 2},
+        "last_game": {
+            "event_id": "game-1",
+            "commence_time": "2026-08-28T00:00:00Z",
+            "line": 24.5,
+            "actual_value": 30,
+            "result": "won",
+        },
+    }
+    market_record.update(market_overrides)
+    return {
+        "player_name": player_name,
+        "sport_key": sport_key,
+        "dfs_odds_type": None,
+        "markets": [market_record],
+        "upgrade_url": None,
+    }
+
+
+def test_official_player_history_preserves_identity_context_and_provenance():
+    session = _Session(_Response(200, _player_history_payload()))
+    client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://api.prop-line.com",
+        session=session,
+        min_request_interval=0,
+        request_budget=PropLineRequestBudget(10),
+    )
+
+    result = asyncio.run(
+        client.fetch_player_history(
+            "basketball_nba",
+            "Alex Example",
+            market="player_points",
+            bookmaker="prizepicks",
+            limit=10,
+        )
+    )
+
+    assert result.succeeded is True
+    assert result.complete is True
+    assert result.player_name == "Alex Example"
+    assert result.sport_key == "basketball_nba"
+    assert result.market == "player_points"
+    assert len(result.entries) == 1
+    entry = result.entries[0]
+    assert isinstance(entry, PropLinePlayerHistoryEntry)
+    assert entry.provider == "PrizePicks"
+    assert entry.supplemental_source == "PropLine"
+    assert entry.event_id == "game-1"
+    assert entry.home_team == "Test Town"
+    assert entry.away_team == "Example City"
+    assert entry.commence_time == datetime(2026, 8, 28)
+    assert entry.resolved_at == datetime(2026, 8, 28, 3)
+    assert entry.over_result == "won"
+    assert entry.over_resolution_state == PROPLINE_RESULT_WON
+    assert entry.over_is_settled is True
+    assert session.calls[0][0] == (
+        "https://api.prop-line.com/v1/sports/basketball_nba/"
+        "players/Alex%20Example/history"
+    )
+    assert session.calls[0][1]["params"] == {
+        "market": "player_points",
+        "limit": "10",
+        "bookmaker": "prizepicks",
+    }
+
+
+def test_player_history_keeps_missing_and_ungraded_results_non_settled():
+    payload = _player_history_payload(
+        actual_value=30,
+        over_result=None,
+        under_result="ungraded",
+        resolved_at=None,
+    )
+    session = _Session(_Response(200, payload))
+    client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://api.prop-line.com",
+        session=session,
+        min_request_interval=0,
+        request_budget=PropLineRequestBudget(10),
+    )
+
+    entry = asyncio.run(
+        client.fetch_player_history(
+            "basketball_nba", "Alex Example", market="player_points"
+        )
+    ).entries[0]
+
+    assert entry.over_result is None
+    assert entry.over_resolution_state == PROPLINE_RESULT_UNRESOLVED
+    assert entry.over_is_settled is False
+    assert entry.under_resolution_state == PROPLINE_RESULT_UNGRADED
+    assert entry.under_is_settled is False
+
+
+def test_player_history_accepts_redacted_nullable_values_and_rejects_incomplete_rows():
+    redacted_payload = _player_history_payload(
+        line=None,
+        actual_value=None,
+        over_result=None,
+        under_result=None,
+        resolved_at=None,
+    )
+    redacted_payload["redacted"] = True
+    session = _QueueSession([
+        _Response(200, redacted_payload),
+        _Response(200, {
+            "player_name": "Alex Example",
+            "sport_key": "basketball_nba",
+            "market": "player_points",
+            "entries": [{}],
+        }),
+    ])
+    client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://api.prop-line.com",
+        session=session,
+        min_request_interval=0,
+        cache_ttl=0,
+        request_budget=PropLineRequestBudget(10),
+    )
+
+    redacted = asyncio.run(
+        client.fetch_player_history(
+            "basketball_nba", "Alex Example", market="player_points"
+        )
+    )
+    incomplete = asyncio.run(
+        client.fetch_player_history(
+            "basketball_nba", "Alex Example", market="player_points"
+        )
+    )
+
+    assert redacted.succeeded is True
+    assert redacted.complete is True
+    assert redacted.redacted is True
+    assert redacted.entries[0].line is None
+    assert redacted.entries[0].over_resolution_state == PROPLINE_RESULT_UNRESOLVED
+    assert incomplete.succeeded is False
+    assert incomplete.complete is False
+    assert incomplete.failure_kind == "incomplete"
+    assert incomplete.entries == ()
+
+
+def test_player_history_cache_reuses_complete_evidence_without_a_second_request():
+    session = _Session(_Response(200, _player_history_payload()))
+    client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://api.prop-line.com",
+        session=session,
+        min_request_interval=0,
+        cache_ttl=300,
+        request_budget=PropLineRequestBudget(10),
+    )
+
+    first = asyncio.run(
+        client.fetch_player_history(
+            "basketball_nba", "Alex Example", market="player_points"
+        )
+    )
+    second = asyncio.run(
+        client.fetch_player_history(
+            "basketball_nba", "Alex Example", market="player_points"
+        )
+    )
+
+    assert first.from_cache is False
+    assert second.from_cache is True
+    assert second.entries == first.entries
+    assert len(session.calls) == 1
+
+
+def test_official_player_trends_preserves_documented_splits_and_last_game():
+    session = _Session(_Response(200, _player_trends_payload()))
+    client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://api.prop-line.com",
+        session=session,
+        min_request_interval=0,
+        request_budget=PropLineRequestBudget(10),
+    )
+
+    result = asyncio.run(
+        client.fetch_player_trends(
+            "basketball_nba", "Alex Example", market="player_points"
+        )
+    )
+
+    assert result.succeeded is True
+    assert result.complete is True
+    assert len(result.markets) == 1
+    trend = result.markets[0]
+    assert isinstance(trend, PropLinePlayerMarketTrend)
+    assert trend.provider == "DraftKings"
+    assert trend.supplemental_source == "PropLine"
+    assert trend.games_graded == 12
+    assert trend.last_5.over == 3
+    assert trend.last_5.over_pct == pytest.approx(0.75)
+    assert trend.last_10 is None
+    assert trend.current_streak.result == "won"
+    assert trend.last_game.event_id == "game-1"
+    assert trend.last_game.resolution_state == PROPLINE_RESULT_WON
+    assert session.calls[0][0] == (
+        "https://api.prop-line.com/v1/sports/basketball_nba/"
+        "players/Alex%20Example/trends"
+    )
+    assert session.calls[0][1]["params"] == {"market": "player_points"}
+
+
+def test_player_trends_flavor_filter_is_documented_and_invalid_values_do_not_request():
+    session = _Session(_Response(200, {
+        **_player_trends_payload(),
+        "dfs_odds_type": "goblin",
+    }))
+    client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://api.prop-line.com",
+        session=session,
+        min_request_interval=0,
+        request_budget=PropLineRequestBudget(10),
+    )
+
+    valid = asyncio.run(
+        client.fetch_player_trends(
+            "basketball_nba",
+            "Alex Example",
+            dfs_odds_type="goblin",
+        )
+    )
+    invalid = asyncio.run(
+        client.fetch_player_trends(
+            "basketball_nba",
+            "Alex Example",
+            dfs_odds_type="other",
+        )
+    )
+
+    assert valid.dfs_odds_type == "goblin"
+    assert session.calls[0][1]["params"] == {"dfs_odds_type": "goblin"}
+    assert invalid.succeeded is False
+    assert invalid.failure_kind == "configuration"
+    assert len(session.calls) == 1
+
+
+def test_history_and_trends_share_the_existing_request_budget():
+    session = _QueueSession([
+        _Response(200, _player_history_payload()),
+        _Response(200, _player_trends_payload()),
+    ])
+    client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://api.prop-line.com",
+        session=session,
+        min_request_interval=0,
+        cache_ttl=0,
+        request_budget=PropLineRequestBudget(1),
+    )
+
+    history = asyncio.run(
+        client.fetch_player_history(
+            "basketball_nba", "Alex Example", market="player_points"
+        )
+    )
+    trends = asyncio.run(
+        client.fetch_player_trends("basketball_nba", "Alex Example")
+    )
+
+    assert history.succeeded is True
+    assert trends.succeeded is False
+    assert trends.failure_kind == "quota"
+    assert client.request_budget.count == 1
+    assert len(session.calls) == 1
+
+
+def test_player_history_and_trends_reject_nonofficial_endpoints_before_request():
+    session = _Session(_Response(200, _player_history_payload()))
+    client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://authorized.example/props",
+        session=session,
+        min_request_interval=0,
+    )
+
+    history = asyncio.run(
+        client.fetch_player_history(
+            "basketball_nba", "Alex Example", market="player_points"
+        )
+    )
+    trends = asyncio.run(
+        client.fetch_player_trends("basketball_nba", "Alex Example")
+    )
+
+    assert history.failure_kind == "configuration"
+    assert trends.failure_kind == "configuration"
+    assert session.calls == []

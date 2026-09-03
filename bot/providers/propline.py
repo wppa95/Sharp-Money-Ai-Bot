@@ -470,18 +470,362 @@ class PropLineResultsFetchResult:
 
 
 @dataclass(frozen=True)
+class PropLinePlayerHistoryEntry:
+    """One official, supplemental PropLine player-prop history entry."""
+
+    observed_at: datetime
+    player_name: str
+    sport: str
+    market: str
+    event_id: str
+    commence_time: datetime
+    home_team: str
+    away_team: str
+    bookmaker: str
+    bookmaker_title: str
+    line: Optional[float]
+    over_price: Optional[int]
+    under_price: Optional[int]
+    actual_value: Optional[float]
+    over_result: Optional[str]
+    under_result: Optional[str]
+    resolved_at: Optional[datetime]
+    provider: str = PROPLINE_PROVIDER_NAME
+    supplemental_source: str = "PropLine"
+    redacted: bool = False
+    response_complete: bool = True
+
+    @property
+    def over_resolution_state(self) -> str:
+        return normalize_propline_result_state(self.over_result)
+
+    @property
+    def under_resolution_state(self) -> str:
+        return normalize_propline_result_state(self.under_result)
+
+    @property
+    def over_is_settled(self) -> bool:
+        return self.over_resolution_state in _PROPLINE_SETTLED_RESULTS
+
+    @property
+    def under_is_settled(self) -> bool:
+        return self.under_resolution_state in _PROPLINE_SETTLED_RESULTS
+
+
+PropLinePlayerHistoryEvidence = PropLinePlayerHistoryEntry
+
+
+@dataclass(frozen=True)
 class PropLinePlayerHistoryFetchResult:
     """One official player-history response, kept separate from prop odds."""
 
-    entries: tuple[dict[str, Any], ...]
+    entries: tuple[PropLinePlayerHistoryEntry, ...]
     fetched_at: datetime
     player_name: str = ""
     sport_key: str = ""
     market: str = ""
+    from_cache: bool = False
     succeeded: bool = False
     complete: bool = False
+    redacted: bool = False
+    upgrade_url: str = ""
     error: str = ""
     failure_kind: str = ""
+
+    @property
+    def history(self) -> tuple[PropLinePlayerHistoryEntry, ...]:
+        return self.entries
+
+
+@dataclass(frozen=True)
+class PropLineHitRateSplit:
+    window: int
+    games: int
+    over: int
+    under: int
+    push: int
+    over_pct: Optional[float]
+
+
+@dataclass(frozen=True)
+class PropLineTrendStreak:
+    result: str
+    length: int
+
+
+@dataclass(frozen=True)
+class PropLineTrendLastGame:
+    event_id: str
+    commence_time: datetime
+    line: Optional[float]
+    actual_value: Optional[float]
+    result: Optional[str]
+
+    @property
+    def resolution_state(self) -> str:
+        return normalize_propline_result_state(self.result)
+
+
+@dataclass(frozen=True)
+class PropLinePlayerMarketTrend:
+    """Aggregated, source-provided hit-rate data for one player market."""
+
+    market: str
+    games_graded: int
+    reference_bookmaker: Optional[str]
+    reference_bookmaker_title: Optional[str]
+    recent_line: Optional[float]
+    avg_actual: Optional[float]
+    last_5: Optional[PropLineHitRateSplit]
+    last_10: Optional[PropLineHitRateSplit]
+    last_20: Optional[PropLineHitRateSplit]
+    last_50: Optional[PropLineHitRateSplit]
+    current_streak: Optional[PropLineTrendStreak]
+    last_game: Optional[PropLineTrendLastGame]
+    provider: str = PROPLINE_PROVIDER_NAME
+    supplemental_source: str = "PropLine"
+    redacted: bool = False
+    response_complete: bool = True
+
+
+@dataclass(frozen=True)
+class PropLinePlayerTrendsFetchResult:
+    """One official player-trends response, kept separate from prop odds."""
+
+    markets: tuple[PropLinePlayerMarketTrend, ...]
+    fetched_at: datetime
+    player_name: str = ""
+    sport_key: str = ""
+    dfs_odds_type: Optional[str] = None
+    from_cache: bool = False
+    succeeded: bool = False
+    complete: bool = False
+    redacted: bool = False
+    upgrade_url: str = ""
+    error: str = ""
+    failure_kind: str = ""
+
+    @property
+    def trends(self) -> tuple[PropLinePlayerMarketTrend, ...]:
+        return self.markets
+
+
+def _optional_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError("expected a numeric value")
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        raise ValueError("expected a numeric value")
+
+
+def _optional_int(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError("expected an integer value")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        raise ValueError("expected an integer value")
+    if isinstance(value, float) and parsed != value:
+        raise ValueError("expected an integer value")
+    return parsed
+
+
+def _documented_int(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("expected an integer value")
+    return value
+
+
+def build_propline_player_history_entry(
+    record: dict[str, Any],
+    *,
+    player_name: str = "",
+    sport_key: str = "",
+    market: str = "",
+    observed_at: Optional[datetime] = None,
+    provider: str = PROPLINE_PROVIDER_NAME,
+) -> Optional[PropLinePlayerHistoryEntry]:
+    """Normalize one documented history entry without inferring outcomes."""
+    if not isinstance(record, dict) or _clean(provider) != PROPLINE_PROVIDER_NAME:
+        return None
+    name = _clean(record.get("player_name")) or _clean(player_name)
+    raw_sport = _clean(record.get("sport_key")) or _clean(sport_key)
+    normalized_sport = _normalize_sport(raw_sport)
+    market_name = _clean(record.get("market")) or _clean(market)
+    event_id = _clean(record.get("event_id"))
+    commence_time = _parse_datetime(record.get("commence_time"))
+    observed = observed_at or _parse_datetime(record.get("_observed_at"))
+    if not name or not normalized_sport or not market_name or not event_id:
+        return None
+    if commence_time is None or not isinstance(observed, datetime):
+        return None
+    resolved_at = _parse_datetime(record.get("resolved_at"))
+    if record.get("resolved_at") not in (None, "") and resolved_at is None:
+        return None
+    try:
+        line = _optional_float(record.get("line"))
+        over_price = _optional_int(record.get("over_price"))
+        under_price = _optional_int(record.get("under_price"))
+        actual_value = _optional_float(record.get("actual_value"))
+    except ValueError:
+        return None
+    over_result = record.get("over_result")
+    under_result = record.get("under_result")
+    if over_result is not None and not isinstance(over_result, str):
+        return None
+    if under_result is not None and not isinstance(under_result, str):
+        return None
+    bookmaker = _clean(record.get("bookmaker"))
+    bookmaker_title = _clean(record.get("bookmaker_title"))
+    normalized_bookmaker = bookmaker.lower().replace("_", "").replace("-", "")
+    entry_provider = (
+        PROPLINE_PROVIDER_NAME
+        if normalized_bookmaker in {"prizepicks", "prizepick"}
+        else bookmaker_title or bookmaker or PROPLINE_PROVIDER_NAME
+    )
+    return PropLinePlayerHistoryEntry(
+        observed_at=observed,
+        player_name=name,
+        sport=normalized_sport,
+        market=market_name,
+        event_id=event_id,
+        commence_time=commence_time,
+        home_team=_clean(record.get("home_team")),
+        away_team=_clean(record.get("away_team")),
+        bookmaker=bookmaker,
+        bookmaker_title=bookmaker_title,
+        line=line,
+        over_price=over_price,
+        under_price=under_price,
+        actual_value=actual_value,
+        over_result=over_result,
+        under_result=under_result,
+        resolved_at=resolved_at,
+        provider=entry_provider,
+        supplemental_source=_clean(record.get("supplemental_source")) or "PropLine",
+        redacted=bool(record.get("redacted", False)),
+    )
+
+
+def _build_propline_hit_rate_split(value: Any) -> Optional[PropLineHitRateSplit]:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("trend split is incomplete")
+    required = {"window", "games", "over", "under", "push", "over_pct"}
+    if not required.issubset(value):
+        raise ValueError("trend split is incomplete")
+    try:
+        values = [
+            _documented_int(value[field])
+            for field in ("window", "games", "over", "under", "push")
+        ]
+        over_pct = _optional_float(value["over_pct"])
+    except (TypeError, ValueError):
+        raise ValueError("trend split contains an invalid value")
+    if min(values) < 0:
+        raise ValueError("trend split contains a negative value")
+    return PropLineHitRateSplit(*values, over_pct)
+
+
+def _build_propline_trend_last_game(value: Any) -> Optional[PropLineTrendLastGame]:
+    if value is None:
+        return None
+    required = {"event_id", "commence_time", "line", "actual_value", "result"}
+    if not isinstance(value, dict) or not required.issubset(value):
+        raise ValueError("trend last game is incomplete")
+    commence_time = _parse_datetime(value["commence_time"])
+    if not _clean(value["event_id"]) or commence_time is None:
+        raise ValueError("trend last game identity is incomplete")
+    result = value["result"]
+    if result is not None and not isinstance(result, str):
+        raise ValueError("trend last game result is invalid")
+    try:
+        line = _optional_float(value["line"])
+        actual_value = _optional_float(value["actual_value"])
+    except ValueError:
+        raise ValueError("trend last game contains an invalid value")
+    return PropLineTrendLastGame(
+        _clean(value["event_id"]), commence_time, line, actual_value, result
+    )
+
+
+def _build_propline_player_market_trend(
+    record: Any,
+    *,
+    redacted: bool = False,
+) -> PropLinePlayerMarketTrend:
+    required = {
+        "market", "games_graded", "reference_bookmaker",
+        "reference_bookmaker_title", "recent_line", "avg_actual",
+        "last_5", "last_10", "last_20", "last_50",
+        "current_streak", "last_game",
+    }
+    if not isinstance(record, dict) or not required.issubset(record):
+        raise ValueError("player trend is incomplete")
+    if not _clean(record["market"]):
+        raise ValueError("player trend identity is incomplete")
+    try:
+        games_graded = _documented_int(record["games_graded"])
+        if games_graded < 0:
+            raise ValueError("negative games graded")
+        splits = [
+            _build_propline_hit_rate_split(record[field])
+            for field in ("last_5", "last_10", "last_20", "last_50")
+        ]
+        streak_value = record["current_streak"]
+        if streak_value is None:
+            streak = None
+        elif (
+            isinstance(streak_value, dict)
+            and {"result", "length"}.issubset(streak_value)
+            and isinstance(streak_value["result"], str)
+        ):
+            streak = PropLineTrendStreak(
+                streak_value["result"], _documented_int(streak_value["length"])
+            )
+        else:
+            raise ValueError("trend streak is incomplete")
+        last_game = _build_propline_trend_last_game(record["last_game"])
+        recent_line = _optional_float(record["recent_line"])
+        avg_actual = _optional_float(record["avg_actual"])
+    except (TypeError, ValueError) as exc:
+        raise ValueError(str(exc))
+    reference_bookmaker = (
+        _clean(record["reference_bookmaker"])
+        if record["reference_bookmaker"] is not None else ""
+    )
+    reference_title = (
+        _clean(record["reference_bookmaker_title"])
+        if record["reference_bookmaker_title"] is not None else ""
+    )
+    normalized_bookmaker = reference_bookmaker.lower().replace("_", "").replace("-", "")
+    trend_provider = (
+        PROPLINE_PROVIDER_NAME
+        if normalized_bookmaker in {"prizepicks", "prizepick"}
+        else reference_title or reference_bookmaker or PROPLINE_PROVIDER_NAME
+    )
+    return PropLinePlayerMarketTrend(
+        market=_clean(record["market"]),
+        games_graded=games_graded,
+        reference_bookmaker=reference_bookmaker or None,
+        reference_bookmaker_title=reference_title or None,
+        recent_line=recent_line,
+        avg_actual=avg_actual,
+        last_5=splits[0],
+        last_10=splits[1],
+        last_20=splits[2],
+        last_50=splits[3],
+        current_streak=streak,
+        last_game=last_game,
+        provider=trend_provider,
+        redacted=redacted or bool(record.get("redacted", False)),
+    )
 
 
 def build_propline_result_evidence(
@@ -1569,6 +1913,108 @@ def _official_result_records(
     return records, True, ""
 
 
+_PLAYER_HISTORY_REQUIRED_FIELDS = {
+    "event_id", "commence_time", "home_team", "away_team", "bookmaker",
+    "bookmaker_title", "line", "over_price", "under_price", "actual_value",
+    "over_result", "under_result", "resolved_at",
+}
+_PLAYER_TRENDS_REQUIRED_FIELDS = {
+    "market", "games_graded", "reference_bookmaker",
+    "reference_bookmaker_title", "recent_line", "avg_actual", "last_5",
+    "last_10", "last_20", "last_50", "current_streak", "last_game",
+}
+
+
+def _official_player_history_records(
+    payload: Any,
+    *,
+    requested_player: str,
+    requested_sport: str,
+    requested_market: str,
+) -> tuple[list[dict[str, Any]], bool, str, dict[str, Any]]:
+    """Validate the documented PlayerHistoryOut response."""
+    if not isinstance(payload, dict):
+        return [], False, "PropLine player history response is not an object", {}
+    if not {"player_name", "sport_key", "market", "entries"}.issubset(payload):
+        return [], False, "PropLine player history response is incomplete", {}
+    player_name = _clean(payload["player_name"])
+    sport_key = _clean(payload["sport_key"])
+    market = _clean(payload["market"])
+    if (
+        not player_name
+        or not sport_key
+        or not market
+        or not _safe_player_name_match(player_name, requested_player)
+        or _normalize_sport(sport_key) != _normalize_sport(requested_sport)
+        or _normalize_stat(market) != _normalize_stat(requested_market)
+    ):
+        return [], False, "PropLine player history identity does not match request", {}
+    entries = payload["entries"]
+    if not isinstance(entries, list):
+        return [], False, "PropLine player history entries are incomplete", {}
+    records: list[dict[str, Any]] = []
+    for entry in entries:
+        if not isinstance(entry, dict) or not _PLAYER_HISTORY_REQUIRED_FIELDS.issubset(entry):
+            return [], False, "PropLine player history entry is incomplete", {}
+        records.append({
+            **entry,
+            "player_name": player_name,
+            "sport_key": sport_key,
+            "market": market,
+            "supplemental_source": "PropLine",
+        })
+    return records, True, "", {
+        "player_name": player_name,
+        "sport_key": sport_key,
+        "market": market,
+        "redacted": bool(payload.get("redacted", False)),
+        "upgrade_url": _clean(payload.get("upgrade_url")),
+    }
+
+
+def _official_player_trends_payload(
+    payload: Any,
+    *,
+    requested_player: str,
+    requested_sport: str,
+    requested_dfs_odds_type: str,
+) -> tuple[dict[str, Any], bool, str]:
+    """Validate the documented PlayerTrendsOut response."""
+    if not isinstance(payload, dict):
+        return {}, False, "PropLine player trends response is not an object"
+    if not {"player_name", "sport_key", "markets"}.issubset(payload):
+        return {}, False, "PropLine player trends response is incomplete"
+    player_name = _clean(payload["player_name"])
+    sport_key = _clean(payload["sport_key"])
+    if (
+        not player_name
+        or not sport_key
+        or not _safe_player_name_match(player_name, requested_player)
+        or _normalize_sport(sport_key) != _normalize_sport(requested_sport)
+    ):
+        return {}, False, "PropLine player trends identity does not match request"
+    returned_flavor = _clean(payload.get("dfs_odds_type")).lower()
+    if requested_dfs_odds_type and returned_flavor != requested_dfs_odds_type:
+        return {}, False, "PropLine player trends flavor does not match request"
+    markets = payload["markets"]
+    if not isinstance(markets, list):
+        return {}, False, "PropLine player trends markets are incomplete"
+    if any(
+        not isinstance(market, dict)
+        or not _PLAYER_TRENDS_REQUIRED_FIELDS.issubset(market)
+        for market in markets
+    ):
+        return {}, False, "PropLine player trend is incomplete"
+    return {
+        "player_name": player_name,
+        "sport_key": sport_key,
+        "dfs_odds_type": returned_flavor or None,
+        "markets": markets,
+        "redacted": bool(payload.get("redacted", False)),
+        "upgrade_url": _clean(payload.get("upgrade_url")),
+    }, True, ""
+
+
 class PropLineClient:
     """Small, cached, rate-limited HTTP client for the authorized feed."""
 
@@ -1616,6 +2062,10 @@ class PropLineClient:
         self._snapshot_state_by_scope: dict[str, PropLineSnapshotState] = {}
         self._events_cache_by_sport: dict[str, tuple[PropLineEvent, ...]] = {}
         self._events_cache_clock_by_sport: dict[str, float] = {}
+        self._player_history_cache: dict[str, PropLinePlayerHistoryFetchResult] = {}
+        self._player_history_cache_clock: dict[str, float] = {}
+        self._player_trends_cache: dict[str, PropLinePlayerTrendsFetchResult] = {}
+        self._player_trends_cache_clock: dict[str, float] = {}
         self.request_limiter = request_limiter or _DEFAULT_PROPLINE_REQUEST_LIMITER
         self.request_limiter.configure_min_interval(self.min_request_interval)
 
@@ -1870,7 +2320,7 @@ class PropLineClient:
         *,
         bookmaker: str = "",
         limit: int = 100,
-    ) -> tuple[str, dict[str, str]]:
+    ) -> tuple[str, dict[str, str], str]:
         official_sport = _clean(sport_key)
         official_player = _clean(player_name)
         requested_market = _clean(market)
@@ -1878,10 +2328,9 @@ class PropLineClient:
             raise PropLineError(
                 "PropLine sport, player, and market are required for player history"
             )
-        params = {
-            "market": requested_market,
-            "limit": str(max(1, min(int(limit), 100))),
-        }
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise PropLineError("PropLine player history limit must be between 1 and 100")
+        params = {"market": requested_market, "limit": str(limit)}
         if _clean(bookmaker):
             params["bookmaker"] = _clean(bookmaker)
         return (
@@ -1889,6 +2338,38 @@ class PropLineClient:
             f"{quote(official_sport, safe='')}/players/"
             f"{quote(official_player, safe='')}/history",
             params,
+            f"{official_sport}:player:{_identity_part(official_player)}:history:"
+            f"{_identity_part(requested_market)}:{_identity_part(bookmaker)}:{limit}",
+        )
+
+    def _official_player_trends_request(
+        self,
+        sport_key: str,
+        player_name: str,
+        *,
+        market: str = "",
+        dfs_odds_type: str = "",
+    ) -> tuple[str, dict[str, str], str]:
+        official_sport = _clean(sport_key)
+        official_player = _clean(player_name)
+        if not official_sport or not official_player:
+            raise PropLineError("PropLine sport and player are required for player trends")
+        flavor = _clean(dfs_odds_type).lower()
+        if flavor and flavor not in {"standard", "goblin", "demon"}:
+            raise PropLineError(
+                "PropLine DFS odds type must be standard, goblin, or demon"
+            )
+        params: dict[str, str] = {}
+        if _clean(market):
+            params["market"] = _clean(market)
+        if flavor:
+            params["dfs_odds_type"] = flavor
+        return (
+            f"{self.api_url.rstrip('/')}/v1/sports/{quote(official_sport, safe='')}"
+            f"/players/{quote(official_player, safe='')}/trends",
+            params,
+            f"{official_sport}:player:{_identity_part(official_player)}:trends:"
+            f"{_identity_part(market)}:{flavor}",
         )
 
     async def fetch_player_history(
@@ -1898,7 +2379,7 @@ class PropLineClient:
         market: str,
         *,
         bookmaker: str = "",
-        limit: int = 100,
+        limit: int = 20,
     ) -> PropLinePlayerHistoryFetchResult:
         """Fetch official, read-only player history from PropLine.
 
@@ -1922,7 +2403,7 @@ class PropLineClient:
             )
 
         try:
-            url, params = self._official_player_history_request(
+            url, params, scope = self._official_player_history_request(
                 sport_key,
                 player_name,
                 market,
@@ -1937,6 +2418,15 @@ class PropLineClient:
             )
 
         async with self._lock:
+            cached = self._player_history_cache.get(scope)
+            cached_at = self._player_history_cache_clock.get(scope)
+            if (
+                cached is not None
+                and cached_at is not None
+                and self.cache_ttl > 0
+                and self._clock() - cached_at < self.cache_ttl
+            ):
+                return replace(cached, from_cache=True)
             try:
                 payload = await self._request_json(url, params)
             except PropLineNotFoundError as exc:
@@ -1966,41 +2456,150 @@ class PropLineClient:
                     failure_kind="quota" if "budget" in str(exc).lower() else "http",
                 )
 
-        if not isinstance(payload, dict):
+        raw_records, complete, error, metadata = _official_player_history_records(
+            payload,
+            requested_player=player_name,
+            requested_sport=sport_key,
+            requested_market=market,
+        )
+        if not complete:
             return PropLinePlayerHistoryFetchResult(
                 (), fetched_at, player_name=_clean(player_name),
                 sport_key=_clean(sport_key), market=_clean(market),
-                error="PropLine player history response is incomplete",
+                error=error,
                 failure_kind="incomplete",
             )
-        response_player = _clean(payload.get("player_name"))
-        response_sport = _clean(payload.get("sport_key"))
-        response_market = _clean(payload.get("market"))
-        entries = payload.get("entries")
-        if (
-            not response_player
-            or not response_sport
-            or not response_market
-            or not isinstance(entries, list)
-            or not _safe_player_name_match(response_player, player_name)
-            or _normalize_sport(response_sport) != _normalize_sport(sport_key)
-            or _normalize_stat(response_market) != _normalize_stat(market)
-        ):
-            return PropLinePlayerHistoryFetchResult(
-                (), fetched_at, player_name=_clean(player_name),
-                sport_key=_clean(sport_key), market=_clean(market),
-                error="PropLine player history identity or structure mismatch",
-                failure_kind="incomplete",
+        entries: list[PropLinePlayerHistoryEntry] = []
+        for record in raw_records:
+            entry = build_propline_player_history_entry(
+                record, observed_at=fetched_at
             )
-        return PropLinePlayerHistoryFetchResult(
-            tuple(item for item in entries if isinstance(item, dict)),
+            if entry is None:
+                return PropLinePlayerHistoryFetchResult(
+                    (), fetched_at, player_name=_clean(player_name),
+                    sport_key=_clean(sport_key), market=_clean(market),
+                    error="PropLine player history entry is invalid",
+                    failure_kind="incomplete",
+                )
+            entries.append(entry)
+        result = PropLinePlayerHistoryFetchResult(
+            tuple(entries),
             fetched_at,
-            player_name=response_player,
-            sport_key=response_sport,
-            market=response_market,
+            player_name=metadata["player_name"],
+            sport_key=metadata["sport_key"],
+            market=metadata["market"],
+            redacted=metadata["redacted"],
+            upgrade_url=metadata["upgrade_url"],
             succeeded=True,
             complete=True,
         )
+        self._player_history_cache[scope] = result
+        self._player_history_cache_clock[scope] = self._clock()
+        return result
+
+    async def fetch_player_trends(
+        self,
+        sport_key: str,
+        player_name: str,
+        *,
+        market: str = "",
+        dfs_odds_type: str = "",
+    ) -> PropLinePlayerTrendsFetchResult:
+        """Fetch official, read-only player trends from PropLine."""
+        fetched_at = datetime.utcnow()
+        player = _clean(player_name)
+        sport = _clean(sport_key)
+        if not self.is_configured:
+            return PropLinePlayerTrendsFetchResult(
+                (), fetched_at, player_name=player, sport_key=sport,
+                error="PropLine is not configured", failure_kind="disabled",
+            )
+        if self.api_url.rstrip("/") != DEFAULT_PROPLINE_API_URL:
+            return PropLinePlayerTrendsFetchResult(
+                (), fetched_at, player_name=player, sport_key=sport,
+                error="PropLine player trends require the official endpoint",
+                failure_kind="configuration",
+            )
+        try:
+            url, params, scope = self._official_player_trends_request(
+                sport, player, market=market, dfs_odds_type=dfs_odds_type
+            )
+        except PropLineError as exc:
+            return PropLinePlayerTrendsFetchResult(
+                (), fetched_at, player_name=player, sport_key=sport,
+                error=str(exc), failure_kind="configuration",
+            )
+        async with self._lock:
+            cached = self._player_trends_cache.get(scope)
+            cached_at = self._player_trends_cache_clock.get(scope)
+            if (
+                cached is not None
+                and cached_at is not None
+                and self.cache_ttl > 0
+                and self._clock() - cached_at < self.cache_ttl
+            ):
+                return replace(cached, from_cache=True)
+            try:
+                payload = await self._request_json(url, params)
+            except PropLineNotFoundError as exc:
+                return PropLinePlayerTrendsFetchResult(
+                    (), fetched_at, player_name=player, sport_key=sport,
+                    error=str(exc), failure_kind="not_found",
+                )
+            except PropLineRateLimitError as exc:
+                return PropLinePlayerTrendsFetchResult(
+                    (), fetched_at, player_name=player, sport_key=sport,
+                    error=str(exc), failure_kind="quota",
+                )
+            except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                return PropLinePlayerTrendsFetchResult(
+                    (), fetched_at, player_name=player, sport_key=sport,
+                    error=f"PropLine player trends request failed: {type(exc).__name__}",
+                    failure_kind="http",
+                )
+            except PropLineError as exc:
+                return PropLinePlayerTrendsFetchResult(
+                    (), fetched_at, player_name=player, sport_key=sport,
+                    error=str(exc),
+                    failure_kind="quota" if "budget" in str(exc).lower() else "http",
+                )
+        normalized, complete, error = _official_player_trends_payload(
+            payload,
+            requested_player=player,
+            requested_sport=sport,
+            requested_dfs_odds_type=_clean(dfs_odds_type).lower(),
+        )
+        if not complete:
+            return PropLinePlayerTrendsFetchResult(
+                (), fetched_at, player_name=player, sport_key=sport,
+                error=error, failure_kind="incomplete",
+            )
+        try:
+            markets = tuple(
+                _build_propline_player_market_trend(
+                    record, redacted=normalized["redacted"]
+                )
+                for record in normalized["markets"]
+            )
+        except ValueError as exc:
+            return PropLinePlayerTrendsFetchResult(
+                (), fetched_at, player_name=player, sport_key=sport,
+                error=str(exc), failure_kind="incomplete",
+            )
+        result = PropLinePlayerTrendsFetchResult(
+            markets,
+            fetched_at,
+            player_name=normalized["player_name"],
+            sport_key=normalized["sport_key"],
+            dfs_odds_type=normalized["dfs_odds_type"],
+            redacted=normalized["redacted"],
+            upgrade_url=normalized["upgrade_url"],
+            succeeded=True,
+            complete=True,
+        )
+        self._player_trends_cache[scope] = result
+        self._player_trends_cache_clock[scope] = self._clock()
+        return result
 
     async def _discover_events_locked(
         self,
@@ -2754,6 +3353,93 @@ class PropLinePrizePicksProvider(PropProviderBase):
             bookmaker=bookmaker or self.bookmaker,
             event_scoped=True,
         )
+
+    async def fetch_player_history(
+        self,
+        sport: str,
+        player_name: str,
+        *,
+        market: str,
+        bookmaker: Optional[str] = None,
+        limit: int = 20,
+    ) -> PropLinePlayerHistoryFetchResult:
+        """Fetch supplemental history without entering the live feed."""
+        canonical_sport = _normalize_sport(sport)
+        if not self.is_available():
+            return PropLinePlayerHistoryFetchResult(
+                (), datetime.utcnow(), player_name=_clean(player_name),
+                sport_key=canonical_sport, market=_clean(market),
+                error="PropLine is not configured", failure_kind="disabled",
+            )
+        if (
+            is_football_related_sport(canonical_sport)
+            or (self._sport_filter is not None and canonical_sport not in self._sport_filter)
+        ):
+            return PropLinePlayerHistoryFetchResult(
+                (), datetime.utcnow(), player_name=_clean(player_name),
+                sport_key=canonical_sport, market=_clean(market),
+                error=f"PropLine sport is outside configured scope: {canonical_sport}",
+                failure_kind="configuration",
+            )
+        official_sport = self.client.official_sport_for(canonical_sport)
+        if not official_sport:
+            return PropLinePlayerHistoryFetchResult(
+                (), datetime.utcnow(), player_name=_clean(player_name),
+                sport_key=canonical_sport, market=_clean(market),
+                error=f"PropLine sport is unsupported: {canonical_sport}",
+                failure_kind="configuration",
+            )
+        result = await self.client.fetch_player_history(
+            official_sport, player_name, market=market,
+            bookmaker=bookmaker or self.bookmaker, limit=limit,
+        )
+        return replace(
+            result,
+            sport_key=canonical_sport,
+            entries=tuple(
+                replace(entry, sport=canonical_sport) for entry in result.entries
+            ),
+        )
+
+    async def fetch_player_trends(
+        self,
+        sport: str,
+        player_name: str,
+        *,
+        market: str = "",
+        dfs_odds_type: str = "",
+    ) -> PropLinePlayerTrendsFetchResult:
+        """Fetch supplemental trends without changing picks or alerts."""
+        canonical_sport = _normalize_sport(sport)
+        if not self.is_available():
+            return PropLinePlayerTrendsFetchResult(
+                (), datetime.utcnow(), player_name=_clean(player_name),
+                sport_key=canonical_sport,
+                error="PropLine is not configured", failure_kind="disabled",
+            )
+        if (
+            is_football_related_sport(canonical_sport)
+            or (self._sport_filter is not None and canonical_sport not in self._sport_filter)
+        ):
+            return PropLinePlayerTrendsFetchResult(
+                (), datetime.utcnow(), player_name=_clean(player_name),
+                sport_key=canonical_sport,
+                error=f"PropLine sport is outside configured scope: {canonical_sport}",
+                failure_kind="configuration",
+            )
+        official_sport = self.client.official_sport_for(canonical_sport)
+        if not official_sport:
+            return PropLinePlayerTrendsFetchResult(
+                (), datetime.utcnow(), player_name=_clean(player_name),
+                sport_key=canonical_sport,
+                error=f"PropLine sport is unsupported: {canonical_sport}",
+                failure_kind="configuration",
+            )
+        result = await self.client.fetch_player_trends(
+            official_sport, player_name, market=market,
+            dfs_odds_type=dfs_odds_type,
+        )
+        return replace(result, sport_key=canonical_sport)
 
     def normalize_stat(self, raw: str) -> str:
         return _normalize_stat(raw)
