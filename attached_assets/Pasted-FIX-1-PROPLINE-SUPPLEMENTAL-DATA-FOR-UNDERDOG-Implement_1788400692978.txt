@@ -1,0 +1,114 @@
+FIX #1 — PROPLINE SUPPLEMENTAL DATA FOR UNDERDOG
+
+Implement this fix now.
+
+The architecture is:
+
+* PrizePicks and Underdog are BOTH primary actionable providers.
+* PP and UD remain completely separate.
+* PropLine already feeds/supplements the PP side.
+* Now PropLine must ALSO supplement the UD side when UD is missing required supporting data.
+
+UNDERDOG
+
+UD remains authoritative for:
+
+* actual UD line
+* market identity
+* provider identity
+* line movement
+* actionable UD pick
+
+When UD has the required data:
+→ use the UD data normally.
+
+When UD is missing supporting data needed by the EXISTING analysis/history pipeline:
+→ use officially documented PropLine data to supplement the missing evidence where available.
+
+PropLine must NOT:
+
+* replace an existing UD line
+* create a synthetic UD line
+* create synthetic UD movement
+* change the UD provider identity
+* merge UD and PP
+* fabricate player identity
+* fabricate historical results
+
+Preserve clear provenance showing that the supplemental evidence came from PropLine.
+
+OPEN DOTA
+
+The OpenDota “player name not found” warnings are part of the problem.
+
+When OpenDota cannot resolve a player and that causes missing supporting evidence:
+
+1. Do not fabricate or guess the player identity.
+2. Do not force an unreliable name match.
+3. If PropLine has a reliable player/event identity and the required documented data, use PropLine as supplemental evidence.
+4. Preserve the original UD player/market identity.
+5. If the identity cannot be safely established, leave the evidence unavailable rather than guessing.
+
+IMPORTANT
+
+This is a DATA-SUPPLEMENTATION fix.
+
+Do NOT change:
+
+* scoring
+* confidence
+* qualification
+* PLAY criteria
+* existing alert thresholds
+* bankroll
+* risk rules
+* Telegram logic
+* scheduler
+* restart behavior
+* PP behavior
+* UD authoritative line behavior
+
+Do NOT increase alert volume because PropLine provides additional evidence.
+
+The intended flow is:
+
+UD direct data
+→ missing supporting evidence?
+→ PropLine supplements the missing evidence
+→ EXISTING analysis uses the additional evidence
+→ EXISTING qualification remains unchanged
+→ EXISTING ranking/selection remains unchanged for this fix
+
+PROPLINE API
+
+Use ONLY officially documented PropLine capabilities/endpoints.
+
+Reuse the PropLine capabilities already implemented where appropriate.
+
+Do not invent endpoints or response structures.
+
+Keep the existing:
+
+* 5,000/day self-cap
+* 208/hour hard pacing limit
+* retry/rate-limit behavior
+* provenance safeguards
+* provider separation
+
+SCOPE
+
+Implement ONLY this UD supplemental-data fix.
+
+Do NOT implement the strongest-pick/one-player selection change in this task. That will be the next separate fix.
+
+After implementation:
+
+* run focused tests
+* run relevant full tests if practical
+* compile/check
+* verify clean startup/restart
+* report exact files changed
+* report exactly what UD data PropLine now supplements
+* report any data that remains unavailable
+
+Stop after this fix.
