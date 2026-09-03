@@ -469,6 +469,21 @@ class PropLineResultsFetchResult:
     failure_kind: str = ""
 
 
+@dataclass(frozen=True)
+class PropLinePlayerHistoryFetchResult:
+    """One official player-history response, kept separate from prop odds."""
+
+    entries: tuple[dict[str, Any], ...]
+    fetched_at: datetime
+    player_name: str = ""
+    sport_key: str = ""
+    market: str = ""
+    succeeded: bool = False
+    complete: bool = False
+    error: str = ""
+    failure_kind: str = ""
+
+
 def build_propline_result_evidence(
     record: dict[str, Any],
     *,
@@ -886,6 +901,13 @@ def _parse_datetime(value: Any) -> Optional[datetime]:
 def _identity_part(value: Any) -> str:
     """Create a stable, case-insensitive identity component."""
     return re.sub(r"\s+", " ", _clean(value)).strip().lower()
+
+
+def _safe_player_name_match(first: Any, second: Any) -> bool:
+    """Accept only an exact normalized player-name match."""
+    return _identity_part(first) == _identity_part(second) and bool(
+        _identity_part(first)
+    )
 
 
 def propline_event_identity(
@@ -1838,6 +1860,146 @@ class PropLineClient:
             f"{self.api_url.rstrip('/')}/v1/sports/{quote(official_sport, safe='')}"
             f"/events/{quote(official_event, safe='')}/results",
             params,
+        )
+
+    def _official_player_history_request(
+        self,
+        sport_key: str,
+        player_name: str,
+        market: str,
+        *,
+        bookmaker: str = "",
+        limit: int = 100,
+    ) -> tuple[str, dict[str, str]]:
+        official_sport = _clean(sport_key)
+        official_player = _clean(player_name)
+        requested_market = _clean(market)
+        if not official_sport or not official_player or not requested_market:
+            raise PropLineError(
+                "PropLine sport, player, and market are required for player history"
+            )
+        params = {
+            "market": requested_market,
+            "limit": str(max(1, min(int(limit), 100))),
+        }
+        if _clean(bookmaker):
+            params["bookmaker"] = _clean(bookmaker)
+        return (
+            f"{self.api_url.rstrip('/')}/v1/sports/"
+            f"{quote(official_sport, safe='')}/players/"
+            f"{quote(official_player, safe='')}/history",
+            params,
+        )
+
+    async def fetch_player_history(
+        self,
+        sport_key: str,
+        player_name: str,
+        market: str,
+        *,
+        bookmaker: str = "",
+        limit: int = 100,
+    ) -> PropLinePlayerHistoryFetchResult:
+        """Fetch official, read-only player history from PropLine.
+
+        This is intentionally limited to the documented official host.  The
+        caller may use the returned entries as supplemental evidence, but this
+        method never turns them into a prop line or a provider identity.
+        """
+        fetched_at = datetime.utcnow()
+        if not self.is_configured:
+            return PropLinePlayerHistoryFetchResult(
+                (), fetched_at, player_name=_clean(player_name),
+                sport_key=_clean(sport_key), market=_clean(market),
+                error="PropLine is not configured", failure_kind="disabled",
+            )
+        if self.api_url.rstrip("/") != DEFAULT_PROPLINE_API_URL:
+            return PropLinePlayerHistoryFetchResult(
+                (), fetched_at, player_name=_clean(player_name),
+                sport_key=_clean(sport_key), market=_clean(market),
+                error="PropLine player history requires the official endpoint",
+                failure_kind="configuration",
+            )
+
+        try:
+            url, params = self._official_player_history_request(
+                sport_key,
+                player_name,
+                market,
+                bookmaker=bookmaker,
+                limit=limit,
+            )
+        except PropLineError as exc:
+            return PropLinePlayerHistoryFetchResult(
+                (), fetched_at, player_name=_clean(player_name),
+                sport_key=_clean(sport_key), market=_clean(market),
+                error=str(exc), failure_kind="configuration",
+            )
+
+        async with self._lock:
+            try:
+                payload = await self._request_json(url, params)
+            except PropLineNotFoundError as exc:
+                return PropLinePlayerHistoryFetchResult(
+                    (), fetched_at, player_name=_clean(player_name),
+                    sport_key=_clean(sport_key), market=_clean(market),
+                    error=str(exc), failure_kind="not_found",
+                )
+            except PropLineRateLimitError as exc:
+                return PropLinePlayerHistoryFetchResult(
+                    (), fetched_at, player_name=_clean(player_name),
+                    sport_key=_clean(sport_key), market=_clean(market),
+                    error=str(exc), failure_kind="quota",
+                )
+            except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                return PropLinePlayerHistoryFetchResult(
+                    (), fetched_at, player_name=_clean(player_name),
+                    sport_key=_clean(sport_key), market=_clean(market),
+                    error=f"PropLine player history request failed: {type(exc).__name__}",
+                    failure_kind="http",
+                )
+            except PropLineError as exc:
+                return PropLinePlayerHistoryFetchResult(
+                    (), fetched_at, player_name=_clean(player_name),
+                    sport_key=_clean(sport_key), market=_clean(market),
+                    error=str(exc),
+                    failure_kind="quota" if "budget" in str(exc).lower() else "http",
+                )
+
+        if not isinstance(payload, dict):
+            return PropLinePlayerHistoryFetchResult(
+                (), fetched_at, player_name=_clean(player_name),
+                sport_key=_clean(sport_key), market=_clean(market),
+                error="PropLine player history response is incomplete",
+                failure_kind="incomplete",
+            )
+        response_player = _clean(payload.get("player_name"))
+        response_sport = _clean(payload.get("sport_key"))
+        response_market = _clean(payload.get("market"))
+        entries = payload.get("entries")
+        if (
+            not response_player
+            or not response_sport
+            or not response_market
+            or not isinstance(entries, list)
+            or not _safe_player_name_match(response_player, player_name)
+            or _normalize_sport(response_sport) != _normalize_sport(sport_key)
+            or _normalize_stat(response_market) != _normalize_stat(market)
+        ):
+            return PropLinePlayerHistoryFetchResult(
+                (), fetched_at, player_name=_clean(player_name),
+                sport_key=_clean(sport_key), market=_clean(market),
+                error="PropLine player history identity or structure mismatch",
+                failure_kind="incomplete",
+            )
+        return PropLinePlayerHistoryFetchResult(
+            tuple(item for item in entries if isinstance(item, dict)),
+            fetched_at,
+            player_name=response_player,
+            sport_key=response_sport,
+            market=response_market,
+            succeeded=True,
+            complete=True,
         )
 
     async def _discover_events_locked(
