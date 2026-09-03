@@ -41,6 +41,26 @@ class PlayerHistoryRecord:
     source: str = "real"
     line_moved: Optional[bool] = None
 
+    @property
+    def player_name(self) -> str:
+        """Compatibility view for the shared game-result calculator."""
+        return self.player
+
+    @property
+    def stat_type(self) -> str:
+        """Compatibility view for the shared game-result calculator."""
+        return self.stat
+
+    @property
+    def game_date(self) -> str:
+        """Compatibility view for the shared game-result calculator."""
+        return self.date
+
+    @property
+    def actual_value(self) -> float:
+        """Compatibility view for the shared game-result calculator."""
+        return self.value
+
 
 @dataclass(frozen=True)
 class HistoryWindow:
@@ -82,6 +102,10 @@ class PlayerHistorySnapshot:
     supplemental_sources: tuple[str, ...] = ()
     supplemental_records: list[PlayerHistoryRecord] = field(default_factory=list)
     total_supplemental_games: int = 0
+
+    @property
+    def has_supplemental_data(self) -> bool:
+        return self.total_supplemental_games > 0
 
     def preferred_l5(self) -> Optional[float]:
         return self.l5.hit_rate if self.l5 else self.proxy_l5

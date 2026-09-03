@@ -1895,6 +1895,7 @@ async def _run_prizepicks_independent_cycle(
         if enrichment_used < enrichment_budget:
             hit_rates = await _fetch_and_compute_hit_rates(
                 db, player, sport, stat, line,
+                source_provider="PrizePicks",
             )
             enrichment_used += 1
         decision = None
