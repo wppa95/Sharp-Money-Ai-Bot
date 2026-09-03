@@ -472,6 +472,33 @@ class PropLineResultsFetchResult:
 
 
 @dataclass(frozen=True)
+class PropLineEndpointResult:
+    """Result envelope for a documented, read-only PropLine endpoint.
+
+    The payload is intentionally not projected into a betting model here.
+    Each endpoint has a different shape and callers decide whether it is
+    suitable for evidence, reporting, or corroboration.  Keeping the raw
+    response in this envelope also preserves redacted/free-tier responses.
+    """
+
+    payload: Any
+    fetched_at: datetime
+    endpoint: str = ""
+    from_cache: bool = False
+    succeeded: bool = False
+    complete: bool = False
+    redacted: bool = False
+    upgrade_url: str = ""
+    error: str = ""
+    failure_kind: str = ""
+
+    @property
+    def data(self) -> Any:
+        """Compatibility/readability alias for the response payload."""
+        return self.payload
+
+
+@dataclass(frozen=True)
 class PropLinePlayerHistoryEntry:
     """One official, supplemental PropLine player-prop history entry."""
 
@@ -2069,6 +2096,8 @@ class PropLineClient:
         self._player_history_cache_clock: dict[str, float] = {}
         self._player_trends_cache: dict[str, PropLinePlayerTrendsFetchResult] = {}
         self._player_trends_cache_clock: dict[str, float] = {}
+        self._endpoint_cache: dict[str, PropLineEndpointResult] = {}
+        self._endpoint_cache_clock: dict[str, float] = {}
         self.request_limiter = request_limiter or _DEFAULT_PROPLINE_REQUEST_LIMITER
         self.request_limiter.configure_min_interval(self.min_request_interval)
 
@@ -2319,6 +2348,430 @@ class PropLineClient:
             f"/events/{quote(official_event, safe='')}/results",
             params,
         )
+
+    def _official_read_path(self, *parts: str) -> str:
+        """Build a path only for the documented official PropLine host."""
+        if self.api_url.rstrip("/") != DEFAULT_PROPLINE_API_URL:
+            raise PropLineError(
+                "This PropLine capability requires the official endpoint"
+            )
+        if not parts or any(not _clean(part) for part in parts):
+            raise PropLineError("PropLine endpoint path is incomplete")
+        return f"{self.api_url.rstrip('/')}/v1/" + "/".join(
+            quote(_clean(part), safe="") for part in parts
+        )
+
+    @staticmethod
+    def _csv_param(value: Any) -> str:
+        if isinstance(value, (list, tuple, set, frozenset)):
+            return ",".join(_clean(item) for item in value if _clean(item))
+        return _clean(value)
+
+    @staticmethod
+    def _event_id(event: Any) -> str:
+        if isinstance(event, PropLineEvent):
+            return event.event_id
+        if isinstance(event, dict):
+            return _clean(_first(event, "id", "event_id", "game_id", "match_id"))
+        return _clean(event)
+
+    async def _fetch_read_only(
+        self,
+        endpoint: str,
+        params: Optional[dict[str, str]] = None,
+        *,
+        cache_scope: str = "",
+    ) -> PropLineEndpointResult:
+        """Fetch one documented GET endpoint with common safety guarantees."""
+        fetched_at = datetime.utcnow()
+        scope = cache_scope or endpoint
+        if not self.is_configured:
+            return PropLineEndpointResult(
+                None, fetched_at, endpoint=endpoint,
+                error="PropLine is not configured", failure_kind="disabled",
+            )
+        async with self._lock:
+            cached = self._endpoint_cache.get(scope)
+            cached_at = self._endpoint_cache_clock.get(scope)
+            if (
+                cached is not None
+                and cached_at is not None
+                and self.cache_ttl > 0
+                and self._clock() - cached_at < self.cache_ttl
+            ):
+                return replace(cached, from_cache=True)
+            try:
+                payload = await self._request_json(endpoint, params or {})
+            except PropLineNotFoundError as exc:
+                return PropLineEndpointResult(
+                    None, fetched_at, endpoint=endpoint,
+                    error=str(exc), failure_kind="not_found",
+                )
+            except PropLineRateLimitError as exc:
+                return PropLineEndpointResult(
+                    None, fetched_at, endpoint=endpoint,
+                    error=str(exc), failure_kind="quota",
+                )
+            except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                return PropLineEndpointResult(
+                    None, fetched_at, endpoint=endpoint,
+                    error=f"PropLine request failed: {type(exc).__name__}",
+                    failure_kind="http",
+                )
+            except PropLineError as exc:
+                return PropLineEndpointResult(
+                    None, fetched_at, endpoint=endpoint,
+                    error=str(exc),
+                    failure_kind="quota" if "budget" in str(exc).lower() else "http",
+                )
+            redacted = bool(payload.get("redacted", False)) if isinstance(payload, dict) else False
+            upgrade_url = _clean(payload.get("upgrade_url")) if isinstance(payload, dict) else ""
+            result = PropLineEndpointResult(
+                payload, fetched_at, endpoint=endpoint,
+                succeeded=True, complete=True, redacted=redacted,
+                upgrade_url=upgrade_url,
+            )
+            self._endpoint_cache[scope] = result
+            self._endpoint_cache_clock[scope] = self._clock()
+            return result
+
+    async def fetch_player_games(
+        self,
+        sport_key: str,
+        player_name: str,
+        *,
+        limit: int = 20,
+        opponent: str = "",
+        stat_type: str = "",
+    ) -> PropLineEndpointResult:
+        """Fetch raw, book-agnostic player game logs."""
+        try:
+            if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+                raise PropLineError("PropLine player games limit must be between 1 and 100")
+            sport = _clean(sport_key)
+            player = _clean(player_name)
+            if not sport or not player:
+                raise PropLineError("PropLine sport and player are required for player games")
+            params = {"limit": str(limit)}
+            if _clean(opponent):
+                params["opponent"] = _clean(opponent)
+            if _clean(stat_type):
+                params["stat_type"] = self._csv_param(stat_type)
+            endpoint = self._official_read_path(
+                "sports", sport, "players", player, "games"
+            )
+        except PropLineError as exc:
+            return PropLineEndpointResult(
+                None, datetime.utcnow(), error=str(exc), failure_kind="configuration"
+            )
+        scope = "games:" + json.dumps([endpoint, sorted(params.items())], separators=(",", ":"))
+        return await self._fetch_read_only(endpoint, params, cache_scope=scope)
+
+    async def fetch_event_stats(
+        self, sport_key: str, event: Any, *, stat_type: str = ""
+    ) -> PropLineEndpointResult:
+        """Fetch raw player/team box-score stats for one event."""
+        return await self._fetch_event_endpoint(
+            sport_key, event, "stats",
+            {"stat_type": self._csv_param(stat_type)} if _clean(stat_type) else {},
+        )
+
+    async def fetch_event_context(
+        self, sport_key: str, event: Any
+    ) -> PropLineEndpointResult:
+        """Fetch venue, lineup, pitcher, and weather context."""
+        return await self._fetch_event_endpoint(sport_key, event, "context")
+
+    async def fetch_event_markets(
+        self, sport_key: str, event: Any, *, period: str = ""
+    ) -> PropLineEndpointResult:
+        """Discover the markets available on one event before pulling odds."""
+        params = {"period": _clean(period)} if _clean(period) else {}
+        return await self._fetch_event_endpoint(sport_key, event, "markets", params)
+
+    async def fetch_scores(
+        self, sport_key: str, *, days_from: int = 3
+    ) -> PropLineEndpointResult:
+        """Fetch recent scores and game status for a sport."""
+        if isinstance(days_from, bool) or not isinstance(days_from, int) or not 0 <= days_from <= 30:
+            return PropLineEndpointResult(
+                None, datetime.utcnow(),
+                error="PropLine days_from must be between 0 and 30",
+                failure_kind="configuration",
+            )
+        try:
+            endpoint = self._official_read_path("sports", _clean(sport_key), "scores")
+        except PropLineError as exc:
+            return PropLineEndpointResult(
+                None, datetime.utcnow(), error=str(exc), failure_kind="configuration"
+            )
+        return await self._fetch_read_only(
+            endpoint, {"days_from": str(days_from)},
+            cache_scope=f"scores:{_clean(sport_key).lower()}:{days_from}",
+        )
+
+    async def fetch_futures(
+        self, sport_key: str, *, bookmakers: Any = ""
+    ) -> PropLineEndpointResult:
+        """Fetch season-long futures markets without entering prop scoring."""
+        try:
+            endpoint = self._official_read_path("sports", _clean(sport_key), "futures")
+        except PropLineError as exc:
+            return PropLineEndpointResult(
+                None, datetime.utcnow(), error=str(exc), failure_kind="configuration"
+            )
+        params = {}
+        if self._csv_param(bookmakers):
+            params["bookmakers"] = self._csv_param(bookmakers)
+        return await self._fetch_read_only(
+            endpoint, params,
+            cache_scope="futures:" + json.dumps([endpoint, sorted(params.items())]),
+        )
+
+    async def fetch_odds_history(
+        self,
+        sport_key: str,
+        event: Any,
+        *,
+        markets: Any = "",
+        from_time: str = "",
+        to_time: str = "",
+        relative_from: str = "",
+        relative_to: str = "",
+        interval: str = "",
+        changes_only: Optional[bool] = None,
+        period: str = "",
+    ) -> PropLineEndpointResult:
+        """Fetch historical odds ticks; never interpret movement as a pick."""
+        params = self._history_params(
+            markets=markets, from_time=from_time, to_time=to_time,
+            relative_from=relative_from, relative_to=relative_to,
+            interval=interval, changes_only=changes_only, period=period,
+        )
+        return await self._fetch_event_endpoint(
+            sport_key, event, "odds/history", params
+        )
+
+    async def fetch_closing_lines(
+        self, sport_key: str, event: Any, *, markets: Any = ""
+    ) -> PropLineEndpointResult:
+        """Fetch provider-defined opening and closing line evidence."""
+        params = {"markets": self._csv_param(markets)} if self._csv_param(markets) else {}
+        return await self._fetch_event_endpoint(
+            sport_key, event, "odds/closing", params
+        )
+
+    async def fetch_movement(
+        self, sport_key: str, event: Any, *, markets: Any = "", period: str = ""
+    ) -> PropLineEndpointResult:
+        """Fetch read-only line movement and cross-book steam context."""
+        params = {}
+        if self._csv_param(markets):
+            params["markets"] = self._csv_param(markets)
+        if _clean(period):
+            params["period"] = _clean(period)
+        return await self._fetch_event_endpoint(sport_key, event, "movement", params)
+
+    async def fetch_best_line(
+        self, sport_key: str, event: Any, *, markets: Any = "", bookmakers: Any = ""
+    ) -> PropLineEndpointResult:
+        """Fetch best comparable sportsbook prices for a documented event."""
+        params = {}
+        if self._csv_param(markets):
+            params["markets"] = self._csv_param(markets)
+        if self._csv_param(bookmakers):
+            params["bookmakers"] = self._csv_param(bookmakers)
+        return await self._fetch_event_endpoint(sport_key, event, "best-line", params)
+
+    async def fetch_ev(
+        self, sport_key: str, event: Any, *, markets: Any = "", bookmakers: Any = ""
+    ) -> PropLineEndpointResult:
+        """Fetch cross-book no-vig +EV calculations as informational data."""
+        params = {}
+        if self._csv_param(markets):
+            params["markets"] = self._csv_param(markets)
+        if self._csv_param(bookmakers):
+            params["bookmakers"] = self._csv_param(bookmakers)
+        return await self._fetch_event_endpoint(sport_key, event, "ev", params)
+
+    async def calculate_ev(
+        self,
+        sport_key: str,
+        event: Any,
+        *,
+        market: str,
+        name: str,
+        price: int,
+        point: Any = None,
+        description: str = "",
+    ) -> PropLineEndpointResult:
+        """Score a caller-supplied price against PropLine's fair line."""
+        if isinstance(price, bool) or not isinstance(price, int):
+            return PropLineEndpointResult(
+                None, datetime.utcnow(),
+                error="PropLine EV price must be an integer American price",
+                failure_kind="configuration",
+            )
+        params = {"market": _clean(market), "name": _clean(name), "price": str(price)}
+        if point is not None:
+            params["point"] = str(point)
+        if _clean(description):
+            params["description"] = _clean(description)
+        return await self._fetch_event_endpoint(sport_key, event, "ev/calc", params)
+
+    async def fetch_projections(
+        self, sport_key: str, event: Any, *, markets: Any = ""
+    ) -> PropLineEndpointResult:
+        """Fetch market-implied values as validation context, not forecasts."""
+        params = {"markets": self._csv_param(markets)} if self._csv_param(markets) else {}
+        return await self._fetch_event_endpoint(
+            sport_key, event, "projections", params
+        )
+
+    async def fetch_dfs_payouts(
+        self, *, platform: str = "prizepicks", leg_win_prob: Any = None
+    ) -> PropLineEndpointResult:
+        """Fetch published DFS payout and breakeven reference math."""
+        params = {}
+        if _clean(platform):
+            params["platform"] = _clean(platform).lower()
+        if leg_win_prob is not None:
+            try:
+                probability = float(leg_win_prob)
+            except (TypeError, ValueError):
+                return PropLineEndpointResult(
+                    None, datetime.utcnow(),
+                    error="PropLine leg_win_prob must be numeric",
+                    failure_kind="configuration",
+                )
+            if not 0.0 <= probability <= 1.0:
+                return PropLineEndpointResult(
+                    None, datetime.utcnow(),
+                    error="PropLine leg_win_prob must be between 0 and 1",
+                    failure_kind="configuration",
+                )
+            params["leg_win_prob"] = str(leg_win_prob)
+        try:
+            endpoint = self._official_read_path("dfs", "payouts")
+        except PropLineError as exc:
+            return PropLineEndpointResult(
+                None, datetime.utcnow(), error=str(exc), failure_kind="configuration"
+            )
+        return await self._fetch_read_only(
+            endpoint, params,
+            cache_scope="dfs-payouts:" + json.dumps(sorted(params.items())),
+        )
+
+    async def fetch_market_hit_rates(
+        self, *, days: int = 28, bookmaker: str = "bovada"
+    ) -> PropLineEndpointResult:
+        """Fetch aggregate market hit-rate calibration counts."""
+        if isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= 60:
+            return PropLineEndpointResult(
+                None, datetime.utcnow(),
+                error="PropLine hit-rate days must be between 1 and 60",
+                failure_kind="configuration",
+            )
+        try:
+            endpoint = self._official_read_path("markets", "hit-rates")
+        except PropLineError as exc:
+            return PropLineEndpointResult(
+                None, datetime.utcnow(), error=str(exc), failure_kind="configuration"
+            )
+        params = {"days": str(days)}
+        if _clean(bookmaker):
+            params["bookmaker"] = _clean(bookmaker).lower()
+        return await self._fetch_read_only(
+            endpoint, params,
+            cache_scope="hit-rates:" + json.dumps(sorted(params.items())),
+        )
+
+    async def fetch_resolution_summary(self, *, days: int = 30) -> PropLineEndpointResult:
+        """Fetch aggregate resolution coverage, with no individual pick claims."""
+        if isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= 90:
+            return PropLineEndpointResult(
+                None, datetime.utcnow(),
+                error="PropLine resolution-summary days must be between 1 and 90",
+                failure_kind="configuration",
+            )
+        try:
+            endpoint = self._official_read_path("markets", "resolution-summary")
+        except PropLineError as exc:
+            return PropLineEndpointResult(
+                None, datetime.utcnow(), error=str(exc), failure_kind="configuration"
+            )
+        return await self._fetch_read_only(
+            endpoint, {"days": str(days)},
+            cache_scope=f"resolution-summary:{days}",
+        )
+
+    async def fetch_freshness(self) -> PropLineEndpointResult:
+        """Fetch per-book game-line and prop freshness."""
+        try:
+            endpoint = self._official_read_path("freshness")
+        except PropLineError as exc:
+            return PropLineEndpointResult(
+                None, datetime.utcnow(), error=str(exc), failure_kind="configuration"
+            )
+        return await self._fetch_read_only(endpoint, {}, cache_scope="freshness")
+
+    async def _fetch_event_endpoint(
+        self,
+        sport_key: str,
+        event: Any,
+        suffix: str,
+        params: Optional[dict[str, str]] = None,
+    ) -> PropLineEndpointResult:
+        sport = _clean(sport_key)
+        event_id = self._event_id(event)
+        if not sport or not event_id:
+            return PropLineEndpointResult(
+                None, datetime.utcnow(),
+                error="PropLine sport and event id are required",
+                failure_kind="configuration",
+            )
+        try:
+            endpoint = self._official_read_path(
+                "sports", sport, "events", event_id, *suffix.split("/")
+            )
+        except PropLineError as exc:
+            return PropLineEndpointResult(
+                None, datetime.utcnow(), error=str(exc), failure_kind="configuration"
+            )
+        request_params = params or {}
+        scope = "event:" + json.dumps(
+            [endpoint, sorted(request_params.items())], separators=(",", ":")
+        )
+        return await self._fetch_read_only(endpoint, request_params, cache_scope=scope)
+
+    @staticmethod
+    def _history_params(
+        *,
+        markets: Any,
+        from_time: str,
+        to_time: str,
+        relative_from: str,
+        relative_to: str,
+        interval: str,
+        changes_only: Optional[bool],
+        period: str,
+    ) -> dict[str, str]:
+        params = {}
+        values = (
+            ("markets", PropLineClient._csv_param(markets)),
+            ("from", _clean(from_time)),
+            ("to", _clean(to_time)),
+            ("relative_from", _clean(relative_from)),
+            ("relative_to", _clean(relative_to)),
+            ("interval", _clean(interval)),
+            ("period", _clean(period)),
+        )
+        for key, value in values:
+            if value:
+                params[key] = value
+        if changes_only is not None:
+            params["changes_only"] = "true" if changes_only else "false"
+        return params
 
     def _official_player_history_request(
         self,
