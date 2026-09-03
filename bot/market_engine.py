@@ -6281,16 +6281,6 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     history      = _fpr_hist,
                 )
 
-                _fpr_val = _fpr_validate(
-                    # Full-pool rescans intentionally do not fetch primary
-                    # provider stats remotely; the snapshot still checks the
-                    # cached primary table and can supplement a genuine gap.
-                    player_name  = _fpr_player,
-                    stat_type    = _fpr_stat,
-                    current_line = _fpr_line,
-                    history      = _fpr_hist,
-                    min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
-                )
                 _fpr_history_snap = None
                 try:
                     from providers.player_history import get_player_history_provider
