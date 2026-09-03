@@ -5352,41 +5352,13 @@ class Database:
 
         async with self.session() as s:
             insert_stmt = _sqlite_insert(PropTrackingLog).values(prepared)
-            # Tracking refreshes only the observation identity/metadata.
-            # Analytic fields, delivery fields, and grading fields remain
-            # owned by their respective pipelines.  One transaction keeps
-            # universal tracking from spending a commit per 100 observations.
-            update_columns = {
-                column: getattr(insert_stmt.excluded, column)
-                for column in (
-                    "player_name",
-                    "team",
-                    "sport",
-                    "line_value",
-                    "game_time",
-                    "game_id",
-                    "provider",
-                    "detected_at",
-                )
-            }
-            # A full Underdog feed is observed every cycle, but most rows are
-            # unchanged.  Do not rewrite those rows (or advance their WAL
-            # pages) just because the feed was seen again.  The next
-            # meaningful line/game identity change still refreshes all
-            # observation metadata, including detected_at.
-            excluded = insert_stmt.excluded
-            tracking_changed = or_(
-                PropTrackingLog.player_name.is_distinct_from(excluded.player_name),
-                PropTrackingLog.team.is_distinct_from(excluded.team),
-                PropTrackingLog.sport.is_distinct_from(excluded.sport),
-                PropTrackingLog.line_value.is_distinct_from(excluded.line_value),
-                PropTrackingLog.game_time.is_distinct_from(excluded.game_time),
-                PropTrackingLog.game_id.is_distinct_from(excluded.game_id),
-            )
-            stmt = insert_stmt.on_conflict_do_update(
+            # Every feed observation is retained in the canonical snapshot
+            # history. This compact ledger only needs to establish that an
+            # identity has been tracked; rewriting thousands of known rows on
+            # every feed creates a large SQLite WAL and can consume the live
+            # monitoring cadence.
+            stmt = insert_stmt.on_conflict_do_nothing(
                 index_elements=["provider", "external_id", "stat_type"],
-                set_=update_columns,
-                where=tracking_changed,
             )
             await s.execute(stmt)
             await s.commit()
