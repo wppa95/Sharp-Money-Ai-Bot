@@ -5958,10 +5958,21 @@ class Database:
                 )
             tracked_observations = sum(tracked_observations_by_provider.values())
             has_normalized_history = tracked_observations > 0
+            tracked_ledger_count = (
+                await s.execute(
+                    select(func.count(PropTrackingLog.id)).where(
+                        PropTrackingLog.detected_at >= cutoff
+                    )
+                )
+            ).scalar() or 0
 
             # Compatibility fallback for installations predating normalized
             # history, where candidate telemetry is the only available stream.
-            if not current_rows and not has_normalized_history:
+            if (
+                not current_rows
+                and not has_normalized_history
+                and not tracked_ledger_count
+            ):
                 sport_res = await s.execute(
                     select(
                         PropCandidateLog.sport,
