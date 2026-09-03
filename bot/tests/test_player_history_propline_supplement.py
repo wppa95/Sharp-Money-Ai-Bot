@@ -86,6 +86,7 @@ async def test_snapshot_uses_propline_gap_for_both_primary_providers(source_prov
         "Points",
         25.5,
         source_provider=source_provider,
+        ensure_real_results=False,
     )
 
     assert snapshot.has_real_data is False
@@ -120,6 +121,7 @@ async def test_snapshot_keeps_primary_results_and_adds_only_distinct_supplementa
         "Points",
         25.5,
         source_provider="PrizePicks",
+        ensure_real_results=False,
     )
 
     assert snapshot.total_real_games == 1
@@ -150,6 +152,7 @@ async def test_supplementation_is_not_used_when_primary_evidence_is_sufficient()
         "Points",
         25.5,
         source_provider="Underdog",
+        ensure_real_results=False,
     )
 
     assert snapshot.total_real_games == 5
