@@ -79,6 +79,7 @@ class PlayerHistorySnapshot:
     total_real_games: int
     total_proxy_snaps: int
     records: list[PlayerHistoryRecord] = field(default_factory=list)
+    supplemental_sources: tuple[str, ...] = ()
 
     def preferred_l5(self) -> Optional[float]:
         return self.l5.hit_rate if self.l5 else self.proxy_l5
@@ -122,7 +123,7 @@ class PlayerHistorySnapshot:
 
 class PlayerHistoryProvider:
     def __init__(self) -> None:
-        self._fetch_cache: set[tuple[str, str, str, str]] = set()
+        self._fetch_cache: set[tuple[str, str, str, str, str]] = set()
 
     async def get_snapshot(
         self,
@@ -136,6 +137,7 @@ class PlayerHistoryProvider:
         ud_history: Optional["list[UnderdogSnapshotRecord]"] = None,
         min_samples: int = 5,
         force_refresh: bool = False,
+        source_provider: str = "Underdog",
         instrumentation=None,
     ) -> PlayerHistorySnapshot:
         sport_u = (sport or "UNKNOWN").upper()
@@ -146,6 +148,8 @@ class PlayerHistoryProvider:
             player_name,
             sport_u,
             stat_type,
+            source_provider=source_provider,
+            min_samples=min_samples,
             force_refresh=force_refresh,
             instrumentation=instrumentation,
         )
@@ -214,6 +218,11 @@ class PlayerHistoryProvider:
             total_real_games=len(real_records),
             total_proxy_snaps=proxy_n,
             records=real_records,
+            supplemental_sources=tuple(sorted({
+                record.source
+                for record in real_records
+                if record.source.lower().startswith("propline")
+            })),
         )
         if instrumentation is not None:
             instrumentation.duration(
@@ -233,11 +242,20 @@ class PlayerHistoryProvider:
         sport,
         stat_type,
         *,
+        source_provider="",
+        min_samples=5,
         force_refresh=False,
         instrumentation=None,
     ) -> None:
         today = datetime.utcnow().date().isoformat()
-        key = (player_name, sport, stat_type.lower().strip(), today)
+        provider_scope = str(source_provider or "").strip().lower()
+        key = (
+            player_name,
+            sport,
+            stat_type.lower().strip(),
+            today,
+            provider_scope,
+        )
         if not force_refresh and key in self._fetch_cache:
             return
         if len(self._fetch_cache) >= _FETCH_CACHE_MAX:
@@ -270,6 +288,35 @@ class PlayerHistoryProvider:
                     )
                 else:
                     await db.upsert_player_result(r)
+
+            # Underdog remains authoritative for the live line and market
+            # identity.  PropLine is consulted only when the existing player
+            # result evidence is still below the validation sample threshold.
+            # PrizePicks never enters this branch.
+            if provider_scope == "underdog":
+                try:
+                    existing = await db.get_player_results(
+                        player_name, sport, stat_type, limit=max(1, int(min_samples))
+                    )
+                except Exception:
+                    existing = []
+                if len(existing) < max(1, int(min_samples)):
+                    supplemental = await self._fetch_propline_history(
+                        player_name,
+                        sport,
+                        stat_type,
+                        instrumentation=instrumentation,
+                    )
+                    for r in _merge_game_results(existing, supplemental):
+                        if instrumentation is not None:
+                            await instrumentation.await_db(
+                                "write", "upsert_player_result_propline",
+                                db.upsert_player_result(r),
+                            )
+                        else:
+                            await db.upsert_player_result(r)
+                    if supplemental and instrumentation is not None:
+                        instrumentation.count("propline_supplemental_props")
             self._fetch_cache.add(key)
             if raw:
                 logger.debug(
@@ -282,6 +329,112 @@ class PlayerHistoryProvider:
                 player_name, stat_type, exc,
             )
             self._fetch_cache.add(key)
+
+    async def _fetch_propline_history(
+        self,
+        player_name: str,
+        sport: str,
+        stat_type: str,
+        *,
+        instrumentation=None,
+    ) -> list:
+        """Adapt official PropLine resolved history into game-result rows."""
+        from providers.player_stats import RawGameResult
+        from providers.propline import PropLineClient, _normalize_stat, _parse_datetime
+
+        client = PropLineClient()
+        if not client.is_configured:
+            return []
+        official_sport = client.official_sport_for(sport)
+        if not official_sport:
+            # The official catalog is authoritative for provider-specific
+            # sports; never guess an endpoint key for DOTA or another sport.
+            discovered = await client.discover_sports()
+            canonical = str(sport or "").upper().strip()
+            official_sport = next(
+                (
+                    item.official_key
+                    for item in discovered
+                    if str(item.canonical_key).upper().strip() == canonical
+                ),
+                None,
+            )
+        if not official_sport:
+            return []
+
+        market = f"player_{_normalize_stat(stat_type).replace(' ', '_')}"
+        result = await client.fetch_player_history(
+            official_sport,
+            player_name,
+            market,
+            bookmaker="prizepicks",
+            limit=100,
+        )
+        if not result.succeeded or not result.complete:
+            return []
+
+        settled = {"WON", "LOST", "PUSH", "VOID"}
+        rows = []
+        for entry in result.entries:
+            event_id = str(entry.get("event_id") or "").strip()
+            actual = entry.get("actual_value")
+            game_date = _parse_datetime(entry.get("commence_time"))
+            resolution = str(
+                entry.get("over_result")
+                or entry.get("under_result")
+                or ""
+            ).strip().upper()
+            if (
+                not event_id
+                or game_date is None
+                or actual is None
+                or resolution not in settled
+            ):
+                continue
+            try:
+                value = float(actual)
+            except (TypeError, ValueError):
+                continue
+            rows.append(RawGameResult(
+                player_name=player_name,
+                sport=str(sport or "").upper(),
+                stat_type=stat_type.lower().strip(),
+                game_date=game_date.date().isoformat(),
+                actual_value=value,
+                opponent=(
+                    str(entry.get("away_team") or "").strip()
+                    or str(entry.get("home_team") or "").strip()
+                    or None
+                ),
+                source="propline_history",
+                game_id=event_id,
+            ))
+        return rows
+
+
+def _merge_game_results(existing: list, supplemental: list) -> list:
+    """Keep primary game results and add only distinct PropLine events."""
+    seen = {
+        (
+            str(getattr(row, "game_id", "") or "").strip()
+            or str(getattr(row, "game_date", "") or "").strip(),
+            str(getattr(row, "stat_type", "") or "").lower().strip(),
+        )
+        for row in existing
+    }
+    merged = list(supplemental)
+    for row in supplemental:
+        key = (
+            str(getattr(row, "game_id", "") or "").strip()
+            or str(getattr(row, "game_date", "") or "").strip(),
+            str(getattr(row, "stat_type", "") or "").lower().strip(),
+        )
+        if key in seen:
+            if row in merged:
+                merged.remove(row)
+            continue
+        seen.add(key)
+    return list(existing) + merged
 
 
 _provider: Optional[PlayerHistoryProvider] = None
