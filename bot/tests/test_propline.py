@@ -11,6 +11,8 @@ import pytest
 
 import providers.propline as propline_module
 from providers.propline import (
+    PROPLINE_DAILY_REQUEST_LIMIT,
+    PROPLINE_MAX_REQUESTS_PER_HOUR,
     PropLineRequestBudget,
     PropLineClient,
     PropLinePrizePicksProvider,
@@ -123,6 +125,7 @@ def test_normalization_preserves_prizepicks_identity_and_metadata():
     assert prop.game_time == datetime(2026, 8, 28, 0, 0)
     assert prop.provider_status == "available"
     assert prop.source_timestamp == datetime(2026, 8, 27, 17, 59)
+    assert prop.supplemental_source == "PropLine"
 
 
 @pytest.mark.parametrize(
@@ -604,6 +607,85 @@ def test_confirmation_rejects_stale_or_ambiguous_prizepicks_matches():
     ) is None
 
 
+def test_confirmation_requires_matching_event_for_id_bearing_propline_rows():
+    now = datetime(2026, 8, 27, 18, 0)
+    target = ConfirmationTarget(
+        sport="NBA",
+        market_type="player_prop",
+        player="Alex Example",
+        stat_type="points",
+        direction="OVER",
+        line=24.5,
+        event="Example City at Test Town",
+        event_id="underdog-game-1",
+        game_time=now,
+    )
+    observation = ConfirmationObservation(
+        provider="PrizePicks",
+        sport="NBA",
+        market_type="player_prop",
+        player="Alex Example",
+        stat_type="points",
+        direction="OVER",
+        line=24.5,
+        event_id="propline-game-2",
+        observed_at=now,
+        supplemental_source="PropLine",
+        game_time=now,
+    )
+
+    assert confirm_market(
+        target,
+        [observation],
+        allowed_providers={"PrizePicks"},
+        max_age_seconds=600,
+        now=now,
+    ) is None
+
+
+def test_confirmation_returns_propline_provenance():
+    now = datetime(2026, 8, 27, 18, 0)
+    target = ConfirmationTarget(
+        sport="NBA",
+        market_type="player_prop",
+        player="Alex Example",
+        stat_type="points",
+        direction="OVER",
+        line=24.5,
+        event="Example City at Test Town",
+        event_id="game-1",
+        game_time=now,
+    )
+    observation = ConfirmationObservation(
+        provider="PrizePicks",
+        sport="NBA",
+        market_type="player_prop",
+        player="Alex Example",
+        stat_type="points",
+        direction="OVER",
+        line=24.5,
+        event="Example City at Test Town",
+        event_id="game-1",
+        observed_at=now,
+        supplemental_source="PropLine",
+        game_time=now,
+    )
+
+    result = confirm_market(
+        target,
+        [observation],
+        allowed_providers={"PrizePicks"},
+        max_age_seconds=600,
+        now=now,
+    )
+
+    assert result is not None
+    assert result["source"] == "PrizePicks"
+    assert result["provenance"]["provider"] == "PrizePicks"
+    assert result["provenance"]["supplemental_source"] == ["PropLine"]
+    assert result["provenance"]["event_ids"] == ["game-1"]
+
+
 def test_player_prop_extra_metadata_is_optional_for_existing_providers():
     prop = PlayerProp(
         provider="Underdog",
@@ -615,6 +697,15 @@ def test_player_prop_extra_metadata_is_optional_for_existing_providers():
     )
     assert prop.direction == ""
     assert prop.source_timestamp is None
+    assert prop.supplemental_source == ""
+
+
+def test_propline_default_budget_matches_plan_without_changing_hourly_limit():
+    budget = PropLineRequestBudget()
+
+    assert PROPLINE_DAILY_REQUEST_LIMIT == 5_000
+    assert budget.limit == 5_000
+    assert PROPLINE_MAX_REQUESTS_PER_HOUR == 208
 
 
 def test_sports_pagination_follows_all_cursors_without_a_page_ceiling():
