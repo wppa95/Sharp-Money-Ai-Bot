@@ -2031,6 +2031,7 @@ async def _run_prizepicks_independent_cycle(
             confidence=getattr(decision, "confidence", None),
         ):
             actionable.append({
+                "provider": "PrizePicks",
                 "prop": prop,
                 "player": player,
                 "sport": sport,
