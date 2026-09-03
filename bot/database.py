@@ -6763,20 +6763,25 @@ class Database:
         player_name: str,
         sport: str,
         stat_type: str,
-        game_date: str,
+        game_date: "Optional[str]",
         *,
         game_id: str = "",
         provider: Optional[str] = None,
     ) -> "Optional[PlayerGameResult]":
         """
         Return the PlayerGameResult for a given player / sport / stat / date and
-        event identity, or None. Provider is accepted for call-site clarity:
+        optional event identity, or None. Provider is accepted for call-site clarity:
         game results are shared official-stat evidence, while provider remains
         an opportunity identity and settlement-rule input.
 
         stat_type is normalised to lowercase before lookup because upsert_player_result
         stores all stat types in lowercase.  This prevents silent mismatches between
         Underdog's mixed-case stat names ("Points") and the stored values ("points").
+
+        If a source provider supplies an event ID that differs from the result
+        provider's event ID, retry by player / sport / stat / date without the
+        source ID. This is safe because the date is still required for the
+        cross-provider fallback.
         """
         normalised_stat = stat_type.lower().strip()
         async with self.session() as s:
@@ -6784,19 +6789,41 @@ class Database:
                 PlayerGameResult.player_name == player_name,
                 PlayerGameResult.sport       == sport,
                 PlayerGameResult.stat_type   == normalised_stat,
-                PlayerGameResult.game_date   == game_date,
             ]
+            if game_date:
+                filters.append(PlayerGameResult.game_date == game_date)
             # Some stat providers do not expose an event ID. Requiring an
             # empty game_id in that case silently misses valid official stats.
             if game_id:
                 filters.append(PlayerGameResult.game_id == str(game_id))
+            if not game_date and not game_id:
+                return None
             result = await s.execute(
                 select(PlayerGameResult)
                 .where(*filters)
                 .order_by(PlayerGameResult.id.desc())
                 .limit(1)
             )
-            return result.scalar_one_or_none()
+            row = result.scalar_one_or_none()
+            if row is not None or not game_id or not game_date:
+                return row
+
+            # Underdog/PrizePicks event IDs and ESPN/MLB result IDs are not
+            # guaranteed to share a namespace. The dated identity is the
+            # authoritative fallback for the shared official-stat evidence.
+            fallback_filters = [
+                PlayerGameResult.player_name == player_name,
+                PlayerGameResult.sport       == sport,
+                PlayerGameResult.stat_type   == normalised_stat,
+                PlayerGameResult.game_date   == game_date,
+            ]
+            fallback = await s.execute(
+                select(PlayerGameResult)
+                .where(*fallback_filters)
+                .order_by(PlayerGameResult.id.desc())
+                .limit(1)
+            )
+            return fallback.scalar_one_or_none()
 
     async def get_tracking_summary(self) -> "dict":
         """
