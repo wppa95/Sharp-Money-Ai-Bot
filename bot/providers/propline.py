@@ -379,6 +379,189 @@ class PropLineOpeningLineEvidence:
     supplemental_source: str = ""
 
 
+PROPLINE_RESULT_WON = "WON"
+PROPLINE_RESULT_LOST = "LOST"
+PROPLINE_RESULT_PUSH = "PUSH"
+PROPLINE_RESULT_VOID = "VOID"
+PROPLINE_RESULT_UNGRADED = "UNGRADED"
+PROPLINE_RESULT_UNRESOLVED = "UNRESOLVED"
+PROPLINE_RESULT_INCOMPLETE = "INCOMPLETE"
+_PROPLINE_SETTLED_RESULTS = {
+    PROPLINE_RESULT_WON,
+    PROPLINE_RESULT_LOST,
+    PROPLINE_RESULT_PUSH,
+    PROPLINE_RESULT_VOID,
+}
+_PROPLINE_KNOWN_RESULT_STATES = _PROPLINE_SETTLED_RESULTS | {
+    PROPLINE_RESULT_UNGRADED,
+    PROPLINE_RESULT_UNRESOLVED,
+    PROPLINE_RESULT_INCOMPLETE,
+}
+
+
+def normalize_propline_result_state(
+    value: Any,
+    *,
+    response_complete: bool = True,
+) -> str:
+    """Normalize a documented result without manufacturing a settlement.
+
+    A null/blank ``resolution`` means that PropLine has not supplied a
+    resolution yet.  ``response_complete`` describes the HTTP payload rather
+    than the market itself, so an incomplete payload always remains distinct
+    from an unresolved result.  Unknown non-empty provider labels are retained
+    in uppercase and are never considered settled.
+    """
+    if not response_complete:
+        return PROPLINE_RESULT_INCOMPLETE
+    raw = _clean(value)
+    if not raw:
+        return PROPLINE_RESULT_UNRESOLVED
+    normalized = re.sub(r"[^a-z]+", "_", raw.lower()).strip("_").upper()
+    if normalized in _PROPLINE_KNOWN_RESULT_STATES:
+        return normalized
+    return normalized
+
+
+@dataclass(frozen=True)
+class PropLineResultEvidence:
+    """One read-only PrizePicks result returned by PropLine."""
+
+    observed_at: datetime
+    resolution_state: str
+    source_resolution: str
+    actual_value: Optional[float]
+    resolved_at: Optional[datetime]
+    provider: str
+    player_name: str
+    sport: str
+    stat_type: str
+    line_value: Optional[float] = None
+    direction: str = ""
+    event_id: str = ""
+    player_id: str = ""
+    market_key: str = ""
+    market_description: str = ""
+    bookmaker_key: str = ""
+    bookmaker_title: str = ""
+    provider_status: str = ""
+    redacted: bool = False
+    dfs_odds_type: str = ""
+    supplemental_source: str = "PropLine"
+    response_complete: bool = True
+
+    @property
+    def is_settled(self) -> bool:
+        """Only explicit won/lost/push/void labels count as settled."""
+        return self.resolution_state in _PROPLINE_SETTLED_RESULTS
+
+
+@dataclass(frozen=True)
+class PropLineResultsFetchResult:
+    """Result of an explicit event-results request, separate from polling."""
+
+    results: tuple[PropLineResultEvidence, ...]
+    fetched_at: datetime
+    event_id: str = ""
+    succeeded: bool = False
+    complete: bool = False
+    error: str = ""
+    failure_kind: str = ""
+
+
+def build_propline_result_evidence(
+    record: dict[str, Any],
+    *,
+    observed_at: Optional[datetime] = None,
+    provider: str = PROPLINE_PROVIDER_NAME,
+    response_complete: bool = True,
+) -> Optional[PropLineResultEvidence]:
+    """Build result evidence from the documented results response fields.
+
+    This helper only copies a provider-supplied ``resolution``.  A missing
+    resolution becomes ``UNRESOLVED``; it is never derived from event status,
+    actual value, line, or the last observed projection.
+    """
+    if not isinstance(record, dict):
+        return None
+    expected_provider = _clean(provider)
+    if expected_provider != PROPLINE_PROVIDER_NAME:
+        return None
+    if _clean(record.get("provider")) != expected_provider:
+        return None
+    if _clean(record.get("bookmaker_key")).replace("_", "").lower() not in {
+        "prizepicks",
+        "prizepick",
+    }:
+        return None
+
+    event_id = _clean(record.get("event_id"))
+    player_name = _clean(record.get("player_name"))
+    market_key = _clean(record.get("market_key")).lower()
+    if not event_id or not player_name or not market_key.startswith("player_"):
+        return None
+    stat_type = _normalize_stat(market_key.removeprefix("player_"))
+    sport = _normalize_sport(record.get("sport_key"))
+    if not sport or not stat_type or is_football_related_sport(sport):
+        return None
+
+    observed = observed_at or _parse_datetime(record.get("_observed_at"))
+    if not isinstance(observed, datetime):
+        return None
+
+    line_value: Optional[float]
+    raw_line = record.get("line")
+    if raw_line is None:
+        line_value = None
+    else:
+        try:
+            line_value = float(raw_line)
+        except (TypeError, ValueError):
+            return None
+
+    actual_value: Optional[float]
+    raw_actual = record.get("actual_value")
+    if raw_actual is None:
+        actual_value = None
+    else:
+        try:
+            actual_value = float(raw_actual)
+        except (TypeError, ValueError):
+            return None
+
+    resolved_at = _parse_datetime(record.get("resolved_at"))
+    if record.get("resolved_at") not in (None, "") and resolved_at is None:
+        return None
+    source_resolution = _clean(record.get("resolution"))
+    return PropLineResultEvidence(
+        observed_at=observed,
+        resolution_state=normalize_propline_result_state(
+            source_resolution,
+            response_complete=response_complete,
+        ),
+        source_resolution=source_resolution,
+        actual_value=actual_value,
+        resolved_at=resolved_at,
+        provider=expected_provider,
+        player_name=player_name,
+        sport=sport,
+        stat_type=stat_type,
+        line_value=line_value,
+        direction=_normalize_direction(record.get("direction")),
+        event_id=event_id,
+        player_id=_clean(record.get("player_id")),
+        market_key=market_key,
+        market_description=_clean(record.get("market_description")),
+        bookmaker_key=_clean(record.get("bookmaker_key")),
+        bookmaker_title=_clean(record.get("bookmaker_title")),
+        provider_status=_clean(record.get("event_status")),
+        redacted=bool(record.get("redacted", False)),
+        dfs_odds_type=_clean(record.get("dfs_odds_type")),
+        supplemental_source=_clean(record.get("supplemental_source")) or "PropLine",
+        response_complete=response_complete,
+    )
+
+
 PROPLINE_VERIFIED_CLOSING_LABEL = "VERIFIED_CLOSING_LINE"
 PROPLINE_TERMINAL_OBSERVED_LABEL = "TERMINAL_LAST_OBSERVED"
 PROPLINE_VERIFIED_CLOSING_BASIS = "provider_closed_state"
