@@ -1097,17 +1097,6 @@ async def _get_odds_api_confirmation(
                                 ),
                                 timeout=5.0,
                             )
-                        pp_history = list(pp_history or [])
-                        pp_history.extend(
-                            prop
-                            for prop in _propline_current_observations.values()
-                            if normalize_name(getattr(prop, "player_name", ""))
-                            == normalize_name(player_name)
-                            and str(getattr(prop, "sport", "") or "").strip().upper()
-                            == str(sport or "").strip().upper()
-                            and _normalize_prop_stat(getattr(prop, "stat_type", ""))
-                            == _normalize_prop_stat(stat_type)
-                        )
                         except TypeError:
                             # Preserve compatibility with lightweight test
                             # doubles and older database adapters.
@@ -1120,6 +1109,17 @@ async def _get_odds_api_confirmation(
                                 ),
                                 timeout=5.0,
                             )
+                        pp_history = list(pp_history or [])
+                        pp_history.extend(
+                            prop
+                            for prop in _propline_current_observations.values()
+                            if normalize_name(getattr(prop, "player_name", ""))
+                            == normalize_name(player_name)
+                            and str(getattr(prop, "sport", "") or "").strip().upper()
+                            == str(sport or "").strip().upper()
+                            and _normalize_prop_stat(getattr(prop, "stat_type", ""))
+                            == _normalize_prop_stat(stat_type)
+                        )
                     else:
                         pp_history = []
                     pp_observations = []
