@@ -575,7 +575,12 @@ class PlayerHistoryProvider:
         official_sport = client.official_sport_for(sport_u)
         if not official_sport:
             return []
-        result = await client.fetch_player_games(
+        fetch_games = getattr(client, "fetch_player_games", None)
+        if not callable(fetch_games):
+            # Keep compatibility with lightweight test/integration clients
+            # that only implement the older resolved-history capability.
+            return []
+        result = await fetch_games(
             official_sport,
             player_name,
             limit=100,
