@@ -812,10 +812,10 @@ _GRADE_FETCH_TIMEOUT_SECONDS = 20
 
 async def _grade_opportunities_job(context) -> None:
     """
-    Every hour: grade completed prop opportunities from stored game results.
+    Every hour: grade completed tracked props from stored game results.
 
-    Finds PENDING rows in prop_opportunity_log whose game_time passed at least
-    4 hours ago, looks up the actual player stat in player_game_results, and
+    Finds PENDING rows in prop_opportunity_log whose event is old enough to
+    resolve, looks up the actual player stat in player_game_results, and
     records HIT / MISS / PUSH from the OVER perspective:
       HIT  → actual_value > line_value
       MISS → actual_value < line_value
