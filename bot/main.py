@@ -908,9 +908,18 @@ async def _grade_opportunities_job(context) -> None:
         graded   = 0
         no_data  = 0
         for opp in pending:
-            if not opp.game_time:
+            game_date = (
+                opp.game_time.strftime("%Y-%m-%d")
+                if opp.game_time
+                else None
+            )
+            # A provider may omit game_time, but a source event/game identity
+            # still lets the result provider reconcile the completed event.
+            # Without either identity, leave the row pending rather than
+            # guessing which player game should settle it.
+            if not game_date and not getattr(opp, "game_id", ""):
+                no_data += 1
                 continue
-            game_date = opp.game_time.strftime("%Y-%m-%d")
             _result_lookup_kwargs = {}
             if getattr(opp, "game_id", ""):
                 _result_lookup_kwargs["game_id"] = opp.game_id
