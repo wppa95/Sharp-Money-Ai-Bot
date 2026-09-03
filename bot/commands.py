@@ -177,6 +177,73 @@ def _format_status_count(value: object) -> str:
         return "unavailable"
 
 
+_SHADOW_PLAYER_RESULT_SOURCES = frozenset({
+    "sleeper_stats_weekly",
+    "graded_prop",
+})
+
+
+def _alert_readiness_lines(
+    coverage: object,
+    directional_counts: object,
+) -> list[str]:
+    """Render configured-sport readiness without implying a pick exists.
+
+    A sport is only marked data-ready when stored player-game evidence exists.
+    Shadow/settlement rows do not satisfy that requirement because they cannot
+    support a safe current directional recommendation.
+    """
+    if not isinstance(coverage, dict) or not isinstance(directional_counts, dict):
+        return []
+    sports = sorted(
+        {
+            str(sport).strip().upper()
+            for sport in getattr(config, "ud_alert_sports", frozenset())
+            if str(sport).strip()
+        }
+    )
+    if not sports:
+        return []
+
+    lines = ["", "🧭 <b>Alert Readiness</b>  <i>(configured active sports)</i>"]
+    for sport in sports:
+        source_counts = coverage.get(sport, {})
+        if not isinstance(source_counts, dict):
+            source_counts = {}
+        total_rows = sum(
+            int(count or 0)
+            for count in source_counts.values()
+            if isinstance(count, (int, float))
+        )
+        real_rows = sum(
+            int(count or 0)
+            for source, count in source_counts.items()
+            if str(source).strip().lower() not in _SHADOW_PLAYER_RESULT_SOURCES
+            and isinstance(count, (int, float))
+        )
+        if real_rows <= 0:
+            if total_rows:
+                detail = "shadow/settlement data only; no real player-game history"
+            else:
+                detail = "no real player-game history available"
+            lines.append(f"  ⚠️ <b>{_html.escape(sport)}</b>  ·  {detail}")
+            continue
+
+        directional = directional_counts.get(sport, 0)
+        try:
+            directional = int(directional or 0)
+        except (TypeError, ValueError):
+            directional = 0
+        if directional:
+            detail = f"{directional:,} directional pick{'s' if directional != 1 else ''} logged"
+            icon = "✅"
+        else:
+            detail = "data ready; no qualifying pick logged in the last 24h"
+            icon = "ℹ️"
+        lines.append(f"  {icon} <b>{_html.escape(sport)}</b>  ·  {detail}")
+    return lines
+
+
 async def _provider_reconciliation(provider: str) -> Optional[dict]:
     """Read one provider's normalized pipeline counters without blocking commands."""
     if _db is None:
