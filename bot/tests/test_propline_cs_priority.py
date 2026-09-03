@@ -103,3 +103,4 @@ def test_propline_history_is_valid_delivery_evidence():
     )
 
     assert _has_strong_underdog_evidence(validation=validation) is True
+    assert market_engine._has_strong_delivery_evidence(validation=validation) is True
