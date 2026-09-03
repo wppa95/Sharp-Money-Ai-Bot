@@ -937,6 +937,8 @@ async def _get_odds_api_confirmation(
     event: str = "",
     game_time: Optional[datetime] = None,
     db: Optional[Database] = None,
+    player_id: str = "",
+    event_id: str = "",
 ) -> Optional[dict]:
     """
     Query optional DraftKings/FanDuel observations as a non-blocking
@@ -991,6 +993,8 @@ async def _get_odds_api_confirmation(
         line=line,
         event=event,
         game_time=game_time,
+        player_id=player_id,
+        event_id=event_id,
     )
     try:
         import asyncio as _asyncio
@@ -1089,6 +1093,7 @@ async def _get_odds_api_confirmation(
                                 # only safe direction to attach here.
                                 direction=direction,
                                 line=prop_line,
+                                supplemental_source="PropLine",
                             )
                         )
                     pp_result = confirm_market(
