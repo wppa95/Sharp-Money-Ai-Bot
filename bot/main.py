@@ -88,10 +88,12 @@ from market_engine import (
     init_odds_confirmation,
     reset_monitoring_runtime_state,
     underdog_job,
+    propline_request_scan_job,
     _run_prizepicks_independent_cycle,
 )
 from providers import init_health_monitor
 from providers.odds_cache import init_odds_cache
+from providers.propline import PROPLINE_MIN_REQUEST_INTERVAL
 from providers.game_results import OddsApiResultsProvider
 from providers.usage_tracker import init_usage_tracker, get_usage_tracker
 from providers.quota_pacing import init_quota_pacer, get_quota_pacer
@@ -595,6 +597,15 @@ async def post_init(application: Application) -> None:
             first=45,
             name="underdog_monitor",
         )
+        # PropLine requests use the provider's continuous 208/hour pace.
+        # Fetching is independent from the shared 120-second PrizePicks
+        # evaluation cycle; the request worker only refreshes observations.
+        jq.run_repeating(
+            _coordinated_job("propline_request_scan", propline_request_scan_job),
+            interval=PROPLINE_MIN_REQUEST_INTERVAL,
+            first=5,
+            name="propline_request_scan",
+        )
         # Full-Pool Rescan Rotation is the sole bounded background rotation.
         # It consumes the canonical active (player, stat, line) universe.
         from market_engine import _full_pool_rescan_job
@@ -644,13 +655,15 @@ async def post_init(application: Application) -> None:
             "Jobs scheduled — underdog: every %ds, FPR: every %ds, "
             "grader: every %ds, history: every %ds, season_check: every %ds, "
             "heartbeat: every 60s "
-            "[PrizePicks/PropLine companion cycle enabled=%s; DK/FD delivery disabled]",
+            "[PrizePicks/PropLine companion cycle enabled=%s; "
+            "PropLine requests every %.1fs; DK/FD delivery disabled]",
             config.UNDERDOG_POLL_INTERVAL,
             config.FPR_INTERVAL,
             config.OPPORTUNITY_GRADER_INTERVAL,
             config.PLAYER_HISTORY_POLL_INTERVAL,
             config.SEASON_CHECK_INTERVAL,
             _propline_enabled,
+            PROPLINE_MIN_REQUEST_INTERVAL,
         )
     else:
         logger.warning("JobQueue not available — background jobs disabled.")
