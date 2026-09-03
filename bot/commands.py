@@ -2546,6 +2546,11 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         # must never be rendered as though its line came from Underdog.
         provider = getattr(plh, "provider", None) or "Underdog"
         provider_emoji = _PROV_EMOJI.get(provider, "📡")
+        source_id = str(
+            getattr(plh, "external_id", None)
+            or getattr(plh, "game_id", None)
+            or ""
+        ).strip()
         provider_line = (
             comp.lines.get(provider) if comp and provider in comp.lines else None
         )
@@ -2607,6 +2612,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             f"Market: {plh.stat_type}",
             f"{provider_emoji} {provider} Line: <code>{source_v:.1f}</code>  {_ll(source_v)}",
             f"{gt_str}{plh.sport}",
+            f"Event: <code>{_html.escape(source_id) if source_id else 'unavailable'}</code>",
             "",
             f"🎯 Pick: <b>{pick_label}</b>",
             f"Confidence: {conf}/100  {stars}{move_str}",

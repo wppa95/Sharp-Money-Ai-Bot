@@ -418,10 +418,11 @@ async def test_representative_bounded_picks_path_finishes_under_deadline(monkeyp
             prev_line=None,
             fetched_at=now,
             team="TEAM",
-            score_tier=None,
+                score_tier="A",
             score_confidence=None,
-            score_total=None,
-            market_quality_score=None,
+                bet_confidence=75,
+                score_total=75,
+                market_quality_score=75,
         )
         for index in range(40)
     ]
