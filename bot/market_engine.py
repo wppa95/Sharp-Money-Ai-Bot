@@ -1637,6 +1637,12 @@ async def _run_prizepicks_independent_cycle(
         )
         return
 
+    # Make this cycle's PropLine observations available to the Underdog
+    # confirmation boundary immediately.  The DB write below remains the
+    # durable history path; this cache avoids a same-cycle race without
+    # issuing another PropLine request.
+    _cache_propline_evidence(list(unique_props.values()))
+
     from engine.ud_scoring import (
         score_ud_prop,
         compute_market_quality,
