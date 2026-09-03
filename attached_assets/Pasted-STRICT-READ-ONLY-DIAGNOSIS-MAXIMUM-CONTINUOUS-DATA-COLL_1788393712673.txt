@@ -1,0 +1,85 @@
+STRICT READ-ONLY DIAGNOSIS — MAXIMUM CONTINUOUS DATA COLLECTION
+
+Do not modify any files.
+Do not restart.
+Do not deploy.
+Do not change configuration.
+Do not fix anything.
+
+CORE OBJECTIVE
+
+The fundamental purpose of this bot is to maximize data collection continuously, across ALL supported sports and ALL available relevant data sources/markets, without unnecessarily leaving available data uncollected.
+
+This is NOT a single-sport monitoring system.
+
+Diagnose whether the current architecture actually fulfills that objective.
+
+TRACE THE COMPLETE DATA-COLLECTION PIPELINE
+
+Determine:
+
+1. The complete list of supported sports.
+2. How the application determines which sports are monitored.
+3. Whether ALL supported sports are intended to be continuously scanned.
+4. How often each sport is scanned.
+5. Whether scanning is continuous/non-stop through the scheduler/monitoring lifecycle.
+6. How Underdog discovery works across sports and markets.
+7. How PrizePicks discovery works through PropLine across sports and markets.
+8. How Odds API data is incorporated.
+9. How player/stat data providers contribute additional historical/current data.
+10. Whether providers are independent or whether one provider’s lack of data can prevent another provider from being scanned.
+11. Every sport/market filtering, exclusion, skip, fallback, or default condition.
+12. Whether any default configuration unintentionally limits the data collection scope.
+13. Whether NBA is receiving disproportionate processing compared with other supported sports.
+14. Whether other sports are actually being scanned but simply producing fewer/no results.
+15. Whether available data is being discarded after discovery because of downstream filtering.
+16. Whether any scheduler/coordinator behavior can cause available scans to be skipped or delayed.
+17. Whether overlapping triggers are correctly coalesced without creating a backlog while still allowing the next scheduled scan to occur.
+18. Whether one active scan completes independently before the next scheduled scan.
+19. Identify any bottleneck that prevents maximum practical data collection.
+
+IMPORTANT ARCHITECTURAL REQUIREMENT
+
+The goal is NOT to force every sport to return data every cycle.
+
+The goal is:
+
+Continuously attempt to collect as much valid, relevant data as the available providers expose across all supported sports and markets.
+
+If a sport has no available data, that is fine.
+
+If a sport has available data but the application is not requesting/processing it, that is a problem.
+
+If a provider has data but downstream logic unnecessarily discards it, identify that separately.
+
+PROVIDER SEPARATION
+
+Preserve the distinction between:
+
+* Underdog
+* PrizePicks
+* PropLine as the underlying PrizePicks data source
+* Odds API
+* Historical/statistical data providers
+
+Do not assume they are interchangeable.
+
+REPORT ONLY — NO CHANGES
+
+A. Complete supported-sports list
+B. Complete provider/data-source map
+C. Intended continuous data-collection flow
+D. Actual sport coverage
+E. Actual provider coverage
+F. Why NBA activity is currently prominent
+G. Which sports/markets are being skipped or under-collected
+H. Any unnecessary filtering or bottlenecks
+I. Whether the system currently achieves maximum practical continuous data collection
+J. Exact files/functions/conditions responsible for any gap
+K. Recommended fixes, WITHOUT implementing them
+
+Do not perform cleanup.
+Do not make improvements.
+Do not modify anything.
+
+STOP after the diagnosis.
