@@ -49,16 +49,19 @@ _SCAN_SLOT_MAX_WAIT_SECONDS = 900.0
 async def _wait_for_underdog_scan_slot() -> bool:
     """Wait for the live scan to release the shared database-heavy slot."""
     waited = 0.0
-    while _underdog_scan_running() and waited < _SCAN_SLOT_MAX_WAIT_SECONDS:
+    while True:
+        scan_running = _underdog_scan_running()
+        if not scan_running:
+            break
+        if waited >= _SCAN_SLOT_MAX_WAIT_SECONDS:
+            logger.warning(
+                "player_history_collector_job: Underdog scan held slot for "
+                "%.0fs — yielding without starting provider work",
+                waited,
+            )
+            return False
         await asyncio.sleep(_SCAN_SLOT_POLL_SECONDS)
         waited += _SCAN_SLOT_POLL_SECONDS
-    if _underdog_scan_running():
-        logger.warning(
-            "player_history_collector_job: Underdog scan held slot for "
-            "%.0fs — yielding without starting provider work",
-            waited,
-        )
-        return False
     if waited:
         logger.info(
             "player_history_collector_job: resumed after Underdog scan "
