@@ -68,6 +68,10 @@ class PlayerProp:
     event:       str = ""       # human-readable event/game label
     provider_status: str = ""
     source_timestamp: Optional[datetime] = None
+    # Non-empty when this normalized provider observation was obtained through
+    # a supplemental data source such as PropLine.  This is provenance only;
+    # ``provider`` remains the sportsbook/pick'em source identity.
+    supplemental_source: str = ""
 
     # ── Identity helpers ──────────────────────────────────────────────────────
 

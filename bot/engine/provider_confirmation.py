@@ -140,6 +140,7 @@ class ConfirmationTarget:
     game_time: Optional[datetime] = None
     event_id: str = ""
     source_id: str = ""
+    player_id: str = ""
 
     @property
     def market(self) -> str:
@@ -164,6 +165,8 @@ class ConfirmationObservation:
     observed_at: Optional[datetime] = None
     event_id: str = ""
     source_id: str = ""
+    player_id: str = ""
+    supplemental_source: str = ""
 
     @property
     def market(self) -> str:
@@ -185,6 +188,7 @@ def observation_from_record(
     direction: Optional[str] = None,
     line: Optional[float] = None,
     odds: Optional[int] = None,
+    supplemental_source: Optional[str] = None,
 ) -> ConfirmationObservation:
     """Adapt one source record without mutating or depending on its class."""
     raw_market = market_type or _value(record, "market_type", "")
@@ -242,6 +246,12 @@ def observation_from_record(
         observed_at=observed,
         event_id=_clean(_value(record, "event_id", _value(record, "game_id", ""))),
         source_id=_clean(_value(record, "source_id", _value(record, "external_id", ""))),
+        player_id=_clean(_value(record, "player_id", _value(record, "athlete_id", ""))),
+        supplemental_source=_clean(
+            supplemental_source
+            if supplemental_source is not None
+            else _value(record, "supplemental_source", "")
+        ),
     )
 
 
@@ -418,6 +428,24 @@ def confirm_market(
         "line_delta": line_delta,
         "confirmed": bool(lines or odds),
         "strong_confirmation": strong,
+        "provenance": {
+            "provider": (
+                "mixed"
+                if len({row.provider for row in unique}) > 1
+                else (unique[0].provider if unique else "")
+            ),
+            "supplemental_source": (
+                sorted(
+                    {
+                        row.supplemental_source
+                        for row in unique
+                        if row.supplemental_source
+                    }
+                )
+            ),
+            "event_ids": sorted({row.event_id for row in unique if row.event_id}),
+            "player_ids": sorted({row.player_id for row in unique if row.player_id}),
+        },
         "source": (
             "PrizePicks"
             if unique and all(row.provider_key == "prizepicks" for row in unique)

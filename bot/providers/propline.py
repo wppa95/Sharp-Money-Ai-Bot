@@ -173,7 +173,7 @@ class PropLineRequestBudget:
 # admission point, so separate client instances cannot burst independently.
 PROPLINE_MAX_REQUESTS_PER_HOUR = 208
 PROPLINE_MIN_REQUEST_INTERVAL = 3600.0 / PROPLINE_MAX_REQUESTS_PER_HOUR
-PROPLINE_DAILY_REQUEST_LIMIT = 1_000
+PROPLINE_DAILY_REQUEST_LIMIT = 5_000
 _DEFAULT_PROPLINE_REQUEST_BUDGET = PropLineRequestBudget(PROPLINE_DAILY_REQUEST_LIMIT)
 
 
@@ -637,6 +637,7 @@ def normalize_propline_prizepicks_record(
         event=event_label,
         provider_status=provider_status,
         source_timestamp=provider_timestamp,
+        supplemental_source="PropLine",
     )
 
 
