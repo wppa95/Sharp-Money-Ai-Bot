@@ -271,10 +271,10 @@ def _same_sport(target: ConfirmationTarget, observation: ConfirmationObservation
 def _same_event(target: ConfirmationTarget, observation: ConfirmationObservation) -> bool:
     if target.event_id and observation.event_id:
         return target.event_id == observation.event_id
-    # If either side has an event identity, do not treat a missing counterpart
-    # as a wildcard.  A source event ID is not safely comparable to a human
-    # label, but it is still evidence that requires a matching event context.
-    if target.event_id or observation.event_id:
+    # PropLine is explicitly used as cross-provider evidence.  Its opaque
+    # event IDs must not be treated as a wildcard when the Underdog target
+    # lacks the same provider-native ID.
+    if observation.supplemental_source == "PropLine":
         if (
             target.game_time is not None
             and observation.game_time is not None
@@ -284,6 +284,14 @@ def _same_event(target: ConfirmationTarget, observation: ConfirmationObservation
         if _has_human_event(target.event) and _has_human_event(observation.event):
             return normalize_event(target.event) == normalize_event(observation.event)
         return False
+    # If either side has an event identity, do not treat a missing counterpart
+    # as a wildcard.  Legacy sportsbook confirmations retain the established
+    # permissive behavior below because their event IDs and display labels
+    # often come from different namespaces.
+    if target.event_id or observation.event_id:
+        if not (_has_human_event(target.event) and _has_human_event(observation.event)):
+            return True
+        return normalize_event(target.event) == normalize_event(observation.event)
     # When both are human labels, require the complete normalized token set.
     if _has_human_event(target.event) or _has_human_event(observation.event):
         return (
