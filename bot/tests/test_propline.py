@@ -1019,3 +1019,53 @@ async def test_propline_observation_reaches_existing_confirmation_boundary(monke
     assert result["matched_books"] == ["PrizePicks"]
     history_db.get_prop_line_history.assert_awaited_once()
     assert result["confirmed"] is True
+
+
+@pytest.mark.asyncio
+async def test_same_cycle_propline_cache_supplements_underdog_without_new_request(monkeypatch):
+    import market_engine
+
+    observed = datetime.utcnow()
+    market_engine._propline_current_observations.clear()
+    market_engine._propline_current_observations[(
+        "Alex Example", "NBA", "points", "game-1"
+    )] = PlayerProp(
+        provider="PrizePicks",
+        sport="NBA",
+        player_name="Alex Example",
+        team="Example City",
+        stat_type="points",
+        line_value=24.5,
+        game_time=observed,
+        external_id="projection-1",
+        game_id="game-1",
+        event_id="game-1",
+        event="Example City at Test Town",
+        fetched_at=observed,
+        supplemental_source="PropLine",
+    )
+
+    history_db = SimpleNamespace(
+        get_prop_line_history=AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(market_engine, "_confirmation_db", history_db)
+    monkeypatch.setattr(market_engine.config, "ODDS_API_ENABLED", False)
+
+    result = await market_engine._get_odds_api_confirmation(
+        "NBA",
+        player_name="Alex Example",
+        stat_type="points",
+        direction="OVER",
+        line=24.5,
+        event="Example City at Test Town",
+        game_time=observed,
+        event_id="game-1",
+        db=history_db,
+    )
+
+    assert result is not None
+    assert result["source"] == "PrizePicks"
+    assert result["provenance"]["supplemental_source"] == ["PropLine"]
+    assert result["confirmed"] is True
+    history_db.get_prop_line_history.assert_awaited_once()
+    market_engine._propline_current_observations.clear()
