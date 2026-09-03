@@ -6043,10 +6043,10 @@ class Database:
             # observations do not appear as PLAYs.
             tracking_res = await s.execute(
                 select(
-                    PropOpportunityLog.provider,
-                    PropOpportunityLog.sport,
-                    PropOpportunityLog.result,
-                ).where(PropOpportunityLog.detected_at >= cutoff)
+                    PropTrackingLog.provider,
+                    PropTrackingLog.sport,
+                    PropTrackingLog.result,
+                ).where(PropTrackingLog.detected_at >= cutoff)
             )
             tracked_total = 0
             tracked_pending = 0
@@ -6269,17 +6269,9 @@ class Database:
                 select(PropOpportunityLog)
                 .where(
                     PropOpportunityLog.result    == "PENDING",
-                    or_(
-                        and_(
-                            PropOpportunityLog.game_time.isnot(None),
-                            PropOpportunityLog.game_time < cutoff,
-                        ),
-                        and_(
-                            PropOpportunityLog.game_time.is_(None),
-                            PropOpportunityLog.detected_at < cutoff,
-                            PropOpportunityLog.game_id != "",
-                        ),
-                    ),
+                    PropOpportunityLog.recommendation.in_(("OVER", "UNDER")),
+                    PropOpportunityLog.game_time.isnot(None),
+                    PropOpportunityLog.game_time <  cutoff,
                 )
                 .order_by(PropOpportunityLog.game_time)
             )
