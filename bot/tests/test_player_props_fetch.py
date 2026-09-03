@@ -152,7 +152,7 @@ def test_default_player_prop_sports():
 
 def test_player_prop_poll_interval_default():
     cfg = Config()
-    assert cfg.PLAYER_PROP_POLL_INTERVAL == 600
+    assert cfg.PLAYER_PROP_POLL_INTERVAL == 120
 
 
 def test_player_prop_sports_raw_override():
