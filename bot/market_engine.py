@@ -748,10 +748,9 @@ def _schedule_deferred_fpr() -> None:
 
 
 def _release_underdog_scan_slot() -> None:
-    """Release the shared slot and hand one deferred FPR trigger to the loop."""
-    global _ud_full_scan_running, _prizepicks_cycle_task
+    """Release the live Underdog slot without launching a database scan."""
+    global _ud_full_scan_running
     _ud_full_scan_running = False
-    _schedule_deferred_fpr()
 
 
 def _bq_stars(bq: int) -> str:
