@@ -155,6 +155,27 @@ class TestIndependentPrizePicks:
 
         assert sports == ("NHL", "SOCCER", "WNBA")
 
+    async def test_catalog_rate_limit_falls_back_to_known_nonfootball_provider_sports(self):
+        class RateLimitedClient:
+            api_url = "https://api.prop-line.com"
+            is_configured = True
+            sports_discovery_failed = True
+
+            async def discover_sports(self):
+                return []
+
+        from providers.propline import PropLinePrizePicksProvider
+
+        provider = PropLinePrizePicksProvider(client=RateLimitedClient())
+        sports = await market_engine._get_prizepicks_scan_sports(provider)
+
+        assert "NBA" in sports
+        assert "MLB" in sports
+        assert "TENNIS" in sports
+        assert "NFL" not in sports
+        assert "NCAAF" not in sports
+        assert "CFL" not in sports
+
     async def test_cycles_round_robin_one_configured_sport_with_scoped_fetch(
         self, monkeypatch
     ):
