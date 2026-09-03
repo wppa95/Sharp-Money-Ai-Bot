@@ -3594,10 +3594,23 @@ async def underdog_job(context) -> None:
     _track_props = getattr(db, "track_prop_records", None)
     if callable(_track_props) and _tracking_records:
         try:
+            _tracking_timeout = max(
+                1.0,
+                min(20.0, _cycle_deadline - time.monotonic()),
+            )
             await _cycle_timing.await_db(
                 "write",
                 "track_prop_records",
-                _track_props(_tracking_records),
+                asyncio.wait_for(
+                    _track_props(_tracking_records),
+                    timeout=_tracking_timeout,
+                ),
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "underdog_job: universal tracking write exceeded %.1fs; "
+                "releasing cycle with snapshot observations intact",
+                _tracking_timeout,
             )
         except Exception as _tracking_exc:  # noqa: BLE001
             logger.warning(
@@ -3620,18 +3633,32 @@ async def underdog_job(context) -> None:
             recent_by_key = {}
             _cycle_timing.count("history_lookups_bypassed")
         elif _new_db_context:
-            # Compatibility path for direct callers that start with an already
-            # warm bot flag but have no process-local scan state.
-            recent_by_key = await _cycle_timing.await_db(
-                "read",
-                "get_latest_underdog_snapshot_per_prop",
-                db.get_latest_underdog_snapshot_per_prop(),
-            )
-            known_keys = await _cycle_timing.await_db(
-                "read",
-                "get_known_underdog_prop_keys",
-                db.get_known_underdog_prop_keys(),
-            )
+            # A fresh process must not block the live cadence on durable
+            # recovery reads. Treat this feed as the comparison baseline:
+            # observations are already persisted above, and the next feed
+            # supplies the first real movement delta. This is the runtime
+            # replacement for the removed cold-start/state-restoration pass.
+            recent_by_key = {}
+            known_keys = set()
+            for _baseline_snap in ud_snaps:
+                if "[REMOVED]" in (_baseline_snap.selection or ""):
+                    continue
+                _baseline_player = _baseline_snap.player or "Unknown"
+                _baseline_stat = _extract_ud_stat_type(
+                    _baseline_snap.selection,
+                    _baseline_snap.player,
+                    _baseline_snap.line,
+                )
+                _baseline_key = (_baseline_player, _baseline_stat)
+                known_keys.add(_baseline_key)
+                recent_by_key[_baseline_key] = SimpleNamespace(
+                    line_value=float(_baseline_snap.line or 0.0),
+                    score_tier=None,
+                    score_total=None,
+                    alert_sent=False,
+                    fetched_at=now,
+                )
+            _cycle_timing.count("history_lookups_bypassed")
             _cycle_timing.count("latest_snapshot_props_returned", len(recent_by_key))
             _cycle_timing.count("known_prop_keys_returned", len(known_keys))
         else:
