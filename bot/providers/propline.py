@@ -1459,6 +1459,92 @@ def _official_odds_records(payload: Any) -> list[dict[str, Any]]:
     return records
 
 
+def _official_result_records(
+    payload: Any,
+    *,
+    bookmaker: str = "prizepicks",
+) -> tuple[list[dict[str, Any]], bool, str]:
+    """Flatten the documented event-results response for one bookmaker."""
+    if not isinstance(payload, dict):
+        return [], False, "PropLine results response is not an object"
+    required_event_fields = {
+        "id",
+        "sport_key",
+        "commence_time",
+        "status",
+        "home_score",
+        "away_score",
+        "bookmakers",
+    }
+    if not required_event_fields.issubset(payload):
+        return [], False, "PropLine results response is incomplete"
+    if not isinstance(payload.get("bookmakers"), list):
+        return [], False, "PropLine results bookmakers are incomplete"
+
+    requested_bookmaker = _clean(bookmaker).lower().replace("_", "")
+    records: list[dict[str, Any]] = []
+    for bookmaker_record in payload["bookmakers"]:
+        if not isinstance(bookmaker_record, dict):
+            return [], False, "PropLine results bookmaker is incomplete"
+        if not {"key", "title", "markets"}.issubset(bookmaker_record):
+            return [], False, "PropLine results bookmaker is incomplete"
+        if not isinstance(bookmaker_record["markets"], list):
+            return [], False, "PropLine results markets are incomplete"
+
+        bookmaker_key = _clean(bookmaker_record.get("key"))
+        if bookmaker_key.lower().replace("_", "") != requested_bookmaker:
+            continue
+        for market in bookmaker_record["markets"]:
+            if not isinstance(market, dict):
+                return [], False, "PropLine results market is incomplete"
+            if not {"key", "description", "outcomes"}.issubset(market):
+                return [], False, "PropLine results market is incomplete"
+            if not isinstance(market["outcomes"], list):
+                return [], False, "PropLine results outcomes are incomplete"
+            market_key = _clean(market.get("key")).lower()
+            if not market_key.startswith("player_"):
+                continue
+            for outcome in market["outcomes"]:
+                if not isinstance(outcome, dict):
+                    return [], False, "PropLine results outcome is incomplete"
+                required_outcome_fields = {
+                    "name",
+                    "description",
+                    "price",
+                    "point",
+                    "resolution",
+                    "actual_value",
+                    "resolved_at",
+                }
+                if not required_outcome_fields.issubset(outcome):
+                    return [], False, "PropLine results outcome is incomplete"
+                records.append(
+                    {
+                        "provider": PROPLINE_PROVIDER_NAME,
+                        "event_id": _clean(payload.get("id")),
+                        "sport_key": _clean(payload.get("sport_key")),
+                        "event_status": _clean(payload.get("status")),
+                        "commence_time": payload.get("commence_time"),
+                        "bookmaker_key": bookmaker_key,
+                        "bookmaker_title": _clean(bookmaker_record.get("title")),
+                        "market_key": market_key,
+                        "market_description": _clean(market.get("description")),
+                        "player_name": _clean(outcome.get("description")),
+                        "player_id": _clean(outcome.get("player_id")),
+                        "direction": _clean(outcome.get("name")),
+                        "line": outcome.get("point"),
+                        "price": outcome.get("price"),
+                        "resolution": outcome.get("resolution"),
+                        "actual_value": outcome.get("actual_value"),
+                        "resolved_at": outcome.get("resolved_at"),
+                        "redacted": bool(outcome.get("redacted", False)),
+                        "dfs_odds_type": _clean(outcome.get("dfs_odds_type")),
+                        "supplemental_source": "PropLine",
+                    }
+                )
+    return records, True, ""
+
+
 class PropLineClient:
     """Small, cached, rate-limited HTTP client for the authorized feed."""
 
@@ -1730,6 +1816,28 @@ class PropLineClient:
             f"{official_sport}:event:{official_event}:{bookmaker.lower()}",
         )
 
+    def _official_event_results_request(
+        self,
+        sport_key: str,
+        event_id: str,
+        *,
+        markets: str = "",
+    ) -> tuple[str, dict[str, str]]:
+        official_sport = _clean(sport_key)
+        official_event = _clean(event_id)
+        if not official_sport or not official_event:
+            raise PropLineError(
+                "PropLine sport and event keys are required for event results"
+            )
+        params: dict[str, str] = {}
+        if _clean(markets):
+            params["markets"] = _clean(markets)
+        return (
+            f"{self.api_url.rstrip('/')}/v1/sports/{quote(official_sport, safe='')}"
+            f"/events/{quote(official_event, safe='')}/results",
+            params,
+        )
+
     async def _discover_events_locked(
         self,
         sport_key: str,
@@ -1923,6 +2031,105 @@ class PropLineClient:
         return await self.fetch_event_props(
             sport_key, event, bookmaker=bookmaker
         )
+
+    async def fetch_event_results(
+        self,
+        sport_key: str,
+        event: Any,
+        *,
+        markets: str = "",
+        bookmaker: str = "prizepicks",
+    ) -> PropLineResultsFetchResult:
+        """Fetch official, informational PropLine result evidence.
+
+        This is an explicit caller-driven request, not part of the live
+        projection polling path.  Results are never inferred from event
+        status, line state, or actual stats returned by another endpoint.
+        """
+        fetched_at = datetime.utcnow()
+        if not self.is_configured:
+            return PropLineResultsFetchResult(
+                (), fetched_at, succeeded=False, complete=False,
+                error="PropLine is not configured", failure_kind="disabled",
+            )
+        if self.api_url.rstrip("/") != DEFAULT_PROPLINE_API_URL:
+            return PropLineResultsFetchResult(
+                (), fetched_at, succeeded=False, complete=False,
+                error="PropLine event results require the official endpoint",
+                failure_kind="configuration",
+            )
+        if isinstance(event, PropLineEvent):
+            event_id = event.event_id
+        elif isinstance(event, dict):
+            event_id = _clean(_first(event, "id", "event_id", "game_id", "match_id"))
+        else:
+            event_id = _clean(event)
+        if not event_id:
+            return PropLineResultsFetchResult(
+                (), fetched_at, succeeded=False, complete=False,
+                error="PropLine event id is required", failure_kind="configuration",
+            )
+
+        async with self._lock:
+            try:
+                url, params = self._official_event_results_request(
+                    sport_key, event_id, markets=markets
+                )
+                payload = await self._request_json(url, params)
+            except PropLineNotFoundError as exc:
+                return PropLineResultsFetchResult(
+                    (), fetched_at, event_id=event_id, error=str(exc),
+                    failure_kind="not_found",
+                )
+            except PropLineRateLimitError as exc:
+                return PropLineResultsFetchResult(
+                    (), fetched_at, event_id=event_id, error=str(exc),
+                    failure_kind="quota",
+                )
+            except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                return PropLineResultsFetchResult(
+                    (), fetched_at, event_id=event_id,
+                    error=f"PropLine results request failed: {type(exc).__name__}",
+                    failure_kind="http",
+                )
+            except PropLineError as exc:
+                return PropLineResultsFetchResult(
+                    (), fetched_at, event_id=event_id, error=str(exc),
+                    failure_kind="quota" if "budget" in str(exc).lower() else "http",
+                )
+
+            raw_records, complete, error = _official_result_records(
+                payload, bookmaker=bookmaker
+            )
+            results = tuple(
+                evidence
+                for record in raw_records
+                if (
+                    evidence := build_propline_result_evidence(
+                        record,
+                        observed_at=fetched_at,
+                        response_complete=complete,
+                    )
+                )
+                is not None
+            )
+            if not complete:
+                return PropLineResultsFetchResult(
+                    results,
+                    fetched_at,
+                    event_id=event_id,
+                    succeeded=False,
+                    complete=False,
+                    error=error or "PropLine results response incomplete",
+                    failure_kind="incomplete",
+                )
+            return PropLineResultsFetchResult(
+                results,
+                fetched_at,
+                event_id=event_id,
+                succeeded=True,
+                complete=True,
+            )
 
     async def fetch_event_scoped_props(
         self,
