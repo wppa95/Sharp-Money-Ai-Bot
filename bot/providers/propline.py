@@ -3257,7 +3257,7 @@ class PropLinePrizePicksProvider(PropProviderBase):
         if self.client.api_url.rstrip("/") != DEFAULT_PROPLINE_API_URL:
             return None
         discovered = await self.client.discover_sports()
-        if self.client.sports_discovery_failed:
+        if getattr(self.client, "sports_discovery_failed", False):
             # Preserve a failed catalog as distinguishable from a valid empty
             # slate so the caller can use its complete non-football fallback.
             return None
