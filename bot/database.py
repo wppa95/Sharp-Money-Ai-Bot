@@ -614,12 +614,14 @@ class PlayerGameResult(Base):
 
 class PropOpportunityLog(Base):
     """
-    Directional player prop opportunities used for evidence and grading.
+    Player prop tracking rows used for evidence and grading.
 
     One row per (external_id, stat_type) pair, recorded immediately after
-    evaluation produces an OVER or UNDER direction. Non-directional evaluations
-    remain represented by the canonical active prop and scan metrics rather
-    than a separate classification row.
+    a valid prop is ingested.  Rows with recommendation ``NONE`` are neutral
+    tracking records: they are deliberately independent of scoring,
+    qualification, strongest-pick selection, and alert delivery.  A later
+    directional evaluation may enrich the same row without changing its
+    grading history.
 
     ``result`` is stored from the OVER perspective for consistent analysis:
       "HIT"     → actual_value > line_value  (over cleared)
@@ -627,7 +629,7 @@ class PropOpportunityLog(Base):
       "PUSH"    → actual_value == line_value
       "PENDING" → game not yet complete / result not yet available
 
-    Interpretation per recommendation:
+    Interpretation per directional recommendation:
       PLAY OVER  + HIT  → ✅ correct pick
       PLAY OVER  + MISS → ❌ incorrect pick
       PLAY UNDER + MISS → ✅ correct pick  (under cleared = over failed)
@@ -642,8 +644,8 @@ class PropOpportunityLog(Base):
     sport          = Column(String(32),  nullable=False, index=True)
     stat_type      = Column(String(64),  nullable=False)
     line_value     = Column(Float,       nullable=False)
-    recommendation = Column(String(8),   nullable=False)   # Current writes: OVER | UNDER
-    decision_tier  = Column(String(8),   nullable=False)   # Legacy score metadata
+    recommendation = Column(String(8),   nullable=False)   # OVER | UNDER | NONE
+    decision_tier  = Column(String(8),   nullable=False)   # score metadata / TRACKED
     confidence     = Column(Integer,     nullable=False, default=0)
     game_time      = Column(DateTime,    nullable=True)
     game_id        = Column(String(128), nullable=False, default="", index=True)
@@ -5116,16 +5118,108 @@ class Database:
             "downstream_intelligence": downstream_intelligence,
         }])
         return
+
+    @_retry_sqlite_write
+    async def track_prop_records(
+        self,
+        records: "list[dict]",
+    ) -> int:
+        """
+        Persist every valid ingested prop as a neutral grading record.
+
+        This is intentionally separate from ``log_prop_opportunity``.  It
+        records the provider/event/player/stat/line identity before any
+        scoring or qualification work, while conflict updates only refresh
+        observation metadata.  In particular, it never downgrades an existing
+        OVER/UNDER row back to ``NONE`` and never overwrites a terminal result.
+        """
+        if not records:
+            return 0
+
+        from sqlalchemy.dialects.sqlite import insert as _sqlite_insert
+
+        prepared_by_identity: dict[tuple[str, str], dict] = {}
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            provider = str(record.get("provider") or "").strip()
+            player_name = str(record.get("player_name") or "").strip()
+            sport = str(record.get("sport") or "").upper().strip()
+            stat_type = str(record.get("stat_type") or "").strip()
+            if not provider or not player_name or not sport or not stat_type:
+                continue
+            try:
+                line_value = float(record.get("line_value"))
+            except (TypeError, ValueError):
+                continue
+            if line_value < 0:
+                continue
+
+            external_id = str(record.get("external_id") or "").strip()
+            game_id = str(record.get("game_id") or "").strip()
+            if not external_id:
+                external_id = f"{player_name}:{sport}:{stat_type}:{game_id}"
+            external_id = _stored_opportunity_external_id(external_id, provider)
+            prepared_by_identity[(external_id, stat_type)] = {
+                "external_id": external_id,
+                "player_name": player_name,
+                "team": str(record.get("team") or ""),
+                "sport": sport,
+                "stat_type": stat_type,
+                "line_value": line_value,
+                "recommendation": "NONE",
+                "decision_tier": "TRACKED",
+                "confidence": 0,
+                "game_time": record.get("game_time"),
+                "game_id": game_id,
+                "detected_at": datetime.utcnow(),
+                "result": "PENDING",
+                "provider": provider,
+            }
+
+        prepared = list(prepared_by_identity.values())
+        if not prepared:
+            return 0
+
+        async with self.session() as s:
+            for start in range(0, len(prepared), 100):
+                rows = prepared[start:start + 100]
+                insert_stmt = _sqlite_insert(PropOpportunityLog).values(rows)
+                # Tracking refreshes only the observation identity/metadata.
+                # Analytic fields, delivery fields, and grading fields remain
+                # owned by their respective pipelines.
+                update_columns = {
+                    column: getattr(insert_stmt.excluded, column)
+                    for column in (
+                        "player_name",
+                        "team",
+                        "sport",
+                        "line_value",
+                        "game_time",
+                        "game_id",
+                        "provider",
+                        "detected_at",
+                    )
+                }
+                stmt = insert_stmt.on_conflict_do_update(
+                    index_elements=["external_id", "stat_type"],
+                    set_=update_columns,
+                )
+                await s.execute(stmt)
+                await s.commit()
+        return len(prepared)
+
     @_retry_sqlite_write
     async def log_prop_opportunity_bulk(
         self,
         opportunities: "list[dict]",
     ) -> int:
-        """Batch-upsert directional prop opportunities in bounded chunks.
+        """Batch-upsert prop opportunities in bounded chunks.
 
-        This has the same contract as ``log_prop_opportunity``: non-directional
-        evaluations are transient, the identity is ``(external_id, stat_type)``,
-        and grading fields are deliberately omitted from conflict updates.
+        Directional rows use OVER/UNDER.  ``NONE`` is reserved for neutral
+        ingestion tracking rows and is accepted here for compatibility with
+        callers that batch both kinds of record.  Grading fields are
+        deliberately omitted from conflict updates.
         """
         if not opportunities:
             return 0
@@ -5145,7 +5239,7 @@ class Database:
             _recommendation = str(
                 opportunity.get("recommendation") or ""
             ).upper()
-            if _recommendation not in ("OVER", "UNDER"):
+            if _recommendation not in ("OVER", "UNDER", "NONE"):
                 continue
 
             _external_id = opportunity.get("external_id")
@@ -6011,12 +6105,14 @@ class Database:
         limit: int = 500,
     ) -> "list[PropOpportunityLog]":
         """
-        Return PENDING opportunities whose game_time was at least cutoff_hours ago.
+        Return PENDING tracking rows old enough to attempt resolution.
 
         Used by the opportunity_grader job to find outcomes that can now be
-        looked up in player_game_results.  ``after_id`` lets the hourly job
-        rotate through a large backlog without retrying the same oldest rows
-        on every cycle.
+        looked up in player_game_results.  Rows with a known game time use that
+        timestamp; rows whose provider did not expose one use detected_at and
+        are resolved only when an event identity is available.  ``after_id``
+        lets the hourly job rotate through a large backlog without retrying the
+        same oldest rows on every cycle.
         """
         from datetime import timedelta
         cutoff = datetime.utcnow() - timedelta(hours=cutoff_hours)
@@ -6025,9 +6121,17 @@ class Database:
                 select(PropOpportunityLog)
                 .where(
                     PropOpportunityLog.result    == "PENDING",
-                    PropOpportunityLog.recommendation.in_(("OVER", "UNDER")),
-                    PropOpportunityLog.game_time.isnot(None),
-                    PropOpportunityLog.game_time <  cutoff,
+                    or_(
+                        and_(
+                            PropOpportunityLog.game_time.isnot(None),
+                            PropOpportunityLog.game_time < cutoff,
+                        ),
+                        and_(
+                            PropOpportunityLog.game_time.is_(None),
+                            PropOpportunityLog.detected_at < cutoff,
+                            PropOpportunityLog.game_id != "",
+                        ),
+                    ),
                 )
                 .order_by(PropOpportunityLog.game_time)
             )
