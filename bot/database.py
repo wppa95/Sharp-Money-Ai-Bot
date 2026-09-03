@@ -6858,7 +6858,10 @@ class Database:
                 .limit(1)
             )
             row = result.scalar_one_or_none()
-            if row is not None or not game_id or not game_date:
+            # Keep direct event-identity callers strict. The dated fallback is
+            # for provider-scoped grading, where source and official result
+            # providers are known to use different event-ID namespaces.
+            if row is not None or not game_id or not game_date or not provider:
                 return row
 
             # Underdog/PrizePicks event IDs and ESPN/MLB result IDs are not
