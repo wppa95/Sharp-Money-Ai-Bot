@@ -57,6 +57,7 @@ from engine.score_validation import clamp_score
 from engine.sport_policy import is_football_related_sport
 from engine.telegram_rate_limiter import get_rate_limiter
 from engine.strongest_pick import select_strongest_actionable_picks
+from engine.delivery_evidence import serialized_evidence_supports_delivery
 from providers import FailureType, get_health_monitor
 from engine.delivery_gates import (
     tier_delivery_gate as _canonical_tier_delivery_gate,
@@ -2725,42 +2726,14 @@ def _has_strong_delivery_evidence(
             return n_real + n_supplemental >= 5
     for obj in (decision, intelligence_trace):
         if isinstance(obj, dict):
-            for key in ("evidence", "bet_evidence", "intelligence_trace"):
-                evidence = obj.get(key)
-                if isinstance(evidence, dict):
-                    source = str(
-                        evidence.get("data_source")
-                        or evidence.get("source")
-                        or ""
-                    ).lower()
-                    if source in {
-                        "real",
-                        "game_results",
-                        "player_game_results",
-                        "propline",
-                        "real+propline",
-                        "primary+propline",
-                    }:
-                        return True
+            if serialized_evidence_supports_delivery(obj):
+                return True
             continue
         if obj is not None:
             for attr in ("evidence", "bet_evidence", "intelligence_trace"):
                 value = getattr(obj, attr, None)
-                if isinstance(value, dict):
-                    source = str(
-                        value.get("data_source")
-                        or value.get("source")
-                        or ""
-                    ).lower()
-                    if source in {
-                        "real",
-                        "game_results",
-                        "player_game_results",
-                        "propline",
-                        "real+propline",
-                        "primary+propline",
-                    }:
-                        return True
+                if serialized_evidence_supports_delivery(value):
+                    return True
     return False
 
 

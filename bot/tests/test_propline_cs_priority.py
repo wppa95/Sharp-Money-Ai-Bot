@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -104,3 +105,24 @@ def test_propline_history_is_valid_delivery_evidence():
 
     assert _has_strong_underdog_evidence(validation=validation) is True
     assert market_engine._has_strong_delivery_evidence(validation=validation) is True
+
+
+def test_serialized_propline_evidence_requires_sample_count():
+    source_only = {"evidence": {"data_source": "propline"}}
+    sufficient = {"evidence": {"data_source": "propline", "n_supp": 5}}
+
+    assert _has_strong_underdog_evidence(decision=source_only) is False
+    assert market_engine._has_strong_delivery_evidence(decision=source_only) is False
+    assert _has_strong_underdog_evidence(decision=sufficient) is True
+    assert market_engine._has_strong_delivery_evidence(decision=sufficient) is True
+
+
+def test_serialized_validation_json_keeps_propline_provenance_and_count():
+    decision = {
+        "validation_json": json.dumps(
+            {"src": "propline", "n": 5, "n_real": 0, "n_supp": 5}
+        )
+    }
+
+    assert _has_strong_underdog_evidence(decision=decision) is True
+    assert market_engine._has_strong_delivery_evidence(decision=decision) is True

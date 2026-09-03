@@ -36,6 +36,7 @@ from engine.delivery_gates import tier_delivery_gate as _canonical_tier_delivery
 from engine.score_validation import clamp_score
 from engine.sport_policy import is_football_related_sport
 from engine.telegram_rate_limiter import get_rate_limiter
+from engine.delivery_evidence import serialized_evidence_supports_delivery
 from models import EVOpportunity, Recommendation, SteamAlert
 
 if TYPE_CHECKING:
@@ -669,47 +670,14 @@ def _has_strong_underdog_evidence(
             return n_real + n_supplemental >= 5
     for obj in (decision, intelligence_trace):
         if isinstance(obj, dict):
-            if any(
-                obj.get(key) not in (None, {}, [], "")
-                for key in ("evidence", "bet_evidence", "intelligence_trace")
-            ):
-                # Stored decision evidence must explicitly identify real game
-                # results; generic proxy/intelligence traces are insufficient.
-                evidence = obj.get("evidence") or obj.get("bet_evidence")
-                if isinstance(evidence, dict):
-                    source = str(
-                        evidence.get("data_source")
-                        or evidence.get("source")
-                        or ""
-                    ).lower()
-                    if source in {
-                        "real",
-                        "game_results",
-                        "player_game_results",
-                        "propline",
-                        "real+propline",
-                        "primary+propline",
-                    }:
-                        return True
+            if serialized_evidence_supports_delivery(obj):
+                return True
             continue
         if obj is not None:
             for attr in ("evidence", "bet_evidence", "intelligence_trace"):
                 value = getattr(obj, attr, None)
-                if isinstance(value, dict):
-                    source = str(
-                        value.get("data_source")
-                        or value.get("source")
-                        or ""
-                    ).lower()
-                    if source in {
-                        "real",
-                        "game_results",
-                        "player_game_results",
-                        "propline",
-                        "real+propline",
-                        "primary+propline",
-                    }:
-                        return True
+                if serialized_evidence_supports_delivery(value):
+                    return True
     return False
 
 
