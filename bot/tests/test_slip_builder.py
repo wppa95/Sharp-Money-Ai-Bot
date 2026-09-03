@@ -99,12 +99,16 @@ class TestBuildAllSlipsOptimizerIntegration:
         # Build a real-looking slip result with 2 legs
         leg_a = _make_record("Alice", "Points", "NBA")
         leg_b = _make_record("Bob", "Assists", "NBA")
+        leg_c = _make_record("Carol", "Rebounds", "NBA")
+        leg_d = _make_record("Dave", "Steals", "NBA")
+        leg_e = _make_record("Eve", "Blocks", "NBA")
+        leg_f = _make_record("Frank", "Threes", "NBA")
 
         fake_slip_2 = _make_slip([leg_a, leg_b])
         fake_slip_3 = _make_slip([leg_a])   # < 2 legs → should be excluded
-        fake_slip_4 = _make_slip([leg_a, leg_b])
-        fake_slip_5 = _make_slip([leg_a, leg_b])
-        fake_slip_6 = _make_slip([leg_a, leg_b])
+        fake_slip_4 = _make_slip([leg_a, leg_b, leg_c, leg_d])
+        fake_slip_5 = _make_slip([leg_a, leg_b, leg_c, leg_d, leg_e])
+        fake_slip_6 = _make_slip([leg_a, leg_b, leg_c, leg_d, leg_e, leg_f])
 
         side_effects = [fake_slip_2, fake_slip_3, fake_slip_4, fake_slip_5, fake_slip_6]
         # Patch at source — optimize_slip is imported inside build_all_slips
@@ -124,7 +128,12 @@ class TestBuildAllSlipsOptimizerIntegration:
         def _side_effect(candidates, n_legs):
             if n_legs == 3:
                 raise RuntimeError("forced error")
-            return _make_slip([leg_a, leg_b])
+            return _make_slip(
+                [leg_a, leg_b]
+                if n_legs == 2
+                else [leg_a, leg_b, _make_record("Carol", "Rebounds"),
+                      _make_record("Dave", "Steals")]
+            )
 
         with patch("engine.slip_optimizer.optimize_slip", side_effect=_side_effect):
             slips = build_all_slips([leg_a, leg_b], max_size=4)
