@@ -293,15 +293,9 @@ def _same_event(target: ConfirmationTarget, observation: ConfirmationObservation
             return True
         return normalize_event(target.event) == normalize_event(observation.event)
     # When both are human labels, require the complete normalized token set.
-    if _has_human_event(target.event) or _has_human_event(observation.event):
-        return (
-            _has_human_event(target.event)
-            and _has_human_event(observation.event)
-            and normalize_event(target.event) == normalize_event(observation.event)
-        )
-    # No event context on either side is acceptable for legacy sportsbook
-    # confirmations; PropLine rows with event IDs are handled above.
-    return True
+    if not (_has_human_event(target.event) and _has_human_event(observation.event)):
+        return True
+    return normalize_event(target.event) == normalize_event(observation.event)
 
 
 def _same_team(target: ConfirmationTarget, observation: ConfirmationObservation) -> bool:
