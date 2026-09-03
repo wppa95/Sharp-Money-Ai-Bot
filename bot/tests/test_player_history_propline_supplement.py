@@ -137,6 +137,49 @@ async def test_snapshot_keeps_primary_results_and_adds_only_distinct_supplementa
 
 
 @pytest.mark.asyncio
+async def test_raw_propline_games_are_normalized_only_after_final_and_never_for_football():
+    class _RawGamesClient:
+        is_configured = True
+
+        def official_sport_for(self, sport):
+            return {"NBA": "basketball_nba", "NFL": "football_nfl"}.get(sport)
+
+        async def fetch_player_games(self, sport, player, **kwargs):
+            return SimpleNamespace(
+                succeeded=True,
+                complete=True,
+                payload={
+                    "games": [
+                        {
+                            "event_id": "final-1",
+                            "commence_time": "2026-08-29T00:00:00Z",
+                            "status": "final",
+                            "opponent": "BOS",
+                            "stats": {"points": 31},
+                        },
+                        {
+                            "event_id": "live-1",
+                            "commence_time": "2026-08-30T00:00:00Z",
+                            "status": "in_progress",
+                            "stats": {"points": 40},
+                        },
+                    ]
+                },
+            )
+
+    provider = PlayerHistoryProvider(propline_client=_RawGamesClient())
+
+    rows = await provider._fetch_propline_games("Alex Example", "NBA", "points")
+    football_rows = await provider._fetch_propline_games("Alex Example", "NFL", "points")
+
+    assert len(rows) == 1
+    assert rows[0].game_id == "final-1"
+    assert rows[0].actual_value == 31.0
+    assert rows[0].source == "propline_games"
+    assert football_rows == []
+
+
+@pytest.mark.asyncio
 async def test_supplementation_is_not_used_when_primary_evidence_is_sufficient():
     db = _DB(
         [
