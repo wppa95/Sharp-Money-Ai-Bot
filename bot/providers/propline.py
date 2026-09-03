@@ -128,6 +128,9 @@ class PropLineNotFoundError(PropLineError):
     """PropLine returned a 404 for an event that may have rotated."""
 
 
+PROPLINE_DAILY_REQUEST_LIMIT = 5_000
+
+
 class PropLineRequestBudget:
     """Process-wide-safe daily request counter for PropLine calls.
 
@@ -136,7 +139,12 @@ class PropLineRequestBudget:
     separate clients from racing past the shared daily limit.
     """
 
-    def __init__(self, limit: int = 1_000, *, day_factory: Callable[[], Any] | None = None) -> None:
+    def __init__(
+        self,
+        limit: int = PROPLINE_DAILY_REQUEST_LIMIT,
+        *,
+        day_factory: Callable[[], Any] | None = None,
+    ) -> None:
         self.limit = max(1, int(limit))
         self._day_factory = day_factory or (lambda: datetime.utcnow().date())
         self._day = self._day_factory()
@@ -173,7 +181,6 @@ class PropLineRequestBudget:
 # admission point, so separate client instances cannot burst independently.
 PROPLINE_MAX_REQUESTS_PER_HOUR = 208
 PROPLINE_MIN_REQUEST_INTERVAL = 3600.0 / PROPLINE_MAX_REQUESTS_PER_HOUR
-PROPLINE_DAILY_REQUEST_LIMIT = 5_000
 _DEFAULT_PROPLINE_REQUEST_BUDGET = PropLineRequestBudget(PROPLINE_DAILY_REQUEST_LIMIT)
 
 
