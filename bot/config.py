@@ -283,7 +283,8 @@ class Config:
     #   NHL    → NHL official public API (api-web.nhle.com) — free, no key ✓ verified
     #   DOTA   → OpenDota API (api.opendota.com) — free, no key
     #   TENNIS → JeffSackmann ATP/WTA CSV (github.com/JeffSackmann) — free, no key
-    #   CS     → PandaScore API — requires PANDASCORE_API_KEY env var;
+    #   CS     → PandaScore API optional fallback; PropLine resolved history
+    #            is preferred when available;
     #            returns [] gracefully without it (alerts suppressed by decision engine)
     #
     #   SOCCER → football-data.org API provider is built (bot/providers/soccer_stats.py)

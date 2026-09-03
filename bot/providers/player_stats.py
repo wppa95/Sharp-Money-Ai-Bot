@@ -7,7 +7,8 @@ from free public APIs (no API key required):
   MLB    → MLB Stats API  (https://statsapi.mlb.com/api/v1/)
   NBA, WNBA, NFL, NHL → ESPN unofficial athlete gamelog endpoint
   DOTA   → OpenDota API   (https://api.opendota.com/api/) — free, no key
-  CS     → PandaScore API (https://api.pandascore.co/) — set PANDASCORE_API_KEY
+  CS     → PropLine resolved history when available; PandaScore API is an
+            optional fallback (https://api.pandascore.co/)
   TENNIS → JeffSackmann ATP/WTA CSV  (github.com/JeffSackmann/) — free, no key
 
 Results are returned as a list of dicts suitable for upsert into the
@@ -433,7 +434,7 @@ class PlayerStatsProvider:
                 # Requires FOOTBALL_DATA_API_KEY env var (free token at
                 # https://www.football-data.org/client/register).
                 # Returns [] gracefully when the key is absent — same pattern
-                # as PandaScore/CS2.
+                # as the optional PandaScore/CS2 fallback.
                 # NOTE: SOCCER is NOT in the UD_ALERT_SPORTS default because the
                 # free tier has no lineup/appearance data; without it DNPs cannot
                 # be distinguished from zero-stat games, producing invalid hit rates.

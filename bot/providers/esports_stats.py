@@ -4,8 +4,9 @@ providers/esports_stats.py — Player stat history for esports (CS2, DOTA 2).
 Data sources:
   DOTA 2 → OpenDota API  (https://api.opendota.com/api/)
             Free, no API key required.
-  CS2    → PandaScore API (https://api.pandascore.co/)
-            Requires PANDASCORE_API_KEY env var; returns [] gracefully without it.
+  CS2    → PandaScore API (https://api.pandascore.co/) as an optional fallback.
+            PropLine resolved history is preferred when available; returns []
+            gracefully without the PandaScore key.
 
 Stat type semantics — multi-map cumulative lines
 ────────────────────────────────────────────────
@@ -236,8 +237,8 @@ class EsportsStatsProvider:
     Fetches per-map esports player stats.
 
     DOTA 2: OpenDota API — free, no key required.
-    CS2:    PandaScore API — set PANDASCORE_API_KEY env var to enable;
-            returns [] gracefully when the key is absent.
+    CS2:    PandaScore API is an optional fallback; PropLine resolved history
+            is preferred when available, and [] is returned without the key.
     """
 
     def __init__(self) -> None:
