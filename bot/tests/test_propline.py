@@ -17,10 +17,20 @@ from providers.propline import (
     PropLineClient,
     PropLineClosingLineEvidence,
     PropLinePrizePicksProvider,
+    PropLineResultEvidence,
     PropLineRequestLimiter,
+    PROPLINE_RESULT_INCOMPLETE,
+    PROPLINE_RESULT_LOST,
+    PROPLINE_RESULT_PUSH,
+    PROPLINE_RESULT_UNGRADED,
+    PROPLINE_RESULT_UNRESOLVED,
+    PROPLINE_RESULT_VOID,
+    PROPLINE_RESULT_WON,
     build_propline_line_movement,
     build_propline_closing_line_evidence,
     build_propline_opening_line_evidence,
+    build_propline_result_evidence,
+    normalize_propline_result_state,
     propline_event_identity,
     propline_market_identity,
     propline_player_identity,
@@ -854,6 +864,120 @@ def test_propline_closing_evidence_rejects_missing_or_mixed_identity():
     ]) is None
 
 
+@pytest.mark.parametrize(
+    ("source_value", "expected"),
+    [
+        ("won", PROPLINE_RESULT_WON),
+        ("lost", PROPLINE_RESULT_LOST),
+        ("push", PROPLINE_RESULT_PUSH),
+        ("void", PROPLINE_RESULT_VOID),
+        ("ungraded", PROPLINE_RESULT_UNGRADED),
+        (None, PROPLINE_RESULT_UNRESOLVED),
+    ],
+)
+def test_propline_result_state_preserves_explicit_resolution_states(
+    source_value, expected
+):
+    assert normalize_propline_result_state(source_value) == expected
+
+
+def test_propline_result_state_marks_incomplete_payload_without_settling_it():
+    assert normalize_propline_result_state("won", response_complete=False) == (
+        PROPLINE_RESULT_INCOMPLETE
+    )
+
+
+def test_propline_result_evidence_preserves_prizepicks_provenance_and_timestamps():
+    observed_at = datetime(2026, 8, 29, 2, 0)
+    evidence = build_propline_result_evidence(
+        {
+            "provider": "PrizePicks",
+            "event_id": "game-1",
+            "sport_key": "basketball_nba",
+            "event_status": "final",
+            "bookmaker_key": "prizepicks",
+            "bookmaker_title": "PrizePicks",
+            "market_key": "player_points",
+            "market_description": "Player Points",
+            "player_name": "Alex Example",
+            "player_id": "player-1",
+            "direction": "Over",
+            "line": 24.5,
+            "resolution": "won",
+            "actual_value": 30,
+            "resolved_at": "2026-08-29T01:55:00Z",
+            "redacted": False,
+            "dfs_odds_type": "standard",
+            "supplemental_source": "PropLine",
+        },
+        observed_at=observed_at,
+    )
+
+    assert isinstance(evidence, PropLineResultEvidence)
+    assert evidence.provider == "PrizePicks"
+    assert evidence.supplemental_source == "PropLine"
+    assert evidence.event_id == "game-1"
+    assert evidence.player_id == "player-1"
+    assert evidence.player_name == "Alex Example"
+    assert evidence.stat_type == "points"
+    assert evidence.direction == "OVER"
+    assert evidence.line_value == 24.5
+    assert evidence.actual_value == 30.0
+    assert evidence.resolution_state == PROPLINE_RESULT_WON
+    assert evidence.source_resolution == "won"
+    assert evidence.resolved_at == datetime(2026, 8, 29, 1, 55)
+    assert evidence.observed_at == observed_at
+    assert evidence.is_settled is True
+
+
+def test_propline_result_evidence_does_not_infer_from_final_status_or_actual_value():
+    evidence = build_propline_result_evidence(
+        {
+            "provider": "PrizePicks",
+            "event_id": "game-1",
+            "sport_key": "basketball_nba",
+            "event_status": "final",
+            "bookmaker_key": "prizepicks",
+            "bookmaker_title": "PrizePicks",
+            "market_key": "player_points",
+            "market_description": "Player Points",
+            "player_name": "Alex Example",
+            "line": 24.5,
+            "resolution": None,
+            "actual_value": 30,
+            "resolved_at": None,
+        },
+        observed_at=datetime(2026, 8, 29, 2, 0),
+    )
+
+    assert evidence is not None
+    assert evidence.provider_status == "final"
+    assert evidence.resolution_state == PROPLINE_RESULT_UNRESOLVED
+    assert evidence.is_settled is False
+
+
+def test_propline_result_evidence_rejects_underdog_or_missing_event_identity():
+    base = {
+        "event_id": "game-1",
+        "sport_key": "basketball_nba",
+        "bookmaker_key": "prizepicks",
+        "market_key": "player_points",
+        "player_name": "Alex Example",
+        "line": 24.5,
+        "resolution": "won",
+        "actual_value": 30,
+        "resolved_at": None,
+    }
+    assert build_propline_result_evidence(
+        {**base, "provider": "Underdog"},
+        observed_at=datetime(2026, 8, 29, 2, 0),
+    ) is None
+    assert build_propline_result_evidence(
+        {**base, "provider": "PrizePicks", "event_id": ""},
+        observed_at=datetime(2026, 8, 29, 2, 0),
+    ) is None
+
+
 def test_propline_line_movement_rejects_mixed_source_identities():
     now = datetime(2026, 8, 28, 12, 0, 0)
     rows = [
@@ -1001,6 +1125,50 @@ def _event_odds(event_id, player="Alex Example", direction="Over"):
     ]
 
 
+def _event_results(event_id, resolution="won"):
+    return {
+        "id": event_id,
+        "sport_key": "basketball_nba",
+        "home_team": "Test Town",
+        "away_team": "Example City",
+        "commence_time": "2026-08-28T00:00:00Z",
+        "status": "final",
+        "home_score": 100,
+        "away_score": 95,
+        "bookmakers": [
+            {
+                "key": "draftkings",
+                "title": "DraftKings",
+                "markets": [],
+            },
+            {
+                "key": "prizepicks",
+                "title": "PrizePicks",
+                "markets": [
+                    {
+                        "key": "player_points",
+                        "description": "Player Points",
+                        "outcomes": [
+                            {
+                                "name": "Over",
+                                "description": "Alex Example",
+                                "price": None,
+                                "point": 24.5,
+                                "resolution": resolution,
+                                "actual_value": 30,
+                                "resolved_at": "2026-08-28T03:00:00Z",
+                                "redacted": False,
+                                "dfs_odds_type": "standard",
+                                "player_id": "player-1",
+                            }
+                        ],
+                    }
+                ],
+            },
+        ],
+    }
+
+
 def test_event_discovery_and_event_scoped_odds_build_complete_snapshot():
     session = _QueueSession(
         [
@@ -1068,6 +1236,100 @@ def test_incomplete_event_snapshot_retains_last_complete_snapshot():
     assert second.retained_last_success is True
     assert [prop.player_name for prop in second.props] == ["Alex Example"]
     assert second.failed_event_ids == ("game-1",)
+
+
+def test_official_event_results_uses_documented_route_and_prizepicks_only():
+    session = _Session(_Response(200, _event_results("game-1")))
+    client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://api.prop-line.com",
+        session=session,
+        min_request_interval=0,
+        request_budget=PropLineRequestBudget(10),
+    )
+
+    result = asyncio.run(
+        client.fetch_event_results(
+            "basketball_nba",
+            {"id": "game-1"},
+            markets="player_points",
+        )
+    )
+
+    assert result.succeeded is True
+    assert result.complete is True
+    assert result.event_id == "game-1"
+    assert len(result.results) == 1
+    assert result.results[0].provider == "PrizePicks"
+    assert result.results[0].resolution_state == PROPLINE_RESULT_WON
+    assert session.calls[0][0] == (
+        "https://api.prop-line.com/v1/sports/basketball_nba/events/game-1/results"
+    )
+    assert session.calls[0][1]["params"] == {"markets": "player_points"}
+
+
+def test_official_event_results_keeps_unresolved_distinct_from_incomplete_payload():
+    unresolved_session = _Session(_Response(200, _event_results("game-1", None)))
+    unresolved_client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://api.prop-line.com",
+        session=unresolved_session,
+        min_request_interval=0,
+        request_budget=PropLineRequestBudget(10),
+    )
+    unresolved = asyncio.run(
+        unresolved_client.fetch_event_results("basketball_nba", "game-1")
+    )
+    assert unresolved.succeeded is True
+    assert unresolved.complete is True
+    assert unresolved.results[0].resolution_state == PROPLINE_RESULT_UNRESOLVED
+    assert unresolved.results[0].is_settled is False
+
+    incomplete_session = _Session(
+        _Response(
+            200,
+            {
+                "id": "game-1",
+                "sport_key": "basketball_nba",
+                "commence_time": "2026-08-28T00:00:00Z",
+                "status": "final",
+                "home_score": 100,
+                "away_score": 95,
+            },
+        )
+    )
+    incomplete_client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://api.prop-line.com",
+        session=incomplete_session,
+        min_request_interval=0,
+        request_budget=PropLineRequestBudget(10),
+    )
+    incomplete = asyncio.run(
+        incomplete_client.fetch_event_results("basketball_nba", "game-1")
+    )
+    assert incomplete.succeeded is False
+    assert incomplete.complete is False
+    assert incomplete.failure_kind == "incomplete"
+    assert incomplete.results == ()
+
+
+def test_event_results_are_not_requested_from_custom_endpoint():
+    session = _Session(_Response(200, _event_results("game-1")))
+    client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://authorized.example/props",
+        session=session,
+        min_request_interval=0,
+    )
+
+    result = asyncio.run(
+        client.fetch_event_results("basketball_nba", "game-1")
+    )
+
+    assert result.complete is False
+    assert result.failure_kind == "configuration"
+    assert session.calls == []
 
 
 def test_event_404_rediscovery_matches_home_away_start_before_retrying():
