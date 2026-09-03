@@ -5339,7 +5339,7 @@ async def underdog_job(context) -> None:
             _n_new_prop_sent,
             _evaluation_budget,
             _cycle_budget_exhausted,
-            time.monotonic() - _cycle_timing.started_at,
+            time.monotonic() - _cycle_timing.started_mono,
         )
         # ── Debug: scored prop detail — logged every cycle ────────────────────────
         _dbg_lines: list[str] = [
