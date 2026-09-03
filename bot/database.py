@@ -5884,7 +5884,6 @@ class Database:
                     PropLineHistory.fetched_at >= today_start,
                     PropLineHistory.fetched_at < today_end,
                     PropLineHistory.removed.isnot(True),
-                    PropLineHistory.fetched_at >= freshness_cutoff,
                     or_(
                         PropLineHistory.game_time.is_(None),
                         PropLineHistory.game_time > now,
