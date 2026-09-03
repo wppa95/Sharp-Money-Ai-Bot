@@ -120,8 +120,9 @@ class Config:
     # provider catalog controls scope when available; an empty value must not
     # silently narrow PrizePicks to a guessed NBA/MLB subset.
     PRIZEPICKS_LEAGUES_RAW: str = os.environ.get("PRIZEPICKS_LEAGUES", "")
-    # Seconds between PrizePicks projection polls (default 5 min).
-    PRIZEPICKS_POLL_INTERVAL: int = int(os.environ.get("PRIZEPICKS_POLL_INTERVAL", "300"))
+    # PrizePicks runs as the companion branch of the shared live-monitoring
+    # cycle, so keep this within the 1–2 minute refresh window.
+    PRIZEPICKS_POLL_INTERVAL: int = int(os.environ.get("PRIZEPICKS_POLL_INTERVAL", "120"))
     # Minimum edge % vs sportsbook fair probability to trigger a PP alert.
     MIN_PP_EDGE: float = float(os.environ.get("MIN_PP_EDGE", "5.0"))
     # Minimum fair probability at the PP line to alert (filters razor-thin lines).
@@ -137,12 +138,12 @@ class Config:
     # Priority 1: NBA, MLB.  Add soccer leagues (e.g. "NBA,MLB,EPL,MLS") for
     # Priority 2.  NFL excluded by default.
     PLAYER_PROP_SPORTS_RAW: str = os.environ.get("PLAYER_PROP_SPORTS", "MLB,NBA,WNBA,NFL")
-    # Seconds between player-prop poll cycles.  Props move slower than game
-    # lines so a 10-minute interval is sufficient and keeps credit usage low.
-    PLAYER_PROP_POLL_INTERVAL: int = int(os.environ.get("PLAYER_PROP_POLL_INTERVAL", "600"))
+    # Keep supplemental player-prop tracking within the live 1–2 minute
+    # refresh window. Strict OddsAPI pacing still controls real requests.
+    PLAYER_PROP_POLL_INTERVAL: int = int(os.environ.get("PLAYER_PROP_POLL_INTERVAL", "120"))
     # Seconds between pregame market watch cycles (continuous, all-day).
     # Each cycle runs morning_scan + pregame_scan for all watched entries.
-    PREGAME_SCAN_INTERVAL: int = int(os.environ.get("PREGAME_SCAN_INTERVAL", "300"))
+    PREGAME_SCAN_INTERVAL: int = int(os.environ.get("PREGAME_SCAN_INTERVAL", "120"))
 
     # ── Sports to monitor (comma-separated Sport enum values) ─────────────────
     # Default: MLB only — the only sport whose alerts can be delivered given
@@ -201,10 +202,18 @@ class Config:
     SPORTSBOOK_CONFIRMATION_ENABLED: bool = False
 
     # Polling intervals for multi-platform connectors (seconds)
-    CONNECTOR_POLL_INTERVAL:  int = int(os.environ.get("CONNECTOR_POLL_INTERVAL",  "90"))
+    CONNECTOR_POLL_INTERVAL:  int = int(os.environ.get("CONNECTOR_POLL_INTERVAL",  "120"))
     CONSENSUS_CHECK_INTERVAL: int = int(os.environ.get("CONSENSUS_CHECK_INTERVAL", "120"))
-    CLV_CHECK_INTERVAL:       int = int(os.environ.get("CLV_CHECK_INTERVAL",       "300"))
+    CLV_CHECK_INTERVAL:       int = int(os.environ.get("CLV_CHECK_INTERVAL",       "120"))
     UNDERDOG_POLL_INTERVAL:   int = int(os.environ.get("UNDERDOG_POLL_INTERVAL",   "120"))
+    # Short, bounded refresh cadence for settlement and evidence enrichment.
+    # The scheduler coordinator prevents overlapping executions.
+    OPPORTUNITY_GRADER_INTERVAL: int = int(
+        os.environ.get("OPPORTUNITY_GRADER_INTERVAL", "120")
+    )
+    PLAYER_HISTORY_POLL_INTERVAL: int = int(
+        os.environ.get("PLAYER_HISTORY_POLL_INTERVAL", "120")
+    )
 
     # Consensus engine thresholds
     # Minimum books for cross-book consensus computation
@@ -419,8 +428,9 @@ class Config:
     # ── Full-Pool Rescan (FPR) ────────────────────────────────────────────────
     # How many active props to score per FPR batch.  Bounded to control CPU/memory.
     FPR_BATCH_SIZE: int = int(os.environ.get("FPR_BATCH_SIZE", "10000"))
-    # Seconds between FPR batches.  Default 300 (5 minutes).
-    FPR_INTERVAL: int = int(os.environ.get("FPR_INTERVAL", "300"))
+    # Seconds between FPR batches. The coordinator prevents overlap while
+    # keeping scan progress visible within the live 1–2 minute window.
+    FPR_INTERVAL: int = int(os.environ.get("FPR_INTERVAL", "120"))
     # Sports placed at the end of each rotation (lowest scheduling priority).
     # They are always rescanned — just last.  Override via FPR_LOW_PRIORITY_SPORTS env var.
     FPR_LOW_PRIORITY_SPORTS_RAW: str = os.environ.get("FPR_LOW_PRIORITY_SPORTS", "NFL,MLB")
