@@ -409,6 +409,11 @@ _prizepicks_processing_tasks: set[asyncio.Task] = set()
 _prizepicks_processing_lock: Optional[asyncio.Lock] = None
 _PRIZEPICKS_DEDUP_PREFIX = "PrizePicks::"
 _prizepicks_sport_cursor = 0
+# Current PropLine observations are also available in-process while the
+# companion branch is running.  This is supplemental evidence only; it never
+# replaces an Underdog snapshot or creates a second alert path.
+_PROPLINE_EVIDENCE_TTL_SECONDS = 20 * 60
+_propline_current_observations: dict[tuple[str, str, str, str], object] = {}
 
 
 async def _get_prizepicks_scan_sports(provider) -> tuple[str, ...]:
@@ -536,6 +541,7 @@ async def reset_monitoring_runtime_state() -> None:
     global _fpr_handoff_task, _fpr_execution_running, _prop_market_alerted
     global _ud_scan_state, _ud_known_keys, _ud_scan_db_id, _prop_dedup_lock
     global _snapshot_cache, _analysis_engine, _confirmation_db, _propline_provider
+    global _propline_current_observations
 
     current = asyncio.current_task()
     tasks = {
@@ -577,6 +583,42 @@ async def reset_monitoring_runtime_state() -> None:
     _analysis_engine = None
     _confirmation_db = None
     _propline_provider = None
+    _propline_current_observations.clear()
+
+
+def _cache_propline_evidence(props: list[object]) -> None:
+    """Publish fresh PropLine observations to the read-only evidence boundary."""
+    now = datetime.utcnow()
+    for prop in props:
+        player = str(getattr(prop, "player_name", "") or "").strip()
+        sport = str(getattr(prop, "sport", "") or "").upper().strip()
+        stat = str(getattr(prop, "stat_type", "") or "").strip().lower()
+        event_id = str(
+            getattr(prop, "event_id", "")
+            or getattr(prop, "game_id", "")
+            or ""
+        ).strip()
+        if not player or not sport or not stat:
+            continue
+        observed_at = getattr(prop, "fetched_at", None)
+        if isinstance(observed_at, datetime) and (
+            now - observed_at
+        ).total_seconds() > _PROPLINE_EVIDENCE_TTL_SECONDS:
+            continue
+        # Exclude football before it can become supplemental evidence.
+        if is_football_related_sport(sport):
+            continue
+        _propline_current_observations[(player, sport, stat, event_id)] = prop
+
+    cutoff = now - timedelta(seconds=_PROPLINE_EVIDENCE_TTL_SECONDS)
+    stale = [
+        key
+        for key, prop in _propline_current_observations.items()
+        if isinstance(getattr(prop, "fetched_at", None), datetime)
+        and getattr(prop, "fetched_at") < cutoff
+    ]
+    for key in stale:
+        _propline_current_observations.pop(key, None)
 
 
 def _queue_deferred_fpr(context: object) -> None:
