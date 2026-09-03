@@ -103,7 +103,9 @@ async def test_snapshot_uses_propline_gap_for_both_primary_providers(source_prov
 
 @pytest.mark.asyncio
 async def test_snapshot_keeps_primary_results_and_adds_only_distinct_supplemental_games():
-    db = _DB([_primary_result("2026-08-29", 30.0, "game-1")])
+    # The primary provider has no event ID here; the shared date is the
+    # fallback identity for matching PropLine's event-bearing row.
+    db = _DB([_primary_result("2026-08-29", 30.0)])
     client = _client(
         [
             _propline_entry("2026-08-29", 30.0, "game-1"),

@@ -1425,26 +1425,47 @@ async def _fetch_and_compute_hit_rates(
 
 def _merge_hit_rate_results(primary: list, supplemental: list) -> list:
     """Merge primary and supplemental game rows without counting one game twice."""
-    seen: set[tuple[str, str]] = set()
     merged: list = []
+    seen_ids: set[tuple[str, str]] = set()
+    seen_dates: set[tuple[str, str]] = set()
+    seen_idless_dates: set[tuple[str, str]] = set()
+
+    def _parts(row) -> tuple[str, str, str]:
+        event_id = str(
+            getattr(row, "game_id", "")
+            or getattr(row, "event_id", "")
+            or ""
+        ).strip()
+        game_date = str(
+            getattr(row, "game_date", "")
+            or getattr(row, "date", "")
+            or ""
+        ).strip()
+        stat = str(
+            getattr(row, "stat_type", "")
+            or getattr(row, "stat", "")
+            or ""
+        ).lower().strip()
+        return event_id, game_date, stat
+
     for row in [*primary, *supplemental]:
-        identity = (
-            str(
-                getattr(row, "game_id", "")
-                or getattr(row, "game_date", "")
-                or getattr(row, "date", "")
-                or ""
-            ).strip(),
-            str(
-                getattr(row, "stat_type", "")
-                or getattr(row, "stat", "")
-                or ""
-            ).lower().strip(),
+        event_id, game_date, stat = _parts(row)
+        duplicate = (
+            (event_id, stat) in seen_ids
+            if event_id
+            else (game_date, stat) in seen_dates
         )
-        if identity in seen:
+        if event_id and (game_date, stat) in seen_idless_dates:
+            duplicate = True
+        if duplicate:
             continue
-        seen.add(identity)
         merged.append(row)
+        if event_id:
+            seen_ids.add((event_id, stat))
+        if game_date:
+            seen_dates.add((game_date, stat))
+            if not event_id:
+                seen_idless_dates.add((game_date, stat))
     merged.sort(
         key=lambda row: str(
             getattr(row, "game_date", "")

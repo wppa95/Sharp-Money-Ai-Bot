@@ -517,27 +517,7 @@ class PlayerHistoryProvider:
 
 def _merge_game_results(existing: list, supplemental: list) -> list:
     """Keep primary game results and add only distinct PropLine events."""
-    seen = {
-        (
-            str(getattr(row, "game_id", "") or "").strip()
-            or str(getattr(row, "game_date", "") or "").strip(),
-            str(getattr(row, "stat_type", "") or "").lower().strip(),
-        )
-        for row in existing
-    }
-    merged = list(supplemental)
-    for row in supplemental:
-        key = (
-            str(getattr(row, "game_id", "") or "").strip()
-            or str(getattr(row, "game_date", "") or "").strip(),
-            str(getattr(row, "stat_type", "") or "").lower().strip(),
-        )
-        if key in seen:
-            if row in merged:
-                merged.remove(row)
-            continue
-        seen.add(key)
-    return list(existing) + merged
+    return _merge_distinct_rows(existing, supplemental)
 
 
 def _merge_history_records(
@@ -545,19 +525,65 @@ def _merge_history_records(
     supplemental: list[PlayerHistoryRecord],
 ) -> list[PlayerHistoryRecord]:
     """Merge primary and supplemental records without double-counting games."""
-    seen: set[tuple[str, str]] = set()
-    merged: list[PlayerHistoryRecord] = []
-    for record in [*primary, *supplemental]:
-        identity = (
-            str(getattr(record, "game_id", "") or "").strip()
-            or str(getattr(record, "date", "") or "").strip(),
-            str(getattr(record, "stat", "") or "").lower().strip(),
-        )
-        if identity in seen:
-            continue
-        seen.add(identity)
-        merged.append(record)
+    merged = _merge_distinct_rows(primary, supplemental)
     merged.sort(key=lambda record: record.date, reverse=True)
+    return merged
+
+
+def _merge_distinct_rows(primary: list, supplemental: list) -> list:
+    """Merge rows by event ID, falling back to date when an ID is unavailable."""
+    merged = list(primary)
+    seen_ids: set[tuple[str, str]] = set()
+    seen_dates: set[tuple[str, str]] = set()
+    seen_idless_dates: set[tuple[str, str]] = set()
+
+    def _parts(row) -> tuple[str, str, str]:
+        event_id = str(
+            getattr(row, "game_id", "")
+            or getattr(row, "event_id", "")
+            or ""
+        ).strip()
+        game_date = str(
+            getattr(row, "game_date", "")
+            or getattr(row, "date", "")
+            or ""
+        ).strip()
+        stat = str(
+            getattr(row, "stat_type", "")
+            or getattr(row, "stat", "")
+            or ""
+        ).lower().strip()
+        return event_id, game_date, stat
+
+    for row in primary:
+        event_id, game_date, stat = _parts(row)
+        if event_id:
+            seen_ids.add((event_id, stat))
+        if game_date:
+            seen_dates.add((game_date, stat))
+            if not event_id:
+                seen_idless_dates.add((game_date, stat))
+
+    for row in supplemental:
+        event_id, game_date, stat = _parts(row)
+        duplicate = (
+            (event_id, stat) in seen_ids
+            if event_id
+            else (game_date, stat) in seen_dates
+        )
+        # When the primary source has no event ID, its date is the only safe
+        # join key. Conversely, an ID-bearing row must not duplicate it.
+        if event_id and (game_date, stat) in seen_idless_dates:
+            duplicate = True
+        if duplicate:
+            continue
+        merged.append(row)
+        if event_id:
+            seen_ids.add((event_id, stat))
+        if game_date:
+            seen_dates.add((game_date, stat))
+            if not event_id:
+                seen_idless_dates.add((game_date, stat))
     return merged
 
 
