@@ -670,6 +670,7 @@ def test_read_only_capability_validation_does_not_spend_request_budget():
         api_key="test-only-key",
         session=session,
         min_request_interval=0,
+        request_budget=PropLineRequestBudget(limit=10),
     )
 
     result = asyncio.run(client.fetch_market_hit_rates(days=61))
