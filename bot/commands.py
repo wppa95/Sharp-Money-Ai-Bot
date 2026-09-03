@@ -2405,11 +2405,10 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             )
             if not results:
                 return None, None
-            # Infer current opponent from the most recent game result
-            # (results are sorted newest-first by the DB query).
-            # In series sports (MLB etc.) the last 1-3 games share the same
-            # opponent, making this a reliable proxy for the current matchup.
-            _opp: Optional[str] = results[0].opponent if results else None
+            # Never infer the current opponent from the newest historical
+            # result.  That result belongs to a completed event and can be a
+            # different matchup from the provider-owned current event.
+            _opp: Optional[str] = getattr(plh, "opponent", None)
             hr = _compute_hr(results, plh.line_value, opponent=_opp)
             return hr, _opp
         except Exception:
@@ -2445,7 +2444,18 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     try:
         _intel_map = await _bounded(_db.get_latest_downstream_intelligence(
-            [(plh.player_name, plh.sport, plh.stat_type) for plh, _ in picks],
+            [
+                (
+                    getattr(plh, "provider", None) or "Underdog",
+                    plh.player_name,
+                    plh.sport,
+                    plh.stat_type,
+                    getattr(plh, "external_id", None)
+                    or getattr(plh, "game_id", None)
+                    or "",
+                )
+                for plh, _ in picks
+            ],
             since_hours=72,
         ))
     except Exception as _intel_exc:
@@ -2604,10 +2614,18 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
         # Persisted Task #135 downstream intelligence.  Do not derive a model
         # projection, movement quality, or historical category when it is absent.
-        _intel = _intel_map.get(
-            (str(plh.player_name).lower(), str(plh.sport).upper(), str(plh.stat_type).lower()),
-            {},
+        _intel_key = (
+            str(getattr(plh, "provider", None) or "Underdog").lower(),
+            str(plh.player_name).lower(),
+            str(plh.sport).upper(),
+            str(plh.stat_type).lower(),
+            str(
+                getattr(plh, "external_id", None)
+                or getattr(plh, "game_id", None)
+                or ""
+            ).lower(),
         )
+        _intel = _intel_map.get(_intel_key, {})
         _value = _intel.get("value") if isinstance(_intel, dict) else {}
         _movement = _intel.get("movement") if isinstance(_intel, dict) else {}
         _evidence = _intel.get("evidence") if isinstance(_intel, dict) else {}

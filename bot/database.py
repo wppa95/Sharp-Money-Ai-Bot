@@ -1438,23 +1438,46 @@ class Database:
 
     async def get_latest_downstream_intelligence(
         self,
-        player_stat_triples: "list[tuple[str, str, str]]",
+        player_stat_triples: "list[tuple]",
         since_hours: int = 72,
-    ) -> "dict[tuple[str, str, str], dict]":
-        """Return the newest persisted downstream payload for each prop."""
+    ) -> "dict[tuple, dict]":
+        """Return the newest persisted downstream payload for each prop.
+
+        The legacy three-field ``(player, sport, stat)`` form remains
+        supported.  Current callers may provide
+        ``(provider, player, sport, stat, source_id)`` so an intelligence
+        payload cannot cross-contaminate providers or event/line identities.
+        """
         if not player_stat_triples:
             return {}
         import json as _json
         from datetime import timedelta
 
-        requested = {
-            (str(player), str(sport), str(stat))
-            for player, sport, stat in player_stat_triples
+        legacy_requested: set[tuple[str, str, str]] = set()
+        scoped_requested: set[tuple[str, str, str, str, str]] = set()
+        for identity in player_stat_triples:
+            if len(identity) == 3:
+                player, sport, stat = identity
+                legacy_requested.add((str(player), str(sport), str(stat)))
+            elif len(identity) == 5:
+                provider, player, sport, stat, source_id = identity
+                scoped_requested.add((
+                    str(provider).strip().lower(),
+                    str(player).strip().lower(),
+                    str(sport).strip().upper(),
+                    str(stat).strip().lower(),
+                    str(source_id or "").strip().lower(),
+                ))
+        # Preserve the old return-key contract for old callers while making
+        # scoped callers explicitly identity-aware.
+        requested_triples = {
+            (player, sport, stat) for player, sport, stat in legacy_requested
+        } | {
+            (player, sport, stat)
+            for _provider, player, sport, stat, _source in scoped_requested
         }
-        wanted = {
-            (str(player).lower(), str(sport).upper(), str(stat).lower())
-            for player, sport, stat in requested
-        }
+        if not requested_triples:
+            return {}
         cutoff = datetime.utcnow() - timedelta(hours=since_hours)
         async with self.session() as s:
             result = await s.execute(
@@ -1466,28 +1489,54 @@ class Database:
                         PropOpportunityLog.player_name,
                         PropOpportunityLog.sport,
                         PropOpportunityLog.stat_type,
-                    ).in_(requested),
+                    ).in_(requested_triples),
                 )
                 .order_by(desc(PropOpportunityLog.detected_at))
-                .limit(max(len(requested) * 20, 100))
+                .limit(max(len(requested_triples) * 20, 100))
             )
             rows = list(result.scalars().all())
 
-        out: dict[tuple[str, str, str], dict] = {}
+        out: dict[tuple, dict] = {}
         for row in rows:
-            key = (
+            triple_key = (
                 str(row.player_name).lower(),
                 str(row.sport).upper(),
                 str(row.stat_type).lower(),
             )
-            if key not in wanted or key in out:
-                continue
             try:
                 payload = _json.loads(row.downstream_intelligence_json)
             except (TypeError, ValueError):
                 continue
-            if isinstance(payload, dict):
-                out[key] = payload
+            if not isinstance(payload, dict):
+                continue
+
+            # A legacy lookup is intentionally broad for compatibility.
+            if triple_key in {
+                (str(player).lower(), str(sport).upper(), str(stat).lower())
+                for player, sport, stat in legacy_requested
+            } and triple_key not in out:
+                out[triple_key] = payload
+
+            provider_key = str(row.provider or "").strip().lower()
+            row_sources = {
+                str(row.external_id or "").strip().lower(),
+                str(row.game_id or "").strip().lower(),
+            } - {""}
+            for scoped in scoped_requested:
+                if (
+                    scoped[0] == provider_key
+                    and scoped[1:] in {
+                        (
+                            triple_key[0],
+                            triple_key[1],
+                            triple_key[2],
+                            source,
+                        )
+                        for source in row_sources
+                    }
+                ):
+                    if scoped not in out:
+                        out[scoped] = payload
         return out
 
     async def get_all_ud_lines_for_prop(
