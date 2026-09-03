@@ -463,12 +463,15 @@ def _format_available_lines_block(
         else "\n\n📊 <b>Available Lines</b>"
     ]
     for emoji, label, value in display_lines:
+        spacing = "  " if label == "PrizePicks" else "    "
         if value is not None:
-            lines.append(f"\n{emoji} {label}:  <code>{value:.1f}</code>")
+            lines.append(f"\n{emoji} {label}:{spacing}<code>{value:.1f}</code>")
         elif provider_upper not in {"UNDERDOG", "PRIZEPICKS"} or label == (
             "PrizePicks" if provider_upper == "PRIZEPICKS" else "Underdog"
         ):
-            lines.append(f"\n{emoji} {label}:  <i>Unavailable for this prop</i>")
+            lines.append(
+                f"\n{emoji} {label}:{spacing}<i>Unavailable for this prop</i>"
+            )
     return "".join(lines)
 
 
