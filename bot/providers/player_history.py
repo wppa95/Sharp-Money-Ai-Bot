@@ -415,12 +415,22 @@ class PlayerHistoryProvider:
             self._supplement_cache[key] = []
             return []
 
-        supplemental = await self._fetch_propline_history(
+        # Raw game logs are book-agnostic and include games without a posted
+        # prop, so they are the preferred supplemental source for history.
+        # Resolved prop history remains the settlement path below.
+        supplemental = await self._fetch_propline_games(
             player_name,
             sport,
             stat_type,
             instrumentation=instrumentation,
         )
+        if not supplemental:
+            supplemental = await self._fetch_propline_history(
+                player_name,
+                sport,
+                stat_type,
+                instrumentation=instrumentation,
+            )
         merged = _merge_game_results(existing, supplemental)
         supplemental = merged[len(existing):]
         if supplemental and instrumentation is not None:
@@ -532,6 +542,92 @@ class PlayerHistoryProvider:
                 opponent=None,
                 source="propline_history",
                 game_id=event_id,
+            ))
+        return rows
+
+    async def _fetch_propline_games(
+        self,
+        player_name: str,
+        sport: str,
+        stat_type: str,
+        *,
+        instrumentation=None,
+    ) -> list:
+        """Adapt complete PropLine raw game logs into supplemental rows.
+
+        Raw game logs are only evidence after a final/completed status.  In
+        particular, live cumulative values must never be persisted as a
+        completed game result.  The football scope guard is applied before a
+        row is constructed.
+        """
+        from providers.player_stats import RawGameResult
+        from providers.propline import PropLineClient, _normalize_stat, _parse_datetime
+        from engine.sport_policy import is_football_related_sport
+
+        sport_u = str(sport or "").upper().strip()
+        if not sport_u or is_football_related_sport(sport_u):
+            return []
+        if self._propline_client is None:
+            self._propline_client = PropLineClient()
+        client = self._propline_client
+        if not client.is_configured:
+            return []
+        official_sport = client.official_sport_for(sport_u)
+        if not official_sport:
+            return []
+        result = await client.fetch_player_games(
+            official_sport,
+            player_name,
+            limit=100,
+            stat_type=_normalize_stat(stat_type),
+        )
+        if not result.succeeded or not result.complete:
+            return []
+        payload = result.payload
+        if not isinstance(payload, dict) or not isinstance(payload.get("games"), list):
+            return []
+
+        requested_stat = _normalize_stat(stat_type)
+        rows = []
+        for game in payload["games"]:
+            if not isinstance(game, dict):
+                continue
+            status = str(game.get("status") or "").strip().lower()
+            if status not in {"final", "completed", "complete", "settled"}:
+                continue
+            game_id = str(
+                game.get("event_id") or game.get("game_id") or game.get("id") or ""
+            ).strip()
+            game_time = _parse_datetime(
+                game.get("commence_time")
+                or game.get("start_time")
+                or game.get("game_time")
+            )
+            stats = game.get("stats")
+            if not game_id or game_time is None or not isinstance(stats, dict):
+                continue
+            value = None
+            for key, raw_value in stats.items():
+                if _normalize_stat(key) == requested_stat:
+                    try:
+                        value = float(raw_value)
+                    except (TypeError, ValueError):
+                        value = None
+                    break
+            if value is None:
+                continue
+            opponent = game.get("opponent")
+            if opponent is None:
+                opponent = game.get("opponent_name")
+            rows.append(RawGameResult(
+                player_name=player_name,
+                sport=sport_u,
+                stat_type=stat_type.lower().strip(),
+                game_date=game_time.date().isoformat(),
+                actual_value=value,
+                opponent=str(opponent).strip() if opponent else None,
+                source="propline_games",
+                game_id=game_id,
             ))
         return rows
 
