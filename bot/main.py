@@ -955,7 +955,13 @@ async def _grade_opportunities_job(context) -> None:
 
             # Classify MISS outcomes for learning — only Model errors update weights
             error_type: Optional[str] = None
-            if outcome == "MISS":
+            # Neutral tracking rows are graded for market history, but they
+            # were never a model recommendation and must not feed calibration
+            # learning as if they were a missed pick.
+            if (
+                outcome == "MISS"
+                and (opp.recommendation or "").upper() in ("OVER", "UNDER")
+            ):
                 from engine.calibration import classify_miss
                 error_type = classify_miss(
                     recommendation = opp.recommendation,
