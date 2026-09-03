@@ -402,7 +402,9 @@ class TestSlipSubcommandRouting:
             prev_line=None,
             bet_recommendation=None,
             bet_confidence=88,
+            score_tier="A",
             score_total=88,
+            market_quality_score=75,
         )
         identities = []
 
