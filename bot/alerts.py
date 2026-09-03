@@ -656,10 +656,17 @@ def _has_strong_underdog_evidence(
         # boundary.
         if not isinstance(source, str):
             return True
-        if source.lower() == "real" and int(
-            getattr(validation, "n_real_games", 0) or 0
-        ) >= 5:
+        source_lower = source.lower().strip()
+        n_real = int(getattr(validation, "n_real_games", 0) or 0)
+        n_supplemental = int(
+            getattr(validation, "n_supplemental_games", 0) or 0
+        )
+        if source_lower == "real" and n_real >= 5:
             return True
+        if source_lower == "propline" and n_supplemental >= 5:
+            return True
+        if source_lower in {"real+propline", "primary+propline"}:
+            return n_real + n_supplemental >= 5
     for obj in (decision, intelligence_trace):
         if isinstance(obj, dict):
             if any(
@@ -675,7 +682,14 @@ def _has_strong_underdog_evidence(
                         or evidence.get("source")
                         or ""
                     ).lower()
-                    if source in {"real", "game_results", "player_game_results"}:
+                    if source in {
+                        "real",
+                        "game_results",
+                        "player_game_results",
+                        "propline",
+                        "real+propline",
+                        "primary+propline",
+                    }:
                         return True
             continue
         if obj is not None:
@@ -687,7 +701,14 @@ def _has_strong_underdog_evidence(
                         or value.get("source")
                         or ""
                     ).lower()
-                    if source in {"real", "game_results", "player_game_results"}:
+                    if source in {
+                        "real",
+                        "game_results",
+                        "player_game_results",
+                        "propline",
+                        "real+propline",
+                        "primary+propline",
+                    }:
                         return True
     return False
 
