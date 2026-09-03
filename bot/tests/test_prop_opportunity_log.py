@@ -61,7 +61,7 @@ class TestLogPropOpportunity:
     @pytest.mark.asyncio
     async def test_inserts_new_record(self, db: Database) -> None:
         await _log(db, external_id="ext-ins-001")
-        pending = await db.get_pending_tracked_props(cutoff_hours=4)
+        pending = await db.get_pending_opportunities(cutoff_hours=4)
         ext_ids = [r.external_id for r in pending]
         assert "ext-ins-001" in ext_ids
 
@@ -118,9 +118,9 @@ class TestLogPropOpportunity:
         }])
         assert inserted == 1
 
-        pending = await db.get_pending_opportunities(cutoff_hours=4)
+        pending = await db.get_pending_tracked_props(cutoff_hours=4)
         assert len(pending) == 1
-        assert pending[0].recommendation == "NONE"
+        assert not hasattr(pending[0], "recommendation")
         assert pending[0].provider == "Underdog"
 
         # Repeated ingestion must not erase a later directional decision.
@@ -149,6 +149,9 @@ class TestLogPropOpportunity:
             "game_time": _past(8),
             "provider": "Underdog",
         }])
+        pending = await db.get_pending_tracked_props(cutoff_hours=4)
+        assert len(pending) == 1
+        assert pending[0].line_value == 21.5
         async with db.session() as s:
             from sqlalchemy import select
             row = (

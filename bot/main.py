@@ -866,12 +866,17 @@ async def _grade_opportunities_job(context) -> None:
         _get_pending_tracked = getattr(db, "get_pending_tracked_props", None)
         if callable(_get_pending_tracked):
             try:
-                _tracked_pending = await _get_pending_tracked(
+                _tracked_result = _get_pending_tracked(
                     cutoff_hours=4,
                     limit=_GRADE_BATCH_SIZE,
                 )
+                if hasattr(_tracked_result, "__await__"):
+                    _tracked_pending = await _tracked_result
             except TypeError:
-                _tracked_pending = await _get_pending_tracked(cutoff_hours=4)
+                # Compatibility with older adapters that do not accept limit.
+                _tracked_result = _get_pending_tracked(cutoff_hours=4)
+                if hasattr(_tracked_result, "__await__"):
+                    _tracked_pending = await _tracked_result
         pending = _legacy_pending + list(_tracked_pending or [])
         if not pending:
             if _ht_start:
