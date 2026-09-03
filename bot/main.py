@@ -597,19 +597,24 @@ async def post_init(application: Application) -> None:
         jq.run_repeating(_coordinated_job("clv_seeder", _clv_seed_job), interval=900, first=120, name="clv_seeder")
         # CLV harvest job — every hour (processes seeds after game_time passes)
         jq.run_repeating(_coordinated_job("clv_harvester", _clv_harvest_job), interval=3600, first=300, name="clv_harvester")
-        # Opportunity grader — hourly (grades completed prop opportunities).
+        # Opportunity grader — short cadence (grades completed opportunities).
         # A bounded, rotating worker must never overlap itself while provider
         # lookups are in flight.
         jq.run_repeating(
             _coordinated_job("opportunity_grader", _grade_opportunities_job),
-            interval=3600,
-            # Run once shortly after startup, then continue on the hourly
-            # cadence.  A restart should not defer grading for a full hour.
+            interval=config.OPPORTUNITY_GRADER_INTERVAL,
+            # Run once shortly after startup, then continue on the short
+            # cadence. A restart should not defer grading.
             first=60,
             name="opportunity_grader",
         )
         from player_history_job import player_history_collector_job
-        jq.run_repeating(_coordinated_job("player_history_collector", player_history_collector_job), interval=240, first=60, name="player_history_collector")
+        jq.run_repeating(
+            _coordinated_job("player_history_collector", player_history_collector_job),
+            interval=config.PLAYER_HISTORY_POLL_INTERVAL,
+            first=90,
+            name="player_history_collector",
+        )
         # API budget check — every 15 minutes
         jq.run_repeating(_coordinated_job("budget_checker", _budget_check_job), interval=900, first=900, name="budget_checker")
         # PropLineHistory prune — once per day (keeps last 14 days)
@@ -812,7 +817,7 @@ _GRADE_FETCH_TIMEOUT_SECONDS = 20
 
 async def _grade_opportunities_job(context) -> None:
     """
-    Every hour: grade completed tracked props from stored game results.
+    Every 1–2 minutes: grade completed tracked props from stored game results.
     The job proactively calls ``fetch_results`` for every pending identity
     using the ``_grade_fetched`` identity set before reading persisted result
     rows.
