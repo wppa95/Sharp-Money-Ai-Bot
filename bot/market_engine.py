@@ -464,7 +464,8 @@ async def _get_prizepicks_scan_sports(provider) -> tuple[str, ...]:
         discovered = await discover()
     except Exception as exc:  # noqa: BLE001
         logger.warning(
-            "prizepicks_cycle: active-sport discovery failed; using configured fallback: %s",
+            "prizepicks_cycle: active-sport discovery failed; using "
+            "non-football fallback: %s",
             type(exc).__name__,
         )
         fallback_sports = _non_football(fallback)

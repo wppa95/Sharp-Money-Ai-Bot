@@ -2057,6 +2057,7 @@ class PropLineClient:
         self._cache_clock_by_scope: dict[str, float] = {}
         self._sports_cache: tuple[PropLineSport, ...] = ()
         self._sports_cache_clock_at: Optional[float] = None
+        self._sports_discovery_failed = False
         self.request_budget = request_budget or _DEFAULT_PROPLINE_REQUEST_BUDGET
         self._request_day = datetime.utcnow().date()
         self._request_count = 0
@@ -2074,6 +2075,11 @@ class PropLineClient:
     @property
     def is_configured(self) -> bool:
         return bool(self.api_key and self.api_url)
+
+    @property
+    def sports_discovery_failed(self) -> bool:
+        """Whether the most recent catalog request failed or was incomplete."""
+        return self._sports_discovery_failed
 
     async def __aenter__(self) -> "PropLineClient":
         if self._session is None:
@@ -2994,19 +3000,24 @@ class PropLineClient:
                     url, params, extractor=_extract_records
                 )
             except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                self._sports_discovery_failed = True
                 logger.warning("PropLine sports discovery failed: %s", type(exc).__name__)
                 return []
             except PropLineError as exc:
+                self._sports_discovery_failed = True
                 logger.warning("PropLine sports discovery error: %s", exc)
                 return []
             except Exception as exc:  # noqa: BLE001
+                self._sports_discovery_failed = True
                 logger.warning("PropLine sports discovery response error: %s", type(exc).__name__)
                 return []
 
             if not complete:
+                self._sports_discovery_failed = True
                 logger.warning("PropLine sports discovery incomplete: %s", pagination_error)
                 return list(self._sports_cache)
             sports = _official_sports_records(raw_sports)
+            self._sports_discovery_failed = False
             self._sports_cache = tuple(sports)
             self._sports_cache_clock_at = self._clock()
             return list(sports)
@@ -3246,6 +3257,10 @@ class PropLinePrizePicksProvider(PropProviderBase):
         if self.client.api_url.rstrip("/") != DEFAULT_PROPLINE_API_URL:
             return None
         discovered = await self.client.discover_sports()
+        if self.client.sports_discovery_failed:
+            # Preserve a failed catalog as distinguishable from a valid empty
+            # slate so the caller can use its complete non-football fallback.
+            return None
         if self._sport_filter is not None:
             discovered = [
                 sport
