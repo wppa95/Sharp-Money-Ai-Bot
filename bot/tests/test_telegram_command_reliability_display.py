@@ -47,6 +47,37 @@ def _mock_status_db() -> MagicMock:
     return db
 
 
+def test_alert_readiness_distinguishes_missing_data_from_no_pick():
+    with patch.object(commands.config, "UD_ALERT_SPORTS_RAW", "MLB,NBA,CS"):
+        lines = commands._alert_readiness_lines(
+            {
+                "MLB": {"mlb_stats_api": 30},
+                "NBA": {"sleeper_stats_weekly": 40},
+                "CS": {},
+            },
+            {"MLB": 2},
+        )
+
+    rendered = "\n".join(lines)
+    assert "MLB" in rendered
+    assert "2 directional picks logged" in rendered
+    assert "NBA" in rendered
+    assert "shadow/settlement data only" in rendered
+    assert "CS" in rendered
+    assert "no real player-game history available" in rendered
+
+
+def test_alert_readiness_marks_real_data_without_recent_pick():
+    with patch.object(commands.config, "UD_ALERT_SPORTS_RAW", "DOTA"):
+        lines = commands._alert_readiness_lines(
+            {"DOTA": {"opendota_series": 32}},
+            {},
+        )
+
+    assert "DOTA" in "\n".join(lines)
+    assert "data ready; no qualifying pick logged in the last 24h" in "\n".join(lines)
+
+
 def test_current_display_sport_filter_uses_configured_active_slate():
     with patch.object(commands.config, "ACTIVE_SPORTS_RAW", "WNBA,CS"):
         assert commands._is_active_display_sport("wnba")

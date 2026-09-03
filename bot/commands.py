@@ -1069,6 +1069,8 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 total_prop_history,
                 ud_history,
                 pp_history,
+                _player_result_coverage,
+                _directional_opportunities,
             ) = await _status_db_reads(
                 [
                     _status_db_read(
@@ -1085,10 +1087,23 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                         "PrizePicks prop history",
                         _db.count_prop_line_history(provider="PrizePicks"),
                     ),
+                    _status_db_read(
+                        "player-result coverage",
+                        _db.get_player_result_coverage_by_sport(
+                            getattr(config, "ud_alert_sports", frozenset())
+                        ),
+                    ),
+                    _status_db_read(
+                        "directional opportunities",
+                        _db.get_directional_opportunity_counts_by_sport(
+                            sports=getattr(config, "ud_alert_sports", frozenset())
+                        ),
+                    ),
                 ]
             )
         else:
             _alerts_today = total_prop_history = ud_history = pp_history = 0
+            _player_result_coverage = _directional_opportunities = None
         _status_counts_degraded = any(
             value is None
             for value in (_alerts_today, total_prop_history, ud_history, pp_history)
@@ -1117,6 +1132,10 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             (
                 f"  History: Underdog: {_format_status_count(ud_history)}"
                 f" · PrizePicks (PropLine): {_format_status_count(pp_history)}"
+            ),
+            *_alert_readiness_lines(
+                _player_result_coverage,
+                _directional_opportunities,
             ),
         ]
         if _ht_pipeline is not None:
