@@ -3367,6 +3367,68 @@ async def underdog_job(context) -> None:
     _cycle_timing.finish("active_pool")
     _cycle_timing.start("scoring_evidence")
 
+    # Universal grading ledger: persist every valid active daily prop before
+    # any scoring, qualification, strongest-pick, or delivery gate runs.
+    # Futures/season-long markets have no single player-game settlement event
+    # and remain represented by the monitoring history instead.
+    _tracking_records = []
+    for _tracked_snap in ud_snaps:
+        if "[REMOVED]" in (_tracked_snap.selection or ""):
+            continue
+        _tracked_player = str(_tracked_snap.player or "").strip()
+        _tracked_sport = str(_tracked_snap.sport or "").upper().strip()
+        _tracked_stat = _extract_ud_stat_type(
+            _tracked_snap.selection,
+            _tracked_snap.player,
+            _tracked_snap.line,
+        )
+        if (
+            not _tracked_player
+            or _tracked_player == "Unknown"
+            or not _tracked_sport
+            or not _tracked_stat
+            or _is_futures_stat(_tracked_stat)
+        ):
+            continue
+        try:
+            _tracked_line = float(_tracked_snap.line or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if _tracked_line < 0:
+            continue
+        _tracked_game_id = str(getattr(_tracked_snap, "game_id", "") or "").strip()
+        _tracked_external = str(
+            getattr(_tracked_snap, "external_id", "") or ""
+        ).strip()
+        if not _tracked_external:
+            _tracked_external = (
+                f"{_tracked_player}:{_tracked_sport}:{_tracked_stat}:{_tracked_game_id}"
+            )
+        _tracking_records.append({
+            "external_id": _tracked_external,
+            "player_name": _tracked_player,
+            "team": str(_tracked_snap.team or ""),
+            "sport": _tracked_sport,
+            "stat_type": _tracked_stat,
+            "line_value": _tracked_line,
+            "game_time": getattr(_tracked_snap, "game_time", None),
+            "game_id": _tracked_game_id,
+            "provider": "Underdog",
+        })
+    _track_props = getattr(db, "track_prop_records", None)
+    if callable(_track_props) and _tracking_records:
+        try:
+            await _cycle_timing.await_db(
+                "write",
+                "track_prop_records",
+                _track_props(_tracking_records),
+            )
+        except Exception as _tracking_exc:  # noqa: BLE001
+            logger.warning(
+                "underdog_job: universal tracking write failed: %s",
+                type(_tracking_exc).__name__,
+            )
+
     try:
         # Use the preceding fetched feed for normal-cycle comparisons.  On a
         # restart there is intentionally no movement classification on the
