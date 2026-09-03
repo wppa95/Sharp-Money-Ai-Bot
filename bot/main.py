@@ -813,7 +813,9 @@ async def post_shutdown(application: Application) -> None:
 
 # ── Heartbeat job ─────────────────────────────────────────────────────────────
 
-_GRADE_BATCH_SIZE = 250
+# Keep each grading pass short enough to complete inside the two-minute
+# scheduler cadence. Pending rows are rotated across subsequent passes.
+_GRADE_BATCH_SIZE = 100
 _GRADE_FETCH_CONCURRENCY = 12
 _GRADE_FETCH_TIMEOUT_SECONDS = 20
 
