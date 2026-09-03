@@ -3608,6 +3608,15 @@ async def underdog_job(context) -> None:
     _track_props = getattr(db, "track_prop_records", None)
     if callable(_track_props) and _tracking_records:
         try:
+            _tracking_operation = _track_props(_tracking_records)
+            if not inspect.isawaitable(_tracking_operation):
+                logger.debug(
+                    "underdog_job: tracking hook is not awaitable; "
+                    "skipping compatibility stub"
+                )
+                _tracking_operation = None
+            if _tracking_operation is None:
+                raise StopAsyncIteration
             _tracking_timeout = max(
                 1.0,
                 min(20.0, _cycle_deadline - time.monotonic()),
@@ -3616,7 +3625,7 @@ async def underdog_job(context) -> None:
                 "write",
                 "track_prop_records",
                 asyncio.wait_for(
-                    _track_props(_tracking_records),
+                    _tracking_operation,
                     timeout=_tracking_timeout,
                 ),
             )
@@ -3646,7 +3655,7 @@ async def underdog_job(context) -> None:
             }
             recent_by_key = {}
             _cycle_timing.count("history_lookups_bypassed")
-        elif _new_db_context:
+        elif _new_db_context and isinstance(db, Database):
             # A fresh process must not block the live cadence on durable
             # recovery reads. Treat this feed as the comparison baseline:
             # observations are already persisted above, and the next feed
@@ -3673,6 +3682,21 @@ async def underdog_job(context) -> None:
                     fetched_at=now,
                 )
             _cycle_timing.count("history_lookups_bypassed")
+            _cycle_timing.count("latest_snapshot_props_returned", len(recent_by_key))
+            _cycle_timing.count("known_prop_keys_returned", len(known_keys))
+        elif _new_db_context:
+            # Compatibility path for direct callers/tests that provide a
+            # database double with an explicit prior state.
+            recent_by_key = await _cycle_timing.await_db(
+                "read",
+                "get_latest_underdog_snapshot_per_prop",
+                db.get_latest_underdog_snapshot_per_prop(),
+            )
+            known_keys = await _cycle_timing.await_db(
+                "read",
+                "get_known_underdog_prop_keys",
+                db.get_known_underdog_prop_keys(),
+            )
             _cycle_timing.count("latest_snapshot_props_returned", len(recent_by_key))
             _cycle_timing.count("known_prop_keys_returned", len(known_keys))
         else:
