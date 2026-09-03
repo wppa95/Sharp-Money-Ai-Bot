@@ -10,10 +10,11 @@ from engine.sport_policy import is_football_related_sport
 
 logger = logging.getLogger(__name__)
 
-# The scheduler cadence remains 240 seconds. Reserve a safety margin so the
-# collector can finish cleanly before the next scheduled run (max_instances=1).
+# The scheduler cadence is two minutes. Reserve a safety margin so the
+# collector can finish cleanly before the next scheduled run (coordinator
+# overlap protection also prevents concurrent collectors).
 # The provider's own request timeout bounds any individual call.
-_CYCLE_TIME_BUDGET_SECONDS = 210.0
+_CYCLE_TIME_BUDGET_SECONDS = 90.0
 
 # Sports for which PlayerStatsProvider.fetch_results() has a working data
 # path.  Unsupported sports (LOL, VALORANT/VAL, PGA/GOLF, MMA, TT, and
