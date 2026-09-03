@@ -3413,6 +3413,7 @@ async def underdog_job(context) -> None:
                                 event=snap.event or "",
                                 game_time=snap.game_time,
                                 db=db,
+                                event_id=str(getattr(snap, "game_id", "") or ""),
                             )
                         except Exception:
                             pass
@@ -3876,6 +3877,7 @@ async def underdog_job(context) -> None:
                                 event=snap.event or "",
                                 game_time=snap.game_time,
                                 db=db,
+                                event_id=str(getattr(snap, "game_id", "") or ""),
                             )
                         except Exception:
                             pass
@@ -4269,6 +4271,7 @@ async def underdog_job(context) -> None:
                             event=getattr(_snap, "event", "") or "",
                             game_time=getattr(_snap, "game_time", None),
                             db=db,
+                            event_id=str(getattr(_snap, "game_id", "") or ""),
                         )
                     except Exception:
                         pass
@@ -5424,6 +5427,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         event=getattr(_sr_snap, "event", "") or "",
                         game_time=getattr(_sr_snap, "game_time", None),
                         db=db,
+                        event_id=str(getattr(_sr_snap, "game_id", "") or ""),
                     )
                 except Exception:
                     pass
