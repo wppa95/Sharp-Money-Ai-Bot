@@ -3335,7 +3335,17 @@ async def underdog_job(context) -> None:
     _mem_before = _rss_mb()
 
     try:
-        snapshots = await _registry.fetch_pickem()
+        _fetch_timeout = max(
+            1.0,
+            min(
+                float(getattr(config, "UNDERDOG_FETCH_TIMEOUT_SECONDS", 30.0)),
+                max(1.0, _cycle_deadline - time.monotonic()),
+            ),
+        )
+        snapshots = await asyncio.wait_for(
+            _registry.fetch_pickem(),
+            timeout=_fetch_timeout,
+        )
     except Exception as _fetch_exc:
         provider_health = get_health_monitor()
         if provider_health is not None:
@@ -3348,7 +3358,11 @@ async def underdog_job(context) -> None:
         if _health:
             _health.record_provider_error("Underdog", str(_fetch_exc))
             _health.record_job_fail("underdog_job", str(_fetch_exc))
-        logger.exception("underdog_job: fetch_pickem failed: %s", _fetch_exc)
+        logger.exception(
+            "underdog_job: fetch_pickem failed after %.1fs: %s",
+            time.monotonic() - _cycle_timing.started_mono,
+            _fetch_exc,
+        )
         _cycle_timing.finish("fetch_parse")
         logger.info("underdog_cycle_timing: %s", _cycle_timing.summary(0, 0))
         _job_activity_end("underdog")

@@ -420,6 +420,9 @@ class Config:
     UNDERDOG_EVALUATION_BUDGET: int = int(
         os.environ.get("UNDERDOG_EVALUATION_BUDGET", "100")
     )
+    UNDERDOG_FETCH_TIMEOUT_SECONDS: float = float(
+        os.environ.get("UNDERDOG_FETCH_TIMEOUT_SECONDS", "30")
+    )
 
     # ── Alert sport suppression ───────────────────────────────────────────────
     # Sports whose Telegram alerts are temporarily suppressed.
