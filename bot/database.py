@@ -5896,6 +5896,12 @@ class Database:
                     "tracked_observations": 0,
                     "historical_observations": 0,
                     "evaluated": candidate_total,
+                    "tracked_total": 0,
+                    "tracked_pending": 0,
+                    "tracked_resolved": 0,
+                    "tracked_by_provider": {},
+                    "tracked_by_sport": {},
+                    "tracked_result_counts": {},
                     "directional_total": 0,
                     "actionable_total": 0,
                     "delivered": 0,
@@ -5935,6 +5941,45 @@ class Database:
                 )
             ]
             tracked_count = sum(by_provider_counts.values())
+
+            # Grading population is universal and intentionally independent of
+            # directional recommendations.  Keep these counters separate from
+            # the directional performance population below so neutral
+            # observations do not appear as PLAYs.
+            tracking_res = await s.execute(
+                select(
+                    PropOpportunityLog.provider,
+                    PropOpportunityLog.sport,
+                    PropOpportunityLog.result,
+                ).where(PropOpportunityLog.detected_at >= cutoff)
+            )
+            tracked_total = 0
+            tracked_pending = 0
+            tracked_resolved = 0
+            tracked_by_provider: dict[str, int] = {}
+            tracked_by_sport: dict[str, int] = {}
+            tracked_result_counts: dict[str, int] = {}
+            for provider, sport, result in tracking_res.all():
+                if not _is_supported_tracking_sport(sport):
+                    continue
+                provider_key = str(provider or "Unknown")
+                sport_key = str(sport or "UNKNOWN")
+                result_key = str(result or "PENDING").upper()
+                tracked_total += 1
+                tracked_by_provider[provider_key] = (
+                    tracked_by_provider.get(provider_key, 0) + 1
+                )
+                tracked_by_sport[sport_key] = tracked_by_sport.get(sport_key, 0) + 1
+                tracked_result_counts[result_key] = (
+                    tracked_result_counts.get(result_key, 0) + 1
+                )
+                if result_key == "PENDING":
+                    tracked_pending += 1
+                elif result_key in {
+                    "HIT", "MISS", "PUSH", "VOID", "CANCELLED",
+                    "INJURY_VOID", "GAME_INTERRUPTED",
+                }:
+                    tracked_resolved += 1
 
             # Directional opportunities and delivery are separate populations
             # from the active observation universe. Scope these to the report
@@ -6043,6 +6088,7 @@ class Database:
                 | set(evaluated_by_provider)
                 | set(directional_by_provider)
                 | set(delivered_by_provider)
+                | set(tracked_by_provider)
             )
             for provider in sorted(all_providers):
                 provider_breakdown[provider] = {
@@ -6057,6 +6103,7 @@ class Database:
                     "pending": pending_by_provider.get(provider, 0),
                     "resolved": resolved_by_provider.get(provider, 0),
                     "result_counts": result_counts_by_provider.get(provider, {}),
+                    "tracked": tracked_by_provider.get(provider, 0),
                 }
         return {
             "since_hours": since_hours,
@@ -6072,6 +6119,12 @@ class Database:
             "evaluated": evaluated_total,
             "evaluated_by_provider": evaluated_by_provider,
             "evaluated_by_sport": evaluated_by_sport,
+            "tracked_total": tracked_total,
+            "tracked_pending": tracked_pending,
+            "tracked_resolved": tracked_resolved,
+            "tracked_by_provider": tracked_by_provider,
+            "tracked_by_sport": tracked_by_sport,
+            "tracked_result_counts": tracked_result_counts,
             "directional_total": directional_total,
             "actionable_total": directional_total,
             "delivered": delivered_total,
