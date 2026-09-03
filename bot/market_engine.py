@@ -748,9 +748,14 @@ def _schedule_deferred_fpr() -> None:
 
 
 def _release_underdog_scan_slot() -> None:
-    """Release the live Underdog slot without launching a database scan."""
+    """Release the live slot and honor only an explicit legacy handoff."""
     global _ud_full_scan_running
     _ud_full_scan_running = False
+    # The production scheduler no longer queues FPR work. Keep this narrow
+    # compatibility hook for direct callers that explicitly queued a legacy
+    # FPR request.
+    if _fpr_deferred_pending:
+        _schedule_deferred_fpr()
 
 
 def _bq_stars(bq: int) -> str:
