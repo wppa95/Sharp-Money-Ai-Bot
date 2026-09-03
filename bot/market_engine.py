@@ -6421,6 +6421,31 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                             _fpr_player, _fpr_stat, _fpr_sport, _fpr_bq_score, _fpr_mq_score, _fpr_dec.recommendation,
                         )
                     if _fpr_mq_ok:
+                        _fpr_delivery_candidates.append({
+                            "provider": _fpr_provider,
+                            "player": _fpr_player,
+                            "sport": _fpr_sport,
+                            "stat_type": _fpr_stat,
+                            "line_val": _fpr_line,
+                            "score": _fpr_score,
+                            "validation": _fpr_val,
+                            "decision": _fpr_dec,
+                            "market_quality": _fpr_mq,
+                            "market_pressure": _fpr_mp,
+                            "snap": _fpr_snap,
+                            "pp_line": _fpr_pp_line,
+                            "ext_id": _fpr_ext_id,
+                            "event_id": str(
+                                getattr(_fpr_snap, "event", "")
+                                or getattr(_fpr_snap, "game_id", "")
+                                or ""
+                            ),
+                        })
+                        # The legacy inline branch below is retained for
+                        # compatibility, but delivery now occurs after the
+                        # complete batch has been strongest-pick filtered.
+                        _fpr_mq_ok = False
+                    if _fpr_mq_ok:
                      # ── Atomic dedup claim [full-pool-rescan] ─────────────────
                      if not await _try_claim_delivery_slot(
                          _fpr_player, _fpr_sport, _fpr_stat, _fpr_line,
