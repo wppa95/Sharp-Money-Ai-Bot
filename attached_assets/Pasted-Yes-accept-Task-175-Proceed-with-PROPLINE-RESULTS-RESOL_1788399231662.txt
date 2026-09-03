@@ -1,0 +1,62 @@
+Yes — accept Task #175.
+
+Proceed with PROPLINE RESULTS/RESOLUTION EVIDENCE ONLY.
+
+This phase must determine and consume PropLine’s officially supported result/resolution data without fabricating outcomes or closing lines.
+
+Requirements:
+
+* Use only an officially documented and verified PropLine results/resolution capability.
+* Do NOT invent an endpoint or response structure.
+* Do NOT infer a result merely because an event has a terminal/last-observed line.
+* Do NOT treat TERMINAL_LAST_OBSERVED as a verified settlement.
+* Preserve explicit settlement states such as won/lost/push/void/ungraded when the source provides them.
+* Preserve source provenance and timestamps.
+* Preserve PrizePicks provider identity.
+* Never mix Underdog rows into PrizePicks result history.
+* Do not create synthetic Underdog results.
+* Keep Underdog authoritative for Underdog provider data.
+
+If PropLine’s documented result data has plan limitations or ambiguous settlement semantics, document that rather than guessing.
+
+Do NOT change:
+
+* scoring
+* confidence
+* qualification
+* PLAY criteria
+* alert thresholds
+* Telegram
+* bankroll
+* risk rules
+* betting logic
+* existing grading rules
+* scheduler design
+* 5,000/day PropLine cap
+* 208/hour PropLine limit
+* pacing
+* Retry-After handling
+* restart behavior
+
+Do not make a database schema change unless absolutely necessary. If one is required, STOP and report why before implementing it.
+
+Keep results/resolution informational only.
+
+Do not connect PropLine results to scoring, grading decisions, alerts, or Telegram yet.
+
+Run focused tests, compilation checks, and restart verification.
+
+STOP after results/resolution.
+
+Do NOT continue automatically into player history, trends, CLV, or provenance reconciliation.
+
+Report:
+
+1. Files changed
+2. Exact official PropLine source/endpoint used
+3. Resolution states supported
+4. How provider identity/provenance is preserved
+5. How unresolved/void/incomplete results are handled
+6. Tests passed
+7. Remaining gaps
+8. Proposed next phase
