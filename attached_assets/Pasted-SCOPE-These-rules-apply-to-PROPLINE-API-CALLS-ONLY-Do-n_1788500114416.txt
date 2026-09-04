@@ -1,0 +1,240 @@
+SCOPE
+These rules apply to PROPLINE API CALLS ONLY.
+Do not rewrite the framework.
+Do not change unrelated collectors, schedulers, UI, models, or file structure.
+Do not create a second database.
+SQLite is the database Replit uses. Keep using the existing SQLite 23 million snapshot database.
+Do not “clean up,” refactor, or rename working code unless it is required to stop PropLine 429s or to point history writes at that existing SQLite snapshot.
+If a change is not needed for PropLine quota control or snapshot updates, do not make it.
+
+NON-NEGOTIABLE GOAL — PROPLINE API CALLS
+Stop hitting PropLine 429s.
+Maximize useful PropLine data from SUCCESSFUL calls only.
+Rejected PropLine requests give zero data and burn the window.
+Default PropLine rate = 180/hour.
+Max PropLine rate = 190/hour.
+Never 200 or 208 PropLine calls/hour.
+Leave room under 190 for other needed PropLine API calls.
+Do not touch non-PropLine systems to do this.
+
+==================================================
+PHASE 0 — STOP THE BLEEDING
+Do this first. Do not optimize until this is done.
+PropLine only.
+==================================================
+1. Halt the current tight PropLine scheduler.
+2. Ban 200/hour, 208/hour, and any 17–18s PropLine cadence.
+3. If a PropLine 429 is active:
+   - honor Retry-After exactly
+   - send ZERO PropLine requests during backoff
+   - do not let a background rotator keep firing
+4. After backoff, start PropLine at 160/hour only.
+5. Success metric for this phase: PropLine 429 count = 0 and attempted ≈ successful.
+
+Do not skip Phase 0.
+Do not use this phase as an excuse to change the framework.
+
+==================================================
+PHASE 1 — STABLE BASELINE AT 180
+Default PropLine operating mode.
+==================================================
+Rate: 180 PropLine calls/hour
+Spacing: 20.0 seconds
+Daily budget: 4,320
+Reserve: everything above 180 up to 190 is reserved for other needed PropLine calls
+
+Allowed on the default PropLine rotation:
+1. GET /v1/sports/{sport}/odds for active sports
+2. Event odds ONLY if that event is currently active
+3. Results ONLY after a game is complete
+
+Rules:
+- Most of the 180 budget goes to bulk sport odds
+- Do not poll all 30 PropLine endpoints
+- Do not refresh all 48 sports every minute
+- 180/hour = one full 48-sport rotation about every 16 minutes
+- Count successful PropLine calls, not attempted calls
+- If attempted >> successful, stay in Phase 1 and slow down
+
+Exit to Phase 2 only when:
+- 30 clean minutes at 180
+- zero PropLine 429s
+- logs show backoff is idle
+
+==================================================
+PHASE 2 — SPEND THE QUOTA ON USEFUL DATA
+Same 180 PropLine rate. Smarter targeting.
+==================================================
+Keep 180/hour. Do not raise the PropLine rate yet.
+
+Sport priority:
+- Active markets: poll most often
+- No current markets: poll least often
+- New event, line move, or imminent start: jump the queue immediately
+
+Endpoint policy:
+ALWAYS
+- Bulk sport odds
+- Event odds for active events
+- Results after completion
+
+ONLY IF A REAL CANDIDATE EXISTS AND THE SQLITE 23MIL SNAPSHOT IS STALE
+- Player history
+- Trends
+- Movement / steam
+- Best line
+- EV
+- Projections
+- Event stats / context
+- Closing lines
+
+RARE / REPORTING ONLY
+- Futures
+- DFS payouts
+- Hit rates
+- Resolution summaries
+- Freshness
+- Grand Salami
+- NHL daily goals
+- CLV grading
+- SGP quotes
+
+The existing SQLite 23 million snapshot database is the source of truth.
+PropLine is only for missing or stale fields.
+If that SQLite snapshot already has fresh evidence, do not call PropLine.
+
+Other needed PropLine API calls must fit inside the reserved room under 190.
+They do not stack on top of the base rate.
+
+Exit to Phase 3 only when:
+- 60 clean minutes at 180
+- zero PropLine 429s
+- bulk odds + adaptive priority are working
+- Hobby/expensive routes are candidate-gated
+- history collector is writing into the existing SQLite snapshot, not a new DB file
+
+==================================================
+PHASE 3 — OPTIONAL BUMP TO 190
+Only if Phase 2 is clean.
+==================================================
+Max PropLine rate: 190 calls/hour
+Spacing: ~18.95 seconds
+Daily budget: 4,560
+
+Use 190 only for extra useful PropLine data, not to poll junk endpoints faster.
+
+Still reserved under / beside this cap:
+- catalog refreshes
+- pagination
+- retries
+- event-specific calls
+- rolling-window drift
+- priority markets
+
+Banned forever:
+- 200/hour
+- 208/hour
+- 17.3s cadence
+- equal polling of all 30 routes
+- one-key “every sport every minute” logic
+  48/min = 2,880/hour = 69,120/day
+  That needs ~14 credentials or a higher plan.
+- creating a second database file
+- switching off SQLite
+- framework rewrites
+
+Drop back to 180 immediately if:
+- any PropLine 429
+- attempted calls pull away from successful calls
+- other needed PropLine API calls start getting crowded out
+
+==================================================
+PHASE 4 — 429 RECOVERY
+This overrides every other phase.
+PropLine only.
+==================================================
+On any PropLine 429:
+1. Stop the PropLine scheduler immediately
+2. Honor Retry-After exactly
+3. Send ZERO PropLine requests during backoff
+4. Kill any 17–20s background PropLine rotator
+5. Resume at 160/hour, not 180 or 190
+6. Stay at 160 until 30 clean minutes
+7. Then 180
+8. 190 only after another 60 clean minutes at 180
+9. Keep reserve under 190 for recovery and other needed PropLine calls
+
+If a PropLine 429 appears, the next action is STOP.
+Not retry. Not “keep rotating.” Not bump the rate back.
+Not refactor the framework.
+
+==================================================
+PHASE 5 — STAY HERE
+Permanent PropLine operating rules.
+==================================================
+Default: 180 PropLine calls/hour
+Max: 190 PropLine calls/hour
+Never: 200 or 208
+Priority: bulk odds for active sports
+Filter: existing SQLite 23mil snapshot before Hobby endpoints
+Trigger extra PropLine routes only for real candidates
+Leave room for other needed PropLine API calls
+Useful accepted data beats a higher theoretical request rate
+Do not change anything outside PropLine call control and snapshot updates
+
+LOGS MUST SHOW
+- current phase
+- current PropLine rate
+- successful PropLine calls
+- attempted PropLine calls
+- 429 count
+- Retry-After
+- backoff state
+- whether a call was bulk / event / results / candidate / reporting
+- whether history/stats writes went to the existing SQLite 23mil snapshot
+
+==================================================
+PHASE 6 — HISTORY COLLECTOR USES THE SQLITE 23MIL SNAPSHOT
+SQLite is the database Replit uses.
+Do not let the history collector create its own database.
+==================================================
+The history collector must use the existing SQLite 23 million snapshot database.
+It must not create, spin up, clone, or maintain a second DB file.
+
+Required behavior:
+- Keep SQLite
+- Use the existing 23mil snapshot SQLite file already in the project
+- Read existing stats / evidence / history / grading / tracking from that snapshot
+- Write updates back into that same SQLite snapshot
+- Keep updating:
+  - stats
+  - evidence
+  - history
+  - grading
+  - tracking
+- Deduplicate against rows already in the snapshot
+- Treat that SQLite snapshot as the source of truth
+- Call PropLine history endpoints only when the snapshot row is missing or stale
+- Never build a parallel collector database “just for history”
+
+Banned:
+- a second SQLite file for history
+- Postgres / extra DB engines
+- copying the 23mil snapshot into a private collector DB
+- history jobs that ignore snapshot data and refetch everything from PropLine
+- framework changes unrelated to this write-path
+
+If a history collector path creates its own database file, that is a defect.
+Delete that path and point it at the existing SQLite 23mil snapshot.
+
+BOTTOM LINE
+These instructions are for PropLine API calls only.
+Do not mess with the framework or change anything not needed.
+SQLite stays. Use the existing 23mil snapshot SQLite database.
+Phase 0: stop the PropLine 429 loop
+Phase 1: lock 180
+Phase 2: maximize useful PropLine data at 180
+Phase 3: 190 only if clean
+Phase 4: any PropLine 429 sends you backward
+Phase 5: stay conservative and keep collecting accepted PropLine data
+Phase 6: history collector updates the existing SQLite 23mil snapshot only — no second database
