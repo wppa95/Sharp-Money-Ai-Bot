@@ -6528,9 +6528,8 @@ async def underdog_job(context) -> None:
         ),
     )
     _job_activity_end("underdog")
-    # Release only after health, timing, and activity bookkeeping are complete.
-    # The deferred FPR handoff must never overlap this final write/diagnostic
-    # window, even though the main scan work has already finished.
+    # Release only after health, timing, tracking, snapshot, and history
+    # persistence are complete. There is no deferred remainder handoff.
     await drain_db_persistence_worker()
     _new_prop_stored_count = _eligible_new_props
     _new_prop_skip_reasons = {
@@ -6547,6 +6546,27 @@ async def underdog_job(context) -> None:
         _n_new_prop_evaluated,
         max(0, _eligible_new_props - _n_new_prop_evaluated),
         _new_prop_skip_reasons or "none",
+    )
+    _cycle_elapsed = time.monotonic() - _cycle_timing.started_mono
+    _cycle_cadence = float(getattr(config, "UNDERDOG_POLL_INTERVAL", 120))
+    _cycle_complete = (
+        not _cycle_budget_exhausted
+        and _snapshot_failed_records == 0
+        and _snapshot_persisted == _snapshot_intended
+        and _n_observation_only == 0
+    )
+    logger.info(
+        "underdog_cycle_complete: cycle_id=%d book_batch=full_current_feed "
+        "elapsed=%.1fs cadence=%.1fs within_cadence=%s complete=%s "
+        "eligible=%d persisted=%d leftovers=0 overlap=0 "
+        "deferred_queue=disabled next_batch=next_cadence",
+        _cycle_sequence,
+        _cycle_elapsed,
+        _cycle_cadence,
+        _cycle_elapsed <= _cycle_cadence,
+        _cycle_complete,
+        _snapshot_intended,
+        _snapshot_persisted,
     )
     _release_underdog_scan_slot()
 
