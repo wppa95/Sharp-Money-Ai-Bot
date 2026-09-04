@@ -325,25 +325,24 @@ def _make_market_quality(label_str: str, score: int) -> MarketQuality:
     return MarketQuality(label=label, score=score, reasons=("High-floor stat",))
 
 
-def test_market_quality_block_contains_how_reliable_label():
+def test_market_quality_block_is_not_rendered():
     mq = _make_market_quality("HIGH", 72)
     result = _format_market_quality_block(mq)
-    assert "How reliable is the market data?" in result
+    assert result == ""
 
 
-def test_market_quality_block_elite_shows_label():
+def test_market_quality_block_does_not_render_internal_label():
     mq = _make_market_quality("ELITE", 90)
     result = _format_market_quality_block(mq)
-    assert "ELITE" in result
-    assert "🥇" in result
+    assert result == ""
 
 
 def test_market_quality_block_none_returns_empty():
     assert _format_market_quality_block(None) == ""
 
 
-def test_decision_block_uses_bettor_facing_quality_label():
-    """The recommendation block uses the public Quality label, not BQ copy."""
+def test_decision_block_omits_quality_metadata():
+    """The recommendation block keeps direction/history but omits quality."""
     from alerts_multiplatform import _format_decision_block
     import types
 
@@ -363,8 +362,8 @@ def test_decision_block_uses_bettor_facing_quality_label():
         h2h_games=None, h2h_over=None, h2h_under=None, h2h_hit_rate=None, h2h_avg=None,
     )
     result = _format_decision_block(decision)
-    assert "Quality:" in result
-    assert "82/100" in result
+    assert "Quality:" not in result
+    assert "82/100" not in result
     assert "Bet Quality" not in result
     assert "BQ" not in result
     assert "A-tier" not in result
@@ -375,8 +374,7 @@ def test_market_quality_line_normalizes_enum_label():
     from alerts_multiplatform import _format_market_quality_line
 
     result = _format_market_quality_line(_make_market_quality("MEDIUM", 61))
-    assert "MEDIUM" in result
-    assert "MarketQualityLabel." not in result
+    assert result == ""
 
 
 def test_qualified_play_omits_all_market_quality_display():

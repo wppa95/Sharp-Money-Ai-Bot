@@ -402,21 +402,17 @@ class TestFormatAlert:
         msg = format_player_prop_market_alert(comp)
         assert "PLAYER PROP MARKET ALERT" in msg
 
-    def test_uses_proxy_match_confidence_label(self):
-        """Section 4 requirement: must say 'Proxy Match Confidence', not just 'Confidence'."""
+    def test_omits_proxy_match_confidence_metadata(self):
+        """Provider comparison confidence remains internal metadata."""
         comp = _make_comp(proxy_match_confidence=90)
         msg = format_player_prop_market_alert(comp)
-        assert "Proxy Match Confidence" in msg
+        assert "Proxy Match Confidence" not in msg
 
-    def test_does_not_say_confidence_alone(self):
-        """Old pp_reference format used 'Confidence: X/100' without 'Proxy Match'."""
+    def test_does_not_render_confidence_lines(self):
+        """The Telegram presentation does not render confidence metadata."""
         comp = _make_comp(proxy_match_confidence=90)
         msg = format_player_prop_market_alert(comp)
-        # Ensure 'Confidence:' (no "Proxy Match" prefix) doesn't appear
-        # (the phrase "Proxy Match Confidence" contains "Confidence", that's fine)
-        lines = msg.split("\n")
-        bare_conf_lines = [l for l in lines if "Confidence:" in l and "Proxy Match" not in l]
-        assert bare_conf_lines == [], f"Found bare 'Confidence:' line: {bare_conf_lines}"
+        assert "Confidence" not in msg
 
     def test_shows_available_providers_only(self):
         """Alert shows only providers with real data; unavailable ones are omitted."""
@@ -470,15 +466,15 @@ class TestFormatAlert:
         msg = format_player_prop_market_alert(comp)
         assert "⚾" in msg
 
-    def test_confidence_bar_in_output(self):
+    def test_confidence_bar_is_not_rendered(self):
         comp = _make_comp(proxy_match_confidence=90)
         msg = format_player_prop_market_alert(comp)
-        assert "████" in msg  # bar has filled blocks
+        assert "████" not in msg
 
     def test_disclaimer_present(self):
         comp = _make_comp()
         msg = format_player_prop_market_alert(comp)
-        assert "not betting edge" in msg or "proxy reliability" in msg
+        assert "Not a betting recommendation" in msg
 
     def test_sources_line_shows_active_providers(self):
         comp = _make_comp()  # only Underdog available

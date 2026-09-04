@@ -422,9 +422,10 @@ class TestFormatPpReferenceAlert:
         msg = format_pp_reference_alert(_make_match(ud_line=25.5))
         assert "25.5" in msg
 
-    def test_contains_confidence_score(self):
+    def test_omits_internal_confidence_score(self):
         msg = format_pp_reference_alert(_make_match(confidence=90))
-        assert "90" in msg
+        assert "Confidence" not in msg
+        assert "90/100" not in msg
 
     def test_contains_sport(self):
         msg = format_pp_reference_alert(_make_match(sport="NBA"))
