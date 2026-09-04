@@ -4781,6 +4781,12 @@ async def underdog_job(context) -> None:
                 _standing_ordered.extend(_sp_grp[:3])
     
             for (_ssnap, _sp, _st, _ssport, _prev) in _standing_ordered:
+                if time.monotonic() >= _cycle_deadline:
+                    logger.warning(
+                        "underdog_job: standing scan reached cycle deadline; "
+                        "leaving remaining candidates for the next scan",
+                    )
+                    break
                 _line_val = _ssnap.line or 0.0
     
                 # 24 h dedup — skip if already alerted today (DB: UnderdogSnapshotRecord.alert_sent)
@@ -4821,15 +4827,18 @@ async def underdog_job(context) -> None:
                 _shistory_snap = None
                 try:
                     from providers.player_history import get_player_history_provider
-                    _shistory_snap = await get_player_history_provider().get_snapshot(
-                        db,
-                        _sp,
-                        _ssport,
-                        _st,
-                        _line_val,
-                        ud_history=_shist,
-                        source_provider="Underdog",
-                        instrumentation=_cycle_timing,
+                    _shistory_snap = await _await_cycle_budget(
+                        get_player_history_provider().get_snapshot(
+                            db,
+                            _sp,
+                            _ssport,
+                            _st,
+                            _line_val,
+                            ud_history=_shist,
+                            source_provider="Underdog",
+                            instrumentation=_cycle_timing,
+                        ),
+                        "standing history",
                     )
                 except Exception:
                     _shistory_snap = None
@@ -4856,10 +4865,13 @@ async def underdog_job(context) -> None:
                     )
                     continue
     
-                _shits = await _fetch_and_compute_hit_rates(
-                    db, _sp, _ssport, _st, _line_val,
-                    cycle_timing=_cycle_timing,
-                    source_provider="Underdog",
+                _shits = await _await_cycle_budget(
+                    _fetch_and_compute_hit_rates(
+                        db, _sp, _ssport, _st, _line_val,
+                        cycle_timing=_cycle_timing,
+                        source_provider="Underdog",
+                    ),
+                    "standing hit rates",
                 )
                 _sdec = make_ud_bet_decision(
                     score        = _sscore,
