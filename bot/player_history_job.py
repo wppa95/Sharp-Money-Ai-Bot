@@ -343,10 +343,10 @@ async def player_history_collector_job(context) -> None:
                 )
             except _CadenceBoundaryReached as exc:
                 logger.warning(
-                    "player_history_collector_job: cadence boundary reached during %s",
+                    "player_history_collector_job: evidence hydration skipped "
+                    "after %s; continuing with full provider collection",
                     exc,
                 )
-                return
             except Exception as exc:
                 logger.warning(
                     "player_history_collector_job: evidence cache hydration failed: %s",
