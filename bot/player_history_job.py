@@ -21,32 +21,33 @@ _SUPPORTED_HISTORY_SPORTS = frozenset({
     "SOCCER",         # Requires FOOTBALL_DATA_API_KEY; returns [] gracefully without it
 })
 
-# Keep transactions short enough that live monitoring and reporting can get
-# the SQLite writer slot, while committing often enough that a long provider
-# collection never keeps all fetched rows only in memory.
-_PLAYER_HISTORY_WRITE_BATCH_SIZE = 25
-# Keep provider work concurrent enough to finish the full per-cycle slice.
-# These workers belong to one invocation; this is not a carryover queue.
-_PLAYER_HISTORY_FETCH_CONCURRENCY = 64
+# Keep transactions large enough that a full active book does not create
+# hundreds of SQLite commits, while still yielding the writer gate regularly
+# for live monitoring and reporting.
+_PLAYER_HISTORY_WRITE_BATCH_SIZE = 500
+# Process the complete active book in one invocation without opening one
+# request per target at once. These workers belong to this invocation; there
+# is no carryover queue or deferred target list.
+_PLAYER_HISTORY_FETCH_CONCURRENCY = 256
 # Do not let a busy SQLite writer consume the whole cadence. Provider calls
 # use the providers' own request timeouts and all selected targets are awaited;
 # target data is never intentionally dropped by this collector.
 _PLAYER_HISTORY_OPERATION_TIMEOUT_SECONDS = 5.0
 
-# This is an API-call/target budget per scheduler run, not a cap on the
-# active-player universe. The full target list is rebuilt so newly active
-# props can join the rotation, while the cursor below ensures that existing
-# targets continue from where the previous run stopped.
+# Retained as a compatibility/configuration value for callers that import it.
+# It is deliberately not used as a selection limit: every active supported
+# target is fetched on every cadence. The default is sized above the current
+# approximately 5,200-target Underdog book.
 try:
     from config import config as _config
 
     _API_CALL_TARGET = max(
-        1, int(getattr(_config, "PLAYER_HISTORY_BATCH_SIZE", 250))
+        5_200, int(getattr(_config, "PLAYER_HISTORY_BATCH_SIZE", 6_000))
     )
 except (ImportError, TypeError, ValueError):
     # Keep this module usable in focused tests and older integrations that do
     # not load the application configuration module.
-    _API_CALL_TARGET = 250
+    _API_CALL_TARGET = 5_200
 
 _NEXT_TARGET_KEY = "_player_history_next_target"
 _CURSOR_KEY = "_player_history_cursor"
@@ -146,13 +147,14 @@ def _rotating_target_slice(
 
 
 async def player_history_collector_job(context) -> None:
-    """Fetch real game results for active primary-provider props.
+    """Fetch real game results for every active supported primary prop.
 
-    Selects all active players whose sport has a working
-    PlayerStatsProvider data path, then fetches one fair, bounded target
-    slice. The next invocation resumes at the following target. It is an
-    independent storage lane: player monitoring neither starts, stops,
-    pauses, nor reports this work.
+    The active target universe is rebuilt on every cadence and fetched in one
+    bounded-concurrency batch. There is intentionally no rotating slice or
+    carryover queue: a prop that is active now is eligible now, and newly
+    active props do not wait for a later rotation. It is an independent
+    storage lane: player monitoring neither starts, stops, pauses, nor reports
+    this work.
     """
     bot_data = context.bot_data
     db = bot_data.get("history_db") or bot_data.get("db")
@@ -160,8 +162,8 @@ async def player_history_collector_job(context) -> None:
         logger.warning("player_history_collector_job: db not ready")
         return
     logger.info(
-        "player_history_collector_job: independent rotating collection starting "
-        "batch_limit=%d cadence_budget=%.1fs",
+        "player_history_collector_job: independent full-book collection starting "
+        "target_floor=%d cadence_budget=%.1fs",
         _API_CALL_TARGET,
         _player_history_cadence_budget(),
     )
@@ -306,30 +308,23 @@ async def player_history_collector_job(context) -> None:
 
         logger.info(
             "player_history_collector_job: provider_targets=%d "
-            "round_robin_sports=%s mode=independent_rotating_collection "
-            "batch_limit=%d",
+            "round_robin_sports=%s mode=independent_full_collection "
+            "target_floor=%d",
             len(targets),
             sorted({sport for _, sport, _ in targets}),
             _API_CALL_TARGET,
         )
 
-        cycle_targets, _, _ = _rotating_target_slice(
-            targets,
-            next_target=bot_data.get(_NEXT_TARGET_KEY),
-            cursor=bot_data.get(_CURSOR_KEY, 0),
-            limit=_API_CALL_TARGET,
+        # Stable ordering keeps request/load distribution reproducible, but
+        # there is no slice limit: every active target is attempted this run.
+        cycle_targets = _fair_cycle_targets(
+            sorted(targets, key=lambda target: (target[1], target[0], target[2])),
+            len(targets),
         )
-        stable_targets = sorted(
-            targets, key=lambda target: (target[1], target[0], target[2])
-        )
-        target_rotation = _fair_cycle_targets(stable_targets, len(stable_targets))
-        rotation_indexes = {
-            target: index for index, target in enumerate(target_rotation)
-        }
         # Hydrate live evidence memory in one bounded background read. The
-        # Underdog scan never performs these reads itself. Only this run's
-        # target slice is loaded; the remaining targets are covered by later
-        # rotations rather than replaying the full active set every time.
+        # Underdog scan never performs these reads itself. This bounded
+        # hydration is only an in-memory warm-up and does not restrict
+        # provider collection or persistence.
         bulk_reader = getattr(db, "get_player_results_bulk", None)
         if cycle_targets and asyncio.iscoroutinefunction(bulk_reader):
             try:
@@ -358,7 +353,7 @@ async def player_history_collector_job(context) -> None:
                     exc,
                 )
 
-        # ── Fetch this run's bounded supported target slice ─────────────────
+        # ── Fetch this run's complete supported target set ──────────────────
         ok = 0
         rows = 0
         completed_results: list[object] = []
@@ -371,19 +366,6 @@ async def player_history_collector_job(context) -> None:
         budget_exhausted = False
         fetch_semaphore = asyncio.Semaphore(_PLAYER_HISTORY_FETCH_CONCURRENCY)
         completed_targets: list[tuple[str, str, str]] = []
-
-        def advance_target(target: tuple[str, str, str]) -> None:
-            """Move rotation only after a target has no unpersisted rows."""
-            if not targets:
-                return
-            try:
-                current_index = rotation_indexes[target]
-                bot_data[_CURSOR_KEY] = (current_index + 1) % len(targets)
-                bot_data[_NEXT_TARGET_KEY] = (
-                    target_rotation[(current_index + 1) % len(targets)]
-                )
-            except (KeyError, IndexError):
-                pass
 
         async def fetch_target(player: str, sport: str, stat: str):
             async with fetch_semaphore:
@@ -433,8 +415,6 @@ async def player_history_collector_job(context) -> None:
                     "for %s/%s/%s",
                     player, sport, stat,
                 )
-                # Do not advance a target whose provider result was not
-                # collected. It remains eligible at the next rotation.
                 continue
             if fetch_status == "error":
                 failed += 1
@@ -442,7 +422,6 @@ async def player_history_collector_job(context) -> None:
                     "player_history_collector_job: %s/%s/%s failed: %s",
                     player, sport, stat, fetch_value,
                 )
-                advance_target((player, sport, stat))
                 continue
 
             raw = fetch_value
@@ -457,7 +436,7 @@ async def player_history_collector_job(context) -> None:
                 rows_by_sport[sport] = rows_by_sport.get(sport, 0) + len(raw)
                 completed_targets.append((player, sport, stat))
             else:
-                advance_target((player, sport, stat))
+                pass
 
         async def write_batch(batch: list[object]) -> None:
             """Persist one completed result batch within this cycle."""
@@ -508,12 +487,6 @@ async def player_history_collector_job(context) -> None:
                     exc,
                 )
                 break
-        else:
-            # A target with returned rows advances only after every result
-            # batch from this invocation has been committed successfully.
-            for target in completed_targets:
-                advance_target(target)
-
         logger.info(
             "player_history_collector_job: done players_ok=%d rows=%d "
             "persisted_rows=%d processed=%d remaining=%d errors=%d "
