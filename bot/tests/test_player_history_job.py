@@ -389,6 +389,39 @@ async def test_player_history_waits_for_all_provider_targets_in_one_cycle():
 
 
 @pytest.mark.asyncio
+async def test_player_history_provider_timeout_cannot_hold_next_cadence(caplog):
+    snapshot = SimpleNamespace(
+        player_name="Slow Provider",
+        sport="NBA",
+        stat_type="points",
+    )
+    db = MagicMock()
+    db.get_active_underdog_snapshot_per_prop = AsyncMock(
+        return_value={("Slow Provider", "points"): snapshot}
+    )
+    provider = MagicMock()
+
+    async def slow_fetch(*_args):
+        await asyncio.sleep(10)
+        return []
+
+    provider.fetch_results = slow_fetch
+    context = SimpleNamespace(bot_data={"db": db})
+
+    with (
+        patch("player_history_job._player_history_cadence_budget", return_value=0.03),
+        patch("providers.player_stats.PlayerStatsProvider", return_value=provider),
+        caplog.at_level("INFO"),
+    ):
+        await asyncio.wait_for(
+            player_history_collector_job(context),
+            timeout=0.2,
+        )
+
+    assert "budget_exhausted=True" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_player_history_blocked_writer_logs_and_does_not_retain_results(caplog):
     snapshot = SimpleNamespace(
         player_name="Blocked Writer",
