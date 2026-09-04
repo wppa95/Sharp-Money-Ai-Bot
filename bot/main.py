@@ -681,15 +681,10 @@ async def post_init(application: Application) -> None:
             when=5,
             name="propline_request_scan",
         )
-        # Full-pool rotation provides bounded eventual rescoring for unchanged
-        # active props. It is independent from the live feed fetch and uses the
-        # same coalescing coordinator so a slow batch cannot overlap itself.
-        jq.run_repeating(
-            _coordinated_job("full_pool_rescan", _full_pool_rescan_job),
-            interval=config.FPR_INTERVAL,
-            first=config.FPR_INTERVAL,
-            name="full_pool_rescan",
-        )
+        # The complete current Underdog book is processed by underdog_job.
+        # There is deliberately no deferred/full-pool remainder worker: a
+        # second batch must begin only on the next cadence after this cycle's
+        # persistence and history gates release.
         # CLV seed job — every 15 minutes (creates AlertCLVSeed entries for alerts)
         jq.run_repeating(_coordinated_job("clv_seeder", _clv_seed_job), interval=900, first=120, name="clv_seeder")
         # CLV harvest job — every hour (processes seeds after game_time passes)
@@ -731,14 +726,13 @@ async def post_init(application: Application) -> None:
                 name="season_checker",
             )
         logger.info(
-            "Jobs scheduled — underdog: every %ds, FPR: every %ds, "
-            "grader: every %ds, history: every %ds (batch=%d, headroom=%ds), "
+            "Jobs scheduled — underdog: every %ds, grader: every %ds, "
+            "history: every %ds (batch=%d, headroom=%ds), "
             "season_check: every %ds, "
             "heartbeat: every 60s "
              "[PrizePicks/PropLine companion cycle enabled=%s; "
              "PropLine default rate=180/hour; DK/FD delivery disabled]",
             config.UNDERDOG_POLL_INTERVAL,
-            config.FPR_INTERVAL,
             config.OPPORTUNITY_GRADER_INTERVAL,
             config.PLAYER_HISTORY_POLL_INTERVAL,
             config.PLAYER_HISTORY_BATCH_SIZE,

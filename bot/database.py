@@ -22,6 +22,7 @@ from sqlalchemy import (
     UniqueConstraint,
     select, func, desc, text, delete, or_, and_, case, tuple_, update
 )
+from sqlalchemy import insert as sa_insert
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
@@ -31,7 +32,7 @@ logger = logging.getLogger(__name__)
 _UNDERDOG_BULK_MAX_RETRIES = 2
 _UNDERDOG_BULK_RETRY_DELAYS = (0.25, 0.75)
 _UNDERDOG_CANTOPEN_RETRY_DELAYS = (0.5, 1.5)
-_UNDERDOG_BULK_BATCH_SIZE = 200
+_UNDERDOG_BULK_BATCH_SIZE = 1_000
 _DB_WRITE_MAX_RETRIES = 2
 _DB_WRITE_RETRY_DELAYS = (0.15, 0.5)
 _PRIZEPICKS_EXTERNAL_PREFIX = "PrizePicks::"
@@ -4296,7 +4297,46 @@ class Database:
                 session = self.session()
                 async with session as s:
                     try:
-                        s.add_all(records)
+                        if hasattr(s, "execute"):
+                            # Core executemany avoids constructing/flushing one
+                            # ORM unit-of-work entry per observation. The
+                            # transaction remains bounded by the outer chunk,
+                            # but the full feed is still awaited before the
+                            # monitoring cycle can release its slot.
+                            values = [
+                                {
+                                    "external_id": str(record.external_id or ""),
+                                    "player_name": str(record.player_name or ""),
+                                    "team": str(record.team or ""),
+                                    "sport": str(record.sport or ""),
+                                    "stat_type": str(record.stat_type or ""),
+                                    "line_value": float(record.line_value or 0.0),
+                                    "game_id": str(record.game_id or ""),
+                                    "game_time": record.game_time,
+                                    "provider_status": record.provider_status,
+                                    "line_moved": bool(record.line_moved),
+                                    "prev_line": record.prev_line,
+                                    "line_delta": record.line_delta,
+                                    "removed": bool(record.removed),
+                                    "alert_sent": bool(record.alert_sent),
+                                    "score_total": record.score_total,
+                                    "score_tier": record.score_tier,
+                                    "score_stars": record.score_stars,
+                                    "alert_outcome": record.alert_outcome,
+                                    "validation_json": record.validation_json,
+                                    "bet_recommendation": record.bet_recommendation,
+                                    "bet_confidence": record.bet_confidence,
+                                    "bet_reason": record.bet_reason,
+                                    "bet_evidence_json": record.bet_evidence_json,
+                                    "fetched_at": record.fetched_at or datetime.utcnow(),
+                                }
+                                for record in records
+                            ]
+                            await s.execute(sa_insert(UnderdogSnapshotRecord), values)
+                        else:
+                            # Lightweight test doubles and older adapters keep
+                            # the original ORM contract.
+                            s.add_all(records)
                         stage = "transaction_begin"
                         # Flush separately so failures while acquiring the
                         # transaction/connection are distinguishable from a
