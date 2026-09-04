@@ -10,14 +10,6 @@ from engine.sport_policy import is_football_related_sport
 
 logger = logging.getLogger(__name__)
 
-# Storage enrichment gets a short bounded window and is preemptible. It must
-# never become part of live monitoring cadence or remain active beside a scan.
-_CYCLE_TIME_BUDGET_SECONDS = 45.0
-_PROVIDER_CALL_TIMEOUT_SECONDS = 8.0
-# This is an API-call target, not a cap on the number of active players
-# retained while building the rotation.
-_API_CALL_TARGET = 250
-
 # Sports for which PlayerStatsProvider.fetch_results() has a working data
 # path.  Unsupported sports (LOL, VALORANT/VAL, PGA/GOLF, MMA, TT, and
 # BADMINTON) would always return [] — filtering them avoids wasting API-call
@@ -28,36 +20,6 @@ _SUPPORTED_HISTORY_SPORTS = frozenset({
     "MLS", "NCAAB", "FIFA",
     "SOCCER",         # Requires FOOTBALL_DATA_API_KEY; returns [] gracefully without it
 })
-
-
-def _underdog_scan_running() -> bool:
-    """Return whether the shared Underdog scan currently owns the DB-heavy slot."""
-    try:
-        from market_engine import _ud_full_scan_running
-        return bool(_ud_full_scan_running)
-    except (ImportError, AttributeError):
-        # Keep the collector usable in isolated tests and older integrations
-        # where the market engine module is not installed.
-        return False
-
-
-# A live Underdog scan can take longer than this job's four-minute cadence
-# when the SQLite pool is under load. Waiting for the current scan is
-# preferable to yielding every scheduled run indefinitely: otherwise non-MLB
-# sports never accumulate the real game results required for a pick.
-_collector_task: asyncio.Task | None = None
-
-
-async def stop_player_history_collector() -> None:
-    """Cancel storage enrichment before any live scan or rescan starts."""
-    global _collector_task
-    task = _collector_task
-    if task is None or task.done() or task is asyncio.current_task():
-        return
-    task.cancel()
-    await asyncio.gather(task, return_exceptions=True)
-    if _collector_task is task:
-        _collector_task = None
 
 
 def _fair_cycle_targets(
@@ -89,27 +51,14 @@ async def player_history_collector_job(context) -> None:
 
     Selects all active players whose sport has a working
     PlayerStatsProvider data path, then calls fetch_results() until the
-    cadence-safe time budget is exhausted. Player count and API calls are
-    uncapped; the run duration is bounded instead.
+    complete target set is exhausted. It is an independent storage lane:
+    player monitoring neither starts, stops, pauses, nor reports this work.
     """
-    global _collector_task
-    db = context.bot_data.get("db")
+    db = context.bot_data.get("history_db") or context.bot_data.get("db")
     if not db:
         logger.warning("player_history_collector_job: db not ready")
         return
-    # Never wait behind monitoring and then start late. This independent
-    # storage job simply skips its turn if a scan or rescan is active.
-    if _underdog_scan_running():
-        logger.info(
-            "player_history_collector_job: storage refresh skipped while "
-            "live monitoring is active"
-        )
-        return
-    _collector_task = asyncio.current_task()
-    logger.info(
-        "player_history_collector_job: starting (time_budget=%.0fs)",
-        _CYCLE_TIME_BUDGET_SECONDS,
-    )
+    logger.info("player_history_collector_job: independent full collection starting")
     try:
         from providers.player_stats import PlayerStatsProvider
 
@@ -159,16 +108,6 @@ async def player_history_collector_job(context) -> None:
                 exc,
             )
 
-        # Underdog may have claimed the slot while the active-pool query was
-        # waiting on SQLite.  Yield before the fallback query or any provider
-        # work so the live scan gets exclusive access to the hot path.
-        if _underdog_scan_running():
-            logger.info(
-                    "player_history_collector_job: storage refresh stopped "
-                    "before provider work because monitoring became active"
-            )
-            return
-
         # ── Fallback: recent normalized history when no active rows ──────────
         if not targets:
             try:
@@ -210,10 +149,9 @@ async def player_history_collector_job(context) -> None:
 
         logger.info(
             "player_history_collector_job: provider_targets=%d "
-            "round_robin_sports=%s time_budget=%.0fs",
+            "round_robin_sports=%s mode=independent_full_collection",
             len(targets),
             sorted({sport for _, sport, _ in targets}),
-            _CYCLE_TIME_BUDGET_SECONDS,
         )
 
         # Hydrate live evidence memory in one bounded background read. The
@@ -237,53 +175,19 @@ async def player_history_collector_job(context) -> None:
                     exc,
                 )
 
-        # ── Fetch results until the cadence-safe time budget is exhausted ───
+        # ── Fetch the complete supported target set ─────────────────────────
         ok = 0
         rows = 0
-        cycle_targets = _fair_cycle_targets(
-            targets, min(len(targets), _API_CALL_TARGET)
-        )
+        cycle_targets = _fair_cycle_targets(targets, len(targets))
         target_counts: dict[str, int] = {}
         ok_by_sport: dict[str, int] = {}
         rows_by_sport: dict[str, int] = {}
         cycle_started = time.monotonic()
-        stopped_for_budget = False
-        stopped_for_underdog = False
-
-        async def _await_history_budget(awaitable, operation: str):
-            remaining = _CYCLE_TIME_BUDGET_SECONDS - (
-                time.monotonic() - cycle_started
-            )
-            if remaining <= 0:
-                if asyncio.iscoroutine(awaitable):
-                    awaitable.close()
-                return []
-            try:
-                return await asyncio.wait_for(
-                    awaitable,
-                    timeout=min(remaining, _PROVIDER_CALL_TIMEOUT_SECONDS),
-                )
-            except asyncio.TimeoutError:
-                logger.warning(
-                    "player_history_collector_job: %s exceeded remaining "
-                    "cycle budget; yielding to the next cycle",
-                    operation,
-                )
-                return []
 
         for player, sport, stat in cycle_targets:
-            if _underdog_scan_running():
-                stopped_for_underdog = True
-                break
-            if time.monotonic() - cycle_started >= _CYCLE_TIME_BUDGET_SECONDS:
-                stopped_for_budget = True
-                break
             target_counts[sport] = target_counts.get(sport, 0) + 1
             try:
-                raw = await _await_history_budget(
-                    provider.fetch_results(player, sport, stat),
-                    f"provider fetch {sport}/{stat}",
-                )
+                raw = await provider.fetch_results(player, sport, stat)
                 # Some non-football sports have no working public
                 # PlayerStatsProvider path.  Let final PropLine event stats
                 # fill those missing rows; that adapter persists accepted
@@ -298,16 +202,13 @@ async def player_history_collector_job(context) -> None:
                         from providers.player_history import (
                             get_player_history_provider,
                         )
-                        raw = await _await_history_budget(
-                            get_player_history_provider().supplement_missing_results(
-                                db,
-                                player,
-                                sport,
-                                stat,
-                                min_samples=5,
-                                source_provider="Underdog",
-                            ),
-                            f"PropLine fallback {sport}/{stat}",
+                        raw = await get_player_history_provider().supplement_missing_results(
+                            db,
+                            player,
+                            sport,
+                            stat,
+                            min_samples=5,
+                            source_provider="Underdog",
                         )
                     except Exception as exc:
                         logger.debug(
@@ -318,12 +219,6 @@ async def player_history_collector_job(context) -> None:
                             stat,
                             exc,
                         )
-                # A provider request can overlap the instant Underdog claims
-                # the slot.  Do not begin the next SQLite write in that case;
-                # the next history cycle will retry this target.
-                if _underdog_scan_running():
-                    stopped_for_underdog = True
-                    break
                 for r in raw:
                     await db.upsert_player_result(r)
                 if raw:
@@ -342,21 +237,12 @@ async def player_history_collector_job(context) -> None:
 
         logger.info(
             "player_history_collector_job: done players_ok=%d rows=%d "
-            "targets_attempted=%d elapsed=%.1fs stopped_for_budget=%s "
-            "stopped_for_underdog=%s targets_by_sport=%s "
+            "targets_attempted=%d targets_total=%d elapsed=%.1fs "
+            "targets_by_sport=%s "
             "players_ok_by_sport=%s rows_by_sport=%s",
-            ok, rows, sum(target_counts.values()), time.monotonic() - cycle_started,
-            stopped_for_budget, stopped_for_underdog, target_counts,
+            ok, rows, sum(target_counts.values()), len(cycle_targets),
+            time.monotonic() - cycle_started, target_counts,
             ok_by_sport, rows_by_sport,
         )
-    except asyncio.CancelledError:
-        logger.info(
-            "player_history_collector_job: storage refresh cancelled before "
-            "live monitoring"
-        )
-        raise
     except Exception as exc:
         logger.exception("player_history_collector_job: %s", exc)
-    finally:
-        if _collector_task is asyncio.current_task():
-            _collector_task = None

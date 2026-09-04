@@ -356,6 +356,7 @@ def _configured_odds_api_sports() -> list[tuple[str, Sport]]:
 # ── Module-level singletons ────────────────────────────────────────────────────
 # Initialised inside post_init so they live in the bot's event loop.
 _db: Database | None = None
+_history_db: Database | None = None
 _engine: AnalysisEngine | None = None
 _season_checker: SeasonChecker | None = None
 
@@ -446,7 +447,7 @@ async def _start_health_server() -> None:
 
 async def post_init(application: Application) -> None:
     """Runs once after the bot is initialised but before polling starts."""
-    global _db, _engine, _season_checker
+    global _db, _history_db, _engine, _season_checker
 
     logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     logger.info("  Sharp Money +EV Detection Bot — Starting Up")
@@ -469,6 +470,11 @@ async def post_init(application: Application) -> None:
 
     _db = Database(config.DATABASE_URL)
     await _db.init()
+    # The continuous evidence/history collector owns a separate connection
+    # pool so its long full-universe run cannot make command/report reads wait
+    # behind storage work.
+    _history_db = Database(config.DATABASE_URL)
+    await _history_db.init()
 
     _engine = AnalysisEngine()
 
@@ -564,6 +570,7 @@ async def post_init(application: Application) -> None:
 
     # Store db reference in bot_data for market engine jobs
     application.bot_data["db"] = _db
+    application.bot_data["history_db"] = _history_db
 
     # Register background jobs
     jq = application.job_queue
@@ -819,6 +826,8 @@ async def post_shutdown(application: Application) -> None:
         await shutdown_db_persistence_worker()
     except Exception as _reset_exc:
         logger.warning("Runtime session cleanup failed during shutdown: %s", _reset_exc)
+    if _history_db:
+        await _history_db.close()
     if _db:
         await _db.close()
     # Stop the health-check server if it started

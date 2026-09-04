@@ -551,18 +551,6 @@ def _active_job_names() -> set[str]:
     return set(_active_jobs)
 
 
-async def _preempt_storage_enrichment() -> None:
-    """Ensure storage-only history work cannot overlap a scan or rescan."""
-    try:
-        from player_history_job import stop_player_history_collector
-        await stop_player_history_collector()
-    except Exception as exc:
-        logger.debug(
-            "storage collector preemption skipped: %s",
-            type(exc).__name__,
-        )
-
-
 # Module-level registry — set by init_market_engine()
 _registry: Optional[ConnectorRegistry] = None
 
@@ -3585,9 +3573,6 @@ async def underdog_job(context) -> None:
     global _cycle_sequence
     _cycle_sequence += 1
     _cycle_timing = _CycleTiming(_cycle_sequence)
-    # Player history is a storage/enrichment concern, never a concurrent
-    # monitoring job. Preempt it before scan state or display status changes.
-    await _preempt_storage_enrichment()
     _job_activity_start("underdog")
     # Reserve a full 30-second safety margin for final persistence, lifecycle
     # updates, and scheduler bookkeeping. If enrichment is slower than
@@ -6341,7 +6326,6 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
     bot          = context.bot
     if db is None:
         return
-    await _preempt_storage_enrichment()
     _job_activity_start("stable_refresh")
 
     chat_ids = list(config.allowed_user_ids)
@@ -6910,7 +6894,6 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
     bot          = context.bot
     if db is None:
         return
-    await _preempt_storage_enrichment()
 
     chat_ids = list(config.allowed_user_ids)
     now      = datetime.utcnow()

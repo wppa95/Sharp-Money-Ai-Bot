@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import sys
 import os
-import asyncio
 import inspect
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -15,10 +14,7 @@ from player_history_job import (
     _SUPPORTED_HISTORY_SPORTS,
     _fair_cycle_targets,
     player_history_collector_job,
-    stop_player_history_collector,
 )
-import player_history_job
-import market_engine
 
 
 def test_fair_cycle_targets_round_robins_all_sports():
@@ -58,27 +54,29 @@ def test_history_collector_is_not_part_of_monitoring_activity_or_health():
     assert "record_job_fail" not in source
 
 
+def test_history_collector_has_no_scan_coordination_hooks():
+    source = inspect.getsource(player_history_collector_job)
+
+    assert "_underdog_scan_running" not in source
+    assert "stop_player_history_collector" not in source
+    assert "time_budget" not in source
+
+
 @pytest.mark.asyncio
-async def test_storage_collector_can_be_preempted_before_scan():
-    task = asyncio.create_task(asyncio.sleep(60))
-    player_history_job._collector_task = task
-
-    await stop_player_history_collector()
-
-    assert task.cancelled()
-    assert player_history_job._collector_task is None
-
-
-def test_all_active_scan_entry_points_preempt_storage_enrichment():
-    assert "_preempt_storage_enrichment" in inspect.getsource(
-        market_engine.underdog_job
+async def test_history_collector_uses_its_dedicated_database_pool():
+    main_db = MagicMock()
+    history_db = MagicMock()
+    history_db.get_active_underdog_snapshot_per_prop = AsyncMock(return_value={})
+    history_db.get_latest_props_for_provider = AsyncMock(return_value=[])
+    context = SimpleNamespace(
+        bot_data={"db": main_db, "history_db": history_db}
     )
-    assert "_preempt_storage_enrichment" in inspect.getsource(
-        market_engine._stable_refresh_job
-    )
-    assert "_preempt_storage_enrichment" in inspect.getsource(
-        market_engine._full_pool_rescan_job
-    )
+
+    with patch("providers.player_stats.PlayerStatsProvider"):
+        await player_history_collector_job(context)
+
+    history_db.get_active_underdog_snapshot_per_prop.assert_awaited_once()
+    assert not main_db.mock_calls
 
 
 @pytest.mark.asyncio
@@ -98,9 +96,7 @@ async def test_player_history_skips_football_before_provider_fetch():
     fake_provider.fetch_results = AsyncMock(return_value=[])
 
     with (
-        patch("player_history_job._underdog_scan_running", return_value=False),
         patch("providers.player_stats.PlayerStatsProvider", return_value=fake_provider),
-        patch("engine.health.get_health_tracker", return_value=None),
     ):
         await player_history_collector_job(context)
 
@@ -108,25 +104,20 @@ async def test_player_history_skips_football_before_provider_fetch():
 
 
 @pytest.mark.asyncio
-async def test_player_history_yields_when_underdog_claims_slot_after_active_read():
-    """The fallback query/provider work must not start after a live scan claims."""
+async def test_player_history_fallback_runs_independently():
     db = MagicMock()
     db.get_active_underdog_snapshot_per_prop = AsyncMock(return_value={})
-    db.get_latest_props_for_provider = AsyncMock()
+    db.get_latest_props_for_provider = AsyncMock(return_value=[])
     context = SimpleNamespace(bot_data={"db": db})
 
-    with (
-        patch("player_history_job._underdog_scan_running", side_effect=[False, True]),
-        patch("engine.health.get_health_tracker", return_value=None),
-    ):
+    with patch("providers.player_stats.PlayerStatsProvider"):
         await player_history_collector_job(context)
 
-    db.get_latest_props_for_provider.assert_not_awaited()
+    db.get_latest_props_for_provider.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_player_history_stops_before_db_write_when_underdog_claims_after_fetch():
-    """A completed stats request must not trigger writes into the hot scan."""
+async def test_player_history_persists_completed_result_independently():
     snapshot = SimpleNamespace(player="Player One", sport="NBA", selection="Points 10.5")
     db = MagicMock()
     db.get_active_underdog_snapshot_per_prop = AsyncMock(
@@ -137,17 +128,13 @@ async def test_player_history_stops_before_db_write_when_underdog_claims_after_f
 
     fake_provider = MagicMock()
     fake_provider.fetch_results = AsyncMock(return_value=[SimpleNamespace()])
-    with (
-        patch("player_history_job._underdog_scan_running", side_effect=[False, False, False, True]),
-        patch("providers.player_stats.PlayerStatsProvider", return_value=fake_provider),
-        patch("engine.health.get_health_tracker", return_value=None),
-    ):
+    with patch("providers.player_stats.PlayerStatsProvider", return_value=fake_provider):
         await player_history_collector_job(context)
 
     fake_provider.fetch_results.assert_awaited_once_with(
             "Player One", "NBA", "points"
     )
-    db.upsert_player_result.assert_not_awaited()
+    db.upsert_player_result.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -170,11 +157,7 @@ async def test_player_history_collects_prizepicks_only_active_target():
 
     fake_provider = MagicMock()
     fake_provider.fetch_results = AsyncMock(return_value=[])
-    with (
-        patch("player_history_job._underdog_scan_running", return_value=False),
-        patch("providers.player_stats.PlayerStatsProvider", return_value=fake_provider),
-        patch("engine.health.get_health_tracker", return_value=None),
-    ):
+    with patch("providers.player_stats.PlayerStatsProvider", return_value=fake_provider):
         await player_history_collector_job(context)
 
     fake_provider.fetch_results.assert_awaited_once_with(
