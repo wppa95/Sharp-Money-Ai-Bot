@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 _UNDERDOG_BULK_MAX_RETRIES = 2
 _UNDERDOG_BULK_RETRY_DELAYS = (0.25, 0.75)
 _UNDERDOG_CANTOPEN_RETRY_DELAYS = (0.5, 1.5)
+_UNDERDOG_BULK_BATCH_SIZE = 200
 _DB_WRITE_MAX_RETRIES = 2
 _DB_WRITE_RETRY_DELAYS = (0.15, 0.5)
 _PRIZEPICKS_EXTERNAL_PREFIX = "PrizePicks::"
@@ -4266,6 +4267,25 @@ class Database:
         """
         if not records:
             return {"records_written": 0, "retry_count": 0}
+
+        # A full live feed can contain several thousand observations. Keep
+        # each transaction bounded so one ORM flush does not monopolize SQLite
+        # or create a multi-gigabyte WAL burst that blocks evidence writers.
+        # Aggregate the per-batch results so callers still receive an exact
+        # durable count and retry total for the complete feed.
+        if len(records) > _UNDERDOG_BULK_BATCH_SIZE:
+            records_written = 0
+            retry_count = 0
+            for start in range(0, len(records), _UNDERDOG_BULK_BATCH_SIZE):
+                result = await self.save_underdog_snapshots_bulk(
+                    records[start: start + _UNDERDOG_BULK_BATCH_SIZE]
+                )
+                records_written += int(result.get("records_written", 0))
+                retry_count += int(result.get("retry_count", 0))
+            return {
+                "records_written": records_written,
+                "retry_count": retry_count,
+            }
 
         retry_count = 0
         for attempt in range(_UNDERDOG_BULK_MAX_RETRIES + 1):
