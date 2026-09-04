@@ -3647,13 +3647,13 @@ async def underdog_job(context) -> None:
     _cycle_sequence += 1
     _cycle_timing = _CycleTiming(_cycle_sequence)
     _job_activity_start("underdog")
-    # Reserve a full 30-second safety margin for final persistence, lifecycle
-    # updates, and scheduler bookkeeping. If enrichment is slower than
-    # expected, the cycle exits with the observations and partial counters it
-    # has already collected instead of holding the cadence indefinitely.
+    # Allow the complete current book to use the existing cadence. The hard
+    # stop is only a safety boundary: it never creates a remainder queue or
+    # schedules deferred work. If reached, the cycle reports the bottleneck
+    # and the next cadence fetches a fresh book.
     _cycle_deadline = time.monotonic() + max(
         5.0,
-        min(90.0, float(getattr(config, "UNDERDOG_POLL_INTERVAL", 120)) - 30.0),
+        float(getattr(config, "UNDERDOG_POLL_INTERVAL", 120)) - 5.0,
     )
 
     async def _await_cycle_budget(awaitable, operation: str):
@@ -3669,9 +3669,9 @@ async def underdog_job(context) -> None:
             return await asyncio.wait_for(awaitable, timeout=remaining)
         except asyncio.TimeoutError:
             _cycle_budget_exhausted = True
-            logger.warning(
-                "underdog_job: cycle deadline reached during %s; "
-                "leaving remaining props for the next scan",
+            logger.error(
+                "underdog_cycle_bottleneck: deadline reached during %s; "
+                "no remainder queue will be created",
                 operation,
             )
             return None
