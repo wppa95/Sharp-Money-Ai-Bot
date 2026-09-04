@@ -3971,13 +3971,15 @@ async def underdog_job(context) -> None:
     # scan cycle so /picks and /slip can apply tier-aware delivery gates.
     # Key: (player, sport, stat_type) → (mq_score: int, bq_score: float).
     _plh_mq_scores:      dict                       = {}
+    # The whole current feed is the evaluation population. Keep the config
+    # value as a lower bound for compatibility/diagnostics, never as a cap.
     _evaluation_budget = max(
-        0, int(getattr(config, "UNDERDOG_EVALUATION_BUDGET", 100))
+        len(ud_snaps),
+        int(getattr(config, "UNDERDOG_EVALUATION_BUDGET", 100)),
     )
     _evaluation_used = 0
-    # A cold/restarted in-memory state can make the entire active feed appear
-    # new.  Do not let one arbitrary new prop trigger a remote evidence
-    # backfill that holds the shared scan slot for the whole cadence.
+    # A large feed still uses the bounded local-history path, but every
+    # observation remains in this cycle's tracking/evaluation population.
     _large_new_prop_feed = len(ud_snaps) > 1000
     # Per-sport pipeline stage counters — emitted in debug summary (#7 diagnostics)
     _sport_raw:           dict[str, int] = {}  # daily props: non-removed, non-futures
@@ -4344,18 +4346,6 @@ async def underdog_job(context) -> None:
             if is_new_prop:
                 # ── New-prop path ────────────────────────────────────────────────
                 _n_new_prop += 1
-                # A restart or a newly populated database can expose a large
-                # number of first-seen identities at once.  Tracking has
-                # already persisted the entire feed above; cap only the
-                # expensive history/evidence/decision work so this live cycle
-                # finishes within its cadence.  The FPR rotation evaluates
-                # the remaining active universe without losing observations.
-                if _evaluation_used >= _evaluation_budget:
-                    _n_observation_only += 1
-                    _new_prop_skip_reasons["evaluation_budget"] = (
-                        _new_prop_skip_reasons.get("evaluation_budget", 0) + 1
-                    )
-                    continue
                 _evaluation_used += 1
                 _n_new_prop_evaluated += 1
                 line_val = snap.line or 0.0
