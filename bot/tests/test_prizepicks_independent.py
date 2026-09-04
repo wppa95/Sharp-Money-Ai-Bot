@@ -47,6 +47,25 @@ def _opportunity(provider: str) -> dict:
 
 
 class TestIndependentPrizePicks:
+    async def test_request_worker_skips_discovery_during_provider_cooldown(
+        self, monkeypatch
+    ):
+        class CooldownProvider:
+            backoff_remaining = 60.0
+            client = None
+
+            def is_available(self):
+                return True
+
+            async def discover_sports(self):
+                raise AssertionError("cooldown must prevent sport discovery")
+
+        monkeypatch.setattr(market_engine, "_propline_provider", CooldownProvider())
+
+        await market_engine.propline_request_scan_job(
+            SimpleNamespace(bot_data={"db": None})
+        )
+
     async def test_request_worker_persists_non_empty_observations(self, monkeypatch):
         prop = SimpleNamespace(
             player_name="Fetched Player",
