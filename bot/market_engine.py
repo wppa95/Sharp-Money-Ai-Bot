@@ -369,6 +369,19 @@ async def _db_persistence_worker() -> None:
             _db_persistence_queue.task_done()
 
 
+async def _persist_game_market_records(db, records: list) -> None:
+    for record in records:
+        operation = db.save_market_snapshot(record)
+        if inspect.isawaitable(operation):
+            await operation
+
+
+async def _persist_tracking_records(track_props, records: list) -> None:
+    operation = track_props(records)
+    if inspect.isawaitable(operation):
+        await operation
+
+
 def _enqueue_db_persistence(label: str, factory) -> bool:
     """Queue a production database write without blocking live monitoring."""
     global _db_persistence_queue, _db_persistence_worker_task, _db_persistence_loop
@@ -3583,11 +3596,8 @@ async def underdog_job(context) -> None:
         or getattr(s, "is_game_market", False) is True
     ]
     if ud_game_markets:
-        for _gm in ud_game_markets:
-            await _cycle_timing.await_db(
-                "write",
-                "save_market_snapshot_underdog_game_market",
-                db.save_market_snapshot(MarketSnapshotRecord(
+        _game_market_records = [
+            MarketSnapshotRecord(
                     sportsbook=_gm.sportsbook, sport=_gm.sport, league=_gm.league,
                     event=_gm.event,
                     market_type=(
@@ -3598,8 +3608,21 @@ async def underdog_job(context) -> None:
                     player=None, team=_gm.team, line=_gm.line, odds=_gm.odds,
                     opening_odds=_gm.opening_odds, is_pickem=True,
                     game_time=_gm.game_time, recorded_at=datetime.utcnow(),
-                )),
+                )
+            for _gm in ud_game_markets
+        ]
+        if isinstance(db, Database):
+            _enqueue_db_persistence(
+                "save Underdog game-market snapshots",
+                lambda: _persist_game_market_records(db, _game_market_records),
             )
+        else:
+            for _game_market_record in _game_market_records:
+                await _cycle_timing.await_db(
+                    "write",
+                    "save_market_snapshot_underdog_game_market",
+                    db.save_market_snapshot(_game_market_record),
+                )
         ud_snaps = [s for s in ud_snaps if s not in ud_game_markets]
     _cycle_timing.count("active_pool_fetched", len(snapshots))
     _cycle_timing.count("active_pool_sportsbook_filtered", len(snapshots) - len(ud_snaps))
