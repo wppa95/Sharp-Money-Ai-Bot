@@ -3947,6 +3947,67 @@ async def underdog_job(context) -> None:
     _cycle_timing.finish("active_pool")
     _cycle_timing.start("scoring_evidence")
 
+    # Build the durable snapshot batch from the complete provider feed before
+    # any bounded scoring/evidence work. Scoring may remain budgeted, but
+    # persistence must never inherit that evaluation cap or deadline.
+    _snapshot_records: list[UnderdogSnapshotRecord] = []
+    for _snapshot in ud_snaps:
+        _snapshot_player = str(_snapshot.player or "Unknown")
+        _snapshot_sport = str(_snapshot.sport or "UNKNOWN").upper()
+        _snapshot_stat = _extract_ud_stat_type(
+            _snapshot.selection,
+            _snapshot.player,
+            _snapshot.line,
+        )
+        try:
+            _snapshot_line = float(_snapshot.line or 0.0)
+        except (TypeError, ValueError):
+            _snapshot_line = 0.0
+        _snapshot_game_id = str(
+            getattr(_snapshot, "event", "")
+            or getattr(_snapshot, "game_id", "")
+            or ""
+        )
+        _snapshot_external_id = str(
+            getattr(_snapshot, "external_id", "") or ""
+        )
+        if not _snapshot_external_id:
+            _snapshot_external_id = (
+                f"{_snapshot_player}:{_snapshot_sport}:"
+                f"{_snapshot_stat}:{_snapshot_game_id}"
+            )
+        _snapshot_removed = "[REMOVED]" in (_snapshot.selection or "")
+        _snapshot_records.append(
+            UnderdogSnapshotRecord(
+                external_id=_snapshot_external_id[:64],
+                player_name=_snapshot_player,
+                team=str(_snapshot.team or ""),
+                sport=_snapshot_sport,
+                stat_type=_snapshot_stat,
+                line_value=_snapshot_line,
+                game_id=_snapshot_game_id[:64],
+                game_time=_snapshot.game_time,
+                provider_status=(
+                    getattr(_snapshot, "game_status", None)
+                    or getattr(_snapshot, "provider_status", None)
+                    or None
+                ),
+                line_moved=False,
+                prev_line=None,
+                line_delta=None,
+                removed=_snapshot_removed,
+                alert_sent=False,
+                alert_outcome=(
+                    "removed" if _snapshot_removed else "observation_only"
+                ),
+                fetched_at=now,
+            )
+        )
+    if is_cold_start:
+        _cold_start_records.extend(_snapshot_records)
+    else:
+        _incremental_records.extend(_snapshot_records)
+
     # Universal grading ledger: persist every valid active daily prop before
     # any scoring, qualification, strongest-pick, or delivery gate runs.
     # Futures/season-long markets have no single player-game settlement event
