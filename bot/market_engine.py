@@ -4154,6 +4154,7 @@ async def underdog_job(context) -> None:
                 )
 
         for _snap_index, snap in enumerate(ud_snaps):
+            record = _snapshot_records[_snap_index]
             if _cycle_budget_exhausted or time.monotonic() >= _cycle_deadline:
                 _n_observation_only += len(ud_snaps) - _snap_index
                 _cycle_budget_exhausted = True
@@ -4179,7 +4180,6 @@ async def underdog_job(context) -> None:
             if not is_removed and _is_futures_stat(stat_type):
                 _sp_fut = snap.sport or "UNKNOWN"
                 _sport_futures[_sp_fut] = _sport_futures.get(_sp_fut, 0) + 1
-                _snapshot_intentionally_skipped += 1
                 continue
 
             # Stage 1: daily prop count per sport (non-removed, non-futures)
@@ -5136,43 +5136,47 @@ async def underdog_job(context) -> None:
             _source_external_id = getattr(snap, "external_id", None)
             if not isinstance(_source_external_id, str) or not _source_external_id:
                 _source_external_id = f"{player}_{stat_type}"
-            record = UnderdogSnapshotRecord(
-                # Preserve the connector's source ID.  It is stable across a
-                # line movement and lets the active-by-line query retire the
-                # old line without deleting its historical snapshot.
-                external_id   = _source_external_id[:64],
-                player_name   = player,
-                team          = snap.team or "",
-                sport         = snap.sport,
-                stat_type     = stat_type,              # actual stat, not "Pick'em"
-                line_value    = snap.line or 0.0,
-                game_id       = snap.event,
-                game_time     = snap.game_time,
-                provider_status = (
-                    getattr(snap, "game_status", None)
-                    or getattr(snap, "provider_status", None)
-                    or None
-                ),
-                line_moved    = line_changed,
-                prev_line     = prev_line,
-                line_delta    = (
-                    (snap.line - prev_line)
-                    if prev_line is not None and snap.line is not None
-                    else None
-                ),
-                removed       = is_removed,
-                alert_sent    = ud_result.sent,
-                score_total   = clamp_score(score.total,  "ud_score.total",  0, 100) if score is not None else None,
-                score_tier    = score.tier   if score is not None else None,
-                score_stars   = clamp_score(score.stars,  "ud_score.stars",  0, 5)   if score is not None else None,
-                alert_outcome      = _alert_outcome,
-                validation_json    = validation.to_json() if validation is not None else None,
-                bet_recommendation = decision.recommendation if decision is not None else None,
-                bet_confidence     = clamp_score(decision.confidence, "ud_bet_confidence", 0, 100) if decision is not None else None,
-                bet_reason         = decision.reason         if decision is not None else None,
-                bet_evidence_json  = decision.to_json()      if decision is not None else None,
-                fetched_at         = now,
+            # The base record was created for every fetched snapshot before
+            # scoring. Enrich that same object when this prop reaches the
+            # bounded evaluation path so the bulk write remains one full-feed
+            # batch without duplicate rows.
+            record.line_moved = line_changed
+            record.prev_line = prev_line
+            record.line_delta = (
+                (snap.line - prev_line)
+                if prev_line is not None and snap.line is not None
+                else None
             )
+            record.removed = is_removed
+            record.alert_sent = ud_result.sent
+            record.score_total = (
+                clamp_score(score.total, "ud_score.total", 0, 100)
+                if score is not None
+                else None
+            )
+            record.score_tier = score.tier if score is not None else None
+            record.score_stars = (
+                clamp_score(score.stars, "ud_score.stars", 0, 5)
+                if score is not None
+                else None
+            )
+            record.alert_outcome = _alert_outcome
+            record.validation_json = (
+                validation.to_json() if validation is not None else None
+            )
+            record.bet_recommendation = (
+                decision.recommendation if decision is not None else None
+            )
+            record.bet_confidence = (
+                clamp_score(decision.confidence, "ud_bet_confidence", 0, 100)
+                if decision is not None
+                else None
+            )
+            record.bet_reason = decision.reason if decision is not None else None
+            record.bet_evidence_json = (
+                decision.to_json() if decision is not None else None
+            )
+            record.fetched_at = now
             _next_ud_scan_state[(player, stat_type)] = SimpleNamespace(
                 line_value=float(snap.line or 0.0),
                 score_tier=score.tier if score is not None else getattr(prev_record, "score_tier", None),
