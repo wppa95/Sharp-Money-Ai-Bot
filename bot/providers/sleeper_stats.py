@@ -179,6 +179,10 @@ class SleeperStatsProvider:
         # sport_slug → {name_normalized: player_id}
         self._name_to_id:     dict[str, dict[str, str]]    = {}
         self._registry_ready: dict[str, bool]              = {}
+        # Multiple player-history targets can enter the shared provider at
+        # once. Serialize the one-time registry load per sport so a full
+        # active-book cycle does not launch one identical request per target.
+        self._registry_locks: dict[str, asyncio.Lock]     = {}
         # (sport_slug, season_type, year, week) → {player_id: {stat_key: value}}
         self._week_cache:     dict[tuple, dict[str, dict]] = {}
         # Semaphore limiting concurrent API calls (created inside an event loop)
@@ -332,27 +336,33 @@ class SleeperStatsProvider:
         """Load and cache the player registry once per sport per process."""
         if self._registry_ready.get(sport_slug):
             return
-        try:
-            data = await self._get_json(f"{self.BASE}/players/{sport_slug}")
-            if not isinstance(data, dict) or not data:
-                logger.warning("Sleeper: empty player registry for %s", sport_slug)
+        lock = self._registry_locks.setdefault(sport_slug, asyncio.Lock())
+        async with lock:
+            # Another target may have completed the load while this target
+            # waited for the per-sport lock.
+            if self._registry_ready.get(sport_slug):
                 return
-            self._registry[sport_slug] = data
-            name_map: dict[str, str] = {}
-            for pid, pdata in data.items():
-                full = pdata.get("full_name") or (
-                    (pdata.get("first_name") or "") + " " + (pdata.get("last_name") or "")
-                ).strip()
-                if full:
-                    name_map[full.lower().strip()] = pid
-            self._name_to_id[sport_slug] = name_map
-            self._registry_ready[sport_slug] = True
-            logger.info(
-                "Sleeper: loaded %d %s players into registry",
-                len(data), sport_slug.upper(),
-            )
-        except Exception as exc:
-            logger.warning("Sleeper: registry load failed for %s: %s", sport_slug, exc)
+            try:
+                data = await self._get_json(f"{self.BASE}/players/{sport_slug}")
+                if not isinstance(data, dict) or not data:
+                    logger.warning("Sleeper: empty player registry for %s", sport_slug)
+                    return
+                self._registry[sport_slug] = data
+                name_map: dict[str, str] = {}
+                for pid, pdata in data.items():
+                    full = pdata.get("full_name") or (
+                        (pdata.get("first_name") or "") + " " + (pdata.get("last_name") or "")
+                    ).strip()
+                    if full:
+                        name_map[full.lower().strip()] = pid
+                self._name_to_id[sport_slug] = name_map
+                self._registry_ready[sport_slug] = True
+                logger.info(
+                    "Sleeper: loaded %d %s players into registry",
+                    len(data), sport_slug.upper(),
+                )
+            except Exception as exc:
+                logger.warning("Sleeper: registry load failed for %s: %s", sport_slug, exc)
 
     def _lookup_player_id(self, sport_slug: str, player_name: str) -> Optional[str]:
         """
