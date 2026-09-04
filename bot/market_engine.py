@@ -5509,7 +5509,7 @@ async def underdog_job(context) -> None:
             if isinstance(db, Database):
                 if not _enqueue_db_persistence(
                     "save Underdog snapshot records",
-                    lambda: db.save_underdog_snapshots_bulk(_incr_snapshot),
+                    lambda records=_incr_snapshot: db.save_underdog_snapshots_bulk(records),
                 ):
                     _snapshot_failed_batches += 1
                     _snapshot_failed_records += len(_incr_snapshot)
@@ -5773,20 +5773,34 @@ async def underdog_job(context) -> None:
                     })
                     # Flush chunk to DB and release memory
                     if len(_cand_rows) >= _CAND_CHUNK:
-                        await _cycle_timing.await_db(
-                            "write",
-                            "log_prop_candidate_batch",
-                            db.log_prop_candidate_batch(_cand_rows),
-                        )
+                        _candidate_batch = list(_cand_rows)
+                        if isinstance(db, Database):
+                            _enqueue_db_persistence(
+                                "log Underdog candidate batch",
+                                lambda batch=_candidate_batch: db.log_prop_candidate_batch(batch),
+                            )
+                        else:
+                            await _cycle_timing.await_db(
+                                "write",
+                                "log_prop_candidate_batch",
+                                db.log_prop_candidate_batch(_candidate_batch),
+                            )
                         _cand_total += len(_cand_rows)
                         _cand_rows = []
                 # Flush remaining rows
                 if _cand_rows:
-                    await _cycle_timing.await_db(
-                        "write",
-                        "log_prop_candidate_batch",
-                        db.log_prop_candidate_batch(_cand_rows),
-                    )
+                    _candidate_batch = list(_cand_rows)
+                    if isinstance(db, Database):
+                        _enqueue_db_persistence(
+                            "log Underdog candidate batch",
+                            lambda batch=_candidate_batch: db.log_prop_candidate_batch(batch),
+                        )
+                    else:
+                        await _cycle_timing.await_db(
+                            "write",
+                            "log_prop_candidate_batch",
+                            db.log_prop_candidate_batch(_candidate_batch),
+                        )
                     _cand_total += len(_cand_rows)
                     _cand_rows = []
                 if _cand_total:
@@ -5811,11 +5825,18 @@ async def underdog_job(context) -> None:
         # Non-fatal: write failure must never abort the cycle.
         if _plh_mq_scores and db and not _cycle_budget_exhausted:
             try:
-                await _cycle_timing.await_db(
-                    "write",
-                    "update_ud_props_mq_scores_bulk",
-                    db.update_ud_props_mq_scores_bulk(_plh_mq_scores),
-                )
+                if isinstance(db, Database):
+                    _mq_scores = dict(_plh_mq_scores)
+                    _enqueue_db_persistence(
+                        "update Underdog market-quality scores",
+                        lambda scores=_mq_scores: db.update_ud_props_mq_scores_bulk(scores),
+                    )
+                else:
+                    await _cycle_timing.await_db(
+                        "write",
+                        "update_ud_props_mq_scores_bulk",
+                        db.update_ud_props_mq_scores_bulk(_plh_mq_scores),
+                    )
             except Exception as _mq_bulk_exc:
                 logger.debug("underdog_job: mq_scores bulk write failed: %s", _mq_bulk_exc)
         
@@ -5824,26 +5845,33 @@ async def underdog_job(context) -> None:
         # Proves that all ~4,600 active props are monitored each poll (not just scored ones).
         try:
             if db and not _cycle_budget_exhausted:
-                await _cycle_timing.await_db(
-                    "write",
-                    "log_scan_cycle",
-                    db.log_scan_cycle(
-                        scan_ts         = now,
-                        fetched         = _n_ud_snaps_this_cycle,
-                        removed         = _n_removed,
-                        futures         = sum(_sport_futures.values()),
-                        active          = sum(_sport_raw.values()),
-                        unchanged       = _n_unchanged_skipped,
-                        new_props       = _n_new_prop,
-                        line_changed    = _n_scored,
-                        cold_start      = _n_cold_start_scored,
-                        analyzed        = _n_new_prop + _n_scored + _n_cold_start_scored,
-                        qualified       = _n_qualified,
-                        alert_delivered = _n_new_prop_sent + _n_lc_sent + _n_standing_sent,
-                        actionable_by_sport = _sport_actionable,
-                        removed_by_sport    = _sport_removed,
-                    ),
+                _scan_cycle_kwargs = dict(
+                    scan_ts         = now,
+                    fetched         = _n_ud_snaps_this_cycle,
+                    removed         = _n_removed,
+                    futures         = sum(_sport_futures.values()),
+                    active          = sum(_sport_raw.values()),
+                    unchanged       = _n_unchanged_skipped,
+                    new_props       = _n_new_prop,
+                    line_changed    = _n_scored,
+                    cold_start      = _n_cold_start_scored,
+                    analyzed        = _n_new_prop + _n_scored + _n_cold_start_scored,
+                    qualified       = _n_qualified,
+                    alert_delivered = _n_new_prop_sent + _n_lc_sent + _n_standing_sent,
+                    actionable_by_sport = dict(_sport_actionable),
+                    removed_by_sport    = dict(_sport_removed),
                 )
+                if isinstance(db, Database):
+                    _enqueue_db_persistence(
+                        "log Underdog scan cycle",
+                        lambda kwargs=_scan_cycle_kwargs: db.log_scan_cycle(**kwargs),
+                    )
+                else:
+                    await _cycle_timing.await_db(
+                        "write",
+                        "log_scan_cycle",
+                        db.log_scan_cycle(**_scan_cycle_kwargs),
+                    )
             elif db:
                 logger.warning(
                     "underdog_job: scan-cycle evidence write deferred after "
