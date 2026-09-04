@@ -209,6 +209,7 @@ class _ScheduledExecutionCoordinator:
     def __init__(self) -> None:
         self._running: set[str] = set()
         self._tasks: set[asyncio.Task] = set()
+        self._exclusive_locks: dict[str, asyncio.Lock] = {}
 
     async def _execute(self, name: str, callback, context, *args, **kwargs):
         try:
@@ -245,7 +246,7 @@ class _ScheduledExecutionCoordinator:
 
         return _coordinated
 
-    def launch(self, name: str, callback):
+    def launch(self, name: str, callback, *, exclusive_group: str | None = None):
         """Return a scheduler callback that tracks one real execution."""
         @wraps(callback)
         async def _launcher(context, *args, **kwargs):
@@ -262,6 +263,21 @@ class _ScheduledExecutionCoordinator:
 
             async def _run_once():
                 try:
+                    if exclusive_group:
+                        lock = self._exclusive_locks.setdefault(
+                            exclusive_group, asyncio.Lock()
+                        )
+                        if lock.locked():
+                            logger.info(
+                                "scheduled_execution: waiting for exclusive group "
+                                "(job=%s group=%s)",
+                                name,
+                                exclusive_group,
+                            )
+                        async with lock:
+                            return await self._execute(
+                                name, callback, context, *args, **kwargs
+                            )
                     return await self._execute(name, callback, context, *args, **kwargs)
                 finally:
                     self._running.discard(name)
@@ -305,7 +321,16 @@ _scheduled_execution_coordinator = _ScheduledExecutionCoordinator()
 
 
 def _coordinated_job(name: str, callback):
-    return _scheduled_execution_coordinator.launch(name, callback)
+    exclusive_group = (
+        "underdog_monitoring"
+        if name in {"underdog_monitor", "player_history_collector"}
+        else None
+    )
+    return _scheduled_execution_coordinator.launch(
+        name,
+        callback,
+        exclusive_group=exclusive_group,
+    )
 
 
 def _configured_odds_api_sports() -> list[tuple[str, Sport]]:

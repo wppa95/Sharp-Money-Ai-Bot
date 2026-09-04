@@ -3935,6 +3935,7 @@ async def underdog_job(context) -> None:
     _n_qualified:     int       = 0   # line-change props that passed the scoring gate
     _n_removed:       int       = 0   # props with [REMOVED] marker
     _n_new_prop:      int       = 0   # first-appearance props detected this cycle
+    _n_new_prop_evaluated: int  = 0   # first-appearance props that used scoring budget
     _n_new_prop_sent:      int       = 0   # immediate new-prop alerts delivered
     _n_cold_start_scored: int       = 0   # props scored during the one-time cold-start pass
     _n_observation_only:   int       = 0   # observed/tracked but deferred to FPR
@@ -3965,6 +3966,7 @@ async def underdog_job(context) -> None:
     _snapshot_failed_records = 0
     _snapshot_retry_count = 0
     _persistence_ok = True
+    _new_prop_skip_reasons: dict[str, int] = {}
     # Scoring data for every scored prop — bulk-written to PropLineHistory at end of
     # scan cycle so /picks and /slip can apply tier-aware delivery gates.
     # Key: (player, sport, stat_type) → (mq_score: int, bq_score: float).
@@ -4175,6 +4177,31 @@ async def underdog_job(context) -> None:
             _cycle_timing.count("known_prop_keys_returned", len(known_keys))
     
         _cycle_budget_exhausted = False
+    # This is the complete new-prop persistence population. It is calculated
+    # from the full feed before the evaluation budget is applied. Every one of
+    # these observations is already represented by the snapshot/tracking
+    # persistence paths; only scoring/evidence enrichment remains budgeted.
+    _eligible_new_props = sum(
+        1
+        for _eligible_snap in ud_snaps
+        if "[REMOVED]" not in (_eligible_snap.selection or "")
+        and not _is_futures_stat(
+            _extract_ud_stat_type(
+                _eligible_snap.selection,
+                _eligible_snap.player,
+                _eligible_snap.line,
+            )
+        )
+        and (
+            _eligible_snap.player or "Unknown",
+            _extract_ud_stat_type(
+                _eligible_snap.selection,
+                _eligible_snap.player,
+                _eligible_snap.line,
+            ),
+        ) not in known_keys
+    )
+    _cycle_timing.count("eligible_new_props", _eligible_new_props)
         # Publish this feed observation into bounded process memory once.
         # Candidate paths below use keyed lookups; they never scan the cache
         # or query SQLite for recent line history.
@@ -4196,6 +4223,31 @@ async def underdog_job(context) -> None:
         for _snap_index, snap in enumerate(ud_snaps):
             record = _snapshot_records[_snap_index]
             if _cycle_budget_exhausted or time.monotonic() >= _cycle_deadline:
+                _remaining_new_props = sum(
+                    1
+                    for _remaining_snap in ud_snaps[_snap_index:]
+                    if "[REMOVED]" not in (_remaining_snap.selection or "")
+                    and not _is_futures_stat(
+                        _extract_ud_stat_type(
+                            _remaining_snap.selection,
+                            _remaining_snap.player,
+                            _remaining_snap.line,
+                        )
+                    )
+                    and (
+                        _remaining_snap.player or "Unknown",
+                        _extract_ud_stat_type(
+                            _remaining_snap.selection,
+                            _remaining_snap.player,
+                            _remaining_snap.line,
+                        ),
+                    ) not in known_keys
+                )
+                if _remaining_new_props:
+                    _new_prop_skip_reasons["cycle_deadline"] = (
+                        _new_prop_skip_reasons.get("cycle_deadline", 0)
+                        + _remaining_new_props
+                    )
                 _n_observation_only += len(ud_snaps) - _snap_index
                 _cycle_budget_exhausted = True
                 logger.warning(
@@ -4299,8 +4351,12 @@ async def underdog_job(context) -> None:
                 # the remaining active universe without losing observations.
                 if _evaluation_used >= _evaluation_budget:
                     _n_observation_only += 1
+                    _new_prop_skip_reasons["evaluation_budget"] = (
+                        _new_prop_skip_reasons.get("evaluation_budget", 0) + 1
+                    )
                     continue
                 _evaluation_used += 1
+                _n_new_prop_evaluated += 1
                 line_val = snap.line or 0.0
                 # On a large restart feed, defer expensive new-prop history
                 # enrichment.  Full-feed tracking already preserves the
@@ -5580,9 +5636,9 @@ async def underdog_job(context) -> None:
         #     )
         if _new_props_batch:
             logger.info(
-                "underdog_job: %d new props stored silently (digest suppressed — "
+                "underdog_job: %d new props evaluated silently (digest suppressed — "
                 "Telegram only fires on qualified alerts)",
-                len(_new_props_batch),
+                _n_new_prop_evaluated,
             )
 
         # ── Ranked delivery phase ──────────────────────────────────────────────────
@@ -6444,6 +6500,22 @@ async def underdog_job(context) -> None:
     # The deferred FPR handoff must never overlap this final write/diagnostic
     # window, even though the main scan work has already finished.
     await drain_db_persistence_worker()
+    _new_prop_stored_count = _eligible_new_props
+    _new_prop_skip_reasons = {
+        _reason: _count
+        for _reason, _count in _new_prop_skip_reasons.items()
+        if _count
+    }
+    logger.info(
+        "underdog_new_prop_persistence: eligible=%d stored=%d evaluated=%d "
+        "observation_only=%d skipped_reasons=%s "
+        "tables=underdog_snapshots,prop_tracking_log,prop_line_history",
+        _eligible_new_props,
+        _new_prop_stored_count,
+        _n_new_prop_evaluated,
+        max(0, _eligible_new_props - _n_new_prop_evaluated),
+        _new_prop_skip_reasons or "none",
+    )
     _release_underdog_scan_slot()
 
 
