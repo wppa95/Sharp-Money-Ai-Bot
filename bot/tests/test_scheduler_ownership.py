@@ -51,11 +51,11 @@ def _job_kwargs(call: ast.Call) -> dict[str, ast.AST]:
     }
 
 
-def test_single_owner_for_monitoring_and_full_pool_rotation():
+def test_current_book_has_one_monitoring_owner_and_no_remainder_rotation():
     names = [name for name, _ in _scheduled_jobs()]
 
     assert names.count("underdog_monitor") == 1
-    assert names.count("full_pool_rescan") == 1
+    assert names.count("full_pool_rescan") == 0
     assert "stable_refresh" not in names
     assert "stable_refresh_job" not in names
     assert "prizepicks_monitor" not in names
@@ -88,7 +88,6 @@ def test_scheduled_jobs_use_coordinator_without_max_instances():
         "odds_poller",
         "player_props_fetcher",
         "underdog_monitor",
-        "full_pool_rescan",
         "opportunity_grader",
         "player_history_collector",
     ):
