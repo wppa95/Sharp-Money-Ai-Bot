@@ -714,8 +714,8 @@ async def post_init(application: Application) -> None:
         # CLV harvest job — every hour (processes seeds after game_time passes)
         jq.run_repeating(_coordinated_job("clv_harvester", _clv_harvest_job), interval=3600, first=300, name="clv_harvester")
         # Opportunity grader — short cadence (grades completed opportunities).
-        # A bounded, rotating worker must never overlap itself while provider
-        # lookups are in flight.
+        # Each trigger gets its own tracked worker so a slow provider lookup
+        # does not suppress the next grading batch.
         jq.run_repeating(
             _coordinated_job(
                 "opportunity_grader",
