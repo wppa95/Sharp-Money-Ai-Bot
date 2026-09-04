@@ -699,6 +699,9 @@ async def send_alert(
         logger.info("send_alert: football betting output suppressed: sport=%s", sport)
         return False
     message = _sanitize_user_alert_message(message)
+    if not _has_strong_bet_label(message):
+        logger.info("send_alert: non-strong-bet alert suppressed")
+        return False
     markup = InlineKeyboardMarkup(keyboard) if keyboard else None
     try:
         await bot.send_message(
@@ -809,6 +812,15 @@ def _sanitize_user_alert_message(message: str) -> str:
     return re.sub(r"[ \t]{2,}", " ", text)
 
 
+def _has_strong_bet_label(message: str) -> bool:
+    """Return whether a rendered alert contains the required pick label."""
+    for line in str(message or "").splitlines():
+        plain = unescape(re.sub(r"<[^>]+>", "", line)).strip()
+        if re.match(r"^💪\s*STRONG\s+BET(?:\b|$)", plain, flags=re.IGNORECASE):
+            return True
+    return False
+
+
 async def broadcast_alert(
     bot: Bot,
     chat_ids: list[Union[int, str]],
@@ -830,6 +842,9 @@ async def broadcast_alert(
         # failure.  Failed counts are reserved for attempted deliveries.
         return {"sent": 0, "failed": 0}
     message = _sanitize_user_alert_message(message)
+    if not _has_strong_bet_label(message):
+        logger.info("broadcast_alert: non-strong-bet alert suppressed")
+        return {"sent": 0, "failed": 0}
     sent = failed = 0
     for cid in chat_ids:
         if await send_alert(bot, cid, message, sport=sport):
@@ -1913,7 +1928,7 @@ class AlertDelivery:
             )
             raise
         discord_sent = False
-        if not removed and not market_move_only:
+        if not removed and not market_move_only and counts["sent"] > 0:
             discord_sent = await send_discord_alert(message)
         alert_sent = counts["sent"] > 0
         if not alert_sent:
