@@ -700,17 +700,11 @@ async def post_init(application: Application) -> None:
             first=60,
             name="opportunity_grader",
         )
-        from player_history_job import (
-            player_history_collector_job,
-            reset_player_history_runtime_state,
-        )
-        reset_player_history_runtime_state(application.bot_data)
-        jq.run_repeating(
-            _coordinated_job("player_history_collector", player_history_collector_job),
-            interval=config.PLAYER_HISTORY_POLL_INTERVAL,
-            first=90,
-            name="player_history_collector",
-        )
+        # Player-result collection is intentionally not scheduled alongside
+        # the full-book cadence. The Underdog cycle owns the exclusive window
+        # and completes tracking/PropLineHistory persistence for the current
+        # feed itself; a separate rotating collector would delay the next
+        # current-book tick without representing that same book.
         # API budget check — every 15 minutes
         jq.run_repeating(_coordinated_job("budget_checker", _budget_check_job), interval=900, first=900, name="budget_checker")
         # PropLineHistory prune — once per day (keeps last 14 days)
