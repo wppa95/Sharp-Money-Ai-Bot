@@ -65,6 +65,38 @@ async def test_shared_cycle_starts_both_branches_and_waits_for_both(monkeypatch)
     assert completed == ["complete"]
 
 
+@pytest.mark.asyncio
+async def test_shared_cycle_uses_empty_paced_batch_without_fallback_fetch(monkeypatch):
+    calls = []
+
+    async def propline_branch(
+        _context,
+        *,
+        _fetched_props=None,
+        _fetched_sport=None,
+        background_processing=False,
+    ):
+        calls.append((_fetched_props, _fetched_sport, background_processing))
+
+    async def underdog_branch(_context):
+        return None
+
+    monkeypatch.setattr(
+        market_engine,
+        "_propline_pending_props",
+        {},
+    )
+    monkeypatch.setattr(
+        market_engine,
+        "_run_prizepicks_independent_cycle",
+        propline_branch,
+    )
+
+    await market_engine._shared_monitoring_cycle(underdog_branch)(SimpleNamespace())
+
+    assert calls == [([], "paced", True)]
+
+
 def test_scheduler_has_one_shared_monitor_owner_and_no_heartbeat_handoff():
     main_source = inspect.getsource(__import__("main").post_init)
     heartbeat_source = inspect.getsource(__import__("main")._heartbeat_job)
