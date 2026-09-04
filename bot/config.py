@@ -214,6 +214,17 @@ class Config:
     PLAYER_HISTORY_POLL_INTERVAL: int = int(
         os.environ.get("PLAYER_HISTORY_POLL_INTERVAL", "120")
     )
+    # Maximum number of player-history provider targets processed per
+    # scheduler run. The collector rotates through the complete active pool
+    # over subsequent runs instead of replaying the first targets forever.
+    PLAYER_HISTORY_BATCH_SIZE: int = int(
+        os.environ.get("PLAYER_HISTORY_BATCH_SIZE", "250")
+    )
+    # Safety margin kept free inside the player-history scheduler interval so
+    # the collector can finish cleanly before the next cadence tick.
+    PLAYER_HISTORY_CADENCE_HEADROOM_SECONDS: int = int(
+        os.environ.get("PLAYER_HISTORY_CADENCE_HEADROOM_SECONDS", "15")
+    )
 
     # Consensus engine thresholds
     # Minimum books for cross-book consensus computation

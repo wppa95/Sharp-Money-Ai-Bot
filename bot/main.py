@@ -666,7 +666,11 @@ async def post_init(application: Application) -> None:
             first=60,
             name="opportunity_grader",
         )
-        from player_history_job import player_history_collector_job
+        from player_history_job import (
+            player_history_collector_job,
+            reset_player_history_runtime_state,
+        )
+        reset_player_history_runtime_state(application.bot_data)
         jq.run_repeating(
             _coordinated_job("player_history_collector", player_history_collector_job),
             interval=config.PLAYER_HISTORY_POLL_INTERVAL,
@@ -689,13 +693,16 @@ async def post_init(application: Application) -> None:
             )
         logger.info(
             "Jobs scheduled — underdog: every %ds, FPR: disabled, "
-            "grader: every %ds, history: every %ds, season_check: every %ds, "
+            "grader: every %ds, history: every %ds (batch=%d, headroom=%ds), "
+            "season_check: every %ds, "
             "heartbeat: every 60s "
              "[PrizePicks/PropLine companion cycle enabled=%s; "
              "PropLine default rate=180/hour; DK/FD delivery disabled]",
             config.UNDERDOG_POLL_INTERVAL,
             config.OPPORTUNITY_GRADER_INTERVAL,
             config.PLAYER_HISTORY_POLL_INTERVAL,
+            config.PLAYER_HISTORY_BATCH_SIZE,
+            config.PLAYER_HISTORY_CADENCE_HEADROOM_SECONDS,
             config.SEASON_CHECK_INTERVAL,
             _propline_enabled,
         )
