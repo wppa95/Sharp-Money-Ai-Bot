@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import os
+import weakref
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from typing import Iterable, Optional
@@ -37,6 +38,62 @@ _DB_WRITE_MAX_RETRIES = 2
 _DB_WRITE_RETRY_DELAYS = (0.15, 0.5)
 _PRIZEPICKS_EXTERNAL_PREFIX = "PrizePicks::"
 _TELEGRAM_DELIVERY_KEY_VERSION = "v1"
+
+# SQLite has one writer slot per database file.  The bot intentionally keeps a
+# second Database object for the long-running player-history collector, but
+# both objects point at the same SQLite URL.  A per-instance lock would
+# therefore leave a cross-pool race.  Keep one lock per URL and event loop so
+# every session from every in-process pool crosses the same gate.
+_SQLITE_WRITER_LOCKS: weakref.WeakKeyDictionary[
+    asyncio.AbstractEventLoop, dict[str, asyncio.Lock]
+] = weakref.WeakKeyDictionary()
+
+
+def _sqlite_writer_lock(url: str) -> asyncio.Lock | None:
+    """Return the shared session gate for one SQLite URL."""
+    if not str(url).startswith("sqlite"):
+        return None
+    loop = asyncio.get_running_loop()
+    locks_for_loop = _SQLITE_WRITER_LOCKS.setdefault(loop, {})
+    return locks_for_loop.setdefault(str(url), asyncio.Lock())
+
+
+class _LockedAsyncSession:
+    """AsyncSession context manager guarded by the process-wide SQLite gate.
+
+    The wrapper deliberately returns the real AsyncSession from ``__aenter__``
+    so existing ORM code and lightweight test doubles keep their current
+    behavior.  Attribute access outside the context (notably ``invalidate()``
+    in the bulk writer retry path) is delegated to the underlying session.
+    """
+
+    def __init__(self, session: AsyncSession, lock: asyncio.Lock | None) -> None:
+        self._session = session
+        self._lock = lock
+        self._acquired = False
+
+    async def __aenter__(self) -> AsyncSession:
+        if self._lock is not None:
+            await self._lock.acquire()
+            self._acquired = True
+        try:
+            return await self._session.__aenter__()
+        except BaseException:
+            if self._acquired:
+                self._lock.release()
+                self._acquired = False
+            raise
+
+    async def __aexit__(self, exc_type, exc_value, traceback) -> object:
+        try:
+            return await self._session.__aexit__(exc_type, exc_value, traceback)
+        finally:
+            if self._acquired:
+                self._lock.release()
+                self._acquired = False
+
+    def __getattr__(self, name: str):
+        return getattr(self._session, name)
 
 
 def _stored_opportunity_external_id(external_id: str, provider: Optional[str]) -> str:
@@ -966,7 +1023,11 @@ class Database:
     def session(self) -> AsyncSession:
         if self._session_factory is None:
             raise RuntimeError("Database.init() has not been called.")
-        return self._session_factory()
+        session = self._session_factory()
+        return _LockedAsyncSession(
+            session,
+            _sqlite_writer_lock(self._url),
+        )
     async def prune_prop_line_history(self, keep_days: int = 14) -> int:
         """Delete PropLineHistory rows older than keep_days. Returns rows deleted."""
         from datetime import timedelta
