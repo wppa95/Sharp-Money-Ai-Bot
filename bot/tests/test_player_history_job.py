@@ -190,6 +190,7 @@ async def test_player_history_flushes_results_in_small_durable_batches():
         return_value={("Batch Player", "points"): snapshot}
     )
     db.upsert_player_results_bulk = AsyncMock()
+    db.upsert_player_result = AsyncMock()
     context = SimpleNamespace(bot_data={"db": db})
 
     fake_provider = MagicMock()
