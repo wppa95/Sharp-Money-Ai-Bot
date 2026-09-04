@@ -1137,9 +1137,11 @@ class TestConfidenceRecalibration:
         assert result.sent
         mock_bot.send_message.assert_called_once()
 
-        # Message should carry the 5-star rating
+        # Quality metadata is retained in the internal record but is not
+        # exposed in delivered Telegram text.
         text = mock_bot.send_message.call_args.kwargs["text"]
-        assert "★★★★★" in text, "Delivered message must display ★★★★★"
+        assert "★★★★★" not in text
+        assert "Rating:" not in text
 
         # DB record must reflect the elite confidence
         records = await db.get_recent_ev(limit=1)
