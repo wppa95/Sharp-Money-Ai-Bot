@@ -136,10 +136,9 @@ def format_pregame_watch_alert(
     """
     Format a 🟣 PREGAME PLAYER PROP OPPORTUNITY alert for Telegram (HTML).
 
-    When a PlayerPropMarketComparison is provided, shows the full 4-provider
-    market view (Available Lines, Movement, Best Available Line, Market Quality,
-    Confidence, Reason).  Falls back to opening/current line comparison when
-    comp is None.
+    When a PlayerPropMarketComparison is provided, shows the provider market
+    view (Available Lines, Movement, Best Available Line, and Reason). Falls
+    back to opening/current line comparison when comp is None.
     """
     sport_icons = {
         "NFL": "🏈", "NBA": "🏀", "MLB": "⚾", "NHL": "🏒",
@@ -230,8 +229,7 @@ def format_pregame_watch_alert(
             "",
             div,
             "",
-            f"<b>Market Quality:</b>  {n_prov}/4 providers",
-            f"<b>Confidence:</b>       {comp.proxy_match_confidence}/100",
+            f"<b>Providers:</b>       {n_prov}/4 available",
         ]
         if comp.best_reason:
             parts.append(f"<b>Reason:</b>           {comp.best_reason}")

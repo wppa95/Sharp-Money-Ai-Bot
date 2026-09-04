@@ -378,7 +378,8 @@ def format_player_prop_market_alert(comp: PlayerPropMarketComparison) -> str:
     Format a Player Prop Market Alert for Telegram (HTML).
 
     Clearly shows all available providers, the best line, market consensus,
-    line movement, and proxy match confidence (labelled explicitly — not betting confidence).
+    line movement, and provider sources. Proxy match confidence remains an
+    internal comparison value rather than Telegram presentation metadata.
     """
     sport_icons = {
         "NFL": "🏈", "NBA": "🏀", "MLB": "⚾", "NHL": "🏒",
@@ -483,21 +484,17 @@ def format_player_prop_market_alert(comp: PlayerPropMarketComparison) -> str:
             " Not a betting recommendation.</i>"
         )
 
-    # ── Sources / confidence ──────────────────────────────────────────────────
+    # ── Sources ────────────────────────────────────────────────────────────────
     active_sources = [
         PROVIDER_EMOJI.get(p, p)
         for p in PROVIDER_ORDER
         if comp.lines.get(p) and comp.lines[p].available
     ]
-    conf_bar = _conf_bar(comp.proxy_match_confidence)
-
     parts += [
         "",
         div,
         "",
         f"📡 <b>Sources:</b>  {' '.join(active_sources)}",
-        f"🔬 <b>Proxy Match Confidence:</b>  {comp.proxy_match_confidence}/100  {conf_bar}",
-        f"<i>Confidence measures provider agreement/proxy reliability, not betting edge.</i>",
         "",
         thick,
     ]
