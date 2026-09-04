@@ -84,3 +84,43 @@ def test_status_reports_shared_cycle_not_provider_subsections():
     assert "last_monitoring_cycle_age_str" in source
     assert "PrizePicks Pipeline" not in source
     assert "Latest Underdog scan" not in source
+
+
+@pytest.mark.asyncio
+async def test_production_database_writes_are_deferred_and_shutdown_drains():
+    calls = []
+    database = market_engine.Database.__new__(market_engine.Database)
+
+    async def write():
+        calls.append("written")
+
+    database.write = write
+    await market_engine._persist_db_write(
+        database,
+        "test deferred write",
+        lambda: database.write(),
+    )
+
+    assert calls == []
+    await market_engine.shutdown_db_persistence_worker()
+    assert calls == ["written"]
+    assert market_engine._db_persistence_worker_task is None
+    assert market_engine._db_persistence_queue is None
+
+
+@pytest.mark.asyncio
+async def test_database_double_keeps_awaited_compatibility_behavior():
+    calls = []
+
+    class DatabaseDouble:
+        async def write(self):
+            calls.append("written")
+
+    database = DatabaseDouble()
+    await market_engine._persist_db_write(
+        database,
+        "test compatibility write",
+        lambda: database.write(),
+    )
+
+    assert calls == ["written"]
