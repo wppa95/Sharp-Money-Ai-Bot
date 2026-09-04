@@ -4253,9 +4253,9 @@ async def underdog_job(context) -> None:
                     )
                 _n_observation_only += len(ud_snaps) - _snap_index
                 _cycle_budget_exhausted = True
-                logger.warning(
-                    "underdog_job: cycle deadline reached after %d/%d observations; "
-                    "releasing partial results",
+                logger.error(
+                    "underdog_cycle_bottleneck: deadline reached after %d/%d "
+                    "observations; no remainder queue",
                     _snap_index,
                     len(ud_snaps),
                 )
@@ -5981,11 +5981,32 @@ async def underdog_job(context) -> None:
                 finally:
                     del _incr_snapshot
             else:
-                logger.warning(
-                    "underdog_job: incremental snapshot persistence deferred after "
-                    "cycle deadline (%d records)",
-                    len(_incr_snapshot),
-                )
+                # The current book is not complete until this write finishes.
+                # Never defer it into a hidden remainder queue.
+                try:
+                    _write_result = await db.save_underdog_snapshots_bulk(
+                        _incr_snapshot
+                    )
+                    _snapshot_persisted += (
+                        int(_write_result.get("records_written", len(_incr_snapshot)))
+                        if isinstance(_write_result, dict)
+                        else len(_incr_snapshot)
+                    )
+                    _snapshot_retry_count += (
+                        int(_write_result.get("retry_count", 0))
+                        if isinstance(_write_result, dict)
+                        else 0
+                    )
+                except Exception as _bulk_exc:
+                    _snapshot_failed_batches += 1
+                    _snapshot_failed_records += len(_incr_snapshot)
+                    _persistence_ok = False
+                    logger.error(
+                        "underdog_cycle_bottleneck: required snapshot persistence "
+                        "failed (%d records): %s",
+                        len(_incr_snapshot),
+                        _bulk_exc,
+                    )
                 del _incr_snapshot
 
         # ── Cold-start bulk save + latch — runs once after the prop loop ──────────
