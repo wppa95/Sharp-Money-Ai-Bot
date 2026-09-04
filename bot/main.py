@@ -15,7 +15,7 @@ from functools import wraps
 import logging
 import os
 import sys
-from collections import defaultdict, deque
+from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
