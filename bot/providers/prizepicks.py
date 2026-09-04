@@ -43,6 +43,9 @@ _STAT_NORM: dict[str, str] = {
     "ast":             "assists",
     "assists":         "assists",
     "3pm":             "3-pointers made",
+            "threes":          "3-pointers made",
+            "three pointers":  "3-pointers made",
+            "three pointers made": "3-pointers made",
     "blk":             "blocks",
     "stl":             "steals",
     # Baseball

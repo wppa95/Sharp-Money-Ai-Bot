@@ -122,6 +122,9 @@ class TestNormalizeStat:
     def test_uppercase_normalized(self):
         assert _normalize_stat("PTS") == "points"
 
+    def test_threes_normalized(self):
+        assert _normalize_stat("Threes") == "3-pointers made"
+
     def test_strips_whitespace(self):
         assert _normalize_stat("  hits  ") == "hits"
 

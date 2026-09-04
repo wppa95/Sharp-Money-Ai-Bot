@@ -20,3 +20,9 @@ def test_pitching_outs_maps_to_mlb_outs_conversion():
     assert PlayerStatsProvider._mlb_extract(
         {"inningsPitched": "5.2"}, "_outs", "pitching outs"
     ) == 17.0
+
+
+def test_basketball_threes_alias_maps_to_three_pointers():
+    from providers.player_stats import _NBA_STAT_MAP
+
+    assert _NBA_STAT_MAP["threes"] == ["3PM"]
