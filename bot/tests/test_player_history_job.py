@@ -173,7 +173,7 @@ async def test_player_history_collects_prizepicks_only_active_target():
 
 
 @pytest.mark.asyncio
-async def test_player_history_flushes_results_in_small_durable_batches():
+async def test_player_history_flushes_results_in_bounded_durable_batches():
     snapshot = SimpleNamespace(
         player_name="Batch Player",
         sport="NBA",
@@ -208,10 +208,7 @@ async def test_player_history_flushes_results_in_small_durable_batches():
     ):
         await player_history_collector_job(context)
 
-    assert [len(call.args[0]) for call in db.upsert_player_results_bulk.await_args_list] == [
-        25,
-        1,
-    ]
+    assert [len(call.args[0]) for call in db.upsert_player_results_bulk.await_args_list] == [26]
     assert not db.upsert_player_result.await_args_list
 
 
@@ -305,7 +302,7 @@ async def test_player_history_logs_deferred_and_failed_targets(caplog):
     context = SimpleNamespace(bot_data={"db": db})
     provider = MagicMock()
     provider.fetch_results = AsyncMock(
-        side_effect=[[], RuntimeError("provider unavailable")]
+        side_effect=[[], RuntimeError("provider unavailable"), []]
     )
     with (
         patch(
