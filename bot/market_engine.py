@@ -5449,46 +5449,61 @@ async def underdog_job(context) -> None:
         # Runs AFTER the ranked delivery phase so that alert_sent=True is persisted
         # for props that were just delivered.  The incremental records have their
         # alert_sent / alert_outcome fields updated in-place by the delivery phase.
-        if _incremental_records and db and not _cycle_budget_exhausted:
+        if _incremental_records and db:
             # Pass a copy so that the .clear() below does not retroactively
             # empty the list object that was handed to the mock in tests.
             _incr_snapshot = list(_incremental_records)
             _incremental_records.clear()
             _snapshot_intended += len(_incr_snapshot)
-            try:
-                _write_result = await _cycle_timing.await_db(
-                    "write",
-                    "save_underdog_snapshots_bulk",
-                    db.save_underdog_snapshots_bulk(_incr_snapshot),
-                )
-                _snapshot_persisted += (
-                    int(_write_result.get("records_written", len(_incr_snapshot)))
-                    if isinstance(_write_result, dict)
-                    else len(_incr_snapshot)
-                )
-                _snapshot_retry_count += (
-                    int(_write_result.get("retry_count", 0))
-                    if isinstance(_write_result, dict)
-                    else 0
-                )
-            except Exception as _bulk_exc:
-                _snapshot_failed_batches += 1
-                _snapshot_failed_records += len(_incr_snapshot)
-                _persistence_ok = False
-                logger.error(
-                    "underdog_job: bulk snapshot save permanently failed "
-                    "after database retries (%d records): %s",
-                    len(_incr_snapshot), _bulk_exc,
-                )
-            finally:
+            if isinstance(db, Database):
+                if not _enqueue_db_persistence(
+                    "save Underdog snapshot records",
+                    lambda: db.save_underdog_snapshots_bulk(_incr_snapshot),
+                ):
+                    _snapshot_failed_batches += 1
+                    _snapshot_failed_records += len(_incr_snapshot)
+                    _persistence_ok = False
+                else:
+                    logger.debug(
+                        "underdog_job: queued %d snapshot records for background persistence",
+                        len(_incr_snapshot),
+                    )
                 del _incr_snapshot
-        elif _incremental_records and _cycle_budget_exhausted:
-            logger.warning(
-                "underdog_job: incremental snapshot persistence deferred after "
-                "cycle deadline (%d records)",
-                len(_incremental_records),
-            )
-            _incremental_records.clear()
+            elif not _cycle_budget_exhausted:
+                try:
+                    _write_result = await _cycle_timing.await_db(
+                        "write",
+                        "save_underdog_snapshots_bulk",
+                        db.save_underdog_snapshots_bulk(_incr_snapshot),
+                    )
+                    _snapshot_persisted += (
+                        int(_write_result.get("records_written", len(_incr_snapshot)))
+                        if isinstance(_write_result, dict)
+                        else len(_incr_snapshot)
+                    )
+                    _snapshot_retry_count += (
+                        int(_write_result.get("retry_count", 0))
+                        if isinstance(_write_result, dict)
+                        else 0
+                    )
+                except Exception as _bulk_exc:
+                    _snapshot_failed_batches += 1
+                    _snapshot_failed_records += len(_incr_snapshot)
+                    _persistence_ok = False
+                    logger.error(
+                        "underdog_job: bulk snapshot save permanently failed "
+                        "after database retries (%d records): %s",
+                        len(_incr_snapshot), _bulk_exc,
+                    )
+                finally:
+                    del _incr_snapshot
+            else:
+                logger.warning(
+                    "underdog_job: incremental snapshot persistence deferred after "
+                    "cycle deadline (%d records)",
+                    len(_incr_snapshot),
+                )
+                del _incr_snapshot
 
         # ── Cold-start bulk save + latch — runs once after the prop loop ──────────
         if is_cold_start:
