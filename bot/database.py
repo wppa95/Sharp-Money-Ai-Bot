@@ -486,20 +486,6 @@ class UnderdogSnapshotRecord(Base):
     bet_evidence_json  = Column(Text,      nullable=True)    # compact JSON evidence blob
     fetched_at  = Column(DateTime,    default=datetime.utcnow, nullable=False)
 
-    __table_args__ = (
-        # History reads filter by player/stat/removal state and return the
-        # newest observations.  Keep that hot path bounded as the append-only
-        # snapshot table grows.
-        Index(
-            "ix_underdog_snapshots_player_stat_removed_fetched",
-            "player_name",
-            "stat_type",
-            "removed",
-            "fetched_at",
-        ),
-    )
-
-
 class PropLineHistory(Base):
     """
     Provider-agnostic player prop line history.
@@ -4258,12 +4244,6 @@ class Database:
                     await conn.execute(text(sql))
                 except Exception:
                     pass  # column already exists — safe to ignore
-            await conn.execute(text(
-                "CREATE INDEX IF NOT EXISTS "
-                "ix_underdog_snapshots_player_stat_removed_fetched "
-                "ON underdog_snapshots "
-                "(player_name, stat_type, removed, fetched_at)"
-            ))
 
     async def save_underdog_snapshot(self, record: "UnderdogSnapshotRecord") -> "UnderdogSnapshotRecord":
         async with self.session() as s:
@@ -4512,13 +4492,29 @@ class Database:
         combination, ordered most-recent-first.  Removal records are excluded
         so they do not distort line-value statistics.
         """
+        # The table is append-only and can be very large.  Restrict the read
+        # to a recent primary-key window before applying the player/stat
+        # filters; an unbounded ORDER BY over the full archive can monopolize
+        # SQLite long enough to stall the live scan cadence.
+        _HISTORY_LOOKBACK_ROWS = 500_000
         async with self.session() as s:
+            _latest_id = (
+                await s.execute(
+                    select(UnderdogSnapshotRecord.id)
+                    .order_by(desc(UnderdogSnapshotRecord.id))
+                    .limit(1)
+                )
+            ).scalar()
+            if _latest_id is None:
+                return []
             result = await s.execute(
                 select(UnderdogSnapshotRecord)
                 .where(
+                    UnderdogSnapshotRecord.id
+                    >= max(1, int(_latest_id) - _HISTORY_LOOKBACK_ROWS),
                     UnderdogSnapshotRecord.player_name == player_name,
-                    UnderdogSnapshotRecord.stat_type   == stat_type,
-                    UnderdogSnapshotRecord.removed     == False,  # noqa: E712
+                    UnderdogSnapshotRecord.stat_type == stat_type,
+                    UnderdogSnapshotRecord.removed == False,  # noqa: E712
                 )
                 .order_by(desc(UnderdogSnapshotRecord.fetched_at))
                 .limit(limit)
