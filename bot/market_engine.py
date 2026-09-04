@@ -58,6 +58,11 @@ from engine.sport_policy import is_football_related_sport
 from engine.telegram_rate_limiter import get_rate_limiter
 from engine.strongest_pick import select_strongest_actionable_picks
 from engine.delivery_evidence import serialized_evidence_supports_delivery
+from engine.evidence_memory import (
+    get_line_history as _memory_line_history,
+    get_player_results as _memory_player_results,
+    put_line_observation as _remember_line_observation,
+)
 from providers import FailureType, get_health_monitor
 from engine.delivery_gates import (
     tier_delivery_gate as _canonical_tier_delivery_gate,
@@ -610,6 +615,7 @@ _propline_request_lock: Optional[asyncio.Lock] = None
 # replaces an Underdog snapshot or creates a second alert path.
 _PROPLINE_EVIDENCE_TTL_SECONDS = 20 * 60
 _propline_current_observations: dict[tuple[str, str, str, str], object] = {}
+_propline_evidence_by_identity: dict[tuple[str, str, str], list[object]] = {}
 
 
 async def _get_prizepicks_scan_sports(provider) -> tuple[str, ...]:
@@ -758,7 +764,7 @@ async def reset_monitoring_runtime_state() -> None:
     global _fpr_handoff_task, _fpr_execution_running, _prop_market_alerted
     global _ud_scan_state, _ud_known_keys, _ud_scan_db_id, _prop_dedup_lock
     global _snapshot_cache, _analysis_engine, _confirmation_db, _propline_provider
-    global _propline_current_observations
+    global _propline_current_observations, _propline_evidence_by_identity
 
     current = asyncio.current_task()
     tasks = {
@@ -800,10 +806,13 @@ async def reset_monitoring_runtime_state() -> None:
     _ud_scan_db_id = None
     _prop_dedup_lock = asyncio.Lock()
     _snapshot_cache.clear()
+    from engine.evidence_memory import clear as clear_evidence_memory
+    clear_evidence_memory()
     _analysis_engine = None
     _confirmation_db = None
     _propline_provider = None
     _propline_current_observations.clear()
+    _propline_evidence_by_identity.clear()
 
 
 def _cache_propline_evidence(props: list[object]) -> None:
@@ -839,6 +848,18 @@ def _cache_propline_evidence(props: list[object]) -> None:
     ]
     for key in stale:
         _propline_current_observations.pop(key, None)
+
+    # Build the candidate lookup index once when observations change. Live
+    # pick evaluation performs one direct lookup instead of scanning memory or
+    # querying the persisted PropLine pool.
+    _propline_evidence_by_identity.clear()
+    for prop in _propline_current_observations.values():
+        identity = (
+            normalize_name(getattr(prop, "player_name", "")),
+            str(getattr(prop, "sport", "") or "").strip().upper(),
+            _normalize_prop_stat(getattr(prop, "stat_type", "")),
+        )
+        _propline_evidence_by_identity.setdefault(identity, []).append(prop)
 
 
 def _propline_prop_key(prop: object) -> tuple[str, str, str, str]:
@@ -1303,12 +1324,25 @@ async def _get_odds_api_confirmation(
     if not sportsbook_confirmation_enabled and normalized_market in {"moneyline", "total"}:
         return None
     source_db = db or _confirmation_db
+    pp_identity = (
+        normalize_name(player_name),
+        str(sport or "").strip().upper(),
+        _normalize_prop_stat(stat_type),
+    )
+    cached_pp_history = list(_propline_evidence_by_identity.get(pp_identity, ()))
+    production_cache_only = isinstance(source_db, Database)
     pp_history_reader = getattr(source_db, "get_prop_line_history", None)
     pp_pool_reader = getattr(source_db, "get_all_active_prop_line_history_by_line", None)
     pp_available = bool(
         normalized_market == "player_prop"
-        and source_db is not None
-        and (callable(pp_history_reader) or callable(pp_pool_reader))
+        and (
+            cached_pp_history
+            or (
+                not production_cache_only
+                and source_db is not None
+                and (callable(pp_history_reader) or callable(pp_pool_reader))
+            )
+        )
     )
     if normalized_market == "player_prop" and is_football_related_sport(sport):
         return None
@@ -1348,7 +1382,9 @@ async def _get_odds_api_confirmation(
             # companion scan; it must never start a second provider request.
             if pp_available:
                 try:
-                    if callable(pp_pool_reader):
+                    if production_cache_only:
+                        pp_history = cached_pp_history
+                    elif callable(pp_pool_reader):
                         # The shared current pool is already source-aware,
                         # freshness-bounded, and removal-safe. Filter its rows
                         # by normalized identity because provider-normalized
@@ -1590,6 +1626,35 @@ def _get_player_stats_provider():
     return _player_stats_provider
 
 
+async def _candidate_line_history(
+    db: Database,
+    player: str,
+    stat: str,
+    *,
+    cycle_timing: Optional[_CycleTiming] = None,
+    operation: str = "get_ud_prop_history",
+) -> list:
+    """Return cache-only production history with legacy-double compatibility."""
+    if isinstance(db, Database):
+        return _memory_line_history(player, stat, limit=30)
+    awaitable = db.get_ud_prop_history(player, stat, limit=30)
+    if cycle_timing is not None:
+        return await cycle_timing.await_db("read", operation, awaitable)
+    return await awaitable
+
+
+def _candidate_player_results(
+    db: Database,
+    player: str,
+    sport: str,
+    stat: str,
+) -> Optional[list]:
+    """Return an explicit cache batch for production, None for legacy doubles."""
+    if not isinstance(db, Database):
+        return None
+    return _memory_player_results(player, sport, stat, limit=40)
+
+
 async def _fetch_and_compute_hit_rates(
     db: Database,
     player_name: str,
@@ -1731,7 +1796,11 @@ async def _fetch_and_compute_hit_rates(
             cycle_timing.count("evidence_lookups")
         primary_result_count = len(db_results)
         supplemental_count = 0
-        if supplemental_results is None and len(db_results) < config.UD_VALIDATION_MIN_SAMPLES:
+        if (
+            preloaded_results is None
+            and supplemental_results is None
+            and len(db_results) < config.UD_VALIDATION_MIN_SAMPLES
+        ):
             try:
                 from providers.player_history import get_player_history_provider
                 supplemental_results = await get_player_history_provider().supplement_missing_results(
@@ -3968,6 +4037,24 @@ async def underdog_job(context) -> None:
             _cycle_timing.count("known_prop_keys_returned", len(known_keys))
     
         _cycle_budget_exhausted = False
+        # Publish this feed observation into bounded process memory once.
+        # Candidate paths below use keyed lookups; they never scan the cache
+        # or query SQLite for recent line history.
+        for _memory_snap in ud_snaps:
+            _memory_player = _memory_snap.player or "Unknown"
+            _memory_stat = _extract_ud_stat_type(
+                _memory_snap.selection,
+                _memory_snap.player,
+                _memory_snap.line,
+            )
+            if not _is_futures_stat(_memory_stat):
+                _remember_line_observation(
+                    _memory_player,
+                    _memory_stat,
+                    _memory_snap.line,
+                    removed="[REMOVED]" in _memory_snap.selection,
+                )
+
         for _snap_index, snap in enumerate(ud_snaps):
             if _cycle_budget_exhausted or time.monotonic() >= _cycle_deadline:
                 _n_observation_only += len(ud_snaps) - _snap_index
@@ -4081,17 +4168,20 @@ async def underdog_job(context) -> None:
                 # enrichment.  Full-feed tracking already preserves the
                 # observation, and without real evidence the delivery gate
                 # cannot send a directional alert anyway.
-                if _large_new_prop_feed:
-                    np_history = []
-                else:
-                    np_history = await _await_cycle_budget(
-                        _cycle_timing.await_db(
-                            "read",
-                            "get_ud_prop_history",
-                            db.get_ud_prop_history(player, stat_type, limit=30),
-                        ),
-                        "new-prop database history",
+                np_history = (
+                    []
+                    if _large_new_prop_feed
+                    else await _candidate_line_history(
+                        db,
+                        player,
+                        stat_type,
+                        cycle_timing=_cycle_timing,
+                        operation="get_ud_prop_history",
                     )
+                )
+                _cached_player_results = _candidate_player_results(
+                    db, player, snap.sport or "UNKNOWN", stat_type
+                )
                 score = _cycle_timing.sync_operation("core_scoring", "score_ud_prop", score_ud_prop,
                     player_name  = player,
                     stat_type    = stat_type,
@@ -4124,6 +4214,8 @@ async def underdog_job(context) -> None:
                                 ud_history=np_history,
                                 source_provider="Underdog",
                                 instrumentation=_cycle_timing,
+                                ensure_real_results=_cached_player_results is None,
+                                preloaded_results=_cached_player_results,
                             ),
                             "new-prop history",
                         )
@@ -4159,7 +4251,9 @@ async def underdog_job(context) -> None:
                 hit_rates = await _await_cycle_budget(
                     _fetch_and_compute_hit_rates(
                         db, player, snap.sport or "UNKNOWN", stat_type, line_val,
+                        allow_remote=_cached_player_results is None,
                         cycle_timing=_cycle_timing,
+                        preloaded_results=_cached_player_results,
                     ),
                     "new-prop hit rates",
                 )
@@ -4406,13 +4500,15 @@ async def underdog_job(context) -> None:
                 # Removal notices bypass scoring and always qualify.
                 if not is_removed and line_changed and prev_line is not None:
                     # Load limit=30 to cover L30 validation window as well as scoring
-                    ud_history = await _await_cycle_budget(
-                        _cycle_timing.await_db(
-                            "read",
-                            "get_ud_prop_history",
-                            db.get_ud_prop_history(player, stat_type, limit=30),
-                        ),
-                        "line-change database history",
+                    ud_history = await _candidate_line_history(
+                        db,
+                        player,
+                        stat_type,
+                        cycle_timing=_cycle_timing,
+                        operation="get_ud_prop_history",
+                    )
+                    _cached_player_results = _candidate_player_results(
+                        db, player, snap.sport or "UNKNOWN", stat_type
                     )
 
                     _hist_snap = None
@@ -4428,6 +4524,8 @@ async def underdog_job(context) -> None:
                                 ud_history=ud_history,
                                 source_provider="Underdog",
                                 instrumentation=_cycle_timing,
+                                ensure_real_results=_cached_player_results is None,
+                                preloaded_results=_cached_player_results,
                             ),
                             "line-change history",
                         )
@@ -4467,7 +4565,9 @@ async def underdog_job(context) -> None:
                         hit_rates = await _await_cycle_budget(
                             _fetch_and_compute_hit_rates(
                                 db, player, snap.sport or "UNKNOWN", stat_type, snap.line or 0.0,
+                                allow_remote=_cached_player_results is None,
                                 cycle_timing=_cycle_timing,
+                                preloaded_results=_cached_player_results,
                             ),
                             "line-change hit rates",
                         )
@@ -4527,13 +4627,12 @@ async def underdog_job(context) -> None:
                     # intentionally skipped — fetching them for ~1000 props on boot
                     # would hammer the stats API; they are populated lazily on the
                     # first qualifying incremental event.  No alerts are sent.
-                    ud_history = await _await_cycle_budget(
-                        _cycle_timing.await_db(
-                            "read",
-                            "get_ud_prop_history",
-                            db.get_ud_prop_history(player, stat_type, limit=30),
-                        ),
-                        "cold-start database history",
+                    ud_history = await _candidate_line_history(
+                        db,
+                        player,
+                        stat_type,
+                        cycle_timing=_cycle_timing,
+                        operation="get_ud_prop_history",
                     )
                     _hist_snap = None  # cold-start: no per-prop PlayerStatsProvider fetch
 
@@ -4582,9 +4681,15 @@ async def underdog_job(context) -> None:
                         "underdog_job: prop re-entry — %s / %s / %s  line=%.1f",
                         player, stat_type, snap.sport or "UNKNOWN", snap.line or 0.0,
                     )
-                    ud_history = await _await_cycle_budget(
-                        db.get_ud_prop_history(player, stat_type, limit=30),
-                        "re-entry database history",
+                    ud_history = await _candidate_line_history(
+                        db,
+                        player,
+                        stat_type,
+                        cycle_timing=_cycle_timing,
+                        operation="get_ud_prop_history",
+                    )
+                    _cached_player_results = _candidate_player_results(
+                        db, player, snap.sport or "UNKNOWN", stat_type
                     )
                     _hist_snap = None
                     try:
@@ -4599,6 +4704,8 @@ async def underdog_job(context) -> None:
                                 ud_history=ud_history,
                                 source_provider="Underdog",
                                 instrumentation=_cycle_timing,
+                                ensure_real_results=_cached_player_results is None,
+                                preloaded_results=_cached_player_results,
                             ),
                             "re-entry history",
                         )
@@ -5067,21 +5174,9 @@ async def underdog_job(context) -> None:
                     break
                 _line_val = _ssnap.line or 0.0
     
-                # 24 h dedup — skip if already alerted today (DB: UnderdogSnapshotRecord.alert_sent)
-                _recent_alert_check = db.has_recent_ud_alert(
-                    _sp, _st, within_seconds=86400
-                )
-                # Test doubles and compatibility callers may not expose the
-                # async DB method.  Do not let that abort the whole scan.
-                if not hasattr(_recent_alert_check, "__await__"):
-                    continue
-                if await _recent_alert_check:
-                    continue
-
-                # In-memory dedup — catches same-session props sent via 95+ broadcast_alert.
-                # broadcast_alert does NOT set UnderdogSnapshotRecord.alert_sent, so
-                # has_recent_ud_alert misses them.  _prop_market_alerted IS set by all 95+
-                # paths, so this check closes the gap within the current bot session.
+                # Production dedup is restored into process memory at startup
+                # and updated atomically on delivery. Never query SQLite once
+                # the live scan has encountered a standing candidate.
                 if _is_prop_deduped(
                     _prop_market_alerted, _sp, _ssport, _st, _line_val,
                     dedup_window_seconds=config.UD_ALERT_DEDUP_WINDOW,
@@ -5097,13 +5192,26 @@ async def underdog_job(context) -> None:
                     )
                     continue
 
-                _shist = await _await_cycle_budget(
-                    _cycle_timing.await_db(
-                        "read",
-                        "get_ud_prop_history",
-                        db.get_ud_prop_history(_sp, _st, limit=30),
-                    ),
-                    "standing database history",
+                # Preserve the historical database-double contract used by
+                # isolated tests and compatibility callers.
+                if not isinstance(db, Database):
+                    _recent_alert_check = db.has_recent_ud_alert(
+                        _sp, _st, within_seconds=86400
+                    )
+                    if not hasattr(_recent_alert_check, "__await__"):
+                        continue
+                    if await _recent_alert_check:
+                        continue
+
+                _shist = await _candidate_line_history(
+                    db,
+                    _sp,
+                    _st,
+                    cycle_timing=_cycle_timing,
+                    operation="get_ud_prop_history",
+                )
+                _cached_player_results = _candidate_player_results(
+                    db, _sp, _ssport, _st
                 )
                 _shistory_snap = None
                 try:
@@ -5118,6 +5226,8 @@ async def underdog_job(context) -> None:
                             ud_history=_shist,
                             source_provider="Underdog",
                             instrumentation=_cycle_timing,
+                            ensure_real_results=_cached_player_results is None,
+                            preloaded_results=_cached_player_results,
                         ),
                         "standing history",
                     )
@@ -5149,8 +5259,10 @@ async def underdog_job(context) -> None:
                 _shits = await _await_cycle_budget(
                     _fetch_and_compute_hit_rates(
                         db, _sp, _ssport, _st, _line_val,
+                        allow_remote=_cached_player_results is None,
                         cycle_timing=_cycle_timing,
                         source_provider="Underdog",
+                        preloaded_results=_cached_player_results,
                     ),
                     "standing hit rates",
                 )
@@ -6381,7 +6493,14 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     continue
 
             # ── Score + validate ──────────────────────────────────────────────
-            _sr_hist  = await db.get_ud_prop_history(_sr_player, _sr_stat, limit=30)
+            _sr_hist = await _candidate_line_history(
+                db,
+                _sr_player,
+                _sr_stat,
+            )
+            _sr_cached_results = _candidate_player_results(
+                db, _sr_player, _sr_sport, _sr_stat
+            )
             _sr_history_snap = None
             try:
                 from providers.player_history import get_player_history_provider
@@ -6393,7 +6512,8 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     _sr_line,
                     ud_history=_sr_hist,
                     source_provider="Underdog",
-                    ensure_real_results=False,
+                    ensure_real_results=_sr_cached_results is None,
+                    preloaded_results=_sr_cached_results,
                 )
             except Exception:
                 _sr_history_snap = None
@@ -6421,8 +6541,9 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
 
             _sr_hits = await _fetch_and_compute_hit_rates(
                 db, _sr_player, _sr_sport, _sr_stat, _sr_line,
-                allow_remote=False,
+                allow_remote=_sr_cached_results is None,
                 source_provider="Underdog",
+                preloaded_results=_sr_cached_results,
             )
             _sr_dec = _sr_decide(
                 score        = _sr_score,

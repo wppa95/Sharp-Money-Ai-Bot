@@ -245,6 +245,27 @@ async def player_history_collector_job(context) -> None:
             _CYCLE_TIME_BUDGET_SECONDS,
         )
 
+        # Hydrate live evidence memory in one bounded background read. The
+        # Underdog scan never performs these reads itself.
+        bulk_reader = getattr(db, "get_player_results_bulk", None)
+        if targets and asyncio.iscoroutinefunction(bulk_reader):
+            try:
+                from engine.evidence_memory import put_player_result_batch
+
+                existing_results = await bulk_reader(targets, limit=40)
+                put_player_result_batch(existing_results)
+                logger.info(
+                    "player_history_collector_job: evidence cache hydrated "
+                    "keys=%d rows=%d",
+                    len(existing_results),
+                    sum(len(rows) for rows in existing_results.values()),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "player_history_collector_job: evidence cache hydration failed: %s",
+                    exc,
+                )
+
         # ── Fetch results until the cadence-safe time budget is exhausted ───
         ok = 0
         rows = 0
@@ -332,6 +353,9 @@ async def player_history_collector_job(context) -> None:
                 for r in raw:
                     await db.upsert_player_result(r)
                 if raw:
+                    from engine.evidence_memory import put_player_results
+
+                    put_player_results(player, sport, stat, raw)
                     ok += 1
                     rows += len(raw)
                     ok_by_sport[sport] = ok_by_sport.get(sport, 0) + 1

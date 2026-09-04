@@ -3,11 +3,11 @@ name: Live monitoring database boundary
 description: Keep live monitoring feed-driven and reserve SQLite access for durable evidence workflows.
 ---
 
-Live monitoring must compare the current provider feed with in-memory state. SQLite may be used for evidence, history, grading, and tracking, but not as a recurring active-pool scan or monitoring source.
+Live monitoring must compare the current provider feed with in-memory state. Player-result evidence, line history, confirmation, and delivery dedup are keyed memory lookups during a scan; SQLite remains durable storage for background hydration, grading, reporting, and tracking.
 
-**Why:** The Underdog snapshot archive grew large enough that database-backed monitoring reads and rewrites held the live cadence for minutes.
+**Why:** Per-candidate evidence, confirmation, and dedup reads made warmed scans suspend inside SQLite even after active-pool restoration moved to memory.
 
-**How to apply:** Do not schedule full-pool or stable-refresh monitoring jobs that read the snapshot archive. Keep durable writes/reads only where they produce or consume evidence, historical records, grading results, or tracking state.
+**How to apply:** Background collectors bulk-hydrate bounded caches after the scan releases its slot. Candidate paths use direct identity lookups; a cache miss yields no evidence/PASS and never falls back to SQLite or a remote provider.
 
 Production writes emitted by a live scan must be serialized outside the scan coroutine, drained during graceful shutdown, and discarded when an event loop is replaced.
 

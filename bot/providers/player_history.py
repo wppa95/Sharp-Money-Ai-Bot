@@ -181,11 +181,12 @@ class PlayerHistoryProvider:
         source_provider: str = "Underdog",
         instrumentation=None,
         ensure_real_results: bool = True,
+        preloaded_results: Optional[list] = None,
     ) -> PlayerHistorySnapshot:
         sport_u = (sport or "UNKNOWN").upper()
         stat_l = stat_type.lower().strip()
 
-        if ensure_real_results:
+        if ensure_real_results and preloaded_results is None:
             await self._ensure_real_results(
                 db,
                 player_name,
@@ -196,7 +197,9 @@ class PlayerHistoryProvider:
                 force_refresh=force_refresh,
                 instrumentation=instrumentation,
             )
-        if instrumentation is not None:
+        if preloaded_results is not None:
+            db_results = list(preloaded_results)
+        elif instrumentation is not None:
             db_results = await instrumentation.await_db(
                 "read",
                 "get_player_results_for_history",
@@ -228,6 +231,8 @@ class PlayerHistoryProvider:
         supplemental_records: list[PlayerHistoryRecord] = []
         provider_scope = str(source_provider or "").strip().lower()
         if (
+            preloaded_results is None
+            and
             provider_scope in {"underdog", "prizepicks"}
             and len(real_records) < max(1, int(min_samples))
         ):
