@@ -91,6 +91,10 @@ class _Session:
         self.calls.append((url, kwargs))
         return self.response
 
+    def post(self, url, **kwargs):
+        self.calls.append((url, kwargs))
+        return self.response
+
 
 class _QueueSession:
     def __init__(self, responses):
@@ -622,6 +626,88 @@ def test_documented_read_only_event_capabilities_keep_payload_and_query_params()
         "markets": "totals",
         "period": "q1",
     }
+
+
+def test_hobby_operational_and_bulk_capabilities_use_documented_routes():
+    session = _QueueSession(
+        [
+            _Response(200, [{"key": "baseball_mlb"}]),
+            _Response(200, [{"id": "game-1"}]),
+            _Response(200, [{"id": "game-1", "bookmakers": []}]),
+            _Response(200, {"runs": 8.5}),
+            _Response(200, {"goals": 6.5}),
+            _Response(200, "sample,csv"),
+        ]
+    )
+    client = PropLineClient(
+        api_key="test-only-key",
+        session=session,
+        min_request_interval=0,
+        cache_ttl=0,
+    )
+
+    results = [
+        asyncio.run(client.fetch_sports()),
+        asyncio.run(client.fetch_events("baseball_mlb")),
+        asyncio.run(client.fetch_sport_odds(
+            "baseball_mlb",
+            markets=["h2h", "totals"],
+            bookmakers=["pinnacle", "draftkings"],
+            period="all",
+            include_links=True,
+            include_book_ids=True,
+        )),
+        asyncio.run(client.fetch_grand_salami(date="2026-09-03")),
+        asyncio.run(client.fetch_daily_goals_total(date="2026-09-03")),
+        asyncio.run(client.fetch_exports_sample()),
+    ]
+
+    assert all(result.succeeded for result in results)
+    assert session.calls[0][0].endswith("/v1/sports")
+    assert session.calls[1][0].endswith("/v1/sports/baseball_mlb/events")
+    assert session.calls[2][1]["params"] == {
+        "markets": "h2h,totals",
+        "bookmakers": "pinnacle,draftkings",
+        "period": "all",
+        "includeLinks": "true",
+        "includeBookIds": "true",
+    }
+    assert session.calls[3][0].endswith("/v1/sports/baseball_mlb/grand-salami")
+    assert session.calls[4][0].endswith("/v1/sports/hockey_nhl/daily-goals-total")
+    assert session.calls[5][0].endswith("/v1/exports/sample")
+
+
+def test_hobby_sgp_and_clv_actions_are_posted_without_touching_polling_models():
+    session = _Session(_Response(200, {"quoted": True, "clv_pct": 4.2}))
+    client = PropLineClient(
+        api_key="test-only-key",
+        session=session,
+        min_request_interval=0,
+        cache_ttl=0,
+    )
+
+    sgp = asyncio.run(client.fetch_sgp(
+        "basketball_nba",
+        "game-1",
+        bookmaker="fanduel",
+        legs=[
+            {"market": "player_points", "name": "Over", "description": "A", "point": 20.5},
+            {"market": "player_rebounds", "name": "Under", "description": "B", "point": 8.5},
+        ],
+    ))
+    clv = asyncio.run(client.grade_clv([
+        {"event_id": "game-1", "market": "player_points", "name": "Over", "point": 20.5, "price": -110}
+    ]))
+
+    assert sgp.succeeded is True
+    assert clv.succeeded is True
+    assert session.calls[0][0].endswith(
+        "/v1/sports/basketball_nba/events/game-1/sgp"
+    )
+    assert session.calls[0][1]["json"]["bookmaker"] == "fanduel"
+    assert len(session.calls[0][1]["json"]["legs"]) == 2
+    assert session.calls[1][0].endswith("/v1/clv/grade")
+    assert "bets" in session.calls[1][1]["json"]
 
 
 def test_player_games_are_cached_and_player_name_is_escaped():
