@@ -2162,7 +2162,14 @@ class PropLineClient:
         self._request_count += 1
         return True
 
-    async def _request_json(self, url: str, params: dict[str, str]) -> Any:
+    async def _request_json(
+        self,
+        url: str,
+        params: dict[str, str],
+        *,
+        method: str = "GET",
+        json_body: Any = None,
+    ) -> Any:
         """Perform one authorized request and account for it centrally."""
         if not self.api_key:
             raise PropLineError("PropLine API key is missing")
@@ -2188,9 +2195,17 @@ class PropLineClient:
                 "Accept": "application/json",
             }
             timeout = aiohttp.ClientTimeout(total=self.timeout_seconds)
-            async with session.get(
-                url, headers=headers, params=params, timeout=timeout
-            ) as response:
+            request_method = getattr(session, method.lower(), None)
+            if request_method is None:
+                raise PropLineError(f"PropLine HTTP method is unsupported: {method}")
+            request_kwargs = {
+                "headers": headers,
+                "params": params,
+                "timeout": timeout,
+            }
+            if json_body is not None:
+                request_kwargs["json"] = json_body
+            async with request_method(url, **request_kwargs) as response:
                 self.request_limiter.observe_provider_limit(response.headers)
                 if response.status == 404:
                     raise PropLineNotFoundError(f"PropLine resource not found (HTTP {response.status})")
@@ -2306,6 +2321,38 @@ class PropLineClient:
         if not official_sport:
             raise PropLineError("PropLine sport key is required for event discovery")
         return f"{self.api_url.rstrip('/')}/v1/sports/{quote(official_sport, safe='')}/events", {}
+
+    def _official_sport_odds_request(
+        self,
+        sport_key: str,
+        *,
+        markets: Any = "",
+        bookmakers: Any = "",
+        period: str = "",
+        include_links: bool = False,
+        include_book_ids: bool = False,
+    ) -> tuple[str, dict[str, str]]:
+        official_sport = _clean(sport_key)
+        if not official_sport:
+            raise PropLineError("PropLine sport key is required for sport odds")
+        params: dict[str, str] = {}
+        for name, value in (
+            ("markets", markets),
+            ("bookmakers", bookmakers),
+            ("period", period),
+        ):
+            cleaned = self._csv_param(value)
+            if cleaned:
+                params[name] = cleaned
+        if include_links:
+            params["includeLinks"] = "true"
+        if include_book_ids:
+            params["includeBookIds"] = "true"
+        return (
+            f"{self.api_url.rstrip('/')}/v1/sports/"
+            f"{quote(official_sport, safe='')}/odds",
+            params,
+        )
 
     def _official_event_odds_request(
         self,
@@ -2434,6 +2481,157 @@ class PropLineClient:
             self._endpoint_cache[scope] = result
             self._endpoint_cache_clock[scope] = self._clock()
             return result
+
+    async def _post_endpoint(
+        self,
+        endpoint: str,
+        body: dict[str, Any],
+    ) -> PropLineEndpointResult:
+        """POST one documented Hobby action without entering live polling."""
+        fetched_at = datetime.utcnow()
+        if not self.is_configured:
+            return PropLineEndpointResult(
+                None, fetched_at, endpoint=endpoint,
+                error="PropLine is not configured", failure_kind="disabled",
+            )
+        async with self._lock:
+            try:
+                payload = await self._request_json(
+                    endpoint, {}, method="POST", json_body=body
+                )
+            except PropLineNotFoundError as exc:
+                return PropLineEndpointResult(
+                    None, fetched_at, endpoint=endpoint,
+                    error=str(exc), failure_kind="not_found",
+                )
+            except PropLineRateLimitError as exc:
+                return PropLineEndpointResult(
+                    None, fetched_at, endpoint=endpoint,
+                    error=str(exc), failure_kind="quota",
+                )
+            except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                return PropLineEndpointResult(
+                    None, fetched_at, endpoint=endpoint,
+                    error=f"PropLine request failed: {type(exc).__name__}",
+                    failure_kind="http",
+                )
+            except PropLineError as exc:
+                return PropLineEndpointResult(
+                    None, fetched_at, endpoint=endpoint,
+                    error=str(exc),
+                    failure_kind="quota" if "budget" in str(exc).lower() else "http",
+                )
+            redacted = bool(payload.get("redacted", False)) if isinstance(payload, dict) else False
+            upgrade_url = _clean(payload.get("upgrade_url")) if isinstance(payload, dict) else ""
+            return PropLineEndpointResult(
+                payload, fetched_at, endpoint=endpoint,
+                succeeded=True, complete=True, redacted=redacted,
+                upgrade_url=upgrade_url,
+            )
+
+    async def fetch_sports(self) -> PropLineEndpointResult:
+        """Fetch the canonical PropLine sport catalog."""
+        try:
+            endpoint = self._official_read_path("sports")
+        except PropLineError as exc:
+            return PropLineEndpointResult(
+                None, datetime.utcnow(), error=str(exc), failure_kind="configuration"
+            )
+        return await self._fetch_read_only(endpoint, {}, cache_scope="sports")
+
+    async def fetch_events(
+        self, sport_key: str, *, refresh: bool = False
+    ) -> PropLineEndpointResult:
+        """Fetch the raw event catalog; event ids remain the join key."""
+        try:
+            endpoint = self._official_read_path("sports", sport_key, "events")
+        except PropLineError as exc:
+            return PropLineEndpointResult(
+                None, datetime.utcnow(), error=str(exc), failure_kind="configuration"
+            )
+        if refresh:
+            self._endpoint_cache.pop(f"events:{_clean(sport_key).lower()}", None)
+            self._endpoint_cache_clock.pop(f"events:{_clean(sport_key).lower()}", None)
+        return await self._fetch_read_only(
+            endpoint, {}, cache_scope=f"events:{_clean(sport_key).lower()}"
+        )
+
+    async def fetch_sport_odds(
+        self,
+        sport_key: str,
+        *,
+        markets: Any = "",
+        bookmakers: Any = "",
+        period: str = "",
+        include_links: bool = False,
+        include_book_ids: bool = False,
+    ) -> PropLineEndpointResult:
+        """Fetch bulk game lines for a sport, including optional player props."""
+        try:
+            endpoint, params = self._official_sport_odds_request(
+                sport_key,
+                markets=markets,
+                bookmakers=bookmakers,
+                period=period,
+                include_links=include_links,
+                include_book_ids=include_book_ids,
+            )
+        except PropLineError as exc:
+            return PropLineEndpointResult(
+                None, datetime.utcnow(), error=str(exc), failure_kind="configuration"
+            )
+        return await self._fetch_read_only(
+            endpoint, params,
+            cache_scope="sport-odds:" + json.dumps(
+                [endpoint, sorted(params.items())], separators=(",", ":")
+            ),
+        )
+
+    async def fetch_grand_salami(
+        self, *, date: str = ""
+    ) -> PropLineEndpointResult:
+        """Fetch the optional MLB all-games runs comparison."""
+        try:
+            endpoint = self._official_read_path(
+                "sports", "baseball_mlb", "grand-salami"
+            )
+        except PropLineError as exc:
+            return PropLineEndpointResult(
+                None, datetime.utcnow(), error=str(exc), failure_kind="configuration"
+            )
+        params = {"date": _clean(date)} if _clean(date) else {}
+        return await self._fetch_read_only(
+            endpoint, params,
+            cache_scope="grand-salami:" + json.dumps(sorted(params.items())),
+        )
+
+    async def fetch_daily_goals_total(
+        self, *, date: str = ""
+    ) -> PropLineEndpointResult:
+        """Fetch the optional NHL daily goals comparison."""
+        try:
+            endpoint = self._official_read_path(
+                "sports", "hockey_nhl", "daily-goals-total"
+            )
+        except PropLineError as exc:
+            return PropLineEndpointResult(
+                None, datetime.utcnow(), error=str(exc), failure_kind="configuration"
+            )
+        params = {"date": _clean(date)} if _clean(date) else {}
+        return await self._fetch_read_only(
+            endpoint, params,
+            cache_scope="daily-goals-total:" + json.dumps(sorted(params.items())),
+        )
+
+    async def fetch_exports_sample(self) -> PropLineEndpointResult:
+        """Fetch PropLine's small public export-shape sample."""
+        try:
+            endpoint = self._official_read_path("exports", "sample")
+        except PropLineError as exc:
+            return PropLineEndpointResult(
+                None, datetime.utcnow(), error=str(exc), failure_kind="configuration"
+            )
+        return await self._fetch_read_only(endpoint, {}, cache_scope="exports-sample")
 
     async def fetch_player_games(
         self,
