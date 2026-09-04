@@ -90,6 +90,7 @@ from market_engine import (
     shutdown_db_persistence_worker,
     underdog_job,
     propline_request_scan_job,
+    propline_request_schedule_state,
     _run_prizepicks_independent_cycle,
 )
 from providers import init_health_monitor
@@ -605,13 +606,47 @@ async def post_init(application: Application) -> None:
             first=45,
             name="underdog_monitor",
         )
-        # PropLine requests use the provider's continuous 208/hour pace.
-        # Fetching is independent from the shared 120-second PrizePicks
-        # evaluation cycle; the request worker only refreshes observations.
-        jq.run_repeating(
-            _coordinated_job("propline_request_scan", propline_request_scan_job),
-            interval=PROPLINE_MIN_REQUEST_INTERVAL,
-            first=5,
+        # PropLine uses a one-shot scheduler so a 429 can remove the
+        # background rotator completely until Retry-After expires.  The next
+        # one-shot is scheduled by the callback at the limiter's current
+        # recovery/baseline interval.
+        propline_scan_callback = None
+
+        async def _propline_scan_tick(context):
+            await propline_request_scan_job(context)
+            state = propline_request_schedule_state()
+            if not state:
+                logger.info("PropLine scheduler stopped: provider unavailable")
+                return
+            delay = max(0.1, float(state["delay"]))
+            queue = getattr(context, "job_queue", None)
+            if queue is None:
+                application_ref = getattr(context, "application", None)
+                queue = getattr(application_ref, "job_queue", None)
+            if queue is None or propline_scan_callback is None:
+                logger.warning("PropLine scheduler stopped: job queue unavailable")
+                return
+            logger.info(
+                "PropLine scheduler next: phase=%s rate=%d/hour delay=%.1fs "
+                "backoff=%s",
+                state["phase"],
+                state["rate"],
+                delay,
+                "active" if state["backoff"] else "idle",
+            )
+            queue.run_once(
+                propline_scan_callback,
+                when=delay,
+                name="propline_request_scan",
+            )
+
+        propline_scan_callback = _coordinated_job(
+            "propline_request_scan",
+            _propline_scan_tick,
+        )
+        jq.run_once(
+            propline_scan_callback,
+            when=5,
             name="propline_request_scan",
         )
         # Do not schedule a database-backed full-pool monitoring scan. The
@@ -657,14 +692,13 @@ async def post_init(application: Application) -> None:
             "Jobs scheduled — underdog: every %ds, FPR: disabled, "
             "grader: every %ds, history: every %ds, season_check: every %ds, "
             "heartbeat: every 60s "
-            "[PrizePicks/PropLine companion cycle enabled=%s; "
-            "PropLine requests every %.1fs; DK/FD delivery disabled]",
+             "[PrizePicks/PropLine companion cycle enabled=%s; "
+             "PropLine default rate=180/hour; DK/FD delivery disabled]",
             config.UNDERDOG_POLL_INTERVAL,
             config.OPPORTUNITY_GRADER_INTERVAL,
             config.PLAYER_HISTORY_POLL_INTERVAL,
             config.SEASON_CHECK_INTERVAL,
             _propline_enabled,
-            PROPLINE_MIN_REQUEST_INTERVAL,
         )
     else:
         logger.warning("JobQueue not available — background jobs disabled.")

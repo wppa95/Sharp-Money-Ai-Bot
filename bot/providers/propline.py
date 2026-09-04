@@ -189,6 +189,39 @@ PROPLINE_MIN_REQUEST_INTERVAL = 3600.0 / PROPLINE_DEFAULT_REQUESTS_PER_HOUR
 _DEFAULT_PROPLINE_REQUEST_BUDGET = PropLineRequestBudget(PROPLINE_DAILY_REQUEST_LIMIT)
 
 
+def _propline_request_kind(url: str) -> str:
+    """Classify a request for quota telemetry without exposing its URL."""
+    path = str(url or "").lower()
+    if "/odds" in path and "/sports/" in path:
+        return "bulk"
+    if "/events/" in path:
+        return "event"
+    if "/results" in path:
+        return "results"
+    if "/history" in path:
+        return "candidate"
+    if any(
+        marker in path
+        for marker in ("/trends", "/movement", "/best-line", "/ev", "/projections")
+    ):
+        return "candidate"
+    if any(
+        marker in path
+        for marker in (
+            "/futures",
+            "/payouts",
+            "/hit-rates",
+            "/freshness",
+            "/grand-salami",
+            "/daily-goals",
+            "/clv",
+            "/sgp",
+        )
+    ):
+        return "reporting"
+    return "other"
+
+
 class PropLineRequestLimiter:
     """Shared rolling-hour limiter with continuous, non-bursting pacing."""
 
@@ -2281,8 +2314,6 @@ class PropLineClient:
             )
         if self.request_budget.remaining <= 0:
             raise PropLineError("PropLine daily request budget exhausted")
-        if not self._reserve_request():
-            raise PropLineError("PropLine daily request budget exhausted")
         await self.request_limiter.acquire()
         # Another client can receive a provider 429 while this request waits
         # for its rolling-hour slot. Never send during that shared cooldown.
@@ -2292,6 +2323,10 @@ class PropLineClient:
                 "PropLine rate-limit backoff active",
                 retry_after=shared_backoff,
             )
+        # Reserve immediately before network I/O. Waiting for a local rolling
+        # slot or a shared cooldown must not consume the daily budget.
+        if not self._reserve_request():
+            raise PropLineError("PropLine daily request budget exhausted")
         self._last_request_at = self._clock()
 
         session = self._session

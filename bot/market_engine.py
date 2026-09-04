@@ -619,6 +619,43 @@ _propline_current_observations: dict[tuple[str, str, str, str], object] = {}
 _propline_evidence_by_identity: dict[tuple[str, str, str], list[object]] = {}
 
 
+def propline_request_schedule_state() -> Optional[dict[str, object]]:
+    """Return the next PropLine one-shot delay and quota state.
+
+    The scheduler is deliberately one-shot rather than repeating: a provider
+    cooldown therefore removes the background rotator entirely until the exact
+    Retry-After deadline.  The client limiter owns the 160/180 phase pacing.
+    """
+    provider = _propline_provider
+    if provider is None or not getattr(provider, "is_available", lambda: False)():
+        return None
+    client = getattr(provider, "client", None)
+    if client is None:
+        return {
+            "delay": 3600.0 / 180.0,
+            "phase": "baseline",
+            "rate": 180,
+            "backoff": 0.0,
+        }
+    backoff = max(0.0, float(getattr(client, "backoff_remaining", 0.0) or 0.0))
+    if backoff > 0:
+        return {
+            "delay": backoff,
+            "phase": "recovery",
+            "rate": 160,
+            "backoff": backoff,
+        }
+    limiter = getattr(client, "request_limiter", None)
+    phase = str(getattr(limiter, "phase", "baseline") or "baseline")
+    rate = int(getattr(limiter, "effective_limit", 180) or 180)
+    return {
+        "delay": 3600.0 / max(1, rate),
+        "phase": phase,
+        "rate": rate,
+        "backoff": 0.0,
+    }
+
+
 async def _get_prizepicks_scan_sports(provider) -> tuple[str, ...]:
     """Return the provider's active canonical sports, with a safe config fallback.
 
