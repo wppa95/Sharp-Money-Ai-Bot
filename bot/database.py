@@ -4870,6 +4870,73 @@ class Database:
                 record.fetched_at = datetime.utcnow()
             await s.commit()
 
+    @_retry_sqlite_write
+    async def upsert_player_results_bulk(self, records: "list[object]") -> int:
+        """Insert or update player-game results in one short transaction.
+
+        Player history collection can return several games for one target.
+        Keeping those rows in a single small transaction avoids repeatedly
+        contending for SQLite's single writer slot while still committing
+        progress before the collector continues through more targets.
+        """
+        if not records:
+            return 0
+
+        from engine.identity import display_player_name
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+        prepared: dict[tuple[str, str, str, str, str], dict] = {}
+        fetched_at = datetime.utcnow()
+        for raw in records:
+            player_name = display_player_name(getattr(raw, "player_name", None))
+            sport = str(getattr(raw, "sport", "") or "").strip().upper()
+            stat_type = str(getattr(raw, "stat_type", "") or "").lower().strip()
+            game_date = str(getattr(raw, "game_date", "") or "").strip()
+            actual_value = getattr(raw, "actual_value", None)
+            opponent = getattr(raw, "opponent", None)
+            source = str(getattr(raw, "source", "api") or "api")
+            game_id = str(getattr(raw, "game_id", "") or "")
+            key = (player_name, sport, stat_type, game_date, game_id)
+            prepared[key] = {
+                "player_name": player_name,
+                "sport": sport,
+                "stat_type": stat_type,
+                "game_date": game_date,
+                "opponent": opponent,
+                "actual_value": actual_value,
+                "source": source,
+                "game_id": game_id,
+                "fetched_at": fetched_at,
+            }
+
+        if not prepared:
+            return 0
+
+        insert_stmt = sqlite_insert(PlayerGameResult).values(list(prepared.values()))
+        stmt = insert_stmt.on_conflict_do_update(
+            index_elements=[
+                "player_name",
+                "sport",
+                "stat_type",
+                "game_date",
+                "game_id",
+            ],
+            set_={
+                "actual_value": insert_stmt.excluded.actual_value,
+                # Preserve an already-known opponent when a later provider
+                # refresh omits it.
+                "opponent": func.coalesce(
+                    insert_stmt.excluded.opponent,
+                    PlayerGameResult.opponent,
+                ),
+                "fetched_at": fetched_at,
+            },
+        )
+        async with self.session() as s:
+            await s.execute(stmt)
+            await s.commit()
+        return len(prepared)
+
     async def get_player_results(
         self,
         player_name: str,

@@ -21,6 +21,11 @@ _SUPPORTED_HISTORY_SPORTS = frozenset({
     "SOCCER",         # Requires FOOTBALL_DATA_API_KEY; returns [] gracefully without it
 })
 
+# Keep transactions short enough that live monitoring and reporting can get
+# the SQLite writer slot, while committing often enough that a long provider
+# collection never keeps all fetched rows only in memory.
+_PLAYER_HISTORY_WRITE_BATCH_SIZE = 25
+
 
 def _fair_cycle_targets(
     targets: list[tuple[str, str, str]],
@@ -178,6 +183,25 @@ async def player_history_collector_job(context) -> None:
         # ── Fetch the complete supported target set ─────────────────────────
         ok = 0
         rows = 0
+        pending_results: list[object] = []
+        bulk_writer = getattr(db, "upsert_player_results_bulk", None)
+
+        async def flush_results() -> None:
+            """Commit a small result batch and release the event loop."""
+            nonlocal pending_results
+            if not pending_results:
+                return
+            batch = pending_results
+            pending_results = []
+            if asyncio.iscoroutinefunction(bulk_writer):
+                await bulk_writer(batch)
+            else:
+                # Compatibility path for lightweight database doubles and
+                # older database implementations.
+                for result in batch:
+                    await db.upsert_player_result(result)
+            await asyncio.sleep(0)
+
         cycle_targets = _fair_cycle_targets(targets, len(targets))
         target_counts: dict[str, int] = {}
         ok_by_sport: dict[str, int] = {}
@@ -220,7 +244,9 @@ async def player_history_collector_job(context) -> None:
                             exc,
                         )
                 for r in raw:
-                    await db.upsert_player_result(r)
+                    pending_results.append(r)
+                    if len(pending_results) >= _PLAYER_HISTORY_WRITE_BATCH_SIZE:
+                        await flush_results()
                 if raw:
                     from engine.evidence_memory import put_player_results
 
@@ -234,6 +260,10 @@ async def player_history_collector_job(context) -> None:
                     "player_history_collector_job: %s/%s/%s failed: %s",
                     player, sport, stat, exc,
                 )
+
+        # Never leave the final partial batch in memory when the target set
+        # ends below the batch threshold.
+        await flush_results()
 
         logger.info(
             "player_history_collector_job: done players_ok=%d rows=%d "
