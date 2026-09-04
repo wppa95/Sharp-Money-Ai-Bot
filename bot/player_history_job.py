@@ -385,8 +385,19 @@ async def player_history_collector_job(context) -> None:
                 try:
                     # All provider work belongs to this invocation. PropLine
                     # resolved-history lookups remain on their own cadence.
-                    raw = await provider.fetch_results(player, sport, stat)
+                    remaining = cycle_deadline - time.monotonic()
+                    if remaining <= 0:
+                        return "deadline", None
+                    raw = await asyncio.wait_for(
+                        provider.fetch_results(player, sport, stat),
+                        timeout=min(
+                            _PLAYER_HISTORY_OPERATION_TIMEOUT_SECONDS,
+                            remaining,
+                        ),
+                    )
                     return "ok", raw or []
+                except asyncio.TimeoutError:
+                    return "deadline", None
                 except Exception as exc:
                     return "error", exc
 
@@ -410,6 +421,16 @@ async def player_history_collector_job(context) -> None:
         ):
             target_counts[sport] = target_counts.get(sport, 0) + 1
             processed += 1
+            if fetch_status == "deadline":
+                budget_exhausted = True
+                logger.debug(
+                    "player_history_collector_job: cadence deadline reached "
+                    "for %s/%s/%s",
+                    player, sport, stat,
+                )
+                # Do not advance a target whose provider result was not
+                # collected. It remains eligible at the next rotation.
+                continue
             if fetch_status == "error":
                 failed += 1
                 logger.debug(
