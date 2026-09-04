@@ -214,11 +214,11 @@ class Config:
     PLAYER_HISTORY_POLL_INTERVAL: int = int(
         os.environ.get("PLAYER_HISTORY_POLL_INTERVAL", "120")
     )
-    # Maximum number of player-history provider targets processed per
-    # scheduler run. The collector rotates through the complete active pool
-    # over subsequent runs instead of replaying the first targets forever.
+    # Full active-book player-history collection runs on every cadence. Keep
+    # this compatibility setting above the current approximately 5,200-target
+    # book; the collector never uses it to truncate the active target list.
     PLAYER_HISTORY_BATCH_SIZE: int = int(
-        os.environ.get("PLAYER_HISTORY_BATCH_SIZE", "250")
+        os.environ.get("PLAYER_HISTORY_BATCH_SIZE", "6000")
     )
     # Safety margin kept free inside the player-history scheduler interval so
     # the collector can finish cleanly before the next cadence tick.

@@ -39,8 +39,8 @@ def test_fair_cycle_targets_preserves_all_when_under_limit():
     ]
 
 
-def test_history_api_target_budget_is_bounded():
-    assert _API_CALL_TARGET == 250
+def test_history_target_floor_covers_current_active_book():
+    assert _API_CALL_TARGET >= 5200
 
 
 def test_fifa_uses_existing_soccer_history_path():
@@ -216,7 +216,7 @@ async def test_player_history_flushes_results_in_small_durable_batches():
 
 
 @pytest.mark.asyncio
-async def test_player_history_rotates_to_next_target_on_following_run():
+async def test_player_history_attempts_full_active_book_on_each_run():
     snapshots = {
         (f"Player {index:03d}", "points"): SimpleNamespace(
             player_name=f"Player {index:03d}",
@@ -242,13 +242,9 @@ async def test_player_history_rotates_to_next_target_on_following_run():
         await player_history_collector_job(context)
         second_run = [call.args for call in provider.fetch_results.await_args_list]
 
-    assert len(first_run) == _API_CALL_TARGET
-    assert len(second_run) == _API_CALL_TARGET
-    assert second_run[:2] == [
-        ("Player 250", "NBA", "points"),
-        ("Player 251", "NBA", "points"),
-    ]
-    assert second_run[:2] not in first_run
+    assert len(first_run) == _API_CALL_TARGET + 2
+    assert len(second_run) == _API_CALL_TARGET + 2
+    assert set(first_run) == set(second_run)
 
 
 @pytest.mark.asyncio
@@ -312,7 +308,6 @@ async def test_player_history_logs_deferred_and_failed_targets(caplog):
         side_effect=[[], RuntimeError("provider unavailable")]
     )
     with (
-        patch("player_history_job._API_CALL_TARGET", 2),
         patch(
             "providers.player_stats.PlayerStatsProvider",
             return_value=provider,
@@ -321,8 +316,8 @@ async def test_player_history_logs_deferred_and_failed_targets(caplog):
     ):
         await player_history_collector_job(context)
 
-    assert "processed=2" in caplog.text
-    assert "remaining=1" in caplog.text
+    assert "processed=3" in caplog.text
+    assert "remaining=0" in caplog.text
     assert "errors=1" in caplog.text
 
 
