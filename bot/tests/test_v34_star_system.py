@@ -521,17 +521,28 @@ class TestScoreTotalNotUsedForStars:
             "score.stars must not be used in _format_95_priority_alert — use BQ stars"
         )
 
-    def test_bq_stars_used_in_alerts_multiplatform(self):
-        """alerts_multiplatform must reference _bq_stars in format functions."""
-        import inspect, alerts_multiplatform as am
-        src_change  = inspect.getsource(am.format_underdog_change_alert)
-        src_newprop = inspect.getsource(am.format_underdog_new_prop_alert)
-        assert "_bq_stars" in src_change, (
-            "_bq_stars must be used in format_underdog_change_alert"
+    def test_supported_low_quality_picks_are_labeled_strong_bet(self):
+        """Evidence gates delivery; stars do not gate the user-facing label."""
+        from types import SimpleNamespace
+        from alerts_multiplatform import (
+            format_underdog_change_alert,
+            format_underdog_new_prop_alert,
         )
-        assert "_bq_stars" in src_newprop, (
-            "_bq_stars must be used in format_underdog_new_prop_alert"
+
+        score = SimpleNamespace(total=66, stars=3, tier="B")
+        decision = SimpleNamespace(recommendation="UNDER", confidence=66)
+
+        changed = format_underdog_change_alert(
+            "Test Player", "TEST", "MLB", "Hits", 1.5, 0.5,
+            score=score, decision=decision,
         )
+        new_prop = format_underdog_new_prop_alert(
+            "Test Player", "TEST", "MLB", "Hits", 0.5,
+            score=score, decision=decision,
+        )
+
+        assert "💪 STRONG BET" in changed
+        assert "💪 STRONG BET" in new_prop
 
     def test_scoring_engine_unchanged(self):
         """_STAR_BANDS in ud_scoring must NOT have been modified (not the right source for alert stars)."""
