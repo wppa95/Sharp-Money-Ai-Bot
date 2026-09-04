@@ -486,6 +486,19 @@ class UnderdogSnapshotRecord(Base):
     bet_evidence_json  = Column(Text,      nullable=True)    # compact JSON evidence blob
     fetched_at  = Column(DateTime,    default=datetime.utcnow, nullable=False)
 
+    __table_args__ = (
+        # History reads filter by player/stat/removal state and return the
+        # newest observations.  Keep that hot path bounded as the append-only
+        # snapshot table grows.
+        Index(
+            "ix_underdog_snapshots_player_stat_removed_fetched",
+            "player_name",
+            "stat_type",
+            "removed",
+            "fetched_at",
+        ),
+    )
+
 
 class PropLineHistory(Base):
     """
@@ -4245,6 +4258,12 @@ class Database:
                     await conn.execute(text(sql))
                 except Exception:
                     pass  # column already exists — safe to ignore
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_underdog_snapshots_player_stat_removed_fetched "
+                "ON underdog_snapshots "
+                "(player_name, stat_type, removed, fetched_at)"
+            ))
 
     async def save_underdog_snapshot(self, record: "UnderdogSnapshotRecord") -> "UnderdogSnapshotRecord":
         async with self.session() as s:
