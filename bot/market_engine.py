@@ -349,6 +349,10 @@ _active_jobs: dict[str, float] = {}
 _db_persistence_queue: Optional[asyncio.Queue] = None
 _db_persistence_worker_task: Optional[asyncio.Task] = None
 _db_persistence_loop = None
+# Keep each snapshot transaction bounded. A full Underdog feed can contain
+# several thousand observations; one giant ORM flush monopolizes SQLite and
+# creates a WAL burst that blocks the independent evidence writer.
+_UNDERDOG_SNAPSHOT_WRITE_BATCH_SIZE = 200
 
 
 async def _db_persistence_worker() -> None:
