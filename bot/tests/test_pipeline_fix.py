@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import sys
+import ast
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -146,16 +147,56 @@ class TestProcessedKeysGate:
         by the standing path.
         """
         src = self._get_engine_source()
-        reentry_pos   = src.find("is_reentry = not is_removed")
-        add_pos       = src.find("_processed_keys.add((player, stat_type))", reentry_pos)
-        assert reentry_pos != -1, "is_reentry detection not found"
-        assert add_pos != -1, (
-            "_processed_keys.add() not found after is_reentry detection — "
-            "re-entry path may have lost its _processed_keys protection."
-        )
-        # Must be within the re-entry scoring block (< 2500 chars; engine has grown)
-        assert add_pos - reentry_pos < 2500, (
-            "Re-entry _processed_keys.add() is too far from the is_reentry detection."
+        tree = ast.parse(src)
+        reentry_blocks = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.If)
+            and isinstance(node.test, ast.Name)
+            and node.test.id == "is_reentry"
+        ]
+        assert reentry_blocks, "if is_reentry block not found"
+
+        def is_processed_key_add(node):
+            return (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "add"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "_processed_keys"
+                and len(node.args) == 1
+                and isinstance(node.args[0], ast.Tuple)
+                and [
+                    element.id
+                    for element in node.args[0].elts
+                    if isinstance(element, ast.Name)
+                ] == ["player", "stat_type"]
+            )
+
+        for reentry_block in reentry_blocks:
+            adds = [
+                node
+                for node in ast.walk(reentry_block)
+                if is_processed_key_add(node)
+            ]
+            validations = [
+                node
+                for node in ast.walk(reentry_block)
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "validate_player_prop"
+                )
+            ]
+            if adds and validations:
+                assert adds[0].lineno < validations[0].lineno, (
+                    "_processed_keys.add() must occur before re-entry validation."
+                )
+                return
+
+        raise AssertionError(
+            "_processed_keys.add((player, stat_type)) not found inside the "
+            "re-entry block before validation."
         )
 
     def test_new_prop_path_still_adds_processed_keys(self):
