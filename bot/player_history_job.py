@@ -170,18 +170,23 @@ async def player_history_collector_job(context) -> None:
         cadence_budget = _player_history_cadence_budget()
         cycle_deadline = cycle_started + cadence_budget
 
-        async def await_in_cycle(operation: str, awaitable_factory):
+        async def await_in_cycle(
+            operation: str,
+            awaitable_factory,
+            *,
+            operation_timeout: float | None = _PLAYER_HISTORY_OPERATION_TIMEOUT_SECONDS,
+        ):
             """Await one operation without allowing it past this cycle's deadline."""
             remaining = cycle_deadline - time.monotonic()
             if remaining <= 0:
                 raise _CadenceBoundaryReached(operation)
             try:
+                timeout = remaining
+                if operation_timeout is not None:
+                    timeout = min(timeout, operation_timeout)
                 return await asyncio.wait_for(
                     awaitable_factory(),
-                    timeout=min(
-                        remaining,
-                        _PLAYER_HISTORY_OPERATION_TIMEOUT_SECONDS,
-                    ),
+                    timeout=timeout,
                 )
             except asyncio.TimeoutError as exc:
                 raise _CadenceBoundaryReached(operation) from exc
@@ -460,6 +465,10 @@ async def player_history_collector_job(context) -> None:
                 await await_in_cycle(
                     "persisting player-history results",
                     lambda: bulk_writer(batch),
+                    # SQLite writes share one process-wide writer gate. Allow
+                    # this small batch to wait for the current monitoring
+                    # transaction, but never beyond this cycle's deadline.
+                    operation_timeout=None,
                 )
             else:
                 # Compatibility path for lightweight database doubles and
@@ -468,6 +477,7 @@ async def player_history_collector_job(context) -> None:
                     await await_in_cycle(
                         "persisting player-history result",
                         lambda result=result: db.upsert_player_result(result),
+                        operation_timeout=None,
                     )
             await asyncio.sleep(0)
 
