@@ -819,13 +819,10 @@ def format_underdog_change_alert(
     if rec in ("OVER", "UNDER") and not removed:
         pick_emoji = "🟢" if rec == "OVER" else "🔴"
         pick_line = f"📌 <b>PICK:</b>  {pick_emoji} <b>{rec} {new_line:.1f}</b>"
-        if conf is not None:
-            _bq_int = int(conf)
-            # Keep the existing quality-to-priority mapping internal.  The
-            # result is intentionally not rendered in Telegram.
-            _bq_star_count = _bq_stars(_bq_int).count("★")
-            if _bq_star_count >= 4:
-                pick_line += "\n💪 STRONG BET"
+        # Evidence/history is the delivery gate.  Stars, score, and tier are
+        # internal metadata and must not decide whether a supported pick gets
+        # the user-facing Strong Bet label.
+        pick_line += "\n💪 STRONG BET"
 
     avail_block = _format_available_lines_block(
         ud_line=new_line if not removed else old_line,
@@ -1056,8 +1053,6 @@ def format_underdog_new_prop_alert(
             ["💪 STRONG BET"]
             if (
                 getattr(decision, "recommendation", "") in ("OVER", "UNDER")
-                and isinstance(getattr(decision, "confidence", None), (int, float))
-                and _bq_stars(int(getattr(decision, "confidence"))).count("★") >= 4
             )
             else []
         ),

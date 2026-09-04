@@ -427,7 +427,12 @@ class TestDeliverUnderdog:
             old_line    = 0.5,
             new_line    = 1.5,
             validation  = MagicMock(has_supporting_data=True),
-            decision    = MagicMock(recommendation="OVER", confidence=80),
+            decision    = MagicMock(
+                recommendation="OVER",
+                confidence=66,
+                decision_tier="B",
+            ),
+            score       = MagicMock(total=66, stars=3, tier="B"),
         )
 
         assert sent_messages
@@ -435,7 +440,40 @@ class TestDeliverUnderdog:
         assert "Connor McDavid" in msg
         assert "0.5" in msg
         assert "1.5" in msg
+        assert "💪 STRONG BET" in msg
         assert "ACTIONABLE BET PICK" in msg or "+1.0" in msg
+
+    @pytest.mark.asyncio
+    async def test_supported_three_star_under_is_sent_with_strong_bet_label(self):
+        sent_messages: list[str] = []
+
+        async def capture(chat_id, text, **kwargs):
+            sent_messages.append(text)
+            return MagicMock()
+
+        mock_bot = MagicMock()
+        mock_bot.send_message = AsyncMock(side_effect=capture)
+        delivery = AlertDelivery(_make_db_mock(), mock_bot, [1])
+        result = await delivery.deliver_underdog(
+            player_name="Nathan MacKinnon",
+            team="COL",
+            sport="NHL",
+            stat_type="Shots on Goal",
+            old_line=3.5,
+            new_line=2.5,
+            validation=MagicMock(has_supporting_data=True),
+            decision=MagicMock(
+                recommendation="UNDER",
+                confidence=66,
+                decision_tier="B",
+            ),
+            score=MagicMock(total=66, stars=3, tier="B"),
+        )
+
+        assert result.sent is True
+        assert sent_messages
+        assert "UNDER 2.5" in sent_messages[0]
+        assert "💪 STRONG BET" in sent_messages[0]
 
     @pytest.mark.asyncio
     async def test_line_change_lower_broadcast(self):

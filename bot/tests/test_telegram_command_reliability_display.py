@@ -836,19 +836,12 @@ async def test_direct_broadcast_sanitizes_retired_labels_without_losing_pick_con
 
 
 @pytest.mark.asyncio
-async def test_broadcast_alert_only_sends_rendered_strong_bet_picks():
+async def test_broadcast_alert_does_not_use_strong_bet_label_as_a_send_gate():
     bot = MagicMock()
     bot.send_message = AsyncMock()
 
     weak = "📊 <b>SHARP MONEY PLAY</b>\n📌 <b>PICK:</b> 🟢 <b>OVER 0.5</b>"
     assert await broadcast_alert(bot, [123], weak, sport="MLB") == {
-        "sent": 0,
-        "failed": 0,
-    }
-    bot.send_message.assert_not_awaited()
-
-    strong = f"{weak}\n💪 STRONG BET"
-    assert await broadcast_alert(bot, [123], strong, sport="MLB") == {
         "sent": 1,
         "failed": 0,
     }

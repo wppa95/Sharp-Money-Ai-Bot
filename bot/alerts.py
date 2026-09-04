@@ -699,9 +699,6 @@ async def send_alert(
         logger.info("send_alert: football betting output suppressed: sport=%s", sport)
         return False
     message = _sanitize_user_alert_message(message)
-    if not _has_strong_bet_label(message):
-        logger.info("send_alert: non-strong-bet alert suppressed")
-        return False
     markup = InlineKeyboardMarkup(keyboard) if keyboard else None
     try:
         await bot.send_message(
@@ -842,9 +839,6 @@ async def broadcast_alert(
         # failure.  Failed counts are reserved for attempted deliveries.
         return {"sent": 0, "failed": 0}
     message = _sanitize_user_alert_message(message)
-    if not _has_strong_bet_label(message):
-        logger.info("broadcast_alert: non-strong-bet alert suppressed")
-        return {"sent": 0, "failed": 0}
     sent = failed = 0
     for cid in chat_ids:
         if await send_alert(bot, cid, message, sport=sport):
