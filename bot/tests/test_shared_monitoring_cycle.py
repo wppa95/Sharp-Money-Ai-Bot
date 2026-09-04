@@ -42,7 +42,11 @@ async def test_shared_cycle_starts_both_branches_without_waiting_for_propline(mo
     await asyncio.sleep(0)
     await asyncio.sleep(0)
 
-    assert set(events) == {"propline-start", "underdog-start"}
+    assert set(events) == {
+        "propline-start",
+        "propline-end",
+        "underdog-start",
+    }
     assert not task.done()
 
     underdog_release.set()
@@ -86,6 +90,7 @@ async def test_shared_cycle_uses_empty_paced_batch_without_fallback_fetch(monkey
     )
 
     await market_engine._shared_monitoring_cycle(underdog_branch)(SimpleNamespace())
+    await asyncio.sleep(0)
 
     assert calls == [([], "paced", True)]
 

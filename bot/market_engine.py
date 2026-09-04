@@ -3573,10 +3573,11 @@ def _shared_monitoring_cycle(cycle_branch):
             # observation.  Keep the shared Underdog scheduler worker bounded
             # by handing that work to the tracked processing-task pool.
             _pp_kwargs["background_processing"] = True
-        _prizepicks_cycle_task = asyncio.create_task(
+        _propline_task = asyncio.create_task(
             _run_prizepicks_independent_cycle(context, **_pp_kwargs),
             name="shared_monitoring_propline",
         )
+        _prizepicks_cycle_task = _propline_task
         def _finish_propline_task(task: asyncio.Task) -> None:
             global _prizepicks_cycle_task
             if task.cancelled():
@@ -3594,12 +3595,12 @@ def _shared_monitoring_cycle(cycle_branch):
         try:
             result = await cycle_branch(context, *args, **kwargs)
         except asyncio.CancelledError:
-            _prizepicks_cycle_task.cancel()
-            await asyncio.gather(_prizepicks_cycle_task, return_exceptions=True)
+            _propline_task.cancel()
+            await asyncio.gather(_propline_task, return_exceptions=True)
             raise
         except BaseException:
-            _prizepicks_cycle_task.cancel()
-            await asyncio.gather(_prizepicks_cycle_task, return_exceptions=True)
+            _propline_task.cancel()
+            await asyncio.gather(_propline_task, return_exceptions=True)
             raise
         else:
             # Do not make a slow/independent PropLine companion extend or
