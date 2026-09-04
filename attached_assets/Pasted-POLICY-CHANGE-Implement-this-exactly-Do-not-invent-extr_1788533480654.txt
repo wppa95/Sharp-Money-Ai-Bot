@@ -1,0 +1,61 @@
+POLICY CHANGE. Implement this exactly. Do not invent extra gates.
+
+Intent
+- I want Strong Bet alerts delivered to Telegram.
+- OVER and UNDER are both allowed.
+- Star count, score, and tier must NOT block delivery anywhere.
+- The only delivery blocker in the framework is evidence/history.
+- If evidence/history supports the pick, render 💪 STRONG BET and send it.
+- If evidence/history does not support the pick, do not send it.
+
+What is broken now
+Yordan Alvarez | Hits + Runs + RBIs | MLB
+stars=3 score=66 tier=B
+was suppressed by:
+broadcast_alert() → _has_strong_bet_label()
+because the formatter only adds "💪 STRONG BET" when stars >= 4.
+
+That is the wrong policy.
+
+Required code behavior
+1. Remove star/score/tier as send blockers.
+   Search the whole bot for delivery / qualification / broadcast / send gates that use:
+   - stars
+   - star count
+   - score threshold
+   - tier S/A/B/C
+   - _has_strong_bet_label() as a send gate
+   - any "non-strong-bet alert suppressed" path
+   Those must not prevent Telegram delivery.
+
+2. Keep evidence/history as the only blocker.
+   A pick may be sent only if evidence/history supports the direction.
+   No evidence / insufficient history / conflicting history = do not send.
+   Do not replace the old star gate with a new score/tier gate.
+
+3. Labeling
+   If a pick passes evidence/history, the rendered Telegram message MUST include:
+   💪 STRONG BET
+   Do not require 4 stars, high score, or S/A tier to print that label.
+   OVER and UNDER both get 💪 STRONG BET when they pass evidence/history.
+
+4. Direction
+   Do not suppress UNDER.
+   Do not require a special UNDER-only label to send.
+   OVER and UNDER use the same evidence/history rule.
+
+Do not touch
+- Telegram token
+- chat / user IDs
+- env vars
+- PropLine key
+- GitHub push/commit
+- unrelated snapshot or grading refactors unless they directly block this send path
+
+First show
+- every file/function that currently blocks on stars, score, tier, or missing 💪 STRONG BET
+- the exact evidence/history check that will remain
+- the exact formatter change so passing picks always render 💪 STRONG BET
+- then make only those changes
+
+After the change, prove with logs that a candidate like the Alvarez 3-star / score 66 / tier B pick would no longer be dropped for those reasons, and would only be dropped if evidence/history failed.
