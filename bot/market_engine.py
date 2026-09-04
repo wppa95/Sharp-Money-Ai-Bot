@@ -3865,15 +3865,18 @@ async def underdog_job(context) -> None:
                 _hist_snap = None
                 try:
                     from providers.player_history import get_player_history_provider
-                    _hist_snap = await get_player_history_provider().get_snapshot(
-                        db,
-                        player,
-                        snap.sport or "UNKNOWN",
-                        stat_type,
-                        line_val,
-                        ud_history=np_history,
-                        source_provider="Underdog",
-                        instrumentation=_cycle_timing,
+                    _hist_snap = await _await_cycle_budget(
+                        get_player_history_provider().get_snapshot(
+                            db,
+                            player,
+                            snap.sport or "UNKNOWN",
+                            stat_type,
+                            line_val,
+                            ud_history=np_history,
+                            source_provider="Underdog",
+                            instrumentation=_cycle_timing,
+                        ),
+                        "new-prop history",
                     )
                 except Exception:
                     _hist_snap = None
@@ -3904,9 +3907,12 @@ async def underdog_job(context) -> None:
                 # Fetch real game results — required before any directional pick.
                 # Also fetch for np_immediate props (e.g. 0.5-line priority stats)
                 # even when they score PASS tier (no prev_line → low movement score).
-                hit_rates = await _fetch_and_compute_hit_rates(
-                    db, player, snap.sport or "UNKNOWN", stat_type, line_val,
-                    cycle_timing=_cycle_timing,
+                hit_rates = await _await_cycle_budget(
+                    _fetch_and_compute_hit_rates(
+                        db, player, snap.sport or "UNKNOWN", stat_type, line_val,
+                        cycle_timing=_cycle_timing,
+                    ),
+                    "new-prop hit rates",
                 )
                 decision = make_ud_bet_decision(
                     score        = score,
@@ -4148,15 +4154,18 @@ async def underdog_job(context) -> None:
                     _hist_snap = None
                     try:
                         from providers.player_history import get_player_history_provider
-                        _hist_snap = await get_player_history_provider().get_snapshot(
-                            db,
-                            player,
-                            snap.sport or "UNKNOWN",
-                            stat_type,
-                            snap.line or 0.0,
-                            ud_history=ud_history,
-                            source_provider="Underdog",
-                            instrumentation=_cycle_timing,
+                        _hist_snap = await _await_cycle_budget(
+                            get_player_history_provider().get_snapshot(
+                                db,
+                                player,
+                                snap.sport or "UNKNOWN",
+                                stat_type,
+                                snap.line or 0.0,
+                                ud_history=ud_history,
+                                source_provider="Underdog",
+                                instrumentation=_cycle_timing,
+                            ),
+                            "line-change history",
                         )
                     except Exception:
                         _hist_snap = None
@@ -4191,9 +4200,12 @@ async def underdog_job(context) -> None:
                     # Fetch real game results — required before any directional pick
                     hit_rates = None
                     if not is_removed:
-                        hit_rates = await _fetch_and_compute_hit_rates(
-                            db, player, snap.sport or "UNKNOWN", stat_type, snap.line or 0.0,
-                            cycle_timing=_cycle_timing,
+                        hit_rates = await _await_cycle_budget(
+                            _fetch_and_compute_hit_rates(
+                                db, player, snap.sport or "UNKNOWN", stat_type, snap.line or 0.0,
+                                cycle_timing=_cycle_timing,
+                            ),
+                            "line-change hit rates",
                         )
                         decision = make_ud_bet_decision(
                             score        = score,
@@ -4302,15 +4314,18 @@ async def underdog_job(context) -> None:
                     _hist_snap = None
                     try:
                         from providers.player_history import get_player_history_provider
-                        _hist_snap = await get_player_history_provider().get_snapshot(
-                            db,
-                            player,
-                            snap.sport or "UNKNOWN",
-                            stat_type,
-                            snap.line or 0.0,
-                            ud_history=ud_history,
-                            source_provider="Underdog",
-                            instrumentation=_cycle_timing,
+                        _hist_snap = await _await_cycle_budget(
+                            get_player_history_provider().get_snapshot(
+                                db,
+                                player,
+                                snap.sport or "UNKNOWN",
+                                stat_type,
+                                snap.line or 0.0,
+                                ud_history=ud_history,
+                                source_provider="Underdog",
+                                instrumentation=_cycle_timing,
+                            ),
+                            "re-entry history",
                         )
                     except Exception:
                         _hist_snap = None
