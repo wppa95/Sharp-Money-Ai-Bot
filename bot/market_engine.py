@@ -3185,12 +3185,30 @@ def _shared_monitoring_cycle(cycle_branch):
         # The evaluation branch remains attached to the 120-second shared
         # cycle.  It consumes paced observations when available and falls back
         # to its existing one-sport fetch for isolated callers/tests.
+        # Older isolated integrations may still expose the one-argument
+        # companion callback.  Keep the paced arguments for production while
+        # preserving that compatibility contract without creating a coroutine
+        # that will fail later inside the task.
+        try:
+            _pp_params = inspect.signature(
+                _run_prizepicks_independent_cycle
+            ).parameters
+        except (TypeError, ValueError):
+            _pp_params = {}
+        _pp_kwargs = {}
+        if (
+            "_fetched_props" in _pp_params
+            or any(
+                parameter.kind is inspect.Parameter.VAR_KEYWORD
+                for parameter in _pp_params.values()
+            )
+        ):
+            _pp_kwargs = {
+                "_fetched_props": pending_props if pending_props else None,
+                "_fetched_sport": "paced",
+            }
         _prizepicks_cycle_task = asyncio.create_task(
-            _run_prizepicks_independent_cycle(
-                context,
-                _fetched_props=pending_props if pending_props else None,
-                _fetched_sport="paced",
-            ),
+            _run_prizepicks_independent_cycle(context, **_pp_kwargs),
             name="shared_monitoring_propline",
         )
         cycle_completed = False
