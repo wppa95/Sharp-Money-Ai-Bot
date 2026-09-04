@@ -511,8 +511,8 @@ def test_client_handles_rate_limit_with_backoff():
 def test_client_default_pacing_supports_one_request_per_120_second_cycle():
     client = PropLineClient(api_key="test-only-key")
 
-    assert client.min_request_interval == pytest.approx(3600 / 208)
-    assert client.request_limiter.effective_limit == 208
+    assert client.min_request_interval == pytest.approx(20.0)
+    assert client.request_limiter.effective_limit == 180
 
 
 def test_shared_limiter_caps_rate_and_continuously_spaces_requests():
@@ -526,7 +526,7 @@ def test_shared_limiter_caps_rate_and_continuously_spaces_requests():
     limiter = PropLineRequestLimiter(limit=999, clock=lambda: clock[0], sleep=advance)
 
     async def exercise():
-        for _ in range(208):
+        for _ in range(190):
             await limiter.acquire()
         before = list(limiter._request_times)
         await limiter.acquire()
@@ -534,10 +534,10 @@ def test_shared_limiter_caps_rate_and_continuously_spaces_requests():
 
     before = asyncio.run(exercise())
 
-    assert limiter.configured_limit == 208
-    assert len(before) == 208
-    assert all(delay == pytest.approx(3600 / 208) for delay in sleeps)
-    assert clock[0] >= 3600 / 208 * 208
+    assert limiter.configured_limit == 190
+    assert len(before) == 190
+    assert all(delay == pytest.approx(3600 / 190) for delay in sleeps)
+    assert clock[0] >= 3600 / 190 * 190
 
 
 def test_provider_lower_limit_is_adopted_by_shared_limiter():
@@ -1199,12 +1199,12 @@ def test_propline_line_movement_rejects_mixed_source_identities():
     assert build_propline_line_movement(rows) is None
 
 
-def test_propline_default_budget_matches_plan_without_changing_hourly_limit():
+def test_propline_default_budget_matches_plan_without_exceeding_hourly_limit():
     budget = PropLineRequestBudget()
 
     assert PROPLINE_DAILY_REQUEST_LIMIT == 5_000
     assert budget.limit == 5_000
-    assert PROPLINE_MAX_REQUESTS_PER_HOUR == 208
+    assert PROPLINE_MAX_REQUESTS_PER_HOUR == 190
 
 
 def test_sports_pagination_follows_all_cursors_without_a_page_ceiling():
