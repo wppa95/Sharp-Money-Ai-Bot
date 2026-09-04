@@ -1,0 +1,468 @@
+Perform a complete CURRENT-STATE AUDIT of this Replit project. This is an audit only. Do not make any changes.
+
+HARD RULES
+
+* Do NOT modify, refactor, delete, rename, reinstall, or rewrite anything.
+* Do NOT deploy or restart the application unless absolutely necessary to verify a fact.
+* Do NOT push anything to GitHub or create a GitHub repository.
+* Do NOT use Supabase.
+* Do NOT use unnecessary Replit Agent resources.
+* Do NOT expose, print, log, or reveal any API keys, tokens, passwords, or secrets.
+* Do NOT assume the previous project state is still accurate.
+* Base everything on the current Replit project, current source code, current runtime, current configuration, logs, and available Replit history/version information.
+* Clearly distinguish between implemented, working, and verified.
+* If something cannot be verified, mark it ⚠️ NEEDS VERIFICATION.
+* Do not claim something works simply because the code exists.
+
+1. CURRENT PROJECT STRUCTURE
+
+Provide the current relevant file/folder tree.
+
+Identify:
+
+* Main entry points
+* Important modules/services
+* Configuration files
+* Package/dependency files
+* Scripts/commands
+* Tests
+* Data/storage directories
+* Runtime/generated files
+* Duplicate or obsolete files
+
+For important files, identify their purpose and key functions/classes.
+
+2. CURRENTLY IMPLEMENTED FEATURES
+
+Audit each area separately.
+
+Providers / APIs
+
+Identify every provider/API currently used.
+
+For each:
+
+* Provider name
+* Endpoint(s)
+* What data it supplies
+* Whether it is actually being called
+* Authentication/configuration requirements
+* Free/paid tier
+* Request limits
+* Current usage/quota if observable
+* Retry/rate-limit behavior
+* Caching/fallback behavior
+* Current connectivity status
+
+Prop Pipeline
+
+Trace the actual pipeline:
+
+Provider → Discovery → Market Discovery → Prop Extraction → Normalization → Deduplication → Analysis → Scoring → Qualification → Ranking → Pick Selection → Alert Generation → Alert Delivery
+
+Identify the exact files/functions responsible for every stage.
+
+Analysis Engine
+
+Audit:
+
+* Statistical analysis
+* Historical data
+* Average vs line
+* Hit rates
+* Consistency
+* Variance
+* Movement analysis
+* Sharp-money detection
+* +EV/fair probability
+* Confidence calculations
+* Weighting formulas
+* Filters
+* Any projection system
+
+Clearly identify what is genuinely functional versus placeholder/scaffold logic.
+
+Scoring / Ranking / Qualification
+
+Determine:
+
+* Current score range
+* Exact scoring formula
+* Thresholds
+* Qualification rules
+* Ranking logic
+* Rejection logic
+* Whether old PASS/reject or tier systems still exist
+* Whether stale scoring code remains
+* Whether qualified picks can actually reach alert generation
+
+Monitoring / Scheduling
+
+Audit:
+
+* Startup lifecycle
+* Monitoring frequency
+* Scheduler/jobs
+* Concurrency
+* Duplicate-monitor protection
+* Error handling
+* Shutdown behavior
+* Whether monitoring continuously runs
+* Whether jobs can silently stop
+
+Alerts
+
+Audit:
+
+* Alert generation
+* Alert filtering
+* Qualification gates
+* Deduplication
+* Cooldowns
+* Alert limits
+* Alert persistence/history
+* Retry behavior
+* Delivery failures
+* Whether alerts can be generated but suppressed before delivery
+
+Discord
+
+Identify every currently implemented command/API.
+
+Verify commands such as:
+
+* /help
+* /status
+* /analyze
+* /picks
+* /slip
+* /dashboard
+* /alerts
+* /grade
+* /performance
+* /backtest
+* /testalert
+* /funnel
+
+Do NOT assume these still exist. Report the actual current implementation.
+
+Audit:
+
+* Authentication
+* Authorization
+* Signature verification
+* User restrictions
+* Error handling
+* Whether commands actually execute
+
+Telegram
+
+Audit the complete current Telegram implementation.
+
+Determine:
+
+* Whether Telegram is configured
+* Bot/client implementation
+* Where delivery is called
+* Whether alerts actually reach Telegram
+* Filters preventing delivery
+* Retry behavior
+* Error handling
+* Missing configuration
+* Silent failures
+
+Dashboard / HTTP API / UI
+
+Identify all current routes/endpoints/UI components.
+
+For each:
+
+* Route
+* Purpose
+* Authentication
+* Current status
+* Important response data
+* Whether it has actually been tested
+
+Persistence / Storage
+
+Identify all current persistence mechanisms:
+
+* JSON/files
+* SQLite
+* PostgreSQL
+* Redis
+* Other storage
+* Runtime state
+* Historical props
+* Alert history
+* Performance data
+* Backtesting data
+* Request-budget state
+
+Determine whether data survives restarts and whether data can be lost.
+
+Backtesting / Performance
+
+Determine exactly what exists for:
+
+* Backtesting
+* Pick grading
+* Historical performance
+* CLV
+* Win rate
+* ROI
+* Hit rate
+* Performance tracking
+
+Separate real functionality from placeholders.
+
+3. CURRENT RUNTIME
+
+Inspect the current runtime without making changes.
+
+Report:
+
+* Whether the server is running
+* Processes
+* Current port
+* Start command
+* Health endpoints
+* Status endpoints
+* Monitoring status
+* Provider connectivity
+* Current API/request usage
+* Remaining quota where observable
+* Number of events/props being processed
+* Number of analyzed props
+* Number of qualified picks
+* Number of alerts generated
+* Number successfully delivered
+* Recent errors
+* Recent warnings
+* Relevant recent log evidence
+
+Do not restart anything unless absolutely necessary.
+
+4. DATA QUALITY AUDIT
+
+Verify that the bot is receiving usable real data, not merely successful HTTP responses.
+
+Check for:
+
+* Empty markets
+* Missing player names
+* Missing teams
+* Missing lines
+* Invalid odds
+* Duplicate props
+* Stale timestamps
+* Incorrect player/event mapping
+* Incorrect market mapping
+* Unsupported markets
+* Bad normalization
+* Impossible/suspicious values
+* Props that never reach analysis
+* Props that reach analysis but can never qualify
+
+If possible without modifying anything, trace several real current props through the entire pipeline and show where they end up.
+
+5. RECENT CHANGES — LAST ~2 DAYS
+
+Use available Replit history/version information.
+
+Identify:
+
+* Files added
+* Files removed
+* Files modified
+* Features added
+* Features removed
+* Bugs fixed
+* Provider changes
+* Analysis changes
+* Scoring changes
+* Qualification changes
+* Monitoring changes
+* Alert changes
+* Discord changes
+* Telegram changes
+* Configuration changes
+
+Explain the impact of significant changes.
+
+Identify anything that appears:
+
+* unfinished
+* abandoned
+* partially implemented
+* duplicated
+* obsolete
+* conflicting with newer code
+
+6. CONFIGURATION / ENVIRONMENT
+
+List every environment variable/configuration key the application expects or references.
+
+For each:
+
+* Variable name
+* Required/optional
+* Purpose
+* Whether configured
+* Whether missing
+* Whether actually used
+* Whether obsolete/duplicated
+
+NEVER show secret values.
+
+Only report names and safe configuration status.
+
+7. SECURITY AUDIT
+
+Check for:
+
+* Hardcoded secrets
+* API keys
+* Tokens
+* Passwords
+* Credentials
+* Sensitive values accidentally logged
+* Weak authentication
+* Missing authorization
+* Unsafe endpoints
+* Discord security issues
+* Telegram security issues
+* Environment-variable handling
+
+Redact all sensitive values.
+
+8. CURRENT PROBLEMS
+
+Identify all meaningful problems and classify them:
+
+🔴 CRITICAL
+🟠 HIGH
+🟡 MEDIUM
+🔵 LOW
+
+Look specifically for:
+
+* Current errors
+* Broken features
+* Silent failures
+* Dead code
+* Duplicate implementations
+* Obsolete code
+* Incorrect logic
+* Race conditions
+* Provider failures
+* Rate-limit risks
+* Data-quality problems
+* Alert suppression
+* Notification failures
+* Persistence/restart problems
+* Anything preventing reliable live operation
+
+9. ARCHITECTURE ASSESSMENT
+
+Explain the actual current architecture.
+
+Show the end-to-end flow:
+
+Provider → Discovery → Normalization → Analysis → Sharp Money / +EV → Scoring → Qualification → Ranking → Picks → Alerts → Discord / Telegram
+
+Identify:
+
+* Bottlenecks
+* Single points of failure
+* Tight coupling
+* Weak abstractions
+* Missing interfaces
+* Reliability risks
+* Scalability limitations
+* Places where bad data can contaminate downstream analysis
+
+10. END-TO-END VALIDATION
+
+Without modifying code/configuration, determine whether the existing system can currently complete this chain:
+
+1. Retrieve provider data
+2. Discover real props
+3. Normalize props
+4. Analyze props
+5. Calculate scoring
+6. Qualify props
+7. Generate picks
+8. Generate alerts
+9. Deliver alerts
+
+For each stage, report:
+
+🟢 VERIFIED WORKING
+🟡 PARTIALLY WORKING
+🔴 BROKEN
+⚠️ NEEDS VERIFICATION
+⚪ NOT IMPLEMENTED
+
+Do not manufacture test results.
+
+11. READINESS MATRIX
+
+Create a concise readiness table covering at least:
+
+* Provider connectivity
+* Prop discovery
+* Normalization
+* Data quality
+* Analysis
+* Sharp money
+* +EV
+* Scoring
+* Qualification
+* Ranking
+* Monitoring
+* Scheduling
+* Alert generation
+* Telegram
+* Discord
+* API/dashboard
+* Persistence
+* Backtesting
+* Performance tracking
+* Security
+* Overall production readiness
+
+Give each a status and short explanation.
+
+12. OLD STATE VS CURRENT STATE
+
+Compare the current project against the previously known V4 architecture.
+
+Identify:
+
+* What remains
+* What changed
+* What was replaced
+* What was removed
+* What is newly implemented
+* What is obsolete
+* Which previous assumptions are now incorrect
+
+13. FINAL PRIORITIES
+
+End with exactly:
+
+TOP 5 PRIORITIES
+
+Rank the five most important things we should work on next.
+
+For each include:
+
+* Problem
+* Why it matters
+* Recommended fix
+* Expected impact
+* Whether it must be completed before live/production use
+
+The objective is to give me a forensic snapshot of exactly where this bot stands today, based on the actual current Replit project and runtime—not assumptions or the previous version.
