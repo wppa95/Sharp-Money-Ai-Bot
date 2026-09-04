@@ -1029,7 +1029,8 @@ def format_pp_reference_alert(match: "PPReferenceMatch") -> str:  # noqa: F821
 
     The 🟣 prefix and mandatory disclaimer clearly distinguish this from a
     🚨 Confirmed PrizePicks Alert.  The alert surfaces the Underdog line as
-    a PP proxy, includes the ±0.5 uncertainty note, and the confidence score.
+    a PP proxy and includes the ±0.5 uncertainty note. Matching confidence
+    remains internal metadata.
 
     Parameters
     ----------
@@ -1041,8 +1042,6 @@ def format_pp_reference_alert(match: "PPReferenceMatch") -> str:  # noqa: F821
 
     sport      = match.sport
     s_icon     = _SPORT_EMOJI.get(sport.upper(), "🎯")
-    conf_bar   = _pp_conf_bar(match.confidence)
-
     # Inferred PP line may equal UD line (proxy) or differ slightly (DB match)
     pp_line_str = f"{match.inferred_pp_line:.1f}"
     ud_line_str = f"{match.ud_line:.1f}"
@@ -1069,7 +1068,6 @@ def format_pp_reference_alert(match: "PPReferenceMatch") -> str:  # noqa: F821
         f"🎯 <b>Inferred PP Line:</b> {pp_line_str}",
         f"    <i>{pp_note}</i>",
         "",
-        f"🔬 <b>Confidence:</b>  {match.confidence}/100  {conf_bar}",
         f"📡 <b>Source:</b>      {source_label}",
         f"",
         f"─────────────────────────────",
