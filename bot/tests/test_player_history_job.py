@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import sys
 import os
+import asyncio
 import inspect
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -250,7 +252,7 @@ async def test_player_history_rotates_to_next_target_on_following_run():
 
 
 @pytest.mark.asyncio
-async def test_player_history_commits_each_target_batch_before_next_fetch():
+async def test_player_history_fetches_targets_concurrently_then_commits_batches():
     first_result = SimpleNamespace()
     second_result = SimpleNamespace()
     snapshots = {
@@ -286,7 +288,7 @@ async def test_player_history_commits_each_target_batch_before_next_fetch():
     ):
         await player_history_collector_job(context)
 
-    assert events == ["fetch", "commit:1", "fetch", "commit:1"]
+    assert events == ["fetch", "fetch", "commit:2"]
 
 
 @pytest.mark.asyncio
@@ -352,3 +354,70 @@ async def test_player_history_cadence_stop_keeps_unprocessed_cursor():
     provider.fetch_results.assert_not_awaited()
     assert "_player_history_next_target" not in context.bot_data
     assert "_player_history_cursor" not in context.bot_data
+
+
+@pytest.mark.asyncio
+async def test_player_history_waits_for_all_provider_targets_in_one_cycle():
+    snapshots = {
+        (f"Player {index}", "points"): SimpleNamespace(
+            player_name=f"Player {index}",
+            sport="NBA",
+            stat_type="points",
+        )
+        for index in range(4)
+    }
+    db = MagicMock()
+    db.get_active_underdog_snapshot_per_prop = AsyncMock(
+        return_value=snapshots
+    )
+    provider = MagicMock()
+
+    async def provider_fetch(*_args):
+        await asyncio.sleep(0.03)
+        return []
+
+    provider.fetch_results = provider_fetch
+    context = SimpleNamespace(bot_data={"db": db})
+
+    started = time.monotonic()
+    with (
+        patch("providers.player_stats.PlayerStatsProvider", return_value=provider),
+    ):
+        await player_history_collector_job(context)
+
+    assert time.monotonic() - started < 0.2
+
+
+@pytest.mark.asyncio
+async def test_player_history_blocked_writer_logs_and_does_not_retain_results(caplog):
+    snapshot = SimpleNamespace(
+        player_name="Blocked Writer",
+        sport="NBA",
+        stat_type="points",
+    )
+    result = SimpleNamespace()
+    db = MagicMock()
+    db.get_active_underdog_snapshot_per_prop = AsyncMock(
+        return_value={("Blocked Writer", "points"): snapshot}
+    )
+    writer_started = asyncio.Event()
+
+    async def blocked_writer(_batch):
+        writer_started.set()
+        await asyncio.sleep(10)
+
+    db.upsert_player_results_bulk = blocked_writer
+    provider = MagicMock()
+    provider.fetch_results = AsyncMock(return_value=[result])
+    context = SimpleNamespace(bot_data={"db": db})
+
+    with (
+        patch("player_history_job._player_history_cadence_budget", return_value=0.03),
+        patch("providers.player_stats.PlayerStatsProvider", return_value=provider),
+        caplog.at_level("WARNING"),
+    ):
+        await player_history_collector_job(context)
+
+    assert writer_started.is_set()
+    assert "SQLite writer busy or blocked" in caplog.text
+    assert "_player_history_pending_results" not in context.bot_data

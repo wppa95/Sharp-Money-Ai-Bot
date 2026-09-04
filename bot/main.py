@@ -735,10 +735,11 @@ async def post_init(application: Application) -> None:
             first=60,
             name="opportunity_grader",
         )
-        # Player-result collection uses the dedicated history pool and the
-        # same exclusive scheduler group as Underdog. It rotates through all
-        # supported active-provider targets, flushes each completed batch, and
-        # never calls PropLine; PropLine remains on its own request cadence.
+        # Player-result collection uses the dedicated history pool and its own
+        # independent scheduler monitor. It rotates through all supported
+        # active-provider targets, fetches them concurrently within this
+        # cadence, flushes completed batches, and never calls PropLine;
+        # PropLine remains on its own request cadence.
         jq.run_repeating(
             _coordinated_job(
                 "player_history_collector",

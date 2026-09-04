@@ -25,6 +25,13 @@ _SUPPORTED_HISTORY_SPORTS = frozenset({
 # the SQLite writer slot, while committing often enough that a long provider
 # collection never keeps all fetched rows only in memory.
 _PLAYER_HISTORY_WRITE_BATCH_SIZE = 25
+# Keep provider work concurrent enough to finish the full per-cycle slice.
+# These workers belong to one invocation; this is not a carryover queue.
+_PLAYER_HISTORY_FETCH_CONCURRENCY = 64
+# Do not let a busy SQLite writer consume the whole cadence. Provider calls
+# use the providers' own request timeouts and all selected targets are awaited;
+# target data is never intentionally dropped by this collector.
+_PLAYER_HISTORY_OPERATION_TIMEOUT_SECONDS = 5.0
 
 # This is an API-call/target budget per scheduler run, not a cap on the
 # active-player universe. The full target list is rebuilt so newly active
@@ -43,6 +50,10 @@ except (ImportError, TypeError, ValueError):
 
 _NEXT_TARGET_KEY = "_player_history_next_target"
 _CURSOR_KEY = "_player_history_cursor"
+
+
+class _CadenceBoundaryReached(Exception):
+    """Internal signal that this collector invocation must stop now."""
 
 
 def _player_history_cadence_budget() -> float:
@@ -156,6 +167,25 @@ async def player_history_collector_job(context) -> None:
     )
     try:
         cycle_started = time.monotonic()
+        cadence_budget = _player_history_cadence_budget()
+        cycle_deadline = cycle_started + cadence_budget
+
+        async def await_in_cycle(operation: str, awaitable_factory):
+            """Await one operation without allowing it past this cycle's deadline."""
+            remaining = cycle_deadline - time.monotonic()
+            if remaining <= 0:
+                raise _CadenceBoundaryReached(operation)
+            try:
+                return await asyncio.wait_for(
+                    awaitable_factory(),
+                    timeout=min(
+                        remaining,
+                        _PLAYER_HISTORY_OPERATION_TIMEOUT_SECONDS,
+                    ),
+                )
+            except asyncio.TimeoutError as exc:
+                raise _CadenceBoundaryReached(operation) from exc
+
         from providers.player_stats import PlayerStatsProvider
 
         provider = PlayerStatsProvider()
@@ -168,12 +198,18 @@ async def player_history_collector_job(context) -> None:
                 db, "get_all_active_prop_line_history_by_line", None
             )
             if asyncio.iscoroutinefunction(_generic_active):
-                active = await _generic_active(
-                    providers=("Underdog", "PrizePicks")
+                active = await await_in_cycle(
+                    "loading active player-history targets",
+                    lambda: _generic_active(
+                        providers=("Underdog", "PrizePicks")
+                    ),
                 )
                 active_rows = active.values()
             else:
-                active = await db.get_active_underdog_snapshot_per_prop()
+                active = await await_in_cycle(
+                    "loading active player-history targets",
+                    db.get_active_underdog_snapshot_per_prop,
+                )
                 active_rows = active.values()
             for s in active_rows:
                 player = (
@@ -198,6 +234,12 @@ async def player_history_collector_job(context) -> None:
                 if key[0] and key[2] and key not in seen:
                     seen.add(key)
                     targets.append(key)
+        except _CadenceBoundaryReached as exc:
+            logger.warning(
+                "player_history_collector_job: cadence boundary reached during %s",
+                exc,
+            )
+            return
         except Exception as exc:
             logger.warning(
                 "player_history_collector_job: active snapshot load failed: %s",
@@ -214,13 +256,21 @@ async def player_history_collector_job(context) -> None:
                     plh = []
                     for _provider in ("Underdog", "PrizePicks"):
                         plh.extend(
-                            await db.get_latest_props_for_provider(
-                                _provider, since_hours=48
+                            await await_in_cycle(
+                                f"loading {_provider} player-history targets",
+                                lambda provider_name=_provider: (
+                                    db.get_latest_props_for_provider(
+                                        provider_name, since_hours=48
+                                    )
+                                ),
                             )
                         )
                 else:
-                    plh = await db.get_latest_props_for_provider(
-                        "Underdog", since_hours=48
+                    plh = await await_in_cycle(
+                        "loading Underdog player-history targets",
+                        lambda: db.get_latest_props_for_provider(
+                            "Underdog", since_hours=48
+                        ),
                     )
                 for s in plh:
                     sport = (getattr(s, "sport", None) or "UNKNOWN").upper()
@@ -237,6 +287,12 @@ async def player_history_collector_job(context) -> None:
                     if key[0] and key[2] and key not in seen:
                         seen.add(key)
                         targets.append(key)
+            except _CadenceBoundaryReached as exc:
+                logger.warning(
+                    "player_history_collector_job: cadence boundary reached during %s",
+                    exc,
+                )
+                return
             except Exception as exc:
                 logger.warning(
                     "player_history_collector_job: prop_line_history fallback failed: %s",
@@ -274,7 +330,10 @@ async def player_history_collector_job(context) -> None:
             try:
                 from engine.evidence_memory import put_player_result_batch
 
-                existing_results = await bulk_reader(cycle_targets, limit=40)
+                existing_results = await await_in_cycle(
+                    "hydrating player-history evidence",
+                    lambda: bulk_reader(cycle_targets, limit=40),
+                )
                 put_player_result_batch(existing_results)
                 logger.info(
                     "player_history_collector_job: evidence cache hydrated "
@@ -282,6 +341,12 @@ async def player_history_collector_job(context) -> None:
                     len(existing_results),
                     sum(len(rows) for rows in existing_results.values()),
                 )
+            except _CadenceBoundaryReached as exc:
+                logger.warning(
+                    "player_history_collector_job: cadence boundary reached during %s",
+                    exc,
+                )
+                return
             except Exception as exc:
                 logger.warning(
                     "player_history_collector_job: evidence cache hydration failed: %s",
@@ -291,113 +356,141 @@ async def player_history_collector_job(context) -> None:
         # ── Fetch this run's bounded supported target slice ─────────────────
         ok = 0
         rows = 0
-        pending_results: list[object] = []
+        completed_results: list[object] = []
         bulk_writer = getattr(db, "upsert_player_results_bulk", None)
         failed = 0
         processed = 0
-
-        async def flush_results() -> None:
-            """Commit a small result batch and release the event loop."""
-            nonlocal pending_results
-            if not pending_results:
-                return
-            batch = pending_results
-            pending_results = []
-            if asyncio.iscoroutinefunction(bulk_writer):
-                await bulk_writer(batch)
-            else:
-                # Compatibility path for lightweight database doubles and
-                # older database implementations.
-                for result in batch:
-                    await db.upsert_player_result(result)
-            await asyncio.sleep(0)
-
         target_counts: dict[str, int] = {}
         ok_by_sport: dict[str, int] = {}
         rows_by_sport: dict[str, int] = {}
         budget_exhausted = False
+        fetch_semaphore = asyncio.Semaphore(_PLAYER_HISTORY_FETCH_CONCURRENCY)
+        completed_targets: list[tuple[str, str, str]] = []
 
-        for player, sport, stat in cycle_targets:
-            if time.monotonic() - cycle_started >= _player_history_cadence_budget():
-                budget_exhausted = True
-                logger.info(
-                    "player_history_collector_job: cadence budget reached "
-                    "processed=%d remaining=%d",
-                    processed,
-                    len(targets) - processed,
-                )
-                break
-            target_counts[sport] = target_counts.get(sport, 0) + 1
+        def advance_target(target: tuple[str, str, str]) -> None:
+            """Move rotation only after a target has no unpersisted rows."""
+            if not targets:
+                return
             try:
-                # Keep one unresponsive connector target from holding the
-                # scheduler lane past the cadence budget.
-                raw = await asyncio.wait_for(
-                    provider.fetch_results(player, sport, stat),
-                    timeout=min(
-                        10.0,
-                        max(
-                            1.0,
-                            _player_history_cadence_budget()
-                            - (time.monotonic() - cycle_started),
-                        ),
-                    ),
+                current_index = rotation_indexes[target]
+                bot_data[_CURSOR_KEY] = (current_index + 1) % len(targets)
+                bot_data[_NEXT_TARGET_KEY] = (
+                    target_rotation[(current_index + 1) % len(targets)]
                 )
-                # This collector is deliberately limited to the current
-                # PlayerStatsProvider connectors. PropLine resolved-history
-                # lookups belong only to the PropLine request cadence and must
-                # never turn this scheduler into an extra provider poller.
-                for r in raw:
-                    pending_results.append(r)
-                    if len(pending_results) >= _PLAYER_HISTORY_WRITE_BATCH_SIZE:
-                        await flush_results()
-                # A provider response is one target batch. Commit its partial
-                # tail before advancing to the next target so a long run
-                # cannot keep completed results only in memory.
-                await flush_results()
-                if raw:
-                    from engine.evidence_memory import put_player_results
+            except (KeyError, IndexError):
+                pass
 
-                    put_player_results(player, sport, stat, raw)
-                    ok += 1
-                    rows += len(raw)
-                    ok_by_sport[sport] = ok_by_sport.get(sport, 0) + 1
-                    rows_by_sport[sport] = rows_by_sport.get(sport, 0) + len(raw)
-            except Exception as exc:
+        async def fetch_target(player: str, sport: str, stat: str):
+            async with fetch_semaphore:
+                try:
+                    # All provider work belongs to this invocation. PropLine
+                    # resolved-history lookups remain on their own cadence.
+                    raw = await provider.fetch_results(player, sport, stat)
+                    return "ok", raw or []
+                except Exception as exc:
+                    return "error", exc
+
+        # A slow provider cannot make this job serially consume the next
+        # scheduler interval: all target calls share one absolute deadline.
+        fetch_results: list[tuple[str, object]] = []
+        if cycle_targets and time.monotonic() < cycle_deadline:
+            fetch_results = list(
+                await asyncio.gather(
+                    *(
+                        fetch_target(player, sport, stat)
+                        for player, sport, stat in cycle_targets
+                    )
+                )
+            )
+        elif cycle_targets:
+            budget_exhausted = True
+
+        for (player, sport, stat), (fetch_status, fetch_value) in zip(
+            cycle_targets, fetch_results
+        ):
+            target_counts[sport] = target_counts.get(sport, 0) + 1
+            processed += 1
+            if fetch_status == "error":
                 failed += 1
                 logger.debug(
                     "player_history_collector_job: %s/%s/%s failed: %s",
-                    player, sport, stat, exc,
+                    player, sport, stat, fetch_value,
                 )
-            finally:
-                processed += 1
-                # Advance only after this target's fetch/write attempt has
-                # completed. Failed targets are still eligible on the next
-                # full rotation, but cannot block every later target.
-                if targets:
-                    try:
-                        current_index = rotation_indexes[(player, sport, stat)]
-                        bot_data[_CURSOR_KEY] = (current_index + 1) % len(targets)
-                        bot_data[_NEXT_TARGET_KEY] = (
-                            target_rotation[(current_index + 1) % len(targets)]
-                        )
-                    except (KeyError, IndexError):
-                        # The active set cannot change during this local list,
-                        # but retain the already calculated next point if a
-                        # lightweight test double returns an unusual target.
-                        pass
+                advance_target((player, sport, stat))
+                continue
 
-        # Never leave the final partial batch in memory when the target set
-        # ends below the batch threshold.
-        await flush_results()
+            raw = fetch_value
+            if raw:
+                from engine.evidence_memory import put_player_results
+
+                put_player_results(player, sport, stat, raw)
+                completed_results.extend(raw)
+                ok += 1
+                rows += len(raw)
+                ok_by_sport[sport] = ok_by_sport.get(sport, 0) + 1
+                rows_by_sport[sport] = rows_by_sport.get(sport, 0) + len(raw)
+                completed_targets.append((player, sport, stat))
+            else:
+                advance_target((player, sport, stat))
+
+        async def write_batch(batch: list[object]) -> None:
+            """Persist one completed result batch within this cycle."""
+            if asyncio.iscoroutinefunction(bulk_writer):
+                await await_in_cycle(
+                    "persisting player-history results",
+                    lambda: bulk_writer(batch),
+                )
+            else:
+                # Compatibility path for lightweight database doubles and
+                # older database implementations.
+                for result in batch:
+                    await await_in_cycle(
+                        "persisting player-history result",
+                        lambda result=result: db.upsert_player_result(result),
+                    )
+            await asyncio.sleep(0)
+
+        persisted_rows = 0
+        for start in range(
+            0, len(completed_results), _PLAYER_HISTORY_WRITE_BATCH_SIZE
+        ):
+            batch = completed_results[start: start + _PLAYER_HISTORY_WRITE_BATCH_SIZE]
+            try:
+                await write_batch(batch)
+                persisted_rows += len(batch)
+            except _CadenceBoundaryReached as exc:
+                budget_exhausted = True
+                logger.warning(
+                    "player_history_collector_job: SQLite writer busy or blocked; "
+                    "cadence boundary reached during %s; completed_rows=%d "
+                    "unpersisted_rows=%d",
+                    exc,
+                    persisted_rows,
+                    len(completed_results) - persisted_rows,
+                )
+                break
+            except Exception as exc:
+                logger.warning(
+                    "player_history_collector_job: result persistence failed "
+                    "after completed_rows=%d: %s",
+                    persisted_rows,
+                    exc,
+                )
+                break
+        else:
+            # A target with returned rows advances only after every result
+            # batch from this invocation has been committed successfully.
+            for target in completed_targets:
+                advance_target(target)
 
         logger.info(
             "player_history_collector_job: done players_ok=%d rows=%d "
-            "processed=%d remaining=%d errors=%d "
+            "persisted_rows=%d processed=%d remaining=%d errors=%d "
             "budget_exhausted=%s targets_total=%d elapsed=%.1fs "
             "targets_by_sport=%s "
             "players_ok_by_sport=%s rows_by_sport=%s",
-            ok, rows, processed, len(targets) - processed, failed,
-            budget_exhausted, len(targets),
+            ok, rows, persisted_rows, processed, len(targets) - processed,
+            failed, budget_exhausted, len(targets),
             time.monotonic() - cycle_started, target_counts,
             ok_by_sport, rows_by_sport,
         )

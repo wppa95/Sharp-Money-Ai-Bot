@@ -11,6 +11,7 @@ description: Final confirmed spec for player_history_collector_job — Tier-1 on
 - **Cadence: 120 seconds**, `max_instances=1`, `misfire_grace_time=120`.
 - **Path**: `get_active_underdog_snapshot_per_prop()` → filter Tier-2 → `provider.fetch_results()` → `db.upsert_player_result()`.
 - **Fallback**: `get_latest_props_for_provider("Underdog", since_hours=48)` with same Tier-2 filter (no count cap on iteration either).
+- **Cadence policy**: fetch the capped slice with bounded concurrency and await every selected target; no result queue is carried forward.
 
 ## Why
 
@@ -19,3 +20,5 @@ description: Final confirmed spec for player_history_collector_job — Tier-1 on
 ## How to Apply
 
 Never add a player-count slice (`[:N]`) to the target-building loop. Only `targets[:_API_CALL_TARGET]` in the fetch loop.
+
+**Cadence rule:** The history collector is a fast monitor, not a backlog processor. Keep selected provider work concurrent so all targets complete inside the two-minute display/monitoring window; use bounded writer waits for lock diagnostics rather than silently dropping targets.
