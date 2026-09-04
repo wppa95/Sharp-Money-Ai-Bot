@@ -95,7 +95,6 @@ from market_engine import (
 )
 from providers import init_health_monitor
 from providers.odds_cache import init_odds_cache
-from providers.propline import PROPLINE_MIN_REQUEST_INTERVAL
 from providers.game_results import OddsApiResultsProvider
 from providers.usage_tracker import init_usage_tracker, get_usage_tracker
 from providers.quota_pacing import init_quota_pacer, get_quota_pacer
