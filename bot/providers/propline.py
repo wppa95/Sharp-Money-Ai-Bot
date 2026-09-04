@@ -2633,6 +2633,63 @@ class PropLineClient:
             )
         return await self._fetch_read_only(endpoint, {}, cache_scope="exports-sample")
 
+    async def fetch_sgp(
+        self,
+        sport_key: str,
+        event: Any,
+        *,
+        bookmaker: str,
+        legs: list[dict[str, Any]],
+    ) -> PropLineEndpointResult:
+        """Request one book-native same-game parlay quote.
+
+        SGP is an explicit caller-driven analysis request. It is never part of
+        the live polling or pick qualification path.
+        """
+        event_id = self._event_id(event)
+        if not _clean(bookmaker):
+            return PropLineEndpointResult(
+                None, datetime.utcnow(),
+                error="PropLine SGP bookmaker is required",
+                failure_kind="configuration",
+            )
+        if not isinstance(legs, list) or not 2 <= len(legs) <= 10:
+            return PropLineEndpointResult(
+                None, datetime.utcnow(),
+                error="PropLine SGP requires between 2 and 10 legs",
+                failure_kind="configuration",
+            )
+        try:
+            endpoint = self._official_read_path(
+                "sports", sport_key, "events", event_id, "sgp"
+            )
+        except PropLineError as exc:
+            return PropLineEndpointResult(
+                None, datetime.utcnow(), error=str(exc), failure_kind="configuration"
+            )
+        return await self._post_endpoint(
+            endpoint,
+            {"bookmaker": _clean(bookmaker).lower(), "legs": legs},
+        )
+
+    async def grade_clv(
+        self, bets: list[dict[str, Any]]
+    ) -> PropLineEndpointResult:
+        """Batch-grade already placed bets against the captured close."""
+        if not isinstance(bets, list) or not 1 <= len(bets) <= 500:
+            return PropLineEndpointResult(
+                None, datetime.utcnow(),
+                error="PropLine CLV grading requires between 1 and 500 bets",
+                failure_kind="configuration",
+            )
+        try:
+            endpoint = self._official_read_path("clv", "grade")
+        except PropLineError as exc:
+            return PropLineEndpointResult(
+                None, datetime.utcnow(), error=str(exc), failure_kind="configuration"
+            )
+        return await self._post_endpoint(endpoint, {"bets": bets})
+
     async def fetch_player_games(
         self,
         sport_key: str,
