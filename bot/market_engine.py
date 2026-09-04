@@ -3309,13 +3309,13 @@ async def underdog_job(context) -> None:
     _cycle_sequence += 1
     _cycle_timing = _CycleTiming(_cycle_sequence)
     _job_activity_start("underdog")
-    # Reserve a safety margin for final persistence, lifecycle updates, and
-    # scheduler bookkeeping.  If enrichment is slower than expected, the
-    # cycle exits with the observations and partial counters it has already
-    # collected instead of holding the cadence indefinitely.
+    # Reserve a full 30-second safety margin for final persistence, lifecycle
+    # updates, and scheduler bookkeeping. If enrichment is slower than
+    # expected, the cycle exits with the observations and partial counters it
+    # has already collected instead of holding the cadence indefinitely.
     _cycle_deadline = time.monotonic() + max(
         5.0,
-        min(105.0, float(getattr(config, "UNDERDOG_POLL_INTERVAL", 120)) - 15.0),
+        min(90.0, float(getattr(config, "UNDERDOG_POLL_INTERVAL", 120)) - 30.0),
     )
 
     async def _await_cycle_budget(awaitable, operation: str):
