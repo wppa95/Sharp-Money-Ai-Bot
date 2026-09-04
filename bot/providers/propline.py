@@ -179,8 +179,13 @@ class PropLineRequestBudget:
 
 # PropLine's hard provider allowance.  The limiter below is the only request
 # admission point, so separate client instances cannot burst independently.
-PROPLINE_MAX_REQUESTS_PER_HOUR = 208
-PROPLINE_MIN_REQUEST_INTERVAL = 3600.0 / PROPLINE_MAX_REQUESTS_PER_HOUR
+PROPLINE_RECOVERY_REQUESTS_PER_HOUR = 160
+PROPLINE_DEFAULT_REQUESTS_PER_HOUR = 180
+PROPLINE_MAX_REQUESTS_PER_HOUR = 190
+PROPLINE_RECOVERY_MIN_REQUEST_INTERVAL = (
+    3600.0 / PROPLINE_RECOVERY_REQUESTS_PER_HOUR
+)
+PROPLINE_MIN_REQUEST_INTERVAL = 3600.0 / PROPLINE_DEFAULT_REQUESTS_PER_HOUR
 _DEFAULT_PROPLINE_REQUEST_BUDGET = PropLineRequestBudget(PROPLINE_DAILY_REQUEST_LIMIT)
 
 
@@ -189,7 +194,7 @@ class PropLineRequestLimiter:
 
     def __init__(
         self,
-        limit: int = PROPLINE_MAX_REQUESTS_PER_HOUR,
+        limit: int = PROPLINE_DEFAULT_REQUESTS_PER_HOUR,
         *,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep,
@@ -205,14 +210,68 @@ class PropLineRequestLimiter:
         self._request_times: deque[float] = deque()
         self._next_request_at = 0.0
         self._blocked_until = 0.0
+        self._phase = "baseline"
+        self._recovery_clean_since: Optional[float] = None
+        self._attempted_count = 0
+        self._successful_count = 0
+        self._rate_limited_count = 0
 
     @property
     def effective_limit(self) -> int:
-        return min(self.configured_limit, self.provider_limit)
+        self._advance_phase()
+        phase_limit = (
+            PROPLINE_RECOVERY_REQUESTS_PER_HOUR
+            if self._phase == "recovery"
+            else PROPLINE_MAX_REQUESTS_PER_HOUR
+        )
+        return min(self.configured_limit, self.provider_limit, phase_limit)
 
     @property
     def min_interval(self) -> float:
         return 3600.0 / self.effective_limit
+
+    @property
+    def phase(self) -> str:
+        self._advance_phase()
+        return self._phase
+
+    @property
+    def backoff_remaining(self) -> float:
+        return max(0.0, self._blocked_until - self._clock())
+
+    @property
+    def attempted_count(self) -> int:
+        return self._attempted_count
+
+    @property
+    def successful_count(self) -> int:
+        return self._successful_count
+
+    @property
+    def rate_limited_count(self) -> int:
+        return self._rate_limited_count
+
+    def _advance_phase(self) -> None:
+        if (
+            self._phase == "recovery"
+            and self._recovery_clean_since is not None
+            and self._clock() - self._recovery_clean_since >= 30 * 60
+        ):
+            self._phase = "baseline"
+            self._recovery_clean_since = None
+
+    def record_attempt(self) -> None:
+        self._attempted_count += 1
+
+    def record_success(self) -> None:
+        self._successful_count += 1
+        if self._phase == "recovery" and self.backoff_remaining <= 0:
+            if self._recovery_clean_since is None:
+                self._recovery_clean_since = self._clock()
+            self._advance_phase()
+
+    def record_rate_limit(self) -> None:
+        self._rate_limited_count += 1
 
     def configure_min_interval(self, interval: float) -> None:
         """Honor a caller's slower configured pace without raising the cap."""
@@ -249,6 +308,11 @@ class PropLineRequestLimiter:
         async with self._lock:
             while True:
                 now = self._clock()
+                if now < self._blocked_until:
+                    raise PropLineRateLimitError(
+                        "PropLine rate-limit backoff active",
+                        retry_after=self._blocked_until - now,
+                    )
                 cutoff = now - 3600.0
                 while self._request_times and self._request_times[0] <= cutoff:
                     self._request_times.popleft()
@@ -271,15 +335,23 @@ class PropLineRequestLimiter:
 
     def defer(self, retry_after: float) -> None:
         """Share a provider cooldown across every client instance."""
+        self._phase = "recovery"
+        self._recovery_clean_since = None
         self._blocked_until = max(
             self._blocked_until,
             self._clock() + max(1.0, float(retry_after)),
         )
+        self.record_rate_limit()
 
     def reset(self) -> None:
         self._request_times.clear()
         self._next_request_at = 0.0
         self._blocked_until = 0.0
+        self._phase = "baseline"
+        self._recovery_clean_since = None
+        self._attempted_count = 0
+        self._successful_count = 0
+        self._rate_limited_count = 0
 
 
 _DEFAULT_PROPLINE_REQUEST_LIMITER = PropLineRequestLimiter()
@@ -2151,6 +2223,29 @@ class PropLineClient:
         """Compatibility view of the centralized daily request limit."""
         return self.request_budget.limit
 
+    @property
+    def request_phase(self) -> str:
+        return self.request_limiter.phase
+
+    @property
+    def request_rate_per_hour(self) -> int:
+        return self.request_limiter.effective_limit
+
+    @property
+    def backoff_remaining(self) -> float:
+        return max(
+            self.request_limiter.backoff_remaining,
+            max(0.0, self._backoff_until - self._clock()),
+        )
+
+    @property
+    def request_stats(self) -> dict[str, int]:
+        return {
+            "attempted": self.request_limiter.attempted_count,
+            "successful": self.request_limiter.successful_count,
+            "rate_limited": self.request_limiter.rate_limited_count,
+        }
+
     @daily_request_limit.setter
     def daily_request_limit(self, value: int) -> None:
         self.request_budget.limit = max(1, int(value))
@@ -2174,14 +2269,29 @@ class PropLineClient:
         if not self.api_key:
             raise PropLineError("PropLine API key is missing")
         now = self._clock()
-        if now < self._backoff_until:
+        shared_backoff = self.request_limiter.backoff_remaining
+        if now < self._backoff_until or shared_backoff > 0:
+            retry_after = max(
+                max(1.0, self._backoff_until - now),
+                shared_backoff,
+            )
             raise PropLineRateLimitError(
                 "PropLine rate-limit backoff active",
-                retry_after=max(1.0, self._backoff_until - now),
+                retry_after=retry_after,
             )
+        if self.request_budget.remaining <= 0:
+            raise PropLineError("PropLine daily request budget exhausted")
         if not self._reserve_request():
             raise PropLineError("PropLine daily request budget exhausted")
         await self.request_limiter.acquire()
+        # Another client can receive a provider 429 while this request waits
+        # for its rolling-hour slot. Never send during that shared cooldown.
+        shared_backoff = self.request_limiter.backoff_remaining
+        if shared_backoff > 0:
+            raise PropLineRateLimitError(
+                "PropLine rate-limit backoff active",
+                retry_after=shared_backoff,
+            )
         self._last_request_at = self._clock()
 
         session = self._session
@@ -2205,6 +2315,8 @@ class PropLineClient:
             }
             if json_body is not None:
                 request_kwargs["json"] = json_body
+            request_kind = _propline_request_kind(url)
+            self.request_limiter.record_attempt()
             async with request_method(url, **request_kwargs) as response:
                 self.request_limiter.observe_provider_limit(response.headers)
                 if response.status == 404:
@@ -2213,6 +2325,18 @@ class PropLineClient:
                     retry_after = _retry_after_seconds(response)
                     self._backoff_until = self._clock() + retry_after
                     self.request_limiter.defer(retry_after)
+                    stats = self.request_stats
+                    logger.warning(
+                        "PropLine 429: phase=%s rate=%d/hour kind=%s "
+                        "attempted=%d successful=%d 429s=%d Retry-After=%.0fs",
+                        self.request_phase,
+                        self.request_rate_per_hour,
+                        request_kind,
+                        stats["attempted"],
+                        stats["successful"],
+                        stats["rate_limited"],
+                        retry_after,
+                    )
                     raise PropLineRateLimitError(
                         f"PropLine rate limited (HTTP {response.status})",
                         retry_after=retry_after,
@@ -2229,7 +2353,20 @@ class PropLineClient:
                     )
                 if response.status >= 400:
                     raise PropLineError(f"PropLine request failed (HTTP {response.status})")
-                return await response.json(content_type=None)
+                payload = await response.json(content_type=None)
+                self.request_limiter.record_success()
+                stats = self.request_stats
+                logger.info(
+                    "PropLine request success: phase=%s rate=%d/hour kind=%s "
+                    "attempted=%d successful=%d 429s=%d backoff=idle",
+                    self.request_phase,
+                    self.request_rate_per_hour,
+                    request_kind,
+                    stats["attempted"],
+                    stats["successful"],
+                    stats["rate_limited"],
+                )
+                return payload
         except (aiohttp.ClientError, asyncio.TimeoutError):
             raise
         finally:
