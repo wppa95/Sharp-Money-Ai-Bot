@@ -5643,9 +5643,13 @@ async def underdog_job(context) -> None:
         #     )
         if _new_props_batch:
             logger.info(
-                "underdog_job: %d new props evaluated silently (digest suppressed — "
-                "Telegram only fires on qualified alerts)",
+                "underdog_job: current-book evaluation complete — new_props=%d "
+                "evaluated=%d qualified=%d delivered=%d "
+                "(Telegram qualification policy unchanged)",
+                _n_new_prop,
                 _n_new_prop_evaluated,
+                _n_qualified,
+                _n_new_prop_sent,
             )
 
         # ── Ranked delivery phase ──────────────────────────────────────────────────
@@ -6128,7 +6132,7 @@ async def underdog_job(context) -> None:
             "actionable=%d removed=%d new=%d new_sent=%d budget=%d "
             "deadline_reached=%s elapsed=%.1fs",
             len(ud_snaps),
-            _n_scored,
+            _n_new_prop_evaluated + _n_scored + _n_cold_start_scored,
             _n_observation_only,
             _n_cold_start_scored,
             _n_qualified,
