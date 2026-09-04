@@ -3287,6 +3287,24 @@ async def underdog_job(context) -> None:
         5.0,
         min(105.0, float(getattr(config, "UNDERDOG_POLL_INTERVAL", 120)) - 15.0),
     )
+
+    async def _await_cycle_budget(awaitable, operation: str):
+        """Bound enrichment work so one prop cannot consume later cadences."""
+        remaining = _cycle_deadline - time.monotonic()
+        if remaining <= 0:
+            if inspect.iscoroutine(awaitable):
+                awaitable.close()
+            return None
+        try:
+            return await asyncio.wait_for(awaitable, timeout=remaining)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "underdog_job: cycle deadline reached during %s; "
+                "leaving remaining props for the next scan",
+                operation,
+            )
+            return None
+
     _cycle_timing.start("state_restore")
     logger.info(
         "underdog_cycle_started: cycle_id=%d cold_start=%s active_jobs=%s",
