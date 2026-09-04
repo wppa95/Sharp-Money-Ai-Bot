@@ -257,6 +257,25 @@ async def player_history_collector_job(context) -> None:
         cycle_started = time.monotonic()
         stopped_for_budget = False
         stopped_for_underdog = False
+
+        async def _await_history_budget(awaitable, operation: str):
+            remaining = _CYCLE_TIME_BUDGET_SECONDS - (
+                time.monotonic() - cycle_started
+            )
+            if remaining <= 0:
+                if asyncio.iscoroutine(awaitable):
+                    awaitable.close()
+                return []
+            try:
+                return await asyncio.wait_for(awaitable, timeout=remaining)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "player_history_collector_job: %s exceeded remaining "
+                    "cycle budget; yielding to the next cycle",
+                    operation,
+                )
+                return []
+
         for player, sport, stat in cycle_targets:
             if _underdog_scan_running():
                 stopped_for_underdog = True
@@ -266,7 +285,10 @@ async def player_history_collector_job(context) -> None:
                 break
             target_counts[sport] = target_counts.get(sport, 0) + 1
             try:
-                raw = await provider.fetch_results(player, sport, stat)
+                raw = await _await_history_budget(
+                    provider.fetch_results(player, sport, stat),
+                    f"provider fetch {sport}/{stat}",
+                )
                 # Some non-football sports have no working public
                 # PlayerStatsProvider path.  Let final PropLine event stats
                 # fill those missing rows; that adapter persists accepted
@@ -281,13 +303,16 @@ async def player_history_collector_job(context) -> None:
                         from providers.player_history import (
                             get_player_history_provider,
                         )
-                        raw = await get_player_history_provider().supplement_missing_results(
-                            db,
-                            player,
-                            sport,
-                            stat,
-                            min_samples=5,
-                            source_provider="Underdog",
+                        raw = await _await_history_budget(
+                            get_player_history_provider().supplement_missing_results(
+                                db,
+                                player,
+                                sport,
+                                stat,
+                                min_samples=5,
+                                source_provider="Underdog",
+                            ),
+                            f"PropLine fallback {sport}/{stat}",
                         )
                     except Exception as exc:
                         logger.debug(
