@@ -5174,9 +5174,21 @@ async def underdog_job(context) -> None:
                     break
                 _line_val = _ssnap.line or 0.0
     
+                # Preserve the historical database-double contract used by
+                # isolated tests and compatibility callers.
+                if not isinstance(db, Database):
+                    _recent_alert_check = db.has_recent_ud_alert(
+                        _sp, _st, within_seconds=86400
+                    )
+                    if not hasattr(_recent_alert_check, "__await__"):
+                        continue
+                    if await _recent_alert_check:
+                        continue
+
                 # Production dedup is restored into process memory at startup
-                # and updated atomically on delivery. Never query SQLite once
-                # the live scan has encountered a standing candidate.
+                # and updated atomically on delivery. Check it after the
+                # database compatibility gate so concurrent delivery paths
+                # cannot re-deliver a standing candidate in this session.
                 if _is_prop_deduped(
                     _prop_market_alerted, _sp, _ssport, _st, _line_val,
                     dedup_window_seconds=config.UD_ALERT_DEDUP_WINDOW,
@@ -5191,17 +5203,6 @@ async def underdog_job(context) -> None:
                         _sp, _ssport, _st,
                     )
                     continue
-
-                # Preserve the historical database-double contract used by
-                # isolated tests and compatibility callers.
-                if not isinstance(db, Database):
-                    _recent_alert_check = db.has_recent_ud_alert(
-                        _sp, _st, within_seconds=86400
-                    )
-                    if not hasattr(_recent_alert_check, "__await__"):
-                        continue
-                    if await _recent_alert_check:
-                        continue
 
                 _shist = await _candidate_line_history(
                     db,
