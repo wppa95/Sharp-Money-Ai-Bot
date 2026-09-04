@@ -1708,6 +1708,7 @@ async def _run_prizepicks_independent_cycle(
                 _fetched_props=_fetched_props,
                 _fetched_sport=_fetched_sport,
                 _processing_locked=True,
+                background_processing=background_processing,
             )
         return
 
@@ -3207,6 +3208,17 @@ def _shared_monitoring_cycle(cycle_branch):
                 "_fetched_props": pending_props if pending_props else None,
                 "_fetched_sport": "paced",
             }
+        if (
+            "background_processing" in _pp_params
+            or any(
+                parameter.kind is inspect.Parameter.VAR_KEYWORD
+                for parameter in _pp_params.values()
+            )
+        ):
+            # PrizePicks evaluation can involve one history lookup per
+            # observation.  Keep the shared Underdog scheduler worker bounded
+            # by handing that work to the tracked processing-task pool.
+            _pp_kwargs["background_processing"] = True
         _prizepicks_cycle_task = asyncio.create_task(
             _run_prizepicks_independent_cycle(context, **_pp_kwargs),
             name="shared_monitoring_propline",
