@@ -715,16 +715,17 @@ async def send_alert(
 
 
 def _sanitize_user_alert_message(message: str) -> str:
-    """Remove retired classification labels at the final Telegram boundary.
+    """Remove internal classification/quality metadata at the Telegram boundary.
 
     This is deliberately narrow: evidence, direction, line movement, provider
-    identity, and safety disclaimers are preserved. Internal tier,
-    recommendation, and quality values remain available to the engine/database.
+    identity, and safety disclaimers are preserved. Internal tier, score,
+    recommendation, confidence, rating, star, and quality values remain
+    available to the engine/database.
     """
     text = str(message or "")
     text = re.sub(r"\b(?:S|A|B|C)[- ]?Tier\b", "", text, flags=re.IGNORECASE)
     text = re.sub(r"\b(?:S/A/B/C|S/A|A/B)[- ]?Tier\b", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"\bTier[- ]?[12]\b", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bTier(?:[- ]?[12])?\b", "", text, flags=re.IGNORECASE)
     text = re.sub(
         r"\b(?:WATCHLIST(?: ONLY)?|NEAR[- ]MISS)\b",
         "",
@@ -767,6 +768,31 @@ def _sanitize_user_alert_message(message: str) -> str:
         "",
         text,
         flags=re.IGNORECASE,
+    )
+    # Legacy formatters use several equivalent labels for internal quality
+    # metadata. Remove complete lines so evidence, direction, and line context
+    # are not damaged by substring replacements.
+    _metadata_line_patterns = (
+        r"\b(?:bet\s+)?quality\b",
+        r"\bmarket\s+quality\b",
+        r"\b(?:proxy\s+match\s+)?confidence\b",
+        r"\b(?:ai\s+)?rating\b",
+        r"\bstars?\b",
+        r"\b(?:quality\s+)?score\b",
+        r"\b(?:decision\s+)?tier\b",
+        r"[★☆⭐🌟]{2,}",
+    )
+    text = "\n".join(
+        line
+        for line in text.splitlines()
+        if not any(
+            re.search(
+                pattern,
+                re.sub(r"<[^>]+>", "", line),
+                flags=re.IGNORECASE,
+            )
+            for pattern in _metadata_line_patterns
+        )
     )
     # Market Quality is also internal-only.  Remove the complete legacy
     # section, including its explanatory continuation line, without touching
