@@ -3766,37 +3766,35 @@ async def underdog_job(context) -> None:
         })
     _track_props = getattr(db, "track_prop_records", None)
     if callable(_track_props) and _tracking_records:
-        try:
-            _tracking_operation = _track_props(_tracking_records)
-            if not inspect.isawaitable(_tracking_operation):
+        if isinstance(db, Database):
+            _tracking_batch = list(_tracking_records)
+            if _enqueue_db_persistence(
+                "track Underdog prop records",
+                lambda: _persist_tracking_records(_track_props, _tracking_batch),
+            ):
                 logger.debug(
-                    "underdog_job: tracking hook is not awaitable; "
-                    "skipping compatibility stub"
+                    "underdog_job: queued %d prop records for background persistence",
+                    len(_tracking_batch),
                 )
-            else:
-                _tracking_timeout = max(
-                    1.0,
-                    min(20.0, _cycle_deadline - time.monotonic()),
-                )
-                await _cycle_timing.await_db(
-                    "write",
-                    "track_prop_records",
-                    asyncio.wait_for(
+        else:
+            try:
+                _tracking_operation = _track_props(_tracking_records)
+                if not inspect.isawaitable(_tracking_operation):
+                    logger.debug(
+                        "underdog_job: tracking hook is not awaitable; "
+                        "skipping compatibility stub"
+                    )
+                else:
+                    await _cycle_timing.await_db(
+                        "write",
+                        "track_prop_records",
                         _tracking_operation,
-                        timeout=_tracking_timeout,
-                    ),
+                    )
+            except Exception as _tracking_exc:  # noqa: BLE001
+                logger.warning(
+                    "underdog_job: universal tracking write failed: %s",
+                    type(_tracking_exc).__name__,
                 )
-        except asyncio.TimeoutError:
-            logger.warning(
-                "underdog_job: universal tracking write exceeded %.1fs; "
-                "releasing cycle with snapshot observations intact",
-                _tracking_timeout,
-            )
-        except Exception as _tracking_exc:  # noqa: BLE001
-            logger.warning(
-                "underdog_job: universal tracking write failed: %s",
-                type(_tracking_exc).__name__,
-            )
 
     try:
         # Use the preceding fetched feed for normal-cycle comparisons.  On a
