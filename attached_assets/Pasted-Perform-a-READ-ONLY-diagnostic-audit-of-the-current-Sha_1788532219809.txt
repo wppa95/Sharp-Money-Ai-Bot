@@ -1,0 +1,79 @@
+Perform a READ-ONLY diagnostic audit of the current Sharp Money AI Bot V4.
+
+DO NOT modify anything.
+Do not edit, refactor, delete, reinstall, redeploy, restart anything unnecessarily, change configuration, rotate credentials, change environment variables, alter the database, or push/commit anything to GitHub.
+
+The goal is to establish the exact current state before we make any changes.
+
+Priority #1 — Telegram Alert Delivery
+
+Trace the complete alert path end-to-end:
+
+PropLine → monitoring → normalization → analysis → scoring → qualification → alert generation → alert scope/filtering → Telegram delivery.
+
+Determine exactly why no Telegram alerts are being delivered despite the monitoring pipeline successfully processing props and identifying actionable/qualified results.
+
+Inspect the actual current code, configuration, runtime behavior, logs, and environment-variable expectations.
+
+Specifically verify:
+
+1. Whether Telegram integration is actually initialized.
+2. Whether the Telegram bot token is being detected/configured at runtime.
+3. Whether the Telegram chat/user ID configuration is present and valid.
+4. Whether authorized-user filtering can block delivery.
+5. Whether alert_scope_filter or any other filtering layer can suppress alerts.
+6. Whether qualified alerts are actually passed into the Telegram delivery function.
+7. Whether the Telegram delivery function is being called.
+8. Whether Telegram API requests are being made.
+9. If requests are made, what HTTP response/error is returned.
+10. Whether errors are being swallowed, logged incorrectly, or treated as successful.
+11. Whether /testalert uses the same delivery path as production alerts.
+12. Whether Discord alert functionality is independent from Telegram and working as expected.
+13. Whether there is any mismatch between the current V4 architecture and older Telegram implementation assumptions.
+
+Also audit the current production pipeline
+
+Report the actual current state of:
+
+* PropLine integration
+* 5,000/day request budget
+* Prop discovery
+* Normalized props
+* Monitoring cycle
+* Analysis engine
+* Sharp Money / +EV engine
+* Qualification engine
+* Alert generation
+* Alert filtering
+* Telegram delivery
+* Discord commands
+* Runtime/server health
+* Persistence/state files
+* Environment variables required
+* Any known errors or warnings
+
+Use the current files and current runtime, not assumptions from previous versions.
+
+Required output
+
+Give me a structured audit with:
+
+A. VERIFIED WORKING
+Only items you can prove are currently working.
+
+B. VERIFIED BROKEN
+Only confirmed failures, with the exact failure point.
+
+C. UNKNOWN / NEEDS VERIFICATION
+Anything you cannot establish from the current environment.
+
+D. TELEGRAM ROOT CAUSE
+Give me the exact point in the pipeline where delivery stops and the evidence supporting that conclusion.
+
+E. EVIDENCE
+Include relevant file paths, function/module names, configuration names, log evidence, HTTP/API responses, and exact error messages where available.
+
+F. MINIMUM FIX
+After the audit only, describe the smallest change that would fix the confirmed Telegram issue. Do not implement it yet.
+
+Again: READ-ONLY ONLY. Do not make any changes whatsoever. Do not use the Replit AI agent. Do not push or commit anything to GitHub.
