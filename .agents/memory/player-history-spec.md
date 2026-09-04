@@ -5,7 +5,7 @@ description: Final confirmed spec for player_history_collector_job — full acti
 
 ## Authoritative Spec
 
-- **Tier-1 only**: filter `_TIER2_SPORTS = {"MLB","NBA","NFL"}` from target list in both primary and fallback paths.
+- **Supported sports only**: skip sports without a working `PlayerStatsProvider` path in both primary and fallback paths.
 - **Player count: unlimited** — no `[:100]` or `[:1000]` cap on target building. Full active Tier-1 snapshot is used.
 - **API calls: full active book per cycle** — every active supported target is attempted in the same cadence; `_API_CALL_TARGET` is only a compatibility/configuration floor and never truncates the target list.
 - **Cadence: 120 seconds**, `max_instances=1`, `misfire_grace_time=120`.

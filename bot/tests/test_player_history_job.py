@@ -213,20 +213,21 @@ async def test_player_history_flushes_results_in_bounded_durable_batches():
 
 
 @pytest.mark.asyncio
-async def test_player_history_attempts_full_active_book_on_each_run():
+async def test_player_history_attempts_and_persists_full_active_book():
     snapshots = {
         (f"Player {index:03d}", "points"): SimpleNamespace(
             player_name=f"Player {index:03d}",
             sport="NBA",
             stat_type="points",
         )
-        for index in range(_API_CALL_TARGET + 2)
+        for index in range(5200)
     }
     db = MagicMock()
     db.get_active_underdog_snapshot_per_prop = AsyncMock(return_value=snapshots)
+    db.upsert_player_results_bulk = AsyncMock()
     db.upsert_player_result = AsyncMock()
     provider = MagicMock()
-    provider.fetch_results = AsyncMock(return_value=[])
+    provider.fetch_results = AsyncMock(return_value=[SimpleNamespace()])
     context = SimpleNamespace(bot_data={"db": db})
 
     with patch(
@@ -234,14 +235,13 @@ async def test_player_history_attempts_full_active_book_on_each_run():
         return_value=provider,
     ):
         await player_history_collector_job(context)
-        first_run = [call.args for call in provider.fetch_results.await_args_list]
-        provider.fetch_results.reset_mock()
-        await player_history_collector_job(context)
-        second_run = [call.args for call in provider.fetch_results.await_args_list]
 
-    assert len(first_run) == _API_CALL_TARGET + 2
-    assert len(second_run) == _API_CALL_TARGET + 2
-    assert set(first_run) == set(second_run)
+    assert provider.fetch_results.await_count == 5200
+    assert sum(
+        len(call.args[0])
+        for call in db.upsert_player_results_bulk.await_args_list
+    ) == 5200
+    assert not db.upsert_player_result.await_args_list
 
 
 @pytest.mark.asyncio
