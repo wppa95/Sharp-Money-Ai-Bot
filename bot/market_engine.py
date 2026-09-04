@@ -485,6 +485,38 @@ def _enqueue_db_persistence(label: str, factory) -> bool:
     return True
 
 
+async def drain_db_persistence_worker() -> bool:
+    """Wait until all queued database work from the current loop is complete.
+
+    A full Underdog scan owns the shared scan slot until its deferred writes
+    finish.  Without this barrier, the next scheduled scan can start while
+    tracking, candidate, market-quality, or lifecycle writes from the prior
+    scan are still using SQLite.
+    """
+    queue = _db_persistence_queue
+    task = _db_persistence_worker_task
+    if queue is None or task is None:
+        return True
+    if task.done():
+        # A cancelled or unexpectedly stopped worker cannot drain its queue.
+        # Do not claim that the persistence boundary was satisfied.
+        if not queue.empty():
+            logger.error(
+                "database persistence worker stopped with %d queued operations",
+                queue.qsize(),
+            )
+            return False
+        return True
+    pending = queue.qsize()
+    await queue.join()
+    if pending:
+        logger.debug(
+            "database persistence barrier drained %d queued operations",
+            pending,
+        )
+    return True
+
+
 async def shutdown_db_persistence_worker(timeout: float = 5.0) -> None:
     """Drain bounded persistence work before the database connection closes."""
     global _db_persistence_queue, _db_persistence_worker_task, _db_persistence_loop
@@ -3743,6 +3775,7 @@ async def underdog_job(context) -> None:
         _cycle_timing.finish("fetch_parse")
         logger.info("underdog_cycle_timing: %s", _cycle_timing.summary(0, 0))
         _job_activity_end("underdog")
+        await drain_db_persistence_worker()
         _release_underdog_scan_slot()
         return
 
@@ -3792,6 +3825,7 @@ async def underdog_job(context) -> None:
         _cycle_timing.finish("fetch_parse")
         logger.info("underdog_cycle_timing: %s", _cycle_timing.summary(0, 0))
         _job_activity_end("underdog")
+        await drain_db_persistence_worker()
         _release_underdog_scan_slot()
         return
     if provider_health is not None and _underdog_connector is not None:
@@ -3808,6 +3842,7 @@ async def underdog_job(context) -> None:
         if _health:
             _health.record_provider_fetch("Underdog")
             _health.record_job_run("underdog_job")   # empty response = successful run
+        await drain_db_persistence_worker()
         _release_underdog_scan_slot()
         return
 
@@ -3880,6 +3915,7 @@ async def underdog_job(context) -> None:
         logger.debug("underdog_job: no Underdog pick'em snapshots in response")
         _cycle_timing.finish("active_pool")
         logger.info("underdog_cycle_timing: %s", _cycle_timing.summary(0, 0))
+        await drain_db_persistence_worker()
         _release_underdog_scan_slot()
         _job_activity_end("underdog")
         if _health:
@@ -6237,6 +6273,7 @@ async def underdog_job(context) -> None:
             # The guard is claimed before this try block.  Always release it
             # on a processing failure so one malformed row cannot stall every
             # subsequent scheduled scan.
+            await drain_db_persistence_worker()
             _release_underdog_scan_slot()
             _job_activity_end("underdog")
             return
@@ -6402,6 +6439,7 @@ async def underdog_job(context) -> None:
     # Release only after health, timing, and activity bookkeeping are complete.
     # The deferred FPR handoff must never overlap this final write/diagnostic
     # window, even though the main scan work has already finished.
+    await drain_db_persistence_worker()
     _release_underdog_scan_slot()
 
 
