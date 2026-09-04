@@ -329,7 +329,19 @@ async def player_history_collector_job(context) -> None:
                 break
             target_counts[sport] = target_counts.get(sport, 0) + 1
             try:
-                raw = await provider.fetch_results(player, sport, stat)
+                # Keep one unresponsive connector target from holding the
+                # scheduler lane past the cadence budget.
+                raw = await asyncio.wait_for(
+                    provider.fetch_results(player, sport, stat),
+                    timeout=min(
+                        10.0,
+                        max(
+                            1.0,
+                            _player_history_cadence_budget()
+                            - (time.monotonic() - cycle_started),
+                        ),
+                    ),
+                )
                 # This collector is deliberately limited to the current
                 # PlayerStatsProvider connectors. PropLine resolved-history
                 # lookups belong only to the PropLine request cadence and must

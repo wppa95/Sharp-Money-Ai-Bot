@@ -344,10 +344,16 @@ class _ScheduledExecutionCoordinator:
 _scheduled_execution_coordinator = _ScheduledExecutionCoordinator()
 
 
-def _coordinated_job(name: str, callback, *, allow_overlap: bool = False):
+def _coordinated_job(
+    name: str,
+    callback,
+    *,
+    allow_overlap: bool = False,
+    use_exclusive_group: bool = True,
+):
     exclusive_group = (
         "underdog_monitoring"
-        if name in {"underdog_monitor", "player_history_collector"}
+        if use_exclusive_group and name in {"underdog_monitor", "player_history_collector"}
         else None
     )
     return _scheduled_execution_coordinator.launch(
@@ -737,6 +743,7 @@ async def post_init(application: Application) -> None:
             _coordinated_job(
                 "player_history_collector",
                 player_history_collector_job,
+                use_exclusive_group=False,
             ),
             interval=config.PLAYER_HISTORY_POLL_INTERVAL,
             first=90,
