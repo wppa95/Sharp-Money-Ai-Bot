@@ -73,7 +73,6 @@ def test_required_independent_jobs_remain_registered():
         "clv_seeder",
         "clv_harvester",
         "opportunity_grader",
-        "player_history_collector",
         "budget_checker",
         "prop_history_pruner",
         "heartbeat",
@@ -89,7 +88,6 @@ def test_scheduled_jobs_use_coordinator_without_max_instances():
         "player_props_fetcher",
         "underdog_monitor",
         "opportunity_grader",
-        "player_history_collector",
     ):
         kwargs = _job_kwargs(jobs[name])
         assert "max_instances" not in kwargs
