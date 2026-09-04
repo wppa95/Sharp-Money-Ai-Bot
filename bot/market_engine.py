@@ -965,6 +965,25 @@ async def propline_request_scan_job(context) -> None:
         _propline_request_lock = asyncio.Lock()
 
     async with _propline_request_lock:
+        # A 429 Retry-After is a hard provider cooldown. Return before sport
+        # discovery so cooldown ticks make zero PropLine requests, including
+        # catalog requests.
+        client = getattr(provider, "client", None)
+        cooldown = max(
+            float(getattr(provider, "backoff_remaining", 0.0) or 0.0),
+            (
+                float(getattr(client, "backoff_remaining", 0.0) or 0.0)
+                if client is not None
+                else 0.0
+            ),
+        )
+        if cooldown > 0:
+            logger.info(
+                "propline_request_scan: cooldown active; requests=0 "
+                "remaining=%.1fs",
+                cooldown,
+            )
+            return
         sports = await _get_prizepicks_scan_sports(provider)
         if not sports:
             logger.info("propline_request_scan: no active PrizePicks sports")
