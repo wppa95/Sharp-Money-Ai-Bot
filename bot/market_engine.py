@@ -341,6 +341,63 @@ class _CycleTiming:
 
 _cycle_sequence = 0
 _active_jobs: dict[str, float] = {}
+_db_persistence_queue: Optional[asyncio.Queue] = None
+_db_persistence_worker_task: Optional[asyncio.Task] = None
+_db_persistence_loop = None
+
+
+async def _db_persistence_worker() -> None:
+    """Persist database records away from the live monitoring critical path."""
+    global _db_persistence_queue
+    assert _db_persistence_queue is not None
+    while True:
+        label, factory = await _db_persistence_queue.get()
+        try:
+            operation = factory()
+            if inspect.isawaitable(operation):
+                await operation
+            logger.debug("database persistence completed: %s", label)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "database persistence deferred operation failed: %s — %s",
+                label,
+                type(exc).__name__,
+            )
+        finally:
+            _db_persistence_queue.task_done()
+
+
+def _enqueue_db_persistence(label: str, factory) -> bool:
+    """Queue a production database write without blocking live monitoring."""
+    global _db_persistence_queue, _db_persistence_worker_task, _db_persistence_loop
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    if _db_persistence_loop is not loop:
+        if (
+            _db_persistence_worker_task is not None
+            and not _db_persistence_worker_task.done()
+        ):
+            _db_persistence_worker_task.cancel()
+        _db_persistence_loop = loop
+        _db_persistence_queue = asyncio.Queue(maxsize=64)
+        _db_persistence_worker_task = asyncio.create_task(
+            _db_persistence_worker(),
+            name="database-persistence-worker",
+        )
+    assert _db_persistence_queue is not None
+    try:
+        _db_persistence_queue.put_nowait((label, factory))
+    except asyncio.QueueFull:
+        logger.warning(
+            "database persistence queue full; dropping deferred operation: %s",
+            label,
+        )
+        return False
+    return True
 
 
 def _job_activity_start(name: str) -> None:
