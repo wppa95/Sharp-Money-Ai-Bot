@@ -3320,14 +3320,17 @@ async def underdog_job(context) -> None:
 
     async def _await_cycle_budget(awaitable, operation: str):
         """Bound enrichment work so one prop cannot consume later cadences."""
+        nonlocal _cycle_budget_exhausted
         remaining = _cycle_deadline - time.monotonic()
         if remaining <= 0:
             if inspect.iscoroutine(awaitable):
                 awaitable.close()
+            _cycle_budget_exhausted = True
             return None
         try:
             return await asyncio.wait_for(awaitable, timeout=remaining)
         except asyncio.TimeoutError:
+            _cycle_budget_exhausted = True
             logger.warning(
                 "underdog_job: cycle deadline reached during %s; "
                 "leaving remaining props for the next scan",
@@ -3759,7 +3762,7 @@ async def underdog_job(context) -> None:
     
         _cycle_budget_exhausted = False
         for _snap_index, snap in enumerate(ud_snaps):
-            if time.monotonic() >= _cycle_deadline:
+            if _cycle_budget_exhausted or time.monotonic() >= _cycle_deadline:
                 _n_observation_only += len(ud_snaps) - _snap_index
                 _cycle_budget_exhausted = True
                 logger.warning(
@@ -3869,10 +3872,13 @@ async def underdog_job(context) -> None:
                 line_val = snap.line or 0.0
                 # Load history even for new props — needed for validation gate.
                 # Truly first-ever props return empty list → validation blocks alert.
-                np_history = await _cycle_timing.await_db(
-                    "read",
-                    "get_ud_prop_history",
-                    db.get_ud_prop_history(player, stat_type, limit=30),
+                np_history = await _await_cycle_budget(
+                    _cycle_timing.await_db(
+                        "read",
+                        "get_ud_prop_history",
+                        db.get_ud_prop_history(player, stat_type, limit=30),
+                    ),
+                    "new-prop database history",
                 )
                 score = _cycle_timing.sync_operation("core_scoring", "score_ud_prop", score_ud_prop,
                     player_name  = player,
@@ -4178,10 +4184,13 @@ async def underdog_job(context) -> None:
                 # Removal notices bypass scoring and always qualify.
                 if not is_removed and line_changed and prev_line is not None:
                     # Load limit=30 to cover L30 validation window as well as scoring
-                    ud_history = await _cycle_timing.await_db(
-                        "read",
-                        "get_ud_prop_history",
-                        db.get_ud_prop_history(player, stat_type, limit=30),
+                    ud_history = await _await_cycle_budget(
+                        _cycle_timing.await_db(
+                            "read",
+                            "get_ud_prop_history",
+                            db.get_ud_prop_history(player, stat_type, limit=30),
+                        ),
+                        "line-change database history",
                     )
 
                     _hist_snap = None
@@ -4291,10 +4300,13 @@ async def underdog_job(context) -> None:
                     # intentionally skipped — fetching them for ~1000 props on boot
                     # would hammer the stats API; they are populated lazily on the
                     # first qualifying incremental event.  No alerts are sent.
-                    ud_history = await _cycle_timing.await_db(
-                        "read",
-                        "get_ud_prop_history",
-                        db.get_ud_prop_history(player, stat_type, limit=30),
+                    ud_history = await _await_cycle_budget(
+                        _cycle_timing.await_db(
+                            "read",
+                            "get_ud_prop_history",
+                            db.get_ud_prop_history(player, stat_type, limit=30),
+                        ),
+                        "cold-start database history",
                     )
                     _hist_snap = None  # cold-start: no per-prop PlayerStatsProvider fetch
 
@@ -4343,7 +4355,10 @@ async def underdog_job(context) -> None:
                         "underdog_job: prop re-entry — %s / %s / %s  line=%.1f",
                         player, stat_type, snap.sport or "UNKNOWN", snap.line or 0.0,
                     )
-                    ud_history = await db.get_ud_prop_history(player, stat_type, limit=30)
+                    ud_history = await _await_cycle_budget(
+                        db.get_ud_prop_history(player, stat_type, limit=30),
+                        "re-entry database history",
+                    )
                     _hist_snap = None
                     try:
                         from providers.player_history import get_player_history_provider
@@ -4855,10 +4870,13 @@ async def underdog_job(context) -> None:
                     )
                     continue
 
-                _shist = await _cycle_timing.await_db(
-                    "read",
-                    "get_ud_prop_history",
-                    db.get_ud_prop_history(_sp, _st, limit=30),
+                _shist = await _await_cycle_budget(
+                    _cycle_timing.await_db(
+                        "read",
+                        "get_ud_prop_history",
+                        db.get_ud_prop_history(_sp, _st, limit=30),
+                    ),
+                    "standing database history",
                 )
                 _shistory_snap = None
                 try:
