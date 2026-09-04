@@ -196,21 +196,18 @@ def build_application() -> Application:
 
 
 class _ScheduledExecutionCoordinator:
-    """Serialize scheduled executions without dropping timer triggers.
+    """Prevent overlapping executions without building a scheduler backlog.
 
     JobQueue timers can fire again while an async callback is still running.
-    The previous coordinator silently discarded those triggers, which made a
-    nominal two-minute cadence depend on how long the previous cycle happened
-    to take.  Each named job now has a small FIFO drained by one worker.  The
-    callbacks themselves remain serialized, but every trigger is represented
-    and is either executed or cancelled explicitly during shutdown.
+    A later trigger for the same named job is intentionally coalesced: the
+    active execution owns that job's resources, and the next timer tick will
+    provide a fresh opportunity after it finishes. Different named jobs remain
+    independent and may run concurrently.
     """
 
     def __init__(self) -> None:
         self._running: set[str] = set()
         self._tasks: set[asyncio.Task] = set()
-        self._queues: dict[str, deque] = {}
-        self._workers: dict[str, asyncio.Task] = {}
 
     async def _execute(self, name: str, callback, context, *args, **kwargs):
         try:
@@ -225,40 +222,52 @@ class _ScheduledExecutionCoordinator:
                 exc_info=(type(error), error, error.__traceback__),
             )
 
-    async def _drain(self, name: str) -> None:
-        """Run one named job's queued triggers in arrival order."""
+    async def _run_guarded(self, name: str, callback, context, *args, **kwargs):
         self._running.add(name)
         try:
-            while self._queues.get(name):
-                callback, context, args, kwargs = self._queues[name].popleft()
-                await self._execute(name, callback, context, *args, **kwargs)
+            return await self._execute(name, callback, context, *args, **kwargs)
         finally:
             self._running.discard(name)
-            self._queues.pop(name, None)
-            self._workers.pop(name, None)
 
     def wrap(self, name: str, callback):
         @wraps(callback)
         async def _coordinated(context, *args, **kwargs):
-            return await self._execute(name, callback, context, *args, **kwargs)
+            if name in self._running:
+                logger.info(
+                    "scheduled_execution: coalescing overlapping trigger (%s)",
+                    name,
+                )
+                return None
+            return await self._run_guarded(
+                name, callback, context, *args, **kwargs
+            )
 
         return _coordinated
 
     def launch(self, name: str, callback):
-        """Return a short-lived scheduler callback for a tracked real task."""
+        """Return a scheduler callback that tracks one real execution."""
         @wraps(callback)
         async def _launcher(context, *args, **kwargs):
-            queue = self._queues.setdefault(name, deque())
-            queue.append((callback, context, args, kwargs))
-            worker = self._workers.get(name)
-            if worker is None or worker.done():
-                worker = asyncio.create_task(
-                    self._drain(name),
-                    name=f"scheduled:{name}",
+            if name in self._running:
+                logger.info(
+                    "scheduled_execution: coalescing overlapping trigger (%s)",
+                    name,
                 )
-                self._workers[name] = worker
-                self._tasks.add(worker)
-                worker.add_done_callback(self._task_finished)
+                return None
+            # Claim synchronously before creating the task. This closes the
+            # small scheduling window where two JobQueue callbacks could both
+            # otherwise enqueue the same named job.
+            self._running.add(name)
+
+            async def _run_once():
+                try:
+                    return await self._execute(name, callback, context, *args, **kwargs)
+                finally:
+                    self._running.discard(name)
+
+            task = asyncio.create_task(_run_once(), name=f"scheduled:{name}")
+            self._tasks.add(task)
+            task.add_done_callback(self._task_finished)
             return None
 
         return _launcher
@@ -289,8 +298,6 @@ class _ScheduledExecutionCoordinator:
             await asyncio.gather(*tasks, return_exceptions=True)
         self._tasks.clear()
         self._running.clear()
-        self._queues.clear()
-        self._workers.clear()
 
 
 _scheduled_execution_coordinator = _ScheduledExecutionCoordinator()
