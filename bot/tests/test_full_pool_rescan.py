@@ -607,8 +607,8 @@ class TestFPRJob:
         # Score function was called → the rejected prop was rescored
         db.get_ud_prop_history.assert_awaited_once()
 
-    async def test_deferred_trigger_is_queued_while_underdog_scan_runs(self):
-        """A scheduled FPR attempt is handed off after the active scan."""
+    async def test_trigger_is_skipped_while_underdog_scan_runs(self):
+        """A legacy FPR attempt never becomes a remainder queue."""
         import market_engine
         from market_engine import _full_pool_rescan_job
 
@@ -628,8 +628,8 @@ class TestFPRJob:
             with patch("market_engine.get_health_tracker", return_value=h):
                 await _full_pool_rescan_job(ctx)
 
-            assert market_engine._fpr_deferred_pending is True
-            assert market_engine._fpr_deferred_context is ctx
+            assert market_engine._fpr_deferred_pending is False
+            assert market_engine._fpr_deferred_context is None
             db.get_all_active_underdog_snapshots_by_line.assert_not_awaited()
         finally:
             market_engine._ud_full_scan_running = old_running
@@ -637,8 +637,8 @@ class TestFPRJob:
             market_engine._fpr_deferred_context = old_context
             market_engine._fpr_execution_running = old_execution
 
-    async def test_released_scan_slot_runs_one_deferred_fpr(self):
-        """The handoff runs once without creating a second rotation."""
+    async def test_released_scan_slot_does_not_run_deferred_fpr(self):
+        """Releasing the scan slot cannot start a remainder batch."""
         import market_engine
 
         ctx = _make_context(_make_db())
@@ -656,9 +656,9 @@ class TestFPRJob:
                 market_engine._release_underdog_scan_slot()
                 await asyncio.sleep(0)
 
-            handoff.assert_awaited_once_with(ctx)
+            handoff.assert_not_awaited()
             assert market_engine._ud_full_scan_running is False
-            assert market_engine._fpr_deferred_pending is False
+            assert market_engine._fpr_deferred_pending is True
         finally:
             if market_engine._fpr_handoff_task is not None:
                 await market_engine._fpr_handoff_task
