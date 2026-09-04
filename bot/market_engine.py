@@ -4132,7 +4132,7 @@ async def underdog_job(context) -> None:
                     and decision.recommendation in ("OVER", "UNDER")
                 ):
                     try:
-                        await db.log_prop_opportunity(
+                        _new_opportunity_kwargs = dict(
                                 external_id = getattr(snap, "external_id", None) or getattr(snap, "id", None) or "",
                                 player_name       = player,
                                 team              = snap.team or "",
@@ -4160,6 +4160,15 @@ async def underdog_job(context) -> None:
                                     bet_confidence=decision.confidence,
                                     market_quality=getattr(score, "market_quality", None),
                                 ),
+                        )
+                        await _persist_db_write(
+                            db,
+                            "log Underdog opportunity [new-prop]",
+                            lambda kwargs=_new_opportunity_kwargs: db.log_prop_opportunity(
+                                **kwargs
+                            ),
+                            cycle_timing=_cycle_timing,
+                            operation="log_prop_opportunity",
                         )
                     except Exception as _pol_exc:
                         logger.warning(
@@ -4425,10 +4434,7 @@ async def underdog_job(context) -> None:
                         )
                         if decision.recommendation in ("OVER", "UNDER"):
                             try:
-                                await _cycle_timing.await_db(
-                                    "write",
-                                    "log_prop_opportunity",
-                                    db.log_prop_opportunity(
+                                _lc_opportunity_kwargs = dict(
                                     external_id       = getattr(snap, "external_id", None) or getattr(snap, "id", None) or "",
                                     player_name       = player,
                                     team              = snap.team or "",
@@ -4444,7 +4450,15 @@ async def underdog_job(context) -> None:
                                     bet_quality_score = decision.confidence,
                                     reason_codes      = _compute_reason_codes(score, decision),
                                     watchlist_state   = None,
+                                )
+                                await _persist_db_write(
+                                    db,
+                                    "log Underdog opportunity [line-change]",
+                                    lambda kwargs=_lc_opportunity_kwargs: db.log_prop_opportunity(
+                                        **kwargs
                                     ),
+                                    cycle_timing=_cycle_timing,
+                                    operation="log_prop_opportunity",
                                 )
                             except Exception as _pol_exc:
                                 logger.warning(
@@ -5108,7 +5122,7 @@ async def underdog_job(context) -> None:
                 # stream. The active snapshot itself remains continuously
                 # monitored regardless of whether a direction is available.
                 try:
-                    await db.log_prop_opportunity(
+                    _standing_opportunity_kwargs = dict(
                         external_id = getattr(_ssnap, "external_id", None) or getattr(_ssnap, "id", None) or "",
                         player_name       = _sp,
                         team              = _ssnap.team or "",
@@ -5136,6 +5150,15 @@ async def underdog_job(context) -> None:
                             bet_confidence=_sdec.confidence,
                             market_quality=getattr(_sscore, "market_quality", None),
                         ),
+                    )
+                    await _persist_db_write(
+                        db,
+                        "log Underdog opportunity [standing]",
+                        lambda kwargs=_standing_opportunity_kwargs: db.log_prop_opportunity(
+                            **kwargs
+                        ),
+                        cycle_timing=_cycle_timing,
+                        operation="log_prop_opportunity",
                     )
                 except Exception as _pol_exc:
                     logger.warning(
@@ -5428,8 +5451,14 @@ async def underdog_job(context) -> None:
                     # Performance tracking — path-specific for log clarity
                     try:
                         if getattr(_dq_result, "authoritative_recorded", True):
-                            await db.mark_opportunity_alert_sent(
-                                _dq_ext_id, _dq_st, provider="Underdog"
+                            await _persist_db_write(
+                                db,
+                                "mark Underdog opportunity alert sent",
+                                lambda: db.mark_opportunity_alert_sent(
+                                    _dq_ext_id, _dq_st, provider="Underdog"
+                                ),
+                                cycle_timing=_cycle_timing,
+                                operation="mark_opportunity_alert_sent",
                             )
                     except Exception as _dq_mark_exc:
                         if _dq_path == "lc":
@@ -5451,7 +5480,7 @@ async def underdog_job(context) -> None:
                     if _dq_odds is not None and _dq_odds.get("avg_odds") is not None:
                         try:
                             _dq_snap_id = int(getattr(_dq_snap, "id", 0) or 0)
-                            await db.seed_clv_from_ud_confirmation(
+                            _clv_seed_kwargs = dict(
                                 source_id   = _dq_snap_id,
                                 sport       = _dq_sport,
                                 stat_type   = _dq_st,
@@ -5460,6 +5489,15 @@ async def underdog_job(context) -> None:
                                 game_time   = _dq_snap.game_time,
                                 tier        = _dq_dec.decision_tier if _dq_dec else "",
                                 avg_odds    = _dq_odds["avg_odds"],
+                            )
+                            await _persist_db_write(
+                                db,
+                                "seed Underdog CLV confirmation",
+                                lambda kwargs=_clv_seed_kwargs: db.seed_clv_from_ud_confirmation(
+                                    **kwargs
+                                ),
+                                cycle_timing=_cycle_timing,
+                                operation="seed_clv_from_ud_confirmation",
                             )
                         except Exception as _dq_clv_exc:
                             logger.debug(
