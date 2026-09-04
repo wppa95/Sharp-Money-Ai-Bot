@@ -5372,9 +5372,10 @@ async def underdog_job(context) -> None:
     
             for (_ssnap, _sp, _st, _ssport, _prev) in _standing_ordered:
                 if time.monotonic() >= _cycle_deadline:
-                    logger.warning(
-                        "underdog_job: standing scan reached cycle deadline; "
-                        "leaving remaining candidates for the next scan",
+                    _cycle_budget_exhausted = True
+                    logger.error(
+                        "underdog_cycle_bottleneck: standing scan reached "
+                        "cycle deadline; no remainder queue",
                     )
                     break
                 _line_val = _ssnap.line or 0.0
