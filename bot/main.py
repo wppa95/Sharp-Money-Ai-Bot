@@ -721,16 +721,13 @@ async def post_init(application: Application) -> None:
             )
         logger.info(
             "Jobs scheduled — underdog: every %ds, grader: every %ds, "
-            "history: every %ds (batch=%d, headroom=%ds), "
+            "history=inline-current-book, "
             "season_check: every %ds, "
             "heartbeat: every 60s "
              "[PrizePicks/PropLine companion cycle enabled=%s; "
              "PropLine default rate=180/hour; DK/FD delivery disabled]",
             config.UNDERDOG_POLL_INTERVAL,
             config.OPPORTUNITY_GRADER_INTERVAL,
-            config.PLAYER_HISTORY_POLL_INTERVAL,
-            config.PLAYER_HISTORY_BATCH_SIZE,
-            config.PLAYER_HISTORY_CADENCE_HEADROOM_SECONDS,
             config.SEASON_CHECK_INTERVAL,
             _propline_enabled,
         )
