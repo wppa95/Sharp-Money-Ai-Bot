@@ -474,7 +474,8 @@ class TestFormatAlert:
     def test_disclaimer_present(self):
         comp = _make_comp()
         msg = format_player_prop_market_alert(comp)
-        assert "Not a betting recommendation" in msg
+        assert "Line differences = market information" in msg or "Market View" in msg
+        assert "Confidence" not in msg
 
     def test_sources_line_shows_active_providers(self):
         comp = _make_comp()  # only Underdog available

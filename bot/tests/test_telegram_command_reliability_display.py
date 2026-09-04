@@ -849,6 +849,49 @@ async def test_broadcast_alert_does_not_use_strong_bet_label_as_a_send_gate():
 
 
 @pytest.mark.asyncio
+async def test_telegram_boundary_removes_all_quality_metadata_but_keeps_pick_context():
+    """Legacy/direct messages cannot expose internal quality classifications."""
+    bot = MagicMock()
+    bot.send_message = AsyncMock()
+    raw = (
+        "📊 <b>SHARP MONEY PLAY</b>\n"
+        "👤 <b>Yordan Alvarez</b> · Hits + Runs + RBIs\n"
+        "📌 <b>PICK:</b> 🟢 <b>OVER 1.5</b>\n"
+        "💪 STRONG BET\n"
+        "Evidence: 8 completed games · Provider: Underdog\n"
+        "Quality: 66/100 ★★★☆☆\n"
+        "Bet Quality: 66/100\n"
+        "Market Quality: HIGH · 80/100\n"
+        "Proxy Match Confidence: 90/100 [█████████░]\n"
+        "AI Confidence: 66/100\n"
+        "Rating: ★★★☆☆\n"
+        "Score: 66 · S-Tier · Tier 1 · A/B/C Tier"
+    )
+
+    result = await broadcast_alert(bot, [123], raw, sport="MLB")
+
+    assert result == {"sent": 1, "failed": 0}
+    delivered = bot.send_message.await_args.kwargs["text"]
+    assert "Yordan Alvarez" in delivered
+    assert "OVER 1.5" in delivered
+    assert "Evidence: 8 completed games" in delivered
+    assert "Provider: Underdog" in delivered
+    assert "💪 STRONG BET" in delivered
+    for leaked in (
+        "Quality",
+        "Confidence",
+        "Rating",
+        "Score",
+        "S-Tier",
+        "Tier 1",
+        "A/B/C",
+        "★",
+        "⭐",
+    ):
+        assert leaked not in delivered
+
+
+@pytest.mark.asyncio
 async def test_dashboard_keeps_provider_activity_when_one_count_read_times_out():
     update, context = _update_and_context()
     db = MagicMock()
