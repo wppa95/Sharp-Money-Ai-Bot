@@ -6005,7 +6005,8 @@ async def underdog_job(context) -> None:
                     + (_n_standing_sent if "_n_standing_sent" in dir() else 0)
                 ),
             )
-            _health.record_database_write("lifecycle_bridge")
+            if not isinstance(db, Database):
+                _health.record_database_write("lifecycle_bridge")
         else:
             _health.record_job_fail(
                 "underdog_job",
