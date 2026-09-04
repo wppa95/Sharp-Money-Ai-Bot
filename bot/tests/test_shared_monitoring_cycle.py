@@ -95,6 +95,41 @@ async def test_shared_cycle_uses_empty_paced_batch_without_fallback_fetch(monkey
     assert calls == [([], "paced", True)]
 
 
+@pytest.mark.asyncio
+async def test_shared_cycle_marks_paced_props_as_already_persisted(monkeypatch):
+    calls = []
+    prop = SimpleNamespace(player_name="Paced Player")
+
+    async def propline_branch(
+        _context,
+        *,
+        _fetched_props=None,
+        _fetched_sport=None,
+        _fetched_persisted=False,
+        background_processing=False,
+    ):
+        calls.append((_fetched_props, _fetched_sport, _fetched_persisted))
+
+    async def underdog_branch(_context):
+        return None
+
+    monkeypatch.setattr(
+        market_engine,
+        "_propline_pending_props",
+        {"prop": prop},
+    )
+    monkeypatch.setattr(
+        market_engine,
+        "_run_prizepicks_independent_cycle",
+        propline_branch,
+    )
+
+    await market_engine._shared_monitoring_cycle(underdog_branch)(SimpleNamespace())
+    await asyncio.sleep(0)
+
+    assert calls == [([prop], "paced", True)]
+
+
 def test_scheduler_has_one_shared_monitor_owner_and_no_heartbeat_handoff():
     main_source = inspect.getsource(__import__("main").post_init)
     heartbeat_source = inspect.getsource(__import__("main")._heartbeat_job)

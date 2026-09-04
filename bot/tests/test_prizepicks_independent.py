@@ -47,6 +47,62 @@ def _opportunity(provider: str) -> dict:
 
 
 class TestIndependentPrizePicks:
+    async def test_request_worker_persists_non_empty_observations(self, monkeypatch):
+        prop = SimpleNamespace(
+            player_name="Fetched Player",
+            team="TM",
+            sport="NBA",
+            stat_type="Points",
+            line_value=20.5,
+            game_time=None,
+            external_id="fetched-prop",
+            event_id="fetched-event",
+            fetched_at=datetime.utcnow(),
+        )
+
+        class FakeProvider:
+            client = None
+
+            def is_available(self):
+                return True
+
+            async def fetch_props_for_sport_result(self, sport, bookmaker=None):
+                assert sport == "NBA"
+                assert bookmaker == "prizepicks"
+                return PropLineFetchResult(
+                    [prop], datetime.utcnow(), succeeded=True, complete=True
+                )
+
+        class FakeDB:
+            def __init__(self):
+                self.saved = []
+                self.tracked = []
+
+            async def upsert_prop_line_history_batch(self, provider, props, **kwargs):
+                self.saved.append((provider, list(props), kwargs))
+
+            async def track_prop_records(self, records):
+                self.tracked.extend(records)
+
+        db = FakeDB()
+        monkeypatch.setattr(market_engine, "_propline_provider", FakeProvider())
+        monkeypatch.setattr(market_engine, "_propline_request_cursor", 0)
+        monkeypatch.setattr(
+            market_engine,
+            "_get_prizepicks_scan_sports",
+            AsyncMock(return_value=("NBA",)),
+        )
+
+        await market_engine.propline_request_scan_job(
+            SimpleNamespace(bot_data={"db": db})
+        )
+
+        assert len(db.saved) == 1
+        assert db.saved[0][0] == "PrizePicks"
+        assert db.saved[0][2] == {"append_snapshot": True}
+        assert len(db.tracked) == 1
+        assert db.tracked[0]["external_id"] == "fetched-prop"
+
     def test_available_lines_show_verified_prizepicks_or_explicit_unavailable(self):
         available = _format_available_lines_block(15.5, pp_line=14.5)
         unavailable = _format_available_lines_block(15.5)

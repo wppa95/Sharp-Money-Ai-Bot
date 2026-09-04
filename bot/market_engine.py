@@ -463,9 +463,9 @@ async def _persist_underdog_postscan(
 ) -> None:
     """Bridge and update lifecycle rows outside the live scan slot."""
     try:
+        # The bridge is part of the current-book completion barrier; do not
+        # truncate a larger active feed into a future remainder.
         bridged = await db.sync_underdog_snapshots_to_prop_history(
-            # The bridge is part of the current-book completion barrier; do
-            # not truncate a larger active feed into a future remainder.
             limit=100_000,
             since_hours=0.17,
         )
@@ -3620,6 +3620,11 @@ def _shared_monitoring_cycle(cycle_branch):
                 "_fetched_props": pending_props,
                 "_fetched_sport": "paced",
             }
+        if "_fetched_persisted" in _pp_params or any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in _pp_params.values()
+        ):
+            _pp_kwargs["_fetched_persisted"] = True
         if (
             "background_processing" in _pp_params
             or any(

@@ -97,6 +97,16 @@ def test_scheduled_jobs_use_coordinator_without_max_instances():
     assert "_coordinated_job(" in source
 
 
+def test_opportunity_grader_has_an_independent_worker_per_trigger():
+    source = MAIN_SOURCE.read_text()
+
+    assert (
+        '_coordinated_job(\n                "opportunity_grader",'
+        in source
+    )
+    assert "allow_overlap=True" in source
+
+
 @pytest.mark.asyncio
 async def test_coordinator_coalesces_active_trigger_and_allows_next_trigger():
     from main import _ScheduledExecutionCoordinator
@@ -164,6 +174,33 @@ async def test_launcher_discards_overlapping_trigger_without_queueing():
     assert calls == 1
     assert not coordinator._running
     assert not coordinator._tasks
+
+
+@pytest.mark.asyncio
+async def test_launcher_allows_overlapping_triggers_when_requested():
+    from main import _ScheduledExecutionCoordinator
+
+    coordinator = _ScheduledExecutionCoordinator()
+    started = []
+    release = asyncio.Event()
+
+    async def callback(_context):
+        started.append(len(started) + 1)
+        await release.wait()
+
+    launcher = coordinator.launch("parallel_job", callback, allow_overlap=True)
+    await launcher(None)
+    await launcher(None)
+    await asyncio.sleep(0)
+
+    assert started == [1, 2]
+    assert len(coordinator._tasks) == 2
+
+    release.set()
+    await asyncio.gather(*list(coordinator._tasks))
+    await asyncio.sleep(0)
+    assert not coordinator._running
+    assert not coordinator._active_counts
 
 
 @pytest.mark.asyncio
