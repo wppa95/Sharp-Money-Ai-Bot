@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 # overlap protection also prevents concurrent collectors).
 # The provider's own request timeout bounds any individual call.
 _CYCLE_TIME_BUDGET_SECONDS = 90.0
+# This is an API-call target, not a cap on the number of active players
+# retained while building the rotation.
+_API_CALL_TARGET = 250
 
 # Sports for which PlayerStatsProvider.fetch_results() has a working data
 # path.  Unsupported sports (LOL, VALORANT/VAL, PGA/GOLF, MMA, TT, and
@@ -245,7 +248,9 @@ async def player_history_collector_job(context) -> None:
         # ── Fetch results until the cadence-safe time budget is exhausted ───
         ok = 0
         rows = 0
-        cycle_targets = _fair_cycle_targets(targets, len(targets))
+        cycle_targets = _fair_cycle_targets(
+            targets, min(len(targets), _API_CALL_TARGET)
+        )
         target_counts: dict[str, int] = {}
         ok_by_sport: dict[str, int] = {}
         rows_by_sport: dict[str, int] = {}
@@ -262,6 +267,37 @@ async def player_history_collector_job(context) -> None:
             target_counts[sport] = target_counts.get(sport, 0) + 1
             try:
                 raw = await provider.fetch_results(player, sport, stat)
+                # Some non-football sports have no working public
+                # PlayerStatsProvider path.  Let final PropLine event stats
+                # fill those missing rows; that adapter persists accepted
+                # rows through the same database upsert below.
+                if (
+                    not raw
+                    and asyncio.iscoroutinefunction(
+                        getattr(db, "get_player_results", None)
+                    )
+                ):
+                    try:
+                        from providers.player_history import (
+                            get_player_history_provider,
+                        )
+                        raw = await get_player_history_provider().supplement_missing_results(
+                            db,
+                            player,
+                            sport,
+                            stat,
+                            min_samples=5,
+                            source_provider="Underdog",
+                        )
+                    except Exception as exc:
+                        logger.debug(
+                            "player_history_collector_job: PropLine fallback "
+                            "%s/%s/%s failed: %s",
+                            player,
+                            sport,
+                            stat,
+                            exc,
+                        )
                 # A provider request can overlap the instant Underdog claims
                 # the slot.  Do not begin the next SQLite write in that case;
                 # the next history cycle will retry this target.

@@ -13,6 +13,7 @@ Public API:
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
@@ -393,9 +394,10 @@ class PlayerHistoryProvider:
     ) -> list:
         """Return missing primary-provider evidence from official PropLine history.
 
-        The rows intentionally stay out of ``player_game_results`` for now.
-        That table is the primary result source used by pick calculations;
-        persistence of supplemental rows is a separate follow-up concern.
+        PropLine event-stat rows are durable player-game evidence.  Resolved
+        prop history and the player-games convenience endpoint remain
+        in-memory fallbacks because they do not provide the same event/status
+        join guarantees.
         """
         today = datetime.utcnow().date().isoformat()
         provider_scope = str(source_provider or "").strip().lower()
@@ -415,24 +417,66 @@ class PlayerHistoryProvider:
             self._supplement_cache[key] = []
             return []
 
-        # Raw game logs are book-agnostic and include games without a posted
-        # prop, so they are the preferred supplemental source for history.
-        # Resolved prop history remains the settlement path below.
-        supplemental = await self._fetch_propline_games(
+        # Event stats are the authoritative raw box-score path.  Persist them
+        # before returning so a later scan does not have to repeat the
+        # provider request.  The database uniqueness constraint makes this
+        # safe when a caller retries the same cycle.
+        event_stats = await self._fetch_propline_event_stats(
             player_name,
             sport,
             stat_type,
             instrumentation=instrumentation,
         )
-        if not supplemental:
-            supplemental = await self._fetch_propline_history(
-                player_name,
-                sport,
-                stat_type,
-                instrumentation=instrumentation,
+        event_stats_merged = _merge_game_results(existing, event_stats)
+        new_event_stats = event_stats_merged[len(existing):]
+        if new_event_stats:
+            for row in new_event_stats:
+                try:
+                    if instrumentation is not None:
+                        await instrumentation.await_db(
+                            "write",
+                            "upsert_propline_event_stat_history",
+                            db.upsert_player_result(row),
+                        )
+                    else:
+                        await db.upsert_player_result(row)
+                except Exception as exc:
+                    logger.warning(
+                        "PlayerHistoryProvider: PropLine history write failed "
+                        "%s / %s: %s",
+                        player_name,
+                        stat_type,
+                        exc,
+                    )
+
+        # Raw game logs are also book-agnostic and may cover older games than
+        # the score window.  Use them only to fill the remaining gap.
+        supplemental = list(new_event_stats)
+        if len(_merge_game_results(existing, supplemental)) < required:
+            supplemental = _merge_game_results(
+                supplemental,
+                await self._fetch_propline_games(
+                    player_name,
+                    sport,
+                    stat_type,
+                    instrumentation=instrumentation,
+                ),
             )
-        merged = _merge_game_results(existing, supplemental)
-        supplemental = merged[len(existing):]
+        if len(_merge_game_results(existing, supplemental)) < required:
+            supplemental = _merge_game_results(
+                supplemental,
+                await self._fetch_propline_history(
+                    player_name,
+                    sport,
+                    stat_type,
+                    instrumentation=instrumentation,
+                ),
+            )
+        if supplemental:
+            merged = _merge_game_results(existing, supplemental)
+            supplemental = merged[len(existing):]
+        else:
+            supplemental = []
         if supplemental and instrumentation is not None:
             instrumentation.count("propline_supplemental_props")
         self._supplement_cache[key] = list(supplemental)
@@ -458,6 +502,291 @@ class PlayerHistoryProvider:
             stat_type,
             instrumentation=instrumentation,
         )
+
+    async def _fetch_propline_event_stats(
+        self,
+        player_name: str,
+        sport: str,
+        stat_type: str,
+        *,
+        instrumentation=None,
+    ) -> list:
+        """Fetch verified final box-score stats for one player/stat.
+
+        PropLine exposes scores and event stats as separate read-only
+        endpoints.  Neither endpoint is trusted in isolation: the score
+        event supplies the date and final status, while the stats response
+        must repeat the same event identity and final status.  Player and
+        stat matches are exact after whitespace/case normalization; multiple
+        matches are rejected instead of guessing.
+        """
+        from providers.player_stats import RawGameResult
+        from providers.propline import (
+            PropLineClient,
+            _clean,
+            _normalize_stat,
+            _parse_datetime,
+        )
+        from engine.sport_policy import is_football_related_sport
+
+        sport_u = str(sport or "").upper().strip()
+        if not sport_u or is_football_related_sport(sport_u):
+            return []
+        if self._propline_client is None:
+            self._propline_client = PropLineClient()
+        client = self._propline_client
+        fetch_scores = getattr(client, "fetch_scores", None)
+        fetch_event_stats = getattr(client, "fetch_event_stats", None)
+        try:
+            configured = bool(getattr(client, "is_configured", False))
+            official_sport = client.official_sport_for(sport_u)
+        except Exception as exc:
+            logger.debug(
+                "PlayerHistoryProvider: PropLine configuration failed "
+                "%s / %s: %s",
+                player_name,
+                stat_type,
+                exc,
+            )
+            return []
+        if not configured:
+            return []
+        if not official_sport or not callable(fetch_scores) or not callable(fetch_event_stats):
+            return []
+
+        requested_player = re.sub(r"\s+", " ", str(player_name or "").strip()).casefold()
+        requested_stat = _normalize_stat(stat_type)
+        if not requested_player or not requested_stat:
+            return []
+
+        def _field(value, *names, default=None):
+            if isinstance(value, dict):
+                for name in names:
+                    candidate = value.get(name)
+                    if candidate not in (None, ""):
+                        return candidate
+            else:
+                for name in names:
+                    candidate = getattr(value, name, None)
+                    if candidate not in (None, ""):
+                        return candidate
+            return default
+
+        def _payload(result):
+            if not bool(_field(result, "succeeded", default=False)):
+                return None
+            if not bool(_field(result, "complete", default=False)):
+                return None
+            return _field(result, "payload")
+
+        def _records(payload, key):
+            if isinstance(payload, list):
+                return [item for item in payload if isinstance(item, dict)]
+            if not isinstance(payload, dict):
+                return []
+            values = payload.get(key)
+            if isinstance(values, list):
+                return [item for item in values if isinstance(item, dict)]
+            nested = payload.get("data")
+            if isinstance(nested, dict):
+                return _records(nested, key)
+            if isinstance(nested, list):
+                return [item for item in nested if isinstance(item, dict)]
+            return []
+
+        final_statuses = {
+            "closed", "complete", "completed", "final", "resolved", "settled",
+        }
+
+        def _sport_matches(value, expected_official, expected_canonical):
+            provided = str(value or "").strip().lower().replace("_", " ")
+            if not provided:
+                return True
+            official = str(expected_official or "").strip().lower().replace("_", " ")
+            canonical = str(expected_canonical or "").strip().lower().replace("_", " ")
+            return provided in {official, canonical}
+
+        try:
+            # Keep the discovery window aligned with PropLine's documented
+            # default.  Older history is filled by the single player-games
+            # request below, rather than multiplying event-stat calls.
+            scores_result = await fetch_scores(official_sport, days_from=3)
+            scores_payload = _payload(scores_result)
+            score_rows = _records(scores_payload, "events")
+        except Exception as exc:
+            logger.debug(
+                "PlayerHistoryProvider: PropLine score discovery failed "
+                "%s / %s: %s",
+                player_name,
+                stat_type,
+                exc,
+            )
+            return []
+
+        # A repeated event ID with conflicting dates is ambiguous.  Do not
+        # let an arbitrary response ordering choose the game date.
+        events: dict[str, dict] = {}
+        ambiguous_event_ids: set[str] = set()
+        for event in score_rows:
+            event_id = _clean(_field(event, "id", "event_id", "game_id", "match_id"))
+            event_time = _parse_datetime(
+                _field(event, "commence_time", "start_time", "event_start", "game_time")
+            )
+            status = _clean(_field(event, "status", "state", "event_status", "game_status")).lower()
+            if not event_id or event_time is None or status not in final_statuses:
+                continue
+            if not _sport_matches(
+                _field(event, "sport_key", "sport", "league"),
+                official_sport,
+                sport_u,
+            ):
+                continue
+            prior = events.get(event_id)
+            if prior is not None:
+                prior_time = _parse_datetime(
+                    _field(prior, "commence_time", "start_time", "event_start", "game_time")
+                )
+                prior_home = re.sub(
+                    r"\s+",
+                    " ",
+                    str(_field(prior, "home_team", "home", "home_name") or "").strip(),
+                ).casefold()
+                prior_away = re.sub(
+                    r"\s+",
+                    " ",
+                    str(_field(prior, "away_team", "away", "away_name") or "").strip(),
+                ).casefold()
+                current_home = re.sub(
+                    r"\s+",
+                    " ",
+                    str(_field(event, "home_team", "home", "home_name") or "").strip(),
+                ).casefold()
+                current_away = re.sub(
+                    r"\s+",
+                    " ",
+                    str(_field(event, "away_team", "away", "away_name") or "").strip(),
+                ).casefold()
+                if (
+                    prior_time != event_time
+                    or prior_home != current_home
+                    or prior_away != current_away
+                ):
+                    ambiguous_event_ids.add(event_id)
+                continue
+            events[event_id] = event
+
+        rows = []
+        seen_keys: set[tuple[str, str, str, str]] = set()
+        for event_id, event in events.items():
+            if event_id in ambiguous_event_ids:
+                continue
+            try:
+                stats_result = await fetch_event_stats(
+                    official_sport,
+                    event_id,
+                    stat_type=requested_stat,
+                )
+            except Exception as exc:
+                logger.debug(
+                    "PlayerHistoryProvider: PropLine event stats failed "
+                    "%s / %s event=%s: %s",
+                    player_name,
+                    stat_type,
+                    event_id,
+                    exc,
+                )
+                continue
+            stats_payload = _payload(stats_result)
+            if not isinstance(stats_payload, dict):
+                continue
+            stats_event_id = _clean(
+                _field(stats_payload, "id", "event_id", "game_id", "match_id")
+            )
+            if stats_event_id != event_id:
+                continue
+            if not _sport_matches(
+                _field(stats_payload, "sport_key", "sport", "league"),
+                official_sport,
+                sport_u,
+            ):
+                continue
+            stats_status = _clean(
+                _field(stats_payload, "status", "state", "event_status", "game_status")
+            ).lower()
+            if stats_status not in final_statuses:
+                continue
+            event_time = _parse_datetime(
+                _field(event, "commence_time", "start_time", "event_start", "game_time")
+            )
+            stats_time = _parse_datetime(
+                _field(stats_payload, "commence_time", "start_time", "event_start", "game_time")
+            )
+            if event_time is None or (stats_time is not None and stats_time.date() != event_time.date()):
+                continue
+
+            players = _records(stats_payload, "players")
+            matching_players = []
+            for player in players:
+                raw_player = _field(
+                    player, "name", "player_name", "display_name", "full_name",
+                    "player", "athlete",
+                )
+                if isinstance(raw_player, dict):
+                    raw_player = _field(
+                        raw_player, "name", "display_name", "full_name"
+                    )
+                normalized_player = re.sub(
+                    r"\s+", " ", str(raw_player or "").strip()
+                ).casefold()
+                if normalized_player == requested_player:
+                    matching_players.append(player)
+            if len(matching_players) != 1:
+                continue
+
+            player = matching_players[0]
+            stats = _field(player, "stats", "statistics", "values")
+            if not isinstance(stats, dict):
+                continue
+            matching_stats = [
+                (key, value) for key, value in stats.items()
+                if _normalize_stat(key) == requested_stat
+            ]
+            if len(matching_stats) != 1:
+                continue
+            _, raw_value = matching_stats[0]
+            if isinstance(raw_value, bool):
+                continue
+            try:
+                value = float(raw_value)
+            except (TypeError, ValueError):
+                continue
+            key = (event_id, event_time.date().isoformat(), requested_player, requested_stat)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+
+            opponent = _field(player, "opponent", "opponent_name")
+            if opponent is None:
+                team = _clean(_field(player, "team", "player_team"))
+                home = _clean(_field(event, "home_team", "home", "home_name"))
+                away = _clean(_field(event, "away_team", "away", "away_name"))
+                normalized_team = team.casefold()
+                if normalized_team and normalized_team == home.casefold():
+                    opponent = away or None
+                elif normalized_team and normalized_team == away.casefold():
+                    opponent = home or None
+
+            rows.append(RawGameResult(
+                player_name=player_name,
+                sport=sport_u,
+                stat_type=stat_type.lower().strip(),
+                game_date=event_time.date().isoformat(),
+                actual_value=value,
+                opponent=str(opponent).strip() if opponent else None,
+                source="propline_event_stats",
+                game_id=event_id,
+            ))
+        return rows
 
     async def _fetch_propline_history(
         self,
