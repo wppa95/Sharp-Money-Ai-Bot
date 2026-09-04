@@ -464,6 +464,33 @@ def _enqueue_db_persistence(label: str, factory) -> bool:
     return True
 
 
+async def _persist_db_write(
+    db,
+    label: str,
+    factory,
+    *,
+    cycle_timing=None,
+    operation: str | None = None,
+) -> None:
+    """Keep production writes off the monitoring coroutine.
+
+    The real ``Database`` is serialized by the persistence worker.  Lightweight
+    database doubles used by direct callers and tests retain the old awaited
+    behavior so their observable contract does not change.
+    """
+    if isinstance(db, Database):
+        if not _enqueue_db_persistence(label, factory):
+            logger.warning("database persistence was not queued: %s", label)
+        return
+
+    result = factory()
+    if inspect.isawaitable(result):
+        if cycle_timing is not None and operation:
+            await cycle_timing.await_db("write", operation, result)
+        else:
+            await result
+
+
 def _job_activity_start(name: str) -> None:
     _active_jobs[name] = time.monotonic()
 
