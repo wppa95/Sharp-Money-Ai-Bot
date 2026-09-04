@@ -265,8 +265,8 @@ def _alert_readiness_lines(
             icon = "✅"
         else:
             detail = (
-                f"data ready; real player-game rows={real_rows:,} "
-                f"({real_sources}); no qualifying pick logged in the last 24h"
+                "data ready; no qualifying pick logged in the last 24h"
+                f" · real player-game rows={real_rows:,} ({real_sources})"
             )
             icon = "ℹ️"
         lines.append(f"  {icon} <b>{_html.escape(sport)}</b>  ·  {detail}")
