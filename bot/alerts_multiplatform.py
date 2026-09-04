@@ -328,7 +328,8 @@ def _format_decision_block(
     """
      Format the full OVER / UNDER evaluation block for internal/legacy callers.
 
-     Shows confidence, all per-window hit-rate statistics, and a reason.
+     Shows all per-window history statistics and a reason. Quality metadata is
+     retained only in the internal decision object.
     When *line* is supplied and the recommendation is OVER or UNDER, a
     "📌 Suggested Play: OVER/UNDER X.X" line is added immediately after the
     recommendation so the actionable play is always visible at a glance.
@@ -357,35 +358,14 @@ def _format_decision_block(
         f"\n\n{_div()}"
         f"\n🎯 <b>Recommendation:</b>  {emoji} {rec}"
         f"{play_line}"
-        f"\n   {_format_quality_line(decision, None)}"
         f"{_format_history_block(decision)}"
         f"{reason_block}"
     )
 
 
 def _format_market_quality_block(market_quality: Optional[object]) -> str:
-    """Render the Market Quality section for Underdog alerts (informational).
-
-    Market Quality = How reliable is the market data?
-    This is separate from Bet Quality (how strong is the actual recommendation).
-    """
-    if market_quality is None:
-        return ""
-    label   = getattr(market_quality, "label",   None)
-    score   = getattr(market_quality, "score",   0)
-    reasons = getattr(market_quality, "reasons", ())
-    if label is None:
-        return ""
-    label_str  = _display_label(label)
-    filled     = round(score / 10)
-    bar        = "█" * filled + "░" * (10 - filled)
-    icon       = {"ELITE": "🥇", "STRONG": "🥈", "HIGH": "🥈", "MEDIUM": "🥉", "LOW": "⚠️"}.get(label_str, "📊")
-    reason_str = "  •  ".join(reasons) if reasons else "Standard market"
-    return (
-        f"\n\n{icon} <b>Market Quality:</b>  {label_str}  "
-        f"<code>[{bar}]</code>  {score}/100"
-        f"\n   <i>How reliable is the market data?  {reason_str}</i>"
-    )
+    """Compatibility stub; market quality is never rendered in Telegram."""
+    return ""
 
 
 def _validate_final_tier(
@@ -540,38 +520,13 @@ def _format_quality_line(
     decision: Optional[object],
     score: Optional[object],
 ) -> str:
-    """Show the existing confidence value with a plain bettor-facing label."""
-    confidence = _numeric_attr(decision, "confidence")
-    if confidence is None:
-        confidence = _numeric_attr(score, "total")
-    if confidence is None:
-        confidence_display = getattr(decision, "confidence_display", None)
-        if callable(confidence_display):
-            try:
-                confidence_display = confidence_display()
-            except Exception:
-                confidence_display = None
-        match = re.search(r"(\d+(?:\.\d+)?)\s*/\s*100", str(confidence_display or ""))
-        if match:
-            confidence = float(match.group(1))
-    if confidence is None:
-        return ""
-
-    quality = int(confidence)
-    stars = _bq_stars(quality)
-    return f"<b>Quality:</b> <code>{quality}/100</code> {stars}"
+    """Compatibility stub; confidence/quality is never rendered in Telegram."""
+    return ""
 
 
 def _format_market_quality_line(market_quality: Optional[object]) -> str:
-    """Render market quality without leaking the enum's Python class name."""
-    if market_quality is None:
-        return ""
-    label = _display_label(getattr(market_quality, "label", None))
-    score = _numeric_attr(market_quality, "score")
-    if not label and score is None:
-        return ""
-    suffix = f" · {int(score)}/100" if score is not None else ""
-    return f"\n\n📊 <b>MARKET</b>\n   {label or 'Market'}{suffix}"
+    """Compatibility stub; market quality is never rendered in Telegram."""
+    return ""
 
 
 def _clean_reason(reason: object) -> str:
