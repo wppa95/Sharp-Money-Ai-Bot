@@ -113,4 +113,5 @@
 - [PropLine zero-observation diagnosis](propline-zero-observations.md) — distinguish empty sport slates from normalization regressions with raw-vs-normalized counts.
 - [Cadence runtime overlap](cadence-runtime-overlap.md) — live full-pool Underdog scans can exceed 2 minutes; interval triggers then skip while the shared slot remains held.
 - [Live monitoring database boundary](live-monitoring-db-boundary.md) — compare live feeds in memory; reserve SQLite for evidence, history, grading, and tracking.
+- [Full-feed snapshot batching](full-feed-snapshot-batching.md) — large live-feed snapshot writes must use bounded transactions or SQLite WAL/lock contention can stall independent evidence jobs.
 - [PropLine read-only capability boundary](propline-readonly-capabilities.md) — raw game context is supplemental only after final status; live/football data cannot enter persisted evidence or alerts.
