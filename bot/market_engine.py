@@ -4177,31 +4177,32 @@ async def underdog_job(context) -> None:
             _cycle_timing.count("known_prop_keys_returned", len(known_keys))
     
         _cycle_budget_exhausted = False
-    # This is the complete new-prop persistence population. It is calculated
-    # from the full feed before the evaluation budget is applied. Every one of
-    # these observations is already represented by the snapshot/tracking
-    # persistence paths; only scoring/evidence enrichment remains budgeted.
-    _eligible_new_props = sum(
-        1
-        for _eligible_snap in ud_snaps
-        if "[REMOVED]" not in (_eligible_snap.selection or "")
-        and not _is_futures_stat(
-            _extract_ud_stat_type(
-                _eligible_snap.selection,
-                _eligible_snap.player,
-                _eligible_snap.line,
+        # This is the complete new-prop persistence population. It is
+        # calculated from the full feed before the evaluation budget is
+        # applied. Every one of these observations is already represented by
+        # the snapshot/tracking persistence paths; only scoring/evidence
+        # enrichment remains budgeted.
+        _eligible_new_props = sum(
+            1
+            for _eligible_snap in ud_snaps
+            if "[REMOVED]" not in (_eligible_snap.selection or "")
+            and not _is_futures_stat(
+                _extract_ud_stat_type(
+                    _eligible_snap.selection,
+                    _eligible_snap.player,
+                    _eligible_snap.line,
+                )
             )
+            and (
+                _eligible_snap.player or "Unknown",
+                _extract_ud_stat_type(
+                    _eligible_snap.selection,
+                    _eligible_snap.player,
+                    _eligible_snap.line,
+                ),
+            ) not in known_keys
         )
-        and (
-            _eligible_snap.player or "Unknown",
-            _extract_ud_stat_type(
-                _eligible_snap.selection,
-                _eligible_snap.player,
-                _eligible_snap.line,
-            ),
-        ) not in known_keys
-    )
-    _cycle_timing.count("eligible_new_props", _eligible_new_props)
+        _cycle_timing.count("eligible_new_props", _eligible_new_props)
         # Publish this feed observation into bounded process memory once.
         # Candidate paths below use keyed lookups; they never scan the cache
         # or query SQLite for recent line history.
