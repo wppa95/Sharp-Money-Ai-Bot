@@ -96,6 +96,7 @@
 - [Delivery dedup claims](delivery-dedup-claims.md) — pre-delivery identity claims prevent concurrent duplicates but must be released whenever no Telegram alert was delivered.
 - [Football active scope](football-active-scope.md) — exclude gridiron, rugby, and Australian-rules football upstream; preserve soccer and historical rows.
 - [Scheduler ownership](scheduler-ownership.md) — FPR owns the only scheduled full-pool rotation; Stable Refresh remains unscheduled compatibility code.
+- [Heavy job exclusivity](heavy-job-exclusivity.md) — Underdog monitoring and player-history collection share an exclusive scheduler group; history waits for scan and persistence drain.
 - [FPR cursor fairness](fpr-cursor-fairness.md) — stable identity order is the rotation; new/moving props get bounded prompt capacity without consuming cursor coverage.
 - [Async SQLite test fixtures](async-sqlite-test-fixtures.md) — module-scoped in-memory DB fixtures can lose tables across pytest event loops; use function-scoped fixtures for isolation.
 - [PropLine pagination safety](propline-pagination.md) — shared request budgeting, loop-safe pagination, complete-snapshot retention, and immutable-field event rediscovery protect the authorized feed.

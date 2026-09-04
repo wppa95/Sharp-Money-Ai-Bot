@@ -201,6 +201,47 @@ async def test_launcher_allows_different_job_names_to_run_independently():
 
 
 @pytest.mark.asyncio
+async def test_launcher_exclusive_group_waits_for_other_heavy_job():
+    from main import _ScheduledExecutionCoordinator
+
+    coordinator = _ScheduledExecutionCoordinator()
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+    second_started = asyncio.Event()
+
+    async def first_callback(_context):
+        first_started.set()
+        await release_first.wait()
+
+    async def second_callback(_context):
+        second_started.set()
+
+    first = coordinator.launch(
+        "underdog_monitor",
+        first_callback,
+        exclusive_group="underdog_monitoring",
+    )
+    second = coordinator.launch(
+        "player_history_collector",
+        second_callback,
+        exclusive_group="underdog_monitoring",
+    )
+
+    await first(None)
+    await first_started.wait()
+    await second(None)
+    await asyncio.sleep(0)
+    assert not second_started.is_set()
+
+    release_first.set()
+    await second_started.wait()
+    await asyncio.gather(*list(coordinator._tasks))
+    await asyncio.sleep(0)
+    assert not coordinator._running
+    assert not coordinator._tasks
+
+
+@pytest.mark.asyncio
 async def test_launcher_long_run_is_not_cancelled_by_later_trigger():
     from main import _ScheduledExecutionCoordinator
 
