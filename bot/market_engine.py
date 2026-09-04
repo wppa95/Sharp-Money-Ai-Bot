@@ -3622,6 +3622,10 @@ async def underdog_job(context) -> None:
         0, int(getattr(config, "UNDERDOG_EVALUATION_BUDGET", 100))
     )
     _evaluation_used = 0
+    # A cold/restarted in-memory state can make the entire active feed appear
+    # new.  Do not let one arbitrary new prop trigger a remote evidence
+    # backfill that holds the shared scan slot for the whole cadence.
+    _large_new_prop_feed = len(ud_snaps) > 1000
     # Per-sport pipeline stage counters — emitted in debug summary (#7 diagnostics)
     _sport_raw:           dict[str, int] = {}  # daily props: non-removed, non-futures
     _sport_futures:       dict[str, int] = {}  # season-long/futures props (tracked, not scored)
@@ -3870,16 +3874,21 @@ async def underdog_job(context) -> None:
                     continue
                 _evaluation_used += 1
                 line_val = snap.line or 0.0
-                # Load history even for new props — needed for validation gate.
-                # Truly first-ever props return empty list → validation blocks alert.
-                np_history = await _await_cycle_budget(
-                    _cycle_timing.await_db(
-                        "read",
-                        "get_ud_prop_history",
-                        db.get_ud_prop_history(player, stat_type, limit=30),
-                    ),
-                    "new-prop database history",
-                )
+                # On a large restart feed, defer expensive new-prop history
+                # enrichment.  Full-feed tracking already preserves the
+                # observation, and without real evidence the delivery gate
+                # cannot send a directional alert anyway.
+                if _large_new_prop_feed:
+                    np_history = []
+                else:
+                    np_history = await _await_cycle_budget(
+                        _cycle_timing.await_db(
+                            "read",
+                            "get_ud_prop_history",
+                            db.get_ud_prop_history(player, stat_type, limit=30),
+                        ),
+                        "new-prop database history",
+                    )
                 score = _cycle_timing.sync_operation("core_scoring", "score_ud_prop", score_ud_prop,
                     player_name  = player,
                     stat_type    = stat_type,
@@ -3899,23 +3908,24 @@ async def underdog_job(context) -> None:
                 # First-seen props must still be evaluated and tracked; the
                 # canonical Telegram gate below decides whether they can be sent.
                 _hist_snap = None
-                try:
-                    from providers.player_history import get_player_history_provider
-                    _hist_snap = await _await_cycle_budget(
-                        get_player_history_provider().get_snapshot(
-                            db,
-                            player,
-                            snap.sport or "UNKNOWN",
-                            stat_type,
-                            line_val,
-                            ud_history=np_history,
-                            source_provider="Underdog",
-                            instrumentation=_cycle_timing,
-                        ),
-                        "new-prop history",
-                    )
-                except Exception:
-                    _hist_snap = None
+                if not _large_new_prop_feed:
+                    try:
+                        from providers.player_history import get_player_history_provider
+                        _hist_snap = await _await_cycle_budget(
+                            get_player_history_provider().get_snapshot(
+                                db,
+                                player,
+                                snap.sport or "UNKNOWN",
+                                stat_type,
+                                line_val,
+                                ud_history=np_history,
+                                source_provider="Underdog",
+                                instrumentation=_cycle_timing,
+                            ),
+                            "new-prop history",
+                        )
+                    except Exception:
+                        _hist_snap = None
                 validation = validate_player_prop(
                     player_name  = player,
                     stat_type    = stat_type,
