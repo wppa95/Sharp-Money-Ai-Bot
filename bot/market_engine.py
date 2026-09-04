@@ -382,6 +382,57 @@ async def _persist_tracking_records(track_props, records: list) -> None:
         await operation
 
 
+async def _persist_underdog_postscan(
+    db,
+    lifecycle_alerted: list[tuple[str, str, str]],
+    lifecycle_removed: list[tuple[str, str, str]],
+    now: datetime,
+) -> None:
+    """Bridge and update lifecycle rows outside the live scan slot."""
+    try:
+        bridged = await db.sync_underdog_snapshots_to_prop_history(
+            limit=6000,
+            since_hours=0.17,
+        )
+        if bridged:
+            logger.debug("underdog_job: bridged %d rows to PropLineHistory", bridged)
+    except Exception as exc:
+        logger.warning("underdog_job: PropLineHistory sync failed: %s", exc)
+    for player, sport, stat_type in lifecycle_alerted:
+        try:
+            await db.update_prop_lifecycle_state(
+                "Underdog",
+                player,
+                sport,
+                stat_type,
+                "ACTIVE_ALERTED",
+                first_alert_sent_at=now,
+            )
+        except Exception as exc:
+            logger.debug(
+                "underdog_job: ACTIVE_ALERTED update failed %s/%s: %s",
+                player,
+                stat_type,
+                exc,
+            )
+    for player, sport, stat_type in lifecycle_removed:
+        try:
+            await db.update_prop_lifecycle_state(
+                "Underdog",
+                player,
+                sport,
+                stat_type,
+                "REMOVED",
+            )
+        except Exception as exc:
+            logger.debug(
+                "underdog_job: REMOVED update failed %s/%s: %s",
+                player,
+                stat_type,
+                exc,
+            )
+
+
 def _enqueue_db_persistence(label: str, factory) -> bool:
     """Queue a production database write without blocking live monitoring."""
     global _db_persistence_queue, _db_persistence_worker_task, _db_persistence_loop
@@ -5817,56 +5868,74 @@ async def underdog_job(context) -> None:
             _job_activity_end("underdog")
             return
 
-    # ── Bridge to PropLineHistory (lifecycle tracking) ─────────────────────────
-    # Must run AFTER the main try block so snapshots exist in UnderdogSnapshotRecord.
-    # A bridge failure is surfaced as a job failure so /health can alert on it.
-    try:
-        bridged = await db.sync_underdog_snapshots_to_prop_history(
-            limit=6000, since_hours=0.17   # ~10 min window covers the current cycle's rows
-            # limit=200 / since_hours=4 previously caused only ~200 of 5,210 active props
-            # to be synced per cycle (oldest-first ordering always hit the same small batch).
-            # 0.17 h ≈ 10 min catches the current cycle's saves; limit=6000 covers all props.
+    # ── Bridge/lifecycle persistence ─────────────────────────────────────────
+    # Production scans keep the database on a separate storage path.  The
+    # in-memory scan state is already complete; bridge/lifecycle work is
+    # serialized by the background writer after this job releases its slot.
+    if isinstance(db, Database):
+        _enqueue_db_persistence(
+            "bridge Underdog snapshots and update lifecycle",
+            lambda: _persist_underdog_postscan(
+                db,
+                list(_lifecycle_alerted),
+                list(_lifecycle_removed),
+                now,
+            ),
         )
-        if bridged:
-            logger.debug("underdog_job: bridged %d rows to PropLineHistory", bridged)
-    except Exception as _bridge_exc:
-        logger.warning("underdog_job: PropLineHistory sync failed: %s", _bridge_exc)
-        _persistence_ok = False
+        if _lifecycle_alerted or _lifecycle_removed:
+            logger.debug(
+                "underdog_job: queued lifecycle persistence — ACTIVE_ALERTED=%d "
+                "REMOVED=%d",
+                len(_lifecycle_alerted),
+                len(_lifecycle_removed),
+            )
+    else:
+        # Compatibility path for direct callers/tests using database doubles.
+        try:
+            bridged = await db.sync_underdog_snapshots_to_prop_history(
+                limit=6000,
+                since_hours=0.17,
+            )
+            if bridged:
+                logger.debug("underdog_job: bridged %d rows to PropLineHistory", bridged)
+        except Exception as _bridge_exc:
+            logger.warning("underdog_job: PropLineHistory sync failed: %s", _bridge_exc)
+            _persistence_ok = False
 
-    # ── Apply lifecycle state transitions (AFTER bridge creates/updates the rows) ──
-    # Queued in _lifecycle_alerted / _lifecycle_removed during the main loop.
-    # Applying here guarantees PropLineHistory rows exist before we try to update them.
-    _lc_fail_count = 0
-    for _lc_player, _lc_sport, _lc_stat in _lifecycle_alerted:
-        try:
-            await db.update_prop_lifecycle_state(
-                "Underdog", _lc_player, _lc_sport, _lc_stat,
-                "ACTIVE_ALERTED", first_alert_sent_at=now,
-            )
-        except Exception as _lc_exc:
+        _lc_fail_count = 0
+        for _lc_player, _lc_sport, _lc_stat in _lifecycle_alerted:
+            try:
+                await db.update_prop_lifecycle_state(
+                    "Underdog", _lc_player, _lc_sport, _lc_stat,
+                    "ACTIVE_ALERTED", first_alert_sent_at=now,
+                )
+            except Exception as _lc_exc:
+                logger.debug(
+                    "underdog_job: ACTIVE_ALERTED update failed %s/%s: %s",
+                    _lc_player, _lc_stat, _lc_exc,
+                )
+                _lc_fail_count += 1
+        for _lc_player, _lc_sport, _lc_stat in _lifecycle_removed:
+            try:
+                await db.update_prop_lifecycle_state(
+                    "Underdog", _lc_player, _lc_sport, _lc_stat, "REMOVED",
+                )
+            except Exception as _lc_exc:
+                logger.debug(
+                    "underdog_job: REMOVED update failed %s/%s: %s",
+                    _lc_player, _lc_stat, _lc_exc,
+                )
+                _lc_fail_count += 1
+        if _lifecycle_alerted or _lifecycle_removed:
             logger.debug(
-                "underdog_job: ACTIVE_ALERTED update failed %s/%s: %s",
-                _lc_player, _lc_stat, _lc_exc,
+                "underdog_job: lifecycle updated — ACTIVE_ALERTED=%d "
+                "REMOVED=%d lc_fails=%d",
+                len(_lifecycle_alerted),
+                len(_lifecycle_removed),
+                _lc_fail_count,
             )
-            _lc_fail_count += 1
-    for _lc_player, _lc_sport, _lc_stat in _lifecycle_removed:
-        try:
-            await db.update_prop_lifecycle_state(
-                "Underdog", _lc_player, _lc_sport, _lc_stat, "REMOVED",
-            )
-        except Exception as _lc_exc:
-            logger.debug(
-                "underdog_job: REMOVED update failed %s/%s: %s",
-                _lc_player, _lc_stat, _lc_exc,
-            )
-            _lc_fail_count += 1
-    if _lifecycle_alerted or _lifecycle_removed:
-        logger.debug(
-            "underdog_job: lifecycle updated — ACTIVE_ALERTED=%d  REMOVED=%d  lc_fails=%d",
-            len(_lifecycle_alerted), len(_lifecycle_removed), _lc_fail_count,
-        )
-    if _lc_fail_count > 0:
-        _persistence_ok = False
+        if _lc_fail_count > 0:
+            _persistence_ok = False
 
     _snapshot_fetched = (
         _snapshot_intentionally_skipped + _snapshot_intended
