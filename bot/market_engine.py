@@ -4044,17 +4044,20 @@ async def underdog_job(context) -> None:
                     if (decision is not None
                             and decision.recommendation in ("OVER", "UNDER")):
                         try:
-                            _np_odds_confirm = await _get_odds_api_confirmation(
-                                snap.sport or "UNKNOWN",
-                                player,
-                                stat_type,
-                                decision.recommendation,
-                                line_val,
-                                team=snap.team or "",
-                                event=snap.event or "",
-                                game_time=snap.game_time,
-                                db=db,
-                                event_id=str(getattr(snap, "game_id", "") or ""),
+                            _np_odds_confirm = await _await_cycle_budget(
+                                _get_odds_api_confirmation(
+                                    snap.sport or "UNKNOWN",
+                                    player,
+                                    stat_type,
+                                    decision.recommendation,
+                                    line_val,
+                                    team=snap.team or "",
+                                    event=snap.event or "",
+                                    game_time=snap.game_time,
+                                    db=db,
+                                    event_id=str(getattr(snap, "game_id", "") or ""),
+                                ),
+                                "new-prop odds confirmation",
                             )
                         except Exception:
                             pass
@@ -4520,17 +4523,20 @@ async def underdog_job(context) -> None:
                             and decision is not None
                             and decision.recommendation in ("OVER", "UNDER")):
                         try:
-                            _lc_odds_confirm = await _get_odds_api_confirmation(
-                                snap.sport or "UNKNOWN",
-                                player,
-                                stat_type,
-                                decision.recommendation,
-                                snap.line or 0.0,
-                                team=snap.team or "",
-                                event=snap.event or "",
-                                game_time=snap.game_time,
-                                db=db,
-                                event_id=str(getattr(snap, "game_id", "") or ""),
+                            _lc_odds_confirm = await _await_cycle_budget(
+                                _get_odds_api_confirmation(
+                                    snap.sport or "UNKNOWN",
+                                    player,
+                                    stat_type,
+                                    decision.recommendation,
+                                    snap.line or 0.0,
+                                    team=snap.team or "",
+                                    event=snap.event or "",
+                                    game_time=snap.game_time,
+                                    db=db,
+                                    event_id=str(getattr(snap, "game_id", "") or ""),
+                                ),
+                                "line-change odds confirmation",
                             )
                         except Exception:
                             pass
