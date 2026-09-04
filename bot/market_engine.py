@@ -3396,7 +3396,11 @@ def _shared_monitoring_cycle(cycle_branch):
             )
         ):
             _pp_kwargs = {
-                "_fetched_props": pending_props if pending_props else None,
+                # Production uses the 17-second request worker as the sole
+                # PropLine fetcher. An empty paced batch is intentional:
+                # passing None would trigger the companion's compatibility
+                # fallback fetch and hold the shared scheduler owner.
+                "_fetched_props": pending_props,
                 "_fetched_sport": "paced",
             }
         if (
