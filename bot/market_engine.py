@@ -5834,17 +5834,35 @@ async def underdog_job(context) -> None:
             _incremental_records.clear()
             _snapshot_intended += len(_incr_snapshot)
             if isinstance(db, Database):
-                if not _enqueue_db_persistence(
-                    "save Underdog snapshot records",
-                    lambda records=_incr_snapshot: db.save_underdog_snapshots_bulk(records),
-                ):
+                try:
+                    # Snapshot persistence is part of the full-scan boundary.
+                    # Await the single bulk transaction so the written count
+                    # is real and the scan slot stays held until all feed
+                    # observations are durable.
+                    _write_result = await _cycle_timing.await_db(
+                        "write",
+                        "save_underdog_snapshots_bulk",
+                        db.save_underdog_snapshots_bulk(_incr_snapshot),
+                    )
+                    _snapshot_persisted += (
+                        int(_write_result.get("records_written", len(_incr_snapshot)))
+                        if isinstance(_write_result, dict)
+                        else len(_incr_snapshot)
+                    )
+                    _snapshot_retry_count += (
+                        int(_write_result.get("retry_count", 0))
+                        if isinstance(_write_result, dict)
+                        else 0
+                    )
+                except Exception as _bulk_exc:
                     _snapshot_failed_batches += 1
                     _snapshot_failed_records += len(_incr_snapshot)
                     _persistence_ok = False
-                else:
-                    logger.debug(
-                        "underdog_job: queued %d snapshot records for background persistence",
+                    logger.error(
+                        "underdog_job: bulk snapshot save permanently failed "
+                        "after database retries (%d records): %s",
                         len(_incr_snapshot),
+                        _bulk_exc,
                     )
                 del _incr_snapshot
             elif not _cycle_budget_exhausted:
