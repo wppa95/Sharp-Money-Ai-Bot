@@ -400,7 +400,9 @@ async def _persist_underdog_postscan(
     """Bridge and update lifecycle rows outside the live scan slot."""
     try:
         bridged = await db.sync_underdog_snapshots_to_prop_history(
-            limit=6000,
+            # The bridge is part of the current-book completion barrier; do
+            # not truncate a larger active feed into a future remainder.
+            limit=100_000,
             since_hours=0.17,
         )
         if bridged:
@@ -6340,9 +6342,9 @@ async def underdog_job(context) -> None:
                         db.log_scan_cycle(**_scan_cycle_kwargs),
                     )
             elif db:
-                logger.warning(
-                    "underdog_job: scan-cycle evidence write deferred after "
-                    "cycle deadline"
+                logger.error(
+                    "underdog_cycle_bottleneck: scan-cycle evidence not written "
+                    "before deadline; no remainder queue"
                 )
         except Exception as _scl_exc:
             logger.debug("underdog_job: scan_cycle_log write skipped: %s", _scl_exc)
