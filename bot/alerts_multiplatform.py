@@ -567,8 +567,8 @@ def _format_analyst_inline_block(
     that builds the narrative from stored decision artifacts.  Returns "" for
     non-directional/removal decisions, or when the import fails.
 
-    Tier remains internal metadata.  The narrative is based on the actual
-    confidence value and never adds a tier-adjustment message.
+    Tier and confidence remain internal metadata. The narrative is not exposed
+    through the Telegram player-pick presentation.
     """
     if decision is None:
         return ""
