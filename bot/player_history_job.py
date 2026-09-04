@@ -330,37 +330,10 @@ async def player_history_collector_job(context) -> None:
             target_counts[sport] = target_counts.get(sport, 0) + 1
             try:
                 raw = await provider.fetch_results(player, sport, stat)
-                # Some non-football sports have no working public
-                # PlayerStatsProvider path.  Let final PropLine event stats
-                # fill those missing rows; that adapter persists accepted
-                # rows through the same database upsert below.
-                if (
-                    not raw
-                    and asyncio.iscoroutinefunction(
-                        getattr(db, "get_player_results", None)
-                    )
-                ):
-                    try:
-                        from providers.player_history import (
-                            get_player_history_provider,
-                        )
-                        raw = await get_player_history_provider().supplement_missing_results(
-                            db,
-                            player,
-                            sport,
-                            stat,
-                            min_samples=5,
-                            source_provider="Underdog",
-                        )
-                    except Exception as exc:
-                        logger.debug(
-                            "player_history_collector_job: PropLine fallback "
-                            "%s/%s/%s failed: %s",
-                            player,
-                            sport,
-                            stat,
-                            exc,
-                        )
+                # This collector is deliberately limited to the current
+                # PlayerStatsProvider connectors. PropLine resolved-history
+                # lookups belong only to the PropLine request cadence and must
+                # never turn this scheduler into an extra provider poller.
                 for r in raw:
                     pending_results.append(r)
                     if len(pending_results) >= _PLAYER_HISTORY_WRITE_BATCH_SIZE:

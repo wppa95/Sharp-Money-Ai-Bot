@@ -1085,6 +1085,23 @@ async def propline_request_scan_job(context) -> None:
                     getattr(context, "bot_data", {}).get("db"),
                     props,
                 )
+                # The provider light represents the live fetch-and-persist
+                # lane, not the evaluator. A successful request worker tick
+                # must clear an old "awaiting first fetch" state even when
+                # the current sport has an empty slate.
+                if getattr(context, "bot_data", {}).get("db") is not None:
+                    try:
+                        _provider_health = get_health_monitor()
+                        if _provider_health is not None:
+                            _provider_health.record_success("PrizePicks")
+                    except Exception:
+                        pass
+                    try:
+                        _health = get_health_tracker()
+                        if _health is not None:
+                            _health.record_provider_fetch("PrizePicks")
+                    except Exception:
+                        pass
                 for prop in props:
                     key = _propline_prop_key(prop)
                     if key[0] and key[1] and key[2]:

@@ -182,6 +182,15 @@ _SHADOW_PLAYER_RESULT_SOURCES = frozenset({
     "graded_prop",
 })
 
+_PLAYER_RESULT_SOURCE_LABELS = {
+    "mlb_stats_api": "MLB Stats API",
+    "opendota_series": "OpenDota",
+    "espn_gamelog": "ESPN gamelog",
+    "sleeper_stats": "Sleeper per-game",
+    "sleeper_stats_weekly": "Sleeper weekly shadow",
+    "graded_prop": "settlement shadow",
+}
+
 
 def _alert_readiness_lines(
     coverage: object,
@@ -221,11 +230,28 @@ def _alert_readiness_lines(
             if str(source).strip().lower() not in _SHADOW_PLAYER_RESULT_SOURCES
             and isinstance(count, (int, float))
         )
+        def _source_detail(*, real_only: bool) -> str:
+            selected = []
+            for source, count in sorted(source_counts.items()):
+                source_key = str(source).strip().lower()
+                if real_only and source_key in _SHADOW_PLAYER_RESULT_SOURCES:
+                    continue
+                if not isinstance(count, (int, float)) or not int(count or 0):
+                    continue
+                label = _PLAYER_RESULT_SOURCE_LABELS.get(source_key, source_key)
+                selected.append(f"{label} {int(count):,}")
+            return ", ".join(selected)
+
+        real_sources = _source_detail(real_only=True)
+        all_sources = _source_detail(real_only=False)
         if real_rows <= 0:
             if total_rows:
-                detail = "shadow/settlement data only; no real player-game history"
+                detail = (
+                    f"shadow/settlement data only; player-game rows={total_rows:,} "
+                    f"({all_sources})"
+                )
             else:
-                detail = "no real player-game history available"
+                detail = "no real player-game history available; player-game rows=0"
             lines.append(f"  ⚠️ <b>{_html.escape(sport)}</b>  ·  {detail}")
             continue
 
@@ -238,7 +264,10 @@ def _alert_readiness_lines(
             detail = f"{directional:,} directional pick{'s' if directional != 1 else ''} logged"
             icon = "✅"
         else:
-            detail = "data ready; no qualifying pick logged in the last 24h"
+            detail = (
+                f"data ready; real player-game rows={real_rows:,} "
+                f"({real_sources}); no qualifying pick logged in the last 24h"
+            )
             icon = "ℹ️"
         lines.append(f"  {icon} <b>{_html.escape(sport)}</b>  ·  {detail}")
     return lines

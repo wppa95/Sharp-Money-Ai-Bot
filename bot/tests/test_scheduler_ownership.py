@@ -73,6 +73,7 @@ def test_required_independent_jobs_remain_registered():
         "clv_seeder",
         "clv_harvester",
         "opportunity_grader",
+        "player_history_collector",
         "budget_checker",
         "prop_history_pruner",
         "heartbeat",

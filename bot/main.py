@@ -94,6 +94,7 @@ from market_engine import (
     propline_request_schedule_state,
     _run_prizepicks_independent_cycle,
 )
+from player_history_job import player_history_collector_job
 from providers import init_health_monitor
 from providers.odds_cache import init_odds_cache
 from providers.game_results import OddsApiResultsProvider
@@ -728,11 +729,19 @@ async def post_init(application: Application) -> None:
             first=60,
             name="opportunity_grader",
         )
-        # Player-result collection is intentionally not scheduled alongside
-        # the full-book cadence. The Underdog cycle owns the exclusive window
-        # and completes tracking/PropLineHistory persistence for the current
-        # feed itself; a separate rotating collector would delay the next
-        # current-book tick without representing that same book.
+        # Player-result collection uses the dedicated history pool and the
+        # same exclusive scheduler group as Underdog. It rotates through all
+        # supported active-provider targets, flushes each completed batch, and
+        # never calls PropLine; PropLine remains on its own request cadence.
+        jq.run_repeating(
+            _coordinated_job(
+                "player_history_collector",
+                player_history_collector_job,
+            ),
+            interval=config.PLAYER_HISTORY_POLL_INTERVAL,
+            first=90,
+            name="player_history_collector",
+        )
         # API budget check — every 15 minutes
         jq.run_repeating(_coordinated_job("budget_checker", _budget_check_job), interval=900, first=900, name="budget_checker")
         # PropLineHistory prune — once per day (keeps last 14 days)
@@ -749,13 +758,14 @@ async def post_init(application: Application) -> None:
             )
         logger.info(
             "Jobs scheduled — underdog: every %ds, grader: every %ds, "
-            "history=inline-current-book, "
+            "history collector: every %ds, "
             "season_check: every %ds, "
             "heartbeat: every 60s "
              "[PrizePicks/PropLine companion cycle enabled=%s; "
              "PropLine default rate=180/hour; DK/FD delivery disabled]",
             config.UNDERDOG_POLL_INTERVAL,
             config.OPPORTUNITY_GRADER_INTERVAL,
+            config.PLAYER_HISTORY_POLL_INTERVAL,
             config.SEASON_CHECK_INTERVAL,
             _propline_enabled,
         )
