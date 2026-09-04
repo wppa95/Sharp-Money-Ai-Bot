@@ -1,0 +1,323 @@
+PROPLINE FREE + $9 HOBBY — DETAILED BREAKDOWN
+=============================================
+Hobby = everything in Free + the paid analysis layer.
+Quota on Hobby: 5,000 requests/day, reset 00:00 UTC.
+Auth: ?apiKey=YOUR_KEY  or  header X-API-Key: YOUR_KEY
+Base: https://api.prop-line.com
+
+
+WHAT THE PLAN IS
+----------------
+Free gives you the live board: sports, games, prices, scores, stats.
+Hobby keeps that board and adds grading, +EV, history, best line,
+player trends, SGP quotes, and CLV.
+
+
+============================================================
+EVERYTHING IN FREE (also on Hobby)
+============================================================
+
+Real-time odds from ~21 sportsbooks + 6 exchanges
+  One request can return the same game/prop priced at many books.
+  Sportsbooks: BetMGM, BetRivers, Bovada, DraftKings, FanDuel,
+  Pinnacle, Unibet, 1xBet, TAB AU, ReBet, BetUS, BetOnline.ag,
+  LowVig.ag, MyBookie.ag, Fanatics, Marathon Bet.
+  DFS pick’em: PrizePicks, Underdog, Sleeper, Dabble, Betr Picks.
+  Exchanges / prediction markets: Kalshi, Polymarket, Matchbook,
+  Smarkets, Novig, ProphetX.
+  Use this to compare prices. Do not treat a DFS pick’em number
+  like a sportsbook two-way price.
+
+~54 sports
+  MLB, NBA, NHL, NFL, college, soccer leagues, tennis, golf,
+  UFC/boxing, and more. Canonical keys come from GET /v1/sports.
+  Some the-odds-api names are accepted as aliases
+  (americanfootball_nfl → football_nfl).
+
+60+ player-prop markets (alts included)
+  Hits, strikeouts, points, yards, goals, etc., plus alternate
+  lines (6.5 and 7.5 both show up as separate rows).
+  A busy MLB game can have 100+ markets across all books.
+
+Update speed
+  About 5 books stream live (~1 second).
+  The rest are polled every 30–90 seconds.
+  Box-score stats during a live game refresh ~every 90 seconds.
+  There is no play-by-play pitch/play stream.
+
+Game scores & results
+  Home/away score, completed flag, commence_time.
+  Separate from prop grading. Scores tell you the game score.
+  Prop resolution (Hobby) tells you if a player Over/Under hit.
+
+the-odds-api compatible shape
+  Responses use bookmakers[] → markets[] → outcomes[].
+  Existing the-odds-api code often works after a base-URL swap.
+
+Commercial use allowed
+  You can put values in your own app/bot/site.
+  You cannot bulk-resell the raw feed as a competing data product.
+
+Public status / uptime page
+  https://prop-line.com/status
+  Not a paid SLA. Just a public uptime record.
+
+
+FREE ENDPOINTS (you still use these on Hobby)
+---------------------------------------------
+
+GET /v1/sports
+  Master list of sport keys.
+  Use this first. Do not hardcode sport names if you can avoid it.
+  Example key: baseball_mlb, basketball_nba, football_nfl.
+
+GET /v1/sports/{sport}/events
+  Upcoming + in-progress games for that sport.
+  Each row has id, home_team, away_team, commence_time, live,
+  completed.
+  Always save id. Every later call keys off event id, not team names.
+
+GET /v1/sports/{sport}/odds
+  Bulk GAME LINES for the whole sport: moneyline (h2h), spreads,
+  totals. Fast way to load a slate. Not the full player-prop board.
+
+GET /v1/sports/{sport}/events/{id}/odds
+  The main live board for ONE game.
+  Pass markets= or you pull more than you need.
+  This is where player props live (hits, Ks, points, yards…).
+  Each outcome has name (Over/Under/team), description (player),
+  price, point (the line), last_change_at, and often player_id.
+
+GET /v1/sports/{sport}/events/{id}/markets
+  Cheap discovery. Returns which market keys that game actually
+  has, plus outcome counts.
+  Call this before /odds so you only request markets you want.
+  Example: pitcher_strikeouts has 46 outcomes on this game.
+
+GET /v1/sports/{sport}/scores
+  Live/final scores for the sport.
+  Use it to know when a game is over so you can then hit
+  /results (Hobby) for prop grades.
+
+GET /v1/sports/{sport}/futures
+  Season-long markets: championship, MVP, division, win totals.
+  Some regular-season futures also carry a grade after the
+  standings are final.
+
+GET /v1/sports/{sport}/events/{id}/stats
+  Raw box-score stats, book-agnostic.
+  Hits, Ks, points, yards, etc. for every player in that game.
+  Live games update ~every 90s with cumulative stats.
+  This is the official-ish stat tape, not a graded bet.
+
+GET /v1/sports/{sport}/events/{id}/context
+  Game conditions.
+  MLB: probable pitchers + hand, lineup flag, umpire, weather.
+  NFL/NCAAF: venue + kickoff weather.
+  Useful when you model batter props vs L/R starters or wind.
+
+GET /v1/sports/{sport}/players/{name}/games
+  That player’s recent raw game log (not graded props).
+  Build L5/L10 averages, splits, H2H vs an opponent.
+  ?opponent=BOS&limit=10 = last 10 meetings vs Boston.
+  No lines or won/lost here. That’s /history and /trends.
+
+GET /v1/sports/baseball_mlb/grand-salami
+  Synthetic “all MLB runs today” total, plus each book’s implied
+  slate total. Optional ?date=YYYY-MM-DD.
+
+GET /v1/sports/hockey_nhl/daily-goals-total
+  Same idea for NHL goals across the day’s slate.
+
+GET /v1/dfs/payouts
+  PrizePicks Power / Flex payout table for 2–6 legs, plus the
+  per-leg hit rate you need to break even.
+  Optional ?leg_win_prob=0.58 to see expected return.
+  Reference math only. Not live picks.
+
+GET /v1/markets/hit-rates
+  League-wide counts: for each market, how many graded Overs
+  won over the last N days. Not per-player.
+
+GET /v1/markets/resolution-summary
+  How many props PropLine graded recently, by sport and market.
+  Coverage volume, not a betting edge.
+
+GET /v1/freshness
+  Per-book staleness, split into game lines vs props.
+  Use this to skip a book whose board is stale.
+
+GET /v1/exports/sample
+  Tiny public CSV sample so you can see export shape.
+  Not your personal archive.
+
+
+OPTIONAL QUERY EXTRAS (work on the odds-style routes)
+-----------------------------------------------------
+markets=pitcher_strikeouts,batter_hits
+  Always pass this. Cuts payload and quota waste.
+
+bookmakers=draftkings,fanduel,pinnacle
+  Only return books you care about.
+
+includeLinks=true
+  Adds that book’s public event page URL (and app_link when it
+  exists). Navigation only, no affiliate tag.
+
+includeBookIds=true
+  Adds the book’s own event/selection ids plus PropLine’s
+  outcome_id. Use this if you join onto DK/FD/Kalshi/PrizePicks
+  native ids.
+
+period=q1   or  period=h1,q1   or  period=all
+  Period markets instead of full game: quarters, halves,
+  periods, first-5 innings, maps, sets.
+  Omit it = full-game markets only.
+
+
+============================================================
+ADDED AT $9 HOBBY
+============================================================
+
+5,000 requests / day
+  Same endpoints as Free, just a higher cap.
+  Every call above counts, Free and Hobby routes included.
+  Watch X-Daily-Remaining on every response.
+
+Prop resolution
+  After the game, each Over/Under is graded against the real
+  box-score stat: won / lost / push / void + actual_value.
+  Void usually means the player never appeared in the box score.
+  This is the feature most other odds APIs do not have.
+
+Cross-book +EV with no-vig fair lines
+  Takes a sharp anchor (Pinnacle first, then Polymarket / Kalshi
+  / Bovada), strips vig, then scores every other book’s price
+  at the SAME line. is_plus_ev + ev_pct per book.
+  Analysis only, not a profit guarantee.
+
++EV calculator
+  You type a price from a book PropLine does not poll
+  (Caesars, bet365, etc.). It scores YOUR number against the
+  same fair line.
+
+Historical line movement (30 days on Hobby)
+  Snapshot tape of price/point changes for that event.
+  Can filter to pregame window, downsample, or changes_only.
+
+Opening + closing lines (CLV)
+  First observed pregame line and last line at/before first pitch
+  or kickoff, per book/market/outcome. Both price AND point.
+
+Grade your bets vs the close
+  You send the bets you actually took. API matches them, attaches
+  the close, CLV%, EV-vs-close%, and the grade.
+
+Best line across every comparable book
+  For each (market, player, line), which book pays the most,
+  plus the runner-up list. Different lines stay separate
+  (DK 6.5 ≠ FD 7.5). DFS pick’em books are excluded.
+
+Same-game parlay pricing
+  You send 2–10 legs from ONE game. FanDuel / BetOnline / LowVig
+  returns the book’s own correlated SGP price, plus the
+  independent (multiplied) price and correlation_factor.
+
+Line movement + steam
+  Open vs now, probability shift, and a steam[] list when
+  several books move the same side the same way.
+
+Market-implied projections
+  The number the sportsbook market implies for a player
+  (line where no-vig Over probability crosses 50%).
+  Not a PropLine forecast. DFS pick’em is excluded.
+
+Player prop history
+  That player’s recent priced props with line, Over/Under
+  prices, actual stat, and won/lost.
+
+Player hit-rate trends
+  Over/under/push splits for last 5/10/20/50 GRADED games,
+  current streak, average actual, recent line.
+  Built from resolution, not raw stats.
+
+
+HOBBY ENDPOINTS
+---------------
+
+GET /v1/sports/{sport}/events/{id}/results
+  Graded board for that game.
+  Same shape as /odds, plus resolution + actual_value + resolved_at.
+  Call after the game is completed.
+
+GET /v1/sports/{sport}/events/{id}/ev
+  +EV sheet for that game.
+  Each line names its fair_source. Filter with markets= and
+  bookmakers= (bookmakers filters prices, not the anchor).
+
+GET /v1/sports/{sport}/events/{id}/ev/calc
+  Score one custom price.
+  Needs market, name (Over/Under or team), price, and point
+  (plus description = player name on props).
+
+GET /v1/sports/{sport}/events/{id}/best-line
+  Line shopper. Best American price per comparable line,
+  with all_prices sorted best-first.
+
+GET /v1/sports/{sport}/events/{id}/odds/history
+  Tick history for that event. Hobby window = 30 days.
+  Useful extras:
+    relative_from=-3h&relative_to=0
+    interval=1m
+    changes_only=true
+
+GET /v1/sports/{sport}/events/{id}/odds/closing
+  Opening + closing snapshot in one call.
+  closing_age_seconds / is_stale tell you if the “close”
+  was captured too far from start.
+
+POST /v1/sports/{sport}/events/{id}/sgp
+  Book-native same-game parlay quote.
+  Body = bookmaker + legs copied from /odds
+  (market, name, description, point).
+  quoted:false means the book refused that combo.
+
+GET /v1/sports/{sport}/events/{id}/movement
+  Derived movement + steam score from the snapshot tape.
+
+GET /v1/sports/{sport}/events/{id}/projections
+  One implied projection per player/market from sportsbook
+  prices.
+
+POST /v1/clv/grade
+  Batch-grade bets you already placed (up to 500 per call).
+  Returns clv_pct, ev_vs_close_pct, resolution, actual_value.
+  Unmatched bets come back matched:false instead of a guess.
+
+GET /v1/sports/{sport}/players/{name}/history
+  That player’s recent graded props for a market.
+  Optional bookmaker= and limit=.
+
+GET /v1/sports/{sport}/players/{name}/trends
+  Hit-rate windows vs a reference book’s posted line.
+  Optional market= and dfs_odds_type=standard|goblin|demon
+  if you want PrizePicks flavor-specific rates.
+
+
+HOW THE TWO SETS WORK TOGETHER
+------------------------------
+Free routes find the game and the live price.
+Hobby routes judge that same game.
+
+Typical one-game flow:
+  1. /sports
+  2. /sports/{sport}/events                  → EVENT_ID
+  3. /events/{id}/markets                    → which props exist
+  4. /events/{id}/odds?markets=...           → live prices
+  5. /events/{id}/ev  and  /best-line        → value + best book
+  6. after the game: /scores then /results   → grade
+  7. /players/{name}/trends                  → does this player hit?
+
+Always pass markets=.
+Always key on event id.
+Always read X-Daily-Remaining so you do not burn the 5,000 cap.
