@@ -3521,7 +3521,7 @@ async def clv_check_job(context) -> None:
 # ── Shared Underdog + PropLine monitoring cycle ────────────────────────────────
 
 def _shared_monitoring_cycle(cycle_branch):
-    """Run Underdog and PropLine from one trigger and await both branches."""
+    """Run Underdog on its cadence while PropLine remains an independent lane."""
 
     @wraps(cycle_branch)
     async def _run_shared_cycle(context, *args, **kwargs):
@@ -3577,7 +3577,20 @@ def _shared_monitoring_cycle(cycle_branch):
             _run_prizepicks_independent_cycle(context, **_pp_kwargs),
             name="shared_monitoring_propline",
         )
-        cycle_completed = False
+        def _finish_propline_task(task: asyncio.Task) -> None:
+            global _prizepicks_cycle_task
+            if task.cancelled():
+                return
+            try:
+                error = task.exception()
+            except asyncio.CancelledError:
+                return
+            if error is not None:
+                logger.error("shared_monitoring_cycle: PropLine branch failed: %s", error)
+            if _prizepicks_cycle_task is task:
+                _prizepicks_cycle_task = None
+
+        _prizepicks_cycle_task.add_done_callback(_finish_propline_task)
         try:
             result = await cycle_branch(context, *args, **kwargs)
         except asyncio.CancelledError:
@@ -3585,37 +3598,24 @@ def _shared_monitoring_cycle(cycle_branch):
             await asyncio.gather(_prizepicks_cycle_task, return_exceptions=True)
             raise
         except BaseException:
-            # The provider branch still belongs to this cycle. Wait for it
-            # before allowing the scheduler to consider the cycle finished.
-            pp_result = await asyncio.gather(
-                _prizepicks_cycle_task, return_exceptions=True
-            )
-            if pp_result and isinstance(pp_result[0], BaseException):
-                logger.error(
-                    "shared_monitoring_cycle: PropLine branch failed while "
-                    "Underdog branch raised: %s",
-                    pp_result[0],
-                )
+            _prizepicks_cycle_task.cancel()
+            await asyncio.gather(_prizepicks_cycle_task, return_exceptions=True)
             raise
         else:
-            pp_result = await asyncio.gather(
-                _prizepicks_cycle_task, return_exceptions=True
-            )
-            if pp_result and isinstance(pp_result[0], BaseException):
-                logger.error(
-                    "shared_monitoring_cycle: PropLine branch failed: %s",
-                    pp_result[0],
-                )
-            cycle_completed = True
+            # Do not make a slow/independent PropLine companion extend or
+            # coalesce the next Underdog tick. Its task has its own completion
+            # callback and remains safe across the next current-book fetch.
+            health = get_health_tracker()
+            if health is not None:
+                health.record_monitoring_cycle_complete()
+            logger.info("shared_monitoring_cycle: Underdog completed")
             return result
         finally:
-            if _prizepicks_cycle_task is not None:
+            if (
+                _prizepicks_cycle_task is not None
+                and _prizepicks_cycle_task.done()
+            ):
                 _prizepicks_cycle_task = None
-            if cycle_completed:
-                health = get_health_tracker()
-                if health is not None:
-                    health.record_monitoring_cycle_complete()
-                logger.info("shared_monitoring_cycle: completed")
 
     return _run_shared_cycle
 
