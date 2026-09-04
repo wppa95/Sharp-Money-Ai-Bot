@@ -890,7 +890,7 @@ def format_market_move_detected(
         f"🐶 <b>Line:</b>  <code>{old_line:.1f}</code>  →  <code>{new_line:.1f}</code>",
         f"📉 <b>Movement:</b>  <code>{change_sign}{change:.1f}</code>",
         "",
-        "📊 <b>Status:</b>  Tracking — evaluating for bet quality",
+        "📊 <b>Status:</b>  Tracking — evaluating for a directional pick",
         "<i>This is a market signal, not yet a bet pick.</i>",
         game_str,
         "",
@@ -1038,8 +1038,8 @@ def format_underdog_new_prop_cycle_summary(
       immediate (bool), game_time (datetime|None).
 
     Sorted display order: 0.5 lines first → line asc → stars desc.
-       Immediately-alerted props are marked with ⚡; other entries show their
-       quality stars without exposing internal classification names.
+       Immediately-alerted props are marked with ⚡; internal quality metadata
+       is used only for ordering and is not shown.
     """
     if not new_props:
         return ""
@@ -1074,15 +1074,13 @@ def format_underdog_new_prop_cycle_summary(
     ]
 
     for p in shown:
-        score  = p.get("score")
-        stars  = getattr(score, "stars_display", "·····") if score else "·····"
         sport  = p.get("sport", "")
         icon   = sport_icon.get(sport, "🎯")
         line   = p.get("line") or 0.0
         marker = "⚡" if p.get("immediate") else "•"
         parts.append(
             f"  {marker}  {icon} {p['player']} — {p['stat_type']}"
-            f"  @{line}  {stars}"
+            f"  @{line}"
         )
 
     if overflow > 0:
