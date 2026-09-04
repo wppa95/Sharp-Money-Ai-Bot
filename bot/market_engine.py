@@ -441,11 +441,27 @@ def _enqueue_db_persistence(label: str, factory) -> bool:
     except RuntimeError:
         return False
     if _db_persistence_loop is not loop:
+        _stale_queue = _db_persistence_queue
+        _stale_count = 0
+        if _stale_queue is not None:
+            while True:
+                try:
+                    _stale_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                else:
+                    _stale_queue.task_done()
+                    _stale_count += 1
         if (
             _db_persistence_worker_task is not None
             and not _db_persistence_worker_task.done()
         ):
             _db_persistence_worker_task.cancel()
+        if _stale_count:
+            logger.warning(
+                "database persistence loop replaced; discarded %d queued operations",
+                _stale_count,
+            )
         _db_persistence_loop = loop
         _db_persistence_queue = asyncio.Queue(maxsize=64)
         _db_persistence_worker_task = asyncio.create_task(
@@ -462,6 +478,33 @@ def _enqueue_db_persistence(label: str, factory) -> bool:
         )
         return False
     return True
+
+
+async def shutdown_db_persistence_worker(timeout: float = 5.0) -> None:
+    """Drain bounded persistence work before the database connection closes."""
+    global _db_persistence_queue, _db_persistence_worker_task, _db_persistence_loop
+    task = _db_persistence_worker_task
+    queue = _db_persistence_queue
+    if task is None:
+        return
+    if queue is not None and not queue.empty():
+        try:
+            await asyncio.wait_for(queue.join(), timeout=max(0.1, timeout))
+        except asyncio.TimeoutError:
+            logger.warning(
+                "database persistence shutdown timed out; cancelling remaining work"
+            )
+    if not task.done():
+        task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    finally:
+        if _db_persistence_worker_task is task:
+            _db_persistence_worker_task = None
+            _db_persistence_queue = None
+            _db_persistence_loop = None
 
 
 async def _persist_db_write(

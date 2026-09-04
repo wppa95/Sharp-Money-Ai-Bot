@@ -87,6 +87,7 @@ from market_engine import (
     init_market_engine,
     init_odds_confirmation,
     reset_monitoring_runtime_state,
+    shutdown_db_persistence_worker,
     underdog_job,
     propline_request_scan_job,
     _run_prizepicks_independent_cycle,
@@ -815,6 +816,7 @@ async def post_shutdown(application: Application) -> None:
     try:
         await _scheduled_execution_coordinator.shutdown()
         await reset_monitoring_runtime_state()
+        await shutdown_db_persistence_worker()
     except Exception as _reset_exc:
         logger.warning("Runtime session cleanup failed during shutdown: %s", _reset_exc)
     if _db:
