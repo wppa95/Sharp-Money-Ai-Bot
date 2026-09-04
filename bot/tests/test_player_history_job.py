@@ -163,3 +163,45 @@ async def test_player_history_collects_prizepicks_only_active_target():
     fake_provider.fetch_results.assert_awaited_once_with(
         "PP Player", "NBA", "points"
     )
+
+
+@pytest.mark.asyncio
+async def test_player_history_flushes_results_in_small_durable_batches():
+    snapshot = SimpleNamespace(
+        player_name="Batch Player",
+        sport="NBA",
+        stat_type="points",
+    )
+    results = [
+        SimpleNamespace(
+            player_name="Batch Player",
+            sport="NBA",
+            stat_type="points",
+            game_date=f"2026-08-{(i % 28) + 1:02d}",
+            actual_value=float(i),
+            opponent="OPP",
+            source="api",
+            game_id=f"game-{i}",
+        )
+        for i in range(26)
+    ]
+    db = MagicMock()
+    db.get_active_underdog_snapshot_per_prop = AsyncMock(
+        return_value={("Batch Player", "points"): snapshot}
+    )
+    db.upsert_player_results_bulk = AsyncMock()
+    context = SimpleNamespace(bot_data={"db": db})
+
+    fake_provider = MagicMock()
+    fake_provider.fetch_results = AsyncMock(return_value=results)
+    with patch(
+        "providers.player_stats.PlayerStatsProvider",
+        return_value=fake_provider,
+    ):
+        await player_history_collector_job(context)
+
+    assert [len(call.args[0]) for call in db.upsert_player_results_bulk.await_args_list] == [
+        25,
+        1,
+    ]
+    assert not db.upsert_player_result.await_args_list
