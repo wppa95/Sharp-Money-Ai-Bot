@@ -108,6 +108,7 @@
 - [Restart session isolation](restart-session-isolation.md) — reset runtime cursors, checkpoints, telemetry, and child tasks on restart; preserve SQLite evidence and delivery history.
 - [Telegram reconciliation identity](telegram-reconciliation-identity.md) — Underdog audits need source identity and delivery path; player/stat/line cannot deterministically join sends to picks.
 - [Managed SQLite CANTOPEN contention](managed-sqlite-cantopen.md) — Absolute path, valid permissions, and isolated inserts can succeed while live concurrent bot scans still fail to open SQLite.
+- [Shared SQLite writer gate](sqlite-writer-gate.md) — Multiple Database pools for one SQLite URL must share a process-wide async session gate.
 - [Telegram command bootstrap](telegram-command-bootstrap.md) — Invalid bot credentials fail polling before handlers run; verify bootstrap before debugging individual commands.
 - [Telegram log redaction](telegram-log-redaction.md) — Managed HTTP logger handlers may bypass app filters; verify captured workflow output and suppress credential-bearing request INFO logs.
 - [Serialized delivery evidence](serialized-delivery-evidence.md) — persisted provenance labels must carry a sufficient sample count before they can support directional delivery.
