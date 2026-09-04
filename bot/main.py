@@ -197,17 +197,19 @@ def build_application() -> Application:
 
 
 class _ScheduledExecutionCoordinator:
-    """Prevent overlapping executions without building a scheduler backlog.
+    """Run named jobs independently without building a scheduler backlog.
 
     JobQueue timers can fire again while an async callback is still running.
-    A later trigger for the same named job is intentionally coalesced: the
-    active execution owns that job's resources, and the next timer tick will
-    provide a fresh opportunity after it finishes. Different named jobs remain
-    independent and may run concurrently.
+    A later trigger for the same named job is normally coalesced: the active
+    execution owns that job's resources, and the next timer tick will provide
+    a fresh opportunity after it finishes. Jobs explicitly marked
+    ``allow_overlap`` get an independent worker task for every trigger.
+    Different named jobs remain independent and may run concurrently.
     """
 
     def __init__(self) -> None:
         self._running: set[str] = set()
+        self._active_counts: dict[str, int] = {}
         self._tasks: set[asyncio.Task] = set()
         self._exclusive_locks: dict[str, asyncio.Lock] = {}
 
@@ -246,11 +248,24 @@ class _ScheduledExecutionCoordinator:
 
         return _coordinated
 
-    def launch(self, name: str, callback, *, exclusive_group: str | None = None):
-        """Return a scheduler callback that tracks one real execution."""
+    def launch(
+        self,
+        name: str,
+        callback,
+        *,
+        exclusive_group: str | None = None,
+        allow_overlap: bool = False,
+    ):
+        """Return a scheduler callback that tracks one real execution.
+
+        ``allow_overlap`` is for batch workers whose next trigger can safely
+        process a different cursor window while an earlier window is still
+        doing provider I/O. It does not change the default protection for
+        stateful full-feed jobs such as Underdog.
+        """
         @wraps(callback)
         async def _launcher(context, *args, **kwargs):
-            if name in self._running:
+            if name in self._running and not allow_overlap:
                 logger.info(
                     "scheduled_execution: coalescing overlapping trigger (%s)",
                     name,
@@ -258,8 +273,10 @@ class _ScheduledExecutionCoordinator:
                 return None
             # Claim synchronously before creating the task. This closes the
             # small scheduling window where two JobQueue callbacks could both
-            # otherwise enqueue the same named job.
+            # otherwise enqueue the same named job. Overlapping jobs use a
+            # count so one completion cannot clear another active worker.
             self._running.add(name)
+            self._active_counts[name] = self._active_counts.get(name, 0) + 1
 
             async def _run_once():
                 try:
@@ -280,7 +297,12 @@ class _ScheduledExecutionCoordinator:
                             )
                     return await self._execute(name, callback, context, *args, **kwargs)
                 finally:
-                    self._running.discard(name)
+                    remaining = self._active_counts.get(name, 1) - 1
+                    if remaining <= 0:
+                        self._active_counts.pop(name, None)
+                        self._running.discard(name)
+                    else:
+                        self._active_counts[name] = remaining
 
             task = asyncio.create_task(_run_once(), name=f"scheduled:{name}")
             self._tasks.add(task)
@@ -315,12 +337,13 @@ class _ScheduledExecutionCoordinator:
             await asyncio.gather(*tasks, return_exceptions=True)
         self._tasks.clear()
         self._running.clear()
+        self._active_counts.clear()
 
 
 _scheduled_execution_coordinator = _ScheduledExecutionCoordinator()
 
 
-def _coordinated_job(name: str, callback):
+def _coordinated_job(name: str, callback, *, allow_overlap: bool = False):
     exclusive_group = (
         "underdog_monitoring"
         if name in {"underdog_monitor", "player_history_collector"}
@@ -330,6 +353,7 @@ def _coordinated_job(name: str, callback):
         name,
         callback,
         exclusive_group=exclusive_group,
+        allow_overlap=allow_overlap,
     )
 
 
@@ -693,7 +717,11 @@ async def post_init(application: Application) -> None:
         # A bounded, rotating worker must never overlap itself while provider
         # lookups are in flight.
         jq.run_repeating(
-            _coordinated_job("opportunity_grader", _grade_opportunities_job),
+            _coordinated_job(
+                "opportunity_grader",
+                _grade_opportunities_job,
+                allow_overlap=True,
+            ),
             interval=config.OPPORTUNITY_GRADER_INTERVAL,
             # Run once shortly after startup, then continue on the short
             # cadence. A restart should not defer grading.

@@ -391,6 +391,70 @@ async def _persist_tracking_records(track_props, records: list) -> None:
         await operation
 
 
+async def _persist_propline_observations(db, props: list[object]) -> int:
+    """Persist a fetched PrizePicks batch before any evaluation work begins.
+
+    The request worker is intentionally the durability boundary. PrizePicks
+    evaluation may be slow and is allowed to run independently of the
+    Underdog cadence, so waiting for evaluation before writing would make a
+    successful provider response disappear from the database during a long
+    cycle.
+    """
+    if db is None or not props:
+        return 0
+    try:
+        await db.upsert_prop_line_history_batch(
+            "PrizePicks",
+            list(props),
+            append_snapshot=True,
+        )
+        tracking_records = []
+        for prop in props:
+            player = str(getattr(prop, "player_name", "") or "").strip()
+            sport = str(getattr(prop, "sport", "") or "").upper().strip()
+            stat = str(getattr(prop, "stat_type", "") or "").strip()
+            event_id = str(
+                getattr(prop, "event_id", "")
+                or getattr(prop, "game_id", "")
+                or ""
+            ).strip()
+            external_id = str(getattr(prop, "external_id", "") or "").strip()
+            if not external_id:
+                external_id = f"{player}:{sport}:{stat}:{event_id}"
+            tracking_records.append({
+                "external_id": external_id,
+                "player_name": player,
+                "team": str(getattr(prop, "team", "") or ""),
+                "sport": sport,
+                "stat_type": stat,
+                "line_value": getattr(prop, "line_value", None),
+                "game_time": getattr(prop, "game_time", None),
+                "game_id": event_id,
+                "provider": "PrizePicks",
+            })
+        track_props = getattr(db, "track_prop_records", None)
+        if callable(track_props) and tracking_records:
+            await track_props(tracking_records)
+        return len(props)
+    except TypeError:
+        # Older adapters may not expose append_snapshot. Keep their existing
+        # upsert contract usable while production retains every observation.
+        try:
+            await db.upsert_prop_line_history_batch("PrizePicks", list(props))
+            return len(props)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "propline_request_scan: persistence failed: %s",
+                type(exc).__name__,
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "propline_request_scan: persistence failed: %s",
+            type(exc).__name__,
+        )
+    return 0
+
+
 async def _persist_underdog_postscan(
     db,
     lifecycle_alerted: list[tuple[str, str, str]],
@@ -1011,6 +1075,10 @@ async def propline_request_scan_job(context) -> None:
                 if not is_football_related_sport(getattr(prop, "sport", ""))
             ]
             if succeeded:
+                persisted = await _persist_propline_observations(
+                    getattr(context, "bot_data", {}).get("db"),
+                    props,
+                )
                 for prop in props:
                     key = _propline_prop_key(prop)
                     if key[0] and key[1] and key[2]:
@@ -1021,6 +1089,10 @@ async def propline_request_scan_job(context) -> None:
                     sport,
                     len(props),
                     len(_propline_pending_props),
+                )
+                logger.info(
+                    "propline_request_scan: persisted=%d provider=PrizePicks",
+                    persisted,
                 )
             else:
                 logger.warning(
@@ -2038,6 +2110,7 @@ async def _run_prizepicks_independent_cycle(
     *,
     _fetched_props: Optional[list] = None,
     _fetched_sport: Optional[str] = None,
+    _fetched_persisted: bool = False,
     _processing_locked: bool = False,
     background_processing: bool = False,
 ) -> None:
@@ -2057,6 +2130,7 @@ async def _run_prizepicks_independent_cycle(
                 context,
                 _fetched_props=_fetched_props,
                 _fetched_sport=_fetched_sport,
+                _fetched_persisted=_fetched_persisted,
                 _processing_locked=True,
                 background_processing=background_processing,
             )
@@ -2257,6 +2331,7 @@ async def _run_prizepicks_independent_cycle(
                 context,
                 _fetched_props=list(props),
                 _fetched_sport=sport,
+                _fetched_persisted=True,
             ),
             name="prizepicks_deferred_evaluation",
         )
@@ -2362,37 +2437,20 @@ async def _run_prizepicks_independent_cycle(
             external_id or event_id,
         )] = history_rows or []
 
-    try:
-        await db.upsert_prop_line_history_batch(
-            "PrizePicks",
+    if not _fetched_persisted:
+        persisted = await _persist_propline_observations(
+            db,
             list(unique_props.values()),
-            append_snapshot=True,
         )
-    except TypeError:
-        # Compatibility for old provider test doubles.  Production Database
-        # supports append_snapshot and therefore always retains the observation.
-        try:
-            await db.upsert_prop_line_history_batch(
-                "PrizePicks", list(unique_props.values())
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "prizepicks_cycle: history persistence failed: %s", type(exc).__name__
-            )
+        if persisted != len(unique_props):
             logger.info(
-                "prizepicks_cycle: provider=PrizePicks sport=%s fetch_succeeded=true "
-                "observations=%d persisted=0 evaluated=0 actionable=0 delivered=0",
-                sport, len(unique_props),
+                "prizepicks_cycle: provider=PrizePicks sport=%s "
+                "observations=%d persisted=%d evaluated=0 actionable=0 delivered=0",
+                sport,
+                len(unique_props),
+                persisted,
             )
             return
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("prizepicks_cycle: history persistence failed: %s", type(exc).__name__)
-        logger.info(
-            "prizepicks_cycle: provider=PrizePicks sport=%s fetch_succeeded=true "
-            "observations=%d persisted=0 evaluated=0 actionable=0 delivered=0",
-            sport, len(unique_props),
-        )
-        return
 
     # Universal grading ledger: record every valid PrizePicks observation before
     # scoring/qualification.  This is deliberately independent of the
