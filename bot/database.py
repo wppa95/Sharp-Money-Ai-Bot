@@ -58,13 +58,63 @@ def _sqlite_writer_lock(url: str) -> asyncio.Lock | None:
     return locks_for_loop.setdefault(str(url), asyncio.Lock())
 
 
-class _LockedAsyncSession:
-    """AsyncSession context manager guarded by the process-wide SQLite gate.
+def _statement_is_write(statement) -> bool:
+    """Return whether a SQLAlchemy statement can change SQLite state."""
+    for attribute in ("is_insert", "is_update", "is_delete", "is_dml"):
+        if bool(getattr(statement, attribute, False)):
+            return True
+    text_value = str(statement).lstrip().lower()
+    return text_value.startswith((
+        "insert ", "update ", "delete ", "replace ", "create ",
+        "alter ", "drop ", "vacuum ",
+    ))
 
-    The wrapper deliberately returns the real AsyncSession from ``__aenter__``
-    so existing ORM code and lightweight test doubles keep their current
-    behavior.  Attribute access outside the context (notably ``invalidate()``
-    in the bulk writer retry path) is delegated to the underlying session.
+
+class _WriteAwareAsyncSession:
+    """Proxy that acquires the shared gate only for write activity."""
+
+    def __init__(
+        self,
+        session: AsyncSession,
+        lock: asyncio.Lock | None,
+        owner: "_LockedAsyncSession",
+    ) -> None:
+        self._session = session
+        self._lock = lock
+        self._owner = owner
+
+    async def execute(self, statement, *args, **kwargs):
+        if _statement_is_write(statement):
+            await self._owner._acquire_writer()
+        return await self._session.execute(statement, *args, **kwargs)
+
+    async def flush(self, *args, **kwargs):
+        await self._owner._acquire_writer()
+        return await self._session.flush(*args, **kwargs)
+
+    async def commit(self):
+        await self._owner._acquire_writer()
+        try:
+            return await self._session.commit()
+        finally:
+            self._owner._release_writer()
+
+    async def rollback(self):
+        try:
+            return await self._session.rollback()
+        finally:
+            self._owner._release_writer()
+
+    def __getattr__(self, name: str):
+        return getattr(self._session, name)
+
+
+class _LockedAsyncSession:
+    """AsyncSession context manager with a cross-pool SQLite write gate.
+
+    Reads do not acquire the gate, which keeps Telegram reports and target
+    discovery responsive while a large monitoring write is in progress.
+    ``flush``/DML/commit acquire the gate and hold it through the transaction.
     """
 
     def __init__(self, session: AsyncSession, lock: asyncio.Lock | None) -> None:
@@ -72,25 +122,25 @@ class _LockedAsyncSession:
         self._lock = lock
         self._acquired = False
 
-    async def __aenter__(self) -> AsyncSession:
-        if self._lock is not None:
+    async def _acquire_writer(self) -> None:
+        if self._lock is not None and not self._acquired:
             await self._lock.acquire()
             self._acquired = True
-        try:
-            return await self._session.__aenter__()
-        except BaseException:
-            if self._acquired:
-                self._lock.release()
-                self._acquired = False
-            raise
+
+    def _release_writer(self) -> None:
+        if self._acquired:
+            self._lock.release()
+            self._acquired = False
+
+    async def __aenter__(self) -> _WriteAwareAsyncSession:
+        await self._session.__aenter__()
+        return _WriteAwareAsyncSession(self._session, self._lock, self)
 
     async def __aexit__(self, exc_type, exc_value, traceback) -> object:
         try:
             return await self._session.__aexit__(exc_type, exc_value, traceback)
         finally:
-            if self._acquired:
-                self._lock.release()
-                self._acquired = False
+            self._release_writer()
 
     def __getattr__(self, name: str):
         return getattr(self._session, name)

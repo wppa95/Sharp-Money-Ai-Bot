@@ -23,18 +23,19 @@ async def test_same_sqlite_url_shares_one_session_gate_across_database_pools(tmp
     active_sessions = 0
     peak_sessions = 0
 
-    async def hold_session(database: Database, entered: asyncio.Event) -> None:
+    async def hold_writer(database: Database, entered: asyncio.Event) -> None:
         nonlocal active_sessions, peak_sessions
-        async with database.session():
+        async with database.session() as session:
+            await session.flush()
             active_sessions += 1
             peak_sessions = max(peak_sessions, active_sessions)
             entered.set()
             await (release_first.wait() if entered is first_entered else asyncio.sleep(0))
             active_sessions -= 1
 
-    first = asyncio.create_task(hold_session(primary, first_entered))
+    first = asyncio.create_task(hold_writer(primary, first_entered))
     await first_entered.wait()
-    second = asyncio.create_task(hold_session(history, second_entered))
+    second = asyncio.create_task(hold_writer(history, second_entered))
     await asyncio.sleep(0)
 
     assert not second_entered.is_set()
