@@ -391,7 +391,12 @@ async def _persist_tracking_records(track_props, records: list) -> None:
         await operation
 
 
-async def _persist_propline_observations(db, props: list[object]) -> int:
+async def _persist_propline_observations(
+    db,
+    props: list[object],
+    *,
+    include_tracking: bool = True,
+) -> int:
     """Persist a fetched PrizePicks batch before any evaluation work begins.
 
     The request worker is intentionally the durability boundary. PrizePicks
@@ -432,9 +437,10 @@ async def _persist_propline_observations(db, props: list[object]) -> int:
                 "game_id": event_id,
                 "provider": "PrizePicks",
             })
-        track_props = getattr(db, "track_prop_records", None)
-        if callable(track_props) and tracking_records:
-            await track_props(tracking_records)
+        if include_tracking:
+            track_props = getattr(db, "track_prop_records", None)
+            if callable(track_props) and tracking_records:
+                await track_props(tracking_records)
         return len(props)
     except TypeError:
         # Older adapters may not expose append_snapshot. Keep their existing
@@ -466,7 +472,7 @@ async def _persist_underdog_postscan(
         # The bridge is part of the current-book completion barrier; do not
         # truncate a larger active feed into a future remainder.
         bridged = await db.sync_underdog_snapshots_to_prop_history(
-            limit=100_000,
+            limit=100000,
             since_hours=0.17,
         )
         if bridged:
@@ -2441,6 +2447,7 @@ async def _run_prizepicks_independent_cycle(
         persisted = await _persist_propline_observations(
             db,
             list(unique_props.values()),
+            include_tracking=False,
         )
         if persisted != len(unique_props):
             logger.info(
