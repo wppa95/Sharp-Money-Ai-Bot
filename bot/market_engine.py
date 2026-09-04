@@ -6365,22 +6365,26 @@ async def underdog_job(context) -> None:
             return
 
     # ── Bridge/lifecycle persistence ─────────────────────────────────────────
-    # Production scans keep the database on a separate storage path.  The
-    # in-memory scan state is already complete; bridge/lifecycle work is
-    # serialized by the background writer after this job releases its slot.
+    # The current book is not complete until the history bridge and lifecycle
+    # updates finish. Keep this inside the exclusive cycle boundary.
     if isinstance(db, Database):
-        _enqueue_db_persistence(
-            "bridge Underdog snapshots and update lifecycle",
-            lambda: _persist_underdog_postscan(
+        try:
+            await _persist_underdog_postscan(
                 db,
                 list(_lifecycle_alerted),
                 list(_lifecycle_removed),
                 now,
-            ),
-        )
+            )
+        except Exception as _postscan_exc:
+            _persistence_ok = False
+            logger.error(
+                "underdog_cycle_bottleneck: required history/lifecycle "
+                "persistence failed: %s",
+                _postscan_exc,
+            )
         if _lifecycle_alerted or _lifecycle_removed:
             logger.debug(
-                "underdog_job: queued lifecycle persistence — ACTIVE_ALERTED=%d "
+                "underdog_job: completed lifecycle persistence — ACTIVE_ALERTED=%d "
                 "REMOVED=%d",
                 len(_lifecycle_alerted),
                 len(_lifecycle_removed),
