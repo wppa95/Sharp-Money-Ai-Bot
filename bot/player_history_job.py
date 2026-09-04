@@ -10,11 +10,10 @@ from engine.sport_policy import is_football_related_sport
 
 logger = logging.getLogger(__name__)
 
-# The scheduler cadence is two minutes. Reserve a safety margin so the
-# collector can finish cleanly before the next scheduled run (coordinator
-# overlap protection also prevents concurrent collectors).
-# The provider's own request timeout bounds any individual call.
-_CYCLE_TIME_BUDGET_SECONDS = 90.0
+# Storage enrichment gets a short bounded window and is preemptible. It must
+# never become part of live monitoring cadence or remain active beside a scan.
+_CYCLE_TIME_BUDGET_SECONDS = 45.0
+_PROVIDER_CALL_TIMEOUT_SECONDS = 8.0
 # This is an API-call target, not a cap on the number of active players
 # retained while building the rotation.
 _API_CALL_TARGET = 250
@@ -46,33 +45,19 @@ def _underdog_scan_running() -> bool:
 # when the SQLite pool is under load. Waiting for the current scan is
 # preferable to yielding every scheduled run indefinitely: otherwise non-MLB
 # sports never accumulate the real game results required for a pick.
-_SCAN_SLOT_POLL_SECONDS = 5.0
-_SCAN_SLOT_MAX_WAIT_SECONDS = 900.0
+_collector_task: asyncio.Task | None = None
 
 
-async def _wait_for_underdog_scan_slot() -> bool:
-    """Wait for the live scan to release the shared database-heavy slot."""
-    waited = 0.0
-    while True:
-        scan_running = _underdog_scan_running()
-        if not scan_running:
-            break
-        if waited >= _SCAN_SLOT_MAX_WAIT_SECONDS:
-            logger.warning(
-                "player_history_collector_job: Underdog scan held slot for "
-                "%.0fs — yielding without starting provider work",
-                waited,
-            )
-            return False
-        await asyncio.sleep(_SCAN_SLOT_POLL_SECONDS)
-        waited += _SCAN_SLOT_POLL_SECONDS
-    if waited:
-        logger.info(
-            "player_history_collector_job: resumed after Underdog scan "
-            "released slot (waited %.0fs)",
-            waited,
-        )
-    return True
+async def stop_player_history_collector() -> None:
+    """Cancel storage enrichment before any live scan or rescan starts."""
+    global _collector_task
+    task = _collector_task
+    if task is None or task.done() or task is asyncio.current_task():
+        return
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    if _collector_task is task:
+        _collector_task = None
 
 
 def _fair_cycle_targets(
@@ -107,30 +92,20 @@ async def player_history_collector_job(context) -> None:
     cadence-safe time budget is exhausted. Player count and API calls are
     uncapped; the run duration is bounded instead.
     """
-    from engine.health import get_health_tracker
-
+    global _collector_task
     db = context.bot_data.get("db")
     if not db:
         logger.warning("player_history_collector_job: db not ready")
         return
-    ht = get_health_tracker()
-    # Player history is enrichment, not the live monitoring path. Do not
-    # start another pool read while Underdog owns the shared scan slot, but
-    # wait for the current scan instead of throwing away every cadence tick.
-    if not await _wait_for_underdog_scan_slot():
-        if ht:
-            ht.record_job_started("player_history_collector_job")
-            ht.record_job_run("player_history_collector_job")
+    # Never wait behind monitoring and then start late. This independent
+    # storage job simply skips its turn if a scan or rescan is active.
+    if _underdog_scan_running():
+        logger.info(
+            "player_history_collector_job: storage refresh skipped while "
+            "live monitoring is active"
+        )
         return
-    _activity_end = None
-    try:
-        from market_engine import _job_activity_start, _job_activity_end
-        _job_activity_start("player_history")
-        _activity_end = _job_activity_end
-    except ImportError:
-        pass
-    if ht:
-        ht.record_job_started("player_history_collector_job")
+    _collector_task = asyncio.current_task()
     logger.info(
         "player_history_collector_job: starting (time_budget=%.0fs)",
         _CYCLE_TIME_BUDGET_SECONDS,
@@ -189,13 +164,9 @@ async def player_history_collector_job(context) -> None:
         # work so the live scan gets exclusive access to the hot path.
         if _underdog_scan_running():
             logger.info(
-                "player_history_collector_job: Underdog scan claimed slot "
-                "after active-pool load — yielding"
+                    "player_history_collector_job: storage refresh stopped "
+                    "before provider work because monitoring became active"
             )
-            if ht:
-                ht.record_job_run("player_history_collector_job")
-            if _activity_end:
-                _activity_end("player_history")
             return
 
         # ── Fallback: recent normalized history when no active rows ──────────
@@ -288,7 +259,10 @@ async def player_history_collector_job(context) -> None:
                     awaitable.close()
                 return []
             try:
-                return await asyncio.wait_for(awaitable, timeout=remaining)
+                return await asyncio.wait_for(
+                    awaitable,
+                    timeout=min(remaining, _PROVIDER_CALL_TIMEOUT_SECONDS),
+                )
             except asyncio.TimeoutError:
                 logger.warning(
                     "player_history_collector_job: %s exceeded remaining "
@@ -375,13 +349,14 @@ async def player_history_collector_job(context) -> None:
             stopped_for_budget, stopped_for_underdog, target_counts,
             ok_by_sport, rows_by_sport,
         )
-        if ht:
-            ht.record_job_run("player_history_collector_job")
-        if _activity_end:
-            _activity_end("player_history")
+    except asyncio.CancelledError:
+        logger.info(
+            "player_history_collector_job: storage refresh cancelled before "
+            "live monitoring"
+        )
+        raise
     except Exception as exc:
         logger.exception("player_history_collector_job: %s", exc)
-        if ht:
-            ht.record_job_fail("player_history_collector_job", str(exc))
-        if _activity_end:
-            _activity_end("player_history")
+    finally:
+        if _collector_task is asyncio.current_task():
+            _collector_task = None

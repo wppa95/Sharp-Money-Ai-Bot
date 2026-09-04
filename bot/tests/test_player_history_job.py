@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import sys
 import os
+import asyncio
+import inspect
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -13,7 +15,10 @@ from player_history_job import (
     _SUPPORTED_HISTORY_SPORTS,
     _fair_cycle_targets,
     player_history_collector_job,
+    stop_player_history_collector,
 )
+import player_history_job
+import market_engine
 
 
 def test_fair_cycle_targets_round_robins_all_sports():
@@ -41,6 +46,39 @@ def test_fifa_uses_existing_soccer_history_path():
 
 def test_football_aliases_are_not_history_targets():
     assert not (_SUPPORTED_HISTORY_SPORTS & {"NFL", "NCAAF", "CFB"})
+
+
+def test_history_collector_is_not_part_of_monitoring_activity_or_health():
+    source = inspect.getsource(player_history_collector_job)
+
+    assert "_job_activity_start" not in source
+    assert "_job_activity_end" not in source
+    assert "record_job_started" not in source
+    assert "record_job_run" not in source
+    assert "record_job_fail" not in source
+
+
+@pytest.mark.asyncio
+async def test_storage_collector_can_be_preempted_before_scan():
+    task = asyncio.create_task(asyncio.sleep(60))
+    player_history_job._collector_task = task
+
+    await stop_player_history_collector()
+
+    assert task.cancelled()
+    assert player_history_job._collector_task is None
+
+
+def test_all_active_scan_entry_points_preempt_storage_enrichment():
+    assert "_preempt_storage_enrichment" in inspect.getsource(
+        market_engine.underdog_job
+    )
+    assert "_preempt_storage_enrichment" in inspect.getsource(
+        market_engine._stable_refresh_job
+    )
+    assert "_preempt_storage_enrichment" in inspect.getsource(
+        market_engine._full_pool_rescan_job
+    )
 
 
 @pytest.mark.asyncio

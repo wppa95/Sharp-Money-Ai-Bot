@@ -9,6 +9,12 @@ Live monitoring must compare the current provider feed with in-memory state. Pla
 
 **How to apply:** Background collectors bulk-hydrate bounded caches after the scan releases its slot. Candidate paths use direct identity lookups; a cache miss yields no evidence/PASS and never falls back to SQLite or a remote provider.
 
+History collection is a storage/enrichment worker, not a monitoring job. It must not register in monitoring activity or health/display state, wait behind scans and start late, or overlap any scan/rescan.
+
+**Why:** A collector shown as active made monitoring displays appear incomplete, and long provider fallbacks could survive into the next live cadence even though the scan itself used memory.
+
+**How to apply:** Skip the collector when monitoring is active, bound its independent work window and provider calls, and preempt any active collector before live scan, Stable Refresh, or full-pool rescan activity begins.
+
 Production writes emitted by a live scan must be serialized outside the scan coroutine, drained during graceful shutdown, and discarded when an event loop is replaced.
 
 **Why:** SQLite persistence can outlive the monitoring work, but asyncio queues and tasks belong to the loop that created them; carrying them across loops risks stale tasks and lost shutdown writes.
