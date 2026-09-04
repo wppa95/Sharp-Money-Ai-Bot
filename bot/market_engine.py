@@ -5371,7 +5371,7 @@ async def underdog_job(context) -> None:
         # Runs AFTER the ranked delivery phase so that alert_sent=True is persisted
         # for props that were just delivered.  The incremental records have their
         # alert_sent / alert_outcome fields updated in-place by the delivery phase.
-        if _incremental_records and db:
+        if _incremental_records and db and not _cycle_budget_exhausted:
             # Pass a copy so that the .clear() below does not retroactively
             # empty the list object that was handed to the mock in tests.
             _incr_snapshot = list(_incremental_records)
@@ -5404,6 +5404,13 @@ async def underdog_job(context) -> None:
                 )
             finally:
                 del _incr_snapshot
+        elif _incremental_records and _cycle_budget_exhausted:
+            logger.warning(
+                "underdog_job: incremental snapshot persistence deferred after "
+                "cycle deadline (%d records)",
+                len(_incremental_records),
+            )
+            _incremental_records.clear()
 
         # ── Cold-start bulk save + latch — runs once after the prop loop ──────────
         if is_cold_start:
@@ -5587,7 +5594,7 @@ async def underdog_job(context) -> None:
         ud_snaps.clear()
 
         # ── PropCandidateLog batch write — edge transparency (Phase 4) ───────
-        if _scored_props and db:
+        if _scored_props and db and not _cycle_budget_exhausted:
             try:
                 import json as _json
                 _now_ts    = datetime.utcnow()
@@ -5658,7 +5665,7 @@ async def underdog_job(context) -> None:
 
         # ── Bulk MQ score write — update PropLineHistory for /picks and /slip filtering ──
         # Non-fatal: write failure must never abort the cycle.
-        if _plh_mq_scores and db:
+        if _plh_mq_scores and db and not _cycle_budget_exhausted:
             try:
                 await _cycle_timing.await_db(
                     "write",
@@ -5672,7 +5679,7 @@ async def underdog_job(context) -> None:
         # Non-fatal: a write failure must not abort the cycle or mask real exceptions.
         # Proves that all ~4,600 active props are monitored each poll (not just scored ones).
         try:
-            if db:
+            if db and not _cycle_budget_exhausted:
                 await _cycle_timing.await_db(
                     "write",
                     "log_scan_cycle",
@@ -5692,6 +5699,11 @@ async def underdog_job(context) -> None:
                         actionable_by_sport = _sport_actionable,
                         removed_by_sport    = _sport_removed,
                     ),
+                )
+            elif db:
+                logger.warning(
+                    "underdog_job: scan-cycle evidence write deferred after "
+                    "cycle deadline"
                 )
         except Exception as _scl_exc:
             logger.debug("underdog_job: scan_cycle_log write skipped: %s", _scl_exc)
