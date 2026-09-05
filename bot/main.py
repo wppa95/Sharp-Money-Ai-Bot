@@ -1182,6 +1182,7 @@ async def _grade_opportunities_job(context) -> None:
                 continue
             actual = result_row.actual_value
             line   = opp.line_value
+            recommendation = getattr(opp, "recommendation", None)
 
             # Direction-aware grading: HIT means the bet won.
             #   OVER recommendation → won if actual > line
@@ -1190,7 +1191,7 @@ async def _grade_opportunities_job(context) -> None:
             _push_tol = 0.01
             if abs(actual - line) < _push_tol:
                 outcome = "PUSH"
-            elif (opp.recommendation or "OVER").upper() == "UNDER":
+            elif (recommendation or "OVER").upper() == "UNDER":
                 outcome = "HIT" if actual < line else "MISS"
             else:
                 # OVER (default) or unknown direction
@@ -1203,17 +1204,17 @@ async def _grade_opportunities_job(context) -> None:
             # learning as if they were a missed pick.
             if (
                 outcome == "MISS"
-                and (opp.recommendation or "").upper() in ("OVER", "UNDER")
+                and (recommendation or "").upper() in ("OVER", "UNDER")
             ):
                 from engine.calibration import classify_miss
                 error_type = classify_miss(
-                    recommendation = opp.recommendation,
+                    recommendation = recommendation,
                     decision_tier  = opp.decision_tier,
                     confidence     = opp.confidence,
                     actual_value   = actual,
                     line_value     = opp.line_value,
                 )
-            if getattr(opp, "recommendation", None) is None:
+            if recommendation is None:
                 _grade_tracked = getattr(db, "grade_tracked_prop", None)
                 if callable(_grade_tracked):
                     await _grade_tracked(opp.id, outcome, actual)

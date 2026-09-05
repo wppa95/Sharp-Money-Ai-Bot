@@ -186,6 +186,33 @@ async def test_no_pending_work_still_records_a_successful_health_run():
     assert health.failures == []
 
 
+@pytest.mark.asyncio
+async def test_grader_settles_neutral_tracking_rows_without_directional_attributes():
+    tracked = SimpleNamespace(
+        id=41,
+        player_name="Tracked Player",
+        sport="NBA",
+        stat_type="Points",
+        game_time=datetime.utcnow() - timedelta(hours=6),
+        line_value=10.0,
+        result="PENDING",
+    )
+    db = MagicMock()
+    db.get_pending_opportunities = AsyncMock(return_value=[])
+    db.get_pending_tracked_props = AsyncMock(return_value=[tracked])
+    db.get_game_result_for_grading = AsyncMock(
+        return_value=SimpleNamespace(actual_value=11.0)
+    )
+    db.grade_tracked_prop = AsyncMock()
+    health = _Health()
+
+    with patch.object(main, "get_health_tracker", return_value=health):
+        await main._grade_opportunities_job(_context(db))
+
+    db.grade_tracked_prop.assert_awaited_once_with(41, "HIT", 11.0)
+    assert health.failures == []
+
+
 def test_grader_source_keeps_pending_selection_and_idempotent_update_contract():
     source = __import__("inspect").getsource(main._grade_opportunities_job)
     assert 'result == "PENDING"' not in source  # selection belongs in Database
