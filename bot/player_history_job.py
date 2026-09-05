@@ -10,15 +10,17 @@ from engine.sport_policy import is_football_related_sport
 
 logger = logging.getLogger(__name__)
 
-# Sports for which PlayerStatsProvider.fetch_results() has a working data
-# path.  Unsupported sports (LOL, VALORANT/VAL, PGA/GOLF, MMA, TT, and
-# BADMINTON) would always return [] — filtering them avoids wasting API-call
-# budget on sports that can never produce DB rows.
+# Sports in the supported player-prop universe.  Several of these sports do
+# not have a public PlayerStatsProvider path; they remain here because the
+# scheduled PropLine supplement is their documented history path.
 _SUPPORTED_HISTORY_SPORTS = frozenset({
     "MLB", "NBA",
     "WNBA", "NHL", "CS", "DOTA", "TENNIS",
     "MLS", "NCAAB", "FIFA",
     "SOCCER",         # Requires FOOTBALL_DATA_API_KEY; returns [] gracefully without it
+    "LOL", "VAL", "VALORANT",
+    "TT", "TABLE TENNIS", "BADMINTON",
+    "MMA", "UFC", "GOLF", "PGA",
 })
 
 # Keep transactions large enough that a full active book does not create
@@ -51,6 +53,12 @@ except (ImportError, TypeError, ValueError):
 
 _NEXT_TARGET_KEY = "_player_history_next_target"
 _CURSOR_KEY = "_player_history_cursor"
+_PROPLINE_CURSOR_KEY = "_player_history_propline_cursor"
+_PRIMARY_HISTORY_PROVIDERS = frozenset({"underdog", "prizepicks"})
+# The shared PropLine limiter allows at most roughly six requests during the
+# two-minute history cadence. Fair target ordering gives every sport a chance
+# while never creating a burst of queued requests behind the limiter.
+_PLAYER_HISTORY_PROPLINE_TARGETS_PER_CYCLE = 6
 
 
 class _CadenceBoundaryReached(Exception):
@@ -99,6 +107,7 @@ def reset_player_history_runtime_state(bot_data: dict | None = None) -> None:
     if bot_data is not None:
         bot_data.pop(_NEXT_TARGET_KEY, None)
         bot_data.pop(_CURSOR_KEY, None)
+        bot_data.pop(_PROPLINE_CURSOR_KEY, None)
 
 
 def _rotating_target_slice(
@@ -149,12 +158,14 @@ def _rotating_target_slice(
 async def player_history_collector_job(context) -> None:
     """Fetch real game results for every active supported primary prop.
 
-    The active target universe is rebuilt on every cadence and fetched in one
-    bounded-concurrency batch. There is intentionally no rotating slice or
-    carryover queue: a prop that is active now is eligible now, and newly
-    active props do not wait for a later rotation. It is an independent
-    storage lane: player monitoring neither starts, stops, pauses, nor reports
-    this work.
+    The active target universe is rebuilt on every cadence and the public/stat
+    provider is fetched in one bounded-concurrency batch. There is intentionally
+    no primary-provider rotation or carryover queue: a prop that is active now
+    is eligible now, and newly active props do not wait for a later rotation.
+    The smaller PropLine supplement window rotates independently so its shared
+    limiter cannot turn a full-book history pass into a request burst.
+    This is an independent storage lane: player monitoring neither starts,
+    stops, pauses, nor reports this work.
     """
     bot_data = context.bot_data
     db = bot_data.get("history_db") or bot_data.get("db")
@@ -198,6 +209,34 @@ async def player_history_collector_job(context) -> None:
         provider = PlayerStatsProvider()
         targets: list[tuple[str, str, str]] = []
         seen: set[tuple[str, str, str]] = set()
+        target_sources: dict[tuple[str, str, str], set[str]] = {}
+
+        def source_for_row(row, key, default: str) -> str:
+            source = (
+                getattr(row, "provider", None)
+                or getattr(row, "source_provider", None)
+                or ""
+            )
+            if not source and isinstance(key, (tuple, list)) and key:
+                candidate = str(key[0] or "").strip()
+                if candidate.lower() in _PRIMARY_HISTORY_PROVIDERS:
+                    source = candidate
+            normalized = str(source or default).strip().lower()
+            return (
+                "PrizePicks"
+                if normalized == "prizepicks"
+                else "Underdog"
+            )
+
+        def source_scope(target: tuple[str, str, str]) -> str:
+            sources = target_sources.get(target, set())
+            if sources == {"PrizePicks"}:
+                return "PrizePicks"
+            if sources == {"Underdog"}:
+                return "Underdog"
+            # A target shared by both books is intentionally requested without
+            # a bookmaker filter so one read-only response covers both.
+            return ""
 
         # ── Primary path: canonical active pool (both primary providers) ──
         try:
@@ -211,14 +250,18 @@ async def player_history_collector_job(context) -> None:
                         providers=("Underdog", "PrizePicks")
                     ),
                 )
-                active_rows = active.values()
+                active_rows = active.items()
             else:
                 active = await await_in_cycle(
                     "loading active player-history targets",
                     db.get_active_underdog_snapshot_per_prop,
                 )
-                active_rows = active.values()
-            for s in active_rows:
+                active_rows = (
+                    active.items()
+                    if hasattr(active, "items")
+                    else ((None, row) for row in active)
+                )
+            for active_key, s in active_rows:
                 player = (
                     getattr(s, "player_name", None)
                     or getattr(s, "player", None)
@@ -238,6 +281,10 @@ async def player_history_collector_job(context) -> None:
                 ):
                     continue  # No provider data path — skip to avoid wasting API calls
                 key = (player.strip(), sport, (stat or "").lower().strip())
+                target_sources.setdefault(
+                    key,
+                    set(),
+                ).add(source_for_row(s, active_key, "Underdog"))
                 if key[0] and key[2] and key not in seen:
                     seen.add(key)
                     targets.append(key)
@@ -290,6 +337,9 @@ async def player_history_collector_job(context) -> None:
                         (s.player_name or "").strip(),
                         sport,
                         (s.stat_type or "").lower().strip(),
+                    )
+                    target_sources.setdefault(key, set()).add(
+                        "PrizePicks" if _provider == "PrizePicks" else "Underdog"
                     )
                     if key[0] and key[2] and key not in seen:
                         seen.add(key)
@@ -363,9 +413,39 @@ async def player_history_collector_job(context) -> None:
         target_counts: dict[str, int] = {}
         ok_by_sport: dict[str, int] = {}
         rows_by_sport: dict[str, int] = {}
+        propline_coverage_by_sport: dict[str, dict[str, int]] = {}
         budget_exhausted = False
         fetch_semaphore = asyncio.Semaphore(_PLAYER_HISTORY_FETCH_CONCURRENCY)
         completed_targets: list[tuple[str, str, str]] = []
+        from providers.player_history import get_player_history_provider
+
+        history_provider = (
+            bot_data.get("player_history_provider")
+            or get_player_history_provider()
+        )
+        if cycle_targets:
+            try:
+                propline_start = (
+                    int(bot_data.get(_PROPLINE_CURSOR_KEY, 0))
+                    % len(cycle_targets)
+                )
+            except (TypeError, ValueError):
+                propline_start = 0
+            propline_count = min(
+                _PLAYER_HISTORY_PROPLINE_TARGETS_PER_CYCLE,
+                len(cycle_targets),
+            )
+            propline_targets = {
+                cycle_targets[
+                    (propline_start + offset) % len(cycle_targets)
+                ]
+                for offset in range(propline_count)
+            }
+            bot_data[_PROPLINE_CURSOR_KEY] = (
+                propline_start + propline_count
+            ) % len(cycle_targets)
+        else:
+            propline_targets = set()
 
         async def fetch_target(player: str, sport: str, stat: str):
             async with fetch_semaphore:
@@ -382,7 +462,17 @@ async def player_history_collector_job(context) -> None:
                             remaining,
                         ),
                     )
-                    return "ok", raw or []
+                    coverage = await history_provider.fetch_scheduled_results(
+                        raw or [],
+                        player,
+                        sport,
+                        stat,
+                        source_provider=source_scope((player, sport, stat)),
+                        allow_propline=(
+                            (player, sport, stat) in propline_targets
+                        ),
+                    )
+                    return "ok", coverage
                 except asyncio.TimeoutError:
                     return "deadline", None
                 except Exception as exc:
@@ -424,7 +514,19 @@ async def player_history_collector_job(context) -> None:
                 )
                 continue
 
-            raw = fetch_value
+            coverage = fetch_value
+            raw = getattr(coverage, "rows", coverage)
+            coverage_status = getattr(coverage, "status", "")
+            if coverage_status in {
+                "usable",
+                "redacted",
+                "unavailable",
+                "malformed",
+            }:
+                sport_coverage = propline_coverage_by_sport.setdefault(sport, {})
+                sport_coverage[coverage_status] = (
+                    sport_coverage.get(coverage_status, 0) + 1
+                )
             if raw:
                 from engine.evidence_memory import put_player_results
 
@@ -492,11 +594,12 @@ async def player_history_collector_job(context) -> None:
             "persisted_rows=%d processed=%d remaining=%d errors=%d "
             "budget_exhausted=%s targets_total=%d elapsed=%.1fs "
             "targets_by_sport=%s "
-            "players_ok_by_sport=%s rows_by_sport=%s",
+            "players_ok_by_sport=%s rows_by_sport=%s "
+            "propline_coverage_by_sport=%s",
             ok, rows, persisted_rows, processed, len(targets) - processed,
             failed, budget_exhausted, len(targets),
             time.monotonic() - cycle_started, target_counts,
-            ok_by_sport, rows_by_sport,
+            ok_by_sport, rows_by_sport, propline_coverage_by_sport,
         )
     except Exception as exc:
         logger.exception("player_history_collector_job: %s", exc)

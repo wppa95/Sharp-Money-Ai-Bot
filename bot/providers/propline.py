@@ -57,6 +57,24 @@ _STAT_NORMALIZATION = {
     "points_rebounds": "points+rebounds",
     "rebounds_assists": "rebounds+assists",
     "points_rebounds_assists": "pts+reb+ast",
+    "fantasy_points_in_game_1": "fantasy points",
+    "fantasy_points_in_game_2": "fantasy points",
+    "fantasy_points_in_games_1+2": "fantasy points",
+    "fantasy_points_in_games_1+2+3": "fantasy points",
+    "fantasy_points_on_maps_1+2": "fantasy points",
+    "fantasy points in game 1": "fantasy points",
+    "fantasy points in game 2": "fantasy points",
+    "fantasy points in games 1+2": "fantasy points",
+    "fantasy points in games 1+2+3": "fantasy points",
+    "fantasy points on maps 1+2": "fantasy points",
+    "kills_in_games_1+2": "kills",
+    "kills_on_maps_1+2": "kills",
+    "assists_on_maps_1+2": "assists",
+    "headshots_on_maps_1+2": "headshots",
+    "kills in games 1+2": "kills",
+    "kills on maps 1+2": "kills",
+    "assists on maps 1+2": "assists",
+    "headshots on maps 1+2": "headshots",
     "points+rebounds": "points+rebounds",
     "points+assists": "points+assists",
     "rebounds+assists": "rebounds+assists",
@@ -1783,6 +1801,7 @@ _OFFICIAL_MARKETS = (
     "player_kills",
     "player_deaths",
     "player_maps_won",
+    "player_fantasy_points",
 )
 
 _STAT_TO_OFFICIAL_MARKET = {
@@ -1898,6 +1917,30 @@ def _canonical_discovered_sport(official_key: str, title: Any = "") -> str:
         return _OFFICIAL_TO_CANONICAL_SPORT[key]
 
     normalized_title = _clean(title).upper().replace("_", " ")
+    normalized_key = re.sub(r"[^A-Z0-9]+", " ", key.upper()).strip()
+    sport_text = f"{normalized_key} {normalized_title}".strip()
+    if (
+        "LEAGUE OF LEGENDS" in sport_text
+        or normalized_key in {"LOL", "ESPORTS LOL"}
+    ):
+        return "LOL"
+    if "VALORANT" in sport_text or normalized_key in {"VAL", "ESPORTS VAL"}:
+        return "VALORANT"
+    if (
+        "TABLE TENNIS" in sport_text
+        or normalized_key in {"TT", "TABLE TENNIS", "TABLETENNIS"}
+    ):
+        return "TT"
+    if "BADMINTON" in sport_text:
+        return "BADMINTON"
+    if "DOTA" in sport_text or normalized_key in {"DOTA", "DOTA 2"}:
+        return "DOTA"
+    if (
+        "COUNTER STRIKE" in sport_text
+        or "CS2" in sport_text
+        or normalized_key in {"CS", "ESPORTS CS"}
+    ):
+        return "CS"
     if normalized_title in {"AMERICAN FOOTBALL", "FOOTBALL"}:
         return "FOOTBALL"
     if normalized_title in {"COLLEGE FOOTBALL", "NCAAF", "CFB"}:

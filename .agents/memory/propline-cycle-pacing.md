@@ -23,7 +23,16 @@ expand a cycle into an all-sports sweep.
 job open across multiple sports and prevented its completion telemetry from
 being recorded promptly.
 
+Scheduled player-history supplementation follows the same boundary: public
+history collection may cover the full active target universe, but PropLine
+fallbacks use a small rotating target window rather than one request per
+active prop.
+
+**Why:** Sparse public history can require PropLine without allowing a
+full-book fallback sweep to queue behind the provider's shared limiter.
+
 **How to apply:** Keep one active companion task per shared cycle, await it
 alongside Underdog, and rely on the existing single-instance scheduler for
 overlap protection. Keep the configured-sport round robin and provider pacing;
-do not add a PrizePicks scheduler or heartbeat-triggered handoff.
+do not add a PrizePicks scheduler, heartbeat-triggered handoff, or an
+unbounded scheduled-history fallback.

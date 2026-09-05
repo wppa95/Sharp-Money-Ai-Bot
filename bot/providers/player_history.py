@@ -27,6 +27,22 @@ _MIN_WINDOW = 3
 H2H_MIN_GAMES = 3
 _FETCH_CACHE_MAX = 2000
 
+PROPLINE_COVERAGE_USABLE = "usable"
+PROPLINE_COVERAGE_REDACTED = "redacted"
+PROPLINE_COVERAGE_UNAVAILABLE = "unavailable"
+PROPLINE_COVERAGE_MALFORMED = "malformed"
+PROPLINE_COVERAGE_NOT_NEEDED = "not_needed"
+
+
+@dataclass(frozen=True)
+class PropLineHistoryCoverage:
+    """Scheduled PropLine history attempt and its safe evidence rows."""
+
+    rows: tuple = ()
+    status: str = PROPLINE_COVERAGE_UNAVAILABLE
+    failure_kind: str = ""
+    error: str = ""
+
 
 @dataclass(frozen=True)
 class PlayerHistoryRecord:
@@ -488,6 +504,62 @@ class PlayerHistoryProvider:
         self._supplement_cache[key] = list(supplemental)
         return list(supplemental)
 
+    async def fetch_scheduled_results(
+        self,
+        primary_results: list | tuple | None,
+        player_name: str,
+        sport: str,
+        stat_type: str,
+        *,
+        min_samples: int = 5,
+        source_provider: str = "",
+        allow_propline: bool = True,
+        instrumentation=None,
+    ) -> PropLineHistoryCoverage:
+        """Supplement a scheduled provider fetch with safe PropLine history.
+
+        The scheduled collector already fetches the public/stat provider.  This
+        method only spends a PropLine request when that evidence is below the
+        normal validation threshold, so the authorized feed remains a
+        supplement rather than a replacement or a new delivery path.
+        """
+        primary = list(primary_results or ())
+        if len(primary) >= max(1, int(min_samples)):
+            return PropLineHistoryCoverage(
+                rows=tuple(primary),
+                status=PROPLINE_COVERAGE_NOT_NEEDED,
+            )
+        if not allow_propline:
+            return PropLineHistoryCoverage(
+                rows=tuple(primary),
+                status=PROPLINE_COVERAGE_NOT_NEEDED,
+            )
+        from engine.sport_policy import is_football_related_sport
+
+        sport_u = str(sport or "").upper().strip()
+        if not sport_u or is_football_related_sport(sport_u):
+            return PropLineHistoryCoverage(
+                rows=tuple(primary),
+                status=PROPLINE_COVERAGE_NOT_NEEDED,
+            )
+
+        metadata: dict[str, str] = {}
+        supplemental = await self._fetch_propline_history(
+            player_name,
+            sport_u,
+            stat_type,
+            source_provider=source_provider,
+            instrumentation=instrumentation,
+            coverage=metadata,
+        )
+        merged = _merge_game_results(primary, supplemental)
+        return PropLineHistoryCoverage(
+            rows=tuple(merged),
+            status=metadata.get("status", PROPLINE_COVERAGE_UNAVAILABLE),
+            failure_kind=metadata.get("failure_kind", ""),
+            error=metadata.get("error", ""),
+        )
+
     async def fetch_resolved_results(
         self,
         player_name: str,
@@ -804,6 +876,7 @@ class PlayerHistoryProvider:
         *,
         source_provider: str = "Underdog",
         instrumentation=None,
+        coverage: Optional[dict[str, str]] = None,
     ) -> list:
         """Adapt official PropLine resolved history into game-result rows."""
         from providers.player_stats import RawGameResult
@@ -816,13 +889,33 @@ class PlayerHistoryProvider:
         if self._propline_client is None:
             self._propline_client = PropLineClient()
         client = self._propline_client
-        if not client.is_configured:
+        if not getattr(client, "is_configured", False):
+            if coverage is not None:
+                coverage.update(status=PROPLINE_COVERAGE_UNAVAILABLE)
             return []
-        official_sport = client.official_sport_for(sport)
+        try:
+            official_sport = client.official_sport_for(sport)
+        except Exception as exc:
+            if coverage is not None:
+                coverage.update(
+                    status=PROPLINE_COVERAGE_UNAVAILABLE,
+                    failure_kind="configuration",
+                    error=str(exc),
+                )
+            return []
         if not official_sport:
             # The official catalog is authoritative for provider-specific
             # sports; never guess an endpoint key for DOTA or another sport.
-            discovered = await client.discover_sports()
+            try:
+                discovered = await client.discover_sports()
+            except Exception as exc:
+                if coverage is not None:
+                    coverage.update(
+                        status=PROPLINE_COVERAGE_UNAVAILABLE,
+                        failure_kind="discovery",
+                        error=str(exc),
+                    )
+                return []
             canonical = str(sport or "").upper().strip()
             official_sport = next(
                 (
@@ -833,10 +926,20 @@ class PlayerHistoryProvider:
                 None,
             )
         if not official_sport:
+            if coverage is not None:
+                coverage.update(
+                    status=PROPLINE_COVERAGE_UNAVAILABLE,
+                    failure_kind="unsupported_sport",
+                )
             return []
 
         market = official_player_market_for(stat_type)
         if not market:
+            if coverage is not None:
+                coverage.update(
+                    status=PROPLINE_COVERAGE_MALFORMED,
+                    failure_kind="unknown_market",
+                )
             logger.info(
                 "PropLine history attempt player=%r sport=%s stat=%s "
                 "market=unmapped bookmaker=%s succeeded=false complete=false "
@@ -848,15 +951,51 @@ class PlayerHistoryProvider:
             )
             return []
         bookmaker = _propline_bookmaker_for_source(source_provider)
-        result = await client.fetch_player_history(
-            official_sport,
-            player_name,
-            market,
-            bookmaker=bookmaker,
-            limit=100,
-        )
+        try:
+            result = await client.fetch_player_history(
+                official_sport,
+                player_name,
+                market,
+                bookmaker=bookmaker,
+                limit=100,
+            )
+        except Exception as exc:
+            if coverage is not None:
+                coverage.update(
+                    status=PROPLINE_COVERAGE_UNAVAILABLE,
+                    failure_kind="request",
+                    error=type(exc).__name__,
+                )
+            logger.warning(
+                "PropLine history attempt player=%r sport=%s stat=%s "
+                "market=%s bookmaker=%s status=%s failure=%s error=%s",
+                player_name,
+                sport,
+                stat_type,
+                market,
+                bookmaker or "all",
+                PROPLINE_COVERAGE_UNAVAILABLE,
+                "request",
+                type(exc).__name__,
+            )
+            return []
         raw_entries = len(getattr(result, "entries", ()) or ())
         if not result.succeeded or not result.complete:
+            failure_kind = str(getattr(result, "failure_kind", "") or "")
+            if coverage is not None:
+                coverage.update(
+                    status=(
+                        PROPLINE_COVERAGE_REDACTED
+                        if bool(getattr(result, "redacted", False))
+                        else (
+                            PROPLINE_COVERAGE_MALFORMED
+                            if failure_kind == "incomplete"
+                            else PROPLINE_COVERAGE_UNAVAILABLE
+                        )
+                    ),
+                    failure_kind=failure_kind,
+                    error=str(getattr(result, "error", "") or ""),
+                )
             _log_propline_history_attempt(
                 player_name,
                 sport,
@@ -908,6 +1047,12 @@ class PlayerHistoryProvider:
                 source="propline_history",
                 game_id=event_id,
             ))
+        if coverage is not None:
+            coverage.update(
+                status=PROPLINE_COVERAGE_USABLE,
+                failure_kind="",
+                error="",
+            )
         _log_propline_history_attempt(
             player_name,
             sport,

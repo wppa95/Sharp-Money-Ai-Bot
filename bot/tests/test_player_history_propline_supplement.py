@@ -6,8 +6,18 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from providers.player_history import PlayerHistoryProvider
+from providers.player_history import (
+    PROPLINE_COVERAGE_MALFORMED,
+    PROPLINE_COVERAGE_REDACTED,
+    PROPLINE_COVERAGE_UNAVAILABLE,
+    PROPLINE_COVERAGE_USABLE,
+    PlayerHistoryProvider,
+)
 from providers.propline import PropLinePlayerHistoryFetchResult
+from providers.propline import (
+    _canonical_discovered_sport,
+    official_player_market_for,
+)
 
 
 class _DB:
@@ -301,6 +311,166 @@ async def test_history_uses_documented_composite_market_key():
         "player_points_rebounds_assists"
     )
     assert client.fetch_player_history.await_args.kwargs["bookmaker"] == "underdog"
+
+
+@pytest.mark.parametrize(
+    "stat,market",
+    [
+        ("Fantasy Points in Games 1+2", "player_fantasy_points"),
+        ("Kills in Games 1+2", "player_kills"),
+    ],
+)
+def test_documented_esports_markets_have_propline_history_keys(stat, market):
+    assert official_player_market_for(stat) == market
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "sport,stat,official_sport,official_market",
+    [
+        ("NBA", "points", "basketball_nba", "player_points"),
+        ("TENNIS", "sets won", "tennis", "player_sets_won"),
+        ("CS", "kills", "cs2", "player_kills"),
+    ],
+)
+async def test_scheduled_history_uses_propline_for_non_mlb_sports(
+    sport, stat, official_sport, official_market
+):
+    entry = _propline_entry("2026-08-29", 31.0, f"{sport}-game")
+    client = _client([entry])
+    client.official_sport_for = lambda requested: {
+        sport: official_sport,
+    }.get(requested)
+    provider = PlayerHistoryProvider(propline_client=client)
+
+    coverage = await provider.fetch_scheduled_results(
+        [],
+        "Alex Example",
+        sport,
+        stat,
+        source_provider="Underdog",
+    )
+
+    assert coverage.status == PROPLINE_COVERAGE_USABLE
+    assert len(coverage.rows) == 1
+    assert client.fetch_player_history.await_args.args[:3] == (
+        official_sport,
+        "Alex Example",
+        official_market,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "result,expected_status",
+    [
+        (
+            PropLinePlayerHistoryFetchResult(
+                entries=(),
+                fetched_at=datetime(2026, 8, 30),
+                player_name="Alex Example",
+                sport_key="basketball_nba",
+                market="player_points",
+                succeeded=True,
+                complete=False,
+                redacted=True,
+                failure_kind="incomplete",
+            ),
+            PROPLINE_COVERAGE_REDACTED,
+        ),
+        (
+            PropLinePlayerHistoryFetchResult(
+                entries=(),
+                fetched_at=datetime(2026, 8, 30),
+                player_name="Alex Example",
+                sport_key="basketball_nba",
+                market="player_points",
+                succeeded=True,
+                complete=False,
+                failure_kind="incomplete",
+            ),
+            PROPLINE_COVERAGE_MALFORMED,
+        ),
+    ],
+)
+async def test_scheduled_history_reports_redacted_and_malformed_responses(
+    result, expected_status
+):
+    client = _client([])
+    client.fetch_player_history = AsyncMock(return_value=result)
+    provider = PlayerHistoryProvider(propline_client=client)
+
+    coverage = await provider.fetch_scheduled_results(
+        [],
+        "Alex Example",
+        "NBA",
+        "points",
+    )
+
+    assert coverage.status == expected_status
+
+
+@pytest.mark.asyncio
+async def test_scheduled_history_reports_unavailable_response():
+    client = SimpleNamespace(
+        is_configured=False,
+        official_sport_for=lambda sport: "basketball_nba",
+    )
+    provider = PlayerHistoryProvider(propline_client=client)
+
+    coverage = await provider.fetch_scheduled_results(
+        [],
+        "Alex Example",
+        "NBA",
+        "points",
+    )
+
+    assert coverage.status == PROPLINE_COVERAGE_UNAVAILABLE
+
+
+@pytest.mark.asyncio
+async def test_scheduled_history_reports_http_failure_as_unavailable():
+    client = _client([])
+    client.fetch_player_history = AsyncMock(
+        return_value=PropLinePlayerHistoryFetchResult(
+            entries=(),
+            fetched_at=datetime(2026, 8, 30),
+            player_name="Alex Example",
+            sport_key="basketball_nba",
+            market="player_points",
+            succeeded=False,
+            complete=False,
+            failure_kind="http",
+            error="provider unavailable",
+        )
+    )
+    provider = PlayerHistoryProvider(propline_client=client)
+
+    coverage = await provider.fetch_scheduled_results(
+        [],
+        "Alex Example",
+        "NBA",
+        "points",
+    )
+
+    assert coverage.status == PROPLINE_COVERAGE_UNAVAILABLE
+    assert coverage.failure_kind == "http"
+
+
+@pytest.mark.parametrize(
+    "official_key,title,canonical",
+    [
+        ("esports_lol", "League of Legends", "LOL"),
+        ("valorant", "Valorant", "VALORANT"),
+        ("table_tennis", "Table Tennis", "TT"),
+        ("dota2", "Dota 2", "DOTA"),
+        ("cs2", "Counter-Strike 2", "CS"),
+    ],
+)
+def test_discovered_esports_sports_keep_supported_bot_names(
+    official_key, title, canonical
+):
+    assert _canonical_discovered_sport(official_key, title) == canonical
 
 
 @pytest.mark.asyncio

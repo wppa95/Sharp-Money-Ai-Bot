@@ -173,6 +173,70 @@ async def test_player_history_collects_prizepicks_only_active_target():
 
 
 @pytest.mark.asyncio
+async def test_player_history_reports_scheduled_propline_coverage_by_sport(caplog):
+    snapshots = {
+        ("NBA Player", "points"): SimpleNamespace(
+            player_name="NBA Player", sport="NBA", stat_type="points"
+        ),
+        ("Tennis Player", "sets won"): SimpleNamespace(
+            player_name="Tennis Player", sport="TENNIS", stat_type="sets won"
+        ),
+        ("Esports Player", "kills"): SimpleNamespace(
+            player_name="Esports Player", sport="CS", stat_type="kills"
+        ),
+    }
+    db = MagicMock()
+    db.get_active_underdog_snapshot_per_prop = AsyncMock(return_value=snapshots)
+    db.upsert_player_results_bulk = AsyncMock()
+    primary_provider = MagicMock()
+    primary_provider.fetch_results = AsyncMock(return_value=[])
+    scheduled_provider = MagicMock()
+
+    async def scheduled_results(primary, player, sport, stat, **kwargs):
+        return SimpleNamespace(
+            rows=[
+                SimpleNamespace(
+                    player_name=player,
+                    sport=sport,
+                    stat_type=stat,
+                    game_date="2026-08-29",
+                    actual_value=1.0,
+                    opponent=None,
+                    source="propline_history",
+                    game_id=f"{sport}-game",
+                )
+            ],
+            status="usable",
+        )
+
+    scheduled_provider.fetch_scheduled_results = AsyncMock(
+        side_effect=scheduled_results
+    )
+    context = SimpleNamespace(
+        bot_data={
+            "db": db,
+            "player_history_provider": scheduled_provider,
+        }
+    )
+
+    with (
+        patch(
+            "providers.player_stats.PlayerStatsProvider",
+            return_value=primary_provider,
+        ),
+        caplog.at_level("INFO"),
+    ):
+        await player_history_collector_job(context)
+
+    assert "propline_coverage_by_sport" in caplog.text
+    assert "'NBA': {'usable': 1}" in caplog.text
+    assert "'TENNIS': {'usable': 1}" in caplog.text
+    assert "'CS': {'usable': 1}" in caplog.text
+    assert primary_provider.fetch_results.await_count == 3
+    assert scheduled_provider.fetch_scheduled_results.call_count == 3
+
+
+@pytest.mark.asyncio
 async def test_player_history_flushes_results_in_bounded_durable_batches():
     snapshot = SimpleNamespace(
         player_name="Batch Player",
