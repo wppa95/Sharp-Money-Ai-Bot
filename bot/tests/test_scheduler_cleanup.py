@@ -77,11 +77,11 @@ def test_required_monitoring_and_maintenance_jobs_remain_registered():
         "underdog_monitor",
         "clv_seeder",
         "clv_harvester",
-        "opportunity_grader",
         "budget_checker",
         "prop_history_pruner",
         "heartbeat",
     } <= names
+    assert "opportunity_grader" not in names
 
 
 def test_registered_job_names_are_unique_and_no_legacy_monitors_are_active():

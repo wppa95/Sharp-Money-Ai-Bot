@@ -64,7 +64,7 @@ def test_current_book_has_one_monitoring_owner_and_no_remainder_rotation():
     assert "consensus_checker" not in names
 
 
-def test_required_independent_jobs_remain_registered():
+def test_required_jobs_remain_registered_and_grading_has_no_independent_timer():
     names = {name for name, _ in _scheduled_jobs()}
 
     assert {
@@ -72,13 +72,13 @@ def test_required_independent_jobs_remain_registered():
         "player_props_fetcher",
         "clv_seeder",
         "clv_harvester",
-        "opportunity_grader",
         "player_history_collector",
         "budget_checker",
         "prop_history_pruner",
         "heartbeat",
         "season_checker",
     } <= names
+    assert "opportunity_grader" not in names
 
 
 def test_scheduled_jobs_use_coordinator_without_max_instances():
@@ -88,7 +88,6 @@ def test_scheduled_jobs_use_coordinator_without_max_instances():
         "odds_poller",
         "player_props_fetcher",
         "underdog_monitor",
-        "opportunity_grader",
     ):
         kwargs = _job_kwargs(jobs[name])
         assert "max_instances" not in kwargs
@@ -98,14 +97,14 @@ def test_scheduled_jobs_use_coordinator_without_max_instances():
     assert "_coordinated_job(" in source
 
 
-def test_opportunity_grader_has_an_independent_worker_per_trigger():
+def test_grading_is_owned_by_the_underdog_two_minute_cycle():
     source = MAIN_SOURCE.read_text()
 
-    assert (
-        '_coordinated_job(\n                "opportunity_grader",'
-        in source
-    )
-    assert "allow_overlap=True" in source
+    assert "async def _underdog_monitor_cycle" in source
+    assert "await underdog_job(context)" in source
+    assert "await _grade_opportunities_job(context)" in source
+    assert '_coordinated_job("underdog_monitor", _underdog_monitor_cycle)' in source
+    assert '"opportunity_grader"' not in source
 
 
 @pytest.mark.asyncio

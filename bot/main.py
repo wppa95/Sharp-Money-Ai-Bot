@@ -664,7 +664,7 @@ async def post_init(application: Application) -> None:
         # jq.run_repeating(clv_check_job,       interval=config.CLV_CHECK_INTERVAL,        first=35,  name="clv_checker")
         # ─────────────────────────────────────────────────────────────────────
         jq.run_repeating(
-            _coordinated_job("underdog_monitor", underdog_job),
+            _coordinated_job("underdog_monitor", _underdog_monitor_cycle),
             interval=config.UNDERDOG_POLL_INTERVAL,
             first=45,
             name="underdog_monitor",
@@ -720,21 +720,6 @@ async def post_init(application: Application) -> None:
         jq.run_repeating(_coordinated_job("clv_seeder", _clv_seed_job), interval=900, first=120, name="clv_seeder")
         # CLV harvest job — every hour (processes seeds after game_time passes)
         jq.run_repeating(_coordinated_job("clv_harvester", _clv_harvest_job), interval=3600, first=300, name="clv_harvester")
-        # Opportunity grader — short cadence (grades completed opportunities).
-        # Each trigger gets its own tracked worker so a slow provider lookup
-        # does not suppress the next grading batch.
-        jq.run_repeating(
-            _coordinated_job(
-                "opportunity_grader",
-                _grade_opportunities_job,
-                allow_overlap=True,
-            ),
-            interval=config.OPPORTUNITY_GRADER_INTERVAL,
-            # Run once shortly after startup, then continue on the short
-            # cadence. A restart should not defer grading.
-            first=60,
-            name="opportunity_grader",
-        )
         # Player-result collection uses the dedicated history pool and its own
         # independent scheduler monitor. It rotates through all supported
         # active-provider targets, fetches them concurrently within this
@@ -765,14 +750,13 @@ async def post_init(application: Application) -> None:
                 name="season_checker",
             )
         logger.info(
-            "Jobs scheduled — underdog: every %ds, grader: every %ds, "
+            "Jobs scheduled — underdog + grader: every %ds, "
             "history collector: every %ds, "
             "season_check: every %ds, "
             "heartbeat: every 60s "
              "[PrizePicks/PropLine companion cycle enabled=%s; "
              "PropLine default rate=180/hour; DK/FD delivery disabled]",
             config.UNDERDOG_POLL_INTERVAL,
-            config.OPPORTUNITY_GRADER_INTERVAL,
             config.PLAYER_HISTORY_POLL_INTERVAL,
             config.SEASON_CHECK_INTERVAL,
             _propline_enabled,
@@ -957,6 +941,26 @@ async def post_shutdown(application: Application) -> None:
 _GRADE_BATCH_SIZE = 100
 _GRADE_FETCH_CONCURRENCY = 12
 _GRADE_FETCH_TIMEOUT_SECONDS = 20
+
+
+async def _underdog_monitor_cycle(context) -> None:
+    """Run monitoring and grading as one single-flight two-minute cycle.
+
+    Grading deliberately lives behind the Underdog monitor owner instead of
+    having its own repeating timer.  This makes one cadence own both phases:
+    a slow scan cannot overlap grading, and a slow grading pass cannot create
+    a second worker, skipped trigger, or queued backlog.
+    """
+    try:
+        await underdog_job(context)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        # Keep settlement useful even if the live-feed phase fails.  The
+        # coordinator still records the scan error, while this cycle's grader
+        # remains serialized behind the same owner.
+        logger.exception("underdog_monitor_cycle: monitoring phase failed")
+    await _grade_opportunities_job(context)
 
 
 async def _grade_opportunities_job(context) -> None:
