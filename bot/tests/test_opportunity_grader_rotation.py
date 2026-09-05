@@ -122,9 +122,16 @@ async def test_grader_fetches_concurrently_with_a_bounded_batch():
 
     provider = MagicMock()
     provider.fetch_results = fetch_results
+    propline_provider = SimpleNamespace(
+        fetch_resolved_results=AsyncMock(return_value=[])
+    )
     with (
         patch.object(main, "get_health_tracker", return_value=health),
         patch("providers.player_stats.PlayerStatsProvider", return_value=provider),
+        patch(
+            "providers.player_history.get_player_history_provider",
+            return_value=propline_provider,
+        ),
     ):
         await main._grade_opportunities_job(_context(db))
 
