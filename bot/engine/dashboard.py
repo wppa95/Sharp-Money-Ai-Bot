@@ -24,12 +24,15 @@ Public API
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from database import Database
+
+logger = logging.getLogger(__name__)
 
 
 # ── Component dataclasses ──────────────────────────────────────────────────────
@@ -484,6 +487,10 @@ class DashboardEngine:
                     )
                 )
             except Exception as exc:
+                logger.exception(
+                    "dashboard recent tracked props failed for provider=%s",
+                    provider,
+                )
                 provider_rows.append(exc)
         if not isinstance(tracking, dict):
             report.unavailable.add("tracking")
@@ -740,6 +747,7 @@ class DashboardEngine:
             if denom >= 5:
                 r.ev_win_rate = r.ev_wins / denom
         except Exception:
+            logger.exception("dashboard EV performance query failed")
             r.unavailable.add("ev")
 
     @staticmethod
@@ -901,6 +909,7 @@ class DashboardEngine:
 
             r.by_market = sorted(mkt_map.values(), key=lambda m: m.count, reverse=True)
         except Exception:
+            logger.exception("dashboard market performance query failed")
             r.unavailable.add("market")
 
     @staticmethod
