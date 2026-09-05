@@ -4,10 +4,13 @@ Loads settings from environment variables / .env file.
 """
 
 import os
+import logging
 from dataclasses import dataclass, field
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -485,10 +488,27 @@ class Config:
 
     @property
     def allowed_user_ids(self) -> set[int]:
-        raw = os.environ.get("ALLOWED_USER_IDS", "")
+        # Keep the existing allowlist name authoritative for deployments that
+        # use multiple recipients, while allowing the dedicated Telegram chat
+        # secret to work for the common single-recipient setup.
+        raw = os.environ.get("ALLOWED_USER_IDS", "").strip()
+        if not raw:
+            raw = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
         if not raw:
             return set()
-        return {int(uid.strip()) for uid in raw.split(",") if uid.strip()}
+        user_ids: set[int] = set()
+        for raw_id in raw.split(","):
+            value = raw_id.strip()
+            if not value:
+                continue
+            try:
+                user_ids.add(int(value))
+            except ValueError:
+                logger.warning(
+                    "Ignoring invalid Telegram recipient ID from "
+                    "ALLOWED_USER_IDS/TELEGRAM_CHAT_ID."
+                )
+        return user_ids
 
     @property
     def ud_alert_sports(self) -> frozenset[str]:
