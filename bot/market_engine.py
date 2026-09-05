@@ -1898,10 +1898,17 @@ def _candidate_player_results(
     sport: str,
     stat: str,
 ) -> Optional[list]:
-    """Return an explicit cache batch for production, None for legacy doubles."""
+    """Return cached evidence, or ``None`` when the cache has no usable rows.
+
+    The downstream history and hit-rate paths use ``None`` as the signal that
+    enrichment is still needed.  Returning an empty list for a cache miss
+    silently disabled both primary-result hydration and PropLine
+    supplementation for production ``Database`` instances.
+    """
     if not isinstance(db, Database):
         return None
-    return _memory_player_results(player, sport, stat, limit=40)
+    results = _memory_player_results(player, sport, stat, limit=40)
+    return results if results else None
 
 
 async def _fetch_and_compute_hit_rates(

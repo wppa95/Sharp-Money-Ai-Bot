@@ -68,6 +68,29 @@ async def test_production_candidate_history_never_falls_back_to_database():
     database.get_ud_prop_history.assert_not_awaited()
 
 
+def test_production_candidate_results_distinguish_cache_miss_from_warm_cache():
+    database = market_engine.Database.__new__(market_engine.Database)
+
+    assert market_engine._candidate_player_results(
+        database, "Player One", "NBA", "Points"
+    ) is None
+
+    rows = [
+        SimpleNamespace(
+            game_id="g1",
+            game_date="2026-09-03",
+            source="official",
+        )
+    ]
+    put_player_results("Player One", "NBA", "Points", rows)
+
+    cached = market_engine._candidate_player_results(
+        database, "Player One", "NBA", "Points"
+    )
+    assert cached is not None
+    assert [row.game_id for row in cached] == ["g1"]
+
+
 @pytest.mark.asyncio
 async def test_preloaded_snapshot_never_reads_or_supplements_database():
     provider = PlayerHistoryProvider()
