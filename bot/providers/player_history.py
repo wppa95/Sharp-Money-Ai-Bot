@@ -474,6 +474,7 @@ class PlayerHistoryProvider:
                     player_name,
                     sport,
                     stat_type,
+                    source_provider=source_provider,
                     instrumentation=instrumentation,
                 ),
             )
