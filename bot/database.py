@@ -48,6 +48,7 @@ _SQLITE_POOL_SIZE = 8
 _SQLITE_MAX_OVERFLOW = 0
 _SQLITE_POOL_TIMEOUT_SECONDS = 30
 _SQLITE_SESSION_LIMIT = _SQLITE_POOL_SIZE
+_SQLITE_BACKPRESSURE_THRESHOLD_SECONDS = 0.001
 
 # SQLite has one writer slot per database file.  The bot intentionally keeps a
 # second Database object for the long-running player-history collector, but
@@ -60,6 +61,18 @@ _SQLITE_WRITER_LOCKS: weakref.WeakKeyDictionary[
 _SQLITE_SESSION_GATES: weakref.WeakKeyDictionary[
     asyncio.AbstractEventLoop, dict[str, asyncio.Semaphore]
 ] = weakref.WeakKeyDictionary()
+_SQLITE_BACKPRESSURE_METRICS: weakref.WeakKeyDictionary[
+    asyncio.AbstractEventLoop, dict[str, dict[str, float]]
+] = weakref.WeakKeyDictionary()
+_SQLITE_BACKPRESSURE_KEYS = (
+    "session_acquires",
+    "session_waits",
+    "session_wait_seconds",
+    "writer_acquires",
+    "writer_waits",
+    "writer_wait_seconds",
+    "write_retries",
+)
 
 
 def _sqlite_writer_lock(url: str) -> asyncio.Lock | None:
@@ -81,6 +94,47 @@ def _sqlite_session_gate(url: str) -> asyncio.Semaphore | None:
         str(url),
         asyncio.Semaphore(_SQLITE_SESSION_LIMIT),
     )
+
+
+def _sqlite_backpressure_metrics(url: str) -> dict[str, float] | None:
+    """Return the per-loop metrics bucket shared by all pools for one URL."""
+    if not str(url).startswith("sqlite"):
+        return None
+    loop = asyncio.get_running_loop()
+    metrics_for_loop = _SQLITE_BACKPRESSURE_METRICS.setdefault(loop, {})
+    return metrics_for_loop.setdefault(
+        str(url),
+        {key: 0.0 for key in _SQLITE_BACKPRESSURE_KEYS},
+    )
+
+
+def _record_sqlite_backpressure(
+    url: str,
+    key: str,
+    amount: float = 1.0,
+) -> None:
+    metrics = _sqlite_backpressure_metrics(url)
+    if metrics is not None:
+        metrics[key] = metrics.get(key, 0.0) + float(amount)
+
+
+def get_sqlite_backpressure_metrics(
+    url: str,
+    *,
+    reset: bool = False,
+) -> dict[str, float]:
+    """Read shared session/writer wait counters without adding a DB table."""
+    metrics = _sqlite_backpressure_metrics(url)
+    if metrics is None:
+        return {key: 0.0 for key in _SQLITE_BACKPRESSURE_KEYS}
+    snapshot = {
+        key: float(metrics.get(key, 0.0))
+        for key in _SQLITE_BACKPRESSURE_KEYS
+    }
+    if reset:
+        for key in _SQLITE_BACKPRESSURE_KEYS:
+            metrics[key] = 0.0
+    return snapshot
 
 
 def _statement_is_write(statement) -> bool:
@@ -147,19 +201,29 @@ class _LockedAsyncSession:
         session: AsyncSession,
         lock: asyncio.Lock | None,
         session_gate: asyncio.Semaphore | None = None,
+        url: str = "",
     ) -> None:
         self._session = session
         self._lock = lock
         self._session_gate = session_gate
+        self._url = url
         self._session_gate_acquired = False
         self._acquired = False
 
     async def _acquire_writer(self) -> None:
         if self._lock is not None and not self._acquired:
+            _record_sqlite_backpressure(self._url, "writer_acquires")
             started = time.monotonic()
             await self._lock.acquire()
             self._acquired = True
             waited = time.monotonic() - started
+            if waited >= _SQLITE_BACKPRESSURE_THRESHOLD_SECONDS:
+                _record_sqlite_backpressure(self._url, "writer_waits")
+                _record_sqlite_backpressure(
+                    self._url,
+                    "writer_wait_seconds",
+                    waited,
+                )
             if waited >= 0.05:
                 logger.info(
                     "SQLite writer gate backpressure: waited %.3fs",
@@ -173,10 +237,18 @@ class _LockedAsyncSession:
 
     async def __aenter__(self) -> _WriteAwareAsyncSession:
         if self._session_gate is not None:
+            _record_sqlite_backpressure(self._url, "session_acquires")
             started = time.monotonic()
             await self._session_gate.acquire()
             self._session_gate_acquired = True
             waited = time.monotonic() - started
+            if waited >= _SQLITE_BACKPRESSURE_THRESHOLD_SECONDS:
+                _record_sqlite_backpressure(self._url, "session_waits")
+                _record_sqlite_backpressure(
+                    self._url,
+                    "session_wait_seconds",
+                    waited,
+                )
             if waited >= 0.05:
                 logger.info(
                     "SQLite session budget backpressure: waited %.3fs",
@@ -385,6 +457,7 @@ def _retry_sqlite_write(func):
             except Exception as exc:
                 if not _is_sqlite_lock_error(exc) or attempt >= _DB_WRITE_MAX_RETRIES:
                     raise
+                _record_sqlite_backpressure(self._url, "write_retries")
                 delay = _DB_WRITE_RETRY_DELAYS[
                     min(attempt, len(_DB_WRITE_RETRY_DELAYS) - 1)
                 ]
@@ -1145,6 +1218,7 @@ class Database:
             session,
             _sqlite_writer_lock(self._url),
             _sqlite_session_gate(self._url),
+            self._url,
         )
     async def prune_prop_line_history(self, keep_days: int = 14) -> int:
         """Delete PropLineHistory rows older than keep_days. Returns rows deleted."""
@@ -4731,6 +4805,7 @@ class Database:
                     )
                     raise
                 retry_count += 1
+                _record_sqlite_backpressure(self._url, "write_retries")
                 delay = _UNDERDOG_BULK_RETRY_DELAYS[
                     min(retry_count - 1, len(_UNDERDOG_BULK_RETRY_DELAYS) - 1)
                 ]

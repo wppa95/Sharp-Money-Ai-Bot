@@ -27,7 +27,7 @@ from telegram.ext import Application, CommandHandler
 sys.path.insert(0, os.path.dirname(__file__))
 
 from config import config
-from database import Database, OddsRecord
+from database import Database, OddsRecord, get_sqlite_backpressure_metrics
 from engine import AnalysisEngine
 from engine.season_check import SeasonChecker
 from engine.analysis import _SPORT_TO_ODDS_API_KEY, PlayerPropLine
@@ -214,6 +214,8 @@ class _ScheduledExecutionCoordinator:
         self._active_counts: dict[str, int] = {}
         self._tasks: set[asyncio.Task] = set()
         self._exclusive_locks: dict[str, asyncio.Lock] = {}
+        self._exclusive_waits = 0
+        self._exclusive_wait_seconds = 0.0
 
     async def _execute(self, name: str, callback, context, *args, **kwargs):
         try:
@@ -296,13 +298,19 @@ class _ScheduledExecutionCoordinator:
                             )
                         async with lock:
                             waited = time.monotonic() - wait_started
+                            if waited > 0:
+                                self._exclusive_waits += 1
+                                self._exclusive_wait_seconds += waited
                             if waited >= 0.05:
                                 logger.info(
                                     "scheduled_execution: exclusive group acquired "
-                                    "(job=%s group=%s waited=%.3fs)",
+                                    "(job=%s group=%s waited=%.3fs "
+                                    "waits=%d total_wait=%.3fs)",
                                     name,
                                     exclusive_group,
                                     waited,
+                                    self._exclusive_waits,
+                                    self._exclusive_wait_seconds,
                                 )
                             return await self._execute(
                                 name, callback, context, *args, **kwargs
@@ -350,6 +358,21 @@ class _ScheduledExecutionCoordinator:
         self._tasks.clear()
         self._running.clear()
         self._active_counts.clear()
+
+    def backpressure_metrics(self) -> dict[str, float]:
+        """Return scheduler wait counters for runtime/load observations."""
+        return {
+            "exclusive_group_waits": float(self._exclusive_waits),
+            "exclusive_group_wait_seconds": round(
+                self._exclusive_wait_seconds,
+                3,
+            ),
+        }
+
+    def reset_backpressure_metrics(self) -> None:
+        """Start a fresh scheduler observation window without replacing locks."""
+        self._exclusive_waits = 0
+        self._exclusive_wait_seconds = 0.0
 
 
 _scheduled_execution_coordinator = _ScheduledExecutionCoordinator()
@@ -534,6 +557,11 @@ async def post_init(application: Application) -> None:
     # Every process/application restart gets a disposable monitoring session.
     # Persistent evidence, grading, learning, and PLAY history remain in SQLite.
     await _scheduled_execution_coordinator.shutdown()
+    logger.info(
+        "Previous scheduler backpressure counters: %s",
+        _scheduled_execution_coordinator.backpressure_metrics(),
+    )
+    _scheduled_execution_coordinator.reset_backpressure_metrics()
     await reset_monitoring_runtime_state()
     logger.info(
         "New monitoring session initialised — session=%s; persistent history preserved",
@@ -545,6 +573,10 @@ async def post_init(application: Application) -> None:
 
     _db = Database(config.DATABASE_URL)
     await _db.init()
+    logger.info(
+        "SQLite backpressure counters reset: %s",
+        get_sqlite_backpressure_metrics(config.DATABASE_URL, reset=True),
+    )
     # The continuous evidence/history collector owns a separate connection
     # pool so its long full-universe run cannot make command/report reads wait
     # behind storage work.

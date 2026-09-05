@@ -73,6 +73,7 @@ from database import (
     CLVRecord,
     UnderdogSnapshotRecord,
     SteamRecord,
+    get_sqlite_backpressure_metrics,
 )
 # AlertCLVSeed rows are seeded by the existing Underdog delivery/harvest
 # pathway; keep the name visible here as an intentional compatibility marker.
@@ -205,8 +206,9 @@ logger = logging.getLogger(__name__)
 class _CycleTiming:
     """In-memory aggregated timing for one monitoring cycle."""
 
-    def __init__(self, cycle_id: int) -> None:
+    def __init__(self, cycle_id: int, database_url: str | None = None) -> None:
         self.cycle_id = cycle_id
+        self.database_url = database_url
         self.started_at = datetime.utcnow()
         self.started_mono = time.monotonic()
         self._open: dict[str, tuple[datetime, float]] = {}
@@ -219,6 +221,12 @@ class _CycleTiming:
         }
         self._overlap_start: set[str] = set()
         self._overlap_during: set[str] = set()
+        self._backpressure_start = (
+            get_sqlite_backpressure_metrics(database_url)
+            if database_url
+            else {}
+        )
+        self._persistence_start = _persistence_metrics_snapshot()
 
     def start(self, name: str) -> None:
         self._open[name] = (datetime.utcnow(), time.monotonic())
@@ -308,6 +316,28 @@ class _CycleTiming:
         self.finish_open()
         ended_at = datetime.utcnow()
         total = max(0.0, time.monotonic() - self.started_mono)
+        backpressure_now = (
+            get_sqlite_backpressure_metrics(self.database_url)
+            if self.database_url
+            else {}
+        )
+        backpressure = {
+            key: round(
+                max(0.0, float(backpressure_now.get(key, 0.0)))
+                - float(self._backpressure_start.get(key, 0.0)),
+                3,
+            )
+            for key in backpressure_now
+        }
+        persistence_now = _persistence_metrics_snapshot()
+        persistence = {
+            key: round(
+                max(0.0, float(persistence_now.get(key, 0.0)))
+                - float(self._persistence_start.get(key, 0.0)),
+                3,
+            )
+            for key in persistence_now
+        }
         return {
             "cycle_id": self.cycle_id,
             "start": self.started_at.isoformat(timespec="milliseconds") + "Z",
@@ -339,6 +369,8 @@ class _CycleTiming:
                     }
                     for key, value in self.metrics["database"].items()
                 },
+                "backpressure": backpressure,
+                "persistence": persistence,
                 "scoring_overlap": sorted(self._overlap_during),
             },
         }
@@ -349,10 +381,32 @@ _active_jobs: dict[str, float] = {}
 _db_persistence_queue: Optional[asyncio.Queue] = None
 _db_persistence_worker_task: Optional[asyncio.Task] = None
 _db_persistence_loop = None
+_db_persistence_metrics = {
+    "enqueued": 0.0,
+    "completed": 0.0,
+    "failed": 0.0,
+    "queue_full": 0.0,
+    "drain_calls": 0.0,
+    "drain_waits": 0.0,
+    "drain_wait_seconds": 0.0,
+}
 # Keep each snapshot transaction bounded. A full Underdog feed can contain
 # several thousand observations; one giant ORM flush monopolizes SQLite and
 # creates a WAL burst that blocks the independent evidence writer.
 _UNDERDOG_SNAPSHOT_WRITE_BATCH_SIZE = 200
+
+
+def _persistence_metric(name: str, amount: float = 1.0) -> None:
+    _db_persistence_metrics[name] = (
+        _db_persistence_metrics.get(name, 0.0) + float(amount)
+    )
+
+
+def _persistence_metrics_snapshot() -> dict[str, float]:
+    return {
+        key: float(value)
+        for key, value in _db_persistence_metrics.items()
+    }
 
 
 async def _db_persistence_worker() -> None:
@@ -365,10 +419,12 @@ async def _db_persistence_worker() -> None:
             operation = factory()
             if inspect.isawaitable(operation):
                 await operation
+            _persistence_metric("completed")
             logger.debug("database persistence completed: %s", label)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            _persistence_metric("failed")
             logger.warning(
                 "database persistence deferred operation failed: %s — %s",
                 label,
@@ -552,7 +608,9 @@ def _enqueue_db_persistence(label: str, factory) -> bool:
     assert _db_persistence_queue is not None
     try:
         _db_persistence_queue.put_nowait((label, factory))
+        _persistence_metric("enqueued")
     except asyncio.QueueFull:
+        _persistence_metric("queue_full")
         logger.warning(
             "database persistence queue full; dropping deferred operation: %s",
             label,
@@ -571,6 +629,7 @@ async def drain_db_persistence_worker() -> bool:
     """
     queue = _db_persistence_queue
     task = _db_persistence_worker_task
+    _persistence_metric("drain_calls")
     if queue is None or task is None:
         return True
     if task.done():
@@ -584,7 +643,12 @@ async def drain_db_persistence_worker() -> bool:
             return False
         return True
     pending = queue.qsize()
+    wait_started = time.monotonic()
     await queue.join()
+    wait_seconds = time.monotonic() - wait_started
+    _persistence_metric("drain_wait_seconds", wait_seconds)
+    if pending:
+        _persistence_metric("drain_waits")
     if pending:
         logger.debug(
             "database persistence barrier drained %d queued operations",
@@ -3749,7 +3813,10 @@ async def underdog_job(context) -> None:
     now      = datetime.utcnow()
     global _cycle_sequence
     _cycle_sequence += 1
-    _cycle_timing = _CycleTiming(_cycle_sequence)
+    _cycle_timing = _CycleTiming(
+        _cycle_sequence,
+        getattr(db, "_url", None),
+    )
     _job_activity_start("underdog")
     # Allow the complete current book to use the existing cadence. The hard
     # stop is only a safety boundary: it never creates a remainder queue or
@@ -6612,6 +6679,9 @@ async def underdog_job(context) -> None:
                 module = "market_engine",
                 error  = "bridge or lifecycle update failed",
             )
+    # Release only after health, timing, tracking, snapshot, and history
+    # persistence are complete. There is no deferred remainder handoff.
+    await drain_db_persistence_worker()
     _cycle_timing.finish("final_bookkeeping")
     logger.info(
         "underdog_cycle_timing: %s",
@@ -6621,9 +6691,6 @@ async def underdog_job(context) -> None:
         ),
     )
     _job_activity_end("underdog")
-    # Release only after health, timing, tracking, snapshot, and history
-    # persistence are complete. There is no deferred remainder handoff.
-    await drain_db_persistence_worker()
     _new_prop_stored_count = _eligible_new_props
     _new_prop_skip_reasons = {
         _reason: _count
