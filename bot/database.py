@@ -1941,6 +1941,7 @@ class Database:
                     PropOpportunityLog.id,
                     PropOpportunityLog.provider,
                     PropOpportunityLog.sport,
+                    PropOpportunityLog.recommendation,
                     PropOpportunityLog.result,
                     AlertCLVSeed.clv_pct,
                     AlertCLVSeed.alerted_at,
@@ -2027,6 +2028,7 @@ class Database:
             opportunity_id,
             provider,
             sport,
+            recommendation,
             outcome,
             clv_pct,
             alerted_at,
@@ -2039,6 +2041,7 @@ class Database:
                 int(seed_id or 0),
                 str(provider or "Underdog"),
                 str(sport or "UNKNOWN"),
+                str(recommendation or "OVER").upper(),
                 str(outcome or "PENDING").upper(),
                 float(clv_pct),
             )
@@ -2046,11 +2049,29 @@ class Database:
             if previous is None or candidate[:2] > previous[:2]:
                 latest_clv[int(opportunity_id)] = candidate
 
-        for _alerted_at, _seed_id, provider, sport, outcome, clv_pct in latest_clv.values():
+        for (
+            _alerted_at,
+            _seed_id,
+            provider,
+            sport,
+            recommendation,
+            outcome,
+            clv_pct,
+        ) in latest_clv.values():
             # CLV coverage is intentionally based on completed directional
             # results only; pending picks do not make the denominator larger.
             if outcome not in {"HIT", "MISS", "PUSH"}:
                 continue
+            directional_outcome = (
+                "HIT"
+                if outcome == "PUSH"
+                else (
+                    "HIT"
+                    if (recommendation == "OVER" and outcome == "HIT")
+                    or (recommendation == "UNDER" and outcome == "MISS")
+                    else "MISS"
+                )
+            )
             for target, key in ((by_sport, sport), (by_provider, provider)):
                 row = target.setdefault(
                     key,
@@ -2066,7 +2087,7 @@ class Database:
                     },
                 )
                 row.setdefault("_clv_values", {"HIT": [], "MISS": [], "PUSH": []})[
-                    outcome
+                    "PUSH" if outcome == "PUSH" else directional_outcome
                 ].append(clv_pct)
 
         for target in (by_sport, by_provider):
