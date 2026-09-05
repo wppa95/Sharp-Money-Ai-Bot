@@ -310,6 +310,16 @@ async def test_launcher_exclusive_group_waits_for_other_heavy_job():
     assert not coordinator._tasks
 
 
+def test_production_monitor_and_history_jobs_share_heavy_job_ownership_group():
+    import inspect
+    import main
+
+    source = inspect.getsource(main.post_init)
+    assert 'name="underdog_monitor"' in source
+    assert 'name="player_history_collector"' in source
+    assert "use_exclusive_group=False" not in source
+
+
 @pytest.mark.asyncio
 async def test_launcher_long_run_is_not_cancelled_by_later_trigger():
     from main import _ScheduledExecutionCoordinator

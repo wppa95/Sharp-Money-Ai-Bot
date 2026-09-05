@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import os
+import time
 import weakref
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -39,6 +40,15 @@ _DB_WRITE_RETRY_DELAYS = (0.15, 0.5)
 _PRIZEPICKS_EXTERNAL_PREFIX = "PrizePicks::"
 _TELEGRAM_DELIVERY_KEY_VERSION = "v1"
 
+# Keep both Database objects (monitoring and history) on an explicit, bounded
+# SQLite pool.  The process-wide session gate below makes that capacity a
+# shared budget across both pools, so one lane cannot exhaust its own pool
+# while the other lane is idle.
+_SQLITE_POOL_SIZE = 8
+_SQLITE_MAX_OVERFLOW = 0
+_SQLITE_POOL_TIMEOUT_SECONDS = 30
+_SQLITE_SESSION_LIMIT = _SQLITE_POOL_SIZE
+
 # SQLite has one writer slot per database file.  The bot intentionally keeps a
 # second Database object for the long-running player-history collector, but
 # both objects point at the same SQLite URL.  A per-instance lock would
@@ -46,6 +56,9 @@ _TELEGRAM_DELIVERY_KEY_VERSION = "v1"
 # every session from every in-process pool crosses the same gate.
 _SQLITE_WRITER_LOCKS: weakref.WeakKeyDictionary[
     asyncio.AbstractEventLoop, dict[str, asyncio.Lock]
+] = weakref.WeakKeyDictionary()
+_SQLITE_SESSION_GATES: weakref.WeakKeyDictionary[
+    asyncio.AbstractEventLoop, dict[str, asyncio.Semaphore]
 ] = weakref.WeakKeyDictionary()
 
 
@@ -56,6 +69,18 @@ def _sqlite_writer_lock(url: str) -> asyncio.Lock | None:
     loop = asyncio.get_running_loop()
     locks_for_loop = _SQLITE_WRITER_LOCKS.setdefault(loop, {})
     return locks_for_loop.setdefault(str(url), asyncio.Lock())
+
+
+def _sqlite_session_gate(url: str) -> asyncio.Semaphore | None:
+    """Return the shared connection budget for one SQLite URL."""
+    if not str(url).startswith("sqlite"):
+        return None
+    loop = asyncio.get_running_loop()
+    gates_for_loop = _SQLITE_SESSION_GATES.setdefault(loop, {})
+    return gates_for_loop.setdefault(
+        str(url),
+        asyncio.Semaphore(_SQLITE_SESSION_LIMIT),
+    )
 
 
 def _statement_is_write(statement) -> bool:
@@ -117,15 +142,29 @@ class _LockedAsyncSession:
     ``flush``/DML/commit acquire the gate and hold it through the transaction.
     """
 
-    def __init__(self, session: AsyncSession, lock: asyncio.Lock | None) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        lock: asyncio.Lock | None,
+        session_gate: asyncio.Semaphore | None = None,
+    ) -> None:
         self._session = session
         self._lock = lock
+        self._session_gate = session_gate
+        self._session_gate_acquired = False
         self._acquired = False
 
     async def _acquire_writer(self) -> None:
         if self._lock is not None and not self._acquired:
+            started = time.monotonic()
             await self._lock.acquire()
             self._acquired = True
+            waited = time.monotonic() - started
+            if waited >= 0.05:
+                logger.info(
+                    "SQLite writer gate backpressure: waited %.3fs",
+                    waited,
+                )
 
     def _release_writer(self) -> None:
         if self._acquired:
@@ -133,7 +172,23 @@ class _LockedAsyncSession:
             self._acquired = False
 
     async def __aenter__(self) -> _WriteAwareAsyncSession:
-        await self._session.__aenter__()
+        if self._session_gate is not None:
+            started = time.monotonic()
+            await self._session_gate.acquire()
+            self._session_gate_acquired = True
+            waited = time.monotonic() - started
+            if waited >= 0.05:
+                logger.info(
+                    "SQLite session budget backpressure: waited %.3fs",
+                    waited,
+                )
+        try:
+            await self._session.__aenter__()
+        except BaseException:
+            if self._session_gate_acquired:
+                self._session_gate.release()
+                self._session_gate_acquired = False
+            raise
         return _WriteAwareAsyncSession(self._session, self._lock, self)
 
     async def __aexit__(self, exc_type, exc_value, traceback) -> object:
@@ -141,6 +196,9 @@ class _LockedAsyncSession:
             return await self._session.__aexit__(exc_type, exc_value, traceback)
         finally:
             self._release_writer()
+            if self._session_gate_acquired:
+                self._session_gate.release()
+                self._session_gate_acquired = False
 
     def __getattr__(self, name: str):
         return getattr(self._session, name)
@@ -1015,11 +1073,20 @@ class Database:
         _connect_args: dict = {}
         if self._url.startswith("sqlite"):
             _connect_args["timeout"] = 30
-        self._engine = create_async_engine(
-            self._url,
-            echo=False,
-            connect_args=_connect_args,
-        )
+        _engine_kwargs = {
+            "echo": False,
+            "connect_args": _connect_args,
+        }
+        # SQLAlchemy's in-memory SQLite dialect uses StaticPool and rejects
+        # QueuePool arguments.  Production uses the file-backed path, where
+        # the explicit bounded pool prevents unmeasured connection growth.
+        if self._url.startswith("sqlite") and ":memory:" not in self._url:
+            _engine_kwargs.update(
+                pool_size=_SQLITE_POOL_SIZE,
+                max_overflow=_SQLITE_MAX_OVERFLOW,
+                pool_timeout=_SQLITE_POOL_TIMEOUT_SECONDS,
+            )
+        self._engine = create_async_engine(self._url, **_engine_kwargs)
         self._session_factory = async_sessionmaker(
             self._engine, class_=AsyncSession, expire_on_commit=False
         )
@@ -1077,6 +1144,7 @@ class Database:
         return _LockedAsyncSession(
             session,
             _sqlite_writer_lock(self._url),
+            _sqlite_session_gate(self._url),
         )
     async def prune_prop_line_history(self, keep_days: int = 14) -> int:
         """Delete PropLineHistory rows older than keep_days. Returns rows deleted."""

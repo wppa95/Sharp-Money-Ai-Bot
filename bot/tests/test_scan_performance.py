@@ -82,7 +82,7 @@ def test_poll_interval_default_120s():
 def test_coordinator_in_underdog_monitor():
     """underdog_monitor uses the shared coalescing coordinator."""
     src = _src("main.py")
-    assert '_coordinated_job("underdog_monitor", underdog_job)' in src
+    assert '_coordinated_job("underdog_monitor", _underdog_monitor_cycle)' in src
 
 
 def test_no_scheduler_max_instances_override():

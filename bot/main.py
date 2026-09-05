@@ -15,6 +15,7 @@ from functools import wraps
 import logging
 import os
 import sys
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any, Optional
@@ -285,6 +286,7 @@ class _ScheduledExecutionCoordinator:
                         lock = self._exclusive_locks.setdefault(
                             exclusive_group, asyncio.Lock()
                         )
+                        wait_started = time.monotonic()
                         if lock.locked():
                             logger.info(
                                 "scheduled_execution: waiting for exclusive group "
@@ -293,6 +295,15 @@ class _ScheduledExecutionCoordinator:
                                 exclusive_group,
                             )
                         async with lock:
+                            waited = time.monotonic() - wait_started
+                            if waited >= 0.05:
+                                logger.info(
+                                    "scheduled_execution: exclusive group acquired "
+                                    "(job=%s group=%s waited=%.3fs)",
+                                    name,
+                                    exclusive_group,
+                                    waited,
+                                )
                             return await self._execute(
                                 name, callback, context, *args, **kwargs
                             )
@@ -720,16 +731,14 @@ async def post_init(application: Application) -> None:
         jq.run_repeating(_coordinated_job("clv_seeder", _clv_seed_job), interval=900, first=120, name="clv_seeder")
         # CLV harvest job — every hour (processes seeds after game_time passes)
         jq.run_repeating(_coordinated_job("clv_harvester", _clv_harvest_job), interval=3600, first=300, name="clv_harvester")
-        # Player-result collection uses the dedicated history pool and its own
-        # independent scheduler monitor. It rotates through all supported
-        # active-provider targets, fetches them concurrently within this
-        # cadence, flushes completed batches, and never calls PropLine;
-        # PropLine remains on its own request cadence.
+        # Player-result collection uses the dedicated history pool, but shares
+        # the heavy-job ownership group with monitoring. It fetches supported
+        # active-provider targets concurrently within its cadence, then writes
+        # bounded batches only after the monitoring persistence barrier releases.
         jq.run_repeating(
             _coordinated_job(
                 "player_history_collector",
                 player_history_collector_job,
-                use_exclusive_group=False,
             ),
             interval=config.PLAYER_HISTORY_POLL_INTERVAL,
             first=90,
