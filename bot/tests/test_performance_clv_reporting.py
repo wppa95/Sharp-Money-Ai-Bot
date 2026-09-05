@@ -37,6 +37,20 @@ async def _opportunity(db, external_id: str, recommendation: str = "OVER"):
     )
 
 
+async def _fetch_opportunity(db, external_id: str):
+    from sqlalchemy import select
+    from database import PropOpportunityLog
+
+    async with db.session() as session:
+        result = await session.execute(
+            select(PropOpportunityLog).where(
+                PropOpportunityLog.external_id == external_id,
+                PropOpportunityLog.stat_type == "hits",
+            )
+        )
+        return result.scalar_one()
+
+
 async def _snapshot_and_seed(db, external_id: str, clv: float, *, offset: int = 0):
     from database import AlertCLVSeed, UnderdogSnapshotRecord
 
@@ -83,7 +97,7 @@ async def test_performance_summary_joins_clv_and_maps_under_direction(db):
         ("under-hit", "MISS"),  # raw result MISS is a directional UNDER hit
         ("no-clv", "HIT"),
     ):
-        row = await db.get_prop_opportunity(external_id, "hits")
+        row = await _fetch_opportunity(db, external_id)
         await db.grade_opportunity(row.id, result=result, actual_value=1.0)
 
     await _snapshot_and_seed(db, "over-hit", 4.0)
@@ -107,7 +121,7 @@ async def test_performance_summary_joins_clv_and_maps_under_direction(db):
 @pytest.mark.asyncio
 async def test_performance_summary_deduplicates_moving_snapshots(db):
     await _opportunity(db, "moving")
-    row = await db.get_prop_opportunity("moving", "hits")
+    row = await _fetch_opportunity(db, "moving")
     await db.grade_opportunity(row.id, result="HIT", actual_value=1.0)
 
     await _snapshot_and_seed(db, "moving", 1.0, offset=0)
