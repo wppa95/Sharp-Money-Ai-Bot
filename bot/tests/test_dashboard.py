@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import pytest
+import pytest_asyncio
 from datetime import datetime, timedelta
 
 import sys, os
@@ -37,7 +38,7 @@ from engine.dashboard import (
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
-@pytest.fixture()
+@pytest_asyncio.fixture(loop_scope="function")
 async def empty_db():
     """Provide an initialised in-memory Database for each test."""
     from database import Database
@@ -467,7 +468,7 @@ class TestDashboardEngineEmpty:
 class TestDashboardEngineWithData:
     """DashboardEngine against a DB with some records."""
 
-    @pytest.fixture()
+    @pytest_asyncio.fixture(loop_scope="function")
     async def db_with_ev(self, empty_db):
         """DB seeded with a few EV records (alerted=True)."""
         from database import EVRecord
