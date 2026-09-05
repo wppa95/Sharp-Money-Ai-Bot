@@ -1914,6 +1914,10 @@ class Database:
         monitoring summary.  It keeps `/performance` and `/grade` responsive
         on large historical databases while preserving the V4 population
         boundary: only OVER/UNDER opportunities are included.
+
+        CLV is joined separately through the exact Underdog snapshot that
+        created a seed.  A CLVRecord has no opportunity/source identifier, so
+        joining it directly to a graded opportunity would be ambiguous.
         """
         async with self.session() as s:
             result = await s.execute(
@@ -1930,6 +1934,45 @@ class Database:
                     PropOpportunityLog.sport,
                     PropOpportunityLog.recommendation,
                     PropOpportunityLog.result,
+                )
+            )
+            clv_result = await s.execute(
+                select(
+                    PropOpportunityLog.id,
+                    PropOpportunityLog.provider,
+                    PropOpportunityLog.sport,
+                    PropOpportunityLog.result,
+                    AlertCLVSeed.clv_pct,
+                    AlertCLVSeed.alerted_at,
+                    AlertCLVSeed.id,
+                )
+                .select_from(PropOpportunityLog)
+                .join(
+                    UnderdogSnapshotRecord,
+                    and_(
+                        UnderdogSnapshotRecord.external_id
+                        == PropOpportunityLog.external_id,
+                        UnderdogSnapshotRecord.stat_type
+                        == PropOpportunityLog.stat_type,
+                        UnderdogSnapshotRecord.sport
+                        == PropOpportunityLog.sport,
+                    ),
+                )
+                .join(
+                    AlertCLVSeed,
+                    and_(
+                        AlertCLVSeed.source_table == "underdog_snapshots",
+                        AlertCLVSeed.source_id == UnderdogSnapshotRecord.id,
+                        AlertCLVSeed.clv_computed == True,  # noqa: E712
+                        AlertCLVSeed.clv_pct.isnot(None),
+                    ),
+                )
+                .where(
+                    PropOpportunityLog.recommendation.in_(("OVER", "UNDER")),
+                    or_(
+                        PropOpportunityLog.provider == "Underdog",
+                        PropOpportunityLog.provider.is_(None),
+                    ),
                 )
             )
 
@@ -1975,6 +2018,76 @@ class Database:
                         row["miss"] += count
                 else:
                     row["void"] += count
+
+        # One opportunity can have several snapshots/seeds as a line moves.
+        # Keep the latest computed seed for that opportunity so CLV samples
+        # cannot be inflated by repeated observations of one pick.
+        latest_clv: dict[int, tuple[datetime, int, str, str, str, float]] = {}
+        for (
+            opportunity_id,
+            provider,
+            sport,
+            outcome,
+            clv_pct,
+            alerted_at,
+            seed_id,
+        ) in clv_result.all():
+            if not _is_supported_tracking_sport(sport) or clv_pct is None:
+                continue
+            candidate = (
+                alerted_at or datetime.min,
+                int(seed_id or 0),
+                str(provider or "Underdog"),
+                str(sport or "UNKNOWN"),
+                str(outcome or "PENDING").upper(),
+                float(clv_pct),
+            )
+            previous = latest_clv.get(int(opportunity_id))
+            if previous is None or candidate[:2] > previous[:2]:
+                latest_clv[int(opportunity_id)] = candidate
+
+        for _alerted_at, _seed_id, provider, sport, outcome, clv_pct in latest_clv.values():
+            # CLV coverage is intentionally based on completed directional
+            # results only; pending picks do not make the denominator larger.
+            if outcome not in {"HIT", "MISS", "PUSH"}:
+                continue
+            for target, key in ((by_sport, sport), (by_provider, provider)):
+                row = target.setdefault(
+                    key,
+                    {
+                        "directional": 0,
+                        "pending": 0,
+                        "resolved": 0,
+                        "hit": 0,
+                        "miss": 0,
+                        "push": 0,
+                        "void": 0,
+                        "raw": {},
+                    },
+                )
+                row.setdefault("_clv_values", {"HIT": [], "MISS": [], "PUSH": []})[
+                    outcome
+                ].append(clv_pct)
+
+        for target in (by_sport, by_provider):
+            for row in target.values():
+                clv_values = row.pop("_clv_values", {})
+                for outcome in ("HIT", "MISS", "PUSH"):
+                    values = clv_values.get(outcome, [])
+                    row[f"clv_{outcome.lower()}_count"] = len(values)
+                    row[f"clv_{outcome.lower()}_avg"] = (
+                        sum(values) / len(values) if values else None
+                    )
+                clv_sample_count = sum(
+                    row[f"clv_{outcome.lower()}_count"]
+                    for outcome in ("HIT", "MISS", "PUSH")
+                )
+                row["clv_count"] = clv_sample_count
+                row["clv_coverage_pct"] = (
+                    clv_sample_count / (row["hit"] + row["miss"] + row["push"]) * 100
+                    if (row["hit"] + row["miss"] + row["push"])
+                    else None
+                )
         return {"by_sport": by_sport, "by_provider": by_provider}
 
     async def count_actionable_pick_records(self) -> int:

@@ -1774,10 +1774,25 @@ async def _send_performance_by_sport(
             rate = f"{hit / valid * 100:.0f}%" if valid else "—"
             void = int(row.get("void", 0) or 0)
             extra = f" · {void} void/other" if void else ""
+            clv_count = int(row.get("clv_count", 0) or 0)
+            clv_coverage = row.get("clv_coverage_pct")
+            clv_coverage_text = (
+                f"{clv_coverage:.0f}% graded"
+                if clv_coverage is not None
+                else "unavailable"
+            )
+
+            def _format_clv(key: str) -> str:
+                value = row.get(key)
+                return f"{value:+.2f}%" if value is not None else "—"
+
             lines.append(
                 f"<b>{_html.escape(str(sport))}</b> · {directional} picks\n"
                 f"  ✅ {hit}H  ❌ {miss}M  ➖ {push}P · "
-                f"{pending} pending · hit rate {rate}{extra}"
+                f"{pending} pending · hit rate {rate}{extra}\n"
+                f"  CLV H/M/P: {_format_clv('clv_hit_avg')} / "
+                f"{_format_clv('clv_miss_avg')} / {_format_clv('clv_push_avg')} "
+                f"· {clv_count} samples · {clv_coverage_text}"
             )
     lines += [
         "",
