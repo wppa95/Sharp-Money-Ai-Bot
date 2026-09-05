@@ -2023,7 +2023,9 @@ class Database:
         # One opportunity can have several snapshots/seeds as a line moves.
         # Keep the latest computed seed for that opportunity so CLV samples
         # cannot be inflated by repeated observations of one pick.
-        latest_clv: dict[int, tuple[datetime, int, str, str, str, float]] = {}
+        latest_clv: dict[
+            int, tuple[datetime, int, str, str, str, str, float]
+        ] = {}
         for (
             opportunity_id,
             provider,

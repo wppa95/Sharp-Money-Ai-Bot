@@ -40,3 +40,14 @@ All in `bot/market_engine.py`, after `ud_result.sent` in:
 `Database.seed_clv_from_ud_confirmation()` in `bot/database.py`.
 Uses ON CONFLICT DO UPDATE SET bet_odds=avg_odds WHERE bet_odds IS NULL —
 so calling twice doesn't overwrite a confirmed seed.
+
+## Performance-report join
+For reporting CLV beside hit/miss results, join `AlertCLVSeed` to
+`UnderdogSnapshotRecord` by `(source_table="underdog_snapshots", source_id=id)`,
+then join the snapshot to `PropOpportunityLog` by `(external_id, stat_type,
+sport)`. Use only computed seeds with non-null `clv_pct`, and keep the newest
+seed per opportunity when line movement created multiple snapshots.
+
+**Why:** `CLVRecord` stores the computed value but has no opportunity/source
+identifier, so joining it directly to graded opportunities can misattribute
+CLV or count one pick multiple times. Missing CLV must remain unavailable.
