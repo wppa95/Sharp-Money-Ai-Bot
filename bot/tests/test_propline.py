@@ -12,6 +12,8 @@ import pytest
 import providers.propline as propline_module
 from providers.propline import (
     PROPLINE_DAILY_REQUEST_LIMIT,
+    PROPLINE_ENDPOINT_DAILY_REQUEST_LIMIT,
+    PROPLINE_ENDPOINT_REQUESTS_PER_HOUR,
     PROPLINE_MAX_REQUESTS_PER_HOUR,
     PropLineRequestBudget,
     PropLineClient,
@@ -56,6 +58,16 @@ def isolated_propline_limiter(monkeypatch):
         propline_module,
         "_DEFAULT_PROPLINE_REQUEST_LIMITER",
         limiter,
+    )
+    endpoint_limiter = PropLineRequestLimiter(
+        limit=PROPLINE_ENDPOINT_REQUESTS_PER_HOUR,
+        clock=lambda: virtual_time[0],
+        sleep=advance,
+    )
+    monkeypatch.setattr(
+        propline_module,
+        "_DEFAULT_PROPLINE_ENDPOINT_REQUEST_LIMITER",
+        endpoint_limiter,
     )
     return limiter
 from providers.prop_provider import PlayerProp
@@ -513,6 +525,7 @@ def test_client_default_pacing_supports_one_request_per_120_second_cycle():
 
     assert client.min_request_interval == pytest.approx(20.0)
     assert client.request_limiter.effective_limit == 180
+    assert client.endpoint_request_limiter.effective_limit == 27
 
 
 def test_shared_limiter_caps_rate_and_continuously_spaces_requests():
@@ -1204,6 +1217,8 @@ def test_propline_default_budget_matches_plan_without_exceeding_hourly_limit():
 
     assert PROPLINE_DAILY_REQUEST_LIMIT == 5_000
     assert budget.limit == 5_000
+    assert PROPLINE_ENDPOINT_DAILY_REQUEST_LIMIT == 650
+    assert PROPLINE_ENDPOINT_REQUESTS_PER_HOUR == 27
     assert PROPLINE_MAX_REQUESTS_PER_HOUR == 190
 
 

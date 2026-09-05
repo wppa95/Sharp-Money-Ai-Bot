@@ -180,7 +180,7 @@ async def test_underdog_cycle_runs_grading_serially_after_monitoring(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_launcher_discards_overlapping_trigger_without_queueing():
+async def test_launcher_queues_overlapping_trigger_without_overlap():
     from main import _ScheduledExecutionCoordinator
 
     coordinator = _ScheduledExecutionCoordinator()
@@ -199,16 +199,16 @@ async def test_launcher_discards_overlapping_trigger_without_queueing():
     await started.wait()
     await first_launcher
 
-    # The active task is still blocked, but the second launcher returns
-    # immediately and does not create a queued execution.
+    # The active task is still blocked; the second trigger is retained but
+    # waits for the same named execution slot.
     await launcher(None)
     assert calls == 1
-    assert len(coordinator._tasks) == 1
+    assert len(coordinator._tasks) == 2
 
     release.set()
     await asyncio.gather(*list(coordinator._tasks))
     await asyncio.sleep(0)
-    assert calls == 1
+    assert calls == 2
     assert not coordinator._running
     assert not coordinator._tasks
 
@@ -346,7 +346,7 @@ async def test_launcher_long_run_is_not_cancelled_by_later_trigger():
     await launcher(None)
     await asyncio.sleep(0)
     assert not cancelled
-    assert len(coordinator._tasks) == 1
+    assert len(coordinator._tasks) == 2
 
     release.set()
     await asyncio.gather(*list(coordinator._tasks))

@@ -199,14 +199,12 @@ def build_application() -> Application:
 
 
 class _ScheduledExecutionCoordinator:
-    """Run named jobs independently without building a scheduler backlog.
+    """Run named jobs independently without overlapping an existing execution.
 
     JobQueue timers can fire again while an async callback is still running.
-    A later trigger for the same named job is normally coalesced: the active
-    execution owns that job's resources, and the next timer tick will provide
-    a fresh opportunity after it finishes. Jobs explicitly marked
-    ``allow_overlap`` get an independent worker task for every trigger.
-    Different named jobs remain independent and may run concurrently.
+    Every trigger is retained and waits for its named execution slot instead of
+    coalescing, cancelling, or skipping another run. Jobs explicitly marked
+    ``allow_overlap`` remain independent worker tasks.
     """
 
     def __init__(self) -> None:
@@ -269,32 +267,30 @@ class _ScheduledExecutionCoordinator:
         """
         @wraps(callback)
         async def _launcher(context, *args, **kwargs):
-            if name in self._running and not allow_overlap:
-                logger.info(
-                    "scheduled_execution: coalescing overlapping trigger (%s)",
-                    name,
-                )
-                return None
             # Claim synchronously before creating the task. This closes the
             # small scheduling window where two JobQueue callbacks could both
-            # otherwise enqueue the same named job. Overlapping jobs use a
-            # count so one completion cannot clear another active worker.
+            # otherwise miss the active-state telemetry. Queued jobs use a
+            # count so one completion cannot clear another waiting worker.
             self._running.add(name)
             self._active_counts[name] = self._active_counts.get(name, 0) + 1
 
             async def _run_once():
                 try:
-                    if exclusive_group:
+                    execution_slot = (
+                        exclusive_group
+                        or (None if allow_overlap else f"job:{name}")
+                    )
+                    if execution_slot:
                         lock = self._exclusive_locks.setdefault(
-                            exclusive_group, asyncio.Lock()
+                            execution_slot, asyncio.Lock()
                         )
                         wait_started = time.monotonic()
                         if lock.locked():
                             logger.info(
-                                "scheduled_execution: waiting for exclusive group "
-                                "(job=%s group=%s)",
+                                "scheduled_execution: waiting for execution slot "
+                                "(job=%s slot=%s)",
                                 name,
-                                exclusive_group,
+                                execution_slot,
                             )
                         async with lock:
                             waited = time.monotonic() - wait_started
@@ -303,11 +299,11 @@ class _ScheduledExecutionCoordinator:
                                 self._exclusive_wait_seconds += waited
                             if waited >= 0.05:
                                 logger.info(
-                                    "scheduled_execution: exclusive group acquired "
-                                    "(job=%s group=%s waited=%.3fs "
+                                    "scheduled_execution: execution slot acquired "
+                                    "(job=%s slot=%s waited=%.3fs "
                                     "waits=%d total_wait=%.3fs)",
                                     name,
-                                    exclusive_group,
+                                    execution_slot,
                                     waited,
                                     self._exclusive_waits,
                                     self._exclusive_wait_seconds,

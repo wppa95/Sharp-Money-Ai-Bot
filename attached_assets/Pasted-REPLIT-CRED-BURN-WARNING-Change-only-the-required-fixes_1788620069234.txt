@@ -1,0 +1,55 @@
+REPLIT CRED BURN WARNING.
+
+Change only the required fixes below.
+Do not redesign the framework.
+Do not add max_instances.
+Do not rewrite the scheduler.
+Do not restore the DB.
+Do not change Telegram send policy.
+Do not run extra audits, tests, refactors, docs, or cleanup.
+
+REQUIRED FIXES
+
+1. Every existing job gets its own scheduler or monitor.
+No overlapping jobs.
+No job coalescing, canceling, or skipping another job.
+Current bug: coalescing overlapping trigger on underdog_monitor and player_history_collector.
+
+2. PropLine budget.
+5000/day cap.
+180/hr = 1 request / 20 seconds = 4320/day.
+Use 650 of the remaining 680 for PropLine API endpoint calls, spread over 24 hours ≈ 27/hr.
+Leave ~30 unused.
+Fix bad sport keys for every sport.
+Do not mark complete=True when observations=0 and pending>0, for any sport.
+Do not spend budget on empty scans, for any sport.
+
+Current bug:
+prizepicks_cycle: provider=PrizePicks sport=paced fetch_succeeded=true observations=0 persisted=0 evaluated=0 actionable=0 delivered=0
+paced is not a sport. Do not treat a paced/empty cycle as a successful sport fetch.
+
+3. Underdog is ingesting 5k+ props but evaluating 1 at a time.
+Current bug:
+underdog_cycle_bottleneck: deadline reached during new-prop hit rates
+deadline reached after 1/5099 observations; no remainder queue
+underdog_job: new_props=1 evaluated=1 qualified=0 delivered=0
+1/5099 is not acceptable.
+Evaluate more than one at a time.
+Full persist. No leftovers.
+
+4. Check if Underdog monitoring can finish in the 2-minute cadence.
+Current run is ~220s, which causes coalesce/skips.
+The cycle is dying at the new-prop hit-rate step after 1 observation.
+If it can fit ≤120s without skipping props, move it to 2 minutes.
+If it cannot, report the slow step and stop. Do not force it.
+
+5. Sports with evidence should alert.
+MLB and NBA are not the only sports.
+
+6. Every observed prop is tracked for grading / hit / miss.
+
+7. Telegram command path is crashing.
+2026-09-05 14:26:12 ERROR commands - Update None caused error: httpx.ReadError
+Do not let a dropped HTTP read kill the update handler.
+
+STOP when these 7 are done.

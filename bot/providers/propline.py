@@ -156,6 +156,7 @@ class PropLineNotFoundError(PropLineError):
 
 
 PROPLINE_DAILY_REQUEST_LIMIT = 5_000
+PROPLINE_ENDPOINT_DAILY_REQUEST_LIMIT = 650
 
 
 class PropLineRequestBudget:
@@ -209,11 +210,15 @@ class PropLineRequestBudget:
 PROPLINE_RECOVERY_REQUESTS_PER_HOUR = 160
 PROPLINE_DEFAULT_REQUESTS_PER_HOUR = 180
 PROPLINE_MAX_REQUESTS_PER_HOUR = 190
+PROPLINE_ENDPOINT_REQUESTS_PER_HOUR = 27
 PROPLINE_RECOVERY_MIN_REQUEST_INTERVAL = (
     3600.0 / PROPLINE_RECOVERY_REQUESTS_PER_HOUR
 )
 PROPLINE_MIN_REQUEST_INTERVAL = 3600.0 / PROPLINE_DEFAULT_REQUESTS_PER_HOUR
 _DEFAULT_PROPLINE_REQUEST_BUDGET = PropLineRequestBudget(PROPLINE_DAILY_REQUEST_LIMIT)
+_DEFAULT_PROPLINE_ENDPOINT_REQUEST_BUDGET = PropLineRequestBudget(
+    PROPLINE_ENDPOINT_DAILY_REQUEST_LIMIT
+)
 
 
 def _propline_request_kind(url: str) -> str:
@@ -415,6 +420,9 @@ class PropLineRequestLimiter:
 
 
 _DEFAULT_PROPLINE_REQUEST_LIMITER = PropLineRequestLimiter()
+_DEFAULT_PROPLINE_ENDPOINT_REQUEST_LIMITER = PropLineRequestLimiter(
+    PROPLINE_ENDPOINT_REQUESTS_PER_HOUR
+)
 
 
 @dataclass(frozen=True)
@@ -2271,6 +2279,8 @@ class PropLineClient:
         clock: Callable[[], float] = time.monotonic,
         request_budget: Optional[PropLineRequestBudget] = None,
         request_limiter: Optional[PropLineRequestLimiter] = None,
+        endpoint_request_budget: Optional[PropLineRequestBudget] = None,
+        endpoint_request_limiter: Optional[PropLineRequestLimiter] = None,
     ) -> None:
         self.api_key = api_key if api_key is not None else os.getenv("PROPLINE_API_KEY", "")
         self.api_url = (
@@ -2297,6 +2307,10 @@ class PropLineClient:
         self._sports_cache_clock_at: Optional[float] = None
         self._sports_discovery_failed = False
         self.request_budget = request_budget or _DEFAULT_PROPLINE_REQUEST_BUDGET
+        self.endpoint_request_budget = (
+            endpoint_request_budget
+            or _DEFAULT_PROPLINE_ENDPOINT_REQUEST_BUDGET
+        )
         self._request_day = datetime.utcnow().date()
         self._request_count = 0
         self._last_success_by_scope: dict[str, PropLineFetchResult] = {}
@@ -2311,6 +2325,10 @@ class PropLineClient:
         self._endpoint_cache_clock: dict[str, float] = {}
         self.request_limiter = request_limiter or _DEFAULT_PROPLINE_REQUEST_LIMITER
         self.request_limiter.configure_min_interval(self.min_request_interval)
+        self.endpoint_request_limiter = (
+            endpoint_request_limiter
+            or _DEFAULT_PROPLINE_ENDPOINT_REQUEST_LIMITER
+        )
 
     @property
     def is_configured(self) -> bool:
@@ -2374,6 +2392,7 @@ class PropLineClient:
     def backoff_remaining(self) -> float:
         return max(
             self.request_limiter.backoff_remaining,
+            self.endpoint_request_limiter.backoff_remaining,
             max(0.0, self._backoff_until - self._clock()),
         )
 
@@ -2389,8 +2408,14 @@ class PropLineClient:
     def daily_request_limit(self, value: int) -> None:
         self.request_budget.limit = max(1, int(value))
 
-    def _reserve_request(self) -> bool:
+    def _reserve_request(self, *, endpoint: bool = False) -> bool:
         self._reset_daily_budget_if_needed()
+        if endpoint and self.endpoint_request_budget.remaining <= 0:
+            return False
+        if self.request_budget.remaining <= 0:
+            return False
+        if endpoint and not self.endpoint_request_budget.reserve():
+            return False
         if not self.request_budget.reserve():
             return False
         self._request_count += 1
@@ -2407,8 +2432,15 @@ class PropLineClient:
         """Perform one authorized request and account for it centrally."""
         if not self.api_key:
             raise PropLineError("PropLine API key is missing")
+        request_kind = _propline_request_kind(url)
+        is_endpoint_request = request_kind != "bulk"
+        request_limiter = (
+            self.endpoint_request_limiter
+            if is_endpoint_request
+            else self.request_limiter
+        )
         now = self._clock()
-        shared_backoff = self.request_limiter.backoff_remaining
+        shared_backoff = self.backoff_remaining
         if now < self._backoff_until or shared_backoff > 0:
             retry_after = max(
                 max(1.0, self._backoff_until - now),
@@ -2420,10 +2452,12 @@ class PropLineClient:
             )
         if self.request_budget.remaining <= 0:
             raise PropLineError("PropLine daily request budget exhausted")
-        await self.request_limiter.acquire()
+        if is_endpoint_request and self.endpoint_request_budget.remaining <= 0:
+            raise PropLineError("PropLine endpoint daily request budget exhausted")
+        await request_limiter.acquire()
         # Another client can receive a provider 429 while this request waits
         # for its rolling-hour slot. Never send during that shared cooldown.
-        shared_backoff = self.request_limiter.backoff_remaining
+        shared_backoff = self.backoff_remaining
         if shared_backoff > 0:
             raise PropLineRateLimitError(
                 "PropLine rate-limit backoff active",
@@ -2431,7 +2465,7 @@ class PropLineClient:
             )
         # Reserve immediately before network I/O. Waiting for a local rolling
         # slot or a shared cooldown must not consume the daily budget.
-        if not self._reserve_request():
+        if not self._reserve_request(endpoint=is_endpoint_request):
             raise PropLineError("PropLine daily request budget exhausted")
         self._last_request_at = self._clock()
 
@@ -2456,22 +2490,26 @@ class PropLineClient:
             }
             if json_body is not None:
                 request_kwargs["json"] = json_body
-            request_kind = _propline_request_kind(url)
-            self.request_limiter.record_attempt()
+            request_limiter.record_attempt()
             async with request_method(url, **request_kwargs) as response:
-                self.request_limiter.observe_provider_limit(response.headers)
+                request_limiter.observe_provider_limit(response.headers)
                 if response.status == 404:
                     raise PropLineNotFoundError(f"PropLine resource not found (HTTP {response.status})")
                 if response.status == 429:
                     retry_after = _retry_after_seconds(response)
                     self._backoff_until = self._clock() + retry_after
                     self.request_limiter.defer(retry_after)
-                    stats = self.request_stats
+                    self.endpoint_request_limiter.defer(retry_after)
+                    stats = {
+                        "attempted": request_limiter.attempted_count,
+                        "successful": request_limiter.successful_count,
+                        "rate_limited": request_limiter.rate_limited_count,
+                    }
                     logger.warning(
                         "PropLine 429: phase=%s rate=%d/hour kind=%s "
                         "attempted=%d successful=%d 429s=%d Retry-After=%.0fs",
-                        self.request_phase,
-                        self.request_rate_per_hour,
+                        request_limiter.phase,
+                        request_limiter.effective_limit,
                         request_kind,
                         stats["attempted"],
                         stats["successful"],
@@ -2485,23 +2523,28 @@ class PropLineClient:
                 if response.status in {408, 425, 502, 503, 504}:
                     retry_after = min(
                         900.0,
-                        max(30.0, 2.0 * self.request_limiter.min_interval),
+                        max(30.0, 2.0 * request_limiter.min_interval),
                     )
                     self._backoff_until = self._clock() + retry_after
                     self.request_limiter.defer(retry_after)
+                    self.endpoint_request_limiter.defer(retry_after)
                     raise PropLineError(
                         f"PropLine temporarily unavailable (HTTP {response.status})"
                     )
                 if response.status >= 400:
                     raise PropLineError(f"PropLine request failed (HTTP {response.status})")
                 payload = await response.json(content_type=None)
-                self.request_limiter.record_success()
-                stats = self.request_stats
+                request_limiter.record_success()
+                stats = {
+                    "attempted": request_limiter.attempted_count,
+                    "successful": request_limiter.successful_count,
+                    "rate_limited": request_limiter.rate_limited_count,
+                }
                 logger.info(
                     "PropLine request success: phase=%s rate=%d/hour kind=%s "
                     "attempted=%d successful=%d 429s=%d backoff=idle",
-                    self.request_phase,
-                    self.request_rate_per_hour,
+                    request_limiter.phase,
+                    request_limiter.effective_limit,
                     request_kind,
                     stats["attempted"],
                     stats["successful"],
@@ -4130,13 +4173,14 @@ class PropLineClient:
                 if (prop := normalize_propline_prizepicks_record(record, fetched_at=fetched_at))
                 is not None
             ]
+            snapshot_complete = complete and bool(props)
             logger.info(
                 "PropLine PrizePicks snapshot: sport=%s raw_records=%d "
                 "normalized_props=%d complete=%s",
                 sport_key or "__custom__",
                 len(raw_records),
                 len(props),
-                complete,
+                snapshot_complete,
             )
             if not complete:
                 logger.warning("PropLine snapshot incomplete: %s", pagination_error)
@@ -4149,7 +4193,8 @@ class PropLineClient:
                     normalized_prop_count=len(props),
                 )
             self._cache = PropLineFetchResult(
-                props, fetched_at, from_cache=False, succeeded=True, complete=True,
+                props, fetched_at, from_cache=False, succeeded=True,
+                complete=snapshot_complete,
                 raw_record_count=len(raw_records),
                 normalized_prop_count=len(props),
             )
@@ -4159,13 +4204,13 @@ class PropLineClient:
             self._cache_clock_by_scope[scope] = self._cache_clock_at
             result = PropLineFetchResult(
                 list(props), fetched_at, from_cache=False,
-                succeeded=True, complete=True,
+                succeeded=True, complete=snapshot_complete,
                 raw_record_count=len(raw_records),
                 normalized_prop_count=len(props),
             )
             self._last_success_by_scope[scope] = result
             self._snapshot_state_by_scope[scope] = PropLineSnapshotState(
-                complete=True,
+                complete=snapshot_complete,
                 last_successful_at=fetched_at,
             )
             return result

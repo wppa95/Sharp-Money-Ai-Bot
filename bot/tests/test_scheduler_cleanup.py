@@ -96,7 +96,7 @@ def test_registered_job_names_are_unique_and_no_legacy_monitors_are_active():
     assert "steam_checker" not in names
 
 
-def test_monitoring_jobs_use_coalescing_coordinator():
+def test_monitoring_jobs_use_non_overlapping_coordinator():
     jobs = {
         name: call for name, _, call in _registered_repeating_jobs()
     }

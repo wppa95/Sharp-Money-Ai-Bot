@@ -14,6 +14,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from httpx import ReadError
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
@@ -5719,6 +5720,12 @@ async def cmd_slipstats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Log errors raised by handlers and notify the user if possible."""
+    if isinstance(context.error, ReadError):
+        logger.warning(
+            "Telegram HTTP read dropped; update handler remains available: %s",
+            context.error,
+        )
+        return
     logger.error(
         "Update %s caused error: %s",
         update, context.error,

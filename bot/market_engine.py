@@ -789,6 +789,7 @@ _propline_request_lock: Optional[asyncio.Lock] = None
 _PROPLINE_EVIDENCE_TTL_SECONDS = 20 * 60
 _propline_current_observations: dict[tuple[str, str, str, str], object] = {}
 _propline_evidence_by_identity: dict[tuple[str, str, str], list[object]] = {}
+_propline_empty_sport_until: dict[str, float] = {}
 
 
 def propline_request_schedule_state() -> Optional[dict[str, object]]:
@@ -975,6 +976,7 @@ async def reset_monitoring_runtime_state() -> None:
     global _ud_scan_state, _ud_known_keys, _ud_scan_db_id, _prop_dedup_lock
     global _snapshot_cache, _analysis_engine, _confirmation_db, _propline_provider
     global _propline_current_observations, _propline_evidence_by_identity
+    global _propline_empty_sport_until
 
     current = asyncio.current_task()
     tasks = {
@@ -1023,6 +1025,7 @@ async def reset_monitoring_runtime_state() -> None:
     _propline_provider = None
     _propline_current_observations.clear()
     _propline_evidence_by_identity.clear()
+    _propline_empty_sport_until.clear()
 
 
 def _cache_propline_evidence(props: list[object]) -> None:
@@ -1124,7 +1127,25 @@ async def propline_request_scan_job(context) -> None:
         if not sports:
             logger.info("propline_request_scan: no active PrizePicks sports")
             return
-        start = _propline_request_cursor % len(sports)
+        now = time.monotonic()
+        eligible_indexes = [
+            index
+            for index, candidate in enumerate(sports)
+            if _propline_empty_sport_until.get(
+                str(candidate).strip().upper(), 0.0
+            ) <= now
+        ]
+        if not eligible_indexes:
+            logger.info(
+                "propline_request_scan: all active sports are in empty-slate "
+                "cooldown; requests=0"
+            )
+            return
+        cursor = _propline_request_cursor % len(sports)
+        start = next(
+            (index for index in eligible_indexes if index >= cursor),
+            eligible_indexes[0],
+        )
         sport = sports[start]
         _propline_request_cursor = (start + 1) % len(sports)
         fetch_result = getattr(provider, "fetch_props_for_sport_result", None)
@@ -1171,6 +1192,15 @@ async def propline_request_scan_job(context) -> None:
                     if key[0] and key[1] and key[2]:
                         _propline_pending_props[key] = prop
                 _cache_propline_evidence(props)
+                empty_key = str(sport).strip().upper()
+                if props:
+                    _propline_empty_sport_until.pop(empty_key, None)
+                else:
+                    cache_ttl = max(
+                        1.0,
+                        float(getattr(client, "cache_ttl", 240.0) or 240.0),
+                    )
+                    _propline_empty_sport_until[empty_key] = now + cache_ttl
                 logger.info(
                     "propline_request_scan: sport=%s observations=%d pending=%d",
                     sport,
@@ -2405,11 +2435,18 @@ async def _run_prizepicks_independent_cycle(
         props = []
 
     if not props:
-        logger.info(
-            "prizepicks_cycle: provider=PrizePicks sport=%s fetch_succeeded=true "
-            "observations=0 persisted=0 evaluated=0 actionable=0 delivered=0",
-            sport,
-        )
+        if _fetched_props is not None and not sport:
+            logger.info(
+                "prizepicks_cycle: provider=PrizePicks source=paced "
+                "observations=0 persisted=0 evaluated=0 actionable=0 delivered=0"
+            )
+        else:
+            logger.info(
+                "prizepicks_cycle: provider=PrizePicks sport=%s "
+                "fetch_succeeded=true observations=0 persisted=0 evaluated=0 "
+                "actionable=0 delivered=0",
+                sport,
+            )
         return
 
     if background_processing:
@@ -3706,7 +3743,7 @@ def _shared_monitoring_cycle(cycle_branch):
                 # passing None would trigger the companion's compatibility
                 # fallback fetch and hold the shared scheduler owner.
                 "_fetched_props": pending_props,
-                "_fetched_sport": "paced",
+                "_fetched_sport": "",
             }
         if "_fetched_persisted" in _pp_params or any(
             parameter.kind is inspect.Parameter.VAR_KEYWORD
@@ -4690,7 +4727,6 @@ async def underdog_job(context) -> None:
                 _np_bet_ready = (
                     decision is not None
                     and decision.recommendation in ("OVER", "UNDER")
-                    and (snap.sport or "UNKNOWN") in config.ud_alert_sports
                 )
                 _np_direction = decision.recommendation if decision else ""
                 # Game-live hard gate — block actionable alerts when game has already started (#5).
@@ -5092,7 +5128,6 @@ async def underdog_job(context) -> None:
                     )
                     is_reentry_qualified = (
                         score is not None
-                        and (snap.sport or "UNKNOWN") in config.ud_alert_sports
                     )
                     if is_reentry_qualified:
                         _n_qualified += 1
@@ -5119,7 +5154,6 @@ async def underdog_job(context) -> None:
                         and score is not None
                         and decision is not None
                         and decision.recommendation in ("OVER", "UNDER")
-                        and (snap.sport or "UNKNOWN") in config.ud_alert_sports
                     )
                     if is_qualified and not is_reentry_qualified:
                         _n_qualified += 1
@@ -5502,8 +5536,6 @@ async def underdog_job(context) -> None:
                     continue
 
                 if _st not in _HFS:
-                    continue
-                if _sport not in config.ud_alert_sports:
                     continue
                 if (_sp, _st) in _processed_keys:
                     continue  # already handled in the main loop this cycle
@@ -6904,8 +6936,6 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 continue
 
             _sr_sport = _sr_snap.sport or "UNKNOWN"
-            if _sr_sport not in config.ud_alert_sports:
-                continue
             if _is_futures_stat(_sr_stat):
                 continue
 

@@ -31,8 +31,15 @@ active prop.
 **Why:** Sparse public history can require PropLine without allowing a
 full-book fallback sweep to queue behind the provider's shared limiter.
 
-**How to apply:** Keep one active companion task per shared cycle, await it
-alongside Underdog, and rely on the existing single-instance scheduler for
-overlap protection. Keep the configured-sport round robin and provider pacing;
-do not add a PrizePicks scheduler, heartbeat-triggered handoff, or an
-unbounded scheduled-history fallback.
+The base live feed retains its 180/hour pacing under the 5,000/day total cap.
+Non-bulk endpoint calls have a separate 650/day and 27/hour allowance. Empty
+sport snapshots are incomplete and enter a short cooldown so they do not
+consume repeated feed requests; transport labels never occupy sport fields.
+
+**Why:** The base feed uses 4,320 requests/day, leaving 680. Reserving 650 for
+endpoint calls leaves roughly 30 unused while preventing history/reporting
+lookups from exhausting the live-feed budget.
+
+**How to apply:** Keep canonical provider sport keys, the configured-sport
+round robin, and separate feed/endpoint admission. Do not report "paced" as a
+sport or repeatedly request a known-empty sport during its cache TTL.
