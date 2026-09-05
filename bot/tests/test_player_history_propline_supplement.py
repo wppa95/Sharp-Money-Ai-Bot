@@ -272,7 +272,67 @@ async def test_snapshot_uses_propline_gap_for_both_primary_providers(source_prov
     assert snapshot.supplemental_sources == ("propline_history",)
     assert db.saved == []
     client.fetch_player_history.assert_awaited_once()
-    assert client.fetch_player_history.await_args.kwargs["bookmaker"] == "prizepicks"
+    expected_bookmaker = (
+        "prizepicks" if source_provider == "PrizePicks" else "underdog"
+    )
+    assert (
+        client.fetch_player_history.await_args.kwargs["bookmaker"]
+        == expected_bookmaker
+    )
+
+
+@pytest.mark.asyncio
+async def test_history_uses_documented_composite_market_key():
+    db = _DB()
+    client = _client(
+        [_propline_entry("2026-08-29", 42.0, "game-1")]
+    )
+    provider = PlayerHistoryProvider(propline_client=client)
+
+    rows = await provider._fetch_propline_history(
+        "Alex Example",
+        "NBA",
+        "points_rebounds_assists",
+        source_provider="Underdog",
+    )
+
+    assert len(rows) == 1
+    assert client.fetch_player_history.await_args.args[2] == (
+        "player_points_rebounds_assists"
+    )
+    assert client.fetch_player_history.await_args.kwargs["bookmaker"] == "underdog"
+
+
+@pytest.mark.asyncio
+async def test_redacted_history_is_logged_as_unusable(caplog):
+    db = _DB()
+    client = _client([])
+    client.fetch_player_history = AsyncMock(
+        return_value=PropLinePlayerHistoryFetchResult(
+            entries=(),
+            fetched_at=datetime(2026, 8, 30),
+            player_name="Alex Example",
+            sport_key="basketball_nba",
+            market="player_points",
+            succeeded=True,
+            complete=False,
+            redacted=True,
+            upgrade_url="https://example.test/upgrade",
+            failure_kind="incomplete",
+            error="PropLine player history response is incomplete",
+        )
+    )
+    provider = PlayerHistoryProvider(propline_client=client)
+
+    with caplog.at_level("WARNING"):
+        rows = await provider._fetch_propline_history(
+            "Alex Example", "NBA", "points", source_provider="PrizePicks"
+        )
+
+    assert rows == []
+    assert "redacted=True" in caplog.text
+    assert "raw_entries=0" in caplog.text
+    assert "upgrade_url=https://example.test/upgrade" in caplog.text
 
 
 @pytest.mark.asyncio
