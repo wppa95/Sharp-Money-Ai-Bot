@@ -102,7 +102,9 @@ def test_grading_is_owned_by_the_underdog_two_minute_cycle():
 
     assert "async def _underdog_monitor_cycle" in source
     assert "await underdog_job(context)" in source
-    assert "await _grade_opportunities_job(context)" in source
+    assert "_grade_opportunities_job(context)" in source
+    assert "_GRADE_CYCLE_BUDGET_SECONDS" in source
+    assert "await asyncio.wait_for(" in source
     assert '_coordinated_job("underdog_monitor", _underdog_monitor_cycle)' in source
     assert "allow_overlap=True" not in source
 

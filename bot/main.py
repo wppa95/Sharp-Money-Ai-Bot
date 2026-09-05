@@ -982,6 +982,11 @@ async def post_shutdown(application: Application) -> None:
 _GRADE_BATCH_SIZE = 100
 _GRADE_FETCH_CONCURRENCY = 12
 _GRADE_FETCH_TIMEOUT_SECONDS = 20
+# Monitoring and grading share one two-minute owner. Keep grading bounded so a
+# slow settlement provider cannot block the next scan or the history collector.
+_GRADE_CYCLE_BUDGET_SECONDS = 50
+_GRADE_CYCLE_HEADROOM_SECONDS = 10
+_GRADE_PROPLINE_TARGETS_PER_CYCLE = 2
 
 
 async def _underdog_monitor_cycle(context) -> None:
@@ -992,6 +997,7 @@ async def _underdog_monitor_cycle(context) -> None:
     a slow scan cannot overlap grading, and a slow grading pass cannot create
     a second worker, skipped trigger, or queued backlog.
     """
+    _cycle_started = time.monotonic()
     try:
         await underdog_job(context)
     except asyncio.CancelledError:
@@ -1001,7 +1007,42 @@ async def _underdog_monitor_cycle(context) -> None:
         # coordinator still records the scan error, while this cycle's grader
         # remains serialized behind the same owner.
         logger.exception("underdog_monitor_cycle: monitoring phase failed")
-    await _grade_opportunities_job(context)
+    _cycle_interval = max(
+        1.0,
+        float(getattr(config, "UNDERDOG_POLL_INTERVAL", 120)),
+    )
+    _grade_budget = min(
+        float(_GRADE_CYCLE_BUDGET_SECONDS),
+        max(
+            0.0,
+            _cycle_interval
+            - _GRADE_CYCLE_HEADROOM_SECONDS
+            - (time.monotonic() - _cycle_started),
+        ),
+    )
+    if _grade_budget <= 0:
+        logger.warning(
+            "underdog_monitor_cycle: no grading budget remained after scan; "
+            "pending rows will rotate on a later cycle"
+        )
+        _ht = get_health_tracker()
+        if _ht:
+            _ht.record_job_run("_grade_opportunities_job")
+        return
+    try:
+        await asyncio.wait_for(
+            _grade_opportunities_job(context),
+            timeout=_grade_budget,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "underdog_monitor_cycle: grading budget exhausted after %.1fs; "
+            "remaining pending rows will rotate on a later cycle",
+            _grade_budget,
+        )
+        _ht = get_health_tracker()
+        if _ht:
+            _ht.record_job_run("_grade_opportunities_job")
 
 
 async def _grade_opportunities_job(context) -> None:
@@ -1131,6 +1172,7 @@ async def _grade_opportunities_job(context) -> None:
         # and read-only; it never grades an unresolved or guessed row.
         _propline_grade_provider = None
         _propline_grade_cache: dict[tuple[str, str, str], list] = {}
+        _propline_grade_attempts = 0
         try:
             from providers.player_history import get_player_history_provider
             _propline_grade_provider = get_player_history_provider()
@@ -1141,6 +1183,7 @@ async def _grade_opportunities_job(context) -> None:
             )
 
         async def _fetch_propline_grade_results(_gopp):
+            nonlocal _propline_grade_attempts
             if _propline_grade_provider is None:
                 return []
             _key = (
@@ -1149,6 +1192,12 @@ async def _grade_opportunities_job(context) -> None:
                 str(_gopp.stat_type or "").lower().strip(),
             )
             if _key not in _propline_grade_cache:
+                if (
+                    _propline_grade_attempts
+                    >= _GRADE_PROPLINE_TARGETS_PER_CYCLE
+                ):
+                    return []
+                _propline_grade_attempts += 1
                 try:
                     _propline_grade_cache[_key] = list(
                         await asyncio.wait_for(

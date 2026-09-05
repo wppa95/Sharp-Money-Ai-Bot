@@ -41,9 +41,6 @@ packages = ["nano"]
 ALLOWED_USER_IDS = "7245518659"
 UD_SLEEPER_ENABLED = "true"
 ODDS_API_ENABLED = "true"
-DRAFTKINGS_ENABLED = "true"
-FANDUEL_ENABLED = "true"
-FPR_BATCH_SIZE = "10000"
 
 [[ports]]
 localPort = 8080

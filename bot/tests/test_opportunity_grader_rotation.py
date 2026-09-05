@@ -141,6 +141,10 @@ async def test_grader_fetches_concurrently_with_a_bounded_batch():
     )
     assert health.cursor == 30
     assert health.runs == 1
+    assert (
+        propline_provider.fetch_resolved_results.await_count
+        == main._GRADE_PROPLINE_TARGETS_PER_CYCLE
+    )
 
 
 @pytest.mark.asyncio
@@ -184,6 +188,29 @@ async def test_no_pending_work_still_records_a_successful_health_run():
     assert health.started == 1
     assert health.runs == 1
     assert health.failures == []
+
+
+@pytest.mark.asyncio
+async def test_monitor_cycle_releases_owner_when_grading_exceeds_budget():
+    health = _Health()
+    scan = AsyncMock()
+
+    async def stalled_grader(_context):
+        await asyncio.sleep(10)
+
+    with (
+        patch.object(main, "underdog_job", scan),
+        patch.object(main, "_grade_opportunities_job", stalled_grader),
+        patch.object(main, "_GRADE_CYCLE_BUDGET_SECONDS", 0.01),
+        patch.object(main, "get_health_tracker", return_value=health),
+    ):
+        await asyncio.wait_for(
+            main._underdog_monitor_cycle(_context(MagicMock())),
+            timeout=0.25,
+        )
+
+    scan.assert_awaited_once()
+    assert health.runs == 1
 
 
 @pytest.mark.asyncio
