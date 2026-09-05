@@ -57,6 +57,15 @@ _STAT_NORMALIZATION = {
     "points_rebounds": "points+rebounds",
     "rebounds_assists": "rebounds+assists",
     "points_rebounds_assists": "pts+reb+ast",
+    "points+rebounds": "points+rebounds",
+    "points+assists": "points+assists",
+    "rebounds+assists": "rebounds+assists",
+    "points+rebounds+assists": "pts+reb+ast",
+    "points+reb+assists": "pts+reb+ast",
+    "pts + reb + ast": "pts+reb+ast",
+    "pts + reb": "pts+reb",
+    "pts + ast": "pts+ast",
+    "reb + ast": "reb+ast",
     "fantasy points": "fantasy points",
     "hits": "hits",
     "hr": "home runs",
@@ -1479,7 +1488,11 @@ def _normalize_sport(value: Any) -> str:
 
 def _normalize_stat(value: Any) -> str:
     raw = re.sub(r"\s+", " ", _clean(value).lower())
-    return _STAT_NORMALIZATION.get(raw, raw)
+    compact = re.sub(r"\s*\+\s*", "+", raw)
+    return _STAT_NORMALIZATION.get(
+        raw,
+        _STAT_NORMALIZATION.get(compact, compact),
+    )
 
 
 def _normalize_direction(value: Any) -> str:
@@ -1771,6 +1784,56 @@ _OFFICIAL_MARKETS = (
     "player_deaths",
     "player_maps_won",
 )
+
+_STAT_TO_OFFICIAL_MARKET = {
+    "points": "player_points",
+    "rebounds": "player_rebounds",
+    "assists": "player_assists",
+    "3-pointers made": "player_threes",
+    "blocks": "player_blocks",
+    "steals": "player_steals",
+    "pts+reb": "player_points_rebounds",
+    "points+rebounds": "player_points_rebounds",
+    "pts+ast": "player_points_assists",
+    "points+assists": "player_points_assists",
+    "reb+ast": "player_rebounds_assists",
+    "rebounds+assists": "player_rebounds_assists",
+    "pts+reb+ast": "player_points_rebounds_assists",
+    "fantasy points": "player_fantasy_points",
+    "hits": "player_hits",
+    "home runs": "player_home_runs",
+    "rbis": "player_rbis",
+    "total bases": "player_total_bases",
+    "strikeouts": "player_strikeouts",
+    "walks": "player_walks",
+    "rushing yards": "player_rushing_yards",
+    "receiving yards": "player_receiving_yards",
+    "receptions": "player_receptions",
+    "passing yards": "player_passing_yards",
+    "passing tds": "player_passing_tds",
+    "rush+rec yards": "player_rush_rec_yards",
+    "shots on goal": "player_shots_on_goal",
+    "games won": "player_games_won",
+    "sets won": "player_sets_won",
+    "kills": "player_kills",
+    "deaths": "player_deaths",
+    "maps won": "player_maps_won",
+}
+
+
+def official_player_market_for(stat_type: Any) -> Optional[str]:
+    """Return the documented player market key for a normalized stat.
+
+    The history endpoint takes official market keys, not the bot's display
+    labels.  Returning ``None`` for an unknown composite is intentional:
+    asking PropLine for a guessed market can return a valid-looking but
+    unrelated response.
+    """
+    candidate = _clean(stat_type).lower()
+    if candidate.startswith("player_") and candidate in _OFFICIAL_MARKETS:
+        return candidate
+    normalized = _normalize_stat(stat_type)
+    return _STAT_TO_OFFICIAL_MARKET.get(normalized)
 
 _CANONICAL_TO_OFFICIAL_SPORT = {
     "MLB": "baseball_mlb",
@@ -3379,6 +3442,10 @@ class PropLineClient:
                 sport_key=_clean(sport_key), market=_clean(market),
                 error=error,
                 failure_kind="incomplete",
+                redacted=bool(payload.get("redacted", False))
+                if isinstance(payload, dict) else False,
+                upgrade_url=_clean(payload.get("upgrade_url"))
+                if isinstance(payload, dict) else "",
             )
         entries: list[PropLinePlayerHistoryEntry] = []
         for record in raw_records:

@@ -3988,6 +3988,11 @@ async def _cmd_backfill_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                             opp.player_name,
                             opp.sport,
                             opp.stat_type,
+                            source_provider=(
+                                getattr(opp, "provider", None)
+                                or getattr(opp, "source_provider", None)
+                                or "Underdog"
+                            ),
                         )
                     )
                 except Exception as exc:

@@ -493,6 +493,7 @@ class PlayerHistoryProvider:
         sport: str,
         stat_type: str,
         *,
+        source_provider: str = "Underdog",
         instrumentation=None,
     ) -> list:
         """Fetch resolved PropLine results for settlement reconciliation.
@@ -505,6 +506,7 @@ class PlayerHistoryProvider:
             player_name,
             sport,
             stat_type,
+            source_provider=source_provider,
             instrumentation=instrumentation,
         )
 
@@ -799,11 +801,16 @@ class PlayerHistoryProvider:
         sport: str,
         stat_type: str,
         *,
+        source_provider: str = "Underdog",
         instrumentation=None,
     ) -> list:
         """Adapt official PropLine resolved history into game-result rows."""
         from providers.player_stats import RawGameResult
-        from providers.propline import PropLineClient, _normalize_stat, _parse_datetime
+        from providers.propline import (
+            PropLineClient,
+            _parse_datetime,
+            official_player_market_for,
+        )
 
         if self._propline_client is None:
             self._propline_client = PropLineClient()
@@ -827,15 +834,38 @@ class PlayerHistoryProvider:
         if not official_sport:
             return []
 
-        market = f"player_{_normalize_stat(stat_type).replace(' ', '_')}"
+        market = official_player_market_for(stat_type)
+        if not market:
+            logger.info(
+                "PropLine history attempt player=%r sport=%s stat=%s "
+                "market=unmapped bookmaker=%s succeeded=false complete=false "
+                "redacted=false raw_entries=0 usable_rows=0 failure=unknown_market",
+                player_name,
+                sport,
+                stat_type,
+                _propline_bookmaker_for_source(source_provider),
+            )
+            return []
+        bookmaker = _propline_bookmaker_for_source(source_provider)
         result = await client.fetch_player_history(
             official_sport,
             player_name,
             market,
-            bookmaker="prizepicks",
+            bookmaker=bookmaker,
             limit=100,
         )
+        raw_entries = len(getattr(result, "entries", ()) or ())
         if not result.succeeded or not result.complete:
+            _log_propline_history_attempt(
+                player_name,
+                sport,
+                stat_type,
+                market,
+                bookmaker,
+                result,
+                raw_entries=raw_entries,
+                usable_rows=0,
+            )
             return []
 
         settled = {"WON", "LOST", "PUSH", "VOID"}
@@ -877,6 +907,16 @@ class PlayerHistoryProvider:
                 source="propline_history",
                 game_id=event_id,
             ))
+        _log_propline_history_attempt(
+            player_name,
+            sport,
+            stat_type,
+            market,
+            bookmaker,
+            result,
+            raw_entries=raw_entries,
+            usable_rows=len(rows),
+        )
         return rows
 
     async def _fetch_propline_games(
@@ -974,6 +1014,55 @@ class PlayerHistoryProvider:
 def _merge_game_results(existing: list, supplemental: list) -> list:
     """Keep primary game results and add only distinct PropLine events."""
     return _merge_distinct_rows(existing, supplemental)
+
+
+def _propline_bookmaker_for_source(source_provider: str) -> str:
+    """Map the evaluated pick source to PropLine's bookmaker namespace."""
+    normalized = str(source_provider or "").strip().lower().replace("_", "")
+    if normalized in {"prizepicks", "prizepick"}:
+        return "prizepicks"
+    if normalized in {"underdog", "underdogfantasy"}:
+        return "underdog"
+    return ""
+
+
+def _log_propline_history_attempt(
+    player_name: str,
+    sport: str,
+    stat_type: str,
+    market: str,
+    bookmaker: str,
+    result,
+    *,
+    raw_entries: int,
+    usable_rows: int,
+) -> None:
+    """Make entitlement and shape failures visible without logging secrets."""
+    redacted = bool(getattr(result, "redacted", False))
+    succeeded = bool(getattr(result, "succeeded", False))
+    complete = bool(getattr(result, "complete", False))
+    failure_kind = str(getattr(result, "failure_kind", "") or "")
+    error = str(getattr(result, "error", "") or "")
+    upgrade_url = str(getattr(result, "upgrade_url", "") or "")
+    logger.log(
+        logging.WARNING if redacted or not succeeded or not complete else logging.INFO,
+        "PropLine history attempt player=%r sport=%s stat=%s market=%s "
+        "bookmaker=%s succeeded=%s complete=%s redacted=%s raw_entries=%d "
+        "usable_rows=%d failure=%s error=%s upgrade_url=%s",
+        player_name,
+        sport,
+        stat_type,
+        market,
+        bookmaker or "all",
+        succeeded,
+        complete,
+        redacted,
+        raw_entries,
+        usable_rows,
+        failure_kind or "none",
+        error or "none",
+        upgrade_url or "none",
+    )
 
 
 def _merge_history_records(

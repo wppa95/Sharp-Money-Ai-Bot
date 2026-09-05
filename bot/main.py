@@ -1111,6 +1111,11 @@ async def _grade_opportunities_job(context) -> None:
                                 _gopp.player_name,
                                 _gopp.sport,
                                 _gopp.stat_type,
+                                source_provider=(
+                                    getattr(_gopp, "provider", None)
+                                    or getattr(_gopp, "source_provider", None)
+                                    or "Underdog"
+                                ),
                             ),
                             timeout=_GRADE_FETCH_TIMEOUT_SECONDS,
                         )
