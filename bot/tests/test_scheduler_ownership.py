@@ -104,7 +104,7 @@ def test_grading_is_owned_by_the_underdog_two_minute_cycle():
     assert "await underdog_job(context)" in source
     assert "await _grade_opportunities_job(context)" in source
     assert '_coordinated_job("underdog_monitor", _underdog_monitor_cycle)' in source
-    assert '"opportunity_grader"' not in source
+    assert "allow_overlap=True" not in source
 
 
 @pytest.mark.asyncio
@@ -140,6 +140,41 @@ async def test_coordinator_coalesces_active_trigger_and_allows_next_trigger():
     assert calls == 2
     release.set()
     await third
+
+
+@pytest.mark.asyncio
+async def test_underdog_cycle_runs_grading_serially_after_monitoring(monkeypatch):
+    import main
+
+    calls: list[str] = []
+    active = 0
+    max_active = 0
+
+    async def fake_monitor(_context):
+        nonlocal active, max_active
+        calls.append("monitor_start")
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0)
+        calls.append("monitor_end")
+        active -= 1
+
+    async def fake_grader(_context):
+        nonlocal active, max_active
+        calls.append("grade_start")
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0)
+        calls.append("grade_end")
+        active -= 1
+
+    monkeypatch.setattr(main, "underdog_job", fake_monitor)
+    monkeypatch.setattr(main, "_grade_opportunities_job", fake_grader)
+
+    await main._underdog_monitor_cycle(None)
+
+    assert calls == ["monitor_start", "monitor_end", "grade_start", "grade_end"]
+    assert max_active == 1
 
 
 @pytest.mark.asyncio
