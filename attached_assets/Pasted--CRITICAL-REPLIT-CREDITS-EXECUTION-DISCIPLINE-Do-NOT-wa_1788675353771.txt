@@ -1,0 +1,81 @@
+
+CRITICAL — REPLIT CREDITS / EXECUTION DISCIPLINE
+
+Do NOT waste Replit credits.
+
+Before doing anything:
+
+- Inspect the existing code and architecture first.
+
+- Do NOT repeatedly restart, rebuild, redeploy, reinstall, or run unnecessary commands.
+
+- Do NOT run expensive or redundant tests.
+
+- Do NOT create unnecessary background processes.
+
+- Do NOT repeatedly poll endpoints just to investigate.
+
+- Use targeted inspection and the minimum number of commands needed to verify behavior.
+
+- Do NOT make changes until the required implementation is understood.
+
+- Do NOT modify unrelated code.
+
+- Do NOT refactor for style or convenience
+
+1. providers.soccer_stats - Soccer: FOOTBALL_DATA_API_KEY no t set - soccer historical data disabled. Regi ster free at https://www.football-data.org/cl
+
+1. No sport should be saying this as propline has all data/grades/evidence/history needed 
+
+2. Why is open dota showing warning when propline and database has evidence/history 
+
+3. Find out why PrizePicks is stale despite having data/evidence
+
+4. Why does it say underdog parsed 8000+ then says underdog snapshots 4100+
+
+5. PrizePicks should be writing snapshots after every fetch
+
+6. 06:04:10 | WARNING | apscheduler. executors. default - Run time of job "opportun ity_grader (trigger: interval[o:02:00], next run at: 2026-09-06 06:06:09 UTC) " was missed by 0:00:01.082363
+        06:12:09 | WARNING | apscheduler. scheduler - Execution of job "opportunity_gra der (trigger: interval[o:02:00], next run at:
+2026-09-06 06:12:09 UTC)" skipped: maximum n umber of running instances reached (1)
+    This shouldn’t be happening as every job should have its own independent scheduler
+
+7. This is a major problem. 1 graded isn’t acceptable && player history propline attempts is pulling no data 
+     2026-09-06 06:08:27 | INFO
+I providers.pl
+ayer_history - PropLine history attempt playe r='George Kirby' sport=MLB stat=Walks Allowed market=unmapped bookmaker=underdog succeeded =false complete=false redacted=false raw_entr ies=0 usable_rows=0 failure=unknown_market
+2026-09-06 06:08:27 | INFO
+I providers.pl
+ayer_history - PropLine history attempt playe r='Shohei Ohtani' sport=MLB stat=Hits + Runs + RBIs market=unmapped bookmaker=underdog suc ceeded=false complete=false redacted=false ra w_entries=0 usable_rows=0 failure=unknown_mar ket
+2026-09-06 06:08:28 | INFO
+1 -_main__ -
+grade_opportunities_job: graded=1 opportuniti es (no_data=100)
+
+8. Why is sleeper only loading nba and not all sports 
+
+	
+	
+	
+2026-09-06 05:37:48 | INFO
+s into registry	I providers.sl
+eper_stats - Sleeper: loaded 2109 NBA player
+2026-09-06 05:37:51 INFO	I providers.pl
+ayer_stats - PlayerStatsProvider: using riche
+2026-09-06 05:37:51 INFO	r NBA source (19 vs 0 results)
+I providers.pl
+ayer_stats - PlayerStatsProvider: using riche r NBA source (22 vs 0 results)
+2026-09-06 05:37:51 | INFO	I providers.pl
+ayer_stats - PlayerStatsProvider: using riche r NBA source (22 vs 0 results)
+2026-09-06 05:37:51 | INFO
+2026-09-06 05:37:51 | INFO	I providers.pl
+ayer_stats - PlayerStatsProvider: using riche r NBA source (20 vs 0 results)
+I providers.pl
+	ayer_stats - PlayerStatsProvider: using riche r NBA source (20 vs 0 results)
+2026-09-06 05:37:51 INFO	providers.pl
+ayer_stats - PlayerStatsProvider: using riche r NBA source (20 vs 0 results)
+	2026-09-06 05:37:51 | INFO | providers.pl ayer_stats - PlayerStatsProvider: using riche r NBA source (22 vs 0 results)
+2026-09-06 05:37:51 INFO
+2026-09-06 05:37:52 | INFO	I providers. pl
+ayer_stats - PlayerStatsProvider: using riche r NBA source (19 vs 0 results)
+I providers.pl
+ 
