@@ -381,11 +381,7 @@ def _coordinated_job(
     allow_overlap: bool = False,
     use_exclusive_group: bool = True,
 ):
-    exclusive_group = (
-        "underdog_monitoring"
-        if use_exclusive_group and name in {"underdog_monitor", "player_history_collector"}
-        else None
-    )
+    exclusive_group = None
     return _scheduled_execution_coordinator.launch(
         name,
         callback,
