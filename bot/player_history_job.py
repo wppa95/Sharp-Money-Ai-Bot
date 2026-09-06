@@ -560,7 +560,7 @@ async def player_history_collector_job(context) -> None:
         for start in range(
             0, len(completed_results), _PLAYER_HISTORY_WRITE_BATCH_SIZE
         ):
-            batch = completed_results[start: start + _PLAYER_HISTORY_WRITE_BATCH_SIZE]
+            batch =  completed_results[start: start + _PLAYER_HISTORY_WRITE_BATCH_SIZE]
             try:
                 await write_batch(batch)
                 persisted_rows += len(batch)

@@ -464,10 +464,14 @@ async def _persist_propline_observations(
     if db is None or not props:
         return 0
     try:
-        await db.upsert_prop_line_history_batch(
-            "PrizePicks",
-            list(props),
-        )
+        try:
+            await db.upsert_prop_line_history_batch(
+                "PrizePicks",
+                list(props),
+                append_snapshot=True,
+            )
+        except TypeError:
+            await db.upsert_prop_line_history_batch("PrizePicks", list(props))
         tracking_records = []
         for prop in props:
             player = str(getattr(prop, "player_name", "") or "").strip()
@@ -490,24 +494,18 @@ async def _persist_propline_observations(
                 "line_value": getattr(prop, "line_value", None),
                 "game_time": getattr(prop, "game_time", None),
                 "game_id": event_id,
+                "line_variant": str(
+                    getattr(prop, "line_variant", "") or ""
+                ).lower(),
                 "provider": "PrizePicks",
             })
         if include_tracking:
             track_props = getattr(db, "track_prop_records", None)
             if callable(track_props) and tracking_records:
-                await track_props(tracking_records)
+                tracked = await track_props(tracking_records)
+                if tracked is not None and int(tracked) < len(tracking_records):
+                    raise RuntimeError("incomplete PrizePicks tracking write")
         return len(props)
-    except TypeError:
-        # Older adapters may not expose append_snapshot. Keep their existing
-        # upsert contract usable while production retains every observation.
-        try:
-            await db.upsert_prop_line_history_batch("PrizePicks", list(props))
-            return len(props)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "propline_request_scan: persistence failed: %s",
-                type(exc).__name__,
-            )
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "propline_request_scan: persistence failed: %s",
@@ -1091,9 +1089,9 @@ def _propline_prop_key(prop: object) -> tuple[str, str, str, str]:
 async def propline_request_scan_job(context) -> None:
     """Refresh one PropLine sport at the provider's continuous request pace.
 
-    This worker is fetch-only.  It does not score or deliver alerts.  The
-    shared 120-second PrizePicks branch consumes the latest buffered
-    observations, keeping request pacing independent from evaluation cadence.
+    This job owns the complete PrizePicks lane: fetch, durable persistence,
+    evaluation, and delivery. Its one-shot scheduler starts the next execution
+    only after this one completes, while unrelated jobs run independently.
     """
     global _propline_request_cursor, _propline_request_lock
     provider = _propline_provider
@@ -1151,11 +1149,17 @@ async def propline_request_scan_job(context) -> None:
         fetch_props = getattr(provider, "fetch_props_for_sport", None)
         try:
             if callable(fetch_result):
-                result = await fetch_result(
-                    sport,
-                    bookmaker="prizepicks",
-                    event_scoped=True,
-                )
+                try:
+                    result = await fetch_result(
+                        sport,
+                        bookmaker="prizepicks",
+                        event_scoped=True,
+                    )
+                except TypeError:
+                    result = await fetch_result(
+                        sport,
+                        bookmaker="prizepicks",
+                    )
                 props = list(getattr(result, "props", []) or [])
                 succeeded = bool(getattr(result, "succeeded", False))
             elif callable(fetch_props):
@@ -1173,6 +1177,15 @@ async def propline_request_scan_job(context) -> None:
                     getattr(context, "bot_data", {}).get("db"),
                     props,
                 )
+                if persisted != len(props):
+                    logger.error(
+                        "propline_request_scan: persistence barrier failed "
+                        "sport=%s observations=%d persisted=%d; evaluation skipped",
+                        sport,
+                        len(props),
+                        persisted,
+                    )
+                    return
                 # The provider light represents the live fetch-and-persist
                 # lane, not the evaluator. A successful request worker tick
                 # must clear an old "awaiting first fetch" state even when
@@ -1190,11 +1203,15 @@ async def propline_request_scan_job(context) -> None:
                             _health.record_provider_fetch("PrizePicks")
                     except Exception:
                         pass
-                for prop in props:
-                    key = _propline_prop_key(prop)
-                    if key[0] and key[1] and key[2]:
-                        _propline_pending_props[key] = prop
                 _cache_propline_evidence(props)
+                if props:
+                    await _run_prizepicks_independent_cycle(
+                        context,
+                        _fetched_props=list(props),
+                        _fetched_sport=str(sport),
+                        _fetched_persisted=True,
+                        background_processing=False,
+                    )
                 empty_key = str(sport).strip().upper()
                 if props:
                     _propline_empty_sport_until.pop(empty_key, None)
@@ -2470,7 +2487,7 @@ async def _run_prizepicks_independent_cycle(
     # One observation per provider-owned identity per cycle.  The provider's
     # external/event IDs are retained; the fallback key still keeps provider
     # identity separate from Underdog.
-    unique_props: dict[tuple[str, str, str, str], object] = {}
+    unique_props: dict[tuple[str, str, str, str, str, float], object] = {}
     for prop in props:
         player = str(getattr(prop, "player_name", "") or "").strip()
         sport = str(getattr(prop, "sport", "") or "").upper().strip()
@@ -2491,6 +2508,8 @@ async def _run_prizepicks_independent_cycle(
                 or getattr(prop, "game_id", "")
                 or ""
             ),
+            str(getattr(prop, "line_variant", "") or "").lower(),
+            line,
         )
         unique_props[identity] = prop
 
@@ -2530,12 +2549,13 @@ async def _run_prizepicks_independent_cycle(
     # observation.  The raw observation must be durable even if scoring,
     # enrichment, or delivery later fails, but the new row must not become its
     # own "previous line" for scoring.
-    history_by_identity: dict[tuple[str, str, str, str], list] = {}
+    history_by_identity: dict[tuple[str, str, str, str, str], list] = {}
     for prop in unique_props.values():
         player = str(getattr(prop, "player_name", "") or "").strip()
         prop_sport = str(getattr(prop, "sport", "") or "").upper().strip()
         stat = str(getattr(prop, "stat_type", "") or "").strip()
         external_id, event_id = _source_identity(prop)
+        line_variant = str(getattr(prop, "line_variant", "") or "").lower()
         history_rows = []
         try:
             try:
@@ -2559,11 +2579,18 @@ async def _run_prizepicks_independent_cycle(
                 "prizepicks_cycle: history lookup failed for %s/%s: %s",
                 player, stat, type(exc).__name__,
             )
+        if line_variant:
+            history_rows = [
+                row for row in history_rows
+                if str(getattr(row, "line_variant", "") or "").lower()
+                == line_variant
+            ]
         history_by_identity[(
             player,
             prop_sport,
             stat,
             external_id or event_id,
+            line_variant,
         )] = history_rows or []
 
     if not _fetched_persisted:
@@ -2604,6 +2631,9 @@ async def _run_prizepicks_independent_cycle(
             "line_value": getattr(_tracked_prop, "line_value", None),
             "game_time": getattr(_tracked_prop, "game_time", None),
             "game_id": _tracked_event,
+            "line_variant": str(
+                getattr(_tracked_prop, "line_variant", "") or ""
+            ).lower(),
             "provider": "PrizePicks",
         })
     _track_props = getattr(db, "track_prop_records", None)
@@ -2638,9 +2668,10 @@ async def _run_prizepicks_independent_cycle(
         sport = str(getattr(prop, "sport", "") or "").upper().strip()
         stat = str(getattr(prop, "stat_type", "") or "").strip()
         line = float(getattr(prop, "line_value", 0.0) or 0.0)
+        line_variant = str(getattr(prop, "line_variant", "") or "").lower()
         external_id_raw, event_id = _source_identity(prop)
         history_rows = history_by_identity.get(
-            (player, sport, stat, external_id_raw or event_id),
+            (player, sport, stat, external_id_raw or event_id, line_variant),
             [],
         )
 
@@ -3819,7 +3850,6 @@ def _shared_monitoring_cycle(cycle_branch):
 
 # ── Underdog pick'em branch ────────────────────────────────────────────────────
 
-@_shared_monitoring_cycle
 async def underdog_job(context) -> None:
     """
     Fetch Underdog Fantasy pick'em projections and alert on prop changes.
@@ -3863,31 +3893,22 @@ async def underdog_job(context) -> None:
         getattr(db, "_url", None),
     )
     _job_activity_start("underdog")
-    # Allow the complete current book to use the existing cadence. The hard
-    # stop is only a safety boundary: it never creates a remainder queue or
-    # schedules deferred work. If reached, the cycle reports the bottleneck
-    # and the next cadence fetches a fresh book.
+    # The provider fetch remains bounded, but a successfully fetched book is
+    # processed to completion. Same-job overlap is prevented by the scheduler;
+    # unrelated jobs remain free to run concurrently.
     _cycle_deadline = time.monotonic() + max(
         5.0,
         float(getattr(config, "UNDERDOG_POLL_INTERVAL", 120)) - 5.0,
     )
 
     async def _await_cycle_budget(awaitable, operation: str):
-        """Bound enrichment work so one prop cannot consume later cadences."""
-        nonlocal _cycle_budget_exhausted
-        remaining = _cycle_deadline - time.monotonic()
-        if remaining <= 0:
-            if inspect.iscoroutine(awaitable):
-                awaitable.close()
-            _cycle_budget_exhausted = True
-            return None
+        """Bound one enrichment call without abandoning later observations."""
         try:
-            return await asyncio.wait_for(awaitable, timeout=remaining)
+            return await asyncio.wait_for(awaitable, timeout=30.0)
         except asyncio.TimeoutError:
-            _cycle_budget_exhausted = True
             logger.error(
-                "underdog_cycle_bottleneck: deadline reached during %s; "
-                "no remainder queue will be created",
+                "underdog_cycle_bottleneck: timed out during %s; "
+                "continuing remaining observations",
                 operation,
             )
             return None
@@ -4325,35 +4346,39 @@ async def underdog_job(context) -> None:
         })
     _track_props = getattr(db, "track_prop_records", None)
     if callable(_track_props) and _tracking_records:
-        if isinstance(db, Database):
-            _tracking_batch = list(_tracking_records)
-            if _enqueue_db_persistence(
-                "track Underdog prop records",
-                lambda: _persist_tracking_records(_track_props, _tracking_batch),
-            ):
+        try:
+            _tracking_operation = _track_props(_tracking_records)
+            if not inspect.isawaitable(_tracking_operation):
                 logger.debug(
-                    "underdog_job: queued %d prop records for background persistence",
-                    len(_tracking_batch),
+                    "underdog_job: tracking hook is not awaitable; "
+                    "skipping compatibility stub"
                 )
-        else:
-            try:
-                _tracking_operation = _track_props(_tracking_records)
-                if not inspect.isawaitable(_tracking_operation):
-                    logger.debug(
-                        "underdog_job: tracking hook is not awaitable; "
-                        "skipping compatibility stub"
-                    )
-                else:
-                    await _cycle_timing.await_db(
-                        "write",
-                        "track_prop_records",
-                        _tracking_operation,
-                    )
-            except Exception as _tracking_exc:  # noqa: BLE001
-                logger.warning(
-                    "underdog_job: universal tracking write failed: %s",
-                    type(_tracking_exc).__name__,
+            else:
+                _tracked_count = await _cycle_timing.await_db(
+                    "write",
+                    "track_prop_records",
+                    _tracking_operation,
                 )
+                if (
+                    _tracked_count is not None
+                    and int(_tracked_count) < len(_tracking_records)
+                ):
+                    raise RuntimeError("incomplete Underdog tracking write")
+        except Exception as _tracking_exc:  # noqa: BLE001
+            _persistence_ok = False
+            logger.warning(
+                "underdog_job: universal tracking write failed: %s",
+                type(_tracking_exc).__name__,
+            )
+    if not _persistence_ok:
+        if _health:
+            _health.record_job_fail(
+                "underdog_job",
+                "universal tracking persistence barrier failed",
+            )
+        _ud_full_scan_running = False
+        _job_activity_end("underdog")
+        return
 
     try:
         # Use the preceding fetched feed for normal-cycle comparisons.  On a
@@ -4448,41 +4473,6 @@ async def underdog_job(context) -> None:
 
         for _snap_index, snap in enumerate(ud_snaps):
             record = _snapshot_records[_snap_index]
-            if _cycle_budget_exhausted or time.monotonic() >= _cycle_deadline:
-                _remaining_new_props = sum(
-                    1
-                    for _remaining_snap in ud_snaps[_snap_index:]
-                    if "[REMOVED]" not in (_remaining_snap.selection or "")
-                    and not _is_futures_stat(
-                        _extract_ud_stat_type(
-                            _remaining_snap.selection,
-                            _remaining_snap.player,
-                            _remaining_snap.line,
-                        )
-                    )
-                    and (
-                        _remaining_snap.player or "Unknown",
-                        _extract_ud_stat_type(
-                            _remaining_snap.selection,
-                            _remaining_snap.player,
-                            _remaining_snap.line,
-                        ),
-                    ) not in known_keys
-                )
-                if _remaining_new_props:
-                    _new_prop_skip_reasons["cycle_deadline"] = (
-                        _new_prop_skip_reasons.get("cycle_deadline", 0)
-                        + _remaining_new_props
-                    )
-                _n_observation_only += len(ud_snaps) - _snap_index
-                _cycle_budget_exhausted = True
-                logger.error(
-                    "underdog_cycle_bottleneck: deadline reached after %d/%d "
-                    "observations; no remainder queue",
-                    _snap_index,
-                    len(ud_snaps),
-                )
-                break
             is_removed = "[REMOVED]" in snap.selection
             if is_removed:
                 _n_removed += 1
@@ -5565,13 +5555,6 @@ async def underdog_job(context) -> None:
                 _standing_ordered.extend(_sp_grp[:3])
     
             for (_ssnap, _sp, _st, _ssport, _prev) in _standing_ordered:
-                if time.monotonic() >= _cycle_deadline:
-                    _cycle_budget_exhausted = True
-                    logger.error(
-                        "underdog_cycle_bottleneck: standing scan reached "
-                        "cycle deadline; no remainder queue",
-                    )
-                    break
                 _line_val = _ssnap.line or 0.0
     
                 # Preserve the historical database-double contract used by

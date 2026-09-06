@@ -16,6 +16,17 @@ with the actual feed.
 use the canonical by-line active pool for bounded rescans, and report tracked
 coverage, movement, rescoring, and delivery independently from alert gates.
 
+Every distinct provider threshold and named line variant must enter the neutral
+grading ledger before scoring, even when it is not actionable or delivered.
+
+**Why:** Provider IDs can be reused across moved thresholds and across
+standard/goblin/demon lines; collapsing them destroys line-specific hit, miss,
+push, and historical-rate evidence.
+
+**How to apply:** Include threshold and provider variant in grading identity,
+append raw line history, and treat complete tracking persistence as a hard
+barrier before evaluation.
+
 FPR must never apply delivery deduplication before scoring. Recently delivered
 props still need history, evaluation, and tracking work; dedup belongs only at
 the alert-delivery gate.

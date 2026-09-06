@@ -227,7 +227,7 @@ class _LockedAsyncSession:
             if waited >= 0.05:
                 logger.info(
                     "SQLite writer gate backpressure: waited %.3fs",
-                    waited,
+                    none,
                 )
 
     def _release_writer(self) -> None:
@@ -751,6 +751,7 @@ class PropLineHistory(Base):
     provider_status = Column(String(32), nullable=True)
     external_id = Column(String(64),  nullable=False, default="")
     game_id     = Column(String(64),  nullable=False, default="")
+    line_variant = Column(String(16), nullable=False, default="")
     fetched_at  = Column(DateTime,    default=datetime.utcnow, nullable=False)
     # Lifecycle columns (added via migration for existing databases)
     first_seen         = Column(DateTime,   nullable=True)
@@ -959,6 +960,7 @@ class PropTrackingLog(Base):
     line_value   = Column(Float,       nullable=False)
     game_time    = Column(DateTime,    nullable=True)
     game_id      = Column(String(128), nullable=False, default="", index=True)
+    line_variant = Column(String(16),  nullable=False, default="")
     detected_at  = Column(DateTime,    default=datetime.utcnow, nullable=False)
     result       = Column(String(16),  nullable=False, default="PENDING", index=True)
     actual_value = Column(Float,       nullable=True)
@@ -1201,6 +1203,7 @@ class Database:
         await self._migrate_prop_line_history_v5()
         await self._migrate_prop_line_history_v6()
         await self._migrate_prop_line_history_v7()
+        await self._migrate_prop_line_variants_v1()
         await self._migrate_player_game_results_v1()
         await self._migrate_prop_opportunity_log_v6()
         await self._migrate_telegram_delivery_audit_v1()
@@ -3332,6 +3335,9 @@ class Database:
                         game_time=getattr(prop, "game_time", None),
                         provider_status=provider_status,
                         external_id=getattr(prop, "external_id", "") or "",
+                        line_variant=str(
+                            getattr(prop, "line_variant", "") or ""
+                        ).lower(),
                         game_id=(
                             getattr(prop, "event_id", "")
                             or getattr(prop, "game_id", "")
@@ -3365,6 +3371,9 @@ class Database:
                         game_time=getattr(prop, "game_time", None),
                         provider_status=provider_status,
                         external_id=getattr(prop, "external_id", "") or "",
+                        line_variant=str(
+                            getattr(prop, "line_variant", "") or ""
+                        ).lower(),
                         game_id=(
                             getattr(prop, "event_id", "")
                             or getattr(prop, "game_id", "")
@@ -3419,6 +3428,9 @@ class Database:
                     else provider_status or row.provider_status
                 )
                 row.external_id = getattr(prop, "external_id", "") or row.external_id
+                row.line_variant = str(
+                    getattr(prop, "line_variant", "") or row.line_variant or ""
+                ).lower()
                 row.game_id = (
                     getattr(prop, "event_id", "")
                     or getattr(prop, "game_id", "")
@@ -5607,6 +5619,20 @@ class Database:
                 "ON prop_line_history (provider, fetched_at)"
             ))
 
+    async def _migrate_prop_line_variants_v1(self) -> None:
+        """Retain provider-owned standard/goblin/demon line identity."""
+        async with self._engine.begin() as conn:
+            for statement in (
+                "ALTER TABLE prop_line_history "
+                "ADD COLUMN line_variant VARCHAR(16) NOT NULL DEFAULT ''",
+                "ALTER TABLE prop_tracking_log "
+                "ADD COLUMN line_variant VARCHAR(16) NOT NULL DEFAULT ''",
+            ):
+                try:
+                    await conn.execute(text(statement))
+                except Exception:
+                    pass
+
     async def _migrate_prop_opportunity_log(self) -> None:
         """Add error_type column to existing tables (learning label classification)."""
         async with self._engine.begin() as conn:
@@ -5862,8 +5888,17 @@ class Database:
 
             external_id = str(record.get("external_id") or "").strip()
             game_id = str(record.get("game_id") or "").strip()
+            line_variant = str(record.get("line_variant") or "").lower().strip()
             if not external_id:
                 external_id = f"{player_name}:{sport}:{stat_type}:{game_id}"
+            if line_variant and not external_id.endswith(f":{line_variant}"):
+                external_id = f"{external_id}:{line_variant}"
+            # The provider may retain one projection ID while moving its
+            # threshold. Each distinct observed threshold must remain a
+            # separately gradeable line rather than replacing the first one.
+            line_identity = f"{line_value:g}"
+            if not external_id.endswith(f":line={line_identity}"):
+                external_id = f"{external_id}:line={line_identity}"
             prepared_by_identity[(provider, external_id, stat_type)] = {
                 "provider": provider,
                 "external_id": external_id,
@@ -5874,6 +5909,7 @@ class Database:
                 "line_value": line_value,
                 "game_time": record.get("game_time"),
                 "game_id": game_id,
+                "line_variant": line_variant,
                 "detected_at": datetime.utcnow(),
                 "result": "PENDING",
             }

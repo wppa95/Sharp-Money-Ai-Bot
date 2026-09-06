@@ -215,7 +215,7 @@ def test_client_uses_key_without_logging_or_polling_other_sources():
     }
 
 
-def test_official_odds_route_accepts_standard_prizepicks_props_only():
+def test_official_odds_route_retains_all_prizepicks_line_variants():
     session = _Session(
         _Response(
             200,
@@ -295,8 +295,9 @@ def test_official_odds_route_accepts_standard_prizepicks_props_only():
         PropLinePrizePicksProvider(client=client).fetch_props_for_sport("NBA")
     )
 
-    assert len(props) == 2
+    assert len(props) == 3
     assert {prop.direction for prop in props} == {"OVER", "UNDER"}
+    assert {prop.line_variant for prop in props} == {"standard", "demon"}
     assert all(prop.provider == "PrizePicks" for prop in props)
     assert all(prop.sport == "NBA" for prop in props)
     assert session.calls[0][0] == "https://api.prop-line.com/v1/sports/basketball_nba/odds"

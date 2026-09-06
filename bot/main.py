@@ -229,11 +229,29 @@ class _ScheduledExecutionCoordinator:
             )
 
     async def _run_guarded(self, name: str, callback, context, *args, **kwargs):
+        self._active_counts[name] = self._active_counts.get(name, 0) + 1
         self._running.add(name)
         try:
             return await self._execute(name, callback, context, *args, **kwargs)
         finally:
-            self._running.discard(name)
+            remaining = self._active_counts.get(name, 1) - 1
+            if remaining > 0:
+                self._active_counts[name] = remaining
+            else:
+                self._active_counts.pop(name, None)
+                self._running.discard(name)
+
+    async def _run_reserved(self, name: str, callback, context, *args, **kwargs):
+        """Execute a slot reserved atomically by ``launch``."""
+        try:
+            return await self._execute(name, callback, context, *args, **kwargs)
+        finally:
+            remaining = self._active_counts.get(name, 1) - 1
+            if remaining > 0:
+                self._active_counts[name] = remaining
+            else:
+                self._active_counts.pop(name, None)
+                self._running.discard(name)
 
     def wrap(self, name: str, callback):
         @wraps(callback)
@@ -260,27 +278,29 @@ class _ScheduledExecutionCoordinator:
     ):
         """Return a scheduler callback that tracks one real execution.
 
-        ``allow_overlap`` is for batch workers whose next trigger can safely
-        process a different cursor window while an earlier window is still
-        doing provider I/O. It does not change the default protection for
-        stateful full-feed jobs such as Underdog.
+        Every execution is an independently tracked task. A second trigger for
+        the same name is always coalesced; different names never share an
+        execution lock or wait on each other. ``allow_overlap`` remains only as
+        a compatibility argument and cannot disable same-job protection.
         """
         @wraps(callback)
         async def _launcher(context, *args, **kwargs):
-            execution_slot = exclusive_group or (
-                None if allow_overlap else f"job:{name}"
-            )
-            if execution_slot:
-                lock = self._exclusive_locks.setdefault(
-                    execution_slot, asyncio.Lock()
+            if self._active_counts.get(name, 0) > 0:
+                logger.info(
+                    "scheduled_execution: coalescing overlapping trigger (%s)",
+                    name,
                 )
-                async with lock:
-                    return await self._run_guarded(
-                        name, callback, context, *args, **kwargs
-                    )
-            return await self._run_guarded(
-                name, callback, context, *args, **kwargs
+                return None
+            self._active_counts[name] = 1
+            self._running.add(name)
+            task = asyncio.create_task(
+                self._run_reserved(name, callback, context, *args, **kwargs),
+                name=f"scheduled:{name}",
             )
+            self._tasks.add(task)
+            task.add_done_callback(self._task_finished)
+            await asyncio.sleep(0)
+            return None
 
         return _launcher
 

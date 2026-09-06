@@ -164,6 +164,36 @@ class TestLogPropOpportunity:
         assert row.recommendation == "OVER"
 
     @pytest.mark.asyncio
+    async def test_tracks_each_line_and_provider_variant_separately(
+        self, db: Database
+    ) -> None:
+        base = {
+            "external_id": "pp-projection-1",
+            "player_name": "A. Guard",
+            "team": "NY",
+            "sport": "NBA",
+            "stat_type": "Points",
+            "game_id": "nba-event-1",
+            "game_time": _past(8),
+            "provider": "PrizePicks",
+        }
+        await db.track_prop_records([
+            {**base, "line_value": 21.5, "line_variant": "standard"},
+            {**base, "line_value": 19.5, "line_variant": "goblin"},
+            {**base, "line_value": 23.5, "line_variant": "demon"},
+        ])
+
+        pending = await db.get_pending_tracked_props(cutoff_hours=4)
+
+        assert len(pending) == 3
+        assert {row.line_value for row in pending} == {19.5, 21.5, 23.5}
+        assert {row.line_variant for row in pending} == {
+            "standard",
+            "goblin",
+            "demon",
+        }
+
+    @pytest.mark.asyncio
     async def test_different_stat_types_are_separate_rows(self, db: Database) -> None:
         await _log(db, external_id="ext-multi", stat_type="Hits")
         await _log(db, external_id="ext-multi", stat_type="RBIs")

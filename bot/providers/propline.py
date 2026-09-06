@@ -1670,6 +1670,9 @@ def normalize_propline_prizepicks_record(
         event=event_label,
         provider_status=provider_status,
         source_timestamp=provider_timestamp,
+        line_variant=_clean(
+            _first(raw_record, "dfs_odds_type", "line_variant", "odds_type")
+        ).lower(),
         supplemental_source="PropLine",
     )
 
@@ -2050,9 +2053,10 @@ def _official_odds_records(payload: Any) -> list[dict[str, Any]]:
                 for outcome in market.get("outcomes") or []:
                     if not isinstance(outcome, dict):
                         continue
-                    odds_type = _clean(outcome.get("dfs_odds_type")).lower()
-                    if odds_type and odds_type != "standard":
-                        continue
+                    odds_type = (
+                        _clean(outcome.get("dfs_odds_type")).lower()
+                        or "standard"
+                    )
                     records.append(
                         {
                             "provider": "PrizePicks",
@@ -2066,6 +2070,7 @@ def _official_odds_records(payload: Any) -> list[dict[str, Any]]:
                             "event": event_data,
                             "external_id": outcome.get("book_outcome_id")
                             or f"{event_id}:{market_key}:{outcome.get('description', '')}:{odds_type or 'standard'}",
+                            "dfs_odds_type": odds_type,
                             # The odds endpoint can return a currently
                             # available line whose last-change timestamp is
                             # older than the fetch.  The client fetch time is

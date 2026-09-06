@@ -19,7 +19,7 @@ def _scheduled_jobs() -> list[tuple[str, ast.Call]]:
             continue
         if not (
             isinstance(node.func, ast.Attribute)
-            and node.func.attr == "run_repeating"
+            and node.func.attr in {"run_repeating", "run_once"}
         ):
             continue
         name = next(
@@ -64,7 +64,7 @@ def test_current_book_has_one_monitoring_owner_and_no_remainder_rotation():
     assert "consensus_checker" not in names
 
 
-def test_required_jobs_remain_registered_and_grading_has_no_independent_timer():
+def test_required_jobs_remain_registered_with_independent_provider_and_grader_timers():
     names = {name for name, _ in _scheduled_jobs()}
 
     assert {
@@ -77,8 +77,9 @@ def test_required_jobs_remain_registered_and_grading_has_no_independent_timer():
         "prop_history_pruner",
         "heartbeat",
         "season_checker",
+        "opportunity_grader",
+        "propline_request_scan",
     } <= names
-    assert "opportunity_grader" not in names
 
 
 def test_scheduled_jobs_use_coordinator_without_max_instances():
@@ -97,16 +98,14 @@ def test_scheduled_jobs_use_coordinator_without_max_instances():
     assert "_coordinated_job(" in source
 
 
-def test_grading_is_owned_by_the_underdog_two_minute_cycle():
+def test_grading_and_propline_are_not_owned_by_the_underdog_cycle():
     source = MAIN_SOURCE.read_text()
 
     assert "async def _underdog_monitor_cycle" in source
     assert "await underdog_job(context)" in source
-    assert "_grade_opportunities_job(context)" in source
-    assert "_GRADE_CYCLE_BUDGET_SECONDS" in source
-    assert "await asyncio.wait_for(" in source
+    assert "async def _opportunity_grader_tick" in source
+    assert "async def _propline_scan_tick" in source
     assert '_coordinated_job("underdog_monitor", _underdog_monitor_cycle)' in source
-    assert "allow_overlap=True" not in source
 
 
 @pytest.mark.asyncio
@@ -186,22 +185,22 @@ async def test_launcher_queues_overlapping_trigger_without_overlap():
     await started.wait()
     await first_launcher
 
-    # The active task is still blocked; the second trigger is retained but
-    # waits for the same named execution slot.
+    # The active task is still blocked; the second same-name trigger is
+    # coalesced instead of overlapping or queuing another execution.
     await launcher(None)
     assert calls == 1
-    assert len(coordinator._tasks) == 2
+    assert len(coordinator._tasks) == 1
 
     release.set()
     await asyncio.gather(*list(coordinator._tasks))
     await asyncio.sleep(0)
-    assert calls == 2
+    assert calls == 1
     assert not coordinator._running
     assert not coordinator._tasks
 
 
 @pytest.mark.asyncio
-async def test_launcher_allows_overlapping_triggers_when_requested():
+async def test_launcher_never_allows_same_job_overlap():
     from main import _ScheduledExecutionCoordinator
 
     coordinator = _ScheduledExecutionCoordinator()
@@ -217,14 +216,38 @@ async def test_launcher_allows_overlapping_triggers_when_requested():
     await launcher(None)
     await asyncio.sleep(0)
 
-    assert started == [1, 2]
-    assert len(coordinator._tasks) == 2
+    assert started == [1]
+    assert len(coordinator._tasks) == 1
 
     release.set()
     await asyncio.gather(*list(coordinator._tasks))
     await asyncio.sleep(0)
     assert not coordinator._running
     assert not coordinator._active_counts
+
+
+@pytest.mark.asyncio
+async def test_simultaneous_same_name_launch_is_admitted_atomically():
+    from main import _ScheduledExecutionCoordinator
+
+    coordinator = _ScheduledExecutionCoordinator()
+    release = asyncio.Event()
+    calls = 0
+
+    async def callback(_context):
+        nonlocal calls
+        calls += 1
+        await release.wait()
+
+    launcher = coordinator.launch("atomic_job", callback)
+    await asyncio.gather(launcher(None), launcher(None))
+    await asyncio.sleep(0)
+
+    assert calls == 1
+    assert len(coordinator._tasks) == 1
+
+    release.set()
+    await asyncio.gather(*list(coordinator._tasks))
 
 
 @pytest.mark.asyncio
@@ -259,7 +282,7 @@ async def test_launcher_allows_different_job_names_to_run_independently():
 
 
 @pytest.mark.asyncio
-async def test_launcher_exclusive_group_waits_for_other_heavy_job():
+async def test_launcher_never_serializes_different_job_names():
     from main import _ScheduledExecutionCoordinator
 
     coordinator = _ScheduledExecutionCoordinator()
@@ -288,8 +311,7 @@ async def test_launcher_exclusive_group_waits_for_other_heavy_job():
     await first(None)
     await first_started.wait()
     await second(None)
-    await asyncio.sleep(0)
-    assert not second_started.is_set()
+    await second_started.wait()
 
     release_first.set()
     await second_started.wait()
@@ -299,14 +321,14 @@ async def test_launcher_exclusive_group_waits_for_other_heavy_job():
     assert not coordinator._tasks
 
 
-def test_production_monitor_and_history_jobs_share_heavy_job_ownership_group():
+def test_production_monitor_and_history_jobs_have_independent_ownership():
     import inspect
     import main
 
     source = inspect.getsource(main.post_init)
     assert 'name="underdog_monitor"' in source
     assert 'name="player_history_collector"' in source
-    assert "use_exclusive_group=False" not in source
+    assert 'exclusive_group="underdog_monitoring"' not in source
 
 
 @pytest.mark.asyncio
@@ -333,7 +355,7 @@ async def test_launcher_long_run_is_not_cancelled_by_later_trigger():
     await launcher(None)
     await asyncio.sleep(0)
     assert not cancelled
-    assert len(coordinator._tasks) == 2
+    assert len(coordinator._tasks) == 1
 
     release.set()
     await asyncio.gather(*list(coordinator._tasks))

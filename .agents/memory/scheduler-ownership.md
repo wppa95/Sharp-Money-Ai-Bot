@@ -3,16 +3,16 @@ name: Scheduler ownership
 description: FPR owns the only scheduled full-pool rotation; Stable Refresh is retained only as an unscheduled compatibility path.
 ---
 
-The active scheduler has one Underdog monitor, one PrizePicks companion cycle
-inside that monitor, and one FPR/full-pool rotation. Stable Refresh must not be
-registered as an independent repeating job or given a replacement cadence.
+Each scheduled job owns an independent execution lane. Underdog, PrizePicks,
+grading, history, and supporting jobs may overlap each other, but a second
+execution of the same named job must always be coalesced.
 
-**Why:** A second DB-backed rotation competed for SQLite and monitoring
-capacity without adding a distinct current user-facing capability.
+**Why:** Shared scheduler ownership let one slow provider or evidence job delay
+unrelated work. Same-job overlap still risks duplicate requests and writes.
 
-**How to apply:** When changing scheduler registrations, preserve the required
-monitoring, CLV, grading, evidence, health, budget, pruning, and season jobs;
-keep monitoring jobs single-instance; and audit legacy job names for duplicates.
+**How to apply:** Never chain one provider's work from another provider's job or
+assign different names to a shared execution group. Reserve same-name admission
+atomically before launching asynchronous work.
 
 The sportsbook player-prop poller is a required, separate OddsAPI confirmation
 source rather than a second pick'em monitor. It must remain registered only once
