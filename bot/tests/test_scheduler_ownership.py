@@ -145,38 +145,25 @@ async def test_coordinator_coalesces_active_trigger_and_allows_next_trigger():
 
 
 @pytest.mark.asyncio
-async def test_underdog_cycle_runs_grading_serially_after_monitoring(monkeypatch):
+async def test_underdog_cycle_does_not_run_independent_grader(monkeypatch):
     import main
 
     calls: list[str] = []
-    active = 0
-    max_active = 0
 
     async def fake_monitor(_context):
-        nonlocal active, max_active
         calls.append("monitor_start")
-        active += 1
-        max_active = max(max_active, active)
         await asyncio.sleep(0)
         calls.append("monitor_end")
-        active -= 1
 
     async def fake_grader(_context):
-        nonlocal active, max_active
-        calls.append("grade_start")
-        active += 1
-        max_active = max(max_active, active)
-        await asyncio.sleep(0)
-        calls.append("grade_end")
-        active -= 1
+        calls.append("grader_should_not_run")
 
     monkeypatch.setattr(main, "underdog_job", fake_monitor)
     monkeypatch.setattr(main, "_grade_opportunities_job", fake_grader)
 
     await main._underdog_monitor_cycle(None)
 
-    assert calls == ["monitor_start", "monitor_end", "grade_start", "grade_end"]
-    assert max_active == 1
+    assert calls == ["monitor_start", "monitor_end"]
 
 
 @pytest.mark.asyncio
