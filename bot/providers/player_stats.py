@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from datetime import datetime
 from typing import NamedTuple, Optional
 from urllib.parse import quote_plus
@@ -443,6 +444,11 @@ class PlayerStatsProvider:
                 # be distinguished from zero-stat games, producing invalid hit rates.
                 # Enable manually: UD_ALERT_SPORTS=...,SOCCER + FOOTBALL_DATA_API_KEY.
                 # _fetch_espn_soccer() is also available for ESPN-accessible envs.
+                if not os.environ.get("FOOTBALL_DATA_API_KEY"):
+                    logger.debug(
+                        "Soccer optional provider disabled; using stored/PropLine history"
+                    )
+                    return []
                 return await _get_soccer_provider().fetch_results(
                     player_name, sport_upper, stat_type
                 )

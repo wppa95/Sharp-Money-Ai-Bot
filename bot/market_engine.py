@@ -2021,6 +2021,8 @@ async def _fetch_and_compute_hit_rates(
             allow_remote
             and cache_key not in _player_result_fetch_cache
             and not _skip_primary_for_propline
+            and len(list(preloaded_results or []))
+            < config.UD_VALIDATION_MIN_SAMPLES
         ):
             provider = _get_player_stats_provider()
             # Guard against unbounded growth: clear the whole set when it exceeds the
@@ -4067,10 +4069,13 @@ async def underdog_job(context) -> None:
     if _health:
         _health.record_provider_fetch("Underdog")
 
-    ud_snaps = [
+    _underdog_provider_snaps = [
         s for s in snapshots
         if s.sportsbook == "Underdog"
-        and not is_football_related_sport(getattr(s, "sport", ""))
+    ]
+    ud_snaps = [
+        s for s in _underdog_provider_snaps
+        if not is_football_related_sport(getattr(s, "sport", ""))
     ]
     # Game markets share the pick'em feed but not the player-prop scoring
     # model. Persist them in the existing canonical snapshot history so
@@ -4110,7 +4115,13 @@ async def underdog_job(context) -> None:
                 )
         ud_snaps = [s for s in ud_snaps if s not in ud_game_markets]
     _cycle_timing.count("active_pool_fetched", len(snapshots))
-    _cycle_timing.count("active_pool_sportsbook_filtered", len(snapshots) - len(ud_snaps))
+    _cycle_timing.count("active_pool_underdog", len(_underdog_provider_snaps))
+    _cycle_timing.count(
+        "active_pool_football_filtered",
+        len(_underdog_provider_snaps) - len(ud_snaps) - len(ud_game_markets),
+    )
+    _cycle_timing.count("active_pool_game_markets", len(ud_game_markets))
+    _cycle_timing.count("active_pool_props", len(ud_snaps))
     # Capture count before the list is cleared later for memory recovery.
     # record_underdog_scan() at end-of-cycle reads this variable so it
     # always reflects the actual number of snapshots processed this cycle.
@@ -4139,8 +4150,6 @@ async def underdog_job(context) -> None:
         if _health:
             _health.record_job_run("underdog_job")
         return
-
-    _cycle_timing.count("active_pool_props", len(ud_snaps))
 
     # Summary counters — emitted as a single INFO line after the loop.
     # Monitoring reports counts and neutral evaluation metrics; score tiers are

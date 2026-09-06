@@ -661,10 +661,31 @@ async def post_init(application: Application) -> None:
             first=45,
             name="underdog_monitor",
         )
-        jq.run_repeating(
-            _coordinated_job("opportunity_grader", _grade_opportunities_job),
-            interval=config.UNDERDOG_POLL_INTERVAL,
-            first=75,
+        # Grading owns an independent one-shot schedule. The next run is only
+        # registered after the current pass finishes, so a slow provider cannot
+        # trigger APScheduler max-instances skips or leave queued grader runs.
+        grader_callback = None
+
+        async def _opportunity_grader_tick(context):
+            await _grade_opportunities_job(context)
+            queue = getattr(context, "job_queue", None)
+            if queue is None:
+                application_ref = getattr(context, "application", None)
+                queue = getattr(application_ref, "job_queue", None)
+            if queue is not None and grader_callback is not None:
+                queue.run_once(
+                    grader_callback,
+                    when=config.UNDERDOG_POLL_INTERVAL,
+                    name="opportunity_grader",
+                )
+
+        grader_callback = _coordinated_job(
+            "opportunity_grader",
+            _opportunity_grader_tick,
+        )
+        jq.run_once(
+            grader_callback,
+            when=75,
             name="opportunity_grader",
         )
         # PropLine uses a one-shot scheduler so a 429 can remove the
@@ -1025,6 +1046,45 @@ async def _grade_opportunities_job(context) -> None:
                 _ht_start.record_job_run("_grade_opportunities_job")
             return
 
+        # Reuse durable game evidence before invoking any remote provider.
+        # This prevents optional-provider warnings and requests for rows the
+        # database can already grade.
+        _stored_grade_results = {}
+        _bulk_result_loader = getattr(db, "get_player_results_bulk", None)
+        if callable(_bulk_result_loader):
+            _bulk_result = _bulk_result_loader(
+                [
+                    (opp.player_name, opp.sport, opp.stat_type)
+                    for opp in pending
+                ],
+                limit=30,
+            )
+            if hasattr(_bulk_result, "__await__"):
+                _stored_grade_results = await _bulk_result
+            elif isinstance(_bulk_result, dict):
+                _stored_grade_results = _bulk_result
+
+        def _has_stored_grade_result(opp) -> bool:
+            _key = (
+                str(opp.player_name),
+                str(opp.sport),
+                str(opp.stat_type or "").lower().strip(),
+            )
+            _date = (
+                opp.game_time.strftime("%Y-%m-%d")
+                if getattr(opp, "game_time", None)
+                else ""
+            )
+            _game_id = str(getattr(opp, "game_id", "") or "")
+            return any(
+                (_date and str(getattr(row, "game_date", "") or "") == _date)
+                or (
+                    _game_id
+                    and str(getattr(row, "game_id", "") or "") == _game_id
+                )
+                for row in _stored_grade_results.get(_key, [])
+            )
+
         # ── Proactively fetch player results so grading works without /backfill ──
         # The grader previously only looked up pre-existing PlayerResult rows.
         # Props removed from Underdog before the game finished would never get
@@ -1040,6 +1100,8 @@ async def _grade_opportunities_job(context) -> None:
                 if _gkey in _grade_fetched:
                     continue
                 _grade_fetched.add(_gkey)
+                if _has_stored_grade_result(_gopp):
+                    continue
                 _grade_targets.append(_gopp)
 
             _grade_sem = asyncio.Semaphore(_GRADE_FETCH_CONCURRENCY)
