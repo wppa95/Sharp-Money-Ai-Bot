@@ -91,7 +91,13 @@ async def _independent_report_reads(
 ) -> list:
     """Run optional report reads together and return unavailable per slow read."""
     timeout_value = _COMMAND_TIMEOUT_SECONDS if timeout is None else timeout
-    tasks = [asyncio.ensure_future(read) for read in reads]
+
+    async def _resolve(read):
+        if hasattr(read, "__await__"):
+            return await read
+        return read
+
+    tasks = [asyncio.create_task(_resolve(read)) for read in reads]
 
     def _consume_finished(report_task: asyncio.Future) -> None:
         if report_task.cancelled():
@@ -1132,8 +1138,6 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 total_prop_history,
                 ud_history,
                 pp_history,
-                _player_result_coverage,
-                _directional_opportunities,
             ) = await _status_db_reads(
                 [
                     _status_db_read(
@@ -1150,23 +1154,10 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                         "PrizePicks prop history",
                         _db.count_prop_line_history(provider="PrizePicks"),
                     ),
-                    _status_db_read(
-                        "player-result coverage",
-                        _db.get_player_result_coverage_by_sport(
-                            getattr(config, "ud_alert_sports", frozenset())
-                        ),
-                    ),
-                    _status_db_read(
-                        "directional opportunities",
-                        _db.get_directional_opportunity_counts_by_sport(
-                            sports=getattr(config, "ud_alert_sports", frozenset())
-                        ),
-                    ),
                 ]
             )
         else:
             _alerts_today = total_prop_history = ud_history = pp_history = 0
-            _player_result_coverage = _directional_opportunities = None
         _status_counts_degraded = any(
             value is None
             for value in (_alerts_today, total_prop_history, ud_history, pp_history)
@@ -1197,10 +1188,6 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 f" · PrizePicks (PropLine): {_format_status_count(pp_history)}"
             ),
             *_prizepicks_feed_count_lines(_ht_pipeline),
-            *_alert_readiness_lines(
-                _player_result_coverage,
-                _directional_opportunities,
-            ),
         ]
         if _ht_pipeline is not None:
             lines.append(
@@ -3672,6 +3659,24 @@ async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         "",
     ]
 
+    # Readiness belongs to /alerts, not /status. These are independent optional
+    # SQLite counters: a transient lock omits this block without delaying or
+    # failing the alert-history command.
+    _coverage, _directional = await _independent_report_reads(
+        [
+            _db.get_player_result_coverage_by_sport(
+                getattr(config, "ud_alert_sports", frozenset())
+            ),
+            _db.get_directional_opportunity_counts_by_sport(
+                sports=getattr(config, "ud_alert_sports", frozenset())
+            ),
+        ],
+        timeout=_STATUS_DB_READ_TIMEOUT_SECONDS,
+    )
+    lines.extend(_alert_readiness_lines(_coverage, _directional))
+    if len(lines) > 2:
+        lines.append("")
+
     # ── Actionable pick alerts (PropOpportunityLog — canonical delivery source) ─
     # PropOpportunityLog.alert_sent=True is set only when broadcast_alert()
     # successfully delivers a 🎯 ACTIONABLE BET PICK to Telegram.  Using
@@ -3716,7 +3721,10 @@ async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             lines.append("  <i>New alerts appear here after delivery.</i>")
     except Exception as exc:
         logger.warning("cmd_alerts: prop history lookup failed: %s", exc)
-        lines.append("  <i>Alert history unavailable — check /health for job status.</i>")
+        lines.append(
+            "  <i>Alert-history rows are temporarily busy; readiness and the "
+            "rest of this screen are still current.</i>"
+        )
 
     _alerts_body = "\n".join(lines)
     try:

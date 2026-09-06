@@ -3390,7 +3390,10 @@ def _has_strong_delivery_evidence(
         n_supplemental = int(
             getattr(validation, "n_supplemental_games", 0) or 0
         )
-        if source_lower == "real" and n_real >= 5:
+        # ``compute_hit_rates`` labels stored provider game results "primary".
+        # They are completed-game evidence just like the older "real" label;
+        # rejecting that label blocked non-MLB sports before direction.
+        if source_lower in {"real", "primary"} and n_real >= 5:
             return True
         if source_lower == "propline" and n_supplemental >= 5:
             return True
