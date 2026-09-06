@@ -275,11 +275,8 @@ async def player_history_collector_job(context) -> None:
                     stat = re.sub(r"\s+-?\d+(?:\.\d+)?\s*$", "", selection)
                     stat = stat or selection
                 sport = (getattr(s, "sport", None) or "UNKNOWN").upper()
-                if (
-                    sport not in _SUPPORTED_HISTORY_SPORTS
-                    or is_football_related_sport(sport)
-                ):
-                    continue  # No provider data path — skip to avoid wasting API calls
+                if is_football_related_sport(sport):
+                    continue
                 key = (player.strip(), sport, (stat or "").lower().strip())
                 target_sources.setdefault(
                     key,
@@ -328,11 +325,8 @@ async def player_history_collector_job(context) -> None:
                     )
                 for s in plh:
                     sport = (getattr(s, "sport", None) or "UNKNOWN").upper()
-                    if (
-                        sport not in _SUPPORTED_HISTORY_SPORTS
-                        or is_football_related_sport(sport)
-                    ):
-                        continue  # No provider data path — skip
+                    if is_football_related_sport(sport):
+                        continue
                     key = (
                         (s.player_name or "").strip(),
                         sport,

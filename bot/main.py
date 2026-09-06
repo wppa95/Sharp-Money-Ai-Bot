@@ -267,63 +267,20 @@ class _ScheduledExecutionCoordinator:
         """
         @wraps(callback)
         async def _launcher(context, *args, **kwargs):
-            # Claim synchronously before creating the task. This closes the
-            # small scheduling window where two JobQueue callbacks could both
-            # otherwise miss the active-state telemetry. Queued jobs use a
-            # count so one completion cannot clear another waiting worker.
-            self._running.add(name)
-            self._active_counts[name] = self._active_counts.get(name, 0) + 1
-
-            async def _run_once():
-                try:
-                    execution_slot = (
-                        exclusive_group
-                        or (None if allow_overlap else f"job:{name}")
+            execution_slot = exclusive_group or (
+                None if allow_overlap else f"job:{name}"
+            )
+            if execution_slot:
+                lock = self._exclusive_locks.setdefault(
+                    execution_slot, asyncio.Lock()
+                )
+                async with lock:
+                    return await self._run_guarded(
+                        name, callback, context, *args, **kwargs
                     )
-                    if execution_slot:
-                        lock = self._exclusive_locks.setdefault(
-                            execution_slot, asyncio.Lock()
-                        )
-                        wait_started = time.monotonic()
-                        if lock.locked():
-                            logger.info(
-                                "scheduled_execution: waiting for execution slot "
-                                "(job=%s slot=%s)",
-                                name,
-                                execution_slot,
-                            )
-                        async with lock:
-                            waited = time.monotonic() - wait_started
-                            if waited > 0:
-                                self._exclusive_waits += 1
-                                self._exclusive_wait_seconds += waited
-                            if waited >= 0.05:
-                                logger.info(
-                                    "scheduled_execution: execution slot acquired "
-                                    "(job=%s slot=%s waited=%.3fs "
-                                    "waits=%d total_wait=%.3fs)",
-                                    name,
-                                    execution_slot,
-                                    waited,
-                                    self._exclusive_waits,
-                                    self._exclusive_wait_seconds,
-                                )
-                            return await self._execute(
-                                name, callback, context, *args, **kwargs
-                            )
-                    return await self._execute(name, callback, context, *args, **kwargs)
-                finally:
-                    remaining = self._active_counts.get(name, 1) - 1
-                    if remaining <= 0:
-                        self._active_counts.pop(name, None)
-                        self._running.discard(name)
-                    else:
-                        self._active_counts[name] = remaining
-
-            task = asyncio.create_task(_run_once(), name=f"scheduled:{name}")
-            self._tasks.add(task)
-            task.add_done_callback(self._task_finished)
-            return None
+            return await self._run_guarded(
+                name, callback, context, *args, **kwargs
+            )
 
         return _launcher
 
@@ -704,6 +661,12 @@ async def post_init(application: Application) -> None:
             first=45,
             name="underdog_monitor",
         )
+        jq.run_repeating(
+            _coordinated_job("opportunity_grader", _grade_opportunities_job),
+            interval=config.UNDERDOG_POLL_INTERVAL,
+            first=75,
+            name="opportunity_grader",
+        )
         # PropLine uses a one-shot scheduler so a 429 can remove the
         # background rotator completely until Retry-After expires.  The next
         # one-shot is scheduled by the callback at the limiter's current
@@ -783,7 +746,7 @@ async def post_init(application: Application) -> None:
                 name="season_checker",
             )
         logger.info(
-            "Jobs scheduled — underdog + grader: every %ds, "
+            "Jobs scheduled — underdog and independent grader: every %ds, "
             "history collector: every %ds, "
             "season_check: every %ds, "
             "heartbeat: every 60s "
@@ -982,59 +945,8 @@ _GRADE_PROPLINE_TARGETS_PER_CYCLE = 2
 
 
 async def _underdog_monitor_cycle(context) -> None:
-    """Run monitoring and grading as one single-flight two-minute cycle.
-
-    Grading deliberately lives behind the Underdog monitor owner instead of
-    having its own repeating timer.  This makes one cadence own both phases:
-    a slow scan cannot overlap grading, and a slow grading pass cannot create
-    a second worker, skipped trigger, or queued backlog.
-    """
-    _cycle_started = time.monotonic()
-    try:
-        await underdog_job(context)
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        # Keep settlement useful even if the live-feed phase fails.  The
-        # coordinator still records the scan error, while this cycle's grader
-        # remains serialized behind the same owner.
-        logger.exception("underdog_monitor_cycle: monitoring phase failed")
-    _cycle_interval = max(
-        1.0,
-        float(getattr(config, "UNDERDOG_POLL_INTERVAL", 120)),
-    )
-    _grade_budget = min(
-        float(_GRADE_CYCLE_BUDGET_SECONDS),
-        max(
-            0.0,
-            _cycle_interval
-            - _GRADE_CYCLE_HEADROOM_SECONDS
-            - (time.monotonic() - _cycle_started),
-        ),
-    )
-    if _grade_budget <= 0:
-        logger.warning(
-            "underdog_monitor_cycle: no grading budget remained after scan; "
-            "pending rows will rotate on a later cycle"
-        )
-        _ht = get_health_tracker()
-        if _ht:
-            _ht.record_job_run("_grade_opportunities_job")
-        return
-    try:
-        await asyncio.wait_for(
-            _grade_opportunities_job(context),
-            timeout=_grade_budget,
-        )
-    except asyncio.TimeoutError:
-        logger.warning(
-            "underdog_monitor_cycle: grading budget exhausted after %.1fs; "
-            "remaining pending rows will rotate on a later cycle",
-            _grade_budget,
-        )
-        _ht = get_health_tracker()
-        if _ht:
-            _ht.record_job_run("_grade_opportunities_job")
+    """Run only the continuous Underdog monitoring cycle."""
+    await underdog_job(context)
 
 
 async def _grade_opportunities_job(context) -> None:

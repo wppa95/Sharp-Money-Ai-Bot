@@ -467,7 +467,6 @@ async def _persist_propline_observations(
         await db.upsert_prop_line_history_batch(
             "PrizePicks",
             list(props),
-            append_snapshot=True,
         )
         tracking_records = []
         for prop in props:
@@ -1152,7 +1151,11 @@ async def propline_request_scan_job(context) -> None:
         fetch_props = getattr(provider, "fetch_props_for_sport", None)
         try:
             if callable(fetch_result):
-                result = await fetch_result(sport, bookmaker="prizepicks")
+                result = await fetch_result(
+                    sport,
+                    bookmaker="prizepicks",
+                    event_scoped=True,
+                )
                 props = list(getattr(result, "props", []) or [])
                 succeeded = bool(getattr(result, "succeeded", False))
             elif callable(fetch_props):
@@ -5480,23 +5483,15 @@ async def underdog_job(context) -> None:
                 alert_sent=bool(ud_result.sent),
                 fetched_at=now,
             )
-            # Cold-start: buffer for a single bulk transaction after the loop.
-            # Incremental: also buffer — bulk-saved once after the loop completes
-            # (same pattern as cold-start).  Avoids ~5 000 individual async
-            # SQLite transactions per scan which dominated scan wall-clock time.
-            if is_cold_start:
-                _cold_start_records.append(record)
-            else:
-                _incremental_records.append(record)
-                # Link this snapshot record into the delivery queue candidate so the
-                # ranked delivery phase can update alert_sent=True before bulk-save.
-                if _dq_collected and _delivery_queue:
-                    for _dq_ref in reversed(_delivery_queue):
-                        if (_dq_ref.get("player") == player
-                                and _dq_ref.get("stat_type") == stat_type
-                                and _dq_ref.get("record") is None):
-                            _dq_ref["record"] = record
-                            break
+            # The base record is already present in the full-feed batch. Enrich
+            # that object in place; do not append a duplicate observation.
+            if _dq_collected and _delivery_queue:
+                for _dq_ref in reversed(_delivery_queue):
+                    if (_dq_ref.get("player") == player
+                            and _dq_ref.get("stat_type") == stat_type
+                            and _dq_ref.get("record") is None):
+                        _dq_ref["record"] = record
+                        break
         _cycle_timing.finish("scoring_evidence")
         _cycle_timing.start("priority_selection")
         # (Incremental bulk-save is performed AFTER the ranked delivery phase so that
@@ -6127,6 +6122,30 @@ async def underdog_job(context) -> None:
             # empty the list object that was handed to the mock in tests.
             _incr_snapshot = list(_incremental_records)
             _incremental_records.clear()
+            # Keep current live state in the shared lifecycle table. Unchanged
+            # observations update last_seen in place; only meaningful events
+            # remain in the raw movement/history table.
+            await _cycle_timing.await_db(
+                "write",
+                "upsert_underdog_live_props",
+                db.upsert_prop_line_history_batch(
+                    "Underdog",
+                    _incr_snapshot,
+                ),
+            )
+            _incr_snapshot = [
+                record
+                for record in _incr_snapshot
+                if (
+                    bool(record.line_moved)
+                    or bool(record.removed)
+                    or bool(record.alert_sent)
+                    or str(record.alert_outcome or "").startswith("new_prop")
+                )
+            ]
+            if not _incr_snapshot:
+                _snapshot_intentionally_skipped += len(_incremental_records)
+                _snapshot_persisted += 0
             _snapshot_intended += len(_incr_snapshot)
             if isinstance(db, Database):
                 try:
