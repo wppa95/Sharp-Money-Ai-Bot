@@ -1,0 +1,268 @@
+CRITICAL — REPLIT CREDITS / EXECUTION DISCIPLINE
+
+Do NOT waste Replit credits.
+
+Before doing anything:
+- Inspect the existing code and architecture first.
+- Do NOT repeatedly restart, rebuild, redeploy, reinstall, or run unnecessary commands.
+- Do NOT use the Replit AI agent.
+- Do NOT run expensive or redundant tests.
+- Do NOT create unnecessary background processes.
+- Do NOT repeatedly poll endpoints just to investigate.
+- Use targeted inspection and the minimum number of commands needed to verify behavior.
+- Do NOT make changes until the required implementation is understood.
+- Do NOT modify unrelated code.
+- Do NOT refactor for style or convenience.
+- Every command/tool execution must have a specific diagnostic or implementation purpose.
+
+If a verification can be performed by reading the existing code, configuration, logs, or database structure, do that instead of running another process.
+
+SCHEDULER
+
+- Underdog must NOT start grading.
+- Grading is its own independent job.
+- A job must never start a different job.
+- A job must never stop a different job.
+- A job must never overlap itself.
+- Do NOT use coalesce.
+- Do NOT use max_instances.
+- Do NOT silently skip scheduled executions.
+- Do NOT create leftover/pending execution queues.
+- "Executed successfully" must only be reported AFTER the real work has completed successfully.
+- Keep continuous, non-stop scanning.
+
+PROPLINE
+
+SPORT SCANNING
+
+- Run the sports job every 20 seconds.
+- Exactly ONE HTTP call per tick.
+- Process exactly ONE sport per tick.
+- Use event-level PrizePicks player props only.
+
+Required endpoint:
+
+GET /v1/sports/{sport}/events/{event_id}/odds?markets=PLAYER_PROPS&bookmakers=prizepicks
+
+Required:
+event_scoped=True
+
+Do NOT replace this with broad book-level polling.
+Do NOT make multiple HTTP calls during a single sports tick.
+
+ENDPOINT JOB
+
+- Run the endpoints job 27 times per hour.
+- Exactly ONE HTTP call per execution.
+- Rotate through:
+
+/events
+/results
+/player history
+/player games
+/ev
+/best-line
+/movement
+/trends
+
+- Persist returned results into SQLite.
+- Block:
+  - futures
+  - Grand Salami
+  - SGP
+
+MULTI-SPORT ALERT DIAGNOSTIC — CRITICAL
+
+We now have PropLine data available across all supported sports except football.
+
+I am NOT receiving alerts from non-MLB/baseball sports.
+
+This must be investigated as part of this audit/implementation.
+
+Do NOT assume the problem is data availability.
+
+Trace the complete pipeline for EACH supported non-football sport:
+
+PropLine sport data
+→ event-level player props
+→ SQLite persistence
+→ live prop state
+→ evidence/history
+→ analysis
+→ direction
+→ qualification
+→ alert creation
+→ alert filtering
+→ deduplication
+→ Telegram delivery
+
+Determine exactly where non-MLB/baseball props are being stopped.
+
+Specifically verify:
+
+1. Is the active sports configuration still restricted to MLB/baseball anywhere?
+
+2. Are non-MLB sports actually being scheduled by the sports scanner?
+
+3. Does the one-sport-per-tick rotation reach every supported non-football sport?
+
+4. Are non-MLB props successfully being normalized?
+
+5. Are non-MLB props being persisted into SQLite?
+
+6. Are non-MLB props being upserted into the live-prop state?
+
+7. Are historical/evidence records being populated for non-MLB players?
+
+8. Does the analysis engine process non-MLB props?
+
+9. Does the direction engine produce OVER/UNDER for non-MLB props?
+
+10. Is there any sport-specific qualification logic that only permits MLB/baseball?
+
+11. Is there an ACTIVE_SPORTS, ENABLED_SPORTS, ALLOWED_SPORTS, market, league, or sport filter anywhere downstream?
+
+12. Is there any hard-coded MLB/baseball condition in:
+    - monitoring
+    - normalization
+    - analysis
+    - qualification
+    - alert generation
+    - alert_scope_filter
+    - Telegram delivery
+    - deduplication
+
+13. Are non-MLB alerts being generated but filtered before Telegram delivery?
+
+14. Are non-MLB alerts reaching the Telegram delivery function?
+
+15. If they reach Telegram delivery, are they failing at the Telegram API?
+
+16. Does football remain the ONLY intentionally blocked sport?
+
+17. Confirm that basketball, hockey, soccer, tennis, and every other currently supported non-football sport are treated according to the same general alert pipeline rather than being silently excluded.
+
+Do NOT simply change the sports list to make this work.
+
+First identify the EXACT reason non-MLB/baseball alerts are not being delivered.
+
+Report evidence showing:
+
+- which sports are currently configured
+- which sports are actually being scanned
+- which sports have props in SQLite
+- which sports reach analysis
+- which sports produce direction
+- which sports qualify
+- which sports generate alerts
+- which sports are filtered
+- which sports reach Telegram delivery
+- the exact blocker, if one exists
+
+If MLB/baseball is currently receiving alerts while other supported sports are not, compare one working MLB prop against one non-MLB prop through the entire pipeline and identify the first point where their behavior diverges.
+
+Intended behavior:
+
+ALL SUPPORTED SPORTS EXCEPT FOOTBALL
+→ may produce alerts
+→ provided the prop satisfies the ONLY delivery blockers:
+   1. missing evidence/history
+   2. no direction
+
+Do NOT create sport-specific quality, tier, star, or arbitrary threshold blockers.
+
+Football remains explicitly blocked.
+
+COMMANDS
+
+- Every Telegram command must read from stored SQLite data only.
+- Telegram commands must NEVER make a live PropLine request.
+- Telegram commands must NEVER make a live Underdog request.
+- Commands must query stored database/state produced by background jobs.
+
+DATABASE / PERSISTENCE
+
+CONTINUOUS SCANNING
+
+- Keep continuous scanning active.
+- Do NOT clone the entire book/database state every scan cycle.
+- Stop using append_snapshot=True for unchanged props.
+
+LIVE PROP UPSERT LOGIC
+
+- Upsert the current live prop.
+- If unchanged:
+    - update last_seen only.
+    - do NOT create another snapshot row.
+- If the line changes:
+    - update the live prop row.
+    - create exactly ONE movement row for that change.
+- If a prop disappears:
+    - mark it removed.
+    - do NOT delete it.
+
+HISTORY
+
+- Preserve settled history.
+- Preserve graded history.
+- Preserve movement history.
+- Do NOT create a full underdog_snapshots copy for every unchanged prop.
+- The database must represent current live state efficiently while retaining meaningful historical events.
+
+ALERTS
+
+DIRECTION
+
+- Alerts must be OVER or UNDER only.
+- No directionless alerts.
+
+DELIVERY BLOCKERS
+
+ONLY these two conditions may block alert delivery:
+
+1. Missing evidence/history
+2. No direction
+
+REMOVE these as delivery blockers:
+
+- tier
+- quality
+- star rating
+- any equivalent tier/quality/star threshold
+
+Stored EV, best-line, movement, and trends may support determining direction.
+
+KEEP:
+
+- pregame filtering
+- no-live filtering
+- football blocked
+- deduplication may remain
+
+Do NOT introduce new delivery blockers without explicit approval.
+
+PROPLINE / UNDERDOG RELATIONSHIP
+
+- If PropLine supplies/fills missing Underdog history or evidence, the alert remains an UNDERDOG alert.
+- PropLine is an evidence/data source.
+- Do NOT relabel a qualified Underdog alert as a PropLine alert merely because PropLine supplied supporting history.
+
+CRITICAL ARCHITECTURE
+
+Underdog and PrizePicks remain the PRIMARY player-prop sources.
+
+PropLine is the PrizePicks feed/evidence source and may also fill missing Underdog history when necessary.
+
+Before changing anything:
+
+1. Inspect the current implementation.
+2. Map every requirement above to the exact existing module/function.
+3. Identify conflicts with the current architecture.
+4. Identify exactly what must change.
+5. Report the implementation plan before making changes.
+
+Do NOT modify, refactor, delete, reinstall, deploy, or push anything until the implementation plan has been reviewed.
+
+Do NOT change unrelated functionality.
+
+Do NOT burn Replit credits on unnecessary execution.
