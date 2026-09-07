@@ -24,10 +24,14 @@ harness, and lightweight unit-level assertions everywhere else.
 """
 
 import ast
+import asyncio
+import json
 import re
 import sys
 import os
 import importlib
+from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 
@@ -61,6 +65,346 @@ def _cfg():
             mp.setenv(k, v)
         spec.loader.exec_module(mod)
     return mod
+
+
+# ── Multi-cycle persistence benchmark ─────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_full_feed_persistence_benchmark_across_live_cycles(
+    tmp_path,
+    record_testsuite_property,
+):
+    """Exercise the durable full-feed boundary over several cadence cycles.
+
+    This deliberately bypasses provider and scoring code.  It models the
+    production persistence fan-out with a real file-backed SQLite database:
+    raw observations, normalized current-feed history, candidate telemetry,
+    directional opportunities, and both tracking/grading ledgers are queued
+    through the same in-process persistence worker used by the live scan.
+
+    The two feed sizes keep this a repeatable regression benchmark rather than
+    a wall-clock performance claim.  Every cycle must remain below the
+    configured 120-second cadence and every expected row must be durable before
+    the next cycle is started.
+    """
+    from sqlalchemy import func, select
+
+    import database as database_module
+    import market_engine as engine
+    from database import (
+        Database,
+        PropCandidateLog,
+        PropLineHistory,
+        PropOpportunityLog,
+        PropTrackingLog,
+        UnderdogSnapshotRecord,
+    )
+
+    scenarios = (
+        # (full-feed observations, full-pool directional/grading rows)
+        (256, 64),
+        (1024, 256),
+    )
+    cycles_per_scenario = 3
+    cadence_budget_seconds = 120.0
+    database = Database(f"sqlite+aiosqlite:///{tmp_path / 'benchmark.sqlite'}")
+    await database.init()
+
+    async def count_rows(model, column, prefix: str) -> int:
+        async with database.session() as session:
+            result = await session.execute(
+                select(func.count()).select_from(model).where(
+                    column.like(f"{prefix}%")
+                )
+            )
+            return int(result.scalar() or 0)
+
+    async def count_tracking_results(prefix: str, result_value: str) -> int:
+        async with database.session() as session:
+            result = await session.execute(
+                select(func.count()).select_from(PropTrackingLog).where(
+                    PropTrackingLog.external_id.like(f"{prefix}%"),
+                    PropTrackingLog.result == result_value,
+                )
+            )
+            return int(result.scalar() or 0)
+
+    async def count_opportunity_results(prefix: str, result_value: str) -> int:
+        async with database.session() as session:
+            result = await session.execute(
+                select(func.count()).select_from(PropOpportunityLog).where(
+                    PropOpportunityLog.external_id.like(f"{prefix}%"),
+                    PropOpportunityLog.result == result_value,
+                )
+            )
+            return int(result.scalar() or 0)
+
+    async def track_and_grade(
+        tracking_rows: list[dict],
+        tracking_prefix: str,
+    ) -> None:
+        tracked = await database.track_prop_records(tracking_rows)
+        assert tracked == len(tracking_rows)
+        async with database.session() as session:
+            result = await session.execute(
+                select(PropTrackingLog.id).where(
+                    PropTrackingLog.external_id.like(f"{tracking_prefix}%")
+                )
+            )
+            tracking_ids = [int(row_id) for row_id in result.scalars().all()]
+        assert await database.grade_tracked_props_bulk(
+            [(row_id, "HIT", 10.0) for row_id in tracking_ids]
+        ) == len(tracking_rows)
+
+    async def persist_and_grade_opportunities(
+        opportunities: list[dict],
+        opportunity_prefix: str,
+    ) -> None:
+        inserted = await database.log_prop_opportunity_bulk(opportunities)
+        assert inserted == len(opportunities)
+        async with database.session() as session:
+            result = await session.execute(
+                select(PropOpportunityLog.id).where(
+                    PropOpportunityLog.external_id.like(f"{opportunity_prefix}%")
+                )
+            )
+            opportunity_ids = [int(row_id) for row_id in result.scalars().all()]
+        assert await database.grade_opportunities_bulk([
+            {"id": row_id, "result": "HIT", "actual_value": 10.0}
+            for row_id in opportunity_ids
+        ]) == len(opportunities)
+
+    reports = []
+    try:
+        # A previous test may have created the worker in this event loop.
+        # Drain it before this benchmark so each scenario starts cleanly.
+        assert await engine.drain_db_persistence_worker()
+
+        for scenario_index, (feed_size, full_pool_size) in enumerate(scenarios):
+            for cycle in range(cycles_per_scenario):
+                prefix = f"bench-{scenario_index}-{cycle}-"
+                observation_prefix = f"{prefix}obs-"
+                candidate_prefix = f"{prefix}candidate-"
+                opportunity_prefix = f"{prefix}opp-"
+                tracking_prefix = f"{prefix}grade-"
+                now = datetime.utcnow()
+                future_game = now + timedelta(hours=6)
+
+                observations = [
+                    UnderdogSnapshotRecord(
+                        external_id=f"{observation_prefix}{index}",
+                        player_name=f"Benchmark Player {index}",
+                        team="BENCH",
+                        sport="NBA",
+                        stat_type="Points",
+                        line_value=20.5 + (index % 5),
+                        game_id=f"{prefix}game-{index}",
+                        game_time=future_game,
+                        fetched_at=now,
+                    )
+                    for index in range(feed_size)
+                ]
+                normalized_props = [
+                    SimpleNamespace(
+                        external_id=f"{observation_prefix}{index}",
+                        player_name=f"Benchmark Player {index}",
+                        team="BENCH",
+                        sport="NBA",
+                        stat_type="Points",
+                        line_value=20.5 + (index % 5),
+                        game_id=f"{prefix}game-{index}",
+                        game_time=future_game,
+                        fetched_at=now,
+                        provider_status="active",
+                    )
+                    for index in range(feed_size)
+                ]
+                candidates = [
+                    {
+                        "scan_ts": now,
+                        "player_name": prop.player_name,
+                        "team": prop.team,
+                        "sport": prop.sport,
+                        "stat_type": prop.stat_type,
+                        "line_value": prop.line_value,
+                        "provider": "Underdog",
+                        "score_total": 70.0,
+                        "score_tier": "A",
+                        "confidence": 75,
+                        "gate_decision": "EVALUATED",
+                        "snapshot_external_id": f"{candidate_prefix}{index}",
+                    }
+                    for index, prop in enumerate(normalized_props)
+                ]
+                opportunities = [
+                    {
+                        "external_id": f"{opportunity_prefix}{index}",
+                        "player_name": f"Benchmark Pool Player {index}",
+                        "team": "BENCH",
+                        "sport": "NBA",
+                        "stat_type": "Points",
+                        "line_value": 20.5 + (index % 5),
+                        "recommendation": "OVER" if index % 2 else "UNDER",
+                        "decision_tier": "A",
+                        "confidence": 75,
+                        "game_time": future_game,
+                        "game_id": f"{prefix}pool-game-{index}",
+                        "provider": "Underdog",
+                        "bet_quality_score": 80,
+                    }
+                    for index in range(full_pool_size)
+                ]
+                tracking_rows = [
+                    {
+                        "external_id": f"{tracking_prefix}{index}",
+                        "player_name": f"Benchmark Pool Player {index}",
+                        "team": "BENCH",
+                        "sport": "NBA",
+                        "stat_type": "Points",
+                        "line_value": 20.5 + (index % 5),
+                        "game_time": future_game,
+                        "game_id": f"{prefix}pool-game-{index}",
+                        "provider": "Underdog",
+                    }
+                    for index in range(full_pool_size)
+                ]
+
+                metrics_before = engine._persistence_metrics_snapshot()
+                backpressure_before = database_module.get_sqlite_backpressure_metrics(
+                    database._url
+                )
+                started = asyncio.get_running_loop().time()
+                queued = (
+                    engine._enqueue_db_persistence(
+                        "benchmark raw observations",
+                        lambda rows=observations: database.save_underdog_snapshots_bulk(rows),
+                    ),
+                    engine._enqueue_db_persistence(
+                        "benchmark normalized feed",
+                        lambda props=normalized_props: database.upsert_prop_line_history_batch(
+                            "Underdog", props, append_snapshot=True
+                        ),
+                    ),
+                    engine._enqueue_db_persistence(
+                        "benchmark candidate evidence",
+                        lambda rows=candidates: database.log_prop_candidate_batch(rows),
+                    ),
+                    engine._enqueue_db_persistence(
+                        "benchmark tracking and grading",
+                        lambda rows=tracking_rows, track_prefix=tracking_prefix:
+                            track_and_grade(rows, track_prefix),
+                    ),
+                    engine._enqueue_db_persistence(
+                        "benchmark opportunity and grading",
+                        lambda rows=opportunities, opp_prefix=opportunity_prefix:
+                            persist_and_grade_opportunities(rows, opp_prefix),
+                    ),
+                )
+                assert all(queued), "benchmark persistence queue rejected required work"
+                assert await engine.drain_db_persistence_worker()
+                elapsed = asyncio.get_running_loop().time() - started
+
+                metrics_after = engine._persistence_metrics_snapshot()
+                backpressure_after = database_module.get_sqlite_backpressure_metrics(
+                    database._url
+                )
+                metric_delta = {
+                    key: round(
+                        float(metrics_after.get(key, 0.0))
+                        - float(metrics_before.get(key, 0.0)),
+                        6,
+                    )
+                    for key in metrics_after
+                }
+                backpressure_delta = {
+                    key: round(
+                        float(backpressure_after.get(key, 0.0))
+                        - float(backpressure_before.get(key, 0.0)),
+                        6,
+                    )
+                    for key in backpressure_after
+                }
+                expected_cycles = cycle + 1
+                expected_observations = feed_size * expected_cycles
+                expected_candidates = feed_size * expected_cycles
+                expected_opportunities = full_pool_size * expected_cycles
+                expected_tracking = full_pool_size * expected_cycles
+                counts = {
+                    "observations": await count_rows(
+                        UnderdogSnapshotRecord,
+                        UnderdogSnapshotRecord.external_id,
+                        f"bench-{scenario_index}-",
+                    ),
+                    "normalized_history": await count_rows(
+                        PropLineHistory,
+                        PropLineHistory.external_id,
+                        f"bench-{scenario_index}-",
+                    ),
+                    "candidates": await count_rows(
+                        PropCandidateLog,
+                        PropCandidateLog.snapshot_external_id,
+                        f"bench-{scenario_index}-",
+                    ),
+                    "opportunities": await count_rows(
+                        PropOpportunityLog,
+                        PropOpportunityLog.external_id,
+                        f"bench-{scenario_index}-",
+                    ),
+                    "graded_tracking": await count_tracking_results(
+                        f"bench-{scenario_index}-",
+                        "HIT",
+                    ),
+                    "graded_opportunities": await count_opportunity_results(
+                        f"bench-{scenario_index}-",
+                        "HIT",
+                    ),
+                }
+                expected_counts = {
+                    "observations": expected_observations,
+                    "normalized_history": expected_observations,
+                    "candidates": expected_candidates,
+                    "opportunities": expected_opportunities,
+                    "graded_tracking": expected_tracking,
+                    "graded_opportunities": expected_opportunities,
+                }
+                assert counts == expected_counts
+                assert metric_delta["failed"] == 0
+                assert metric_delta["queue_full"] == 0
+                assert metric_delta["enqueued"] == 5
+                assert metric_delta["completed"] == 5
+                assert elapsed <= cadence_budget_seconds
+
+                reports.append({
+                    "scenario": scenario_index,
+                    "cycle": cycle + 1,
+                    "feed_size": feed_size,
+                    "full_pool_size": full_pool_size,
+                    "scan_elapsed_seconds": round(elapsed, 4),
+                    "writer_wait_seconds": backpressure_delta.get(
+                        "writer_wait_seconds", 0.0
+                    ),
+                    "writer_waits": int(backpressure_delta.get("writer_waits", 0)),
+                    "queue_full": int(metric_delta["queue_full"]),
+                    "queue_depth_after_drain": 0,
+                    "persisted": counts,
+                })
+    finally:
+        await engine.drain_db_persistence_worker()
+        worker = engine._db_persistence_worker_task
+        if worker is not None and not worker.done():
+            worker.cancel()
+            await asyncio.gather(worker, return_exceptions=True)
+        engine._db_persistence_queue = None
+        engine._db_persistence_worker_task = None
+        engine._db_persistence_loop = None
+        await database.close()
+
+    record_testsuite_property(
+        "full_feed_persistence_benchmark",
+        json.dumps(reports),
+    )
+    assert len(reports) == len(scenarios) * cycles_per_scenario
 
 
 # ── 1. Poll interval ──────────────────────────────────────────────────────────
