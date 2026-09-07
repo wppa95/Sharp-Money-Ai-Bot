@@ -705,24 +705,6 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         lines.append("  <b>Player Props</b> — unified feed health")
         lines.extend(_market_rows)
 
-        # Each provider has its own normalized pipeline counters. Never infer
-        # one provider's volume or grading state from the other.
-        ud_reconciliation = await _provider_reconciliation("Underdog")
-        pp_reconciliation = await _provider_reconciliation("PrizePicks")
-        _append_provider_pipeline(
-            lines,
-            provider="Underdog",
-            health_tracker=ht,
-            reconciliation=ud_reconciliation,
-        )
-        lines.append("")
-        _append_provider_pipeline(
-            lines,
-            provider="PrizePicks",
-            health_tracker=ht,
-            reconciliation=pp_reconciliation,
-        )
-
         # ── Stat provider health (historical enrichment) ──────────────────────
         lines.append("")
         lines.append("<b>📊 Stat Providers</b>")
