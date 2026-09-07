@@ -6172,7 +6172,10 @@ async def underdog_job(context) -> None:
                     f" [{c.get('tier','?')} bq={c.get('bq',0):.0f}]"
                     for c in _delivery_queue if c.get("_sent")
                 ]
-                logger.warning(
+                # Deferral is expected when another scan path already owns the
+                # atomic delivery claim; it is not a failed delivery or lost
+                # scheduled work.  Keep genuine send failures above WARNING.
+                logger.info(
                     "underdog_job: ranked delivery — %d/%d sent, %d deferred\n"
                     "  Selected: %s\n"
                     "  Deferred: %s",

@@ -147,7 +147,11 @@ async def _status_db_read(label: str, coro):
     except asyncio.CancelledError:
         # If the outer report deadline fires while aiosqlite is still unwinding
         # its cancellation, this optional counter must not cancel /status too.
-        logger.warning("cmd_status: %s counter cancelled; marking unavailable", label)
+        # This is an optional report counter.  The command intentionally
+        # continues with a neutral unavailable value when SQLite cancellation
+        # outlives the report deadline, so this is expected degradation rather
+        # than a command failure.
+        logger.info("cmd_status: %s counter cancelled; marking unavailable", label)
         return None
     except Exception as exc:  # noqa: BLE001
         logger.warning("cmd_status: %s counter unavailable: %s", label, exc)
