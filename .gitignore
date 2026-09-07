@@ -38,6 +38,9 @@ bot/data/
 *.log
 logs/
 
+# Validation artifacts
+test-results/
+
 # IDE
 .idea/
 .vscode/
