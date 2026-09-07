@@ -315,17 +315,46 @@ async def test_history_uses_documented_composite_market_key():
 
 
 @pytest.mark.parametrize(
-    "stat,market",
+    "stat,market,sport",
     [
-        ("Fantasy Points in Games 1+2", "player_fantasy_points"),
-        ("Kills in Games 1+2", "player_kills"),
-        ("Regular Season Points", "player_points"),
-        ("Headshots on Maps 1+2", "player_headshots"),
-        ("1H Goals", "player_goals"),
+        ("Kills in Games 1+2", "player_kills_maps_1_2", "CS"),
+        ("Regular Season Points", "player_points", "NBA"),
+        ("Headshots on Maps 1+2", "player_headshots_maps_1_2", "CS"),
+        ("Goals", "anytime_goal_scorer", "SOCCER"),
     ],
 )
-def test_documented_esports_markets_have_propline_history_keys(stat, market):
-    assert official_player_market_for(stat) == market
+def test_documented_markets_have_propline_history_keys(stat, market, sport):
+    assert official_player_market_for(stat, sport=sport) == market
+
+
+@pytest.mark.parametrize(
+    "sport,stat,market",
+    [
+        ("NBA", "turnovers", "player_turnovers"),
+        ("NBA", "double double", "player_double_double"),
+        ("NHL", "saves", "goalie_saves"),
+        ("NHL", "blocked shots", "player_blocked_shots"),
+        ("TENNIS", "double faults", "player_double_faults"),
+        ("TENNIS", "total games", "total_games"),
+        ("UFC", "significant strikes", "player_significant_strikes"),
+        ("SOCCER", "goal or assist", "goal_or_assist"),
+    ],
+)
+def test_propline_documented_non_mlb_market_routes(sport, stat, market):
+    assert official_player_market_for(stat, sport=sport) == market
+
+
+@pytest.mark.parametrize("sport", ["CS", "DOTA", "LOL", "VAL"])
+@pytest.mark.parametrize("stat", ["kills", "fantasy points"])
+def test_propline_does_not_treat_unsupported_esports_props_as_graded(
+    sport, stat
+):
+    expected = (
+        "player_kills_maps_1_2"
+        if sport == "CS" and stat == "kills"
+        else None
+    )
+    assert official_player_market_for(stat, sport=sport) == expected
 
 
 @pytest.mark.parametrize(
@@ -349,8 +378,8 @@ def test_supported_sports_resolve_to_propline_catalog_routes(sport, official):
     "sport,stat,official_sport,official_market",
     [
         ("NBA", "points", "basketball_nba", "player_points"),
-        ("TENNIS", "sets won", "tennis", "player_sets_won"),
-        ("CS", "kills", "cs2", "player_kills"),
+        ("TENNIS", "aces", "tennis", "player_aces"),
+        ("CS", "kills", "cs2", "player_kills_maps_1_2"),
     ],
 )
 async def test_scheduled_history_uses_propline_for_non_mlb_sports(

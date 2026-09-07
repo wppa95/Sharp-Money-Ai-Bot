@@ -958,7 +958,8 @@ class PlayerHistoryProvider:
                 )
             return []
 
-        market = official_player_market_for(stat_type)
+        sport_u = str(sport or "").upper().strip()
+        market = official_player_market_for(stat_type, sport=sport_u)
         if not market:
             if coverage is not None:
                 coverage.update(

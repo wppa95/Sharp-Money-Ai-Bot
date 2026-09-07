@@ -8,3 +8,9 @@ The scheduled player-history collector must use PropLine's fast market-specific 
 **Why:** Calling the raw endpoints first caused the five-second target timeout to fire before resolved history, making the collector appear healthy while silently producing no PropLine coverage.
 
 **How to apply:** Keep raw games and event stats on supplemental/backfill paths with their own pacing. When diagnosing coverage, report both the sports actually attempted and the returned status; an empty usable-row report alone is ambiguous.
+
+PropLine's documented graded esports player coverage is CS2 map 1-2 kills and headshots only; Dota 2, LoL, and Valorant remain odds-only for player props. Sport-aware market routing is required because several non-MLB markets use provider-specific keys.
+
+**Why:** Generic esports mappings previously made unsupported titles look eligible and routed CS2 lines to obsolete market names.
+
+**How to apply:** Use the official PropLine market catalog for NBA, NHL, Tennis, UFC, soccer, and CS2 mappings; return unsupported rather than guessing when the catalog only documents game-line coverage.

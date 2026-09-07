@@ -114,8 +114,11 @@ _STAT_NORMALIZATION = {
     "shots on goal": "shots on goal",
     "goals": "goals",
     "goal": "goals",
-    "1h goals": "goals",
-    "2h goals": "goals",
+    # PropLine documents anytime goal scoring, not half-specific player
+    # markets. Preserve the qualifier so it cannot be silently treated as
+    # an equivalent market.
+    "1h goals": "1h goals",
+    "2h goals": "2h goals",
     "goals scored": "goals",
     "headshots": "headshots",
     "headshots on maps 1+2": "headshots",
@@ -1821,6 +1824,7 @@ _OFFICIAL_MARKETS = (
     "player_points",
     "player_rebounds",
     "player_assists",
+    "player_turnovers",
     "player_threes",
     "player_blocks",
     "player_steals",
@@ -1828,6 +1832,8 @@ _OFFICIAL_MARKETS = (
     "player_points_assists",
     "player_rebounds_assists",
     "player_points_rebounds_assists",
+    "player_double_double",
+    "player_triple_double",
     "player_hits",
     "player_home_runs",
     "player_rbis",
@@ -1844,6 +1850,14 @@ _OFFICIAL_MARKETS = (
     "player_shots_on_goal",
     "player_shots_on_target",
     "player_goals",
+    "player_first_goal",
+    "player_goals_2plus",
+    "player_points_1plus",
+    "player_points_2plus",
+    "player_points_3plus",
+    "goalie_saves",
+    "player_blocked_shots",
+    "player_power_play_points",
     "player_headshots",
     "player_saves",
     "player_games_won",
@@ -1851,10 +1865,23 @@ _OFFICIAL_MARKETS = (
     "player_games_played",
     "player_sets_played",
     "player_tiebreakers_played",
+    "player_aces",
+    "player_double_faults",
+    "player_break_points_won",
+    "total_games",
+    "total_tiebreaks",
+    "total_sets",
     "player_kills",
     "player_deaths",
     "player_maps_won",
+    "player_kills_maps_1_2",
+    "player_headshots_maps_1_2",
+    "player_significant_strikes",
+    "player_takedowns",
+    "fight_time_minutes",
     "player_fantasy_points",
+    "anytime_goal_scorer",
+    "goal_or_assist",
 )
 
 # Keep the odds request conservative: PropLine's catalog can expose a valid
@@ -1874,6 +1901,11 @@ _STAT_TO_OFFICIAL_MARKET = {
     "saves": "player_saves",
     "rebounds": "player_rebounds",
     "assists": "player_assists",
+    "turnovers": "player_turnovers",
+    "double double": "player_double_double",
+    "double-double": "player_double_double",
+    "triple double": "player_triple_double",
+    "triple-double": "player_triple_double",
     "3-pointers made": "player_threes",
     "blocks": "player_blocks",
     "steals": "player_steals",
@@ -1902,6 +1934,21 @@ _STAT_TO_OFFICIAL_MARKET = {
     "rush+rec yards": "player_rush_rec_yards",
     "shots on goal": "player_shots_on_goal",
     "shots on target": "player_shots_on_target",
+    "aces": "player_aces",
+    "double faults": "player_double_faults",
+    "break points won": "player_break_points_won",
+    "total games": "total_games",
+    "total tiebreaks": "total_tiebreaks",
+    "total tie breaks": "total_tiebreaks",
+    "total sets": "total_sets",
+    "blocked shots": "player_blocked_shots",
+    "power play points": "player_power_play_points",
+    "significant strikes": "player_significant_strikes",
+    "takedowns": "player_takedowns",
+    "fight time (mins)": "fight_time_minutes",
+    "fight time minutes": "fight_time_minutes",
+    "goal or assist": "goal_or_assist",
+    "anytime goal scorer": "anytime_goal_scorer",
     "games won": "player_games_won",
     "sets won": "player_sets_won",
     "games played": "player_games_played",
@@ -1913,8 +1960,74 @@ _STAT_TO_OFFICIAL_MARKET = {
     "maps won": "player_maps_won",
 }
 
+_SPORT_STAT_TO_OFFICIAL_MARKET = {
+    # PropLine uses sport-specific market keys for several otherwise generic
+    # stats. Keep these choices here instead of making callers guess from a
+    # display label alone.
+    "NHL": {
+        "points": "player_points_1plus",
+        "saves": "goalie_saves",
+    },
+    "TENNIS": {
+        "aces": "player_aces",
+        "double faults": "player_double_faults",
+        "break points won": "player_break_points_won",
+        "games won": "player_games_won",
+        "total games": "total_games",
+        "total tiebreaks": "total_tiebreaks",
+        "total sets": "total_sets",
+    },
+    "CS": {
+        "kills": "player_kills_maps_1_2",
+        "headshots": "player_headshots_maps_1_2",
+    },
+    "ESPORTS": {
+        "kills": "player_kills_maps_1_2",
+        "headshots": "player_headshots_maps_1_2",
+    },
+    "SOCCER": {
+        "goals": "anytime_goal_scorer",
+        "goal or assist": "goal_or_assist",
+    },
+    "EPL": {
+        "goals": "anytime_goal_scorer",
+        "goal or assist": "goal_or_assist",
+    },
+    "LALIGA": {
+        "goals": "anytime_goal_scorer",
+        "goal or assist": "goal_or_assist",
+    },
+    "SERIEA": {
+        "goals": "anytime_goal_scorer",
+        "goal or assist": "goal_or_assist",
+    },
+    "BUNDESLIGA": {
+        "goals": "anytime_goal_scorer",
+        "goal or assist": "goal_or_assist",
+    },
+    "LIGUE1": {
+        "goals": "anytime_goal_scorer",
+        "goal or assist": "goal_or_assist",
+    },
+    "MLS": {
+        "goals": "anytime_goal_scorer",
+        "goal or assist": "goal_or_assist",
+    },
+    "FIFA": {
+        "goals": "anytime_goal_scorer",
+        "goal or assist": "goal_or_assist",
+    },
+}
+_SPORTS_WITHOUT_GRADED_PLAYER_MARKETS = frozenset(
+    {"DOTA", "LOL", "VAL", "VALORANT", "ESPORTS"}
+)
 
-def official_player_market_for(stat_type: Any) -> Optional[str]:
+
+def official_player_market_for(
+    stat_type: Any,
+    *,
+    sport: Any = "",
+) -> Optional[str]:
     """Return the documented player market key for a normalized stat.
 
     The history endpoint takes official market keys, not the bot's display
@@ -1926,6 +2039,26 @@ def official_player_market_for(stat_type: Any) -> Optional[str]:
     if candidate.startswith("player_") and candidate in _OFFICIAL_MARKETS:
         return candidate
     normalized = _normalize_stat(stat_type)
+    sport_key = _normalize_sport(sport)
+    if sport_key in _SPORTS_WITHOUT_GRADED_PLAYER_MARKETS:
+        # PropLine documents game-line coverage for these esports titles, but
+        # graded player props only for CS2. Never route a Dota/LoL/Valorant
+        # player stat through the CS2 market keys.
+        return None
+    if sport_key == "CS" and normalized not in {"kills", "headshots"}:
+        # CS2 is the only esports title with documented graded player props,
+        # and its graded catalog is limited to map 1-2 kills/headshots.
+        return None
+    sport_mapping = _SPORT_STAT_TO_OFFICIAL_MARKET.get(sport_key, {})
+    sport_market = sport_mapping.get(normalized)
+    if sport_market in _OFFICIAL_MARKETS or sport_market in {
+        "anytime_goal_scorer",
+        "goal_or_assist",
+        "total_games",
+        "total_tiebreaks",
+        "total_sets",
+    }:
+        return sport_market
     return _STAT_TO_OFFICIAL_MARKET.get(normalized)
 
 _CANONICAL_TO_OFFICIAL_SPORT = {
