@@ -227,7 +227,7 @@ class _LockedAsyncSession:
             if waited >= 0.05:
                 logger.info(
                     "SQLite writer gate backpressure: waited %.3fs",
-                    None,
+                    waited,
                 )
 
     def _release_writer(self) -> None:
