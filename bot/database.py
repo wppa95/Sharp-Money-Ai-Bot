@@ -8231,20 +8231,7 @@ class Database:
                     active_by_sport.get(sport_key, 0) + row_count
                 )
             tracked = sum(active_by_provider.values())
-
-        return {
-            "counts":   counts,
-            "by_sport": by_sport,
-            "by_provider": by_provider,
-            "active_by_provider": active_by_provider,
-            "active_by_sport": active_by_sport,
-            "tracked": tracked,
-            "active_tracked": tracked,
-            "tracked_observations": sum(tracked_observations_by_provider.values()),
-            "historical_observations": sum(tracked_observations_by_provider.values()),
-            "tracked_observations_by_provider": tracked_observations_by_provider,
-            "historical_observations_by_provider": tracked_observations_by_provider,
-            "observations_by_sport": {
+            observations_by_sport = {
                 str(sport or "UNKNOWN"): int(count or 0)
                 for sport, count in (
                     await s.execute(
@@ -8259,7 +8246,21 @@ class Database:
                     )
                 ).all()
                 if _is_supported_tracking_sport(sport)
-            },
+            }
+
+        return {
+            "counts":   counts,
+            "by_sport": by_sport,
+            "by_provider": by_provider,
+            "active_by_provider": active_by_provider,
+            "active_by_sport": active_by_sport,
+            "tracked": tracked,
+            "active_tracked": tracked,
+            "tracked_observations": sum(tracked_observations_by_provider.values()),
+            "historical_observations": sum(tracked_observations_by_provider.values()),
+            "tracked_observations_by_provider": tracked_observations_by_provider,
+            "historical_observations_by_provider": tracked_observations_by_provider,
+            "observations_by_sport": observations_by_sport,
             "total":    total,
             "directional_total": total,
             "directional_by_provider": directional_by_provider,
@@ -8762,6 +8763,9 @@ class Database:
         return result_list[:limit_sports]
 
     async def close(self) -> None:
-        if self._engine:
-            await self._engine.dispose()
+        engine = self._engine
+        self._engine = None
+        self._session_factory = None
+        if engine:
+            await engine.dispose()
             logger.info("Database connection closed.")

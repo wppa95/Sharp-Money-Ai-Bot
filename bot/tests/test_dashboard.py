@@ -39,13 +39,15 @@ from engine.dashboard import (
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 @pytest_asyncio.fixture(loop_scope="function")
-async def empty_db():
-    """Provide an initialised in-memory Database for each test."""
+async def empty_db(tmp_path):
+    """Provide an isolated, explicitly closed Database for each test."""
     from database import Database
-    db = Database("sqlite+aiosqlite:///:memory:")
+    db = Database(f"sqlite+aiosqlite:///{tmp_path / 'dashboard.sqlite'}")
     await db.init()
-    yield db
-    await db.close()
+    try:
+        yield db
+    finally:
+        await db.close()
 
 
 # ── TierPerf tests ────────────────────────────────────────────────────────────
