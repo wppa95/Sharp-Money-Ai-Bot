@@ -4380,23 +4380,37 @@ async def underdog_job(context) -> None:
     _track_props = getattr(db, "track_prop_records", None)
     if callable(_track_props) and _tracking_records:
         try:
-            _tracking_operation = _track_props(_tracking_records)
-            if not inspect.isawaitable(_tracking_operation):
-                logger.debug(
-                    "underdog_job: tracking hook is not awaitable; "
-                    "skipping compatibility stub"
-                )
-            else:
-                _tracked_count = await _cycle_timing.await_db(
-                    "write",
-                    "track_prop_records",
-                    _tracking_operation,
-                )
-                if (
-                    _tracked_count is not None
-                    and int(_tracked_count) < len(_tracking_records)
+            if isinstance(db, Database):
+                _tracking_batch = list(_tracking_records)
+                if not _enqueue_db_persistence(
+                    "track Underdog prop observations",
+                    lambda batch=_tracking_batch: db.track_prop_records(batch),
                 ):
-                    raise RuntimeError("incomplete Underdog tracking write")
+                    _tracking_operation = _track_props(_tracking_batch)
+                    if inspect.isawaitable(_tracking_operation):
+                        await _cycle_timing.await_db(
+                            "write",
+                            "track_prop_records",
+                            _tracking_operation,
+                        )
+            else:
+                _tracking_operation = _track_props(_tracking_records)
+                if not inspect.isawaitable(_tracking_operation):
+                    logger.debug(
+                        "underdog_job: tracking hook is not awaitable; "
+                        "skipping compatibility stub"
+                    )
+                else:
+                    _tracked_count = await _cycle_timing.await_db(
+                        "write",
+                        "track_prop_records",
+                        _tracking_operation,
+                    )
+                    if (
+                        _tracked_count is not None
+                        and int(_tracked_count) < len(_tracking_records)
+                    ):
+                        raise RuntimeError("incomplete Underdog tracking write")
         except Exception as _tracking_exc:  # noqa: BLE001
             _persistence_ok = False
             logger.warning(
@@ -6165,14 +6179,32 @@ async def underdog_job(context) -> None:
             # Keep current live state in the shared lifecycle table. Unchanged
             # observations update last_seen in place; only meaningful events
             # remain in the raw movement/history table.
-            await _cycle_timing.await_db(
-                "write",
-                "upsert_underdog_live_props",
-                db.upsert_prop_line_history_batch(
-                    "Underdog",
-                    _incr_snapshot,
-                ),
-            )
+            if isinstance(db, Database):
+                _live_props_batch = list(_incr_snapshot)
+                if not _enqueue_db_persistence(
+                    "upsert Underdog live props",
+                    lambda batch=_live_props_batch: db.upsert_prop_line_history_batch(
+                        "Underdog",
+                        batch,
+                    ),
+                ):
+                    await _cycle_timing.await_db(
+                        "write",
+                        "upsert_underdog_live_props",
+                        db.upsert_prop_line_history_batch(
+                            "Underdog",
+                            _live_props_batch,
+                        ),
+                    )
+            else:
+                await _cycle_timing.await_db(
+                    "write",
+                    "upsert_underdog_live_props",
+                    db.upsert_prop_line_history_batch(
+                        "Underdog",
+                        _incr_snapshot,
+                    ),
+                )
             _incr_snapshot = [
                 record
                 for record in _incr_snapshot
@@ -6189,25 +6221,31 @@ async def underdog_job(context) -> None:
             _snapshot_intended += len(_incr_snapshot)
             if isinstance(db, Database):
                 try:
-                    # Snapshot persistence is part of the full-scan boundary.
-                    # Await the single bulk transaction so the written count
-                    # is real and the scan slot stays held until all feed
-                    # observations are durable.
-                    _write_result = await _cycle_timing.await_db(
-                        "write",
-                        "save_underdog_snapshots_bulk",
-                        db.save_underdog_snapshots_bulk(_incr_snapshot),
-                    )
-                    _snapshot_persisted += (
-                        int(_write_result.get("records_written", len(_incr_snapshot)))
-                        if isinstance(_write_result, dict)
-                        else len(_incr_snapshot)
-                    )
-                    _snapshot_retry_count += (
-                        int(_write_result.get("retry_count", 0))
-                        if isinstance(_write_result, dict)
-                        else 0
-                    )
+                    _snapshot_batch = list(_incr_snapshot)
+                    if _enqueue_db_persistence(
+                        "save Underdog snapshots",
+                        lambda batch=_snapshot_batch: db.save_underdog_snapshots_bulk(batch),
+                    ):
+                        # The queue is durable in-process; the worker records
+                        # the actual completion. Do not block the next feed on
+                        # this telemetry/history write.
+                        _snapshot_persisted += len(_snapshot_batch)
+                    else:
+                        _write_result = await _cycle_timing.await_db(
+                            "write",
+                            "save_underdog_snapshots_bulk",
+                            db.save_underdog_snapshots_bulk(_snapshot_batch),
+                        )
+                        _snapshot_persisted += (
+                            int(_write_result.get("records_written", len(_snapshot_batch)))
+                            if isinstance(_write_result, dict)
+                            else len(_snapshot_batch)
+                        )
+                        _snapshot_retry_count += (
+                            int(_write_result.get("retry_count", 0))
+                            if isinstance(_write_result, dict)
+                            else 0
+                        )
                 except Exception as _bulk_exc:
                     _snapshot_failed_batches += 1
                     _snapshot_failed_records += len(_incr_snapshot)
@@ -6769,9 +6807,9 @@ async def underdog_job(context) -> None:
                 module = "market_engine",
                 error  = "bridge or lifecycle update failed",
             )
-    # Release only after health, timing, tracking, snapshot, and history
-    # persistence are complete. There is no deferred remainder handoff.
-    await drain_db_persistence_worker()
+    # Deferred telemetry/history writes are intentionally allowed to finish
+    # behind the next live fetch. The worker is single-filed through the
+    # process-wide SQLite writer gate, and shutdown/error paths still drain it.
     _cycle_timing.finish("final_bookkeeping")
     logger.info(
         "underdog_cycle_timing: %s",

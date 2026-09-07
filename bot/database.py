@@ -6263,36 +6263,68 @@ class Database:
         """
         if not candidates:
             return 0
-        inserted = 0
-        failed   = 0
+        rows: list[PropCandidateLog] = []
+        failed = 0
         for c in candidates:
             try:
-                async with self.session() as s:
-                    row = PropCandidateLog(
-                        scan_ts              = c.get("scan_ts") or datetime.utcnow(),
-                        player_name          = c.get("player_name", ""),
-                        team                 = c.get("team", ""),
-                        sport                = c.get("sport", ""),
-                        stat_type            = c.get("stat_type", ""),
-                        line_value           = float(c.get("line_value") or 0.0),
-                        provider             = c.get("provider", "Underdog"),
-                        score_total          = c.get("score_total"),
-                        score_tier           = c.get("score_tier"),
-                        confidence           = c.get("confidence"),
-                        gate_decision        = c.get("gate_decision", "EVALUATED"),
-                        rejection_reason     = c.get("rejection_reason"),
-                        reason_codes         = c.get("reason_codes"),
-                        snapshot_external_id = c.get("snapshot_external_id"),
-                    )
-                    s.add(row)
-                    await s.commit()
-                    inserted += 1
+                rows.append(PropCandidateLog(
+                    scan_ts              = c.get("scan_ts") or datetime.utcnow(),
+                    player_name          = c.get("player_name", ""),
+                    team                 = c.get("team", ""),
+                    sport                = c.get("sport", ""),
+                    stat_type            = c.get("stat_type", ""),
+                    line_value           = float(c.get("line_value") or 0.0),
+                    provider             = c.get("provider", "Underdog"),
+                    score_total          = c.get("score_total"),
+                    score_tier           = c.get("score_tier"),
+                    confidence           = c.get("confidence"),
+                    gate_decision        = c.get("gate_decision", "EVALUATED"),
+                    rejection_reason     = c.get("rejection_reason"),
+                    reason_codes         = c.get("reason_codes"),
+                    snapshot_external_id = c.get("snapshot_external_id"),
+                ))
             except Exception as _row_exc:
                 logger.warning(
                     "log_prop_candidate_batch: skipping bad row (%s/%s): %s",
                     c.get("player_name", "?"), c.get("stat_type", "?"), _row_exc,
                 )
                 failed += 1
+
+        # Candidate telemetry is non-critical, but it can contain thousands of
+        # neutral evaluations. One session/commit per row monopolizes the
+        # process-wide SQLite writer gate and makes the next live scan stale.
+        # Commit bounded batches, falling back to row isolation only when a
+        # batch contains a database-invalid value.
+        inserted = 0
+        chunk_size = 100
+        for start in range(0, len(rows), chunk_size):
+            chunk = rows[start:start + chunk_size]
+            try:
+                async with self.session() as s:
+                    s.add_all(chunk)
+                    await s.commit()
+                inserted += len(chunk)
+            except Exception as _batch_exc:
+                logger.warning(
+                    "log_prop_candidate_batch: batch insert failed; "
+                    "falling back to row isolation (%d rows): %s",
+                    len(chunk),
+                    _batch_exc,
+                )
+                for row in chunk:
+                    try:
+                        async with self.session() as s:
+                            s.add(row)
+                            await s.commit()
+                        inserted += 1
+                    except Exception as _row_exc:
+                        logger.warning(
+                            "log_prop_candidate_batch: skipping bad row (%s/%s): %s",
+                            row.player_name,
+                            row.stat_type,
+                            _row_exc,
+                        )
+                        failed += 1
         if failed:
             logger.warning(
                 "log_prop_candidate_batch: %d/%d rows failed", failed, inserted + failed
