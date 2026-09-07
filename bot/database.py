@@ -4189,12 +4189,16 @@ class Database:
         # ── Execute batched UPDATEs in a single session ───────────────────────
         if update_jobs:
             async with self.session() as s:
-                for row_id, uvals in update_jobs:
-                    await s.execute(
-                        sa_update(PropLineHistory)
-                        .where(PropLineHistory.id == row_id)
-                        .values(**uvals)
-                    )
+                # SQLAlchemy's ORM bulk-update-by-primary-key path turns this
+                # into bounded executemany calls instead of one awaited
+                # statement per prop.  Keep batches bounded so a large live
+                # feed does not monopolize the shared SQLite writer gate.
+                for start in range(0, len(update_jobs), 500):
+                    batch = [
+                        {"id": row_id, **uvals}
+                        for row_id, uvals in update_jobs[start:start + 500]
+                    ]
+                    await s.execute(sa_update(PropLineHistory), batch)
                 await s.commit()
             upserted += len(update_jobs)
 

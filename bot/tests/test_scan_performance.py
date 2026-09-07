@@ -768,14 +768,14 @@ async def test_concurrent_file_backed_writers_stay_within_cadence(
 # ── 1. Poll interval ──────────────────────────────────────────────────────────
 
 
-def test_poll_interval_default_120s():
-    """config.py must default UNDERDOG_POLL_INTERVAL to '120'."""
+def test_poll_interval_default_60s():
+    """config.py must default the shared Player Props cycle to one minute."""
     src = _src("config.py")
-    # Config uses os.environ.get with "120" as default
+    # Config uses os.environ.get with "60" as default
     assert re.search(
-        r'UNDERDOG_POLL_INTERVAL.*int\(os\.environ\.get\([^,]+,\s*["\']120["\']\)',
+        r'UNDERDOG_POLL_INTERVAL.*int\(os\.environ\.get\([^,]+,\s*["\']60["\']\)',
         src,
-    ), "UNDERDOG_POLL_INTERVAL default must be '120'"
+    ), "UNDERDOG_POLL_INTERVAL default must be '60'"
 
 
 # ── 2. scheduled execution coordinator ───────────────────────────────────────

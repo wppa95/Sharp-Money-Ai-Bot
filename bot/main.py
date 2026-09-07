@@ -804,8 +804,8 @@ async def post_init(application: Application) -> None:
         # jq.run_repeating(clv_check_job,       interval=config.CLV_CHECK_INTERVAL,        first=35,  name="clv_checker")
         # Legacy source compatibility: _coordinated_job("underdog_monitor", _underdog_monitor_cycle)
         # is equivalent because _underdog_monitor_cycle only delegates to underdog_job.
-        # Production uses the shared wrapper so health records completion only
-        # after the Underdog monitoring branch finishes.
+        # Production uses the shared Player Props wrapper so health records
+        # completion only after the canonical monitoring branch finishes.
         # ─────────────────────────────────────────────────────────────────────
         _shared_underdog_cycle = _shared_monitoring_cycle(underdog_job)
         jq.run_repeating(

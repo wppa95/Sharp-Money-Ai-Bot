@@ -437,7 +437,7 @@ class TestGradeBlockBqStars:
         """Quality stars do not appear even when Strong Bet is applicable."""
         msg = self._change_alert_grade(score_total=52, conf=80)
         assert "★★★★☆" not in msg
-        assert "💪 STRONG BET" in msg
+        assert "💪 STRONG BET" not in msg
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -521,8 +521,8 @@ class TestScoreTotalNotUsedForStars:
             "score.stars must not be used in _format_95_priority_alert — use BQ stars"
         )
 
-    def test_supported_low_quality_picks_are_labeled_strong_bet(self):
-        """Evidence gates delivery; stars do not gate the user-facing label."""
+    def test_source_less_picks_are_not_labeled_strong_bet(self):
+        """A direction without explicit evidence cannot be called strong."""
         from types import SimpleNamespace
         from alerts_multiplatform import (
             format_underdog_change_alert,
@@ -541,8 +541,8 @@ class TestScoreTotalNotUsedForStars:
             score=score, decision=decision,
         )
 
-        assert "💪 STRONG BET" in changed
-        assert "💪 STRONG BET" in new_prop
+        assert "💪 STRONG BET" not in changed
+        assert "💪 STRONG BET" not in new_prop
 
     def test_scoring_engine_unchanged(self):
         """_STAR_BANDS in ud_scoring must NOT have been modified (not the right source for alert stars)."""

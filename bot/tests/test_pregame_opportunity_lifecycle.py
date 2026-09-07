@@ -126,7 +126,11 @@ async def test_pregame_underdog_prop_can_reach_delivery():
             21.5,
             game_time=_future(),
             strict_pregame=True,
-            validation=SimpleNamespace(has_supporting_data=True),
+            validation=SimpleNamespace(
+                has_supporting_data=True,
+                data_source="real",
+                n_real_games=5,
+            ),
             decision=SimpleNamespace(recommendation="OVER", confidence=80),
         )
     assert result.sent is True

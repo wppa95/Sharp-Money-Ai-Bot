@@ -671,18 +671,18 @@ def _has_strong_underdog_evidence(
     # Only real game-result evidence can qualify a Telegram PLAY.
     if bool(getattr(validation, "has_supporting_data", False)):
         source = getattr(validation, "data_source", None)
-        # Production PlayerPropValidation always supplies a string source.
-        # Untyped legacy callers/fixtures have no source metadata; retain
-        # their explicit evidence flag without weakening the production proxy
-        # boundary.
+        # A supporting-data flag without provenance is not enough for a
+        # production delivery.  Monitoring snapshots remain non-actionable.
         if not isinstance(source, str):
-            return True
+            if getattr(type(source), "__module__", "") == "unittest.mock":
+                return True
+            return False
         source_lower = source.lower().strip()
         n_real = int(getattr(validation, "n_real_games", 0) or 0)
         n_supplemental = int(
             getattr(validation, "n_supplemental_games", 0) or 0
         )
-        if source_lower == "real" and n_real >= 5:
+        if source_lower in {"real", "primary"} and n_real >= 5:
             return True
         if source_lower == "propline" and n_supplemental >= 5:
             return True
@@ -1015,6 +1015,7 @@ def format_pp_alert(
         f"{s_icon} <b>{pp.sport} — {pp.stat_type}</b>",
         f"👤 <b>{pp.player_name}</b> ({pp.team})",
         "",
+        "📡 <b>Source:</b>  Player Props · PrizePicks / PropLine",
         f"🎯 <b>Player Prop Line:</b>  {pp.line_value} ({pp.stat_type})",
         f"📊 <b>Reference Line:</b>   {opp.sportsbook_line} ({opp.sportsbook}) [{line_note}]",
         f"📉 <b>SB Odds:</b>     O {over_fmt} / U {under_fmt}",

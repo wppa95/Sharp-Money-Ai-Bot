@@ -4577,7 +4577,7 @@ async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"  Sleeper (NFL):     {'✅ active' if getattr(config, 'UD_SLEEPER_ENABLED', True) else '⏸️ disabled'}",
         "",
         "<b>Poll Intervals</b>",
-        f"  Shared monitor:    <code>{config.UNDERDOG_POLL_INTERVAL}s ({config.UNDERDOG_POLL_INTERVAL // 60} min)</code>",
+        f"  Shared Player Props monitor: <code>{config.UNDERDOG_POLL_INTERVAL}s ({config.UNDERDOG_POLL_INTERVAL // 60} min)</code>",
         f"  Season check:      <code>{config.SEASON_CHECK_INTERVAL}s</code>",
         "",
         "<i>Secrets are never shown. Restart the bot after changing env vars.</i>",

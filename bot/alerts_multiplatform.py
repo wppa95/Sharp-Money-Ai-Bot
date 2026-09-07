@@ -453,6 +453,80 @@ def _format_available_lines_block(
     return "".join(lines)
 
 
+def _evidence_display(
+    validation: Optional[object],
+    decision: Optional[object],
+) -> tuple[str, int]:
+    """Return a user-safe evidence label and completed-result count."""
+    source = str(getattr(validation, "data_source", "") or "").strip().lower()
+    real = int(getattr(validation, "n_real_games", 0) or 0)
+    supplemental = int(getattr(validation, "n_supplemental_games", 0) or 0)
+    total = real + supplemental
+    if source in {"real", "primary"} and real:
+        return "completed game results", real
+    if source == "propline" and supplemental:
+        return "PropLine results", supplemental
+    if source in {"real+propline", "primary+propline"} and total:
+        return "game results + PropLine results", total
+
+    # Serialized decision evidence is accepted by the delivery gate for
+    # compatibility.  Do not invent a source label when the formatter cannot
+    # identify one explicitly.
+    if isinstance(decision, dict):
+        nested = decision.get("evidence") or decision.get("bet_evidence")
+        if isinstance(nested, dict):
+            nested_source = str(
+                nested.get("data_source") or nested.get("source") or ""
+            ).strip().lower()
+            nested_count = int(
+                nested.get("n_real_games")
+                or nested.get("n_supplemental_games")
+                or nested.get("n")
+                or 0
+            )
+            if nested_source and nested_count:
+                return nested_source.replace("_", " "), nested_count
+    return "unavailable", 0
+
+
+def _has_strong_directional_history(
+    validation: Optional[object],
+    decision: Optional[object],
+) -> bool:
+    """Only label a pick strong when history supports its actual direction."""
+    recommendation = str(
+        getattr(decision, "recommendation", "") or ""
+    ).upper()
+    if recommendation not in {"OVER", "UNDER"}:
+        return False
+    source = str(getattr(validation, "data_source", "") or "").strip().lower()
+    if source not in {
+        "real", "primary", "propline", "real+propline", "primary+propline",
+    }:
+        return False
+    sample_count = (
+        int(getattr(validation, "n_real_games", 0) or 0)
+        + int(getattr(validation, "n_supplemental_games", 0) or 0)
+    )
+    if sample_count < 5:
+        return False
+
+    # Use the direction-specific counts rather than the generic OVER rate.
+    # This prevents a strong UNDER label from being attached to a merely
+    # average OVER-rate window.
+    for prefix in ("l5", "l10", "l20", "l30", "season"):
+        games = _numeric_attr(decision, f"{prefix}_games")
+        directional_count = _numeric_attr(
+            decision,
+            f"{prefix}_{'over' if recommendation == 'OVER' else 'under'}",
+        )
+        if games is None or games < 5 or directional_count is None:
+            continue
+        if directional_count / games >= 0.70:
+            return True
+    return False
+
+
 def _display_label(value: object) -> str:
     """Return a human-readable enum/string label without its Python type name."""
     raw = getattr(value, "value", value)
@@ -772,18 +846,6 @@ def format_underdog_change_alert(
     if rec in ("OVER", "UNDER") and not removed:
         pick_emoji = "🟢" if rec == "OVER" else "🔴"
         pick_line = f"📌 <b>PICK:</b>  {pick_emoji} <b>{rec} {new_line:.1f}</b>"
-        # Evidence/history is the delivery gate.  Stars, score, and tier are
-        # internal metadata and must not decide whether a supported pick gets
-        # the user-facing Strong Bet label.
-        pick_line += "\n💪 STRONG BET"
-
-    avail_block = _format_available_lines_block(
-        ud_line=new_line if not removed else old_line,
-        pp_line=pp_line,
-        dk_line=dk_line,
-        fd_line=fd_line,
-        provider=source,
-    ) if not removed else ""
 
     if removed:
         body_lines = [
@@ -818,14 +880,21 @@ def format_underdog_change_alert(
             f"👤 <b>{escape(str(player_name))}</b>",
             "",
             movement_block,
+            f"📡 <b>Source:</b>  Player Props · {escape(source)}",
             opponent_str,
             game_str,
             opening_str,
-            avail_block.lstrip("\n"),
             "",
             pick_line,
         ]
         if decision is not None:
+            evidence_label, evidence_count = _evidence_display(validation, decision)
+            body_lines += [
+                f"🧾 <b>Evidence:</b>  {escape(evidence_label)}"
+                + (f" ({evidence_count} games)" if evidence_count else "")
+            ]
+            if _has_strong_directional_history(validation, decision):
+                body_lines += ["💪 STRONG BET"]
             decision_reason = _clean_reason(getattr(decision, "reason", ""))
             history = _format_history_block(decision)
             if history:
@@ -963,13 +1032,6 @@ def format_underdog_new_prop_alert(
             f"Supporting game history available ({getattr(validation, 'n_real_games', 0)} games)"
         )
 
-    avail_block = _format_available_lines_block(
-        ud_line=line_value,
-        pp_line=pp_line,
-        dk_line=dk_line,
-        fd_line=fd_line,
-        provider=source,
-    )
     history_block = _format_history_block(decision)
     context_line = (
         f"  <b>First Seen:</b>    {datetime.utcnow().strftime('%H:%M UTC')}"
@@ -988,9 +1050,7 @@ def format_underdog_new_prop_alert(
             f"👤 <b>{escape(str(player_name))}</b>",
         "",
         _div(),
-        avail_block.lstrip("\n"),
-        "",
-        _div(),
+        f"📡 <b>Source:</b>  Player Props · {escape(source)}",
         f"  {source_emoji} <b>PLAYER PROP LINE:</b>  <code>{line_value:.1f}</code>  {_line_label(line_value)}",
         context_line,
         *(
@@ -1004,9 +1064,7 @@ def format_underdog_new_prop_alert(
         ),
         *(
             ["💪 STRONG BET"]
-            if (
-                getattr(decision, "recommendation", "") in ("OVER", "UNDER")
-            )
+            if _has_strong_directional_history(validation, decision)
             else []
         ),
         "",

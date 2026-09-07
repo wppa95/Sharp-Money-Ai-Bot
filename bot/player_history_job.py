@@ -562,6 +562,23 @@ async def player_history_collector_job(context) -> None:
             else:
                 pass
 
+        # Keep the report shape stable even when a provider returns no rows,
+        # a sport is out of season, or the cadence budget is exhausted.  A
+        # missing key used to make configured sports disappear from Telegram
+        # reports, which looked like those sports were not being attempted.
+        report_sports = {
+            str(sport).upper()
+            for sport in (
+                set(target_counts)
+                | {sport for _player, sport, _stat in cycle_targets}
+            )
+        }
+        for sport in report_sports:
+            target_counts.setdefault(sport, 0)
+            ok_by_sport.setdefault(sport, 0)
+            rows_by_sport.setdefault(sport, 0)
+            propline_coverage_by_sport.setdefault(sport, {})
+
         async def write_batch(batch: list[object]) -> None:
             """Persist one completed result batch without the fetch deadline."""
             if asyncio.iscoroutinefunction(bulk_writer):

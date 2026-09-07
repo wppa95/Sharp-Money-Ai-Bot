@@ -440,11 +440,11 @@ class TestDeliverUnderdog:
         assert "Connor McDavid" in msg
         assert "0.5" in msg
         assert "1.5" in msg
-        assert "💪 STRONG BET" in msg
+        assert "💪 STRONG BET" not in msg
         assert "ACTIONABLE BET PICK" in msg or "+1.0" in msg
 
     @pytest.mark.asyncio
-    async def test_supported_three_star_under_is_sent_with_strong_bet_label(self):
+    async def test_supported_three_star_under_is_sent_without_unearned_strong_label(self):
         sent_messages: list[str] = []
 
         async def capture(chat_id, text, **kwargs):
@@ -473,7 +473,7 @@ class TestDeliverUnderdog:
         assert result.sent is True
         assert sent_messages
         assert "UNDER 2.5" in sent_messages[0]
-        assert "💪 STRONG BET" in sent_messages[0]
+        assert "💪 STRONG BET" not in sent_messages[0]
 
     @pytest.mark.asyncio
     async def test_line_change_lower_broadcast(self):

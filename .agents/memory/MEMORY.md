@@ -124,3 +124,4 @@
 - [Grader date reconciliation](grader-date-reconciliation.md) — UTC event timestamps may settle against the preceding provider-local calendar date.
 - [External SQLite lock tests](external-sqlite-lock-tests.md) — lower busy_timeout to force raw-writer lock errors; otherwise SQLite waits internally and bypasses retry coverage.
 - [Canonical Player Props pipeline](canonical-player-props-pipeline.md) — PropLine and Underdog share normalization and persistence before scoring while retaining source identity.
+- [Player Props delivery presentation](player-props-delivery-presentation.md) — Telegram labels the shared product/source explicitly; strong picks require explicit results provenance and direction-specific hit-rate support.

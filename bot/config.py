@@ -123,9 +123,9 @@ class Config:
     # provider catalog controls scope when available; an empty value must not
     # silently narrow PrizePicks to a guessed NBA/MLB subset.
     PRIZEPICKS_LEAGUES_RAW: str = os.environ.get("PRIZEPICKS_LEAGUES", "")
-    # PrizePicks runs as the companion branch of the shared live-monitoring
-    # cycle, so keep this within the 1–2 minute refresh window.
-    PRIZEPICKS_POLL_INTERVAL: int = int(os.environ.get("PRIZEPICKS_POLL_INTERVAL", "120"))
+    # PrizePicks runs as the companion branch of the shared live Player Props
+    # cycle. Provider request pacing remains controlled by PropLine.
+    PRIZEPICKS_POLL_INTERVAL: int = int(os.environ.get("PRIZEPICKS_POLL_INTERVAL", "60"))
     # Minimum edge % vs sportsbook fair probability to trigger a PP alert.
     MIN_PP_EDGE: float = float(os.environ.get("MIN_PP_EDGE", "5.0"))
     # Minimum fair probability at the PP line to alert (filters razor-thin lines).
@@ -208,7 +208,9 @@ class Config:
     CONNECTOR_POLL_INTERVAL:  int = int(os.environ.get("CONNECTOR_POLL_INTERVAL",  "120"))
     CONSENSUS_CHECK_INTERVAL: int = int(os.environ.get("CONSENSUS_CHECK_INTERVAL", "120"))
     CLV_CHECK_INTERVAL:       int = int(os.environ.get("CLV_CHECK_INTERVAL",       "120"))
-    UNDERDOG_POLL_INTERVAL:   int = int(os.environ.get("UNDERDOG_POLL_INTERVAL",   "120"))
+    # One shared Player Props evaluation cycle per minute. PropLine's own
+    # authorized fetch scheduler remains independently rate-limited.
+    UNDERDOG_POLL_INTERVAL:   int = int(os.environ.get("UNDERDOG_POLL_INTERVAL",   "60"))
     # Short, bounded refresh cadence for settlement and evidence enrichment.
     # The scheduler coordinator prevents overlapping executions.
     OPPORTUNITY_GRADER_INTERVAL: int = int(

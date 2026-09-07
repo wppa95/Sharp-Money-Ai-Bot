@@ -153,10 +153,8 @@ class TestIndependentPrizePicks:
             source="PrizePicks",
         )
 
-        assert "🎯 Player Prop:  <code>1.5</code>" in underdog_message
-        assert "🎯 Player Prop:  <code>1.5</code>" in prizepicks_message
-        assert "PrizePicks" not in underdog_message
-        assert "Underdog" not in prizepicks_message
+        assert "📡 <b>Source:</b>  Player Props · Underdog" in underdog_message
+        assert "📡 <b>Source:</b>  Player Props · PrizePicks" in prizepicks_message
 
     def test_confirmation_line_only_accepts_verified_prizepicks_source(self):
         assert market_engine._prizepicks_line_from_confirmation(
@@ -602,7 +600,7 @@ class TestIndependentPrizePicks:
 
         assert "PLAYER PROP PLAY" in message
         assert "PLAYER PROP LINE" in message
-        assert "PrizePicks" not in message
+        assert "📡 <b>Source:</b>  Player Props · PrizePicks" in message
         assert "Underdog" not in message
 
     def test_provider_adapter_preserves_prizepicks_identity(self):

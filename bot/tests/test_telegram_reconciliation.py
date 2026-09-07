@@ -162,7 +162,11 @@ async def _deliver_traceable_play(db, *, source_id: str, event_id: str, path: st
             stat_type="Hits",
             old_line=0.5,
             new_line=1.5,
-            validation=SimpleNamespace(has_supporting_data=True),
+            validation=SimpleNamespace(
+                has_supporting_data=True,
+                data_source="real",
+                n_real_games=5,
+            ),
             decision=SimpleNamespace(
                 recommendation="OVER",
                 confidence=85,
@@ -267,7 +271,11 @@ async def test_failed_play_is_audited_but_not_marked_delivered(db):
     ):
         result = await delivery.deliver_underdog(
             "Traceable Player", "TEAM", "MLB", "Hits", 0.5, 1.5,
-            validation=SimpleNamespace(has_supporting_data=True),
+            validation=SimpleNamespace(
+                has_supporting_data=True,
+                data_source="real",
+                n_real_games=5,
+            ),
             decision=SimpleNamespace(
                 recommendation="OVER", confidence=85, decision_tier="A"
             ),

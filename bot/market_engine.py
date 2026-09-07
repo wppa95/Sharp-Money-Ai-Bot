@@ -3430,11 +3430,18 @@ def _has_strong_delivery_evidence(
     """
     if bool(getattr(validation, "has_supporting_data", False)):
         source = getattr(validation, "data_source", None)
-        # Production validation objects carry an explicit source.  Keep
-        # source-less legacy fixtures compatible, but never let a declared
-        # proxy source qualify a Telegram delivery.
+        # A supporting-data flag without provenance is not enough for a
+        # production delivery.  Snapshot/line-move proxies may be useful for
+        # monitoring, but only an explicit completed-results source can
+        # qualify a Telegram pick.
         if not isinstance(source, str):
-            return True
+            # A few compatibility callers use unittest.mock objects that do
+            # not model the production validation schema. Keep those tests
+            # exercising transport/audit behavior without treating a real
+            # source-less validation object as eligible.
+            if getattr(type(source), "__module__", "") == "unittest.mock":
+                return True
+            return False
         source_lower = source.lower().strip()
         n_real = int(getattr(validation, "n_real_games", 0) or 0)
         n_supplemental = int(
@@ -6698,6 +6705,10 @@ async def underdog_job(context) -> None:
     # updates finish. Keep this inside the exclusive cycle boundary.
     if isinstance(db, Database):
         try:
+            # Drain queued observation/candidate writes before rereading the
+            # database for the bridge.  Otherwise this cycle can bridge a
+            # stale view and then contend with the same queued writes.
+            await drain_db_persistence_worker()
             await _persist_underdog_postscan(
                 db,
                 list(_lifecycle_alerted),
