@@ -6914,22 +6914,6 @@ async def underdog_job(context) -> None:
         ),
     )
     _job_activity_end("underdog")
-    _new_prop_stored_count = _eligible_new_props
-    _new_prop_skip_reasons = {
-        _reason: _count
-        for _reason, _count in _new_prop_skip_reasons.items()
-        if _count
-    }
-    logger.info(
-        "underdog_new_prop_persistence: eligible=%d stored=%d evaluated=%d "
-        "observation_only=%d skipped_reasons=%s "
-        "tables=underdog_snapshots,prop_tracking_log,prop_line_history",
-        _eligible_new_props,
-        _new_prop_stored_count,
-        _n_new_prop_evaluated,
-        max(0, _eligible_new_props - _n_new_prop_evaluated),
-        _new_prop_skip_reasons or "none",
-    )
     _cycle_elapsed = time.monotonic() - _cycle_timing.started_mono
     _cycle_cadence = float(getattr(config, "UNDERDOG_POLL_INTERVAL", 120))
     _cycle_complete = (
