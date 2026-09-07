@@ -102,6 +102,43 @@ async def test_grader_deduplicates_provider_fetches_and_grades_directions():
 
 
 @pytest.mark.asyncio
+async def test_grader_reconciles_utc_event_to_provider_previous_calendar_date():
+    """Late-night UTC events must settle against the provider-local date."""
+    from datetime import datetime
+
+    row = _opp(21, "Late Night Player", "Points")
+    row.game_time = datetime(2026, 9, 5, 1, 40)
+
+    db = MagicMock()
+    db.get_pending_opportunities = AsyncMock(return_value=[row])
+    db.upsert_player_result = AsyncMock()
+    db.grade_opportunity = AsyncMock()
+    health = _Health()
+    lookup_dates = []
+
+    async def get_result(player, sport, stat, game_date, **kwargs):
+        lookup_dates.append(game_date)
+        if game_date == "2026-09-04":
+            return SimpleNamespace(actual_value=11.0)
+        return None
+
+    db.get_game_result_for_grading = AsyncMock(side_effect=get_result)
+    provider = MagicMock()
+    provider.fetch_results = AsyncMock(return_value=[])
+
+    with (
+        patch.object(main, "get_health_tracker", return_value=health),
+        patch("providers.player_stats.PlayerStatsProvider", return_value=provider),
+    ):
+        await main._grade_opportunities_job(_context(db))
+
+    assert lookup_dates == ["2026-09-05", "2026-09-04"]
+    db.grade_opportunity.assert_awaited_once()
+    assert db.grade_opportunity.await_args.args[:3] == (21, "HIT", 11.0)
+    assert health.runs == 1
+
+
+@pytest.mark.asyncio
 async def test_grader_fetches_concurrently_with_a_bounded_batch():
     opportunities = [_opp(i, f"Player {i}", "Points") for i in range(1, 31)]
     db = MagicMock()

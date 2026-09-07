@@ -122,3 +122,4 @@
 - [Telegram command catalog](telegram-command-catalog.md) — command metadata is durable in SQLite and drives the menu/help surface while callbacks remain code-owned.
 - [Non-MLB funnel populations](non-mlb-funnel.md) — separate observation, normalization, evaluation, direction, and delivery populations; neutral FPR evaluations still need telemetry.
 - [SQLite scan latency](sqlite-scan-latency.md) — batch neutral telemetry and defer non-critical writes so full Underdog scans stay within cadence.
+- [Grader date reconciliation](grader-date-reconciliation.md) — UTC event timestamps may settle against the preceding provider-local calendar date.

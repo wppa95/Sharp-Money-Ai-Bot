@@ -1358,49 +1358,81 @@ async def _grade_opportunities_job(context) -> None:
 
         graded   = 0
         no_data  = 0
+        date_shifted = 0
+        no_data_by_sport: dict[str, int] = defaultdict(int)
         for opp in pending:
             game_date = (
                 opp.game_time.strftime("%Y-%m-%d")
                 if opp.game_time
                 else None
             )
+            # Feed event timestamps are UTC, while official player-result
+            # providers key their rows by the local game calendar date. A
+            # late-night UTC event therefore commonly settles on the prior
+            # provider date (for example, 01:40 UTC → the previous MLB date).
+            # Try the exact date first, then one previous date; never search
+            # by player/stat alone.
+            _game_dates = [game_date] if game_date else []
+            if game_date and opp.game_time:
+                _previous_game_date = (
+                    opp.game_time - timedelta(days=1)
+                ).strftime("%Y-%m-%d")
+                if _previous_game_date != game_date:
+                    _game_dates.append(_previous_game_date)
             # A provider may omit game_time, but a source event/game identity
             # still lets the result provider reconcile the completed event.
             # Without either identity, leave the row pending rather than
             # guessing which player game should settle it.
             if not game_date and not getattr(opp, "game_id", ""):
                 no_data += 1
+                no_data_by_sport[str(getattr(opp, "sport", "UNKNOWN")).upper()] += 1
                 continue
             _result_lookup_kwargs = {}
             if getattr(opp, "game_id", ""):
                 _result_lookup_kwargs["game_id"] = opp.game_id
             if getattr(opp, "provider", None):
                 _result_lookup_kwargs["provider"] = opp.provider
-            result_row = await db.get_game_result_for_grading(
-                opp.player_name, opp.sport, opp.stat_type, game_date,
-                **_result_lookup_kwargs,
-            )
+            result_row = None
+            _matched_game_date = game_date
+            for _candidate_game_date in _game_dates:
+                result_row = await db.get_game_result_for_grading(
+                    opp.player_name,
+                    opp.sport,
+                    opp.stat_type,
+                    _candidate_game_date,
+                    **_result_lookup_kwargs,
+                )
+                if result_row is not None:
+                    _matched_game_date = _candidate_game_date
+                    break
             if result_row is None:
                 # A date is required to safely reconcile a PropLine result to
                 # this opportunity.  Never fall back by player/stat alone.
                 if game_date:
                     for _propline_result in await _fetch_propline_grade_results(opp):
                         await db.upsert_player_result(_propline_result)
-                    result_row = await db.get_game_result_for_grading(
-                        opp.player_name,
-                        opp.sport,
-                        opp.stat_type,
-                        game_date,
-                        **_result_lookup_kwargs,
-                    )
+                    for _candidate_game_date in _game_dates:
+                        result_row = await db.get_game_result_for_grading(
+                            opp.player_name,
+                            opp.sport,
+                            opp.stat_type,
+                            _candidate_game_date,
+                            **_result_lookup_kwargs,
+                        )
+                        if result_row is not None:
+                            _matched_game_date = _candidate_game_date
+                            break
             if result_row is None:
                 no_data += 1
+                no_data_by_sport[str(getattr(opp, "sport", "UNKNOWN")).upper()] += 1
                 logger.debug(
                     "_grade_opportunities_job: no result for %s | %s | %s | %s",
                     opp.player_name, opp.sport, opp.stat_type,
                     game_date or "event identity",
                 )
                 continue
+            if _matched_game_date != game_date:
+                date_shifted += 1
             actual = result_row.actual_value
             line   = opp.line_value
             recommendation = getattr(opp, "recommendation", None)
@@ -1446,8 +1478,12 @@ async def _grade_opportunities_job(context) -> None:
             graded += 1
         if graded or no_data:
             logger.info(
-                "_grade_opportunities_job: graded=%d opportunities (no_data=%d)",
-                graded, no_data,
+                "_grade_opportunities_job: graded=%d opportunities "
+                "(no_data=%d date_shifted=%d no_data_by_sport=%s)",
+                graded,
+                no_data,
+                date_shifted,
+                dict(sorted(no_data_by_sport.items())),
             )
         _ht_g = get_health_tracker()
         if _ht_g:
