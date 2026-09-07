@@ -58,14 +58,14 @@ def test_stable_refresh_is_not_independently_scheduled():
     assert "_stable_refresh_job" not in MAIN_SOURCE
 
 
-def test_no_remainder_full_pool_rotation_is_registered():
+def test_full_pool_rotation_is_registered_once():
     jobs = _registered_repeating_jobs()
 
     assert [
         (name, function)
         for name, function, _ in jobs
         if "pool" in name.lower() or "rescan" in name.lower()
-    ] == []
+    ] == [("full_pool_rescan", "_coordinated_job('full_pool_rescan', _full_pool_rescan_job)")]
 
 
 def test_required_monitoring_and_maintenance_jobs_remain_registered():
@@ -75,6 +75,7 @@ def test_required_monitoring_and_maintenance_jobs_remain_registered():
         "odds_poller",
         "player_props_fetcher",
         "underdog_monitor",
+        "full_pool_rescan",
         "clv_seeder",
         "clv_harvester",
         "budget_checker",

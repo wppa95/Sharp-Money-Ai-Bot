@@ -51,11 +51,11 @@ def _job_kwargs(call: ast.Call) -> dict[str, ast.AST]:
     }
 
 
-def test_current_book_has_one_monitoring_owner_and_no_remainder_rotation():
+def test_current_book_has_one_monitoring_owner_and_full_pool_rotation():
     names = [name for name, _ in _scheduled_jobs()]
 
     assert names.count("underdog_monitor") == 1
-    assert names.count("full_pool_rescan") == 0
+    assert names.count("full_pool_rescan") == 1
     assert "stable_refresh" not in names
     assert "stable_refresh_job" not in names
     assert "prizepicks_monitor" not in names
@@ -79,6 +79,7 @@ def test_required_jobs_remain_registered_with_independent_provider_and_grader_ti
         "season_checker",
         "opportunity_grader",
         "propline_request_scan",
+        "full_pool_rescan",
     } <= names
 
 
@@ -89,6 +90,7 @@ def test_scheduled_jobs_use_coordinator_without_max_instances():
         "odds_poller",
         "player_props_fetcher",
         "underdog_monitor",
+        "full_pool_rescan",
     ):
         kwargs = _job_kwargs(jobs[name])
         assert "max_instances" not in kwargs
@@ -106,6 +108,7 @@ def test_grading_and_propline_are_not_owned_by_the_underdog_cycle():
     assert "async def _opportunity_grader_tick" in source
     assert "async def _propline_scan_tick" in source
     assert '_coordinated_job("underdog_monitor", _underdog_monitor_cycle)' in source
+    assert '_coordinated_job("full_pool_rescan", _full_pool_rescan_job)' in source
 
 
 @pytest.mark.asyncio

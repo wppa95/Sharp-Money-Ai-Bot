@@ -807,6 +807,17 @@ async def post_init(application: Application) -> None:
             first=45,
             name="underdog_monitor",
         )
+        # The live monitor handles new props and line movement. The full-pool
+        # rotation is the complementary data-consumption path: it re-scores
+        # the complete eligible active pool so unchanged props are not merely
+        # fetched and persisted without receiving fresh evidence evaluation.
+        if config.FPR_INTERVAL > 0:
+            jq.run_repeating(
+                _coordinated_job("full_pool_rescan", _full_pool_rescan_job),
+                interval=config.FPR_INTERVAL,
+                first=config.FPR_INTERVAL,
+                name="full_pool_rescan",
+            )
         # Grading owns an independent one-shot schedule. The next run is only
         # registered after the current pass finishes, so a slow provider cannot
         # trigger APScheduler max-instances skips or leave queued grader runs.
@@ -913,13 +924,15 @@ async def post_init(application: Application) -> None:
                 name="season_checker",
             )
         logger.info(
-            "Jobs scheduled — underdog and independent grader: every %ds, "
+            "Jobs scheduled — underdog and full-pool rotation: every %ds; "
+            "independent grader: every %ds, "
             "history collector: every %ds, "
             "season_check: every %ds, "
             "heartbeat: every 60s "
              "[PrizePicks/PropLine companion cycle enabled=%s; "
              "PropLine default rate=180/hour; DK/FD delivery disabled]",
             config.UNDERDOG_POLL_INTERVAL,
+            config.FPR_INTERVAL,
             config.PLAYER_HISTORY_POLL_INTERVAL,
             config.SEASON_CHECK_INTERVAL,
             _propline_enabled,
