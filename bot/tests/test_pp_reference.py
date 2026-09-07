@@ -407,12 +407,12 @@ class TestPropHistoryMatch:
 class TestFormatPpReferenceAlert:
     def test_purple_emoji_prefix(self):
         msg = format_pp_reference_alert(_make_match())
-        assert msg.startswith("🟣")
+        assert msg.startswith("🎯")
 
     def test_contains_mandatory_disclaimer(self):
         msg = format_pp_reference_alert(_make_match())
         assert "Reference only" in msg
-        assert "not confirmed PrizePicks data" in msg
+        assert "not confirmed provider data" in msg
 
     def test_contains_player_name(self):
         msg = format_pp_reference_alert(_make_match(player_name="LeBron James"))

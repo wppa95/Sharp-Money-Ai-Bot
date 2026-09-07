@@ -326,7 +326,7 @@ class TestRegressionGuards(unittest.TestCase):
 
     def test_underdog_pipeline_section_still_present(self):
         output = _run_cmd_health(self.ht)
-        self.assertIn("Underdog Pipeline", output)
+        self.assertIn("Player Props Pipeline", output)
 
     def test_restart_reason_section_removed(self):
         """P4 cleanup: 'Restart reason:' display line intentionally removed from /health.

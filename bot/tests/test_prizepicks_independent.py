@@ -126,9 +126,10 @@ class TestIndependentPrizePicks:
         available = _format_available_lines_block(15.5, pp_line=14.5)
         unavailable = _format_available_lines_block(15.5)
 
-        assert "🟣 PrizePicks:  <code>14.5</code>" in available
-        assert "🟣 PrizePicks:  <i>Unavailable for this prop</i>" in unavailable
-        assert "🐶 Underdog:    <code>15.5</code>" in unavailable
+        assert "🎯 Player Prop:  <code>14.5</code>" in available
+        assert "🎯 Player Prop:  <code>15.5</code>" in available
+        assert "🎯 Player Prop:  <i>Unavailable for this prop</i>" in unavailable
+        assert "🎯 Player Prop:  <code>15.5</code>" in unavailable
 
     def test_provider_alerts_do_not_mix_prizepicks_and_underdog_lines(self):
         underdog_message = format_underdog_change_alert(
@@ -152,9 +153,9 @@ class TestIndependentPrizePicks:
             source="PrizePicks",
         )
 
-        assert "🐶 Underdog:" in underdog_message
+        assert "🎯 Player Prop:  <code>1.5</code>" in underdog_message
+        assert "🎯 Player Prop:  <code>1.5</code>" in prizepicks_message
         assert "PrizePicks" not in underdog_message
-        assert "🟣 PrizePicks:" in prizepicks_message
         assert "Underdog" not in prizepicks_message
 
     def test_confirmation_line_only_accepts_verified_prizepicks_source(self):
@@ -588,7 +589,7 @@ class TestIndependentPrizePicks:
         assert ("LeBron James", "NBA", "Points") in restored
         assert ("PrizePicks::LeBron James", "NBA", "Points") in restored
 
-    def test_prizepicks_alert_is_explicitly_labeled(self):
+    def test_player_prop_alert_uses_unified_label(self):
         message = format_underdog_change_alert(
             player_name="LeBron James",
             team="LAL",
@@ -599,9 +600,10 @@ class TestIndependentPrizePicks:
             source="PrizePicks",
         )
 
-        assert "SHARP MONEY PLAY" in message
-        assert "LINE</b> · PrizePicks" in message
-        assert "UNDERDOG PROP LIVE" not in message
+        assert "PLAYER PROP PLAY" in message
+        assert "PLAYER PROP LINE" in message
+        assert "PrizePicks" not in message
+        assert "Underdog" not in message
 
     def test_provider_adapter_preserves_prizepicks_identity(self):
         prop = SimpleNamespace(

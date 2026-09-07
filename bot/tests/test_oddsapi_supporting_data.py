@@ -675,7 +675,7 @@ class TestHealthMonitorRegistration(unittest.TestCase):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestOddsPollingEnabled(unittest.TestCase):
-    """OddsAPI game-line polling is active; player props remain independently off."""
+    """OddsAPI game-line polling is active; Player Props use the shared monitor."""
 
     @staticmethod
     def _main_src():
@@ -711,26 +711,16 @@ class TestOddsPollingEnabled(unittest.TestCase):
                          "_player_props_job must remain commented out")
 
     def test_underdog_job_still_primary(self):
-        """underdog_job must still be the only active primary polling job."""
-        import re
+        """The shared monitoring wrapper must schedule the Player Props monitor."""
         src = self._main_src()
-        # Registration may be multi-line: jq.run_repeating(\n    underdog_job
-        # Use full-source search (not line-by-line) to catch multiline form.
-        # Exclude commented-out lines by checking that the matched context
-        # is not inside a # comment block.
-        lines = src.splitlines()
-        found = False
-        for i, line in enumerate(lines):
-            if "underdog_job" in line and "run_repeating" in line and not line.lstrip().startswith("#"):
-                found = True
-                break
-            # Handle two-line form: run_repeating(\n    underdog_job
-            if "run_repeating" in line and not line.lstrip().startswith("#"):
-                if i + 1 < len(lines) and "underdog_job" in lines[i + 1]:
-                    found = True
-                    break
-        self.assertTrue(found,
-                        "underdog_job must remain active as the primary polling job")
+        self.assertIn(
+            "_shared_underdog_cycle = _shared_monitoring_cycle(underdog_job)",
+            src,
+        )
+        self.assertRegex(
+            src,
+            r'_coordinated_job\("underdog_monitor",\s*_shared_underdog_cycle\)',
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

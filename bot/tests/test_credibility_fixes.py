@@ -407,4 +407,4 @@ class TestPicksDeliveryStatus:
     def test_picks_header_describes_current_provider_lines(self):
         import inspect, commands
         src = inspect.getsource(commands._cmd_picks_inner)
-        assert "Underdog and PrizePicks lines are shown separately." in src
+        assert "All Player Props lines are combined in this view." in src

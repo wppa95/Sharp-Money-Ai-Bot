@@ -462,5 +462,5 @@ async def test_representative_bounded_picks_path_finishes_under_deadline(monkeyp
     sent_text = "\n".join(
         str(call.args[0]) for call in update.message.reply_text.await_args_list
     )
-    assert "PRIZEPICKS PICK" in sent_text
+    assert "Actionable Player Prop Picks" in sent_text
     assert "temporarily unavailable" not in sent_text
