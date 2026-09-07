@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import sqlite3
+import threading
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import func, select, text
+from sqlalchemy.exc import OperationalError
 
 from database import (
     Database,
+    UnderdogSnapshotRecord,
     _SQLITE_MAX_OVERFLOW,
     _SQLITE_POOL_SIZE,
     _SQLITE_POOL_TIMEOUT_SECONDS,
@@ -120,3 +125,144 @@ async def test_shared_session_budget_applies_across_monitor_and_history_pools(tm
         await asyncio.gather(*tasks, return_exceptions=True)
         await history.close()
         await primary.close()
+
+
+def _snapshot(index: int) -> UnderdogSnapshotRecord:
+    return UnderdogSnapshotRecord(
+        external_id=f"writer-lock-{index}",
+        player_name=f"Writer Lock Player {index}",
+        team="TST",
+        sport="NBA",
+        stat_type="Points",
+        line_value=10.5,
+        game_id=f"writer-lock-game-{index}",
+    )
+
+
+def _start_external_writer_lock(db_path):
+    """Hold a raw SQLite write transaction outside Database's async gate."""
+    acquired = threading.Event()
+    release = threading.Event()
+    errors: list[BaseException] = []
+
+    def hold_lock() -> None:
+        connection = None
+        transaction_started = False
+        try:
+            connection = sqlite3.connect(
+                str(db_path),
+                timeout=0,
+                isolation_level=None,
+            )
+            connection.execute("BEGIN IMMEDIATE")
+            transaction_started = True
+            acquired.set()
+            if not release.wait(timeout=5):
+                errors.append(TimeoutError("external writer lock was not released"))
+            connection.commit()
+        except BaseException as exc:
+            errors.append(exc)
+            acquired.set()
+        finally:
+            if connection is not None:
+                if transaction_started:
+                    try:
+                        connection.rollback()
+                    except sqlite3.Error:
+                        pass
+                connection.close()
+
+    thread = threading.Thread(target=hold_lock, name="sqlite-external-writer")
+    thread.start()
+    return thread, acquired, release, errors
+
+
+async def _set_sqlite_busy_timeout(database: Database, milliseconds: int) -> None:
+    # The production timeout is intentionally generous. Lower it only for
+    # these tests so the raw external lock produces a bounded lock error and
+    # exercises the Python-level fresh-transaction retry.
+    async with database._engine.begin() as connection:
+        await connection.execute(text(f"PRAGMA busy_timeout={milliseconds}"))
+
+
+async def _count_snapshots(database: Database) -> int:
+    async with database.session() as session:
+        return int(
+            await session.scalar(
+                select(func.count()).select_from(UnderdogSnapshotRecord)
+            )
+            or 0
+        )
+
+
+@pytest.mark.asyncio
+async def test_file_backed_external_writer_lock_retries_and_preserves_rows(
+    tmp_path, monkeypatch
+):
+    db_path = tmp_path / "external-writer-recovery.sqlite"
+    database = Database(f"sqlite+aiosqlite:///{db_path}")
+    await database.init()
+    await _set_sqlite_busy_timeout(database, 1)
+
+    try:
+        await database.save_underdog_snapshots_bulk([_snapshot(0)])
+        thread, acquired, release, errors = _start_external_writer_lock(db_path)
+        assert await asyncio.to_thread(acquired.wait, 2)
+        assert not errors
+
+        class ReleaseOnRetry(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                if "SQLite lock; retry" in record.getMessage():
+                    release.set()
+
+        handler = ReleaseOnRetry()
+        database_logger = logging.getLogger("database")
+        database_logger.addHandler(handler)
+        monkeypatch.setattr("database._UNDERDOG_BULK_RETRY_DELAYS", (0.01, 0.01))
+        try:
+            result = await database.save_underdog_snapshots_bulk(
+                [_snapshot(1), _snapshot(2)]
+            )
+        finally:
+            database_logger.removeHandler(handler)
+            release.set()
+            await asyncio.to_thread(thread.join, 2)
+
+        assert not thread.is_alive()
+        assert not errors
+        assert result["records_written"] == 2
+        assert result["retry_count"] >= 1
+        assert await _count_snapshots(database) == 3
+    finally:
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_file_backed_external_writer_lock_exhaustion_fails_loudly(
+    tmp_path, monkeypatch
+):
+    db_path = tmp_path / "external-writer-exhaustion.sqlite"
+    database = Database(f"sqlite+aiosqlite:///{db_path}")
+    await database.init()
+    await _set_sqlite_busy_timeout(database, 1)
+
+    thread = None
+    release = None
+    try:
+        thread, acquired, release, errors = _start_external_writer_lock(db_path)
+        assert await asyncio.to_thread(acquired.wait, 2)
+        assert not errors
+
+        monkeypatch.setattr("database._UNDERDOG_BULK_RETRY_DELAYS", (0, 0))
+        with pytest.raises(OperationalError, match="database is locked"):
+            await database.save_underdog_snapshots_bulk([_snapshot(1)])
+        assert await _count_snapshots(database) == 0
+    finally:
+        if release is not None:
+            release.set()
+        if thread is not None:
+            await asyncio.to_thread(thread.join, 2)
+        await database.close()
+
+    assert not thread.is_alive()
+    assert not errors
