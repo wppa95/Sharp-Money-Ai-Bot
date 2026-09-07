@@ -418,17 +418,21 @@ def _primary_player_prop_provider_lines(
             except Exception:
                 pass
 
+    _health_icons = set(provider_icons.values())
+    overall_icon = (
+        "🚨" if "🚨" in _health_icons
+        else "🟡" if "🟡" in _health_icons
+        else "🟢" if "🟢" in _health_icons
+        else "⚪"
+    )
+    source_states = (
+        f"Underdog: {'available' if underdog_enabled else 'unavailable'} · "
+        f"PrizePicks / PropLine: "
+        f"{'available' if prizepicks_enabled else 'unavailable'}"
+    )
     return [
-        (
-            f"  {provider_icons['Underdog']} <b>Player Props</b> "
-            f"<i>(Underdog source)</i> — "
-            + ("available" if underdog_enabled else "Unavailable")
-        ),
-        (
-            f"  {provider_icons['PrizePicks']} <b>Player Props</b> "
-            f"<i>(PrizePicks / PropLine source)</i> — "
-            + ("available" if prizepicks_enabled else "Unavailable")
-        ),
+        f"  {overall_icon} <b>Player Props</b> — {source_states}",
+        "    <i>Source identity is retained on individual picks.</i>",
     ]
 
 
@@ -437,6 +441,7 @@ def _primary_provider_runtime_lines(health_monitor: object | None) -> list[str]:
     lines = ["  <i>Live fetch health</i>"]
     if health_monitor is None or not hasattr(health_monitor, "get_health"):
         return lines + ["    ⚪ Runtime health unavailable"]
+    provider_runtime: list[str] = []
     for provider in ("Underdog", "PrizePicks"):
         try:
             health = health_monitor.get_health(provider)
@@ -458,14 +463,16 @@ def _primary_provider_runtime_lines(health_monitor: object | None) -> list[str]:
                 if health.consecutive_failures
                 else ""
             )
-            lines.append(
-                f"    {icon} Player Props <i>({provider} source)</i>: "
+            provider_runtime.append(
+                f"    {icon} {provider}: "
                 f"{state} · last ✓: {last_ok}{failure_note}"
             )
         except Exception:
-            lines.append(
-                f"    ⚪ Player Props <i>({provider} source)</i>: health unavailable"
-            )
+            provider_runtime.append(f"    ⚪ {provider}: health unavailable")
+    lines.append(
+        "    <b>Player Props source health</b> — "
+        " · ".join(line.strip() for line in provider_runtime)
+    )
     return lines
 
 
@@ -764,16 +771,17 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         lines.append("")
         lines.append("<b>📡 Market Providers</b>")
         _market_provider_labels = {
-            "Underdog": "Player Props · Underdog source",
-            "PrizePicks": "Player Props · PrizePicks / PropLine source",
+            "Underdog": "Underdog source",
+            "PrizePicks": "PrizePicks / PropLine source",
         }
+        _market_rows: list[str] = []
         for provider in ("Underdog", "PrizePicks"):
             info = ht.get_provider_info(provider)
             if info:
                 last_fetch = ht.provider_last_fetch_str(provider)
                 streak = info.get("error_streak", 0)
                 icon = "✅" if streak == 0 else "⚠️" if streak < 3 else "🚨"
-                lines.append(
+                _market_rows.append(
                     f"  {icon} <b>{_html.escape(provider)}</b> — "
                     f"{_market_provider_labels[provider]}  ·  "
                     f"last fetch: {_html.escape(last_fetch)}"
@@ -781,12 +789,14 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 )
                 last_err_msg = info.get("last_error_msg")
                 if last_err_msg and streak:
-                    lines.append(f"      ↳ {_html.escape(str(last_err_msg)[:100])}")
+                    _market_rows.append(f"      ↳ {_html.escape(str(last_err_msg)[:100])}")
             else:
-                lines.append(
+                _market_rows.append(
                     f"  ⚪ <b>{_html.escape(provider)}</b> — "
                     f"{_market_provider_labels[provider]}  ·  not yet fetched"
                 )
+        lines.append("  <b>Player Props</b> — unified feed health")
+        lines.extend(_market_rows)
 
         # Each provider has its own normalized pipeline counters. Never infer
         # one provider's volume or grading state from the other.

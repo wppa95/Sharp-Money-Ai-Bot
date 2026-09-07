@@ -7275,7 +7275,10 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             if not _tier_delivery_gate(
                 _sr_sport, _sr_dec.recommendation, _sr_bq_score, _sr_mq_score,
                 _has_strong_delivery_evidence(
-                    score=_sr_score, intelligence_trace=getattr(_sr_dec, "evidence", None),
+                    score=_sr_score,
+                    validation=_sr_val,
+                    decision=_sr_dec,
+                    intelligence_trace=getattr(_sr_dec, "evidence", None),
                 ),
                 score_tier=getattr(_sr_dec, "decision_tier", None),
             ):
@@ -8138,7 +8141,10 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     _fpr_mq_ok    = _tier_delivery_gate(
                         _fpr_sport, _fpr_dec.recommendation, _fpr_bq_score, _fpr_mq_score,
                         _has_strong_delivery_evidence(
-                            score=_fpr_score, intelligence_trace=getattr(_fpr_dec, "evidence", None),
+                            score=_fpr_score,
+                            validation=_fpr_val,
+                            decision=_fpr_dec,
+                            intelligence_trace=getattr(_fpr_dec, "evidence", None),
                         ),
                         score_tier=getattr(_fpr_dec, "decision_tier", None),
                         confidence=getattr(_fpr_dec, "confidence", None),

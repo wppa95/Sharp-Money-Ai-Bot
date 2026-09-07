@@ -141,8 +141,8 @@ def test_canonical_provider_roles_are_exact():
     lines = commands._primary_player_prop_provider_lines(_health_monitor())
 
     assert lines == [
-        "  ⚪ <b>Player Props</b> <i>(Underdog source)</i> — available",
-        "  ⚪ <b>Player Props</b> <i>(PrizePicks / PropLine source)</i> — available",
+        "  ⚪ <b>Player Props</b> — Underdog: available · PrizePicks / PropLine: available",
+        "    <i>Source identity is retained on individual picks.</i>",
     ]
 
 
@@ -155,9 +155,9 @@ def test_provider_roles_show_degraded_underdog_and_disabled_prizepicks():
     lines = commands._primary_player_prop_provider_lines(monitor)
     runtime = commands._primary_provider_runtime_lines(monitor)
 
-    assert lines[0] == "  🟡 <b>Player Props</b> <i>(Underdog source)</i> — available"
-    assert lines[1] == "  ⚪ <b>Player Props</b> <i>(PrizePicks / PropLine source)</i> — Unavailable"
-    assert "    🟡 Player Props <i>(Underdog source)</i>: degraded" in runtime[1]
+    assert lines[0] == "  🟡 <b>Player Props</b> — Underdog: available · PrizePicks / PropLine: unavailable"
+    assert lines[1] == "    <i>Source identity is retained on individual picks.</i>"
+    assert "Underdog: degraded" in runtime[1]
     assert "1 failure" in runtime[1]
 
 
@@ -212,8 +212,8 @@ async def test_status_shows_provider_roles_and_separate_history_counts():
         await commands.cmd_status(update, context)
 
     message = update.message.reply_text.await_args.args[0]
-    assert "⚪ <b>Player Props</b> <i>(Underdog source)</i> — available" in message
-    assert "⚪ <b>Player Props</b> <i>(PrizePicks / PropLine source)</i> — available" in message
+    assert "Player Props</b> — Underdog: available · PrizePicks / PropLine: available" in message
+    assert "Market Providers" in message
     assert "DraftKings/FanDuel" not in message
     assert "Underdog: 20" in message
     assert "PrizePicks (PropLine): 10" in message
@@ -322,10 +322,10 @@ async def test_providers_command_includes_live_primary_provider_health():
         await commands.cmd_providers(update, context)
 
     message = update.message.reply_text.await_args.args[0]
-    assert "🟡 <b>Player Props</b> <i>(Underdog source)</i> — available" in message
-    assert "⚪ <b>Player Props</b> <i>(PrizePicks / PropLine source)</i> — available" in message
-    assert "🟡 Player Props <i>(Underdog source)</i>: degraded" in message
-    assert "⚪ Player Props <i>(PrizePicks source)</i>: awaiting first successful fetch" in message
+    assert "Player Props</b> — Underdog: available · PrizePicks / PropLine: available" in message
+    assert "Player Props source health" in message
+    assert "Underdog: degraded" in message
+    assert "PrizePicks: awaiting first successful fetch" in message
 
 
 def test_dashboard_report_does_not_merge_provider_breakdowns():
@@ -624,14 +624,14 @@ async def test_real_underdog_registry_failure_and_recovery_reach_command_output(
     await run_job()
     degraded = await provider_message()
     assert monitor.get_health("Underdog").status == ProviderStatus.DEGRADED
-    assert "🟡 <b>Player Props</b> <i>(Underdog source)</i> — available" in degraded
-    assert "🟡 Player Props <i>(Underdog source)</i>: degraded" in degraded
+    assert "Player Props</b> — Underdog: available" in degraded
+    assert "Underdog: degraded" in degraded
 
     await run_job()
     recovered = await provider_message()
     assert monitor.get_health("Underdog").status == ProviderStatus.OK
-    assert "🟢 <b>Player Props</b> <i>(Underdog source)</i> — available" in recovered
-    assert "🟢 Player Props <i>(Underdog source)</i>: ok" in recovered
+    assert "Player Props</b> — Underdog: available" in recovered
+    assert "Underdog: ok" in recovered
 
 
 @pytest.mark.asyncio

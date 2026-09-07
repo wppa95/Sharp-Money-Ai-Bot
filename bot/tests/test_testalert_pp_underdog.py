@@ -38,6 +38,7 @@ os.environ.setdefault("TELEGRAM_TOKEN", "test:token")
 import asyncio
 import pytest
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from alerts import AlertDelivery, DeliveryResult
@@ -361,6 +362,70 @@ class TestDeliverUnderdog:
             decision    = MagicMock(recommendation="OVER", confidence=80),
         )
         assert not result.filtered
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("sport", ["NBA", "CS", "TENNIS", "DOTA"])
+    async def test_non_mlb_real_evidence_can_deliver(self, sport):
+        """Supported non-MLB sports are not blocked by the delivery boundary."""
+        sent_messages: list[str] = []
+
+        async def capture(chat_id, text, **kwargs):
+            sent_messages.append(text)
+            return MagicMock()
+
+        mock_bot = MagicMock()
+        mock_bot.send_message = AsyncMock(side_effect=capture)
+        delivery = AlertDelivery(_make_db_mock(), mock_bot, [1])
+        validation = SimpleNamespace(
+            has_supporting_data=True,
+            data_source="real",
+            n_real_games=10,
+            n_supplemental_games=0,
+        )
+        result = await delivery.deliver_underdog(
+            player_name="Supported Player",
+            team="TEAM",
+            sport=sport,
+            stat_type="Points",
+            old_line=10.5,
+            new_line=11.5,
+            validation=validation,
+            decision=SimpleNamespace(recommendation="OVER", confidence=75),
+        )
+
+        assert result.sent is True
+        assert sent_messages
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "sport",
+        ["NFL", "NCAAF", "CFB", "CFL", "AFL", "RUGBY", "americanfootball_nfl"],
+    )
+    async def test_football_family_real_evidence_stays_blocked(self, sport):
+        """Football-family sports remain monitoring-only even with evidence."""
+        mock_bot = MagicMock()
+        mock_bot.send_message = AsyncMock(return_value=MagicMock())
+        delivery = AlertDelivery(_make_db_mock(), mock_bot, [1])
+        validation = SimpleNamespace(
+            has_supporting_data=True,
+            data_source="real",
+            n_real_games=10,
+            n_supplemental_games=0,
+        )
+
+        result = await delivery.deliver_underdog(
+            player_name="Football Player",
+            team="TEAM",
+            sport=sport,
+            stat_type="Points",
+            old_line=10.5,
+            new_line=11.5,
+            validation=validation,
+            decision=SimpleNamespace(recommendation="OVER", confidence=75),
+        )
+
+        assert result.sent is False
+        assert mock_bot.send_message.await_count == 0
 
     @pytest.mark.asyncio
     async def test_non_strong_moneyline_is_filtered_before_formatting(self):

@@ -604,8 +604,8 @@ def format_help_message(commands=None) -> str:
         lines.extend([
             "",
             "<b>Player Props</b>",
-            "  🟢 <b>Player Props</b> — Underdog source",
-            "  🟢 <b>Player Props</b> — PrizePicks / PropLine source",
+            "  🟢 <b>Player Props</b> — Underdog + PrizePicks / PropLine",
+            "  <i>Source identity is shown on each pick when relevant.</i>",
             "",
             "<i>Monitoring player props across multiple sports. Not betting advice.</i>",
         ])
@@ -645,9 +645,9 @@ def format_start_message() -> str:
         f"  🎯 Alert when a clear OVER or UNDER signal is confirmed",
         f"  🗃️ Collect multi-sport data for grading and model learning",
         "",
-        "<b>Alert format:</b>  provider-specific directional pick",
+        "<b>Alert format:</b>  unified Player Props directional pick",
         "  Shows the source line, direction, confidence, and supporting data.",
-        "  Underdog and PrizePicks picks are labeled separately.",
+        "  The underlying source is retained where it helps verify the line.",
         "",
         "Use /help to see all commands.",
         "",
