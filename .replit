@@ -16,6 +16,10 @@ author = "agent"
 task = "workflow.run"
 args = "Sharp Money Bot"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "full-feed-persistence"
+
 [[workflows.workflow]]
 name = "Sharp Money Bot"
 author = "agent"
@@ -26,6 +30,17 @@ args = "BOT_HEALTH_PORT=8099 python bot/main.py"
 
 [workflows.workflow.metadata]
 outputType = "console"
+
+[[workflows.workflow]]
+name = "full-feed-persistence"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "bash scripts/validate-full-feed-persistence.sh"
+
+[workflows.workflow.metadata]
+isValidation = true
 
 [postMerge]
 path = "scripts/post-merge.sh"

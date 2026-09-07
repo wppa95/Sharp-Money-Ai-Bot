@@ -39,6 +39,15 @@ import pytest
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 
+# These are the regression limits for the recurring full-feed validation.  Keep
+# them in the benchmark so a change to the contract fails the validation
+# command, rather than only changing the prose documentation.
+FULL_FEED_CADENCE_BUDGET_SECONDS = 120.0
+FULL_FEED_MAX_QUEUE_SATURATION = 0
+FULL_FEED_MAX_PERSISTENCE_FAILURES = 0
+FULL_FEED_MAX_WRITER_WAIT_SECONDS = 120.0
+FULL_FEED_MAX_COUNT_DELTA = 0
+
 
 def _src(rel: str) -> str:
     with open(os.path.join(ROOT, rel)) as f:
@@ -107,7 +116,7 @@ async def test_full_feed_persistence_benchmark_across_live_cycles(
         (1024, 256),
     )
     cycles_per_scenario = 3
-    cadence_budget_seconds = 120.0
+    cadence_budget_seconds = FULL_FEED_CADENCE_BUDGET_SECONDS
     database = Database(f"sqlite+aiosqlite:///{tmp_path / 'benchmark.sqlite'}")
     await database.init()
 
@@ -368,12 +377,23 @@ async def test_full_feed_persistence_benchmark_across_live_cycles(
                     "graded_tracking": expected_tracking,
                     "graded_opportunities": expected_opportunities,
                 }
-                assert counts == expected_counts
-                assert metric_delta["failed"] == 0
-                assert metric_delta["queue_full"] == 0
+                count_deltas = {
+                    key: counts[key] - expected_counts[key]
+                    for key in expected_counts
+                }
+                assert all(
+                    abs(delta) <= FULL_FEED_MAX_COUNT_DELTA
+                    for delta in count_deltas.values()
+                ), f"unexpected durable count deltas: {count_deltas}"
+                assert metric_delta["failed"] <= FULL_FEED_MAX_PERSISTENCE_FAILURES
+                assert metric_delta["queue_full"] <= FULL_FEED_MAX_QUEUE_SATURATION
                 assert metric_delta["enqueued"] == 5
                 assert metric_delta["completed"] == 5
                 assert elapsed <= cadence_budget_seconds
+                assert (
+                    backpressure_delta.get("writer_wait_seconds", 0.0)
+                    <= FULL_FEED_MAX_WRITER_WAIT_SECONDS
+                )
 
                 reports.append({
                     "scenario": scenario_index,
@@ -388,6 +408,7 @@ async def test_full_feed_persistence_benchmark_across_live_cycles(
                     "queue_full": int(metric_delta["queue_full"]),
                     "queue_depth_after_drain": 0,
                     "persisted": counts,
+                    "count_deltas": count_deltas,
                 })
     finally:
         await engine.drain_db_persistence_worker()
@@ -403,6 +424,16 @@ async def test_full_feed_persistence_benchmark_across_live_cycles(
     record_testsuite_property(
         "full_feed_persistence_benchmark",
         json.dumps(reports),
+    )
+    record_testsuite_property(
+        "full_feed_persistence_thresholds",
+        json.dumps({
+            "cadence_budget_seconds": FULL_FEED_CADENCE_BUDGET_SECONDS,
+            "max_queue_saturation": FULL_FEED_MAX_QUEUE_SATURATION,
+            "max_persistence_failures": FULL_FEED_MAX_PERSISTENCE_FAILURES,
+            "max_writer_wait_seconds": FULL_FEED_MAX_WRITER_WAIT_SECONDS,
+            "max_absolute_count_delta": FULL_FEED_MAX_COUNT_DELTA,
+        }),
     )
     assert len(reports) == len(scenarios) * cycles_per_scenario
 

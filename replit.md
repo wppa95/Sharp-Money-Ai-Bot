@@ -275,6 +275,29 @@ Lets users import PrizePicks prop data into the shared `PropLineHistory` while t
 
 Run: `python -m pytest bot/tests/ -q`
 
+### Full-feed persistence validation
+
+The project validation command `full-feed-persistence` runs the synthetic
+six-cycle full-feed persistence benchmark in
+`bot/tests/test_scan_performance.py`. It uses a temporary file-backed SQLite
+database and never calls an external provider. The JUnit report is written to
+`test-results/full-feed-persistence.xml` and the report contents are echoed in
+the validation summary.
+
+The benchmark fails the validation when any of these limits are exceeded:
+
+| Signal | Threshold |
+|---|---:|
+| Per-cycle persistence elapsed time | 120 seconds |
+| Queue saturation (`queue_full`) | 0 |
+| Persistence failures (`failed`) | 0 |
+| Writer wait time per cycle | 120 seconds |
+| Absolute durable-count delta from expected | 0 rows |
+
+The six-cycle property records per-cycle elapsed time, writer wait, queue
+saturation, cumulative durable counts, and count deltas so feed growth can be
+reviewed even when it remains below the failure thresholds.
+
 ---
 
 ## Configuration
