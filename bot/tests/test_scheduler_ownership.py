@@ -64,7 +64,7 @@ def test_current_book_has_one_monitoring_owner_and_full_pool_rotation():
     assert "consensus_checker" not in names
 
 
-def test_required_jobs_remain_registered_with_independent_provider_and_grader_timers():
+def test_required_jobs_remain_registered_with_shared_player_props_and_grader_timers():
     names = {name for name, _ in _scheduled_jobs()}
 
     assert {
@@ -78,7 +78,6 @@ def test_required_jobs_remain_registered_with_independent_provider_and_grader_ti
         "heartbeat",
         "season_checker",
         "opportunity_grader",
-        "propline_request_scan",
         "full_pool_rescan",
     } <= names
 
@@ -100,13 +99,13 @@ def test_scheduled_jobs_use_coordinator_without_max_instances():
     assert "_coordinated_job(" in source
 
 
-def test_grading_and_propline_are_not_owned_by_the_underdog_cycle():
+def test_grading_and_player_props_share_the_underdog_cycle_owner():
     source = MAIN_SOURCE.read_text()
 
     assert "async def _underdog_monitor_cycle" in source
     assert "await underdog_job(context)" in source
     assert "async def _opportunity_grader_tick" in source
-    assert "async def _propline_scan_tick" in source
+    assert "async def _propline_scan_tick" not in source
     assert '_coordinated_job("underdog_monitor", _underdog_monitor_cycle)' in source
     assert '_coordinated_job("full_pool_rescan", _full_pool_rescan_job)' in source
 

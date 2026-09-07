@@ -92,7 +92,7 @@ async def test_shared_cycle_uses_empty_paced_batch_without_fallback_fetch(monkey
     await market_engine._shared_monitoring_cycle(underdog_branch)(SimpleNamespace())
     await asyncio.sleep(0)
 
-    assert calls == [([], "paced", True)]
+    assert calls == [([], "paced", False)]
 
 
 @pytest.mark.asyncio

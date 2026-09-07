@@ -93,8 +93,6 @@ from market_engine import (
     underdog_job,
     _shared_monitoring_cycle,
     _full_pool_rescan_job,
-    propline_request_scan_job,
-    propline_request_schedule_state,
     _run_prizepicks_independent_cycle,
 )
 from player_history_job import player_history_collector_job
@@ -852,50 +850,9 @@ async def post_init(application: Application) -> None:
             when=75,
             name="opportunity_grader",
         )
-        # PropLine uses a one-shot scheduler so a 429 can remove the
-        # background rotator completely until Retry-After expires.  The next
-        # one-shot is scheduled by the callback at the limiter's current
-        # recovery/baseline interval.
-        propline_scan_callback = None
-
-        async def _propline_scan_tick(context):
-            await propline_request_scan_job(context)
-            state = propline_request_schedule_state()
-            if not state:
-                logger.info("PropLine scheduler stopped: provider unavailable")
-                return
-            delay = max(0.1, float(state["delay"]))
-            queue = getattr(context, "job_queue", None)
-            if queue is None:
-                application_ref = getattr(context, "application", None)
-                queue = getattr(application_ref, "job_queue", None)
-            if queue is None or propline_scan_callback is None:
-                logger.warning("PropLine scheduler stopped: job queue unavailable")
-                return
-            logger.info(
-                "PropLine scheduler next: phase=%s rate=%d/hour delay=%.1fs "
-                "backoff=%s",
-                state["phase"],
-                state["rate"],
-                delay,
-                "active" if state["backoff"] else "idle",
-            )
-            queue.run_once(
-                propline_scan_callback,
-                when=delay,
-                name="propline_request_scan",
-            )
-
-        propline_scan_callback = _coordinated_job(
-            "propline_request_scan",
-            _propline_scan_tick,
-        )
-        jq.run_once(
-            propline_scan_callback,
-            when=5,
-            name="propline_request_scan",
-        )
         # The complete current Underdog book is processed by underdog_job.
+        # PropLine ingestion, evaluation, and delivery are owned by the same
+        # shared monitoring cycle; there is no provider-specific scheduler.
         # There is deliberately no deferred/full-pool remainder worker: a
         # second batch must begin only on the next cadence after this cycle's
         # persistence and history gates release.
@@ -936,7 +893,7 @@ async def post_init(application: Application) -> None:
             "history collector: every %ds, "
             "season_check: every %ds, "
             "heartbeat: every 60s "
-             "[PrizePicks/PropLine companion cycle enabled=%s; "
+             "[Unified Player Props cycle enabled=%s; "
              "PropLine default rate=180/hour; DK/FD delivery disabled]",
             config.UNDERDOG_POLL_INTERVAL,
             config.FPR_INTERVAL,
@@ -2366,16 +2323,14 @@ async def _player_props_job(context) -> None:
 async def _prizepicks_job(context) -> None:
     """Compatibility entry point for the retired legacy PrizePicks job.
 
-    PrizePicks must use the provider-independent PropLine companion pipeline.
-    Keeping this callback as a delegating shim prevents an old scheduler
-    registration or external callback from reviving the former sportsbook-edge
-    path, which had different scope, identity, and delivery rules.
+    Route old callers through the same combined Player Props cycle rather than
+    reviving a provider-only evaluation path.
     """
     logger.warning(
         "_prizepicks_job is a compatibility shim; delegating to the "
-        "independent PrizePicks pipeline"
+        "unified Player Props cycle"
     )
-    await _run_prizepicks_independent_cycle(context)
+    await _shared_monitoring_cycle(underdog_job)(context)
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────

@@ -1091,9 +1091,9 @@ def _propline_prop_key(prop: object) -> tuple[str, str, str, str]:
 async def propline_request_scan_job(context) -> None:
     """Refresh one PropLine sport at the provider's continuous request pace.
 
-    This job owns the complete PrizePicks lane: fetch, durable persistence,
-    evaluation, and delivery. Its one-shot scheduler starts the next execution
-    only after this one completes, while unrelated jobs run independently.
+    This job owns only provider-specific fetch, pacing, and durable ingestion.
+    It is invoked by the shared Player Props monitoring cycle; evaluation and
+    delivery happen after the observations enter the canonical universe.
     """
     global _propline_request_cursor, _propline_request_lock
     provider = _propline_provider
@@ -1206,14 +1206,8 @@ async def propline_request_scan_job(context) -> None:
                     except Exception:
                         pass
                 _cache_propline_evidence(props)
-                if props:
-                    await _run_prizepicks_independent_cycle(
-                        context,
-                        _fetched_props=list(props),
-                        _fetched_sport=str(sport),
-                        _fetched_persisted=True,
-                        background_processing=False,
-                    )
+                for prop in props:
+                    _propline_pending_props[_propline_prop_key(prop)] = prop
                 empty_key = str(sport).strip().upper()
                 if props:
                     _propline_empty_sport_until.pop(empty_key, None)
@@ -3767,21 +3761,30 @@ async def clv_check_job(context) -> None:
 # ── Shared Underdog + PropLine monitoring cycle ────────────────────────────────
 
 def _shared_monitoring_cycle(cycle_branch):
-    """Run Underdog on its cadence while PropLine remains an independent lane."""
+    """Run one evaluation cycle over the combined Underdog/PropLine universe."""
 
     @wraps(cycle_branch)
     async def _run_shared_cycle(context, *args, **kwargs):
         global _prizepicks_cycle_task, _propline_pending_props
 
-        # Consume the latest observations collected by the 17-second request
-        # worker.  A copy keeps the buffer safe while the next request scan
-        # refreshes it.
+        # Provider-specific authorization and pacing remain inside PropLine,
+        # but the fetch is owned by this shared cycle. Run ingestion alongside
+        # the current-book evaluation so a slow provider cannot stall the
+        # complete Player Props universe or cause repeated cadence coalescing.
+        _propline_ingest_task = asyncio.create_task(
+            propline_request_scan_job(context),
+            name="shared_monitoring_propline_ingestion",
+        )
+
+        # Consume observations collected by the prior shared cycle. Newly
+        # ingested rows remain queued for the next cycle, which preserves a
+        # deterministic evaluation snapshot.
         pending_props = list(_propline_pending_props.values())
         _propline_pending_props.clear()
 
-        # The evaluation branch remains attached to the 120-second shared
-        # cycle.  It consumes paced observations when available and falls back
-        # to its existing one-sport fetch for isolated callers/tests.
+        # The evaluation branch remains attached to the shared monitoring cycle.
+        # The request worker only ingests paced observations; this is the single
+        # production handoff where both providers enter evaluation/delivery.
         # Older isolated integrations may still expose the one-argument
         # companion callback.  Keep the paced arguments for production while
         # preserving that compatibility contract without creating a coroutine
@@ -3801,10 +3804,9 @@ def _shared_monitoring_cycle(cycle_branch):
             )
         ):
             _pp_kwargs = {
-                # Production uses the 17-second request worker as the sole
-                # PropLine fetcher. An empty paced batch is intentional:
-                # passing None would trigger the companion's compatibility
-                # fallback fetch and hold the shared scheduler owner.
+                # Production uses the request worker as the sole PropLine fetcher.
+                # An empty paced batch is intentional: passing None would trigger
+                # a second provider fetch inside the shared evaluator.
                 "_fetched_props": pending_props,
                 "_fetched_sport": "paced",
             }
@@ -3820,10 +3822,9 @@ def _shared_monitoring_cycle(cycle_branch):
                 for parameter in _pp_params.values()
             )
         ):
-            # PrizePicks evaluation can involve one history lookup per
-            # observation.  Keep the shared Underdog scheduler worker bounded
-            # by handing that work to the tracked processing-task pool.
-            _pp_kwargs["background_processing"] = True
+            # Do not fork a second evaluation lane. The shared cycle owns the
+            # provider branch and completes only after both feeds finish.
+            _pp_kwargs["background_processing"] = False
         _propline_task = asyncio.create_task(
             _run_prizepicks_independent_cycle(context, **_pp_kwargs),
             name="shared_monitoring_propline",
@@ -3844,14 +3845,60 @@ def _shared_monitoring_cycle(cycle_branch):
 
         _prizepicks_cycle_task.add_done_callback(_finish_propline_task)
         try:
-            result = await cycle_branch(context, *args, **kwargs)
+            result, _ = await asyncio.gather(
+                cycle_branch(context, *args, **kwargs),
+                _propline_task,
+            )
+            try:
+                await asyncio.wait_for(
+                    _propline_ingest_task,
+                    timeout=max(
+                        5.0,
+                        min(
+                            20.0,
+                            float(
+                                getattr(
+                                    config,
+                                    "UNDERDOG_POLL_INTERVAL",
+                                    60,
+                                )
+                            )
+                            - 5.0,
+                        ),
+                    ),
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "shared_monitoring_cycle: PropLine ingestion exceeded "
+                    "its bounded wait; queued evaluation continues next cycle"
+                )
+                _propline_ingest_task.cancel()
+                await asyncio.gather(
+                    _propline_ingest_task,
+                    return_exceptions=True,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "shared_monitoring_cycle: PropLine ingestion failed: %s",
+                    type(exc).__name__,
+                )
         except asyncio.CancelledError:
             _propline_task.cancel()
+            _propline_ingest_task.cancel()
             await asyncio.gather(_propline_task, return_exceptions=True)
+            await asyncio.gather(
+                _propline_ingest_task,
+                return_exceptions=True,
+            )
             raise
         except BaseException:
             _propline_task.cancel()
+            _propline_ingest_task.cancel()
             await asyncio.gather(_propline_task, return_exceptions=True)
+            await asyncio.gather(
+                _propline_ingest_task,
+                return_exceptions=True,
+            )
             raise
         else:
             # Do not make a slow/independent PropLine companion extend or
@@ -3863,6 +3910,12 @@ def _shared_monitoring_cycle(cycle_branch):
             logger.info("shared_monitoring_cycle: Underdog completed")
             return result
         finally:
+            if not _propline_ingest_task.done():
+                _propline_ingest_task.cancel()
+                await asyncio.gather(
+                    _propline_ingest_task,
+                    return_exceptions=True,
+                )
             if (
                 _prizepicks_cycle_task is not None
                 and _prizepicks_cycle_task.done()

@@ -40,18 +40,19 @@ def test_ranked_delivery_uses_delivery_result_contract_not_reason():
 
 
 @pytest.mark.asyncio
-async def test_legacy_prizepicks_callback_delegates_to_independent_pipeline():
+async def test_legacy_prizepicks_callback_delegates_to_unified_player_props_cycle():
     import main
 
     context = MagicMock()
     with patch.object(
         main,
-        "_run_prizepicks_independent_cycle",
-        new_callable=AsyncMock,
-    ) as independent_cycle:
+        "_shared_monitoring_cycle",
+        return_value=AsyncMock(),
+    ) as shared_cycle:
         await main._prizepicks_job(context)
 
-    independent_cycle.assert_awaited_once_with(context)
+    shared_cycle.assert_called_once_with(main.underdog_job)
+    shared_cycle.return_value.assert_awaited_once_with(context)
 
 
 def test_provider_database_write_isolated_and_persisted(tmp_path: Path):
