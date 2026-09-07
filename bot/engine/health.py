@@ -434,8 +434,22 @@ class HealthTracker:
             self._save()
 
     def last_monitoring_cycle_age_str(self) -> str:
-        """Return the age of the latest completed shared monitoring cycle."""
-        return _age_str(self._state.get("last_monitoring_cycle_ts"))
+        """Return the latest shared-cycle age, with a live-scan fallback.
+
+        The Underdog branch records its completed scan before the final
+        deferred-write drain. If that optional bookkeeping barrier is still
+        draining, use the branch timestamp so /status does not look stale
+        while live monitoring is actively processing the feed.
+        """
+        with self._lock:
+            _shared_ts = self._state.get("last_monitoring_cycle_ts")
+            _scan_ts = self._state.get("last_underdog_scan_ts")
+        timestamps = [
+            float(ts)
+            for ts in (_shared_ts, _scan_ts)
+            if ts is not None
+        ]
+        return _age_str(max(timestamps) if timestamps else None)
 
     def monitoring_cycle_count(self) -> int:
         """Return the number of completed shared cycles in this session."""

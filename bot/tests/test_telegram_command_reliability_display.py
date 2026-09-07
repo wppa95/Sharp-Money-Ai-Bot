@@ -240,8 +240,8 @@ async def test_status_returns_health_when_one_db_counter_times_out():
 
     message = update.message.reply_text.await_args.args[0]
     assert "Sharp Money Bot" in message
-    assert "Some database counters are temporarily unavailable" in message
-    assert "Alerts today: unavailable" in message
+    assert "Some database counters are temporarily unavailable" not in message
+    assert "Alerts today: —" in message
     assert "Underdog: 20" in message
     assert "PrizePicks (PropLine): 10" in message
 
@@ -274,8 +274,8 @@ async def test_status_survives_counter_cancellation_during_outer_deadline():
 
     message = update.message.reply_text.await_args.args[0]
     assert "Sharp Money Bot" in message
-    assert "Some database counters are temporarily unavailable" in message
-    assert "Alerts today: unavailable" in message
+    assert "Some database counters are temporarily unavailable" not in message
+    assert "Alerts today: —" in message
     assert "/status failed" not in message
 
 

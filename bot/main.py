@@ -91,6 +91,7 @@ from market_engine import (
     reset_monitoring_runtime_state,
     shutdown_db_persistence_worker,
     underdog_job,
+    _shared_monitoring_cycle,
     _full_pool_rescan_job,
     propline_request_scan_job,
     propline_request_schedule_state,
@@ -800,9 +801,12 @@ async def post_init(application: Application) -> None:
         # jq.run_repeating(clv_check_job,       interval=config.CLV_CHECK_INTERVAL,        first=35,  name="clv_checker")
         # Legacy source compatibility: _coordinated_job("underdog_monitor", _underdog_monitor_cycle)
         # is equivalent because _underdog_monitor_cycle only delegates to underdog_job.
+        # Production uses the shared wrapper so health records completion only
+        # after the Underdog monitoring branch finishes.
         # ─────────────────────────────────────────────────────────────────────
+        _shared_underdog_cycle = _shared_monitoring_cycle(underdog_job)
         jq.run_repeating(
-            _coordinated_job("underdog_monitor", underdog_job),
+            _coordinated_job("underdog_monitor", _shared_underdog_cycle),
             interval=config.UNDERDOG_POLL_INTERVAL,
             first=45,
             name="underdog_monitor",

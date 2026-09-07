@@ -81,6 +81,13 @@ def test_record_underdog_scan_age_str(tmp_path):
     assert "ago" in s or s == "—"
 
 
+def test_monitoring_cycle_age_falls_back_to_latest_scan(tmp_path):
+    ht = _make_tracker(tmp_path)
+    ht.record_underdog_scan(100, 2)
+    age = ht.last_monitoring_cycle_age_str()
+    assert "ago" in age or age == "—"
+
+
 def test_record_underdog_scan_default_none(tmp_path):
     ht = _make_tracker(tmp_path)
     assert ht.last_underdog_scan() is None

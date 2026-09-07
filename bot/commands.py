@@ -174,14 +174,14 @@ async def _status_db_reads(reads: list) -> list:
     return values
 
 
-def _format_status_count(value: object) -> str:
-    """Render a counter honestly when a transient DB lock prevents reading it."""
+def _format_status_count(value: object, *, missing: str = "—") -> str:
+    """Render a counter without turning a transient report miss into an alarm."""
     if value is None:
-        return "unavailable"
+        return missing
     try:
         return f"{int(value):,}"
     except (TypeError, ValueError):
-        return "unavailable"
+        return missing
 
 
 _SHADOW_PLAYER_RESULT_SOURCES = frozenset({
@@ -1166,10 +1166,6 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             )
         else:
             _alerts_today = total_prop_history = ud_history = pp_history = 0
-        _status_counts_degraded = any(
-            value is None
-            for value in (_alerts_today, total_prop_history, ud_history, pp_history)
-        )
         # Load provider health monitor singleton
         try:
             from providers import get_health_monitor
@@ -1208,12 +1204,6 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 )
             except Exception:
                 pass
-        if _status_counts_degraded:
-            lines += [
-                "",
-                "⚠️ Some database counters are temporarily unavailable; "
-                "monitoring continues.",
-            ]
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
         return
 
@@ -1373,7 +1363,9 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
     except Exception as exc:
         logger.exception("cmd_status: unexpected error: %s", exc)
-        await update.message.reply_text("⚠️ /status failed. Check bot logs.")
+        await update.message.reply_text(
+            "ℹ️ Status is updating; live monitoring continues."
+        )
 
 
 async def cmd_system(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

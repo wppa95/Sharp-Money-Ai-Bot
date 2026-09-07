@@ -14,3 +14,15 @@ timeouts even while the bot and providers remain healthy.
 **How to apply:** Use short independent timeouts for optional counters, render
 unavailable values honestly, and preserve provider/scheduler health sections.
 Keep the live monitoring path independent from report-only database reads.
+
+When the shared monitoring completion marker is delayed by a deferred SQLite
+drain, status may use the latest completed Underdog scan timestamp as a
+display-only freshness fallback; this must not be treated as shared-cycle
+completion for scheduler accounting.
+
+**Why:** The feed scan can finish and record its results before background
+bookkeeping drains, so showing only the shared barrier makes a healthy monitor
+look stale.
+
+**How to apply:** Prefer the shared-cycle timestamp, but fall back to the
+current-session scan timestamp for user-facing freshness only.
