@@ -26,7 +26,10 @@ _SUPPORTED_HISTORY_SPORTS = frozenset({
 
 # Keep transactions bounded below SQLite's variable/statement limits while
 # making a large history pass use far fewer commits than one-row writes.
-_PLAYER_HISTORY_WRITE_BATCH_SIZE = 500
+# Keep each SQLite writer transaction short enough that a live monitoring
+# snapshot or command read is not forced to wait behind a large history burst.
+_PLAYER_HISTORY_WRITE_BATCH_SIZE = 100
+_PLAYER_HISTORY_WRITE_YIELD_SECONDS = 0.02
 # Fetch cadence protects the provider side of this job. Once results exist in
 # memory, persistence is a durable evidence obligation and must be allowed to
 # outlive that cadence. Same-name scheduler coalescing prevents another
@@ -581,6 +584,9 @@ async def player_history_collector_job(context) -> None:
                     raise asyncio.TimeoutError
                 await asyncio.wait_for(write_batch(batch), timeout=remaining)
                 persisted_rows += len(batch)
+                # Let monitoring persistence and command reads compete for the
+                # shared writer gate before immediately claiming it again.
+                await asyncio.sleep(_PLAYER_HISTORY_WRITE_YIELD_SECONDS)
             except asyncio.TimeoutError:
                 logger.warning(
                     "player_history_collector_job: persistence timeout; "
