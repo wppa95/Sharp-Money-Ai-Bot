@@ -1790,6 +1790,27 @@ async def _send_performance_by_sport(
                 f"{_format_clv('clv_miss_avg')} / {_format_clv('clv_push_avg')} "
                 f"· {clv_count} samples · {clv_coverage_text}"
             )
+            direction_rows = (
+                (summary.get("by_sport_direction", {}) or {}).get(sport, {}) or {}
+            )
+            for direction in ("OVER", "UNDER"):
+                direction_row = direction_rows.get(direction)
+                if not direction_row:
+                    continue
+                direction_hit = int(direction_row.get("hit", 0) or 0)
+                direction_miss = int(direction_row.get("miss", 0) or 0)
+                direction_push = int(direction_row.get("push", 0) or 0)
+                direction_pending = int(direction_row.get("pending", 0) or 0)
+                direction_valid = direction_hit + direction_miss
+                direction_rate = (
+                    f"{direction_hit / direction_valid * 100:.0f}%"
+                    if direction_valid else "—"
+                )
+                lines.append(
+                    f"  {direction}: {direction_hit}W-{direction_miss}L-"
+                    f"{direction_push}P · {direction_pending} pending · "
+                    f"{direction_rate}"
+                )
     lines += [
         "",
         "<i>HIT/MISS/PUSH use valid completed-game results only. "

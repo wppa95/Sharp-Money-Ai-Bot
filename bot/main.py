@@ -1146,6 +1146,11 @@ async def _grade_opportunities_job(context) -> None:
             if _ht_start and hasattr(_ht_start, "get_opportunity_grader_cursor")
             else 0
         )
+        _tracked_cursor = (
+            _ht_start.get_tracking_grader_cursor()
+            if _ht_start and hasattr(_ht_start, "get_tracking_grader_cursor")
+            else 0
+        )
         try:
             pending = await db.get_pending_opportunities(
                 cutoff_hours=4,
@@ -1178,6 +1183,7 @@ async def _grade_opportunities_job(context) -> None:
             try:
                 _tracked_result = _get_pending_tracked(
                     cutoff_hours=4,
+                    after_id=_tracked_cursor,
                     limit=_GRADE_BATCH_SIZE,
                 )
                 if hasattr(_tracked_result, "__await__"):
@@ -1187,6 +1193,19 @@ async def _grade_opportunities_job(context) -> None:
                 _tracked_result = _get_pending_tracked(cutoff_hours=4)
                 if hasattr(_tracked_result, "__await__"):
                     _tracked_pending = await _tracked_result
+            if not _tracked_pending and _tracked_cursor:
+                try:
+                    _tracked_result = _get_pending_tracked(
+                        cutoff_hours=4,
+                        after_id=None,
+                        limit=_GRADE_BATCH_SIZE,
+                    )
+                    if hasattr(_tracked_result, "__await__"):
+                        _tracked_pending = await _tracked_result
+                except TypeError:
+                    _tracked_result = _get_pending_tracked(cutoff_hours=4)
+                    if hasattr(_tracked_result, "__await__"):
+                        _tracked_pending = await _tracked_result
         pending = _legacy_pending + list(_tracked_pending or [])
         if not pending:
             if _ht_start:
@@ -1523,6 +1542,10 @@ async def _grade_opportunities_job(context) -> None:
             if hasattr(_ht_g, "set_opportunity_grader_cursor") and _legacy_pending:
                 _ht_g.set_opportunity_grader_cursor(
                     max(int(getattr(_opp, "id", 0) or 0) for _opp in _legacy_pending)
+                )
+            if hasattr(_ht_g, "set_tracking_grader_cursor") and _tracked_pending:
+                _ht_g.set_tracking_grader_cursor(
+                    max(int(getattr(_tracked, "id", 0) or 0) for _tracked in _tracked_pending)
                 )
             _ht_g.record_job_run("_grade_opportunities_job")
     except Exception:
