@@ -407,6 +407,333 @@ async def test_full_feed_persistence_benchmark_across_live_cycles(
     assert len(reports) == len(scenarios) * cycles_per_scenario
 
 
+@pytest.mark.asyncio
+async def test_concurrent_file_backed_writers_stay_within_cadence(
+    tmp_path,
+    record_testsuite_property,
+):
+    """Exercise shared SQLite gates with grading/evidence writers in flight.
+
+    The multi-cycle benchmark above intentionally serializes the persistence
+    worker, so it cannot prove that a grading pass or player-evidence write
+    waits safely behind a live scan.  This phase uses two independently pooled
+    ``Database`` objects pointing at the same file, holds one bounded write
+    transaction open, and then releases four writers together.  The hold makes
+    writer-gate contention deterministic without relying on scheduler timing or
+    a platform-specific SQLite lock race.
+    """
+    from sqlalchemy import func, select
+
+    import database as database_module
+    from database import (
+        Database,
+        PlayerGameResult,
+        PropCandidateLog,
+        PropOpportunityLog,
+        PropTrackingLog,
+        ScanCycleLog,
+        UnderdogSnapshotRecord,
+    )
+
+    cadence_budget_seconds = 120.0
+    url = f"sqlite+aiosqlite:///{tmp_path / 'concurrent-writers.sqlite'}"
+    monitoring_database = Database(url)
+    grading_database = Database(url)
+    await monitoring_database.init()
+    await grading_database.init()
+
+    phase_prefix = "contention-"
+    now = datetime.utcnow()
+    future_game = now + timedelta(hours=6)
+    tracking_rows = [
+        {
+            "external_id": f"{phase_prefix}tracking-{index}",
+            "player_name": f"Contention Player {index}",
+            "team": "BENCH",
+            "sport": "NBA",
+            "stat_type": "Points",
+            "line_value": 20.5,
+            "game_time": future_game,
+            "game_id": f"{phase_prefix}tracking-game-{index}",
+            "provider": "Underdog",
+        }
+        for index in range(48)
+    ]
+    opportunity_rows = [
+        {
+            "external_id": f"{phase_prefix}opportunity-{index}",
+            "player_name": f"Contention Player {index}",
+            "team": "BENCH",
+            "sport": "NBA",
+            "stat_type": "Points",
+            "line_value": 20.5,
+            "recommendation": "OVER",
+            "decision_tier": "A",
+            "confidence": 75,
+            "game_time": future_game,
+            "game_id": f"{phase_prefix}opportunity-game-{index}",
+            "provider": "Underdog",
+            "bet_quality_score": 80,
+        }
+        for index in range(48)
+    ]
+
+    try:
+        assert await monitoring_database.track_prop_records(tracking_rows) == len(
+            tracking_rows
+        )
+        assert await monitoring_database.log_prop_opportunity_bulk(
+            opportunity_rows
+        ) == len(opportunity_rows)
+
+        async with monitoring_database.session() as session:
+            tracking_result = await session.execute(
+                select(PropTrackingLog.id).where(
+                    PropTrackingLog.external_id.like(f"{phase_prefix}tracking-%")
+                )
+            )
+            tracking_ids = [int(row_id) for row_id in tracking_result.scalars().all()]
+            opportunity_result = await session.execute(
+                select(PropOpportunityLog.id).where(
+                    PropOpportunityLog.external_id.like(
+                        f"{phase_prefix}opportunity-%"
+                    )
+                )
+            )
+            opportunity_ids = [
+                int(row_id) for row_id in opportunity_result.scalars().all()
+            ]
+        assert len(tracking_ids) == len(tracking_rows)
+        assert len(opportunity_ids) == len(opportunity_rows)
+
+        feed_rows = [
+            UnderdogSnapshotRecord(
+                external_id=f"{phase_prefix}snapshot-{index}",
+                player_name=f"Contention Feed Player {index}",
+                team="BENCH",
+                sport="NBA",
+                stat_type="Points",
+                line_value=20.5,
+                game_id=f"{phase_prefix}feed-game-{index}",
+                game_time=future_game,
+                fetched_at=now,
+            )
+            for index in range(256)
+        ]
+        candidate_rows = [
+            {
+                "scan_ts": now,
+                "player_name": f"Contention Feed Player {index}",
+                "team": "BENCH",
+                "sport": "NBA",
+                "stat_type": "Points",
+                "line_value": 20.5,
+                "provider": "Underdog",
+                "score_total": 70.0,
+                "score_tier": "A",
+                "confidence": 75,
+                "gate_decision": "EVALUATED",
+                "snapshot_external_id": f"{phase_prefix}candidate-{index}",
+            }
+            for index in range(128)
+        ]
+        evidence_rows = [
+            SimpleNamespace(
+                player_name=f"Contention Evidence Player {index}",
+                sport="NBA",
+                stat_type="points",
+                game_date=(now - timedelta(days=1)).strftime("%Y-%m-%d"),
+                actual_value=21.0,
+                opponent="BENCH",
+                source="contention-benchmark",
+                game_id=f"{phase_prefix}evidence-game-{index}",
+            )
+            for index in range(64)
+        ]
+
+        holder_ready = asyncio.Event()
+        release_holder = asyncio.Event()
+        phase_started = asyncio.Event()
+        phase_start = asyncio.Event()
+        ready_count = 0
+        ready_count_lock = asyncio.Lock()
+        writer_count = 4
+
+        async def hold_writer_slot() -> None:
+            async with monitoring_database.session() as session:
+                session.add(
+                    ScanCycleLog(
+                        scan_ts=now,
+                        fetched=1,
+                        active=1,
+                        analyzed=1,
+                    )
+                )
+                await session.flush()
+                holder_ready.set()
+                await release_holder.wait()
+                await session.commit()
+
+        async def await_phase_start() -> None:
+            nonlocal ready_count
+            async with ready_count_lock:
+                ready_count += 1
+                if ready_count == writer_count:
+                    phase_started.set()
+            await phase_start.wait()
+
+        async def persist_feed() -> dict[str, int]:
+            await await_phase_start()
+            snapshot_result = await monitoring_database.save_underdog_snapshots_bulk(
+                feed_rows
+            )
+            candidate_count = await monitoring_database.log_prop_candidate_batch(
+                candidate_rows
+            )
+            return {
+                "snapshots": int(snapshot_result["records_written"]),
+                "candidates": candidate_count,
+                "snapshot_retries": int(snapshot_result["retry_count"]),
+            }
+
+        async def grade_tracking() -> int:
+            await await_phase_start()
+            return await grading_database.grade_tracked_props_bulk(
+                [(tracking_id, "HIT", 21.0) for tracking_id in tracking_ids]
+            )
+
+        async def grade_opportunities() -> int:
+            await await_phase_start()
+            return await grading_database.grade_opportunities_bulk(
+                [
+                    {"id": opportunity_id, "result": "HIT", "actual_value": 21.0}
+                    for opportunity_id in opportunity_ids
+                ]
+            )
+
+        async def persist_evidence() -> int:
+            await await_phase_start()
+            return await grading_database.upsert_player_results_bulk(evidence_rows)
+
+        metrics_before = database_module.get_sqlite_backpressure_metrics(
+            url,
+            reset=True,
+        )
+        holder_task = asyncio.create_task(hold_writer_slot())
+        await asyncio.wait_for(holder_ready.wait(), timeout=5.0)
+
+        started = asyncio.get_running_loop().time()
+        writer_tasks = [
+            asyncio.create_task(persist_feed()),
+            asyncio.create_task(grade_tracking()),
+            asyncio.create_task(grade_opportunities()),
+            asyncio.create_task(persist_evidence()),
+        ]
+        await asyncio.wait_for(phase_started.wait(), timeout=5.0)
+        phase_start.set()
+        # Let every writer reach the shared gate while the holder is still
+        # active.  The explicit pause makes writer_waits deterministic while
+        # keeping the entire phase far below the 120-second cadence.
+        await asyncio.sleep(0.05)
+        release_holder.set()
+        writer_results = await asyncio.gather(*writer_tasks)
+        await holder_task
+        cycle_elapsed = asyncio.get_running_loop().time() - started
+
+        metrics_after = database_module.get_sqlite_backpressure_metrics(url)
+        backpressure_delta = {
+            key: float(metrics_after.get(key, 0.0))
+            - float(metrics_before.get(key, 0.0))
+            for key in metrics_after
+        }
+
+        async def count_rows(model, column, prefix: str) -> int:
+            async with monitoring_database.session() as session:
+                result = await session.execute(
+                    select(func.count()).select_from(model).where(
+                        column.like(f"{prefix}%")
+                    )
+                )
+                return int(result.scalar() or 0)
+
+        async def count_results(model, prefix: str) -> int:
+            async with monitoring_database.session() as session:
+                result = await session.execute(
+                    select(func.count()).select_from(model).where(
+                        model.external_id.like(f"{prefix}%"),
+                        model.result == "HIT",
+                    )
+                )
+                return int(result.scalar() or 0)
+
+        persisted = {
+            "snapshots": await count_rows(
+                UnderdogSnapshotRecord,
+                UnderdogSnapshotRecord.external_id,
+                f"{phase_prefix}snapshot-",
+            ),
+            "candidates": await count_rows(
+                PropCandidateLog,
+                PropCandidateLog.snapshot_external_id,
+                f"{phase_prefix}candidate-",
+            ),
+            "graded_tracking": await count_results(
+                PropTrackingLog,
+                f"{phase_prefix}tracking-",
+            ),
+            "graded_opportunities": await count_results(
+                PropOpportunityLog,
+                f"{phase_prefix}opportunity-",
+            ),
+            "evidence": await count_rows(
+                PlayerGameResult,
+                PlayerGameResult.game_id,
+                f"{phase_prefix}evidence-game-",
+            ),
+        }
+        expected = {
+            "snapshots": len(feed_rows),
+            "candidates": len(candidate_rows),
+            "graded_tracking": len(tracking_rows),
+            "graded_opportunities": len(opportunity_rows),
+            "evidence": len(evidence_rows),
+        }
+        assert writer_results[0]["snapshots"] == len(feed_rows)
+        assert writer_results[0]["candidates"] == len(candidate_rows)
+        assert writer_results[0]["snapshot_retries"] >= 0
+        assert writer_results[1] == len(tracking_rows)
+        assert writer_results[2] == len(opportunity_rows)
+        assert writer_results[3] == len(evidence_rows)
+        assert persisted == expected, "concurrent writers lost required rows"
+        assert backpressure_delta["writer_waits"] >= 1
+        assert backpressure_delta["writer_wait_seconds"] > 0.0
+        assert backpressure_delta["write_retries"] >= 0
+        assert cycle_elapsed <= cadence_budget_seconds
+
+        contention_report = {
+            "cycle_elapsed_seconds": round(cycle_elapsed, 4),
+            "writer_wait_seconds": round(
+                backpressure_delta["writer_wait_seconds"], 6
+            ),
+            "writer_waits": int(backpressure_delta["writer_waits"]),
+            "session_wait_seconds": round(
+                backpressure_delta["session_wait_seconds"], 6
+            ),
+            "session_waits": int(backpressure_delta["session_waits"]),
+            "write_retries": int(backpressure_delta["write_retries"]),
+            "snapshot_retries": int(writer_results[0]["snapshot_retries"]),
+            "persisted": persisted,
+        }
+    finally:
+        await grading_database.close()
+        await monitoring_database.close()
+
+    record_testsuite_property(
+        "concurrent_file_backed_writer_benchmark",
+        json.dumps(contention_report),
+    )
+
+
 # ── 1. Poll interval ──────────────────────────────────────────────────────────
 
 
