@@ -149,18 +149,35 @@ def test_exact_provider_owned_opportunity_is_suppressed():
     "identity_change",
     [
         {"provider": "PrizePicks"},
-        {"source_id": "source-2"},
-        {"event_id": "event-2"},
         {"direction": "UNDER"},
     ],
 )
-def test_meaningful_identity_change_is_not_cross_suppressed(identity_change):
+def test_provider_and_direction_changes_are_not_cross_suppressed(identity_change):
     alerted = {}
     _record_prop_alerted(
         alerted, "Player", "MLB", "Hits", 0.5, **_identity()
     )
 
     assert not _is_prop_deduped(
+        alerted, "Player", "MLB", "Hits", 0.5,
+        **_dedup_kwargs(), **_identity(**identity_change)
+    )
+
+
+@pytest.mark.parametrize(
+    "identity_change",
+    [
+        {"source_id": "source-2"},
+        {"event_id": "event-2"},
+    ],
+)
+def test_rotated_source_and_event_ids_are_logically_suppressed(identity_change):
+    alerted = {}
+    _record_prop_alerted(
+        alerted, "Player", "MLB", "Hits", 0.5, **_identity()
+    )
+
+    assert _is_prop_deduped(
         alerted, "Player", "MLB", "Hits", 0.5,
         **_dedup_kwargs(), **_identity(**identity_change)
     )
@@ -312,7 +329,7 @@ def test_multiple_alternate_lines_remain_distinct_opportunities():
     )
 
     assert len(alerted) == 2
-    assert not _is_prop_deduped(
+    assert _is_prop_deduped(
         alerted, "Player", "MLB", "Hits", 1.5,
         **_dedup_kwargs(), **_identity(source_id="projection-low")
     )
