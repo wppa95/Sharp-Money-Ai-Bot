@@ -607,12 +607,14 @@ async def player_history_collector_job(context) -> None:
                 break
         logger.info(
             "player_history_collector_job: done players_ok=%d rows=%d "
-            "persisted_rows=%d processed=%d remaining=%d errors=%d "
+            "persisted_rows=%d targets_processed=%d rows_processed=%d "
+            "remaining_targets=%d processed=%d remaining=%d errors=%d "
             "budget_exhausted=%s targets_total=%d elapsed=%.1fs "
             "targets_by_sport=%s "
             "players_ok_by_sport=%s rows_by_sport=%s "
             "propline_coverage_by_sport=%s",
-            ok, rows, persisted_rows, processed, len(targets) - processed,
+            ok, rows, persisted_rows, processed, rows, len(targets) - processed,
+            processed, len(targets) - processed,
             failed, budget_exhausted, len(targets),
             time.monotonic() - cycle_started, target_counts,
             ok_by_sport, rows_by_sport, propline_coverage_by_sport,
