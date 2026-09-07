@@ -222,3 +222,21 @@ async def test_empty_bulk_snapshot_save_reports_zero():
         "records_written": 0,
         "retry_count": 0,
     }
+
+
+@pytest.mark.asyncio
+async def test_large_bulk_snapshot_save_uses_bounded_transactions(monkeypatch):
+    """Large feeds release the SQLite writer gate between complete chunks."""
+    sessions = [_FakeSession() for _ in range(3)]
+    original_sessions = list(sessions)
+    database = Database("sqlite+aiosqlite:///:memory:")
+    monkeypatch.setattr("database._UNDERDOG_BULK_BATCH_SIZE", 2)
+    database.session = lambda: _SessionContext(sessions.pop(0))
+
+    result = await database.save_underdog_snapshots_bulk(
+        [object(), object(), object(), object(), object()]
+    )
+
+    assert result == {"records_written": 5, "retry_count": 0}
+    assert all(session.commits == 1 for session in original_sessions)
+    assert all(session.exited for session in original_sessions)

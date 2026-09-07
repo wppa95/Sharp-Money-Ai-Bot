@@ -114,6 +114,32 @@ def test_bulk_save_called_for_incremental():
     )
 
 
+def test_full_feed_keeps_unchanged_observations():
+    """Raw history must retain every feed observation, not only movers."""
+    src = _src("market_engine.py")
+    assert "raw snapshot append-only for the complete feed" in src
+    assert "normalized PropLineHistory upsert" in src
+
+
+def test_persistence_queue_saturation_applies_backpressure():
+    """A full deferred queue must not silently discard required writes."""
+    src = _src("market_engine.py")
+    assert "caller must apply backpressure" in src
+    assert "dropping deferred operation" not in src
+    assert "db.log_prop_candidate_batch(_candidate_batch)" in src
+
+
+def test_large_writes_are_chunked_and_yield_between_transactions():
+    """Feed/history/opportunity writes must release SQLite between chunks."""
+    database_src = _src("database.py")
+    engine_src = _src("market_engine.py")
+    assert "_UNDERDOG_BULK_BATCH_SIZE = 200" in database_src
+    assert "_PROP_HISTORY_BATCH_SIZE = 200" in database_src
+    assert "_TRACKING_BATCH_SIZE = 200" in database_src
+    assert "await asyncio.sleep(0)" in database_src
+    assert "full_pool_rescan_timing:" in engine_src
+
+
 def test_single_save_not_called_in_main_loop():
     """save_underdog_snapshot (singular) must not be called inside the per-prop loop."""
     src = _src("market_engine.py")

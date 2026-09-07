@@ -599,7 +599,7 @@ def _enqueue_db_persistence(label: str, factory) -> bool:
     except asyncio.QueueFull:
         _persistence_metric("queue_full")
         logger.warning(
-            "database persistence queue full; dropping deferred operation: %s",
+            "database persistence queue full; caller must apply backpressure: %s",
             label,
         )
         return False
@@ -6166,8 +6166,8 @@ async def underdog_job(context) -> None:
             _incr_snapshot = list(_incremental_records)
             _incremental_records.clear()
             # Keep current live state in the shared lifecycle table. Unchanged
-            # observations update last_seen in place; only meaningful events
-            # remain in the raw movement/history table.
+            # observations update last_seen in place; the append-only raw
+            # snapshot ledger below retains the complete feed separately.
             if isinstance(db, Database):
                 _live_props_batch = list(_incr_snapshot)
                 if not _enqueue_db_persistence(
@@ -6194,19 +6194,11 @@ async def underdog_job(context) -> None:
                         _incr_snapshot,
                     ),
                 )
-            _incr_snapshot = [
-                record
-                for record in _incr_snapshot
-                if (
-                    bool(record.line_moved)
-                    or bool(record.removed)
-                    or bool(record.alert_sent)
-                    or str(record.alert_outcome or "").startswith("new_prop")
-                )
-            ]
-            if not _incr_snapshot:
-                _snapshot_intentionally_skipped += len(_incremental_records)
-                _snapshot_persisted += 0
+            # Keep the raw snapshot append-only for the complete feed. The
+            # normalized PropLineHistory upsert above is the current-state
+            # index, but it cannot replace the observation ledger needed for
+            # grading and post-scan diagnostics. Unchanged props are therefore
+            # intentionally retained instead of being filtered out here.
             _snapshot_intended += len(_incr_snapshot)
             if isinstance(db, Database):
                 try:
@@ -6521,10 +6513,15 @@ async def underdog_job(context) -> None:
                     if len(_cand_rows) >= _CAND_CHUNK:
                         _candidate_batch = list(_cand_rows)
                         if isinstance(db, Database):
-                            _enqueue_db_persistence(
-                                "log Underdog candidate batch",
-                                lambda batch=_candidate_batch: db.log_prop_candidate_batch(batch),
-                            )
+                            if not _enqueue_db_persistence(
+                                    "log Underdog candidate batch",
+                                    lambda batch=_candidate_batch: db.log_prop_candidate_batch(batch),
+                            ):
+                                await _cycle_timing.await_db(
+                                    "write",
+                                    "log_prop_candidate_batch",
+                                    db.log_prop_candidate_batch(_candidate_batch),
+                                )
                         else:
                             await _cycle_timing.await_db(
                                 "write",
@@ -6537,10 +6534,15 @@ async def underdog_job(context) -> None:
                 if _cand_rows:
                     _candidate_batch = list(_cand_rows)
                     if isinstance(db, Database):
-                        _enqueue_db_persistence(
-                            "log Underdog candidate batch",
-                            lambda batch=_candidate_batch: db.log_prop_candidate_batch(batch),
-                        )
+                        if not _enqueue_db_persistence(
+                                "log Underdog candidate batch",
+                                lambda batch=_candidate_batch: db.log_prop_candidate_batch(batch),
+                        ):
+                            await _cycle_timing.await_db(
+                                "write",
+                                "log_prop_candidate_batch",
+                                db.log_prop_candidate_batch(_candidate_batch),
+                            )
                     else:
                         await _cycle_timing.await_db(
                             "write",
@@ -6573,10 +6575,15 @@ async def underdog_job(context) -> None:
             try:
                 if isinstance(db, Database):
                     _mq_scores = dict(_plh_mq_scores)
-                    _enqueue_db_persistence(
-                        "update Underdog market-quality scores",
-                        lambda scores=_mq_scores: db.update_ud_props_mq_scores_bulk(scores),
-                    )
+                    if not _enqueue_db_persistence(
+                            "update Underdog market-quality scores",
+                            lambda scores=_mq_scores: db.update_ud_props_mq_scores_bulk(scores),
+                    ):
+                        await _cycle_timing.await_db(
+                            "write",
+                            "update_ud_props_mq_scores_bulk",
+                            db.update_ud_props_mq_scores_bulk(_mq_scores),
+                        )
                 else:
                     await _cycle_timing.await_db(
                         "write",
@@ -6608,10 +6615,15 @@ async def underdog_job(context) -> None:
                     removed_by_sport    = dict(_sport_removed),
                 )
                 if isinstance(db, Database):
-                    _enqueue_db_persistence(
-                        "log Underdog scan cycle",
-                        lambda kwargs=_scan_cycle_kwargs: db.log_scan_cycle(**kwargs),
-                    )
+                    if not _enqueue_db_persistence(
+                            "log Underdog scan cycle",
+                            lambda kwargs=_scan_cycle_kwargs: db.log_scan_cycle(**kwargs),
+                    ):
+                        await _cycle_timing.await_db(
+                            "write",
+                            "log_scan_cycle",
+                            db.log_scan_cycle(**_scan_cycle_kwargs),
+                        )
                 else:
                     await _cycle_timing.await_db(
                         "write",
@@ -6796,9 +6808,16 @@ async def underdog_job(context) -> None:
                 module = "market_engine",
                 error  = "bridge or lifecycle update failed",
             )
-    # Deferred telemetry/history writes are intentionally allowed to finish
-    # behind the next live fetch. The worker is single-filed through the
-    # process-wide SQLite writer gate, and shutdown/error paths still drain it.
+    # The worker is single-filed through the process-wide SQLite writer gate,
+    # while database methods commit bounded chunks. Drain before releasing the
+    # scan slot so a completed cycle never leaves observations, candidates, or
+    # grading telemetry in an untracked queue.
+    if not await drain_db_persistence_worker():
+        _persistence_ok = False
+        logger.error(
+            "underdog_cycle_bottleneck: persistence worker did not drain "
+            "before scan completion"
+        )
     _cycle_timing.finish("final_bookkeeping")
     logger.info(
         "underdog_cycle_timing: %s",
@@ -7462,6 +7481,10 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
     chat_ids = list(config.allowed_user_ids)
     now      = datetime.utcnow()
     _health  = get_health_tracker()
+    _fpr_started_mono = time.monotonic()
+    _fpr_backpressure_start = get_sqlite_backpressure_metrics(
+        getattr(db, "_url", None)
+    ) if getattr(db, "_url", None) else {}
 
     if _health:
         _health.record_job_started("full_pool_rescan_job")
@@ -7510,6 +7533,33 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
     fpr_total_rescanned = 0
     fpr_by_sport        = {}
     rotation_complete   = False
+
+    def _log_fpr_timing(stage: str) -> None:
+        """Expose rotation latency and SQLite wait cost in every FPR cycle."""
+        _current_bp = (
+            get_sqlite_backpressure_metrics(getattr(db, "_url", None))
+            if getattr(db, "_url", None)
+            else {}
+        )
+        _writer_wait = max(
+            0.0,
+            float(_current_bp.get("writer_wait_seconds", 0.0))
+            - float(_fpr_backpressure_start.get("writer_wait_seconds", 0.0)),
+        )
+        logger.info(
+            "full_pool_rescan_timing: stage=%s elapsed=%.3fs "
+            "writer_wait=%.3fs writer_waits=%d pool=%d rescored=%d",
+            stage,
+            time.monotonic() - _fpr_started_mono,
+            _writer_wait,
+            int(max(
+                0.0,
+                float(_current_bp.get("writer_waits", 0.0))
+                - float(_fpr_backpressure_start.get("writer_waits", 0.0)),
+            )),
+            fpr_pool_size,
+            fpr_rescored,
+        )
 
     try:
         # ── Fetch full active pool from DB (zero provider API calls) ──────────
@@ -7586,6 +7636,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         _fpr_prizepicks_lines = _active_prizepicks_lines(active_pool)
         fpr_pool_size = len(active_pool)
         if fpr_pool_size == 0:
+            _log_fpr_timing("empty")
             _fpr_execution_running = False
             _ud_full_scan_running = False
             if _health:
@@ -8316,6 +8367,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
 
     except Exception as _fpr_exc:
         logger.exception("full_pool_rescan_job: error: %s", _fpr_exc)
+        _log_fpr_timing("failed")
         _fpr_execution_running = False
         _ud_full_scan_running = False
         if _health:
@@ -8381,6 +8433,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         "full_pool_rescan_job: rotation=#%d pool=%d batch=%d rescored=%d sent=%d",
         _display_rotation, fpr_pool_size, fpr_batch_size, fpr_rescored, fpr_sent,
     )
+    _log_fpr_timing("complete")
     _fpr_execution_running = False
     _ud_full_scan_running = False
     _job_activity_end("fpr")

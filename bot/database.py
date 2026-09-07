@@ -34,7 +34,13 @@ logger = logging.getLogger(__name__)
 _UNDERDOG_BULK_MAX_RETRIES = 2
 _UNDERDOG_BULK_RETRY_DELAYS = (0.25, 0.75)
 _UNDERDOG_CANTOPEN_RETRY_DELAYS = (0.5, 1.5)
-_UNDERDOG_BULK_BATCH_SIZE = 50_000
+# SQLite has one writer slot. Keep monitoring commits short enough that
+# grading/history/command work can acquire that slot between feed chunks.
+# The caller still receives one aggregate count, so chunking never changes
+# the durability contract or drops a record.
+_UNDERDOG_BULK_BATCH_SIZE = 200
+_PROP_HISTORY_BATCH_SIZE = 200
+_TRACKING_BATCH_SIZE = 200
 _DB_WRITE_MAX_RETRIES = 2
 _DB_WRITE_RETRY_DELAYS = (0.15, 0.5)
 _PRIZEPICKS_EXTERNAL_PREFIX = "PrizePicks::"
@@ -3384,6 +3390,23 @@ class Database:
         """
         if not props:
             return 0
+        if len(props) > _PROP_HISTORY_BATCH_SIZE:
+            # A full Underdog feed can contain thousands of rows. Do not hold
+            # the shared SQLite writer gate across the complete feed: each
+            # chunk gets its own read/write transaction and the event loop can
+            # service independent grading, history, and command work between
+            # commits. Recursive calls intentionally preserve the existing
+            # identity/upsert semantics for every row.
+            upserted = 0
+            for start in range(0, len(props), _PROP_HISTORY_BATCH_SIZE):
+                upserted += await self.upsert_prop_line_history_batch(
+                    provider,
+                    props[start:start + _PROP_HISTORY_BATCH_SIZE],
+                    append_snapshot=append_snapshot,
+                    refresh_metadata=refresh_metadata,
+                )
+                await asyncio.sleep(0)
+            return upserted
 
         def _identity(
             player: str,
@@ -6005,6 +6028,14 @@ class Database:
         """
         if not records:
             return 0
+        if len(records) > _TRACKING_BATCH_SIZE:
+            tracked = 0
+            for start in range(0, len(records), _TRACKING_BATCH_SIZE):
+                tracked += await self.track_prop_records(
+                    records[start:start + _TRACKING_BATCH_SIZE]
+                )
+                await asyncio.sleep(0)
+            return tracked
 
         from sqlalchemy.dialects.sqlite import insert as _sqlite_insert
 
@@ -6296,9 +6327,12 @@ class Database:
         if not prepared:
             return 0
 
-        async with self.session() as s:
-            for start in range(0, len(prepared), chunk_size):
-                rows = prepared[start:start + chunk_size]
+        for start in range(0, len(prepared), chunk_size):
+            rows = prepared[start:start + chunk_size]
+            # Open one short transaction per chunk. Keeping the session outside
+            # this loop made a 10k-prop full-pool rotation monopolize SQLite's
+            # writer gate even though the SQL statements were already chunked.
+            async with self.session() as s:
                 _insert_stmt = _sqlite_insert(PropOpportunityLog).values(rows)
                 _update_columns = {
                     column: getattr(_insert_stmt.excluded, column)
@@ -6329,6 +6363,7 @@ class Database:
                 )
                 await s.execute(stmt)
                 await s.commit()
+            await asyncio.sleep(0)
         return len(prepared)
 
     async def log_prop_candidate_batch(
