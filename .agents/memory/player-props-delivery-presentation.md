@@ -23,6 +23,16 @@ provider ingestion concurrently with the current-book branch and bound its
 wait; slow PropLine/PrizePicks requests must not stall Underdog processing or
 create a second evaluation lane.
 
+The shared monitoring cadence is 180 seconds, leaving room for the current
+full-feed persistence cycle to finish before the next scheduled scan.
+
+**Why:** The full current feed can take roughly two minutes when evidence and
+SQLite persistence are included; a one-minute cadence repeatedly coalesced
+triggers even when the feed itself completed correctly.
+
+**How to apply:** Keep the cadence at or above the measured full-cycle runtime
+unless persistence performance is intentionally changed and re-measured.
+
 **Why:** A one-shot PropLine scheduler could stop after its initial request,
 while synchronous ingestion could make the shared cycle coalesce later
 Underdog ticks. Both failure modes split or starve the canonical Player Props
