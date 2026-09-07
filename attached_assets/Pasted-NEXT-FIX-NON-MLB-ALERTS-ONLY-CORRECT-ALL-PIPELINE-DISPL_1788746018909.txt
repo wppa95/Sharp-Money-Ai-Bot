@@ -1,0 +1,403 @@
+NEXT FIX — NON-MLB ALERTS ONLY + CORRECT ALL PIPELINE DISPLAYS
+
+The problem I need fixed is:
+
+Why am I getting ZERO alerts for every other supported sport when those sports have thousands of actively tracked props?
+
+Football remains excluded.
+
+These are the ONLY fixes for now.
+
+━━━━━━━━━━━━━━━━━━
+CURRENT EVIDENCE
+━━━━━━━━━━━━━━━━━━
+
+Current /funnel / monitoring display shows:
+
+Provider Pipeline:
+
+Underdog
+
+* Observed: 1,760
+* Evaluated: 4
+* Active tracked: 21,897
+* Directional: 4
+* Actionable persisted: 4
+* Delivered: 4
+
+But the sport breakdown shows:
+
+TENNIS   Active 8136   Observed 0   Directional 0   Delivered 0
+MLB      Active 6848   Observed 0   Directional 4   Delivered 4
+FIFA     Active 2557   Observed 0   Directional 0   Delivered 0
+WNBA     Active 1132   Observed 0   Directional 0   Delivered 0
+MMA      Active 1012   Observed 0   Directional 0   Delivered 0
+CS        Active 954    Observed 0   Directional 0   Delivered 0
+LOL       Active 466    Observed 0   Directional 0   Delivered 0
+PGA       Active 457    Observed 0   Directional 0   Delivered 0
+NBA       Active 129    Observed 0   Directional 0   Delivered 0
+F1SZN     Active 123    Observed 0   Directional 0   Delivered 0
+NHL       Active 89     Observed 0   Directional 0   Delivered 0
+KBO       Active 83     Observed 0   Directional 0   Delivered 0
+VAL       Active 68     Observed 0   Directional 0   Delivered 0
+BKFC      Active 60     Observed 0     Directional 0   Delivered 0
+NPB       Active 50     Observed 0     Directional 0   Delivered 0
+LALIGA    Active 49     Observed 0     Directional 0   Delivered 0
+DOTA      Active 39     Observed 0     Directional 0   Delivered 0
+HIGHLIMIT Active 38     Observed 0     Directional 0   Delivered 0
+RACING   Active 37     Observed 0     Directional 0   Delivered 0
+OUTLAWS  Active 34     Observed 0     Directional 0   Delivered 0
+MOTORCYCLE 15           Observed 0     Directional 0   Delivered 0
+USAC      5              Observed 0     Directional 0   Delivered 0
+
+This is not a normal lack-of-opportunity situation.
+
+There are thousands of active non-MLB props, yet none are becoming observed/evaluated/directional/actionable.
+
+━━━━━━━━━━━━━━━━━━
+PRIMARY TASK
+━━━━━━━━━━━━━━━━━━
+
+Find the EXACT code path that causes supported non-MLB sports to stop before analysis and Telegram delivery.
+
+Trace actual data:
+
+Underdog observation
+→ sport normalization
+→ market/stat normalization
+→ persistence
+→ observation eligibility
+→ evidence/history lookup
+→ analysis
+→ direction
+→ qualification
+→ actionable persistence
+→ delivery eligibility
+→ Telegram
+
+Determine where non-MLB props disappear.
+
+Do not assume the problem is simply “no good picks.”
+
+Show the actual blocker.
+
+━━━━━━━━━━━━━━━━━━
+CRITICAL COMPARISON
+━━━━━━━━━━━━━━━━━━
+
+Compare one working MLB prop against actual non-MLB props.
+
+Use the same pipeline stages and identify the FIRST stage where behavior differs.
+
+I specifically need to know:
+
+1. Why MLB produces directional candidates.
+2. Why TENNIS does not.
+3. Why FIFA does not.
+4. Why WNBA does not.
+5. Why MMA does not.
+6. Why CS does not.
+7. Why LOL does not.
+8. Why PGA does not.
+9. Why NBA/NHL/KBO/NPB/etc. do not.
+
+Do not just tell me they have no qualifying picks.
+
+Show the actual blocker.
+
+━━━━━━━━━━━━━━━━━━
+MARKET MAPPING
+━━━━━━━━━━━━━━━━━━
+
+The earlier logs already showed:
+
+TENNIS:
+tie breakers played
+→ market=unmapped
+→ unknown_market
+
+FIFA:
+shots on target
+→ market=unmapped
+→ unknown_market
+
+This strongly suggests the normalization/market mapping layer is not correctly handling non-MLB markets.
+
+Inspect the actual Underdog observations and the existing normalized market model.
+
+Correct the mapping for supported non-football sports.
+
+Do not blindly map markets.
+
+Use the actual provider stat/market identifiers and preserve the correct sport + stat semantics.
+
+━━━━━━━━━━━━━━━━━━
+FIND WHY 2244 BECOMES 3
+━━━━━━━━━━━━━━━━━━
+
+This is critical.
+
+The logs showed:
+
+* fetched=2244
+* analyzed=3
+* actionable=1
+
+Find every filter/gate responsible for this reduction.
+
+For the current run, produce counts for:
+
+* received
+* normalized
+* supported sport
+* supported market
+* persisted
+* evidence available
+* history available
+* analysis eligible
+* analyzed
+* direction available
+* qualified
+* alert created
+* delivery eligible
+* sent
+* deferred
+* filtered/rejected
+
+Identify the exact code/function responsible for every major drop.
+
+Then fix the blockers causing supported non-football sports to disappear.
+
+━━━━━━━━━━━━━━━━━━
+NON-MLB ALERT REQUIREMENT
+━━━━━━━━━━━━━━━━━━
+
+Every supported non-football sport must be capable of reaching the same alert pipeline.
+
+That means:
+
+Active tracked prop
+→ current observation
+→ supported market
+→ evidence/history
+→ analysis
+→ OVER/UNDER direction
+→ actionable candidate
+→ Telegram alert
+
+Do not create a separate non-MLB alert system.
+
+Do not create sport-specific scoring logic unless an existing sport-specific market definition actually requires it.
+
+Football stays excluded.
+
+━━━━━━━━━━━━━━━━━━
+DO NOT CONFUSE TRACKING WITH OBSERVATION
+━━━━━━━━━━━━━━━━━━
+
+The display currently says:
+
+Active tracked: 22,381
+
+but:
+
+Historical observations: 1,760
+Evaluated candidates: 4
+
+Do not assume an active tracked prop automatically has a current observation.
+
+Determine why current observations are not being generated/recognized for non-MLB tracked props.
+
+If observations exist in SQLite but the display says zero by sport, fix the aggregation/query.
+
+If observations do not exist, fix the observation ingestion/normalization path.
+
+━━━━━━━━━━━━━━━━━━
+DISPLAY CORRECTION
+━━━━━━━━━━━━━━━━━━
+
+All displays must read correctly.
+
+The current data is internally inconsistent.
+
+For example:
+
+Provider Pipeline says:
+
+Underdog Observed: 1,760
+
+while the Sport Funnel says:
+
+MLB Observed: 0
+TENNIS Observed: 0
+FIFA Observed: 0
+etc.
+
+That cannot be accepted unless the two displays are intentionally measuring different populations — and if they are, the UI must clearly label the different definitions.
+
+Audit every displayed metric:
+
+* Observed
+* Evaluated
+* Active tracked
+* Directional
+* Actionable persisted
+* Delivered
+* Pending
+* Resolved
+* Rescored
+* Line movers
+* New
+* Removed
+* Historical observations
+
+Make sure each metric has one clear definition and the queries/counts actually match that definition.
+
+The sport breakdown must use the same underlying population definitions as the top-level funnel where applicable.
+
+Do not fabricate numbers.
+
+Do not simply rename labels to hide a mismatch.
+
+Fix the underlying aggregation/query logic.
+
+━━━━━━━━━━━━━━━━━━
+REQUIRED SPORT FUNNEL
+━━━━━━━━━━━━━━━━━━
+
+The sport breakdown should accurately show, for each supported sport:
+
+Sport
+Active
+Observed
+Evaluated
+Directional
+Actionable
+Delivered
+
+At minimum:
+
+TENNIS
+FIFA
+WNBA
+MMA
+CS
+LOL
+PGA
+NBA
+F1SZN
+NHL
+KBO
+VAL
+BKFC
+NPB
+LALIGA
+DOTA
+HIGHLIMIT
+RACING
+OUTLAWS
+MOTORCYCLE
+USAC
+
+Football must remain excluded.
+
+━━━━━━━━━━━━━━━━━━
+NO FALSE “NO OPPORTUNITY” RESULT
+━━━━━━━━━━━━━━━━━━
+
+If a sport has active props but zero current observations, the system must make that distinction clear.
+
+It must not imply:
+
+“there are no qualifying opportunities”
+
+when the actual problem is:
+
+“the props never reached evaluation.”
+
+Likewise, if observations exist but are filtered before analysis, display the actual stage causing the drop.
+
+━━━━━━━━━━━━━━━━━━
+DELIVERY
+━━━━━━━━━━━━━━━━━━
+
+Once non-MLB candidates are correctly reaching analysis and have valid OVER/UNDER direction, they must be allowed into the existing delivery pipeline.
+
+Do not add:
+
+* tier requirements
+* star requirements
+* arbitrary quality requirements
+* MLB-only requirements
+* baseball-only requirements
+
+Existing legitimate safeguards remain:
+
+* missing required evidence/history
+* no valid OVER/UNDER direction
+* pregame/live restrictions
+* football exclusion
+* legitimate deduplication
+
+━━━━━━━━━━━━━━━━━━
+CONCURRENT DELIVERY ISSUE
+━━━━━━━━━━━━━━━━━━
+
+Do not make this the main project.
+
+Only fix it if it is directly preventing legitimate non-MLB alerts from being delivered.
+
+The earlier message:
+
+concurrent path already claimed delivery slot
+
+must not be used as an excuse for the broader non-MLB problem.
+
+First determine whether non-MLB props even reach delivery eligibility.
+
+If they never reach that stage, fix the earlier pipeline blocker first.
+
+━━━━━━━━━━━━━━━━━━
+VERIFICATION REQUIRED
+━━━━━━━━━━━━━━━━━━
+
+After fixing, verify with actual stored/live data.
+
+I need evidence for multiple non-MLB sports showing that they can progress through:
+
+Observed
+→ Evaluated
+→ Directional
+→ Actionable
+→ Delivered
+
+Verify at least several different sport categories, including:
+
+* TENNIS
+* FIFA/soccer
+* WNBA/NBA
+* MMA
+* CS/LOL
+
+Do not claim success simply because the application starts or compiles.
+
+Show the actual before/after counts.
+
+Also confirm football remains excluded.
+
+━━━━━━━━━━━━━━━━━━
+FINAL REPORT REQUIRED
+━━━━━━━━━━━━━━━━━━
+
+Report only:
+
+1. Exact root cause(s) preventing non-MLB sports from being analyzed.
+2. Exact file/function changed.
+3. What was changed.
+4. Before/after pipeline counts by sport.
+5. Confirmation that football remains excluded.
+6. Confirmation that all displayed funnel metrics now use correct underlying populations.
+
+Do not make any other changes.
+
+STOP after these fixes and verification.
