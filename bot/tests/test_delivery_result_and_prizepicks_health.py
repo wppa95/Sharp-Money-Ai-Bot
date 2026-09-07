@@ -91,76 +91,23 @@ def test_prizepicks_feed_counts_keep_empty_separate_from_failed(tmp_path: Path):
     assert "WNBA: 0 raw records · 0 normalized props · failed" in rendered
 
 
-def test_prizepicks_pipeline_renderer_does_not_borrow_underdog_counts():
-    lines: list[str] = []
-    commands._append_provider_pipeline(
-        lines,
-        provider="PrizePicks",
-        health_tracker=None,
-        reconciliation={
-            "observed": 12,
-            "tracked": 7,
-            "evaluated": 10,
-            "actionable_persisted": 3,
-            "delivered_alerts": 2,
-        },
-    )
-
-    text = "\n".join(lines)
-    assert "Player Props Pipeline" in text
-    assert "Observed:" in text and "12" in text
-    assert "Tracked active:" in text and "7" in text
-    assert "Evaluated:" in text and "10" in text
-    assert "Directional/actionable:" in text and "3" in text
-    assert "Delivered alerts:" in text and "2" in text
-    assert "Underdog" not in text
-
-
-def test_prizepicks_pipeline_renderer_has_clean_empty_state():
-    lines: list[str] = []
-    commands._append_provider_pipeline(
-        lines,
-        provider="PrizePicks",
-        health_tracker=None,
-        reconciliation=None,
-    )
-
-    text = "\n".join(lines)
-    assert "No normalized observations in the last 24h." in text
-    assert "unavailable" in text
-
-
 @pytest.mark.asyncio
-async def test_health_includes_provider_isolated_prizepicks_pipeline(tmp_path: Path):
+async def test_health_keeps_only_compact_player_props_runtime_summary(tmp_path: Path):
     update, context = _update_and_context()
     tracker = HealthTracker(path=tmp_path / "health.json")
     tracker.record_provider_fetch("PrizePicks")
     tracker.record_provider_database_write("PrizePicks")
 
-    db = MagicMock()
-    db.get_telegram_reconciliation = AsyncMock(return_value={
-        "by_provider": {
-            "PrizePicks": {
-                "observed": 12,
-                "tracked": 7,
-                "evaluated": 10,
-                "actionable_persisted": 3,
-                "delivered_alerts": 2,
-            }
-        }
-    })
-
     with (
         patch.object(commands, "_check_allowed", return_value=True),
-        patch.object(commands, "_db", db),
         patch("engine.health.get_health_tracker", return_value=tracker),
     ):
         await commands.cmd_health(update, context)
 
     text = update.message.reply_text.await_args.args[0]
     assert "Player Props Pipeline" in text
-    assert "Observed:" in text and "12" in text
-    assert "Delivered alerts:" in text and "2" in text
+    assert "Observed:" not in text
+    assert "Delivered alerts:" not in text
 
 
 @pytest.mark.asyncio
@@ -231,6 +178,6 @@ async def test_status_shows_prizepicks_feed_counts_by_sport(tmp_path: Path):
         await commands.cmd_status(update, context)
 
     text = update.message.reply_text.await_args.args[0]
-    assert "Player Props feed by sport (PrizePicks / PropLine source)" in text
-    assert "NBA: 0 raw records · 0 normalized props · empty" in text
-    assert "MLB: 6 raw records · 3 normalized props · ok" in text
+    assert "Player Props feed by sport" not in text
+    assert "NBA: 0 raw records · 0 normalized props · empty" not in text
+    assert "MLB: 6 raw records · 3 normalized props · ok" not in text
