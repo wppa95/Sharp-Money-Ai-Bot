@@ -26,9 +26,10 @@ _SUPPORTED_HISTORY_SPORTS = frozenset({
 
 # Keep transactions bounded below SQLite's variable/statement limits while
 # making a large history pass use far fewer commits than one-row writes.
-# Keep each SQLite writer transaction short enough that a live monitoring
-# snapshot or command read is not forced to wait behind a large history burst.
-_PLAYER_HISTORY_WRITE_BATCH_SIZE = 100
+# Keep history persistence bulk-oriented: one upsert transaction handles a
+# substantial result set while the bounded loop still commits progress instead
+# of holding the database for the entire full-book refresh.
+_PLAYER_HISTORY_WRITE_BATCH_SIZE = 1000
 _PLAYER_HISTORY_WRITE_YIELD_SECONDS = 0.02
 # Fetch cadence protects the provider side of this job. Once results exist in
 # memory, persistence is a durable evidence obligation and must be allowed to
