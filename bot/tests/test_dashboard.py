@@ -75,6 +75,49 @@ class TestTierPerf:
         assert t.hit_rate is None
 
 
+@pytest.mark.asyncio
+async def test_dashboard_totals_keep_partial_data_when_one_counter_is_slow():
+    class _Db:
+        async def count_ev_records(self):
+            return 11
+
+        async def count_steam_records(self):
+            return 7
+
+        async def count_pp_edge_records(self):
+            return 5
+
+        async def count_clv_records(self):
+            return 3
+
+        async def count_today_pp_alerts(self):
+            return 2
+
+    async def slow_underdog_counter(_db):
+        await asyncio.sleep(2.5)
+        return 99
+
+    original = DashboardEngine._count_underdog_deliveries
+    original_today = DashboardEngine._count_today_underdog_deliveries
+    DashboardEngine._count_underdog_deliveries = staticmethod(slow_underdog_counter)
+    DashboardEngine._count_today_underdog_deliveries = staticmethod(
+        slow_underdog_counter
+    )
+    try:
+        report = DashboardReport()
+        await DashboardEngine._gather_totals(_Db(), report)
+    finally:
+        DashboardEngine._count_underdog_deliveries = original
+        DashboardEngine._count_today_underdog_deliveries = original_today
+
+    assert report.total_ev_alerts == 11
+    assert report.total_steam_alerts == 7
+    assert report.total_pp_alerts == 5
+    assert report.total_clv_records == 3
+    assert report.today_pp_alerts == 2
+    assert "totals" not in report.unavailable
+
+
 # ── SportPerf tests ────────────────────────────────────────────────────────────
 
 class TestSportPerf:

@@ -628,8 +628,23 @@ class DashboardEngine:
     @staticmethod
     async def _gather_totals(db: "Database", r: DashboardReport) -> None:
         try:
-            values = []
-            for reader in (
+            async def _read_with_deadline(reader, *args):
+                """Return one counter without letting SQLite stall the report."""
+                task = asyncio.ensure_future(reader(*args))
+                done, _pending = await asyncio.wait({task}, timeout=1.75)
+                if task in done:
+                    return task.result()
+                task.cancel()
+                task.add_done_callback(
+                    lambda finished: (
+                        None
+                        if finished.cancelled()
+                        else finished.exception()
+                    )
+                )
+                raise asyncio.TimeoutError
+
+            readers = (
                 db.count_ev_records,
                 db.count_steam_records,
                 DashboardEngine._count_underdog_deliveries,
@@ -637,17 +652,22 @@ class DashboardEngine:
                 db.count_clv_records,
                 DashboardEngine._count_today_underdog_deliveries,
                 db.count_today_pp_alerts,
-            ):
-                try:
+            )
+            values = await asyncio.gather(
+                *(
+                    _read_with_deadline(
+                        reader,
+                        db,
+                    )
                     if reader in (
                         DashboardEngine._count_underdog_deliveries,
                         DashboardEngine._count_today_underdog_deliveries,
-                    ):
-                        values.append(await reader(db))
-                    else:
-                        values.append(await reader())
-                except Exception as exc:
-                    values.append(exc)
+                    )
+                    else _read_with_deadline(reader)
+                    for reader in readers
+                ),
+                return_exceptions=True,
+            )
             fields = (
                 "total_ev_alerts",
                 "total_steam_alerts",
@@ -661,7 +681,13 @@ class DashboardEngine:
                 if not isinstance(value, Exception):
                     setattr(r, field_name, int(value or 0))
                 else:
-                    r.unavailable.add("totals")
+                    # Keep the rest of the dashboard useful when one optional
+                    # count is blocked by a long-running SQLite writer.
+                    logger.debug(
+                        "dashboard counter unavailable field=%s error=%s",
+                        field_name,
+                        type(value).__name__,
+                    )
         except Exception:
             r.unavailable.add("totals")
 

@@ -15,6 +15,7 @@ from providers.player_history import (
 )
 from providers.propline import PropLinePlayerHistoryFetchResult
 from providers.propline import (
+    PropLineClient,
     _canonical_discovered_sport,
     official_player_market_for,
 )
@@ -318,10 +319,29 @@ async def test_history_uses_documented_composite_market_key():
     [
         ("Fantasy Points in Games 1+2", "player_fantasy_points"),
         ("Kills in Games 1+2", "player_kills"),
+        ("Regular Season Points", "player_points"),
+        ("Headshots on Maps 1+2", "player_headshots"),
+        ("1H Goals", "player_goals"),
     ],
 )
 def test_documented_esports_markets_have_propline_history_keys(stat, market):
     assert official_player_market_for(stat) == market
+
+
+@pytest.mark.parametrize(
+    "sport,official",
+    [
+        ("NHL", "hockey_nhl"),
+        ("FIFA", "soccer_fifa_world_cup"),
+        ("CS", "esports"),
+        ("DOTA", "esports"),
+        ("LOL", "esports"),
+        ("VAL", "esports"),
+    ],
+)
+def test_supported_sports_resolve_to_propline_catalog_routes(sport, official):
+    client = PropLineClient(api_key="test-key")
+    assert client.official_sport_for(sport) == official
 
 
 @pytest.mark.asyncio

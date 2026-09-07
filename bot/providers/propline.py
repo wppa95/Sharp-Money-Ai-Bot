@@ -38,6 +38,9 @@ DEFAULT_PROPLINE_API_URL = "https://api.prop-line.com"
 _STAT_NORMALIZATION = {
     "pts": "points",
     "points": "points",
+    "regular season points": "points",
+    "season points": "points",
+    "player points": "points",
     "reb": "rebounds",
     "rebs": "rebounds",
     "rebounds": "rebounds",
@@ -68,13 +71,21 @@ _STAT_NORMALIZATION = {
     "fantasy points in games 1+2+3": "fantasy points",
     "fantasy points on maps 1+2": "fantasy points",
     "kills_in_games_1+2": "kills",
+    "kills_in_games_1+2+3": "kills",
     "kills_on_maps_1+2": "kills",
+    "kills_on_maps_1+2+3": "kills",
     "assists_on_maps_1+2": "assists",
+    "assists_on_maps_1+2+3": "assists",
     "headshots_on_maps_1+2": "headshots",
+    "headshots_on_maps_1+2+3": "headshots",
     "kills in games 1+2": "kills",
+    "kills in games 1+2+3": "kills",
     "kills on maps 1+2": "kills",
+    "kills on maps 1+2+3": "kills",
     "assists on maps 1+2": "assists",
+    "assists on maps 1+2+3": "assists",
     "headshots on maps 1+2": "headshots",
+    "headshots on maps 1+2+3": "headshots",
     "points+rebounds": "points+rebounds",
     "points+assists": "points+assists",
     "rebounds+assists": "rebounds+assists",
@@ -101,6 +112,15 @@ _STAT_NORMALIZATION = {
     "rush+rec yards": "rush+rec yards",
     "shots": "shots on goal",
     "shots on goal": "shots on goal",
+    "goals": "goals",
+    "goal": "goals",
+    "1h goals": "goals",
+    "2h goals": "goals",
+    "goals scored": "goals",
+    "headshots": "headshots",
+    "headshots on maps 1+2": "headshots",
+    "headshots on maps 1+2+3": "headshots",
+    "saves": "saves",
     "goals+assists": "points",
     "games won": "games won",
     "sets won": "sets won",
@@ -1823,6 +1843,9 @@ _OFFICIAL_MARKETS = (
     "player_rush_rec_yards",
     "player_shots_on_goal",
     "player_shots_on_target",
+    "player_goals",
+    "player_headshots",
+    "player_saves",
     "player_games_won",
     "player_sets_won",
     "player_games_played",
@@ -1834,8 +1857,21 @@ _OFFICIAL_MARKETS = (
     "player_fantasy_points",
 )
 
+# Keep the odds request conservative: PropLine's catalog can expose a valid
+# player-history market before that market is accepted by every sport's bulk
+# odds route. History resolution may still use the expanded market mapping
+# above without risking a whole-sport odds request.
+_OFFICIAL_ODDS_MARKETS = tuple(
+    market
+    for market in _OFFICIAL_MARKETS
+    if market not in {"player_goals", "player_headshots", "player_saves"}
+)
+
 _STAT_TO_OFFICIAL_MARKET = {
     "points": "player_points",
+    "goals": "player_goals",
+    "headshots": "player_headshots",
+    "saves": "player_saves",
     "rebounds": "player_rebounds",
     "assists": "player_assists",
     "3-pointers made": "player_threes",
@@ -1918,6 +1954,18 @@ _CANONICAL_TO_OFFICIAL_SPORT = {
     "FIFA": "soccer_fifa_world_cup",
     "CFL": "football_cfl",
     "AFL": "aussie_rules_afl",
+    "BOXING": "boxing",
+    "TT": "table_tennis",
+    "TABLE TENNIS": "table_tennis",
+    "BADMINTON": "badminton",
+    # PropLine currently exposes one shared esports catalog entry. Keep the
+    # bot's sport identity in the request/response metadata while routing the
+    # provider call through that documented namespace.
+    "CS": "esports",
+    "DOTA": "esports",
+    "LOL": "esports",
+    "VAL": "esports",
+    "VALORANT": "esports",
 }
 
 _OFFICIAL_TO_CANONICAL_SPORT = {
@@ -1945,7 +1993,22 @@ _OFFICIAL_TO_CANONICAL_SPORT = {
     "soccer_fifa_world_cup": "FIFA",
     "football_cfl": "CFL",
     "aussie_rules_afl": "AFL",
+    "boxing": "BOXING",
+    "table_tennis": "TT",
+    "badminton": "BADMINTON",
+    "esports": "ESPORTS",
 }
+
+_ESPORTS_SPORT_ALIASES = frozenset({"CS", "DOTA", "LOL", "VAL", "VALORANT", "ESPORTS"})
+
+
+def _sports_match(left: Any, right: Any) -> bool:
+    """Match canonical sport names, including PropLine's shared esports key."""
+    left_key = _normalize_sport(left)
+    right_key = _normalize_sport(right)
+    if left_key == right_key:
+        return True
+    return left_key in _ESPORTS_SPORT_ALIASES and right_key in _ESPORTS_SPORT_ALIASES
 
 
 def _canonical_discovered_sport(official_key: str, title: Any = "") -> str:
@@ -2225,7 +2288,7 @@ def _official_player_history_records(
         or not sport_key
         or not market
         or not _safe_player_name_match(player_name, requested_player)
-        or _normalize_sport(sport_key) != _normalize_sport(requested_sport)
+        or not _sports_match(sport_key, requested_sport)
         or _normalize_stat(market) != _normalize_stat(requested_market)
     ):
         return [], False, "PropLine player history identity does not match request", {}
@@ -2655,7 +2718,7 @@ class PropLineClient:
             return (
                 f"{base_url}/v1/sports/{official_sport}/odds",
                 {
-                    "markets": ",".join(_OFFICIAL_MARKETS),
+                    "markets": ",".join(_OFFICIAL_ODDS_MARKETS),
                     "bookmakers": bookmaker,
                 },
                 f"{official_sport}:{bookmaker.lower()}",
@@ -2721,7 +2784,7 @@ class PropLineClient:
             f"{self.api_url.rstrip('/')}/v1/sports/{quote(official_sport, safe='')}"
             f"/events/{quote(official_event, safe='')}/odds",
             {
-                "markets": ",".join(_OFFICIAL_MARKETS),
+                "markets": ",".join(_OFFICIAL_ODDS_MARKETS),
                 "bookmakers": bookmaker,
             },
             f"{official_sport}:event:{official_event}:{bookmaker.lower()}",

@@ -40,7 +40,10 @@ logger = logging.getLogger(__name__)
 
 # ── Bot startup time for uptime tracking ──────────────────────────────────────
 _START_TIME = time.monotonic()
-_DASHBOARD_TIMEOUT_SECONDS = 8.0
+# Dashboard reads aggregate several large SQLite populations. Individual
+# counters are deadline-bounded inside DashboardEngine, but the command still
+# needs enough room to render a complete partial report during a busy scan.
+_DASHBOARD_TIMEOUT_SECONDS = 15.0
 _PROVIDER_REPORT_TIMEOUT_SECONDS = 2.0
 _COMMAND_TIMEOUT_SECONDS = 8.0
 _PICKS_TIMEOUT_SECONDS = 12.0
@@ -5539,7 +5542,15 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             lines += ["", "<i>Sport breakdown accumulates as the bot scans props.</i>"]
 
         lines.append(f"\n{_thick}")
-        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+        # A large all-sport funnel can exceed Telegram's 4096-character limit.
+        # Split only at line boundaries so each section remains valid HTML.
+        await _send_in_chunks(
+            update,
+            "\n".join(lines),
+            parse_mode=ParseMode.HTML,
+            sep="\n",
+            max_len=3800,
+        )
 
     except Exception as exc:
         logger.exception("cmd_funnel: error: %s", exc)
