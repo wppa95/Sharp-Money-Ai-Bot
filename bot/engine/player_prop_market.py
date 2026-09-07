@@ -568,13 +568,42 @@ def _is_prop_deduped(
         if any(identity)
         else (player, sport, stat_type)
     )
-    if key not in alerted_set:
-        return False
-    last_ts, last_line = alerted_set[key]
     ts            = now_ts if now_ts is not None else time.time()
-    within_window = (ts - last_ts) < dedup_window_seconds
-    same_line     = abs(line - last_line) < min_line_change
-    return within_window and same_line
+
+    def _matches_recent(value: object) -> bool:
+        """Apply the time/line rules to one stored alert value."""
+        try:
+            last_ts, last_line = value
+            within_window = (ts - float(last_ts)) < dedup_window_seconds
+            same_line = abs(float(line) - float(last_line)) < min_line_change
+        except (TypeError, ValueError):
+            return False
+        return within_window and same_line
+
+    if key in alerted_set and _matches_recent(alerted_set[key]):
+        return True
+
+    # Source/event identifiers are useful audit metadata, but they can rotate
+    # while the logical pick remains the same.  Once a direction is known, use
+    # the stable provider × player × sport × market × direction identity as a
+    # fallback.  This prevents repeated MLB alerts after an Underdog refresh
+    # without collapsing PrizePicks and Underdog into one delivery slot.
+    if direction:
+        logical_prefix = (player, sport, stat_type)
+        normalized_direction = str(direction).strip().upper()
+        normalized_provider = str(provider or "").strip()
+        for stored_key, stored_value in alerted_set.items():
+            if not isinstance(stored_key, tuple) or len(stored_key) < 7:
+                continue
+            if tuple(stored_key[:3]) != logical_prefix:
+                continue
+            if str(stored_key[3]).strip() != normalized_provider:
+                continue
+            if str(stored_key[6]).strip().upper() != normalized_direction:
+                continue
+            if _matches_recent(stored_value):
+                return True
+    return False
 
 
 def _record_prop_alerted(

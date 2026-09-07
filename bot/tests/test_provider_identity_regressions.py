@@ -61,29 +61,50 @@ def test_extended_dedup_keeps_provider_event_and_direction_separate():
         direction="OVER",
         **common,
     )
-    assert not _is_prop_deduped(
+
+
+def test_logical_dedup_blocks_rotated_source_and_event_ids():
+    alerted: dict = {}
+    _record_prop_alerted(
         alerted,
-        "LeBron James",
-        "NBA",
-        "Points",
-        25.5,
-        provider="PrizePicks",
-        source_id="projection-1",
-        event_id="game-2",
+        "Cedric Mullins",
+        "MLB",
+        "Hits",
+        1.5,
+        now_ts=100.0,
+        provider="Underdog",
+        source_id="projection-old",
+        event_id="event-old",
         direction="OVER",
-        **common,
+    )
+
+    assert _is_prop_deduped(
+        alerted,
+        "Cedric Mullins",
+        "MLB",
+        "Hits",
+        1.5,
+        dedup_window_seconds=3600,
+        min_line_change=0.5,
+        now_ts=101.0,
+        provider="Underdog",
+        source_id="projection-new",
+        event_id="event-new",
+        direction="OVER",
     )
     assert not _is_prop_deduped(
         alerted,
-        "LeBron James",
-        "NBA",
-        "Points",
-        25.5,
-        provider="PrizePicks",
-        source_id="projection-1",
-        event_id="game-1",
-        direction="UNDER",
-        **common,
+        "Cedric Mullins",
+        "MLB",
+        "Hits",
+        2.0,
+        dedup_window_seconds=3600,
+        min_line_change=0.5,
+        now_ts=101.0,
+        provider="Underdog",
+        source_id="projection-new",
+        event_id="event-new",
+        direction="OVER",
     )
 
 

@@ -3,11 +3,11 @@ name: Delivery dedup claims
 description: Rules for provider-aware duplicate suppression around concurrent Telegram delivery
 ---
 
-Delivery deduplication must use provider-owned opportunity identity: provider, source ID, event ID, player, sport, market, line, and direction. A pre-delivery claim is only a concurrency guard; it must be released when delivery is filtered or fails, because only a successful Telegram delivery should suppress an exact repeat.
+Delivery deduplication must use provider-owned opportunity identity: provider, player, sport, market, line, and direction, with source ID and event ID retained as audit metadata. Source/event IDs may rotate during feed refreshes, so the same-provider logical identity must still suppress an unchanged repeat. A pre-delivery claim is only a concurrency guard; it must be released when delivery is filtered or fails, because only a successful Telegram delivery should suppress an exact repeat.
 
 **Why:** Claiming before network I/O prevents concurrent scan paths from sending the same alert twice, but retaining failed claims suppresses legitimate retries and confuses attempted delivery with delivered history.
 
-**How to apply:** Keep dedup downstream of evaluation/tracking/grading. Claim atomically immediately before delivery, preserve the claim after successful delivery, and release it on every non-delivery path. Never replace identity-aware dedup with player-, market-, sport-, or provider-wide cooldowns.
+**How to apply:** Keep dedup downstream of evaluation/tracking/grading. Claim atomically immediately before delivery, preserve the claim after successful delivery, and release it on every non-delivery path. Match rotated source/event IDs only within the same provider, direction, and dedup line-change window. Never replace identity-aware dedup with player-, market-, sport-, or provider-wide cooldowns.
 
 Every callable prop-to-Telegram adapter must enforce the canonical direction-and-evidence gate, including compatibility senders. Removal and market-movement records are monitoring-only and must return before claim or formatting even when other actionable fields are present.
 
