@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 from functools import wraps
+import inspect
 import logging
 import os
 import sys
@@ -1098,9 +1099,10 @@ async def post_shutdown(application: Application) -> None:
 
 # ── Heartbeat job ─────────────────────────────────────────────────────────────
 
-# Keep each grading pass short enough to complete inside the two-minute
-# scheduler cadence. Pending rows are rotated across subsequent passes.
-_GRADE_BATCH_SIZE = 100
+# Keep each grading pass bounded while allowing both independent settlement
+# populations to make progress.  The old 100+100 split left large backlogs
+# growing faster than the grader could drain them.
+_GRADE_BATCH_SIZE = 250
 _GRADE_FETCH_CONCURRENCY = 12
 _GRADE_FETCH_TIMEOUT_SECONDS = 20
 # Monitoring and grading share one two-minute owner. Keep grading bounded so a
@@ -1360,6 +1362,8 @@ async def _grade_opportunities_job(context) -> None:
         no_data  = 0
         date_shifted = 0
         no_data_by_sport: dict[str, int] = defaultdict(int)
+        _tracked_grades: list[tuple[int, str, float]] = []
+        _opportunity_grades: list[dict[str, Any]] = []
         for opp in pending:
             game_date = (
                 opp.game_time.strftime("%Y-%m-%d")
@@ -1468,14 +1472,43 @@ async def _grade_opportunities_job(context) -> None:
                     line_value     = opp.line_value,
                 )
             if recommendation is None:
-                _grade_tracked = getattr(db, "grade_tracked_prop", None)
-                if callable(_grade_tracked):
-                    await _grade_tracked(opp.id, outcome, actual)
+                _tracked_grades.append((opp.id, outcome, actual))
             else:
-                await db.grade_opportunity(
-                    opp.id, outcome, actual, error_type=error_type
+                _opportunity_grades.append(
+                    {
+                        "id": opp.id,
+                        "result": outcome,
+                        "actual_value": actual,
+                        "error_type": error_type,
+                    }
                 )
             graded += 1
+
+        # Keep the expensive per-row settlement lookups above, but commit each
+        # population once.  This materially reduces SQLite writer-gate
+        # contention during large history refreshes.  Older adapters and test
+        # doubles still use the original row-at-a-time methods.
+        _bulk_tracked = getattr(db, "grade_tracked_props_bulk", None)
+        if _tracked_grades and inspect.iscoroutinefunction(_bulk_tracked):
+            await _bulk_tracked(_tracked_grades)
+        elif _tracked_grades:
+            _grade_tracked = getattr(db, "grade_tracked_prop", None)
+            if callable(_grade_tracked):
+                for _tracking_id, _outcome, _actual in _tracked_grades:
+                    await _grade_tracked(_tracking_id, _outcome, _actual)
+
+        _bulk_opportunities = getattr(db, "grade_opportunities_bulk", None)
+        if _opportunity_grades and inspect.iscoroutinefunction(_bulk_opportunities):
+            await _bulk_opportunities(_opportunity_grades)
+        elif _opportunity_grades:
+            for _grade in _opportunity_grades:
+                await db.grade_opportunity(
+                    _grade["id"],
+                    _grade["result"],
+                    _grade["actual_value"],
+                    error_type=_grade.get("error_type"),
+                )
+
         if graded or no_data:
             logger.info(
                 "_grade_opportunities_job: graded=%d opportunities "

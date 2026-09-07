@@ -6101,6 +6101,40 @@ class Database:
             await s.commit()
 
     @_retry_sqlite_write
+    async def grade_tracked_props_bulk(
+        self,
+        updates: "list[tuple[int, str, float]]",
+    ) -> int:
+        """Set multiple universal tracking settlements in one transaction."""
+        if not updates:
+            return 0
+        from sqlalchemy import update as _sa_update
+
+        applied = 0
+        async with self.session() as s:
+            for tracking_id, result, actual_value in updates:
+                response = await s.execute(
+                    _sa_update(PropTrackingLog)
+                    .where(
+                        PropTrackingLog.id == int(tracking_id),
+                        or_(
+                            PropTrackingLog.result == "PENDING",
+                            PropTrackingLog.result.is_(None),
+                            PropTrackingLog.result == "",
+                        ),
+                    )
+                    .values(
+                        result=str(result),
+                        actual_value=float(actual_value),
+                        graded_at=datetime.utcnow(),
+                        settlement_source="auto_grade",
+                    )
+                )
+                applied += int(response.rowcount or 0)
+            await s.commit()
+        return applied
+
+    @_retry_sqlite_write
     async def log_prop_opportunity_bulk(
         self,
         opportunities: "list[dict]",
@@ -7218,6 +7252,99 @@ class Database:
                 .values(**values)
             )
             await s.commit()
+
+    @_retry_sqlite_write
+    async def grade_opportunities_bulk(
+        self,
+        updates: "list[dict]",
+    ) -> int:
+        """Grade directional opportunities with one bounded SQLite commit.
+
+        The single-row method remains the compatibility API.  The scheduled
+        grader uses this method so a large settlement pass does not acquire and
+        release the process-wide writer gate for every pick.
+        """
+        if not updates:
+            return 0
+        from engine.identity import display_player_name
+
+        ids = [int(item["id"]) for item in updates if item.get("id") is not None]
+        if not ids:
+            return 0
+        applied = 0
+        async with self.session() as s:
+            rows_result = await s.execute(
+                select(PropOpportunityLog).where(PropOpportunityLog.id.in_(ids))
+            )
+            rows_by_id = {
+                int(row.id): row for row in rows_result.scalars().all()
+            }
+            for item in updates:
+                opp_row = rows_by_id.get(int(item["id"]))
+                if opp_row is None:
+                    continue
+                if str(opp_row.result or "").upper() not in {"", "PENDING"}:
+                    continue
+
+                outcome = str(item.get("result") or "").upper()
+                actual_value = float(item.get("actual_value", 0.0))
+                if outcome in {"HIT", "MISS", "PUSH"}:
+                    evidence_date = (
+                        opp_row.game_time.strftime("%Y-%m-%d")
+                        if opp_row.game_time
+                        else datetime.utcnow().strftime("%Y-%m-%d")
+                    )
+                    evidence_game_id = str(opp_row.game_id or "")
+                    evidence_result = await s.execute(
+                        select(PlayerGameResult).where(
+                            PlayerGameResult.player_name
+                            == display_player_name(opp_row.player_name),
+                            PlayerGameResult.sport
+                            == (opp_row.sport or "").upper().strip(),
+                            PlayerGameResult.stat_type
+                            == (opp_row.stat_type or "").lower().strip(),
+                            PlayerGameResult.game_date == evidence_date,
+                            PlayerGameResult.game_id == evidence_game_id,
+                        )
+                    )
+                    if evidence_result.scalar_one_or_none() is None:
+                        s.add(
+                            PlayerGameResult(
+                                player_name=display_player_name(opp_row.player_name),
+                                sport=(opp_row.sport or "").upper().strip(),
+                                stat_type=(opp_row.stat_type or "").lower().strip(),
+                                game_date=evidence_date,
+                                opponent=opp_row.team or None,
+                                actual_value=actual_value,
+                                source="graded_prop",
+                                game_id=evidence_game_id,
+                            )
+                        )
+
+                values = {
+                    "result": outcome,
+                    "actual_value": actual_value,
+                    "graded_at": datetime.utcnow(),
+                }
+                if item.get("error_type") is not None:
+                    values["error_type"] = item["error_type"]
+                if item.get("void_reason") is not None:
+                    values["void_reason"] = str(item["void_reason"])[:64]
+                response = await s.execute(
+                    update(PropOpportunityLog)
+                    .where(
+                        PropOpportunityLog.id == int(opp_row.id),
+                        or_(
+                            PropOpportunityLog.result == "PENDING",
+                            PropOpportunityLog.result.is_(None),
+                            PropOpportunityLog.result == "",
+                        ),
+                    )
+                    .values(**values)
+                )
+                applied += int(response.rowcount or 0)
+            await s.commit()
+        return applied
 
     @_retry_sqlite_write
     async def mark_opportunity_alert_sent(
