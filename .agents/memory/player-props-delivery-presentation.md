@@ -23,7 +23,7 @@ provider ingestion concurrently with the current-book branch and bound its
 wait; slow PropLine/PrizePicks requests must not stall Underdog processing or
 create a second evaluation lane.
 
-The shared monitoring cadence is 180 seconds, leaving room for the current
+The shared monitoring cadence is 150 seconds, leaving room for the current
 full-feed persistence cycle to finish before the next scheduled scan.
 
 **Why:** The full current feed can take roughly two minutes when evidence and
