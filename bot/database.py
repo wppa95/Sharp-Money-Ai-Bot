@@ -595,6 +595,21 @@ class TelegramDeliveryAudit(Base):
     )
 
 
+class TelegramCommand(Base):
+    """Durable command catalog used by the Telegram UI and help output."""
+
+    __tablename__ = "telegram_commands"
+
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    command     = Column(String(64), nullable=False, unique=True, index=True)
+    description = Column(String(256), nullable=False, default="")
+    category    = Column(String(64), nullable=False, default="System")
+    usage       = Column(String(256), nullable=True)
+    alias_of    = Column(String(64), nullable=True)
+    enabled     = Column(Boolean, nullable=False, default=True)
+    sort_order  = Column(Integer, nullable=False, default=0)
+
+
 # ── PrizePicks models ─────────────────────────────────────────────────────────
 
 class PrizePicksRecord(Base):
@@ -1223,6 +1238,89 @@ class Database:
             _sqlite_session_gate(self._url),
             self._url,
         )
+
+    async def ensure_telegram_commands(
+        self,
+        definitions: "Iterable[dict]",
+    ) -> int:
+        """Seed/update command metadata while preserving operator enablement."""
+        rows_written = 0
+        async with self.session() as s:
+            for definition in definitions:
+                command = str(definition.get("command") or "").strip().lstrip("/")
+                if not command:
+                    continue
+                result = await s.execute(
+                    select(TelegramCommand).where(
+                        TelegramCommand.command == command
+                    )
+                )
+                row = result.scalar_one_or_none()
+                values = {
+                    "description": str(
+                        definition.get("description") or ""
+                    )[:256],
+                    "category": str(
+                        definition.get("category") or "System"
+                    )[:64],
+                    "usage": (
+                        str(definition.get("usage"))[:256]
+                        if definition.get("usage")
+                        else None
+                    ),
+                    "alias_of": (
+                        str(definition.get("alias_of")).strip().lstrip("/")
+                        if definition.get("alias_of")
+                        else None
+                    ),
+                    "sort_order": int(definition.get("sort_order") or 0),
+                }
+                if row is None:
+                    row = TelegramCommand(
+                        command=command,
+                        enabled=bool(definition.get("enabled", True)),
+                        **values,
+                    )
+                    s.add(row)
+                else:
+                    for key, value in values.items():
+                        setattr(row, key, value)
+                rows_written += 1
+            await s.commit()
+        return rows_written
+
+    async def get_telegram_commands(
+        self,
+        *,
+        enabled_only: bool = False,
+    ) -> list["TelegramCommand"]:
+        """Return the persisted command catalog in menu order."""
+        async with self.session() as s:
+            stmt = select(TelegramCommand).order_by(
+                TelegramCommand.sort_order,
+                TelegramCommand.command,
+            )
+            if enabled_only:
+                stmt = stmt.where(TelegramCommand.enabled.is_(True))
+            result = await s.execute(stmt)
+            return list(result.scalars().all())
+
+    async def is_telegram_command_enabled(self, command: str) -> bool:
+        """Return the DB-controlled availability of one registered command."""
+        normalized = str(command or "").strip().lstrip("/").lower()
+        if not normalized:
+            return False
+        async with self.session() as s:
+            result = await s.execute(
+                select(TelegramCommand.enabled).where(
+                    TelegramCommand.command == normalized
+                )
+            )
+            value = result.scalar_one_or_none()
+        # A missing row remains available for compatibility during startup or
+        # with an older test double; the post-init seed creates all known rows.
+        return True if value is None else bool(value)
+
     async def prune_prop_line_history(self, keep_days: int = 14) -> int:
         """Delete PropLineHistory rows older than keep_days. Returns rows deleted."""
         from datetime import timedelta

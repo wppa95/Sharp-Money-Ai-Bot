@@ -22,7 +22,7 @@ import inspect
 import re
 import time
 from threading import Lock
-from html import unescape
+from html import escape, unescape
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Optional, Union
@@ -555,60 +555,81 @@ def format_ud_removal_alert(
     ])
 
 
-def format_help_message() -> str:
-    return "\n".join([
-        f"{EMOJI['robot']} <b>Sharp Money Bot — Commands</b>",
-        "",
-        "<b>🎯 Player Prop Monitoring</b>",
-        f"  /picks          — Current directional player prop picks",
-        f"                    <i>/picks 5 · /picks MLB · /picks TENNIS 5</i>",
-        f"  /slip [N]       — Build a prop slip from top N picks (2–6)",
-        f"                    <i>/slip 3 · /slip 5</i>",
-        f"  /dashboard      — Player prop activity, provider status, alert history",
-        f"  /alerts         — Recent actionable pick alert history",
-        f"  /funnel [h]     — Monitoring and delivery pipeline by provider",
-        f"  /reconcile [h]  — Reconcile source volume with Telegram delivery",
-        f"  /grade          — Win/loss breakdown (/grades is an alias)",
-        f"  /player NAME    — Tracked history and hit rate for one player",
-        f"  /slipstats      — Pick and slip performance",
-        "",
-        "<b>📊 Market Analysis</b>",
-        f"  /analyze ARGS   — Analyze one line (shows usage when omitted)",
-        f"  /market         — Line movement and validation summary",
-        f"  /steam          — Recent steam moves",
-        f"  /ev             — Recent EV opportunities",
-        f"  /clv            — Closing Line Value history",
-        "",
-        "<b>📈 Performance</b>",
-        f"  /performance    — Pick performance by sport",
-        f"  /backtest       — Replay resolved picks through the model",
-        f"  /stats          — Pick generation stats and outcome summary",
-        f"  /calibration    — Model calibration against outcomes",
-        f"  /tracking       — Directional pick tracking summary",
-        f"  /analyst        — Latest analyst assessment",
-        f"  /rollups        — Learning rollups",
-        f"  /learning       — Learning rollups (alias)",
-        f"  /refinement     — Refinement rules and triggers",
-        "",
-        "<b>⚙️ System</b>",
-        f"  /start          — Welcome message and chat ID",
-        f"  /status         — Bot uptime, provider health, database counts",
-        f"  /system         — Concise runtime system status",
-        f"  /health         — Background job health",
-        f"  /providers      — Player prop provider status",
-        f"  /config         — Active configuration and alert scope",
-        f"  /blocks         — Active reliability blocks",
-        f"  /block ARGS     — Add or remove a reliability block",
-        f"  /backfill       — Grade eligible pending props",
-        f"  /pp_import      — Manual PrizePicks line import",
-        f"  /testalert      — Send a mock alert to verify delivery",
-        f"  /help           — This menu",
-        "",
-        "<b>Primary Player Prop Providers</b>",
-        "  🟢 <b>Underdog</b> — Primary Player Props",
-        "  🟢 <b>PrizePicks</b> — PropLine — Primary Player Props",
-        "",
-        f"<i>Monitoring player props across multiple sports. Not betting advice.</i>",
+def format_help_message(commands=None) -> str:
+    """Render the persisted command catalog, with a safe legacy fallback."""
+    if commands:
+        lines = [
+            f"{EMOJI['robot']} <b>Sharp Money Bot — Commands</b>",
+            "",
+        ]
+        current_category = None
+        for row in commands:
+            category = str(
+                getattr(row, "category", None)
+                or (row.get("category") if isinstance(row, dict) else "")
+                or "System"
+            )
+            command = str(
+                getattr(row, "command", None)
+                or (row.get("command") if isinstance(row, dict) else "")
+                or ""
+            ).strip().lstrip("/")
+            description = str(
+                getattr(row, "description", None)
+                or (row.get("description") if isinstance(row, dict) else "")
+                or ""
+            )
+            usage = (
+                getattr(row, "usage", None)
+                if not isinstance(row, dict)
+                else row.get("usage")
+            )
+            alias_of = (
+                getattr(row, "alias_of", None)
+                if not isinstance(row, dict)
+                else row.get("alias_of")
+            )
+            if not command:
+                continue
+            if category != current_category:
+                if current_category is not None:
+                    lines.append("")
+                lines.append(f"<b>{escape(category)}</b>")
+                current_category = category
+            suffix = f"  <i>{escape(str(usage))}</i>" if usage else ""
+            if alias_of:
+                suffix += f"  <i>alias for /{escape(str(alias_of))}</i>"
+            lines.append(
+                f"  /{escape(command)} — {escape(description)}{suffix}"
+            )
+        lines.extend([
+            "",
+            "<b>Primary Player Prop Providers</b>",
+            "  🟢 <b>Underdog</b> — Primary Player Props",
+            "  🟢 <b>PrizePicks</b> — PropLine — Primary Player Props",
+            "",
+            "<i>Monitoring player props across multiple sports. Not betting advice.</i>",
+        ])
+        return "\n".join(lines)
+
+    # Compatibility fallback for startup/tests before the database catalog is
+    # initialized. Production /help always passes persisted rows.
+    legacy_commands = [
+        "picks", "slip", "dashboard", "alerts", "funnel", "reconcile",
+        "grade", "grades", "player", "slipstats", "analyze", "market",
+        "steam", "ev", "clv", "performance", "backtest", "stats",
+        "calibration", "tracking", "analyst", "rollups", "learning",
+        "refinement", "start", "status", "system", "health", "providers",
+        "config", "blocks", "block", "backfill", "pp_import", "testalert",
+        "help",
+    ]
+    return format_help_message([
+        {
+            "command": command,
+            "description": "Available command",
+            "category": "Commands",
+        }
+        for command in legacy_commands
     ])
 
 

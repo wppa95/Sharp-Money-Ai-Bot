@@ -622,8 +622,16 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("⛔ Unauthorized.")
         return
     try:
+        db = getattr(context, "bot_data", {}).get("db")
+        catalog = []
+        if db is not None and hasattr(db, "get_telegram_commands"):
+            catalog = await _report_read(
+                db.get_telegram_commands(enabled_only=True),
+                fallback=[],
+                timeout=3.0,
+            )
         await update.message.reply_text(
-            format_help_message(),
+            format_help_message(catalog or None),
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True,
         )

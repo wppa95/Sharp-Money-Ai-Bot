@@ -20,7 +20,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
-from telegram import Update
+from telegram import BotCommand, Update
 from telegram.ext import Application, CommandHandler
 
 # Ensure the bot/ directory is on the path for sibling imports
@@ -171,6 +171,48 @@ TELEGRAM_COMMAND_HANDLERS = (
     ("learning", cmd_learning),
 )
 
+# Metadata is seeded once into SQLite and then read from there for help,
+# Telegram's command menu, and runtime enable/disable checks. Handler code
+# remains the tested implementation behind each durable command identity.
+TELEGRAM_COMMAND_CATALOG = [
+    {"command": "picks", "description": "Current directional player prop picks", "category": "Player Props", "usage": "5 · MLB · TENNIS 5", "sort_order": 10},
+    {"command": "slip", "description": "Build a prop slip from top picks", "category": "Player Props", "usage": "[N]", "sort_order": 20},
+    {"command": "dashboard", "description": "Player prop activity and provider status", "category": "Player Props", "sort_order": 30},
+    {"command": "alerts", "description": "Recent actionable pick alert history", "category": "Player Props", "sort_order": 40},
+    {"command": "funnel", "description": "Monitoring and delivery pipeline by provider", "category": "Player Props", "usage": "[hours]", "sort_order": 50},
+    {"command": "reconcile", "description": "Reconcile source volume with Telegram delivery", "category": "Player Props", "usage": "[hours]", "sort_order": 60},
+    {"command": "grade", "description": "Win/loss breakdown", "category": "Player Props", "sort_order": 70},
+    {"command": "grades", "description": "Win/loss breakdown", "category": "Player Props", "alias_of": "grade", "sort_order": 71},
+    {"command": "player", "description": "Tracked history and hit rate for one player", "category": "Player Props", "usage": "NAME", "sort_order": 80},
+    {"command": "slipstats", "description": "Pick and slip performance", "category": "Player Props", "sort_order": 90},
+    {"command": "analyze", "description": "Analyze one line", "category": "Market Analysis", "usage": "ARGS", "sort_order": 100},
+    {"command": "market", "description": "Line movement and validation summary", "category": "Market Analysis", "sort_order": 110},
+    {"command": "steam", "description": "Recent steam moves", "category": "Market Analysis", "sort_order": 120},
+    {"command": "ev", "description": "Recent EV opportunities", "category": "Market Analysis", "sort_order": 130},
+    {"command": "clv", "description": "Closing Line Value history", "category": "Market Analysis", "sort_order": 140},
+    {"command": "performance", "description": "Pick performance by sport", "category": "Performance", "sort_order": 200},
+    {"command": "backtest", "description": "Replay resolved picks through the model", "category": "Performance", "sort_order": 210},
+    {"command": "stats", "description": "Pick generation and outcome summary", "category": "Performance", "sort_order": 220},
+    {"command": "calibration", "description": "Model calibration against outcomes", "category": "Performance", "sort_order": 230},
+    {"command": "tracking", "description": "Directional pick tracking summary", "category": "Performance", "sort_order": 240},
+    {"command": "analyst", "description": "Latest analyst assessment", "category": "Performance", "sort_order": 250},
+    {"command": "rollups", "description": "Learning rollups", "category": "Performance", "sort_order": 260},
+    {"command": "learning", "description": "Learning rollups", "category": "Performance", "alias_of": "rollups", "sort_order": 261},
+    {"command": "refinement", "description": "Refinement rules and triggers", "category": "Performance", "sort_order": 270},
+    {"command": "start", "description": "Welcome message and chat ID", "category": "System", "sort_order": 300},
+    {"command": "status", "description": "Uptime, provider health, and database counts", "category": "System", "sort_order": 310},
+    {"command": "system", "description": "Concise runtime system status", "category": "System", "sort_order": 320},
+    {"command": "health", "description": "Background job health", "category": "System", "sort_order": 330},
+    {"command": "providers", "description": "Player prop provider status", "category": "System", "sort_order": 340},
+    {"command": "config", "description": "Active configuration and alert scope", "category": "System", "sort_order": 350},
+    {"command": "blocks", "description": "Active reliability blocks", "category": "System", "sort_order": 360},
+    {"command": "block", "description": "Add or remove a reliability block", "category": "System", "usage": "ARGS", "sort_order": 370},
+    {"command": "backfill", "description": "Grade eligible pending props", "category": "System", "sort_order": 380},
+    {"command": "pp_import", "description": "Manual PrizePicks line import", "category": "System", "sort_order": 390},
+    {"command": "testalert", "description": "Send a mock alert to verify delivery", "category": "System", "sort_order": 400},
+    {"command": "help", "description": "Show the database command catalog", "category": "System", "sort_order": 410},
+]
+
 
 def register_command_handlers(application: Application) -> Application:
     """Attach the complete production command surface to *application*.
@@ -181,6 +223,9 @@ def register_command_handlers(application: Application) -> Application:
     ``commands.py``.
     """
     for command, callback in TELEGRAM_COMMAND_HANDLERS:
+        # The durable catalog controls the Telegram menu/help surface. Keep
+        # the callback identity stable here so aliases intentionally share the
+        # exact same production implementation and authorization path.
         application.add_handler(CommandHandler(command, callback))
     application.add_error_handler(error_handler)
     return application
@@ -647,6 +692,32 @@ async def post_init(application: Application) -> None:
     # Store db reference in bot_data for market engine jobs
     application.bot_data["db"] = _db
     application.bot_data["history_db"] = _history_db
+    from providers.player_history import get_player_history_provider
+    application.bot_data["player_history_provider"] = (
+        get_player_history_provider()
+    )
+    try:
+        seeded = await _db.ensure_telegram_commands(TELEGRAM_COMMAND_CATALOG)
+        command_rows = await _db.get_telegram_commands(enabled_only=True)
+        await application.bot.set_my_commands([
+            BotCommand(
+                str(row.command),
+                str(row.description or "Sharp Money Bot command")[:256],
+            )
+            for row in command_rows
+        ])
+        logger.info(
+            "Telegram command catalog loaded from database: %d commands (%d seeded)",
+            len(command_rows),
+            seeded,
+        )
+    except Exception as _command_catalog_exc:
+        # Command handlers remain available if Telegram's menu API or a
+        # transient database lock prevents menu synchronization during boot.
+        logger.warning(
+            "Telegram command catalog unavailable during startup: %s",
+            _command_catalog_exc,
+        )
 
     # Register background jobs
     jq = application.job_queue
@@ -1110,9 +1181,17 @@ async def _grade_opportunities_job(context) -> None:
         # Props removed from Underdog before the game finished would never get
         # a result row from scanning, leaving them PENDING forever.
         # This mirrors the /backfill fetch pattern so auto-grading is self-contained.
+        _grade_stat_prov = None
         try:
             from providers.player_stats import PlayerStatsProvider as _GradeStatProvider
             _grade_stat_prov = _GradeStatProvider()
+        except Exception as _prov_init_exc:
+            logger.warning(
+                "_grade_opportunities_job: stat provider initialization failed: %s",
+                _prov_init_exc,
+            )
+
+        if _grade_stat_prov is not None:
             _grade_fetched: set = set()
             _grade_targets = []
             for _gopp in pending:
@@ -1142,14 +1221,26 @@ async def _grade_opportunities_job(context) -> None:
                         )
                         return []
 
-            _grade_batches = await asyncio.gather(
-                *(_fetch_grade_results(_gopp) for _gopp in _grade_targets)
-            )
-            for _graw in _grade_batches:
-                for _gr in _graw:
-                    await db.upsert_player_result(_gr)
-        except Exception as _prov_exc:
-            logger.warning("_grade_opportunities_job: stat provider init failed: %s", _prov_exc)
+            try:
+                _grade_batches = await asyncio.gather(
+                    *(_fetch_grade_results(_gopp) for _gopp in _grade_targets)
+                )
+                _all_grade_results = [
+                    _gr
+                    for _graw in _grade_batches
+                    for _gr in (_graw or [])
+                ]
+                _bulk_grade_writer = getattr(db, "upsert_player_results_bulk", None)
+                if callable(_bulk_grade_writer) and _all_grade_results:
+                    await _bulk_grade_writer(_all_grade_results)
+                else:
+                    for _gr in _all_grade_results:
+                        await db.upsert_player_result(_gr)
+            except Exception as _prov_fetch_exc:
+                logger.warning(
+                    "_grade_opportunities_job: stat provider fetch/persist failed: %s",
+                    _prov_fetch_exc,
+                )
 
         # If the public stat provider has no row for a completed event, use
         # PropLine's resolved history as a settlement fallback.  This is

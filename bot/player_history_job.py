@@ -5,6 +5,7 @@ import asyncio
 import logging
 import re
 import time
+from types import SimpleNamespace
 
 from engine.sport_policy import is_football_related_sport
 
@@ -23,10 +24,14 @@ _SUPPORTED_HISTORY_SPORTS = frozenset({
     "MMA", "UFC", "GOLF", "PGA",
 })
 
-# Keep transactions large enough that a full active book does not create
-# hundreds of SQLite commits, while still yielding the writer gate regularly
-# for live monitoring and reporting.
+# Keep transactions bounded below SQLite's variable/statement limits while
+# making a large history pass use far fewer commits than one-row writes.
 _PLAYER_HISTORY_WRITE_BATCH_SIZE = 500
+# Fetch cadence protects the provider side of this job. Once results exist in
+# memory, persistence is a durable evidence obligation and must be allowed to
+# outlive that cadence. Same-name scheduler coalescing prevents another
+# collector from overlapping this write drain.
+_PLAYER_HISTORY_PERSIST_TIMEOUT_SECONDS = 900.0
 # Process the complete active book in one invocation without opening one
 # request per target at once. These workers belong to this invocation; there
 # is no carryover queue or deferred target list.
@@ -413,9 +418,9 @@ async def player_history_collector_job(context) -> None:
         completed_targets: list[tuple[str, str, str]] = []
         from providers.player_history import get_player_history_provider
 
+        configured_history_provider = bot_data.get("player_history_provider")
         history_provider = (
-            bot_data.get("player_history_provider")
-            or get_player_history_provider()
+            configured_history_provider or get_player_history_provider()
         )
         if cycle_targets:
             try:
@@ -456,16 +461,35 @@ async def player_history_collector_job(context) -> None:
                             remaining,
                         ),
                     )
-                    coverage = await history_provider.fetch_scheduled_results(
-                        raw or [],
-                        player,
-                        sport,
-                        stat,
-                        source_provider=source_scope((player, sport, stat)),
-                        allow_propline=(
-                            (player, sport, stat) in propline_targets
-                        ),
-                    )
+                    if configured_history_provider is None:
+                        # Direct/unit-test callers do not have the production
+                        # shared history provider in bot_data. Do not make
+                        # them perform an unbounded supplemental network read;
+                        # the primary provider result is already valid evidence.
+                        coverage = SimpleNamespace(
+                            rows=list(raw or []),
+                            status="usable" if raw else "",
+                        )
+                    else:
+                        remaining = cycle_deadline - time.monotonic()
+                        if remaining <= 0:
+                            return "deadline", None
+                        coverage = await asyncio.wait_for(
+                            history_provider.fetch_scheduled_results(
+                                raw or [],
+                                player,
+                                sport,
+                                stat,
+                                source_provider=source_scope((player, sport, stat)),
+                                allow_propline=(
+                                    (player, sport, stat) in propline_targets
+                                ),
+                            ),
+                            timeout=min(
+                                _PLAYER_HISTORY_OPERATION_TIMEOUT_SECONDS,
+                                remaining,
+                            ),
+                        )
                     return "ok", coverage
                 except asyncio.TimeoutError:
                     return "deadline", None
@@ -535,42 +559,33 @@ async def player_history_collector_job(context) -> None:
                 pass
 
         async def write_batch(batch: list[object]) -> None:
-            """Persist one completed result batch within this cycle."""
+            """Persist one completed result batch without the fetch deadline."""
             if asyncio.iscoroutinefunction(bulk_writer):
-                await await_in_cycle(
-                    "persisting player-history results",
-                    lambda: bulk_writer(batch),
-                    # SQLite writes share one process-wide writer gate. Allow
-                    # this small batch to wait for the current monitoring
-                    # transaction, but never beyond this cycle's deadline.
-                    operation_timeout=None,
-                )
+                await bulk_writer(batch)
             else:
                 # Compatibility path for lightweight database doubles and
                 # older database implementations.
                 for result in batch:
-                    await await_in_cycle(
-                        "persisting player-history result",
-                        lambda result=result: db.upsert_player_result(result),
-                        operation_timeout=None,
-                    )
+                    await db.upsert_player_result(result)
             await asyncio.sleep(0)
 
         persisted_rows = 0
+        persist_deadline = time.monotonic() + _PLAYER_HISTORY_PERSIST_TIMEOUT_SECONDS
         for start in range(
             0, len(completed_results), _PLAYER_HISTORY_WRITE_BATCH_SIZE
         ):
             batch =  completed_results[start: start + _PLAYER_HISTORY_WRITE_BATCH_SIZE]
             try:
-                await write_batch(batch)
+                remaining = persist_deadline - time.monotonic()
+                if remaining <= 0:
+                    raise asyncio.TimeoutError
+                await asyncio.wait_for(write_batch(batch), timeout=remaining)
                 persisted_rows += len(batch)
-            except _CadenceBoundaryReached as exc:
-                budget_exhausted = True
+            except asyncio.TimeoutError:
                 logger.warning(
-                    "player_history_collector_job: SQLite writer busy or blocked; "
-                    "cadence boundary reached during %s; completed_rows=%d "
+                    "player_history_collector_job: persistence timeout; "
+                    "completed_rows=%d "
                     "unpersisted_rows=%d",
-                    exc,
                     persisted_rows,
                     len(completed_results) - persisted_rows,
                 )

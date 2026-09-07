@@ -478,7 +478,7 @@ async def test_player_history_provider_timeout_cannot_hold_next_cadence(caplog):
 
 
 @pytest.mark.asyncio
-async def test_player_history_blocked_writer_logs_and_does_not_retain_results(caplog):
+async def test_player_history_waits_for_blocked_writer_and_retains_results(caplog):
     snapshot = SimpleNamespace(
         player_name="Blocked Writer",
         sport="NBA",
@@ -493,7 +493,7 @@ async def test_player_history_blocked_writer_logs_and_does_not_retain_results(ca
 
     async def blocked_writer(_batch):
         writer_started.set()
-        await asyncio.sleep(10)
+        await asyncio.sleep(0.01)
 
     db.upsert_player_results_bulk = blocked_writer
     provider = MagicMock()
@@ -501,12 +501,12 @@ async def test_player_history_blocked_writer_logs_and_does_not_retain_results(ca
     context = SimpleNamespace(bot_data={"db": db})
 
     with (
-        patch("player_history_job._player_history_cadence_budget", return_value=0.03),
         patch("providers.player_stats.PlayerStatsProvider", return_value=provider),
-        caplog.at_level("WARNING"),
+        caplog.at_level("INFO"),
     ):
         await player_history_collector_job(context)
 
     assert writer_started.is_set()
-    assert "SQLite writer busy or blocked" in caplog.text
+    assert "persisted_rows=1" in caplog.text
+    assert "unpersisted_rows" not in caplog.text
     assert "_player_history_pending_results" not in context.bot_data

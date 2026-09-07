@@ -118,3 +118,5 @@
 - [Live monitoring database boundary](live-monitoring-db-boundary.md) — compare live feeds in memory; reserve SQLite for evidence, history, grading, and tracking.
 - [Full-feed snapshot batching](full-feed-snapshot-batching.md) — large live-feed snapshot writes must use bounded transactions or SQLite WAL/lock contention can stall independent evidence jobs.
 - [PropLine read-only capability boundary](propline-readonly-capabilities.md) — raw game context is supplemental only after final status; live/football data cannot enter persisted evidence or alerts.
+- [Player history persistence boundary](player-history-persistence.md) — fetch cadence may expire, but completed results remain a durable write obligation and must drain in bounded batches or report failure.
+- [Telegram command catalog](telegram-command-catalog.md) — command metadata is durable in SQLite and drives the menu/help surface while callbacks remain code-owned.

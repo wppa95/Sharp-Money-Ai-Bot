@@ -191,17 +191,12 @@ async def test_no_pending_work_still_records_a_successful_health_run():
 
 
 @pytest.mark.asyncio
-async def test_monitor_cycle_releases_owner_when_grading_exceeds_budget():
+async def test_monitor_cycle_does_not_couple_grading_to_monitor():
     health = _Health()
     scan = AsyncMock()
 
-    async def stalled_grader(_context):
-        await asyncio.sleep(10)
-
     with (
         patch.object(main, "underdog_job", scan),
-        patch.object(main, "_grade_opportunities_job", stalled_grader),
-        patch.object(main, "_GRADE_CYCLE_BUDGET_SECONDS", 0.01),
         patch.object(main, "get_health_tracker", return_value=health),
     ):
         await asyncio.wait_for(
@@ -210,7 +205,7 @@ async def test_monitor_cycle_releases_owner_when_grading_exceeds_budget():
         )
 
     scan.assert_awaited_once()
-    assert health.runs == 1
+    assert health.runs == 0
 
 
 @pytest.mark.asyncio
