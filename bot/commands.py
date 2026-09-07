@@ -339,15 +339,13 @@ def _primary_player_prop_provider_lines(
     )
     return [
         f"  {overall_icon} <b>Player Props</b> — {source_states}",
-        "    <i>Source identity is retained on individual picks.</i>",
     ]
 
 
 def _primary_provider_runtime_lines(health_monitor: object | None) -> list[str]:
-    """Render live fetch health separately from each provider's configured role."""
-    lines = ["  <i>Live fetch health</i>"]
+    """Render one compact live-fetch line for the unified product."""
     if health_monitor is None or not hasattr(health_monitor, "get_health"):
-        return lines + ["    ⚪ Runtime health unavailable"]
+        return ["  Fetch: unavailable"]
     provider_runtime: list[str] = []
     for provider in ("Underdog", "PrizePicks"):
         try:
@@ -371,16 +369,12 @@ def _primary_provider_runtime_lines(health_monitor: object | None) -> list[str]:
                 else ""
             )
             provider_runtime.append(
-                f"    {icon} {provider}: "
+                f"{icon} {provider}: "
                 f"{state} · last ✓: {last_ok}{failure_note}"
             )
         except Exception:
-            provider_runtime.append(f"    ⚪ {provider}: health unavailable")
-    lines.append(
-        "    <b>Player Props source health</b> — "
-        " · ".join(line.strip() for line in provider_runtime)
-    )
-    return lines
+            provider_runtime.append(f"⚪ {provider}: unavailable")
+    return ["  Fetch: " + " · ".join(provider_runtime)]
 
 
 def _prizepicks_feed_count_lines(health_tracker: object | None) -> list[str]:
@@ -1102,7 +1096,6 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 f"  History: Underdog: {_format_status_count(ud_history)}"
                 f" · PrizePicks (PropLine): {_format_status_count(pp_history)}"
             ),
-            *_prizepicks_feed_count_lines(_ht_pipeline),
         ]
         if _ht_pipeline is not None:
             lines.append(
@@ -1115,9 +1108,6 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 )
             except Exception:
                 pass
-        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
-        return
-
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
     except Exception as exc:
         logger.exception("cmd_status: unexpected error: %s", exc)
