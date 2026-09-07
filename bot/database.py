@@ -6060,12 +6060,23 @@ class Database:
         async with self.session() as s:
             insert_stmt = _sqlite_insert(PropTrackingLog).values(prepared)
             # Every feed observation is retained in the canonical snapshot
-            # history. This compact ledger only needs to establish that an
-            # identity has been tracked; rewriting thousands of known rows on
-            # every feed creates a large SQLite WAL and can consume the live
-            # monitoring cadence.
-            stmt = insert_stmt.on_conflict_do_nothing(
+            # history. This compact ledger keeps one gradeable row per
+            # provider/line identity, while refreshing the latest observation
+            # metadata when the same line is seen again. Settlement fields are
+            # deliberately omitted from the conflict update so a later scan
+            # can never erase a terminal HIT/MISS/PUSH.
+            stmt = insert_stmt.on_conflict_do_update(
                 index_elements=["provider", "external_id", "stat_type"],
+                set_={
+                    "player_name": insert_stmt.excluded.player_name,
+                    "team": insert_stmt.excluded.team,
+                    "sport": insert_stmt.excluded.sport,
+                    "line_value": insert_stmt.excluded.line_value,
+                    "game_time": insert_stmt.excluded.game_time,
+                    "game_id": insert_stmt.excluded.game_id,
+                    "line_variant": insert_stmt.excluded.line_variant,
+                    "detected_at": insert_stmt.excluded.detected_at,
+                },
             )
             await s.execute(stmt)
             await s.commit()

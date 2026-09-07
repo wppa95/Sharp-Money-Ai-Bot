@@ -16,7 +16,12 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from database import Database, PropOpportunityLog, PlayerGameResult
+from database import (
+    Database,
+    PlayerGameResult,
+    PropOpportunityLog,
+    PropTrackingLog,
+)
 
 
 @pytest.fixture
@@ -192,6 +197,40 @@ class TestLogPropOpportunity:
             "goblin",
             "demon",
         }
+
+    @pytest.mark.asyncio
+    async def test_reseen_unalerted_line_refreshes_tracking_metadata(self, db: Database) -> None:
+        """Tracking remains current even when delivery never happens."""
+        base = {
+            "external_id": "nba-reseen-1",
+            "player_name": "A. Guard",
+            "team": "NY",
+            "sport": "NBA",
+            "stat_type": "Points",
+            "line_value": 21.5,
+            "provider": "Underdog",
+        }
+        first_time = _past(8)
+        second_time = _past(5)
+        assert await db.track_prop_records([
+            {**base, "game_id": "old-event", "game_time": first_time},
+        ]) == 1
+        assert await db.track_prop_records([
+            {**base, "game_id": "current-event", "game_time": second_time},
+        ]) == 1
+
+        async with db.session() as s:
+            from sqlalchemy import select
+            row = (
+                await s.execute(
+                    select(PropTrackingLog).where(
+                        PropTrackingLog.external_id.like("nba-reseen-1%")
+                    )
+                )
+            ).scalar_one()
+        assert row.game_id == "current-event"
+        assert row.game_time == second_time
+        assert row.result == "PENDING"
 
     @pytest.mark.asyncio
     async def test_different_stat_types_are_separate_rows(self, db: Database) -> None:

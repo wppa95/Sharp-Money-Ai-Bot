@@ -4329,14 +4329,13 @@ async def underdog_job(context) -> None:
         for record in _snapshot_records:
             _incremental_records.append(record)
 
-    # Universal grading ledger: persist every valid active daily prop before
-    # any scoring, qualification, strongest-pick, or delivery gate runs.
-    # Futures/season-long markets have no single player-game settlement event
-    # and remain represented by the monitoring history instead.
+    # Universal grading ledger: persist every valid eligible feed observation
+    # before any scoring, qualification, strongest-pick, or delivery gate runs.
+    # Removed eligible rows remain represented for settlement; futures and
+    # season-long markets are intentionally disabled and stay out of this
+    # gradeable population. Snapshot/history tables still retain raw feed data.
     _tracking_records = []
     for _tracked_snap in ud_snaps:
-        if "[REMOVED]" in (_tracked_snap.selection or ""):
-            continue
         _tracked_player = str(_tracked_snap.player or "").strip()
         _tracked_sport = str(_tracked_snap.sport or "").upper().strip()
         _tracked_stat = _extract_ud_stat_type(

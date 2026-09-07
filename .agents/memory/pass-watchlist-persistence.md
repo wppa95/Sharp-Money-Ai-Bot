@@ -1,10 +1,10 @@
 ---
-name: Directional persistence policy
-description: Active props are rescanned continuously, but only strong OVER/UNDER evaluations are stored as opportunity or candidate records.
+name: Universal prop persistence policy
+description: Eligible observations are retained for settlement tracking independently of scoring or Telegram delivery; futures remain disabled.
 ---
 
-Only directional OVER/UNDER evaluations may create persistent opportunity or candidate records. PASS, no-direction, and watchlist states are transient scan results; the underlying active prop remains in the canonical monitoring universe and is rescanned until a strong direction is available.
+Every eligible player-prop observation is retained in the delivery-independent tracking ledger before scoring or Telegram gates. PASS, no-direction, removed, and undelivered observations remain gradeable when a supported settlement exists; futures and season-long markets are intentionally excluded because they are disabled.
 
-**Why:** Persistent PASS/watchlist rows made transient evidence gaps look like tracked props and allowed obsolete secondary classifications to influence reporting.
+**Why:** Settlement coverage must not depend on whether a prop qualified for an alert, while disabled season-long markets do not have the supported single-game settlement contract.
 
-**How to apply:** Keep scan/evaluation logic active for every canonical prop, but filter persistence at the database/API boundary and before candidate batch inserts. Preserve the final Telegram delivery gate and delivery safety controls.
+**How to apply:** Write eligible observations to universal tracking before scoring; keep directional opportunity/candidate records and Telegram delivery separately gated. Never re-enable futures tracking without a settlement design.
