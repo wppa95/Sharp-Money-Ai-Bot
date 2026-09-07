@@ -87,7 +87,7 @@ def test_extended_dedup_keeps_provider_event_and_direction_separate():
     )
 
 
-def test_prizepicks_edge_alert_has_provider_specific_heading_and_line():
+def test_prizepicks_edge_alert_uses_shared_player_prop_heading_and_line():
     pp = PrizePicksLine(
         external_id="projection-1",
         player_name="LeBron James",
@@ -108,17 +108,14 @@ def test_prizepicks_edge_alert_has_provider_specific_heading_and_line():
     )
 
     message = format_pp_alert(opportunity)
-    assert "📊 <b>SHARP MONEY PLAY</b>" in message
-    assert "PrizePicks Line" in message
+    assert "📊 <b>PLAYER PROP PLAY</b>" in message
+    assert "Player Prop Line" in message
     assert "ACTIONABLE BET PICK" not in message
     assert "verify before placing" not in message.lower()
 
 
-def test_change_alert_preserves_source_heading_and_line_label():
-    for provider, line_label in (
-        ("Underdog", "LINE</b> · Underdog"),
-        ("PrizePicks", "LINE</b> · PrizePicks"),
-    ):
+def test_change_alert_uses_shared_player_prop_heading_and_line_label():
+    for provider in ("Underdog", "PrizePicks"):
         message = format_underdog_change_alert(
             player_name="LeBron James",
             team="LAL",
@@ -128,5 +125,5 @@ def test_change_alert_preserves_source_heading_and_line_label():
             new_line=25.5,
             source=provider,
         )
-        assert "📊 <b>SHARP MONEY PLAY</b>" in message
-        assert line_label in message
+        assert "📊 <b>PLAYER PROP PLAY</b>" in message
+        assert "PLAYER PROP LINE" in message

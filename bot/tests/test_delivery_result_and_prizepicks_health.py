@@ -106,7 +106,7 @@ def test_prizepicks_pipeline_renderer_does_not_borrow_underdog_counts():
     )
 
     text = "\n".join(lines)
-    assert "PrizePicks Pipeline" in text
+    assert "Player Props Pipeline" in text
     assert "Observed:" in text and "12" in text
     assert "Tracked active:" in text and "7" in text
     assert "Evaluated:" in text and "10" in text
@@ -157,7 +157,7 @@ async def test_health_includes_provider_isolated_prizepicks_pipeline(tmp_path: P
         await commands.cmd_health(update, context)
 
     text = update.message.reply_text.await_args.args[0]
-    assert "PrizePicks Pipeline" in text
+    assert "Player Props Pipeline" in text
     assert "Observed:" in text and "12" in text
     assert "Delivered alerts:" in text and "2" in text
 
@@ -196,7 +196,7 @@ async def test_status_uses_shared_monitoring_cycle_without_merging_ud():
         await commands.cmd_status(update, context)
 
     text = update.message.reply_text.await_args.args[0]
-    assert "PrizePicks Pipeline" not in text
+    assert "Player Props Pipeline" not in text
     assert "Latest Underdog scan" not in text
     assert "Latest monitoring cycle" not in text
     assert "Observed:            99" not in text
@@ -230,6 +230,6 @@ async def test_status_shows_prizepicks_feed_counts_by_sport(tmp_path: Path):
         await commands.cmd_status(update, context)
 
     text = update.message.reply_text.await_args.args[0]
-    assert "PrizePicks feed by sport" in text
+    assert "Player Props feed by sport (PrizePicks / PropLine source)" in text
     assert "NBA: 0 raw records · 0 normalized props · empty" in text
     assert "MLB: 6 raw records · 3 normalized props · ok" in text

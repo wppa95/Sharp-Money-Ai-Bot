@@ -427,28 +427,26 @@ def _format_available_lines_block(
     """
     provider_upper = str(provider or "").strip().upper()
     if provider_upper == "UNDERDOG":
-        display_lines = [("🐶", "Underdog", ud_line)]
+        display_lines = [("🎯", "Player Prop", ud_line)]
     elif provider_upper == "PRIZEPICKS":
-        display_lines = [("🟣", "PrizePicks", pp_line)]
+        display_lines = [("🎯", "Player Prop", pp_line)]
     else:
         display_lines = [
-            ("🟣", "PrizePicks", pp_line),
-            ("🐶", "Underdog", ud_line),
+            ("🎯", "Player Prop", pp_line),
+            ("🎯", "Player Prop", ud_line),
         ]
 
     available_count = sum(value is not None for _, _, value in display_lines)
     lines = [
-        "\n\n📊 <b>Available Line</b>"
+        "\n\n📊 <b>Available Player Prop Line</b>"
         if available_count == 1
-        else "\n\n📊 <b>Available Lines</b>"
+        else "\n\n📊 <b>Available Player Prop Lines</b>"
     ]
     for emoji, label, value in display_lines:
-        spacing = "  " if label == "PrizePicks" else "    "
+        spacing = "  "
         if value is not None:
             lines.append(f"\n{emoji} {label}:{spacing}<code>{value:.1f}</code>")
-        elif provider_upper not in {"UNDERDOG", "PRIZEPICKS"} or label == (
-            "PrizePicks" if provider_upper == "PRIZEPICKS" else "Underdog"
-        ):
+        elif provider_upper not in {"UNDERDOG", "PRIZEPICKS"} or label == "Player Prop":
             lines.append(
                 f"\n{emoji} {label}:{spacing}<i>Unavailable for this prop</i>"
             )
@@ -706,7 +704,7 @@ def format_underdog_change_alert(
     market_confirmation: Optional[dict] = None,  # OddsAPI sportsbook confirmation data
     source: str = "Underdog",
 ) -> str:
-    """Format an alert for an Underdog prop line change or removed prop.
+    """Format a player-prop line change or removed prop.
 
     Now includes an "Available Lines" block showing all 4 providers, and
     separates Market Movement Score from Bet Confidence.
@@ -716,28 +714,28 @@ def format_underdog_change_alert(
     """
     source = source.strip() or "Underdog"
     source_upper = source.upper()
-    source_emoji = "🟣" if source_upper == "PRIZEPICKS" else "🐶"
+    source_emoji = "🎯"
     sport_icon = {
         "NFL": "🏈", "NBA": "🏀", "MLB": "⚾",
         "NHL": "🏒", "UFC": "🥊", "WNBA": "🏀",
     }.get(sport, "🎯")
 
     if removed:
-        header         = f"🚫 <b>{source_upper} PROP REMOVED</b>"
-        movement_block = f"  🐶 <b>Last Line:</b>  <code>{old_line:.1f}</code>"
+        header         = "🚫 <b>PLAYER PROP REMOVED</b>"
+        movement_block = f"  🎯 <b>Last Player Prop Line:</b>  <code>{old_line:.1f}</code>"
     elif standing:
-        header         = "📊 <b>SHARP MONEY PLAY</b>"
+        header         = "📊 <b>PLAYER PROP PLAY</b>"
         movement_block = (
-            f"📊 <b>LINE</b> · {escape(source)}\n"
+            f"📊 <b>PLAYER PROP LINE</b>\n"
             f"  {source_emoji} <code>{new_line:.1f}</code>  {_line_label(new_line)}"
         )
     else:
         change         = new_line - old_line
         direction_icon = "📈" if change > 0 else "📉"
-        header         = "📊 <b>SHARP MONEY PLAY</b>"
+        header         = "📊 <b>PLAYER PROP PLAY</b>"
         change_sign    = "+" if change >= 0 else ""
         movement_block = (
-            f"📊 <b>LINE</b> · {escape(source)}\n"
+            f"📊 <b>PLAYER PROP LINE</b>\n"
             f"  {source_emoji} <code>{new_line:.1f}</code>  {_line_label(new_line)}\n"
             f"  Previous:         <code>{old_line:.1f}</code>\n"
             f"  {direction_icon} Move:  <code>{change_sign}{change:.1f}</code>"
@@ -796,7 +794,7 @@ def format_underdog_change_alert(
             f"{sport_icon} <b>{escape(str(sport))} — {escape(str(stat_type))}</b>",
             f"👤 <b>{escape(str(player_name))}</b>",
             "",
-            f"{source_emoji} {escape(source)} Last line: <code>{old_line:.1f}</code>",
+            f"{source_emoji} Player Prop Line: <code>{old_line:.1f}</code>",
             f"Removal: {escape(removal_reason or 'Market no longer available')}",
             "",
             f"{EMOJI['clock']} <i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>",
@@ -858,7 +856,7 @@ def format_market_move_detected(
     new_line: float,
     game_time: Optional[datetime] = None,
 ) -> str:
-    """Lightweight alert for significant line moves that do not yet qualify as bet picks.
+    """Lightweight player-prop alert for a significant line move.
 
     Fires when Underdog moves a line by ≥ MIN_UNDERDOG_LINE_CHANGE but the prop
     has not passed the full scoring + confidence + tier gate.  Keeps the user
@@ -887,7 +885,7 @@ def format_market_move_detected(
         f"{sport_icon} <b>{sport} — {stat_type}</b>",
         f"👤 <b>{player_name}</b>",
         "",
-        f"🐶 <b>Line:</b>  <code>{old_line:.1f}</code>  →  <code>{new_line:.1f}</code>",
+        f"🎯 <b>Player Prop Line:</b>  <code>{old_line:.1f}</code>  →  <code>{new_line:.1f}</code>",
         f"📉 <b>Movement:</b>  <code>{change_sign}{change:.1f}</code>",
         "",
         "📊 <b>Status:</b>  Tracking — evaluating for a directional pick",
@@ -927,7 +925,7 @@ def format_underdog_new_prop_alert(
     market_confirmation: Optional[dict] = None,  # OddsAPI sportsbook confirmation data
     source: str = "Underdog",
 ) -> str:
-    """Format a 🚨 UNDERDOG PROP LIVE alert for a first-appearance prop.
+    """Format a 🚨 PLAYER PROP LIVE alert for a first-appearance prop.
 
     Fires when a (player_name, stat_type) pair is seen for the very first
     time AND has sufficient history to justify an immediate alert.
@@ -935,7 +933,7 @@ def format_underdog_new_prop_alert(
     """
     source = source.strip() or "Underdog"
     source_upper = source.upper()
-    source_emoji = "🟣" if source_upper == "PRIZEPICKS" else "🐶"
+    source_emoji = "🎯"
     sport_icon = {
         "NFL": "🏈", "NBA": "🏀", "MLB": "⚾",
         "NHL": "🏒", "UFC": "🥊", "WNBA": "🏀",
@@ -983,7 +981,7 @@ def format_underdog_new_prop_alert(
     _thick = "━" * 18
     parts = [
         _thick,
-        "📊 <b>SHARP MONEY PLAY</b>",
+        "📊 <b>PLAYER PROP PLAY</b>",
         _thick,
         "",
             f"{sport_icon} <b>{escape(str(sport))} — {escape(str(stat_type))}</b>",
@@ -993,7 +991,7 @@ def format_underdog_new_prop_alert(
         avail_block.lstrip("\n"),
         "",
         _div(),
-        f"  {source_emoji} <b>LINE · {escape(source)}:</b>  <code>{line_value:.1f}</code>  {_line_label(line_value)}",
+        f"  {source_emoji} <b>PLAYER PROP LINE:</b>  <code>{line_value:.1f}</code>  {_line_label(line_value)}",
         context_line,
         *(
             [

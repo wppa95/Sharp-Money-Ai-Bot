@@ -341,7 +341,8 @@ def _append_provider_pipeline(
             last_db_write = "unavailable"
 
     lines.extend((
-        f"<b>📈 { _html.escape(provider) } Pipeline</b>",
+        f"<b>📈 Player Props Pipeline</b> "
+        f"<i>({_html.escape(provider)} source)</i>",
         f"  Status:              {_html.escape(status)}",
         f"  Last scan:           {_html.escape(str(last_scan))}",
         f"  Last DB write:       {_html.escape(str(last_db_write))}",
@@ -412,12 +413,14 @@ def _primary_player_prop_provider_lines(
 
     return [
         (
-            f"  {provider_icons['Underdog']} <b>Underdog</b> — "
-            + ("Primary Player Props" if underdog_enabled else "Unavailable")
+            f"  {provider_icons['Underdog']} <b>Player Props</b> "
+            f"<i>(Underdog source)</i> — "
+            + ("available" if underdog_enabled else "Unavailable")
         ),
         (
-            f"  {provider_icons['PrizePicks']} <b>PrizePicks</b> — PropLine — "
-            + ("Primary Player Props" if prizepicks_enabled else "Unavailable")
+            f"  {provider_icons['PrizePicks']} <b>Player Props</b> "
+            f"<i>(PrizePicks / PropLine source)</i> — "
+            + ("available" if prizepicks_enabled else "Unavailable")
         ),
     ]
 
@@ -449,11 +452,13 @@ def _primary_provider_runtime_lines(health_monitor: object | None) -> list[str]:
                 else ""
             )
             lines.append(
-                f"    {icon} {provider}: "
+                f"    {icon} Player Props <i>({provider} source)</i>: "
                 f"{state} · last ✓: {last_ok}{failure_note}"
             )
         except Exception:
-            lines.append(f"    ⚪ {provider}: health unavailable")
+            lines.append(
+                f"    ⚪ Player Props <i>({provider} source)</i>: health unavailable"
+            )
     return lines
 
 
@@ -472,7 +477,7 @@ def _prizepicks_feed_count_lines(health_tracker: object | None) -> list[str]:
     if not isinstance(counts_by_sport, dict) or not counts_by_sport:
         return []
 
-    lines = ["  <i>PrizePicks feed by sport</i>"]
+    lines = ["  <i>Player Props feed by sport (PrizePicks / PropLine source)</i>"]
     for sport, counts in sorted(counts_by_sport.items()):
         if not isinstance(counts, dict):
             continue
@@ -752,8 +757,8 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         lines.append("")
         lines.append("<b>📡 Market Providers</b>")
         _market_provider_labels = {
-            "Underdog": "Primary Player Props",
-            "PrizePicks": "PropLine — Primary Player Props",
+            "Underdog": "Player Props · Underdog source",
+            "PrizePicks": "Player Props · PrizePicks / PropLine source",
         }
         for provider in ("Underdog", "PrizePicks"):
             info = ht.get_provider_info(provider)
@@ -880,7 +885,7 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
         # ── Phase 2: extended runtime telemetry ───────────────────────────────
         lines.append("")
-        lines.append("<b>📡 Underdog Pipeline</b>")
+        lines.append("<b>📡 Player Props Pipeline</b>")
         ud_scan = ht.last_underdog_scan()
         ud_scan_age = ht.last_underdog_scan_age_str()
         ud_props   = ht.last_underdog_props()
@@ -2508,7 +2513,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             f"🎯 <b>Actionable Player Prop Picks</b>\n\n"
             f"No qualifying player props available right now{hint}.\n\n"
             f"<i>Season-long futures are excluded from this view.\n"
-            f"Underdog and PrizePicks lines are shown separately.</i>",
+            f"All Player Props lines are combined in this view.</i>",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -2786,13 +2791,9 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         entry_lines: list[str] = [
             "━━━━━━━━━━━━━━━━━━",
             f"<b>#{rank} {plh.player_name}</b>",
-            (
-                "🐶 <b>UNDERDOG PICK</b>"
-                if provider == "Underdog"
-                else "🟣 <b>PRIZEPICKS PICK</b>"
-            ),
+            "🎯 <b>PLAYER PROP PICK</b>",
             f"Market: {plh.stat_type}",
-            f"{provider_emoji} {provider} Line: <code>{source_v:.1f}</code>  {_ll(source_v)}",
+            f"🎯 Player Prop Line: <code>{source_v:.1f}</code>  {_ll(source_v)}",
             f"{gt_str}{plh.sport}",
             f"Event: <code>{_html.escape(source_id) if source_id else 'unavailable'}</code>",
             "",
@@ -2898,7 +2899,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         # Only show when there are ≥2 distinct lines
         if len(alt) >= 2 and provider == "Underdog":
             entry_lines.append("")
-            entry_lines.append("📊 <b>Available Underdog Lines:</b>")
+            entry_lines.append("📊 <b>Available Player Prop Lines:</b>")
             alt_labeled = "  ".join(
                 f"{_ll(v).split(' ')[0]} <code>{v:.1f}</code>" for v in alt
             )
@@ -3087,12 +3088,9 @@ def _render_slip_section(
                 pp_pl = comp.lines.get("PrizePicks")
                 pp_v  = pp_pl.line_value if (pp_pl and pp_pl.available) else None
                 _source = getattr(r, "sportsbook", None) or "Underdog"
-                _source_emoji = {"Underdog": "🐶", "PrizePicks": "🟣"}.get(
-                    _source, "📡"
-                )
-                row_parts = [f"{_source_emoji} {_source} {_lv2(best_line)}"]
+                row_parts = [f"🎯 Player Prop {_lv2(best_line)}"]
                 if _source != "PrizePicks" and pp_v is not None:
-                    row_parts.append(f"🟣 PrizePicks {_lv2(pp_v)}")
+                    row_parts.append(f"🎯 Player Prop {_lv2(pp_v)}")
                 provider_row = "\n    " + "  ".join(row_parts)
 
         section.append(
@@ -3226,8 +3224,7 @@ async def _cmd_slip_journal(
         tier_icon = _TIER_EMOJI.get(opp.decision_tier or "", "⚪")
         await update.message.reply_text(
             f"✅ <b>Leg added to {open_slip.slip_code}</b>\n\n"
-            f"{'🟣' if (getattr(opp, 'provider', None) or '').lower() == 'prizepicks' else '🐶'} "
-            f"<b>{(getattr(opp, 'provider', None) or 'Underdog').upper()} PICK</b>\n"
+            f"🎯 <b>PLAYER PROP PICK</b>\n"
             f"{tier_icon} <b>{opp.player_name}</b> · {opp.stat_type}\n"
             f"{opp.recommendation} <code>{opp.line_value:g}</code>  ·  "
             f"conf <code>{opp.confidence}/100</code>  ·  {opp.sport}\n\n"
@@ -3272,8 +3269,8 @@ async def _cmd_slip_journal(
             av  = f"  <i>(actual: {leg.actual_value:g})</i>" if leg.actual_value is not None else ""
             _leg_provider = getattr(leg, "provider", None) or "Underdog"
             lines.append(
-                f"{sym} {'🟣' if _leg_provider.lower() == 'prizepicks' else '🐶'} "
-                f"<b>{_leg_provider.upper()} PICK</b> · <b>{leg.player_name}</b> {leg.direction or ''} "
+                f"{sym} 🎯 "
+                f"<b>PLAYER PROP PICK</b> · <b>{leg.player_name}</b> {leg.direction or ''} "
                 f"<code>{leg.line_value:g}</code> · {leg.stat_type}{av}"
             )
 
@@ -3334,8 +3331,7 @@ async def _cmd_slip_journal(
             sym = {"HIT": "✅", "MISS": "❌", "PUSH": "🔁", "PENDING": "⏳"}.get(leg.result, "⏳")
             _leg_provider = getattr(leg, "provider", None) or "Underdog"
             lines.append(
-                f"  {sym} {'🟣' if _leg_provider.lower() == 'prizepicks' else '🐶'} "
-                f"{_leg_provider.upper()} · {leg.player_name} · "
+                f"  {sym} 🎯 PLAYER PROP · {leg.player_name} · "
                 f"{leg.direction or ''} {leg.line_value:g} · {leg.stat_type}"
             )
 
@@ -3728,11 +3724,8 @@ async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 _ts_str = _fmt_user_ts(_ts)
                 _rec  = getattr(r, "recommendation", "")
                 _rec_icon = "⬆️" if _rec == "OVER" else ("⬇️" if _rec == "UNDER" else "")
-                _source = getattr(r, "provider", None) or "Underdog"
-                _source_icon = "🟣" if _source == "PrizePicks" else "🐶"
-                _source_label = "PRIZEPICKS" if _source == "PrizePicks" else "UNDERDOG"
                 lines.append(
-                    f"  {_source_icon} <b>{_source_label} PICK</b> · "
+                    f"  🎯 <b>PLAYER PROP PICK</b> · "
                     f"{_rec_icon} <b>{r.player_name}</b>  {r.stat_type}  "
                     f"<code>{_lv:.1f}</code>  ·  <i>{r.sport}</i>"
                     f"  ·  {_ts_str}"
@@ -5674,16 +5667,15 @@ async def cmd_player(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             if getattr(r, "actual_value", None) is not None else ""
         )
         recommendation = str(getattr(r, "recommendation", "") or "").upper()
-        source = getattr(r, "provider", None) or "Underdog"
         lines.append(
             f"{sym} "
-            f"{'🟣' if source.lower() == 'prizepicks' else '🐶'} "
-            f"<b>{source.upper()} {'PICK' if recommendation else 'TRACKED'}</b> · "
+            f"🎯 "
+            f"<b>PLAYER PROP {'PICK' if recommendation else 'TRACKED'}</b> · "
             f"<b>{r.stat_type}</b> {recommendation or 'TRACKED'} "
             f"<code>{r.line_value:g}</code>  ·  {r.sport}  ·  {date}{av}"
         )
 
-    lines.append("\n<i>Source: prop_opportunity_log · providers shown per pick</i>")
+    lines.append("\n<i>Source: prop_opportunity_log · Player Props combined</i>")
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
 

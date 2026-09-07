@@ -528,8 +528,8 @@ def format_ud_removal_alert(
 ) -> str:
     """Format a provider-labeled removal alert for a previously alerted prop."""
     _fmt_dt = lambda dt: dt.strftime("%b %-d %H:%M UTC") if dt else "—"
-    provider = str(provider or "Underdog").strip() or "Underdog"
-    source_emoji = "🟣" if provider.lower() == "prizepicks" else "🐶"
+    provider = str(provider or "Player Props").strip() or "Player Props"
+    source_emoji = "🎯"
 
     duration_str = "—"
     if first_seen and last_seen:
@@ -540,10 +540,10 @@ def format_ud_removal_alert(
             duration_str = f"{secs // 3600}h {(secs % 3600) // 60}m"
 
     return "\n".join([
-        f"🚫 <b>{provider.upper()} PROP REMOVED</b>",
+        f"🚫 <b>PLAYER PROP REMOVED</b>",
         f"",
         f"<b>{player_name}</b>  ·  {sport}  ·  {stat_type}",
-        f"{source_emoji} {provider} Line: <b>{last_line:.1f}</b>",
+        f"{source_emoji} Player Prop Line: <b>{last_line:.1f}</b>",
         f"",
         f"First seen:      {_fmt_dt(first_seen)}",
         f"Last seen:       {_fmt_dt(last_seen)}",
@@ -603,9 +603,9 @@ def format_help_message(commands=None) -> str:
             )
         lines.extend([
             "",
-            "<b>Primary Player Prop Providers</b>",
-            "  🟢 <b>Underdog</b> — Primary Player Props",
-            "  🟢 <b>PrizePicks</b> — PropLine — Primary Player Props",
+            "<b>Player Props</b>",
+            "  🟢 <b>Player Props</b> — Underdog source",
+            "  🟢 <b>Player Props</b> — PrizePicks / PropLine source",
             "",
             "<i>Monitoring player props across multiple sports. Not betting advice.</i>",
         ])
@@ -770,11 +770,17 @@ def _sanitize_user_alert_message(message: str) -> str:
     )
     text = re.sub(r"\bACTIONABLE(?: BET PICK)?\b", "", text, flags=re.IGNORECASE)
     # Normalize legacy provider-specific PLAY headers at the final boundary.
-    # The playable source is still shown in the line block below the
-    # product-level header.
+    # Provider identity remains in internal records; Telegram uses one
+    # product-level Player Props label.
     text = re.sub(
-        r"(?:🐶|🟣)\s*<b>\s*(?:UNDERDOG|PRIZEPICKS)\s+PICK\s*</b>",
-        "📊 <b>SHARP MONEY PLAY</b>",
+        r"(?:🐶|🟣|🎯)\s*<b>\s*(?:UNDERDOG|PRIZEPICKS|PLAYER PROP)\s+PICK\s*</b>",
+        "📊 <b>PLAYER PROP PLAY</b>",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"\b(?:UNDERDOG|PRIZEPICKS)\s+(?:PROP|LINE|PICK|PLAY)\b",
+        "PLAYER PROP",
         text,
         flags=re.IGNORECASE,
     )
@@ -1004,12 +1010,12 @@ def format_pp_alert(
     under_fmt = format_odds(opp.sportsbook_under_odds)
 
     parts = [
-        f"📊 <b>SHARP MONEY PLAY</b>",
+        f"📊 <b>PLAYER PROP PLAY</b>",
         "",
         f"{s_icon} <b>{pp.sport} — {pp.stat_type}</b>",
         f"👤 <b>{pp.player_name}</b> ({pp.team})",
         "",
-        f"🟣 <b>PrizePicks Line:</b>  {pp.line_value} ({pp.stat_type})",
+        f"🎯 <b>Player Prop Line:</b>  {pp.line_value} ({pp.stat_type})",
         f"📊 <b>Reference Line:</b>   {opp.sportsbook_line} ({opp.sportsbook}) [{line_note}]",
         f"📉 <b>SB Odds:</b>     O {over_fmt} / U {under_fmt}",
         "",
@@ -1035,7 +1041,7 @@ def format_pp_alert(
         f"─────────────────────────────",
         *_risk_section(risk_factors),
         "",
-        f"<i>PrizePicks line and market context are shown for research.</i>",
+        f"<i>Player prop line and market context are shown for research.</i>",
     ]
 
     return "\n".join(parts)
@@ -1078,21 +1084,21 @@ def format_pp_reference_alert(match: "PPReferenceMatch") -> str:  # noqa: F821
     )
 
     lines = [
-        f"🟣 <b>PRIZEPICKS REFERENCE ALERT</b>",
+        f"🎯 <b>PLAYER PROP REFERENCE ALERT</b>",
         "",
         f"{s_icon} <b>{sport}</b>  ·  {match.stat_type}",
         f"👤 <b>{match.player_name}</b>",
         "",
         f"─────────────────────────────",
-        f"📊 <b>Underdog Line:</b>    {ud_line_str}",
-        f"🎯 <b>Inferred PP Line:</b> {pp_line_str}",
+        f"🎯 <b>Player Prop Line:</b>    {ud_line_str}",
+        f"🎯 <b>Reference Prop Line:</b> {pp_line_str}",
         f"    <i>{pp_note}</i>",
         "",
-        f"📡 <b>Source:</b>      {source_label}",
+        f"📡 <b>Player Props Source:</b> {source_label}",
         f"",
         f"─────────────────────────────",
-        f"⚠️  <b>Reference only — not confirmed PrizePicks data.</b>",
-        f"    Underdog and PrizePicks lines typically match within ±0.5",
+        f"⚠️  <b>Reference only — not confirmed provider data.</b>",
+        f"    Player prop lines typically match within ±0.5",
         f"    but can diverge.",
         f"",
         f"{EMOJI['clock']} <i>{match.matched_at.strftime('%Y-%m-%d %H:%M UTC')}</i>",

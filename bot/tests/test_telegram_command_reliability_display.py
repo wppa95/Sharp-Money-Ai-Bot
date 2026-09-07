@@ -141,8 +141,8 @@ def test_canonical_provider_roles_are_exact():
     lines = commands._primary_player_prop_provider_lines(_health_monitor())
 
     assert lines == [
-        "  ⚪ <b>Underdog</b> — Primary Player Props",
-        "  ⚪ <b>PrizePicks</b> — PropLine — Primary Player Props",
+        "  ⚪ <b>Player Props</b> <i>(Underdog source)</i> — available",
+        "  ⚪ <b>Player Props</b> <i>(PrizePicks / PropLine source)</i> — available",
     ]
 
 
@@ -155,9 +155,9 @@ def test_provider_roles_show_degraded_underdog_and_disabled_prizepicks():
     lines = commands._primary_player_prop_provider_lines(monitor)
     runtime = commands._primary_provider_runtime_lines(monitor)
 
-    assert lines[0] == "  🟡 <b>Underdog</b> — Primary Player Props"
-    assert lines[1] == "  ⚪ <b>PrizePicks</b> — PropLine — Unavailable"
-    assert "    🟡 Underdog: degraded" in runtime[1]
+    assert lines[0] == "  🟡 <b>Player Props</b> <i>(Underdog source)</i> — available"
+    assert lines[1] == "  ⚪ <b>Player Props</b> <i>(PrizePicks / PropLine source)</i> — Unavailable"
+    assert "    🟡 Player Props <i>(Underdog source)</i>: degraded" in runtime[1]
     assert "1 failure" in runtime[1]
 
 
@@ -212,8 +212,8 @@ async def test_status_shows_provider_roles_and_separate_history_counts():
         await commands.cmd_status(update, context)
 
     message = update.message.reply_text.await_args.args[0]
-    assert "⚪ <b>Underdog</b> — Primary Player Props" in message
-    assert "⚪ <b>PrizePicks</b> — PropLine — Primary Player Props" in message
+    assert "⚪ <b>Player Props</b> <i>(Underdog source)</i> — available" in message
+    assert "⚪ <b>Player Props</b> <i>(PrizePicks / PropLine source)</i> — available" in message
     assert "DraftKings/FanDuel" not in message
     assert "Underdog: 20" in message
     assert "PrizePicks (PropLine): 10" in message
@@ -322,10 +322,10 @@ async def test_providers_command_includes_live_primary_provider_health():
         await commands.cmd_providers(update, context)
 
     message = update.message.reply_text.await_args.args[0]
-    assert "🟡 <b>Underdog</b> — Primary Player Props" in message
-    assert "⚪ <b>PrizePicks</b> — PropLine — Primary Player Props" in message
-    assert "🟡 Underdog: degraded" in message
-    assert "⚪ PrizePicks: awaiting first successful fetch" in message
+    assert "🟡 <b>Player Props</b> <i>(Underdog source)</i> — available" in message
+    assert "⚪ <b>Player Props</b> <i>(PrizePicks / PropLine source)</i> — available" in message
+    assert "🟡 Player Props <i>(Underdog source)</i>: degraded" in message
+    assert "⚪ Player Props <i>(PrizePicks source)</i>: awaiting first successful fetch" in message
 
 
 def test_dashboard_report_does_not_merge_provider_breakdowns():
@@ -545,8 +545,7 @@ async def test_alert_history_preserves_uppercase_provider_pick_labels():
         await commands.cmd_alerts(update, context)
 
     message = update.message.reply_text.await_args.args[0]
-    assert "<b>UNDERDOG PICK</b>" in message
-    assert "<b>PRIZEPICKS PICK</b>" in message
+    assert message.count("<b>PLAYER PROP PICK</b>") == 2
 
 
 @pytest.mark.asyncio
@@ -625,14 +624,14 @@ async def test_real_underdog_registry_failure_and_recovery_reach_command_output(
     await run_job()
     degraded = await provider_message()
     assert monitor.get_health("Underdog").status == ProviderStatus.DEGRADED
-    assert "🟡 <b>Underdog</b> — Primary Player Props" in degraded
-    assert "🟡 Underdog: degraded" in degraded
+    assert "🟡 <b>Player Props</b> <i>(Underdog source)</i> — available" in degraded
+    assert "🟡 Player Props <i>(Underdog source)</i>: degraded" in degraded
 
     await run_job()
     recovered = await provider_message()
     assert monitor.get_health("Underdog").status == ProviderStatus.OK
-    assert "🟢 <b>Underdog</b> — Primary Player Props" in recovered
-    assert "🟢 Underdog: ok" in recovered
+    assert "🟢 <b>Player Props</b> <i>(Underdog source)</i> — available" in recovered
+    assert "🟢 Player Props <i>(Underdog source)</i>: ok" in recovered
 
 
 @pytest.mark.asyncio
@@ -840,7 +839,7 @@ async def test_broadcast_alert_does_not_use_strong_bet_label_as_a_send_gate():
     bot = MagicMock()
     bot.send_message = AsyncMock()
 
-    weak = "📊 <b>SHARP MONEY PLAY</b>\n📌 <b>PICK:</b> 🟢 <b>OVER 0.5</b>"
+    weak = "📊 <b>PLAYER PROP PLAY</b>\n📌 <b>PICK:</b> 🟢 <b>OVER 0.5</b>"
     assert await broadcast_alert(bot, [123], weak, sport="MLB") == {
         "sent": 1,
         "failed": 0,
@@ -854,7 +853,7 @@ async def test_telegram_boundary_removes_all_quality_metadata_but_keeps_pick_con
     bot = MagicMock()
     bot.send_message = AsyncMock()
     raw = (
-        "📊 <b>SHARP MONEY PLAY</b>\n"
+        "📊 <b>PLAYER PROP PLAY</b>\n"
         "👤 <b>Yordan Alvarez</b> · Hits + Runs + RBIs\n"
         "📌 <b>PICK:</b> 🟢 <b>OVER 1.5</b>\n"
         "💪 STRONG BET\n"
