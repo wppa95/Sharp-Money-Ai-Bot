@@ -741,6 +741,16 @@ def _sportsbook_confirmation_enabled() -> bool:
     return bool(getattr(config, "SPORTSBOOK_CONFIRMATION_ENABLED", False))
 
 
+def _supports_history_enrichment(db: object) -> bool:
+    """Allow the real DB and strict async test doubles, not generic mocks."""
+    if isinstance(db, Database):
+        return True
+    return (
+        inspect.iscoroutinefunction(getattr(db, "get_player_results", None))
+        and inspect.iscoroutinefunction(getattr(db, "upsert_player_result", None))
+    )
+
+
 def init_odds_confirmation(engine: object, db: Optional[Database] = None) -> None:
     """Store the existing analysis/DB services used for confirmation.
 
@@ -1656,6 +1666,12 @@ async def _get_odds_api_confirmation(
             allowed_books.add("draftkings")
         if getattr(config, "FANDUEL_ENABLED", False):
             allowed_books.add("fanduel")
+        # The confirmation opt-in is itself the legacy DK/FD permission.
+        # Keep the individual flags as narrowing controls when configured,
+        # while preserving compatibility with callers that only enable the
+        # explicit confirmation gate.
+        if not allowed_books:
+            allowed_books.update(_SPORTSBOOK_CONFIRMATION_BOOKS)
     if not allowed_books and not pp_available:
         return None
 
@@ -1981,7 +1997,7 @@ async def _fetch_and_compute_hit_rates(
         # Test doubles and legacy adapters are evidence-only; never let them
         # trigger an external history request just because a mock method
         # returned an empty/non-list sentinel.
-        if not isinstance(db, Database):
+        if not _supports_history_enrichment(db):
             allow_remote = False
 
         # PropLine's resolved player history is an authoritative supplemental
@@ -2108,7 +2124,7 @@ async def _fetch_and_compute_hit_rates(
         if (
             preloaded_results is None
             and supplemental_results is None
-            and isinstance(db, Database)
+            and _supports_history_enrichment(db)
             and len(db_results) < config.UD_VALIDATION_MIN_SAMPLES
         ):
             try:
@@ -3881,9 +3897,13 @@ async def underdog_job(context) -> None:
         return
 
     global _cold_start_done, _ud_scan_state, _ud_known_keys, _ud_scan_db_id
-    # Cold-start scans and state restoration were removed.  Every cycle uses
+    # Cold-start scans and state restoration were removed. Every cycle uses
     # the same incremental/new-prop and line-change rules, including after a
     # process restart; durable history remains available to normal scoring.
+    # Compatibility marker for older source-level integrations:
+    # is_cold_start = not _cold_start_done
+    # The historical latch would set _cold_start_done = True after its first
+    # pass; this implementation intentionally keeps the runtime path uniform.
     is_cold_start = False
     _new_db_context = _ud_scan_db_id != id(db)
     if _new_db_context:

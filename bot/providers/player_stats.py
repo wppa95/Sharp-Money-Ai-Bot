@@ -444,7 +444,10 @@ class PlayerStatsProvider:
                 # be distinguished from zero-stat games, producing invalid hit rates.
                 # Enable manually: UD_ALERT_SPORTS=...,SOCCER + FOOTBALL_DATA_API_KEY.
                 # _fetch_espn_soccer() is also available for ESPN-accessible envs.
-                if not os.environ.get("FOOTBALL_DATA_API_KEY"):
+                if (
+                    not os.environ.get("FOOTBALL_DATA_API_KEY")
+                    and _soccer_provider_instance is None
+                ):
                     logger.debug(
                         "Soccer optional provider disabled; using stored/PropLine history"
                     )

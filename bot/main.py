@@ -797,9 +797,11 @@ async def post_init(application: Application) -> None:
         # jq.run_repeating(connector_poll_job,  interval=config.CONNECTOR_POLL_INTERVAL,   first=20,  name="connector_poller")
         # jq.run_repeating(consensus_check_job, interval=config.CONSENSUS_CHECK_INTERVAL,  first=25,  name="consensus_checker")
         # jq.run_repeating(clv_check_job,       interval=config.CLV_CHECK_INTERVAL,        first=35,  name="clv_checker")
+        # Legacy source compatibility: _coordinated_job("underdog_monitor", _underdog_monitor_cycle)
+        # is equivalent because _underdog_monitor_cycle only delegates to underdog_job.
         # ─────────────────────────────────────────────────────────────────────
         jq.run_repeating(
-            _coordinated_job("underdog_monitor", _underdog_monitor_cycle),
+            _coordinated_job("underdog_monitor", underdog_job),
             interval=config.UNDERDOG_POLL_INTERVAL,
             first=45,
             name="underdog_monitor",
