@@ -120,3 +120,4 @@
 - [PropLine read-only capability boundary](propline-readonly-capabilities.md) — raw game context is supplemental only after final status; live/football data cannot enter persisted evidence or alerts.
 - [Player history persistence boundary](player-history-persistence.md) — fetch cadence may expire, but completed results remain a durable write obligation and must drain in bounded batches or report failure.
 - [Telegram command catalog](telegram-command-catalog.md) — command metadata is durable in SQLite and drives the menu/help surface while callbacks remain code-owned.
+- [Non-MLB funnel populations](non-mlb-funnel.md) — separate observation, normalization, evaluation, direction, and delivery populations; neutral FPR evaluations still need telemetry.

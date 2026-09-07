@@ -64,6 +64,14 @@ _TENNIS_STAT_MAP: dict[str, tuple[str, str]] = {
     "total games":      ("_games_w", "_games_l"),
     "sets won":         ("_sets_w",  "_sets_l"),
     "sets":             ("_sets_w",  "_sets_l"),
+    "games played":     ("_games_total", "_games_total"),
+    "sets played":      ("_sets_total", "_sets_total"),
+    "1st set games won": ("_first_set_games_w", "_first_set_games_l"),
+    "1st set games played": (
+        "_first_set_games_total", "_first_set_games_total"
+    ),
+    "tiebreakers played": ("_tiebreaks", "_tiebreaks"),
+    "tie breakers played": ("_tiebreaks", "_tiebreaks"),
 }
 
 
@@ -124,6 +132,25 @@ def _parse_sets(score: str) -> Optional[tuple[int, int]]:
             l_sets += 1
         # draws don't happen in tennis sets
     return (w_sets, l_sets)
+
+
+def _parse_first_set(score: str) -> Optional[tuple[int, int, int]]:
+    """Return first-set games and whether that set used a tiebreak."""
+    if not score:
+        return None
+    low = score.lower()
+    if any(x in low for x in ("ret", "w/o", "walkover", "def", "bye", "unfinished")):
+        return None
+    first = score.split()[0]
+    has_tiebreak = 1 if "(" in first and ")" in first else 0
+    first = first.split("(")[0]
+    parts = first.split("-")
+    if len(parts) != 2:
+        return None
+    try:
+        return (int(parts[0]), int(parts[1]), has_tiebreak)
+    except ValueError:
+        return None
 
 
 def _tourney_date_to_iso(date_str: str) -> Optional[str]:
@@ -253,17 +280,37 @@ class TennisStatsProvider:
         col   = winner_col if player_won else loser_col
         score = row.get("score", "")
 
-        if col in ("_games_w", "_games_l"):
+        if col in ("_games_w", "_games_l", "_games_total"):
             parsed = _parse_score(score)
             if parsed is None:
                 return None
-            val = float(parsed[0] if player_won else parsed[1])
+            if col == "_games_total":
+                val = float(sum(parsed))
+            else:
+                val = float(parsed[0] if player_won else parsed[1])
 
-        elif col in ("_sets_w", "_sets_l"):
+        elif col in ("_sets_w", "_sets_l", "_sets_total"):
             parsed = _parse_sets(score)
             if parsed is None:
                 return None
-            val = float(parsed[0] if player_won else parsed[1])
+            if col == "_sets_total":
+                val = float(sum(parsed))
+            else:
+                val = float(parsed[0] if player_won else parsed[1])
+
+        elif col in (
+            "_first_set_games_w", "_first_set_games_l",
+            "_first_set_games_total", "_tiebreaks",
+        ):
+            parsed = _parse_first_set(score)
+            if parsed is None:
+                return None
+            if col == "_tiebreaks":
+                val = float(parsed[2])
+            elif col == "_first_set_games_total":
+                val = float(parsed[0] + parsed[1])
+            else:
+                val = float(parsed[0] if player_won else parsed[1])
 
         else:
             raw = row.get(col, "")

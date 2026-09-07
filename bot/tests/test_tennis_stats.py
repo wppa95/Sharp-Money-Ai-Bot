@@ -33,6 +33,7 @@ from providers.tennis_stats import (
     _TENNIS_STAT_MAP,
     _parse_score,
     _parse_sets,
+    _parse_first_set,
     _tourney_date_to_iso,
 )
 from providers.player_stats import RawGameResult
@@ -95,6 +96,11 @@ class TestParseSets:
         assert result == (3, 2)
 
 
+def test_first_set_parser_preserves_tiebreak_presence():
+    assert _parse_first_set("7-6(4) 6-3") == (7, 6, 1)
+    assert _parse_first_set("6-3 7-5") == (6, 3, 0)
+
+
 # ── _tourney_date_to_iso ──────────────────────────────────────────────────────
 
 class TestTourneyDateToIso:
@@ -123,6 +129,9 @@ class TestTennisStatMap:
         "sets won",
         "sets",
         "service points",
+        "tiebreakers played",
+        "games played",
+        "sets played",
     ]
 
     def test_all_required_types_mapped(self):
@@ -204,6 +213,14 @@ class TestExtractResult:
         row    = _make_row(score="6-3 4-6 7-5")
         result = TennisStatsProvider._extract_result(
             row, "Carlos Alcaraz", "sets won", ("_sets_w", "_sets_l")
+        )
+        assert result is not None
+        assert result.actual_value == 1.0
+
+    def test_tiebreakers_played(self):
+        row = _make_row(score="7-6(4) 6-3")
+        result = TennisStatsProvider._extract_result(
+            row, "Novak Djokovic", "tiebreakers played", ("_tiebreaks", "_tiebreaks")
         )
         assert result is not None
         assert result.actual_value == 1.0

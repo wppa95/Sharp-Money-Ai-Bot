@@ -66,6 +66,7 @@ _STAT_NORM: dict[str, str] = {
     "assists":            "assists",
     "key passes":         "key passes",
     "shots on target":    "shots on target",
+    "shots attempted":    "shots attempted",
     # Note: "shots" is kept as "shots on goal" (hockey) below; Underdog soccer
     # uses the more specific "shots on target" key, not a bare "shots" key.
     "goalkeeper saves":   "goalkeeper saves",
@@ -82,11 +83,26 @@ _STAT_NORM: dict[str, str] = {
     # Tennis
     "games won":       "games won",
     "sets won":        "sets won",
+    "games played":    "games played",
+    "sets played":     "sets played",
+    "1st set games won": "1st set games won",
+    "1st set games played": "1st set games played",
+    "tiebreakers played": "tiebreakers played",
+    "tie breakers played": "tiebreakers played",
+    "aces":            "aces",
+    "double faults":  "double faults",
+    "points won":     "points won",
+    "breakpoints won": "breakpoints won",
+    "1st set aces":   "1st set aces",
     # Esports
     "kills":           "kills",
     "deaths":          "deaths",
     "maps won":        "maps won",
     "cs":              "cs per min",
+    "significant strikes": "significant strikes",
+    "fight time (mins)": "fight time (mins)",
+    "takedowns": "takedowns",
+    "finishing position": "finishing position",
 }
 
 

@@ -5186,6 +5186,26 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         except Exception as _provider_exc:
             logger.debug("cmd_funnel: provider reconciliation unavailable: %s", _provider_exc)
 
+        # Use the normalized funnel populations for the provider headline when
+        # available.  Reconciliation also includes transport/audit rows, but
+        # its historical-observation definition must not disagree with the
+        # sport table below.
+        _normalized_provider_pipeline = summary.get("provider_breakdown", {}) or {}
+        if _normalized_provider_pipeline:
+            provider_pipeline = {
+                provider: {
+                    "observed": values.get("historical_observations", 0),
+                    "evaluated": values.get("evaluated", 0),
+                    "tracked": values.get("active_tracked", 0),
+                    "directional": values.get("directional", 0),
+                    "actionable_persisted": values.get("actionable", 0),
+                    "audit_delivered_alerts": values.get("delivered", 0),
+                    "pending": values.get("pending", 0),
+                    "resolved": values.get("resolved", 0),
+                }
+                for provider, values in _normalized_provider_pipeline.items()
+            }
+
         if provider_pipeline:
             lines += [
                 "",
@@ -5469,15 +5489,20 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             else:
                 lines += [
                     "",
-                    f"{'Sport':<12} {'Active':>8} {'Observed':>9} {'Directional':>12} {'Delivered':>10}",
+                    f"{'Sport':<12} {'Active':>8} {'Observed':>9} "
+                    f"{'Directional':>12} {'Delivered':>10}",
                     "─" * 57,
                 ]
                 normalized_observed_by_sport = (
                     summary.get("observations_by_sport", {}) or {}
                 )
+                normalized_evaluated_by_sport = (
+                    summary.get("evaluated_by_sport", {}) or {}
+                )
                 _sports = (
                     set(normalized_by_sport)
                     | set(normalized_observed_by_sport)
+                    | set(normalized_evaluated_by_sport)
                     | set(normalized_directional_by_sport)
                     | set(normalized_delivered_by_sport)
                 )
@@ -5492,10 +5517,17 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     sp = _html.escape(str(sport)[:11])
                     sc = normalized_by_sport.get(sport, 0)
                     so = normalized_observed_by_sport.get(sport, 0)
+                    se = normalized_evaluated_by_sport.get(sport, 0)
                     sa = normalized_directional_by_sport.get(sport, 0)
                     sd = normalized_delivered_by_sport.get(sport, 0)
                     lines.append(
-                        f"<code>{sp:<12} {sc:>8} {so:>9} {sa:>12} {sd:>10}</code>"
+                        f"<code>{sp:<12} {sc:>8} {so:>9} "
+                        f"{sa:>12} {sd:>10}</code>"
+                    )
+                    # Keep the compact legacy row stable for Telegram clients
+                    # while exposing the newer analysis populations beneath it.
+                    lines.append(
+                        f"  <i>evaluated {se} · actionable {sa}</i>"
                     )
         else:
             lines += ["", "<i>Sport breakdown accumulates as the bot scans props.</i>"]

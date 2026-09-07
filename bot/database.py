@@ -3366,7 +3366,7 @@ class Database:
         keys = {
             _identity(
                 getattr(prop, "player_name", "") or "",
-                getattr(prop, "sport", "") or "",
+                str(getattr(prop, "sport", "") or "").upper().strip(),
                 getattr(prop, "stat_type", "") or "",
                 (
                     getattr(prop, "event_id", "")
@@ -3395,7 +3395,7 @@ class Database:
             for row in result.scalars().all():
                 key = _identity(
                     row.player_name,
-                    row.sport,
+                    str(row.sport or "").upper().strip(),
                     row.stat_type,
                     row.game_id or "",
                     row.external_id or "",
@@ -3405,7 +3405,7 @@ class Database:
             for prop in props:
                 key = _identity(
                     getattr(prop, "player_name", "") or "",
-                    getattr(prop, "sport", "") or "",
+                    str(getattr(prop, "sport", "") or "").upper().strip(),
                     getattr(prop, "stat_type", "") or "",
                     (
                         getattr(prop, "event_id", "")
@@ -3950,7 +3950,7 @@ class Database:
 
     async def sync_underdog_snapshots_to_prop_history(
         self,
-        limit: int = 200,
+        limit: int | None = None,
         since_hours: int = 48,
     ) -> int:
         """
@@ -3972,12 +3972,14 @@ class Database:
 
         # Load recent Underdog snapshots (all, including removed — we track removals)
         async with self.session() as s:
-            result = await s.execute(
+            snapshot_query = (
                 select(UnderdogSnapshotRecord)
                 .where(UnderdogSnapshotRecord.fetched_at >= cutoff)
-                .order_by(UnderdogSnapshotRecord.fetched_at.asc())  # oldest first
-                .limit(limit)
+                .order_by(UnderdogSnapshotRecord.fetched_at.asc())
             )
+            if limit is not None and int(limit) > 0:
+                snapshot_query = snapshot_query.limit(int(limit))
+            result = await s.execute(snapshot_query)
             snaps = list(result.scalars().all())
 
         if not snaps:
@@ -4026,7 +4028,7 @@ class Database:
         for snap in snaps:
             key = (
                 snap.player_name or "",
-                snap.sport or "",
+                str(snap.sport or "").upper().strip(),
                 snap.stat_type or "",
                 getattr(snap, "external_id", None)
                 or getattr(snap, "game_id", None)
@@ -6748,7 +6750,7 @@ class Database:
                 if not _is_supported_tracking_sport(sport):
                     continue
                 provider_key = str(provider or "Unknown")
-                sport_key = str(sport or "UNKNOWN")
+                sport_key = str(sport or "UNKNOWN").upper().strip()
                 tracked_observations_by_provider[provider_key] = (
                     tracked_observations_by_provider.get(provider_key, 0)
                     + int(count or 0)
@@ -6829,7 +6831,7 @@ class Database:
             for provider, sport in current_rows:
                 if not _is_supported_tracking_sport(sport):
                     continue
-                sport_key = str(sport or "UNKNOWN")
+                sport_key = str(sport or "UNKNOWN").upper().strip()
                 provider_key = str(provider or "Unknown")
                 by_sport_counts[sport_key] = by_sport_counts.get(sport_key, 0) + 1
                 by_provider_counts[provider_key] = (
@@ -6869,7 +6871,7 @@ class Database:
                 if not _is_supported_tracking_sport(sport):
                     continue
                 provider_key = str(provider or "Unknown")
-                sport_key = str(sport or "UNKNOWN")
+                sport_key = str(sport or "UNKNOWN").upper().strip()
                 result_key = str(result or "PENDING").upper()
                 tracked_total += 1
                 tracked_by_provider[provider_key] = (
@@ -6923,7 +6925,7 @@ class Database:
                 directional_by_provider[provider_key] = (
                     directional_by_provider.get(provider_key, 0) + 1
                 )
-                sport_key = str(sport or "UNKNOWN")
+                sport_key = str(sport or "UNKNOWN").upper().strip()
                 directional_by_sport[sport_key] = (
                     directional_by_sport.get(sport_key, 0) + 1
                 )
@@ -6956,7 +6958,7 @@ class Database:
                 delivered_by_provider[provider_key] = (
                     delivered_by_provider.get(provider_key, 0) + 1
                 )
-                sport_key = str(audit.sport or "UNKNOWN")
+                sport_key = str(audit.sport or "UNKNOWN").upper().strip()
                 delivered_by_sport[sport_key] = (
                     delivered_by_sport.get(sport_key, 0) + 1
                 )
@@ -6977,7 +6979,7 @@ class Database:
                 if not _is_supported_tracking_sport(sport):
                     continue
                 provider_key = str(provider or "Unknown")
-                sport_key = str(sport or "UNKNOWN")
+                sport_key = str(sport or "UNKNOWN").upper().strip()
                 count_value = int(count or 0)
                 evaluated_total += count_value
                 evaluated_by_provider[provider_key] = (

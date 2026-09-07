@@ -81,6 +81,10 @@ _STAT_NORM: dict[str, str] = {
     "strikeouts":        "strikeouts",
     "walks":             "walks",
     "total bases":       "total bases",
+    "runs":              "runs",
+    "stolen bases":      "stolen bases",
+    "hits + runs + rbis": "hits+runs+rbis",
+    "batter walks":      "walks",
     # American football
     "rushing yards":     "rushing yards",
     "receiving yards":   "receiving yards",
@@ -92,6 +96,9 @@ _STAT_NORM: dict[str, str] = {
     "shots":             "shots on goal",
     "shots on goal":     "shots on goal",
     "goals+assists":     "points",
+    "goals + assists":   "points",
+    "shots on target":   "shots on target",
+    "shots attempted":   "shots attempted",
     # Esports
     "kills":             "kills",
     "deaths":            "deaths",
@@ -99,6 +106,21 @@ _STAT_NORM: dict[str, str] = {
     # Tennis
     "games won":         "games won",
     "sets won":          "sets won",
+    "games played":      "games played",
+    "sets played":       "sets played",
+    "1st set games won": "1st set games won",
+    "1st set games played": "1st set games played",
+    "tiebreakers played": "tiebreakers played",
+    "tie breakers played": "tiebreakers played",
+    "aces":              "aces",
+    "double faults":     "double faults",
+    "points won":        "points won",
+    "breakpoints won":   "breakpoints won",
+    "1st set aces":      "1st set aces",
+    "significant strikes": "significant strikes",
+    "fight time (mins)":   "fight time (mins)",
+    "takedowns":           "takedowns",
+    "finishing position":  "finishing position",
 }
 
 #: Set of canonical PP stat names (values of _STAT_NORM).

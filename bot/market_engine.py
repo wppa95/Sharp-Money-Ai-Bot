@@ -288,7 +288,7 @@ class _CycleTiming:
         started = time.monotonic()
         self.count(f"{category}_operations")
         try:
-            return await awaitable
+            return await awaitable if inspect.isawaitable(awaitable) else awaitable
         finally:
             elapsed = time.monotonic() - started
             self.duration(category, elapsed)
@@ -296,7 +296,7 @@ class _CycleTiming:
     async def await_db(self, kind: str, operation: str, awaitable):
         started = time.monotonic()
         try:
-            return await awaitable
+            return await awaitable if inspect.isawaitable(awaitable) else awaitable
         finally:
             self.database(kind, operation, time.monotonic() - started)
 
@@ -1939,7 +1939,7 @@ async def _candidate_line_history(
     awaitable = db.get_ud_prop_history(player, stat, limit=30)
     if cycle_timing is not None:
         return await cycle_timing.await_db("read", operation, awaitable)
-    return await awaitable
+    return await awaitable if inspect.isawaitable(awaitable) else awaitable
 
 
 def _candidate_player_results(
@@ -1978,6 +1978,12 @@ async def _fetch_and_compute_hit_rates(
     cache_key = (player_name, sport, stat_type.lower().strip(), today)
 
     try:
+        # Test doubles and legacy adapters are evidence-only; never let them
+        # trigger an external history request just because a mock method
+        # returned an empty/non-list sentinel.
+        if not isinstance(db, Database):
+            allow_remote = False
+
         # PropLine's resolved player history is an authoritative supplemental
         # evidence source for the same pick'em market.  For CS in particular,
         # do not make PandaScore a prerequisite when PropLine already has the
@@ -2093,6 +2099,8 @@ async def _fetch_and_compute_hit_rates(
             )
         else:
             db_results = await db.get_player_results(player_name, sport, stat_type, limit=30)
+        if not isinstance(db_results, list):
+            db_results = []
         if cycle_timing is not None:
             cycle_timing.count("evidence_lookups")
         primary_result_count = len(db_results)
@@ -2100,6 +2108,7 @@ async def _fetch_and_compute_hit_rates(
         if (
             preloaded_results is None
             and supplemental_results is None
+            and isinstance(db, Database)
             and len(db_results) < config.UD_VALIDATION_MIN_SAMPLES
         ):
             try:
@@ -3782,7 +3791,7 @@ def _shared_monitoring_cycle(cycle_branch):
                 # passing None would trigger the companion's compatibility
                 # fallback fetch and hold the shared scheduler owner.
                 "_fetched_props": pending_props,
-                "_fetched_sport": "",
+                "_fetched_sport": "paced",
             }
         if "_fetched_persisted" in _pp_params or any(
             parameter.kind is inspect.Parameter.VAR_KEYWORD
@@ -3903,6 +3912,8 @@ async def underdog_job(context) -> None:
 
     async def _await_cycle_budget(awaitable, operation: str):
         """Bound one enrichment call without abandoning later observations."""
+        if not inspect.isawaitable(awaitable):
+            return awaitable
         try:
             return await asyncio.wait_for(awaitable, timeout=30.0)
         except asyncio.TimeoutError:
@@ -4292,9 +4303,11 @@ async def underdog_job(context) -> None:
             )
         )
     if is_cold_start:
-        _cold_start_records.extend(_snapshot_records)
+        for record in _snapshot_records:
+            _cold_start_records.append(record)
     else:
-        _incremental_records.extend(_snapshot_records)
+        for record in _snapshot_records:
+            _incremental_records.append(record)
 
     # Universal grading ledger: persist every valid active daily prop before
     # any scoring, qualification, strongest-pick, or delivery gate runs.
@@ -4612,7 +4625,10 @@ async def underdog_job(context) -> None:
                                 ud_history=np_history,
                                 source_provider="Underdog",
                                 instrumentation=_cycle_timing,
-                                ensure_real_results=_cached_player_results is None,
+                                ensure_real_results=(
+                                    _cached_player_results is None
+                                    and isinstance(db, Database)
+                                ),
                                 preloaded_results=_cached_player_results,
                             ),
                             "new-prop history",
@@ -4921,7 +4937,10 @@ async def underdog_job(context) -> None:
                                 ud_history=ud_history,
                                 source_provider="Underdog",
                                 instrumentation=_cycle_timing,
-                                ensure_real_results=_cached_player_results is None,
+                                ensure_real_results=(
+                                    _cached_player_results is None
+                                    and isinstance(db, Database)
+                                ),
                                 preloaded_results=_cached_player_results,
                             ),
                             "line-change history",
@@ -5101,7 +5120,10 @@ async def underdog_job(context) -> None:
                                 ud_history=ud_history,
                                 source_provider="Underdog",
                                 instrumentation=_cycle_timing,
-                                ensure_real_results=_cached_player_results is None,
+                                ensure_real_results=(
+                                    _cached_player_results is None
+                                    and isinstance(db, Database)
+                                ),
                                 preloaded_results=_cached_player_results,
                             ),
                             "re-entry history",
@@ -5610,7 +5632,10 @@ async def underdog_job(context) -> None:
                             ud_history=_shist,
                             source_provider="Underdog",
                             instrumentation=_cycle_timing,
-                            ensure_real_results=_cached_player_results is None,
+                            ensure_real_results=(
+                                _cached_player_results is None
+                                and isinstance(db, Database)
+                            ),
                             preloaded_results=_cached_player_results,
                         ),
                         "standing history",
@@ -6421,11 +6446,10 @@ async def underdog_job(context) -> None:
                 _cand_total = 0
                 _cand_rows: list[dict] = []
                 for _cp in _scored_props:
-                    # No-direction evaluations stay in the canonical active
-                    # pool and are rescanned; candidate/evidence rows remain
-                    # directional only.
-                    if _cp.get("direction") not in ("OVER", "UNDER"):
-                        continue
+                    # Every scored prop is an evaluation.  Directional
+                    # opportunities remain a separate downstream population;
+                    # dropping neutral evaluations here made non-MLB sports
+                    # appear to have never reached analysis.
                     _ccodes = _compute_reason_codes_from_scored_dict(_cp)
                     _cand_rows.append({
                         "scan_ts":              _now_ts,
@@ -6601,7 +6625,7 @@ async def underdog_job(context) -> None:
         # Compatibility path for direct callers/tests using database doubles.
         try:
             bridged = await db.sync_underdog_snapshots_to_prop_history(
-                limit=6000,
+                limit=100000,
                 since_hours=0.17,
             )
             if bridged:
@@ -7003,7 +7027,10 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     _sr_line,
                     ud_history=_sr_hist,
                     source_provider="Underdog",
-                    ensure_real_results=_sr_cached_results is None,
+                    ensure_real_results=(
+                        _sr_cached_results is None
+                        and isinstance(db, Database)
+                    ),
                     preloaded_results=_sr_cached_results,
                 )
             except Exception:
@@ -7738,6 +7765,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
 
         _fpr_opportunity_rows: list[dict] = []
         _fpr_delivery_candidates: list[dict] = []
+        _fpr_candidate_rows: list[dict] = []
 
         # ── Score each prop in this batch ─────────────────────────────────────
         for _fpr_key in batch_keys:
@@ -7853,15 +7881,38 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     hit_rates    = _fpr_hits,
                     sport        = _fpr_sport,
                 )
+                _fpr_ext_id = (
+                    getattr(_fpr_snap, "external_id", None)
+                    or str(getattr(_fpr_snap, "id", None) or "")
+                )
+
+                # FPR is a real analysis pass, not just a delivery pass.
+                # Persist one evaluation row for every successfully scored
+                # prop so the funnel can show non-directional/non-MLB work
+                # instead of treating it as if it never reached analysis.
+                _fpr_candidate_rows.append({
+                    "scan_ts": datetime.utcnow(),
+                    "player_name": _fpr_player,
+                    "team": getattr(_fpr_snap, "team", "") or "",
+                    "sport": _fpr_sport,
+                    "stat_type": _fpr_stat,
+                    "line_value": _fpr_line,
+                    "provider": _fpr_provider,
+                    "score_total": getattr(_fpr_score, "total", None),
+                    "score_tier": getattr(_fpr_score, "tier", None),
+                    "confidence": getattr(_fpr_dec, "confidence", None),
+                    "gate_decision": "EVALUATED",
+                    "rejection_reason": None,
+                    "reason_codes": json.dumps(
+                        _compute_reason_codes(_fpr_score, _fpr_dec)
+                    ),
+                    "snapshot_external_id": _fpr_ext_id,
+                })
 
                 # Keep the canonical monitoring/evidence stream complete for
                 # every directional evaluation. Buffer rows and persist them
                 # in one bounded upsert after scoring; unavailable direction
                 # remains a transient evaluation result.
-                _fpr_ext_id = (
-                    getattr(_fpr_snap, "external_id", None)
-                    or str(getattr(_fpr_snap, "id", None) or "")
-                )
                 if getattr(_fpr_dec, "recommendation", None) in ("OVER", "UNDER"):
                     _fpr_opportunity_rows.append({
                         "external_id": f"{_fpr_ext_id}:{_fpr_line:g}",
@@ -8087,6 +8138,20 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 fpr_rescored        += 1
                 fpr_total_rescanned += 1
                 fpr_by_sport[_fpr_sport] = fpr_by_sport.get(_fpr_sport, 0) + 1
+
+        _log_fpr_candidates = getattr(db, "log_prop_candidate_batch", None)
+        if (
+            _fpr_candidate_rows
+            and callable(_log_fpr_candidates)
+            and asyncio.iscoroutinefunction(_log_fpr_candidates)
+        ):
+            try:
+                await _log_fpr_candidates(_fpr_candidate_rows)
+            except Exception as _fpr_candidate_exc:
+                logger.warning(
+                    "full_pool_rescan: evaluation telemetry write failed: %s",
+                    type(_fpr_candidate_exc).__name__,
+                )
 
         # Selection happens only after the complete qualified batch has been
         # evaluated.  This prevents a stronger later-processed prop from

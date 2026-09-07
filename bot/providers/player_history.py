@@ -13,6 +13,7 @@ Public API:
 from __future__ import annotations
 
 import logging
+import inspect
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -32,6 +33,24 @@ PROPLINE_COVERAGE_REDACTED = "redacted"
 PROPLINE_COVERAGE_UNAVAILABLE = "unavailable"
 PROPLINE_COVERAGE_MALFORMED = "malformed"
 PROPLINE_COVERAGE_NOT_NEEDED = "not_needed"
+
+
+def _is_database_backend(db: object) -> bool:
+    """Only the real database backend may trigger remote history enrichment."""
+    try:
+        from database import Database
+        if isinstance(db, Database):
+            return True
+        # Lightweight async database doubles used by provider tests are safe
+        # to exercise with the injected PropLine client; generic mocks are not.
+        return (
+            inspect.iscoroutinefunction(getattr(db, "get_player_results", None))
+            and inspect.iscoroutinefunction(
+                getattr(db, "upsert_player_result", None)
+            )
+        )
+    except Exception:
+        return False
 
 
 @dataclass(frozen=True)
@@ -250,6 +269,7 @@ class PlayerHistoryProvider:
             preloaded_results is None
             and
             provider_scope in {"underdog", "prizepicks"}
+            and _is_database_backend(db)
             and len(real_records) < max(1, int(min_samples))
         ):
             supplemental_results = await self.supplement_missing_results(
