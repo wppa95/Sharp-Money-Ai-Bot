@@ -24,9 +24,6 @@ def _update_and_context():
 
 
 def test_delivery_result_string_covers_expected_outcomes():
-    assert "rate-limited" in str(
-        DeliveryResult(sent=False, rate_limited=True, filtered_reason="flood brake")
-    )
     assert "filtered" in str(
         DeliveryResult(sent=False, filtered=True, filtered_reason="stale line")
     )

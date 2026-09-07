@@ -35,7 +35,6 @@ from config import config
 from engine.delivery_gates import tier_delivery_gate as _canonical_tier_delivery_gate
 from engine.score_validation import clamp_score
 from engine.sport_policy import is_football_related_sport
-from engine.telegram_rate_limiter import get_rate_limiter
 from engine.delivery_evidence import serialized_evidence_supports_delivery
 from models import EVOpportunity, Recommendation, SteamAlert
 
@@ -1590,33 +1589,6 @@ class AlertDelivery:
         ):
             return DeliveryResult(sent=False, deduped=True)
 
-        # Global limiter is deliberately applied after all source-specific
-        # qualification and caps.  It counts one alert, not one recipient.
-        if self._chat_ids:
-            limiter = get_rate_limiter()
-            limiter.record_qualified()
-            rate = limiter.check(
-                _pp_direction,
-                float(getattr(score, "total", 0) or 0),
-                float(getattr(score, "total", 0) or 0),
-            )
-            if not rate.allowed:
-                self._release_prop_delivery_claim(
-                    provider="PrizePicks",
-                    source="PrizePicks",
-                    event_id=str(_pp_event_id or ""),
-                    player_name=getattr(opp.pp_line, "player_name", ""),
-                    sport=_pp_sport,
-                    stat_type=getattr(opp.pp_line, "stat_type", ""),
-                    direction=_pp_direction,
-                    line_value=_pp_line_value,
-                )
-                return DeliveryResult(
-                    sent=False,
-                    rate_limited=True,
-                    filtered_reason=rate.reason,
-                )
-
         # 3. Format and send
         try:
             message = format_pp_alert(opp)
@@ -1650,8 +1622,6 @@ class AlertDelivery:
                 direction=_pp_direction,
                 line_value=_pp_line_value,
             )
-        if alert_sent:
-            get_rate_limiter().record_sent()
         _audit_ok = await self._audit_telegram_attempt(
             provider="PrizePicks",
             alert_kind="ACTIONABLE_PICK",
@@ -1867,41 +1837,6 @@ class AlertDelivery:
             return DeliveryResult(sent=False, deduped=True)
 
 
-        # The limiter is shared by Underdog and PrizePicks, so a simultaneous
-        # provider surge cannot bypass protection by taking another path.
-        _actionable = True
-        if self._chat_ids and _actionable:
-            limiter = get_rate_limiter()
-            limiter.record_qualified()
-            _ud_conf = float(getattr(decision, "confidence", 0) or 0)
-            _ud_bq = float(getattr(score, "total", 0) or 0)
-            _meaningful = (
-                new_prop
-                or abs(new_line - old_line) >= 2 * config.MIN_UNDERDOG_LINE_CHANGE
-            )
-            rate = limiter.check(
-                _direction,
-                _ud_conf,
-                _ud_bq,
-                is_meaningful_change=_meaningful,
-            )
-            if not rate.allowed:
-                self._release_prop_delivery_claim(
-                    provider=source,
-                    source=source,
-                    event_id=str(event_id or ""),
-                    player_name=player_name,
-                    sport=sport,
-                    stat_type=stat_type,
-                    direction=_direction,
-                    line_value=_ud_line_value,
-                )
-                return DeliveryResult(
-                    sent=False,
-                    rate_limited=True,
-                    filtered_reason=rate.reason,
-                )
-
         # 4. Format
         if market_move_only:
             message = format_market_move_detected(
@@ -1981,8 +1916,6 @@ class AlertDelivery:
                 direction=_direction,
                 line_value=_ud_line_value,
             )
-        if alert_sent and _actionable:
-            get_rate_limiter().record_sent()
         _alert_kind = (
             "REMOVAL" if removed
             else "MARKET_MOVE" if market_move_only

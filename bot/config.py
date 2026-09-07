@@ -375,42 +375,6 @@ class Config:
     # Set DAILY_UNDERDOG_LIMIT env var to a positive integer to re-enable.
     DAILY_UNDERDOG_LIMIT: int = int(os.environ.get("DAILY_UNDERDOG_LIMIT", "0"))
 
-    # ── Global Telegram rate limiter ─────────────────────────────────────────
-    # Prevents alert floods by capping the total number of Telegram messages
-    # sent inside a rolling time window, regardless of how many props qualify.
-    #
-    # Qualified props that are blocked stay available in /picks (deferred, not
-    # discarded).  Removals and market-move-only alerts bypass the limiter.
-    #
-    # Layer 1 — sliding-window budget:
-    #   At most TG_RATE_MAX_PER_WINDOW actionable alerts in any rolling
-    #   TG_RATE_WINDOW_SECONDS window.  Within the window, higher-tier props
-    #   get priority (S > A > B).  S/A meaningful-change moves may exceed the
-    #   budget by one slot, but never the flood threshold.
-    #
-    # Layer 2 — emergency flood-protection mode:
-    #   If TG_FLOOD_THRESHOLD alerts are sent inside the window, all Telegram
-    #   delivery halts for TG_FLOOD_PROTECTION_DURATION seconds.  The bot
-    #   keeps scanning, scoring, and storing picks normally.
-
-    # Rolling window length in seconds (default 5 minutes).
-    TG_RATE_WINDOW_SECONDS: int = int(os.environ.get("TG_RATE_WINDOW_SECONDS", "300"))
-    # Max actionable alerts per window (Layer 1 budget).
-
-    TG_RATE_MAX_PER_WINDOW: int = int(os.environ.get("TG_RATE_MAX_PER_WINDOW", "10"))
-    # Per-tier caps applied by the ranked delivery queue (before the rate limiter).
-    # Tier 1 = every sport EXCEPT NBA/MLB/NFL.  Tier 2 = NBA, MLB, NFL only.
-    TG_TIER1_MAX_PER_WINDOW: int = int(os.environ.get("TG_TIER1_MAX_PER_WINDOW", "8"))
-    TG_TIER2_MAX_PER_WINDOW: int = int(os.environ.get("TG_TIER2_MAX_PER_WINDOW", "2"))
-    # Alert count inside the window that triggers emergency flood protection.
-    # Raised from 10 → 20 to match the new 10-alert budget (meaningful-change
-    # bypasses can push the count slightly above the budget before the brake engages).
-    TG_FLOOD_THRESHOLD: int = int(os.environ.get("TG_FLOOD_THRESHOLD", "20"))
-    # Seconds to stay in flood-protection mode once engaged.
-    TG_FLOOD_PROTECTION_DURATION: int = int(
-        os.environ.get("TG_FLOOD_PROTECTION_DURATION", "600")
-    )
-
     # ── Per-tier confidence minimums ─────────────────────────────────────────
     # Alerts for each tier only fire when decision.confidence ≥ the minimum
     # for that tier.  Set all to 0 to disable (score-tier gate still applies).

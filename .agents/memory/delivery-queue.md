@@ -6,7 +6,7 @@ description: Delivery prioritization system — collects candidates from all thr
 # Ranked Delivery Queue
 
 ## Rule
-All qualified prop candidates from new-prop, line-change, and standing paths are collected into `_delivery_queue` during the scan loop, then ranked and delivered after the standing scan. No path delivers to Telegram inline anymore.
+All qualified prop candidates from new-prop, line-change, and standing paths are collected into `_delivery_queue` during the scan loop, then ranked and delivered after the standing scan. No path delivers to Telegram inline anymore. Ranking prioritizes delivery order; it is not a global Telegram rate limit.
 
 ## Priority formula
 `_DELIVERY_TIER_BASE` (S=10000, A=5000, B=1000, C=200) + `conf×0.5 + bq×0.3 + mq×0.2` + 500 if `is_tier1` + 200 if `is_meaningful_change`.
@@ -29,7 +29,7 @@ The standing elif uses `_sp = _dq_player` so that `_lifecycle_alerted.append((_s
 ## Record linkage
 After `_incremental_records.append(record)`, the code walks `_delivery_queue` in reverse to link the snapshot record object to the matching queued candidate. Delivery phase flips `alert_sent=True` on the record for delivered candidates.
 
-**Why:** Prevents the first-encountered props from winning rate-limit slots over higher-quality picks; best candidates always get delivered first regardless of scan order.
+**Why:** Prevents the first-encountered props from winning delivery priority over higher-quality picks; best candidates always get delivered first regardless of scan order, while every evaluated candidate remains available to learning telemetry.
 
 ## Tests
 `bot/tests/test_delivery_queue.py` — 19 tests covering priority formula, diversification, empty/single/multi-candidate queues, tier1 bonus, meaningful-change bonus, group-rank attribute.

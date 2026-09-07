@@ -567,12 +567,9 @@ async def test_reconciliation_excludes_old_rows(db):
 async def test_consensus_broadcast_audits_fanout_and_only_counts_sent():
     import market_engine
 
-    limiter = MagicMock()
-    limiter.check.return_value = SimpleNamespace(allowed=True)
     db = MagicMock()
     db.log_telegram_delivery = AsyncMock()
     with (
-        patch.object(market_engine, "get_rate_limiter", return_value=limiter),
         patch.object(
             market_engine,
             "broadcast_alert",
@@ -590,8 +587,6 @@ async def test_consensus_broadcast_audits_fanout_and_only_counts_sent():
         )
 
     assert counts["sent"] == 2
-    limiter.record_qualified.assert_called_once()
-    limiter.record_sent.assert_called_once()
     broadcast.assert_awaited_once()
     db.log_telegram_delivery.assert_awaited_once()
     assert db.log_telegram_delivery.await_args.kwargs["recipients_sent"] == 2
@@ -599,19 +594,18 @@ async def test_consensus_broadcast_audits_fanout_and_only_counts_sent():
 
 
 @pytest.mark.asyncio
-async def test_consensus_broadcast_rate_limit_skips_network_and_is_audited():
+async def test_consensus_broadcast_has_no_global_rate_limit():
     import market_engine
 
-    limiter = MagicMock()
-    limiter.check.return_value = SimpleNamespace(
-        allowed=False,
-        reason="rate-limited",
-    )
     db = MagicMock()
     db.log_telegram_delivery = AsyncMock()
     with (
-        patch.object(market_engine, "get_rate_limiter", return_value=limiter),
-        patch.object(market_engine, "broadcast_alert", new_callable=AsyncMock) as broadcast,
+        patch.object(
+            market_engine,
+            "broadcast_alert",
+            new_callable=AsyncMock,
+            return_value={"sent": 0, "failed": 1},
+        ) as broadcast,
     ):
         counts = await market_engine._broadcast_consensus_alert(
             db=db,
@@ -622,8 +616,7 @@ async def test_consensus_broadcast_rate_limit_skips_network_and_is_audited():
             alert_kind="STEAM",
         )
 
-    assert counts == {"sent": 0, "failed": 0, "rate_limited": True}
-    broadcast.assert_not_awaited()
-    limiter.record_sent.assert_not_called()
+    assert counts == {"sent": 0, "failed": 1, "rate_limited": False}
+    broadcast.assert_awaited_once()
     db.log_telegram_delivery.assert_awaited_once()
-    assert db.log_telegram_delivery.await_args.kwargs["outcome"] == "rate_limited"
+    assert db.log_telegram_delivery.await_args.kwargs["outcome"] == "failed"

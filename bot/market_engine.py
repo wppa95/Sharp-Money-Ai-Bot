@@ -55,7 +55,6 @@ from engine.player_prop_market import (
 )
 from engine.score_validation import clamp_score
 from engine.sport_policy import is_football_related_sport
-from engine.telegram_rate_limiter import get_rate_limiter
 from engine.strongest_pick import select_strongest_actionable_picks
 from engine.delivery_evidence import serialized_evidence_supports_delivery
 from engine.evidence_memory import (
@@ -110,28 +109,19 @@ async def _broadcast_consensus_alert(
     stat_type: Optional[str] = None,
     line_value: Optional[float] = None,
 ) -> dict:
-    """Rate-limit and audit the legacy consensus broadcast path."""
+    """Broadcast and audit the legacy consensus path."""
     if not chat_ids:
         return {"sent": 0, "failed": 0, "rate_limited": False}
 
-    limiter = get_rate_limiter()
-    limiter.record_qualified()
-    rate = limiter.check("A", 80, 80, is_meaningful_change=True)
-    if not rate.allowed:
-        outcome = "rate_limited"
-        counts = {"sent": 0, "failed": 0, "rate_limited": True}
-    else:
-        counts = await broadcast_alert(bot, chat_ids, message, sport=sport)
-        sent = int(counts.get("sent", 0) or 0)
-        if sent:
-            limiter.record_sent()
-        outcome = "sent" if sent else "failed"
-        counts = {
-            **counts,
-            "sent": sent,
-            "failed": int(counts.get("failed", 0) or 0),
-            "rate_limited": False,
-        }
+    counts = await broadcast_alert(bot, chat_ids, message, sport=sport)
+    sent = int(counts.get("sent", 0) or 0)
+    counts = {
+        **counts,
+        "sent": sent,
+        "failed": int(counts.get("failed", 0) or 0),
+        "rate_limited": False,
+    }
+    outcome = "sent" if sent else "failed"
 
     audit = getattr(db, "log_telegram_delivery", None)
     if audit is not None:
@@ -3518,7 +3508,7 @@ async def _try_claim_delivery_slot(
     queue) checking the same candidate during network I/O cannot also pass the
     dedup check and cause a duplicate Telegram alert.
 
-    If delivery subsequently fails (rate-limited, Telegram error, filtered,
+    If delivery subsequently fails (Telegram error, filtered,
     etc.), the caller must release the claim.  A claim is a concurrency lock,
     not proof that an alert was delivered.
     """
@@ -7334,7 +7324,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     _sr_dec.recommendation, _sr_score.tier, int(_sr_score.total),
                 )
             else:
-                # deliver_underdog returned not-sent (rate-limited, disabled sport, etc.)
+                # deliver_underdog returned not-sent (disabled sport, etc.)
                 sr_not_delivered += 1
                 sr_actionable -= 1
                 _release_prop_delivery_claim(
@@ -8156,7 +8146,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                                 _fpr_bookkeeping_exc,
                             )
                     elif _fpr_mq_ok:
-                        # deliver_underdog returned not-sent (rate-limited, etc.)
+                        # deliver_underdog returned not-sent (etc.)
                         fpr_not_delivered += 1
                         _release_prop_delivery_claim(
                             _prop_market_alerted,
