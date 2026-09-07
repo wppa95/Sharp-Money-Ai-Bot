@@ -125,3 +125,5 @@
 - [External SQLite lock tests](external-sqlite-lock-tests.md) — lower busy_timeout to force raw-writer lock errors; otherwise SQLite waits internally and bypasses retry coverage.
 - [Canonical Player Props pipeline](canonical-player-props-pipeline.md) — PropLine and Underdog share normalization and persistence before scoring while retaining source identity.
 - [Player Props delivery presentation](player-props-delivery-presentation.md) — Telegram labels the shared product/source explicitly; strong picks require explicit results provenance and direction-specific hit-rate support.
+- [PropLine analytics API bridge](propline-api-bridge.md) — external bundle routes must stay behind a persistent Python facade worker so PropLine pacing/cache/source safety remain centralized.
+- [Generated API schema exports](generated-api-schema-exports.md) — Orval can name path and query parameter outputs identically; keep the package index explicit to avoid isolatedModules collisions.

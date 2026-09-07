@@ -35,6 +35,7 @@ def _jsonable(value: Any) -> Any:
 def endpoint_result_payload(result: PropLineEndpointResult) -> dict[str, Any]:
     """Return a stable machine-readable envelope for any read-only endpoint."""
     return {
+        "source": "PropLine",
         "payload": _jsonable(result.payload),
         "fetched_at": result.fetched_at.isoformat(),
         "endpoint": result.endpoint,
@@ -51,6 +52,7 @@ def endpoint_result_payload(result: PropLineEndpointResult) -> dict[str, Any]:
 def results_payload(result: PropLineResultsFetchResult) -> dict[str, Any]:
     """Return resolved prop evidence without inventing settlement states."""
     return {
+        "source": "PropLine",
         "results": _jsonable(result.results),
         "fetched_at": result.fetched_at.isoformat(),
         "event_id": result.event_id,
@@ -103,6 +105,7 @@ class PropLineAnalytics:
         )
         return {
             "kind": "event_bundle",
+            "source": "PropLine",
             "provider": "PropLine",
             "sport": sport_key,
             "event_id": event_id,
@@ -145,6 +148,7 @@ class PropLineAnalytics:
         )
         return {
             "kind": "player_bundle",
+            "source": "PropLine",
             "provider": "PropLine",
             "sport": sport_key,
             "player_name": player_name,

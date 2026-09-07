@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: propline
+    description: Read-only PropLine analytics
 paths:
   /healthz:
     get:
@@ -24,7 +26,107 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /propline/events/{sportKey}/{eventId}:
+    get:
+      operationId: propLineEventBundle
+      tags: [propline]
+      summary: Read a PropLine event bundle
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/SportKey"
+        - $ref: "#/components/parameters/EventId"
+        - $ref: "#/components/parameters/Markets"
+        - $ref: "#/components/parameters/Bookmaker"
+        - $ref: "#/components/parameters/Period"
+      responses:
+        "200":
+          description: Resolved props, actual player stats, and line movement
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PropLineEventBundle"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /propline/players/{sportKey}/{playerName}/{market}:
+    get:
+      operationId: propLinePlayerBundle
+      tags: [propline]
+      summary: Read a PropLine player bundle
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/SportKey"
+        - $ref: "#/components/parameters/PlayerName"
+        - $ref: "#/components/parameters/Market"
+        - $ref: "#/components/parameters/Bookmaker"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/StatType"
+      responses:
+        "200":
+          description: Resolved prop history, actual player games, and trends
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PropLinePlayerBundle"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    SportKey:
+      name: sportKey
+      in: path
+      required: true
+      schema: { type: string }
+    EventId:
+      name: eventId
+      in: path
+      required: true
+      schema: { type: string }
+    PlayerName:
+      name: playerName
+      in: path
+      required: true
+      schema: { type: string }
+    Market:
+      name: market
+      in: path
+      required: true
+      schema: { type: string }
+    Markets:
+      name: markets
+      in: query
+      schema: { type: string, default: "" }
+    Bookmaker:
+      name: bookmaker
+      in: query
+      schema: { type: string, enum: [prizepicks], default: prizepicks }
+    Period:
+      name: period
+      in: query
+      schema: { type: string, default: "" }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    StatType:
+      name: stat_type
+      in: query
+      schema: { type: string, default: "" }
+  responses:
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error: { type: string }
   schemas:
     HealthStatus:
       type: object
@@ -33,4 +135,73 @@ components:
           type: string
       required:
         - status
+    PropLineEndpointEnvelope:
+      type: object
+      required: [source, payload, fetched_at, endpoint, from_cache, succeeded, complete, redacted, upgrade_url, error, failure_kind]
+      properties:
+        source: { type: string, enum: [PropLine] }
+        payload: {}
+        fetched_at: { type: string }
+        endpoint: { type: string }
+        from_cache: { type: boolean }
+        succeeded: { type: boolean }
+        complete: { type: boolean }
+        redacted: { type: boolean }
+        upgrade_url: { type: string }
+        error: { type: string }
+        failure_kind: { type: string }
+    PropLineResultsEnvelope:
+      type: object
+      required: [source, results, fetched_at, event_id, succeeded, complete, error, failure_kind]
+      properties:
+        source: { type: string, enum: [PropLine] }
+        results: { type: array, items: {} }
+        fetched_at: { type: string }
+        event_id: { type: string }
+        succeeded: { type: boolean }
+        complete: { type: boolean }
+        error: { type: string }
+        failure_kind: { type: string }
+    PropLineEventBundle:
+      type: object
+      required: [kind, source, provider, sport, event_id, bookmaker, resolved_props, actual_player_stats, line_movement]
+      properties:
+        kind: { type: string, enum: [event_bundle] }
+        source: { type: string, enum: [PropLine] }
+        provider: { type: string, enum: [PropLine] }
+        sport: { type: string }
+        event_id: { type: string }
+        bookmaker: { type: string }
+        resolved_props: { $ref: "#/components/schemas/PropLineResultsEnvelope" }
+        actual_player_stats: { $ref: "#/components/schemas/PropLineEndpointEnvelope" }
+        line_movement: { $ref: "#/components/schemas/PropLineEndpointEnvelope" }
+    PropLinePlayerBundle:
+      type: object
+      required: [kind, source, provider, sport, player_name, market, bookmaker, resolved_prop_history, actual_player_games, player_trends]
+      properties:
+        kind: { type: string, enum: [player_bundle] }
+        source: { type: string, enum: [PropLine] }
+        provider: { type: string, enum: [PropLine] }
+        sport: { type: string }
+        player_name: { type: string }
+        market: { type: string }
+        bookmaker: { type: string }
+        resolved_prop_history:
+          type: object
+          required: [entries, fetched_at, player_name, sport_key, market, from_cache, succeeded, complete, redacted, upgrade_url, error, failure_kind]
+          properties:
+            entries: { type: array, items: {} }
+            fetched_at: { type: string }
+            player_name: { type: string }
+            sport_key: { type: string }
+            market: { type: string }
+            from_cache: { type: boolean }
+            succeeded: { type: boolean }
+            complete: { type: boolean }
+            redacted: { type: boolean }
+            upgrade_url: { type: string }
+            error: { type: string }
+            failure_kind: { type: string }
+        actual_player_games: { $ref: "#/components/schemas/PropLineEndpointEnvelope" }
+        player_trends: { $ref: "#/components/schemas/PropLineEndpointEnvelope" }
 
