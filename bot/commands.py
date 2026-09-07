@@ -1167,15 +1167,6 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     f"  {h.status_emoji} <b>{_html.escape(name)}</b>  {_html.escape(h.status.value)}"
                     f"  ·  last ✓: {_html.escape(last_ok)}{fail_note}"
                 )
-        lines.append("")
-        _append_provider_pipeline(
-            lines,
-            provider="PrizePicks",
-            health_tracker=_ht_pipeline,
-            reconciliation=pp_reconciliation,
-        )
-        lines.append("")
-
         # ── Stat provider health (historical enrichment) ──────────────────────
         lines.append("📊 <b>Stat Providers</b>")
         try:
