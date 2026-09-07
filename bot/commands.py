@@ -3589,8 +3589,8 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         msg = report.to_telegram()
         await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
     except asyncio.TimeoutError:
-        logger.warning(
-            "cmd_dashboard: aggregation exceeded %.1fs",
+        logger.info(
+            "cmd_dashboard: aggregation exceeded %.1fs; returning partial report",
             _DASHBOARD_TIMEOUT_SECONDS,
         )
         # Keep the promised dashboard contract.  A timeout is not permission

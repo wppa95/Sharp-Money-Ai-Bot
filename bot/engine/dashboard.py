@@ -34,6 +34,32 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_DASHBOARD_UNAVAILABLE = object()
+
+
+def _consume_dashboard_task(task: asyncio.Future) -> None:
+    """Consume a late cancellation/DB exception without a task warning."""
+    if task.cancelled():
+        return
+    try:
+        task.exception()
+    except Exception:
+        pass
+
+
+async def _bounded_dashboard_read(awaitable, timeout: float = 1.75):
+    """Bound one report read without waiting for SQLite cancellation cleanup."""
+    task = asyncio.ensure_future(awaitable)
+    done, _pending = await asyncio.wait({task}, timeout=timeout)
+    if task in done:
+        try:
+            return task.result()
+        except Exception:
+            return _DASHBOARD_UNAVAILABLE
+    task.cancel()
+    task.add_done_callback(_consume_dashboard_task)
+    return _DASHBOARD_UNAVAILABLE
+
 
 # ── Component dataclasses ──────────────────────────────────────────────────────
 
@@ -474,24 +500,19 @@ class DashboardEngine:
         # individual helpers already isolate failures, so serialization only
         # changes scheduling; it does not change report semantics.
         await cls._gather_totals(db, report)
-        try:
-            tracking = await db.get_tracking_summary()
-        except Exception as exc:
-            tracking = exc
+        tracking = await _bounded_dashboard_read(
+            db.get_tracking_summary(),
+            timeout=1.75,
+        )
         provider_rows = []
         for provider in ("Underdog", "PrizePicks"):
-            try:
-                provider_rows.append(
-                    await db.get_recent_tracked_props(
+            rows = await _bounded_dashboard_read(
+                db.get_recent_tracked_props(
                         provider, since_hours=1, limit=100
-                    )
-                )
-            except Exception as exc:
-                logger.exception(
-                    "dashboard recent tracked props failed for provider=%s",
-                    provider,
-                )
-                provider_rows.append(exc)
+                ),
+                timeout=1.25,
+            )
+            provider_rows.append(rows)
         if not isinstance(tracking, dict):
             report.unavailable.add("tracking")
         try:
@@ -585,7 +606,7 @@ class DashboardEngine:
                 provider_rows = []
             report.recent_tracked_props = []
             for provider, rows in zip(("Underdog", "PrizePicks"), provider_rows):
-                if isinstance(rows, Exception):
+                if rows is _DASHBOARD_UNAVAILABLE:
                     continue
                 report.recent_tracked_props.extend(
                     {
@@ -607,19 +628,29 @@ class DashboardEngine:
         # Run the remaining sections in order for the same reason as the
         # top-level reads: bounded database concurrency is more reliable than
         # parallel SQLite sessions while the monitoring writer is active.
-        for gatherer in (
-            cls._gather_ev_performance,
-            cls._gather_clv_performance,
-            cls._gather_ud_breakdown,
-            cls._gather_by_sport,
-            cls._gather_by_market,
-            cls._gather_daily_trend,
-            cls._gather_system_panel,
-            cls._gather_intelligence_panel,
+        for section, gatherer in (
+            ("ev", cls._gather_ev_performance),
+            ("clv", cls._gather_clv_performance),
+            ("ud", cls._gather_ud_breakdown),
+            ("sport", cls._gather_by_sport),
+            ("market", cls._gather_by_market),
+            ("daily", cls._gather_daily_trend),
+            ("system", cls._gather_system_panel),
+            ("intelligence", cls._gather_intelligence_panel),
         ):
-            await gatherer(db, report)
+            result = await _bounded_dashboard_read(
+                gatherer(db, report),
+                timeout=1.75,
+            )
+            if result is _DASHBOARD_UNAVAILABLE:
+                report.unavailable.add(section)
         cls._compute_best_worst(report)
-        await cls._gather_provider_pipeline(db, report)
+        result = await _bounded_dashboard_read(
+            cls._gather_provider_pipeline(db, report),
+            timeout=1.75,
+        )
+        if result is _DASHBOARD_UNAVAILABLE:
+            report.unavailable.add("pipeline")
 
         return report
 

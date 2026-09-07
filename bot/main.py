@@ -791,7 +791,10 @@ async def post_init(application: Application) -> None:
         jq.run_repeating(
             _coordinated_job("player_props_fetcher", _player_props_job),
             interval=config.PLAYER_PROP_POLL_INTERVAL,
-            first=60,
+            # Keep the first sportsbook pass away from the heavy Underdog
+            # cycle. Both jobs share SQLite and the previous 15-second offset
+            # allowed a short event-loop stall to become an APScheduler miss.
+            first=90,
             name="player_props_fetcher",
         )
         # Legacy _prizepicks_job remains disabled.  The authorized PropLine
