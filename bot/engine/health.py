@@ -105,6 +105,7 @@ _RUNTIME_SESSION_KEYS = frozenset({
     "stable_refresh_cursor",
     "wl_refresh_cursor",
     "opportunity_grader_cursor",
+    "tracking_grader_cursor",
     "fpr_cursor",
     "fpr_rotation",
     "stable_refresh_stats",
@@ -966,6 +967,17 @@ class HealthTracker:
         """Persist the opportunity id checkpoint used by hourly grading."""
         with self._lock:
             self._state["opportunity_grader_cursor"] = max(0, int(cursor))
+            self._save()
+
+    def get_tracking_grader_cursor(self) -> int:
+        """Return the last neutral-tracking id visited by the rotating grader."""
+        with self._lock:
+            return max(0, int(self._state.get("tracking_grader_cursor", 0)))
+
+    def set_tracking_grader_cursor(self, cursor: int) -> None:
+        """Persist the neutral-tracking checkpoint used by hourly grading."""
+        with self._lock:
+            self._state["tracking_grader_cursor"] = max(0, int(cursor))
             self._save()
 
     def get_wl_refresh_cursor(self) -> int:

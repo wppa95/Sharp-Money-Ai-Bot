@@ -2222,6 +2222,47 @@ class Database:
 
         by_sport: dict[str, dict] = {}
         by_provider: dict[str, dict] = {}
+        by_sport_direction: dict[str, dict[str, dict]] = {}
+
+        def _new_performance_row() -> dict:
+            return {
+                "directional": 0,
+                "pending": 0,
+                "resolved": 0,
+                "hit": 0,
+                "miss": 0,
+                "push": 0,
+                "void": 0,
+                "raw": {},
+            }
+
+        def _add_outcome(
+            target: dict,
+            key: str,
+            recommendation: str,
+            outcome: str,
+            count: int,
+        ) -> None:
+            row = target.setdefault(key, _new_performance_row())
+            row["directional"] += count
+            row["raw"].setdefault(recommendation, {})[outcome] = (
+                row["raw"].setdefault(recommendation, {}).get(outcome, 0) + count
+            )
+            if outcome == "PENDING":
+                row["pending"] += count
+            elif outcome in {"HIT", "MISS", "PUSH"}:
+                row["resolved"] += count
+                if outcome == "PUSH":
+                    row["push"] += count
+                elif (recommendation == "OVER" and outcome == "HIT") or (
+                    recommendation == "UNDER" and outcome == "MISS"
+                ):
+                    row["hit"] += count
+                else:
+                    row["miss"] += count
+            else:
+                row["void"] += count
+
         for provider, sport, recommendation, outcome, count in result.all():
             if not _is_supported_tracking_sport(sport):
                 continue
@@ -2230,38 +2271,15 @@ class Database:
             rec_key = str(recommendation or "").upper()
             outcome_key = str(outcome or "PENDING").upper()
             count = int(count or 0)
-            for target, key in ((by_sport, sport_key), (by_provider, provider_key)):
-                row = target.setdefault(
-                    key,
-                    {
-                        "directional": 0,
-                        "pending": 0,
-                        "resolved": 0,
-                        "hit": 0,
-                        "miss": 0,
-                        "push": 0,
-                        "void": 0,
-                        "raw": {},
-                    },
-                )
-                row["directional"] += count
-                row["raw"].setdefault(rec_key, {})[outcome_key] = (
-                    row["raw"].setdefault(rec_key, {}).get(outcome_key, 0) + count
-                )
-                if outcome_key == "PENDING":
-                    row["pending"] += count
-                elif outcome_key in {"HIT", "MISS", "PUSH"}:
-                    row["resolved"] += count
-                    if outcome_key == "PUSH":
-                        row["push"] += count
-                    elif (rec_key == "OVER" and outcome_key == "HIT") or (
-                        rec_key == "UNDER" and outcome_key == "MISS"
-                    ):
-                        row["hit"] += count
-                    else:
-                        row["miss"] += count
-                else:
-                    row["void"] += count
+            _add_outcome(by_sport, sport_key, rec_key, outcome_key, count)
+            _add_outcome(by_provider, provider_key, rec_key, outcome_key, count)
+            _add_outcome(
+                by_sport_direction.setdefault(sport_key, {}),
+                rec_key,
+                rec_key,
+                outcome_key,
+                count,
+            )
 
         # One opportunity can have several snapshots/seeds as a line moves.
         # Keep the latest computed seed for that opportunity so CLV samples
@@ -2317,19 +2335,17 @@ class Database:
                     else "MISS"
                 )
             )
-            for target, key in ((by_sport, sport), (by_provider, provider)):
+            for target, key in (
+                (by_sport, sport),
+                (by_provider, provider),
+                (
+                    by_sport_direction.setdefault(str(sport), {}),
+                    str(recommendation).upper(),
+                ),
+            ):
                 row = target.setdefault(
                     key,
-                    {
-                        "directional": 0,
-                        "pending": 0,
-                        "resolved": 0,
-                        "hit": 0,
-                        "miss": 0,
-                        "push": 0,
-                        "void": 0,
-                        "raw": {},
-                    },
+                    _new_performance_row(),
                 )
                 row.setdefault("_clv_values", {"HIT": [], "MISS": [], "PUSH": []})[
                     "PUSH" if outcome == "PUSH" else directional_outcome
@@ -2354,7 +2370,30 @@ class Database:
                     if (row["hit"] + row["miss"] + row["push"])
                     else None
                 )
-        return {"by_sport": by_sport, "by_provider": by_provider}
+        for direction_rows in by_sport_direction.values():
+            for row in direction_rows.values():
+                clv_values = row.pop("_clv_values", {})
+                for outcome in ("HIT", "MISS", "PUSH"):
+                    values = clv_values.get(outcome, [])
+                    row[f"clv_{outcome.lower()}_count"] = len(values)
+                    row[f"clv_{outcome.lower()}_avg"] = (
+                        sum(values) / len(values) if values else None
+                    )
+                clv_sample_count = sum(
+                    row[f"clv_{outcome.lower()}_count"]
+                    for outcome in ("HIT", "MISS", "PUSH")
+                )
+                row["clv_count"] = clv_sample_count
+                row["clv_coverage_pct"] = (
+                    clv_sample_count / (row["hit"] + row["miss"] + row["push"]) * 100
+                    if (row["hit"] + row["miss"] + row["push"])
+                    else None
+                )
+        return {
+            "by_sport": by_sport,
+            "by_provider": by_provider,
+            "by_sport_direction": by_sport_direction,
+        }
 
     async def count_actionable_pick_records(self) -> int:
         """Total 🎯 ACTIONABLE BET PICK records ever delivered to Telegram.
