@@ -538,10 +538,15 @@ class PlayerHistoryProvider:
     ) -> PropLineHistoryCoverage:
         """Supplement a scheduled provider fetch with safe PropLine history.
 
-        The scheduled collector already fetches the public/stat provider.  This
+        The scheduled collector already fetches the public/stat provider. This
         method only spends a PropLine request when that evidence is below the
         normal validation threshold, so the authorized feed remains a
         supplement rather than a replacement or a new delivery path.
+
+        The fast, market-specific resolved-history endpoint is used here. Raw
+        player-game and event-stat endpoints are intentionally left to the
+        existing supplemental/backfill path because their shared pacing can
+        wait longer than this collector's per-target budget.
         """
         primary = list(primary_results or ())
         if len(primary) >= max(1, int(min_samples)):

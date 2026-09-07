@@ -145,6 +145,39 @@ async def test_player_history_persists_completed_result_independently():
 
 
 @pytest.mark.asyncio
+async def test_propline_cursor_retries_target_after_timeout():
+    snapshot = SimpleNamespace(
+        player_name="CS Player",
+        sport="CS",
+        stat_type="kills",
+    )
+    db = MagicMock()
+    db.get_active_underdog_snapshot_per_prop = AsyncMock(
+        return_value={("CS Player", "CS", "kills"): snapshot}
+    )
+    db.upsert_player_results_bulk = AsyncMock()
+    primary_provider = MagicMock()
+    primary_provider.fetch_results = AsyncMock(return_value=[])
+    scheduled_provider = MagicMock()
+    scheduled_provider.fetch_scheduled_results = AsyncMock(
+        side_effect=asyncio.TimeoutError
+    )
+    bot_data = {
+        "db": db,
+        "player_history_provider": scheduled_provider,
+    }
+    context = SimpleNamespace(bot_data=bot_data)
+
+    with patch(
+        "providers.player_stats.PlayerStatsProvider",
+        return_value=primary_provider,
+    ):
+        await player_history_collector_job(context)
+
+    assert bot_data["_player_history_propline_cursor"] == 0
+
+
+@pytest.mark.asyncio
 async def test_player_history_collects_prizepicks_only_active_target():
     """PrizePicks-only rows use the same shared historical provider path."""
     pp_row = SimpleNamespace(

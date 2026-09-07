@@ -64,10 +64,11 @@ _NEXT_TARGET_KEY = "_player_history_next_target"
 _CURSOR_KEY = "_player_history_cursor"
 _PROPLINE_CURSOR_KEY = "_player_history_propline_cursor"
 _PRIMARY_HISTORY_PROVIDERS = frozenset({"underdog", "prizepicks"})
-# The shared PropLine limiter allows at most roughly six requests during the
-# two-minute history cadence. Fair target ordering gives every sport a chance
-# while never creating a burst of queued requests behind the limiter.
-_PLAYER_HISTORY_PROPLINE_TARGETS_PER_CYCLE = 6
+# The shared PropLine history endpoint is currently advertised at 27/hour
+# (about one request every 133 seconds). One scheduled target per two-minute
+# cycle avoids queueing requests past this collector's five-second target
+# budget; the cursor still rotates the complete target universe fairly.
+_PLAYER_HISTORY_PROPLINE_TARGETS_PER_CYCLE = 1
 
 
 class _CadenceBoundaryReached(Exception):
@@ -416,7 +417,9 @@ async def player_history_collector_job(context) -> None:
         target_counts: dict[str, int] = {}
         ok_by_sport: dict[str, int] = {}
         rows_by_sport: dict[str, int] = {}
+        propline_attempts_by_sport: dict[str, int] = {}
         propline_coverage_by_sport: dict[str, dict[str, int]] = {}
+        propline_cursor_advanced = False
         budget_exhausted = False
         fetch_semaphore = asyncio.Semaphore(_PLAYER_HISTORY_FETCH_CONCURRENCY)
         completed_targets: list[tuple[str, str, str]] = []
@@ -444,9 +447,13 @@ async def player_history_collector_job(context) -> None:
                 ]
                 for offset in range(propline_count)
             }
-            bot_data[_PROPLINE_CURSOR_KEY] = (
+            propline_cursor_next = (
                 propline_start + propline_count
             ) % len(cycle_targets)
+            for _player, _sport, _stat in propline_targets:
+                propline_attempts_by_sport[_sport] = (
+                    propline_attempts_by_sport.get(_sport, 0) + 1
+                )
         else:
             propline_targets = set()
 
@@ -536,9 +543,18 @@ async def player_history_collector_job(context) -> None:
                 )
                 continue
 
+            if (player, sport, stat) in propline_targets:
+                propline_cursor_advanced = True
             coverage = fetch_value
             raw = getattr(coverage, "rows", coverage)
             coverage_status = getattr(coverage, "status", "")
+            if (player, sport, stat) in propline_targets and coverage_status == (
+                "not_needed"
+            ):
+                sport_coverage = propline_coverage_by_sport.setdefault(sport, {})
+                sport_coverage["not_needed"] = (
+                    sport_coverage.get("not_needed", 0) + 1
+                )
             if coverage_status in {
                 "usable",
                 "redacted",
@@ -578,6 +594,16 @@ async def player_history_collector_job(context) -> None:
             ok_by_sport.setdefault(sport, 0)
             rows_by_sport.setdefault(sport, 0)
             propline_coverage_by_sport.setdefault(sport, {})
+
+        # A timed-out PropLine request must remain the next target. Advancing
+        # the cursor before the request would otherwise lose a target for a
+        # full rotation of the active book (many hours) whenever the shared
+        # endpoint is still inside its rolling interval.
+        if cycle_targets:
+            if propline_cursor_advanced:
+                bot_data[_PROPLINE_CURSOR_KEY] = propline_cursor_next
+            else:
+                bot_data[_PROPLINE_CURSOR_KEY] = propline_start
 
         async def write_batch(batch: list[object]) -> None:
             """Persist one completed result batch without the fetch deadline."""
@@ -629,12 +655,14 @@ async def player_history_collector_job(context) -> None:
             "budget_exhausted=%s targets_total=%d elapsed=%.1fs "
             "targets_by_sport=%s "
             "players_ok_by_sport=%s rows_by_sport=%s "
-            "propline_coverage_by_sport=%s",
+             "propline_attempts_by_sport=%s "
+             "propline_coverage_by_sport=%s",
             ok, rows, persisted_rows, processed, rows, len(targets) - processed,
             processed, len(targets) - processed,
             failed, budget_exhausted, len(targets),
             time.monotonic() - cycle_started, target_counts,
-            ok_by_sport, rows_by_sport, propline_coverage_by_sport,
+             ok_by_sport, rows_by_sport, propline_attempts_by_sport,
+             propline_coverage_by_sport,
         )
     except Exception as exc:
         logger.exception("player_history_collector_job: %s", exc)
