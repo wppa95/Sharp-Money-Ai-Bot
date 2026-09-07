@@ -123,3 +123,4 @@
 - [SQLite scan latency](sqlite-scan-latency.md) — batch neutral telemetry and defer non-critical writes so full Underdog scans stay within cadence.
 - [Grader date reconciliation](grader-date-reconciliation.md) — UTC event timestamps may settle against the preceding provider-local calendar date.
 - [External SQLite lock tests](external-sqlite-lock-tests.md) — lower busy_timeout to force raw-writer lock errors; otherwise SQLite waits internally and bypasses retry coverage.
+- [Canonical Player Props pipeline](canonical-player-props-pipeline.md) — PropLine and Underdog share normalization and persistence before scoring while retaining source identity.

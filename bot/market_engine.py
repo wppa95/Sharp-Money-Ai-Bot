@@ -66,6 +66,10 @@ from providers import FailureType, get_health_monitor
 from engine.delivery_gates import (
     tier_delivery_gate as _canonical_tier_delivery_gate,
 )
+from engine.player_props_pipeline import (
+    canonicalize_player_props,
+    persist_canonical_player_props,
+)
 from database import (
     Database,
     MarketSnapshotRecord,
@@ -454,14 +458,12 @@ async def _persist_propline_observations(
     if db is None or not props:
         return 0
     try:
-        try:
-            await db.upsert_prop_line_history_batch(
-                "PrizePicks",
-                list(props),
-                append_snapshot=True,
-            )
-        except TypeError:
-            await db.upsert_prop_line_history_batch("PrizePicks", list(props))
+        await persist_canonical_player_props(
+            db,
+            "PrizePicks",
+            props,
+            append_snapshot=True,
+        )
         tracking_records = []
         for prop in props:
             player = str(getattr(prop, "player_name", "") or "").strip()
@@ -2499,6 +2501,11 @@ async def _run_prizepicks_independent_cycle(
         _track_prizepicks_processing_task(processing_task)
         return
 
+    # Both feeds enter the same canonical Player Props boundary.  The raw
+    # provider object remains available for provider-specific enrichment and
+    # delivery, while the canonical object owns source-aware identity.
+    props = canonicalize_player_props("PrizePicks", props)
+
     # One observation per provider-owned identity per cycle.  The provider's
     # external/event IDs are retained; the fallback key still keeps provider
     # identity separate from Underdog.
@@ -2865,18 +2872,12 @@ async def _run_prizepicks_independent_cycle(
         # Refresh score/recommendation metadata on the current row without
         # inserting another snapshot.  The append-only observation was already
         # committed before evaluation above.
-        try:
-            await db.upsert_prop_line_history_batch(
-                "PrizePicks",
-                list(unique_props.values()),
-                refresh_metadata=True,
-            )
-        except TypeError:
-            # Older test doubles/integrations do not expose the optional
-            # metadata-refresh flag; their current-state upsert is still safe.
-            await db.upsert_prop_line_history_batch(
-                "PrizePicks", list(unique_props.values())
-            )
+        await persist_canonical_player_props(
+            db,
+            "PrizePicks",
+            unique_props.values(),
+            refresh_metadata=True,
+        )
     except Exception as exc:  # noqa: BLE001
         logger.warning("prizepicks_cycle: history persistence failed: %s", type(exc).__name__)
         logger.info(
@@ -4318,6 +4319,33 @@ async def underdog_job(context) -> None:
     else:
         for record in _snapshot_records:
             _incremental_records.append(record)
+
+    # Underdog and PropLine now cross the same canonical Player Props
+    # persistence boundary before scoring begins.  The provider-specific raw
+    # snapshot ledger below remains responsible for complete-feed retention,
+    # while this shared row supplies one source-aware current-state stream for
+    # history, reporting, and downstream evaluation.
+    _canonical_underdog_props = canonicalize_player_props(
+        "Underdog",
+        _snapshot_records,
+    )
+    if _canonical_underdog_props and db:
+        try:
+            await _cycle_timing.await_db(
+                "write",
+                "persist_canonical_underdog_props",
+                persist_canonical_player_props(
+                    db,
+                    "Underdog",
+                    _canonical_underdog_props,
+                ),
+            )
+        except Exception as _canonical_persist_exc:  # noqa: BLE001
+            _persistence_ok = False
+            logger.error(
+                "underdog_job: canonical Player Props persistence failed: %s",
+                type(_canonical_persist_exc).__name__,
+            )
 
     # Universal grading ledger: persist every valid eligible feed observation
     # before any scoring, qualification, strongest-pick, or delivery gate runs.
@@ -6172,26 +6200,32 @@ async def underdog_job(context) -> None:
                 _live_props_batch = list(_incr_snapshot)
                 if not _enqueue_db_persistence(
                     "upsert Underdog live props",
-                    lambda batch=_live_props_batch: db.upsert_prop_line_history_batch(
+                    lambda batch=_live_props_batch: persist_canonical_player_props(
+                        db,
                         "Underdog",
                         batch,
+                        refresh_metadata=True,
                     ),
                 ):
                     await _cycle_timing.await_db(
                         "write",
                         "upsert_underdog_live_props",
-                        db.upsert_prop_line_history_batch(
+                        persist_canonical_player_props(
+                            db,
                             "Underdog",
                             _live_props_batch,
+                            refresh_metadata=True,
                         ),
                     )
             else:
                 await _cycle_timing.await_db(
                     "write",
                     "upsert_underdog_live_props",
-                    db.upsert_prop_line_history_batch(
+                    persist_canonical_player_props(
+                        db,
                         "Underdog",
                         _incr_snapshot,
+                        refresh_metadata=True,
                     ),
                 )
             # Keep the raw snapshot append-only for the complete feed. The
