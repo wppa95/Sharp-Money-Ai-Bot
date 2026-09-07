@@ -1286,9 +1286,10 @@ def _schedule_deferred_fpr() -> None:
 
 
 def _release_underdog_scan_slot() -> None:
-    """Release the live slot without creating a remainder handoff."""
+    """Release the live slot and hand off any waiting FPR trigger."""
     global _ud_full_scan_running
     _ud_full_scan_running = False
+    _schedule_deferred_fpr()
 
 
 def _bq_stars(bq: int) -> str:
@@ -7533,11 +7534,12 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
     # a live feed scan owns the slot. The production scheduler no longer
     # registers this database-backed job.
     if _ud_full_scan_running:
-        # There is no remainder queue. A direct legacy FPR trigger is rejected
-        # while the current-book cycle owns the monitoring slot.
+        # Preserve every scheduled trigger. The live scan owns the slot for
+        # now, and _release_underdog_scan_slot() hands this FPR run off as
+        # soon as the current-book persistence barrier completes.
+        _queue_deferred_fpr(context)
         logger.info(
-            "full_pool_rescan: skipped while Underdog cycle is active "
-            "(no remainder queue)"
+            "full_pool_rescan: deferred until Underdog cycle completes"
         )
         if _health:
             _health.record_job_run("full_pool_rescan_job")

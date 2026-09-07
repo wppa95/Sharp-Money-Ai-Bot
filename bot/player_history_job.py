@@ -395,8 +395,8 @@ async def player_history_collector_job(context) -> None:
                     sum(len(rows) for rows in existing_results.values()),
                 )
             except _CadenceBoundaryReached as exc:
-                logger.warning(
-                    "player_history_collector_job: evidence hydration skipped "
+                logger.info(
+                    "player_history_collector_job: evidence hydration deferred "
                     "after %s; continuing with full provider collection",
                     exc,
                 )
