@@ -12,5 +12,7 @@ the same deadline for writes turned a successful fetch into zero persisted
 evidence and made later grading impossible.
 
 **How to apply:** Treat fetch timing and evidence persistence as separate phases.
-Keep batch sizes bounded for SQLite, and make supplemental provider calls
-timeout-bounded without replacing valid primary-provider rows.
+Keep SQLite history writes bulk-oriented with large bounded upsert batches
+(currently 1,000 rows) so full-book collection maximizes data consumption; use
+only a small cooperative yield between commits, and make supplemental provider
+calls timeout-bounded without replacing valid primary-provider rows.
