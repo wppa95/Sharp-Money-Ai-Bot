@@ -41,6 +41,7 @@ AUTHORITATIVE_COMMANDS = {
     "system",
     "health",
     "providers",
+    "propdata",
     "config",
     "blocks",
     "block",
@@ -80,7 +81,7 @@ def test_authoritative_command_surface_is_registered_once():
 
     assert returned is application
     assert AUTHORITATIVE_COMMANDS <= registered.keys()
-    assert len(registered) == 36
+    assert len(registered) == 37
     assert len(application.handlers) == len(registered)
     assert application.error_handlers == [main.error_handler]
 
@@ -118,7 +119,7 @@ def test_build_application_uses_the_same_registered_surface(monkeypatch):
     assert AUTHORITATIVE_COMMANDS <= registered
     assert "grades" in registered
     assert "learning" in registered
-    assert len(registered) == 36
+    assert len(registered) == 37
     assert len(application.error_handlers) == 1
 
 

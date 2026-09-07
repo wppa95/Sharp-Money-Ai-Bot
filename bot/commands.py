@@ -4225,6 +4225,87 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.message.reply_text("⚠️ /providers failed. Check bot logs.")
 
 
+async def cmd_propdata(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/propdata event|player — read-only PropLine analytics data.
+
+    Examples:
+      /propdata event MLB EVENT_ID player_hits
+      /propdata player MLB Shohei Ohtani player_hits
+    """
+    if not _check_allowed(update):
+        await update.message.reply_text("⛔ Unauthorized.")
+        return
+
+    args = [str(arg).strip() for arg in (context.args or []) if str(arg).strip()]
+    usage = (
+        "Usage:\n"
+        "/propdata event SPORT EVENT_ID [MARKET]\n"
+        "/propdata player SPORT PLAYER_NAME MARKET\n\n"
+        "Returns resolved props, actual player stats, and historical line movement "
+        "from the authorized PropLine API."
+    )
+    if not args or args[0].lower() not in {"event", "player"}:
+        await update.message.reply_text(usage)
+        return
+
+    mode = args[0].lower()
+    if mode == "event":
+        if len(args) < 3:
+            await update.message.reply_text(usage)
+            return
+        sport, event_id = args[1:3]
+        market = args[3] if len(args) >= 4 else ""
+        request = ("event", sport, event_id, market)
+    else:
+        if len(args) < 4:
+            await update.message.reply_text(usage)
+            return
+        sport = args[1]
+        market = args[-1]
+        player_name = " ".join(args[2:-1])
+        if not player_name:
+            await update.message.reply_text(usage)
+            return
+        request = ("player", sport, player_name, market)
+
+    try:
+        from propline_analytics import PropLineAnalytics
+
+        analytics = PropLineAnalytics.from_environment()
+        if mode == "event":
+            _, sport, event_id, market = request
+            payload = await _bounded(
+                analytics.event_bundle(sport, event_id, markets=market),
+                timeout=12.0,
+            )
+        else:
+            _, sport, player_name, market = request
+            payload = await _bounded(
+                analytics.player_bundle(sport, player_name, market),
+                timeout=12.0,
+            )
+        rendered = _json.dumps(payload, indent=2, default=str)
+        if len(rendered) > 3800:
+            rendered = (
+                rendered[:3800]
+                + "\n... truncated; use the Python facade for the full payload"
+            )
+        await update.message.reply_text(
+            f"<pre>{_html.escape(rendered)}</pre>",
+            parse_mode=ParseMode.HTML,
+        )
+    except asyncio.TimeoutError:
+        await update.message.reply_text(
+            "⚠️ PropLine analytics request timed out. The provider remains read-only; "
+            "retry after its request window."
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("cmd_propdata failed: %s", exc, exc_info=True)
+        await update.message.reply_text(
+            "⚠️ PropLine analytics unavailable. Check provider configuration and logs."
+        )
+
+
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/stats — Alert generation stats, outcomes tracked, performance summary."""
     if not _check_allowed(update):

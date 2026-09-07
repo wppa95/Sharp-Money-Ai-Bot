@@ -619,8 +619,8 @@ def format_help_message(commands=None) -> str:
         "steam", "ev", "clv", "performance", "backtest", "stats",
         "calibration", "tracking", "analyst", "rollups", "learning",
         "refinement", "start", "status", "system", "health", "providers",
-        "config", "blocks", "block", "backfill", "pp_import", "testalert",
-        "help",
+        "propdata", "config", "blocks", "block", "backfill", "pp_import",
+        "testalert", "help",
     ]
     return format_help_message([
         {

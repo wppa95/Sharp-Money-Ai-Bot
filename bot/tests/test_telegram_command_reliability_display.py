@@ -129,7 +129,7 @@ def test_help_lists_every_registered_command_and_no_unregistered_restarts():
 def test_every_registered_command_resolves_to_an_async_handler():
     registrations = main.TELEGRAM_COMMAND_HANDLERS
 
-    assert len(registrations) == 36  # 35 production commands + legacy /learning alias
+    assert len(registrations) == 37  # 36 production commands + legacy /learning alias
     assert len({command for command, _callback in registrations}) == len(registrations)
     for command, handler in registrations:
         assert command

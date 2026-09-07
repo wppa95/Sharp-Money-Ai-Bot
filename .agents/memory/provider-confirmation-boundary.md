@@ -53,3 +53,15 @@ need to see.
 
 **How to apply:** Never use exact raw stat text or a near-equal line threshold
 as the prerequisite for showing a verified PrizePicks line beside Underdog.
+
+On-demand PropLine analytics may compose official resolved-results, player-games,
+player-trends, event-stats, and odds-history endpoints for trackers and reports,
+but it remains a read-only evidence facade rather than a monitoring, scoring, or
+alert-delivery path.
+
+**Why:** Explicit analytics requests need richer provider data without creating
+a second scheduler or allowing supplemental evidence to fabricate a bet.
+
+**How to apply:** Keep these requests behind the existing authenticated client,
+rate limiter, and source labels. Persist or score the data only through the
+canonical framework paths.
