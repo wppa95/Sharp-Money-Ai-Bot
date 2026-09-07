@@ -142,7 +142,6 @@ def test_canonical_provider_roles_are_exact():
 
     assert lines == [
         "  ⚪ <b>Player Props</b> — Underdog: available · PrizePicks / PropLine: available",
-        "    <i>Source identity is retained on individual picks.</i>",
     ]
 
 
@@ -156,9 +155,9 @@ def test_provider_roles_show_degraded_underdog_and_disabled_prizepicks():
     runtime = commands._primary_provider_runtime_lines(monitor)
 
     assert lines[0] == "  🟡 <b>Player Props</b> — Underdog: available · PrizePicks / PropLine: unavailable"
-    assert lines[1] == "    <i>Source identity is retained on individual picks.</i>"
-    assert "Underdog: degraded" in runtime[1]
-    assert "1 failure" in runtime[1]
+    assert "Fetch:" in runtime[0]
+    assert "Underdog: degraded" in runtime[0]
+    assert "1 failure" in runtime[0]
 
 
 @pytest.mark.asyncio
@@ -323,7 +322,7 @@ async def test_providers_command_includes_live_primary_provider_health():
 
     message = update.message.reply_text.await_args.args[0]
     assert "Player Props</b> — Underdog: available · PrizePicks / PropLine: available" in message
-    assert "Player Props source health" in message
+    assert "Fetch:" in message
     assert "Underdog: degraded" in message
     assert "PrizePicks: awaiting first successful fetch" in message
 
