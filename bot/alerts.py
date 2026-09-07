@@ -558,7 +558,7 @@ def format_help_message(commands=None) -> str:
     """Render the persisted command catalog, with a safe legacy fallback."""
     if commands is not None:
         lines = [
-            f"{EMOJI['robot']} <b>Sharp Money Bot — Commands</b>",
+            f"{EMOJI['robot']} <b>Sharp Money Bot</b>",
             "",
         ]
         current_category = None
@@ -603,11 +603,7 @@ def format_help_message(commands=None) -> str:
             )
         lines.extend([
             "",
-            "<b>Player Props</b>",
-            "  🟢 <b>Player Props</b> — Underdog + PrizePicks / PropLine",
-            "  <i>Source identity is shown on each pick when relevant.</i>",
-            "",
-            "<i>Monitoring player props across multiple sports. Not betting advice.</i>",
+            "<b>Player Props</b> · Underdog + PrizePicks / PropLine",
         ])
         return "\n".join(lines)
 
@@ -634,24 +630,12 @@ def format_help_message(commands=None) -> str:
 
 def format_start_message() -> str:
     return "\n".join([
-        f"{EMOJI['sharp']} <b>Sharp Money Bot — Player Prop Monitor</b>",
+        f"{EMOJI['sharp']} <b>Sharp Money Bot</b>",
         "",
-        "I monitor <b>Underdog Fantasy</b> and <b>PrizePicks via PropLine</b>",
-        "player props across multiple sports and surface clear directional picks.",
-        "",
-        "<b>What I do:</b>",
-        f"  🐶 Monitor Underdog Fantasy and PrizePicks via PropLine",
-        f"  📈 Detect line movement across the active sport rotation",
-        f"  🎯 Alert when a clear OVER or UNDER signal is confirmed",
-        f"  🗃️ Collect multi-sport data for grading and model learning",
-        "",
-        "<b>Alert format:</b>  unified Player Props directional pick",
-        "  Shows the source line, direction, confidence, and supporting data.",
-        "  The underlying source is retained where it helps verify the line.",
+        "<b>Player Props</b> · Underdog + PrizePicks / PropLine",
+        "Clear OVER and UNDER picks with supporting data.",
         "",
         "Use /help to see all commands.",
-        "",
-        f"<i>Monitoring Underdog and PrizePicks player props. Not betting advice.</i>",
     ])
 
 
