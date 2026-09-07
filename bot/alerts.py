@@ -557,7 +557,7 @@ def format_ud_removal_alert(
 
 def format_help_message(commands=None) -> str:
     """Render the persisted command catalog, with a safe legacy fallback."""
-    if commands:
+    if commands is not None:
         lines = [
             f"{EMOJI['robot']} <b>Sharp Money Bot — Commands</b>",
             "",

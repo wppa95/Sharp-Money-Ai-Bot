@@ -214,6 +214,79 @@ TELEGRAM_COMMAND_CATALOG = [
 ]
 
 
+def _telegram_bot_commands(rows) -> list[BotCommand]:
+    """Convert catalog rows/definitions into Telegram menu commands."""
+    commands: list[BotCommand] = []
+    for row in rows:
+        if isinstance(row, dict):
+            command = row.get("command")
+            description = row.get("description")
+        else:
+            command = getattr(row, "command", None)
+            description = getattr(row, "description", None)
+        command = str(command or "").strip().lstrip("/")
+        if not command:
+            continue
+        commands.append(
+            BotCommand(
+                command,
+                str(description or "Sharp Money Bot command")[:256],
+            )
+        )
+    return commands
+
+
+async def sync_telegram_command_catalog(
+    application: Application,
+    db: Database,
+) -> tuple[list, int]:
+    """Seed and publish the durable command catalog without blocking startup.
+
+    The database controls the normal menu population, including operator
+    enable/disable changes.  If the catalog read is unavailable during boot,
+    publish the static production definitions as a compatibility fallback so
+    a transient SQLite lock cannot prevent the bot from starting with a menu.
+    """
+    try:
+        seeded = await db.ensure_telegram_commands(TELEGRAM_COMMAND_CATALOG)
+        command_rows = await db.get_telegram_commands(enabled_only=True)
+    except Exception as exc:
+        logger.warning(
+            "Telegram command catalog unavailable during startup: %s",
+            exc,
+        )
+        # The fallback is deliberately static and handler-backed; it is only
+        # used when the durable catalog cannot be read, never for an empty
+        # enabled catalog (which is an intentional operator configuration).
+        try:
+            await application.bot.set_my_commands(
+                _telegram_bot_commands(TELEGRAM_COMMAND_CATALOG)
+            )
+        except Exception as menu_exc:
+            # A Telegram transport outage must not block polling startup either.
+            logger.warning(
+                "Telegram command menu fallback unavailable during startup: %s",
+                menu_exc,
+            )
+        return [], 0
+    try:
+        await application.bot.set_my_commands(_telegram_bot_commands(command_rows))
+    except Exception as menu_exc:
+        # A Telegram transport outage must not block polling startup. Do not
+        # retry with static definitions here: the database read succeeded, so
+        # the operator's disabled commands must remain excluded.
+        logger.warning(
+            "Telegram command menu unavailable during startup: %s",
+            menu_exc,
+        )
+    logger.info(
+        "Telegram command catalog loaded from database: %d commands (%d seeded)",
+        len(command_rows),
+        seeded,
+    )
+    return command_rows, seeded
+
+
 def register_command_handlers(application: Application) -> Application:
     """Attach the complete production command surface to *application*.
 
@@ -696,28 +769,7 @@ async def post_init(application: Application) -> None:
     application.bot_data["player_history_provider"] = (
         get_player_history_provider()
     )
-    try:
-        seeded = await _db.ensure_telegram_commands(TELEGRAM_COMMAND_CATALOG)
-        command_rows = await _db.get_telegram_commands(enabled_only=True)
-        await application.bot.set_my_commands([
-            BotCommand(
-                str(row.command),
-                str(row.description or "Sharp Money Bot command")[:256],
-            )
-            for row in command_rows
-        ])
-        logger.info(
-            "Telegram command catalog loaded from database: %d commands (%d seeded)",
-            len(command_rows),
-            seeded,
-        )
-    except Exception as _command_catalog_exc:
-        # Command handlers remain available if Telegram's menu API or a
-        # transient database lock prevents menu synchronization during boot.
-        logger.warning(
-            "Telegram command catalog unavailable during startup: %s",
-            _command_catalog_exc,
-        )
+    await sync_telegram_command_catalog(application, _db)
 
     # Register background jobs
     jq = application.job_queue
