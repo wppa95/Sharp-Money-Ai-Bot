@@ -1,0 +1,147 @@
+Current problems 
+
+1. Displays are too messy.
+
+2. SQLite write are still causing backload
+
+3. Underdog & PrizePicks still show seperate in displays. PrizePicks/propline & underdog should be fully intergrated
+
+4. prizepicks_cycle: provider=PrizePicks spo rt=paced fetch_succeeded=true observations=0 persisted=0 evaluated=0 actionable=0 delivere d=0
+
+5. 2026-09-07 15:27:52 | INFO
+I player_histo
+ry_job - player _history_collector_job: eviden ce hydration deferred after hydrating player-history evidence; continuing with full provid er collection
+
+There should be only one scan process PrizePicks/propline 20 second scans should update with underdogs 1 min scans  
+
+6. 2026-09-07 15:46:52 | INFO
+I player_histo
+ry_job - player_history_collector_job: done p layers_ok=1597 rows=150010 persisted_rows=150
+010 targets_processed=3387 rows_processed=150
+010 remaining_targets=0 processed=3387 remain ing=0 errors=0 budget_exhausted=True targets total=3387 elapsed=75.0s targets_by_sport={'B
+ASKETBALL': 30, 'CS': 282, 'DOTA': 10, 'FIFA' : 356, 'LOL': 50, 'MLB': 1960, 'MMA': 20, 'NB A': 49, 'NHL': 89, 'TENNIS': 531, 'VAL': 10} players_ok_by_sport={'MLB': 1566, 'NBA': 31} rows_by_sport={'MLB': 149485, 'NBA': 525} pro pline_coverage_by_sport={' BASKETBALL': {'usab le': 1}}
+
+Players ok by sport and rows by sport only show 2 sports instead it should show the whole sports list 
+
+7. These is a definition of a good over pick
+━━━━━━━━━━━━━━━━━━
+📊 PLAYER PROP PLAY
+━━━━━━━━━━━━━━━━━━
+⚾ MLB — Hits + Runs + RBIs
+👤 Kaelen Culpepper
+📊 PLAYER PROP LINE
+ 🎯 0.5 🟢 Low Line / Goblin Discount
+ Previous: 1.5
+ 📉 Move: -1.0
+
+ 🕐 Game starts: 3:10 PM ET
+📊 Available Player Prop Line
+🎯 Player Prop: 0.5
+📌 PICK: 🟢 OVER 0.5
+💪 STRONG BET
+
+
+📈 HISTORY
+ L5: 80% (4/5)
+ L10: 90% (9/10)
+ L20: 90% (18/20)
+ 25-game sample: 92% (23/25)
+
+💬 Reason:
+📍 Status: 🟢 AVAILABLE NOW
+🕐 2026-09-07 15:55 UTC
+━━━━━━━━━━━━━━━━━━
+
+━━━━━━━━━━━━━━━━━━
+📊 PLAYER PROP PLAY
+━━━━━━━━━━━━━━━━━━
+⚾ MLB — Walks Allowed
+👤 Joey Cantillo
+📊 PLAYER PROP LINE
+ 🎯 1.5 ⚪ Standard Line
+ Previous: 2.5
+ 📉 Move: -1.0
+
+ 🕐 Game starts: 1:35 PM ET
+📊 Available Player Prop Line
+🎯 Player Prop: 1.5
+📌 PICK: 🟢 OVER 1.5
+💪 STRONG BET
+
+
+📈 HISTORY
+ L5: 80% (4/5)
+ L10: 70% (7/10)
+ L20: 75% (15/20)
+ 29-game sample: 76% (22/29)
+
+💬 Reason:
+📍 Status: 🟢 AVAILABLE NOW
+🕐 2026-09-07 15:45 UTC
+━━━━━━━━━━━━━━━━━━
+
+These is a definition of a strong under 
+
+━━━━━━━━━━━━━━━━━━
+📊 PLAYER PROP PLAY
+━━━━━━━━━━━━━━━━━━
+⚾ MLB — Hits + Runs + RBIs
+👤 Max Muncy
+📊 PLAYER PROP LINE
+ 🎯 1.5 ⚪ Standard Line
+ Previous: 0.5
+ 📈 Move: +1.0
+
+ 🕐 Game starts: 9:10 PM ET
+📊 Available Player Prop Line
+🎯 Player Prop: 1.5
+📌 PICK: 🔴 UNDER 1.5
+💪 STRONG BET
+
+
+📈 HISTORY
+ L5: 20% (1/5)
+ L10: 20% (2/10)
+ L20: 30% (6/20)
+ L30: 33% (10/30)
+ Season: 32% (13/40)
+
+💬 Reason:
+📍 Status: 🟢 AVAILABLE NOW
+🕐 2026-09-07 15:16 UTC
+━━━━━━━━━━━━━━━━━━
+
+━━━━━━━━━━━━━━━━━━
+📊 PLAYER PROP PLAY
+━━━━━━━━━━━━━━━━━━
+⚾ MLB — Hits + Runs + RBIs
+👤 Kaelen Culpepper
+📊 PLAYER PROP LINE
+ 🎯 1.5 ⚪ Standard Line
+ Previous: 0.5
+ 📈 Move: +1.0
+
+ 🕐 Game starts: 3:10 PM ET
+📊 Available Player Prop Line
+🎯 Player Prop: 1.5
+📌 PICK: 🔴 UNDER 1.5
+💪 STRONG BET
+
+
+📈 HISTORY
+ L5: 40% (2/5)
+ L10: 40% (4/10)
+ L20: 50% (10/20)
+ 25-game sample: 44% (11/25)
+
+💬 Reason:
+ Line is 7% above historical average · Playable edge — moderate variance expected
+📍 Status: 🟢 AVAILABLE NOW
+🕐 2026-09-07 15:59 UTC
+━━━━━━━━━━━━━━━━━━
+
+8. Strong over and under deduction should come from evidence/history & hit rate 
+
+9. Find the bottle neck of why non mlb sports are reaching telegram 
+
+Give report of fixes when done
