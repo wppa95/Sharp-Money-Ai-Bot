@@ -782,6 +782,7 @@ _prizepicks_sport_cursor = 0
 _propline_request_cursor = 0
 _propline_pending_props: dict[tuple[str, str, str, str], object] = {}
 _propline_request_lock: Optional[asyncio.Lock] = None
+_propline_ingest_task: Optional[asyncio.Task] = None
 # Current PropLine observations are also available in-process while the
 # companion branch is running.  This is supplemental evidence only; it never
 # replaces an Underdog snapshot or creates a second alert path.
@@ -969,6 +970,7 @@ async def reset_monitoring_runtime_state() -> None:
     global _prizepicks_processing_tasks, _prizepicks_processing_lock
     global _prizepicks_sport_cursor, _propline_request_cursor
     global _propline_pending_props, _propline_request_lock
+    global _propline_ingest_task
     global _cold_start_done, _MARKET_FIRST_ALERT, _priority_override_sent
     global _ud_full_scan_running, _fpr_deferred_pending, _fpr_deferred_context
     global _fpr_handoff_task, _fpr_execution_running, _prop_market_alerted
@@ -983,6 +985,7 @@ async def reset_monitoring_runtime_state() -> None:
         for task in (
             [_prizepicks_cycle_task, _fpr_handoff_task]
             + list(_prizepicks_processing_tasks)
+            + [_propline_ingest_task]
         )
         if task is not None and task is not current and not task.done()
     }
@@ -1003,6 +1006,7 @@ async def reset_monitoring_runtime_state() -> None:
     _propline_request_cursor = 0
     _propline_pending_props.clear()
     _propline_request_lock = None
+    _propline_ingest_task = None
     _cold_start_done = False
     _MARKET_FIRST_ALERT.clear()
     _priority_override_sent.clear()
@@ -3766,15 +3770,45 @@ def _shared_monitoring_cycle(cycle_branch):
     @wraps(cycle_branch)
     async def _run_shared_cycle(context, *args, **kwargs):
         global _prizepicks_cycle_task, _propline_pending_props
+        global _propline_ingest_task
 
         # Provider-specific authorization and pacing remain inside PropLine,
         # but the fetch is owned by this shared cycle. Run ingestion alongside
         # the current-book evaluation so a slow provider cannot stall the
         # complete Player Props universe or cause repeated cadence coalescing.
-        _propline_ingest_task = asyncio.create_task(
-            propline_request_scan_job(context),
-            name="shared_monitoring_propline_ingestion",
-        )
+        if (
+            _propline_ingest_task is None
+            or _propline_ingest_task.done()
+        ):
+            _propline_ingest_task = asyncio.create_task(
+                propline_request_scan_job(context),
+                name="shared_monitoring_propline_ingestion",
+            )
+
+            def _finish_propline_ingestion(task: asyncio.Task) -> None:
+                global _propline_ingest_task
+                if task.cancelled():
+                    return
+                try:
+                    error = task.exception()
+                except asyncio.CancelledError:
+                    return
+                if error is not None:
+                    logger.error(
+                        "shared_monitoring_cycle: PropLine ingestion failed: %s",
+                        error,
+                    )
+                if _propline_ingest_task is task:
+                    _propline_ingest_task = None
+
+            _propline_ingest_task.add_done_callback(
+                _finish_propline_ingestion
+            )
+        else:
+            logger.debug(
+                "shared_monitoring_cycle: PropLine ingestion still active; "
+                "reusing its queued handoff"
+            )
 
         # Consume observations collected by the prior shared cycle. Newly
         # ingested rows remain queued for the next cycle, which preserves a
@@ -3849,56 +3883,13 @@ def _shared_monitoring_cycle(cycle_branch):
                 cycle_branch(context, *args, **kwargs),
                 _propline_task,
             )
-            try:
-                await asyncio.wait_for(
-                    _propline_ingest_task,
-                    timeout=max(
-                        5.0,
-                        min(
-                            20.0,
-                            float(
-                                getattr(
-                                    config,
-                                    "UNDERDOG_POLL_INTERVAL",
-                                    60,
-                                )
-                            )
-                            - 5.0,
-                        ),
-                    ),
-                )
-            except asyncio.TimeoutError:
-                logger.warning(
-                    "shared_monitoring_cycle: PropLine ingestion exceeded "
-                    "its bounded wait; queued evaluation continues next cycle"
-                )
-                _propline_ingest_task.cancel()
-                await asyncio.gather(
-                    _propline_ingest_task,
-                    return_exceptions=True,
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "shared_monitoring_cycle: PropLine ingestion failed: %s",
-                    type(exc).__name__,
-                )
         except asyncio.CancelledError:
             _propline_task.cancel()
-            _propline_ingest_task.cancel()
             await asyncio.gather(_propline_task, return_exceptions=True)
-            await asyncio.gather(
-                _propline_ingest_task,
-                return_exceptions=True,
-            )
             raise
         except BaseException:
             _propline_task.cancel()
-            _propline_ingest_task.cancel()
             await asyncio.gather(_propline_task, return_exceptions=True)
-            await asyncio.gather(
-                _propline_ingest_task,
-                return_exceptions=True,
-            )
             raise
         else:
             # Do not make a slow/independent PropLine companion extend or
@@ -3910,12 +3901,6 @@ def _shared_monitoring_cycle(cycle_branch):
             logger.info("shared_monitoring_cycle: Underdog completed")
             return result
         finally:
-            if not _propline_ingest_task.done():
-                _propline_ingest_task.cancel()
-                await asyncio.gather(
-                    _propline_ingest_task,
-                    return_exceptions=True,
-                )
             if (
                 _prizepicks_cycle_task is not None
                 and _prizepicks_cycle_task.done()

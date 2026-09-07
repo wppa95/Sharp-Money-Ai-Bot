@@ -359,9 +359,37 @@ class _ScheduledExecutionCoordinator:
                 self._active_counts.pop(name, None)
                 self._running.discard(name)
 
-    async def _run_reserved(self, name: str, callback, context, *args, **kwargs):
+    async def _run_reserved(
+        self,
+        name: str,
+        callback,
+        context,
+        *args,
+        exclusive_group: str | None = None,
+        **kwargs,
+    ):
         """Execute a slot reserved atomically by ``launch``."""
         try:
+            if exclusive_group:
+                lock = self._exclusive_locks.setdefault(
+                    exclusive_group,
+                    asyncio.Lock(),
+                )
+                wait_started = time.monotonic()
+                was_locked = lock.locked()
+                async with lock:
+                    if was_locked:
+                        self._exclusive_waits += 1
+                        self._exclusive_wait_seconds += (
+                            time.monotonic() - wait_started
+                        )
+                    return await self._execute(
+                        name,
+                        callback,
+                        context,
+                        *args,
+                        **kwargs,
+                    )
             return await self._execute(name, callback, context, *args, **kwargs)
         finally:
             remaining = self._active_counts.get(name, 1) - 1
@@ -412,7 +440,14 @@ class _ScheduledExecutionCoordinator:
             self._active_counts[name] = 1
             self._running.add(name)
             task = asyncio.create_task(
-                self._run_reserved(name, callback, context, *args, **kwargs),
+                self._run_reserved(
+                    name,
+                    callback,
+                    context,
+                    *args,
+                    exclusive_group=exclusive_group,
+                    **kwargs,
+                ),
                 name=f"scheduled:{name}",
             )
             self._tasks.add(task)
@@ -473,10 +508,12 @@ def _coordinated_job(
     name: str,
     callback,
     *,
+    exclusive_group: str | None = None,
     allow_overlap: bool = False,
     use_exclusive_group: bool = True,
 ):
-    exclusive_group = None
+    if not use_exclusive_group:
+        exclusive_group = None
     return _scheduled_execution_coordinator.launch(
         name,
         callback,
@@ -807,7 +844,11 @@ async def post_init(application: Application) -> None:
         # ─────────────────────────────────────────────────────────────────────
         _shared_underdog_cycle = _shared_monitoring_cycle(underdog_job)
         jq.run_repeating(
-            _coordinated_job("underdog_monitor", _shared_underdog_cycle),
+            _coordinated_job(
+                "underdog_monitor",
+                _shared_underdog_cycle,
+                exclusive_group="underdog_monitoring",
+            ),
             interval=config.UNDERDOG_POLL_INTERVAL,
             first=45,
             name="underdog_monitor",
@@ -861,13 +902,13 @@ async def post_init(application: Application) -> None:
         # CLV harvest job — every hour (processes seeds after game_time passes)
         jq.run_repeating(_coordinated_job("clv_harvester", _clv_harvest_job), interval=3600, first=300, name="clv_harvester")
         # Player-result collection uses the dedicated history pool, but shares
-        # the heavy-job ownership group with monitoring. It fetches supported
-        # active-provider targets concurrently within its cadence, then writes
-        # bounded batches only after the monitoring persistence barrier releases.
+        # the heavy-job ownership group with monitoring. It waits for the live
+        # scan and its persistence drain before claiming SQLite.
         jq.run_repeating(
             _coordinated_job(
                 "player_history_collector",
                 player_history_collector_job,
+                exclusive_group="underdog_monitoring",
             ),
             interval=config.PLAYER_HISTORY_POLL_INTERVAL,
             first=90,

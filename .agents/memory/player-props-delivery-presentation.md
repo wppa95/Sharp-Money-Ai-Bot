@@ -19,9 +19,10 @@ hit-rate support.
 
 Provider-specific fetching and pacing remain separate, but production
 evaluation and delivery must enter through one shared monitoring cycle. Run
-provider ingestion concurrently with the current-book branch and bound its
-wait; slow PropLine/PrizePicks requests must not stall Underdog processing or
-create a second evaluation lane.
+provider ingestion concurrently with the current-book branch and keep its task
+tracked in the background; slow PropLine/PrizePicks persistence must not stall
+Underdog processing, create a second evaluation lane, or produce a misleading
+timeout warning.
 
 The shared monitoring cadence is 150 seconds, leaving room for the current
 full-feed persistence cycle to finish before the next scheduled scan.
@@ -40,5 +41,17 @@ universe.
 
 **How to apply:** Keep the shared cycle as the only production owner of the
 fetch-to-evaluation handoff. Queue newly persisted provider observations for
-the next deterministic evaluation snapshot, and cancel/log a provider fetch
-that exceeds the bounded wait rather than blocking the whole cycle.
+the next deterministic evaluation snapshot, retain one tracked ingestion task,
+and report genuine task failures without cancelling healthy work just because
+SQLite is busy.
+
+The live Underdog monitor and player-history collector share an exclusive
+heavy-job scheduler group. History begins only after the monitoring cycle and
+its deferred persistence drain release SQLite.
+
+**Why:** Separate database pools still contend on the same SQLite writer; the
+previously dormant scheduler group allowed a full history write to overlap the
+live feed and create long writer/drain waits.
+
+**How to apply:** Keep both production jobs in the same heavy-job group while
+leaving unrelated reads and lightweight jobs independent.

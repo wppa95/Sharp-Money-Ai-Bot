@@ -284,7 +284,7 @@ async def test_launcher_allows_different_job_names_to_run_independently():
 
 
 @pytest.mark.asyncio
-async def test_launcher_never_serializes_different_job_names():
+async def test_launcher_serializes_different_job_names_in_same_exclusive_group():
     from main import _ScheduledExecutionCoordinator
 
     coordinator = _ScheduledExecutionCoordinator()
@@ -313,24 +313,25 @@ async def test_launcher_never_serializes_different_job_names():
     await first(None)
     await first_started.wait()
     await second(None)
-    await second_started.wait()
+    await asyncio.sleep(0)
+    assert not second_started.is_set()
 
     release_first.set()
-    await second_started.wait()
     await asyncio.gather(*list(coordinator._tasks))
     await asyncio.sleep(0)
+    assert second_started.is_set()
     assert not coordinator._running
     assert not coordinator._tasks
 
 
-def test_production_monitor_and_history_jobs_have_independent_ownership():
+def test_production_monitor_and_history_jobs_share_heavy_job_ownership():
     import inspect
     import main
 
     source = inspect.getsource(main.post_init)
     assert 'name="underdog_monitor"' in source
     assert 'name="player_history_collector"' in source
-    assert 'exclusive_group="underdog_monitoring"' not in source
+    assert source.count('exclusive_group="underdog_monitoring"') >= 2
 
 
 @pytest.mark.asyncio

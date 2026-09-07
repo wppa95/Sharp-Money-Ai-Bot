@@ -328,7 +328,10 @@ class TestSchedulerCoordinator:
             if name_val != "underdog_monitor":
                 continue
             callback = ast.unparse(node.args[0]) if node.args else ""
-            assert callback == "_coordinated_job('underdog_monitor', _shared_underdog_cycle)"
+            assert callback.startswith(
+                "_coordinated_job('underdog_monitor', _shared_underdog_cycle"
+            )
+            assert "exclusive_group='underdog_monitoring'" in callback
             assert not any(kw.arg == "job_kwargs" for kw in node.keywords)
             found = True
             break

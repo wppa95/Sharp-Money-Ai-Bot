@@ -719,7 +719,8 @@ class TestOddsPollingEnabled(unittest.TestCase):
         )
         self.assertRegex(
             src,
-            r'_coordinated_job\("underdog_monitor",\s*_shared_underdog_cycle\)',
+            r'_coordinated_job\(\s*"underdog_monitor",\s*_shared_underdog_cycle'
+            r'[\s\S]*?exclusive_group="underdog_monitoring"',
         )
 
 
