@@ -71,6 +71,29 @@ class TestLogPropOpportunity:
         assert "ext-ins-001" in ext_ids
 
     @pytest.mark.asyncio
+    async def test_old_event_identity_without_game_time_is_gradeable(
+        self, db: Database
+    ) -> None:
+        """Provider feeds may omit kickoff time but still expose an event ID."""
+        await _log(
+            db,
+            external_id="ext-no-time",
+            game_id="event-no-time",
+            game_time=None,
+        )
+        pending = await db.get_pending_opportunities(cutoff_hours=0)
+        assert [row.external_id for row in pending] == ["ext-no-time"]
+
+    @pytest.mark.asyncio
+    async def test_missing_time_and_event_identity_stays_out_of_grading(
+        self, db: Database
+    ) -> None:
+        """Never grade a stale row by player/stat alone."""
+        await _log(db, external_id="ext-no-identity", game_time=None, game_id="")
+        pending = await db.get_pending_opportunities(cutoff_hours=4)
+        assert pending == []
+
+    @pytest.mark.asyncio
     async def test_upsert_updates_recommendation(self, db: Database) -> None:
         """Re-evaluating the same prop updates recommendation, not duplicates."""
         await _log(db, external_id="ext-upsert", stat_type="Hits",

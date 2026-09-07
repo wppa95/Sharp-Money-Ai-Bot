@@ -1344,7 +1344,9 @@ async def _grade_opportunities_job(context) -> None:
         # already exposes the event result.  The fallback is event-specific
         # and read-only; it never grades an unresolved or guessed row.
         _propline_grade_provider = None
-        _propline_grade_cache: dict[tuple[str, str, str], list] = {}
+        # Provider is part of this cache key. Underdog and PrizePicks can use
+        # the same player/stat pair while their event/result namespaces differ.
+        _propline_grade_cache: dict[tuple[str, str, str, str], list] = {}
         _propline_grade_attempts = 0
         try:
             from providers.player_history import get_player_history_provider
@@ -1363,6 +1365,11 @@ async def _grade_opportunities_job(context) -> None:
                 str(_gopp.player_name),
                 str(_gopp.sport).upper(),
                 str(_gopp.stat_type or "").lower().strip(),
+                str(
+                    getattr(_gopp, "provider", None)
+                    or getattr(_gopp, "source_provider", None)
+                    or "Underdog"
+                ).strip(),
             )
             if _key not in _propline_grade_cache:
                 if (
@@ -1449,10 +1456,24 @@ async def _grade_opportunities_job(context) -> None:
                 if result_row is not None:
                     _matched_game_date = _candidate_game_date
                     break
+            # Some PropLine projections have a stable event identity but no
+            # game timestamp. Once the official result has been persisted,
+            # reconcile by that identity instead of leaving the row pending
+            # forever. This remains strict: no date and no game_id still
+            # cannot be graded safely.
+            if result_row is None and not game_date and getattr(opp, "game_id", ""):
+                result_row = await db.get_game_result_for_grading(
+                    opp.player_name,
+                    opp.sport,
+                    opp.stat_type,
+                    None,
+                    **_result_lookup_kwargs,
+                )
             if result_row is None:
-                # A date is required to safely reconcile a PropLine result to
-                # this opportunity.  Never fall back by player/stat alone.
-                if game_date:
+                # A date or source event identity is required to safely
+                # reconcile a PropLine result to this opportunity. Never fall
+                # back by player/stat alone.
+                if game_date or getattr(opp, "game_id", ""):
                     for _propline_result in await _fetch_propline_grade_results(opp):
                         await db.upsert_player_result(_propline_result)
                     for _candidate_game_date in _game_dates:
@@ -1466,6 +1487,18 @@ async def _grade_opportunities_job(context) -> None:
                         if result_row is not None:
                             _matched_game_date = _candidate_game_date
                             break
+                    if (
+                        result_row is None
+                        and not game_date
+                        and getattr(opp, "game_id", "")
+                    ):
+                        result_row = await db.get_game_result_for_grading(
+                            opp.player_name,
+                            opp.sport,
+                            opp.stat_type,
+                            None,
+                            **_result_lookup_kwargs,
+                        )
             if result_row is None:
                 no_data += 1
                 no_data_by_sport[str(getattr(opp, "sport", "UNKNOWN")).upper()] += 1

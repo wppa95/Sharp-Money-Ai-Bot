@@ -139,6 +139,39 @@ async def test_grader_reconciles_utc_event_to_provider_previous_calendar_date():
 
 
 @pytest.mark.asyncio
+async def test_grader_reconciles_old_event_identity_without_game_time():
+    """A PropLine event ID is sufficient when kickoff time was omitted."""
+    row = _opp(22, "Identity Player", "Points")
+    row.game_time = None
+    row.game_id = "propline-event-22"
+
+    db = MagicMock()
+    db.get_pending_opportunities = AsyncMock(return_value=[row])
+    db.upsert_player_result = AsyncMock()
+    db.grade_opportunity = AsyncMock()
+    health = _Health()
+
+    async def get_result(player, sport, stat, game_date, **kwargs):
+        assert game_date is None
+        assert kwargs["game_id"] == "propline-event-22"
+        return SimpleNamespace(actual_value=11.0)
+
+    db.get_game_result_for_grading = AsyncMock(side_effect=get_result)
+    provider = MagicMock()
+    provider.fetch_results = AsyncMock(return_value=[])
+
+    with (
+        patch.object(main, "get_health_tracker", return_value=health),
+        patch("providers.player_stats.PlayerStatsProvider", return_value=provider),
+    ):
+        await main._grade_opportunities_job(_context(db))
+
+    db.grade_opportunity.assert_awaited_once_with(22, "HIT", 11.0, error_type=None)
+    assert health.cursor == 22
+    assert health.failures == []
+
+
+@pytest.mark.asyncio
 async def test_grader_fetches_concurrently_with_a_bounded_batch():
     opportunities = [_opp(i, f"Player {i}", "Points") for i in range(1, 31)]
     db = MagicMock()

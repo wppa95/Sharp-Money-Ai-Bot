@@ -7238,10 +7238,22 @@ class Database:
                 .where(
                     PropOpportunityLog.result    == "PENDING",
                     PropOpportunityLog.recommendation.in_(("OVER", "UNDER")),
-                    PropOpportunityLog.game_time.isnot(None),
-                    PropOpportunityLog.game_time <  cutoff,
+                    or_(
+                        and_(
+                            PropOpportunityLog.game_time.isnot(None),
+                            PropOpportunityLog.game_time < cutoff,
+                        ),
+                        and_(
+                            PropOpportunityLog.game_time.is_(None),
+                            PropOpportunityLog.detected_at < cutoff,
+                            PropOpportunityLog.game_id != "",
+                        ),
+                    ),
                 )
-                .order_by(PropOpportunityLog.game_time)
+                # The grader persists an id cursor. Ordering by a different
+                # column can repeatedly skip older rows when new rows arrive
+                # between cycles, so keep the query order cursor-compatible.
+                .order_by(PropOpportunityLog.id)
             )
             if after_id is not None:
                 stmt = stmt.where(PropOpportunityLog.id > int(after_id))

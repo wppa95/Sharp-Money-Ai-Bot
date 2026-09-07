@@ -42,7 +42,6 @@ export class PropLineBridge {
   private pending: Pending | undefined;
   private stdoutBuffer = "";
   private requestQueue: Promise<unknown> = Promise.resolve();
-  private failedError: Error | undefined;
 
   request(payload: BridgeRequest): Promise<unknown> {
     const next = this.requestQueue.then(() => this.send(payload));
@@ -59,9 +58,6 @@ export class PropLineBridge {
   }
 
   private start(): ChildProcessWithoutNullStreams {
-    if (this.failedError) {
-      throw this.failedError;
-    }
     if (this.child) {
       return this.child;
     }
@@ -133,11 +129,15 @@ export class PropLineBridge {
   }
 
   private fail(error: Error): void {
-    this.failedError = error;
     this.pending?.reject(error);
     this.pending = undefined;
     this.child?.kill();
     this.child = undefined;
+    this.stdoutBuffer = "";
+    // A worker failure is request-scoped, not a permanent bridge failure.
+    // The next queued request starts a fresh worker so a transient Python
+    // crash, provider import failure, or broken pipe can recover without
+    // restarting the API server.
   }
 }
 

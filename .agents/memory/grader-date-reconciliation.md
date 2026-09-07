@@ -12,4 +12,7 @@ rows.
 
 **How to apply:** Never search by player/stat alone. Use the shifted date only
 after an exact-date miss, preserve game-ID/provider constraints, and report
-shifted matches separately from genuinely unresolved rows.
+shifted matches separately from genuinely unresolved rows. If the provider omits
+time but supplies an event ID, allow strict event-ID reconciliation; keep the
+grader cursor ordered by row ID and include provider in PropLine fallback cache
+keys.
