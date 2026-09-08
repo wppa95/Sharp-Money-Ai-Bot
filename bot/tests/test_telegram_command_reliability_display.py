@@ -350,31 +350,14 @@ def test_dashboard_report_does_not_merge_provider_breakdowns():
 
 
 @pytest.mark.asyncio
-async def test_funnel_renders_provider_pipeline_separately():
+async def test_funnel_omits_provider_sections():
     update, context = _update_and_context()
     db = MagicMock()
     db.get_scan_cycle_summary = AsyncMock(return_value={"cycles": 0})
     db.get_funnel_summary = AsyncMock(
         return_value={"tracked": 0, "by_sport": []}
     )
-    db.get_telegram_reconciliation = AsyncMock(
-        return_value={
-            "by_provider": {
-                "Underdog": {
-                    "observed": 100,
-                    "evaluated": 80,
-                    "actionable_persisted": 6,
-                    "audit_delivered_alerts": 2,
-                },
-                "PrizePicks": {
-                    "observed": 40,
-                    "evaluated": 30,
-                    "actionable_persisted": 4,
-                    "audit_delivered_alerts": 1,
-                },
-            }
-        }
-    )
+    db.get_telegram_reconciliation = AsyncMock()
 
     with (
         patch("commands._check_allowed", return_value=True),
@@ -383,10 +366,10 @@ async def test_funnel_renders_provider_pipeline_separately():
         await commands.cmd_funnel(update, context)
 
     message = update.message.reply_text.await_args.args[0]
-    assert "<b>Underdog</b>" in message
-    assert "Observed: <code>100</code>  ·  Evaluated: <code>80</code>" in message
+    assert "Player Prop Market Providers" not in message
+    assert "Provider Pipeline" not in message
     assert "PrizePicks" not in message
-    assert "Observed: <code>40</code>  ·  Evaluated: <code>30</code>" not in message
+    db.get_telegram_reconciliation.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -506,36 +489,7 @@ async def test_funnel_provider_populations_and_zero_directional_sport_stay_separ
         "directional_by_sport": {},
         "delivered_by_sport": {},
     })
-    db.get_telegram_reconciliation = AsyncMock(return_value={
-        "by_provider": {
-            "Underdog": {
-                "observed": 5,
-                "tracked": 3,
-                "evaluated": 4,
-                "directional": 2,
-                "actionable_persisted": 2,
-                "audit_delivered_alerts": 1,
-                "pending": 1,
-                "resolved": 0,
-                "hit": 0,
-                "miss": 0,
-                "push": 0,
-            },
-            "PrizePicks": {
-                "observed": 9,
-                "tracked": 7,
-                "evaluated": 8,
-                "directional": 6,
-                "actionable_persisted": 6,
-                "audit_delivered_alerts": 4,
-                "pending": 2,
-                "resolved": 3,
-                "hit": 2,
-                "miss": 1,
-                "push": 0,
-            },
-        }
-    })
+    db.get_telegram_reconciliation = AsyncMock()
 
     with (
         patch("commands._check_allowed", return_value=True),
@@ -544,9 +498,9 @@ async def test_funnel_provider_populations_and_zero_directional_sport_stay_separ
         await commands.cmd_funnel(update, context)
 
     message = update.message.reply_text.await_args.args[0]
-    assert "Underdog" in message and "PrizePicks" not in message
-    assert "Observed: <code>5</code>  ·  Evaluated: <code>4</code>" in message
-    assert "Observed: <code>9</code>  ·  Evaluated: <code>8</code>" not in message
+    assert "Player Prop Market Providers" not in message
+    assert "Provider Pipeline" not in message
+    db.get_telegram_reconciliation.assert_not_awaited()
     assert "Soccer" in message
     assert "Soccer" in message.split("Sport Funnel Breakdown", 1)[1]
 @pytest.mark.asyncio
@@ -966,14 +920,7 @@ async def test_funnel_keeps_fast_pipeline_sections_when_scan_read_times_out():
     db.get_funnel_summary = AsyncMock(
         return_value={"tracked": 3, "by_sport": []}
     )
-    db.get_telegram_reconciliation = AsyncMock(
-        return_value={
-            "by_provider": {
-                "Underdog": {"observed": 10, "evaluated": 8},
-                "PrizePicks": {"observed": 5, "evaluated": 4},
-            }
-        }
-    )
+    db.get_telegram_reconciliation = AsyncMock()
 
     async def slow_scan_summary(*args, **kwargs):
         await asyncio.sleep(1)
@@ -988,9 +935,9 @@ async def test_funnel_keeps_fast_pipeline_sections_when_scan_read_times_out():
         await asyncio.wait_for(commands.cmd_funnel(update, context), timeout=0.2)
 
     message = update.message.reply_text.await_args_list[-1].args[0]
-    assert "Provider Pipeline" in message
-    assert "Observed: <code>10</code>  ·  Evaluated: <code>8</code>" in message
-    assert "Observed: <code>5</code>  ·  Evaluated: <code>4</code>" not in message
+    assert "Player Prop Market Providers" not in message
+    assert "Provider Pipeline" not in message
+    db.get_telegram_reconciliation.assert_not_awaited()
     assert "Candidate records tracked: <b>3</b>" in message
     assert "Could not load funnel data" not in message
 

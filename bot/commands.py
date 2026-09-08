@@ -4949,74 +4949,7 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             "📡 <b>Scan Pipeline</b>",
             _thick,
             "",
-            "<b>Player Prop Market Providers</b>",
-            *_primary_player_prop_provider_lines(),
         ]
-
-        # Existing reconciliation data already keeps provider observations,
-        # evaluations, actionable rows, and deliveries separate. Bound this
-        # optional reporting query so it cannot make /funnel unresponsive.
-        provider_pipeline: dict = {}
-        try:
-            reconciliation = await _bounded(
-                _db.get_telegram_reconciliation(
-                    since_hours=since_h,
-                    bucket_minutes=60,
-                ),
-                timeout=_PROVIDER_REPORT_TIMEOUT_SECONDS,
-            )
-            if isinstance(reconciliation, dict):
-                provider_pipeline = reconciliation.get("by_provider", {})
-        except asyncio.TimeoutError:
-            logger.warning(
-                "cmd_funnel: provider reconciliation exceeded %.1fs",
-                _PROVIDER_REPORT_TIMEOUT_SECONDS,
-            )
-        except Exception as _provider_exc:
-            logger.debug("cmd_funnel: provider reconciliation unavailable: %s", _provider_exc)
-
-        # Use the normalized funnel populations for the provider headline when
-        # available.  Reconciliation also includes transport/audit rows, but
-        # its historical-observation definition must not disagree with the
-        # sport table below.
-        _normalized_provider_pipeline = summary.get("provider_breakdown", {}) or {}
-        if _normalized_provider_pipeline:
-            provider_pipeline = {
-                provider: {
-                    "observed": values.get("historical_observations", 0),
-                    "evaluated": values.get("evaluated", 0),
-                    "tracked": values.get("active_tracked", 0),
-                    "directional": values.get("directional", 0),
-                    "actionable_persisted": values.get("actionable", 0),
-                    "audit_delivered_alerts": values.get("delivered", 0),
-                    "pending": values.get("pending", 0),
-                    "resolved": values.get("resolved", 0),
-                }
-                for provider, values in _normalized_provider_pipeline.items()
-            }
-
-        if provider_pipeline:
-            lines += [
-                "",
-                f"<b>Provider Pipeline</b>  <i>(last {since_h}h)</i>",
-            ]
-            for _provider in ("Underdog",):
-                _row = provider_pipeline.get(_provider, {})
-                _delivered = _row.get("audit_delivered_alerts", 0)
-                lines += [
-                    f"  <b>{_provider}</b>",
-                    f"    Observed: <code>{int(_row.get('observed', 0) or 0):,}</code>"
-                    f"  ·  Evaluated: <code>{int(_row.get('evaluated', 0) or 0):,}</code>",
-                    f"    Active tracked: <code>{int(_row.get('tracked', 0) or 0):,}</code>"
-                    f"  ·  Directional: <code>{int(_row.get('directional', _row.get('actionable_persisted', 0)) or 0):,}</code>",
-                    f"    Actionable persisted: <code>{int(_row.get('actionable_persisted', 0) or 0):,}</code>"
-                    f"  ·  Delivered: <code>{int(_delivered or 0):,}</code>",
-                    f"    Pending grading: <code>{int(_row.get('pending', 0) or 0):,}</code>"
-                    f"  ·  Resolved: <code>{int(_row.get('resolved', 0) or 0):,}</code>"
-                    f"  ·  H/M/P: <code>{int((_row.get('result_counts') or {}).get('HIT', 0) or 0)}/"
-                    f"{int((_row.get('result_counts') or {}).get('MISS', 0) or 0)}/"
-                    f"{int((_row.get('result_counts') or {}).get('PUSH', 0) or 0)}</code>",
-                ]
 
         # ── Section 1: Scan Pipeline (from ScanCycleLog) ─────────────────────────────
         # FPR stats describe the current canonical active by-line universe.
