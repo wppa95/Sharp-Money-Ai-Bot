@@ -423,8 +423,9 @@ class Config:
     # ── Full-Pool Rescan (FPR) ────────────────────────────────────────────────
     # How many active props to score per FPR batch.  Bounded to control CPU/memory.
     FPR_BATCH_SIZE: int = int(os.environ.get("FPR_BATCH_SIZE", "10000"))
-    # Seconds between FPR batches. The coordinator prevents overlap while
-    # keeping scan progress visible within the live 1–2 minute window.
+    # Compatibility enable/disable switch for the full-pool rotation. The
+    # production scheduler uses UNDERDOG_POLL_INTERVAL so monitoring cannot
+    # drift onto a separate cadence.
     FPR_INTERVAL: int = int(os.environ.get("FPR_INTERVAL", "120"))
     # Sports placed at the end of each rotation (lowest scheduling priority).
     # They are always rescanned — just last.  Override via FPR_LOW_PRIORITY_SPORTS env var.

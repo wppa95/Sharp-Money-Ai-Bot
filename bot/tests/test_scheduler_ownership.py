@@ -119,6 +119,17 @@ def test_monitoring_and_grading_have_distinct_cycle_owners():
     )
 
 
+def test_full_pool_monitoring_uses_underdog_cadence():
+    source = MAIN_SOURCE.read_text()
+    fpr_block = source[
+        source.index('if config.FPR_INTERVAL > 0:')
+        :source.index('        # Grading owns an independent one-shot schedule.')
+    ]
+
+    assert "interval=config.UNDERDOG_POLL_INTERVAL" in fpr_block
+    assert "first=config.UNDERDOG_POLL_INTERVAL" in fpr_block
+
+
 @pytest.mark.asyncio
 async def test_coordinator_coalesces_active_trigger_and_allows_next_trigger():
     from main import _ScheduledExecutionCoordinator

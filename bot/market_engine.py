@@ -7584,7 +7584,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
     Full-Pool Rescan Rotation: covers the entire active prop pool in batches.
 
     • Batch size: config.FPR_BATCH_SIZE (default 10,000)
-    • Interval:   config.FPR_INTERVAL   (default 300 s / 5 min)
+     • Interval:   config.UNDERDOG_POLL_INTERVAL (same cadence as live monitoring)
     • When all props in the current pool have been covered the rotation counter
       increments and the cursor resets to 0 automatically.
     • Removed/inactive props are excluded by the canonical provider-aware

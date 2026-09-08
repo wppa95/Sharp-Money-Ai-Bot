@@ -851,8 +851,10 @@ async def post_init(application: Application) -> None:
                     _full_pool_rescan_job,
                     exclusive_group=_SQLITE_WRITE_JOB_GROUP,
                 ),
-                interval=config.FPR_INTERVAL,
-                first=config.FPR_INTERVAL,
+                # Full-pool monitoring is part of the active Underdog cycle;
+                # it must not drift to a separate cadence.
+                interval=config.UNDERDOG_POLL_INTERVAL,
+                first=config.UNDERDOG_POLL_INTERVAL,
                 name="full_pool_rescan",
             )
         # Grading owns an independent one-shot schedule. The next run is only
@@ -952,8 +954,8 @@ async def post_init(application: Application) -> None:
              "[Unified Player Props cycle enabled=%s; "
              "sportsbook integrations disabled]",
             config.UNDERDOG_POLL_INTERVAL,
-            config.FPR_INTERVAL,
-            config.OPPORTUNITY_GRADER_INTERVAL,
+            config.UNDERDOG_POLL_INTERVAL,
+            config.UNDERDOG_POLL_INTERVAL,
             config.PLAYER_HISTORY_POLL_INTERVAL,
             config.SEASON_CHECK_INTERVAL,
             _propline_enabled,
