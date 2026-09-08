@@ -5275,10 +5275,9 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                         f"{int(row.get('removed', 0) or 0):>7}</code>"
                     )
             else:
-                lines += [
-                    "",
-                    "<code>Sport         Obs     Act    Eval     Dir     Del</code>",
-                    "<code>──────────  -------  -------  -------  -------  -------</code>",
+                _sport_table_lines = [
+                    f"{'Sport':<6}{'Obs':>5}{'Act':>5}{'Eval':>5}{'Dir':>5}{'Del':>5}",
+                    f"{'------':<6}{'-----':>5}{'-----':>5}{'-----':>5}{'-----':>5}{'-----':>5}",
                 ]
                 normalized_observed_by_sport = (
                     summary.get("observations_by_sport", {}) or {}
@@ -5301,17 +5300,17 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     ),
                 ):
                     # Escape dynamic sport name to prevent HTML parse errors
-                    sp = _html.escape(str(sport)[:10])
+                    sp = _html.escape(str(sport)[:6])
                     sc = normalized_by_sport.get(sport, 0)
                     so = normalized_observed_by_sport.get(sport, 0)
                     se = normalized_evaluated_by_sport.get(sport, 0)
                     sa = normalized_directional_by_sport.get(sport, 0)
                     sd = normalized_delivered_by_sport.get(sport, 0)
-                    lines.append(
-                        f"<code>{sp:<10}  {int(so or 0):>7}  "
-                        f"{int(sc or 0):>7}  {int(se or 0):>7}  "
-                        f"{int(sa or 0):>7}  {int(sd or 0):>7}</code>"
+                    _sport_table_lines.append(
+                        f"{sp:<6}{int(so or 0):>5}{int(sc or 0):>5}"
+                        f"{int(se or 0):>5}{int(sa or 0):>5}{int(sd or 0):>5}"
                     )
+                lines += ["", "<pre>" + "\n".join(_sport_table_lines) + "</pre>"]
         else:
             lines += ["", "<i>Sport breakdown accumulates as the bot scans props.</i>"]
 

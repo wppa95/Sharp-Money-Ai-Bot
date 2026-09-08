@@ -413,22 +413,21 @@ async def test_funnel_sport_breakdown_uses_aligned_columns_and_active_sort():
 
     message = update.message.reply_text.await_args.args[0]
     table = message.split("Sport Funnel Breakdown", 1)[1]
-    row_lines = [line for line in table.splitlines() if line.startswith("<code>")]
 
+    assert "<pre>" in table
     assert re.search(r"Sport\s+Obs\s+Act\s+Eval\s+Dir\s+Del", table)
     data_rows = [
-        line for line in row_lines
-        if not line.startswith("<code>Sport") and "─" not in line
+        line for line in table.split("<pre>", 1)[1].split("</pre>", 1)[0].splitlines()[2:]
     ]
     assert len(data_rows) == 4
-    assert [line.split()[0].removeprefix("<code>") for line in data_rows] == [
+    assert [line.split()[0] for line in data_rows] == [
         "MLB", "Soccer", "NBA", "FIFA",
     ]
-    assert "<code>MLB" in data_rows[0]
+    assert "MLB" in data_rows[0]
     assert "1,234" not in data_rows[0]
     assert "FIFA" in data_rows[-1]
     assert "NFL" not in table
-    assert re.search(r"<code>MLB\s+5678\s+1234\s+0\s+90\s+45</code>", table)
+    assert re.search(r"MLB\s+5678\s+1234\s+0\s+90\s+45", table)
     assert "Cold-start" not in message
     assert "Futures" not in message
     assert "Scan figures are observation/scoring" not in message
