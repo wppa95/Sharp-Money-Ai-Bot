@@ -87,6 +87,11 @@ class PlayerHitRates:
     data_source: str = "primary"
     n_supplemental_games: int = 0
     supplemental_sources: tuple[str, ...] = ()
+    # Recent opponent-specific windows. ``h2h`` remains the aggregate sample
+    # for backward compatibility.
+    h2h_l5: Optional[WindowStats] = None
+    h2h_l10: Optional[WindowStats] = None
+    h2h_l20: Optional[WindowStats] = None
 
 
 # ── Computation ───────────────────────────────────────────────────────────────
@@ -169,6 +174,9 @@ def compute_hit_rates(
 
     # H2H — only compute when opponent known and sufficient matchups exist
     h2h_stats: Optional[WindowStats] = None
+    h2h_l5_stats: Optional[WindowStats] = None
+    h2h_l10_stats: Optional[WindowStats] = None
+    h2h_l20_stats: Optional[WindowStats] = None
     if opponent:
         h2h_subset = [
             r for r in sorted_results
@@ -176,6 +184,9 @@ def compute_hit_rates(
         ]
         if len(h2h_subset) >= h2h_min_games:
             h2h_stats = _window_stats(h2h_subset, h2h_min_games)
+        h2h_l5_stats = _window_stats(h2h_subset[:5], 5)
+        h2h_l10_stats = _window_stats(h2h_subset[:10], 10)
+        h2h_l20_stats = _window_stats(h2h_subset[:20], 20)
 
     # Determine player_name / stat_type from first record
     first = sorted_results[0]
@@ -194,6 +205,9 @@ def compute_hit_rates(
         h2h           = h2h_stats,
         has_real_data = True,
         total_games   = len(sorted_results),
+        h2h_l5       = h2h_l5_stats,
+        h2h_l10      = h2h_l10_stats,
+        h2h_l20      = h2h_l20_stats,
     )
 
 
