@@ -1,0 +1,70 @@
+━━━━━━━━━━━━━━━━━━
+📡 Scan Pipeline
+━━━━━━━━━━━━━━━━━━
+
+Player Prop Market Providers
+  🟢 Player Props — Underdog: available
+
+Provider Pipeline  (last 1h)
+  Underdog
+    Observed: 5,372  ·  Evaluated: 13,860
+    Active tracked: 29,425  ·  Directional: 1
+    Actionable persisted: 1  ·  Delivered: 1
+    Pending grading: 5,283  ·  Resolved: 0  ·  H/M/P: 0/0/0
+
+Last 1h  ·  scan completed but log not recorded (check bot logs).
+Scan cycle metrics appear here once the first scan completes.
+
+━━━━━━━━━━━━━━━━━━
+🔭 Tracking & Grading Funnel
+━━━━━━━━━━━━━━━━━━
+
+Current tracking, windowed evaluation, delivery, and grading are separate populations.
+
+📥 Active tracked props: 29,832
+🧾 Historical observations: 5,372
+🔬 Evaluated candidates: 13,860
+🎯 Directional OVER/UNDER opportunities: 1
+✅ Actionable persisted: 1
+🔬 Rescored: 0
+📈 Line movers: 0
+📤 Delivered alerts: 1
+⏳ Pending grading (tracked props): 5,283
+🏁 Resolved tracked outcomes: 0
+   └─ HIT / MISS / PUSH: 0 / 0 / 0
+
+Direction is the persisted actionable population; delivery is recorded separately.
+Quality, evidence, deduplication, and live-game safeguards still govern delivery.
+Use /alerts to see Telegram-delivered picks.
+
+────────────────
+
+⚽ Sport Funnel Breakdown
+
+
+Sport        Active  Observed  Evaluated  Directional  Delivered
+──────────  -------  --------  ---------  -----------  ---------
+MLB           10920         0       7947            1          1
+TENNIS        10142         0        804            0          0
+FIFA           3808         0       3538            0          0
+WNBA           1132         0          0            0          0
+CS             1070         0       1134            0          0
+MMA            1049         0        147            0          0
+PGA             457         0          0            0          0
+LOL             385         0          0            0          0
+F1SZN           145         0         66            0          0
+NBA             129         0          0            0          0
+VAL             121         0        140            0          0
+NHL              89         0          0            0          0
+KBO              83         0          0            0          0
+BKFC             60         0          0            0          0
+DOTA             57         0         54            0          0
+NPB              50         0          0            0          0
+HIGHLIMIT        38         0          0            0          0
+RACING           37         0          0            0          0
+OUTLAWS          30         0          0            0          0
+MOTORCYCLE       15         0          0            0          0
+BASKETBALL       10         0         30            0          0
+USAC              5         0          0            0          0
+
+━━━━━━━━━━━━━━━━━━
