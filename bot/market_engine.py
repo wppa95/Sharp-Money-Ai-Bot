@@ -743,6 +743,55 @@ async def _persist_db_write(
             await result
 
 
+async def _persist_required_candidate_batch(
+    db,
+    candidates: list[dict],
+    *,
+    label: str,
+    attempts: int = 4,
+) -> int:
+    """Persist candidate telemetry before the monitoring cycle is complete.
+
+    Candidate rows are evaluation evidence, not disposable diagnostics.  Use a
+    strict transaction and retry transient SQLite contention rather than
+    enqueueing a batch and clearing the only in-memory copy.
+    """
+    if not candidates:
+        return 0
+    expected = len(candidates)
+    last_error: Exception | None = None
+    for attempt in range(1, max(1, attempts) + 1):
+        try:
+            inserted = await db.log_prop_candidate_batch(
+                candidates,
+                strict=True,
+            )
+            if int(inserted or 0) != expected:
+                raise RuntimeError(
+                    f"incomplete candidate telemetry write "
+                    f"({int(inserted or 0)}/{expected})"
+                )
+            logger.debug("%s: persisted %d candidates", label, expected)
+            return expected
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            if attempt >= max(1, attempts):
+                break
+            delay = min(2.0, 0.25 * (2 ** (attempt - 1)))
+            logger.warning(
+                "%s failed (%d/%d); retrying in %.2fs: %s",
+                label,
+                attempt,
+                max(1, attempts),
+                delay,
+                type(exc).__name__,
+            )
+            await asyncio.sleep(delay)
+    raise RuntimeError(
+        f"{label} failed after {max(1, attempts)} attempts"
+    ) from last_error
+
+
 def _job_activity_start(name: str) -> None:
     _active_jobs[name] = time.monotonic()
 
@@ -6762,9 +6811,8 @@ async def underdog_job(context) -> None:
                         "reason_codes":         _json.dumps(_ccodes) if _ccodes else None,
                         "snapshot_external_id": _cp.get("external_id"),
                     })
-                # Keep one full-cycle bulk operation, but do not place
-                # non-critical candidate telemetry in front of the required
-                # post-scan bridge.
+                # Keep one full-cycle bulk operation, then persist it through
+                # the required post-scan candidate-evidence barrier.
                 _candidate_batch = list(_cand_rows)
                 if isinstance(db, Database):
                     _deferred_candidate_batch = _candidate_batch
@@ -6955,19 +7003,27 @@ async def underdog_job(context) -> None:
             _persistence_ok = False
 
     if _deferred_candidate_batch and isinstance(db, Database):
-        if _enqueue_db_persistence(
-            "log Underdog candidate batch",
-            lambda batch=_deferred_candidate_batch: db.log_prop_candidate_batch(batch),
-        ):
-            logger.debug(
-                "underdog_job: queued %d candidates after post-scan bridge",
-                len(_deferred_candidate_batch),
+        try:
+            await _persist_required_candidate_batch(
+                db,
+                list(_deferred_candidate_batch),
+                label="underdog candidate telemetry",
             )
-        else:
-            logger.warning(
-                "underdog_job: could not schedule candidate telemetry write"
+        except Exception as _candidate_exc:
+            _persistence_ok = False
+            logger.error(
+                "underdog_job: candidate telemetry write failed "
+                "after retries: %s",
+                type(_candidate_exc).__name__,
             )
-        _deferred_candidate_batch.clear()
+            if _health:
+                _health.record_pipeline_fail(
+                    "candidate_telemetry",
+                    "market_engine",
+                    str(_candidate_exc),
+                )
+        finally:
+            _deferred_candidate_batch.clear()
 
     _snapshot_fetched = (
         _snapshot_intentionally_skipped + _snapshot_intended
@@ -8497,12 +8553,30 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             and asyncio.iscoroutinefunction(_log_fpr_candidates)
         ):
             try:
-                await _log_fpr_candidates(_fpr_candidate_rows)
+                if isinstance(db, Database):
+                    await _persist_required_candidate_batch(
+                        db,
+                        list(_fpr_candidate_rows),
+                        label="full_pool_rescan candidate telemetry",
+                    )
+                else:
+                    inserted = await _log_fpr_candidates(_fpr_candidate_rows)
+                    if inserted is not None and int(inserted) != len(_fpr_candidate_rows):
+                        raise RuntimeError(
+                            "incomplete full_pool_rescan candidate telemetry write"
+                        )
             except Exception as _fpr_candidate_exc:
-                logger.warning(
-                    "full_pool_rescan: evaluation telemetry write failed: %s",
+                logger.error(
+                    "full_pool_rescan: evaluation telemetry write failed "
+                    "after retries: %s",
                     type(_fpr_candidate_exc).__name__,
                 )
+                if _health:
+                    _health.record_pipeline_fail(
+                        "candidate_telemetry",
+                        "market_engine",
+                        str(_fpr_candidate_exc),
+                    )
 
         # Selection happens only after the complete qualified batch has been
         # evaluated.  This prevents a stronger later-processed prop from

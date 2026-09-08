@@ -6456,6 +6456,8 @@ class Database:
     async def log_prop_candidate_batch(
         self,
         candidates: "list[dict]",
+        *,
+        strict: bool = False,
     ) -> int:
         """
         Batch-insert PropCandidateLog rows from a list of scored-prop dicts.
@@ -6495,6 +6497,16 @@ class Database:
                     c.get("player_name", "?"), c.get("stat_type", "?"), _row_exc,
                 )
                 failed += 1
+
+        # Required telemetry uses one transaction so a retry cannot duplicate
+        # an earlier partially committed chunk.  The default path retains the
+        # older bounded/isolated behavior for compatibility callers.
+        if strict:
+            async with self.session() as s:
+                s.add_all(rows)
+                await s.commit()
+            await asyncio.sleep(0)
+            return len(rows)
 
         # Candidate telemetry is non-critical, but it can contain thousands of
         # neutral evaluations. One session/commit per row monopolizes the
