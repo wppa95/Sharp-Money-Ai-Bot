@@ -901,6 +901,8 @@ async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             if tg_perf["graded"] > 0:
                 tg_lines.append(f"  Hit Rate: <b>{tg_hr}%</b>")
             for source, source_perf in sorted(tg_perf.get("by_provider", {}).items()):
+                if str(source).strip().lower() != "underdog":
+                    continue
                 tg_lines.append(
                     f"  <b>{_html.escape(source)}:</b> "
                     f"{source_perf['hit']}H-{source_perf['miss']}M-"
@@ -1607,6 +1609,8 @@ async def cmd_backtest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             msg += "\n\n📡 <b>Provider context</b>"
             msg += "\n<i>Backtest metrics above use legacy EVRecord rows.</i>"
             for provider, stats in sorted(provider_perf["by_provider"].items()):
+                if str(provider).strip().lower() != "underdog":
+                    continue
                 msg += (
                     f"\n  {provider}: {stats.get('hit', 0)}H-"
                     f"{stats.get('miss', 0)}M-{stats.get('push', 0)}P · "
@@ -3426,6 +3430,8 @@ async def cmd_reconcile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             "Actionable  Delivered  Pending  Resolved  H/M/P</code>",
         ]
         for provider, row in sorted(report.get("by_provider", {}).items()):
+            if str(provider).strip().lower() != "underdog":
+                continue
             # Only identity-complete confirmed PLAY audits count as delivered.
             # Legacy/source flags are shown separately as UNKNOWN below.
             delivered = row.get("audit_delivered_alerts", 0)
@@ -3582,6 +3588,8 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if by_provider:
         lines += ["", "─ <b>By Provider</b> " + "─" * 15]
         for provider, row in sorted(by_provider.items()):
+            if str(provider).strip().lower() != "underdog":
+                continue
             lines.append(
                 f"  {_html.escape(str(provider))}: "
                 f"{int(row.get('hit', 0) or 0)}H / "
@@ -4077,6 +4085,8 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             _resolved = tracking.get("resolved_by_provider", {}) or {}
             _providers = set(_active) | set(_observed) | set(_directional) | set(_delivered)
             for provider in sorted(_providers):
+                if str(provider).strip().lower() != "underdog":
+                    continue
                 result_counts = (tracking.get("result_counts_by_provider", {}) or {}).get(provider, {})
                 lines.append(
                     f"  <b>{_html.escape(provider)}:</b> "
@@ -4459,6 +4469,10 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         | set(_observed_by_provider)
         | set(_directional_by_provider)
     )
+    _provider_names = {
+        provider for provider in _provider_names
+        if str(provider).strip().lower() == "underdog"
+    }
     if _provider_names:
         lines += ["", "━━━━━━━━━━━━━━━━━━", "<b>By Provider</b>"]
         for provider in sorted(_provider_names):

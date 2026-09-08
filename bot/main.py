@@ -244,6 +244,11 @@ async def sync_telegram_command_catalog(
     """
     try:
         seeded = await db.ensure_telegram_commands(TELEGRAM_COMMAND_CATALOG)
+        # These legacy handlers are intentionally not registered anymore, but
+        # older databases may still contain their catalog rows. Disable them
+        # before publishing Telegram's menu so retired provider surfaces do
+        # not reappear after restart.
+        await db.disable_telegram_commands(("pp_import", "propdata"))
         command_rows = await db.get_telegram_commands(enabled_only=True)
     except Exception as exc:
         logger.warning(

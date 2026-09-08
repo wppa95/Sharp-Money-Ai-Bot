@@ -274,7 +274,6 @@ class DashboardReport:
         ]
         for provider, legacy_total, today_total in (
             ("Underdog", self.total_ud_alerts, self.today_ud_alerts),
-            ("PrizePicks", self.total_pp_alerts, self.today_pp_alerts),
         ):
             values = self.provider_pipeline.get(provider)
             if not isinstance(values, dict):
@@ -340,10 +339,8 @@ class DashboardReport:
         if self.recent_tracked_props:
             parts.append("🔔 <b>Recently Tracked Props</b>  <i>(last hour · all sports)</i>")
             for prop in self.recent_tracked_props[:5]:
-                provider = prop.get("provider", "Underdog")
-                source_emoji = "🟣" if provider == "PrizePicks" else "🐶"
                 parts.append(
-                    f"  {source_emoji} <b>{provider.upper()} PICK</b> · "
+                    f"  🐶 <b>UNDERDOG PICK</b> · "
                     f"<b>{prop['player_name']}</b>  {prop['stat_type']} "
                     f"<code>{prop['line_value']:.1f}</code> · <i>{prop['sport']}</i>"
                 )
@@ -379,8 +376,7 @@ class DashboardReport:
                 ev_str  = f"  EV {sp.avg_ev:+.1f}%"  if sp.avg_ev  is not None else ""
                 clv_str = f"  CLV {sp.avg_clv:+.1f}%" if sp.avg_clv is not None else ""
                 parts.append(
-                    f"  {sp.sport:<10} UD <code>{sp.ud_count:>3}</code>"
-                    f" · PP <code>{sp.pp_count:>3}</code>"
+                 f"  {sp.sport:<10} UD <code>{sp.ud_count:>3}</code>"
                     f" · EV <code>{sp.ev_count:>3}</code>"
                     f"{ev_str}{clv_str}"
                 )
@@ -414,7 +410,6 @@ class DashboardReport:
             for d in trend_days[-1:]:
                 parts.append(
                     f"  {d.date_str}  UD <code>{d.ud_count}</code>"
-                    f" · PP <code>{d.pp_count}</code>"
                     f" · EV <code>{d.ev_count}</code>"
                     f" · Steam <code>{d.steam_count}</code>"
                 )
@@ -505,7 +500,7 @@ class DashboardEngine:
             timeout=1.75,
         )
         provider_rows = []
-        for provider in ("Underdog", "PrizePicks"):
+        for provider in ("Underdog",):
             rows = await _bounded_dashboard_read(
                 db.get_recent_tracked_props(
                         provider, since_hours=1, limit=100
@@ -605,7 +600,7 @@ class DashboardEngine:
             if isinstance(provider_rows, Exception):
                 provider_rows = []
             report.recent_tracked_props = []
-            for provider, rows in zip(("Underdog", "PrizePicks"), provider_rows):
+            for provider, rows in zip(("Underdog",), provider_rows):
                 if rows is _DASHBOARD_UNAVAILABLE:
                     continue
                 report.recent_tracked_props.extend(
@@ -1097,10 +1092,7 @@ class DashboardEngine:
         # needed for this presentation.
         by_provider = r.tracking_by_provider
 
-        known_providers = (
-            {"Underdog", "PrizePicks"}
-            | set(by_provider)
-        )
+        known_providers = {"Underdog"}
         pipeline: dict[str, dict] = {}
         health_monitor = None
         health_tracker = None

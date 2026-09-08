@@ -1295,6 +1295,24 @@ class Database:
             await s.commit()
         return rows_written
 
+    async def disable_telegram_commands(self, commands: "Iterable[str]") -> int:
+        """Disable retired commands so stale catalog rows cannot be published."""
+        normalized = {
+            str(command or "").strip().lstrip("/").lower()
+            for command in commands
+            if str(command or "").strip()
+        }
+        if not normalized:
+            return 0
+        async with self.session() as s:
+            result = await s.execute(
+                update(TelegramCommand)
+                .where(TelegramCommand.command.in_(normalized))
+                .values(enabled=False)
+            )
+            await s.commit()
+            return int(result.rowcount or 0)
+
     async def get_telegram_commands(
         self,
         *,
