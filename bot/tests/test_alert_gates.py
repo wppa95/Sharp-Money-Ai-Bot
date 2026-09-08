@@ -359,7 +359,7 @@ class TestCmdFunnelSportBreakdown:
         assert "Action" in msg
         assert "Removed" in msg
         assert "<code>NBA" in msg
-        assert "8        3        2</code>" in msg
+        assert re.search(r"<code>NBA\s+8\s+3\s+2</code>", msg)
         assert "<code>WNBA" in msg
         assert "0        0        1</code>" in msg
 

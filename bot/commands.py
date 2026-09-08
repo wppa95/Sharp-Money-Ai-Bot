@@ -5268,26 +5268,25 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 # removal columns for mocked or pre-normalized responses.
                 lines += [
                     "",
-                    f"{'Sport':<12} {'Active':>8} {'Action':>8} {'Removed':>8}",
-                    "─" * 42,
+                    "<code>Sport        Active   Action  Removed</code>",
+                    "<code>──────────  -------  ------  -------</code>",
                 ]
                 for row in by_sport:
                     sport = row.get("sport")
                     if not _report_sport_allowed(sport):
                         continue
-                    sp = _html.escape(str(sport)[:11])
+                    sp = _html.escape(str(sport)[:10])
                     lines.append(
-                        f"<code>{sp:<12} "
-                        f"{int(row.get('tracked', 0) or 0):>8} "
-                        f"{int(row.get('actionable', 0) or 0):>8} "
-                        f"{int(row.get('removed', 0) or 0):>8}</code>"
+                        f"<code>{sp:<10}  "
+                        f"{int(row.get('tracked', 0) or 0):>7}  "
+                        f"{int(row.get('actionable', 0) or 0):>6}  "
+                        f"{int(row.get('removed', 0) or 0):>7}</code>"
                     )
             else:
                 lines += [
                     "",
-                    f"{'Sport':<12} {'Active':>8} {'Observed':>9} "
-                    f"{'Directional':>12} {'Delivered':>10}",
-                    "─" * 57,
+                    "<code>Sport        Active  Observed  Evaluated  Directional  Delivered</code>",
+                    "<code>──────────  -------  --------  ---------  -----------  ---------</code>",
                 ]
                 normalized_observed_by_sport = (
                     summary.get("observations_by_sport", {}) or {}
@@ -5310,20 +5309,16 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     ),
                 ):
                     # Escape dynamic sport name to prevent HTML parse errors
-                    sp = _html.escape(str(sport)[:11])
+                    sp = _html.escape(str(sport)[:10])
                     sc = normalized_by_sport.get(sport, 0)
                     so = normalized_observed_by_sport.get(sport, 0)
                     se = normalized_evaluated_by_sport.get(sport, 0)
                     sa = normalized_directional_by_sport.get(sport, 0)
                     sd = normalized_delivered_by_sport.get(sport, 0)
                     lines.append(
-                        f"<code>{sp:<12} {sc:>8} {so:>9} "
-                        f"{sa:>12} {sd:>10}</code>"
-                    )
-                    # Keep the compact legacy row stable for Telegram clients
-                    # while exposing the newer analysis populations beneath it.
-                    lines.append(
-                        f"  <i>evaluated {se} · actionable {sa}</i>"
+                        f"<code>{sp:<10}  {int(sc or 0):>7}  "
+                        f"{int(so or 0):>8}  {int(se or 0):>9}  "
+                        f"{int(sa or 0):>11}  {int(sd or 0):>9}</code>"
                     )
         else:
             lines += ["", "<i>Sport breakdown accumulates as the bot scans props.</i>"]
