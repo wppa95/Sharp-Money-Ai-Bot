@@ -768,14 +768,21 @@ async def test_concurrent_file_backed_writers_stay_within_cadence(
 # ── 1. Poll interval ──────────────────────────────────────────────────────────
 
 
-def test_poll_interval_default_180s():
-    """config.py must leave enough time for the full Player Props cycle."""
+def test_poll_interval_default_120s():
+    """Underdog must refresh the complete Player Props feed every two minutes."""
     src = _src("config.py")
-    # Config uses os.environ.get with "180" as default
+    # Config uses os.environ.get with "120" as default
     assert re.search(
-        r'UNDERDOG_POLL_INTERVAL.*int\(os\.environ\.get\([^,]+,\s*["\']180["\']\)',
+        r'UNDERDOG_POLL_INTERVAL.*int\(os\.environ\.get\([^,]+,\s*["\']120["\']\)',
         src,
-    ), "UNDERDOG_POLL_INTERVAL default must be '180'"
+    ), "UNDERDOG_POLL_INTERVAL default must be '120'"
+
+
+def test_underdog_evaluation_budget_does_not_cap_the_feed():
+    """Every fetched prop remains in the cycle population for persistence."""
+    src = _src("market_engine.py")
+    assert "_evaluation_budget = max(" in src
+    assert "len(ud_snaps)" in src
 
 
 def test_player_history_interval_default_300s():
@@ -797,10 +804,7 @@ def test_coordinator_in_underdog_monitor():
         r'_coordinated_job\(\s*"underdog_monitor",\s*_underdog_monitor_cycle',
         src,
     )
-    assert re.search(
-        r'_coordinated_job\(\s*"prizepicks_monitor",\s*prizepicks_job',
-        src,
-    )
+    assert "prizepicks_monitor" not in src
 
 
 def test_no_scheduler_max_instances_override():

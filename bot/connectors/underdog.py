@@ -100,7 +100,7 @@ class UnderdogConnector(BaseConnector):
 
     name          = "Underdog"
     is_pickem     = True
-    poll_interval = 300  # 5 minutes — pick'em lines move slowly
+    poll_interval = 120  # 2 minutes — refresh the complete current feed
 
     def __init__(
         self,

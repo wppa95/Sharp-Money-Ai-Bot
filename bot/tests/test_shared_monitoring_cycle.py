@@ -16,7 +16,7 @@ import market_engine
 
 
 @pytest.mark.asyncio
-async def test_shared_cycle_does_not_hold_underdog_for_propline_ingestion(monkeypatch):
+async def test_shared_cycle_keeps_propline_internal_to_ingestion(monkeypatch):
     events = []
     underdog_release = asyncio.Event()
     ingestion_release = asyncio.Event()
@@ -66,16 +66,14 @@ async def test_shared_cycle_does_not_hold_underdog_for_propline_ingestion(monkey
     assert set(events) == {
         "ingestion-start",
         "ingestion-end",
-        "propline-start",
         "underdog-start",
         "underdog-end",
-        "propline-end",
     }
     assert completed == ["complete"]
 
 
 @pytest.mark.asyncio
-async def test_shared_cycle_uses_empty_paced_batch_without_fallback_fetch(monkeypatch):
+async def test_shared_cycle_does_not_create_empty_propline_opportunity_batch(monkeypatch):
     calls = []
 
     async def propline_branch(
@@ -104,11 +102,11 @@ async def test_shared_cycle_uses_empty_paced_batch_without_fallback_fetch(monkey
     await market_engine._shared_monitoring_cycle(underdog_branch)(SimpleNamespace())
     await asyncio.sleep(0)
 
-    assert calls == [([], "paced", False)]
+    assert calls == []
 
 
 @pytest.mark.asyncio
-async def test_shared_cycle_marks_paced_props_as_already_persisted(monkeypatch):
+async def test_shared_cycle_does_not_handoff_propline_props_to_delivery(monkeypatch):
     calls = []
     prop = SimpleNamespace(player_name="Paced Player")
 
@@ -139,15 +137,15 @@ async def test_shared_cycle_marks_paced_props_as_already_persisted(monkeypatch):
     await market_engine._shared_monitoring_cycle(underdog_branch)(SimpleNamespace())
     await asyncio.sleep(0)
 
-    assert calls == [([prop], "paced", True)]
+    assert calls == []
 
 
-def test_scheduler_has_independent_monitor_owners_and_no_heartbeat_handoff():
+def test_scheduler_has_one_underdog_monitor_owner_and_no_heartbeat_handoff():
     main_source = inspect.getsource(__import__("main").post_init)
     heartbeat_source = inspect.getsource(__import__("main")._heartbeat_job)
 
     assert "name=\"underdog_monitor\"" in main_source
-    assert "name=\"prizepicks_monitor\"" in main_source
+    assert "name=\"prizepicks_monitor\"" not in main_source
     assert "_shared_monitoring_cycle" not in main_source
     assert "_start_prizepicks_cycle" not in main_source
     assert "_start_prizepicks_cycle" not in heartbeat_source
