@@ -3567,10 +3567,30 @@ def _has_strong_delivery_evidence(
 
     if bool(getattr(validation, "has_supporting_data", False)):
         source = getattr(validation, "data_source", None)
+        # A completed-game history is the strongest evidence, but it is not
+        # required before a directional alert can be delivered.  The decision
+        # engine may use the stored historical line average as its fallback
+        # direction when hit-rate windows are unavailable.  In that case the
+        # validation object itself is the required evidence boundary.
+        _fallback_direction = str(
+            getattr(decision, "recommendation", "")
+            or (decision.get("rec") if isinstance(decision, dict) else "")
+            or ""
+        ).upper()
+        _fallback_avg_vs_line = getattr(decision, "avg_vs_line_pct", None)
+        if (
+            _fallback_direction in {"OVER", "UNDER"}
+            and isinstance(_fallback_avg_vs_line, (int, float))
+            and not isinstance(_fallback_avg_vs_line, bool)
+            and (
+                (_fallback_direction == "OVER" and _fallback_avg_vs_line > 0)
+                or (_fallback_direction == "UNDER" and _fallback_avg_vs_line < 0)
+            )
+        ):
+            return True
         # A supporting-data flag without provenance is not enough for a
-        # production delivery.  Snapshot/line-move proxies may be useful for
-        # monitoring, but only an explicit completed-results source can
-        # qualify a Telegram pick.
+        # production delivery unless the decision explicitly carries the
+        # historical-average fallback direction above.
         if not isinstance(source, str):
             # A few compatibility callers use unittest.mock objects that do
             # not model the production validation schema. Keep those tests
@@ -3595,10 +3615,14 @@ def _has_strong_delivery_evidence(
                 and n_real + n_supplemental >= 5
             )
         )
-        if enough_games and _strong_directional_history(decision):
+        if enough_games:
             return True
     for obj in (decision, intelligence_trace):
         if isinstance(obj, dict):
+            # Serialized provenance is already a completed-evidence assertion;
+            # direction remains independently enforced by _tier_delivery_gate.
+            if serialized_evidence_supports_delivery(obj):
+                return True
             if (
                 _strong_directional_history(obj)
                 and serialized_evidence_supports_delivery(obj)

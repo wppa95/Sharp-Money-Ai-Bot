@@ -1,4 +1,4 @@
-"""Regression tests for missing-history market-signal handling."""
+"""Regression tests for historical-average direction fallback."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ def _validation(avg_line: float | None = None) -> MagicMock:
     return validation
 
 
-def test_missing_history_never_creates_direction_from_market_signal():
+def test_missing_history_uses_historical_average_for_direction():
     result = make_ud_bet_decision(
         score=_score(98.0, "S"),
         validation=_validation(avg_line=20.0),
@@ -30,17 +30,17 @@ def test_missing_history_never_creates_direction_from_market_signal():
     )
 
     assert isinstance(result, UDBetDecision)
-    assert result.recommendation is None
-    assert result.decision_tier is None
-    assert result.confidence == 0
+    assert result.recommendation == "OVER"
+    assert result.decision_tier == "S"
+    assert result.confidence == 95
     assert result.l5_games is None
     assert result.l5_hit_rate is None
     assert result.season_games is None
     assert result.avg_vs_line_pct == 0.25
-    assert "not sufficient" in result.reason.lower()
+    assert "historical average fallback" in result.reason.lower()
 
 
-def test_missing_history_is_not_turned_into_fake_zero_rate_data():
+def test_missing_history_can_create_under_from_historical_average():
     result = make_ud_bet_decision(
         score=_score(70.0, "C"),
         validation=_validation(avg_line=8.0),
@@ -48,7 +48,7 @@ def test_missing_history_is_not_turned_into_fake_zero_rate_data():
         hit_rates=[],
     )
 
-    assert result.recommendation is None
+    assert result.recommendation == "UNDER"
     assert result.l5_games is None
     assert result.l5_over is None
     assert result.l5_under is None
@@ -57,7 +57,7 @@ def test_missing_history_is_not_turned_into_fake_zero_rate_data():
     assert result.season_games is None
 
 
-def test_missing_history_retains_market_context_for_rescans():
+def test_missing_history_uses_current_line_above_average_for_under():
     result = make_ud_bet_decision(
         score=_score(60.0, "S"),
         validation=_validation(avg_line=10.0),
@@ -65,12 +65,12 @@ def test_missing_history_retains_market_context_for_rescans():
         hit_rates=None,
     )
 
-    assert result.recommendation not in {"OVER", "UNDER"}
+    assert result.recommendation == "UNDER"
     assert result.avg_vs_line_pct == -0.2
-    assert "monitoring" in result.reason.lower()
+    assert "historical average fallback" in result.reason.lower()
 
 
-def test_missing_history_behavior_does_not_depend_on_score_tier():
+def test_missing_history_direction_does_not_depend_on_score_tier():
     results = [
         make_ud_bet_decision(
             score=_score(80.0, tier),
@@ -81,4 +81,4 @@ def test_missing_history_behavior_does_not_depend_on_score_tier():
         for tier in ("S", "A", "B", "C", "PASS", "legacy")
     ]
 
-    assert all(result.recommendation is None for result in results)
+    assert all(result.recommendation == "OVER" for result in results)

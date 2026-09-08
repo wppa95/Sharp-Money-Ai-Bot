@@ -6,10 +6,12 @@ for every Underdog prop that has reached the scoring + validation gates.
 
 Design principle
 ────────────────
-A directional pick requires REAL player game-result data.  Market-movement
-    signals (line position vs history, move direction) are shown as supplementary
-    monitoring information but CANNOT on their own generate an OVER or UNDER.
-    Without real game history the engine returns no direction.
+A directional pick requires supporting evidence/history, but a completed
+player-game hit-rate window is not itself a delivery gate.  When settled
+hit-rate data is available it remains the preferred directional signal.  When
+it is unavailable or inconclusive, the stored historical line average provides
+the fallback direction: a current line below that average suggests OVER and a
+current line above it suggests UNDER.
 
 Tier definitions
 ────────────────
@@ -278,8 +280,9 @@ def make_ud_bet_decision(
     """
     Evaluate OVER / UNDER / PASS for a qualified Underdog prop.
 
-    Real game results (``hit_rates``) are required for any directional pick.
-    Market-movement signals are retained as supplementary context only.
+    Real game results (``hit_rates``) are preferred for direction and tier
+    quality, but are not required when supporting evidence/history exists.
+    The historical line average is used as the fallback directional signal.
 
     Parameters
     ----------
@@ -287,10 +290,9 @@ def make_ud_bet_decision(
     validation:   PlayerPropValidation from validate_player_prop() — market supplement.
     current_line: Current prop line value.
     prev_line:    Previous line if this is a line-change event.
-    hit_rates:    PlayerHitRates computed from real game results.
-                   If None or has_real_data=False, no directional result is
-                   returned; the internal no-direction state retains market
-                   context for monitoring and later enrichment.
+    hit_rates:    PlayerHitRates computed from real game results.  If absent,
+                   insufficient, or inconclusive, the decision falls back to
+                   validation.avg_line when supporting data is available.
     """
     # ── Market supplement values ──────────────────────────────────────────────
     avg_vs_line_pct: Optional[float] = None
@@ -303,34 +305,70 @@ def make_ud_bet_decision(
         and current_line <= validation.min_line_seen
     )
 
-    # ── Gate 1: real game data required ──────────────────────────────────────
+    def _historical_fallback(reason: str) -> UDBetDecision:
+        """Use stored line history when result hit-rates cannot decide."""
+        if not bool(getattr(validation, "has_supporting_data", False)):
+            return UDBetDecision.make_no_direction(
+                reason=(
+                    "No supporting evidence/history available — "
+                    "hit-rate data and historical line evidence are both missing"
+                ),
+                hit_rates=hit_rates,
+                avg_vs_line_pct=avg_vs_line_pct,
+                at_historical_low=at_low,
+            )
+
+        direction = _historical_average_direction(validation, current_line)
+        if direction is None:
+            return UDBetDecision.make_no_direction(
+                reason=(
+                    f"{reason}; historical average does not establish "
+                    "an OVER or UNDER direction"
+                ),
+                hit_rates=hit_rates,
+                avg_vs_line_pct=avg_vs_line_pct,
+                at_historical_low=at_low,
+            )
+
+        score_total = getattr(score, "total", None)
+        confidence = (
+            int(max(10, min(_MAX_CONFIDENCE, float(score_total))))
+            if isinstance(score_total, (int, float)) and not isinstance(score_total, bool)
+            else _MIN_CONFIDENCE
+        )
+        score_tier = str(getattr(score, "tier", "") or "").upper()
+        if score_tier not in {"S", "A", "B", "C"}:
+            score_tier = "B"
+        avg_line = float(getattr(validation, "avg_line"))
+        relation = "below" if direction == "OVER" else "above"
+        return UDBetDecision.make_pick(
+            recommendation=direction,
+            decision_tier=score_tier,
+            confidence=confidence,
+            reason=(
+                f"Historical average fallback — current line {current_line:g} "
+                f"is {relation} historical average {avg_line:g}; "
+                "settled hit-rate history is retained for reporting and "
+                "quality enrichment, not used as a delivery blocker"
+            ),
+            hit_rates=hit_rates,
+            avg_vs_line_pct=avg_vs_line_pct,
+            at_historical_low=at_low,
+        )
+
+    # ── Gate 1: supporting evidence/history required ─────────────────────────
     # Guard against callers passing a list or other wrong type (e.g. from
     # cold-start hit_rates=None path) — treat any non-PlayerHitRates value as None.
     if not hasattr(hit_rates, "has_real_data"):
         hit_rates = None
     if hit_rates is None or not hit_rates.has_real_data:
-        return UDBetDecision.make_no_direction(
-            reason             = (
-                "No player game history available — "
-                "market signals retained for monitoring, but are not sufficient "
-                "for a directional recommendation"
-            ),
-            hit_rates          = hit_rates,
-            avg_vs_line_pct    = avg_vs_line_pct,
-            at_historical_low  = at_low,
-        )
+        return _historical_fallback("No settled player-game hit-rate window available")
 
     # ── Gate 2: sufficient sample size ───────────────────────────────────────
     primary = _primary_window(hit_rates)
     if primary is None:
-        return UDBetDecision.make_no_direction(
-            reason             = (
-                f"Insufficient sample ({hit_rates.total_games} result(s) — "
-                f"need ≥{_MIN_GAMES_PRIMARY})"
-            ),
-            hit_rates          = hit_rates,
-            avg_vs_line_pct    = avg_vs_line_pct,
-            at_historical_low  = at_low,
+        return _historical_fallback(
+            f"Insufficient settled sample ({hit_rates.total_games} result(s))"
         )
 
     rate = primary.hit_rate
@@ -342,25 +380,14 @@ def make_ud_bet_decision(
     elif rate <= (1.0 - _b):
         direction = "UNDER"
     else:
-        return UDBetDecision.make_no_direction(
-            reason             = (
-                f"Hit rate {rate:.0%} is inconclusive — "
-                f"no clear directional edge (need ≥{_b:.0%} or ≤{1-_b:.0%})"
-            ),
-            hit_rates          = hit_rates,
-            avg_vs_line_pct    = avg_vs_line_pct,
-            at_historical_low  = at_low,
+        return _historical_fallback(
+            f"Hit rate {rate:.0%} is inconclusive"
         )
 
     # ── Gate 4: no contradicting window ──────────────────────────────────────
     contradiction = _check_contradictions(hit_rates, direction)
     if contradiction:
-        return UDBetDecision.make_no_direction(
-            reason             = contradiction,
-            hit_rates          = hit_rates,
-            avg_vs_line_pct    = avg_vs_line_pct,
-            at_historical_low  = at_low,
-        )
+        return _historical_fallback(contradiction)
 
     # ── Tier classification ───────────────────────────────────────────────────
     tier = _determine_tier(hit_rates, direction, primary)
@@ -386,6 +413,23 @@ def make_ud_bet_decision(
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
+
+def _historical_average_direction(
+    validation: "PlayerPropValidation",
+    current_line: float,
+) -> Optional[str]:
+    """Return the line-history direction, or None when history is neutral."""
+    avg_line = getattr(validation, "avg_line", None)
+    if not isinstance(avg_line, (int, float)) or isinstance(avg_line, bool):
+        return None
+    if not isinstance(current_line, (int, float)) or isinstance(current_line, bool):
+        return None
+    if avg_line > current_line:
+        return "OVER"
+    if avg_line < current_line:
+        return "UNDER"
+    return None
+
 
 def _primary_window(hit_rates: "PlayerHitRates") -> "Optional[WindowStats]":
     """Return the smallest window with ≥ _MIN_GAMES_PRIMARY games."""

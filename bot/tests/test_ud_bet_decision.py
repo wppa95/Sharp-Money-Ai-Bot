@@ -79,7 +79,10 @@ def _score(**kw) -> MagicMock:
 def _validation(**kw) -> MagicMock:
     v = MagicMock()
     v.has_supporting_data = kw.get("has_supporting_data", True)
-    v.avg_line            = kw.get("avg_line",            26.0)
+    # Keep the default neutral so the no-history gate tests do not accidentally
+    # exercise the historical-average fallback. Dedicated fallback tests below
+    # provide an intentionally directional average.
+    v.avg_line            = kw.get("avg_line",            25.5)
     v.min_line_seen       = kw.get("min_line_seen",       24.0)
     v.l5_rate             = kw.get("l5_rate",             0.6)
     v.l10_rate            = kw.get("l10_rate",            0.5)
@@ -181,6 +184,27 @@ class TestPassGates:
         """L5=20% but L10=65% → contradicting windows for UNDER → no direction."""
         hr = _hit_rates(l5_r=0.20, l10_r=0.65)
         d  = make_ud_bet_decision(_score(), _validation(), 25.5, hit_rates=hr)
+        assert d.recommendation is None
+
+    def test_historical_average_fallback_can_create_direction(self):
+        """Supporting line history is enough when hit-rate windows are absent."""
+        d = make_ud_bet_decision(
+            _score(),
+            _validation(avg_line=30.0),
+            25.5,
+            hit_rates=None,
+        )
+        assert d.recommendation == "OVER"
+        assert d.l5_games is None
+        assert "historical average fallback" in d.reason.lower()
+
+    def test_historical_average_fallback_still_requires_supporting_data(self):
+        d = make_ud_bet_decision(
+            _score(),
+            _validation(avg_line=30.0, has_supporting_data=False),
+            25.5,
+            hit_rates=None,
+        )
         assert d.recommendation is None
 
 
