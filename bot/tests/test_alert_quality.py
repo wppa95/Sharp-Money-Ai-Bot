@@ -507,6 +507,45 @@ def test_strong_bet_uses_directional_hit_and_miss_thresholds():
     assert _has_strong_directional_history(validation, under) is True
 
 
+def test_strong_bet_thresholds_are_inclusive_and_directional():
+    from alerts_multiplatform import _has_strong_directional_history
+    import types
+
+    validation = types.SimpleNamespace(
+        data_source="real",
+        n_real_games=10,
+        n_supplemental_games=0,
+    )
+
+    over_at_boundary = types.SimpleNamespace(
+        recommendation="OVER",
+        l5_games=10,
+        l5_over=7,
+    )
+    over_below_boundary = types.SimpleNamespace(
+        recommendation="OVER",
+        l5_games=10,
+        l5_over=6,
+    )
+    under_at_boundary = types.SimpleNamespace(
+        recommendation="UNDER",
+        l5_games=10,
+        l5_under=6,
+    )
+    under_above_allowed_over_rate = types.SimpleNamespace(
+        recommendation="UNDER",
+        l5_games=10,
+        l5_under=5,
+    )
+
+    assert _has_strong_directional_history(validation, over_at_boundary) is True
+    assert _has_strong_directional_history(validation, over_below_boundary) is False
+    assert _has_strong_directional_history(validation, under_at_boundary) is True
+    assert _has_strong_directional_history(
+        validation, under_above_allowed_over_rate
+    ) is False
+
+
 def test_clean_reason_removes_repeated_history_and_internal_tier():
     from alerts_multiplatform import _clean_reason
 
