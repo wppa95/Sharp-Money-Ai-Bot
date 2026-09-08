@@ -1,0 +1,98 @@
+━━━━━━━━━━━━━━━━━━
+📡 Scan Pipeline
+━━━━━━━━━━━━━━━━━━
+
+Player Prop Market Providers
+  🟢 Player Props — Underdog: available
+
+Provider Pipeline  (last 1h)
+  Underdog
+    Observed: 4,772  ·  Evaluated: 9,301
+    Active tracked: 28,763  ·  Directional: 0
+    Actionable persisted: 0  ·  Delivered: 0
+    Pending: 0  ·  Resolved: 0  ·  H/M/P: 0/0/0
+
+Last 1h  ·  2 scans  (~30min each)
+
+📡 Full Monitoring Pipeline
+
+📥 Fetched from Underdog:          9,479
+🚫 Removed from feed:              0
+🔮 Futures/awards skipped:         178
+👁 Prop observations (cumulative scan total): 9,301
+   └─ Not re-alerted / below movement threshold: 0
+   └─ New first-appearance:        9,301
+   └─ Line moved (re-scored):      0
+   └─ Cold-start re-scanned:       0
+
+🔬 Scored this period:             16,377
+   ├─ New:                         9,301
+   ├─ Line moved:                  0
+   ├─ Cold-start:                  0
+   └─ Full-pool rotation:           7,076
+🎯 Qualified directional candidates: 0
+📤 Delivered to Telegram:          0
+ℹ️ Scan figures are observation/scoring events, not necessarily unique props;
+   new, movement, and not-realerted counters can overlap.
+   FPR is the current active rotation; tracking totals are separate.
+
+━━━━━━━━━━━━━━━━━━
+🌐 Full-Pool Rescan Rotation  (last batch)
+━━━━━━━━━━━━━━━━━━
+
+Rotation:           #1  (✅ complete — next started)
+Next rotation:      #2
+Progress:           100.0%
+Coverage:           7,076 / 7,076 active props
+Active source IDs:  7,076
+Uncovered remainder: 0
+🔬 Rescored:        7,076
+📤 Sent:            0
+
+━━━━━━━━━━━━━━━━━━
+🔭 Tracking & Grading Funnel
+━━━━━━━━━━━━━━━━━━
+
+Current tracking, windowed evaluation, delivery, and grading are separate populations.
+
+📥 Active tracked props: 29,170
+🧾 Historical observations: 4,772
+🔬 Evaluated candidates: 9,301
+🎯 Directional OVER/UNDER opportunities: 0
+✅ Actionable persisted: 0
+🔬 Rescored: 16,377
+📈 Line movers: 0
+📤 Delivered alerts: 0
+⏳ Pending grading: 0
+🏁 Resolved outcomes: 0
+   └─ HIT / MISS / PUSH: 0 / 0 / 0
+
+Direction is the persisted actionable population; delivery is recorded separately.
+Quality, evidence, deduplication, and live-game safeguards still govern delivery.
+Use /alerts to see Telegram-delivered picks.
+
+────────────────
+
+⚽ Sport Funnel Breakdown
+
+
+Sport          Active  Observed  Directional  Delivered
+─────────────────────────────────────────────────────────
+MLB             10681         0            0          0
+  evaluated 5298 · actionable 0
+TENNIS           9811         0            0          0
+  evaluated 550 · actionable 0
+FIFA             3688         0            0          0
+  evaluated 2373 · actionable 0
+WNBA             1132         0            0          0
+  evaluated 0 · actionable 0
+CS               1099         0            0          0
+  evaluated 788 · actionable 0
+MMA              1049         0            0          0
+  evaluated 98 · actionable 0
+PGA               457         0            0          0
+  evaluated 0 · actionable 0
+LOL               385         0            0          0
+  evaluated 0 · actionable 0
+F1SZN             145         0            0          0
+  evaluated 44 · actionable 0
