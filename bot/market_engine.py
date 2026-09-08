@@ -4092,10 +4092,12 @@ async def underdog_job(context) -> None:
     if _health:
         _health.record_job_started("underdog_job")
 
-    # Claim the full-scan slot before cold-start state restoration.  Restoring
+    # Claim the full-scan slot before cold-start state restoration. Restoring
     # dedup/lifecycle state can itself be expensive on a large SQLite history;
     # FPR and Stable Refresh must not start competing full-pool reads during
-    # that window.
+    # that window. The scheduler deliberately does not use one global
+    # exclusive lock: this in-process guard prevents duplicate live-feed scans
+    # while allowing FPR to consume the persisted pool independently.
     global _ud_full_scan_running
     if _ud_full_scan_running:
         logger.info(

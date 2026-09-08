@@ -835,6 +835,11 @@ async def post_init(application: Application) -> None:
                 "underdog_monitor",
                 _underdog_monitor_cycle,
                 exclusive_group=_SQLITE_WRITE_JOB_GROUP,
+                # Cadence-critical monitoring has its own full-scan handoff
+                # guard in market_engine. Do not make it wait behind FPR,
+                # grading, or history work at the scheduler level; SQLite
+                # writes are still serialized by the process-wide DB gate.
+                use_exclusive_group=False,
             ),
             interval=config.UNDERDOG_POLL_INTERVAL,
             first=45,
@@ -850,6 +855,11 @@ async def post_init(application: Application) -> None:
                     "full_pool_rescan",
                     _full_pool_rescan_job,
                     exclusive_group=_SQLITE_WRITE_JOB_GROUP,
+                    # FPR defers itself through the monitoring slot when a
+                    # live feed scan is active. Keeping it out of the shared
+                    # scheduler lock prevents it from starving the next feed
+                    # cadence while preserving one-at-a-time FPR execution.
+                    use_exclusive_group=False,
                 ),
                 # Full-pool monitoring is part of the active Underdog cycle;
                 # it must not drift to a separate cadence.
@@ -879,6 +889,9 @@ async def post_init(application: Application) -> None:
             "opportunity_grader",
             _opportunity_grader_tick,
             exclusive_group=_SQLITE_WRITE_JOB_GROUP,
+            # Settlement fetches and grading must not hold the monitoring
+            # scheduler slot. The database writer gate protects commits.
+            use_exclusive_group=False,
         )
         jq.run_once(
             grader_callback,

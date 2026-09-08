@@ -46,6 +46,11 @@ _START_TIME = time.monotonic()
 _DASHBOARD_TIMEOUT_SECONDS = 15.0
 _PROVIDER_REPORT_TIMEOUT_SECONDS = 2.0
 _COMMAND_TIMEOUT_SECONDS = 8.0
+# Grade/tracking aggregate reads span large append-only populations. Keep the
+# normal command deadline for lightweight commands, but give these two
+# database-backed reports enough time to cross a busy history-write window.
+# Tests can still shorten the base deadline by patching _COMMAND_TIMEOUT_SECONDS.
+_AGGREGATE_REPORT_TIMEOUT_MULTIPLIER = 4.0
 _PICKS_TIMEOUT_SECONDS = 12.0
 _STATUS_DB_READ_TIMEOUT_SECONDS = 4.0
 _CURRENT_PROP_MAX_FUTURE_HOURS = 24 * 14
@@ -3507,11 +3512,14 @@ async def cmd_grade(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     try:
-        return await _bounded(_cmd_grade_inner(update, context))
+        return await _bounded(
+            _cmd_grade_inner(update, context),
+            timeout=_COMMAND_TIMEOUT_SECONDS * _AGGREGATE_REPORT_TIMEOUT_MULTIPLIER,
+        )
     except asyncio.TimeoutError:
         logger.warning(
             "cmd_grade: report exceeded %.1fs; returning unavailable state",
-            _COMMAND_TIMEOUT_SECONDS,
+            _COMMAND_TIMEOUT_SECONDS * _AGGREGATE_REPORT_TIMEOUT_MULTIPLIER,
         )
         await update.message.reply_text(
             "⚠️ Grade data is temporarily unavailable because the database is busy. "
@@ -3536,7 +3544,7 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     summary = await _report_read(
         _db.get_directional_performance_summary(),
         fallback=None,
-        timeout=_COMMAND_TIMEOUT_SECONDS,
+        timeout=_COMMAND_TIMEOUT_SECONDS * _AGGREGATE_REPORT_TIMEOUT_MULTIPLIER,
     )
     if not isinstance(summary, dict):
         await update.message.reply_text(
@@ -4321,9 +4329,15 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
 
     try:
-        data = await _bounded(_db.get_tracking_summary())
+        data = await _bounded(
+            _db.get_tracking_summary(),
+            timeout=_COMMAND_TIMEOUT_SECONDS * _AGGREGATE_REPORT_TIMEOUT_MULTIPLIER,
+        )
     except asyncio.TimeoutError:
-        logger.warning("cmd_tracking: summary exceeded %.1fs", _COMMAND_TIMEOUT_SECONDS)
+        logger.warning(
+            "cmd_tracking: summary exceeded %.1fs",
+            _COMMAND_TIMEOUT_SECONDS * _AGGREGATE_REPORT_TIMEOUT_MULTIPLIER,
+        )
         await update.message.reply_text(
             "⚠️ Tracking data is temporarily unavailable because the database is busy. "
             "Please retry shortly.",

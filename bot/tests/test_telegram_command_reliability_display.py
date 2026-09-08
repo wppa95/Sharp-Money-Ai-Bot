@@ -696,6 +696,41 @@ async def test_tracking_reports_unavailable_when_summary_is_busy():
 
 
 @pytest.mark.asyncio
+async def test_tracking_waits_through_extended_history_read_window():
+    """A short history-write stall should return real DB data, not unavailable."""
+    update, context = _update_and_context()
+    db = MagicMock()
+
+    async def delayed_summary():
+        await asyncio.sleep(0.03)
+        return {
+            "counts": {},
+            "by_sport": {},
+            "by_provider": {},
+            "total": 0,
+            "pending": 0,
+            "tracked": 12,
+            "active_tracked": 12,
+            "tracked_observations": 24,
+            "historical_observations": 24,
+            "observations_by_sport": {},
+        }
+
+    db.get_tracking_summary = delayed_summary
+    with (
+        patch("commands._check_allowed", return_value=True),
+        patch("commands._db", db),
+        patch("commands._COMMAND_TIMEOUT_SECONDS", 0.01),
+    ):
+        await asyncio.wait_for(commands.cmd_tracking(update, context), timeout=0.2)
+
+    message = update.message.reply_text.await_args.args[0]
+    assert "temporarily unavailable" not in message
+    assert "Historical observations: 24" in message
+    assert "Active tracked props: 12" in message
+
+
+@pytest.mark.asyncio
 async def test_analyst_reports_unavailable_when_recent_picks_read_is_busy():
     update, context = _update_and_context()
     db = MagicMock()
@@ -758,6 +793,29 @@ async def test_grade_reports_unavailable_when_live_report_exceeds_deadline():
     assert "Grade data is temporarily unavailable" in message
     assert "monitoring continues" in message
     assert "failed" not in message.lower()
+
+
+@pytest.mark.asyncio
+async def test_grade_waits_through_extended_history_read_window():
+    """A short aggregate-query stall should still render persisted grade data."""
+    update, context = _update_and_context()
+    db = MagicMock()
+
+    async def delayed_summary():
+        await asyncio.sleep(0.03)
+        return {"by_sport": {}, "by_provider": {}}
+
+    db.get_directional_performance_summary = delayed_summary
+    with (
+        patch("commands._check_allowed", return_value=True),
+        patch("commands._db", db),
+        patch("commands._COMMAND_TIMEOUT_SECONDS", 0.01),
+    ):
+        await asyncio.wait_for(commands.cmd_grade(update, context), timeout=0.2)
+
+    message = update.message.reply_text.await_args.args[0]
+    assert "Grade data is UNAVAILABLE" not in message
+    assert "No resolved picks yet." in message
 
 
 @pytest.mark.asyncio

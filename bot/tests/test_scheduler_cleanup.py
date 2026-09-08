@@ -68,7 +68,7 @@ def test_full_pool_rotation_is_registered_once():
     ] == [(
         "full_pool_rescan",
         "_coordinated_job('full_pool_rescan', _full_pool_rescan_job, "
-        "exclusive_group=_SQLITE_WRITE_JOB_GROUP)",
+            "exclusive_group=_SQLITE_WRITE_JOB_GROUP, use_exclusive_group=False)",
     )]
 
 
