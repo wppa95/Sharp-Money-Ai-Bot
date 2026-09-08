@@ -441,6 +441,48 @@ def test_history_uses_sample_label_for_short_season_window():
     assert "<b>Season:</b>" not in result
 
 
+def test_alert_history_includes_h2h_window_from_decision():
+    from alerts_multiplatform import format_underdog_change_alert
+    import types
+
+    decision = types.SimpleNamespace(
+        recommendation="OVER",
+        confidence=82,
+        reason="H2H supports the current direction",
+        l5_games=None,
+        l5_over=None,
+        l5_hit_rate=None,
+        l10_games=None,
+        l10_over=None,
+        l10_hit_rate=None,
+        l20_games=None,
+        l20_over=None,
+        l20_hit_rate=None,
+        l30_games=None,
+        l30_over=None,
+        l30_hit_rate=None,
+        season_games=None,
+        season_over=None,
+        season_hit_rate=None,
+        h2h_games=3,
+        h2h_over=2,
+        h2h_hit_rate=2 / 3,
+    )
+
+    message = format_underdog_change_alert(
+        player_name="Test Player",
+        team="TEST",
+        sport="MLB",
+        stat_type="Hits",
+        old_line=1.0,
+        new_line=1.5,
+        decision=decision,
+    )
+
+    assert "H2H:" in message
+    assert "67% (2/3)" in message
+
+
 def test_clean_reason_removes_repeated_history_and_internal_tier():
     from alerts_multiplatform import _clean_reason
 
