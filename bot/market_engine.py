@@ -2780,6 +2780,7 @@ async def _run_prizepicks_independent_cycle(
             hit_rates = await _fetch_and_compute_hit_rates(
                 db, player, sport, stat, line,
                 source_provider="PrizePicks",
+                opponent=getattr(prop, "opponent", None),
             )
             enrichment_used += 1
         decision = None
@@ -4821,6 +4822,7 @@ async def underdog_job(context) -> None:
                         allow_remote=_cached_player_results is None,
                         cycle_timing=_cycle_timing,
                         preloaded_results=_cached_player_results,
+                        opponent=getattr(snap, "opponent", None),
                     ),
                     "new-prop hit rates",
                 )
@@ -5138,6 +5140,7 @@ async def underdog_job(context) -> None:
                                 allow_remote=_cached_player_results is None,
                                 cycle_timing=_cycle_timing,
                                 preloaded_results=_cached_player_results,
+                                opponent=getattr(snap, "opponent", None),
                             ),
                             "line-change hit rates",
                         )
@@ -5828,6 +5831,7 @@ async def underdog_job(context) -> None:
                         cycle_timing=_cycle_timing,
                         source_provider="Underdog",
                         preloaded_results=_cached_player_results,
+                        opponent=getattr(_ssnap, "opponent", None),
                     ),
                     "standing hit rates",
                 )
@@ -7259,6 +7263,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 allow_remote=_sr_cached_results is None,
                 source_provider="Underdog",
                 preloaded_results=_sr_cached_results,
+                opponent=getattr(_sr_snap, "opponent", None),
             )
             _sr_dec = _sr_decide(
                 score        = _sr_score,
@@ -8106,6 +8111,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     preloaded_results=_fpr_results_by_prop.get(
                         (_fpr_player, _fpr_sport, _fpr_stat.lower().strip())
                     ) if _fpr_results_by_prop else None,
+                    opponent=getattr(_fpr_snap, "opponent", None),
                 )
                 _fpr_dec = _fpr_decide(
                     score        = _fpr_score,
