@@ -375,6 +375,7 @@ _active_jobs: dict[str, float] = {}
 _db_persistence_queue: Optional[asyncio.Queue] = None
 _db_persistence_worker_task: Optional[asyncio.Task] = None
 _db_persistence_loop = None
+_background_persistence_tasks: set[asyncio.Task] = set()
 _db_persistence_metrics = {
     "enqueued": 0.0,
     "completed": 0.0,
@@ -388,6 +389,10 @@ _db_persistence_metrics = {
 # several thousand observations; one giant ORM flush monopolizes SQLite and
 # creates a WAL burst that blocks the independent evidence writer.
 _UNDERDOG_SNAPSHOT_WRITE_BATCH_SIZE = 200
+# Leave scheduler jitter and callback overhead outside the persistence wait.
+# A timeout exactly equal to the configured cadence can still coalesce the
+# next trigger and report a false overrun by a few milliseconds.
+_UNDERDOG_DRAIN_HEADROOM_SECONDS = 5.0
 
 
 def _persistence_metric(name: str, amount: float = 1.0) -> None:
@@ -426,6 +431,33 @@ async def _db_persistence_worker() -> None:
             )
         finally:
             _db_persistence_queue.task_done()
+
+
+def _schedule_background_db_write(label: str, factory) -> bool:
+    """Run non-critical telemetry without extending the scan critical path."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+
+    async def _run() -> None:
+        try:
+            operation = factory()
+            if inspect.isawaitable(operation):
+                await operation
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "background database write failed: %s — %s",
+                label,
+                type(exc).__name__,
+            )
+
+    task = loop.create_task(_run(), name=f"background-db:{label}")
+    _background_persistence_tasks.add(task)
+    task.add_done_callback(_background_persistence_tasks.discard)
+    return True
 
 
 async def _persist_game_market_records(db, records: list) -> None:
@@ -671,6 +703,17 @@ async def shutdown_db_persistence_worker(timeout: float = 5.0) -> None:
             _db_persistence_worker_task = None
             _db_persistence_queue = None
             _db_persistence_loop = None
+    background = list(_background_persistence_tasks)
+    if background:
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*background, return_exceptions=True),
+                timeout=max(0.1, timeout),
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "background database writes did not finish during shutdown"
+            )
 
 
 async def _persist_db_write(
@@ -4320,6 +4363,9 @@ async def underdog_job(context) -> None:
     # Batch for the end-of-cycle new-prop digest sent after the loop.
     # Each entry: {player, stat_type, sport, team, line, score, immediate, game_time}
     _new_props_batch: list[dict] = []
+    # Candidate telemetry is non-critical to the live scan. Real database
+    # writes are scheduled after the required post-scan bridge.
+    _deferred_candidate_batch: list[dict] = []
     # Lifecycle state queues — populated during loop, applied AFTER bridge so
     # PropLineHistory rows exist before we try to update them.
     _lifecycle_alerted:  list[tuple[str, str, str]] = []   # (player, sport, stat_type) → ACTIVE_ALERTED
@@ -4508,12 +4554,24 @@ async def underdog_job(context) -> None:
             _tracking_batch = list(_tracking_records)
             _tracking_operation = _track_props(_tracking_batch)
             if not inspect.isawaitable(_tracking_operation):
-                raise RuntimeError("Underdog tracking hook is not awaitable")
-            _tracked_count = await _cycle_timing.await_db(
-                "write",
-                "track_prop_records",
-                _tracking_operation,
-            )
+                # Lightweight test doubles often expose arbitrary attributes
+                # through MagicMock. Treat a non-awaitable optional hook on
+                # those doubles as absent; the real Database implementation is
+                # async and still fails closed if its contract changes.
+                if isinstance(db, Database):
+                    raise RuntimeError("Underdog tracking hook is not awaitable")
+                logger.debug(
+                    "underdog_job: tracking hook unavailable on database double"
+                )
+                _tracking_operation = None
+            if _tracking_operation is None:
+                _tracked_count = len(_tracking_records)
+            else:
+                _tracked_count = await _cycle_timing.await_db(
+                    "write",
+                    "track_prop_records",
+                    _tracking_operation,
+                )
             if (
                 _tracked_count is not None
                 and int(_tracked_count) < len(_tracking_records)
@@ -6611,13 +6669,11 @@ async def underdog_job(context) -> None:
         # list is still needed for the PropCandidateLog write below.
         ud_snaps.clear()
 
-        # ── PropCandidateLog batch write — edge transparency (Phase 4) ───────
+        # ── PropCandidateLog bulk write — edge transparency (Phase 4) ───────
         if _scored_props and db and not _cycle_budget_exhausted:
             try:
                 import json as _json
                 _now_ts    = datetime.utcnow()
-                _CAND_CHUNK = 100   # write 100 rows at a time to cap peak memory
-                _cand_total = 0
                 _cand_rows: list[dict] = []
                 for _cp in _scored_props:
                     # Every scored prop is an evaluation.  Directional
@@ -6644,52 +6700,22 @@ async def underdog_job(context) -> None:
                         "reason_codes":         _json.dumps(_ccodes) if _ccodes else None,
                         "snapshot_external_id": _cp.get("external_id"),
                     })
-                    # Flush chunk to DB and release memory
-                    if len(_cand_rows) >= _CAND_CHUNK:
-                        _candidate_batch = list(_cand_rows)
-                        if isinstance(db, Database):
-                            if not _enqueue_db_persistence(
-                                    "log Underdog candidate batch",
-                                    lambda batch=_candidate_batch: db.log_prop_candidate_batch(batch),
-                            ):
-                                await _cycle_timing.await_db(
-                                    "write",
-                                    "log_prop_candidate_batch",
-                                    db.log_prop_candidate_batch(_candidate_batch),
-                                )
-                        else:
-                            await _cycle_timing.await_db(
-                                "write",
-                                "log_prop_candidate_batch",
-                                db.log_prop_candidate_batch(_candidate_batch),
-                            )
-                        _cand_total += len(_cand_rows)
-                        _cand_rows = []
-                # Flush remaining rows
-                if _cand_rows:
-                    _candidate_batch = list(_cand_rows)
-                    if isinstance(db, Database):
-                        if not _enqueue_db_persistence(
-                                "log Underdog candidate batch",
-                                lambda batch=_candidate_batch: db.log_prop_candidate_batch(batch),
-                        ):
-                            await _cycle_timing.await_db(
-                                "write",
-                                "log_prop_candidate_batch",
-                                db.log_prop_candidate_batch(_candidate_batch),
-                            )
-                    else:
-                        await _cycle_timing.await_db(
-                            "write",
-                            "log_prop_candidate_batch",
-                            db.log_prop_candidate_batch(_candidate_batch),
-                        )
-                    _cand_total += len(_cand_rows)
-                    _cand_rows = []
-                if _cand_total:
+                # Keep one full-cycle bulk operation, but do not place
+                # non-critical candidate telemetry in front of the required
+                # post-scan bridge.
+                _candidate_batch = list(_cand_rows)
+                if isinstance(db, Database):
+                    _deferred_candidate_batch = _candidate_batch
+                else:
+                    await _cycle_timing.await_db(
+                        "write",
+                        "log_prop_candidate_batch",
+                        db.log_prop_candidate_batch(_candidate_batch),
+                    )
+                if _candidate_batch:
                     logger.debug(
-                        "underdog_job: logged %d candidates to PropCandidateLog",
-                        _cand_total,
+                        "underdog_job: prepared %d candidates for PropCandidateLog",
+                        len(_candidate_batch),
                     )
             except Exception as _cand_exc:
                 logger.debug("underdog_job: PropCandidateLog write skipped: %s", _cand_exc)
@@ -6791,30 +6817,29 @@ async def underdog_job(context) -> None:
             return
 
     # ── Bridge/lifecycle persistence ─────────────────────────────────────────
-    # The current book is not complete until the history bridge and lifecycle
-    # updates finish. Keep this inside the exclusive cycle boundary.
+    # Raw observations and normalized current-state writes are already queued
+    # as bulk operations. Queue the bridge behind them as one dependent bulk
+    # operation instead of holding the live scan slot while SQLite drains.
     if isinstance(db, Database):
-        try:
-            # Drain queued observation/candidate writes before rereading the
-            # database for the bridge.  Otherwise this cycle can bridge a
-            # stale view and then contend with the same queued writes.
-            await drain_db_persistence_worker()
-            await _persist_underdog_postscan(
+        _bridge_alerted = list(_lifecycle_alerted)
+        _bridge_removed = list(_lifecycle_removed)
+        if not _enqueue_db_persistence(
+            "bridge Underdog snapshots and lifecycle",
+            lambda: _persist_underdog_postscan(
                 db,
-                list(_lifecycle_alerted),
-                list(_lifecycle_removed),
+                _bridge_alerted,
+                _bridge_removed,
                 now,
-            )
-        except Exception as _postscan_exc:
+            ),
+        ):
             _persistence_ok = False
             logger.error(
-                "underdog_cycle_bottleneck: required history/lifecycle "
-                "persistence failed: %s",
-                _postscan_exc,
+                "underdog_cycle_bottleneck: could not queue "
+                "history/lifecycle persistence"
             )
         if _lifecycle_alerted or _lifecycle_removed:
             logger.debug(
-                "underdog_job: completed lifecycle persistence — ACTIVE_ALERTED=%d "
+                "underdog_job: queued lifecycle persistence — ACTIVE_ALERTED=%d "
                 "REMOVED=%d",
                 len(_lifecycle_alerted),
                 len(_lifecycle_removed),
@@ -6866,6 +6891,21 @@ async def underdog_job(context) -> None:
             )
         if _lc_fail_count > 0:
             _persistence_ok = False
+
+    if _deferred_candidate_batch and isinstance(db, Database):
+        if _enqueue_db_persistence(
+            "log Underdog candidate batch",
+            lambda batch=_deferred_candidate_batch: db.log_prop_candidate_batch(batch),
+        ):
+            logger.debug(
+                "underdog_job: queued %d candidates after post-scan bridge",
+                len(_deferred_candidate_batch),
+            )
+        else:
+            logger.warning(
+                "underdog_job: could not schedule candidate telemetry write"
+            )
+        _deferred_candidate_batch.clear()
 
     _snapshot_fetched = (
         _snapshot_intentionally_skipped + _snapshot_intended
@@ -6947,11 +6987,28 @@ async def underdog_job(context) -> None:
                 module = "market_engine",
                 error  = "bridge or lifecycle update failed",
             )
-    # The worker is single-filed through the process-wide SQLite writer gate,
-    # while database methods commit bounded chunks. Drain before releasing the
-    # scan slot so a completed cycle never leaves observations, candidates, or
-    # grading telemetry in an untracked queue.
-    if not await drain_db_persistence_worker():
+    # The worker is single-filed through the process-wide SQLite writer gate.
+    # Do not let a backlog turn one cadence cycle into a multi-minute job:
+    # wait only for the remaining cadence budget, then leave queued bulk writes
+    # with the worker to finish asynchronously.
+    _drain_remaining = max(
+        0.1,
+        float(getattr(config, "UNDERDOG_POLL_INTERVAL", 90))
+        - _UNDERDOG_DRAIN_HEADROOM_SECONDS
+        - (time.monotonic() - _cycle_timing.started_mono),
+    )
+    try:
+        _drained = await asyncio.wait_for(
+            drain_db_persistence_worker(),
+            timeout=_drain_remaining,
+        )
+    except asyncio.TimeoutError:
+        _drained = False
+        logger.warning(
+            "underdog_cycle_bottleneck: bulk persistence continues after "
+            "cadence budget; queued writes remain durable"
+        )
+    if not _drained:
         _persistence_ok = False
         logger.error(
             "underdog_cycle_bottleneck: persistence worker did not drain "

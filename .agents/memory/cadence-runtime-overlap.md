@@ -19,3 +19,16 @@ actual cycle contract.
 
 **How to apply:** Schedule full-pool work from `UNDERDOG_POLL_INTERVAL`, while
 preserving only `FPR_INTERVAL=0` as the disable path.
+
+The live cycle must reserve scheduler headroom rather than waiting for the
+full configured interval. Required bulk feed writes stay ordered in the
+persistence worker; bridge and non-critical candidate telemetry follow that
+order without extending the monitoring coroutine past its budget.
+
+**Why:** Waiting exactly 90 seconds caused a few milliseconds of scheduler
+overlap and false cadence failures, while synchronous bridge/candidate drains
+turned a 16-second scan into a 112-second job.
+
+**How to apply:** Leave explicit headroom in the final persistence wait,
+preserve raw-feed → bridge/lifecycle → candidate ordering, and let queued bulk
+writes finish asynchronously after the live scan returns.

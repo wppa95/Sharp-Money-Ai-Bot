@@ -6437,7 +6437,10 @@ class Database:
         # Commit bounded batches, falling back to row isolation only when a
         # batch contains a database-invalid value.
         inserted = 0
-        chunk_size = 100
+        # Use substantial executemany batches. The caller submits one complete
+        # monitoring cycle; keeping 1,000-row chunks here avoids SQLite bind
+        # limits without turning thousands of candidates into tiny commits.
+        chunk_size = 1000
         for start in range(0, len(rows), chunk_size):
             chunk = rows[start:start + chunk_size]
             try:
