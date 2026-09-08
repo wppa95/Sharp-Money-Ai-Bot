@@ -7,4 +7,4 @@ Every eligible player-prop observation is retained in the delivery-independent t
 
 **Why:** Settlement coverage must not depend on whether a prop qualified for an alert, while disabled season-long markets do not have the supported single-game settlement contract.
 
-**How to apply:** Write eligible observations to universal tracking before scoring; keep directional opportunity/candidate records and Telegram delivery separately gated. Never re-enable futures tracking without a settlement design.
+**How to apply:** Write eligible observations to universal tracking before scoring and await that write as a required barrier; keep directional opportunity/candidate records and Telegram delivery separately gated. Never re-enable futures tracking without a settlement design.
