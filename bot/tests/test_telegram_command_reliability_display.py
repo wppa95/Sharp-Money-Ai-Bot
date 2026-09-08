@@ -447,6 +447,41 @@ async def test_funnel_sport_breakdown_uses_aligned_columns_and_active_sort():
 
 
 @pytest.mark.asyncio
+async def test_funnel_uses_cycle_log_when_normalized_population_query_times_out():
+    update, context = _update_and_context(["1"])
+    db = MagicMock()
+    db.get_scan_cycle_summary = AsyncMock(return_value={
+        "cycles": 1,
+        "fetched": 4_642,
+        "removed": 0,
+        "futures": 0,
+        "active": 4_642,
+        "unchanged": 0,
+        "new_props": 4_553,
+        "line_changed": 0,
+        "cold_start": 0,
+        "analyzed": 4_553,
+        "qualified": 0,
+        "alert_delivered": 0,
+        "actionable_by_sport": {"MLB": 2_649},
+        "removed_by_sport": {},
+    })
+    db.get_funnel_summary = AsyncMock(side_effect=asyncio.TimeoutError)
+    db.get_telegram_reconciliation = AsyncMock(return_value={"by_provider": {}})
+
+    with (
+        patch("commands._check_allowed", return_value=True),
+        patch("commands._db", db),
+    ):
+        await commands.cmd_funnel(update, context)
+
+    message = update.message.reply_text.await_args.args[0]
+    assert "Funnel data is UNAVAILABLE" not in message
+    assert "Fetched from Underdog:" in message
+    assert "<b>4,642</b>" in message
+
+
+@pytest.mark.asyncio
 async def test_funnel_provider_populations_and_zero_directional_sport_stay_separate():
     update, context = _update_and_context()
     db = MagicMock()

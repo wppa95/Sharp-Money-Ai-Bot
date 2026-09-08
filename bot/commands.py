@@ -4850,14 +4850,37 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         ])
         scan_summary: dict = _scan_result if isinstance(_scan_result, dict) else {}
         if not isinstance(_summary_result, dict):
-            await update.message.reply_text(
-                "⚠️ <b>Scan Pipeline</b>\n\n"
-                "<i>Funnel data is UNAVAILABLE; the database query failed "
-                "or timed out. This is not zero.</i>",
-                parse_mode=ParseMode.HTML,
+            # ScanCycleLog is the per-monitoring-cycle source of truth for the
+            # pipeline section.  The normalized-history aggregate is larger
+            # and can time out while SQLite is draining the current cycle.
+            # Do not discard a healthy cycle report just because the optional
+            # population aggregate was unavailable.
+            if not scan_summary:
+                await update.message.reply_text(
+                    "⚠️ <b>Scan Pipeline</b>\n\n"
+                    "<i>Funnel data is UNAVAILABLE; the database query failed "
+                    "or timed out. This is not zero.</i>",
+                    parse_mode=ParseMode.HTML,
+                )
+                return
+            logger.warning(
+                "cmd_funnel: normalized funnel aggregate unavailable; "
+                "rendering ScanCycleLog fallback"
             )
-            return
-        summary = _summary_result
+            summary = {
+                "since_hours": since_h,
+                "evaluated": int(scan_summary.get("analyzed", 0) or 0),
+                "directional_total": int(scan_summary.get("qualified", 0) or 0),
+                "actionable_total": int(scan_summary.get("qualified", 0) or 0),
+                "delivered": int(scan_summary.get("alert_delivered", 0) or 0),
+                "pending": 0,
+                "resolved": 0,
+                "provider_breakdown": {},
+                "by_sport": [],
+                "source": "scan_cycle_log_fallback",
+            }
+        else:
+            summary = _summary_result
 
         tracked   = int(
             summary.get("active_tracked", summary.get("tracked", 0)) or 0
