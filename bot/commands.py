@@ -4395,6 +4395,14 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
         return
 
+    if not isinstance(data, dict):
+        logger.warning("cmd_tracking: summary returned an invalid payload")
+        await update.message.reply_text(
+            "⚠️ Tracking data is temporarily unavailable. Please retry shortly.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
     counts   = data.get("counts", {})
     by_sport = data.get("by_sport", {})
     total    = data.get("total", 0)
@@ -5089,19 +5097,15 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         if sc_cycles > 0:
             sc_fetched   = scan_summary.get("fetched", 0)
             sc_removed   = scan_summary.get("removed", 0)
-            sc_futures   = scan_summary.get("futures", 0)
             sc_active    = scan_summary.get("active", 0)
             sc_unchanged = scan_summary.get("unchanged", 0)
             sc_new       = scan_summary.get("new_props", 0)
             sc_lc        = scan_summary.get("line_changed", 0)
-            sc_cold      = scan_summary.get("cold_start", 0)
             sc_analyzed  = scan_summary.get("analyzed", 0)
             sc_delivered = scan_summary.get("alert_delivered", 0)
             _avg_mins    = (since_h * 60) // max(sc_cycles, 1)
             fpr_rescored = fpr_stats.get("fpr_rescored", 0)
             sc_total_scored = sc_analyzed + fpr_rescored
-            # Note: sc_analyzed = sc_new + sc_lc + sc_cold (all scored paths).
-            # sc_cold = cold-start re-scored (first cycle after restart, every active prop).
             lines += [
                 "",
                  (
@@ -5116,23 +5120,17 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 "",
                 f"📥 Fetched from Underdog:          <b>{sc_fetched:,}</b>",
                 f"🚫 Removed from feed:              <b>{sc_removed:,}</b>",
-                f"🔮 Futures/awards skipped:         <b>{sc_futures:,}</b>",
-                    f"👁 Prop observations (cumulative scan total): <b>{sc_active:,}</b>",
-                    f"   └─ Not re-alerted / below movement threshold: <b>{sc_unchanged:,}</b>",
+                f"👁 Prop observations (cumulative scan total): <b>{sc_active:,}</b>",
+                f"   └─ Not re-alerted / below movement threshold: <b>{sc_unchanged:,}</b>",
                 f"   └─ New first-appearance:        <b>{sc_new:,}</b>",
                 f"   └─ Line moved (re-scored):      <b>{sc_lc:,}</b>",
-                f"   └─ Cold-start re-scanned:       <b>{sc_cold:,}</b>",
                 "",
                 f"🔬 Scored this period:             <b>{sc_total_scored:,}</b>",
                 f"   ├─ New:                         <b>{sc_new:,}</b>",
                 f"   ├─ Line moved:                  <b>{sc_lc:,}</b>",
-                f"   ├─ Cold-start:                  <b>{sc_cold:,}</b>",
                 f"   └─ Full-pool rotation:           <b>{fpr_rescored:,}</b>",
-                    f"🎯 Qualified directional candidates: <b>{int(scan_summary.get('qualified', 0) or 0):,}</b>",
+                f"🎯 Qualified directional candidates: <b>{int(scan_summary.get('qualified', 0) or 0):,}</b>",
                 f"📤 Delivered to Telegram:          <b>{sc_delivered:,}</b>",
-                    "ℹ️ Scan figures are observation/scoring events, not necessarily unique props;",
-                    "   new, movement, and not-realerted counters can overlap.",
-                    "   FPR is the current active rotation; tracking totals are separate.",
             ]
             # ── Full-Pool Rescan Rotation block ──────────────────────────────────
             try:
@@ -5187,7 +5185,7 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                         # log write may have failed silently
                         _scan_status = "scan completed but log not recorded (check bot logs)"
                     elif _uj.get("started_at") or _uj.get("last_fail_ts"):
-                        _scan_status = "⏳ first scan in progress (cold-start may take 5–15 min)"
+                        _scan_status = "⏳ first scan in progress"
             except Exception:
                 pass
             lines += [
@@ -5238,9 +5236,6 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             f"{int(tracked_result_counts.get('MISS', 0) or 0):,} / "
             f"{int(tracked_result_counts.get('PUSH', 0) or 0):,}</b>",
             "",
-            "<i>Direction is the persisted actionable population; delivery is recorded separately.</i>",
-            "<i>Quality, evidence, deduplication, and live-game safeguards still govern delivery.</i>",
-            "<i>Use /alerts to see Telegram-delivered picks.</i>",
         ]
         if not has_normalized_funnel:
             lines.insert(
@@ -5282,8 +5277,8 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             else:
                 lines += [
                     "",
-                    "<code>Sport        Active  Observed  Evaluated  Directional  Delivered</code>",
-                    "<code>──────────  -------  --------  ---------  -----------  ---------</code>",
+                    "<code>Sport         Obs     Act    Eval     Dir     Del</code>",
+                    "<code>──────────  -------  -------  -------  -------  -------</code>",
                 ]
                 normalized_observed_by_sport = (
                     summary.get("observations_by_sport", {}) or {}
@@ -5313,9 +5308,9 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     sa = normalized_directional_by_sport.get(sport, 0)
                     sd = normalized_delivered_by_sport.get(sport, 0)
                     lines.append(
-                        f"<code>{sp:<10}  {int(sc or 0):>7}  "
-                        f"{int(so or 0):>8}  {int(se or 0):>9}  "
-                        f"{int(sa or 0):>11}  {int(sd or 0):>9}</code>"
+                        f"<code>{sp:<10}  {int(so or 0):>7}  "
+                        f"{int(sc or 0):>7}  {int(se or 0):>7}  "
+                        f"{int(sa or 0):>7}  {int(sd or 0):>7}</code>"
                     )
         else:
             lines += ["", "<i>Sport breakdown accumulates as the bot scans props.</i>"]

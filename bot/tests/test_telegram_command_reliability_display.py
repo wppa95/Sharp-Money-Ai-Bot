@@ -415,10 +415,7 @@ async def test_funnel_sport_breakdown_uses_aligned_columns_and_active_sort():
     table = message.split("Sport Funnel Breakdown", 1)[1]
     row_lines = [line for line in table.splitlines() if line.startswith("<code>")]
 
-    assert re.search(
-        r"Sport\s+Active\s+Observed\s+Evaluated\s+Directional\s+Delivered",
-        table,
-    )
+    assert re.search(r"Sport\s+Obs\s+Act\s+Eval\s+Dir\s+Del", table)
     data_rows = [
         line for line in row_lines
         if not line.startswith("<code>Sport") and "─" not in line
@@ -431,7 +428,10 @@ async def test_funnel_sport_breakdown_uses_aligned_columns_and_active_sort():
     assert "1,234" not in data_rows[0]
     assert "FIFA" in data_rows[-1]
     assert "NFL" not in table
-    assert re.search(r"<code>MLB\s+1234\s+5678\s+0\s+90\s+45</code>", table)
+    assert re.search(r"<code>MLB\s+5678\s+1234\s+0\s+90\s+45</code>", table)
+    assert "Cold-start" not in message
+    assert "Futures" not in message
+    assert "Scan figures are observation/scoring" not in message
 
 
 @pytest.mark.asyncio
