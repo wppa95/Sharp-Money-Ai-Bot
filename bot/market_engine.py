@@ -1993,6 +1993,7 @@ async def _fetch_and_compute_hit_rates(
     preloaded_results: Optional[list] = None,
     source_provider: str = "Underdog",
     supplemental_results: Optional[list] = None,
+    opponent: Optional[str] = None,
 ) -> "Optional[object]":
     """
     Fetch fresh game results (at most once per calendar day per player/stat),
@@ -2166,7 +2167,11 @@ async def _fetch_and_compute_hit_rates(
                 cycle_timing.count("props_without_evidence")
             return None
         _evidence_processing_started = time.monotonic()
-        result = compute_hit_rates(db_results, current_line)
+        result = compute_hit_rates(
+            db_results,
+            current_line,
+            opponent=opponent,
+        )
         if cycle_timing is not None:
             cycle_timing.duration(
                 "evidence_processing",
