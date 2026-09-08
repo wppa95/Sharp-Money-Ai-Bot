@@ -292,6 +292,11 @@ class PlayerHistoryProvider:
                     date=r.game_date,
                     opponent=r.opponent,
                     value=float(r.actual_value),
+                    is_h2h=bool(
+                        opponent
+                        and r.opponent
+                        and _fuzzy_team_match(r.opponent, opponent)
+                    ),
                     source=getattr(r, "source", "propline_history"),
                 )
                 for r in supplemental_results
