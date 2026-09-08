@@ -514,7 +514,10 @@ def _has_strong_directional_history(
     # Use the direction-specific counts rather than the generic OVER rate.
     # This prevents a strong UNDER label from being attached to a merely
     # average OVER-rate window.
-    for prefix in ("l5", "l10", "l20", "l30", "season"):
+    for prefix in (
+        "l5", "l10", "l20", "l30", "season",
+        "h2h_l5", "h2h_l10", "h2h_l20", "h2h",
+    ):
         games = _numeric_attr(decision, f"{prefix}_games")
         directional_count = _numeric_attr(
             decision,
@@ -522,7 +525,10 @@ def _has_strong_directional_history(
         )
         if games is None or games < 5 or directional_count is None:
             continue
-        if directional_count / games >= 0.70:
+        # Strong OVER requires ≥70% OVER hits. Strong UNDER means the
+        # corresponding OVER rate is ≤40%, i.e. ≥60% UNDER hits.
+        threshold = 0.70 if recommendation == "OVER" else 0.60
+        if directional_count / games >= threshold:
             return True
     return False
 
