@@ -102,6 +102,24 @@ class UDBetDecision:
     h2h_hit_rate:   Optional[float]
     h2h_avg:        Optional[float]
 
+    h2h_l5_games:      Optional[int]
+    h2h_l5_over:       Optional[int]
+    h2h_l5_under:      Optional[int]
+    h2h_l5_hit_rate:   Optional[float]
+    h2h_l5_avg:        Optional[float]
+
+    h2h_l10_games:      Optional[int]
+    h2h_l10_over:       Optional[int]
+    h2h_l10_under:      Optional[int]
+    h2h_l10_hit_rate:   Optional[float]
+    h2h_l10_avg:        Optional[float]
+
+    h2h_l20_games:      Optional[int]
+    h2h_l20_over:       Optional[int]
+    h2h_l20_under:      Optional[int]
+    h2h_l20_hit_rate:   Optional[float]
+    h2h_l20_avg:        Optional[float]
+
     # ── Market supplements (always available; secondary use only) ─────────────
     avg_vs_line_pct:   Optional[float]   # (hist_avg - current) / hist_avg; +ve = OVER signal
     at_historical_low: bool              # current line == minimum ever seen
@@ -231,6 +249,9 @@ class UDBetDecision:
                 "l30":  {"g": self.l30_games, "o": self.l30_over, "r": _r(self.l30_hit_rate), "avg": _r(self.l30_avg)},
                 "sea":  {"g": self.season_games, "o": self.season_over, "r": _r(self.season_hit_rate), "avg": _r(self.season_avg)},
                 "h2h":  {"g": self.h2h_games, "o": self.h2h_over, "r": _r(self.h2h_hit_rate), "avg": _r(self.h2h_avg)},
+                "h2h_l5": {"g": self.h2h_l5_games, "o": self.h2h_l5_over, "r": _r(self.h2h_l5_hit_rate), "avg": _r(self.h2h_l5_avg)},
+                "h2h_l10": {"g": self.h2h_l10_games, "o": self.h2h_l10_over, "r": _r(self.h2h_l10_hit_rate), "avg": _r(self.h2h_l10_avg)},
+                "h2h_l20": {"g": self.h2h_l20_games, "o": self.h2h_l20_over, "r": _r(self.h2h_l20_hit_rate), "avg": _r(self.h2h_l20_avg)},
                 "mkt":  {"dev": _r(self.avg_vs_line_pct), "atlow": self.at_historical_low},
             },
             separators=(",", ":"),
@@ -621,6 +642,9 @@ def _windows_from_hit_rates(hit_rates: "Optional[PlayerHitRates]") -> dict:
     l30 = hit_rates.l30    if hit_rates else None
     sea = hit_rates.season if hit_rates else None
     h2h = hit_rates.h2h    if hit_rates else None
+    h2h_l5 = hit_rates.h2h_l5 if hit_rates else None
+    h2h_l10 = hit_rates.h2h_l10 if hit_rates else None
+    h2h_l20 = hit_rates.h2h_l20 if hit_rates else None
 
     return {
         "l5_games":       _g(l5,  "games"),
@@ -653,4 +677,19 @@ def _windows_from_hit_rates(hit_rates: "Optional[PlayerHitRates]") -> dict:
         "h2h_under":      _g(h2h, "under_count"),
         "h2h_hit_rate":   _g(h2h, "hit_rate"),
         "h2h_avg":        _g(h2h, "average"),
+        "h2h_l5_games":   _g(h2h_l5, "games"),
+        "h2h_l5_over":    _g(h2h_l5, "over_count"),
+        "h2h_l5_under":   _g(h2h_l5, "under_count"),
+        "h2h_l5_hit_rate":_g(h2h_l5, "hit_rate"),
+        "h2h_l5_avg":     _g(h2h_l5, "average"),
+        "h2h_l10_games":  _g(h2h_l10, "games"),
+        "h2h_l10_over":   _g(h2h_l10, "over_count"),
+        "h2h_l10_under":  _g(h2h_l10, "under_count"),
+        "h2h_l10_hit_rate": _g(h2h_l10, "hit_rate"),
+        "h2h_l10_avg":    _g(h2h_l10, "average"),
+        "h2h_l20_games":  _g(h2h_l20, "games"),
+        "h2h_l20_over":   _g(h2h_l20, "over_count"),
+        "h2h_l20_under":  _g(h2h_l20, "under_count"),
+        "h2h_l20_hit_rate": _g(h2h_l20, "hit_rate"),
+        "h2h_l20_avg":    _g(h2h_l20, "average"),
     }
