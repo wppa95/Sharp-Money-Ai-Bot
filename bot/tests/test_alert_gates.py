@@ -8,6 +8,7 @@ Tests for P1/P2 alert gate changes:
 from __future__ import annotations
 
 import pytest
+import re
 from unittest.mock import MagicMock, AsyncMock, patch
 
 
@@ -361,7 +362,7 @@ class TestCmdFunnelSportBreakdown:
         assert "<code>NBA" in msg
         assert re.search(r"<code>NBA\s+8\s+3\s+2</code>", msg)
         assert "<code>WNBA" in msg
-        assert "0        0        1</code>" in msg
+        assert re.search(r"<code>WNBA\s+0\s+0\s+1</code>", msg)
 
     @pytest.mark.asyncio
     async def test_funnel_renders_no_breakdown_when_empty(self):

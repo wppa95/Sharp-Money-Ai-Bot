@@ -436,13 +436,17 @@ async def test_funnel_sport_breakdown_uses_aligned_columns_and_active_sort():
         r"Sport\s+Active\s+Observed\s+Evaluated\s+Directional\s+Delivered",
         table,
     )
-    assert len(row_lines) == 6  # header + separator + four sports
-    assert [line.split()[0].removeprefix("<code>") for line in row_lines] == [
+    data_rows = [
+        line for line in row_lines
+        if not line.startswith("<code>Sport") and "─" not in line
+    ]
+    assert len(data_rows) == 4
+    assert [line.split()[0].removeprefix("<code>") for line in data_rows] == [
         "MLB", "Soccer", "NBA", "FIFA",
     ]
-    assert "<code>MLB" in row_lines[0]
-    assert "1,234" not in row_lines[0]
-    assert "FIFA" in row_lines[-1]
+    assert "<code>MLB" in data_rows[0]
+    assert "1,234" not in data_rows[0]
+    assert "FIFA" in data_rows[-1]
     assert "NFL" not in table
     assert re.search(r"<code>MLB\s+1234\s+5678\s+0\s+90\s+45</code>", table)
 
