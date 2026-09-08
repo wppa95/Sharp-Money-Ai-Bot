@@ -61,6 +61,8 @@ class PropLineHistoryCoverage:
     status: str = PROPLINE_COVERAGE_UNAVAILABLE
     failure_kind: str = ""
     error: str = ""
+    sport: str = ""
+    market: str = ""
 
 
 @dataclass(frozen=True)
@@ -583,6 +585,8 @@ class PlayerHistoryProvider:
             status=metadata.get("status", PROPLINE_COVERAGE_UNAVAILABLE),
             failure_kind=metadata.get("failure_kind", ""),
             error=metadata.get("error", ""),
+            sport=metadata.get("sport", sport_u),
+            market=metadata.get("market", ""),
         )
 
     async def fetch_resolved_results(
@@ -916,7 +920,10 @@ class PlayerHistoryProvider:
         client = self._propline_client
         if not getattr(client, "is_configured", False):
             if coverage is not None:
-                coverage.update(status=PROPLINE_COVERAGE_UNAVAILABLE)
+                coverage.update(
+                    status=PROPLINE_COVERAGE_UNAVAILABLE,
+                    sport=str(sport or "").upper().strip(),
+                )
             return []
         try:
             official_sport = client.official_sport_for(sport)
@@ -926,6 +933,7 @@ class PlayerHistoryProvider:
                     status=PROPLINE_COVERAGE_UNAVAILABLE,
                     failure_kind="configuration",
                     error=str(exc),
+                    sport=str(sport or "").upper().strip(),
                 )
             return []
         if not official_sport:
@@ -939,6 +947,7 @@ class PlayerHistoryProvider:
                         status=PROPLINE_COVERAGE_UNAVAILABLE,
                         failure_kind="discovery",
                         error=str(exc),
+                        sport=str(sport or "").upper().strip(),
                     )
                 return []
             canonical = str(sport or "").upper().strip()
@@ -955,6 +964,7 @@ class PlayerHistoryProvider:
                 coverage.update(
                     status=PROPLINE_COVERAGE_UNAVAILABLE,
                     failure_kind="unsupported_sport",
+                    sport=str(sport or "").upper().strip(),
                 )
             return []
 
@@ -965,6 +975,8 @@ class PlayerHistoryProvider:
                 coverage.update(
                     status=PROPLINE_COVERAGE_MALFORMED,
                     failure_kind="unknown_market",
+                    sport=sport_u,
+                    market="unmapped",
                 )
             logger.info(
                 "PropLine history attempt player=%r sport=%s stat=%s "
@@ -991,6 +1003,8 @@ class PlayerHistoryProvider:
                     status=PROPLINE_COVERAGE_UNAVAILABLE,
                     failure_kind="request",
                     error=type(exc).__name__,
+                    sport=sport_u,
+                    market=market,
                 )
             logger.warning(
                 "PropLine history attempt player=%r sport=%s stat=%s "
@@ -1008,19 +1022,22 @@ class PlayerHistoryProvider:
         raw_entries = len(getattr(result, "entries", ()) or ())
         if not result.succeeded or not result.complete:
             failure_kind = str(getattr(result, "failure_kind", "") or "")
+            status = (
+                PROPLINE_COVERAGE_REDACTED
+                if bool(getattr(result, "redacted", False))
+                else (
+                    PROPLINE_COVERAGE_MALFORMED
+                    if failure_kind == "incomplete"
+                    else PROPLINE_COVERAGE_UNAVAILABLE
+                )
+            )
             if coverage is not None:
                 coverage.update(
-                    status=(
-                        PROPLINE_COVERAGE_REDACTED
-                        if bool(getattr(result, "redacted", False))
-                        else (
-                            PROPLINE_COVERAGE_MALFORMED
-                            if failure_kind == "incomplete"
-                            else PROPLINE_COVERAGE_UNAVAILABLE
-                        )
-                    ),
+                    status=status,
                     failure_kind=failure_kind,
                     error=str(getattr(result, "error", "") or ""),
+                    sport=sport_u,
+                    market=market,
                 )
             _log_propline_history_attempt(
                 player_name,
@@ -1031,6 +1048,31 @@ class PlayerHistoryProvider:
                 result,
                 raw_entries=raw_entries,
                 usable_rows=0,
+            )
+            return []
+
+        # A complete response can still contain only unresolved rows (or be
+        # redacted by the provider). Neither case is completed-game evidence.
+        # Keep those outcomes distinct from malformed HTTP/schema responses so
+        # coverage reports explain whether the feed was unavailable or gated.
+        if bool(getattr(result, "redacted", False)):
+            if coverage is not None:
+                coverage.update(
+                    status=PROPLINE_COVERAGE_REDACTED,
+                    failure_kind="redacted",
+                    sport=sport_u,
+                    market=market,
+                )
+            _log_propline_history_attempt(
+                player_name,
+                sport,
+                stat_type,
+                market,
+                bookmaker,
+                result,
+                raw_entries=raw_entries,
+                usable_rows=0,
+                status=PROPLINE_COVERAGE_REDACTED,
             )
             return []
 
@@ -1075,9 +1117,15 @@ class PlayerHistoryProvider:
             ))
         if coverage is not None:
             coverage.update(
-                status=PROPLINE_COVERAGE_USABLE,
-                failure_kind="",
+                status=(
+                    PROPLINE_COVERAGE_USABLE
+                    if rows
+                    else PROPLINE_COVERAGE_UNAVAILABLE
+                ),
+                failure_kind="" if rows else "no_settled_entries",
                 error="",
+                sport=sport_u,
+                market=market,
             )
         _log_propline_history_attempt(
             player_name,
@@ -1088,6 +1136,11 @@ class PlayerHistoryProvider:
             result,
             raw_entries=raw_entries,
             usable_rows=len(rows),
+            status=(
+                PROPLINE_COVERAGE_USABLE
+                if rows
+                else PROPLINE_COVERAGE_UNAVAILABLE
+            ),
         )
         return rows
 
@@ -1208,6 +1261,7 @@ def _log_propline_history_attempt(
     *,
     raw_entries: int,
     usable_rows: int,
+    status: str = "",
 ) -> None:
     """Make entitlement and shape failures visible without logging secrets."""
     redacted = bool(getattr(result, "redacted", False))
@@ -1220,7 +1274,7 @@ def _log_propline_history_attempt(
         logging.WARNING if redacted or not succeeded or not complete else logging.INFO,
         "PropLine history attempt player=%r sport=%s stat=%s market=%s "
         "bookmaker=%s succeeded=%s complete=%s redacted=%s raw_entries=%d "
-        "usable_rows=%d failure=%s error=%s upgrade_url=%s",
+        "usable_rows=%d status=%s failure=%s error=%s upgrade_url=%s",
         player_name,
         sport,
         stat_type,
@@ -1231,6 +1285,7 @@ def _log_propline_history_attempt(
         redacted,
         raw_entries,
         usable_rows,
+        status or "unknown",
         failure_kind or "none",
         error or "none",
         upgrade_url or "none",

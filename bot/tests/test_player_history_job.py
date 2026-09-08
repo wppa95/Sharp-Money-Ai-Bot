@@ -18,6 +18,7 @@ from player_history_job import (
     _fair_cycle_targets,
     player_history_collector_job,
 )
+from providers.player_history import PropLineHistoryCoverage
 
 
 def test_fair_cycle_targets_round_robins_all_sports():
@@ -267,6 +268,104 @@ async def test_player_history_reports_scheduled_propline_coverage_by_sport(caplo
     assert "'CS': {'usable': 1}" in caplog.text
     assert primary_provider.fetch_results.await_count == 3
     assert scheduled_provider.fetch_scheduled_results.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_propline_rotation_covers_each_non_mlb_market_across_cycles(caplog):
+    targets = [
+        ("NHL Player", "NHL", "goals"),
+        ("Tennis Player", "TENNIS", "aces"),
+        ("UFC Fighter", "UFC", "takedowns"),
+        ("Soccer Player", "SOCCER", "goals"),
+        ("CS Player", "CS", "kills"),
+    ]
+    snapshots = {
+        (player, sport, stat): SimpleNamespace(
+            player_name=player,
+            sport=sport,
+            stat_type=stat,
+        )
+        for player, sport, stat in targets
+    }
+    db = MagicMock()
+    db.get_active_underdog_snapshot_per_prop = AsyncMock(return_value=snapshots)
+    db.upsert_player_results_bulk = AsyncMock()
+    primary_provider = MagicMock()
+    primary_provider.fetch_results = AsyncMock(return_value=[])
+    scheduled_provider = MagicMock()
+    propline_calls = []
+
+    async def scheduled_results(primary, player, sport, stat, **kwargs):
+        allowed = bool(kwargs["allow_propline"])
+        propline_calls.append((player, sport, stat, allowed))
+        if not allowed:
+            return PropLineHistoryCoverage(
+                rows=tuple(primary),
+                status="not_needed",
+            )
+        row = SimpleNamespace(
+            player_name=player,
+            sport=sport,
+            stat_type=stat,
+            game_date="2026-08-29",
+            actual_value=1.0,
+            opponent=None,
+            source="propline_history",
+            game_id=f"{sport}-completed-game",
+        )
+        return PropLineHistoryCoverage(
+            rows=(row,),
+            status="usable",
+        )
+
+    scheduled_provider.fetch_scheduled_results = AsyncMock(
+        side_effect=scheduled_results
+    )
+    context = SimpleNamespace(
+        bot_data={
+            "db": db,
+            "player_history_provider": scheduled_provider,
+        }
+    )
+
+    with (
+        patch(
+            "providers.player_stats.PlayerStatsProvider",
+            return_value=primary_provider,
+        ),
+        caplog.at_level("INFO"),
+    ):
+        for _ in targets:
+            await player_history_collector_job(context)
+
+    selected = {
+        (player, sport, stat)
+        for player, sport, stat, allowed in propline_calls
+        if allowed
+    }
+    assert selected == set(targets)
+    assert all(
+        sum(
+            1
+            for player, sport, stat, allowed in propline_calls
+            if allowed and (player, sport, stat) == target
+        )
+        == 1
+        for target in targets
+    )
+    persisted = [
+        row
+        for call in db.upsert_player_results_bulk.await_args_list
+        for row in call.args[0]
+    ]
+    assert {
+        (row.sport, row.stat_type, row.source)
+        for row in persisted
+    } == {
+        (sport, stat, "propline_history")
+        for _player, sport, stat in targets
+    }
+    assert "propline_coverage_by_sport_market" in caplog.text
 
 
 @pytest.mark.asyncio

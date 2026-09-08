@@ -378,8 +378,24 @@ def test_supported_sports_resolve_to_propline_catalog_routes(sport, official):
     "sport,stat,official_sport,official_market",
     [
         ("NBA", "points", "basketball_nba", "player_points"),
+        ("NHL", "goals", "hockey_nhl", "player_goals"),
+        ("NHL", "shots on goal", "hockey_nhl", "player_shots_on_goal"),
+        ("NHL", "blocked shots", "hockey_nhl", "player_blocked_shots"),
+        ("NHL", "saves", "hockey_nhl", "goalie_saves"),
         ("TENNIS", "aces", "tennis", "player_aces"),
+        ("TENNIS", "double faults", "tennis", "player_double_faults"),
+        ("TENNIS", "break points won", "tennis", "player_break_points_won"),
+        ("TENNIS", "games won", "tennis", "player_games_won"),
+        ("TENNIS", "total games", "tennis", "total_games"),
+        ("TENNIS", "total tiebreaks", "tennis", "total_tiebreaks"),
+        ("TENNIS", "total sets", "tennis", "total_sets"),
+        ("UFC", "significant strikes", "mma_ufc", "player_significant_strikes"),
+        ("UFC", "takedowns", "mma_ufc", "player_takedowns"),
+        ("UFC", "fight time (mins)", "mma_ufc", "fight_time_minutes"),
+        ("SOCCER", "goals", "soccer_epl", "anytime_goal_scorer"),
+        ("SOCCER", "goal or assist", "soccer_epl", "goal_or_assist"),
         ("CS", "kills", "cs2", "player_kills_maps_1_2"),
+        ("CS", "headshots", "cs2", "player_headshots_maps_1_2"),
     ],
 )
 async def test_scheduled_history_uses_propline_for_non_mlb_sports(
@@ -407,6 +423,34 @@ async def test_scheduled_history_uses_propline_for_non_mlb_sports(
         "Alex Example",
         official_market,
     )
+
+
+@pytest.mark.asyncio
+async def test_complete_but_unresolved_history_is_not_completed_game_evidence():
+    client = _client(
+        [
+            SimpleNamespace(
+                event_id="unresolved-game",
+                commence_time=datetime(2026, 8, 29),
+                actual_value=None,
+                over_result=None,
+                under_result=None,
+            )
+        ]
+    )
+    provider = PlayerHistoryProvider(propline_client=client)
+
+    coverage = await provider.fetch_scheduled_results(
+        [],
+        "Alex Example",
+        "NHL",
+        "goals",
+    )
+
+    assert coverage.status == PROPLINE_COVERAGE_UNAVAILABLE
+    assert coverage.failure_kind == "no_settled_entries"
+    assert coverage.rows == ()
+    assert coverage.market == "player_goals"
 
 
 @pytest.mark.asyncio

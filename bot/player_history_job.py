@@ -419,6 +419,10 @@ async def player_history_collector_job(context) -> None:
         rows_by_sport: dict[str, int] = {}
         propline_attempts_by_sport: dict[str, int] = {}
         propline_coverage_by_sport: dict[str, dict[str, int]] = {}
+        propline_attempts_by_sport_market: dict[str, dict[str, int]] = {}
+        propline_coverage_by_sport_market: dict[
+            str, dict[str, dict[str, int]]
+        ] = {}
         propline_cursor_advanced = False
         budget_exhausted = False
         fetch_semaphore = asyncio.Semaphore(_PLAYER_HISTORY_FETCH_CONCURRENCY)
@@ -429,6 +433,27 @@ async def player_history_collector_job(context) -> None:
         history_provider = (
             configured_history_provider or get_player_history_provider()
         )
+
+        def propline_market_for(
+            sport: str,
+            stat: str,
+            coverage: object = None,
+        ) -> str:
+            reported_market = str(
+                getattr(coverage, "market", "") or ""
+            ).strip()
+            if reported_market:
+                return reported_market
+            try:
+                from providers.propline import official_player_market_for
+
+                return (
+                    official_player_market_for(stat, sport=sport)
+                    or "unmapped"
+                )
+            except Exception:
+                return "unmapped"
+
         if cycle_targets:
             try:
                 propline_start = (
@@ -454,6 +479,11 @@ async def player_history_collector_job(context) -> None:
                 propline_attempts_by_sport[_sport] = (
                     propline_attempts_by_sport.get(_sport, 0) + 1
                 )
+                market = propline_market_for(_sport, _stat)
+                sport_attempts = propline_attempts_by_sport_market.setdefault(
+                    _sport, {}
+                )
+                sport_attempts[market] = sport_attempts.get(market, 0) + 1
         else:
             propline_targets = set()
 
@@ -548,6 +578,21 @@ async def player_history_collector_job(context) -> None:
             coverage = fetch_value
             raw = getattr(coverage, "rows", coverage)
             coverage_status = getattr(coverage, "status", "")
+            if (player, sport, stat) in propline_targets:
+                market = propline_market_for(sport, stat, coverage)
+                sport_markets = propline_coverage_by_sport_market.setdefault(
+                    sport, {}
+                )
+                market_coverage = sport_markets.setdefault(market, {})
+                if coverage_status in {
+                    "usable",
+                    "redacted",
+                    "unavailable",
+                    "malformed",
+                }:
+                    market_coverage[coverage_status] = (
+                        market_coverage.get(coverage_status, 0) + 1
+                    )
             if (player, sport, stat) in propline_targets and coverage_status == (
                 "not_needed"
             ):
@@ -656,13 +701,16 @@ async def player_history_collector_job(context) -> None:
             "targets_by_sport=%s "
             "players_ok_by_sport=%s rows_by_sport=%s "
              "propline_attempts_by_sport=%s "
-             "propline_coverage_by_sport=%s",
+            "propline_coverage_by_sport=%s "
+            "propline_attempts_by_sport_market=%s "
+            "propline_coverage_by_sport_market=%s",
             ok, rows, persisted_rows, processed, rows, len(targets) - processed,
             processed, len(targets) - processed,
             failed, budget_exhausted, len(targets),
             time.monotonic() - cycle_started, target_counts,
-             ok_by_sport, rows_by_sport, propline_attempts_by_sport,
-             propline_coverage_by_sport,
+            ok_by_sport, rows_by_sport, propline_attempts_by_sport,
+            propline_coverage_by_sport, propline_attempts_by_sport_market,
+            propline_coverage_by_sport_market,
         )
     except Exception as exc:
         logger.exception("player_history_collector_job: %s", exc)
