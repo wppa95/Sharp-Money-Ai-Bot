@@ -48,24 +48,21 @@ def _row(
     )
 
 
-def test_direction_is_resolved_before_fair_result_cap():
+def test_direction_is_resolved_before_fair_result_cap_for_underdog():
     non_directional = [
         _row("Underdog", f"No Direction {index}", None, external_id=f"none-{index}")
         for index in range(20)
     ]
     ud_over = _row("Underdog", "UD Directional", "OVER", external_id="ud-over")
-    pp_under = _row("PrizePicks", "PP Directional", "UNDER", external_id="pp-under")
-
     selected = commands._select_directional_provider_rows(
         [*non_directional, ud_over],
-        [pp_under],
+        [],
         {},
         2,
     )
 
     assert [(provider, row.player_name) for provider, row in selected] == [
         ("Underdog", "UD Directional"),
-        ("PrizePicks", "PP Directional"),
     ]
 
 
@@ -80,38 +77,36 @@ def test_live_underdog_direction_overrides_synced_value_before_cap():
     assert selected == [("Underdog", ud)]
 
 
-def test_provider_identity_and_source_aware_dedup_remain_intact():
+def test_underdog_source_aware_dedup_remains_intact():
     ud = _row("Underdog", "Same Player", "OVER", external_id="ud-source")
-    pp_a = _row("PrizePicks", "Same Player", "UNDER", external_id="pp-a")
-    pp_b = _row("PrizePicks", "Same Player", "OVER", external_id="pp-b")
 
     selected = commands._select_directional_provider_rows(
         [ud],
-        [pp_a, pp_b, pp_a],
+        [],
         {},
-        3,
+        2,
     )
 
     assert [(provider, row.external_id) for provider, row in selected] == [
         ("Underdog", "ud-source"),
-        ("PrizePicks", "pp-a"),
-        ("PrizePicks", "pp-b"),
     ]
 
 
 @pytest.mark.parametrize("tier", ["S", "A", "B", "C", "PASS", None])
 @pytest.mark.parametrize("decision_tier", ["Tier 1", "Tier 2", "Rejected", None])
-def test_retired_classification_metadata_does_not_gate_picks(tier, decision_tier):
+def test_retired_classification_metadata_does_not_gate_underdog_picks(
+    tier, decision_tier
+):
     row = _row(
-        "PrizePicks",
+        "Underdog",
         "Neutral Metadata",
         "OVER",
         external_id=f"{tier}-{decision_tier}",
         score_tier=tier,
         decision_tier=decision_tier,
     )
-    assert commands._select_directional_provider_rows([], [row], {}, 1) == [
-        ("PrizePicks", row)
+    assert commands._select_directional_provider_rows([row], [], {}, 1) == [
+        ("Underdog", row)
     ]
 
 
@@ -127,11 +122,11 @@ def test_pregame_state_remains_hard_and_unknown_is_not_fabricated():
 
 
 def test_picks_selection_does_not_require_evidence_delivery_or_alert_state():
-    row = _row("PrizePicks", "Research Row", "UNDER", external_id="research")
+    row = _row("Underdog", "Research Row", "UNDER", external_id="research")
     del row.alert_sent
     assert not hasattr(row, "evidence")
-    assert commands._select_directional_provider_rows([], [row], {}, 1) == [
-        ("PrizePicks", row)
+    assert commands._select_directional_provider_rows([row], [], {}, 1) == [
+        ("Underdog", row)
     ]
     source = inspect.getsource(commands._cmd_picks_inner)
     assert "broadcast_alert" not in source

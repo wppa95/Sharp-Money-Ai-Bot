@@ -52,25 +52,24 @@ def _job_kwargs(call: ast.Call) -> dict[str, ast.AST]:
     }
 
 
-def test_current_book_has_independent_monitoring_owners_and_full_pool_rotation():
+def test_current_book_has_underdog_monitoring_and_full_pool_rotation():
     names = [name for name, _ in _scheduled_jobs()]
 
     assert names.count("underdog_monitor") == 1
     assert names.count("full_pool_rescan") == 1
     assert "stable_refresh" not in names
     assert "stable_refresh_job" not in names
-    assert names.count("prizepicks_monitor") == 1
+    assert "prizepicks_monitor" not in names
     assert "prizepicks_job" not in names
     assert "connector_poller" not in names
     assert "consensus_checker" not in names
 
 
-def test_required_jobs_remain_registered_with_independent_player_props_and_grader_timers():
+def test_required_jobs_remain_registered_with_underdog_and_grader_timers():
     names = {name for name, _ in _scheduled_jobs()}
 
     assert {
         "odds_poller",
-        "player_props_fetcher",
         "clv_seeder",
         "clv_harvester",
         "player_history_collector",
@@ -88,9 +87,7 @@ def test_scheduled_jobs_use_coordinator_without_max_instances():
 
     for name in (
         "odds_poller",
-        "player_props_fetcher",
         "underdog_monitor",
-        "prizepicks_monitor",
         "full_pool_rescan",
     ):
         kwargs = _job_kwargs(jobs[name])
@@ -101,7 +98,7 @@ def test_scheduled_jobs_use_coordinator_without_max_instances():
     assert "_coordinated_job(" in source
 
 
-def test_monitoring_and_grading_have_independent_cycle_owners():
+def test_monitoring_and_grading_have_distinct_cycle_owners():
     source = MAIN_SOURCE.read_text()
 
     assert "async def _underdog_monitor_cycle" in source
@@ -112,11 +109,8 @@ def test_monitoring_and_grading_have_independent_cycle_owners():
         r'_coordinated_job\(\s*"underdog_monitor",\s*_underdog_monitor_cycle',
         source,
     )
-    assert re.search(
-        r'_coordinated_job\(\s*"prizepicks_monitor",\s*prizepicks_job',
-        source,
-    )
-    assert "_shared_monitoring_cycle" not in source
+    assert "prizepicks_monitor" not in source
+    assert "prizepicks_job" not in source
     assert '_coordinated_job("full_pool_rescan", _full_pool_rescan_job)' in source
 
 

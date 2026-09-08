@@ -329,9 +329,8 @@ class TestSchedulerCoordinator:
                 continue
             callback = ast.unparse(node.args[0]) if node.args else ""
             assert callback.startswith(
-                "_coordinated_job('underdog_monitor', _shared_underdog_cycle"
+                "_coordinated_job('underdog_monitor', _underdog_monitor_cycle"
             )
-            assert "exclusive_group='underdog_monitoring'" in callback
             assert not any(kw.arg == "job_kwargs" for kw in node.keywords)
             found = True
             break

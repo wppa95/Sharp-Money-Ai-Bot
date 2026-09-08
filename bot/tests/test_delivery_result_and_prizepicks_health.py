@@ -39,19 +39,11 @@ def test_ranked_delivery_uses_delivery_result_contract_not_reason():
     assert "str(_dq_result)" in source
 
 
-@pytest.mark.asyncio
-async def test_legacy_prizepicks_callback_delegates_to_independent_cycle():
+def test_legacy_prizepicks_scheduler_callback_is_removed():
     import main
 
-    context = MagicMock()
-    with patch.object(
-        main,
-        "prizepicks_job",
-        return_value=AsyncMock(),
-    ) as prizepicks_cycle:
-        await main._prizepicks_job(context)
-
-    prizepicks_cycle.assert_awaited_once_with(context)
+    assert not hasattr(main, "_prizepicks_job")
+    assert not hasattr(main, "prizepicks_job")
 
 
 def test_provider_database_write_isolated_and_persisted(tmp_path: Path):
@@ -65,7 +57,7 @@ def test_provider_database_write_isolated_and_persisted(tmp_path: Path):
     assert "last_db_write_ts" not in ud_info
 
 
-def test_prizepicks_feed_counts_keep_empty_separate_from_failed(tmp_path: Path):
+def test_internal_propline_feed_counts_are_not_rendered_in_telegram(tmp_path: Path):
     tracker = HealthTracker(path=tmp_path / "health.json")
     tracker.record_provider_feed_counts(
         "PrizePicks", "NBA", 0, 0, succeeded=True
@@ -85,9 +77,9 @@ def test_prizepicks_feed_counts_keep_empty_separate_from_failed(tmp_path: Path):
     assert counts["WNBA"]["state"] == "failed"
 
     rendered = "\n".join(commands._prizepicks_feed_count_lines(tracker))
-    assert "NBA: 0 raw records · 0 normalized props · empty" in rendered
-    assert "MLB: 9 raw records · 4 normalized props · ok" in rendered
-    assert "WNBA: 0 raw records · 0 normalized props · failed" in rendered
+    assert rendered == ""
+    assert "PrizePicks" not in rendered
+    assert "PropLine" not in rendered
 
 
 @pytest.mark.asyncio
@@ -147,7 +139,8 @@ async def test_status_uses_shared_monitoring_cycle_without_merging_ud():
     assert "Latest Underdog scan" not in text
     assert "Latest monitoring cycle" not in text
     assert "Observed:            99" not in text
-    assert "History: Underdog: 15 · PrizePicks (PropLine): 5" in text
+    assert "History: Underdog: 15" in text
+    assert "PrizePicks" not in text
 
 
 @pytest.mark.asyncio
