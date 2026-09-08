@@ -7313,6 +7313,26 @@ class Database:
                     evaluated_by_sport.get(sport_key, 0) + count_value
                 )
 
+            # A directional opportunity and a confirmed delivery are both
+            # downstream evidence that evaluation occurred.  Candidate
+            # telemetry is intentionally non-critical and may be deferred or
+            # unavailable for a short report window, so it cannot make the
+            # funnel claim ``directional > evaluated`` or ``delivered >
+            # evaluated``.  Use those downstream populations as a conservative
+            # lower bound while retaining all neutral candidate evaluations
+            # whenever they are present.
+            for sport_key, count_value in directional_by_sport.items():
+                evaluated_by_sport[sport_key] = max(
+                    evaluated_by_sport.get(sport_key, 0),
+                    int(count_value or 0),
+                )
+            for sport_key, count_value in delivered_by_sport.items():
+                evaluated_by_sport[sport_key] = max(
+                    evaluated_by_sport.get(sport_key, 0),
+                    int(count_value or 0),
+                )
+            evaluated_total = sum(evaluated_by_sport.values())
+
             provider_breakdown: dict[str, dict] = {}
             all_providers = (
                 set(active_by_provider)

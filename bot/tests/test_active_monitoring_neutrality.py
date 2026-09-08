@@ -10,7 +10,12 @@ import pytest
 from sqlalchemy import select
 
 import market_engine
-from database import Database, PropCandidateLog, PropOpportunityLog
+from database import (
+    Database,
+    PropCandidateLog,
+    PropLineHistory,
+    PropOpportunityLog,
+)
 from engine.dashboard import DashboardEngine, DashboardReport
 
 
@@ -105,6 +110,74 @@ async def test_tracking_and_dashboard_ignore_legacy_non_directional_rows(db):
     assert report.intelligence_panel.total_graded == 1
     assert report.intelligence_panel.total_hits == 1
     assert report.intelligence_panel.total_misses == 0
+
+
+@pytest.mark.asyncio
+async def test_funnel_evaluation_floor_covers_directional_and_delivered_rows(db):
+    """Downstream rows must never make the funnel report Dir/Del > Eval."""
+    from database import TelegramDeliveryAudit
+    from datetime import timedelta
+
+    async with db.session() as session:
+        now = datetime.utcnow()
+        session.add(
+            PropLineHistory(
+                external_id="directional-without-candidate-telemetry",
+                provider="Underdog",
+                player_name="Directional",
+                team="",
+                sport="MLB",
+                stat_type="Hits",
+                line_value=1.5,
+                game_time=now + timedelta(hours=2),
+                fetched_at=now,
+                removed=False,
+            )
+        )
+        session.add(
+            PropOpportunityLog(
+                external_id="directional-without-candidate-telemetry",
+                player_name="Directional",
+                team="",
+                sport="MLB",
+                stat_type="Hits",
+                line_value=1.5,
+                recommendation="OVER",
+                decision_tier="A",
+                confidence=75,
+                result="PENDING",
+                provider="Underdog",
+                alert_sent=True,
+                detected_at=now,
+            )
+        )
+        session.add(
+            TelegramDeliveryAudit(
+                provider="Underdog",
+                sport="MLB",
+                player_name="Directional",
+                stat_type="Hits",
+                external_id="directional-without-candidate-telemetry",
+                event_id="event-1",
+                delivery_key="delivery-key-1",
+                line_value=1.5,
+                outcome="sent",
+                attempted_at=now,
+            )
+        )
+        await session.commit()
+
+    summary = await db.get_funnel_summary()
+
+    assert summary["evaluated"] >= summary["directional_total"]
+    assert summary["evaluated"] >= summary["delivered"]
+    assert summary["evaluated_by_sport"]["MLB"] >= 1
+    assert summary["evaluated_by_sport"]["MLB"] >= (
+        summary["directional_by_sport"]["MLB"]
+    )
+    assert summary["evaluated_by_sport"]["MLB"] >= (
+        summary["delivered_by_sport"]["MLB"]
+    )
 
 
 @pytest.mark.asyncio
