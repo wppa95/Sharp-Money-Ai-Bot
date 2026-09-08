@@ -514,10 +514,12 @@ def _has_strong_directional_history(
     # Use the direction-specific counts rather than the generic OVER rate.
     # This prevents a strong UNDER label from being attached to a merely
     # average OVER-rate window.
-    for prefix in (
-        "l5", "l10", "l20", "l30", "season",
-        "h2h_l5", "h2h_l10", "h2h_l20", "h2h",
-    ):
+    prefixes = (
+        ("l5", "l10", "l15", "l30", "season")
+        if recommendation == "OVER"
+        else ("l5", "l10", "l20", "l30", "season")
+    )
+    for prefix in prefixes:
         games = _numeric_attr(decision, f"{prefix}_games")
         directional_count = _numeric_attr(
             decision,
@@ -570,6 +572,7 @@ def _format_history_block(decision: Optional[object]) -> str:
     windows = (
         ("L5", "l5_hit_rate", "l5_games", "l5_over"),
         ("L10", "l10_hit_rate", "l10_games", "l10_over"),
+        ("L15", "l15_hit_rate", "l15_games", "l15_over"),
         ("L20", "l20_hit_rate", "l20_games", "l20_over"),
         ("L30", "l30_hit_rate", "l30_games", "l30_over"),
         ("Season", "season_hit_rate", "season_games", "season_over"),

@@ -292,18 +292,9 @@ def _primary_player_prop_provider_lines(
 ) -> list[str]:
     """Render configured provider roles with the current health-state icon."""
     underdog_enabled = bool(config.UNDERDOG_ENABLED)
-    try:
-        from providers.propline import PropLinePrizePicksProvider
-        prizepicks_enabled = PropLinePrizePicksProvider().is_available()
-    except Exception:
-        prizepicks_enabled = False
-
-    provider_icons = {
-        "Underdog": "🟢" if underdog_enabled else "⚪",
-        "PrizePicks": "🟢" if prizepicks_enabled else "⚪",
-    }
+    provider_icons = {"Underdog": "🟢" if underdog_enabled else "⚪"}
     if health_monitor is not None and hasattr(health_monitor, "get_health"):
-        for provider in ("Underdog", "PrizePicks"):
+        for provider in ("Underdog",):
             try:
                 health = health_monitor.get_health(provider)
                 # Registration alone is not a successful fetch.  Do not show a
@@ -320,8 +311,6 @@ def _primary_player_prop_provider_lines(
                 if health.status.value == "disabled":
                     if provider == "Underdog":
                         underdog_enabled = False
-                    else:
-                        prizepicks_enabled = False
             except Exception:
                 pass
 
@@ -332,11 +321,7 @@ def _primary_player_prop_provider_lines(
         else "🟢" if "🟢" in _health_icons
         else "⚪"
     )
-    source_states = (
-        f"Underdog: {'available' if underdog_enabled else 'unavailable'} · "
-        f"PrizePicks / PropLine: "
-        f"{'available' if prizepicks_enabled else 'unavailable'}"
-    )
+    source_states = f"Underdog: {'available' if underdog_enabled else 'unavailable'}"
     return [
         f"  {overall_icon} <b>Player Props</b> — {source_states}",
     ]
@@ -347,7 +332,7 @@ def _primary_provider_runtime_lines(health_monitor: object | None) -> list[str]:
     if health_monitor is None or not hasattr(health_monitor, "get_health"):
         return ["  Fetch: unavailable"]
     provider_runtime: list[str] = []
-    for provider in ("Underdog", "PrizePicks"):
+    for provider in ("Underdog",):
         try:
             health = health_monitor.get_health(provider)
             awaiting_first_fetch = not getattr(health, "last_success", None)
@@ -378,35 +363,8 @@ def _primary_provider_runtime_lines(health_monitor: object | None) -> list[str]:
 
 
 def _prizepicks_feed_count_lines(health_tracker: object | None) -> list[str]:
-    """Render the latest raw and normalized PrizePicks counts by sport."""
-    if health_tracker is None:
-        return []
-    try:
-        if hasattr(health_tracker, "get_provider_feed_counts"):
-            counts_by_sport = health_tracker.get_provider_feed_counts("PrizePicks")
-        else:
-            info = health_tracker.get_provider_info("PrizePicks") or {}
-            counts_by_sport = info.get("feed_counts_by_sport") or {}
-    except Exception:
-        return []
-    if not isinstance(counts_by_sport, dict) or not counts_by_sport:
-        return []
-
-    lines = ["  <i>Player Props feed by sport (PrizePicks / PropLine source)</i>"]
-    for sport, counts in sorted(counts_by_sport.items()):
-        if not isinstance(counts, dict):
-            continue
-        raw = counts.get("raw_records", "—")
-        normalized = counts.get("normalized_props", "—")
-        state = str(counts.get("state", "") or "").strip().lower()
-        state_label = f" · {state}" if state else ""
-        lines.append(
-            f"    {_html.escape(str(sport))}: "
-            f"{_html.escape(str(raw))} raw records · "
-            f"{_html.escape(str(normalized))} normalized props"
-            f"{_html.escape(state_label)}"
-        )
-    return lines if len(lines) > 1 else []
+    """PropLine is internal and never appears in Telegram command output."""
+    return []
 
 
 # ── Module-level references (set by main.py on startup) ───────────────────────
@@ -671,12 +629,9 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         # ── Market provider health (live prop sources) ────────────────────────
         lines.append("")
         lines.append("<b>📡 Market Providers</b>")
-        _market_provider_labels = {
-            "Underdog": "Underdog source",
-            "PrizePicks": "PrizePicks / PropLine source",
-        }
+        _market_provider_labels = {"Underdog": "Underdog source"}
         _market_rows: list[str] = []
-        for provider in ("Underdog", "PrizePicks"):
+        for provider in ("Underdog",):
             info = ht.get_provider_info(provider)
             if info:
                 last_fetch = ht.provider_last_fetch_str(provider)
@@ -1050,7 +1005,6 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 _alerts_today,
                 total_prop_history,
                 ud_history,
-                pp_history,
             ) = await _status_db_reads(
                 [
                     _status_db_read(
@@ -1063,14 +1017,10 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                         "Underdog prop history",
                         _db.count_prop_line_history(provider="Underdog"),
                     ),
-                    _status_db_read(
-                        "PrizePicks prop history",
-                        _db.count_prop_line_history(provider="PrizePicks"),
-                    ),
                 ]
             )
         else:
-            _alerts_today = total_prop_history = ud_history = pp_history = 0
+            _alerts_today = total_prop_history = ud_history = 0
         # Load provider health monitor singleton
         try:
             from providers import get_health_monitor
@@ -1094,7 +1044,6 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             *_primary_player_prop_provider_lines(_mon),
             (
                 f"  History: Underdog: {_format_status_count(ud_history)}"
-                f" · PrizePicks (PropLine): {_format_status_count(pp_history)}"
             ),
         ]
         if _ht_pipeline is not None:
@@ -1141,8 +1090,7 @@ async def cmd_system(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         ]
         if ht is not None:
             ud_info = ht.get_provider_info("Underdog") or {}
-            pp_info = ht.get_provider_info("PrizePicks") or {}
-            for name, info in (("Underdog", ud_info), ("PrizePicks", pp_info)):
+            for name, info in (("Underdog", ud_info),):
                 if info:
                     age = ht.provider_last_fetch_str(name)
                     streak = int(info.get("error_streak", 0) or 0)
@@ -1745,10 +1693,6 @@ def _is_current_provider_sport(
     provider: Optional[str],
 ) -> bool:
     """Apply the provider's own current-slate scope."""
-    if str(provider or "").strip().lower() == "prizepicks":
-        # ACTIVE_SPORTS is the Underdog scope. PrizePicks has an independent
-        # active catalog, so dynamic PP sports must remain visible here.
-        return bool(str(sport or "").strip())
     return _is_active_display_sport(sport)
 
 
@@ -1771,7 +1715,7 @@ def _has_current_prop_data(
     """
     now = now or datetime.utcnow()
     provider = str(getattr(prop, "provider", "") or "").strip().lower()
-    if provider not in {"underdog", "prizepicks"}:
+    if provider != "underdog":
         return False
     player = str(getattr(prop, "player_name", "") or "").strip()
     sport = str(getattr(prop, "sport", "") or "").strip()
@@ -1896,12 +1840,14 @@ def _select_directional_provider_rows(
     rec_map: dict[tuple[str, str, str, str], tuple[Optional[str], Optional[int]]],
     limit: int,
 ) -> list[tuple[str, Any]]:
-    """Resolve direction, preserve provider identity, then apply a fair cap."""
+    """Resolve Underdog direction, then apply a fair cap.
+
+    ``pp_props`` remains in the signature for callers written against the
+    previous multi-provider command surface, but is intentionally ignored:
+    PropLine is internal evidence and never a Telegram candidate.
+    """
     directional_by_identity: dict[tuple[str, ...], tuple[str, Any]] = {}
-    for provider, prop in (
-        *[("Underdog", row) for row in ud_props],
-        *[("PrizePicks", row) for row in pp_props],
-    ):
+    for provider, prop in (("Underdog", row) for row in ud_props):
         effective_rec = getattr(prop, "bet_recommendation", None)
         if provider == "Underdog":
             live_rec, _ = rec_map.get(
@@ -2201,32 +2147,20 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if sport_filter:
         ud_props = [p for p in ud_props if p.sport.upper() == sport_filter]
 
+    # PropLine is an internal evidence source, not a separate Telegram
+    # provider. Keep the bounded legacy read for comparison compatibility, but
+    # never expose those rows as a command provider or candidate.
     try:
-        _stage_started = time.monotonic()
-        pp_rows = await _bounded(_db.get_latest_props_for_provider(
+        await _bounded(_db.get_latest_props_for_provider(
             "PrizePicks",
             since_hours=_since_hours,
             limit=_provider_overfetch,
             directional_first=True,
         ))
-        _pp_query_seconds = time.monotonic() - _stage_started
     except Exception:
-        pp_rows = []
-        _pp_query_seconds = time.monotonic() - _stage_started
-
-    pp_props = [
-        p for p in pp_rows
-        if getattr(p, "removed", False) is not True
-        and not _is_season_future(p.stat_type)
-        and _has_current_prop_data(p, now)
-        and _is_current_provider_sport(p.sport, "PrizePicks")
-        and not is_telegram_suppressed_sport(p.sport)
-        and _is_upcoming_game(
-            getattr(p, "game_time", None),
-            getattr(p, "provider_status", None),
-        )
-        and (not sport_filter or p.sport.upper() == sport_filter)
-    ]
+        pass
+    pp_props = []
+    _pp_query_seconds = 0.0
     # Resolve direction before deduplication or limiting. /picks is a current
     # directional research view, not a second Telegram delivery gate.
     _rec_map: dict = {}
@@ -2244,7 +2178,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     _direction_started = time.monotonic()
     provider_props = _select_directional_provider_rows(
         ud_props,
-        pp_props,
+        [],
         _rec_map,
         limit,
     )
@@ -2828,12 +2762,7 @@ def _render_slip_section(
             if comp and comp.lines:
                 def _lv2(v: Optional[float]) -> str:
                     return f"<code>{v:.1f}</code>" if v is not None else "—"
-                pp_pl = comp.lines.get("PrizePicks")
-                pp_v  = pp_pl.line_value if (pp_pl and pp_pl.available) else None
-                _source = getattr(r, "sportsbook", None) or "Underdog"
                 row_parts = [f"🎯 Player Prop {_lv2(best_line)}"]
-                if _source != "PrizePicks" and pp_v is not None:
-                    row_parts.append(f"🎯 Player Prop {_lv2(pp_v)}")
                 provider_row = "\n    " + "  ".join(row_parts)
 
         section.append(
@@ -3153,64 +3082,34 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             getattr(p, "provider_status", None),
         )
     ]
-    try:
-        pp_props = await _report_read(
-            _db.get_latest_props_for_provider("PrizePicks", since_hours=24),
-            fallback=[],
-        )
-    except Exception:
-        pp_props = []
-    pp_props = [
-        p for p in pp_props
-        if not _is_season_future(p.stat_type)
-        and _has_current_prop_data(p, now)
-        and _is_current_provider_sport(p.sport, "PrizePicks")
-        and not is_telegram_suppressed_sport(p.sport)
-        and _is_upcoming_game(
-            getattr(p, "game_time", None),
-            getattr(p, "provider_status", None),
-        )
-    ]
-    provider_props = [
-        *[("Underdog", p) for p in ud_props],
-        *[("PrizePicks", p) for p in pp_props],
-    ]
+    # PropLine is internal evidence for Underdog, not a separate Telegram
+    # provider. Only Underdog-owned rows enter the slip display.
+    provider_props = [("Underdog", p) for p in ud_props]
     if not provider_props:
         await update.message.reply_text(
             "🎯 <b>Sharp Money Prop Slip</b>\n\n"
             "No current directional player props available right now.\n\n"
             "<i>Season-long futures are excluded from this view.\n"
-            "Underdog and PrizePicks props are tracked independently. "
-            "Run /picks to check current opportunities.</i>",
+        "Run /picks to check current opportunities.</i>",
             parse_mode=ParseMode.HTML,
         )
         return
 
-    # ── 2. Cross-provider enrichment for Underdog rows ───────────────────────
-    try:
-        pp_rows = await _report_read(
-            _db.get_latest_props_for_provider("PrizePicks", since_hours=24),
-            fallback=[],
-        )
-    except Exception:
-        pp_rows = []
-
-    # ── 3. Build PropPickAdapter candidates (Underdog + PrizePicks only) ─────
+    # ── 2. Build PropPickAdapter candidates from Underdog rows ───────────────
     _candidates: list[PropPickAdapter] = []
     for provider, plh in provider_props:
         comp = None
-        if provider == "Underdog":
-            comp = build_player_prop_market_comparison(
-                player_name    = plh.player_name,
-                sport          = plh.sport,
-                stat_type      = plh.stat_type,
-                ud_line        = plh.line_value,
-                previous_line  = plh.prev_line,
-                fetched_at     = plh.fetched_at,
-                pp_rows        = pp_rows,
-                now            = now,
-                min_confidence = 0,
-            )
+        comp = build_player_prop_market_comparison(
+            player_name    = plh.player_name,
+            sport          = plh.sport,
+            stat_type      = plh.stat_type,
+            ud_line        = plh.line_value,
+            previous_line  = plh.prev_line,
+            fetched_at     = plh.fetched_at,
+            pp_rows        = [],
+            now            = now,
+            min_confidence = 0,
+        )
         adapter = PropPickAdapter(plh, comp)
         # Populate bet direction from synced PropLineHistory column
         _plh_rec = getattr(plh, "bet_recommendation", None)
@@ -3297,7 +3196,7 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         lines = [
             f"🎯 <b>Sharp Money Prop Slips — {today}</b>",
             f"<i>{len(slips)} slip size{'s' if len(slips) != 1 else ''} built "
-            f"from {len(_candidates)} Underdog and PrizePicks props</i>",
+            f"from {len(_candidates)} Underdog player props</i>",
             "",
         ]
         for size in sorted(slips):
@@ -3581,7 +3480,7 @@ async def cmd_reconcile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         lines += [
             "",
             "<i>Raw provider observations and funnel evaluations are not Telegram "
-            "messages. PrizePicks, Underdog, and sportsbook paths remain separate.</i>",
+            "messages. Current player-prop data remains separate from delivery.</i>",
         ]
         body = "\n".join(lines)
         await update.message.reply_text(body, parse_mode=ParseMode.HTML)
@@ -4054,9 +3953,8 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         # Each metric is optional.  A locked history query must not hide the
         # provider counts or make the entire Telegram command fail.
-        ud_today, pp_today, total_ud, tracking = await _independent_report_reads([
+        ud_today, total_ud, tracking = await _independent_report_reads([
             _db.count_today_actionable_alerts(),
-            _db.count_today_pp_alerts(),
             _db.count_underdog_records(),
             _db.get_tracking_summary(),
         ])
@@ -4077,7 +3975,6 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             "",
             "<b>Today's Actionable Picks</b>",
             f"  Underdog:    <b>{ud_today if ud_today is not None else 'unavailable'}</b>",
-            f"  PrizePicks (PropLine): <b>{pp_today if pp_today is not None else 'unavailable'}</b>",
             "",
             "<b>Reporting populations</b>",
         ]
@@ -4361,7 +4258,6 @@ async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         return
 
     ud_sports = ", ".join(sorted(config.ud_alert_sports or [])) or "none"
-    pp_sports = ", ".join(config.prizepicks_leagues or []) or "provider-discovered"
     try:
         from providers import get_health_monitor
         _config_mon = get_health_monitor()
@@ -4373,7 +4269,6 @@ async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         "",
         "<b>Alert Scope</b>",
         f"  Underdog sports:   <code>{ud_sports}</code>",
-        f"  PrizePicks sports: <code>{pp_sports}</code>",
         f"  Min validation:    <code>{config.UD_VALIDATION_MIN_SAMPLES} snapshots</code>",
         "",
         "<b>Alert Limits</b>",
@@ -4382,8 +4277,7 @@ async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         "<b>Player Prop Market Providers</b>",
         *_primary_player_prop_provider_lines(_config_mon),
         *_primary_provider_runtime_lines(_config_mon),
-        f"  Coverage: all discovered PrizePicks sports per cycle, within pacing/budget",
-        f"  CS2 current PrizePicks lines: <b>PropLine</b>",
+        f"  Coverage: all discovered Underdog player props within pacing/budget",
         "",
         "<b>Historical Enrichment Sources</b>",
         f"  ESPN gamelog:      ✅ active (NBA/NFL/WNBA/MLB/Soccer/NHL)",
@@ -5041,7 +4935,7 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 "",
                 f"<b>Provider Pipeline</b>  <i>(last {since_h}h)</i>",
             ]
-            for _provider in ("Underdog", "PrizePicks"):
+            for _provider in ("Underdog",):
                 _row = provider_pipeline.get(_provider, {})
                 _delivered = _row.get("audit_delivered_alerts", 0)
                 lines += [

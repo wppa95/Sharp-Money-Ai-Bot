@@ -78,6 +78,12 @@ class UDBetDecision:
     l10_hit_rate:   Optional[float]
     l10_avg:        Optional[float]
 
+    l15_games:      Optional[int]
+    l15_over:       Optional[int]
+    l15_under:      Optional[int]
+    l15_hit_rate:   Optional[float]
+    l15_avg:        Optional[float]
+
     l20_games:      Optional[int]
     l20_over:       Optional[int]
     l20_under:      Optional[int]
@@ -245,6 +251,7 @@ class UDBetDecision:
                 "conf": self.confidence,
                 "l5":   {"g": self.l5_games, "o": self.l5_over, "r": _r(self.l5_hit_rate), "avg": _r(self.l5_avg)},
                 "l10":  {"g": self.l10_games, "o": self.l10_over, "r": _r(self.l10_hit_rate), "avg": _r(self.l10_avg)},
+                "l15":  {"g": self.l15_games, "o": self.l15_over, "r": _r(self.l15_hit_rate), "avg": _r(self.l15_avg)},
                 "l20":  {"g": self.l20_games, "o": self.l20_over, "r": _r(self.l20_hit_rate), "avg": _r(self.l20_avg)},
                 "l30":  {"g": self.l30_games, "o": self.l30_over, "r": _r(self.l30_hit_rate), "avg": _r(self.l30_avg)},
                 "sea":  {"g": self.season_games, "o": self.season_over, "r": _r(self.season_hit_rate), "avg": _r(self.season_avg)},
@@ -638,6 +645,7 @@ def _windows_from_hit_rates(hit_rates: "Optional[PlayerHitRates]") -> dict:
 
     l5  = hit_rates.l5     if hit_rates else None
     l10 = hit_rates.l10    if hit_rates else None
+    l15 = hit_rates.l15    if hit_rates else None
     l20 = hit_rates.l20    if hit_rates else None
     l30 = hit_rates.l30    if hit_rates else None
     sea = hit_rates.season if hit_rates else None
@@ -657,6 +665,11 @@ def _windows_from_hit_rates(hit_rates: "Optional[PlayerHitRates]") -> dict:
         "l10_under":      _g(l10, "under_count"),
         "l10_hit_rate":   _g(l10, "hit_rate"),
         "l10_avg":        _g(l10, "average"),
+        "l15_games":      _g(l15, "games"),
+        "l15_over":       _g(l15, "over_count"),
+        "l15_under":      _g(l15, "under_count"),
+        "l15_hit_rate":   _g(l15, "hit_rate"),
+        "l15_avg":        _g(l15, "average"),
         "l20_games":      _g(l20, "games"),
         "l20_over":       _g(l20, "over_count"),
         "l20_under":      _g(l20, "under_count"),

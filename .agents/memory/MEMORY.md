@@ -79,7 +79,7 @@
 - [Unified prop tracking](unified-prop-tracking.md) — persistent monitoring rows are independent of delivery; retired Watchlist/Near-Miss labels must not drive rotation or reports.
 - [Unified monitoring universe](unified-monitoring-universe.md) — every active prop line is continuously scannable; delivery eligibility never creates a rotation or tracking queue.
 - [Directional persistence policy](pass-watchlist-persistence.md) — PASS/no-direction/watchlist are transient scan results; only OVER/UNDER evaluations are persisted.
-- [Provider scope separation](provider-scope-separation.md) — ACTIVE_SPORTS is the Underdog universe, not a generic OddsAPI sport list; keep provider namespaces separate.
+- [Provider scope separation](provider-scope-separation.md) — ACTIVE_SPORTS is the Underdog universe; PropLine is internal Underdog evidence, not a user-facing provider.
 - [OddsAPI error pacing](oddsapi-error-pacing.md) — permanent 422 INVALID_MARKET responses must not back off valid shared polling.
 - [OddsAPI strict pacing](oddsapi-strict-pacing.md) — all real cache misses share a persisted local-day cap and minimum request interval.
 - [FPR scheduler starvation](fpr-scheduler-starvation.md) — when Underdog scans exceed the FPR interval, serialized deferrals can prevent live FPR execution without a post-scan handoff.

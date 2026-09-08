@@ -31,7 +31,7 @@ from config import config
 from database import Database, OddsRecord, get_sqlite_backpressure_metrics
 from engine import AnalysisEngine
 from engine.season_check import SeasonChecker
-from engine.analysis import _SPORT_TO_ODDS_API_KEY, PlayerPropLine
+from engine.analysis import _SPORT_TO_ODDS_API_KEY
 from alert_scope_filter import is_ev_line_in_scope
 from logging_utils import install_credential_redaction
 from models import (
@@ -40,7 +40,7 @@ from models import (
     OddsMovement,
     Sport,
 )
-from alerts import AlertDelivery, broadcast_alert, format_pp_alert
+from alerts import AlertDelivery, broadcast_alert
 from commands import (
     cmd_start,
     cmd_help,
@@ -61,11 +61,9 @@ from commands import (
     cmd_backtest,
     cmd_testalert,
     cmd_providers,
-    cmd_propdata,
     cmd_stats,
     cmd_config,
     cmd_calibration,
-    cmd_pp_import,
     cmd_health,
 
     cmd_tracking,
@@ -92,9 +90,7 @@ from market_engine import (
     reset_monitoring_runtime_state,
     shutdown_db_persistence_worker,
     underdog_job,
-    prizepicks_job,
     _full_pool_rescan_job,
-    _run_prizepicks_independent_cycle,
 )
 from player_history_job import player_history_collector_job
 from providers import init_health_monitor
@@ -162,12 +158,10 @@ TELEGRAM_COMMAND_HANDLERS = (
     ("system", cmd_system),
     ("health", cmd_health),
     ("providers", cmd_providers),
-    ("propdata", cmd_propdata),
     ("config", cmd_config),
     ("blocks", cmd_blocks),
     ("block", cmd_block),
     ("backfill", cmd_backfill),
-    ("pp_import", cmd_pp_import),
     ("testalert", cmd_testalert),
     ("help", cmd_help),
     ("learning", cmd_learning),
@@ -206,12 +200,10 @@ TELEGRAM_COMMAND_CATALOG = [
     {"command": "system", "description": "Concise runtime system status", "category": "System", "sort_order": 320},
     {"command": "health", "description": "Background job health", "category": "System", "sort_order": 330},
     {"command": "providers", "description": "Player prop provider status", "category": "System", "sort_order": 340},
-    {"command": "propdata", "description": "Resolved props, player stats, and line movement", "category": "Player Props", "usage": "event|player ARGS", "sort_order": 95},
     {"command": "config", "description": "Active configuration and alert scope", "category": "System", "sort_order": 350},
     {"command": "blocks", "description": "Active reliability blocks", "category": "System", "sort_order": 360},
     {"command": "block", "description": "Add or remove a reliability block", "category": "System", "usage": "ARGS", "sort_order": 370},
     {"command": "backfill", "description": "Grade eligible pending props", "category": "System", "sort_order": 380},
-    {"command": "pp_import", "description": "Manual PrizePicks line import", "category": "System", "sort_order": 390},
     {"command": "testalert", "description": "Send a mock alert to verify delivery", "category": "System", "sort_order": 400},
     {"command": "help", "description": "Show the database command catalog", "category": "System", "sort_order": 410},
 ]
@@ -228,7 +220,7 @@ def _telegram_bot_commands(rows) -> list[BotCommand]:
             command = getattr(row, "command", None)
             description = getattr(row, "description", None)
         command = str(command or "").strip().lstrip("/")
-        if not command:
+        if not command or command.lower() in {"propdata", "pp_import"}:
             continue
         commands.append(
             BotCommand(
@@ -723,19 +715,19 @@ async def post_init(application: Application) -> None:
 
     # ── Provider health monitor + shared Odds API cache ──────────────────────
     _health_monitor = init_health_monitor()
-    # PrizePicks runs through the authorized PropLine companion cycle launched
-    # by underdog_job.  Register it here so command reports show real fetch
-    # health instead of treating the provider role as a health signal.
+    # PropLine is an internal evidence/feed companion for Underdog. It is not
+    # exposed as an independent Telegram provider.
     from providers.propline import PropLinePrizePicksProvider
-    _propline_enabled = PropLinePrizePicksProvider().is_available()
-    _health_monitor.register("PrizePicks", disabled=not _propline_enabled)
+    _propline_enabled = PropLinePrizePicksProvider(
+        bookmaker=config.PROPLINE_UNDERDOG_BOOKMAKER
+    ).is_available()
     # OddsAPI is registered so quota headers (x-requests-remaining/used) recorded
     # by OddsApiCache._fetch() appear in /status and health logs.
     _health_monitor.register("OddsAPI")
     _health_monitor.register("Underdog", disabled=not config.UNDERDOG_ENABLED)
     logger.info(
         "Provider health monitor initialised "
-        "(OddsAPI + Underdog + PrizePicks/PropLine=%s)",
+        "(OddsAPI + Underdog + internal PropLine feed=%s)",
         "enabled" if _propline_enabled else "disabled",
     )
     if config.discord_configured:
@@ -824,28 +816,6 @@ async def post_init(application: Application) -> None:
             name="odds_poller",
         )
         # jq.run_repeating(_steam_check_job,    interval=config.STEAM_CHECK_INTERVAL,      first=15,  name="steam_checker")
-        # Store DK/FD player-prop markets separately from the h2h/totals EV
-        # poller. Only the enabled sportsbook books are retained.
-        jq.run_repeating(
-            _coordinated_job("player_props_fetcher", _player_props_job),
-            interval=config.PLAYER_PROP_POLL_INTERVAL,
-            # Keep the first sportsbook pass away from the heavy Underdog
-            # cycle. Both jobs share SQLite and the previous 15-second offset
-            # allowed a short event-loop stall to become an APScheduler miss.
-            first=90,
-            name="player_props_fetcher",
-        )
-        # PrizePicks/PropLine owns an independent scheduler cycle. It does not
-        # run as a child or companion of the Underdog monitor.
-        # jq.run_repeating(connector_poll_job,  interval=config.CONNECTOR_POLL_INTERVAL,   first=20,  name="connector_poller")
-        # jq.run_repeating(consensus_check_job, interval=config.CONSENSUS_CHECK_INTERVAL,  first=25,  name="consensus_checker")
-        # jq.run_repeating(clv_check_job,       interval=config.CLV_CHECK_INTERVAL,        first=35,  name="clv_checker")
-        jq.run_repeating(
-            _coordinated_job("prizepicks_monitor", prizepicks_job),
-            interval=config.PRIZEPICKS_POLL_INTERVAL,
-            first=60,
-            name="prizepicks_monitor",
-        )
         jq.run_repeating(
             _coordinated_job(
                 "underdog_monitor",
@@ -926,16 +896,15 @@ async def post_init(application: Application) -> None:
                 name="season_checker",
             )
         logger.info(
-            "Jobs scheduled — independent cycles: underdog every %ds; "
-            "PropLine every %ds; full-pool every %ds; "
+            "Jobs scheduled — Underdog every %ds with internal PropLine feed; "
+            "full-pool every %ds; "
             "independent grader: every %ds, "
             "history collector: every %ds, "
             "season_check: every %ds, "
             "heartbeat: every 60s "
              "[Unified Player Props cycle enabled=%s; "
-             "PropLine default rate=180/hour; DK/FD delivery disabled]",
+             "sportsbook integrations disabled]",
             config.UNDERDOG_POLL_INTERVAL,
-            config.PRIZEPICKS_POLL_INTERVAL,
             config.FPR_INTERVAL,
             config.OPPORTUNITY_GRADER_INTERVAL,
             config.PLAYER_HISTORY_POLL_INTERVAL,
@@ -2332,98 +2301,6 @@ async def _season_check_job(context) -> None:
 
 
 # ── Pregame market watch job (continuous, all-day) ────────────────────────────
-
-# ── Player-prop odds fetching job ─────────────────────────────────────────────
-
-async def _player_props_job(context) -> None:
-    """
-    Fetch player-prop odds for every configured sport and store them as
-    OddsRecord rows so the PrizePicks crossmatch pipeline can find sportsbook
-    equivalents when _prizepicks_job runs.
-
-    Runs every PLAYER_PROP_POLL_INTERVAL seconds (default 10 min).  Only
-    fetches sports that are active according to the season checker, so credits
-    are not wasted on off-season leagues.
-    """
-    if _db is None or _engine is None:
-        logger.debug("_player_props_job: DB or engine not ready, skipping")
-        return
-    if not config.SPORTSBOOK_CONFIRMATION_ENABLED:
-        logger.info(
-            "_player_props_job: sportsbook confirmation disabled; "
-            "skipping DraftKings/FanDuel player props"
-        )
-        return
-
-    now = datetime.utcnow()
-    total_saved = 0
-    allowed_books = set()
-    if config.DRAFTKINGS_ENABLED:
-        allowed_books.add("draftkings")
-    if config.FANDUEL_ENABLED:
-        allowed_books.add("fanduel")
-    if not allowed_books:
-        logger.debug("_player_props_job: no sportsbook player-prop books enabled")
-        return
-    allowed_book_names = {book.replace(" ", "") for book in allowed_books}
-
-    for sport_str in config.player_prop_sports:
-        try:
-            sport = Sport(sport_str)
-        except ValueError:
-            logger.warning("_player_props_job: unknown sport %r in PLAYER_PROP_SPORTS", sport_str)
-            continue
-
-        # Skip out-of-season sports to protect API credits
-        if _season_checker is not None:
-            odds_key = _SPORT_TO_ODDS_API_KEY.get(sport)
-            if odds_key and not _season_checker.is_sport_active(odds_key):
-                logger.info(
-                    "_player_props_job: skipping %s (%s) — out of season",
-                    sport_str, odds_key,
-                )
-                continue
-
-        lines: list[PlayerPropLine] = await _engine.fetch_player_prop_odds(sport)
-        if not lines:
-            logger.debug("_player_props_job: no player prop lines for %s", sport_str)
-            continue
-
-        for pl in lines:
-            if pl.sportsbook.lower().replace(" ", "") not in allowed_book_names:
-                continue
-            # selection = "Player Name Over" / "Player Name Under"
-            selection = f"{pl.player_name} {pl.description}".strip()
-            record = OddsRecord(
-                sportsbook=pl.sportsbook,
-                sport=pl.sport.value,
-                market_type=pl.market_key,   # e.g. "player_points" — matches PP_STAT_TO_ODDS_API
-                event=pl.event,
-                selection=selection,
-                american_odds=pl.american_odds,
-                line=pl.line,
-                event_start=pl.event_start,
-                recorded_at=now,
-            )
-            await _db.save_odds(record)
-            total_saved += 1
-
-    if total_saved:
-        logger.info("_player_props_job: saved %d player prop records", total_saved)
-    else:
-        logger.debug("_player_props_job: no player prop records saved this cycle")
-
-
-# ── PrizePicks monitoring job ─────────────────────────────────────────────────
-
-async def _prizepicks_job(context) -> None:
-    """Compatibility entry point for the independent PrizePicks cycle."""
-    logger.warning(
-        "_prizepicks_job is a compatibility shim; delegating to the "
-        "independent PropLine cycle"
-    )
-    await prizepicks_job(context)
-
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 

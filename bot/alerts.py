@@ -590,6 +590,8 @@ def format_help_message(commands=None) -> str:
             )
             if not command:
                 continue
+            if command.lower() in {"propdata", "pp_import"}:
+                continue
             if category != current_category:
                 if current_category is not None:
                     lines.append("")
@@ -603,7 +605,7 @@ def format_help_message(commands=None) -> str:
             )
         lines.extend([
             "",
-            "<b>Player Props</b> · Underdog + PrizePicks / PropLine",
+            "<b>Player Props</b> · Underdog",
         ])
         return "\n".join(lines)
 
@@ -615,8 +617,7 @@ def format_help_message(commands=None) -> str:
         "steam", "ev", "clv", "performance", "backtest", "stats",
         "calibration", "tracking", "analyst", "rollups", "learning",
         "refinement", "start", "status", "system", "health", "providers",
-        "propdata", "config", "blocks", "block", "backfill", "pp_import",
-        "testalert", "help",
+        "config", "blocks", "block", "backfill", "testalert", "help",
     ]
     return format_help_message([
         {
@@ -632,7 +633,7 @@ def format_start_message() -> str:
     return "\n".join([
         f"{EMOJI['sharp']} <b>Sharp Money Bot</b>",
         "",
-        "<b>Player Props</b> · Underdog + PrizePicks / PropLine",
+        "<b>Player Props</b> · Underdog",
         "Clear OVER and UNDER picks with supporting data.",
         "",
         "Use /help to see all commands.",

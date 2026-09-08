@@ -756,7 +756,13 @@ def init_odds_confirmation(engine: object, db: Optional[Database] = None) -> Non
     _confirmation_db = db
     try:
         from providers.propline import PropLinePrizePicksProvider
-        _propline_provider = PropLinePrizePicksProvider()
+        _propline_provider = PropLinePrizePicksProvider(
+            bookmaker=str(
+                getattr(config, "PROPLINE_UNDERDOG_BOOKMAKER", "underdog")
+                or "underdog"
+            ).strip()
+            or "underdog"
+        )
     except Exception:
         # Provider setup is optional; the existing OddsAPI confirmation path
         # must remain available even if PropLine dependencies/configuration
@@ -1158,13 +1164,21 @@ async def propline_request_scan_job(context) -> None:
                 try:
                     result = await fetch_result(
                         sport,
-                        bookmaker="prizepicks",
+                        bookmaker=getattr(
+                            config,
+                            "PROPLINE_UNDERDOG_BOOKMAKER",
+                            "underdog",
+                        ),
                         event_scoped=True,
                     )
                 except TypeError:
                     result = await fetch_result(
                         sport,
-                        bookmaker="prizepicks",
+                        bookmaker=getattr(
+                            config,
+                            "PROPLINE_UNDERDOG_BOOKMAKER",
+                            "underdog",
+                        ),
                     )
                 props = list(getattr(result, "props", []) or [])
                 succeeded = bool(getattr(result, "succeeded", False))
@@ -3454,6 +3468,48 @@ def _has_strong_delivery_evidence(
     This is deliberately a delivery-only check.  It does not change scoring,
     persistence, grading, or whether a prop is evaluated.
     """
+    def _strong_directional_history(obj: object) -> bool:
+        recommendation = str(
+            getattr(obj, "recommendation", "")
+            or (obj.get("rec") if isinstance(obj, dict) else "")
+            or ""
+        ).upper()
+        if recommendation not in {"OVER", "UNDER"}:
+            return False
+        prefixes = (
+            ("l5", "l10", "l15", "l30", "season")
+            if recommendation == "OVER"
+            else ("l5", "l10", "l20", "l30", "season")
+        )
+        threshold = 0.70 if recommendation == "OVER" else 0.60
+        for prefix in prefixes:
+            if isinstance(obj, dict):
+                window = obj.get(prefix) or {}
+                games = window.get("g")
+                count = window.get("o" if recommendation == "OVER" else "u")
+                if (
+                    recommendation == "UNDER"
+                    and count is None
+                    and isinstance(games, (int, float))
+                    and isinstance(window.get("o"), (int, float))
+                ):
+                    count = games - window["o"]
+            else:
+                games = getattr(obj, f"{prefix}_games", None)
+                count = getattr(
+                    obj,
+                    f"{prefix}_{'over' if recommendation == 'OVER' else 'under'}",
+                    None,
+                )
+            if (
+                isinstance(games, (int, float))
+                and games >= 5
+                and isinstance(count, (int, float))
+                and count / games >= threshold
+            ):
+                return True
+        return False
+
     if bool(getattr(validation, "has_supporting_data", False)):
         source = getattr(validation, "data_source", None)
         # A supporting-data flag without provenance is not enough for a
@@ -3476,21 +3532,31 @@ def _has_strong_delivery_evidence(
         # ``compute_hit_rates`` labels stored provider game results "primary".
         # They are completed-game evidence just like the older "real" label;
         # rejecting that label blocked non-MLB sports before direction.
-        if source_lower in {"real", "primary"} and n_real >= 5:
+        enough_games = (
+            (source_lower in {"real", "primary"} and n_real >= 5)
+            or (source_lower == "propline" and n_supplemental >= 5)
+            or (
+                source_lower in {"real+propline", "primary+propline"}
+                and n_real + n_supplemental >= 5
+            )
+        )
+        if enough_games and _strong_directional_history(decision):
             return True
-        if source_lower == "propline" and n_supplemental >= 5:
-            return True
-        if source_lower in {"real+propline", "primary+propline"}:
-            return n_real + n_supplemental >= 5
     for obj in (decision, intelligence_trace):
         if isinstance(obj, dict):
-            if serialized_evidence_supports_delivery(obj):
+            if (
+                _strong_directional_history(obj)
+                and serialized_evidence_supports_delivery(obj)
+            ):
                 return True
             continue
         if obj is not None:
             for attr in ("evidence", "bet_evidence", "intelligence_trace"):
                 value = getattr(obj, attr, None)
-                if serialized_evidence_supports_delivery(value):
+                if (
+                    _strong_directional_history(obj)
+                    and serialized_evidence_supports_delivery(value)
+                ):
                     return True
     return False
 
@@ -3793,7 +3859,7 @@ async def clv_check_job(context) -> None:
 # ── Shared Underdog + PropLine monitoring cycle ────────────────────────────────
 
 def _shared_monitoring_cycle(cycle_branch):
-    """Run one evaluation cycle over the combined Underdog/PropLine universe."""
+    """Run one Underdog evaluation cycle with PropLine evidence preloaded."""
 
     @wraps(cycle_branch)
     async def _run_shared_cycle(context, *args, **kwargs):
@@ -3857,95 +3923,19 @@ def _shared_monitoring_cycle(cycle_branch):
                     exc,
                 )
 
-        # Consume observations collected by the prior shared cycle. Newly
-        # ingested rows are now available to this evaluation snapshot.
-        pending_props = list(_propline_pending_props.values())
+        # PropLine observations are already persisted and indexed as
+        # supplemental evidence. They must not enter a separate opportunity or
+        # Telegram-delivery lane.
         _propline_pending_props.clear()
-
-        # The evaluation branch remains attached to the shared monitoring cycle.
-        # The request worker only ingests paced observations; this is the single
-        # production handoff where both providers enter evaluation/delivery.
-        # Older isolated integrations may still expose the one-argument
-        # companion callback.  Keep the paced arguments for production while
-        # preserving that compatibility contract without creating a coroutine
-        # that will fail later inside the task.
         try:
-            _pp_params = inspect.signature(
-                _run_prizepicks_independent_cycle
-            ).parameters
-        except (TypeError, ValueError):
-            _pp_params = {}
-        _pp_kwargs = {}
-        if (
-            "_fetched_props" in _pp_params
-            or any(
-                parameter.kind is inspect.Parameter.VAR_KEYWORD
-                for parameter in _pp_params.values()
-            )
-        ):
-            _pp_kwargs = {
-                # Production uses the request worker as the sole PropLine fetcher.
-                # An empty paced batch is intentional: passing None would trigger
-                # a second provider fetch inside the shared evaluator.
-                "_fetched_props": pending_props,
-                "_fetched_sport": "paced",
-            }
-        if "_fetched_persisted" in _pp_params or any(
-            parameter.kind is inspect.Parameter.VAR_KEYWORD
-            for parameter in _pp_params.values()
-        ):
-            _pp_kwargs["_fetched_persisted"] = True
-        if (
-            "background_processing" in _pp_params
-            or any(
-                parameter.kind is inspect.Parameter.VAR_KEYWORD
-                for parameter in _pp_params.values()
-            )
-        ):
-            # Do not fork a second evaluation lane. The shared cycle owns the
-            # provider branch and completes only after both feeds finish.
-            _pp_kwargs["background_processing"] = False
-        _propline_task = asyncio.create_task(
-            _run_prizepicks_independent_cycle(context, **_pp_kwargs),
-            name="shared_monitoring_propline",
-        )
-        _prizepicks_cycle_task = _propline_task
-        def _finish_propline_task(task: asyncio.Task) -> None:
-            global _prizepicks_cycle_task
-            if task.cancelled():
-                return
-            try:
-                error = task.exception()
-            except asyncio.CancelledError:
-                return
-            if error is not None:
-                logger.error("shared_monitoring_cycle: PropLine branch failed: %s", error)
-            if _prizepicks_cycle_task is task:
-                _prizepicks_cycle_task = None
-
-        _prizepicks_cycle_task.add_done_callback(_finish_propline_task)
-        try:
-            result, _ = await asyncio.gather(
-                _underdog_task,
-                _propline_task,
-            )
+            result = await _underdog_task
         except asyncio.CancelledError:
             _underdog_task.cancel()
-            _propline_task.cancel()
-            await asyncio.gather(
-                _underdog_task,
-                _propline_task,
-                return_exceptions=True,
-            )
+            await asyncio.gather(_underdog_task, return_exceptions=True)
             raise
         except BaseException:
             _underdog_task.cancel()
-            _propline_task.cancel()
-            await asyncio.gather(
-                _underdog_task,
-                _propline_task,
-                return_exceptions=True,
-            )
+            await asyncio.gather(_underdog_task, return_exceptions=True)
             raise
         else:
             # Do not make a slow/independent PropLine companion extend or

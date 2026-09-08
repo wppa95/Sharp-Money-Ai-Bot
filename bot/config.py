@@ -117,15 +117,17 @@ class Config:
             if uid.strip().isdigit()
         }
 
-    # ── PrizePicks monitoring ─────────────────────────────────────────────────
-    # Optional compatibility fallback for custom PrizePicks endpoints that do
-    # not expose the authoritative provider sports catalog.  The official
-    # provider catalog controls scope when available; an empty value must not
-    # silently narrow PrizePicks to a guessed NBA/MLB subset.
+    # ── PropLine evidence feed ────────────────────────────────────────────────
+    # PropLine is an internal read-only evidence/feed source for the Underdog
+    # player-prop pipeline. It is not an independent Telegram provider.
+    # The official provider catalog controls scope when available; an empty
+    # value must not silently narrow the feed to a guessed subset.
     PRIZEPICKS_LEAGUES_RAW: str = os.environ.get("PRIZEPICKS_LEAGUES", "")
-    # PrizePicks has its own scheduler cycle. Provider request pacing remains
-    # controlled by PropLine within that independent cycle.
+    # Retained as a compatibility name for existing environment configuration.
     PRIZEPICKS_POLL_INTERVAL: int = int(os.environ.get("PRIZEPICKS_POLL_INTERVAL", "60"))
+    PROPLINE_UNDERDOG_BOOKMAKER: str = os.environ.get(
+        "PROPLINE_UNDERDOG_BOOKMAKER", "underdog"
+    )
     # Minimum edge % vs sportsbook fair probability to trigger a PP alert.
     MIN_PP_EDGE: float = float(os.environ.get("MIN_PP_EDGE", "5.0"))
     # Minimum fair probability at the PP line to alert (filters razor-thin lines).
@@ -193,15 +195,14 @@ class Config:
         "false", "0", "no", "off"
     )
 
-    # ── Multi-platform connector settings ────────────────────────────────────
-    # Enable/disable individual connectors via env vars.  DK/FD flags are
-    # retained for future support; sportsbook confirmation is separately
-    # disabled by SPORTSBOOK_CONFIRMATION_ENABLED below.
-    DRAFTKINGS_ENABLED: bool = os.environ.get("DRAFTKINGS_ENABLED", "false").lower() == "true"
-    FANDUEL_ENABLED:    bool = os.environ.get("FANDUEL_ENABLED",    "false").lower() == "true"
+    # ── Player-prop source settings ────────────────────────────────────────────
+    # PrizePicks/DraftKings/FanDuel are intentionally not active integrations.
+    # PropLine is consumed only as an internal Underdog evidence source.
+    DRAFTKINGS_ENABLED: bool = False
+    FANDUEL_ENABLED:    bool = False
     UNDERDOG_ENABLED:   bool = os.environ.get("UNDERDOG_ENABLED",   "true").lower() == "true"
-    # Temporary safety switch: DK/FD remain configured for future support, but
-    # must not participate in confirmation until this is deliberately enabled.
+    # Kept as a compatibility attribute for callers/tests; sportsbook
+    # confirmation is permanently disabled in this product.
     SPORTSBOOK_CONFIRMATION_ENABLED: bool = False
 
     # Polling intervals for multi-platform connectors (seconds)
@@ -394,11 +395,11 @@ class Config:
     UD_STRICT_SPORT_MIN_BET_QUALITY: int = int(
         os.environ.get("UD_STRICT_SPORT_MIN_BET_QUALITY", "95")
     )
-    # Maximum number of expensive new-prop evaluations in one live feed
-    # cycle. All observations are still persisted and counted; the remaining
-    # active props are covered by the bounded FPR rotation.
+    # Maximum number of expensive new-prop evaluations in one live feed cycle.
+    # All observations are still persisted and counted; the remaining active
+    # props are covered by the bounded FPR rotation.
     UNDERDOG_EVALUATION_BUDGET: int = int(
-        os.environ.get("UNDERDOG_EVALUATION_BUDGET", "100")
+        os.environ.get("UNDERDOG_EVALUATION_BUDGET", "10000")
     )
     UNDERDOG_FETCH_TIMEOUT_SECONDS: float = float(
         os.environ.get("UNDERDOG_FETCH_TIMEOUT_SECONDS", "30")

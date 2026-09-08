@@ -4541,17 +4541,25 @@ def _retry_after_seconds(response: Any) -> float:
 
 
 class PropLinePrizePicksProvider(PropProviderBase):
-    """PropProviderBase adapter for PropLine's PrizePicks-only feed."""
+    """PropLine adapter used internally as the Underdog evidence feed.
+
+    The legacy class name is retained for storage/API compatibility. PropLine
+    is not exposed as an independent Telegram provider or delivery stream.
+    """
 
     def __init__(
             self,
             *,
             sport_filter: Optional[list[str]] = None,
             client: Optional[PropLineClient] = None,
-            bookmaker: str = "prizepicks",
+            bookmaker: Optional[str] = None,
         ) -> None:
             self._sport_filter = {s.upper() for s in sport_filter} if sport_filter else None
-            self.bookmaker = bookmaker.strip().lower()
+            self.bookmaker = (
+                (bookmaker or os.getenv("PROPLINE_UNDERDOG_BOOKMAKER", "prizepicks"))
+                .strip()
+                .lower()
+            )
             self.client = client or PropLineClient()
 
     @property

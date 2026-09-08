@@ -80,6 +80,7 @@ class PlayerHitRates:
 
     has_real_data: bool
     total_games:   int
+    l15:    Optional[WindowStats] = None  # most recent 15 games
 
     # Evidence provenance.  Supplemental rows remain eligible for the existing
     # decision engine, but callers can distinguish them from primary-provider
@@ -103,7 +104,7 @@ def compute_hit_rates(
     h2h_min_games: int = H2H_MIN_GAMES,
 ) -> PlayerHitRates:
     """
-    Compute L5 / L10 / L20 / L30 / season / H2H statistics from DB records.
+    Compute L5 / L10 / L15 / L20 / L30 / season / H2H statistics from DB records.
 
     Parameters
     ----------
@@ -130,6 +131,7 @@ def compute_hit_rates(
             current_line = current_line,
             l5           = None,
             l10          = None,
+            l15          = None,
             l20          = None,
             l30          = None,
             season       = None,
@@ -168,6 +170,7 @@ def compute_hit_rates(
 
     l5_stats  = _window_stats(sorted_results[:5], 5)
     l10_stats = _window_stats(sorted_results[:10], 10)
+    l15_stats = _window_stats(sorted_results[:15], 15)
     l20_stats = _window_stats(sorted_results[:20], 20)
     l30_stats = _window_stats(sorted_results[:30], 30)
     season_stats = _window_stats(sorted_results, 1)
@@ -199,6 +202,7 @@ def compute_hit_rates(
         current_line  = current_line,
         l5            = l5_stats,
         l10           = l10_stats,
+        l15           = l15_stats,
         l20           = l20_stats,
         l30           = l30_stats,
         season        = season_stats,
