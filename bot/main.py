@@ -317,12 +317,12 @@ def build_application() -> Application:
 
 
 class _ScheduledExecutionCoordinator:
-    """Run named jobs independently without overlapping an existing execution.
+    """Run named jobs serially without dropping scheduler triggers.
 
-    JobQueue timers can fire again while an async callback is still running.
-    Every trigger is retained and waits for its named execution slot instead of
-    coalescing, cancelling, or skipping another run. Jobs explicitly marked
-    ``allow_overlap`` remain independent worker tasks.
+    JobQueue timers may fire again while an async callback is still running.
+    Every trigger gets its own task and waits on the named job lock. This is
+    deliberately queueing rather than coalescing: one completed callback
+    represents one completed scheduled execution.
     """
 
     def __init__(self) -> None:
@@ -330,6 +330,7 @@ class _ScheduledExecutionCoordinator:
         self._active_counts: dict[str, int] = {}
         self._tasks: set[asyncio.Task] = set()
         self._exclusive_locks: dict[str, asyncio.Lock] = {}
+        self._job_locks: dict[str, asyncio.Lock] = {}
         self._exclusive_waits = 0
         self._exclusive_wait_seconds = 0.0
 
@@ -370,27 +371,36 @@ class _ScheduledExecutionCoordinator:
     ):
         """Execute a slot reserved atomically by ``launch``."""
         try:
-            if exclusive_group:
-                lock = self._exclusive_locks.setdefault(
-                    exclusive_group,
-                    asyncio.Lock(),
-                )
-                wait_started = time.monotonic()
-                was_locked = lock.locked()
-                async with lock:
-                    if was_locked:
-                        self._exclusive_waits += 1
-                        self._exclusive_wait_seconds += (
-                            time.monotonic() - wait_started
-                        )
-                    return await self._execute(
-                        name,
-                        callback,
-                        context,
-                        *args,
-                        **kwargs,
+            job_lock = self._job_locks.setdefault(name, asyncio.Lock())
+            job_wait_started = time.monotonic()
+            job_was_locked = job_lock.locked()
+            async with job_lock:
+                if job_was_locked:
+                    self._exclusive_waits += 1
+                    self._exclusive_wait_seconds += (
+                        time.monotonic() - job_wait_started
                     )
-            return await self._execute(name, callback, context, *args, **kwargs)
+                if exclusive_group:
+                    lock = self._exclusive_locks.setdefault(
+                        exclusive_group,
+                        asyncio.Lock(),
+                    )
+                    wait_started = time.monotonic()
+                    was_locked = lock.locked()
+                    async with lock:
+                        if was_locked:
+                            self._exclusive_waits += 1
+                            self._exclusive_wait_seconds += (
+                                time.monotonic() - wait_started
+                            )
+                        return await self._execute(
+                            name,
+                            callback,
+                            context,
+                            *args,
+                            **kwargs,
+                        )
+                return await self._execute(name, callback, context, *args, **kwargs)
         finally:
             remaining = self._active_counts.get(name, 1) - 1
             if remaining > 0:
@@ -402,14 +412,14 @@ class _ScheduledExecutionCoordinator:
     def wrap(self, name: str, callback):
         @wraps(callback)
         async def _coordinated(context, *args, **kwargs):
-            if name in self._running:
-                logger.info(
-                    "scheduled_execution: coalescing overlapping trigger (%s)",
-                    name,
-                )
-                return None
-            return await self._run_guarded(
-                name, callback, context, *args, **kwargs
+            self._active_counts[name] = self._active_counts.get(name, 0) + 1
+            self._running.add(name)
+            return await self._run_reserved(
+                name,
+                callback,
+                context,
+                *args,
+                **kwargs,
             )
 
         return _coordinated
@@ -422,23 +432,14 @@ class _ScheduledExecutionCoordinator:
         exclusive_group: str | None = None,
         allow_overlap: bool = False,
     ):
-        """Return a scheduler callback that tracks one real execution.
-
-        Every execution is an independently tracked task. A second trigger for
-        the same name is always coalesced; different names never share an
-        execution lock or wait on each other. ``allow_overlap`` remains only as
-        a compatibility argument and cannot disable same-job protection.
-        """
+        """Return a scheduler callback that tracks every real execution."""
         @wraps(callback)
         async def _launcher(context, *args, **kwargs):
-            if self._active_counts.get(name, 0) > 0:
-                logger.info(
-                    "scheduled_execution: coalescing overlapping trigger (%s)",
-                    name,
-                )
-                return None
             self._active_counts[name] = 1
             self._running.add(name)
+            # The named lock serializes later triggers. Keep each trigger as a
+            # task so APScheduler cannot discard it while an earlier scan is
+            # finishing its database barrier.
             task = asyncio.create_task(
                 self._run_reserved(
                     name,
@@ -484,6 +485,8 @@ class _ScheduledExecutionCoordinator:
         self._tasks.clear()
         self._running.clear()
         self._active_counts.clear()
+        self._job_locks.clear()
+        self._exclusive_locks.clear()
 
     def backpressure_metrics(self) -> dict[str, float]:
         """Return scheduler wait counters for runtime/load observations."""
@@ -507,6 +510,7 @@ _scheduled_execution_coordinator = _ScheduledExecutionCoordinator()
 # ownership group so they wait before starting instead of competing for the
 # process-wide writer gate while a full Underdog persistence drain is active.
 _SQLITE_WRITE_JOB_GROUP = "sqlite_write_jobs"
+_SCAN_JOB_KWARGS = {"coalesce": False, "max_instances": 1000}
 
 
 def _coordinated_job(
@@ -844,6 +848,7 @@ async def post_init(application: Application) -> None:
             interval=config.UNDERDOG_POLL_INTERVAL,
             first=45,
             name="underdog_monitor",
+            job_kwargs=_SCAN_JOB_KWARGS,
         )
         # The live monitor handles new props and line movement. The full-pool
         # rotation is the complementary data-consumption path: it re-scores
@@ -866,6 +871,7 @@ async def post_init(application: Application) -> None:
                 interval=config.UNDERDOG_POLL_INTERVAL,
                 first=config.UNDERDOG_POLL_INTERVAL,
                 name="full_pool_rescan",
+                job_kwargs=_SCAN_JOB_KWARGS,
             )
         # Grading owns an independent one-shot schedule. The next run is only
         # registered after the current pass finishes, so a slow provider cannot
@@ -897,6 +903,7 @@ async def post_init(application: Application) -> None:
             grader_callback,
             when=75,
             name="opportunity_grader",
+            job_kwargs=_SCAN_JOB_KWARGS,
         )
         # Underdog, PropLine, full-pool, grading, and player history each own
         # independent scheduler callbacks. None is a child of another cycle.

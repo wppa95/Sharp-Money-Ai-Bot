@@ -461,6 +461,15 @@ def _schedule_background_db_write(label: str, factory) -> bool:
 
 
 async def _persist_game_market_records(db, records: list) -> None:
+    bulk = getattr(db, "save_market_snapshots_bulk", None)
+    if callable(bulk):
+        written = await bulk(records)
+        if int(written or 0) != len(records):
+            raise RuntimeError(
+                f"incomplete game-market snapshot write ({written}/{len(records)})"
+            )
+        return
+    # Compatibility path for lightweight database doubles.
     for record in records:
         operation = db.save_market_snapshot(record)
         if inspect.isawaitable(operation):
@@ -544,51 +553,44 @@ async def _persist_underdog_postscan(
     lifecycle_removed: list[tuple[str, str, str]],
     now: datetime,
 ) -> None:
-    """Bridge and update lifecycle rows outside the live scan slot."""
-    try:
-        # The bridge is part of the current-book completion barrier; do not
-        # truncate a larger active feed into a future remainder.
-        bridged = await db.sync_underdog_snapshots_to_prop_history(
-            limit=100000,
-            since_hours=0.17,
-        )
-        if bridged:
-            logger.debug("underdog_job: bridged %d rows to PropLineHistory", bridged)
-    except Exception as exc:
-        logger.warning("underdog_job: PropLineHistory sync failed: %s", exc)
-    for player, sport, stat_type in lifecycle_alerted:
-        try:
-            await db.update_prop_lifecycle_state(
-                "Underdog",
-                player,
-                sport,
-                stat_type,
-                "ACTIVE_ALERTED",
-                first_alert_sent_at=now,
+    """Bridge and update lifecycle rows as one required post-scan phase."""
+    bridged = await db.sync_underdog_snapshots_to_prop_history(
+        limit=100000,
+        since_hours=0.17,
+    )
+    if bridged:
+        logger.debug("underdog_job: bridged %d rows to PropLineHistory", bridged)
+
+    updates = [
+        {
+            "provider": "Underdog",
+            "player_name": player,
+            "sport": sport,
+            "stat_type": stat_type,
+            "new_state": "ACTIVE_ALERTED",
+            "first_alert_sent_at": now,
+        }
+        for player, sport, stat_type in lifecycle_alerted
+    ]
+    updates.extend(
+        {
+            "provider": "Underdog",
+            "player_name": player,
+            "sport": sport,
+            "stat_type": stat_type,
+            "new_state": "REMOVED",
+        }
+        for player, sport, stat_type in lifecycle_removed
+    )
+    bulk = getattr(db, "update_prop_lifecycle_states_bulk", None)
+    if updates and callable(bulk):
+        applied = await bulk(updates)
+        if int(applied or 0) != len(updates):
+            raise RuntimeError(
+                f"incomplete lifecycle write ({applied}/{len(updates)})"
             )
-        except Exception as exc:
-            logger.debug(
-                "underdog_job: ACTIVE_ALERTED update failed %s/%s: %s",
-                player,
-                stat_type,
-                exc,
-            )
-    for player, sport, stat_type in lifecycle_removed:
-        try:
-            await db.update_prop_lifecycle_state(
-                "Underdog",
-                player,
-                sport,
-                stat_type,
-                "REMOVED",
-            )
-        except Exception as exc:
-            logger.debug(
-                "underdog_job: REMOVED update failed %s/%s: %s",
-                player,
-                stat_type,
-                exc,
-            )
+    elif updates:
+        raise RuntimeError("bulk lifecycle persistence is unavailable")
 
 
 def _enqueue_db_persistence(label: str, factory) -> bool:
@@ -724,17 +726,7 @@ async def _persist_db_write(
     cycle_timing=None,
     operation: str | None = None,
 ) -> None:
-    """Keep production writes off the monitoring coroutine.
-
-    The real ``Database`` is serialized by the persistence worker.  Lightweight
-    database doubles used by direct callers and tests retain the old awaited
-    behavior so their observable contract does not change.
-    """
-    if isinstance(db, Database):
-        if not _enqueue_db_persistence(label, factory):
-            logger.warning("database persistence was not queued: %s", label)
-        return
-
+    """Await a database write before the owning scan can complete."""
     result = factory()
     if inspect.isawaitable(result):
         if cycle_timing is not None and operation:
@@ -748,13 +740,12 @@ async def _persist_required_candidate_batch(
     candidates: list[dict],
     *,
     label: str,
-    attempts: int = 4,
+    attempts: int = 1,
 ) -> int:
     """Persist candidate telemetry before the monitoring cycle is complete.
 
-    Candidate rows are evaluation evidence, not disposable diagnostics.  Use a
-    strict transaction and retry transient SQLite contention rather than
-    enqueueing a batch and clearing the only in-memory copy.
+    Candidate rows are evaluation evidence, not disposable diagnostics. Use a
+    single strict transaction and surface any failure to the scan health state.
     """
     if not candidates:
         return 0
@@ -1039,20 +1030,17 @@ _priority_override_sent: set = set()
 
 # ── Underdog full-scan concurrency guard ──────────────────────────────────────
 # Set to True while underdog_job is executing a full scan (fetch + score + deliver).
-# A second instance (via max_instances=2) that finds this flag set will run only the
-# fast new-prop detection path and return immediately, keeping the 2-minute polling
-# cadence alive without duplicating the heavy scoring work.
+# Every scheduler trigger is retained by the coordinator. A trigger that finds
+# this flag set waits for the current full scan instead of starting a second one.
 _ud_full_scan_running: bool = False
 
-# FPR is scheduled independently, but it must not lose its only execution window
-# when a long Underdog scan occupies the shared full-scan slot.  A deferred trigger
-# records one retry request; the active Underdog job hands that request off after
-# releasing the slot.  These are process-local coordination flags, not a second
-# rotation or another scheduler.
-_fpr_deferred_pending: bool = False
-_fpr_deferred_context: object | None = None
-_fpr_handoff_task: asyncio.Task | None = None
+# FPR is scheduled independently and waits for the shared full-scan slot when
+# Underdog is active. Each trigger remains a separate scheduled execution.
 _fpr_execution_running: bool = False
+# Required scan batches that could not be committed.  They are retained for
+# explicit recovery/diagnostics; the live scheduler never silently retries
+# them or clears the only in-memory copy.
+_failed_required_persistence_batches: list[dict] = []
 
 
 async def wait_for_underdog_persistence_idle() -> None:
@@ -1082,8 +1070,8 @@ async def reset_monitoring_runtime_state() -> None:
     global _propline_pending_props, _propline_request_lock
     global _propline_ingest_task
     global _cold_start_done, _MARKET_FIRST_ALERT, _priority_override_sent
-    global _ud_full_scan_running, _fpr_deferred_pending, _fpr_deferred_context
-    global _fpr_handoff_task, _fpr_execution_running, _prop_market_alerted
+    global _ud_full_scan_running, _fpr_execution_running, _prop_market_alerted
+    global _failed_required_persistence_batches
     global _ud_scan_state, _ud_known_keys, _ud_scan_db_id, _prop_dedup_lock
     global _snapshot_cache, _analysis_engine, _confirmation_db, _propline_provider
     global _propline_current_observations, _propline_evidence_by_identity
@@ -1093,7 +1081,7 @@ async def reset_monitoring_runtime_state() -> None:
     tasks = {
         task
         for task in (
-            [_prizepicks_cycle_task, _fpr_handoff_task]
+            [_prizepicks_cycle_task]
             + list(_prizepicks_processing_tasks)
             + [_propline_ingest_task]
         )
@@ -1121,10 +1109,8 @@ async def reset_monitoring_runtime_state() -> None:
     _MARKET_FIRST_ALERT.clear()
     _priority_override_sent.clear()
     _ud_full_scan_running = False
-    _fpr_deferred_pending = False
-    _fpr_deferred_context = None
-    _fpr_handoff_task = None
     _fpr_execution_running = False
+    _failed_required_persistence_batches.clear()
     _prop_market_alerted.clear()
     _ud_scan_state.clear()
     _ud_known_keys.clear()
@@ -1289,7 +1275,7 @@ async def propline_request_scan_job(context) -> None:
             elif callable(fetch_props):
                 props = list(await fetch_props(sport) or [])
                 succeeded = True
-            else:
+            if not isinstance(db, Database):
                 props = []
                 succeeded = False
             props = [
@@ -1383,50 +1369,10 @@ async def prizepicks_job(context) -> None:
     )
 
 
-def _queue_deferred_fpr(context: object) -> None:
-    """Remember one FPR trigger to run after the current full scan."""
-    global _fpr_deferred_pending, _fpr_deferred_context
-    _fpr_deferred_pending = True
-    _fpr_deferred_context = context
-
-
-def _schedule_deferred_fpr() -> None:
-    """Start the one queued FPR pass once the shared scan slot is free."""
-    global _fpr_deferred_pending, _fpr_deferred_context, _fpr_handoff_task
-
-    if not _fpr_deferred_pending:
-        return
-    if _fpr_handoff_task is not None and not _fpr_handoff_task.done():
-        return
-
-    context = _fpr_deferred_context
-    _fpr_deferred_pending = False
-    _fpr_deferred_context = None
-
-    async def _run_deferred_fpr() -> None:
-        global _fpr_handoff_task
-        try:
-            logger.info("full_pool_rescan: running deferred batch after Underdog scan")
-            await _full_pool_rescan_job(context)
-        except Exception:
-            # The FPR job records its own failures.  This guard prevents an
-            # unexpected task-level exception from becoming an unhandled-task
-            # warning and hiding the next scheduled opportunity.
-            logger.exception("full_pool_rescan: deferred handoff failed")
-        finally:
-            _fpr_handoff_task = None
-
-    _fpr_handoff_task = asyncio.create_task(
-        _run_deferred_fpr(),
-        name="deferred_full_pool_rescan",
-    )
-
-
 def _release_underdog_scan_slot() -> None:
-    """Release the live slot and hand off any waiting FPR trigger."""
-    global _ud_full_scan_running
+    """Release the live slot; queued FPR triggers wait in their own task."""
+    global _ud_full_scan_running, _failed_required_persistence_batches
     _ud_full_scan_running = False
-    _schedule_deferred_fpr()
 
 
 def _bq_stars(bq: int) -> str:
@@ -4154,6 +4100,7 @@ async def underdog_job(context) -> None:
     now      = datetime.utcnow()
     global _cycle_sequence
     _cycle_sequence += 1
+    _persistence_ok = True
     _cycle_timing = _CycleTiming(
         _cycle_sequence,
         getattr(db, "_url", None),
@@ -4191,21 +4138,14 @@ async def underdog_job(context) -> None:
     if _health:
         _health.record_job_started("underdog_job")
 
-    # Claim the full-scan slot before cold-start state restoration. Restoring
-    # dedup/lifecycle state can itself be expensive on a large SQLite history;
-    # FPR and Stable Refresh must not start competing full-pool reads during
-    # that window. The scheduler deliberately does not use one global
-    # exclusive lock: this in-process guard prevents duplicate live-feed scans
-    # while allowing FPR to consume the persisted pool independently.
+    # Claim the full-scan slot before state restoration. A queued trigger waits
+    # for the prior scan to finish instead of taking a partial fast path.
     global _ud_full_scan_running
-    if _ud_full_scan_running:
-        logger.info(
-            "underdog_job: full scan in progress — deferring overlapping trigger"
+    while _ud_full_scan_running or _fpr_execution_running:
+        logger.debug(
+            "underdog_job: another scan is completing — waiting for scan slot"
         )
-        if _health:
-            _health.record_job_run("underdog_job")
-        _job_activity_end("underdog")
-        return
+        await asyncio.sleep(0.25)
     _ud_full_scan_running = True
 
     # ── Evict stale dedup entries ─────────────────────────────────────────────
@@ -4244,11 +4184,8 @@ async def underdog_job(context) -> None:
     _cycle_timing.finish("state_restore")
     _cycle_timing.start("fetch_parse")
 
-    # ── Concurrency guard — fast new-prop path when full scan is already running ──
-    # max_instances=2 allows a second underdog_job to start while the first is still
-    # scoring.  If the primary scan is active, the secondary instance only fetches +
-    # detects new props (fast, ~2–5 s) and returns immediately so the 2-min cadence
-    # is preserved without duplicating heavy scoring work.
+    # ── Concurrency guard — wait for the active full scan ─────────────────────
+    # Retained scheduler triggers wait here and never take a partial or fast path.
     # Memory baseline — log current RSS before the heavy scan to diagnose OOM kills.
     # Uses VmRSS (/proc/self/status) which reflects actual live RSS rather than the
     # all-time high-water mark returned by resource.ru_maxrss.
@@ -4393,17 +4330,16 @@ async def underdog_job(context) -> None:
             for _gm in ud_game_markets
         ]
         if isinstance(db, Database):
-            _enqueue_db_persistence(
-                "save Underdog game-market snapshots",
-                lambda: _persist_game_market_records(db, _game_market_records),
-            )
-        else:
-            for _game_market_record in _game_market_records:
-                await _cycle_timing.await_db(
-                    "write",
-                    "save_market_snapshot_underdog_game_market",
-                    db.save_market_snapshot(_game_market_record),
+            try:
+                await _persist_game_market_records(db, _game_market_records)
+            except Exception as _game_market_exc:
+                _persistence_ok = False
+                logger.error(
+                    "underdog_job: game-market bulk persistence failed: %s",
+                    type(_game_market_exc).__name__,
                 )
+        else:
+            await _persist_game_market_records(db, _game_market_records)
         ud_snaps = [s for s in ud_snaps if s not in ud_game_markets]
     _cycle_timing.count("active_pool_fetched", len(snapshots))
     _cycle_timing.count("active_pool_underdog", len(_underdog_provider_snaps))
@@ -4464,9 +4400,9 @@ async def underdog_job(context) -> None:
     # Batch for the end-of-cycle new-prop digest sent after the loop.
     # Each entry: {player, stat_type, sport, team, line, score, immediate, game_time}
     _new_props_batch: list[dict] = []
-    # Candidate telemetry is non-critical to the live scan. Real database
-    # writes are scheduled after the required post-scan bridge.
+    # Candidate telemetry is written in the required post-scan bulk phase.
     _deferred_candidate_batch: list[dict] = []
+    _opportunity_batch: list[dict] = []
     # Lifecycle state queues — populated during loop, applied AFTER bridge so
     # PropLineHistory rows exist before we try to update them.
     _lifecycle_alerted:  list[tuple[str, str, str]] = []   # (player, sport, stat_type) → ACTIVE_ALERTED
@@ -4482,7 +4418,6 @@ async def underdog_job(context) -> None:
     _snapshot_failed_batches = 0
     _snapshot_failed_records = 0
     _snapshot_retry_count = 0
-    _persistence_ok = True
     _new_prop_skip_reasons: dict[str, int] = {}
     # Scoring data for every scored prop — bulk-written to PropLineHistory at end of
     # scan cycle so /picks and /slip can apply tier-aware delivery gates.
@@ -5019,15 +4954,7 @@ async def underdog_job(context) -> None:
                                     market_quality=getattr(score, "market_quality", None),
                                 ),
                         )
-                        await _persist_db_write(
-                            db,
-                            "log Underdog opportunity [new-prop]",
-                            lambda kwargs=_new_opportunity_kwargs: db.log_prop_opportunity(
-                                **kwargs
-                            ),
-                            cycle_timing=_cycle_timing,
-                            operation="log_prop_opportunity",
-                        )
+                        _opportunity_batch.append(_new_opportunity_kwargs)
                     except Exception as _pol_exc:
                         logger.warning(
                             "underdog_job: log_prop_opportunity [new-prop] failed: %s", _pol_exc
@@ -5216,10 +5143,14 @@ async def underdog_job(context) -> None:
                     })
     
             else:
-                # ── Line-change / removal path (existing logic) ──────────────────
-                # Score line-change props that pass the raw magnitude pre-filter.
-                # Removal notices bypass scoring and always qualify.
-                if not is_removed and line_changed and prev_line is not None:
+                # ── Existing-prop evaluation path ───────────────────────────────
+                # Every active existing prop is scored on every fetched scan.
+                # Line movement still controls alert eligibility, but it no
+                # longer controls whether evidence, direction, and candidate
+                # telemetry are produced.
+                if not is_removed and (
+                    line_changed or prev_record is not None
+                ):
                     # Load limit=30 to cover L30 validation window as well as scoring
                     ud_history = await _candidate_line_history(
                         db,
@@ -5271,11 +5202,9 @@ async def underdog_job(context) -> None:
                         int(getattr(market_quality, "score", 0)),
                         float(score.total if score else 0),
                     )
-                    # NOTE: _processed_keys is NOT set here for every line-change.
-                    # It is only set when should_alert=True (actual alert eligible),
-                    # so that qualified props with sub-threshold line movement
-                    # (is_qualified=True, should_alert=False) remain available for
-                    # the standing path to evaluate as stable high-quality props.
+                    # Mark every existing prop handled by this scan so the
+                    # standing compatibility path cannot evaluate it twice.
+                    _processed_keys.add((player, stat_type))
                     validation = validate_player_prop(
                         player_name  = player,
                         stat_type    = stat_type,
@@ -5324,15 +5253,7 @@ async def underdog_job(context) -> None:
                                     reason_codes      = _compute_reason_codes(score, decision),
                                     watchlist_state   = None,
                                 )
-                                await _persist_db_write(
-                                    db,
-                                    "log Underdog opportunity [line-change]",
-                                    lambda kwargs=_lc_opportunity_kwargs: db.log_prop_opportunity(
-                                        **kwargs
-                                    ),
-                                    cycle_timing=_cycle_timing,
-                                    operation="log_prop_opportunity",
-                                )
+                                _opportunity_batch.append(_lc_opportunity_kwargs)
                             except Exception as _pol_exc:
                                 logger.warning(
                                     "underdog_job: log_prop_opportunity [lc] failed: %s", _pol_exc
@@ -5756,8 +5677,7 @@ async def underdog_job(context) -> None:
                 elif is_cold_start and score is not None:
                     _alert_outcome = "cold_start_scored"
                 else:
-                    _alert_outcome = "skipped"
-                    _n_unchanged_skipped += 1  # stable line — no re-score needed this cycle
+                    _alert_outcome = "evaluated"
             elif _dq_collected:
                 _alert_outcome = "queued"
             elif ud_result.sent:
@@ -6037,15 +5957,7 @@ async def underdog_job(context) -> None:
                             market_quality=getattr(_sscore, "market_quality", None),
                         ),
                     )
-                    await _persist_db_write(
-                        db,
-                        "log Underdog opportunity [standing]",
-                        lambda kwargs=_standing_opportunity_kwargs: db.log_prop_opportunity(
-                            **kwargs
-                        ),
-                        cycle_timing=_cycle_timing,
-                        operation="log_prop_opportunity",
-                    )
+                    _opportunity_batch.append(_standing_opportunity_kwargs)
                 except Exception as _pol_exc:
                     logger.warning(
                         "underdog_job: log_prop_opportunity [standing] failed: %s", _pol_exc
@@ -6459,33 +6371,22 @@ async def underdog_job(context) -> None:
         # for props that were just delivered.  The incremental records have their
         # alert_sent / alert_outcome fields updated in-place by the delivery phase.
         if _incremental_records and db:
-            # Pass a copy so that the .clear() below does not retroactively
-            # empty the list object that was handed to the mock in tests.
             _incr_snapshot = list(_incremental_records)
-            _incremental_records.clear()
+            _snapshot_batch_failed = False
             # Keep current live state in the shared lifecycle table. Unchanged
             # observations update last_seen in place; the append-only raw
             # snapshot ledger below retains the complete feed separately.
             if isinstance(db, Database):
-                _live_props_batch = list(_incr_snapshot)
-                if not _enqueue_db_persistence(
-                    "upsert Underdog live props",
-                    lambda batch=_live_props_batch: persist_canonical_player_props(
-                        db,
-                        "Underdog",
-                        batch,
-                        refresh_metadata=True,
-                    ),
-                ):
-                    await _cycle_timing.await_db(
-                        "write",
-                        "upsert_underdog_live_props",
-                        persist_canonical_player_props(
-                            db,
-                            "Underdog",
-                            _live_props_batch,
-                            refresh_metadata=True,
-                        ),
+                _live_written = await persist_canonical_player_props(
+                    db,
+                    "Underdog",
+                    _incr_snapshot,
+                    refresh_metadata=True,
+                )
+                if _live_written != len(_incr_snapshot):
+                    raise RuntimeError(
+                        "incomplete Underdog live-props persistence "
+                        f"({_live_written}/{len(_incr_snapshot)})"
                     )
             else:
                 await _cycle_timing.await_db(
@@ -6507,34 +6408,35 @@ async def underdog_job(context) -> None:
             if isinstance(db, Database):
                 try:
                     _snapshot_batch = list(_incr_snapshot)
-                    if _enqueue_db_persistence(
-                        "save Underdog snapshots",
-                        lambda batch=_snapshot_batch: db.save_underdog_snapshots_bulk(batch),
-                    ):
-                        # The queue is durable in-process; the worker records
-                        # the actual completion. Do not block the next feed on
-                        # this telemetry/history write.
-                        _snapshot_persisted += len(_snapshot_batch)
-                    else:
-                        _write_result = await _cycle_timing.await_db(
-                            "write",
-                            "save_underdog_snapshots_bulk",
-                            db.save_underdog_snapshots_bulk(_snapshot_batch),
-                        )
-                        _snapshot_persisted += (
-                            int(_write_result.get("records_written", len(_snapshot_batch)))
-                            if isinstance(_write_result, dict)
-                            else len(_snapshot_batch)
-                        )
-                        _snapshot_retry_count += (
-                            int(_write_result.get("retry_count", 0))
-                            if isinstance(_write_result, dict)
-                            else 0
+                    _write_result = await db.save_underdog_snapshots_bulk(
+                        _snapshot_batch
+                    )
+                    _written = int(
+                        _write_result.get("records_written", 0)
+                        if isinstance(_write_result, dict)
+                        else 0
+                    )
+                    _snapshot_persisted += _written
+                    _snapshot_retry_count += int(
+                        _write_result.get("retry_count", 0)
+                        if isinstance(_write_result, dict)
+                        else 0
+                    )
+                    if _written != len(_snapshot_batch):
+                        raise RuntimeError(
+                            f"incomplete Underdog snapshot persistence "
+                            f"({_written}/{len(_snapshot_batch)})"
                         )
                 except Exception as _bulk_exc:
+                    _snapshot_batch_failed = True
                     _snapshot_failed_batches += 1
                     _snapshot_failed_records += len(_incr_snapshot)
                     _persistence_ok = False
+                    _failed_required_persistence_batches.append({
+                        "kind": "underdog_snapshots",
+                        "created_at": now,
+                        "records": list(_incr_snapshot),
+                    })
                     logger.error(
                         "underdog_job: bulk snapshot save permanently failed "
                         "after database retries (%d records): %s",
@@ -6542,7 +6444,7 @@ async def underdog_job(context) -> None:
                         _bulk_exc,
                     )
                 del _incr_snapshot
-            elif not _cycle_budget_exhausted:
+            else:
                 try:
                     _write_result = await _cycle_timing.await_db(
                         "write",
@@ -6560,9 +6462,15 @@ async def underdog_job(context) -> None:
                         else 0
                     )
                 except Exception as _bulk_exc:
+                    _snapshot_batch_failed = True
                     _snapshot_failed_batches += 1
                     _snapshot_failed_records += len(_incr_snapshot)
                     _persistence_ok = False
+                    _failed_required_persistence_batches.append({
+                        "kind": "underdog_snapshots",
+                        "created_at": now,
+                        "records": list(_incr_snapshot),
+                    })
                     logger.error(
                         "underdog_job: bulk snapshot save permanently failed "
                         "after database retries (%d records): %s",
@@ -6570,34 +6478,8 @@ async def underdog_job(context) -> None:
                     )
                 finally:
                     del _incr_snapshot
-            else:
-                # The current book is not complete until this write finishes.
-                # Never defer it into a hidden remainder queue.
-                try:
-                    _write_result = await db.save_underdog_snapshots_bulk(
-                        _incr_snapshot
-                    )
-                    _snapshot_persisted += (
-                        int(_write_result.get("records_written", len(_incr_snapshot)))
-                        if isinstance(_write_result, dict)
-                        else len(_incr_snapshot)
-                    )
-                    _snapshot_retry_count += (
-                        int(_write_result.get("retry_count", 0))
-                        if isinstance(_write_result, dict)
-                        else 0
-                    )
-                except Exception as _bulk_exc:
-                    _snapshot_failed_batches += 1
-                    _snapshot_failed_records += len(_incr_snapshot)
-                    _persistence_ok = False
-                    logger.error(
-                        "underdog_cycle_bottleneck: required snapshot persistence "
-                        "failed (%d records): %s",
-                        len(_incr_snapshot),
-                        _bulk_exc,
-                    )
-                del _incr_snapshot
+            if not _snapshot_batch_failed:
+                _incremental_records.clear()
 
         # ── Cold-start bulk save + latch — runs once after the prop loop ──────────
         if is_cold_start:
@@ -6828,7 +6710,11 @@ async def underdog_job(context) -> None:
                         len(_candidate_batch),
                     )
             except Exception as _cand_exc:
-                logger.debug("underdog_job: PropCandidateLog write skipped: %s", _cand_exc)
+                _persistence_ok = False
+                logger.error(
+                    "underdog_job: candidate batch preparation failed: %s",
+                    _cand_exc,
+                )
             finally:
                 # Release the scored-prop accumulator regardless of success/failure.
                 # At 5000+ props this is the largest single allocation that stays alive
@@ -6840,21 +6726,29 @@ async def underdog_job(context) -> None:
                 # holds freed memory as its own pool, which looks like growth in RSS.
                 gc.collect()
 
+        # ── Directional opportunity bulk write ─────────────────────────────────
+        if _opportunity_batch and db:
+            try:
+                _opportunity_rows = list(_opportunity_batch)
+                _bulk_opportunities = getattr(db, "log_prop_opportunity_bulk", None)
+                if callable(_bulk_opportunities):
+                    await _bulk_opportunities(_opportunity_rows)
+                else:
+                    raise RuntimeError("bulk opportunity persistence is unavailable")
+                _opportunity_batch.clear()
+            except Exception as _opportunity_exc:
+                _persistence_ok = False
+                logger.error(
+                    "underdog_job: opportunity bulk write failed: %s",
+                    _opportunity_exc,
+                )
+
         # ── Bulk MQ score write — update PropLineHistory for /picks and /slip filtering ──
-        # Non-fatal: write failure must never abort the cycle.
         if _plh_mq_scores and db and not _cycle_budget_exhausted:
             try:
                 if isinstance(db, Database):
                     _mq_scores = dict(_plh_mq_scores)
-                    if not _enqueue_db_persistence(
-                            "update Underdog market-quality scores",
-                            lambda scores=_mq_scores: db.update_ud_props_mq_scores_bulk(scores),
-                    ):
-                        await _cycle_timing.await_db(
-                            "write",
-                            "update_ud_props_mq_scores_bulk",
-                            db.update_ud_props_mq_scores_bulk(_mq_scores),
-                        )
+                    await db.update_ud_props_mq_scores_bulk(_mq_scores)
                 else:
                     await _cycle_timing.await_db(
                         "write",
@@ -6862,13 +6756,13 @@ async def underdog_job(context) -> None:
                         db.update_ud_props_mq_scores_bulk(_plh_mq_scores),
                     )
             except Exception as _mq_bulk_exc:
-                logger.debug("underdog_job: mq_scores bulk write failed: %s", _mq_bulk_exc)
+                _persistence_ok = False
+                logger.error("underdog_job: mq_scores bulk write failed: %s", _mq_bulk_exc)
         
     # ── Scan cycle log — full pipeline evidence ──────────────────────────────────
-        # Non-fatal: a write failure must not abort the cycle or mask real exceptions.
         # Proves that all ~4,600 active props are monitored each poll (not just scored ones).
         try:
-            if db and not _cycle_budget_exhausted:
+            if db:
                 _scan_cycle_kwargs = dict(
                     scan_ts         = now,
                     fetched         = _n_ud_snaps_this_cycle,
@@ -6886,15 +6780,7 @@ async def underdog_job(context) -> None:
                     removed_by_sport    = dict(_sport_removed),
                 )
                 if isinstance(db, Database):
-                    if not _enqueue_db_persistence(
-                            "log Underdog scan cycle",
-                            lambda kwargs=_scan_cycle_kwargs: db.log_scan_cycle(**kwargs),
-                    ):
-                        await _cycle_timing.await_db(
-                            "write",
-                            "log_scan_cycle",
-                            db.log_scan_cycle(**_scan_cycle_kwargs),
-                        )
+                    await db.log_scan_cycle(**_scan_cycle_kwargs)
                 else:
                     await _cycle_timing.await_db(
                         "write",
@@ -6907,7 +6793,8 @@ async def underdog_job(context) -> None:
                     "before deadline; no remainder queue"
                 )
         except Exception as _scl_exc:
-            logger.debug("underdog_job: scan_cycle_log write skipped: %s", _scl_exc)
+            _persistence_ok = False
+            logger.error("underdog_job: scan_cycle_log write failed: %s", _scl_exc)
 
     except Exception as _job_exc:
             logger.exception("underdog_job: processing error: %s", _job_exc)
@@ -6921,35 +6808,38 @@ async def underdog_job(context) -> None:
             # The guard is claimed before this try block.  Always release it
             # on a processing failure so one malformed row cannot stall every
             # subsequent scheduled scan.
-            await drain_db_persistence_worker()
+            if _snapshot_records:
+                _failed_required_persistence_batches.append({
+                    "kind": "underdog_scan",
+                    "created_at": now,
+                    "records": list(_snapshot_records),
+                })
             _release_underdog_scan_slot()
             _job_activity_end("underdog")
             return
 
     # ── Bridge/lifecycle persistence ─────────────────────────────────────────
-    # Raw observations and normalized current-state writes are already queued
-    # as bulk operations. Queue the bridge behind them as one dependent bulk
-    # operation instead of holding the live scan slot while SQLite drains.
+    # The scan is not complete until raw observations, normalized history, and
+    # lifecycle transitions have committed.
     if isinstance(db, Database):
         _bridge_alerted = list(_lifecycle_alerted)
         _bridge_removed = list(_lifecycle_removed)
-        if not _enqueue_db_persistence(
-            "bridge Underdog snapshots and lifecycle",
-            lambda: _persist_underdog_postscan(
+        try:
+            await _persist_underdog_postscan(
                 db,
                 _bridge_alerted,
                 _bridge_removed,
                 now,
-            ),
-        ):
+            )
+        except Exception as _postscan_exc:
             _persistence_ok = False
             logger.error(
-                "underdog_cycle_bottleneck: could not queue "
-                "history/lifecycle persistence"
+                "underdog_job: required history/lifecycle persistence failed: %s",
+                _postscan_exc,
             )
         if _lifecycle_alerted or _lifecycle_removed:
             logger.debug(
-                "underdog_job: queued lifecycle persistence — ACTIVE_ALERTED=%d "
+                "underdog_job: lifecycle persistence — ACTIVE_ALERTED=%d "
                 "REMOVED=%d",
                 len(_lifecycle_alerted),
                 len(_lifecycle_removed),
@@ -7105,32 +6995,14 @@ async def underdog_job(context) -> None:
                 module = "market_engine",
                 error  = "bridge or lifecycle update failed",
             )
-    # The worker is single-filed through the process-wide SQLite writer gate.
-    # Do not let a backlog turn one cadence cycle into a multi-minute job:
-    # wait only for the remaining cadence budget, then leave queued bulk writes
-    # with the worker to finish asynchronously.
-    _drain_remaining = max(
-        0.1,
-        float(getattr(config, "UNDERDOG_POLL_INTERVAL", 90))
-        - _UNDERDOG_DRAIN_HEADROOM_SECONDS
-        - (time.monotonic() - _cycle_timing.started_mono),
-    )
-    try:
-        _drained = await asyncio.wait_for(
-            drain_db_persistence_worker(),
-            timeout=_drain_remaining,
-        )
-    except asyncio.TimeoutError:
-        _drained = False
-        logger.warning(
-            "underdog_cycle_bottleneck: bulk persistence continues after "
-            "cadence budget; queued writes remain durable"
-        )
+    # There should be no deferred writes left from this scan. Keep a final
+    # barrier for compatibility callers that still used the worker, but never
+    # return a completed scan while its database work is outstanding.
+    _drained = await drain_db_persistence_worker()
     if not _drained:
         _persistence_ok = False
         logger.error(
-            "underdog_cycle_bottleneck: persistence worker did not drain "
-            "before scan completion"
+            "underdog_job: persistence worker did not drain before scan completion"
         )
     _cycle_timing.finish("final_bookkeeping")
     logger.info(
@@ -7793,25 +7665,11 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         _health.record_job_started("full_pool_rescan_job")
 
     global _fpr_execution_running, _ud_full_scan_running
-    if _fpr_execution_running:
-        logger.info("full_pool_rescan: deferred trigger already running")
-        if _health:
-            _health.record_job_run("full_pool_rescan_job")
-        return
-    # Keep direct callers safe if they explicitly invoke the legacy FPR while
-    # a live feed scan owns the slot. The production scheduler no longer
-    # registers this database-backed job.
-    if _ud_full_scan_running:
-        # Preserve every scheduled trigger. The live scan owns the slot for
-        # now, and _release_underdog_scan_slot() hands this FPR run off as
-        # soon as the current-book persistence barrier completes.
-        _queue_deferred_fpr(context)
-        logger.info(
-            "full_pool_rescan: deferred until Underdog cycle completes"
+    while _fpr_execution_running or _ud_full_scan_running:
+        logger.debug(
+            "full_pool_rescan: another scan is completing — waiting for scan slot"
         )
-        if _health:
-            _health.record_job_run("full_pool_rescan_job")
-        return
+        await asyncio.sleep(0.25)
 
     _job_activity_start("fpr")
 

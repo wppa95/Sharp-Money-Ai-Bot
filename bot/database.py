@@ -3296,6 +3296,19 @@ class Database:
             await s.refresh(record)
         return record
 
+    async def save_market_snapshots_bulk(
+        self,
+        records: "list[MarketSnapshotRecord]",
+    ) -> int:
+        """Persist market observations in one transaction."""
+        if not records:
+            return 0
+        async with self.session() as s:
+            s.add_all(records)
+            await s.flush()
+            await s.commit()
+        return len(records)
+
     async def get_snapshots_since(
         self,
         sport: str,
@@ -4083,6 +4096,59 @@ class Database:
             )
             await s.commit()
         return True
+
+    async def update_prop_lifecycle_states_bulk(
+        self,
+        updates: "list[dict]",
+    ) -> int:
+        """Apply lifecycle transitions in one transaction."""
+        if not updates:
+            return 0
+        from sqlalchemy import update as sa_update
+
+        applied = 0
+        async with self.session() as s:
+            for item in updates:
+                provider = str(item.get("provider") or "")
+                player_name = str(item.get("player_name") or "")
+                sport = str(item.get("sport") or "")
+                stat_type = str(item.get("stat_type") or "")
+                new_state = str(item.get("new_state") or "")
+                if not provider or not player_name or not sport or not stat_type or not new_state:
+                    continue
+                filters = [
+                    PropLineHistory.provider == provider,
+                    PropLineHistory.player_name == player_name,
+                    PropLineHistory.sport == sport,
+                    PropLineHistory.stat_type == stat_type,
+                ]
+                external_id = str(item.get("external_id") or "")
+                game_id = str(item.get("game_id") or "")
+                if external_id:
+                    filters.append(PropLineHistory.external_id == external_id)
+                elif game_id:
+                    filters.append(PropLineHistory.game_id == game_id)
+                result = await s.execute(
+                    select(PropLineHistory)
+                    .where(*filters)
+                    .order_by(desc(PropLineHistory.fetched_at))
+                    .limit(1)
+                )
+                row = result.scalar_one_or_none()
+                if row is None:
+                    continue
+                values = {"lifecycle_state": new_state}
+                first_alert = item.get("first_alert_sent_at")
+                if first_alert is not None and row.first_alert_sent_at is None:
+                    values["first_alert_sent_at"] = first_alert
+                await s.execute(
+                    sa_update(PropLineHistory)
+                    .where(PropLineHistory.id == row.id)
+                    .values(**values)
+                )
+                applied += 1
+            await s.commit()
+        return applied
 
     async def count_prop_line_history(self, provider: Optional[str] = None) -> int:
         """Count PropLineHistory rows, optionally filtered by provider."""
@@ -4912,9 +4978,9 @@ class Database:
 
         Used by the cold-start path to avoid opening one SQLite write
         transaction per prop (which causes lock contention with concurrent
-        background jobs).  A transient SQLite writer lock is retried with a
-        fresh transaction.  Non-lock errors and exhausted retries propagate to
-        the caller so a scan cannot report successful persistence falsely.
+        background jobs).  A lock or transaction error propagates immediately
+        so the owning scan can preserve the batch and report incomplete
+        persistence instead of silently retrying.
         """
         if not records:
             return {"records_written": 0, "retry_count": 0}
@@ -5014,6 +5080,16 @@ class Database:
                     stage=stage,
                     exc=exc,
                 )
+                # The scan contract is fail-fast: the caller owns recovery and
+                # must mark the scan incomplete rather than silently retrying
+                # or moving this batch to a background queue.
+                logger.error(
+                    "save_underdog_snapshots_bulk: required batch failed "
+                    "without retry (%d records): %s",
+                    len(records),
+                    exc,
+                )
+                raise
                 if (
                     _is_sqlite_cantopen_error(exc)
                     and session is not None
@@ -6099,7 +6175,6 @@ class Database:
         }])
         return
 
-    @_retry_sqlite_write
     async def track_prop_records(
         self,
         records: "list[dict]",
@@ -6302,7 +6377,6 @@ class Database:
             await s.commit()
         return applied
 
-    @_retry_sqlite_write
     async def log_prop_opportunity_bulk(
         self,
         opportunities: "list[dict]",
