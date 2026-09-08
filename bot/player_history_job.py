@@ -65,7 +65,7 @@ _CURSOR_KEY = "_player_history_cursor"
 _PROPLINE_CURSOR_KEY = "_player_history_propline_cursor"
 _PRIMARY_HISTORY_PROVIDERS = frozenset({"underdog", "prizepicks"})
 # The shared PropLine history endpoint is currently advertised at 27/hour
-# (about one request every 133 seconds). One scheduled target per two-minute
+# (about one request every 133 seconds). One scheduled target per five-minute
 # cycle avoids queueing requests past this collector's five-second target
 # budget; the cursor still rotates the complete target universe fairly.
 _PLAYER_HISTORY_PROPLINE_TARGETS_PER_CYCLE = 1
@@ -79,7 +79,7 @@ def _player_history_cadence_budget() -> float:
     """Return the fetch budget while leaving room before the next scheduler tick."""
     interval = max(
         1.0,
-        float(getattr(_config, "PLAYER_HISTORY_POLL_INTERVAL", 120)),
+        float(getattr(_config, "PLAYER_HISTORY_POLL_INTERVAL", 300)),
     )
     headroom = max(
         0.0,

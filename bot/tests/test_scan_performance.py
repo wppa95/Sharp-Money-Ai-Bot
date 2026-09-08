@@ -768,14 +768,23 @@ async def test_concurrent_file_backed_writers_stay_within_cadence(
 # ── 1. Poll interval ──────────────────────────────────────────────────────────
 
 
-def test_poll_interval_default_120s():
+def test_poll_interval_default_180s():
     """config.py must leave enough time for the full Player Props cycle."""
     src = _src("config.py")
-    # Config uses os.environ.get with "120" as default
+    # Config uses os.environ.get with "180" as default
     assert re.search(
-        r'UNDERDOG_POLL_INTERVAL.*int\(os\.environ\.get\([^,]+,\s*["\']120["\']\)',
+        r'UNDERDOG_POLL_INTERVAL.*int\(os\.environ\.get\([^,]+,\s*["\']180["\']\)',
         src,
-    ), "UNDERDOG_POLL_INTERVAL default must be '120'"
+    ), "UNDERDOG_POLL_INTERVAL default must be '180'"
+
+
+def test_player_history_interval_default_300s():
+    """Player history runs on the requested five-minute cadence."""
+    src = _src("config.py")
+    assert re.search(
+        r'PLAYER_HISTORY_POLL_INTERVAL[\s\S]*?os\.environ\.get\([^,]+,\s*["\']300["\']\)',
+        src,
+    ), "PLAYER_HISTORY_POLL_INTERVAL default must be '300'"
 
 
 # ── 2. scheduled execution coordinator ───────────────────────────────────────
