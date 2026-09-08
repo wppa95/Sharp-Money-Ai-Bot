@@ -567,6 +567,9 @@ def _format_history_block(decision: Optional[object]) -> str:
         ("L20", "l20_hit_rate", "l20_games", "l20_over"),
         ("L30", "l30_hit_rate", "l30_games", "l30_over"),
         ("Season", "season_hit_rate", "season_games", "season_over"),
+        ("H2H L5", "h2h_l5_hit_rate", "h2h_l5_games", "h2h_l5_over"),
+        ("H2H L10", "h2h_l10_hit_rate", "h2h_l10_games", "h2h_l10_over"),
+        ("H2H L20", "h2h_l20_hit_rate", "h2h_l20_games", "h2h_l20_over"),
         ("H2H", "h2h_hit_rate", "h2h_games", "h2h_over"),
     )
     rows: list[str] = []
