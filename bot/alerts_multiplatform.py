@@ -46,6 +46,7 @@ def _line_label(line: float) -> str:
 from alerts import EMOJI, _div, format_odds, format_probability, RiskFactor
 from engine.consensus import ConsensusResult, MarketInefficiency
 from engine.clv import CLVOpportunity, CLVResult
+from engine.ud_bet_decision import evidence_source_label
 
 # ── V3.4 Bet Quality star + priority helpers ───────────────────────────────────
 
@@ -458,6 +459,28 @@ def _evidence_display(
     decision: Optional[object],
 ) -> tuple[str, int]:
     """Return a user-safe evidence label and completed-result count."""
+    source = str(
+        getattr(decision, "evidence_source", "") or ""
+    ).strip().lower()
+    if isinstance(decision, dict):
+        source = str(
+            decision.get("evidence_source")
+            or decision.get("evidence_source_key")
+            or ""
+        ).strip().lower()
+    if source in {"settled_results", "historical_average"}:
+        count = (
+            int(getattr(validation, "n_real_games", 0) or 0)
+            + int(getattr(validation, "n_supplemental_games", 0) or 0)
+        )
+        if not count and source == "settled_results":
+            for prefix in ("l5", "l10", "l20", "l30", "season"):
+                value = getattr(decision, f"{prefix}_games", None)
+                if isinstance(value, int):
+                    count = value
+                    break
+        return evidence_source_label(source), count
+
     source = str(getattr(validation, "data_source", "") or "").strip().lower()
     real = int(getattr(validation, "n_real_games", 0) or 0)
     supplemental = int(getattr(validation, "n_supplemental_games", 0) or 0)

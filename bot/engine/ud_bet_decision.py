@@ -55,6 +55,17 @@ _CONTRA_CEIL:  float = 0.60
 _MAX_CONFIDENCE: int = 95
 _MIN_CONFIDENCE: int = 10
 
+EVIDENCE_SETTLED_RESULTS = "settled_results"
+EVIDENCE_HISTORICAL_AVERAGE = "historical_average"
+
+
+def evidence_source_label(source: Optional[str]) -> str:
+    """Return the honest user-facing label for a decision's evidence basis."""
+    return {
+        EVIDENCE_SETTLED_RESULTS: "Settled player-game results",
+        EVIDENCE_HISTORICAL_AVERAGE: "Historical-average fallback",
+    }.get(str(source or "").strip().lower(), "Unavailable")
+
 
 # ── Dataclass ────────────────────────────────────────────────────────────────
 
@@ -131,6 +142,9 @@ class UDBetDecision:
     # ── Market supplements (always available; secondary use only) ─────────────
     avg_vs_line_pct:   Optional[float]   # (hist_avg - current) / hist_avg; +ve = OVER signal
     at_historical_low: bool              # current line == minimum ever seen
+    # What supplied the direction. A pick can retain settled windows while
+    # using the validated historical-average fallback.
+    evidence_source: Optional[str] = None
 
     # ── Constructors ─────────────────────────────────────────────────────────
 
@@ -151,6 +165,7 @@ class UDBetDecision:
             reason             = reason,
             avg_vs_line_pct    = avg_vs_line_pct,
             at_historical_low  = at_historical_low,
+            evidence_source    = None,
             **w,
         )
 
@@ -174,6 +189,11 @@ class UDBetDecision:
             reason             = reason,
             avg_vs_line_pct    = avg_vs_line_pct,
             at_historical_low  = at_historical_low,
+            evidence_source    = (
+                EVIDENCE_SETTLED_RESULTS
+                if getattr(hit_rates, "has_real_data", False)
+                else None
+            ),
             **w,
         )
 
@@ -187,6 +207,7 @@ class UDBetDecision:
         hit_rates: "PlayerHitRates",
         avg_vs_line_pct: Optional[float] = None,
         at_historical_low: bool = False,
+        evidence_source: Optional[str] = None,
     ) -> "UDBetDecision":
         """Construct an OVER/UNDER decision."""
         w = _windows_from_hit_rates(hit_rates)
@@ -197,6 +218,14 @@ class UDBetDecision:
             reason             = reason,
             avg_vs_line_pct    = avg_vs_line_pct,
             at_historical_low  = at_historical_low,
+            evidence_source    = (
+                evidence_source
+                or (
+                    EVIDENCE_SETTLED_RESULTS
+                    if getattr(hit_rates, "has_real_data", False)
+                    else None
+                )
+            ),
             **w,
         )
 
@@ -226,6 +255,10 @@ class UDBetDecision:
         low  = "  ⬇️ historical low" if self.at_historical_low else ""
         return f"{sign}{pct:.1%}{low}"
 
+    def evidence_source_display(self) -> str:
+        """Return the evidence basis in plain language for reports/alerts."""
+        return evidence_source_label(self.evidence_source)
+
     def window_display(
         self,
         games: Optional[int],
@@ -251,6 +284,8 @@ class UDBetDecision:
                 "rec":  self.recommendation,
                 "tier": self.decision_tier,
                 "conf": self.confidence,
+                "evidence_source": self.evidence_source,
+                "evidence_label": self.evidence_source_display(),
                 "l5":   {"g": self.l5_games, "o": self.l5_over, "r": _r(self.l5_hit_rate), "avg": _r(self.l5_avg)},
                 "l10":  {"g": self.l10_games, "o": self.l10_over, "r": _r(self.l10_hit_rate), "avg": _r(self.l10_avg)},
                 "l15":  {"g": self.l15_games, "o": self.l15_over, "r": _r(self.l15_hit_rate), "avg": _r(self.l15_avg)},
@@ -354,6 +389,7 @@ def make_ud_bet_decision(
             hit_rates=hit_rates,
             avg_vs_line_pct=avg_vs_line_pct,
             at_historical_low=at_low,
+            evidence_source=EVIDENCE_HISTORICAL_AVERAGE,
         )
 
     # ── Gate 1: supporting evidence/history required ─────────────────────────
@@ -409,6 +445,7 @@ def make_ud_bet_decision(
         hit_rates          = hit_rates,
         avg_vs_line_pct    = avg_vs_line_pct,
         at_historical_low  = at_low,
+        evidence_source    = EVIDENCE_SETTLED_RESULTS,
     )
 
 

@@ -34,6 +34,7 @@ from alerts import (
 from config import config
 from database import Database
 from engine import AnalysisEngine
+from engine.ud_bet_decision import evidence_source_label
 from models import MarketType, Sport
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,22 @@ _AGGREGATE_REPORT_TIMEOUT_MULTIPLIER = 4.0
 _PICKS_TIMEOUT_SECONDS = 12.0
 _STATUS_DB_READ_TIMEOUT_SECONDS = 4.0
 _CURRENT_PROP_MAX_FUTURE_HOURS = 24 * 14
+
+
+def _evidence_label_from_reason_codes(value: object) -> str:
+    """Read persisted decision provenance without inferring from raw windows."""
+    codes = value
+    if isinstance(value, str):
+        try:
+            codes = _json.loads(value)
+        except (TypeError, ValueError):
+            codes = [part.strip() for part in value.split(",")]
+    if isinstance(codes, list):
+        if "EVIDENCE:SETTLED_RESULTS" in codes:
+            return evidence_source_label("settled_results")
+        if "EVIDENCE:HISTORICAL_AVERAGE" in codes:
+            return evidence_source_label("historical_average")
+    return evidence_source_label(None)
 
 
 async def _bounded(coro, timeout: Optional[float] = None):
@@ -2184,6 +2201,17 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         logger.warning("cmd_picks: recommendation lookup failed: %s", _rec_exc)
         _rec_query_seconds = time.monotonic() - _stage_started
 
+    _provenance_map: dict = {}
+    _provenance_reader = getattr(_db, "get_ud_evidence_provenance_bulk", None)
+    if callable(_provenance_reader):
+        try:
+            _provenance_map = await _bounded(_provenance_reader(
+                [_ud_recommendation_identity(p) for p in ud_props],
+                since_hours=24,
+            ))
+        except Exception as _prov_exc:
+            logger.warning("cmd_picks: evidence provenance lookup failed: %s", _prov_exc)
+
     _direction_started = time.monotonic()
     provider_props = _select_directional_provider_rows(
         ud_props,
@@ -2457,6 +2485,14 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 plh.player_name, plh.stat_type,
             )
         pick_label = _PICK_LABEL.get(bet_rec or "", "—")
+        _evidence_source = _provenance_map.get(rec_key)
+        if _evidence_source is None and _provenance_map:
+            _rec_key_lower = tuple(str(part).lower() for part in rec_key)
+            for _stored_key, _stored_source in _provenance_map.items():
+                if tuple(str(part).lower() for part in _stored_key) == _rec_key_lower:
+                    _evidence_source = _stored_source
+                    break
+        _evidence_label = evidence_source_label(_evidence_source)
 
         # Line movement annotation
         move_str = ""
@@ -2485,6 +2521,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             "",
             f"🎯 Pick: <b>{pick_label}</b>",
             f"Confidence: {conf}/100  {stars}{move_str}",
+            f"🧾 Evidence basis: <b>{_html.escape(_evidence_label)}</b>",
         ]
 
         # Persisted Task #135 downstream intelligence.  Do not derive a model
@@ -3375,11 +3412,17 @@ async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 _ts_str = _fmt_user_ts(_ts)
                 _rec  = getattr(r, "recommendation", "")
                 _rec_icon = "⬆️" if _rec == "OVER" else ("⬇️" if _rec == "UNDER" else "")
+                _evidence_label = _evidence_label_from_reason_codes(
+                    getattr(r, "reason_codes", None)
+                )
                 lines.append(
                     f"  🎯 <b>PLAYER PROP PICK</b> · "
                     f"{_rec_icon} <b>{r.player_name}</b>  {r.stat_type}  "
                     f"<code>{_lv:.1f}</code>  ·  <i>{r.sport}</i>"
                     f"  ·  {_ts_str}"
+                )
+                lines.append(
+                    f"      🧾 Evidence basis: <b>{_html.escape(_evidence_label)}</b>"
                 )
         else:
             lines.append("  <i>No player prop alerts sent today.</i>")
@@ -4941,6 +4984,7 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             or {}
         )
         delivered_total = int(summary.get("delivered", 0) or 0)
+        evidence_by_source = summary.get("evidence_by_source", {}) or {}
 
         def _fmt_rate(num: int, denom: int) -> str:
             """Format a small percentage with enough precision to stay non-zero."""
@@ -5179,6 +5223,12 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             f"🔬 Evaluated candidates: <b>{evaluated_total:,}</b>",
             f"🎯 Directional OVER/UNDER opportunities: <b>{directional_total:,}</b>",
             f"✅ Actionable persisted: <b>{int(summary.get('actionable_total', directional_total) or 0):,}</b>",
+            (
+                "   └─ Evidence basis: "
+                f"settled results <b>{int(evidence_by_source.get('settled_results', 0) or 0):,}</b> · "
+                f"historical-average fallback <b>{int(evidence_by_source.get('historical_average', 0) or 0):,}</b> · "
+                f"unavailable <b>{int(evidence_by_source.get('unavailable', 0) or 0):,}</b>"
+            ),
             f"🔬 Rescored: <b>{sc_rescored:,}</b>",
             f"📈 Line movers: <b>{sc_movers:,}</b>",
             f"📤 Delivered alerts: <b>{delivered_total:,}</b>",

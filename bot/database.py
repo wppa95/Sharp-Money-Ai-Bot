@@ -1827,6 +1827,71 @@ class Database:
                 out[identity] = (row.bet_recommendation, row.bet_confidence)
         return out
 
+    async def get_ud_evidence_provenance_bulk(
+        self,
+        player_stat_identities: "list[tuple[str, str, str, str]]",
+        since_hours: int = 24,
+    ) -> "dict[tuple[str, str, str, str], str]":
+        """Return persisted decision evidence provenance for current UD props.
+
+        The provenance is read from the same latest snapshot used for the
+        current recommendation, so /picks cannot mistake available windows for
+        the evidence that actually supplied the direction.
+        """
+        if not player_stat_identities:
+            return {}
+        cutoff = datetime.utcnow() - timedelta(hours=since_hours)
+        wanted = {
+            (
+                str(player),
+                str(sport),
+                str(stat),
+                str(source_id or ""),
+            )
+            for player, sport, stat, source_id in player_stat_identities
+        }
+        source_ids = {identity[3] for identity in wanted if identity[3]}
+        if not source_ids:
+            return {}
+        async with self.session() as s:
+            result = await s.execute(
+                select(UnderdogSnapshotRecord).where(
+                    UnderdogSnapshotRecord.external_id.in_(source_ids),
+                    UnderdogSnapshotRecord.fetched_at >= cutoff,
+                )
+            )
+            rows = list(result.scalars().all())
+
+        latest: dict[
+            tuple[str, str, str, str], UnderdogSnapshotRecord
+        ] = {}
+        for row in rows:
+            identity = (
+                row.player_name,
+                row.sport,
+                row.stat_type,
+                row.external_id,
+            )
+            if identity not in wanted:
+                continue
+            previous = latest.get(identity)
+            if previous is None or row.id > previous.id:
+                latest[identity] = row
+
+        out: dict[tuple[str, str, str, str], str] = {}
+        for identity, row in latest.items():
+            if row.removed is True or not row.bet_evidence_json:
+                continue
+            try:
+                source = str(
+                    json.loads(row.bet_evidence_json).get("evidence_source") or ""
+                ).strip().lower()
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if source in {"settled_results", "historical_average"}:
+                out[identity] = source
+        return out
+
     async def get_latest_downstream_intelligence(
         self,
         player_stat_triples: "list[tuple]",
@@ -7128,6 +7193,7 @@ class Database:
                     PropOpportunityLog.recommendation,
                     PropOpportunityLog.result,
                     PropOpportunityLog.alert_sent,
+                    PropOpportunityLog.reason_codes,
                 ).where(
                     PropOpportunityLog.detected_at >= cutoff,
                     PropOpportunityLog.recommendation.in_(("OVER", "UNDER")),
@@ -7146,7 +7212,19 @@ class Database:
             result_counts: dict[str, int] = {}
             result_counts_by_provider: dict[str, dict[str, int]] = {}
             result_counts_by_sport: dict[str, dict[str, int]] = {}
-            for provider, sport, recommendation, result, alert_sent in opportunity_rows.all():
+            evidence_by_source: dict[str, int] = {
+                "settled_results": 0,
+                "historical_average": 0,
+                "unavailable": 0,
+            }
+            for (
+                provider,
+                sport,
+                recommendation,
+                result,
+                alert_sent,
+                reason_codes,
+            ) in opportunity_rows.all():
                 if not _is_supported_tracking_sport(sport):
                     continue
                 provider_key = str(provider or "Underdog")
@@ -7164,6 +7242,23 @@ class Database:
                 provider_results[result_key] = provider_results.get(result_key, 0) + 1
                 sport_results = result_counts_by_sport.setdefault(sport_key, {})
                 sport_results[result_key] = sport_results.get(result_key, 0) + 1
+                try:
+                    parsed_codes = (
+                        json.loads(reason_codes)
+                        if isinstance(reason_codes, str)
+                        else reason_codes
+                    )
+                except (TypeError, ValueError):
+                    parsed_codes = []
+                if isinstance(parsed_codes, list) and "EVIDENCE:SETTLED_RESULTS" in parsed_codes:
+                    evidence_by_source["settled_results"] += 1
+                elif (
+                    isinstance(parsed_codes, list)
+                    and "EVIDENCE:HISTORICAL_AVERAGE" in parsed_codes
+                ):
+                    evidence_by_source["historical_average"] += 1
+                else:
+                    evidence_by_source["unavailable"] += 1
                 if result_key == "PENDING":
                     pending_total += 1
                     pending_by_provider[provider_key] = (
@@ -7281,6 +7376,7 @@ class Database:
             "result_counts": result_counts,
             "result_counts_by_provider": result_counts_by_provider,
             "result_counts_by_sport": result_counts_by_sport,
+            "evidence_by_source": evidence_by_source,
             "provider_breakdown": provider_breakdown,
             "by_sport": by_sport,
             "by_provider": [

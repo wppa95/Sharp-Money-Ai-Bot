@@ -542,6 +542,8 @@ class TestSerialization:
         blob = json.loads(d.to_json())
         assert blob["rec"] in ("OVER", "UNDER", "PASS")
         assert isinstance(blob["conf"], int)
+        assert blob["evidence_source"] == "settled_results"
+        assert blob["evidence_label"] == "Settled player-game results"
 
     def test_to_json_l5_sub_dict(self):
         hr   = _hit_rates(l5_r=0.80, l10_r=0.70)

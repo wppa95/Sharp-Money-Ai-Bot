@@ -3203,6 +3203,13 @@ def _compute_reason_codes(
         _rec = getattr(decision, "recommendation", None)
         if _rec in ("OVER", "UNDER"):
             codes.append(f"GATE:{_rec}")
+        _evidence_source = str(
+            getattr(decision, "evidence_source", "") or ""
+        ).strip().lower()
+        if _evidence_source == "settled_results":
+            codes.append("EVIDENCE:SETTLED_RESULTS")
+        elif _evidence_source == "historical_average":
+            codes.append("EVIDENCE:HISTORICAL_AVERAGE")
 
     return codes
 
@@ -3245,6 +3252,11 @@ def _compute_reason_codes_from_scored_dict(p: dict) -> list[str]:
     _tc = {"S": "S_TIER", "A": "A_TIER", "B": "B_TIER"}.get(tier)
     if _tc:
         codes.append(_tc)
+    _evidence_source = str(p.get("evidence_source") or "").strip().lower()
+    if _evidence_source == "settled_results":
+        codes.append("EVIDENCE:SETTLED_RESULTS")
+    elif _evidence_source == "historical_average":
+        codes.append("EVIDENCE:HISTORICAL_AVERAGE")
     return codes
 
 
@@ -5122,6 +5134,11 @@ async def underdog_job(context) -> None:
                             and decision.recommendation in ("OVER", "UNDER")
                             else None
                         ),
+                        "evidence_source": (
+                            getattr(decision, "evidence_source", None)
+                            if decision is not None
+                            else None
+                        ),
                         "decision_conf":   (decision.confidence if decision is not None else None),
                         "evidence_available": bool(validation.has_supporting_data),
                         # ── component breakdown ──────────────────────────────
@@ -5434,6 +5451,11 @@ async def underdog_job(context) -> None:
                                 decision.recommendation
                                 if decision is not None
                                 and decision.recommendation in ("OVER", "UNDER")
+                                else None
+                            ),
+                            "evidence_source": (
+                                getattr(decision, "evidence_source", None)
+                                if decision is not None
                                 else None
                             ),
                             "evidence_available": bool(validation.has_supporting_data),
