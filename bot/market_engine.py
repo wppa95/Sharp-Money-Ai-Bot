@@ -2755,6 +2755,7 @@ async def _run_prizepicks_independent_cycle(
             history_snap = await get_player_history_provider().get_snapshot(
                 db, player, sport, stat, line, ud_history=history,
                 source_provider="PrizePicks",
+                opponent=getattr(prop, "opponent", None),
             )
         except Exception:
             pass
@@ -4770,6 +4771,7 @@ async def underdog_job(context) -> None:
                                 line_val,
                                 ud_history=np_history,
                                 source_provider="Underdog",
+                                opponent=getattr(snap, "opponent", None),
                                 instrumentation=_cycle_timing,
                                 ensure_real_results=(
                                     _cached_player_results is None
@@ -5082,6 +5084,7 @@ async def underdog_job(context) -> None:
                                 snap.line or 0.0,
                                 ud_history=ud_history,
                                 source_provider="Underdog",
+                                opponent=getattr(snap, "opponent", None),
                                 instrumentation=_cycle_timing,
                                 ensure_real_results=(
                                     _cached_player_results is None
@@ -5265,6 +5268,7 @@ async def underdog_job(context) -> None:
                                 snap.line or 0.0,
                                 ud_history=ud_history,
                                 source_provider="Underdog",
+                                opponent=getattr(snap, "opponent", None),
                                 instrumentation=_cycle_timing,
                                 ensure_real_results=(
                                     _cached_player_results is None
@@ -5777,6 +5781,7 @@ async def underdog_job(context) -> None:
                             _line_val,
                             ud_history=_shist,
                             source_provider="Underdog",
+                            opponent=getattr(_ssnap, "opponent", None),
                             instrumentation=_cycle_timing,
                             ensure_real_results=(
                                 _cached_player_results is None
@@ -7213,6 +7218,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     _sr_line,
                     ud_history=_sr_hist,
                     source_provider="Underdog",
+                    opponent=getattr(_sr_snap, "opponent", None),
                     ensure_real_results=(
                         _sr_cached_results is None
                         and isinstance(db, Database)
@@ -8075,6 +8081,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         _fpr_stat,
                         _fpr_line,
                         source_provider=_fpr_provider,
+                        opponent=getattr(_fpr_snap, "opponent", None),
                         ensure_real_results=False,
                     )
                 except Exception:

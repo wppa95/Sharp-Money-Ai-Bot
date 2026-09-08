@@ -1849,6 +1849,29 @@ def test_official_player_history_preserves_identity_context_and_provenance():
     }
 
 
+def test_current_propline_prop_preserves_opponent_for_h2h_evidence():
+    prop = normalize_propline_prizepicks_record(
+        {
+            "provider": "PrizePicks",
+            "sport": "NBA",
+            "player_name": "Alex Example",
+            "team": "Test Town",
+            "stat_type": "Points",
+            "line": 24.5,
+            "event": {
+                "id": "game-1",
+                "name": "Example City at Test Town",
+                "home_team": "Test Town",
+                "away_team": "Example City",
+                "start_time": "2026-08-28T00:00:00Z",
+            },
+        }
+    )
+
+    assert prop is not None
+    assert prop.opponent == "Example City"
+
+
 def test_player_history_keeps_missing_and_ungraded_results_non_settled():
     payload = _player_history_payload(
         actual_value=30,

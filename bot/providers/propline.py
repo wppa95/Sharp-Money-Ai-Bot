@@ -696,6 +696,7 @@ class PropLinePlayerHistoryEntry:
     over_result: Optional[str]
     under_result: Optional[str]
     resolved_at: Optional[datetime]
+    player_team: str = ""
     provider: str = PROPLINE_PROVIDER_NAME
     supplemental_source: str = "PropLine"
     redacted: bool = False
@@ -888,6 +889,17 @@ def build_propline_player_history_entry(
         return None
     bookmaker = _clean(record.get("bookmaker"))
     bookmaker_title = _clean(record.get("bookmaker_title"))
+    player = record.get("player")
+    player_team = _clean(
+        record.get("player_team")
+        or record.get("team")
+        or record.get("team_name")
+        or (
+            player.get("team")
+            if isinstance(player, dict)
+            else ""
+        )
+    )
     normalized_bookmaker = bookmaker.lower().replace("_", "").replace("-", "")
     entry_provider = (
         PROPLINE_PROVIDER_NAME
@@ -912,6 +924,7 @@ def build_propline_player_history_entry(
         over_result=over_result,
         under_result=under_result,
         resolved_at=resolved_at,
+        player_team=player_team,
         provider=entry_provider,
         supplemental_source=_clean(record.get("supplemental_source")) or "PropLine",
         redacted=bool(record.get("redacted", False)),
@@ -1591,6 +1604,19 @@ def _is_prizepicks_player_prop(raw: dict[str, Any]) -> bool:
     return True
 
 
+def _team_names_match(left: Any, right: Any) -> bool:
+    """Match provider team labels without guessing across unrelated teams."""
+    left_norm = " ".join(str(left or "").strip().casefold().split())
+    right_norm = " ".join(str(right or "").strip().casefold().split())
+    if not left_norm or not right_norm:
+        return False
+    return (
+        left_norm == right_norm
+        or left_norm in right_norm
+        or right_norm in left_norm
+    )
+
+
 def normalize_propline_prizepicks_record(
     raw_record: dict[str, Any],
     *,
@@ -1632,9 +1658,13 @@ def normalize_propline_prizepicks_record(
         return None
 
     event = _first(raw_record, "event", "game", "match", "game_description")
+    event_home = ""
+    event_away = ""
     if isinstance(event, dict):
         event_label = _clean(_first(event, "name", "display_name", "description"))
         event_id = _clean(_first(event, "id", "event_id", "game_id"))
+        event_home = _clean(_first(event, "home_team", "home", "home_name"))
+        event_away = _clean(_first(event, "away_team", "away", "away_name"))
         event_time = _parse_datetime(
             _first(event, "game_time", "start_time", "event_start", "commence_time")
         )
@@ -1644,6 +1674,8 @@ def normalize_propline_prizepicks_record(
     else:
         event_label = _clean(event)
         event_id = _clean(_first(raw_record, "event_id", "game_id", "match_id"))
+        event_home = _clean(_first(raw_record, "home_team", "home", "home_name"))
+        event_away = _clean(_first(raw_record, "away_team", "away", "away_name"))
         event_time = None
         event_status = ""
 
@@ -1684,6 +1716,12 @@ def normalize_propline_prizepicks_record(
     )
     observed_at = fetched_at or datetime.utcnow()
     team = _clean(_nested_value(raw_record, "team", "team_name"))
+    opponent = _clean(_first(raw_record, "opponent", "opponent_name"))
+    if not opponent and team:
+        if _team_names_match(team, event_home):
+            opponent = event_away
+        elif _team_names_match(team, event_away):
+            opponent = event_home
     provider_status = event_status or _clean(
         _first(raw_record, "status", "availability", "projection_status")
     )
@@ -1711,6 +1749,7 @@ def normalize_propline_prizepicks_record(
             _first(raw_record, "dfs_odds_type", "line_variant", "odds_type")
         ).lower(),
         supplemental_source="PropLine",
+        opponent=opponent,
     )
 
 

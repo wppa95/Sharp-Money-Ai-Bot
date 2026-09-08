@@ -64,6 +64,8 @@ class MarketSnapshot:
     # Explicit marker for pick'em game totals.  Game markets share the
     # Underdog feed with player props but must never enter prop scoring.
     is_game_market: bool = False
+    # Optional player-prop opponent used to select H2H evidence windows.
+    opponent: Optional[str] = None
 
     @property
     def market_key(self) -> tuple[str, str, str, str]:

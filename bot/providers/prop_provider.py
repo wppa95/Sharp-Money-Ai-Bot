@@ -75,6 +75,9 @@ class PlayerProp:
     # a supplemental data source such as PropLine.  This is provenance only;
     # ``provider`` remains the sportsbook/pick'em source identity.
     supplemental_source: str = ""
+    # Opponent for H2H evidence. Providers may leave this blank when the feed
+    # does not expose enough event/team context to determine it safely.
+    opponent: str = ""
 
     # ── Identity helpers ──────────────────────────────────────────────────────
 

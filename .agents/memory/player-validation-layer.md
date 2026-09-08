@@ -25,7 +25,10 @@ Before any immediate individual Telegram alert fires for an Underdog prop, the p
 ```json
 {"n":8,"l5":0.8,"l10":0.7,"l20":0.65,"l30":null,"avg":0.5,"min":0.5,"rate_below":0.9,"season":null,"h2h":null,"has_data":true}
 ```
-- `season` and `h2h` are always `null` until game-result tracking is added.
+- In `validation_json`, `season` and `h2h` remain `null` because this validator
+  is intentionally market-proxy-only. Real H2H evidence is computed separately
+  from completed player-game results when the current prop has a safely
+  identified opponent.
 - `l5/l10/l20/l30` are line-move rates (fraction of records where `line_moved=True`), **not** actual hit rates against prop lines. They are market-proxy signals only.
 
 ## Files

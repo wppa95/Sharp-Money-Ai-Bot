@@ -1103,15 +1103,34 @@ class PlayerHistoryProvider:
                 value = float(actual)
             except (TypeError, ValueError):
                 continue
+            player_team = str(
+                _entry_value("player_team")
+                or _entry_value("team")
+                or ""
+            ).strip()
+            home_team = str(
+                _entry_value("home_team")
+                or _entry_value("home")
+                or ""
+            ).strip()
+            away_team = str(
+                _entry_value("away_team")
+                or _entry_value("away")
+                or ""
+            ).strip()
+            opponent = None
+            if player_team and home_team and away_team:
+                if _fuzzy_team_match(player_team, home_team):
+                    opponent = away_team
+                elif _fuzzy_team_match(player_team, away_team):
+                    opponent = home_team
             rows.append(RawGameResult(
                 player_name=player_name,
                 sport=str(sport or "").upper(),
                 stat_type=stat_type.lower().strip(),
                 game_date=game_date.date().isoformat(),
                 actual_value=value,
-                # PropLine's history schema does not identify which side the
-                # player played for.  Do not guess an opponent from home/away.
-                opponent=None,
+                opponent=opponent,
                 source="propline_history",
                 game_id=event_id,
             ))

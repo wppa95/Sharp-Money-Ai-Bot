@@ -38,6 +38,30 @@ _HEADERS = {
 }
 
 
+def _opponent_for_player(team, home, away) -> str:
+    """Return the opposing team only when the feed identifies the player team."""
+    def _label(value) -> str:
+        if isinstance(value, dict):
+            value = (
+                value.get("name")
+                or value.get("display_name")
+                or value.get("abbreviation")
+                or value.get("id")
+            )
+        return " ".join(str(value or "").strip().casefold().split())
+
+    player_team = _label(team)
+    home_team = _label(home)
+    away_team = _label(away)
+    if not player_team:
+        return ""
+    if player_team == home_team and away_team:
+        return str(away).strip() if not isinstance(away, dict) else _label(away)
+    if player_team == away_team and home_team:
+        return str(home).strip() if not isinstance(home, dict) else _label(home)
+    return ""
+
+
 @dataclass
 class UnderdogProjection:
     """
@@ -60,6 +84,7 @@ class UnderdogProjection:
     is_game_market: bool = False
     selection: str = ""
     event: str = ""
+    opponent: str = ""
 
 
 class UnderdogConnector(BaseConnector):
@@ -174,6 +199,7 @@ class UnderdogConnector(BaseConnector):
             is_pickem    = True,
              is_moneyline  = proj.is_moneyline,
              is_game_market = proj.is_game_market,
+             opponent    = getattr(proj, "opponent", None) or None,
             )
             # Stash notes for downstream consumers via a convention attr
             object.__setattr__(snaps, "_notes", notes) if False else None
@@ -369,6 +395,17 @@ class UnderdogConnector(BaseConnector):
                         or ""
                     ),
                     fetched_at  = datetime.utcnow(),
+                    opponent    = _opponent_for_player(
+                        team,
+                        g_data.get("home_team")
+                        or g_data.get("home_team_id")
+                        or g_data.get("home")
+                        or "",
+                        g_data.get("away_team")
+                        or g_data.get("away_team_id")
+                        or g_data.get("away")
+                        or "",
+                    ),
                 ))
             except (KeyError, TypeError, ValueError) as exc:
                 logger.debug("Underdog parse error: %s", exc)

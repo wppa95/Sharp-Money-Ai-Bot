@@ -56,6 +56,27 @@ def _propline_entry(day: str, value: float, event_id: str):
     )
 
 
+def _propline_entry_with_teams(
+    day: str,
+    value: float,
+    event_id: str,
+    *,
+    player_team: str = "Boston Celtics",
+    home_team: str = "Boston Celtics",
+    away_team: str = "New York Knicks",
+):
+    return SimpleNamespace(
+        event_id=event_id,
+        commence_time=datetime.fromisoformat(day),
+        actual_value=value,
+        over_result="won",
+        under_result="lost",
+        player_team=player_team,
+        home_team=home_team,
+        away_team=away_team,
+    )
+
+
 def _client(entries):
     client = SimpleNamespace(
         is_configured=True,
@@ -290,6 +311,57 @@ async def test_snapshot_uses_propline_gap_for_both_primary_providers(source_prov
         client.fetch_player_history.await_args.kwargs["bookmaker"]
         == expected_bookmaker
     )
+
+
+@pytest.mark.asyncio
+async def test_snapshot_computes_h2h_from_opponent_tagged_results():
+    db = _DB(
+        [
+            _primary_result("2026-08-29", 30.0, "game-1"),
+            _primary_result("2026-08-22", 28.0, "game-2"),
+            _primary_result("2026-08-15", 26.0, "game-3"),
+        ]
+    )
+    provider = PlayerHistoryProvider()
+
+    snapshot = await provider.get_snapshot(
+        db,
+        "Alex Example",
+        "NBA",
+        "Points",
+        25.5,
+        opponent="TEST",
+        ensure_real_results=False,
+    )
+
+    assert snapshot.h2h is not None
+    assert snapshot.h2h.games == 3
+    assert snapshot.h2h.over_count == 3
+    assert snapshot.h2h.hit_rate == 1.0
+
+
+@pytest.mark.asyncio
+async def test_propline_history_preserves_opponent_when_player_team_is_known():
+    client = _client(
+        [
+            _propline_entry_with_teams(
+                "2026-08-29T00:00:00",
+                30.0,
+                "game-1",
+            )
+        ]
+    )
+    provider = PlayerHistoryProvider(propline_client=client)
+
+    rows = await provider._fetch_propline_history(
+        "Alex Example",
+        "NBA",
+        "Points",
+        source_provider="PrizePicks",
+    )
+
+    assert len(rows) == 1
+    assert rows[0].opponent == "New York Knicks"
 
 
 @pytest.mark.asyncio
