@@ -65,7 +65,11 @@ def test_full_pool_rotation_is_registered_once():
         (name, function)
         for name, function, _ in jobs
         if "pool" in name.lower() or "rescan" in name.lower()
-    ] == [("full_pool_rescan", "_coordinated_job('full_pool_rescan', _full_pool_rescan_job)")]
+    ] == [(
+        "full_pool_rescan",
+        "_coordinated_job('full_pool_rescan', _full_pool_rescan_job, "
+        "exclusive_group=_SQLITE_WRITE_JOB_GROUP)",
+    )]
 
 
 def test_required_monitoring_and_maintenance_jobs_remain_registered():

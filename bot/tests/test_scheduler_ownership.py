@@ -111,7 +111,12 @@ def test_monitoring_and_grading_have_distinct_cycle_owners():
     )
     assert "prizepicks_monitor" not in source
     assert "prizepicks_job" not in source
-    assert '_coordinated_job("full_pool_rescan", _full_pool_rescan_job)' in source
+    assert (
+        '_coordinated_job(' in source
+        and '"full_pool_rescan"' in source
+        and '_full_pool_rescan_job' in source
+        and 'exclusive_group=_SQLITE_WRITE_JOB_GROUP' in source
+    )
 
 
 @pytest.mark.asyncio
@@ -325,14 +330,20 @@ async def test_launcher_allows_different_job_names_to_run_independently():
     assert not coordinator._tasks
 
 
-def test_production_monitor_and_history_jobs_do_not_share_ownership():
+def test_production_database_writers_share_one_ownership_group():
     import inspect
     import main
 
     source = inspect.getsource(main.post_init)
     assert 'name="underdog_monitor"' in source
     assert 'name="player_history_collector"' in source
-    assert 'exclusive_group="underdog_monitoring"' not in source
+    assert 'exclusive_group=_SQLITE_WRITE_JOB_GROUP' in source
+    assert "sqlite_write_jobs" in inspect.getsource(main)
+    history_registration = source[
+        source.index('"player_history_collector"'):
+        source.index('"player_history_collector"') + 220
+    ]
+    assert "exclusive_group" not in history_registration
 
 
 @pytest.mark.asyncio

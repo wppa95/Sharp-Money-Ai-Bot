@@ -652,6 +652,18 @@ async def player_history_collector_job(context) -> None:
 
         async def write_batch(batch: list[object]) -> None:
             """Persist one completed result batch without the fetch deadline."""
+            # Provider collection stays independent so it cannot occupy the
+            # Underdog scheduler slot for minutes. Before claiming SQLite for
+            # a durable result batch, yield while the live Underdog scan owns
+            # its full-feed persistence window.
+            try:
+                from market_engine import wait_for_underdog_persistence_idle
+
+                await wait_for_underdog_persistence_idle()
+            except ImportError:
+                # Lightweight compatibility environments may not load the
+                # monitoring engine; their database doubles remain valid.
+                pass
             if asyncio.iscoroutinefunction(bulk_writer):
                 await bulk_writer(batch)
             else:

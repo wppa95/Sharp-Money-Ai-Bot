@@ -963,6 +963,18 @@ _fpr_handoff_task: asyncio.Task | None = None
 _fpr_execution_running: bool = False
 
 
+async def wait_for_underdog_persistence_idle() -> None:
+    """Yield until the live Underdog scan releases its persistence window.
+
+    Player-history collection performs network work independently, but its
+    durable result batches must not race the full-feed observation writes.
+    This cooperative boundary keeps the next Underdog cadence eligible to
+    start without holding a scheduler ownership lock across provider calls.
+    """
+    while _ud_full_scan_running:
+        await asyncio.sleep(0.05)
+
+
 async def reset_monitoring_runtime_state() -> None:
     """Destroy disposable market-monitoring state before a new session starts.
 

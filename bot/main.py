@@ -498,6 +498,11 @@ class _ScheduledExecutionCoordinator:
 
 _scheduled_execution_coordinator = _ScheduledExecutionCoordinator()
 
+# SQLite has one writer slot. Keep database-mutating scheduled jobs in one
+# ownership group so they wait before starting instead of competing for the
+# process-wide writer gate while a full Underdog persistence drain is active.
+_SQLITE_WRITE_JOB_GROUP = "sqlite_write_jobs"
+
 
 def _coordinated_job(
     name: str,
@@ -810,7 +815,11 @@ async def post_init(application: Application) -> None:
         # restart-safe pacing. It never reads ACTIVE_SPORTS for provider
         # selection.
         jq.run_repeating(
-            _coordinated_job("odds_poller", _poll_odds_job),
+            _coordinated_job(
+                "odds_poller",
+                _poll_odds_job,
+                exclusive_group=_SQLITE_WRITE_JOB_GROUP,
+            ),
             interval=config.ODDS_POLL_INTERVAL,
             first=10,
             name="odds_poller",
@@ -820,6 +829,7 @@ async def post_init(application: Application) -> None:
             _coordinated_job(
                 "underdog_monitor",
                 _underdog_monitor_cycle,
+                exclusive_group=_SQLITE_WRITE_JOB_GROUP,
             ),
             interval=config.UNDERDOG_POLL_INTERVAL,
             first=45,
@@ -831,7 +841,11 @@ async def post_init(application: Application) -> None:
         # fetched and persisted without receiving fresh evidence evaluation.
         if config.FPR_INTERVAL > 0:
             jq.run_repeating(
-                _coordinated_job("full_pool_rescan", _full_pool_rescan_job),
+                _coordinated_job(
+                    "full_pool_rescan",
+                    _full_pool_rescan_job,
+                    exclusive_group=_SQLITE_WRITE_JOB_GROUP,
+                ),
                 interval=config.FPR_INTERVAL,
                 first=config.FPR_INTERVAL,
                 name="full_pool_rescan",
@@ -857,6 +871,7 @@ async def post_init(application: Application) -> None:
         grader_callback = _coordinated_job(
             "opportunity_grader",
             _opportunity_grader_tick,
+            exclusive_group=_SQLITE_WRITE_JOB_GROUP,
         )
         jq.run_once(
             grader_callback,
@@ -866,9 +881,27 @@ async def post_init(application: Application) -> None:
         # Underdog, PropLine, full-pool, grading, and player history each own
         # independent scheduler callbacks. None is a child of another cycle.
         # CLV seed job — every 15 minutes (creates AlertCLVSeed entries for alerts)
-        jq.run_repeating(_coordinated_job("clv_seeder", _clv_seed_job), interval=900, first=120, name="clv_seeder")
+        jq.run_repeating(
+            _coordinated_job(
+                "clv_seeder",
+                _clv_seed_job,
+                exclusive_group=_SQLITE_WRITE_JOB_GROUP,
+            ),
+            interval=900,
+            first=120,
+            name="clv_seeder",
+        )
         # CLV harvest job — every hour (processes seeds after game_time passes)
-        jq.run_repeating(_coordinated_job("clv_harvester", _clv_harvest_job), interval=3600, first=300, name="clv_harvester")
+        jq.run_repeating(
+            _coordinated_job(
+                "clv_harvester",
+                _clv_harvest_job,
+                exclusive_group=_SQLITE_WRITE_JOB_GROUP,
+            ),
+            interval=3600,
+            first=300,
+            name="clv_harvester",
+        )
         # Player-result collection uses the dedicated history pool, but shares
         # the heavy-job ownership group with monitoring. It waits for the live
         # scan and its persistence drain before claiming SQLite.
@@ -884,7 +917,16 @@ async def post_init(application: Application) -> None:
         # API budget check — every 15 minutes
         jq.run_repeating(_coordinated_job("budget_checker", _budget_check_job), interval=900, first=900, name="budget_checker")
         # PropLineHistory prune — once per day (keeps last 14 days)
-        jq.run_repeating(_coordinated_job("prop_history_pruner", _prune_prop_history_job), interval=86400, first=600, name="prop_history_pruner")
+        jq.run_repeating(
+            _coordinated_job(
+                "prop_history_pruner",
+                _prune_prop_history_job,
+                exclusive_group=_SQLITE_WRITE_JOB_GROUP,
+            ),
+            interval=86400,
+            first=600,
+            name="prop_history_pruner",
+        )
         # Heartbeat — every 60 s (keeps HealthTracker alive timestamp current)
         jq.run_repeating(_coordinated_job("heartbeat", _heartbeat_job), interval=60, first=30, name="heartbeat")
         # Season / market-status refresh (skip when interval is 0 = disabled)
