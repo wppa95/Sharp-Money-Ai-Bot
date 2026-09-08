@@ -200,6 +200,22 @@ class TestComputeHitRates:
         assert hr.h2h.over_count == 3
         assert hr.h2h.hit_rate == 1.0
 
+    def test_h2h_recent_windows_are_exposed_when_available(self):
+        recs = [
+            _Rec("P", "NBA", "pts", f"2026-07-{20 - i:02d}", 3.0 if i < 4 else 1.0, "BOS")
+            for i in range(20)
+        ]
+
+        hr = compute_hit_rates(recs, 2.5, opponent="BOS")
+
+        assert hr.h2h_l5 is not None
+        assert hr.h2h_l5.games == 5
+        assert hr.h2h_l5.over_count == 4
+        assert hr.h2h_l10 is not None
+        assert hr.h2h_l10.games == 10
+        assert hr.h2h_l20 is not None
+        assert hr.h2h_l20.games == 20
+
     def test_h2h_fuzzy_opponent_match(self):
         """"Boston Red Sox" should match stored "BOS"."""
         recs = [
