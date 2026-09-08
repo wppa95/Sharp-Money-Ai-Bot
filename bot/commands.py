@@ -4843,9 +4843,25 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             except ValueError:
                 pass
 
+        # Scan-cycle counts are session-scoped for live funnel reporting.
+        # Otherwise `/funnel 1` immediately after a restart includes rows
+        # written by the previous process and looks like this session already
+        # completed several scans.
+        _funnel_session_started = None
+        try:
+            from engine.health import get_health_tracker as _get_ht_session
+            _ht_session = _get_ht_session()
+            if _ht_session is not None:
+                _funnel_session_started = _ht_session.monitoring_session_started()
+        except Exception:
+            pass
+
         # Fetch scan pipeline summary (non-fatal: new method may not exist on old schema)
         _scan_result, _summary_result = await _independent_report_reads([
-            _db.get_scan_cycle_summary(since_hours=since_h),
+            _db.get_scan_cycle_summary(
+                since_hours=since_h,
+                session_started_at=_funnel_session_started,
+            ),
             _db.get_funnel_summary(since_hours=since_h),
         ])
         scan_summary: dict = _scan_result if isinstance(_scan_result, dict) else {}
@@ -5097,7 +5113,13 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             # sc_cold = cold-start re-scored (first cycle after restart, every active prop).
             lines += [
                 "",
-                f"<i>Last {since_h}h  ·  {sc_cycles} scans  (~{_avg_mins}min each)</i>",
+                 (
+                     f"<i>Current session (up to {since_h}h)  ·  {sc_cycles} scans"
+                     f"  (~{_avg_mins}min each)</i>"
+                     if scan_summary.get("session_scoped")
+                     else f"<i>Last {since_h}h  ·  {sc_cycles} scans"
+                     f"  (~{_avg_mins}min each)</i>"
+                 ),
                 "",
                 "📡 <b>Full Monitoring Pipeline</b>",
                 "",

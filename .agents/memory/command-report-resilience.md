@@ -37,3 +37,13 @@ mandatory incorrectly reported the entire funnel as unavailable.
 **How to apply:** Render scan-cycle counts when available, mark only the
 normalized population section as degraded if needed, and show UNAVAILABLE only
 when both the cycle log and population sources fail.
+
+Live scan-cycle reports should use the current monitoring session as their
+lower time bound; historical windows can remain for population and performance
+sections.
+
+**Why:** A one-hour aggregate after restart included pre-restart scan rows,
+making a fresh session appear to have already completed multiple scans.
+
+**How to apply:** Pass the session start timestamp into ScanCycleLog reports
+and label the result as current-session scoped.

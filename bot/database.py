@@ -13,7 +13,7 @@ import logging
 import os
 import time
 import weakref
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Iterable, Optional
 
@@ -6788,14 +6788,43 @@ class Database:
                 if "duplicate column name" not in str(exc).lower():
                     logger.debug("scan_cycle_log migration skipped: %s", exc)
 
-    async def get_scan_cycle_summary(self, since_hours: int = 24) -> dict:
+    async def get_scan_cycle_summary(
+        self,
+        since_hours: int = 24,
+        session_started_at: Optional[object] = None,
+    ) -> dict:
         """Aggregate ScanCycleLog for the full pipeline view in /funnel.
 
         Returns a dict with cumulative pipeline counts over the requested window,
-        plus cycles (number of scan cycles recorded).
+        plus cycles (number of scan cycles recorded).  When a live monitoring
+        session start is supplied, the scan population is also restricted to
+        that session so a restart cannot make a fresh ``/funnel 1`` report
+        include rows from the previous process.
         """
         from datetime import timedelta
         cutoff = datetime.utcnow() - timedelta(hours=since_hours)
+        if session_started_at is not None:
+            try:
+                if isinstance(session_started_at, datetime):
+                    session_cutoff = session_started_at
+                else:
+                    _session_text = str(session_started_at).strip()
+                    if _session_text.endswith(" UTC"):
+                        _session_text = _session_text[:-4] + "+00:00"
+                    session_cutoff = datetime.fromisoformat(
+                        _session_text.replace("Z", "+00:00")
+                    )
+                if session_cutoff.tzinfo is not None:
+                    session_cutoff = session_cutoff.astimezone(timezone.utc).replace(
+                        tzinfo=None
+                    )
+                cutoff = max(cutoff, session_cutoff)
+            except (TypeError, ValueError):
+                logger.debug(
+                    "get_scan_cycle_summary: invalid session start %r",
+                    session_started_at,
+                )
+        scan_filter = ScanCycleLog.scan_ts >= cutoff
         async with self.session() as s:
             result = await s.execute(
                 select(
@@ -6812,17 +6841,20 @@ class Database:
                     func.sum(ScanCycleLog.qualified).label("qualified"),
                     func.sum(ScanCycleLog.alert_delivered).label("alert_delivered"),
                 )
-                .where(ScanCycleLog.scan_ts >= cutoff)
+                .where(scan_filter)
             )
             row = result.one_or_none()
             if row is None or (row.cycles or 0) == 0:
-                return {"cycles": 0}
+                return {
+                    "cycles": 0,
+                    "session_scoped": session_started_at is not None,
+                }
             actionable_by_sport: dict[str, int] = {}
             removed_by_sport: dict[str, int] = {}
             maps = await s.execute(select(
                 ScanCycleLog.actionable_by_sport,
                 ScanCycleLog.removed_by_sport,
-            ).where(ScanCycleLog.scan_ts >= cutoff))
+            ).where(scan_filter))
             for actionable_json, removed_json in maps.all():
                 for target, raw in (
                     (actionable_by_sport, actionable_json),
@@ -6851,6 +6883,7 @@ class Database:
                 "alert_delivered":  row.alert_delivered or 0,
                 "actionable_by_sport": actionable_by_sport,
                 "removed_by_sport":    removed_by_sport,
+                "session_scoped": session_started_at is not None,
             }
 
     async def get_funnel_summary(self, since_hours: int = 24) -> dict:
