@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -126,3 +127,72 @@ def test_serialized_validation_json_keeps_propline_provenance_and_count():
 
     assert _has_strong_underdog_evidence(decision=decision) is True
     assert market_engine._has_strong_delivery_evidence(decision=decision) is True
+
+
+def test_telegram_delivery_accepts_strong_over_from_any_supported_window():
+    validation = SimpleNamespace(
+        has_supporting_data=True,
+        data_source="real",
+        n_real_games=10,
+        n_supplemental_games=0,
+    )
+    for window in ("l5", "l10", "l20", "l30", "season"):
+        decision = SimpleNamespace(
+            recommendation="OVER",
+            **{
+                f"{window}_games": 10,
+                f"{window}_over": 7,
+            },
+        )
+        assert market_engine._has_strong_delivery_evidence(
+            validation=validation,
+            decision=decision,
+        ) is True
+
+
+def test_telegram_delivery_accepts_strong_under_at_forty_percent_or_less():
+    validation = SimpleNamespace(
+        has_supporting_data=True,
+        data_source="real",
+        n_real_games=10,
+        n_supplemental_games=0,
+    )
+    for window in ("l5", "l10", "l20", "l30", "season"):
+        decision = SimpleNamespace(
+            recommendation="UNDER",
+            **{
+                f"{window}_games": 10,
+                # 4/10 OVER = 40%, so the complementary UNDER count is 6/10.
+                f"{window}_under": 6,
+            },
+        )
+        assert market_engine._has_strong_delivery_evidence(
+            validation=validation,
+            decision=decision,
+        ) is True
+
+
+def test_telegram_delivery_rejects_direction_without_strong_window():
+    validation = SimpleNamespace(
+        has_supporting_data=True,
+        data_source="real",
+        n_real_games=10,
+        n_supplemental_games=0,
+    )
+    decision = SimpleNamespace(
+        recommendation="UNDER",
+        l5_games=10,
+        l5_over=5,
+        l10_games=10,
+        l10_over=5,
+        l20_games=10,
+        l20_over=5,
+        l30_games=10,
+        l30_over=5,
+        season_games=10,
+        season_over=5,
+    )
+    assert market_engine._has_strong_delivery_evidence(
+        validation=validation,
+        decision=decision,
+    ) is False

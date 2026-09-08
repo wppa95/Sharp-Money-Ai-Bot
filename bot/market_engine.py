@@ -3533,7 +3533,9 @@ def _has_strong_delivery_evidence(
     """Return whether existing scoring/validation data supports delivery.
 
     This is deliberately a delivery-only check.  It does not change scoring,
-    persistence, grading, or whether a prop is evaluated.
+    persistence, grading, or whether a prop is evaluated.  A directional
+    result must have at least one strong completed-result window: 70%+ OVER
+    or 40%- UNDER across L5, L10, L20, L30, or season.
     """
     def _strong_directional_history(obj: object) -> bool:
         recommendation = str(
@@ -3543,36 +3545,42 @@ def _has_strong_delivery_evidence(
         ).upper()
         if recommendation not in {"OVER", "UNDER"}:
             return False
-        prefixes = (
-            ("l5", "l10", "l15", "l30", "season")
-            if recommendation == "OVER"
-            else ("l5", "l10", "l20", "l30", "season")
-        )
-        threshold = 0.70 if recommendation == "OVER" else 0.60
+        prefixes = ("l5", "l10", "l20", "l30", "season")
         for prefix in prefixes:
             if isinstance(obj, dict):
                 window = obj.get(prefix) or {}
                 games = window.get("g")
-                count = window.get("o" if recommendation == "OVER" else "u")
+                over_count = window.get("o")
                 if (
-                    recommendation == "UNDER"
-                    and count is None
+                    over_count is None
                     and isinstance(games, (int, float))
-                    and isinstance(window.get("o"), (int, float))
+                    and isinstance(window.get("u"), (int, float))
                 ):
-                    count = games - window["o"]
+                    over_count = games - window["u"]
             else:
                 games = getattr(obj, f"{prefix}_games", None)
-                count = getattr(
-                    obj,
-                    f"{prefix}_{'over' if recommendation == 'OVER' else 'under'}",
-                    None,
-                )
+                over_count = getattr(obj, f"{prefix}_over", None)
+                if (
+                    over_count is None
+                    and isinstance(games, (int, float))
+                ):
+                    under_count = getattr(obj, f"{prefix}_under", None)
+                    if isinstance(under_count, (int, float)):
+                        over_count = games - under_count
             if (
                 isinstance(games, (int, float))
                 and games >= 5
-                and isinstance(count, (int, float))
-                and count / games >= threshold
+                and isinstance(over_count, (int, float))
+                and (
+                    (
+                        recommendation == "OVER"
+                        and over_count / games >= 0.70
+                    )
+                    or (
+                        recommendation == "UNDER"
+                        and over_count / games <= 0.40
+                    )
+                )
             ):
                 return True
         return False
@@ -3628,18 +3636,24 @@ def _has_strong_delivery_evidence(
             )
         )
         if enough_games:
-            return True
+            # Validation-only callers use this helper to check provenance
+            # before a decision exists. Actual delivery must also satisfy the
+            # strong directional window rule above.
+            return decision is None or _strong_directional_history(decision)
     for obj in (decision, intelligence_trace):
         if isinstance(obj, dict):
-            # Serialized provenance is already a completed-evidence assertion;
-            # direction remains independently enforced by _tier_delivery_gate.
             if serialized_evidence_supports_delivery(obj):
-                return True
-            if (
-                _strong_directional_history(obj)
-                and serialized_evidence_supports_delivery(obj)
-            ):
-                return True
+                recommendation = str(
+                    obj.get("recommendation") or obj.get("rec") or ""
+                ).upper()
+                # Evidence-only compatibility payloads have no direction to
+                # qualify here; the canonical delivery gate handles direction.
+                # Once a payload is directional, require the same strong
+                # window rule as object decisions.
+                if recommendation not in {"OVER", "UNDER"}:
+                    return True
+                if _strong_directional_history(obj):
+                    return True
             continue
         if obj is not None:
             for attr in ("evidence", "bet_evidence", "intelligence_trace"):
