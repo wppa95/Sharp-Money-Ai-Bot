@@ -209,6 +209,9 @@ async def test_funnel_separates_observations_active_directional_and_delivery(db)
 
     assert summary["tracked"] == 1
     assert summary["tracked_observations"] == 2
+    assert summary["observations_by_sport"] == {"NBA": 2}
+    assert summary["active_by_sport"] == {"NBA": 1}
+    assert summary["active_tracked"] <= summary["historical_observations"]
     assert summary["directional_total"] == 1
     assert summary["delivered"] == 0
     assert summary["pending"] == 1

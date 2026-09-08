@@ -6893,6 +6893,9 @@ class Database:
 
         Every persisted provider observation is monitoring data.  Alert
         delivery is reported separately and never changes tracking status.
+        The active population is limited to latest prop rows observed inside
+        the requested report window, so every active row has an observation
+        in the same funnel population.
         ``PropCandidateLog`` fallback exists only for old databases/tests that
         have no normalized history rows yet; the returned ``tracked`` field
         always represents the monitoring population, not Telegram delivery.
@@ -6930,6 +6933,7 @@ class Database:
                     PropLineHistory.sport,
                 ).where(
                     PropLineHistory.id.in_(current_ids),
+                    PropLineHistory.fetched_at >= cutoff,
                     or_(
                         PropLineHistory.removed == False,  # noqa: E712
                         PropLineHistory.removed.is_(None),
@@ -7034,7 +7038,6 @@ class Database:
 
             by_sport_counts: dict[str, int] = {}
             by_provider_counts: dict[str, int] = {}
-            observation_by_sport: dict[str, int] = {}
             active_by_provider: dict[str, int] = {}
             active_by_sport: dict[str, int] = {}
             for provider, sport in current_rows:
@@ -7114,8 +7117,10 @@ class Database:
                     )
 
             # Directional opportunities and delivery are separate populations
-            # from the active observation universe. Scope these to the report
-            # window, while keeping the current active universe all-time.
+            # from the active observation universe. All populations here are
+            # scoped to the requested report window so the funnel remains
+            # ordered: observed -> active -> evaluated -> directional ->
+            # delivered.
             opportunity_rows = await s.execute(
                 select(
                     PropOpportunityLog.provider,
