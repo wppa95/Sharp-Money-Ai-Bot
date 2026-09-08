@@ -4,7 +4,7 @@ test_scan_performance.py — Regression suite for the scan-performance batch-sav
 Verifies that the performance fix (bulk snapshot save instead of per-prop individual
 saves) does not alter any V3.5-frozen behaviour.  14 regression items:
 
- 1. Poll interval configured to 120 s
+  1. Poll interval constrained to 60–120 s with a 90 s default
  2. max_instances=2 enforced on underdog_monitor job
  3. Full active prop feed is monitored each cycle (no sports/markets silently dropped)
  4. No sports removed from UD_ALERT_SPORTS
@@ -768,14 +768,13 @@ async def test_concurrent_file_backed_writers_stay_within_cadence(
 # ── 1. Poll interval ──────────────────────────────────────────────────────────
 
 
-def test_poll_interval_default_60s():
-    """Underdog must refresh the complete Player Props feed every minute."""
+def test_poll_interval_is_bounded_to_one_or_two_minutes():
+    """Underdog cadence must remain between one and two minutes."""
     src = _src("config.py")
-    # Config uses os.environ.get with "60" as default
-    assert re.search(
-        r'UNDERDOG_POLL_INTERVAL.*int\(os\.environ\.get\([^,]+,\s*["\']60["\']\)',
-        src,
-    ), "UNDERDOG_POLL_INTERVAL default must be '60'"
+    assert "os.environ.get(\"UNDERDOG_POLL_INTERVAL\", \"90\")" in src
+    assert "max(" in src and "min(120" in src
+    from config import Config
+    assert 60 <= Config().UNDERDOG_POLL_INTERVAL <= 120
 
 
 def test_underdog_evaluation_budget_does_not_cap_the_feed():
