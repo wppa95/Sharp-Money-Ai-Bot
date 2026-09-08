@@ -1257,14 +1257,27 @@ async def _grade_opportunities_job(context) -> None:
                 str(opp.sport),
                 str(opp.stat_type or "").lower().strip(),
             )
-            _date = (
+            _event_date = (
                 opp.game_time.strftime("%Y-%m-%d")
                 if getattr(opp, "game_time", None)
                 else ""
             )
+            # Older Underdog rows may have only the source event ID. That ID
+            # is not the same namespace as official player-game results, while
+            # detected_at is the durable date captured when the opportunity
+            # entered the database. Use it only as a dated DB lookup fallback.
+            if (
+                not _event_date
+                and getattr(opp, "game_id", "")
+                and getattr(opp, "detected_at", None)
+            ):
+                _event_date = opp.detected_at.strftime("%Y-%m-%d")
             _game_id = str(getattr(opp, "game_id", "") or "")
             return any(
-                (_date and str(getattr(row, "game_date", "") or "") == _date)
+                (
+                    _event_date
+                    and str(getattr(row, "game_date", "") or "") == _event_date
+                )
                 or (
                     _game_id
                     and str(getattr(row, "game_id", "") or "") == _game_id
@@ -1417,6 +1430,15 @@ async def _grade_opportunities_job(context) -> None:
                 if opp.game_time
                 else None
             )
+            if (
+                not game_date
+                and getattr(opp, "game_id", "")
+                and getattr(opp, "detected_at", None)
+            ):
+                # Use the database observation date when the source event has
+                # no kickoff timestamp. The result lookup remains date-bound;
+                # it never falls back to player/stat alone.
+                game_date = opp.detected_at.strftime("%Y-%m-%d")
             # Feed event timestamps are UTC, while official player-result
             # providers key their rows by the local game calendar date. A
             # late-night UTC event therefore commonly settles on the prior

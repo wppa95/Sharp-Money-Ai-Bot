@@ -4,16 +4,19 @@ description: How the primary PrizePicks feed is scheduled without a competing jo
 ---
 
 The primary PrizePicks monitor is a branch of the same scheduled monitoring
-cycle as Underdog. Each Underdog scheduler trigger starts both branches
-concurrently, and the shared cycle does not complete until both branches have
-finished. It fetches one configured PrizePicks sport per cycle and must not call
-the provider-wide all-sports fetch in production. The provider's own request
+cycle as Underdog. Each Underdog scheduler trigger starts the paced PropLine
+ingestion and the Underdog branch under one owner; the shared cycle must await
+ingestion before consuming its handoff, then evaluate the completed batch. It
+fetches one configured PrizePicks sport per cycle and must not call the
+provider-wide all-sports fetch in production. The provider's own request
 pacing remains internal to that branch.
 
 **Why:** A heartbeat handoff created a second effective monitoring rhythm:
 PropLine could still be processing an older cycle while Underdog started the
-next one. Shared ownership makes cadence and completion explicit without
-slowing either provider or changing the authorized client's pacing.
+next one. Consuming the handoff before the paced request completed also made
+successful fetches appear as recurring empty evaluator batches. Shared
+ownership makes cadence and completion explicit without adding a second fetch
+path or changing the authorized client's pacing.
 
 The result-metadata fetch adapter must follow the same one-sport limit as the
 legacy scoped adapter; exposing fetch success metadata is not permission to

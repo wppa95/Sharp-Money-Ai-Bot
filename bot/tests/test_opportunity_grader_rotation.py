@@ -172,6 +172,47 @@ async def test_grader_reconciles_old_event_identity_without_game_time():
 
 
 @pytest.mark.asyncio
+async def test_grader_uses_database_observation_date_when_event_time_is_missing():
+    """Stored official evidence must not require a mismatched source event ID."""
+    row = _opp(23, "Stored Player", "Points")
+    row.game_time = None
+    row.detected_at = datetime(2026, 9, 5, 18, 0)
+    row.game_id = "underdog-event-23"
+
+    stored = SimpleNamespace(game_date="2026-09-05", game_id="official-23")
+    db = MagicMock()
+    db.get_pending_opportunities = AsyncMock(return_value=[row])
+    db.get_player_results_bulk = AsyncMock(
+        return_value={
+            ("Stored Player", "NBA", "points"): [stored],
+        }
+    )
+    db.get_game_result_for_grading = AsyncMock(
+        side_effect=lambda player, sport, stat, game_date, **kwargs: (
+            SimpleNamespace(actual_value=11.0)
+            if game_date == "2026-09-05"
+            else None
+        )
+    )
+    db.grade_opportunity = AsyncMock()
+    health = _Health()
+    provider = MagicMock()
+    provider.fetch_results = AsyncMock(return_value=[])
+
+    with (
+        patch.object(main, "get_health_tracker", return_value=health),
+        patch("providers.player_stats.PlayerStatsProvider", return_value=provider),
+    ):
+        await main._grade_opportunities_job(_context(db))
+
+    assert db.get_game_result_for_grading.await_args.args[3] == "2026-09-05"
+    db.grade_opportunity.assert_awaited_once_with(
+        23, "HIT", 11.0, error_type=None
+    )
+    provider.fetch_results.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_grader_fetches_concurrently_with_a_bounded_batch():
     opportunities = [_opp(i, f"Player {i}", "Points") for i in range(1, 31)]
     db = MagicMock()

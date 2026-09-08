@@ -3810,9 +3810,25 @@ def _shared_monitoring_cycle(cycle_branch):
                 "reusing its queued handoff"
             )
 
+        # The ingestion task is still the only paced PropLine request owner,
+        # but the evaluator must not consume the handoff before that request
+        # has finished. Waiting here preserves one request per cycle while
+        # ensuring a successful fetch reaches canonical persistence/evaluation
+        # instead of producing a recurring empty "paced" batch.
+        _ingest_task = _propline_ingest_task
+        if _ingest_task is not None and not _ingest_task.done():
+            try:
+                await _ingest_task
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                logger.error(
+                    "shared_monitoring_cycle: PropLine ingestion failed: %s",
+                    exc,
+                )
+
         # Consume observations collected by the prior shared cycle. Newly
-        # ingested rows remain queued for the next cycle, which preserves a
-        # deterministic evaluation snapshot.
+        # ingested rows are now available to this evaluation snapshot.
         pending_props = list(_propline_pending_props.values())
         _propline_pending_props.clear()
 

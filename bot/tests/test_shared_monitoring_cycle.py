@@ -16,7 +16,7 @@ import market_engine
 
 
 @pytest.mark.asyncio
-async def test_shared_cycle_starts_both_branches_without_waiting_for_propline(monkeypatch):
+async def test_shared_cycle_waits_for_propline_ingestion_before_evaluation(monkeypatch):
     events = []
     underdog_release = asyncio.Event()
     completed = []
@@ -25,7 +25,11 @@ async def test_shared_cycle_starts_both_branches_without_waiting_for_propline(mo
         def record_monitoring_cycle_complete(self):
             completed.append("complete")
 
-    async def propline_branch(_context):
+    async def propline_ingestion(_context):
+        events.append("ingestion-start")
+        events.append("ingestion-end")
+
+    async def propline_branch(_context, **_kwargs):
         events.append("propline-start")
         events.append("propline-end")
 
@@ -35,14 +39,19 @@ async def test_shared_cycle_starts_both_branches_without_waiting_for_propline(mo
         events.append("underdog-end")
 
     monkeypatch.setattr(market_engine, "_run_prizepicks_independent_cycle", propline_branch)
+    monkeypatch.setattr(
+        market_engine, "propline_request_scan_job", propline_ingestion
+    )
     monkeypatch.setattr(market_engine, "get_health_tracker", lambda: Health())
 
     shared_cycle = market_engine._shared_monitoring_cycle(underdog_branch)
     task = asyncio.create_task(shared_cycle(SimpleNamespace()))
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
+    for _ in range(5):
+        await asyncio.sleep(0)
 
     assert set(events) == {
+        "ingestion-start",
+        "ingestion-end",
         "propline-start",
         "propline-end",
         "underdog-start",
@@ -54,6 +63,8 @@ async def test_shared_cycle_starts_both_branches_without_waiting_for_propline(mo
     assert "underdog-end" in events
     await task
     assert set(events) == {
+        "ingestion-start",
+        "ingestion-end",
         "propline-start",
         "underdog-start",
         "underdog-end",
