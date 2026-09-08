@@ -813,6 +813,14 @@ class TestIssue1QualifiedIsIntermediate:
         assert "log_prop_opportunity" in src
         assert "watchlist_state" in src
 
+    def test_tracking_write_is_awaited_before_scan_continues(self):
+        """Every valid observation must be confirmed before delivery bookkeeping."""
+        src = inspect.getsource(__import__("market_engine").underdog_job)
+        tracking_idx = src.find("_tracking_operation = _track_props")
+        await_idx = src.find("await _cycle_timing.await_db", tracking_idx)
+        assert tracking_idx != -1
+        assert await_idx > tracking_idx
+
     def test_delivery_gates_after_prop_candidate_log(self):
         """Delivery gates (confidence, live/past) apply AFTER PropCandidateLog write."""
         src = inspect.getsource(__import__("market_engine").underdog_job)

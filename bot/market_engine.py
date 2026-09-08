@@ -4499,37 +4499,24 @@ async def underdog_job(context) -> None:
     _track_props = getattr(db, "track_prop_records", None)
     if callable(_track_props) and _tracking_records:
         try:
-            if isinstance(db, Database):
-                _tracking_batch = list(_tracking_records)
-                if not _enqueue_db_persistence(
-                    "track Underdog prop observations",
-                    lambda batch=_tracking_batch: db.track_prop_records(batch),
-                ):
-                    _tracking_operation = _track_props(_tracking_batch)
-                    if inspect.isawaitable(_tracking_operation):
-                        await _cycle_timing.await_db(
-                            "write",
-                            "track_prop_records",
-                            _tracking_operation,
-                        )
-            else:
-                _tracking_operation = _track_props(_tracking_records)
-                if not inspect.isawaitable(_tracking_operation):
-                    logger.debug(
-                        "underdog_job: tracking hook is not awaitable; "
-                        "skipping compatibility stub"
-                    )
-                else:
-                    _tracked_count = await _cycle_timing.await_db(
-                        "write",
-                        "track_prop_records",
-                        _tracking_operation,
-                    )
-                    if (
-                        _tracked_count is not None
-                        and int(_tracked_count) < len(_tracking_records)
-                    ):
-                        raise RuntimeError("incomplete Underdog tracking write")
+            # This is the grading durability boundary, not optional telemetry.
+            # Await it before scoring/delivery can finish so props with no
+            # evidence, PASS decisions, or no Telegram delivery still have a
+            # confirmed settlement row in PropTrackingLog.
+            _tracking_batch = list(_tracking_records)
+            _tracking_operation = _track_props(_tracking_batch)
+            if not inspect.isawaitable(_tracking_operation):
+                raise RuntimeError("Underdog tracking hook is not awaitable")
+            _tracked_count = await _cycle_timing.await_db(
+                "write",
+                "track_prop_records",
+                _tracking_operation,
+            )
+            if (
+                _tracked_count is not None
+                and int(_tracked_count) < len(_tracking_records)
+            ):
+                raise RuntimeError("incomplete Underdog tracking write")
         except Exception as _tracking_exc:  # noqa: BLE001
             _persistence_ok = False
             logger.warning(
