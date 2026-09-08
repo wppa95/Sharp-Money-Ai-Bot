@@ -7040,6 +7040,9 @@ class Database:
             tracked_by_provider: dict[str, int] = {}
             tracked_by_sport: dict[str, int] = {}
             tracked_result_counts: dict[str, int] = {}
+            tracked_pending_by_provider: dict[str, int] = {}
+            tracked_resolved_by_provider: dict[str, int] = {}
+            tracked_result_counts_by_provider: dict[str, dict[str, int]] = {}
             for provider, sport, result in tracking_res.all():
                 if not _is_supported_tracking_sport(sport):
                     continue
@@ -7054,13 +7057,25 @@ class Database:
                 tracked_result_counts[result_key] = (
                     tracked_result_counts.get(result_key, 0) + 1
                 )
+                provider_results = tracked_result_counts_by_provider.setdefault(
+                    provider_key, {}
+                )
+                provider_results[result_key] = (
+                    provider_results.get(result_key, 0) + 1
+                )
                 if result_key == "PENDING":
                     tracked_pending += 1
+                    tracked_pending_by_provider[provider_key] = (
+                        tracked_pending_by_provider.get(provider_key, 0) + 1
+                    )
                 elif result_key in {
                     "HIT", "MISS", "PUSH", "VOID", "CANCELLED",
                     "INJURY_VOID", "GAME_INTERRUPTED",
                 }:
                     tracked_resolved += 1
+                    tracked_resolved_by_provider[provider_key] = (
+                        tracked_resolved_by_provider.get(provider_key, 0) + 1
+                    )
 
             # Directional opportunities and delivery are separate populations
             # from the active observation universe. Scope these to the report
@@ -7181,9 +7196,11 @@ class Database:
                     "directional": directional_by_provider.get(provider, 0),
                     "actionable": directional_by_provider.get(provider, 0),
                     "delivered": delivered_by_provider.get(provider, 0),
-                    "pending": pending_by_provider.get(provider, 0),
-                    "resolved": resolved_by_provider.get(provider, 0),
-                    "result_counts": result_counts_by_provider.get(provider, {}),
+                    "pending": tracked_pending_by_provider.get(provider, 0),
+                    "resolved": tracked_resolved_by_provider.get(provider, 0),
+                    "result_counts": tracked_result_counts_by_provider.get(
+                        provider, {}
+                    ),
                     "tracked": tracked_by_provider.get(provider, 0),
                 }
         return {
@@ -7206,6 +7223,9 @@ class Database:
             "tracked_by_provider": tracked_by_provider,
             "tracked_by_sport": tracked_by_sport,
             "tracked_result_counts": tracked_result_counts,
+            "tracked_pending_by_provider": tracked_pending_by_provider,
+            "tracked_resolved_by_provider": tracked_resolved_by_provider,
+            "tracked_result_counts_by_provider": tracked_result_counts_by_provider,
             "directional_total": directional_total,
             "actionable_total": directional_total,
             "delivered": delivered_total,

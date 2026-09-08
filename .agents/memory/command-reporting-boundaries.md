@@ -20,3 +20,15 @@ Status readiness must distinguish missing real player-game evidence from a sport
 **Why:** A configured multi-sport slate can be healthy and fully scanned while only one sport has usable evidence. Collapsing that state into “no picks” hides provider coverage failures, while treating shadow data as evidence would misrepresent actionable readiness.
 
 **How to apply:** Build readiness from source-level player-result coverage plus recent directional opportunity counts, and keep the report separate from delivery and market-observation totals.
+
+Universal tracking grading is its own population: pending and resolved counts in
+the tracking funnel must come from `PropTrackingLog`, not from directional
+`PropOpportunityLog` rows.
+
+**Why:** A healthy feed can have many tracked lines awaiting settlement while
+having zero directional recommendations in the same window; using opportunity
+grades makes the tracking funnel falsely appear empty.
+
+**How to apply:** Keep directional pending/resolved metrics separate, but make
+the primary tracking/grading display use the universal ledger and preserve
+provider-level result counts.

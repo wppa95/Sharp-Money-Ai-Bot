@@ -8,7 +8,12 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import select
 
-from database import Database, PropLineHistory, PropOpportunityLog
+from database import (
+    Database,
+    PropLineHistory,
+    PropOpportunityLog,
+    PropTrackingLog,
+)
 from engine.backtesting import BacktestEngine
 
 
@@ -184,6 +189,19 @@ async def test_funnel_separates_observations_active_directional_and_delivery(db)
                 alert_sent=False,
                 detected_at=now,
             ),
+            PropTrackingLog(
+                external_id="ud-tracked-1:line=20.5",
+                player_name="Tracked Player",
+                team="TEAM",
+                sport="NBA",
+                stat_type="Rebounds",
+                line_value=20.5,
+                game_time=now + timedelta(hours=2),
+                game_id="game-ud-tracked-1",
+                provider="Underdog",
+                detected_at=now,
+                result="PENDING",
+            ),
         ])
         await session.commit()
 
@@ -195,6 +213,10 @@ async def test_funnel_separates_observations_active_directional_and_delivery(db)
     assert summary["delivered"] == 0
     assert summary["pending"] == 1
     assert summary["resolved"] == 0
+    assert summary["tracked_pending"] == 1
+    assert summary["tracked_resolved"] == 0
+    assert summary["tracked_result_counts"] == {"PENDING": 1}
+    assert summary["provider_breakdown"]["Underdog"]["pending"] == 1
     assert summary["directional_by_provider"] == {"Underdog": 1}
     assert summary["delivered_by_provider"] == {}
 

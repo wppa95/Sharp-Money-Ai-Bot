@@ -4873,8 +4873,20 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         directional_total = int(
             summary.get("directional_total", summary.get("total", 0)) or 0
         )
-        pending_total = int(summary.get("pending", 0) or 0)
-        resolved_total = int(summary.get("resolved", 0) or 0)
+        # Grading belongs to the universal tracking ledger, not only to
+        # directional opportunities. A current feed can have many pending or
+        # resolved tracked props while producing zero OVER/UNDER opportunities.
+        pending_total = int(
+            summary.get("tracked_pending", summary.get("pending", 0)) or 0
+        )
+        resolved_total = int(
+            summary.get("tracked_resolved", summary.get("resolved", 0)) or 0
+        )
+        tracked_result_counts = (
+            summary.get("tracked_result_counts")
+            or summary.get("result_counts")
+            or {}
+        )
         delivered_total = int(summary.get("delivered", 0) or 0)
 
         def _fmt_rate(num: int, denom: int) -> str:
@@ -4960,10 +4972,11 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     f"  ·  Directional: <code>{int(_row.get('directional', _row.get('actionable_persisted', 0)) or 0):,}</code>",
                     f"    Actionable persisted: <code>{int(_row.get('actionable_persisted', 0) or 0):,}</code>"
                     f"  ·  Delivered: <code>{int(_delivered or 0):,}</code>",
-                    f"    Pending: <code>{int(_row.get('pending', 0) or 0):,}</code>"
+                    f"    Pending grading: <code>{int(_row.get('pending', 0) or 0):,}</code>"
                     f"  ·  Resolved: <code>{int(_row.get('resolved', 0) or 0):,}</code>"
-                    f"  ·  H/M/P: <code>{int(_row.get('hit', 0) or 0)}/"
-                    f"{int(_row.get('miss', 0) or 0)}/{int(_row.get('push', 0) or 0)}</code>",
+                    f"  ·  H/M/P: <code>{int((_row.get('result_counts') or {}).get('HIT', 0) or 0)}/"
+                    f"{int((_row.get('result_counts') or {}).get('MISS', 0) or 0)}/"
+                    f"{int((_row.get('result_counts') or {}).get('PUSH', 0) or 0)}</code>",
                 ]
 
         # ── Section 1: Scan Pipeline (from ScanCycleLog) ─────────────────────────────
@@ -5177,11 +5190,11 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             f"🔬 Rescored: <b>{sc_rescored:,}</b>",
             f"📈 Line movers: <b>{sc_movers:,}</b>",
             f"📤 Delivered alerts: <b>{delivered_total:,}</b>",
-            f"⏳ Pending grading: <b>{pending_total:,}</b>",
-            f"🏁 Resolved outcomes: <b>{resolved_total:,}</b>",
-            f"   └─ HIT / MISS / PUSH: <b>{int((summary.get('result_counts', {}) or {}).get('HIT', 0) or 0):,} / "
-            f"{int((summary.get('result_counts', {}) or {}).get('MISS', 0) or 0):,} / "
-            f"{int((summary.get('result_counts', {}) or {}).get('PUSH', 0) or 0):,}</b>",
+            f"⏳ Pending grading (tracked props): <b>{pending_total:,}</b>",
+            f"🏁 Resolved tracked outcomes: <b>{resolved_total:,}</b>",
+            f"   └─ HIT / MISS / PUSH: <b>{int(tracked_result_counts.get('HIT', 0) or 0):,} / "
+            f"{int(tracked_result_counts.get('MISS', 0) or 0):,} / "
+            f"{int(tracked_result_counts.get('PUSH', 0) or 0):,}</b>",
             "",
             "<i>Direction is the persisted actionable population; delivery is recorded separately.</i>",
             "<i>Quality, evidence, deduplication, and live-game safeguards still govern delivery.</i>",
