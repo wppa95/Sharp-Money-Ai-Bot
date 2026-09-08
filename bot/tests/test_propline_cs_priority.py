@@ -129,47 +129,57 @@ def test_serialized_validation_json_keeps_propline_provenance_and_count():
     assert market_engine._has_strong_delivery_evidence(decision=decision) is True
 
 
-def test_telegram_delivery_accepts_strong_over_from_any_supported_window():
+def test_telegram_delivery_requires_strong_over_in_every_window():
     validation = SimpleNamespace(
         has_supporting_data=True,
         data_source="real",
         n_real_games=10,
         n_supplemental_games=0,
     )
-    for window in ("l5", "l10", "l20", "l30", "season"):
-        decision = SimpleNamespace(
-            recommendation="OVER",
+    decision = SimpleNamespace(
+        recommendation="OVER",
+        **{
             **{
-                f"{window}_games": 10,
-                f"{window}_over": 7,
+                f"{window}_games": 10
+                for window in ("l5", "l10", "l20", "l30", "season")
             },
-        )
-        assert market_engine._has_strong_delivery_evidence(
-            validation=validation,
-            decision=decision,
-        ) is True
+            **{
+                f"{window}_over": 7
+                for window in ("l5", "l10", "l20", "l30", "season")
+            },
+        },
+    )
+    assert market_engine._has_strong_delivery_evidence(
+        validation=validation,
+        decision=decision,
+    ) is True
 
 
-def test_telegram_delivery_accepts_strong_under_at_forty_percent_or_less():
+def test_telegram_delivery_requires_strong_under_in_every_window():
     validation = SimpleNamespace(
         has_supporting_data=True,
         data_source="real",
         n_real_games=10,
         n_supplemental_games=0,
     )
-    for window in ("l5", "l10", "l20", "l30", "season"):
-        decision = SimpleNamespace(
-            recommendation="UNDER",
+    decision = SimpleNamespace(
+        recommendation="UNDER",
+        **{
             **{
-                f"{window}_games": 10,
+                f"{window}_games": 10
+                for window in ("l5", "l10", "l20", "l30", "season")
+            },
+            **{
                 # 4/10 OVER = 40%, so the complementary UNDER count is 6/10.
-                f"{window}_under": 6,
+                f"{window}_under": 6
+                for window in ("l5", "l10", "l20", "l30", "season")
             },
-        )
-        assert market_engine._has_strong_delivery_evidence(
-            validation=validation,
-            decision=decision,
-        ) is True
+        },
+    )
+    assert market_engine._has_strong_delivery_evidence(
+        validation=validation,
+        decision=decision,
+    ) is True
 
 
 def test_telegram_delivery_rejects_direction_without_strong_window():
@@ -191,6 +201,32 @@ def test_telegram_delivery_rejects_direction_without_strong_window():
         l30_over=5,
         season_games=10,
         season_over=5,
+    )
+    assert market_engine._has_strong_delivery_evidence(
+        validation=validation,
+        decision=decision,
+    ) is False
+
+
+def test_telegram_delivery_rejects_when_one_required_window_is_missing():
+    validation = SimpleNamespace(
+        has_supporting_data=True,
+        data_source="real",
+        n_real_games=50,
+        n_supplemental_games=0,
+    )
+    decision = SimpleNamespace(
+        recommendation="OVER",
+        l5_games=10,
+        l5_over=7,
+        l10_games=10,
+        l10_over=7,
+        l20_games=20,
+        l20_over=14,
+        l30_games=None,
+        l30_over=None,
+        season_games=50,
+        season_over=35,
     )
     assert market_engine._has_strong_delivery_evidence(
         validation=validation,

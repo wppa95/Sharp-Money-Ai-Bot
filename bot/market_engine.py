@@ -3534,8 +3534,8 @@ def _has_strong_delivery_evidence(
 
     This is deliberately a delivery-only check.  It does not change scoring,
     persistence, grading, or whether a prop is evaluated.  A directional
-    result must have at least one strong completed-result window: 70%+ OVER
-    or 40%- UNDER across L5, L10, L20, L30, or season.
+    result must have strong completed-result evidence in every required
+    window: 70%+ OVER or 40%- UNDER across L5, L10, L20, L30, and season.
     """
     def _strong_directional_history(obj: object) -> bool:
         recommendation = str(
@@ -3546,6 +3546,7 @@ def _has_strong_delivery_evidence(
         if recommendation not in {"OVER", "UNDER"}:
             return False
         prefixes = ("l5", "l10", "l20", "l30", "season")
+        windows: list[tuple[float, float]] = []
         for prefix in prefixes:
             if isinstance(obj, dict):
                 window = obj.get(prefix) or {}
@@ -3568,22 +3569,21 @@ def _has_strong_delivery_evidence(
                     if isinstance(under_count, (int, float)):
                         over_count = games - under_count
             if (
-                isinstance(games, (int, float))
-                and games >= 5
-                and isinstance(over_count, (int, float))
-                and (
-                    (
-                        recommendation == "OVER"
-                        and over_count / games >= 0.70
-                    )
-                    or (
-                        recommendation == "UNDER"
-                        and over_count / games <= 0.40
-                    )
-                )
+                not isinstance(games, (int, float))
+                or games < 5
+                or not isinstance(over_count, (int, float))
             ):
-                return True
-        return False
+                return False
+            windows.append((float(games), float(over_count)))
+
+        return all(
+            (
+                over_count / games >= 0.70
+                if recommendation == "OVER"
+                else over_count / games <= 0.40
+            )
+            for games, over_count in windows
+        )
 
     if bool(getattr(validation, "has_supporting_data", False)):
         source = getattr(validation, "data_source", None)
