@@ -129,7 +129,7 @@ def test_help_lists_every_registered_command_and_no_unregistered_restarts():
 def test_every_registered_command_resolves_to_an_async_handler():
     registrations = main.TELEGRAM_COMMAND_HANDLERS
 
-    assert len(registrations) == 37  # 36 production commands + legacy /learning alias
+    assert len(registrations) == 35  # retired PrizePicks catalog commands excluded
     assert len({command for command, _callback in registrations}) == len(registrations)
     for command, handler in registrations:
         assert command
@@ -141,7 +141,7 @@ def test_canonical_provider_roles_are_exact():
     lines = commands._primary_player_prop_provider_lines(_health_monitor())
 
     assert lines == [
-        "  ⚪ <b>Player Props</b> — Underdog: available · PrizePicks / PropLine: available",
+        "  ⚪ <b>Player Props</b> — Underdog: available",
     ]
 
 
@@ -154,7 +154,7 @@ def test_provider_roles_show_degraded_underdog_and_disabled_prizepicks():
     lines = commands._primary_player_prop_provider_lines(monitor)
     runtime = commands._primary_provider_runtime_lines(monitor)
 
-    assert lines[0] == "  🟡 <b>Player Props</b> — Underdog: available · PrizePicks / PropLine: unavailable"
+    assert lines[0] == "  🟡 <b>Player Props</b> — Underdog: available"
     assert "Fetch:" in runtime[0]
     assert "Underdog: degraded" in runtime[0]
     assert "1 failure" in runtime[0]
@@ -211,11 +211,11 @@ async def test_status_shows_provider_roles_and_separate_history_counts():
         await commands.cmd_status(update, context)
 
     message = update.message.reply_text.await_args.args[0]
-    assert "Player Props</b> — Underdog: available · PrizePicks / PropLine: available" in message
+    assert "Player Props</b> — Underdog: available" in message
     assert "Market Providers" in message
     assert "DraftKings/FanDuel" not in message
     assert "Underdog: 20" in message
-    assert "PrizePicks (PropLine): 10" in message
+    assert "PrizePicks" not in message
 
 
 @pytest.mark.asyncio
@@ -242,7 +242,7 @@ async def test_status_returns_health_when_one_db_counter_times_out():
     assert "Some database counters are temporarily unavailable" not in message
     assert "Alerts today: —" in message
     assert "Underdog: 20" in message
-    assert "PrizePicks (PropLine): 10" in message
+    assert "PrizePicks" not in message
 
 
 @pytest.mark.asyncio
@@ -301,8 +301,8 @@ async def test_dashboard_activity_section_keeps_provider_counts_separate():
     activity = messages[1]
     assert "Underdog" in activity
     assert "Observed: <code>70</code>" in activity
-    assert "PrizePicks" in activity
-    assert "Observed: <code>30</code>" in activity
+    assert "PrizePicks" not in activity
+    assert "Observed: <code>30</code>" not in activity
     assert activity.count("Provider Pipeline") == 1
 
 
@@ -321,10 +321,10 @@ async def test_providers_command_includes_live_primary_provider_health():
         await commands.cmd_providers(update, context)
 
     message = update.message.reply_text.await_args.args[0]
-    assert "Player Props</b> — Underdog: available · PrizePicks / PropLine: available" in message
+    assert "Player Props</b> — Underdog: available" in message
     assert "Fetch:" in message
     assert "Underdog: degraded" in message
-    assert "PrizePicks: awaiting first successful fetch" in message
+    assert "PrizePicks" not in message
 
 
 def test_dashboard_report_does_not_merge_provider_breakdowns():
@@ -343,10 +343,10 @@ def test_dashboard_report_does_not_merge_provider_breakdowns():
 
     assert "Underdog" in message
     assert "Observed: <code>12</code>" in message
-    assert "PrizePicks" in message
-    assert "Observed: <code>7</code>" in message
-    assert "UD <code>  5</code> · PP <code>  4</code> · EV <code>  1</code>" in message
-    assert "UD <code>2</code> · PP <code>3</code> · EV <code>1</code>" in message
+    assert "PrizePicks" not in message
+    assert "Observed: <code>7</code>" not in message
+    assert "UD <code>  5</code> · EV <code>  1</code>" in message
+    assert "UD <code>2</code> · EV <code>1</code>" in message
 
 
 @pytest.mark.asyncio
@@ -385,8 +385,8 @@ async def test_funnel_renders_provider_pipeline_separately():
     message = update.message.reply_text.await_args.args[0]
     assert "<b>Underdog</b>" in message
     assert "Observed: <code>100</code>  ·  Evaluated: <code>80</code>" in message
-    assert "<b>PrizePicks</b>" in message
-    assert "Observed: <code>40</code>  ·  Evaluated: <code>30</code>" in message
+    assert "PrizePicks" not in message
+    assert "Observed: <code>40</code>  ·  Evaluated: <code>30</code>" not in message
 
 
 @pytest.mark.asyncio
@@ -504,9 +504,9 @@ async def test_funnel_provider_populations_and_zero_directional_sport_stay_separ
         await commands.cmd_funnel(update, context)
 
     message = update.message.reply_text.await_args.args[0]
-    assert "Underdog" in message and "PrizePicks" in message
+    assert "Underdog" in message and "PrizePicks" not in message
     assert "Observed: <code>5</code>  ·  Evaluated: <code>4</code>" in message
-    assert "Observed: <code>9</code>  ·  Evaluated: <code>8</code>" in message
+    assert "Observed: <code>9</code>  ·  Evaluated: <code>8</code>" not in message
     assert "Soccer" in message
     assert "Soccer" in message.split("Sport Funnel Breakdown", 1)[1]
 @pytest.mark.asyncio
@@ -811,7 +811,7 @@ async def test_stats_keeps_fast_metrics_when_one_report_read_times_out():
 
     message = update.message.reply_text.await_args.args[0]
     assert "Underdog:    <b>4</b>" in message
-    assert "PrizePicks (PropLine): <b>unavailable</b>" in message
+    assert "PrizePicks" not in message
     assert "Tracked observations: <b>12</b>" in message
     assert "99 Underdog snapshots" in message
 
@@ -916,7 +916,7 @@ async def test_dashboard_keeps_provider_activity_when_one_count_read_times_out()
     activity = update.message.reply_text.await_args_list[1].args[0]
     assert "Provider Pipeline" in activity
     assert "Underdog" in activity
-    assert "PrizePicks" in activity
+    assert "PrizePicks" not in activity
 
 
 @pytest.mark.asyncio
@@ -950,7 +950,7 @@ async def test_funnel_keeps_fast_pipeline_sections_when_scan_read_times_out():
     message = update.message.reply_text.await_args_list[-1].args[0]
     assert "Provider Pipeline" in message
     assert "Observed: <code>10</code>  ·  Evaluated: <code>8</code>" in message
-    assert "Observed: <code>5</code>  ·  Evaluated: <code>4</code>" in message
+    assert "Observed: <code>5</code>  ·  Evaluated: <code>4</code>" not in message
     assert "Candidate records tracked: <b>3</b>" in message
     assert "Could not load funnel data" not in message
 
@@ -968,7 +968,7 @@ async def test_current_provider_reports_do_not_present_pandascore():
 
     providers_message = update.message.reply_text.await_args.args[0]
     assert "Underdog" in providers_message
-    assert "PrizePicks" in providers_message
+    assert "PrizePicks" not in providers_message
     assert "PandaScore" not in providers_message
 
     update, context = _update_and_context()
@@ -979,5 +979,5 @@ async def test_current_provider_reports_do_not_present_pandascore():
         await commands.cmd_config(update, context)
 
     config_message = update.message.reply_text.await_args.args[0]
-    assert "CS2 current PrizePicks lines: <b>PropLine</b>" in config_message
+    assert "PrizePicks" not in config_message
     assert "PandaScore" not in config_message
