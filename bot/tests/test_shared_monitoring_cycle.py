@@ -16,9 +16,10 @@ import market_engine
 
 
 @pytest.mark.asyncio
-async def test_shared_cycle_waits_for_propline_ingestion_before_evaluation(monkeypatch):
+async def test_shared_cycle_does_not_hold_underdog_for_propline_ingestion(monkeypatch):
     events = []
     underdog_release = asyncio.Event()
+    ingestion_release = asyncio.Event()
     completed = []
 
     class Health:
@@ -27,6 +28,7 @@ async def test_shared_cycle_waits_for_propline_ingestion_before_evaluation(monke
 
     async def propline_ingestion(_context):
         events.append("ingestion-start")
+        await ingestion_release.wait()
         events.append("ingestion-end")
 
     async def propline_branch(_context, **_kwargs):
@@ -49,18 +51,17 @@ async def test_shared_cycle_waits_for_propline_ingestion_before_evaluation(monke
     for _ in range(5):
         await asyncio.sleep(0)
 
-    assert set(events) == {
-        "ingestion-start",
-        "ingestion-end",
-        "propline-start",
-        "propline-end",
-        "underdog-start",
-    }
+    assert "ingestion-start" in events
+    assert "underdog-start" in events
+    assert "propline-start" not in events
     assert not task.done()
 
     underdog_release.set()
     await asyncio.sleep(0)
     assert "underdog-end" in events
+    assert not task.done()
+
+    ingestion_release.set()
     await task
     assert set(events) == {
         "ingestion-start",

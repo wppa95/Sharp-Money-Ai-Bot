@@ -3773,9 +3773,13 @@ def _shared_monitoring_cycle(cycle_branch):
         global _propline_ingest_task
 
         # Provider-specific authorization and pacing remain inside PropLine,
-        # but the fetch is owned by this shared cycle. Run ingestion alongside
-        # the current-book evaluation so a slow provider cannot stall the
-        # complete Player Props universe or cause repeated cadence coalescing.
+        # but the fetch is owned by this shared cycle. Start the current-book
+        # evaluation immediately and run ingestion alongside it so a slow
+        # provider cannot hold the Underdog monitor slot open.
+        _underdog_task = asyncio.create_task(
+            cycle_branch(context, *args, **kwargs),
+            name="shared_monitoring_underdog",
+        )
         if (
             _propline_ingest_task is None
             or _propline_ingest_task.done()
@@ -3810,11 +3814,9 @@ def _shared_monitoring_cycle(cycle_branch):
                 "reusing its queued handoff"
             )
 
-        # The ingestion task is still the only paced PropLine request owner,
-        # but the evaluator must not consume the handoff before that request
-        # has finished. Waiting here preserves one request per cycle while
-        # ensuring a successful fetch reaches canonical persistence/evaluation
-        # instead of producing a recurring empty "paced" batch.
+        # The ingestion task is still the only paced PropLine request owner.
+        # Wait for its handoff before evaluating PropLine, but do not delay the
+        # already-running Underdog scan while provider pacing is in progress.
         _ingest_task = _propline_ingest_task
         if _ingest_task is not None and not _ingest_task.done():
             try:
@@ -3896,16 +3898,26 @@ def _shared_monitoring_cycle(cycle_branch):
         _prizepicks_cycle_task.add_done_callback(_finish_propline_task)
         try:
             result, _ = await asyncio.gather(
-                cycle_branch(context, *args, **kwargs),
+                _underdog_task,
                 _propline_task,
             )
         except asyncio.CancelledError:
+            _underdog_task.cancel()
             _propline_task.cancel()
-            await asyncio.gather(_propline_task, return_exceptions=True)
+            await asyncio.gather(
+                _underdog_task,
+                _propline_task,
+                return_exceptions=True,
+            )
             raise
         except BaseException:
+            _underdog_task.cancel()
             _propline_task.cancel()
-            await asyncio.gather(_propline_task, return_exceptions=True)
+            await asyncio.gather(
+                _underdog_task,
+                _propline_task,
+                return_exceptions=True,
+            )
             raise
         else:
             # Do not make a slow/independent PropLine companion extend or
