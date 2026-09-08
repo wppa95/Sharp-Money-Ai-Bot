@@ -791,9 +791,16 @@ def test_player_history_interval_default_300s():
 
 
 def test_coordinator_in_underdog_monitor():
-    """underdog_monitor uses the shared coalescing coordinator."""
+    """underdog_monitor uses its own coordinator callback."""
     src = _src("main.py")
-    assert '_coordinated_job("underdog_monitor", _underdog_monitor_cycle)' in src
+    assert re.search(
+        r'_coordinated_job\(\s*"underdog_monitor",\s*_underdog_monitor_cycle',
+        src,
+    )
+    assert re.search(
+        r'_coordinated_job\(\s*"prizepicks_monitor",\s*prizepicks_job',
+        src,
+    )
 
 
 def test_no_scheduler_max_instances_override():

@@ -123,8 +123,8 @@ class Config:
     # provider catalog controls scope when available; an empty value must not
     # silently narrow PrizePicks to a guessed NBA/MLB subset.
     PRIZEPICKS_LEAGUES_RAW: str = os.environ.get("PRIZEPICKS_LEAGUES", "")
-    # PrizePicks runs as the companion branch of the shared live Player Props
-    # cycle. Provider request pacing remains controlled by PropLine.
+    # PrizePicks has its own scheduler cycle. Provider request pacing remains
+    # controlled by PropLine within that independent cycle.
     PRIZEPICKS_POLL_INTERVAL: int = int(os.environ.get("PRIZEPICKS_POLL_INTERVAL", "60"))
     # Minimum edge % vs sportsbook fair probability to trigger a PP alert.
     MIN_PP_EDGE: float = float(os.environ.get("MIN_PP_EDGE", "5.0"))

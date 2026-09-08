@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import re
 from pathlib import Path
 
 import pytest
@@ -51,20 +52,20 @@ def _job_kwargs(call: ast.Call) -> dict[str, ast.AST]:
     }
 
 
-def test_current_book_has_one_monitoring_owner_and_full_pool_rotation():
+def test_current_book_has_independent_monitoring_owners_and_full_pool_rotation():
     names = [name for name, _ in _scheduled_jobs()]
 
     assert names.count("underdog_monitor") == 1
     assert names.count("full_pool_rescan") == 1
     assert "stable_refresh" not in names
     assert "stable_refresh_job" not in names
-    assert "prizepicks_monitor" not in names
+    assert names.count("prizepicks_monitor") == 1
     assert "prizepicks_job" not in names
     assert "connector_poller" not in names
     assert "consensus_checker" not in names
 
 
-def test_required_jobs_remain_registered_with_shared_player_props_and_grader_timers():
+def test_required_jobs_remain_registered_with_independent_player_props_and_grader_timers():
     names = {name for name, _ in _scheduled_jobs()}
 
     assert {
@@ -89,6 +90,7 @@ def test_scheduled_jobs_use_coordinator_without_max_instances():
         "odds_poller",
         "player_props_fetcher",
         "underdog_monitor",
+        "prizepicks_monitor",
         "full_pool_rescan",
     ):
         kwargs = _job_kwargs(jobs[name])
@@ -99,14 +101,22 @@ def test_scheduled_jobs_use_coordinator_without_max_instances():
     assert "_coordinated_job(" in source
 
 
-def test_grading_and_player_props_share_the_underdog_cycle_owner():
+def test_monitoring_and_grading_have_independent_cycle_owners():
     source = MAIN_SOURCE.read_text()
 
     assert "async def _underdog_monitor_cycle" in source
     assert "await underdog_job(context)" in source
     assert "async def _opportunity_grader_tick" in source
     assert "async def _propline_scan_tick" not in source
-    assert '_coordinated_job("underdog_monitor", _underdog_monitor_cycle)' in source
+    assert re.search(
+        r'_coordinated_job\(\s*"underdog_monitor",\s*_underdog_monitor_cycle',
+        source,
+    )
+    assert re.search(
+        r'_coordinated_job\(\s*"prizepicks_monitor",\s*prizepicks_job',
+        source,
+    )
+    assert "_shared_monitoring_cycle" not in source
     assert '_coordinated_job("full_pool_rescan", _full_pool_rescan_job)' in source
 
 
@@ -284,7 +294,7 @@ async def test_launcher_allows_different_job_names_to_run_independently():
 
 
 @pytest.mark.asyncio
-async def test_launcher_serializes_different_job_names_in_same_exclusive_group():
+async def test_launcher_allows_different_job_names_to_run_independently():
     from main import _ScheduledExecutionCoordinator
 
     coordinator = _ScheduledExecutionCoordinator()
@@ -302,36 +312,33 @@ async def test_launcher_serializes_different_job_names_in_same_exclusive_group()
     first = coordinator.launch(
         "underdog_monitor",
         first_callback,
-        exclusive_group="underdog_monitoring",
     )
     second = coordinator.launch(
         "player_history_collector",
         second_callback,
-        exclusive_group="underdog_monitoring",
     )
 
     await first(None)
     await first_started.wait()
     await second(None)
     await asyncio.sleep(0)
-    assert not second_started.is_set()
+    assert second_started.is_set()
 
     release_first.set()
     await asyncio.gather(*list(coordinator._tasks))
     await asyncio.sleep(0)
-    assert second_started.is_set()
     assert not coordinator._running
     assert not coordinator._tasks
 
 
-def test_production_monitor_and_history_jobs_share_heavy_job_ownership():
+def test_production_monitor_and_history_jobs_do_not_share_ownership():
     import inspect
     import main
 
     source = inspect.getsource(main.post_init)
     assert 'name="underdog_monitor"' in source
     assert 'name="player_history_collector"' in source
-    assert source.count('exclusive_group="underdog_monitoring"') >= 2
+    assert 'exclusive_group="underdog_monitoring"' not in source
 
 
 @pytest.mark.asyncio

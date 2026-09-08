@@ -92,7 +92,7 @@ from market_engine import (
     reset_monitoring_runtime_state,
     shutdown_db_persistence_worker,
     underdog_job,
-    _shared_monitoring_cycle,
+    prizepicks_job,
     _full_pool_rescan_job,
     _run_prizepicks_independent_cycle,
 )
@@ -835,22 +835,21 @@ async def post_init(application: Application) -> None:
             first=90,
             name="player_props_fetcher",
         )
-        # Legacy _prizepicks_job remains disabled.  The authorized PropLine
-        # PrizePicks cycle runs as a guarded companion task inside underdog_job.
+        # PrizePicks/PropLine owns an independent scheduler cycle. It does not
+        # run as a child or companion of the Underdog monitor.
         # jq.run_repeating(connector_poll_job,  interval=config.CONNECTOR_POLL_INTERVAL,   first=20,  name="connector_poller")
         # jq.run_repeating(consensus_check_job, interval=config.CONSENSUS_CHECK_INTERVAL,  first=25,  name="consensus_checker")
         # jq.run_repeating(clv_check_job,       interval=config.CLV_CHECK_INTERVAL,        first=35,  name="clv_checker")
-        # Legacy source compatibility: _coordinated_job("underdog_monitor", _underdog_monitor_cycle)
-        # is equivalent because _underdog_monitor_cycle only delegates to underdog_job.
-        # Production uses the shared Player Props wrapper so health records
-        # completion only after the canonical monitoring branch finishes.
-        # ─────────────────────────────────────────────────────────────────────
-        _shared_underdog_cycle = _shared_monitoring_cycle(underdog_job)
+        jq.run_repeating(
+            _coordinated_job("prizepicks_monitor", prizepicks_job),
+            interval=config.PRIZEPICKS_POLL_INTERVAL,
+            first=60,
+            name="prizepicks_monitor",
+        )
         jq.run_repeating(
             _coordinated_job(
                 "underdog_monitor",
-                _shared_underdog_cycle,
-                exclusive_group="underdog_monitoring",
+                _underdog_monitor_cycle,
             ),
             interval=config.UNDERDOG_POLL_INTERVAL,
             first=45,
@@ -894,12 +893,8 @@ async def post_init(application: Application) -> None:
             when=75,
             name="opportunity_grader",
         )
-        # The complete current Underdog book is processed by underdog_job.
-        # PropLine ingestion, evaluation, and delivery are owned by the same
-        # shared monitoring cycle; there is no provider-specific scheduler.
-        # There is deliberately no deferred/full-pool remainder worker: a
-        # second batch must begin only on the next cadence after this cycle's
-        # persistence and history gates release.
+        # Underdog, PropLine, full-pool, grading, and player history each own
+        # independent scheduler callbacks. None is a child of another cycle.
         # CLV seed job — every 15 minutes (creates AlertCLVSeed entries for alerts)
         jq.run_repeating(_coordinated_job("clv_seeder", _clv_seed_job), interval=900, first=120, name="clv_seeder")
         # CLV harvest job — every hour (processes seeds after game_time passes)
@@ -911,7 +906,6 @@ async def post_init(application: Application) -> None:
             _coordinated_job(
                 "player_history_collector",
                 player_history_collector_job,
-                exclusive_group="underdog_monitoring",
             ),
             interval=config.PLAYER_HISTORY_POLL_INTERVAL,
             first=90,
@@ -932,7 +926,8 @@ async def post_init(application: Application) -> None:
                 name="season_checker",
             )
         logger.info(
-            "Jobs scheduled — underdog and full-pool rotation: every %ds; "
+            "Jobs scheduled — independent cycles: underdog every %ds; "
+            "PropLine every %ds; full-pool every %ds; "
             "independent grader: every %ds, "
             "history collector: every %ds, "
             "season_check: every %ds, "
@@ -940,7 +935,9 @@ async def post_init(application: Application) -> None:
              "[Unified Player Props cycle enabled=%s; "
              "PropLine default rate=180/hour; DK/FD delivery disabled]",
             config.UNDERDOG_POLL_INTERVAL,
+            config.PRIZEPICKS_POLL_INTERVAL,
             config.FPR_INTERVAL,
+            config.OPPORTUNITY_GRADER_INTERVAL,
             config.PLAYER_HISTORY_POLL_INTERVAL,
             config.SEASON_CHECK_INTERVAL,
             _propline_enabled,
@@ -2420,16 +2417,12 @@ async def _player_props_job(context) -> None:
 # ── PrizePicks monitoring job ─────────────────────────────────────────────────
 
 async def _prizepicks_job(context) -> None:
-    """Compatibility entry point for the retired legacy PrizePicks job.
-
-    Route old callers through the same combined Player Props cycle rather than
-    reviving a provider-only evaluation path.
-    """
+    """Compatibility entry point for the independent PrizePicks cycle."""
     logger.warning(
         "_prizepicks_job is a compatibility shim; delegating to the "
-        "unified Player Props cycle"
+        "independent PropLine cycle"
     )
-    await _shared_monitoring_cycle(underdog_job)(context)
+    await prizepicks_job(context)
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────

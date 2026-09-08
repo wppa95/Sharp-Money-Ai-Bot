@@ -1244,6 +1244,27 @@ async def propline_request_scan_job(context) -> None:
             )
 
 
+async def prizepicks_job(context) -> None:
+    """Run the independent PropLine ingestion and evaluation cycle.
+
+    This is deliberately not called from the Underdog scheduler. The request
+    worker owns one paced provider fetch, then this same independent job hands
+    only its completed observations to the canonical evaluator.
+    """
+    global _propline_pending_props
+
+    await propline_request_scan_job(context)
+    pending_props = list(_propline_pending_props.values())
+    _propline_pending_props.clear()
+    await _run_prizepicks_independent_cycle(
+        context,
+        _fetched_props=pending_props,
+        _fetched_sport="paced",
+        _fetched_persisted=True,
+        background_processing=False,
+    )
+
+
 def _queue_deferred_fpr(context: object) -> None:
     """Remember one FPR trigger to run after the current full scan."""
     global _fpr_deferred_pending, _fpr_deferred_context

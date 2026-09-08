@@ -75,6 +75,7 @@ def test_required_monitoring_and_maintenance_jobs_remain_registered():
         "odds_poller",
         "player_props_fetcher",
         "underdog_monitor",
+        "prizepicks_monitor",
         "full_pool_rescan",
         "clv_seeder",
         "clv_harvester",
@@ -90,7 +91,7 @@ def test_registered_job_names_are_unique_and_no_legacy_monitors_are_active():
     names = [name for name, _, _ in jobs]
 
     assert len(names) == len(set(names))
-    assert "prizepicks_monitor" not in names
+    assert names.count("prizepicks_monitor") == 1
     assert "connector_poller" not in names
     assert "consensus_checker" not in names
     assert "clv_checker" not in names

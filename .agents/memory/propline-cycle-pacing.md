@@ -3,22 +3,18 @@ name: PropLine cycle pacing
 description: How the primary PrizePicks feed is scheduled without a competing job.
 ---
 
-The primary PrizePicks monitor is a branch of the same scheduled monitoring
-cycle as Underdog. Each Underdog scheduler trigger starts the current-book scan
-and paced PropLine ingestion under one owner; the Underdog scan must not wait
-for provider pacing, while PropLine evaluation waits for its completed
-ingestion handoff. It fetches one configured PrizePicks sport per cycle and
-must not call the provider-wide all-sports fetch in production. The provider's
-own request pacing remains internal to that branch.
+The primary PrizePicks monitor has its own scheduler cycle, separate from
+Underdog. Its cycle owns one paced PropLine ingestion and then evaluates that
+completed handoff; no other scheduler callback starts, stops, or gates it.
+Underdog has its own scheduler callback and completion boundary. PropLine
+fetches one configured PrizePicks sport per cycle and must not call the
+provider-wide all-sports fetch in production. The provider's own request pacing
+remains internal to its cycle.
 
-**Why:** A heartbeat handoff created a second effective monitoring rhythm:
-PropLine could still be processing an older cycle while Underdog started the
-next one. Consuming the handoff before the paced request completed also made
-successful fetches appear as recurring empty evaluator batches, while waiting
-for that request before starting Underdog made the monitor hold its slot and
-coalesce the next trigger. Shared ownership makes cadence and completion
-explicit without adding a second fetch path or changing the authorized
-client's pacing.
+**Why:** A shared owner let PropLine pacing and persistence extend the
+Underdog execution slot, causing the next Underdog trigger to be coalesced.
+Independent callbacks make each cadence and completion boundary explicit
+without allowing one provider's slow work to stop another provider's cycle.
 
 The result-metadata fetch adapter must follow the same one-sport limit as the
 legacy scoped adapter; exposing fetch success metadata is not permission to

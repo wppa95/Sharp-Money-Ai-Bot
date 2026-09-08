@@ -711,17 +711,14 @@ class TestOddsPollingEnabled(unittest.TestCase):
                          "_player_props_job must remain commented out")
 
     def test_underdog_job_still_primary(self):
-        """The shared monitoring wrapper must schedule the Player Props monitor."""
+        """Underdog and PrizePicks have separate scheduler owners."""
         src = self._main_src()
-        self.assertIn(
-            "_shared_underdog_cycle = _shared_monitoring_cycle(underdog_job)",
-            src,
-        )
+        self.assertIn('_coordinated_job("prizepicks_monitor", prizepicks_job)', src)
         self.assertRegex(
             src,
-            r'_coordinated_job\(\s*"underdog_monitor",\s*_shared_underdog_cycle'
-            r'[\s\S]*?exclusive_group="underdog_monitoring"',
+            r'_coordinated_job\(\s*"underdog_monitor",\s*_underdog_monitor_cycle'
         )
+        self.assertNotIn("_shared_monitoring_cycle", src)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

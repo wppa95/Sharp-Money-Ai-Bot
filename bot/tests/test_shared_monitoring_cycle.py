@@ -142,12 +142,13 @@ async def test_shared_cycle_marks_paced_props_as_already_persisted(monkeypatch):
     assert calls == [([prop], "paced", True)]
 
 
-def test_scheduler_has_one_shared_monitor_owner_and_no_heartbeat_handoff():
+def test_scheduler_has_independent_monitor_owners_and_no_heartbeat_handoff():
     main_source = inspect.getsource(__import__("main").post_init)
     heartbeat_source = inspect.getsource(__import__("main")._heartbeat_job)
 
     assert "name=\"underdog_monitor\"" in main_source
-    assert "_shared_monitoring_cycle(underdog_job)" in main_source
+    assert "name=\"prizepicks_monitor\"" in main_source
+    assert "_shared_monitoring_cycle" not in main_source
     assert "_start_prizepicks_cycle" not in main_source
     assert "_start_prizepicks_cycle" not in heartbeat_source
     assert "record_monitoring_cycle_complete" in inspect.getsource(
