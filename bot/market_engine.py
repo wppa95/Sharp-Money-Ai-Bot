@@ -4022,7 +4022,7 @@ async def underdog_job(context) -> None:
     # unrelated jobs remain free to run concurrently.
     _cycle_deadline = time.monotonic() + max(
         5.0,
-        float(getattr(config, "UNDERDOG_POLL_INTERVAL", 120)) - 5.0,
+        float(getattr(config, "UNDERDOG_POLL_INTERVAL", 60)) - 5.0,
     )
 
     async def _await_cycle_budget(awaitable, operation: str):
@@ -6967,7 +6967,7 @@ async def underdog_job(context) -> None:
     )
     _job_activity_end("underdog")
     _cycle_elapsed = time.monotonic() - _cycle_timing.started_mono
-    _cycle_cadence = float(getattr(config, "UNDERDOG_POLL_INTERVAL", 120))
+    _cycle_cadence = float(getattr(config, "UNDERDOG_POLL_INTERVAL", 60))
     _cycle_complete = (
         not _cycle_budget_exhausted
         and _snapshot_failed_records == 0
