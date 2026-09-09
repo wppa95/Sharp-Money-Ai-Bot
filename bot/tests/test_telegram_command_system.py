@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import inspect
+from types import SimpleNamespace
 
 import main
+import pytest
+from telegram.error import Conflict
 from commands import (
     cmd_grade,
     cmd_learning,
@@ -127,3 +130,22 @@ def test_registration_does_not_require_database_or_engine_initialization():
     main.register_command_handlers(application)
 
     assert all(handler.callback for handler in application.handlers)
+
+
+@pytest.mark.asyncio
+async def test_telegram_conflict_stops_duplicate_polling_instance():
+    class ApplicationDouble:
+        stopped = False
+
+        def stop_running(self) -> None:
+            self.stopped = True
+
+    application = ApplicationDouble()
+    context = SimpleNamespace(
+        error=Conflict("terminated by another getUpdates request"),
+        application=application,
+    )
+
+    await main.error_handler(None, context)
+
+    assert application.stopped is True

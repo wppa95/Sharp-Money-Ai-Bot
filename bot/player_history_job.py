@@ -397,8 +397,9 @@ async def player_history_collector_job(context) -> None:
                 )
             except _CadenceBoundaryReached as exc:
                 logger.info(
-                    "player_history_collector_job: evidence hydration deferred "
-                    "after %s; continuing with full provider collection",
+                    "player_history_collector_job: evidence cache hydration "
+                    "skipped at cadence boundary during %s; continuing with "
+                    "full provider collection",
                     exc,
                 )
             except Exception as exc:

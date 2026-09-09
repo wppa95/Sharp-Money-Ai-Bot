@@ -17,6 +17,7 @@ from typing import Any, Optional
 from httpx import ReadError
 from telegram import Update
 from telegram.constants import ParseMode
+from telegram.error import Conflict
 from telegram.ext import ContextTypes
 
 from alerts import (
@@ -5532,6 +5533,16 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
             "Telegram HTTP read dropped; update handler remains available: %s",
             context.error,
         )
+        return
+    if isinstance(context.error, Conflict):
+        logger.warning(
+            "Telegram polling conflict: another process is using this bot "
+            "token; stopping this instance",
+        )
+        application = getattr(context, "application", None)
+        stop_running = getattr(application, "stop_running", None)
+        if callable(stop_running):
+            stop_running()
         return
     logger.error(
         "Update %s caused error: %s",

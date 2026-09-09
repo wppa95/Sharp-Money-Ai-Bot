@@ -1165,6 +1165,7 @@ class PlayerHistoryProvider:
                 if rows
                 else PROPLINE_COVERAGE_UNAVAILABLE
             ),
+            failure_kind_override="no_settled_entries" if not rows else "",
         )
         return rows
 
@@ -1286,18 +1287,23 @@ def _log_propline_history_attempt(
     raw_entries: int,
     usable_rows: int,
     status: str = "",
+    failure_kind_override: str = "",
 ) -> None:
     """Make entitlement and shape failures visible without logging secrets."""
     redacted = bool(getattr(result, "redacted", False))
     succeeded = bool(getattr(result, "succeeded", False))
     complete = bool(getattr(result, "complete", False))
-    failure_kind = str(getattr(result, "failure_kind", "") or "")
+    failure_kind = str(
+        failure_kind_override
+        or getattr(result, "failure_kind", "")
+        or ""
+    )
     error = str(getattr(result, "error", "") or "")
     upgrade_url = str(getattr(result, "upgrade_url", "") or "")
     logger.log(
         logging.WARNING if redacted or not succeeded or not complete else logging.INFO,
         "PropLine history attempt player=%r sport=%s stat=%s market=%s "
-        "bookmaker=%s succeeded=%s complete=%s redacted=%s raw_entries=%d "
+        "bookmaker=%s request_succeeded=%s complete=%s redacted=%s raw_entries=%d "
         "usable_rows=%d status=%s failure=%s error=%s upgrade_url=%s",
         player_name,
         sport,
