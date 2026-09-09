@@ -129,3 +129,4 @@
 - [Generated API schema exports](generated-api-schema-exports.md) — Orval can name path and query parameter outputs identically; keep the package index explicit to avoid isolatedModules collisions.
 - [PropLine history pacing](propline-history-pacing.md) — scheduled history must use the fast resolved-history endpoint; raw games/event stats belong on slower supplemental paths.
 - [PropLine completed-evidence coverage](propline-coverage-evidence.md) — only explicit settlements are usable; unresolved complete payloads are unavailable and coverage is audited by sport and market.
+- [CLV bulk writes](clv-bulk-writes.md) — bounded CLV batches and no full-history sort before LIMIT keep scheduled CLV work from appearing stuck.

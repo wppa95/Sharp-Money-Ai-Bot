@@ -41,6 +41,7 @@ _UNDERDOG_CANTOPEN_RETRY_DELAYS = (0.5, 1.5)
 _UNDERDOG_BULK_BATCH_SIZE = 200
 _PROP_HISTORY_BATCH_SIZE = 200
 _TRACKING_BATCH_SIZE = 200
+_CLV_BULK_BATCH_SIZE = 100
 _DB_WRITE_MAX_RETRIES = 2
 _DB_WRITE_RETRY_DELAYS = (0.15, 0.5)
 _PRIZEPICKS_EXTERNAL_PREFIX = "PrizePicks::"
@@ -3359,6 +3360,22 @@ class Database:
             await s.refresh(record)
         return record
 
+    async def save_clv_records_bulk(
+        self,
+        records: "list[CLVRecord]",
+    ) -> int:
+        """Persist CLV results in bounded write transactions."""
+        if not records:
+            return 0
+        written = 0
+        for start in range(0, len(records), _CLV_BULK_BATCH_SIZE):
+            batch = records[start:start + _CLV_BULK_BATCH_SIZE]
+            async with self.session() as s:
+                s.add_all(batch)
+                await s.commit()
+            written += len(batch)
+        return written
+
     async def get_recent_clv_records(self, limit: int = 20) -> list["CLVRecord"]:
         async with self.session() as s:
             result = await s.execute(
@@ -4627,6 +4644,55 @@ class Database:
                 .values(clv_pct=None, clv_computed=True)
             )
             await s.commit()
+
+    async def mark_clv_seeds_computed_bulk(
+        self,
+        updates: "dict[int, float]",
+    ) -> int:
+        """Mark computed seeds and assign their CLV values in bulk batches."""
+        if not updates:
+            return 0
+        from sqlalchemy import case as sa_case
+
+        updated = 0
+        items = list(updates.items())
+        for start in range(0, len(items), _CLV_BULK_BATCH_SIZE):
+            batch = dict(items[start:start + _CLV_BULK_BATCH_SIZE])
+            async with self.session() as s:
+                await s.execute(
+                    update(AlertCLVSeed)
+                    .where(AlertCLVSeed.id.in_(batch))
+                    .values(
+                        clv_pct=sa_case(
+                            batch,
+                            value=AlertCLVSeed.id,
+                        ),
+                        clv_computed=True,
+                    )
+                )
+                await s.commit()
+            updated += len(batch)
+        return updated
+
+    async def mark_clv_seeds_expired_bulk(
+        self,
+        seed_ids: "list[int]",
+    ) -> int:
+        """Expire unresolved seeds in bounded bulk updates."""
+        if not seed_ids:
+            return 0
+        updated = 0
+        for start in range(0, len(seed_ids), _CLV_BULK_BATCH_SIZE):
+            batch = seed_ids[start:start + _CLV_BULK_BATCH_SIZE]
+            async with self.session() as s:
+                result = await s.execute(
+                    update(AlertCLVSeed)
+                    .where(AlertCLVSeed.id.in_(batch))
+                    .values(clv_pct=None, clv_computed=True)
+                )
+                await s.commit()
+            updated += int(result.rowcount or 0)
+        return updated
 
     async def get_last_odds_for_event(
         self, event: str, selection: str

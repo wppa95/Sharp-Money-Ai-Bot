@@ -1970,6 +1970,9 @@ async def _clv_harvest_job(context) -> None:
 
         harvested = 0
         expired   = 0
+        clv_records = []
+        computed_updates: dict[int, float] = {}
+        expired_ids: list[int] = []
         now       = datetime.utcnow()
         grace     = timedelta(hours=4)   # wait this long for closing odds before expiring
 
@@ -1977,7 +1980,7 @@ async def _clv_harvest_job(context) -> None:
             game_time = seed.game_time
             if game_time is None:
                 # No timing info — expire immediately
-                await _db.mark_clv_seed_expired(seed.id)
+                expired_ids.append(seed.id)
                 expired += 1
                 continue
 
@@ -1985,7 +1988,7 @@ async def _clv_harvest_job(context) -> None:
             # Underdog seeds seeded via seed_clv_from_ud_confirmation() DO have
             # bet_odds (from OddsAPI avg_odds), so they proceed to closing-line lookup.
             if not seed.bet_odds:
-                await _db.mark_clv_seed_expired(seed.id)
+                expired_ids.append(seed.id)
                 expired += 1
                 continue
 
@@ -2027,8 +2030,8 @@ async def _clv_harvest_job(context) -> None:
                         rec.tier         = seed.tier         or ""
                     except AttributeError:
                         pass
-                    await _db.save_clv_record(rec)
-                    await _db.mark_clv_seed_computed(seed.id, clv_result.clv_pct)
+                    clv_records.append(rec)
+                    computed_updates[seed.id] = clv_result.clv_pct
                     harvested += 1
                 except Exception as exc:
                     logger.warning(
@@ -2036,8 +2039,18 @@ async def _clv_harvest_job(context) -> None:
                     )
             elif now - game_time > grace:
                 # Grace period elapsed, no odds found → expire
-                await _db.mark_clv_seed_expired(seed.id)
+                expired_ids.append(seed.id)
                 expired += 1
+
+        # Keep the per-seed read/compute work above, but cross SQLite only
+        # once per bounded batch instead of opening a write transaction for
+        # every harvested or expired seed.
+        if clv_records:
+            await _db.save_clv_records_bulk(clv_records)
+        if computed_updates:
+            await _db.mark_clv_seeds_computed_bulk(computed_updates)
+        if expired_ids:
+            await _db.mark_clv_seeds_expired_bulk(expired_ids)
 
         if harvested or expired:
             logger.info(
