@@ -132,3 +132,4 @@
 - [CLV bulk writes](clv-bulk-writes.md) — bounded CLV batches and no full-history sort before LIMIT keep scheduled CLV work from appearing stuck.
 - [Funnel timing](funnel-timing.md) — report scan age/cadence from observed timestamps, never from the requested report window.
 - [Direction-only prop delivery](direction-only-delivery.md) — active delivery and selection use direction plus evidence; tier/BQ/MQ/PASS are legacy metadata only.
+- [PropLine complete-feed ledger](propline-complete-feed-ledger.md) — fetch all active non-football sports, retain immutable normalized observations, and withhold evaluation on partial feeds.
