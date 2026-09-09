@@ -129,6 +129,32 @@ async def test_preloaded_snapshot_never_reads_or_supplements_database():
 
 
 @pytest.mark.asyncio
+async def test_empty_preloaded_results_do_not_reopen_database_or_enrich():
+    database = SimpleNamespace(
+        get_player_results=AsyncMock(
+            side_effect=AssertionError("empty bulk snapshot queried SQLite")
+        )
+    )
+    database.upsert_player_results_bulk = AsyncMock(
+        side_effect=AssertionError("live scan fetched supplemental history")
+    )
+
+    result = await market_engine._fetch_and_compute_hit_rates(
+        database,
+        "Player One",
+        "NBA",
+        "Points",
+        20.5,
+        allow_remote=False,
+        preloaded_results=[],
+    )
+
+    assert result is None
+    database.get_player_results.assert_not_awaited()
+    database.upsert_player_results_bulk.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_production_confirmation_uses_keyed_memory_not_database_pool():
     database = market_engine.Database.__new__(market_engine.Database)
     database.get_all_active_prop_line_history_by_line = AsyncMock(

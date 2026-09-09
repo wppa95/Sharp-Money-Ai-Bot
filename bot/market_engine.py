@@ -2215,10 +2215,10 @@ async def _fetch_and_compute_hit_rates(
                     len(raw_results), player_name, stat_type,
                 )
 
-        # A bulk hydration miss is not proof that no history exists. Always
-        # consult the durable database when the preloaded batch is empty so
-        # missing in-memory evidence can be rebuilt from persisted records.
-        if preloaded_results:
+        # An explicit preloaded batch, including an empty batch, is authoritative
+        # for this live scan. The independent history collector owns any durable
+        # refill; do not reopen SQLite per prop after a bulk hydration miss.
+        if preloaded_results is not None:
             db_results = list(preloaded_results)
         elif cycle_timing is not None:
             db_results = await cycle_timing.await_db(
@@ -2236,7 +2236,7 @@ async def _fetch_and_compute_hit_rates(
         supplemental_count = 0
         if (
             allow_remote
-            and (preloaded_results is None or not preloaded_results)
+            and preloaded_results is None
             and supplemental_results is None
             and _supports_history_enrichment(db)
             and len(db_results) < config.UD_VALIDATION_MIN_SAMPLES
