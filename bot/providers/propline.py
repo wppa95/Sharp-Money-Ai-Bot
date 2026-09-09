@@ -1080,7 +1080,7 @@ def build_propline_result_evidence(
         return None
     stat_type = _normalize_stat(market_key.removeprefix("player_"))
     sport = _normalize_sport(record.get("sport_key"))
-    if not sport or not stat_type or is_football_related_sport(sport):
+    if not sport or not stat_type:
         return None
 
     observed = observed_at or _parse_datetime(record.get("_observed_at"))
@@ -1648,7 +1648,7 @@ def normalize_propline_prizepicks_record(
     stat_type = _normalize_stat(
         _first(raw_record, "stat_type", "stat", "market_name", "prop_type", "category")
     )
-    if not sport or not stat_type or is_football_related_sport(sport):
+    if not sport or not stat_type:
         return None
 
     raw_line = _first(raw_record, "line_value", "line", "point", "threshold", "value")
@@ -4596,21 +4596,16 @@ class PropLinePrizePicksProvider(PropProviderBase):
         discovered = await self.client.discover_sports()
         if getattr(self.client, "sports_discovery_failed", False):
             # Preserve a failed catalog as distinguishable from a valid empty
-            # slate so the caller can use its complete non-football fallback.
+            # slate so the caller can use its complete configured fallback.
             return None
         if self._sport_filter is not None:
             discovered = [
                 sport
                 for sport in discovered
                 if sport.canonical_key in self._sport_filter
-                and not is_football_related_sport(sport.canonical_key)
             ]
         else:
-            discovered = [
-                sport
-                for sport in discovered
-                if not is_football_related_sport(sport.canonical_key)
-            ]
+            discovered = list(discovered)
         return discovered
 
     async def fetch_props(self) -> list[PlayerProp]:
@@ -4623,8 +4618,7 @@ class PropLinePrizePicksProvider(PropProviderBase):
             result = await self.client.fetch_prizepicks_props(bookmaker=self.bookmaker)
             return [
                 prop for prop in result.props
-                if not is_football_related_sport(prop.sport)
-                and (self._sport_filter is None or prop.sport in self._sport_filter)
+                if self._sport_filter is None or prop.sport in self._sport_filter
             ]
 
         discovered = await self.client.discover_sports()
@@ -4632,14 +4626,9 @@ class PropLinePrizePicksProvider(PropProviderBase):
             discovered = [
                 sport for sport in discovered
                 if sport.canonical_key in self._sport_filter
-                and not is_football_related_sport(sport.canonical_key)
             ]
         else:
-            discovered = [
-                sport
-                for sport in discovered
-                if not is_football_related_sport(sport.canonical_key)
-            ]
+            discovered = list(discovered)
 
         props: list[PlayerProp] = []
         for sport in discovered:
@@ -4669,12 +4658,6 @@ class PropLinePrizePicksProvider(PropProviderBase):
                 error="PropLine is not configured", failure_kind="disabled",
             )
         canonical_sport = _normalize_sport(sport)
-        if is_football_related_sport(canonical_sport):
-            return PropLineFetchResult(
-                [], datetime.utcnow(),
-                error=f"PropLine sport is outside football-free scope: {canonical_sport}",
-                failure_kind="configuration",
-            )
         if self._sport_filter is not None and canonical_sport not in self._sport_filter:
             return PropLineFetchResult(
                 [], datetime.utcnow(),

@@ -32,7 +32,7 @@ EXPECTED_DEFAULT_SPORTS = [
     # Underdog scanner scope (not Odds API Sport enum values).
     # These are the default Underdog sports scanned for prop alerts.
     # Tier-1 Odds API scope is governed by UD_TIER1_SPORTS_RAW separately.
-    "TENNIS", "WNBA", "CS", "LOL", "VAL", "DOTA", "PGA", "FIFA", "CFB",
+    "NFL", "CFB", "TENNIS", "WNBA", "CS", "LOL", "VAL", "DOTA", "PGA", "FIFA",
 ]
 
 # Verified Odds API sport keys (documented at the-odds-api.com)
@@ -95,11 +95,9 @@ class TestActiveSportsConfig:
         for value in config.active_sports:
             assert isinstance(value, str) and len(value) > 0
 
-    def test_no_tier2_sport_in_active_sports_default(self):
-        # Tier-2 sports (MLB/NBA/NFL) must not appear in the Underdog scanner default.
-        tier2 = {"MLB", "NBA", "NFL"}
-        for value in config.active_sports:
-            assert value not in tier2, f"Tier-2 sport {value!r} in active_sports default"
+    def test_football_is_enabled_in_active_sports_default(self):
+        assert "NFL" in config.active_sports
+        assert "CFB" in config.active_sports
 
     def test_env_var_override_still_works(self):
         c = Config(ACTIVE_SPORTS_RAW="NFL, NBA ,MLB")

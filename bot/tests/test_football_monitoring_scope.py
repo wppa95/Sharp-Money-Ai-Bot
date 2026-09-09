@@ -1,4 +1,4 @@
-"""Regression coverage for the football-free active prop monitoring scope."""
+"""Regression coverage for football monitoring with delivery suppression."""
 
 from __future__ import annotations
 
@@ -78,7 +78,7 @@ def _projection(external_id: str, sport: str) -> UnderdogProjection:
     )
 
 
-def test_underdog_filters_football_before_snapshot_creation():
+def test_underdog_keeps_football_for_snapshot_creation():
     connector = UnderdogConnector()
     connector._fetch_projections = AsyncMock(
         return_value=[
@@ -90,11 +90,13 @@ def test_underdog_filters_football_before_snapshot_creation():
 
     snapshots = asyncio.run(connector.fetch())
 
-    assert {snapshot.sport for snapshot in snapshots} == {"SOCCER", "MLB"}
-    assert {snapshot.external_id for snapshot in snapshots} == {"soccer-1", "mlb-1"}
+    assert {snapshot.sport for snapshot in snapshots} == {"SOCCER", "MLB", "NFL"}
+    assert {snapshot.external_id for snapshot in snapshots} == {
+        "soccer-1", "mlb-1", "nfl-1",
+    }
 
 
-def test_underdog_does_not_emit_removal_for_stale_football_state():
+def test_underdog_emits_removal_for_stale_football_state():
     connector = UnderdogConnector()
     nfl = _projection("nfl-1", "NFL")
     connector._previous = {"nfl-1": nfl}
@@ -103,11 +105,11 @@ def test_underdog_does_not_emit_removal_for_stale_football_state():
 
     snapshots = asyncio.run(connector.fetch())
 
-    assert {snapshot.external_id for snapshot in snapshots} == {"mlb-1"}
-    assert all("[REMOVED]" not in snapshot.selection for snapshot in snapshots)
+    assert {snapshot.external_id for snapshot in snapshots} == {"mlb-1", "nfl-1"}
+    assert any("[REMOVED]" in snapshot.selection for snapshot in snapshots)
 
 
-def test_underdog_normalized_provider_filters_football_but_keeps_other_sports():
+def test_underdog_normalized_provider_keeps_football_and_other_sports():
     snapshots = [
         SimpleNamespace(
             removed=False,
@@ -139,7 +141,7 @@ def test_underdog_normalized_provider_filters_football_but_keeps_other_sports():
 
     props = asyncio.run(UnderdogProvider(snapshots=snapshots).fetch_props())
 
-    assert [prop.sport for prop in props] == ["SOCCER"]
+    assert [prop.sport for prop in props] == ["NFL", "SOCCER"]
 
 
 class _MixedPropLineClient:
@@ -171,31 +173,35 @@ class _MixedPropLineClient:
         )
 
 
-def test_prizepicks_custom_endpoint_filters_mixed_football_batch():
+def test_prizepicks_custom_endpoint_keeps_mixed_football_batch():
     provider = PropLinePrizePicksProvider(client=_MixedPropLineClient())
 
     props = asyncio.run(provider.fetch_props())
 
     assert [(prop.sport, prop.player_name) for prop in props] == [
-        ("NBA", "NBA Player")
+        ("NFL", "NFL Player"),
+        ("NBA", "NBA Player"),
     ]
 
 
-def test_prizepicks_sport_scoped_football_fetch_is_blocked_before_request():
+def test_prizepicks_sport_scoped_football_fetch_is_supported():
     client = _MixedPropLineClient()
+    client.official_sport_for = lambda sport: {
+        "CFB": "americanfootball_ncaaf",
+    }.get(sport)
     provider = PropLinePrizePicksProvider(client=client)
 
     result = asyncio.run(provider.fetch_props_for_sport_result("CFB"))
 
-    assert result.props == []
-    assert result.failure_kind == "configuration"
+    assert result.succeeded is True
+    assert result.failure_kind == ""
 
 
 @pytest.mark.parametrize(
     "sport",
     ["NFL", "NCAAF", "CFB", "FCS", "CFL", "AFL", "AFLW"],
 )
-def test_prizepicks_normalization_rejects_football_without_persistable_prop(sport):
+def test_prizepicks_normalization_accepts_football_for_persistence(sport):
     from providers.propline import normalize_propline_prizepicks_record
 
     record = {
@@ -207,4 +213,6 @@ def test_prizepicks_normalization_rejects_football_without_persistable_prop(spor
         "line": 20.5,
     }
 
-    assert normalize_propline_prizepicks_record(record) is None
+    normalized = normalize_propline_prizepicks_record(record)
+    assert normalized is not None
+    assert normalized.sport == sport

@@ -7,15 +7,13 @@ import re
 import time
 from types import SimpleNamespace
 
-from engine.sport_policy import is_football_related_sport
-
 logger = logging.getLogger(__name__)
 
 # Sports in the supported player-prop universe.  Several of these sports do
 # not have a public PlayerStatsProvider path; they remain here because the
 # scheduled PropLine supplement is their documented history path.
 _SUPPORTED_HISTORY_SPORTS = frozenset({
-    "MLB", "NBA",
+    "MLB", "NBA", "NFL", "NCAAF", "CFB",
     "WNBA", "NHL", "CS", "DOTA", "TENNIS",
     "MLS", "NCAAB", "FIFA",
     "SOCCER",         # Requires FOOTBALL_DATA_API_KEY; returns [] gracefully without it
@@ -285,8 +283,6 @@ async def player_history_collector_job(context) -> None:
                     stat = re.sub(r"\s+-?\d+(?:\.\d+)?\s*$", "", selection)
                     stat = stat or selection
                 sport = (getattr(s, "sport", None) or "UNKNOWN").upper()
-                if is_football_related_sport(sport):
-                    continue
                 key = (player.strip(), sport, (stat or "").lower().strip())
                 target_sources.setdefault(
                     key,
@@ -335,8 +331,6 @@ async def player_history_collector_job(context) -> None:
                     )
                 for s in plh:
                     sport = (getattr(s, "sport", None) or "UNKNOWN").upper()
-                    if is_football_related_sport(sport):
-                        continue
                     key = (
                         (s.player_name or "").strip(),
                         sport,

@@ -4983,14 +4983,18 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             pass
 
         # Fetch scan pipeline summary (non-fatal: new method may not exist on old schema)
-        _scan_result, _summary_result = await _independent_report_reads([
+        _scan_result, _summary_result, _observation_result = await _independent_report_reads([
             _db.get_scan_cycle_summary(
                 since_hours=since_h,
                 session_started_at=_funnel_session_started,
             ),
             _db.get_funnel_summary(since_hours=since_h),
+            _db.get_funnel_observation_summary(since_hours=since_h),
         ])
         scan_summary: dict = _scan_result if isinstance(_scan_result, dict) else {}
+        observation_summary: dict = (
+            _observation_result if isinstance(_observation_result, dict) else {}
+        )
         if not isinstance(_summary_result, dict):
             # ScanCycleLog is the per-monitoring-cycle source of truth for the
             # pipeline section.  The normalized-history aggregate is larger
@@ -5021,6 +5025,11 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 "by_sport": [],
                 "source": "scan_cycle_log_fallback",
             }
+            # Preserve the first funnel stage even when the heavier population
+            # aggregate is unavailable.  Missing fields are explicitly marked
+            # partial rather than being interpreted as zero.
+            summary.update(observation_summary)
+            summary["source"] = "scan_cycle_log_plus_observation_fallback"
         else:
             summary = _summary_result
 
@@ -5054,6 +5063,8 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         )
         delivered_total = int(summary.get("delivered", 0) or 0)
         evidence_by_source = summary.get("evidence_by_source", {}) or {}
+        partial_funnel = summary.get("source") == "scan_cycle_log_plus_observation_fallback"
+        observations_available = "observations_by_sport" in summary
 
         def _fmt_rate(num: int, denom: int) -> str:
             """Format a small percentage with enough precision to stay non-zero."""
@@ -5077,6 +5088,14 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             _thick,
             "",
         ]
+        if partial_funnel:
+            lines += [
+                "⚠️ <b>Partial funnel report:</b> the heavy population aggregate "
+                "was unavailable during this scan.",
+                "<i>Observed counts below come from normalized feed history; "
+                "missing downstream fields are not zero.</i>",
+                "",
+            ]
 
         # ── Section 1: Scan Pipeline (from ScanCycleLog) ─────────────────────────────
         # FPR stats describe the current canonical active by-line universe.
@@ -5445,7 +5464,11 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                             legacy_row.get("tracked", 0),
                         ),
                     )
-                    so = normalized_observed_by_sport.get(sport, 0)
+                    so = (
+                        normalized_observed_by_sport.get(sport, 0)
+                        if observations_available
+                        else "—"
+                    )
                     se = normalized_evaluated_by_sport.get(
                         sport,
                         legacy_row.get(
@@ -5456,7 +5479,7 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     sa = normalized_directional_by_sport.get(sport, 0)
                     sd = normalized_delivered_by_sport.get(sport, 0)
                     _sport_table_lines.append(
-                        f"{sp:<6}{int(so or 0):>5}{int(sc or 0):>5}"
+                        f"{sp:<6}{str(so):>5}{int(sc or 0):>5}"
                         f" {int(se or 0):>5}{int(sa or 0):>5}{int(sd or 0):>5}"
                     )
                 lines += ["", "<pre>" + "\n".join(_sport_table_lines) + "</pre>"]

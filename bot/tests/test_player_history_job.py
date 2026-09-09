@@ -48,8 +48,8 @@ def test_fifa_uses_existing_soccer_history_path():
     assert "FIFA" in _SUPPORTED_HISTORY_SPORTS
 
 
-def test_football_aliases_are_not_history_targets():
-    assert not (_SUPPORTED_HISTORY_SPORTS & {"NFL", "NCAAF", "CFB"})
+def test_football_aliases_are_history_targets():
+    assert {"NFL", "NCAAF", "CFB"} <= _SUPPORTED_HISTORY_SPORTS
 
 
 def test_history_collector_is_not_part_of_monitoring_activity_or_health():
@@ -88,7 +88,7 @@ async def test_history_collector_uses_its_dedicated_database_pool():
 
 
 @pytest.mark.asyncio
-async def test_player_history_skips_football_before_provider_fetch():
+async def test_player_history_includes_football_before_provider_fetch():
     football_row = SimpleNamespace(
         player_name="Football Player",
         sport="NFL",
@@ -108,7 +108,7 @@ async def test_player_history_skips_football_before_provider_fetch():
     ):
         await player_history_collector_job(context)
 
-    fake_provider.fetch_results.assert_not_awaited()
+    fake_provider.fetch_results.assert_awaited_once()
 
 
 @pytest.mark.asyncio

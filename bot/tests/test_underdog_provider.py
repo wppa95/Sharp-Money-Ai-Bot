@@ -246,7 +246,7 @@ class TestUnderdogProvider:
         ]
         p = UnderdogProvider(snapshots=snaps, sport_filter=None)
         props = _run(p.fetch_props())
-        assert len(props) == 2
+        assert len(props) == 3
 
     def test_len_counts_all_including_removed(self):
         snaps = [_make_snap(), _make_snap(removed=True, external_id="ud-002")]

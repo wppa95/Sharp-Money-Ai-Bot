@@ -488,10 +488,12 @@ def _retry_sqlite_write(func):
 
 
 def _is_supported_tracking_sport(sport: Optional[object]) -> bool:
-    """Keep football-related legacy rows out of current tracking populations."""
-    from engine.sport_policy import is_football_related_sport
+    """Return whether a normalized sport can appear in tracking reports.
 
-    return not is_football_related_sport(sport)
+    Football is now part of the monitored/persisted universe.  Telegram
+    delivery still applies the independent football suppression gate.
+    """
+    return bool(str(sport or "").strip())
 
 
 def _tier_from_confidence(ai_confidence: int) -> str:
@@ -7971,6 +7973,46 @@ class Database:
                 )
             ],
             "source": "prop_line_history",
+        }
+
+    async def get_funnel_observation_summary(self, since_hours: int = 24) -> dict:
+        """Return the lightweight observed-stage population for ``/funnel``.
+
+        The complete funnel also aggregates candidate, tracking, opportunity,
+        and delivery tables.  Those reads can be slow while a large rotation
+        is writing SQLite.  The observed stage must remain independently
+        reportable so a partial funnel never renders missing observations as
+        zero.
+        """
+        from datetime import timedelta
+
+        cutoff = datetime.utcnow() - timedelta(hours=max(1, int(since_hours)))
+        async with self.session() as s:
+            result = await s.execute(
+                select(
+                    PropLineHistory.sport,
+                    func.count(PropLineHistory.id),
+                )
+                .where(
+                    PropLineHistory.provider.in_(("Underdog", "PrizePicks")),
+                    PropLineHistory.fetched_at >= cutoff,
+                )
+                .group_by(PropLineHistory.sport)
+            )
+            observations_by_sport: dict[str, int] = {}
+            for sport, count in result.all():
+                if not _is_supported_tracking_sport(sport):
+                    continue
+                sport_key = str(sport or "UNKNOWN").upper().strip()
+                observations_by_sport[sport_key] = (
+                    observations_by_sport.get(sport_key, 0) + int(count or 0)
+                )
+        return {
+            "since_hours": max(1, int(since_hours)),
+            "historical_observations": sum(observations_by_sport.values()),
+            "tracked_observations": sum(observations_by_sport.values()),
+            "observations_by_sport": observations_by_sport,
+            "source": "prop_line_history_observations_only",
         }
 
     async def get_pending_opportunities(

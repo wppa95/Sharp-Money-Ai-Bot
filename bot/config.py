@@ -164,7 +164,7 @@ class Config:
     # "EPL" or the EPL feed will be fetched twice.
     ACTIVE_SPORTS_RAW: str = os.environ.get(
         "ACTIVE_SPORTS",
-     "TENNIS,WNBA,CS,LOL,VAL,DOTA,PGA,FIFA,CFB",
+     "NFL,CFB,TENNIS,WNBA,CS,LOL,VAL,DOTA,PGA,FIFA",
     )
 
     # ── Alert thresholds ──────────────────────────────────────────────────────

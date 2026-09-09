@@ -225,7 +225,7 @@ async def test_funnel_separates_observations_active_directional_and_delivery(db)
 
 
 @pytest.mark.asyncio
-async def test_tracking_summary_excludes_football_but_keeps_soccer(db):
+async def test_tracking_summary_includes_football_and_soccer(db):
     now = datetime.utcnow()
     async with db.session() as session:
         session.add_all([
@@ -258,7 +258,6 @@ async def test_tracking_summary_excludes_football_but_keeps_soccer(db):
 
     summary = await db.get_tracking_summary()
 
-    assert summary["tracked_observations"] == 1
-    assert summary["tracked"] == 1
-    assert summary["active_by_sport"] == {"SOCCER": 1}
-    assert "NFL" not in summary["active_by_sport"]
+    assert summary["tracked_observations"] == 2
+    assert summary["tracked"] == 2
+    assert summary["active_by_sport"] == {"NFL": 1, "SOCCER": 1}
