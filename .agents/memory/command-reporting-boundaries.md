@@ -32,3 +32,16 @@ grades makes the tracking funnel falsely appear empty.
 **How to apply:** Keep directional pending/resolved metrics separate, but make
 the primary tracking/grading display use the universal ledger and preserve
 provider-level result counts.
+
+Per-sport report tables must union normalized database maps with live FPR
+telemetry and compatibility rows before rendering. Aggregate totals can be
+correct while the table is empty if the renderer only trusts normalized
+per-sport maps.
+
+**Why:** Full-pool rescans persist their latest sport distribution in the
+health sidecar, while normalized history/candidate aggregates can temporarily
+have no per-sport rows after a restart or during database catch-up.
+
+**How to apply:** Use FPR sport counts as the active/evaluation fallback for
+the table, while preserving normalized observation, directional, and delivery
+counts whenever those populations are available.
