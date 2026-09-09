@@ -131,7 +131,7 @@ def test_full_pool_monitoring_uses_underdog_cadence():
 
 
 @pytest.mark.asyncio
-async def test_coordinator_coalesces_active_trigger_and_allows_next_trigger():
+async def test_coordinator_queues_active_trigger_and_allows_next_trigger():
     from main import _ScheduledExecutionCoordinator
 
     coordinator = _ScheduledExecutionCoordinator()
@@ -152,15 +152,16 @@ async def test_coordinator_coalesces_active_trigger_and_allows_next_trigger():
     await asyncio.sleep(0)
 
     assert calls == 1
-    assert second.done()
+    assert not second.done()
     release.set()
-    await first
+    await asyncio.gather(first, second)
+    assert calls == 2
 
-    # A later trigger is not queued or lost after the active execution ends.
+    # A later trigger is admitted after the queued execution finishes.
     release.clear()
     third = asyncio.create_task(wrapped(None))
     await asyncio.sleep(0)
-    assert calls == 2
+    assert calls == 3
     release.set()
     await third
 
@@ -208,15 +209,16 @@ async def test_launcher_queues_overlapping_trigger_without_overlap():
     await first_launcher
 
     # The active task is still blocked; the second same-name trigger is
-    # coalesced instead of overlapping or queuing another execution.
-    await launcher(None)
+    # queued instead of overlapping the first execution.
+    second_launcher = asyncio.create_task(launcher(None))
+    await second_launcher
     assert calls == 1
-    assert len(coordinator._tasks) == 1
+    assert len(coordinator._tasks) == 2
 
     release.set()
     await asyncio.gather(*list(coordinator._tasks))
     await asyncio.sleep(0)
-    assert calls == 1
+    assert calls == 2
     assert not coordinator._running
     assert not coordinator._tasks
 
@@ -239,11 +241,12 @@ async def test_launcher_never_allows_same_job_overlap():
     await asyncio.sleep(0)
 
     assert started == [1]
-    assert len(coordinator._tasks) == 1
+    assert len(coordinator._tasks) == 2
 
     release.set()
     await asyncio.gather(*list(coordinator._tasks))
     await asyncio.sleep(0)
+    assert started == [1, 2]
     assert not coordinator._running
     assert not coordinator._active_counts
 
@@ -265,8 +268,8 @@ async def test_simultaneous_same_name_launch_is_admitted_atomically():
     await asyncio.gather(launcher(None), launcher(None))
     await asyncio.sleep(0)
 
-    assert calls == 1
-    assert len(coordinator._tasks) == 1
+    assert calls == 2
+    assert len(coordinator._tasks) == 2
 
     release.set()
     await asyncio.gather(*list(coordinator._tasks))
