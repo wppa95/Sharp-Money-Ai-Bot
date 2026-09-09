@@ -268,11 +268,12 @@ async def test_simultaneous_same_name_launch_is_admitted_atomically():
     await asyncio.gather(launcher(None), launcher(None))
     await asyncio.sleep(0)
 
-    assert calls == 2
+    assert calls == 1
     assert len(coordinator._tasks) == 2
 
     release.set()
     await asyncio.gather(*list(coordinator._tasks))
+    assert calls == 2
 
 
 @pytest.mark.asyncio
@@ -384,7 +385,7 @@ async def test_launcher_long_run_is_not_cancelled_by_later_trigger():
     await launcher(None)
     await asyncio.sleep(0)
     assert not cancelled
-    assert len(coordinator._tasks) == 1
+    assert len(coordinator._tasks) == 2
 
     release.set()
     await asyncio.gather(*list(coordinator._tasks))
