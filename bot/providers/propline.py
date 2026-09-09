@@ -4724,10 +4724,7 @@ class PropLinePrizePicksProvider(PropProviderBase):
                 sport_key=canonical_sport, market=_clean(market),
                 error="PropLine is not configured", failure_kind="disabled",
             )
-        if (
-            is_football_related_sport(canonical_sport)
-            or (self._sport_filter is not None and canonical_sport not in self._sport_filter)
-        ):
+        if self._sport_filter is not None and canonical_sport not in self._sport_filter:
             return PropLinePlayerHistoryFetchResult(
                 (), datetime.utcnow(), player_name=_clean(player_name),
                 sport_key=canonical_sport, market=_clean(market),
@@ -4770,10 +4767,7 @@ class PropLinePrizePicksProvider(PropProviderBase):
                 sport_key=canonical_sport,
                 error="PropLine is not configured", failure_kind="disabled",
             )
-        if (
-            is_football_related_sport(canonical_sport)
-            or (self._sport_filter is not None and canonical_sport not in self._sport_filter)
-        ):
+        if self._sport_filter is not None and canonical_sport not in self._sport_filter:
             return PropLinePlayerTrendsFetchResult(
                 (), datetime.utcnow(), player_name=_clean(player_name),
                 sport_key=canonical_sport,
