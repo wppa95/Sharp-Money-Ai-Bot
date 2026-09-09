@@ -483,6 +483,36 @@ def test_alert_history_includes_h2h_window_from_decision():
     assert "67% (2/3)" in message
 
 
+def test_alert_history_includes_h2h_from_validation_when_decision_lacks_it():
+    from alerts_multiplatform import format_underdog_change_alert
+    import types
+
+    decision = types.SimpleNamespace(
+        recommendation="OVER",
+        confidence=82,
+        l5_games=None, l5_over=None, l5_hit_rate=None,
+        l10_games=None, l10_over=None, l10_hit_rate=None,
+        l20_games=None, l20_over=None, l20_hit_rate=None,
+        l30_games=None, l30_over=None, l30_hit_rate=None,
+        season_games=None, season_over=None, season_hit_rate=None,
+        h2h_games=None, h2h_over=None, h2h_hit_rate=None,
+    )
+    validation = types.SimpleNamespace(h2h_hit_rate=0.75)
+
+    message = format_underdog_change_alert(
+        player_name="Test Player",
+        team="TEST",
+        sport="MLB",
+        stat_type="Hits",
+        old_line=1.0,
+        new_line=1.5,
+        validation=validation,
+        decision=decision,
+    )
+
+    assert "<b>H2H:</b> 75%" in message
+
+
 def test_strong_bet_uses_directional_hit_and_miss_thresholds():
     from alerts_multiplatform import _has_strong_directional_history
     import types

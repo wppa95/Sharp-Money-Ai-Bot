@@ -567,7 +567,10 @@ def _display_label(value: object) -> str:
 
 def _numeric_attr(obj: Optional[object], name: str) -> Optional[float]:
     """Read a numeric display value without rendering mock/sentinel objects."""
-    value = getattr(obj, name, None) if obj is not None else None
+    if isinstance(obj, dict):
+        value = obj.get(name)
+    else:
+        value = getattr(obj, name, None) if obj is not None else None
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return value
     return None
@@ -586,9 +589,12 @@ def _history_window_label(
     return label
 
 
-def _format_history_block(decision: Optional[object]) -> str:
-    """Render one compact hit-history block from the existing decision values."""
-    if decision is None:
+def _format_history_block(
+    decision: Optional[object],
+    validation: Optional[object] = None,
+) -> str:
+    """Render one compact hit-history block, including available H2H data."""
+    if decision is None and validation is None:
         return ""
 
     l30_games = _numeric_attr(decision, "l30_games")
@@ -605,6 +611,7 @@ def _format_history_block(decision: Optional[object]) -> str:
         ("H2H", "h2h_hit_rate", "h2h_games", "h2h_over"),
     )
     rows: list[str] = []
+    h2h_rendered = False
     for label, rate_name, games_name, over_name in windows:
         rate = _numeric_attr(decision, rate_name)
         games = _numeric_attr(decision, games_name)
@@ -617,6 +624,15 @@ def _format_history_block(decision: Optional[object]) -> str:
         else:
             value = f"{rate:.0%} ({int(games)} games)"
         rows.append(f"   <b>{shown_label}:</b> {value}")
+        if label == "H2H":
+            h2h_rendered = True
+
+    # Some delivery paths have H2H on PlayerPropValidation before a complete
+    # UDBetDecision is available. Preserve that signal rather than silently
+    # dropping it from the Telegram alert.
+    validation_h2h = _numeric_attr(validation, "h2h_hit_rate")
+    if not h2h_rendered and validation_h2h is not None:
+        rows.append(f"   <b>H2H:</b> {validation_h2h:.0%}")
 
     if not rows:
         return "\n\n📈 <b>HISTORY</b>\n   <b>L5:</b> N/A — no history available"
@@ -931,7 +947,7 @@ def format_underdog_change_alert(
             if _has_strong_directional_history(validation, decision):
                 body_lines += ["💪 STRONG BET"]
             decision_reason = _clean_reason(getattr(decision, "reason", ""))
-            history = _format_history_block(decision)
+            history = _format_history_block(decision, validation)
             if history:
                 body_lines += [history]
             if decision_reason:
@@ -1067,7 +1083,7 @@ def format_underdog_new_prop_alert(
             f"Supporting game history available ({getattr(validation, 'n_real_games', 0)} games)"
         )
 
-    history_block = _format_history_block(decision)
+    history_block = _format_history_block(decision, validation)
     context_line = (
         f"  <b>First Seen:</b>    {datetime.utcnow().strftime('%H:%M UTC')}"
         + (f"\n{opponent_str}" if opponent_str else "")
