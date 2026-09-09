@@ -4601,13 +4601,6 @@ class PropLinePrizePicksProvider(PropProviderBase):
                 sport
                 for sport in discovered
                 if sport.canonical_key in self._sport_filter
-                and not is_football_related_sport(sport.canonical_key)
-            ]
-        else:
-            discovered = [
-                sport
-                for sport in discovered
-                if not is_football_related_sport(sport.canonical_key)
             ]
         return discovered
 
@@ -4621,7 +4614,6 @@ class PropLinePrizePicksProvider(PropProviderBase):
             result = await self.client.fetch_prizepicks_props(bookmaker=self.bookmaker)
             return [
                 prop for prop in result.props
-                if not is_football_related_sport(prop.sport)
                 and (self._sport_filter is None or prop.sport in self._sport_filter)
             ]
 
@@ -4630,13 +4622,6 @@ class PropLinePrizePicksProvider(PropProviderBase):
             discovered = [
                 sport for sport in discovered
                 if sport.canonical_key in self._sport_filter
-                and not is_football_related_sport(sport.canonical_key)
-            ]
-        else:
-            discovered = [
-                sport
-                for sport in discovered
-                if not is_football_related_sport(sport.canonical_key)
             ]
 
         props: list[PlayerProp] = []
@@ -4667,12 +4652,6 @@ class PropLinePrizePicksProvider(PropProviderBase):
                 error="PropLine is not configured", failure_kind="disabled",
             )
         canonical_sport = _normalize_sport(sport)
-        if is_football_related_sport(canonical_sport):
-            return PropLineFetchResult(
-                [], datetime.utcnow(),
-                error=f"PropLine sport is outside football-free scope: {canonical_sport}",
-                failure_kind="configuration",
-            )
         if self._sport_filter is not None and canonical_sport not in self._sport_filter:
             return PropLineFetchResult(
                 [], datetime.utcnow(),
