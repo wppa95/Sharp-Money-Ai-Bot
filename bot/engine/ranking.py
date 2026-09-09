@@ -483,6 +483,8 @@ def compute_ranking(
     overall_history     Aggregate performance across all resolved bets.
     market_history      Performance filtered to this specific market type.
     sport_history       Performance filtered to this specific sport.
+    adaptive_multiplier  Optional eligible multiplier from the active audited
+                         provider-aware weight ledger.
 
     Returns
     -------
@@ -503,7 +505,11 @@ def compute_ranking(
 
     # ── Step 2: Historical adjustment ─────────────────────────────────────────
     final_score, hist_breakdown = _hist_scorer.compute(
-        confidence_result, overall_history, market_history, sport_history
+        confidence_result,
+        overall_history,
+        market_history,
+        sport_history,
+        adaptive_multiplier,
     )
 
     # ── Step 3: Tier and decision ─────────────────────────────────────────────
