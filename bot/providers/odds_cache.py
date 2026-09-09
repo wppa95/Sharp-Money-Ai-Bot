@@ -2,7 +2,7 @@
 providers/odds_cache.py — Shared async TTL cache for Odds API responses.
 
 DraftKings and FanDuel connectors each previously made a separate HTTP call
-per sport per 90-second cycle (e.g. ?bookmakers=draftkings and
+per sport per two-minute cycle (e.g. ?bookmakers=draftkings and
 ?bookmakers=fanduel).  This module replaces both calls with one shared fetch
 per (sport_key, markets, regions) key and lets each connector filter the
 full response for its own bookmaker client-side.

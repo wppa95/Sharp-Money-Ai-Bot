@@ -209,13 +209,13 @@ class Config:
     CONNECTOR_POLL_INTERVAL:  int = int(os.environ.get("CONNECTOR_POLL_INTERVAL",  "120"))
     CONSENSUS_CHECK_INTERVAL: int = int(os.environ.get("CONSENSUS_CHECK_INTERVAL", "120"))
     CLV_CHECK_INTERVAL:       int = int(os.environ.get("CLV_CHECK_INTERVAL",       "120"))
-    # One shared Player Props evaluation cycle every 1–2 minutes. The default
-    # is 90 seconds, and environment overrides are bounded to this same range.
+    # One shared Player Props evaluation cycle every 2 minutes by default.
+    # Environment overrides are bounded to the one-to-two-minute range.
     # Each cycle fetches the complete current Underdog feed; the evaluation
     # budget is a lower bound rather than a feed-size cap.
     UNDERDOG_POLL_INTERVAL:   int = max(
         60,
-        min(120, int(os.environ.get("UNDERDOG_POLL_INTERVAL", "90"))),
+        min(120, int(os.environ.get("UNDERDOG_POLL_INTERVAL", "120"))),
     )
     # Five-minute refresh cadence for settlement and evidence enrichment.
     # The scheduler coordinator prevents overlapping executions.
