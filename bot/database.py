@@ -1059,6 +1059,54 @@ class PropTrackingLog(Base):
     )
 
 
+class AdaptiveLearningRun(Base):
+    """Immutable audit record for one adaptive-learning rebuild."""
+
+    __tablename__ = "adaptive_learning_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    version = Column(String(64), nullable=False, unique=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    activated_at = Column(DateTime, nullable=True)
+    active = Column(Boolean, default=False, nullable=False, index=True)
+    min_sample_size = Column(Integer, nullable=False)
+    min_model_errors = Column(Integer, nullable=False)
+    max_delta = Column(Float, nullable=False)
+    eligible_groups = Column(Integer, nullable=False, default=0)
+    total_groups = Column(Integer, nullable=False, default=0)
+    status = Column(String(32), nullable=False, default="DESCRIPTIVE")
+
+
+class AdaptiveLearningWeight(Base):
+    """Provider/sport/market weights belonging to one audited run."""
+
+    __tablename__ = "adaptive_learning_weights"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    version = Column(String(64), nullable=False, index=True)
+    provider = Column(String(64), nullable=False, index=True)
+    sport = Column(String(32), nullable=False, index=True)
+    market_type = Column(String(64), nullable=False, index=True)
+    sample_size = Column(Integer, nullable=False, default=0)
+    eligible_samples = Column(Integer, nullable=False, default=0)
+    model_errors = Column(Integer, nullable=False, default=0)
+    hit_rate = Column(Float, nullable=True)
+    multiplier = Column(Float, nullable=False, default=1.0)
+    status = Column(String(32), nullable=False, default="INSUFFICIENT_SAMPLE")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "version", "provider", "sport", "market_type",
+            name="uq_adaptive_learning_weight",
+        ),
+        Index(
+            "ix_adaptive_learning_weight_lookup",
+            "version", "provider", "sport", "market_type",
+        ),
+    )
+
+
 # ── Prop Candidate Log ────────────────────────────────────────────────────────
 
 class PropCandidateLog(Base):
