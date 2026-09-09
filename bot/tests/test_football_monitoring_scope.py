@@ -174,31 +174,35 @@ class _MixedPropLineClient:
         )
 
 
-def test_prizepicks_custom_endpoint_filters_mixed_football_batch():
+def test_prizepicks_custom_endpoint_keeps_mixed_sports_for_persistence():
     provider = PropLinePrizePicksProvider(client=_MixedPropLineClient())
 
     props = asyncio.run(provider.fetch_props())
 
-    assert [(prop.sport, prop.player_name) for prop in props] == [
-        ("NBA", "NBA Player")
-    ]
+    assert {(prop.sport, prop.player_name) for prop in props} == {
+        ("NFL", "NFL Player"),
+        ("NBA", "NBA Player"),
+    }
 
 
-def test_prizepicks_sport_scoped_football_fetch_is_blocked_before_request():
+def test_prizepicks_sport_scoped_football_fetch_is_enabled_for_persistence():
     client = _MixedPropLineClient()
     provider = PropLinePrizePicksProvider(client=client)
 
     result = asyncio.run(provider.fetch_props_for_sport_result("CFB"))
 
-    assert result.props == []
-    assert result.failure_kind == "configuration"
+    assert {(prop.sport, prop.player_name) for prop in result.props} == {
+        ("CFB", "NFL Player"),
+        ("CFB", "NBA Player"),
+    }
+    assert result.succeeded is True
 
 
 @pytest.mark.parametrize(
     "sport",
     ["NFL", "NCAAF", "CFB", "FCS", "CFL", "AFL", "AFLW"],
 )
-def test_prizepicks_normalization_rejects_football_without_persistable_prop(sport):
+def test_prizepicks_normalization_keeps_football_for_history_persistence(sport):
     from providers.propline import normalize_propline_prizepicks_record
 
     record = {
@@ -210,4 +214,6 @@ def test_prizepicks_normalization_rejects_football_without_persistable_prop(spor
         "line": 20.5,
     }
 
-    assert normalize_propline_prizepicks_record(record) is None
+    normalized = normalize_propline_prizepicks_record(record)
+    assert normalized is not None
+    assert normalized.sport == sport
