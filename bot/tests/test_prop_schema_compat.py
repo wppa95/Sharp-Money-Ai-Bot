@@ -88,7 +88,7 @@ async def _nullable_flags(database: Database, table_name: str) -> dict[str, bool
 
 
 @pytest.mark.asyncio
-async def test_init_rebuilds_legacy_prop_tables_without_losing_rows(tmp_path):
+async def test_init_rebuilds_legacy_prop_tables_idempotently(tmp_path):
     path = tmp_path / "legacy-props.sqlite"
     await _seed_pre_compat_schema(path)
 
@@ -127,6 +127,49 @@ async def test_init_rebuilds_legacy_prop_tables_without_losing_rows(tmp_path):
         assert candidate.gate_decision == "ACCEPTED"
     finally:
         await database.close()
+
+    # A restart must be able to initialize the already-upgraded file again.
+    # In particular, the compatibility rebuild must not run a second time or
+    # disturb the historical rows it preserved.
+    restarted_database = Database(f"sqlite+aiosqlite:///{path}")
+    await restarted_database.init()
+    try:
+        opportunity_nullable = await _nullable_flags(
+            restarted_database, "prop_opportunity_log"
+        )
+        candidate_nullable = await _nullable_flags(
+            restarted_database, "prop_candidate_log"
+        )
+
+        assert opportunity_nullable["decision_tier"] is True
+        assert candidate_nullable["gate_decision"] is True
+
+        async with restarted_database.session() as session:
+            opportunity = (
+                await session.execute(
+                    select(PropOpportunityLog).where(
+                        PropOpportunityLog.external_id == "legacy-opportunity"
+                    )
+                )
+            ).scalar_one()
+            candidate = (
+                await session.execute(
+                    select(PropCandidateLog).where(
+                        PropCandidateLog.snapshot_external_id == "legacy-snapshot"
+                    )
+                )
+            ).scalar_one()
+
+        assert opportunity.id == 41
+        assert opportunity.result == "HIT"
+        assert opportunity.decision_tier == "A"
+        assert opportunity.bet_quality_score == 82
+        assert candidate.id == 42
+        assert candidate.score_total == pytest.approx(74.5)
+        assert candidate.score_tier == "A"
+        assert candidate.gate_decision == "ACCEPTED"
+    finally:
+        await restarted_database.close()
 
 
 @pytest.mark.asyncio
