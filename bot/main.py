@@ -1830,6 +1830,8 @@ async def _player_props_job(context) -> None:
                 provider,
                 props,
                 append_snapshot=True,
+                append_observations=True,
+                track=True,
             )
         except Exception as exc:
             logger.exception(

@@ -589,58 +589,14 @@ async def _persist_propline_observations(
         canonical_props = canonicalize_player_props("PrizePicks", props)
         if not canonical_props:
             return 0
-        observation_writer = getattr(
-            db, "save_prop_line_observations_batch", None
-        )
-        if callable(observation_writer):
-            observed = observation_writer("PrizePicks", canonical_props)
-            if inspect.isawaitable(observed):
-                observed = await observed
-            if int(observed or 0) != len(canonical_props):
-                raise RuntimeError(
-                    "incomplete PrizePicks observation-ledger write "
-                    f"({observed}/{len(canonical_props)})"
-                )
         await persist_canonical_player_props(
             db,
             "PrizePicks",
             canonical_props,
             append_snapshot=True,
+            append_observations=True,
+            track=include_tracking,
         )
-        tracking_records = []
-        for prop in canonical_props:
-            player = str(getattr(prop, "player_name", "") or "").strip()
-            sport = str(getattr(prop, "sport", "") or "").upper().strip()
-            stat = str(getattr(prop, "stat_type", "") or "").strip()
-            event_id = str(
-                getattr(prop, "event_id", "")
-                or getattr(prop, "game_id", "")
-                or ""
-            ).strip()
-            external_id = str(getattr(prop, "external_id", "") or "").strip()
-            if not external_id:
-                external_id = f"{player}:{sport}:{stat}:{event_id}"
-            tracking_records.append({
-                "external_id": external_id,
-                "player_name": player,
-                "team": str(getattr(prop, "team", "") or ""),
-                "sport": sport,
-                "stat_type": stat,
-                "line_value": getattr(prop, "line_value", None),
-                "game_time": getattr(prop, "game_time", None),
-                "game_id": event_id,
-                "line_variant": str(
-                    getattr(prop, "line_variant", "") or ""
-                ).lower(),
-                "provider": "PrizePicks",
-                "product": PLAYER_PROPS_PRODUCT,
-            })
-        if include_tracking:
-            track_props = getattr(db, "track_prop_records", None)
-            if callable(track_props) and tracking_records:
-                tracked = await track_props(tracking_records)
-                if tracked is not None and int(tracked) < len(tracking_records):
-                    raise RuntimeError("incomplete PrizePicks tracking write")
         return len(canonical_props)
     except Exception as exc:  # noqa: BLE001
         logger.warning(
@@ -7872,6 +7828,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
       the rotation or prevent their evaluation.
     """
     from engine.player_validator import validate_player_prop as _fpr_validate
+    from engine.sport_policy import is_football_related_sport as _fpr_is_football
     from engine.ud_bet_decision import make_ud_bet_decision as _fpr_decide
     from engine.ud_scoring import (
         score_ud_prop          as _fpr_score_fn,
@@ -8021,7 +7978,10 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         active_pool = {
             key: snap
             for key, snap in active_pool.items()
-            if not _is_futures_stat(getattr(snap, "stat_type", ""))
+            if (
+                not _is_futures_stat(getattr(snap, "stat_type", ""))
+                and not _fpr_is_football(getattr(snap, "sport", ""))
+            )
         }
         _fpr_prizepicks_lines = _active_prizepicks_lines(active_pool)
         fpr_pool_size = len(active_pool)

@@ -115,3 +115,38 @@ async def test_shared_persistence_adapter_preserves_provider_and_source_metadata
     assert rows[0].external_id == "pp-1"
     assert rows[0].line_variant == "goblin"
     assert rows[0].event_id == "game-1"
+
+
+@pytest.mark.asyncio
+async def test_provider_ingestion_can_write_observations_and_tracking_together():
+    calls = []
+
+    class FakeDB:
+        async def save_prop_line_observations_batch(self, provider, props):
+            calls.append(("observations", provider, list(props)))
+            return len(props)
+
+        async def upsert_prop_line_history_batch(self, provider, props, **kwargs):
+            calls.append(("history", provider, list(props), kwargs))
+
+        async def track_prop_records(self, records):
+            calls.append(("tracking", list(records)))
+            return len(records)
+
+    count = await persist_canonical_player_props(
+        FakeDB(),
+        "DraftKings",
+        [_prop("DraftKings", "dk-1", 25.5)],
+        append_snapshot=True,
+        append_observations=True,
+        track=True,
+    )
+
+    assert count == 1
+    assert [call[0] for call in calls] == [
+        "observations",
+        "history",
+        "tracking",
+    ]
+    assert calls[0][1] == "DraftKings"
+    assert calls[2][1][0]["provider"] == "DraftKings"

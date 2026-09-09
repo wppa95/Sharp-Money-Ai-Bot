@@ -137,3 +137,4 @@
 - [Opportunity event identity](opportunity-event-identity.md) — preserve Underdog event IDs through opportunity writes; keep historical repairs out of startup-critical migrations.
 - [History coverage boundaries](history-coverage-boundaries.md) — batch full-book provider work; report empty sport coverage separately from errors and deadlines.
 - [Odds API player-prop feed](odds-player-prop-feed.md) — sportsbook props supplement the canonical Underdog workflow; h2h/totals polling is retired.
+- [Provider-aware prop ledger](provider-aware-prop-ledger.md) — every supported feed keeps source identity across observation, history, tracking, grading, and reports; sportsbook rows never enter the Underdog alert universe.

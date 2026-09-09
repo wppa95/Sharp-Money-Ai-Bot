@@ -170,12 +170,33 @@ async def persist_canonical_player_props(
     *,
     append_snapshot: bool = False,
     refresh_metadata: bool = False,
+    append_observations: bool = False,
+    track: bool = False,
 ) -> int:
-    """Persist one provider batch through the shared Player Props ledger."""
+    """Persist one provider batch through the shared Player Props ledger.
+
+    ``append_observations`` and ``track`` are opt-in for compatibility with
+    existing callers that use this function only for current-state refreshes.
+    Provider ingestion jobs should enable both so the same batch enters the
+    immutable observation ledger and the neutral settlement-tracking ledger.
+    """
     canonical = canonicalize_player_props(provider, props)
     if db is None or not canonical:
         return 0
     rows = as_history_objects(canonical)
+    if append_observations:
+        observation_writer = getattr(
+            db, "save_prop_line_observations_batch", None
+        )
+        if callable(observation_writer):
+            observed = observation_writer(provider, rows)
+            if inspect.isawaitable(observed):
+                observed = await observed
+            if int(observed or 0) != len(rows):
+                raise RuntimeError(
+                    f"incomplete {provider} observation-ledger write "
+                    f"({observed}/{len(rows)})"
+                )
     options = {}
     if append_snapshot:
         options["append_snapshot"] = True
@@ -195,4 +216,33 @@ async def persist_canonical_player_props(
         operation = db.upsert_prop_line_history_batch(provider, rows)
         if inspect.isawaitable(operation):
             await operation
+    if track:
+        tracker = getattr(db, "track_prop_records", None)
+        if callable(tracker):
+            tracking_records = []
+            for prop in canonical:
+                external_id = prop.external_id or (
+                    f"{prop.player_name}:{prop.sport}:{prop.stat_type}:{prop.game_id}"
+                )
+                tracking_records.append({
+                    "provider": prop.provider,
+                    "product": "Player Props",
+                    "external_id": external_id,
+                    "player_name": prop.player_name,
+                    "team": prop.team,
+                    "sport": prop.sport,
+                    "stat_type": prop.stat_type,
+                    "line_value": prop.line_value,
+                    "game_time": prop.game_time,
+                    "game_id": prop.game_id,
+                    "line_variant": prop.line_variant,
+                })
+            tracked = tracker(tracking_records)
+            if inspect.isawaitable(tracked):
+                tracked = await tracked
+            if tracked is not None and int(tracked) < len(tracking_records):
+                raise RuntimeError(
+                    f"incomplete {provider} tracking write "
+                    f"({tracked}/{len(tracking_records)})"
+                )
     return len(canonical)

@@ -62,6 +62,12 @@ _NEXT_TARGET_KEY = "_player_history_next_target"
 _CURSOR_KEY = "_player_history_cursor"
 _PROPLINE_CURSOR_KEY = "_player_history_propline_cursor"
 _PRIMARY_HISTORY_PROVIDERS = frozenset({"underdog", "prizepicks"})
+_PLAYER_PROP_PROVIDERS = (
+    "Underdog",
+    "PrizePicks",
+    "DraftKings",
+    "FanDuel",
+)
 # The shared PropLine history endpoint is currently advertised at 27/hour
 # (about one request every 133 seconds). One scheduled target per five-minute
 # cycle avoids queueing requests past this collector's five-second target
@@ -231,9 +237,12 @@ async def player_history_collector_job(context) -> None:
                     source = candidate
             normalized = str(source or default).strip().lower()
             return (
-                "PrizePicks"
-                if normalized == "prizepicks"
-                else "Underdog"
+                {
+                    "underdog": "Underdog",
+                    "prizepicks": "PrizePicks",
+                    "draftkings": "DraftKings",
+                    "fanduel": "FanDuel",
+                }.get(normalized, str(source or default).strip() or default)
             )
 
         def source_scope(target: tuple[str, str, str]) -> str:
@@ -255,7 +264,7 @@ async def player_history_collector_job(context) -> None:
                 active = await await_in_cycle(
                     "loading active player-history targets",
                     lambda: _generic_active(
-                        providers=("Underdog", "PrizePicks")
+                        providers=_PLAYER_PROP_PROVIDERS
                     ),
                 )
                 active_rows = active.items()
@@ -310,26 +319,28 @@ async def player_history_collector_job(context) -> None:
                     db, "get_all_active_prop_line_history_by_line", None
                 )
                 if asyncio.iscoroutinefunction(_generic_active):
-                    plh = []
-                    for _provider in ("Underdog", "PrizePicks"):
-                        plh.extend(
-                            await await_in_cycle(
-                                f"loading {_provider} player-history targets",
-                                lambda provider_name=_provider: (
-                                    db.get_latest_props_for_provider(
-                                        provider_name, since_hours=48
-                                    )
-                                ),
+                    plh: list[tuple[str, object]] = []
+                    for _provider in _PLAYER_PROP_PROVIDERS:
+                        provider_rows = await await_in_cycle(
+                            f"loading {_provider} player-history targets",
+                            lambda provider_name=_provider: (
+                                db.get_latest_props_for_provider(
+                                    provider_name, since_hours=48
+                                )
+                            ),
                             )
+                        plh.extend(
+                            (_provider, row) for row in (provider_rows or [])
                         )
                 else:
-                    plh = await await_in_cycle(
+                    provider_rows = await await_in_cycle(
                         "loading Underdog player-history targets",
                         lambda: db.get_latest_props_for_provider(
                             "Underdog", since_hours=48
                         ),
                     )
-                for s in plh:
+                    plh = [("Underdog", row) for row in (provider_rows or [])]
+                for _provider, s in plh:
                     sport = (getattr(s, "sport", None) or "UNKNOWN").upper()
                     key = (
                         (s.player_name or "").strip(),
@@ -337,7 +348,7 @@ async def player_history_collector_job(context) -> None:
                         (s.stat_type or "").lower().strip(),
                     )
                     target_sources.setdefault(key, set()).add(
-                        "PrizePicks" if _provider == "PrizePicks" else "Underdog"
+                        _provider
                     )
                     if key[0] and key[2] and key not in seen:
                         seen.add(key)

@@ -43,6 +43,7 @@ _PROP_HISTORY_BATCH_SIZE = 200
 _TRACKING_BATCH_SIZE = 200
 _CLV_BULK_BATCH_SIZE = 100
 PLAYER_PROPS_PRODUCT = "Player Props"
+_PLAYER_PROP_PROVIDERS = ("Underdog", "PrizePicks", "DraftKings", "FanDuel")
 _DB_WRITE_MAX_RETRIES = 2
 _DB_WRITE_RETRY_DELAYS = (0.15, 0.5)
 _PRIZEPICKS_EXTERNAL_PREFIX = "PrizePicks::"
@@ -2948,7 +2949,7 @@ class Database:
                         PropLineHistory.sport,
                         func.count(PropLineHistory.id),
                     ).where(
-                        PropLineHistory.provider.in_(("Underdog", "PrizePicks")),
+                        PropLineHistory.provider.in_(_PLAYER_PROP_PROVIDERS),
                         PropLineHistory.fetched_at >= cutoff,
                     ).group_by(
                         PropLineHistory.provider,
@@ -2981,7 +2982,7 @@ class Database:
                 tracked_ids = (
                     select(func.max(PropLineHistory.id))
                     .where(
-                        PropLineHistory.provider.in_(("Underdog", "PrizePicks")),
+                        PropLineHistory.provider.in_(_PLAYER_PROP_PROVIDERS),
                     )
                     .group_by(
                         PropLineHistory.provider,
@@ -7539,7 +7540,7 @@ class Database:
             current_ids = (
                 select(func.max(PropLineHistory.id))
                 .where(
-                    PropLineHistory.provider.in_(("Underdog", "PrizePicks")),
+                    PropLineHistory.provider.in_(_PLAYER_PROP_PROVIDERS),
                 )
                 .group_by(
                     PropLineHistory.provider,
@@ -7583,7 +7584,7 @@ class Database:
                     func.count(PropLineHistory.id),
                 )
                 .where(
-                    PropLineHistory.provider.in_(("Underdog", "PrizePicks")),
+                    PropLineHistory.provider.in_(_PLAYER_PROP_PROVIDERS),
                     PropLineHistory.fetched_at >= cutoff,
                 )
                 .group_by(PropLineHistory.provider, PropLineHistory.sport)
@@ -7994,7 +7995,7 @@ class Database:
                     func.count(PropLineHistory.id),
                 )
                 .where(
-                    PropLineHistory.provider.in_(("Underdog", "PrizePicks")),
+                    PropLineHistory.provider.in_(_PLAYER_PROP_PROVIDERS),
                     PropLineHistory.fetched_at >= cutoff,
                 )
                 .group_by(PropLineHistory.sport)
@@ -9147,7 +9148,7 @@ class Database:
                     PropLineHistory.sport,
                     func.count(PropLineHistory.id),
                 )
-                .where(PropLineHistory.provider.in_(("Underdog", "PrizePicks")))
+                .where(PropLineHistory.provider.in_(_PLAYER_PROP_PROVIDERS))
                 .group_by(PropLineHistory.provider, PropLineHistory.sport)
             )
             tracked_observations_by_provider: dict[str, int] = {}
@@ -9166,7 +9167,7 @@ class Database:
             # lines.
             current_ids = (
                 select(func.max(PropLineHistory.id))
-                .where(PropLineHistory.provider.in_(("Underdog", "PrizePicks")))
+                .where(PropLineHistory.provider.in_(_PLAYER_PROP_PROVIDERS))
                 .group_by(
                     PropLineHistory.provider,
                     PropLineHistory.player_name,
@@ -9228,7 +9229,7 @@ class Database:
                             func.count(PropLineHistory.id),
                         )
                         .where(
-                            PropLineHistory.provider.in_(("Underdog", "PrizePicks"))
+                            PropLineHistory.provider.in_(_PLAYER_PROP_PROVIDERS)
                         )
                         .group_by(PropLineHistory.sport)
                     )

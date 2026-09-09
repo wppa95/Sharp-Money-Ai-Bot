@@ -261,3 +261,29 @@ async def test_tracking_summary_includes_football_and_soccer(db):
     assert summary["tracked_observations"] == 2
     assert summary["tracked"] == 2
     assert summary["active_by_sport"] == {"NFL": 1, "SOCCER": 1}
+
+
+@pytest.mark.asyncio
+async def test_funnel_includes_sportsbook_provider_observations(db):
+    now = datetime.utcnow()
+    async with db.session() as session:
+        session.add(
+            PropLineHistory(
+                external_id="dk-funnel-1",
+                provider="DraftKings",
+                player_name="Sportsbook Player",
+                team="TEAM",
+                sport="NBA",
+                stat_type="Points",
+                line_value=22.5,
+                game_time=now + timedelta(hours=2),
+                fetched_at=now,
+                removed=False,
+            )
+        )
+        await session.commit()
+
+    summary = await db.get_funnel_observation_summary(since_hours=24)
+
+    assert summary["historical_observations"] == 1
+    assert summary["observations_by_sport"] == {"NBA": 1}
