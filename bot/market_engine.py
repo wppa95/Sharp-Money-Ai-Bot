@@ -1264,10 +1264,6 @@ async def propline_request_scan_job(context) -> None:
             elif callable(fetch_props):
                 props = list(await fetch_props(sport) or [])
                 succeeded = True
-            props = [
-                prop for prop in props
-                if not is_football_related_sport(getattr(prop, "sport", ""))
-            ]
             if succeeded:
                 persisted = await _persist_propline_observations(
                     getattr(context, "bot_data", {}).get("db"),
