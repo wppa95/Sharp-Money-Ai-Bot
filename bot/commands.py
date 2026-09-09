@@ -5022,7 +5022,7 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             )
         )
 
-        sc_cycles = scan_summary.get("cycles", 0)
+        sc_cycles = int(scan_summary.get("cycles", 0) or 0)
         if sc_cycles > 0:
             sc_fetched   = scan_summary.get("fetched", 0)
             sc_removed   = scan_summary.get("removed", 0)
@@ -5032,17 +5032,56 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             sc_lc        = scan_summary.get("line_changed", 0)
             sc_analyzed  = scan_summary.get("analyzed", 0)
             sc_delivered = scan_summary.get("alert_delivered", 0)
-            _avg_mins    = (since_h * 60) // max(sc_cycles, 1)
+            # A report-window average is not a scan duration.  For one scan it
+            # incorrectly reports the entire requested window (for example,
+            # "~60min each") even when the bot started only a few minutes ago.
+            # Use the observed interval between scan timestamps, and describe
+            # a single scan by its age instead of inventing a cadence.
+            def _report_dt(value: object) -> Optional[datetime]:
+                if isinstance(value, datetime):
+                    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+                if not value:
+                    return None
+                try:
+                    text = str(value).strip().replace(" UTC", "+00:00").replace("Z", "+00:00")
+                    parsed = datetime.fromisoformat(text)
+                    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+                except (TypeError, ValueError):
+                    return None
+
+            _first_scan = _report_dt(scan_summary.get("first_scan_ts"))
+            _last_scan = _report_dt(scan_summary.get("last_scan_ts"))
+            _now_utc = datetime.now(timezone.utc)
+            if sc_cycles == 1:
+                _scan_age = (
+                    max(0.0, (_now_utc - _first_scan).total_seconds() / 60.0)
+                    if _first_scan
+                    else None
+                )
+                _scan_timing = (
+                    f"1 scan · first scan {_scan_age:.0f}m ago"
+                    if _scan_age is not None
+                    else "1 scan · cadence pending"
+                )
+            elif _first_scan and _last_scan:
+                _span_minutes = max(
+                    0.0,
+                    (_last_scan - _first_scan).total_seconds() / 60.0,
+                )
+                _interval_minutes = _span_minutes / max(sc_cycles - 1, 1)
+                _scan_timing = (
+                    f"{sc_cycles} scans · ~{_interval_minutes:.1f}min between scans"
+                )
+            else:
+                _scan_timing = f"{sc_cycles} scans · timing unavailable"
             fpr_rescored = fpr_stats.get("fpr_rescored", 0)
             sc_total_scored = sc_analyzed + fpr_rescored
             lines += [
                 "",
                  (
-                     f"<i>Current session (up to {since_h}h)  ·  {sc_cycles} scans"
-                     f"  (~{_avg_mins}min each)</i>"
+                     f"<i>Current session (up to {since_h}h)  ·  {_scan_timing}</i>"
                      if scan_summary.get("session_scoped")
-                     else f"<i>Last {since_h}h  ·  {sc_cycles} scans"
-                     f"  (~{_avg_mins}min each)</i>"
+                     else f"<i>Last {since_h}h  ·  {_scan_timing}</i>"
                  ),
                 "",
                 "📡 <b>Full Monitoring Pipeline</b>",

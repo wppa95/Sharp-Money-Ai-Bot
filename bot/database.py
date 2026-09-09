@@ -7052,6 +7052,8 @@ class Database:
             result = await s.execute(
                 select(
                     func.count(ScanCycleLog.id).label("cycles"),
+                    func.min(ScanCycleLog.scan_ts).label("first_scan_ts"),
+                    func.max(ScanCycleLog.scan_ts).label("last_scan_ts"),
                     func.sum(ScanCycleLog.fetched).label("fetched"),
                     func.sum(ScanCycleLog.removed).label("removed"),
                     func.sum(ScanCycleLog.futures).label("futures"),
@@ -7070,6 +7072,8 @@ class Database:
             if row is None or (row.cycles or 0) == 0:
                 return {
                     "cycles": 0,
+                    "first_scan_ts": None,
+                    "last_scan_ts": None,
                     "session_scoped": session_started_at is not None,
                 }
             actionable_by_sport: dict[str, int] = {}
@@ -7093,6 +7097,8 @@ class Database:
                         continue
             return {
                 "cycles":           row.cycles or 0,
+                "first_scan_ts":    row.first_scan_ts,
+                "last_scan_ts":     row.last_scan_ts,
                 "fetched":          row.fetched or 0,
                 "removed":          row.removed or 0,
                 "futures":          row.futures or 0,

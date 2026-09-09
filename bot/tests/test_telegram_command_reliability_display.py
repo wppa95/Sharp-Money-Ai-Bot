@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import re
 import time
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -428,6 +429,40 @@ async def test_funnel_sport_breakdown_uses_aligned_columns_and_active_sort():
     assert "FIFA" in data_rows[-1]
     assert "NFL" not in table
     assert re.search(r"MLB\s+5678\s+1234\s+0\s+90\s+45", table)
+
+
+@pytest.mark.asyncio
+async def test_funnel_single_scan_reports_age_not_report_window_as_duration():
+    update, context = _update_and_context()
+    db = MagicMock()
+    db.get_scan_cycle_summary = AsyncMock(return_value={
+        "cycles": 1,
+        "first_scan_ts": datetime.now(timezone.utc) - timedelta(minutes=4),
+        "last_scan_ts": datetime.now(timezone.utc) - timedelta(minutes=4),
+        "session_scoped": True,
+        "fetched": 2_829,
+        "removed": 0,
+        "active": 2_740,
+        "unchanged": 0,
+        "new_props": 2_740,
+        "line_changed": 0,
+        "analyzed": 2_740,
+        "qualified": 0,
+        "alert_delivered": 0,
+        "actionable_by_sport": {},
+        "removed_by_sport": {},
+    })
+    db.get_funnel_summary = AsyncMock(return_value={"tracked": 0, "by_sport": []})
+
+    with (
+        patch("commands._check_allowed", return_value=True),
+        patch("commands._db", db),
+    ):
+        await commands.cmd_funnel(update, context)
+
+    message = update.message.reply_text.await_args_list[-1].args[0]
+    assert "first scan" in message
+    assert "~60min each" not in message
     assert "Cold-start" not in message
     assert "Futures" not in message
     assert "Scan figures are observation/scoring" not in message
