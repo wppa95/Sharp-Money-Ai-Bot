@@ -3530,7 +3530,8 @@ def _has_strong_delivery_evidence(
     This is deliberately a delivery-only check.  It does not change scoring,
     persistence, grading, or whether a prop is evaluated.  A directional
     result must have strong completed-result evidence in every required
-    window: 70%+ OVER or 40%- UNDER across L5, L10, L20, L30, and season.
+    window: 70%+ OVER or 30%- OVER for UNDER across L5, L10, L15, L20,
+    L30, and season.
     """
     def _strong_directional_history(obj: object) -> bool:
         recommendation = str(
@@ -3540,7 +3541,7 @@ def _has_strong_delivery_evidence(
         ).upper()
         if recommendation not in {"OVER", "UNDER"}:
             return False
-        prefixes = ("l5", "l10", "l20", "l30", "season")
+        prefixes = ("l5", "l10", "l15", "l20", "l30", "season")
         windows: list[tuple[float, float]] = []
         for prefix in prefixes:
             if isinstance(obj, dict):
@@ -3575,7 +3576,7 @@ def _has_strong_delivery_evidence(
             (
                 over_count / games >= 0.70
                 if recommendation == "OVER"
-                else over_count / games <= 0.40
+                else over_count / games <= 0.30
             )
             for games, over_count in windows
         )

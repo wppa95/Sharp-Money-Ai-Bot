@@ -4756,25 +4756,28 @@ class Database:
 
         Safe to call repeatedly — the UNIQUE constraint prevents duplicates.
         """
-        from sqlalchemy import not_
         from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
         async with self.session() as s:
-            seeded_ids_subq = (
-                select(AlertCLVSeed.source_id)
-                .where(AlertCLVSeed.source_table == "ev_records")
-                .scalar_subquery()
-            )
             result = await s.execute(
                 select(EVRecord)
                 .where(
                     EVRecord.alert_sent == True,              # noqa: E712
-                    not_(EVRecord.id.in_(seeded_ids_subq)),
                 )
-                .order_by(desc(EVRecord.detected_at))
-                .limit(limit)
+                .limit(max(limit * 10, limit))
             )
-            ev_rows = list(result.scalars().all())
+            candidates = list(result.scalars().all())
+            candidate_ids = [row.id for row in candidates]
+            seeded = set()
+            if candidate_ids:
+                seeded_result = await s.execute(
+                    select(AlertCLVSeed.source_id).where(
+                        AlertCLVSeed.source_table == "ev_records",
+                        AlertCLVSeed.source_id.in_(candidate_ids),
+                    )
+                )
+                seeded = set(seeded_result.scalars().all())
+            ev_rows = [row for row in candidates if row.id not in seeded][:limit]
 
         if not ev_rows:
             return 0
@@ -4818,25 +4821,28 @@ class Database:
         Bulk-inserts all seeds in a single transaction (ON CONFLICT DO NOTHING).
         Returns the number of new seeds created.
         """
-        from sqlalchemy import not_
         from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
         async with self.session() as s:
-            seeded_ids_subq = (
-                select(AlertCLVSeed.source_id)
-                .where(AlertCLVSeed.source_table == "underdog_snapshots")
-                .scalar_subquery()
-            )
             result = await s.execute(
                 select(UnderdogSnapshotRecord)
                 .where(
                     UnderdogSnapshotRecord.alert_sent == True,    # noqa: E712
-                    not_(UnderdogSnapshotRecord.id.in_(seeded_ids_subq)),
                 )
-                .order_by(desc(UnderdogSnapshotRecord.fetched_at))
-                .limit(limit)
+                .limit(max(limit * 10, limit))
             )
-            ud_rows = list(result.scalars().all())
+            candidates = list(result.scalars().all())
+            candidate_ids = [row.id for row in candidates]
+            seeded = set()
+            if candidate_ids:
+                seeded_result = await s.execute(
+                    select(AlertCLVSeed.source_id).where(
+                        AlertCLVSeed.source_table == "underdog_snapshots",
+                        AlertCLVSeed.source_id.in_(candidate_ids),
+                    )
+                )
+                seeded = set(seeded_result.scalars().all())
+            ud_rows = [row for row in candidates if row.id not in seeded][:limit]
 
         if not ud_rows:
             return 0

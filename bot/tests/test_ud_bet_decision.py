@@ -105,6 +105,7 @@ def _hit_rates(
     total_games: int = 20,
     l5_n: int = 5,          l5_r: float | None = None,
     l10_n: int = 10,        l10_r: float | None = None,
+    l15_n: int | None = None, l15_r: float | None = None,
     l20_n: int | None = None, l20_r: float | None = None,
     l30_n: int | None = None, l30_r: float | None = None,
     season_n: int | None = None, season_r: float | None = None,
@@ -120,6 +121,7 @@ def _hit_rates(
         current_line  = current_line,
         l5            = _w(l5_n, l5_r),
         l10           = _w(l10_n, l10_r),
+        l15           = _w(l15_n, l15_r),
         l20           = _w(l20_n, l20_r),
         l30           = _w(l30_n, l30_r),
         season        = _w(season_n, season_r),
@@ -278,8 +280,10 @@ class TestTierClassification:
         hr = _hit_rates(
             l5_r     = 0.80,
             l10_r    = 0.70,
-            l20_n    = 20, l20_r    = 0.68,
-            season_n = 50, season_r = 0.65,
+            l15_n    = 15, l15_r = 0.70,
+            l20_n    = 20, l20_r    = 0.70,
+            l30_n    = 30, l30_r    = 0.70,
+            season_n = 50, season_r = 0.70,
         )
         d = make_ud_bet_decision(_score(), _validation(), 25.5, hit_rates=hr)
         assert d.recommendation == "OVER"
@@ -289,8 +293,10 @@ class TestTierClassification:
         hr = _hit_rates(
             l5_r     = 0.20,
             l10_r    = 0.30,
-            l20_n    = 20, l20_r    = 0.32,
-            season_n = 50, season_r = 0.35,
+            l15_n    = 15, l15_r = 0.30,
+            l20_n    = 20, l20_r    = 0.30,
+            l30_n    = 30, l30_r    = 0.30,
+            season_n = 50, season_r = 0.30,
         )
         d = make_ud_bet_decision(_score(), _validation(), 25.5, hit_rates=hr)
         assert d.recommendation == "UNDER"
@@ -303,20 +309,16 @@ class TestTierClassification:
         assert d.recommendation == "OVER"
         assert d.decision_tier  == "A"
 
-    def test_s_tier_allowed_when_season_barely_positive(self):
-        """Season at 55% >= 55% threshold with strong L5/L10/L20 (80/70/70%) → S-tier.
-
-        The season gate was relaxed from 0.60 to 0.55 so that players on a hot
-        streak aren't denied S-tier purely because their season average is only
-        marginally positive.  L5/L10/L20 at 70-80% outweigh a 55% season rate.
-        """
+    def test_s_tier_requires_all_windows_at_strong_threshold(self):
+        """A season rate below 70% prevents a Strong OVER classification."""
         hr = _hit_rates(
-            l5_r=0.80, l10_r=0.70, l20_n=20, l20_r=0.70,
-            season_n=50, season_r=0.55,   # exactly at new 0.55 threshold → S allowed
+            l5_r=0.80, l10_r=0.70, l15_n=15, l15_r=0.70,
+            l20_n=20, l20_r=0.70, l30_n=30, l30_r=0.70,
+            season_n=50, season_r=0.55,
         )
         d = make_ud_bet_decision(_score(), _validation(), 25.5, hit_rates=hr)
         assert d.recommendation == "OVER"
-        assert d.decision_tier  == "S"
+        assert d.decision_tier  == "A"
 
     def test_a_tier_primary_in_a_range(self):
         """L5 at 63% (A-range 62–65%)."""

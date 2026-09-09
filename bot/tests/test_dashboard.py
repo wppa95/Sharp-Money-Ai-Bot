@@ -186,8 +186,8 @@ class TestDashboardReport:
     async def test_to_telegram_has_alerts_section(self):
         r = DashboardReport(total_ud_alerts=3, today_ud_alerts=1)
         msg = r.to_telegram()
-        assert "Provider Pipeline" in msg
-        assert "3" in msg
+        assert "Provider Pipeline" not in msg
+        assert "Closing Line Value" in msg
 
     async def test_to_telegram_ev_section_with_data(self):
         # EV section removed from display — CLV is the primary performance metric
@@ -237,7 +237,7 @@ class TestDashboardReport:
             ud_tier_breakdown={"S": 3, "A": 10, "B": 7},
         )
         msg = r.to_telegram()
-        assert "Underdog" in msg
+        assert "Provider Pipeline" not in msg
 
     async def test_to_telegram_by_sport(self):
         r = DashboardReport(
@@ -320,10 +320,9 @@ class TestDashboardNormalizedActivity:
 
         message = report.to_telegram()
 
-        assert "Observed: <code>5,124</code>" in message
-        assert "Observed: <code>265</code>" not in message
+        assert "Provider Pipeline" not in message
+        assert "Observed:" not in message
         assert "PrizePicks" not in message
-        assert "Observed: <code>89,188</code>" not in message
 
     def test_legacy_activity_is_only_a_fallback(self):
         report = DashboardReport(
@@ -333,8 +332,8 @@ class TestDashboardNormalizedActivity:
 
         message = report.to_telegram()
 
-        assert "Observed: <code>12</code>" in message
-        assert "Observed: <code>7</code>" not in message
+        assert "Provider Pipeline" not in message
+        assert "Observed:" not in message
 
     def test_empty_normalized_provider_stays_zero(self):
         report = DashboardReport(
@@ -348,12 +347,11 @@ class TestDashboardNormalizedActivity:
 
         message = report.to_telegram()
 
-        assert "Observed: <code>0</code>" in message
-        assert message.count("Observed: <code>0</code>") == 1
+        assert "Provider Pipeline" not in message
+        assert "Observed:" not in message
 
     def test_historical_and_recent_tracking_sections_remain_intact(self):
         report = DashboardReport(
-            provider_pipeline={"Underdog": {"observed": 5_389}},
             recent_tracked_props=[{
                 "provider": "Underdog",
                 "player_name": "UD Player",
@@ -365,7 +363,7 @@ class TestDashboardNormalizedActivity:
 
         message = report.to_telegram()
 
-        assert "Observed: <code>5,389</code>" in message
+        assert "Provider Pipeline" not in message
         assert "Recently Tracked Props" in message
         assert "UNDERDOG PICK" in message
         assert "PrizePicks" not in message
@@ -437,9 +435,9 @@ async def test_dashboard_gather_uses_normalized_activity_and_preserves_legacy_hi
 
     assert report.tracking_by_provider["Underdog"]["observed"] == 2
     assert report.tracking_by_provider["PrizePicks"]["observed"] == 1
-    assert "Observed: <code>2</code>" in activity
-    assert "Observed: <code>1</code>" not in activity
-    assert "Active tracked: <code>2</code>" in activity
+    assert "Provider Pipeline" not in activity
+    assert "Observed:" not in activity
+    assert "MLB" in activity
     assert len(report.recent_tracked_props) == 2
     assert "PrizePicks" not in activity
 

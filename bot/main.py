@@ -335,17 +335,32 @@ class _ScheduledExecutionCoordinator:
         self._exclusive_wait_seconds = 0.0
 
     async def _execute(self, name: str, callback, context, *args, **kwargs):
+        # Track the scheduler-facing name, not only callback-internal aliases.
+        # This keeps /health aligned with the jobs the scheduler actually runs.
         try:
-            return await callback(context, *args, **kwargs)
+            from engine.health import get_health_tracker
+            health = get_health_tracker()
+        except Exception:
+            health = None
+        if health is not None:
+            health.record_job_started(name)
+        try:
+            result = await callback(context, *args, **kwargs)
         except asyncio.CancelledError:
             raise
         except Exception as error:
+            if health is not None:
+                health.record_job_fail(name, str(error))
             logger.error(
                 "scheduled_execution: task failed (%s): %s",
                 name,
                 error,
                 exc_info=(type(error), error, error.__traceback__),
             )
+        else:
+            if health is not None:
+                health.record_job_run(name)
+            return result
 
     async def _run_guarded(self, name: str, callback, context, *args, **kwargs):
         self._active_counts[name] = self._active_counts.get(name, 0) + 1
@@ -913,9 +928,13 @@ async def post_init(application: Application) -> None:
                 "clv_seeder",
                 _clv_seed_job,
                 exclusive_group=_SQLITE_WRITE_JOB_GROUP,
+                # CLV seeding uses the database's process-wide writer gate;
+                # keeping it out of the scheduler-level group prevents a
+                # long monitoring pass from leaving /health at "never ran".
+                use_exclusive_group=False,
             ),
             interval=900,
-            first=120,
+            first=10,
             name="clv_seeder",
         )
         # CLV harvest job — every hour (processes seeds after game_time passes)
@@ -926,7 +945,7 @@ async def post_init(application: Application) -> None:
                 exclusive_group=_SQLITE_WRITE_JOB_GROUP,
             ),
             interval=3600,
-            first=300,
+            first=20,
             name="clv_harvester",
         )
         # Player-result collection uses the dedicated history pool, but shares
@@ -942,7 +961,7 @@ async def post_init(application: Application) -> None:
             name="player_history_collector",
         )
         # API budget check — every 15 minutes
-        jq.run_repeating(_coordinated_job("budget_checker", _budget_check_job), interval=900, first=900, name="budget_checker")
+        jq.run_repeating(_coordinated_job("budget_checker", _budget_check_job), interval=900, first=30, name="budget_checker")
         # PropLineHistory prune — once per day (keeps last 14 days)
         jq.run_repeating(
             _coordinated_job(
@@ -951,7 +970,7 @@ async def post_init(application: Application) -> None:
                 exclusive_group=_SQLITE_WRITE_JOB_GROUP,
             ),
             interval=86400,
-            first=600,
+                first=40,
             name="prop_history_pruner",
         )
         # Heartbeat — every 60 s (keeps HealthTracker alive timestamp current)
@@ -961,7 +980,7 @@ async def post_init(application: Application) -> None:
             jq.run_repeating(
                 _coordinated_job("season_checker", _season_check_job),
                 interval=config.SEASON_CHECK_INTERVAL,
-                first=config.SEASON_CHECK_INTERVAL,  # first eager load already done above
+                first=50,
                 name="season_checker",
             )
         logger.info(
@@ -1004,15 +1023,7 @@ async def post_init(application: Application) -> None:
 
 async def _send_startup_notification(bot, chat_ids: list[int], ht) -> None:
     """
-    Send a startup or crash-recovery notification to all configured chat IDs.
-
-    Crash format (unexpected_exit / crash_detected):
-        ⚠️ Sharp Money Bot Restarted
-        Reason: [actual detected cause]
-        Crash Details: [exc_type: exc_msg / Module / Function]
-        Last Active Task: …
-        Last Heartbeat: HH:MM UTC
-        Recovery Status: Resumed Monitoring ✅
+    Send a startup or restart notification to all configured chat IDs.
 
     Normal start format:
         ✅ Sharp Money Bot Online
@@ -1025,72 +1036,16 @@ async def _send_startup_notification(bot, chat_ids: list[int], ht) -> None:
 
     startup_reason = ht.startup_reason() if ht else "unknown"
     restart_num    = ht.restart_count()  if ht else 0
-    last_hb        = ht.last_heartbeat() if ht else None
-    last_job       = (
-        (ht.last_job_started_name() or "Underdog Market Monitor")
-        if ht else "Underdog Market Monitor"
-    )
-
-    if startup_reason in ("unexpected_exit", "crash_detected"):
-        # ── Determine the actual crash cause ─────────────────────────────────
-        cause_label  = ht.crash_cause_label() if ht else "Unknown Exit"
-        crash_detail = ht.last_crash_detail() if ht else None
-
-        # Format the last heartbeat timestamp
-        hb_str = "unknown"
-        if last_hb:
-            try:
-                from datetime import datetime as _dt
-                hb_dt  = _dt.fromisoformat(last_hb.replace("Z", "+00:00"))
-                hb_str = hb_dt.strftime("%H:%M UTC")
-            except Exception:
-                hb_str = str(last_hb)[:16]
-
-        crash_id_num = ht.last_crash_id() if ht else None
-        crash_id_str = f"#{crash_id_num}" if crash_id_num else "—"
-
+    if startup_reason != "first_start":
         parts: list[str] = [
             "🤖 <b>Sharp Money Bot Restarted</b>",
             "",
             "<b>Status:</b>  Monitoring resumed ✅",
-        ]
-
-        # ── Crash details block (only when captured) ──────────────────────────
-        if crash_detail:
-            exc_type = crash_detail.get("exc_type", "")
-            exc_msg  = crash_detail.get("exc_msg",  "")[:120]
-            mod      = crash_detail.get("active_module", "")
-            fn       = crash_detail.get("active_function", "")
-            job      = crash_detail.get("active_job", "") or last_job
-            uptime   = crash_detail.get("uptime_secs")
-
-            parts += [
-                "",
-                "<b>Crash Details:</b>",
-                f"  <code>{_h.escape(exc_type)}: {_h.escape(exc_msg)}</code>",
-            ]
-            if mod:
-                import os as _os
-                parts.append(f"  Module:    <code>{_h.escape(_os.path.basename(mod))}</code>")
-            if fn:
-                parts.append(f"  Function:  <code>{_h.escape(fn)}</code>")
-            if job:
-                parts.append(f"  Active Job: {_h.escape(str(job))}")
-            mem = crash_detail.get("memory_mb")
-            if mem is not None:
-                parts.append(f"  Memory at crash: {mem} MB")
-            if uptime is not None:
-                mins = int(uptime) // 60
-                secs = int(uptime) % 60
-                parts.append(f"  Uptime at crash: {mins}m {secs}s")
-
-        parts += [
-            "",
-            f"<b>Last Active Task:</b>  {_h.escape(last_job)}",
-            f"<b>Last Heartbeat:</b>  {_h.escape(hb_str)}",
             f"Startup #{restart_num}",
+            "",
+            "<i>Props will be analysed as they are detected.</i>",
         ]
-    elif startup_reason == "first_start":
+    else:
         parts = [
             "🤖 <b>Sharp Money Bot Online</b>",
             "",
@@ -1099,17 +1054,6 @@ async def _send_startup_notification(bot, chat_ids: list[int], ht) -> None:
             "",
             "<i>Ready. Props will be analysed as they are detected.</i>",
         ]
-    else:
-        # clean restart / manual restart — simple notice, no noise
-        parts = [
-            "🤖 <b>Sharp Money Bot Restarted</b>",
-            "",
-            "<b>Status:</b>  Monitoring resumed ✅",
-            f"Startup #{restart_num}",
-            "",
-            "<i>Props will be analysed as they are detected.</i>",
-        ]
-
     text = "\n".join(parts)
     for chat_id in chat_ids:
         try:

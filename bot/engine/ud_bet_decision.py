@@ -51,6 +51,10 @@ _CONTRA_FLOOR: float = 0.40
 # A window is "contradicting" an UNDER pick if its rate > this value
 _CONTRA_CEIL:  float = 0.60
 
+# Strong directional labels require every requested result window to agree.
+_STRONG_OVER_RATE: float = 0.70
+_STRONG_UNDER_RATE: float = 0.30
+
 # Confidence bounds
 _MAX_CONFIDENCE: int = 95
 _MIN_CONFIDENCE: int = 10
@@ -473,6 +477,7 @@ def _primary_window(hit_rates: "PlayerHitRates") -> "Optional[WindowStats]":
     for w in (
         hit_rates.l5,
         hit_rates.l10,
+        hit_rates.l15,
         hit_rates.l20,
         hit_rates.l30,
         hit_rates.season,
@@ -488,6 +493,7 @@ def _all_sufficient_windows(hit_rates: "PlayerHitRates") -> "list[WindowStats]":
         w for w in (
             hit_rates.l5,
             hit_rates.l10,
+            hit_rates.l15,
             hit_rates.l20,
             hit_rates.l30,
             hit_rates.season,
@@ -539,13 +545,8 @@ def _determine_tier(
 
     if over:
         if rate >= _S_RATE:
-            has_large = any(
-                w.games >= _MIN_GAMES_S_TIER and w.hit_rate >= _S_RATE
-                for w in windows
-            )
-            # Allow slight wobble in long windows (e.g. L30 at 0.52 while L5/L10 strong)
-            all_support = all(w.hit_rate >= 0.52 for w in windows)
-            if has_large and all_support and _season_supports(hit_rates, "OVER", 0.55):
+            required = _required_strong_windows(hit_rates)
+            if required and all(w.hit_rate >= _STRONG_OVER_RATE for w in required):
                 return "S"
             return "A"
         elif rate >= _A_RATE:
@@ -554,13 +555,8 @@ def _determine_tier(
             return "B"
     else:
         if rate <= (1.0 - _S_RATE):
-            has_large = any(
-                w.games >= _MIN_GAMES_S_TIER and w.hit_rate <= (1.0 - _S_RATE)
-                for w in windows
-            )
-            # Allow slight wobble in long windows (e.g. L30 at 0.48 while L5/L10 strong)
-            all_support = all(w.hit_rate <= 0.48 for w in windows)
-            if has_large and all_support and _season_supports(hit_rates, "UNDER", 0.45):
+            required = _required_strong_windows(hit_rates)
+            if required and all(w.hit_rate <= _STRONG_UNDER_RATE for w in required):
                 return "S"
             return "A"
         elif rate <= (1.0 - _A_RATE):
@@ -579,6 +575,23 @@ def _season_supports(
     if s is None or s.games < _MIN_GAMES_PRIMARY:
         return True   # no data → don't penalise
     return s.hit_rate >= threshold if direction == "OVER" else s.hit_rate <= threshold
+
+
+def _required_strong_windows(
+    hit_rates: "PlayerHitRates",
+) -> "Optional[list[WindowStats]]":
+    """Return complete L5/L10/L15/L20/L30 + season coverage."""
+    windows = [
+        hit_rates.l5,
+        hit_rates.l10,
+        hit_rates.l15,
+        hit_rates.l20,
+        hit_rates.l30,
+        hit_rates.season,
+    ]
+    if any(w is None or w.games < _MIN_GAMES_PRIMARY for w in windows):
+        return None
+    return windows
 
 
 def _compute_confidence(

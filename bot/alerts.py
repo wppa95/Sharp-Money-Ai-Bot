@@ -837,6 +837,19 @@ def _sanitize_user_alert_message(message: str) -> str:
             continue
         _clean_lines.append(_line)
     text = "\n".join(_clean_lines)
+    # Keep Telegram focused on the pick itself. These operational fields stay
+    # in the database and internal reports, but are not part of the user-facing
+    # alert surface.
+    _hidden_labels = re.compile(
+        r"\b(?:source|provider|evidence|reason(?:s| codes)?|status)\b\s*:",
+        flags=re.IGNORECASE,
+    )
+    text = "\n".join(
+        line
+        for line in text.splitlines()
+        if not _hidden_labels.search(unescape(re.sub(r"<[^>]+>", "", line)))
+        and "UTC" not in unescape(re.sub(r"<[^>]+>", "", line)).upper()
+    )
     text = re.sub(r"\bdecision_pass\b", "no-direction", text, flags=re.IGNORECASE)
     text = re.sub(r"\bnot_immediate\b", "not yet actionable", text, flags=re.IGNORECASE)
     # PASS is an internal recommendation state, not a user-facing outcome.

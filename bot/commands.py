@@ -596,36 +596,24 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
         logger.info("cmd_health: health tracker loaded")
 
-        # ── Restart / crash diagnostics ───────────────────────────────────────
-        reason       = ht.last_startup_reason()
-        crash        = ht.was_unexpected_exit()
-        prev_session = ht.last_session_duration_str()
-
-        _REASON_LABEL: dict[str, str] = {
-            "first_start":     "🆕 First start",
-            "clean_restart":   "✅ Clean restart  (SIGTERM / normal stop)",
-            "crash_detected":  "❌ Crash detected  (run_polling raised)",
-            "unexpected_exit": "⚠️ Unexpected exit  (SIGKILL / OOM / hard crash)",
-            "unknown":         "❓ Unknown",
-        }
-        reason_label = _REASON_LABEL.get(reason, f"❓ {_html.escape(str(reason))}")
-
         lines: list[str] = [
             "❤️ <b>Bot Health</b>",
             "",
             f"Uptime:           {_uptime_str()}",
             f"Heartbeat:        {ht.heartbeat_age_str()}",
-            f"Last startup:     {_html.escape(ht.last_startup() or '—')}",
             "",
             "<b>📋 Background Jobs</b>",
         ]
 
         _JOB_LABELS = {
-            "underdog_job":        "Underdog monitor",
-            "_clv_seed_job":       "CLV seeder",
-            "_clv_harvest_job":    "CLV harvester",
-            "_budget_check_job":   "Budget checker",
-            "_season_check_job":   "Season checker",
+            "underdog_monitor":      "Underdog monitor",
+            "clv_seeder":            "CLV seeder",
+            "clv_harvester":         "CLV harvester",
+            "budget_checker":        "Budget checker",
+            "season_checker":        "Season checker",
+            "opportunity_grader":    "Opportunity grader",
+            "player_history_collector": "Player history",
+            "prop_history_pruner":   "History pruner",
         }
 
         logger.info("cmd_health: reading job info")
@@ -807,65 +795,6 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 )
                 lines.append(f"   at {_html.escape(_pf_ts_raw)}")
                 lines.append(f"   ↳ {_html.escape(str(pf.get('error',''))[:100])}")
-
-        # ── Crash forensics — only shown when there is actual crash history ───
-        last_cid     = ht.last_crash_id()
-        crash_detail = ht.last_crash_detail()
-        crash_hist   = ht.crash_history()
-
-        _has_crash_data = last_cid is not None or bool(crash_detail) or len(crash_hist) > 0
-        if _has_crash_data:
-            lines.append("")
-            lines.append("<b>💥 Crash Forensics</b>")
-            if last_cid is not None:
-                cause = ht.crash_cause_label()
-                lines.append(f"  Last crash ID:   <b>#{last_cid}</b>  ({_html.escape(cause)})")
-            else:
-                lines.append("  Last crash ID:   <i>none recorded</i>")
-
-            if crash_detail:
-                cd_ts   = crash_detail.get("ts", "—")
-                cd_exc  = crash_detail.get("exc_type", "")
-                cd_msg  = crash_detail.get("exc_msg", "")[:80]
-                cd_job  = crash_detail.get("active_job") or crash_detail.get("last_job_started") or "—"
-                cd_mod  = crash_detail.get("active_module", "")
-                cd_fn   = crash_detail.get("active_function", "")
-                cd_hb   = crash_detail.get("last_heartbeat", "") or "—"
-                cd_ud   = crash_detail.get("last_underdog_scan", "") or "—"
-                cd_db   = crash_detail.get("last_db_write", "") or "—"
-                cd_mem  = crash_detail.get("memory_mb")
-                cd_uptime = crash_detail.get("uptime_secs")
-
-                import os as _os
-                mod_base = _os.path.basename(cd_mod) if cd_mod else "—"
-
-                lines.append(f"  Last crash at:   {_html.escape(cd_ts)}")
-                if cd_exc:
-                    lines.append(f"  Exception:       <code>{_html.escape(cd_exc)}: {_html.escape(cd_msg)}</code>")
-                if mod_base and mod_base != "—":
-                    lines.append(f"  Module:          <code>{_html.escape(mod_base)}</code>")
-                if cd_fn:
-                    lines.append(f"  Function:        <code>{_html.escape(cd_fn)}</code>")
-                lines.append(f"  Active job:      {_html.escape(str(cd_job))}")
-                lines.append(f"  Last heartbeat:  {_html.escape(cd_hb)}")
-                lines.append(f"  Last UD scan:    {_html.escape(cd_ud)}")
-                lines.append(f"  Last DB write:   {_html.escape(cd_db)}")
-                if cd_mem is not None:
-                    lines.append(f"  Memory at crash: {cd_mem} MB")
-                if cd_uptime is not None:
-                    mins = int(cd_uptime) // 60
-                    secs = int(cd_uptime) % 60
-                    lines.append(f"  Uptime at crash: {mins}m {secs}s")
-
-            # Show last 3 crash IDs as a mini-log
-            if len(crash_hist) > 1:
-                lines.append("")
-                lines.append("  <b>Crash log (recent):</b>")
-                for rec in crash_hist[-3:]:
-                    cid   = rec.get("crash_id", "?")
-                    cts   = rec.get("ts", "—")[:16]
-                    cexc  = rec.get("exc_type", "—")
-                    lines.append(f"    #{cid}  {_html.escape(cts)}  {_html.escape(cexc[:40])}")
 
         logger.info("cmd_health: sending response (%d lines)", len(lines))
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)

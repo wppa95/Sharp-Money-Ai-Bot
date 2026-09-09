@@ -262,66 +262,6 @@ class DashboardReport:
             "",
         ]
 
-        # Activity Summary is intentionally consolidated into this one
-        # normalized, provider-separated pipeline section.
-        # ── Single provider pipeline (normalized, provider-separated) ───────
-        # This is the only dashboard presentation of provider pipeline
-        # populations. ``provider_pipeline`` is populated by gather(); the
-        # tracking map remains a compatibility fallback for older callers.
-        parts += [
-            "📡 <b>Provider Pipeline</b>  <i>(normalized)</i>",
-            "",
-        ]
-        for provider, legacy_total, today_total in (
-            ("Underdog", self.total_ud_alerts, self.today_ud_alerts),
-        ):
-            values = self.provider_pipeline.get(provider)
-            if not isinstance(values, dict):
-                values = self.tracking_by_provider.get(provider, {})
-            if not isinstance(values, dict):
-                values = {}
-
-            status = values.get("status")
-            if not status and self.system_panel is not None:
-                status = (self.system_panel.provider_status or {}).get(provider)
-            status = str(status or "unavailable")
-            last_fetch = str(values.get("last_fetch") or "unavailable")
-            last_success = str(values.get("last_success") or "unavailable")
-            active = values.get("active", values.get("tracked", 0))
-            observed = values.get("observed", legacy_total)
-            evaluated = values.get("evaluated", 0)
-            directional = values.get(
-                "directional", values.get("actionable_persisted", 0)
-            )
-            actionable = values.get(
-                "actionable_persisted", values.get("actionable", directional)
-            )
-            delivered = values.get("delivered", values.get("delivered_alerts", 0))
-            pending = values.get("pending", 0)
-            resolved = values.get("resolved", 0)
-            hit = values.get("hit", 0)
-            miss = values.get("miss", 0)
-            push = values.get("push", 0)
-            metric_section = "tracking" if tracking_unavailable else "ok"
-            parts += [
-                f"  <b>{provider}</b>",
-                f"    Status: <code>{status}</code>"
-                f"  ·  Last fetch: <code>{last_fetch}</code>",
-                f"    Last successful activity: <code>{last_success}</code>",
-                f"    Observed: <code>{_count(observed, section=metric_section)}</code>"
-                f"  ·  Active tracked: <code>{_count(active, section=metric_section)}</code>",
-                f"    Evaluated: <code>{_count(evaluated, section=metric_section)}</code>"
-                f"  ·  Directional/actionable: <code>{_count(directional, section=metric_section)}</code>",
-                f"    Actionable persisted: <code>{_count(actionable, section=metric_section)}</code>"
-                f"  ·  Delivered: <code>{_count(delivered, section=metric_section)}</code>",
-                f"    Pending grading: <code>{_count(pending, section=metric_section)}</code>"
-                f"  ·  Resolved: <code>{_count(resolved, section=metric_section)}</code>",
-                f"    HIT / MISS / PUSH: <code>{_count(hit, section=metric_section)} / "
-                f"{_count(miss, section=metric_section)} / {_count(push, section=metric_section)}</code>"
-                f"  ·  Today: <code>{_count(today_total, section='totals' if 'totals' in self.unavailable else 'ok')}</code>",
-            ]
-        parts.append("")
-
         if tracking_unavailable:
             parts.append("  By current sport: <i>UNAVAILABLE</i>")
             parts.append("")
@@ -425,9 +365,6 @@ class DashboardReport:
                 parts.append(f"  Crashes:   <code>{sp.crash_count}</code>")
             if sp.active_blocks:
                 parts.append(f"  Blocks:    <code>{sp.active_blocks}</code> players blocked")
-            for name, status in (sp.provider_status or {}).items():
-                icon = "✅" if status == "OK" else "⚠️" if status == "DEGRADED" else "❌"
-                parts.append(f"  {icon} {name}: <code>{status}</code>")
             parts.append("")
 
         # ── Intelligence panel ────────────────────────────────────────────────
@@ -439,12 +376,6 @@ class DashboardReport:
                     f"  Graded: <code>{ip.total_graded}</code>  "
                     f"Hit rate: <code>{ip.hit_rate*100:.0f}%</code>"
                 )
-            if ip.provider_breakdown:
-                parts.append("  By source:")
-                for source, counts in sorted(ip.provider_breakdown.items()):
-                    parts.append(
-                        f"    {source}: {counts['W']}W-{counts['L']}L-{counts['P']}P"
-                    )
             if ip.total_misses > 0:
                 parts.append(
                     f"  Miss types:  "
