@@ -5035,6 +5035,12 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             sc_lc        = scan_summary.get("line_changed", 0)
             sc_analyzed  = scan_summary.get("analyzed", 0)
             sc_delivered = scan_summary.get("alert_delivered", 0)
+            sc_enrichment_status = str(
+                scan_summary.get("enrichment_status", "complete") or "complete"
+            )
+            sc_enrichment_deferred = int(
+                scan_summary.get("enrichment_deferred", 0) or 0
+            )
             # A report-window average is not a scan duration.  For one scan it
             # incorrectly reports the entire requested window (for example,
             # "~60min each") even when the bot started only a few minutes ago.
@@ -5103,6 +5109,19 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 f"🎯 Qualified directional candidates: <b>{int(scan_summary.get('qualified', 0) or 0):,}</b>",
                 f"📤 Delivered to Telegram:          <b>{sc_delivered:,}</b>",
             ]
+            if sc_enrichment_status != "complete" or sc_enrichment_deferred:
+                lines += [
+                    "",
+                    "⚠️ <b>Optional evidence enrichment:</b> "
+                    f"<b>{_html.escape(sc_enrichment_status)}</b>"
+                    + (
+                        f" · {sc_enrichment_deferred:,} observations deferred"
+                        if sc_enrichment_deferred
+                        else ""
+                    ),
+                    "<i>Complete feed observations were retained; "
+                    "directional evidence may be incomplete for this cycle.</i>",
+                ]
             # ── Full-Pool Rescan Rotation block ──────────────────────────────────
             try:
                 if fpr_stats:

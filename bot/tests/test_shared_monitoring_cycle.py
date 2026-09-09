@@ -4,8 +4,9 @@ import asyncio
 import inspect
 import os
 import sys
+import time
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -138,6 +139,97 @@ async def test_shared_cycle_does_not_handoff_propline_props_to_delivery(monkeypa
     await asyncio.sleep(0)
 
     assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_shared_cycle_bounds_cancellation_resistant_enrichment(monkeypatch):
+    """A stalled optional lookup cannot delay cycle completion bookkeeping."""
+    cleanup_finished = asyncio.Event()
+    completed = []
+
+    class Health:
+        def record_monitoring_cycle_complete(self):
+            completed.append("complete")
+
+    async def stalled_enrichment():
+        try:
+            await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            # Model an aiosqlite/provider worker that needs time to unwind.
+            await asyncio.sleep(0.08)
+            cleanup_finished.set()
+            return "late"
+
+    async def underdog_branch(_context):
+        started = time.monotonic()
+        bounded, result = await market_engine._await_task_without_cancellation_cleanup(
+            stalled_enrichment(),
+            timeout=0.01,
+        )
+        assert bounded is False
+        assert result is None
+        assert time.monotonic() - started < 0.06
+        return {"observations_persisted": 2, "enrichment": "deferred"}
+
+    async def propline_ingestion(_context):
+        return None
+
+    monkeypatch.setattr(market_engine, "propline_request_scan_job", propline_ingestion)
+    monkeypatch.setattr(market_engine, "get_health_tracker", lambda: Health())
+
+    result = await market_engine._shared_monitoring_cycle(underdog_branch)(
+        SimpleNamespace()
+    )
+
+    assert result == {"observations_persisted": 2, "enrichment": "deferred"}
+    assert completed == ["complete"]
+    await asyncio.wait_for(cleanup_finished.wait(), timeout=0.2)
+
+
+@pytest.mark.asyncio
+async def test_funnel_renders_scan_cycle_when_optional_report_read_stalls(monkeypatch):
+    """Funnel uses recorded scan evidence instead of turning a timeout into zero."""
+    update = MagicMock()
+    update.message.reply_text = AsyncMock()
+    context = SimpleNamespace(args=[])
+    cleanup_finished = asyncio.Event()
+    db = MagicMock()
+    db.get_scan_cycle_summary = AsyncMock(
+        return_value={
+            "cycles": 1,
+            "fetched": 4,
+            "active": 3,
+            "analyzed": 1,
+            "qualified": 1,
+            "alert_delivered": 0,
+            "first_scan_ts": "2026-09-09T12:00:00+00:00",
+            "last_scan_ts": "2026-09-09T12:00:00+00:00",
+            "enrichment_status": "deferred",
+            "enrichment_deferred": 2,
+        }
+    )
+
+    async def stalled_funnel_read(*_args, **_kwargs):
+        try:
+            await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            await asyncio.sleep(0.08)
+            cleanup_finished.set()
+            return None
+
+    db.get_funnel_summary = stalled_funnel_read
+    monkeypatch.setattr(commands, "_db", db)
+    monkeypatch.setattr(commands, "_check_allowed", lambda _update: True)
+    monkeypatch.setattr(commands, "_COMMAND_TIMEOUT_SECONDS", 0.01)
+
+    await asyncio.wait_for(commands.cmd_funnel(update, context), timeout=0.2)
+    message = update.message.reply_text.await_args_list[-1].args[0]
+
+    assert "Fetched from Underdog:          <b>4</b>" in message
+    assert "Optional evidence enrichment:</b> <b>deferred</b>" in message
+    assert "2 observations deferred" in message
+    assert "UNAVAILABLE" not in message
+    await asyncio.wait_for(cleanup_finished.wait(), timeout=0.2)
 
 
 def test_scheduler_has_one_underdog_monitor_owner_and_no_heartbeat_handoff():

@@ -369,6 +369,37 @@ class _CycleTiming:
         }
 
 
+async def _await_task_without_cancellation_cleanup(
+    awaitable,
+    timeout: float,
+) -> tuple[bool, object]:
+    """Wait for optional work without awaiting a slow cancellation cleanup."""
+    task = asyncio.ensure_future(awaitable)
+
+    def _consume_late_result(report_task: asyncio.Future) -> None:
+        if report_task.cancelled():
+            return
+        try:
+            report_task.exception()
+        except Exception:
+            pass
+
+    try:
+        done, _pending = await asyncio.wait(
+            {task},
+            timeout=max(0.0, float(timeout)),
+        )
+    except asyncio.CancelledError:
+        task.cancel()
+        task.add_done_callback(_consume_late_result)
+        raise
+    if task in done:
+        return True, task.result()
+    task.cancel()
+    task.add_done_callback(_consume_late_result)
+    return False, None
+
+
 _cycle_sequence = 0
 _active_jobs: dict[str, float] = {}
 _db_persistence_queue: Optional[asyncio.Queue] = None
@@ -4113,29 +4144,12 @@ async def underdog_job(context) -> None:
                 operation,
             )
             return None
-        task = asyncio.ensure_future(awaitable)
-
-        def _consume_timed_out(task: asyncio.Future) -> None:
-            if task.cancelled():
-                return
-            try:
-                task.exception()
-            except Exception:
-                pass
-
-        try:
-            done, _pending = await asyncio.wait(
-                {task},
-                timeout=min(30.0, max(0.1, remaining)),
-            )
-        except asyncio.CancelledError:
-            task.cancel()
-            task.add_done_callback(_consume_timed_out)
-            raise
-        if task in done:
-            return task.result()
-        task.cancel()
-        task.add_done_callback(_consume_timed_out)
+        completed, result = await _await_task_without_cancellation_cleanup(
+            awaitable,
+            timeout=min(30.0, max(0.1, remaining)),
+        )
+        if completed:
+            return result
         # One enrichment timeout is enough to declare this cycle's optional
         # evidence budget exhausted. The complete feed is already persisted;
         # continuing to launch one remote lookup per remaining prop would
@@ -6780,6 +6794,12 @@ async def underdog_job(context) -> None:
                     alert_delivered = _n_new_prop_sent + _n_lc_sent + _n_standing_sent,
                     actionable_by_sport = dict(_sport_actionable),
                     removed_by_sport    = dict(_sport_removed),
+                    enrichment_status = (
+                        "deferred"
+                        if _cycle_budget_exhausted or _n_observation_only
+                        else "complete"
+                    ),
+                    enrichment_deferred = _n_observation_only,
                 )
                 if isinstance(db, Database):
                     await db.log_scan_cycle(**_scan_cycle_kwargs)

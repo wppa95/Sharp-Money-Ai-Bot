@@ -439,6 +439,33 @@ async def test_full_feed_persistence_benchmark_across_live_cycles(
 
 
 @pytest.mark.asyncio
+async def test_deferred_enrichment_state_survives_into_funnel_scan_summary(tmp_path):
+    """A complete observation feed remains reportable when evidence is deferred."""
+    from database import Database
+
+    database = Database(f"sqlite+aiosqlite:///{tmp_path / 'deferred-enrichment.sqlite'}")
+    await database.init()
+    try:
+        await database.log_scan_cycle(
+            scan_ts=datetime.utcnow(),
+            fetched=4,
+            active=4,
+            analyzed=1,
+            enrichment_status="deferred",
+            enrichment_deferred=3,
+        )
+        summary = await database.get_scan_cycle_summary(since_hours=24)
+    finally:
+        await database.close()
+
+    assert summary["cycles"] == 1
+    assert summary["fetched"] == 4
+    assert summary["active"] == 4
+    assert summary["enrichment_status"] == "deferred"
+    assert summary["enrichment_deferred"] == 3
+
+
+@pytest.mark.asyncio
 async def test_concurrent_file_backed_writers_stay_within_cadence(
     tmp_path,
     record_testsuite_property,

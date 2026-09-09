@@ -1105,6 +1105,11 @@ class ScanCycleLog(Base):
     alert_delivered = Column(Integer,  nullable=False, default=0)  # successfully sent to Telegram
     actionable_by_sport = Column(Text, nullable=True)  # JSON: sport -> scan-actionable count
     removed_by_sport    = Column(Text, nullable=True)  # JSON: sport -> feed-removal count
+    # Optional player-history enrichment is allowed to defer after the complete
+    # feed is persisted. Keep that degraded state with the cycle so reports do
+    # not mistake observation-only work for a zero or failed scan.
+    enrichment_status   = Column(String(16), nullable=False, default="complete")
+    enrichment_deferred = Column(Integer, nullable=False, default=0)
 
 
 # ── Player Risk / Block System ─────────────────────────────────────────────────
@@ -1274,6 +1279,7 @@ class Database:
         await self._migrate_telegram_delivery_audit_v2()
         await self._migrate_slip_journal_leg_v1()
         await self._migrate_scan_cycle_log_v1()
+        await self._migrate_scan_cycle_log_v2()
         # player_risk_records is created by create_all (new table); no column migration needed
         logger.info("Database initialised at %s", self._url)
 
@@ -7164,6 +7170,8 @@ class Database:
         alert_delivered: int = 0,
         actionable_by_sport: Optional[dict] = None,
         removed_by_sport: Optional[dict] = None,
+        enrichment_status: str = "complete",
+        enrichment_deferred: int = 0,
     ) -> None:
         """Write one scan-cycle summary row. Non-fatal on failure."""
         async with self.session() as s:
@@ -7182,6 +7190,8 @@ class Database:
                 alert_delivered = alert_delivered,
                 actionable_by_sport = json.dumps(actionable_by_sport or {}),
                 removed_by_sport    = json.dumps(removed_by_sport or {}),
+                enrichment_status   = str(enrichment_status or "complete"),
+                enrichment_deferred = max(0, int(enrichment_deferred or 0)),
             ))
             await s.commit()
 
@@ -7197,6 +7207,21 @@ class Database:
             except Exception as exc:
                 if "duplicate column name" not in str(exc).lower():
                     logger.debug("scan_cycle_log migration skipped: %s", exc)
+
+    async def _migrate_scan_cycle_log_v2(self) -> None:
+        """Persist optional-enrichment completion state for funnel reports."""
+        for statement in (
+            "ALTER TABLE scan_cycle_log ADD COLUMN enrichment_status "
+            "VARCHAR(16) NOT NULL DEFAULT 'complete'",
+            "ALTER TABLE scan_cycle_log ADD COLUMN enrichment_deferred "
+            "INTEGER NOT NULL DEFAULT 0",
+        ):
+            try:
+                async with self._engine.begin() as conn:
+                    await conn.execute(text(statement))
+            except Exception as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    logger.debug("scan_cycle_log v2 migration skipped: %s", exc)
 
     async def get_scan_cycle_summary(
         self,
@@ -7282,6 +7307,16 @@ class Database:
                                 target[key] = target.get(key, 0) + int(count or 0)
                     except (TypeError, ValueError, json.JSONDecodeError):
                         continue
+            latest_cycle = await s.execute(
+                select(
+                    ScanCycleLog.enrichment_status,
+                    ScanCycleLog.enrichment_deferred,
+                )
+                .where(scan_filter)
+                .order_by(ScanCycleLog.scan_ts.desc(), ScanCycleLog.id.desc())
+                .limit(1)
+            )
+            latest_enrichment = latest_cycle.first()
             return {
                 "cycles":           row.cycles or 0,
                 "first_scan_ts":    row.first_scan_ts,
@@ -7299,6 +7334,13 @@ class Database:
                 "alert_delivered":  row.alert_delivered or 0,
                 "actionable_by_sport": actionable_by_sport,
                 "removed_by_sport":    removed_by_sport,
+                "enrichment_status": (
+                    getattr(latest_enrichment, "enrichment_status", None)
+                    or "complete"
+                ),
+                "enrichment_deferred": int(
+                    getattr(latest_enrichment, "enrichment_deferred", 0) or 0
+                ),
                 "session_scoped": session_started_at is not None,
             }
 
