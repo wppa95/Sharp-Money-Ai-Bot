@@ -1080,7 +1080,7 @@ def build_propline_result_evidence(
         return None
     stat_type = _normalize_stat(market_key.removeprefix("player_"))
     sport = _normalize_sport(record.get("sport_key"))
-    if not sport or not stat_type or is_football_related_sport(sport):
+    if not sport or not stat_type:
         return None
 
     observed = observed_at or _parse_datetime(record.get("_observed_at"))
@@ -1648,7 +1648,7 @@ def normalize_propline_prizepicks_record(
     stat_type = _normalize_stat(
         _first(raw_record, "stat_type", "stat", "market_name", "prop_type", "category")
     )
-    if not sport or not stat_type or is_football_related_sport(sport):
+    if not sport or not stat_type:
         return None
 
     raw_line = _first(raw_record, "line_value", "line", "point", "threshold", "value")
@@ -4541,10 +4541,12 @@ def _retry_after_seconds(response: Any) -> float:
 
 
 class PropLinePrizePicksProvider(PropProviderBase):
-    """PropLine adapter used internally as the Underdog evidence feed.
+    """PropLine adapter used internally as the PrizePicks history feed.
 
     The legacy class name is retained for storage/API compatibility. PropLine
     is not exposed as an independent Telegram provider or delivery stream.
+    All catalog sports are persisted; active scoring and delivery apply their
+    own football suppression after persistence.
     """
 
     def __init__(
