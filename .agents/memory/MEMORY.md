@@ -135,3 +135,4 @@
 - [Direction-only prop delivery](direction-only-delivery.md) — active delivery and selection use direction plus evidence; tier/BQ/MQ/PASS are legacy metadata only.
 - [PropLine complete-feed ledger](propline-complete-feed-ledger.md) — fetch all active non-football sports, retain immutable normalized observations, and withhold evaluation on partial feeds.
 - [Opportunity event identity](opportunity-event-identity.md) — preserve Underdog event IDs through opportunity writes; keep historical repairs out of startup-critical migrations.
+- [History coverage boundaries](history-coverage-boundaries.md) — batch full-book provider work; report empty sport coverage separately from errors and deadlines.

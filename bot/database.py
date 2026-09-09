@@ -8664,25 +8664,94 @@ class Database:
             # Keep direct event-identity callers strict. The dated fallback is
             # for provider-scoped grading, where source and official result
             # providers are known to use different event-ID namespaces.
-            if row is not None or not game_id or not game_date or not provider:
+            if row is not None:
                 return row
 
-            # Underdog/PrizePicks event IDs and ESPN/MLB result IDs are not
-            # guaranteed to share a namespace. The dated identity is the
-            # authoritative fallback for the shared official-stat evidence.
-            fallback_filters = [
-                PlayerGameResult.player_name == player_name,
-                PlayerGameResult.sport       == sport,
-                PlayerGameResult.stat_type   == normalised_stat,
-                PlayerGameResult.game_date   == game_date,
-            ]
-            fallback = await s.execute(
+            if game_date and provider:
+                # Underdog/PrizePicks event IDs and ESPN/MLB result IDs are
+                # not guaranteed to share a namespace. The dated identity is
+                # the authoritative cross-provider fallback. Use normalized
+                # text here because provider display names can differ only by
+                # case while still representing the same player/stat.
+                fallback = await s.execute(
+                    select(PlayerGameResult)
+                    .where(
+                        func.lower(PlayerGameResult.player_name)
+                        == str(player_name).lower().strip(),
+                        func.upper(PlayerGameResult.sport)
+                        == str(sport).upper().strip(),
+                        func.lower(PlayerGameResult.stat_type)
+                        == normalised_stat,
+                        PlayerGameResult.game_date == game_date,
+                    )
+                    .order_by(PlayerGameResult.id.desc())
+                    .limit(1)
+                )
+                row = fallback.scalar_one_or_none()
+                if row is not None:
+                    return row
+
+            # Some providers persist the component stats but cannot return a
+            # composite market label (for example MLB H+R+RBI). Derive that
+            # market only when every named component exists for the same
+            # player, sport, and completed game date. This is database-backed
+            # evidence, not a player/stat-only guess.
+            composite_components = {
+                "hits + runs + rbis": ("hits", "runs", "rbis"),
+                "hits+runs+rbis": ("hits", "runs", "rbis"),
+                "points + rebounds + assists": ("points", "rebounds", "assists"),
+                "pts+reb+ast": ("points", "rebounds", "assists"),
+                "pts + reb + ast": ("points", "rebounds", "assists"),
+                "points + rebounds": ("points", "rebounds"),
+                "pts+reb": ("points", "rebounds"),
+                "points + assists": ("points", "assists"),
+                "pts+ast": ("points", "assists"),
+                "rebounds + assists": ("rebounds", "assists"),
+                "reb+ast": ("rebounds", "assists"),
+                "goals + assists": ("goals", "assists"),
+                "g+a": ("goals", "assists"),
+            }
+            components = composite_components.get(normalised_stat)
+            if not components or not game_date or not provider:
+                return None
+
+            component_result = await s.execute(
                 select(PlayerGameResult)
-                .where(*fallback_filters)
+                .where(
+                    func.lower(PlayerGameResult.player_name)
+                    == str(player_name).lower().strip(),
+                    func.upper(PlayerGameResult.sport)
+                    == str(sport).upper().strip(),
+                    func.lower(PlayerGameResult.stat_type).in_(components),
+                    PlayerGameResult.game_date == game_date,
+                )
                 .order_by(PlayerGameResult.id.desc())
-                .limit(1)
             )
-            return fallback.scalar_one_or_none()
+            component_rows = component_result.scalars().all()
+            by_stat: dict[str, PlayerGameResult] = {}
+            for component_row in component_rows:
+                key = str(component_row.stat_type or "").lower().strip()
+                by_stat.setdefault(key, component_row)
+            if any(component not in by_stat for component in components):
+                return None
+
+            selected = [by_stat[component] for component in components]
+            return PlayerGameResult(
+                player_name=player_name,
+                sport=str(sport).upper().strip(),
+                stat_type=normalised_stat,
+                game_date=game_date,
+                opponent=next(
+                    (row.opponent for row in selected if row.opponent),
+                    None,
+                ),
+                actual_value=sum(float(row.actual_value) for row in selected),
+                source="derived_from_db",
+                game_id=next(
+                    (str(row.game_id) for row in selected if row.game_id),
+                    "",
+                ),
+            )
 
     async def get_tracking_summary(self) -> "dict":
         """

@@ -127,6 +127,11 @@ class TestSoccerStatMap:
     def test_get_stat_map_soccer_case_insensitive(self):
         assert _get_stat_map("soccer") is _SOCCER_STAT_MAP
 
+    def test_get_stat_map_generic_basketball_alias(self):
+        from providers.player_stats import _NBA_STAT_MAP
+
+        assert _get_stat_map("BASKETBALL") is _NBA_STAT_MAP
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # _SOCCER_LEAGUE_PRIORITY

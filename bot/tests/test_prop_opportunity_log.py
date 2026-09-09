@@ -413,6 +413,39 @@ class TestGetGameResultForGrading:
         assert row is not None
         assert row.actual_value == 24.0
 
+    @pytest.mark.asyncio
+    async def test_derives_composite_from_stored_component_results(
+        self, db: Database
+    ) -> None:
+        for stat_type, actual_value in (
+            ("hits", 1.0),
+            ("runs", 2.0),
+            ("rbis", 2.0),
+        ):
+            await db.upsert_player_result(PlayerGameResult(
+                player_name="Cedric Mullins",
+                sport="MLB",
+                stat_type=stat_type,
+                game_date="2026-09-08",
+                actual_value=actual_value,
+                opponent="BOS",
+                source="graded_prop",
+                game_id="mlb-event",
+            ))
+
+        row = await db.get_game_result_for_grading(
+            "Cedric Mullins",
+            "MLB",
+            "Hits + Runs + RBIs",
+            "2026-09-08",
+            game_id="underdog-event",
+            provider="Underdog",
+        )
+
+        assert row is not None
+        assert row.actual_value == 5.0
+        assert row.source == "derived_from_db"
+
 
 class TestGetTrackingSummary:
     @pytest.mark.asyncio

@@ -375,39 +375,6 @@ async def player_history_collector_job(context) -> None:
             sorted(targets, key=lambda target: (target[1], target[0], target[2])),
             len(targets),
         )
-        # Hydrate live evidence memory in one bounded background read. The
-        # Underdog scan never performs these reads itself. This bounded
-        # hydration is only an in-memory warm-up and does not restrict
-        # provider collection or persistence.
-        bulk_reader = getattr(db, "get_player_results_bulk", None)
-        if cycle_targets and asyncio.iscoroutinefunction(bulk_reader):
-            try:
-                from engine.evidence_memory import put_player_result_batch
-
-                existing_results = await await_in_cycle(
-                    "hydrating player-history evidence",
-                    lambda: bulk_reader(cycle_targets, limit=40),
-                )
-                put_player_result_batch(existing_results)
-                logger.info(
-                    "player_history_collector_job: evidence cache hydrated "
-                    "keys=%d rows=%d",
-                    len(existing_results),
-                    sum(len(rows) for rows in existing_results.values()),
-                )
-            except _CadenceBoundaryReached as exc:
-                logger.info(
-                    "player_history_collector_job: evidence cache hydration "
-                    "skipped at cadence boundary during %s; continuing with "
-                    "full provider collection",
-                    exc,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "player_history_collector_job: evidence cache hydration failed: %s",
-                    exc,
-                )
-
         # ── Fetch this run's complete supported target set ──────────────────
         ok = 0
         rows = 0
@@ -418,6 +385,7 @@ async def player_history_collector_job(context) -> None:
         target_counts: dict[str, int] = {}
         ok_by_sport: dict[str, int] = {}
         rows_by_sport: dict[str, int] = {}
+        no_result_by_sport: dict[str, int] = {}
         propline_attempts_by_sport: dict[str, int] = {}
         propline_coverage_by_sport: dict[str, dict[str, int]] = {}
         propline_attempts_by_sport_market: dict[str, dict[str, int]] = {}
@@ -539,20 +507,44 @@ async def player_history_collector_job(context) -> None:
                     return "error", exc
 
         # A slow provider cannot make this job serially consume the next
-        # scheduler interval: all target calls share one absolute deadline.
+        # scheduler interval: target calls run in bounded batches under one
+        # absolute deadline. Creating one task for every active prop at once
+        # caused excessive memory use and made cancellation unreliable.
         fetch_results: list[tuple[str, object]] = []
-        if cycle_targets and time.monotonic() < cycle_deadline:
-            fetch_results = list(
-                await asyncio.gather(
-                    *(
-                        fetch_target(player, sport, stat)
-                        for player, sport, stat in cycle_targets
-                    )
+        for batch_start in range(
+            0,
+            len(cycle_targets),
+            _PLAYER_HISTORY_FETCH_CONCURRENCY,
+        ):
+            remaining = cycle_deadline - time.monotonic()
+            if remaining <= 0:
+                budget_exhausted = True
+                break
+            batch = cycle_targets[
+                batch_start: batch_start + _PLAYER_HISTORY_FETCH_CONCURRENCY
+            ]
+            tasks = [
+                asyncio.create_task(fetch_target(player, sport, stat))
+                for player, sport, stat in batch
+            ]
+            try:
+                batch_results = await asyncio.wait_for(
+                    asyncio.gather(*tasks),
+                    timeout=remaining,
                 )
-            )
-        elif cycle_targets:
-            budget_exhausted = True
+            except asyncio.TimeoutError:
+                budget_exhausted = True
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                fetch_results.extend(
+                    [("deadline", None)] * len(batch)
+                )
+                break
+            fetch_results.extend(batch_results)
 
+        deadline_targets = 0
         for (player, sport, stat), (fetch_status, fetch_value) in zip(
             cycle_targets, fetch_results
         ):
@@ -560,6 +552,7 @@ async def player_history_collector_job(context) -> None:
             processed += 1
             if fetch_status == "deadline":
                 budget_exhausted = True
+                deadline_targets += 1
                 logger.debug(
                     "player_history_collector_job: cadence deadline reached "
                     "for %s/%s/%s",
@@ -622,7 +615,12 @@ async def player_history_collector_job(context) -> None:
                 rows_by_sport[sport] = rows_by_sport.get(sport, 0) + len(raw)
                 completed_targets.append((player, sport, stat))
             else:
-                pass
+                # An empty provider response is not a successful evidence
+                # collection. Keep it separate from transport errors so
+                # health/report consumers can see coverage gaps by sport.
+                no_result_by_sport[sport] = (
+                    no_result_by_sport.get(sport, 0) + 1
+                )
 
         # Keep the report shape stable even when a provider returns no rows,
         # a sport is out of season, or the cadence budget is exhausted.  A
@@ -639,6 +637,7 @@ async def player_history_collector_job(context) -> None:
             target_counts.setdefault(sport, 0)
             ok_by_sport.setdefault(sport, 0)
             rows_by_sport.setdefault(sport, 0)
+            no_result_by_sport.setdefault(sport, 0)
             propline_coverage_by_sport.setdefault(sport, {})
 
         # A timed-out PropLine request must remain the next target. Advancing
@@ -706,22 +705,34 @@ async def player_history_collector_job(context) -> None:
                     exc,
                 )
                 break
+        no_result_targets = sum(no_result_by_sport.values())
+        if no_result_targets:
+            logger.warning(
+                "player_history_collector_job: provider coverage gap "
+                "empty_results=%d by_sport=%s",
+                no_result_targets,
+                no_result_by_sport,
+            )
         logger.info(
             "player_history_collector_job: done players_ok=%d rows=%d "
             "persisted_rows=%d targets_processed=%d rows_processed=%d "
             "remaining_targets=%d processed=%d remaining=%d errors=%d "
-            "budget_exhausted=%s targets_total=%d elapsed=%.1fs "
+            "deadline_targets=%d empty_results=%d budget_exhausted=%s "
+            "targets_total=%d elapsed=%.1fs "
             "targets_by_sport=%s "
             "players_ok_by_sport=%s rows_by_sport=%s "
+            "no_result_by_sport=%s "
              "propline_attempts_by_sport=%s "
             "propline_coverage_by_sport=%s "
             "propline_attempts_by_sport_market=%s "
             "propline_coverage_by_sport_market=%s",
-            ok, rows, persisted_rows, processed, rows, len(targets) - processed,
-            processed, len(targets) - processed,
-            failed, budget_exhausted, len(targets),
+            ok, rows, persisted_rows, processed, rows,
+            len(cycle_targets) - processed, processed,
+            len(cycle_targets) - processed, failed, deadline_targets,
+            no_result_targets, budget_exhausted, len(cycle_targets),
             time.monotonic() - cycle_started, target_counts,
-            ok_by_sport, rows_by_sport, propline_attempts_by_sport,
+            ok_by_sport, rows_by_sport, no_result_by_sport,
+            propline_attempts_by_sport,
             propline_coverage_by_sport, propline_attempts_by_sport_market,
             propline_coverage_by_sport_market,
         )

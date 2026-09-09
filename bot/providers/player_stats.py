@@ -331,6 +331,19 @@ def _richest_results(
     return primary
 
 
+def _relabel_results(
+    results: list[RawGameResult],
+    sport: str,
+) -> list[RawGameResult]:
+    """Keep the active-book sport identity when using a canonical provider route."""
+    return [
+        result._replace(sport=sport)
+        if result.sport != sport
+        else result
+        for result in results
+    ]
+
+
 # ESPN sport routing:  Underdog sport key → (sport_slug, league_slug)
 _ESPN_ROUTE: dict[str, tuple[str, str]] = {
     "NBA":    ("basketball",     "nba"),
@@ -387,18 +400,30 @@ class PlayerStatsProvider:
                     if _sleeper_enabled() else []
                 )
                 return _richest_results(primary, alternate, sport="MLB")
-            elif sport_upper == "NBA":
-                sport_slug, league_slug = _ESPN_ROUTE["NBA"]
+            elif sport_upper in ("NBA", "BASKETBALL"):
+                # Underdog uses the generic BASKETBALL key for the active
+                # WNBA slate. Try that league first, then NBA as a safe
+                # fallback for generic/off-season targets.
+                route_sport = "WNBA" if sport_upper == "BASKETBALL" else "NBA"
+                sport_slug, league_slug = _ESPN_ROUTE[route_sport]
                 primary = await self._fetch_espn(
-                    player_name, "NBA", stat_lower, sport_slug, league_slug,
+                    player_name, route_sport, stat_lower, sport_slug, league_slug,
                 )
+                if sport_upper == "BASKETBALL" and not primary:
+                    sport_slug, league_slug = _ESPN_ROUTE["NBA"]
+                    primary = await self._fetch_espn(
+                        player_name, "NBA", stat_lower, sport_slug, league_slug,
+                    )
                 alternate = (
                     await _get_sleeper_provider().fetch_results(
                         player_name, "NBA", stat_lower,
                     )
                     if _sleeper_enabled() else []
                 )
-                return _richest_results(primary, alternate, sport="NBA")
+                return _relabel_results(
+                    _richest_results(primary, alternate, sport=route_sport),
+                    sport_upper,
+                )
             elif sport_upper == "NFL":
                 # ESPN gamelog (primary) + Sleeper historical weeks (supplement).
                 # Sleeper provides one game per NFL week, so per-week = per-game.
@@ -452,8 +477,11 @@ class PlayerStatsProvider:
                         "Soccer optional provider disabled; using stored/PropLine history"
                     )
                     return []
-                return await _get_soccer_provider().fetch_results(
-                    player_name, sport_upper, stat_type
+                return _relabel_results(
+                    await _get_soccer_provider().fetch_results(
+                        player_name, sport_upper, stat_type
+                    ),
+                    sport_upper,
                 )
             elif sport_upper in _ESPN_ROUTE:
                 sport_slug, league_slug = _ESPN_ROUTE[sport_upper]
@@ -915,7 +943,7 @@ class PlayerStatsProvider:
 def _get_stat_map(sport: str) -> Optional[dict]:
     """Return the stat map for a flat (non-NFL) sport."""
     s = sport.upper()
-    if s in ("NBA", "WNBA", "NCAAB"):
+    if s in ("NBA", "WNBA", "NCAAB", "BASKETBALL"):
         return _NBA_STAT_MAP
     if s == "NHL":
         return _NHL_STAT_MAP

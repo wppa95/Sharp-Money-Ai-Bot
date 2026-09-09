@@ -902,7 +902,7 @@ async def post_init(application: Application) -> None:
             if queue is not None and grader_callback is not None:
                 queue.run_once(
                     grader_callback,
-                    when=config.UNDERDOG_POLL_INTERVAL,
+                    when=config.OPPORTUNITY_GRADER_INTERVAL,
                     name="opportunity_grader",
                 )
 
@@ -994,7 +994,7 @@ async def post_init(application: Application) -> None:
              "sportsbook integrations disabled]",
             config.UNDERDOG_POLL_INTERVAL,
             config.UNDERDOG_POLL_INTERVAL,
-            config.UNDERDOG_POLL_INTERVAL,
+            config.OPPORTUNITY_GRADER_INTERVAL,
             config.PLAYER_HISTORY_POLL_INTERVAL,
             config.SEASON_CHECK_INTERVAL,
             _propline_enabled,
@@ -1105,8 +1105,9 @@ async def post_shutdown(application: Application) -> None:
 _GRADE_BATCH_SIZE = 250
 _GRADE_FETCH_CONCURRENCY = 12
 _GRADE_FETCH_TIMEOUT_SECONDS = 20
-# Monitoring and grading share one two-minute owner. Keep grading bounded so a
-# slow settlement provider cannot block the next scan or the history collector.
+# Monitoring and grading have independent owners. Keep each grading pass
+# bounded so a slow settlement provider cannot block a live scan or history
+# collection while the 30-minute cadence drains the durable backlog.
 _GRADE_CYCLE_BUDGET_SECONDS = 50
 _GRADE_CYCLE_HEADROOM_SECONDS = 10
 _GRADE_PROPLINE_TARGETS_PER_CYCLE = 2
@@ -1223,7 +1224,9 @@ async def _grade_opportunities_job(context) -> None:
                     (opp.player_name, opp.sport, opp.stat_type)
                     for opp in pending
                 ],
-                limit=30,
+                # Keep enough durable history to reconcile opportunities from
+                # several weeks ago, not only the most recent 30 games.
+                limit=90,
             )
             if hasattr(_bulk_result, "__await__"):
                 _stored_grade_results = await _bulk_result
@@ -1548,6 +1551,21 @@ async def _grade_opportunities_job(context) -> None:
                 continue
             if _matched_game_date != game_date:
                 date_shifted += 1
+            if getattr(result_row, "source", "") == "derived_from_db":
+                # Persist the composite result after deriving it from durable
+                # component rows so future grading/reporting reads use the
+                # database directly instead of recomputing it.
+                try:
+                    await db.upsert_player_result(result_row)
+                except Exception as _derived_persist_exc:
+                    logger.warning(
+                        "_grade_opportunities_job: derived result persistence "
+                        "failed for %s/%s/%s: %s",
+                        opp.player_name,
+                        opp.sport,
+                        opp.stat_type,
+                        _derived_persist_exc,
+                    )
             actual = result_row.actual_value
             line   = opp.line_value
             recommendation = getattr(opp, "recommendation", None)
