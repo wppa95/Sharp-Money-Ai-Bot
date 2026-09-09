@@ -4614,7 +4614,7 @@ class PropLinePrizePicksProvider(PropProviderBase):
             result = await self.client.fetch_prizepicks_props(bookmaker=self.bookmaker)
             return [
                 prop for prop in result.props
-                and (self._sport_filter is None or prop.sport in self._sport_filter)
+                if self._sport_filter is None or prop.sport in self._sport_filter
             ]
 
         discovered = await self.client.discover_sports()
