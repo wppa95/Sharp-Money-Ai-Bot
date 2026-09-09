@@ -295,7 +295,7 @@ class TestBuildComparison:
         assert result.best_provider == "PrizePicks"
         assert result.best_line == 6.0
 
-    def test_dk_fd_lines_are_not_stored_in_current_comparison(self):
+    def test_legacy_dk_fd_args_do_not_create_unverified_book_rows(self):
         result = build_player_prop_market_comparison(
             player_name = "Test Player",
             sport       = "MLB",
@@ -306,7 +306,11 @@ class TestBuildComparison:
             now         = NOW,
         )
         assert result is not None
-        assert set(result.lines) == {"PrizePicks", "Underdog"}
+        assert set(result.lines) == {
+            "PrizePicks", "Underdog", "DraftKings", "FanDuel"
+        }
+        assert result.lines["DraftKings"].available is False
+        assert result.lines["FanDuel"].available is False
 
     def test_movement_calculated(self):
         result = build_player_prop_market_comparison(
@@ -390,7 +394,9 @@ class TestBuildComparison:
         )
         assert result is not None
         assert result.lines["PrizePicks"].available is False
-        assert set(result.lines) == {"PrizePicks", "Underdog"}
+        assert set(result.lines) == {
+            "PrizePicks", "Underdog", "DraftKings", "FanDuel"
+        }
         assert result.lines["Underdog"].available is True
 
 
@@ -956,7 +962,9 @@ class TestRunCycleBPlus:
 
 class TestProviderPriority:
     def test_order_constant(self):
-        assert PROVIDER_ORDER == ["PrizePicks", "Underdog"]
+        assert PROVIDER_ORDER == [
+            "PrizePicks", "Underdog", "DraftKings", "FanDuel"
+        ]
 
     def test_dk_beats_fd_when_pp_ud_unavailable(self):
         result = build_player_prop_market_comparison(

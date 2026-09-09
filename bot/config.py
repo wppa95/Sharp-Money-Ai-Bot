@@ -51,8 +51,9 @@ class Config:
 
     # ── External APIs ─────────────────────────────────────────────────────────
     ODDS_API_KEY: str = os.environ.get("ODDS_API_KEY", "")
-    # Disable optional sportsbook confirmation calls without removing the
-    # configured Odds API credential or affecting Underdog monitoring.
+    # Odds API is used for sportsbook player-prop observations only. The
+    # general h2h/totals poller is disabled; these flags control the optional
+    # DraftKings/FanDuel player-prop sources.
     ODDS_API_ENABLED: bool = os.environ.get("ODDS_API_ENABLED", "true").lower() not in (
         "false", "0", "no", "off"
     )
@@ -142,7 +143,9 @@ class Config:
     # in odds_records so the PP crossmatch pipeline can find sportsbook matches.
     # Priority 1: NBA, MLB.  Add soccer leagues (e.g. "NBA,MLB,EPL,MLS") for
     # Priority 2.  NFL excluded by default.
-    PLAYER_PROP_SPORTS_RAW: str = os.environ.get("PLAYER_PROP_SPORTS", "MLB,NBA,WNBA,NFL")
+    PLAYER_PROP_SPORTS_RAW: str = os.environ.get(
+        "PLAYER_PROP_SPORTS", "MLB,NBA,WNBA,NFL,NHL"
+    )
     # Keep supplemental player-prop tracking within the live 1–2 minute
     # refresh window. Strict OddsAPI pacing still controls real requests.
     PLAYER_PROP_POLL_INTERVAL: int = int(os.environ.get("PLAYER_PROP_POLL_INTERVAL", "120"))
@@ -196,14 +199,18 @@ class Config:
     )
 
     # ── Player-prop source settings ────────────────────────────────────────────
-    # PrizePicks/DraftKings/FanDuel are intentionally not active integrations.
-    # PropLine is consumed only as an internal Underdog evidence source.
-    DRAFTKINGS_ENABLED: bool = False
-    FANDUEL_ENABLED:    bool = False
+    # PrizePicks/PropLine remains internal evidence; DK/FD feed the shared
+    # player-prop ledger and never create a separate alert product.
+    DRAFTKINGS_ENABLED: bool = os.environ.get("DRAFTKINGS_ENABLED", "true").lower() not in (
+        "false", "0", "no", "off"
+    )
+    FANDUEL_ENABLED: bool = os.environ.get("FANDUEL_ENABLED", "true").lower() not in (
+        "false", "0", "no", "off"
+    )
     UNDERDOG_ENABLED:   bool = os.environ.get("UNDERDOG_ENABLED",   "true").lower() == "true"
-    # Kept as a compatibility attribute for callers/tests; sportsbook
-    # confirmation is permanently disabled in this product.
-    SPORTSBOOK_CONFIRMATION_ENABLED: bool = False
+    SPORTSBOOK_CONFIRMATION_ENABLED: bool = os.environ.get(
+        "SPORTSBOOK_CONFIRMATION_ENABLED", "true"
+    ).lower() not in ("false", "0", "no", "off")
 
     # Polling intervals for multi-platform connectors (seconds)
     CONNECTOR_POLL_INTERVAL:  int = int(os.environ.get("CONNECTOR_POLL_INTERVAL",  "120"))

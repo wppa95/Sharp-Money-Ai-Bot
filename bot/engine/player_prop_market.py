@@ -55,7 +55,7 @@ _PROP_CLAIM_LOCK = Lock()
 @dataclass
 class ProviderLine:
     """A single provider's line for one player/market combination."""
-    provider:    str              # "PrizePicks" | "Underdog"
+    provider:    str              # canonical provider name
     emoji:       str              # visual identifier
     line_value:  Optional[float]  # None = unavailable
     available:   bool             # True if a line exists
@@ -66,12 +66,15 @@ class ProviderLine:
         return "Unavailable"
 
 
-# Current player-prop display providers, in display order.  Sportsbook
-# connectors are intentionally not part of this current monitoring view.
-PROVIDER_ORDER = ["PrizePicks", "Underdog"]
+# Sportsbook rows are supplemental context for the Underdog pick, not separate
+# alert sources. They are displayed only when the canonical ledger has a
+# matching player/stat/event row.
+PROVIDER_ORDER = ["PrizePicks", "Underdog", "DraftKings", "FanDuel"]
 PROVIDER_EMOJI = {
     "PrizePicks": "🟣",
     "Underdog":   "🐶",
+    "DraftKings": "🟦",
+    "FanDuel":    "🔵",
 }
 
 # Sports that PrizePicks actively offers lines for
@@ -316,6 +319,34 @@ def build_player_prop_market_comparison(
             available  = True,
         ),
     }
+    # The current ledger may also contain sportsbook observations from the
+    # Odds API player-prop ingestion job. Keep them informational: the
+    # Underdog line remains the only actionable selection.
+    for provider in ("DraftKings", "FanDuel"):
+        matching = [
+            row for row in (pp_rows or [])
+            if getattr(row, "provider", "") == provider
+            and getattr(row, "player_name", "").strip().lower()
+                == player_name.strip().lower()
+            and getattr(row, "sport", "").upper() == sport.upper()
+            and normalize_stat(getattr(row, "stat_type", "")) == norm_stat
+        ]
+        latest = max(
+            matching,
+            key=lambda row: getattr(row, "fetched_at", None) or datetime.min,
+            default=None,
+        )
+        book_line = (
+            float(getattr(latest, "line_value"))
+            if latest is not None and getattr(latest, "line_value", None) is not None
+            else None
+        )
+        lines[provider] = ProviderLine(
+            provider=provider,
+            emoji=PROVIDER_EMOJI[provider],
+            line_value=book_line,
+            available=book_line is not None,
+        )
 
     # ── Compute market view ───────────────────────────────────────────────────
     available_lines = [

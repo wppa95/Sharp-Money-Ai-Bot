@@ -76,10 +76,46 @@ _SPORT_PLAYER_PROP_MARKETS: dict[Sport, str] = {
         "player_threes,player_steals,player_blocks"
     ),
     Sport.MLB: "player_hits,player_pitcher_strikeouts,player_total_bases",
+    Sport.WNBA: (
+        "player_points,player_rebounds,player_assists,"
+        "player_threes,player_steals,player_blocks"
+    ),
+    Sport.NFL: (
+        "player_pass_yds,player_pass_tds,player_pass_completions,"
+        "player_rush_yds,player_rush_tds,player_receptions,"
+        "player_reception_yds,player_reception_tds"
+    ),
+    Sport.NHL: (
+        "player_points,player_assists,player_goals,"
+        "player_shots_on_goal,player_blocked_shots"
+    ),
     # Soccer leagues removed: soccer player-prop alerts are out of scope and
     # fetching them consumes quota that blocks MLB/NBA HIGH-priority calls.
     # Re-add here only when soccer prop delivery is enabled in
     # alert_scope_filter.py.
+}
+
+_ODDS_MARKET_TO_PROP_STAT: dict[str, str] = {
+    "player_points": "Points",
+    "player_rebounds": "Rebounds",
+    "player_assists": "Assists",
+    "player_threes": "3-PT Made",
+    "player_steals": "Steals",
+    "player_blocks": "Blocks",
+    "player_hits": "Hits",
+    "player_pitcher_strikeouts": "Pitcher Strikeouts",
+    "player_total_bases": "Total Bases",
+    "player_pass_yds": "Passing Yards",
+    "player_pass_tds": "Passing Touchdowns",
+    "player_pass_completions": "Pass Completions",
+    "player_rush_yds": "Rushing Yards",
+    "player_rush_tds": "Rushing Touchdowns",
+    "player_receptions": "Receptions",
+    "player_reception_yds": "Receiving Yards",
+    "player_reception_tds": "Receiving Touchdowns",
+    "player_goals": "Goals",
+    "player_shots_on_goal": "Shots on Goal",
+    "player_blocked_shots": "Blocked Shots",
 }
 
 _ODDS_API_BASE = "https://api.the-odds-api.com/v4"
@@ -102,6 +138,7 @@ class PlayerPropLine:
     # Observation time is distinct from event_start and lets confirmation
     # reject stale cached rows without treating game time as fetch time.
     observed_at:  datetime = field(default_factory=datetime.utcnow)
+    event_id:      str = ""
 
 
 # ── Vig removal ───────────────────────────────────────────────────────────────
@@ -580,6 +617,7 @@ class AnalysisEngine:
             away = event.get("away_team", "Away")
             home = event.get("home_team", "Home")
             event_name = f"{away} @ {home}"
+            event_id = str(event.get("id") or event_name)
 
             commence_str = event.get("commence_time")
             try:
@@ -673,6 +711,7 @@ class AnalysisEngine:
             away = event.get("away_team", "Away")
             home = event.get("home_team", "Home")
             event_name = f"{away} @ {home}"
+            event_id = str(event.get("id") or event_name)
 
             commence_str = event.get("commence_time")
             try:
@@ -704,6 +743,7 @@ class AnalysisEngine:
                                     line=outcome.get("point"),
                                     event_start=event_start,
                                     observed_at=datetime.utcnow(),
+                                    event_id=event_id,
                                 )
                             )
                         except (KeyError, TypeError, ValueError) as exc:

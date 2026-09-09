@@ -68,93 +68,81 @@ class TestIsEvLineInScope:
         assert is_ev_line_in_scope(sport, MarketType.MONEYLINE) is True
 
 
-# ── _poll_odds_job early filter ────────────────────────────────────────────────
+# ── _poll_odds_job player-prop ingestion ──────────────────────────────────────
 
-def _make_odds_line(sport: Sport, market_type: MarketType) -> MagicMock:
+def _make_prop_line(sport: Sport, market_key: str = "player_points") -> MagicMock:
     line = MagicMock()
     line.sport = sport
-    line.market_type = market_type
+    line.market_key = market_key
     line.sportsbook = "FanDuel"
     line.event = "Team A @ Team B"
-    line.selection = "Team A"
+    line.event_id = "event-1"
+    line.player_name = "Player A"
+    line.description = "Over"
     line.american_odds = -110
-    line.line = None
+    line.line = 20.5
     line.event_start = None
+    line.observed_at = __import__("datetime").datetime.utcnow()
     return line
 
 
 @pytest.mark.asyncio
-async def test_poll_odds_job_drops_out_of_scope_lines():
-    """Out-of-scope lines must not be passed to save_odds or analyze_line."""
+async def test_poll_odds_job_persists_only_configured_player_props():
+    """The Odds API job stores props and never calls game-line EV code."""
     import main as main_mod
 
-    wnba_ml = _make_odds_line(Sport.WNBA, MarketType.MONEYLINE)   # Tier-1 — passes
-    mlb_ml  = _make_odds_line(Sport.MLB,  MarketType.MONEYLINE)
-    nba_spread = _make_odds_line(Sport.NBA, MarketType.SPREAD)     # wrong market
-
     mock_db = MagicMock()
-    mock_db.save_odds = AsyncMock()
-
     mock_engine = MagicMock()
-    mock_engine.fetch_live_odds = AsyncMock(return_value=[wnba_ml, mlb_ml, nba_spread])
-    mock_engine.analyze_line = MagicMock(return_value=MagicMock())
-
-    mock_delivery = MagicMock()
-    mock_delivery.deliver_ev = AsyncMock()
-
+    mock_engine.fetch_player_prop_odds = AsyncMock(
+        return_value=[_make_prop_line(Sport.WNBA)]
+    )
     mock_cfg = MagicMock()
-    mock_cfg.active_sports = ["WNBA"]     # used by other paths
+    mock_cfg.ODDS_API_SPORTS_RAW = "WNBA,MLB"
+    mock_cfg.player_prop_sports = ["WNBA"]
+    mock_cfg.ODDS_API_ENABLED = True
+    mock_cfg.SPORTSBOOK_CONFIRMATION_ENABLED = True
     mock_cfg.DRAFTKINGS_ENABLED = False
     mock_cfg.FANDUEL_ENABLED = True
-    mock_cfg.allowed_user_ids = []
 
     with patch.object(main_mod, "_db", mock_db), \
          patch.object(main_mod, "_engine", mock_engine), \
          patch.object(main_mod, "_season_checker", None), \
          patch.object(main_mod, "config", mock_cfg), \
-         patch("main.AlertDelivery", return_value=mock_delivery):
+         patch.object(
+             main_mod,
+             "persist_canonical_player_props",
+             new=AsyncMock(return_value=1),
+         ) as persist:
         await main_mod._poll_odds_job(MagicMock())
 
-    # Both active-sport moneylines pass; the spread remains excluded.
-    saved_market_types = [
-        c.args[0].market_type if c.args else c.kwargs.get("record").market_type
-        for c in mock_db.save_odds.call_args_list
-    ]
-    assert all(mt == MarketType.MONEYLINE.value for mt in saved_market_types)
-    assert mock_db.save_odds.call_count == 2
-
-    # analyze_line must not be called with out-of-scope inputs
-    # Only moneylines reach the market groups.
-    for c in mock_engine.analyze_line.call_args_list:
-        kwargs = c.kwargs if c.kwargs else {}
-        args   = c.args
-        sport_arg = kwargs.get("sport") or (args[0] if args else None)
-        assert sport_arg in (None, Sport.WNBA, Sport.MLB), f"analyze_line called with {sport_arg}"
+    mock_engine.fetch_player_prop_odds.assert_awaited_once_with(Sport.WNBA)
+    persist.assert_awaited_once()
+    mock_engine.fetch_live_odds.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_poll_odds_job_keeps_active_moneyline():
-    """An active-sport moneyline is retained by the moneyline-only poller."""
+async def test_poll_odds_job_skips_sports_without_player_prop_mapping():
+    """Unsupported game markets are not fetched as a fallback."""
     import main as main_mod
 
     mock_db = MagicMock()
-    mock_db.save_odds = AsyncMock()
     mock_engine = MagicMock()
-    mock_engine.fetch_live_odds = AsyncMock(
-        return_value=[_make_odds_line(Sport.NHL, MarketType.MONEYLINE)]
-    )
+    mock_engine.fetch_player_prop_odds = AsyncMock()
     mock_cfg = MagicMock()
-    mock_cfg.active_sports = ["NHL"]
-    mock_cfg.allowed_user_ids = []
+    mock_cfg.ODDS_API_SPORTS_RAW = "NCAAB"
+    mock_cfg.player_prop_sports = ["NCAAB"]
+    mock_cfg.ODDS_API_ENABLED = True
+    mock_cfg.SPORTSBOOK_CONFIRMATION_ENABLED = True
+    mock_cfg.DRAFTKINGS_ENABLED = True
+    mock_cfg.FANDUEL_ENABLED = True
 
     with patch.object(main_mod, "_db", mock_db), \
          patch.object(main_mod, "_engine", mock_engine), \
          patch.object(main_mod, "_season_checker", None), \
-         patch.object(main_mod, "config", mock_cfg), \
-         patch("main.AlertDelivery", return_value=MagicMock(deliver_ev=AsyncMock())):
+         patch.object(main_mod, "config", mock_cfg):
         await main_mod._poll_odds_job(MagicMock())
 
-    mock_db.save_odds.assert_called_once()
+    mock_engine.fetch_player_prop_odds.assert_not_awaited()
 
 
 # ── _steam_check_job early sport filter ───────────────────────────────────────

@@ -114,7 +114,7 @@ def canonicalize_player_props(
     key.  This means standard, goblin, and demon lines remain independently
     addressable even when they belong to the same player/stat/event.
     """
-    unique: dict[tuple[str, str, str, str, str, str, float], CanonicalPlayerProp] = {}
+    unique: dict[tuple[str, str, str, str, str, str], CanonicalPlayerProp] = {}
     for prop in props or ():
         canonical = canonicalize_player_prop(provider, prop)
         if canonical is None:
@@ -126,7 +126,6 @@ def canonicalize_player_props(
             canonical.stat_type,
             canonical.source_id,
             canonical.line_variant,
-            canonical.line_value,
         )
         unique[key] = canonical
     return list(unique.values())

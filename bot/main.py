@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 from functools import wraps
+import hashlib
 import inspect
 import logging
 import os
@@ -19,6 +20,7 @@ import sys
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from typing import Any, Optional
 
 from telegram import BotCommand, Update
@@ -32,6 +34,8 @@ from database import Database, OddsRecord, get_sqlite_backpressure_metrics
 from engine import AnalysisEngine
 from engine.season_check import SeasonChecker
 from engine.analysis import _SPORT_TO_ODDS_API_KEY
+from engine.analysis import _SPORT_PLAYER_PROP_MARKETS, _ODDS_MARKET_TO_PROP_STAT
+from engine.player_props_pipeline import persist_canonical_player_props
 from alert_scope_filter import is_ev_line_in_scope
 from logging_utils import install_credential_redaction
 from models import (
@@ -844,7 +848,7 @@ async def post_init(application: Application) -> None:
                 _poll_odds_job,
                 exclusive_group=_SQLITE_WRITE_JOB_GROUP,
             ),
-            interval=config.ODDS_POLL_INTERVAL,
+            interval=config.PLAYER_PROP_POLL_INTERVAL,
             first=10,
             name="odds_poller",
         )
@@ -991,13 +995,14 @@ async def post_init(application: Application) -> None:
             "season_check: every %ds, "
             "heartbeat: every 60s "
              "[Unified Player Props cycle enabled=%s; "
-             "sportsbook integrations disabled]",
+             "Odds API player-prop sportsbook feed enabled=%s]",
             config.UNDERDOG_POLL_INTERVAL,
             config.UNDERDOG_POLL_INTERVAL,
             config.OPPORTUNITY_GRADER_INTERVAL,
             config.PLAYER_HISTORY_POLL_INTERVAL,
             config.SEASON_CHECK_INTERVAL,
-            _propline_enabled,
+             _propline_enabled,
+             config.SPORTSBOOK_CONFIRMATION_ENABLED,
         )
     else:
         logger.warning("JobQueue not available — background jobs disabled.")
@@ -1686,31 +1691,22 @@ async def _heartbeat_job(context) -> None:
 
 # ── Background jobs ────────────────────────────────────────────────────────────
 
-async def _poll_odds_job(context) -> None:
+async def _player_props_job(context) -> None:
     """
-    Fetch live odds for all active sports, store each line as an OddsRecord,
-    then scan for +EV opportunities and alert on any that exceed the threshold.
+    Fetch sportsbook player props and persist them into the shared Player Props
+    ledger. H2H/totals polling and separate sportsbook EV alerts are retired.
 
-    EV detection approach:
-      1. Group fetched lines by (event, market_type).
-      2. Identify the two distinct selections in each market pair.
-      3. Find the best (highest) offered odds for each selection across all books.
-      4. Use multiplicative vig removal to build the fair probability.
-      5. For every book's offered odds on each side, compute EV against that
-         fair line and alert if EV ≥ MIN_EV_THRESHOLD.
+    Underdog remains the bettable source. DraftKings/FanDuel rows are stored
+    with provider-owned identity so the Underdog pipeline can use them as
+    current market context without creating a second alert universe.
     """
     if _db is None or _engine is None:
-        logger.debug("_poll_odds_job: DB or engine not ready, skipping")
+        logger.debug("_player_props_job: DB or engine not ready, skipping")
         return
 
     now      = datetime.utcnow()
-    bot      = context.bot
-    chat_ids = list(config.allowed_user_ids)
-    delivery = AlertDelivery(_db, bot, chat_ids)
     pacer = get_quota_pacer()
 
-    # ── 1. Fetch odds for every active sport ──────────────────────────────────
-    all_lines: list[OddsLine] = []
     allowed_books = set()
     if config.SPORTSBOOK_CONFIRMATION_ENABLED:
         if config.DRAFTKINGS_ENABLED:
@@ -1718,134 +1714,134 @@ async def _poll_odds_job(context) -> None:
         if config.FANDUEL_ENABLED:
             allowed_books.add("fanduel")
     if not getattr(config, "ODDS_API_ENABLED", True):
-        logger.debug("_poll_odds_job: OddsAPI disabled by configuration")
+        logger.debug("_player_props_job: OddsAPI disabled by configuration")
         return
 
     configured_sports = _configured_odds_api_sports()
+    configured_prop_sports = getattr(config, "player_prop_sports", None)
+    if not isinstance(configured_prop_sports, (list, tuple, set, frozenset)):
+        raw_prop_sports = getattr(config, "PLAYER_PROP_SPORTS_RAW", "")
+        configured_prop_sports = (
+            str(raw_prop_sports).split(",") if isinstance(raw_prop_sports, str) else []
+        )
+    prop_sports = {str(value).strip().upper() for value in configured_prop_sports}
+    if not configured_sports:
+        aliases = {
+            "CFB": Sport.NCAAF,
+            "NCAA": Sport.NCAAF,
+            "FOOTBALL": Sport.NFL,
+            "BASKETBALL": Sport.NBA,
+            "BASEBALL": Sport.MLB,
+        }
+        by_name = {member.value.upper(): member for member in Sport}
+        configured_sports = [
+            (
+                raw,
+                aliases.get(raw.upper()) or by_name.get(raw.upper()),
+            )
+            for raw in configured_prop_sports
+            if (aliases.get(raw.upper()) or by_name.get(raw.upper())) is not None
+        ]
+    persisted_by_provider: dict[str, list[object]] = defaultdict(list)
+    seen: set[tuple[str, str, str, str]] = set()
     for sport_str, sport in configured_sports:
+        if sport_str.upper() not in {str(value).upper() for value in prop_sports}:
+            continue
+        if sport not in _SPORT_PLAYER_PROP_MARKETS:
+            logger.debug(
+                "_player_props_job: no player-prop market mapping for %s; skipping",
+                sport_str,
+            )
+            continue
         # Skip sports that are out of season / have no active markets.
         # The checker is fail-open: returns True if cache not yet populated.
         if _season_checker is not None:
             odds_key = _SPORT_TO_ODDS_API_KEY.get(sport)
             if odds_key and not _season_checker.is_sport_active(odds_key):
                 logger.info(
-                    "_poll_odds_job: skipping %s (%s) — out of season / no active markets",
+                    "_player_props_job: skipping %s (%s) — out of season / no active markets",
                     sport_str, odds_key,
                 )
                 continue
         if pacer is not None and not await pacer.wait_for_slot():
             logger.info(
-                "_poll_odds_job: Odds API request skipped — %s",
+                "_player_props_job: Odds API request skipped — %s",
                 pacer.block_reason(),
             )
             break
-        lines = await _engine.fetch_live_odds(sport, markets="h2h,totals")
-        allowed_book_names = {book.replace(" ", "") for book in allowed_books}
-        if not config.SPORTSBOOK_CONFIRMATION_ENABLED:
-            lines = [
-                line for line in lines
-                if line.sportsbook.lower().replace(" ", "") not in {"draftkings", "fanduel"}
-            ]
-        if allowed_book_names:
-            all_lines.extend(
-                line for line in lines
-                if line.sportsbook.lower().replace(" ", "") in allowed_book_names
+        lines = await _engine.fetch_player_prop_odds(sport)
+        for line in lines:
+            book_key = str(line.sportsbook or "").lower().replace(" ", "")
+            if book_key not in allowed_books or line.line is None:
+                continue
+            provider = "DraftKings" if book_key == "draftkings" else "FanDuel"
+            stat_type = _ODDS_MARKET_TO_PROP_STAT.get(line.market_key)
+            if not stat_type:
+                continue
+            event_id = str(getattr(line, "event_id", "") or line.event)
+            identity = (
+                provider,
+                event_id,
+                str(line.player_name).strip().lower(),
+                stat_type,
             )
-        else:
-            # Keep unrelated sportsbook lines available to the existing EV
-            # path, but never retain DK/FD lines while their confirmation role
-            # is disabled.
-            all_lines.extend(lines)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            source_key = "|".join(str(part) for part in identity)
+            external_id = "odds-" + hashlib.sha1(source_key.encode()).hexdigest()[:32]
+            persisted_by_provider[provider].append(
+                SimpleNamespace(
+                    provider=provider,
+                    sport=sport.value,
+                    player_name=str(line.player_name).strip(),
+                    team="",
+                    stat_type=stat_type,
+                    line_value=float(line.line),
+                    game_time=line.event_start,
+                    provider_status="active",
+                    external_id=external_id,
+                    game_id=event_id,
+                    event_id=event_id,
+                    line_variant="sportsbook",
+                    fetched_at=line.observed_at,
+                )
+            )
 
     if pacer is not None:
         logger.info("%s", pacer.telemetry().summary)
 
-    if not all_lines:
-        logger.debug("_poll_odds_job: no lines returned from API")
+    persisted = 0
+    for provider, props in persisted_by_provider.items():
+        try:
+            persisted += await persist_canonical_player_props(
+                _db,
+                provider,
+                props,
+                append_snapshot=True,
+            )
+        except Exception as exc:
+            logger.exception(
+                "_player_props_job: player-prop persistence failed provider=%s: %s",
+                provider,
+                exc,
+            )
+    if not persisted:
+        logger.debug("_player_props_job: no player-prop lines persisted")
         return
 
-    # ── 1b. Early scope filter — drop lines that can never be delivered ────────
-    # Only Tier 1 sports (all supported sports except MLB/NBA/NFL) pass the
-    # AlertScopeFilter EV pipeline.  Filtering here avoids writing out-of-scope
-    # rows to odds_records and running EV analysis on data that will always be
-    # blocked at delivery.
-    before_filter = len(all_lines)
-    all_lines = [l for l in all_lines if is_ev_line_in_scope(l.sport, l.market_type)]
-    dropped = before_filter - len(all_lines)
-    if dropped:
-        logger.debug(
-            "_poll_odds_job: dropped %d out-of-scope lines before analysis (%d remain)",
-            dropped, len(all_lines),
-        )
+    logger.info(
+        "_player_props_job: persisted %d sportsbook player-prop rows "
+        "(DraftKings=%d FanDuel=%d); h2h/totals disabled",
+        persisted,
+        len(persisted_by_provider.get("DraftKings", [])),
+        len(persisted_by_provider.get("FanDuel", [])),
+    )
 
-    if not all_lines:
-        logger.debug("_poll_odds_job: no in-scope lines after scope filter")
-        return
 
-    logger.info("_poll_odds_job: storing %d in-scope odds lines", len(all_lines))
-
-    # ── 2. Store every in-scope line to the database ──────────────────────────
-    for line in all_lines:
-        record = OddsRecord(
-            sportsbook=line.sportsbook,
-            sport=line.sport.value,
-            market_type=line.market_type.value,
-            event=line.event,
-            selection=line.selection,
-            american_odds=line.american_odds,
-            line=line.line,
-            event_start=line.event_start,
-            recorded_at=now,
-        )
-        await _db.save_odds(record)
-
-    # ── 3. Detect +EV opportunities ───────────────────────────────────────────
-    # Group lines by (event, market_type) to find opposing sides.
-    market_groups: dict[tuple[str, MarketType], list[OddsLine]] = defaultdict(list)
-    for line in all_lines:
-        market_groups[(line.event, line.market_type)].append(line)
-
-    for (event, market_type), group in market_groups.items():
-        # Collect distinct selections and best odds for each
-        best_odds_per_selection: dict[str, tuple[int, str]] = {}  # sel -> (odds, book)
-        for line in group:
-            sel = line.selection
-            if sel not in best_odds_per_selection or line.american_odds > best_odds_per_selection[sel][0]:
-                best_odds_per_selection[sel] = (line.american_odds, line.sportsbook)
-
-        selections = list(best_odds_per_selection.keys())
-        if len(selections) != 2:
-            # Need exactly two sides for vig removal
-            continue
-
-        sel_a, sel_b = selections[0], selections[1]
-        best_a, book_a = best_odds_per_selection[sel_a]
-        best_b, book_b = best_odds_per_selection[sel_b]
-
-        # Evaluate EV for each book's offered odds against the fair line
-        for line in group:
-            is_side_a = (line.selection == sel_a)
-            opp_best_odds = best_b if is_side_a else best_a
-
-            try:
-                opp = _engine.analyze_line(
-                    sport=line.sport,
-                    market_type=line.market_type,
-                    event=line.event,
-                    selection=line.selection,
-                    player=None,
-                    line=line.line,
-                    side_a_odds=line.american_odds,
-                    side_b_odds=opp_best_odds,
-                    is_side_a=True,
-                    best_book=line.sportsbook,
-                )
-            except Exception as exc:
-                logger.debug("EV analysis failed for %s/%s: %s", event, line.selection, exc)
-                continue
-
-            # AlertDelivery handles: filter → dedup → format → send → log
-            await delivery.deliver_ev(opp)
+async def _poll_odds_job(context) -> None:
+    """Compatibility entry point for the retired general Odds API poller."""
+    await _player_props_job(context)
 
 
 async def _steam_check_job(context) -> None:

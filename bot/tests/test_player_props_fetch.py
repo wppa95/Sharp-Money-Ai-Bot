@@ -99,9 +99,10 @@ def test_soccer_leagues_not_in_map():
         )
 
 
-def test_nfl_not_in_default_map():
-    """NFL is excluded by design — confirm it has no default entry."""
-    assert Sport.NFL not in _SPORT_PLAYER_PROP_MARKETS
+def test_nfl_player_props_are_in_default_map():
+    """NFL sportsbook props are part of the active player-prop feed."""
+    assert Sport.NFL in _SPORT_PLAYER_PROP_MARKETS
+    assert "player_pass_yds" in _SPORT_PLAYER_PROP_MARKETS[Sport.NFL]
 
 
 def test_all_prop_sports_have_odds_api_key():
@@ -340,7 +341,7 @@ async def test_fetch_player_prop_odds_malformed_outcome_skipped():
 
 @pytest.mark.asyncio
 async def test_player_props_job_writes_odds_records():
-    """Job should write one OddsRecord per PlayerPropLine with correct fields."""
+    """Job should persist sportsbook lines through the canonical ledger."""
     import main as main_mod
 
     pl = PlayerPropLine(
@@ -356,12 +357,8 @@ async def test_player_props_job_writes_odds_records():
     )
 
     mock_db = MagicMock()
-    mock_db.save_odds = AsyncMock()
     mock_engine = MagicMock()
     mock_engine.fetch_player_prop_odds = AsyncMock(return_value=[pl])
-
-    saved_records = []
-    mock_db.save_odds.side_effect = lambda r: saved_records.append(r) or None
 
     mock_cfg = MagicMock()
     mock_cfg.player_prop_sports = ["NBA"]
@@ -370,17 +367,21 @@ async def test_player_props_job_writes_odds_records():
     with patch.object(main_mod, "_db", mock_db), \
          patch.object(main_mod, "_engine", mock_engine), \
          patch.object(main_mod, "_season_checker", None), \
-         patch.object(main_mod, "config", mock_cfg):
+         patch.object(main_mod, "config", mock_cfg), \
+         patch.object(
+             main_mod,
+             "persist_canonical_player_props",
+             new=AsyncMock(return_value=1),
+         ) as persist:
         await main_mod._player_props_job(MagicMock())
 
     assert mock_engine.fetch_player_prop_odds.called
-    assert len(saved_records) == 1
-    rec = saved_records[0]
-    assert rec.market_type == "player_points"
-    assert "LeBron James" in rec.selection
-    assert "Over" in rec.selection
-    assert rec.sportsbook == "FanDuel"
-    assert rec.line == 25.5
+    persist.assert_awaited_once()
+    provider, props = persist.call_args.args[1:3]
+    assert provider == "FanDuel"
+    assert props[0].player_name == "LeBron James"
+    assert props[0].stat_type == "Points"
+    assert props[0].line_value == 25.5
 
 
 @pytest.mark.asyncio

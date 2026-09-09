@@ -3708,6 +3708,7 @@ def _has_strong_delivery_evidence(
 
 def _has_delivery_evidence(
     *,
+    score: object = None,
     validation: object = None,
     decision: object = None,
     intelligence_trace: object = None,
