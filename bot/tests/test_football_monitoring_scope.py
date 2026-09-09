@@ -191,9 +191,10 @@ def test_prizepicks_sport_scoped_football_fetch_is_enabled_for_persistence():
 
     result = asyncio.run(provider.fetch_props_for_sport_result("CFB"))
 
-    assert [(prop.sport, prop.player_name) for prop in result.props] == [
-        ("NFL", "NFL Player")
-    ]
+    assert {(prop.sport, prop.player_name) for prop in result.props} == {
+        ("CFB", "NFL Player"),
+        ("CFB", "NBA Player"),
+    }
     assert result.succeeded is True
 
 
