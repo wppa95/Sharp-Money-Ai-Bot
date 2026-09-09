@@ -138,3 +138,4 @@
 - [History coverage boundaries](history-coverage-boundaries.md) — batch full-book provider work; report empty sport coverage separately from errors and deadlines.
 - [Odds API player-prop feed](odds-player-prop-feed.md) — sportsbook props supplement the canonical Underdog workflow; h2h/totals polling is retired.
 - [Provider-aware prop ledger](provider-aware-prop-ledger.md) — every supported feed keeps source identity across observation, history, tracking, grading, and reports; sportsbook rows never enter the Underdog alert universe.
+- [Adaptive learning policy](adaptive-learning-policy.md) — provider-aware weights are explicit, audited, bounded ranking adjustments and never qualification or delivery gates.

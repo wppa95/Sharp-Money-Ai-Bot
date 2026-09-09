@@ -538,4 +538,5 @@ def compute_ranking(
         overall_history=overall_history,
         market_history=market_history,
         sport_history=sport_history,
+        adaptive_weight_version=adaptive_weight_version,
     )

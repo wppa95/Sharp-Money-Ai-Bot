@@ -9173,6 +9173,7 @@ class Database:
             )
             _intel_n, _avg_sharp, _avg_evidence, _sharp_n = intel_row.one()
 
+        adaptive_status = await self.get_adaptive_learning_status()
         return {
             "by_tier":      by_tier,
             "by_sport":     by_sport,
@@ -9193,6 +9194,7 @@ class Database:
                 "calibration_minimum": 5,
                 "calibrated": int(_intel_n or 0) >= 5,
             },
+            "adaptive_learning": adaptive_status,
         }
 
     async def get_game_result_for_grading(

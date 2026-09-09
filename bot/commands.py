@@ -835,6 +835,7 @@ async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             return
         total   = rollups.get("total_graded", 0)
         intel   = rollups.get("intelligence", {})
+        adaptive = rollups.get("adaptive_learning", {})
 
         # ── 🎯 Telegram actionable picks block (always shown first) ───────────
         tg_lines = ["📊 <b>Learning Rollups</b>", "", "🎯 <b>TELEGRAM ACTIONABLE PICKS</b>"]
@@ -877,6 +878,27 @@ async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 f"  Avg: <b>{intel.get('sharp_confidence_avg') if intel.get('sharp_confidence_avg') is not None else '—'}/100</b>"
                 f"  · Evidence: {intel.get('evidence_completeness_avg') if intel.get('evidence_completeness_avg') is not None else '—'}%",
                 f"  Sample: {intel.get('sample_size', 0)}  · <i>{_cal}</i>",
+                "",
+            ])
+
+        # Adaptive weights are ranking-only and auditable.  Keep their status
+        # visible without implying that descriptive or insufficient groups
+        # affect qualification or Telegram delivery.
+        if adaptive:
+            adaptive_version = adaptive.get("version") or "none"
+            adaptive_state = (
+                "ACTIVE" if adaptive.get("active") else adaptive.get("status", "NOT_INITIALIZED")
+            )
+            tg_lines.extend([
+                "🧮 <b>Adaptive ranking weights</b>",
+                f"  Version: <b>{_html.escape(str(adaptive_version))}</b> · "
+                f"Status: <b>{_html.escape(str(adaptive_state))}</b>",
+                f"  Eligible groups: {adaptive.get('eligible_groups', 0)}/"
+                f"{adaptive.get('total_groups', 0)} · "
+                f"Minimum sample: {adaptive.get('min_sample_size', '—')} · "
+                f"Model misses: {adaptive.get('min_model_errors', '—')}",
+                f"  Max multiplier delta: ±{float(adaptive.get('max_delta', 0.0)) * 100:.0f}% · "
+                "<i>ranking only; delivery gates unchanged</i>",
                 "",
             ])
 
@@ -944,7 +966,39 @@ async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 async def cmd_learning(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/learning — explicit alias for the persistent learning report."""
+    """/learning — report active weights, or explicitly rebuild them."""
+    args = [
+        str(arg).strip().lower()
+        for arg in (getattr(context, "args", None) or [])
+    ]
+    if args and args[0] == "rebuild":
+        if not _check_allowed(update):
+            await update.message.reply_text("⛔ Unauthorized.")
+            return
+        try:
+            db: "Database" = context.bot_data.get("db")
+            if db is None:
+                await update.message.reply_text("⚠️ Database not available.")
+                return
+            result = await db.rebuild_adaptive_learning_weights()
+            state = "ACTIVE" if result["active"] else "DESCRIPTIVE ONLY"
+            await update.message.reply_text(
+                "🧮 <b>Adaptive weights rebuilt</b>\n\n"
+                f"Version: <b>{_html.escape(str(result['version']))}</b>\n"
+                f"Status: <b>{state}</b>\n"
+                f"Eligible groups: {result['eligible_groups']}/"
+                f"{result['total_groups']}\n"
+                f"Minimum sample: {result['min_sample_size']}\n"
+                f"Model misses required: {result['min_model_errors']}\n"
+                f"Maximum multiplier delta: ±{result['max_delta'] * 100:.0f}%\n\n"
+                "<i>Weights affect ranking only. Qualification, delivery, "
+                "alerts, and grading are unchanged.</i>",
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception as exc:
+            logger.exception("cmd_learning rebuild: failed: %s", exc)
+            await update.message.reply_text("⚠️ Adaptive weight rebuild failed. Check bot logs.")
+        return
     await cmd_rollups(update, context)
 
 
