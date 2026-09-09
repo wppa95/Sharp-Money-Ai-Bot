@@ -535,7 +535,7 @@ def test_format_new_prop_alert_contains_required_fields():
         score=None,
         low_line_threshold=1.0,
     )
-    assert "📊 <b>PLAYER PROP PLAY</b>" in msg
+    assert "📊 <b>PLAYER PROP</b>" in msg
     assert "Aaron Judge" in msg
     assert "Home Runs" in msg
     assert "0.5" in msg

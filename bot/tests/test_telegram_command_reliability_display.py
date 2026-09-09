@@ -889,7 +889,7 @@ async def test_broadcast_alert_does_not_use_strong_bet_label_as_a_send_gate():
     bot = MagicMock()
     bot.send_message = AsyncMock()
 
-    weak = "📊 <b>PLAYER PROP PLAY</b>\n📌 <b>PICK:</b> 🟢 <b>OVER 0.5</b>"
+    weak = "📊 <b>PLAYER PROP</b>\n📌 <b>PICK:</b> 🟢 <b>OVER 0.5</b>"
     assert await broadcast_alert(bot, [123], weak, sport="MLB") == {
         "sent": 1,
         "failed": 0,
@@ -903,7 +903,7 @@ async def test_telegram_boundary_removes_all_quality_metadata_but_keeps_pick_con
     bot = MagicMock()
     bot.send_message = AsyncMock()
     raw = (
-        "📊 <b>PLAYER PROP PLAY</b>\n"
+        "📊 <b>PLAYER PROP</b>\n"
         "👤 <b>Yordan Alvarez</b> · Hits + Runs + RBIs\n"
         "📌 <b>PICK:</b> 🟢 <b>OVER 1.5</b>\n"
         "💪 STRONG BET\n"

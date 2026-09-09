@@ -598,7 +598,7 @@ class TestIndependentPrizePicks:
             source="PrizePicks",
         )
 
-        assert "PLAYER PROP PLAY" in message
+        assert "PLAYER PROP" in message
         assert "PLAYER PROP LINE" in message
         assert "📡 <b>Source:</b>  Player Props · PrizePicks" in message
         assert "Underdog" not in message

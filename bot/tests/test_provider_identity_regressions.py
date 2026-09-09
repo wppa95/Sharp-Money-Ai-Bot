@@ -219,7 +219,7 @@ def test_prizepicks_edge_alert_uses_shared_player_prop_heading_and_line():
     )
 
     message = format_pp_alert(opportunity)
-    assert "📊 <b>PLAYER PROP PLAY</b>" in message
+    assert "📊 <b>PLAYER PROP</b>" in message
     assert "Player Prop Line" in message
     assert "ACTIONABLE BET PICK" not in message
     assert "verify before placing" not in message.lower()
@@ -236,5 +236,5 @@ def test_change_alert_uses_shared_player_prop_heading_and_line_label():
             new_line=25.5,
             source=provider,
         )
-        assert "📊 <b>PLAYER PROP PLAY</b>" in message
+        assert "📊 <b>PLAYER PROP</b>" in message
         assert "PLAYER PROP LINE" in message

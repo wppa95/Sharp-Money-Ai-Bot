@@ -759,7 +759,7 @@ def _sanitize_user_alert_message(message: str) -> str:
     # product-level Player Props label.
     text = re.sub(
         r"(?:🐶|🟣|🎯)\s*<b>\s*(?:UNDERDOG|PRIZEPICKS|PLAYER PROP)\s+PICK\s*</b>",
-        "📊 <b>PLAYER PROP PLAY</b>",
+        "📊 <b>PLAYER PROP</b>",
         text,
         flags=re.IGNORECASE,
     )
@@ -1008,7 +1008,7 @@ def format_pp_alert(
     under_fmt = format_odds(opp.sportsbook_under_odds)
 
     parts = [
-        f"📊 <b>PLAYER PROP PLAY</b>",
+        f"📊 <b>PLAYER PROP</b>",
         "",
         f"{s_icon} <b>{pp.sport} — {pp.stat_type}</b>",
         f"👤 <b>{pp.player_name}</b> ({pp.team})",

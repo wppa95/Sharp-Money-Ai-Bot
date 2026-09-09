@@ -833,7 +833,7 @@ def format_underdog_change_alert(
         header         = "🚫 <b>PLAYER PROP REMOVED</b>"
         movement_block = f"  🎯 <b>Last Player Prop Line:</b>  <code>{old_line:.1f}</code>"
     elif standing:
-        header         = "📊 <b>PLAYER PROP PLAY</b>"
+        header         = "📊 <b>PLAYER PROP</b>"
         movement_block = (
             f"📊 <b>PLAYER PROP LINE</b>\n"
             f"  {source_emoji} <code>{new_line:.1f}</code>  {_line_label(new_line)}"
@@ -841,7 +841,7 @@ def format_underdog_change_alert(
     else:
         change         = new_line - old_line
         direction_icon = "📈" if change > 0 else "📉"
-        header         = "📊 <b>PLAYER PROP PLAY</b>"
+        header         = "📊 <b>PLAYER PROP</b>"
         change_sign    = "+" if change >= 0 else ""
         movement_block = (
             f"📊 <b>PLAYER PROP LINE</b>\n"
@@ -1078,7 +1078,7 @@ def format_underdog_new_prop_alert(
     _thick = "━" * 18
     parts = [
         _thick,
-        "📊 <b>PLAYER PROP PLAY</b>",
+        "📊 <b>PLAYER PROP</b>",
         _thick,
         "",
             f"{sport_icon} <b>{escape(str(sport))} — {escape(str(stat_type))}</b>",

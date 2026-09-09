@@ -417,7 +417,7 @@ def test_qualified_play_omits_all_market_quality_display():
         market_quality=market_quality,
     )
 
-    assert "PLAYER PROP PLAY" in message
+    assert "PLAYER PROP" in message
     assert "PICK:" in message
     assert "Market Quality" not in message
     assert "MARKET" not in message
