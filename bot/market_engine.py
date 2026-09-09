@@ -497,14 +497,29 @@ async def _persist_propline_observations(
     if db is None or not props:
         return 0
     try:
+        canonical_props = canonicalize_player_props("PrizePicks", props)
+        if not canonical_props:
+            return 0
+        observation_writer = getattr(
+            db, "save_prop_line_observations_batch", None
+        )
+        if callable(observation_writer):
+            observed = observation_writer("PrizePicks", canonical_props)
+            if inspect.isawaitable(observed):
+                observed = await observed
+            if int(observed or 0) != len(canonical_props):
+                raise RuntimeError(
+                    "incomplete PrizePicks observation-ledger write "
+                    f"({observed}/{len(canonical_props)})"
+                )
         await persist_canonical_player_props(
             db,
             "PrizePicks",
-            props,
+            canonical_props,
             append_snapshot=True,
         )
         tracking_records = []
-        for prop in props:
+        for prop in canonical_props:
             player = str(getattr(prop, "player_name", "") or "").strip()
             sport = str(getattr(prop, "sport", "") or "").upper().strip()
             stat = str(getattr(prop, "stat_type", "") or "").strip()
@@ -536,7 +551,7 @@ async def _persist_propline_observations(
                 tracked = await track_props(tracking_records)
                 if tracked is not None and int(tracked) < len(tracking_records):
                     raise RuntimeError("incomplete PrizePicks tracking write")
-        return len(props)
+        return len(canonical_props)
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "propline_request_scan: persistence failed: %s",
@@ -1187,7 +1202,7 @@ def _propline_prop_key(prop: object) -> tuple[str, str, str, str]:
 
 
 async def propline_request_scan_job(context) -> None:
-    """Refresh one PropLine sport at the provider's continuous request pace.
+    """Refresh every active PropLine sport in one complete feed pass.
 
     This job owns only provider-specific fetch, pacing, and durable ingestion.
     It is invoked by the shared Player Props monitoring cycle; evaluation and
@@ -1195,8 +1210,9 @@ async def propline_request_scan_job(context) -> None:
     """
     global _propline_request_cursor, _propline_request_lock
     provider = _propline_provider
+    db = getattr(context, "bot_data", {}).get("db")
     if provider is None or not getattr(provider, "is_available", lambda: False)():
-        return
+        return False
     if _propline_request_lock is None:
         _propline_request_lock = asyncio.Lock()
 
@@ -1219,11 +1235,11 @@ async def propline_request_scan_job(context) -> None:
                 "remaining=%.1fs",
                 cooldown,
             )
-            return
+            return False
         sports = await _get_prizepicks_scan_sports(provider)
         if not sports:
             logger.info("propline_request_scan: no active PrizePicks sports")
-            return
+            return True
         now = time.monotonic()
         eligible_indexes = [
             index
@@ -1237,55 +1253,83 @@ async def propline_request_scan_job(context) -> None:
                 "propline_request_scan: all active sports are in empty-slate "
                 "cooldown; requests=0"
             )
-            return
+            return True
         cursor = _propline_request_cursor % len(sports)
-        start = next(
+        first = next(
             (index for index in eligible_indexes if index >= cursor),
             eligible_indexes[0],
         )
-        sport = sports[start]
-        _propline_request_cursor = (start + 1) % len(sports)
+        ordered_indexes = [
+            index for index in eligible_indexes if index >= first
+        ] + [
+            index for index in eligible_indexes if index < first
+        ]
+        failed_sports: list[str] = []
+        persisted_sports: list[str] = []
+        last_attempted_index = first
         fetch_result = getattr(provider, "fetch_props_for_sport_result", None)
         fetch_props = getattr(provider, "fetch_props_for_sport", None)
-        try:
-            if callable(fetch_result):
-                try:
-                    result = await fetch_result(
-                        sport,
-                        bookmaker=getattr(
-                            config,
-                            "PROPLINE_UNDERDOG_BOOKMAKER",
-                            "underdog",
-                        ),
-                        event_scoped=True,
+        for offset, sport_index in enumerate(ordered_indexes):
+            sport = sports[sport_index]
+            last_attempted_index = sport_index
+            try:
+                if callable(fetch_result):
+                    try:
+                        result = await fetch_result(
+                            sport,
+                            bookmaker="prizepicks",
+                        )
+                    except TypeError:
+                        result = await fetch_result(
+                            sport,
+                            bookmaker="prizepicks",
+                        )
+                    props = list(getattr(result, "props", []) or [])
+                    succeeded = bool(
+                        getattr(result, "succeeded", False)
+                        and getattr(result, "complete", False)
                     )
-                except TypeError:
-                    result = await fetch_result(
-                        sport,
-                        bookmaker=getattr(
-                            config,
-                            "PROPLINE_UNDERDOG_BOOKMAKER",
-                            "underdog",
-                        ),
+                    failure_text = str(getattr(result, "error", "") or "")
+                    failure_kind = str(
+                        getattr(result, "failure_kind", "") or ""
                     )
-                props = list(getattr(result, "props", []) or [])
-                succeeded = bool(getattr(result, "succeeded", False))
-            elif callable(fetch_props):
-                props = list(await fetch_props(sport) or [])
-                succeeded = True
-            if not isinstance(db, Database):
-                props = []
-                succeeded = False
-            props = [
-                prop for prop in props
-                if not is_football_related_sport(getattr(prop, "sport", ""))
-            ]
-            if succeeded:
-                persisted = await _persist_propline_observations(
-                    getattr(context, "bot_data", {}).get("db"),
-                    props,
-                )
+                elif callable(fetch_props):
+                    props = list(await fetch_props(sport) or [])
+                    succeeded = True
+                    failure_text = ""
+                    failure_kind = ""
+                else:
+                    props = []
+                    succeeded = False
+                    failure_text = "PropLine provider has no sport fetch method"
+                    failure_kind = "configuration"
+                props = [
+                    prop for prop in props
+                    if not is_football_related_sport(
+                        getattr(prop, "sport", "")
+                    )
+                ]
+                if not succeeded:
+                    failed_sports.append(sport)
+                    logger.warning(
+                        "propline_request_scan: sport=%s incomplete; "
+                        "observations are not evaluated: %s",
+                        sport,
+                        failure_text or failure_kind or "provider failure",
+                    )
+                    failure_lower = (
+                        f"{failure_kind} {failure_text}".lower()
+                    )
+                    if any(
+                        marker in failure_lower
+                        for marker in ("quota", "budget", "rate", "429", "backoff")
+                    ):
+                        break
+                    continue
+
+                persisted = await _persist_propline_observations(db, props)
                 if persisted != len(props):
+                    failed_sports.append(sport)
                     logger.error(
                         "propline_request_scan: persistence barrier failed "
                         "sport=%s observations=%d persisted=%d; evaluation skipped",
@@ -1293,24 +1337,21 @@ async def propline_request_scan_job(context) -> None:
                         len(props),
                         persisted,
                     )
-                    return
-                # The provider light represents the live fetch-and-persist
-                # lane, not the evaluator. A successful request worker tick
-                # must clear an old "awaiting first fetch" state even when
-                # the current sport has an empty slate.
-                if getattr(context, "bot_data", {}).get("db") is not None:
-                    try:
-                        _provider_health = get_health_monitor()
-                        if _provider_health is not None:
-                            _provider_health.record_success("PrizePicks")
-                    except Exception:
-                        pass
-                    try:
-                        _health = get_health_tracker()
-                        if _health is not None:
-                            _health.record_provider_fetch("PrizePicks")
-                    except Exception:
-                        pass
+                    continue
+
+                persisted_sports.append(sport)
+                try:
+                    _provider_health = get_health_monitor()
+                    if _provider_health is not None:
+                        _provider_health.record_success("PrizePicks")
+                except Exception:
+                    pass
+                try:
+                    _health = get_health_tracker()
+                    if _health is not None:
+                        _health.record_provider_fetch("PrizePicks")
+                except Exception:
+                    pass
                 _cache_propline_evidence(props)
                 for prop in props:
                     _propline_pending_props[_propline_prop_key(prop)] = prop
@@ -1329,21 +1370,25 @@ async def propline_request_scan_job(context) -> None:
                     len(props),
                     len(_propline_pending_props),
                 )
-                logger.info(
-                    "propline_request_scan: persisted=%d provider=PrizePicks",
-                    persisted,
-                )
-            else:
+            except Exception as exc:
+                failed_sports.append(sport)
                 logger.warning(
-                    "propline_request_scan: sport=%s provider returned no accepted snapshot",
+                    "propline_request_scan: sport=%s failed: %s",
                     sport,
+                    type(exc).__name__,
                 )
-        except Exception as exc:
-            logger.warning(
-                "propline_request_scan: sport=%s failed: %s",
-                sport,
-                type(exc).__name__,
+            _propline_request_cursor = (sport_index + 1) % len(sports)
+
+        _propline_request_cursor = (last_attempted_index + 1) % len(sports)
+        if failed_sports:
+            logger.error(
+                "propline_request_scan: incomplete feed persisted_sports=%s "
+                "failed_sports=%s; pending evaluation withheld",
+                ",".join(persisted_sports) or "none",
+                ",".join(failed_sports),
             )
+            _propline_pending_props.clear()
+        return not failed_sports
 
 
 async def prizepicks_job(context) -> None:
@@ -1355,9 +1400,14 @@ async def prizepicks_job(context) -> None:
     """
     global _propline_pending_props
 
-    await propline_request_scan_job(context)
+    ingestion_complete = await propline_request_scan_job(context)
     pending_props = list(_propline_pending_props.values())
     _propline_pending_props.clear()
+    if not ingestion_complete:
+        logger.warning(
+            "prizepicks_job: complete-feed barrier failed; evaluation withheld"
+        )
+        return
     await _run_prizepicks_independent_cycle(
         context,
         _fetched_props=pending_props,

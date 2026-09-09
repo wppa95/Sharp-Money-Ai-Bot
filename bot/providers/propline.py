@@ -4440,7 +4440,11 @@ class PropLineClient:
                 if (prop := normalize_propline_prizepicks_record(record, fetched_at=fetched_at))
                 is not None
             ]
-            snapshot_complete = complete and bool(props)
+            # An empty, fully paginated response is a valid complete snapshot.
+            # A non-empty response with zero accepted props is different: it
+            # indicates a normalization/schema mismatch and must not replace
+            # the last known complete feed.
+            snapshot_complete = complete and (not raw_records or bool(props))
             logger.info(
                 "PropLine PrizePicks snapshot: sport=%s raw_records=%d "
                 "normalized_props=%d complete=%s",

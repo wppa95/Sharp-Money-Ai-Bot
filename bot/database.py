@@ -811,6 +811,42 @@ class PropLineHistory(Base):
     )
 
 
+class PropLineObservation(Base):
+    """Immutable normalized observations from a provider feed snapshot.
+
+    ``PropLineHistory`` is intentionally a current-state/lifecycle view.  This
+    table is the append-only observation ledger used to prove what the feed
+    actually returned at each fetch without making an unresolved live quote
+    look like a settled player result.
+    """
+
+    __tablename__ = "prop_line_observations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    snapshot_id = Column(String(96), nullable=False, index=True)
+    observation_key = Column(String(64), nullable=False, index=True)
+    provider = Column(String(64), nullable=False, index=True)
+    sport = Column(String(32), nullable=False, index=True)
+    player_name = Column(String(128), nullable=False)
+    team = Column(String(64), nullable=False, default="")
+    stat_type = Column(String(64), nullable=False)
+    line_value = Column(Float, nullable=False)
+    game_time = Column(DateTime, nullable=True)
+    provider_status = Column(String(32), nullable=True)
+    external_id = Column(String(128), nullable=False, default="")
+    game_id = Column(String(128), nullable=False, default="")
+    line_variant = Column(String(32), nullable=False, default="")
+    fetched_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    __table_args__ = (
+        Index(
+            "ix_prop_line_observations_provider_fetched_at",
+            "provider",
+            "fetched_at",
+        ),
+    )
+
+
 class AlertCLVSeed(Base):
     """
     CLV seed record — captures alert odds at fire time for later CLV computation.
@@ -3479,6 +3515,124 @@ class Database:
         async with self.session() as s:
             s.add_all(records)
             await s.commit()
+
+    async def save_prop_line_observations_batch(
+        self,
+        provider: str,
+        props: "list[object]",
+        *,
+        snapshot_id: Optional[str] = None,
+    ) -> int:
+        """Append one normalized provider snapshot without mutating history."""
+        if not props:
+            return 0
+
+        snapshot = str(snapshot_id or "").strip() or datetime.utcnow().strftime(
+            "%Y%m%dT%H%M%S.%fZ"
+        )
+        rows: list[PropLineObservation] = []
+        seen: set[tuple] = set()
+        for prop in props:
+            player = str(getattr(prop, "player_name", "") or "").strip()
+            sport = str(getattr(prop, "sport", "") or "").upper().strip()
+            stat = str(getattr(prop, "stat_type", "") or "").strip()
+            if not player or not sport or not stat:
+                continue
+            try:
+                line = float(getattr(prop, "line_value", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if line < 0:
+                continue
+            external_id = str(getattr(prop, "external_id", "") or "").strip()
+            game_id = str(
+                getattr(prop, "event_id", "")
+                or getattr(prop, "game_id", "")
+                or ""
+            ).strip()
+            line_variant = str(
+                getattr(prop, "line_variant", "") or ""
+            ).strip().lower()
+            identity = (
+                str(provider or "").strip(),
+                player,
+                sport,
+                stat,
+                external_id,
+                game_id,
+                line_variant,
+                line,
+            )
+            if identity in seen:
+                continue
+            seen.add(identity)
+            observation_key = hashlib.sha256(
+                "\x1f".join(str(value) for value in identity).encode("utf-8")
+            ).hexdigest()
+            fetched_at = getattr(prop, "fetched_at", None)
+            if not isinstance(fetched_at, datetime):
+                fetched_at = datetime.utcnow()
+            rows.append(
+                PropLineObservation(
+                    snapshot_id=snapshot,
+                    observation_key=observation_key,
+                    provider=str(provider or "").strip() or "Unknown",
+                    sport=sport,
+                    player_name=player,
+                    team=str(getattr(prop, "team", "") or ""),
+                    stat_type=stat,
+                    line_value=line,
+                    game_time=getattr(prop, "game_time", None),
+                    provider_status=(
+                        getattr(prop, "provider_status", None)
+                        or getattr(prop, "game_status", None)
+                        or None
+                    ),
+                    external_id=external_id,
+                    game_id=game_id,
+                    line_variant=line_variant,
+                    fetched_at=fetched_at,
+                )
+            )
+        if not rows:
+            return 0
+        async with self.session() as s:
+            s.add_all(rows)
+            await s.commit()
+        return len(rows)
+
+    async def get_prop_line_observations(
+        self,
+        provider: str,
+        *,
+        since: Optional[datetime] = None,
+        limit: int = 500,
+    ) -> "list[PropLineObservation]":
+        """Return immutable normalized observations newest first."""
+        filters = [PropLineObservation.provider == provider]
+        if since is not None:
+            filters.append(PropLineObservation.fetched_at >= since)
+        async with self.session() as s:
+            result = await s.execute(
+                select(PropLineObservation)
+                .where(*filters)
+                .order_by(
+                    PropLineObservation.fetched_at.desc(),
+                    PropLineObservation.id.desc(),
+                )
+                .limit(max(1, int(limit)))
+            )
+            return list(result.scalars().all())
+
+    async def count_prop_line_observations(
+        self, provider: Optional[str] = None
+    ) -> int:
+        async with self.session() as s:
+            query = select(func.count(PropLineObservation.id))
+            if provider:
+                query = query.where(PropLineObservation.provider == provider)
+            result = await s.execute(query)
+            return int(result.scalar_one() or 0)
 
     async def upsert_prop_line_history_batch(
         self,

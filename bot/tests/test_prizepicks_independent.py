@@ -15,7 +15,7 @@ from alerts_multiplatform import (
     format_underdog_change_alert,
 )
 from commands import PropPickAdapter
-from database import Database, PropOpportunityLog
+from database import Database, PropLineObservation, PropOpportunityLog
 import market_engine
 from engine.player_results import compute_hit_rates
 from providers.propline import PropLineFetchResult
@@ -122,6 +122,131 @@ class TestIndependentPrizePicks:
         assert len(db.tracked) == 1
         assert db.tracked[0]["external_id"] == "fetched-prop"
 
+    async def test_request_worker_ingests_every_active_sport(self, monkeypatch):
+        calls = []
+
+        def prop_for(sport):
+            return SimpleNamespace(
+                player_name=f"{sport} Player",
+                team="TM",
+                sport=sport,
+                stat_type="Points",
+                line_value=20.5,
+                game_time=None,
+                external_id=f"{sport}-prop",
+                event_id=f"{sport}-event",
+                fetched_at=datetime.utcnow(),
+            )
+
+        class FakeProvider:
+            client = None
+
+            def is_available(self):
+                return True
+
+            async def fetch_props_for_sport_result(self, sport, bookmaker=None):
+                calls.append((sport, bookmaker))
+                return PropLineFetchResult(
+                    [prop_for(sport)],
+                    datetime.utcnow(),
+                    succeeded=True,
+                    complete=True,
+                )
+
+        class FakeDB:
+            def __init__(self):
+                self.saved = []
+
+            async def upsert_prop_line_history_batch(self, provider, props, **kwargs):
+                self.saved.extend(props)
+
+            async def track_prop_records(self, records):
+                return len(records)
+
+        db = FakeDB()
+        monkeypatch.setattr(market_engine, "_propline_provider", FakeProvider())
+        monkeypatch.setattr(market_engine, "_propline_request_cursor", 0)
+        monkeypatch.setattr(market_engine, "_propline_empty_sport_until", {})
+        monkeypatch.setattr(
+            market_engine,
+            "_get_prizepicks_scan_sports",
+            AsyncMock(return_value=("NBA", "MLB", "NHL")),
+        )
+
+        complete = await market_engine.propline_request_scan_job(
+            SimpleNamespace(bot_data={"db": db})
+        )
+
+        assert complete is True
+        assert calls == [
+            ("NBA", "prizepicks"),
+            ("MLB", "prizepicks"),
+            ("NHL", "prizepicks"),
+        ]
+        assert {prop.sport for prop in db.saved} == {"NBA", "MLB", "NHL"}
+
+    async def test_incomplete_sport_persists_successes_but_withholds_pending_feed(
+        self, monkeypatch
+    ):
+        successful_prop = SimpleNamespace(
+            player_name="Complete Player",
+            team="TM",
+            sport="NBA",
+            stat_type="Points",
+            line_value=20.5,
+            game_time=None,
+            external_id="complete-prop",
+            event_id="complete-event",
+            fetched_at=datetime.utcnow(),
+        )
+
+        class FakeProvider:
+            client = None
+
+            def is_available(self):
+                return True
+
+            async def fetch_props_for_sport_result(self, sport, bookmaker=None):
+                if sport == "MLB":
+                    return PropLineFetchResult(
+                        [],
+                        datetime.utcnow(),
+                        succeeded=False,
+                        complete=False,
+                        error="incomplete page",
+                        failure_kind="incomplete",
+                    )
+                return PropLineFetchResult(
+                    [successful_prop],
+                    datetime.utcnow(),
+                    succeeded=True,
+                    complete=True,
+                )
+
+        class FakeDB:
+            async def upsert_prop_line_history_batch(self, provider, props, **kwargs):
+                return len(props)
+
+            async def track_prop_records(self, records):
+                return len(records)
+
+        monkeypatch.setattr(market_engine, "_propline_provider", FakeProvider())
+        monkeypatch.setattr(market_engine, "_propline_request_cursor", 0)
+        monkeypatch.setattr(market_engine, "_propline_empty_sport_until", {})
+        monkeypatch.setattr(
+            market_engine,
+            "_get_prizepicks_scan_sports",
+            AsyncMock(return_value=("NBA", "MLB")),
+        )
+        market_engine._propline_pending_props.clear()
+
+        complete = await market_engine.propline_request_scan_job(
+            SimpleNamespace(bot_data={"db": FakeDB()})
+        )
+
+        assert complete is False
+        assert market_engine._propline_pending_props == {}
+
     def test_available_lines_show_verified_prizepicks_or_explicit_unavailable(self):
         available = _format_available_lines_block(15.5, pp_line=14.5)
         unavailable = _format_available_lines_block(15.5)
@@ -130,6 +255,35 @@ class TestIndependentPrizePicks:
         assert "🎯 Player Prop:  <code>15.5</code>" in available
         assert "🎯 Player Prop:  <i>Unavailable for this prop</i>" in unavailable
         assert "🎯 Player Prop:  <code>15.5</code>" in unavailable
+
+    async def test_observation_ledger_is_append_only_and_batch_deduplicated(self, db):
+        first = SimpleNamespace(
+            player_name="Ledger Player",
+            team="TM",
+            sport="NBA",
+            stat_type="Points",
+            line_value=20.5,
+            game_time=None,
+            external_id="ledger-prop",
+            event_id="ledger-event",
+            line_variant="standard",
+            fetched_at=datetime.utcnow(),
+        )
+        second_values = vars(first).copy()
+        second_values["line_value"] = 21.5
+        second = SimpleNamespace(**second_values)
+
+        assert await db.save_prop_line_observations_batch(
+            "PrizePicks", [first, first]
+        ) == 1
+        assert await db.save_prop_line_observations_batch(
+            "PrizePicks", [second]
+        ) == 1
+
+        rows = await db.get_prop_line_observations("PrizePicks")
+        assert len(rows) == 2
+        assert {row.line_value for row in rows} == {20.5, 21.5}
+        assert all(isinstance(row, PropLineObservation) for row in rows)
 
     def test_provider_alerts_do_not_mix_prizepicks_and_underdog_lines(self):
         underdog_message = format_underdog_change_alert(
