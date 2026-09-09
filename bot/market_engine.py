@@ -2188,13 +2188,26 @@ async def _fetch_and_compute_hit_rates(
                     time.monotonic() - _provider_started,
                 )
                 cycle_timing.count("provider_enrichment_props")
-            for r in raw_results:
+            _bulk_writer = getattr(db, "upsert_player_results_bulk", None)
+            if callable(_bulk_writer):
                 if cycle_timing is not None:
                     await cycle_timing.await_db(
-                        "write", "upsert_player_result", db.upsert_player_result(r)
+                        "write",
+                        "upsert_player_results_bulk",
+                        _bulk_writer(raw_results),
                     )
                 else:
-                    await db.upsert_player_result(r)
+                    await _bulk_writer(raw_results)
+            else:
+                # Legacy test doubles/adapters may only expose the original
+                # single-row method; production Database uses the bulk writer.
+                for r in raw_results:
+                    if cycle_timing is not None:
+                        await cycle_timing.await_db(
+                            "write", "upsert_player_result", db.upsert_player_result(r)
+                        )
+                    else:
+                        await db.upsert_player_result(r)
             _player_result_fetch_cache.add(cache_key)
             if raw_results:
                 logger.debug(
@@ -2222,7 +2235,8 @@ async def _fetch_and_compute_hit_rates(
         primary_result_count = len(db_results)
         supplemental_count = 0
         if (
-            (preloaded_results is None or not preloaded_results)
+            allow_remote
+            and (preloaded_results is None or not preloaded_results)
             and supplemental_results is None
             and _supports_history_enrichment(db)
             and len(db_results) < config.UD_VALIDATION_MIN_SAMPLES
@@ -4131,6 +4145,12 @@ async def underdog_job(context) -> None:
         nonlocal _cycle_budget_exhausted
         if not inspect.isawaitable(awaitable):
             return awaitable
+        if _cycle_budget_exhausted:
+            if isinstance(awaitable, asyncio.Future):
+                awaitable.cancel()
+            elif inspect.iscoroutine(awaitable):
+                awaitable.close()
+            return None
         remaining = _cycle_deadline - time.monotonic()
         if remaining <= 0:
             _cycle_budget_exhausted = True
@@ -4533,6 +4553,40 @@ async def underdog_job(context) -> None:
                 fetched_at=now,
             )
         )
+
+    # Live scans consume the evidence already collected by the independent
+    # history job. Load it once for the complete feed rather than opening a
+    # database read (and potentially a provider lookup) for every prop.
+    _player_results_by_prop: Optional[dict[tuple[str, str, str], list]] = None
+    if isinstance(db, Database):
+        _bulk_results_reader = getattr(db, "get_player_results_bulk", None)
+        if callable(_bulk_results_reader):
+            _bulk_result_keys = list(dict.fromkeys(
+                (
+                    record.player_name,
+                    record.sport,
+                    record.stat_type.lower().strip(),
+                )
+                for record in _snapshot_records
+                if record.player_name
+                and record.sport
+                and record.stat_type
+                and not record.removed
+                and not _is_futures_stat(record.stat_type)
+            ))
+            try:
+                _player_results_by_prop = await _cycle_timing.await_db(
+                    "read",
+                    "get_player_results_bulk",
+                    _bulk_results_reader(_bulk_result_keys, limit=30),
+                )
+            except Exception as _bulk_results_exc:
+                _player_results_by_prop = {}
+                logger.error(
+                    "underdog_job: bulk evidence read failed; "
+                    "live scan will not issue per-prop fallback lookups: %s",
+                    _bulk_results_exc,
+                )
     if is_cold_start:
         for record in _snapshot_records:
             _cold_start_records.append(record)
@@ -4880,8 +4934,17 @@ async def underdog_job(context) -> None:
                         operation="get_ud_prop_history",
                     )
                 )
-                _cached_player_results = _candidate_player_results(
-                    db, player, snap.sport or "UNKNOWN", stat_type
+                _result_key = (
+                    player,
+                    (snap.sport or "UNKNOWN").upper(),
+                    stat_type.lower().strip(),
+                )
+                _cached_player_results = (
+                    _player_results_by_prop.get(_result_key, [])
+                    if _player_results_by_prop is not None
+                    else _candidate_player_results(
+                        db, player, snap.sport or "UNKNOWN", stat_type
+                    )
                 )
                 score = _cycle_timing.sync_operation("core_scoring", "score_ud_prop", score_ud_prop,
                     player_name  = player,
@@ -4956,7 +5019,7 @@ async def underdog_job(context) -> None:
                 hit_rates = await _await_cycle_budget(
                     _fetch_and_compute_hit_rates(
                         db, player, snap.sport or "UNKNOWN", stat_type, line_val,
-                        allow_remote=_cached_player_results is None,
+                        allow_remote=False,
                         cycle_timing=_cycle_timing,
                         preloaded_results=_cached_player_results,
                         opponent=getattr(snap, "opponent", None),
@@ -5263,7 +5326,7 @@ async def underdog_job(context) -> None:
                         hit_rates = await _await_cycle_budget(
                             _fetch_and_compute_hit_rates(
                                 db, player, snap.sport or "UNKNOWN", stat_type, snap.line or 0.0,
-                                allow_remote=_cached_player_results is None,
+                                allow_remote=False,
                                 cycle_timing=_cycle_timing,
                                 preloaded_results=_cached_player_results,
                                 opponent=getattr(snap, "opponent", None),
@@ -5886,8 +5949,11 @@ async def underdog_job(context) -> None:
                     cycle_timing=_cycle_timing,
                     operation="get_ud_prop_history",
                 )
-                _cached_player_results = _candidate_player_results(
-                    db, _sp, _ssport, _st
+                _result_key = (_sp, _ssport.upper(), _st.lower().strip())
+                _cached_player_results = (
+                    _player_results_by_prop.get(_result_key, [])
+                    if _player_results_by_prop is not None
+                    else _candidate_player_results(db, _sp, _ssport, _st)
                 )
                 _shistory_snap = None
                 try:
@@ -5939,7 +6005,7 @@ async def underdog_job(context) -> None:
                 _shits = await _await_cycle_budget(
                     _fetch_and_compute_hit_rates(
                         db, _sp, _ssport, _st, _line_val,
-                        allow_remote=_cached_player_results is None,
+                        allow_remote=False,
                         cycle_timing=_cycle_timing,
                         source_provider="Underdog",
                         preloaded_results=_cached_player_results,
@@ -7271,8 +7337,11 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 _sr_player,
                 _sr_stat,
             )
-            _sr_cached_results = _candidate_player_results(
-                db, _sr_player, _sr_sport, _sr_stat
+            _sr_result_key = (_sr_player, _sr_sport.upper(), _sr_stat.lower().strip())
+            _sr_cached_results = (
+                _player_results_by_prop.get(_sr_result_key, [])
+                if _player_results_by_prop is not None
+                else _candidate_player_results(db, _sr_player, _sr_sport, _sr_stat)
             )
             _sr_history_snap = None
             try:
@@ -7318,7 +7387,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
 
             _sr_hits = await _fetch_and_compute_hit_rates(
                 db, _sr_player, _sr_sport, _sr_stat, _sr_line,
-                allow_remote=_sr_cached_results is None,
+                allow_remote=False,
                 source_provider="Underdog",
                 preloaded_results=_sr_cached_results,
                 opponent=getattr(_sr_snap, "opponent", None),

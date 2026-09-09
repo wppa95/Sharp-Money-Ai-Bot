@@ -403,14 +403,25 @@ class PlayerHistoryProvider:
                     __import__("time").monotonic() - _provider_started,
                 )
                 instrumentation.count("provider_enrichment_props")
-            for r in raw:
+            _bulk_writer = getattr(db, "upsert_player_results_bulk", None)
+            if callable(_bulk_writer):
                 if instrumentation is not None:
                     await instrumentation.await_db(
-                        "write", "upsert_player_result_for_history",
-                        db.upsert_player_result(r),
+                        "write",
+                        "upsert_player_results_bulk_for_history",
+                        _bulk_writer(raw),
                     )
                 else:
-                    await db.upsert_player_result(r)
+                    await _bulk_writer(raw)
+            else:
+                for r in raw:
+                    if instrumentation is not None:
+                        await instrumentation.await_db(
+                            "write", "upsert_player_result_for_history",
+                            db.upsert_player_result(r),
+                        )
+                    else:
+                        await db.upsert_player_result(r)
 
             # Underdog remains authoritative for the live line and market
             # identity.  PropLine is consulted only when the existing player
@@ -478,24 +489,28 @@ class PlayerHistoryProvider:
         event_stats_merged = _merge_game_results(existing, event_stats)
         new_event_stats = event_stats_merged[len(existing):]
         if new_event_stats:
-            for row in new_event_stats:
-                try:
+            try:
+                _bulk_writer = getattr(db, "upsert_player_results_bulk", None)
+                if callable(_bulk_writer):
                     if instrumentation is not None:
                         await instrumentation.await_db(
                             "write",
-                            "upsert_propline_event_stat_history",
-                            db.upsert_player_result(row),
+                            "upsert_player_results_bulk_propline",
+                            _bulk_writer(new_event_stats),
                         )
                     else:
+                        await _bulk_writer(new_event_stats)
+                else:
+                    for row in new_event_stats:
                         await db.upsert_player_result(row)
-                except Exception as exc:
-                    logger.warning(
-                        "PlayerHistoryProvider: PropLine history write failed "
-                        "%s / %s: %s",
-                        player_name,
-                        stat_type,
-                        exc,
-                    )
+            except Exception as exc:
+                logger.warning(
+                    "PlayerHistoryProvider: PropLine history write failed "
+                    "%s / %s: %s",
+                    player_name,
+                    stat_type,
+                    exc,
+                )
 
         # Raw game logs are also book-agnostic and may cover older games than
         # the score window.  Use them only to fill the remaining gap.
