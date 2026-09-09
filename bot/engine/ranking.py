@@ -46,6 +46,7 @@ from .confidence import (
     SupportingFactor,
     compute_confidence,
 )
+from .adaptive_learning import adaptive_score_adjustment
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
