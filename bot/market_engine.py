@@ -4097,17 +4097,56 @@ async def underdog_job(context) -> None:
 
     async def _await_cycle_budget(awaitable, operation: str):
         """Bound one enrichment call without abandoning later observations."""
+        nonlocal _cycle_budget_exhausted
         if not inspect.isawaitable(awaitable):
             return awaitable
-        try:
-            return await asyncio.wait_for(awaitable, timeout=30.0)
-        except asyncio.TimeoutError:
-            logger.error(
-                "underdog_cycle_bottleneck: timed out during %s; "
+        remaining = _cycle_deadline - time.monotonic()
+        if remaining <= 0:
+            _cycle_budget_exhausted = True
+            if isinstance(awaitable, asyncio.Future):
+                awaitable.cancel()
+            elif inspect.iscoroutine(awaitable):
+                awaitable.close()
+            logger.warning(
+                "underdog_cycle_bottleneck: cycle budget exhausted before %s; "
                 "continuing remaining observations",
                 operation,
             )
             return None
+        task = asyncio.ensure_future(awaitable)
+
+        def _consume_timed_out(task: asyncio.Future) -> None:
+            if task.cancelled():
+                return
+            try:
+                task.exception()
+            except Exception:
+                pass
+
+        try:
+            done, _pending = await asyncio.wait(
+                {task},
+                timeout=min(30.0, max(0.1, remaining)),
+            )
+        except asyncio.CancelledError:
+            task.cancel()
+            task.add_done_callback(_consume_timed_out)
+            raise
+        if task in done:
+            return task.result()
+        task.cancel()
+        task.add_done_callback(_consume_timed_out)
+        # One enrichment timeout is enough to declare this cycle's optional
+        # evidence budget exhausted. The complete feed is already persisted;
+        # continuing to launch one remote lookup per remaining prop would
+        # recreate the scheduler/funnel stall this guard is meant to prevent.
+        _cycle_budget_exhausted = True
+        logger.error(
+            "underdog_cycle_bottleneck: timed out during %s; "
+            "continuing remaining observations",
+            operation,
+        )
+        return None
 
     _cycle_timing.start("state_restore")
     logger.info(
@@ -4712,6 +4751,26 @@ async def underdog_job(context) -> None:
 
             # Extract stat-type before any counters so futures are correctly separated.
             stat_type = _extract_ud_stat_type(snap.selection, snap.player, snap.line)
+
+            # The complete feed has already been persisted above. Once the
+            # scoring deadline is reached, stop doing per-prop enrichment so a
+            # large feed cannot keep the monitoring cycle open indefinitely.
+            if time.monotonic() >= _cycle_deadline:
+                _cycle_budget_exhausted = True
+                if not is_removed and _is_futures_stat(stat_type):
+                    _sp_fut = snap.sport or "UNKNOWN"
+                    _sport_futures[_sp_fut] = _sport_futures.get(_sp_fut, 0) + 1
+                elif is_removed:
+                    _n_removed += 1
+                    _removed_sport = (snap.sport or "UNKNOWN").upper()
+                    _sport_removed[_removed_sport] = (
+                        _sport_removed.get(_removed_sport, 0) + 1
+                    )
+                else:
+                    _sp_raw = snap.sport or "UNKNOWN"
+                    _sport_raw[_sp_raw] = _sport_raw.get(_sp_raw, 0) + 1
+                _n_observation_only += 1
+                continue
 
             # Separate season-long futures / award markets from daily props.
             # Count them in _sport_futures so diagnostics show the split clearly.
