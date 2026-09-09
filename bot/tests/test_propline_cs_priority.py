@@ -141,11 +141,11 @@ def test_telegram_delivery_requires_strong_over_in_every_window():
         **{
             **{
                 f"{window}_games": 10
-                for window in ("l5", "l10", "l20", "l30", "season")
+                for window in ("l5", "l10", "l15", "l20", "l30", "season")
             },
             **{
                 f"{window}_over": 7
-                for window in ("l5", "l10", "l20", "l30", "season")
+                for window in ("l5", "l10", "l15", "l20", "l30", "season")
             },
         },
     )
@@ -167,12 +167,12 @@ def test_telegram_delivery_requires_strong_under_in_every_window():
         **{
             **{
                 f"{window}_games": 10
-                for window in ("l5", "l10", "l20", "l30", "season")
+                for window in ("l5", "l10", "l15", "l20", "l30", "season")
             },
             **{
-                # 4/10 OVER = 40%, so the complementary UNDER count is 6/10.
-                f"{window}_under": 6
-                for window in ("l5", "l10", "l20", "l30", "season")
+                # 3/10 OVER = 30%, so the complementary UNDER count is 7/10.
+                f"{window}_under": 7
+                for window in ("l5", "l10", "l15", "l20", "l30", "season")
             },
         },
     )
@@ -195,6 +195,8 @@ def test_telegram_delivery_rejects_direction_without_strong_window():
         l5_over=5,
         l10_games=10,
         l10_over=5,
+        l15_games=10,
+        l15_over=5,
         l20_games=10,
         l20_over=5,
         l30_games=10,

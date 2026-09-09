@@ -534,28 +534,23 @@ def _has_strong_directional_history(
     if sample_count < 5:
         return False
 
-    # Use the direction-specific counts rather than the generic OVER rate.
-    # This prevents a strong UNDER label from being attached to a merely
-    # average OVER-rate window.
-    prefixes = (
-        ("l5", "l10", "l15", "l30", "season")
-        if recommendation == "OVER"
-        else ("l5", "l10", "l20", "l30", "season")
-    )
+    # Every displayed primary window must agree.  Do not let one favorable
+    # window produce a STRONG BET label while L15/L20 or Season contradicts
+    # the direction.
+    prefixes = ("l5", "l10", "l15", "l20", "l30", "season")
+    directional_field = "over" if recommendation == "OVER" else "under"
+    threshold = 0.70
     for prefix in prefixes:
         games = _numeric_attr(decision, f"{prefix}_games")
         directional_count = _numeric_attr(
             decision,
-            f"{prefix}_{'over' if recommendation == 'OVER' else 'under'}",
+            f"{prefix}_{directional_field}",
         )
         if games is None or games < 5 or directional_count is None:
-            continue
-        # Strong OVER requires ≥70% OVER hits. Strong UNDER means the
-        # corresponding OVER rate is ≤40%, i.e. ≥60% UNDER hits.
-        threshold = 0.70 if recommendation == "OVER" else 0.60
-        if directional_count / games >= threshold:
-            return True
-    return False
+            return False
+        if directional_count / games < threshold:
+            return False
+    return True
 
 
 def _display_label(value: object) -> str:

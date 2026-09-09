@@ -30,7 +30,7 @@ Before any immediate individual Telegram alert fires for an Underdog prop, the p
   from completed player-game results when the current prop has a safely
   identified opponent.
 - `l5/l10/l20/l30` are line-move rates (fraction of records where `line_moved=True`), **not** actual hit rates against prop lines. They are market-proxy signals only.
-- Alert history uses completed-result hit-rate windows separately; H2H L5/L10/L20 require a safely identified opponent and enough matching games. "STRONG BET" is directional: OVER ≥70% OVER hits, UNDER ≥60% UNDER hits.
+- Alert history uses completed-result hit-rate windows separately; H2H L5/L10/L20 require a safely identified opponent and enough matching games. A Telegram "STRONG BET" label requires every primary window (L5/L10/L15/L20/L30/Season) to align: OVER ≥70% OVER hits or UNDER ≤30% OVER hits.
 
 ## Files
 

@@ -524,13 +524,17 @@ def test_strong_bet_uses_directional_hit_and_miss_thresholds():
     )
     over = types.SimpleNamespace(
         recommendation="OVER",
-        l5_games=10,
-        l5_over=7,
+        **{
+            **{f"{window}_games": 10 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
+            **{f"{window}_over": 7 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
+        },
     )
     under = types.SimpleNamespace(
         recommendation="UNDER",
-        l5_games=10,
-        l5_under=6,
+        **{
+            **{f"{window}_games": 10 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
+            **{f"{window}_under": 7 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
+        },
     )
 
     assert _has_strong_directional_history(validation, over) is True
@@ -549,23 +553,33 @@ def test_strong_bet_thresholds_are_inclusive_and_directional():
 
     over_at_boundary = types.SimpleNamespace(
         recommendation="OVER",
-        l5_games=10,
-        l5_over=7,
+        **{
+            **{f"{window}_games": 10 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
+            **{f"{window}_over": 7 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
+        },
     )
     over_below_boundary = types.SimpleNamespace(
         recommendation="OVER",
-        l5_games=10,
-        l5_over=6,
+        **{
+            **{f"{window}_games": 10 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
+            **{f"{window}_over": 7 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
+            "l20_over": 6,
+        },
     )
     under_at_boundary = types.SimpleNamespace(
         recommendation="UNDER",
-        l5_games=10,
-        l5_under=6,
+        **{
+            **{f"{window}_games": 10 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
+            **{f"{window}_under": 7 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
+        },
     )
     under_above_allowed_over_rate = types.SimpleNamespace(
         recommendation="UNDER",
-        l5_games=10,
-        l5_under=5,
+        **{
+            **{f"{window}_games": 10 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
+            **{f"{window}_under": 7 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
+            "l15_under": 6,
+        },
     )
 
     assert _has_strong_directional_history(validation, over_at_boundary) is True
