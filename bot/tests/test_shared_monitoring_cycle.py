@@ -164,7 +164,7 @@ def test_status_reports_shared_cycle_not_provider_subsections():
 
 
 @pytest.mark.asyncio
-async def test_production_database_writes_are_deferred_and_shutdown_drains():
+async def test_production_database_writes_are_awaited_before_scan_completion():
     calls = []
     database = market_engine.Database.__new__(market_engine.Database)
 
@@ -178,7 +178,7 @@ async def test_production_database_writes_are_deferred_and_shutdown_drains():
         lambda: database.write(),
     )
 
-    assert calls == []
+    assert calls == ["written"]
     await market_engine.shutdown_db_persistence_worker()
     assert calls == ["written"]
     assert market_engine._db_persistence_worker_task is None
