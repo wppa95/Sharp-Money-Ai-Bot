@@ -286,11 +286,17 @@ async def player_history_collector_job(context) -> None:
                     stat = re.sub(r"\s+-?\d+(?:\.\d+)?\s*$", "", selection)
                     stat = stat or selection
                 sport = (getattr(s, "sport", None) or "UNKNOWN").upper()
+                row_source = source_for_row(s, active_key, "Underdog")
+                if (
+                    row_source != "PrizePicks"
+                    and is_football_related_sport(sport)
+                ):
+                    continue
                 key = (player.strip(), sport, (stat or "").lower().strip())
                 target_sources.setdefault(
                     key,
                     set(),
-                ).add(source_for_row(s, active_key, "Underdog"))
+                ).add(row_source)
                 if key[0] and key[2] and key not in seen:
                     seen.add(key)
                     targets.append(key)
@@ -334,16 +340,20 @@ async def player_history_collector_job(context) -> None:
                     )
                 for s in plh:
                     sport = (getattr(s, "sport", None) or "UNKNOWN").upper()
-                    if is_football_related_sport(sport):
+                    row_source = (
+                        "PrizePicks" if _provider == "PrizePicks" else "Underdog"
+                    )
+                    if (
+                        row_source != "PrizePicks"
+                        and is_football_related_sport(sport)
+                    ):
                         continue
                     key = (
                         (s.player_name or "").strip(),
                         sport,
                         (s.stat_type or "").lower().strip(),
                     )
-                    target_sources.setdefault(key, set()).add(
-                        "PrizePicks" if _provider == "PrizePicks" else "Underdog"
-                    )
+                    target_sources.setdefault(key, set()).add(row_source)
                     if key[0] and key[2] and key not in seen:
                         seen.add(key)
                         targets.append(key)
