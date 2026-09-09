@@ -4621,6 +4621,23 @@ async def cmd_analyst(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 )
             )
         ]
+        # Prefer the durable analyst payload linked to the opportunity row.
+        # The narrative below remains a compatibility presentation layer and
+        # is never treated as the source of the stored AI prediction.
+        stored_analyst: dict[tuple[str, str, str], object] = {}
+        get_alerted = getattr(_db, "get_alerted_opportunity_log", None)
+        if callable(get_alerted):
+            try:
+                for row in await _bounded(get_alerted(since_hours=72, limit=10)):
+                    stored_analyst[
+                        (
+                            str(getattr(row, "player_name", "")).lower(),
+                            str(getattr(row, "sport", "")).upper(),
+                            str(getattr(row, "stat_type", "")).lower(),
+                        )
+                    ] = row
+            except Exception as exc:
+                logger.debug("cmd_analyst: stored advisory lookup unavailable: %s", exc)
 
         if not alerted:
             await update.message.reply_text(
@@ -4697,6 +4714,39 @@ async def cmd_analyst(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             lines.append(
                 f"Direction: <b>{_html.escape(getattr(snap, 'bet_recommendation', ''))}</b>"
             )
+            ai_row = stored_analyst.get(
+                (
+                    str(getattr(snap, "player_name", "")).lower(),
+                    str(getattr(snap, "sport", "")).upper(),
+                    str(getattr(snap, "stat_type", "")).lower(),
+                )
+            )
+            if ai_row is not None:
+                try:
+                    import json
+                    ai_payload = json.loads(
+                        getattr(ai_row, "analyst_payload_json", None) or "{}"
+                    )
+                except (TypeError, ValueError):
+                    ai_payload = {}
+                ai_prediction = str(
+                    ai_payload.get("prediction")
+                    or getattr(ai_row, "analyst_prediction", None)
+                    or "UNAVAILABLE"
+                )
+                ai_grade = getattr(ai_row, "analyst_grade", None) or "PENDING"
+                ai_model = str(
+                    ai_payload.get("model_version")
+                    or getattr(ai_row, "analyst_model_version", None)
+                    or "unavailable"
+                )
+                lines.append(
+                    f"🧠 Stored AI: <b>{_html.escape(ai_prediction)}</b> · "
+                    f"grade <b>{_html.escape(str(ai_grade))}</b> · "
+                    f"model <code>{_html.escape(ai_model)}</code>"
+                )
+            else:
+                lines.append("🧠 Stored AI: <b>UNAVAILABLE</b>")
             lines.append("")
             lines.append(f"✅ {_html.escape(narrative.recommended_because[:200])}")
             lines.append(f"⚠️ {_html.escape(narrative.risk_because[:200])}")

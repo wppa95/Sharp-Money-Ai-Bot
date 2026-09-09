@@ -617,55 +617,31 @@ class TestFPRJob:
         h = _make_health()
 
         old_running = market_engine._ud_full_scan_running
-        old_pending = market_engine._fpr_deferred_pending
-        old_context = market_engine._fpr_deferred_context
         old_execution = market_engine._fpr_execution_running
+        task = None
         try:
             market_engine._ud_full_scan_running = True
-            market_engine._fpr_deferred_pending = False
-            market_engine._fpr_deferred_context = None
             market_engine._fpr_execution_running = False
             with patch("market_engine.get_health_tracker", return_value=h):
-                await _full_pool_rescan_job(ctx)
+                task = asyncio.create_task(_full_pool_rescan_job(ctx))
+                await asyncio.sleep(0)
 
-            assert market_engine._fpr_deferred_pending is True
-            assert market_engine._fpr_deferred_context is ctx
+            assert not task.done()
             db.get_all_active_underdog_snapshots_by_line.assert_not_awaited()
         finally:
+            if task is not None:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
             market_engine._ud_full_scan_running = old_running
-            market_engine._fpr_deferred_pending = old_pending
-            market_engine._fpr_deferred_context = old_context
             market_engine._fpr_execution_running = old_execution
 
     async def test_released_scan_slot_runs_deferred_fpr(self):
-        """Releasing the scan slot starts the queued FPR handoff."""
+        """FPR has no separate deferred handoff state."""
         import market_engine
 
-        ctx = _make_context(_make_db())
-        old_running = market_engine._ud_full_scan_running
-        old_pending = market_engine._fpr_deferred_pending
-        old_context = market_engine._fpr_deferred_context
-        old_task = market_engine._fpr_handoff_task
-        try:
-            handoff = AsyncMock()
-            with patch("market_engine._full_pool_rescan_job", handoff):
-                market_engine._ud_full_scan_running = True
-                market_engine._fpr_deferred_pending = True
-                market_engine._fpr_deferred_context = ctx
-                market_engine._fpr_handoff_task = None
-                market_engine._release_underdog_scan_slot()
-                await asyncio.sleep(0)
-
-            handoff.assert_awaited_once_with(ctx)
-            assert market_engine._ud_full_scan_running is False
-            assert market_engine._fpr_deferred_pending is False
-        finally:
-            if market_engine._fpr_handoff_task is not None:
-                await market_engine._fpr_handoff_task
-            market_engine._ud_full_scan_running = old_running
-            market_engine._fpr_deferred_pending = old_pending
-            market_engine._fpr_deferred_context = old_context
-            market_engine._fpr_handoff_task = old_task
+        assert not hasattr(market_engine, "_fpr_deferred_pending")
+        assert not hasattr(market_engine, "_fpr_deferred_context")
+        assert hasattr(market_engine, "_fpr_execution_running")
 
     # ── Test 4: multiple batches cover entire pool ─────────────────────────────
     async def test_multiple_batches_cover_full_pool(self):

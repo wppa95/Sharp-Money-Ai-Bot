@@ -73,7 +73,7 @@ def test_direct_compatibility_broadcasters_keep_canonical_safety_boundaries():
         pregame_watch.PregameWatchEngine.pregame_scan,
     ):
         source = inspect.getsource(fn)
-        assert "_canonical_tier_delivery_gate" in source
+        assert "_directional_evidence_gate" in source
         assert "_is_fresh_delivery_line" in source
         assert "is_game_alertable" in source
         assert "provider" in source

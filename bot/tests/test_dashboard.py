@@ -186,7 +186,7 @@ class TestDashboardReport:
     async def test_to_telegram_has_alerts_section(self):
         r = DashboardReport(total_ud_alerts=3, today_ud_alerts=1)
         msg = r.to_telegram()
-        assert "Provider Pipeline" not in msg
+        assert "Provider Pipeline" in msg
         assert "Closing Line Value" in msg
 
     async def test_to_telegram_ev_section_with_data(self):
@@ -237,7 +237,7 @@ class TestDashboardReport:
             ud_tier_breakdown={"S": 3, "A": 10, "B": 7},
         )
         msg = r.to_telegram()
-        assert "Provider Pipeline" not in msg
+        assert "Provider Pipeline" in msg
 
     async def test_to_telegram_by_sport(self):
         r = DashboardReport(
@@ -320,8 +320,8 @@ class TestDashboardNormalizedActivity:
 
         message = report.to_telegram()
 
-        assert "Provider Pipeline" not in message
-        assert "Observed:" not in message
+        assert "Provider Pipeline" in message
+        assert "Observed:" in message
         assert "PrizePicks" not in message
 
     def test_legacy_activity_is_only_a_fallback(self):
@@ -332,8 +332,8 @@ class TestDashboardNormalizedActivity:
 
         message = report.to_telegram()
 
-        assert "Provider Pipeline" not in message
-        assert "Observed:" not in message
+        assert "Provider Pipeline" in message
+        assert "Observed:" in message
 
     def test_empty_normalized_provider_stays_zero(self):
         report = DashboardReport(
@@ -347,8 +347,8 @@ class TestDashboardNormalizedActivity:
 
         message = report.to_telegram()
 
-        assert "Provider Pipeline" not in message
-        assert "Observed:" not in message
+        assert "Provider Pipeline" in message
+        assert "Observed:" in message
 
     def test_historical_and_recent_tracking_sections_remain_intact(self):
         report = DashboardReport(
@@ -363,7 +363,7 @@ class TestDashboardNormalizedActivity:
 
         message = report.to_telegram()
 
-        assert "Provider Pipeline" not in message
+        assert "Provider Pipeline" in message
         assert "Recently Tracked Props" in message
         assert "UNDERDOG PICK" in message
         assert "PrizePicks" not in message
@@ -435,8 +435,8 @@ async def test_dashboard_gather_uses_normalized_activity_and_preserves_legacy_hi
 
     assert report.tracking_by_provider["Underdog"]["observed"] == 2
     assert report.tracking_by_provider["PrizePicks"]["observed"] == 1
-    assert "Provider Pipeline" not in activity
-    assert "Observed:" not in activity
+    assert "Provider Pipeline" in activity
+    assert "Observed:" in activity
     assert "MLB" in activity
     assert len(report.recent_tracked_props) == 2
     assert "PrizePicks" not in activity

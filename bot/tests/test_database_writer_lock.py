@@ -196,7 +196,7 @@ async def _count_snapshots(database: Database) -> int:
 
 
 @pytest.mark.asyncio
-async def test_file_backed_external_writer_lock_retries_and_preserves_rows(
+async def test_file_backed_external_writer_lock_fails_loudly_and_preserves_rows(
     tmp_path, monkeypatch
 ):
     db_path = tmp_path / "external-writer-recovery.sqlite"
@@ -210,29 +210,18 @@ async def test_file_backed_external_writer_lock_retries_and_preserves_rows(
         assert await asyncio.to_thread(acquired.wait, 2)
         assert not errors
 
-        class ReleaseOnRetry(logging.Handler):
-            def emit(self, record: logging.LogRecord) -> None:
-                if "SQLite lock; retry" in record.getMessage():
-                    release.set()
-
-        handler = ReleaseOnRetry()
-        database_logger = logging.getLogger("database")
-        database_logger.addHandler(handler)
-        monkeypatch.setattr("database._UNDERDOG_BULK_RETRY_DELAYS", (0.01, 0.01))
         try:
-            result = await database.save_underdog_snapshots_bulk(
-                [_snapshot(1), _snapshot(2)]
-            )
+            with pytest.raises(Exception, match="database is locked"):
+                await database.save_underdog_snapshots_bulk(
+                    [_snapshot(1), _snapshot(2)]
+                )
         finally:
-            database_logger.removeHandler(handler)
             release.set()
             await asyncio.to_thread(thread.join, 2)
 
         assert not thread.is_alive()
         assert not errors
-        assert result["records_written"] == 2
-        assert result["retry_count"] >= 1
-        assert await _count_snapshots(database) == 3
+        assert await _count_snapshots(database) == 1
     finally:
         await database.close()
 

@@ -234,11 +234,12 @@ class TestStandingPathGatesIntact:
         )
 
     def test_score_tier_gate_still_in_standing_path(self):
-        """Standing path must use the canonical delivery gate, not tier labels."""
+        """Standing path must use the canonical directional evidence gate."""
         src = self._get_engine_source()
-        assert "tier_gate [standing]" in src, (
-            "Canonical delivery gate missing from standing path."
+        assert "UD standing_gate" in src, (
+            "Standing validation gate missing from standing path."
         )
+        assert "_sdec.recommendation" in src
 
     def test_24h_dedup_still_in_standing_path(self):
         """Standing path must still enforce 24h alert dedup."""

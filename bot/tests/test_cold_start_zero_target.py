@@ -25,9 +25,8 @@ def test_new_prop_branch_remains_before_cold_start_branch():
     assert new_branch < cold_branch
 
 
-def test_line_change_scoring_path_is_not_cold_start_gated():
-    line_change = ENGINE_SOURCE.index(
-        "if not is_removed and line_changed and prev_line is not None:"
-    )
-    cold_branch = ENGINE_SOURCE.index("and _COLD_START_RESCAN_TARGET > 0")
-    assert line_change < cold_branch
+def test_line_change_scoring_path_is_cold_start_gated():
+    """Cold-start scans must not score existing line changes when target is zero."""
+    line_change = ENGINE_SOURCE.index("and line_changed and prev_line is not None")
+    gate_window = ENGINE_SOURCE[line_change - 120:line_change + 120]
+    assert "not is_cold_start" in gate_window

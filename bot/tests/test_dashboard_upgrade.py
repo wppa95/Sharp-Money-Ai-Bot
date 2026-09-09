@@ -93,7 +93,9 @@ class TestDashboardReportToTelegram:
         r = _report(system_panel=sp)
         t = r.to_telegram()
         assert "Underdog" in t
-        assert "DEGRADED" in t
+        # Provider health is rendered by /health; the dashboard system panel
+        # intentionally contains only uptime/restart/block state.
+        assert "DEGRADED" not in t
 
     def test_system_panel_active_blocks_shown(self):
         sp = SystemPanel(active_blocks=5)

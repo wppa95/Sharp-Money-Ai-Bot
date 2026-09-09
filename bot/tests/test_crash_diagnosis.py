@@ -343,7 +343,7 @@ async def _send(ht, startup_reason: str) -> str:
 
 
 def test_crash_alert_shows_actual_cause_not_unexpected_exit(tmp_path):
-    """Crash detail block is shown; generic 'Unexpected Exit' label is suppressed."""
+    """Restart notification remains generic; details stay out of Telegram."""
     detail = {
         "exc_type": "ValueError", "exc_msg": "bad line value",
         "tb_text": "  File market_engine.py, line 99\n",
@@ -353,12 +353,12 @@ def test_crash_alert_shows_actual_cause_not_unexpected_exit(tmp_path):
     ht = _mock_ht("unexpected_exit", crash_detail=detail)
     msg = _run(_send(ht, "unexpected_exit"))
     assert "Unexpected Exit" not in msg
-    # V3.1: cause label removed; crash details block shown instead
-    assert "Crash Details" in msg
-    assert "ValueError" in msg
+    assert "Crash Details" not in msg
+    assert "ValueError" not in msg
 
 
 def test_crash_alert_shows_crash_details_block(tmp_path):
+    """Crash details are retained in health storage, not startup Telegram."""
     detail = {
         "exc_type": "RuntimeError", "exc_msg": "connection refused",
         "tb_text": "  File connectors/underdog.py, line 55\n",
@@ -367,9 +367,9 @@ def test_crash_alert_shows_crash_details_block(tmp_path):
     }
     ht = _mock_ht("unexpected_exit", crash_detail=detail)
     msg = _run(_send(ht, "unexpected_exit"))
-    assert "Crash Details" in msg
-    assert "RuntimeError" in msg
-    assert "connection refused" in msg
+    assert "Crash Details" not in msg
+    assert "RuntimeError" not in msg
+    assert "connection refused" not in msg
 
 
 def test_crash_alert_shows_active_module(tmp_path):
@@ -380,7 +380,7 @@ def test_crash_alert_shows_active_module(tmp_path):
     }
     ht = _mock_ht("crash_detected", crash_detail=detail)
     msg = _run(_send(ht, "crash_detected"))
-    assert "market_engine" in msg
+    assert "market_engine" not in msg
 
 
 def test_crash_alert_shows_active_function(tmp_path):
@@ -392,7 +392,7 @@ def test_crash_alert_shows_active_function(tmp_path):
     }
     ht = _mock_ht("crash_detected", crash_detail=detail)
     msg = _run(_send(ht, "crash_detected"))
-    assert "_compute_intel" in msg
+    assert "_compute_intel" not in msg
 
 
 def test_crash_alert_shows_recovery_status(tmp_path):
@@ -406,12 +406,12 @@ def test_crash_alert_shows_recovery_status(tmp_path):
 def test_crash_alert_shows_last_active_task(tmp_path):
     ht = _mock_ht("unexpected_exit")
     msg = _run(_send(ht, "unexpected_exit"))
-    assert "Last Active Task" in msg
-    assert "underdog" in msg.lower()
+    assert "Last Active Task" not in msg
+    assert "underdog" not in msg.lower()
 
 
 def test_crash_alert_db_lock_shows_database_lock_reason(tmp_path):
-    """DB lock crashes show exception type and message in the crash details block."""
+    """DB lock details remain stored and are not sent in startup Telegram."""
     detail = {
         "exc_type": "OperationalError", "exc_msg": "database is locked",
         "tb_text": "  File database.py, line 500\n",
@@ -420,10 +420,9 @@ def test_crash_alert_db_lock_shows_database_lock_reason(tmp_path):
     }
     ht = _mock_ht("crash_detected", crash_detail=detail)
     msg = _run(_send(ht, "crash_detected"))
-    # V3.1: cause label removed; exc_type/exc_msg shown in crash details block
-    assert "Crash Details" in msg
-    assert "OperationalError" in msg
-    assert "database is locked" in msg
+    assert "Crash Details" not in msg
+    assert "OperationalError" not in msg
+    assert "database is locked" not in msg
 
 
 def test_crash_alert_memory_kill_shows_appropriate_reason(tmp_path):
@@ -454,7 +453,7 @@ def test_normal_start_notification_unaffected(tmp_path):
 
 
 def test_crash_alert_html_safe(tmp_path):
-    """Exception message with HTML chars must be escaped."""
+    """Crash text is not included in the generic restart notification."""
     detail = {
         "exc_type": "ValueError",
         "exc_msg": "<script>alert('xss')</script>",
@@ -464,7 +463,7 @@ def test_crash_alert_html_safe(tmp_path):
     ht = _mock_ht("unexpected_exit", crash_detail=detail)
     msg = _run(_send(ht, "unexpected_exit"))
     assert "<script>" not in msg
-    assert "&lt;script&gt;" in msg or "script" in msg  # escaped or included safely
+    assert "script" not in msg
 
 
 def test_crash_alert_startup_number_included(tmp_path):

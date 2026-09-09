@@ -26,6 +26,7 @@ from engine.analysis import (
     PlayerPropLine,
     _SPORT_PLAYER_PROP_MARKETS,
     _SPORT_TO_ODDS_API_KEY,
+    SPORTSBOOK_PLAYER_PROP_COVERAGE,
 )
 from models import Sport
 from providers.usage_tracker import CallPriority, infer_call_priority
@@ -103,6 +104,14 @@ def test_nfl_player_props_are_in_default_map():
     """NFL sportsbook props are part of the active player-prop feed."""
     assert Sport.NFL in _SPORT_PLAYER_PROP_MARKETS
     assert "player_pass_yds" in _SPORT_PLAYER_PROP_MARKETS[Sport.NFL]
+
+
+def test_additional_sports_have_explicit_coverage_status():
+    for sport in ("MLB", "NBA", "WNBA", "NFL", "NHL"):
+        assert SPORTSBOOK_PLAYER_PROP_COVERAGE[sport]["status"] == "validated"
+    for sport in ("EPL", "LaLiga", "TENNIS"):
+        assert SPORTSBOOK_PLAYER_PROP_COVERAGE[sport]["status"] == "unverified"
+        assert not SPORTSBOOK_PLAYER_PROP_COVERAGE[sport]["markets"]
 
 
 def test_all_prop_sports_have_odds_api_key():

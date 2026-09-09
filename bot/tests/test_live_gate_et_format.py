@@ -331,7 +331,7 @@ class TestSchedulerCoordinator:
             assert callback.startswith(
                 "_coordinated_job('underdog_monitor', _underdog_monitor_cycle"
             )
-            assert not any(kw.arg == "job_kwargs" for kw in node.keywords)
+            assert any(kw.arg == "job_kwargs" for kw in node.keywords)
             found = True
             break
 

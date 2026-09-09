@@ -34,7 +34,11 @@ from database import Database, OddsRecord, get_sqlite_backpressure_metrics
 from engine import AnalysisEngine
 from engine.season_check import SeasonChecker
 from engine.analysis import _SPORT_TO_ODDS_API_KEY
-from engine.analysis import _SPORT_PLAYER_PROP_MARKETS, _ODDS_MARKET_TO_PROP_STAT
+from engine.analysis import (
+    _SPORT_PLAYER_PROP_MARKETS,
+    _ODDS_MARKET_TO_PROP_STAT,
+    SPORTSBOOK_PLAYER_PROP_COVERAGE,
+)
 from engine.player_props_pipeline import persist_canonical_player_props
 from alert_scope_filter import is_ev_line_in_scope
 from logging_utils import install_credential_redaction
@@ -1748,9 +1752,16 @@ async def _player_props_job(context) -> None:
         if sport_str.upper() not in {str(value).upper() for value in prop_sports}:
             continue
         if sport not in _SPORT_PLAYER_PROP_MARKETS:
+            coverage = SPORTSBOOK_PLAYER_PROP_COVERAGE.get(
+                str(getattr(sport, "value", sport)),
+                {"status": "unverified", "reason": "sport not mapped"},
+            )
             logger.debug(
-                "_player_props_job: no player-prop market mapping for %s; skipping",
+                "_player_props_job: sportsbook player-prop coverage %s for %s; "
+                "skipping (%s)",
+                coverage.get("status", "unverified"),
                 sport_str,
+                coverage.get("reason", "no validated market mapping"),
             )
             continue
         # Skip sports that are out of season / have no active markets.

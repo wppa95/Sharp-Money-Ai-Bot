@@ -57,6 +57,10 @@ from engine.score_validation import clamp_score
 from engine.sport_policy import is_football_related_sport
 from engine.strongest_pick import select_strongest_actionable_picks
 from engine.delivery_evidence import serialized_evidence_supports_delivery
+from engine.ai_analyst import (
+    AnalystDecision,
+    build_advisory_from_pipeline as _build_ai_analyst,
+)
 from engine.evidence_memory import (
     get_line_history as _memory_line_history,
     get_player_results as _memory_player_results,
@@ -99,6 +103,49 @@ def _snapshot_event_id(snapshot) -> str:
         if value is not None and str(value).strip():
             return str(value).strip()
     return ""
+
+
+def _analyst_payload(
+    *,
+    player_name: str,
+    sport: str,
+    stat_type: str,
+    line: float,
+    provider: str,
+    event_id: str,
+    decision,
+    score=None,
+    validation=None,
+    hit_rates=None,
+    intelligence_trace=None,
+) -> dict:
+    """Create advisory AI output without affecting any delivery decision."""
+    try:
+        return _build_ai_analyst(
+            player_name=player_name,
+            sport=sport,
+            stat_type=stat_type,
+            line=line,
+            provider=provider,
+            event_id=event_id,
+            decision=decision,
+            score=score,
+            validation=validation,
+            hit_rates=hit_rates,
+            intelligence_trace=intelligence_trace,
+        ).to_dict()
+    except Exception as exc:
+        logger.warning("AI analyst advisory unavailable: %s", type(exc).__name__)
+        return AnalystDecision(
+            prediction="UNAVAILABLE",
+            evidence_status="UNAVAILABLE",
+            rationale="Analyst output unavailable; no prediction was generated.",
+            evidence_used=(),
+            missing_inputs=("analyst_evaluation",),
+            confidence=None,
+            confidence_source=None,
+            risk_level=None,
+        ).to_dict()
 
 
 from alerts import AlertDelivery, broadcast_alert, identify_sharp_books
@@ -2938,6 +2985,18 @@ async def _run_prizepicks_independent_cycle(
         setattr(prop, "bet_confidence", decision.confidence)
         setattr(prop, "market_quality_score", getattr(market_quality, "score", None))
         setattr(prop, "score_total", getattr(score, "total", None))
+        _analyst_result = _analyst_payload(
+            player_name=player,
+            sport=sport,
+            stat_type=stat,
+            line=line,
+            provider="PrizePicks",
+            event_id=str(getattr(prop, "game_id", "") or getattr(prop, "event_id", "") or ""),
+            decision=decision,
+            score=score,
+            validation=validation,
+            hit_rates=hit_rates,
+        )
         try:
             await db.log_prop_opportunity(
                 external_id=external_id,
@@ -2958,6 +3017,7 @@ async def _run_prizepicks_independent_cycle(
                 provider="PrizePicks",
                 bet_quality_score=decision.confidence,
                 reason_codes=_compute_reason_codes(score, decision),
+                analyst_result=_analyst_result,
                 downstream_intelligence=_build_downstream_intel(
                     line_delta=(line - previous) if previous is not None else None,
                     evidence={
@@ -5096,6 +5156,18 @@ async def underdog_job(context) -> None:
                     hit_rates    = hit_rates,
                     sport        = snap.sport or "",
                 )
+                _new_analyst_result = _analyst_payload(
+                    player_name=player,
+                    sport=snap.sport or "UNKNOWN",
+                    stat_type=stat_type,
+                    line=line_val,
+                    provider="Underdog",
+                    event_id=_snapshot_event_id(snap),
+                    decision=decision,
+                    score=score,
+                    validation=validation,
+                    hit_rates=hit_rates,
+                )
                 # Persist only directional opportunities. A prop without a
                 # direction remains in the canonical active pool and is
                 # evaluated again by normal scans, Stable Refresh, and FPR.
@@ -5119,6 +5191,7 @@ async def underdog_job(context) -> None:
                                 provider          = "Underdog",
                                 bet_quality_score = decision.confidence,
                                 reason_codes      = _compute_reason_codes(score, decision),
+                                 analyst_result    = _new_analyst_result,
                                 watchlist_state   = None,
                                 downstream_intelligence = _build_downstream_intel(
                                     line_delta=getattr(snap, "line_delta", None),
@@ -5371,9 +5444,6 @@ async def underdog_job(context) -> None:
                         int(getattr(market_quality, "score", 0)),
                         float(score.total if score else 0),
                     )
-                    # Mark every existing prop handled by this scan so the
-                    # standing compatibility path cannot evaluate it twice.
-                    _processed_keys.add((player, stat_type))
                     validation = validate_player_prop(
                         player_name  = player,
                         stat_type    = stat_type,
@@ -5382,6 +5452,11 @@ async def underdog_job(context) -> None:
                         min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
                         history_snap = _hist_snap,
                     )
+                    # Mark every existing prop handled by this scan so the
+                    # standing compatibility path cannot evaluate it twice.
+                    # This stays after validation so the line-change path
+                    # cannot suppress evidence preparation prematurely.
+                    _processed_keys.add((player, stat_type))
                     # Fetch real game results — required before any directional pick
                     hit_rates = None
                     if not is_removed:
@@ -5403,6 +5478,18 @@ async def underdog_job(context) -> None:
                             hit_rates    = hit_rates,
                             sport        = snap.sport or "",
                         )
+                        _lc_analyst_result = _analyst_payload(
+                            player_name=player,
+                            sport=snap.sport or "UNKNOWN",
+                            stat_type=stat_type,
+                            line=snap.line or 0.0,
+                            provider="Underdog",
+                            event_id=_snapshot_event_id(snap),
+                            decision=decision,
+                            score=score,
+                            validation=validation,
+                            hit_rates=hit_rates,
+                        )
                         if decision.recommendation in ("OVER", "UNDER"):
                             try:
                                 _lc_opportunity_kwargs = dict(
@@ -5420,6 +5507,7 @@ async def underdog_job(context) -> None:
                                     provider          = "Underdog",
                                     bet_quality_score = decision.confidence,
                                     reason_codes      = _compute_reason_codes(score, decision),
+                                     analyst_result    = _lc_analyst_result,
                                     watchlist_state   = None,
                                 )
                                 _opportunity_batch.append(_lc_opportunity_kwargs)
@@ -5640,6 +5728,7 @@ async def underdog_job(context) -> None:
                     # are excluded from the standing path to prevent double-evaluation.
                     # Props with sub-threshold line movement (should_alert=False) are intentionally
                     # left out of _processed_keys so the standing path can evaluate them.
+                    # NOTE: _processed_keys is NOT set here for sub-threshold movement.
                     _processed_keys.add((player, stat_type))
 
                 # Market movement data is stored in UnderdogSnapshotRecord + PropCandidateLog.
@@ -6083,6 +6172,18 @@ async def underdog_job(context) -> None:
                     hit_rates    = _shits,
                     sport        = _ssport,
                 )
+                _standing_analyst_result = _analyst_payload(
+                    player_name=_sp,
+                    sport=_ssport,
+                    stat_type=_st,
+                    line=_line_val,
+                    provider="Underdog",
+                    event_id=_snapshot_event_id(_ssnap),
+                    decision=_sdec,
+                    score=_sscore,
+                    validation=_sval,
+                    hit_rates=_shits,
+                )
                 if _sdec is None or _sdec.recommendation not in ("OVER", "UNDER"):
                     continue
 
@@ -6105,6 +6206,7 @@ async def underdog_job(context) -> None:
                         provider          = "Underdog",
                         bet_quality_score = _sdec.confidence,
                         reason_codes      = _compute_reason_codes(_sscore, _sdec),
+                         analyst_result    = _standing_analyst_result,
                         watchlist_state   = None,
                         downstream_intelligence = _build_downstream_intel(
                             line_delta=getattr(_ssnap, "line_delta", None),
@@ -7462,6 +7564,18 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 hit_rates    = _sr_hits,
                 sport        = _sr_sport,
             )
+            _sr_analyst_result = _analyst_payload(
+                player_name=_sr_player,
+                sport=_sr_sport,
+                stat_type=_sr_stat,
+                line=_sr_line,
+                provider="Underdog",
+                event_id=_snapshot_event_id(_sr_snap),
+                decision=_sr_dec,
+                score=_sr_score,
+                validation=_sr_val,
+                hit_rates=_sr_hits,
+            )
 
             # Persist directional opportunities only. A missing direction is a
             # transient evaluation result; the active prop stays in rotation.
@@ -7489,6 +7603,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         provider          = "Underdog",
                         bet_quality_score = _sr_dec.confidence,
                         reason_codes      = _compute_reason_codes(_sr_score, _sr_dec),
+                         analyst_result    = _sr_analyst_result,
                     )
                 except Exception as _sr_pol_exc:
                     logger.debug("stable_refresh: log_prop_opportunity failed: %s", _sr_pol_exc)
@@ -8296,6 +8411,18 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     getattr(_fpr_snap, "external_id", None)
                     or str(getattr(_fpr_snap, "id", None) or "")
                 )
+                _fpr_analyst_result = _analyst_payload(
+                    player_name=_fpr_player,
+                    sport=_fpr_sport,
+                    stat_type=_fpr_stat,
+                    line=_fpr_line,
+                    provider=_fpr_provider,
+                    event_id=_snapshot_event_id(_fpr_snap),
+                    decision=_fpr_dec,
+                    score=_fpr_score,
+                    validation=_fpr_val,
+                    hit_rates=_fpr_hits,
+                )
 
                 # FPR is a real analysis pass, not just a delivery pass.
                 # Persist one evaluation row for every successfully scored
@@ -8340,6 +8467,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         "provider": _fpr_provider,
                         "bet_quality_score": float(getattr(_fpr_score, "total", 0) or 0),
                         "reason_codes": _compute_reason_codes(_fpr_score, _fpr_dec),
+                        "analyst_result": _fpr_analyst_result,
                         "watchlist_state": None,
                     })
 

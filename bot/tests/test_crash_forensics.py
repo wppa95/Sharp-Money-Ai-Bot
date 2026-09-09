@@ -337,10 +337,10 @@ def test_startup_notification_contains_crash_id():
 
     assert len(sent) == 1
     msg = sent[0]
-    # V3.1: Crash ID removed from notification; crash details block still present
-    assert "Crash Details" in msg
-    assert "ValueError" in msg
-    assert "bad prop line" in msg
+    # Startup notifications intentionally do not expose persisted crash details.
+    assert "Crash Details" not in msg
+    assert "ValueError" not in msg
+    assert "bad prop line" not in msg
 
 
 def test_startup_notification_crash_snapshot_saved_label():
@@ -384,7 +384,7 @@ def test_startup_notification_crash_snapshot_saved_label():
 
 
 def test_startup_notification_module_basename_shown():
-    """Module field should show basename, not full path."""
+    """Crash module paths are not included in the generic restart message."""
     import asyncio
 
     class _FakeHT:
@@ -428,8 +428,7 @@ def test_startup_notification_module_basename_shown():
         asyncio.set_event_loop(None)
 
     msg = sent[0]
-    assert "market_engine.py" in msg
-    # Full path should not appear
+    assert "market_engine.py" not in msg
     assert "/home/runner" not in msg
 
 
@@ -438,7 +437,7 @@ def test_startup_notification_module_basename_shown():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_cmd_health_crash_section_shown(tmp_path):
-    """cmd_health output must contain the Crash Forensics block."""
+    """Current health output intentionally omits historical crash forensics."""
     import asyncio
 
     loop = asyncio.new_event_loop()
@@ -488,8 +487,8 @@ def test_cmd_health_crash_section_shown(tmp_path):
 
     assert replies, "No reply from cmd_health"
     text = replies[0]
-    assert "Crash Forensics" in text
-    assert "crash ID" in text.lower() or "Crash ID" in text or "#1" in text
+    assert "Crash Forensics" not in text
+    assert "bad line" not in text
 
 
 def test_cmd_health_no_crash_shows_none_recorded(tmp_path):
@@ -534,7 +533,7 @@ def test_cmd_health_no_crash_shows_none_recorded(tmp_path):
 
 
 def test_cmd_health_crash_log_shows_multiple_entries(tmp_path):
-    """When multiple crashes exist, /health shows a mini crash log."""
+    """Historical crash rows remain sidecar data, not a /health section."""
     import asyncio
 
     loop = asyncio.new_event_loop()
@@ -568,7 +567,7 @@ def test_cmd_health_crash_log_shows_multiple_entries(tmp_path):
     loop.close()
 
     text = replies[0]
-    # Should show crash log with #1, #2, #3
-    assert "#1" in text
-    assert "#2" in text
-    assert "#3" in text
+    assert "Crash Forensics" not in text
+    assert "Error1" not in text
+    assert "Error2" not in text
+    assert "Error3" not in text

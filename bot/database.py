@@ -48,6 +48,13 @@ _DB_WRITE_RETRY_DELAYS = (0.15, 0.5)
 _PRIZEPICKS_EXTERNAL_PREFIX = "PrizePicks::"
 _TELEGRAM_DELIVERY_KEY_VERSION = "v1"
 
+
+def _analyst_grade(prediction: Optional[str], result: Optional[str]) -> Optional[str]:
+    """Derive analyst outcome from the authoritative stored result."""
+    from engine.ai_analyst import analyst_grade
+
+    return analyst_grade(prediction, result)
+
 # Keep both Database objects (monitoring and history) on an explicit, bounded
 # SQLite pool.  The process-wide session gate below makes that capacity a
 # shared budget across both pools, so one lane cannot exhaust its own pool
@@ -992,6 +999,16 @@ class PropOpportunityLog(Base):
     # that were not delivered remain False.
     alert_sent         = Column(Boolean,     nullable=False, default=False)
     alert_sent_at      = Column(DateTime,    nullable=True)               # UTC timestamp of delivery
+    # Advisory AI analyst output. These fields are never used as a delivery,
+    # qualification, or grading gate.
+    analyst_prediction      = Column(String(16), nullable=True)             # OVER/UNDER/UNAVAILABLE
+    analyst_confidence      = Column(Integer, nullable=True)
+    analyst_risk_level      = Column(String(16), nullable=True)
+    analyst_model           = Column(String(64), nullable=True)
+    analyst_model_version   = Column(String(32), nullable=True)
+    analyst_payload_json    = Column(Text, nullable=True)
+    analyst_grade           = Column(String(8), nullable=True)              # HIT/MISS/PUSH
+    analyst_graded_at       = Column(DateTime, nullable=True)
 
     __table_args__ = (
         UniqueConstraint(
@@ -1275,6 +1292,7 @@ class Database:
         await self._migrate_player_props_product_v1()
         await self._migrate_player_game_results_v1()
         await self._migrate_prop_opportunity_log_v6()
+        await self._migrate_prop_opportunity_log_v7()
         await self._migrate_telegram_delivery_audit_v1()
         await self._migrate_telegram_delivery_audit_v2()
         await self._migrate_slip_journal_leg_v1()
@@ -6403,6 +6421,28 @@ class Database:
             except Exception:
                 pass
 
+    async def _migrate_prop_opportunity_log_v7(self) -> None:
+        """Add isolated, auditable AI analyst fields."""
+        columns = (
+            ("analyst_prediction", "VARCHAR(16)"),
+            ("analyst_confidence", "INTEGER"),
+            ("analyst_risk_level", "VARCHAR(16)"),
+            ("analyst_model", "VARCHAR(64)"),
+            ("analyst_model_version", "VARCHAR(32)"),
+            ("analyst_payload_json", "TEXT"),
+            ("analyst_grade", "VARCHAR(8)"),
+            ("analyst_graded_at", "DATETIME"),
+        )
+        async with self._engine.begin() as conn:
+            for name, definition in columns:
+                try:
+                    await conn.execute(text(
+                        f"ALTER TABLE prop_opportunity_log ADD COLUMN "
+                        f"{name} {definition}"
+                    ))
+                except Exception:
+                    pass
+
     async def repair_underdog_opportunity_game_ids(self) -> int:
         """Repair blank opportunity event IDs from retained UD snapshots.
 
@@ -6483,6 +6523,7 @@ class Database:
         reason_codes:       "Optional[list]" = None,   # structured codes, JSON-encoded
         watchlist_state:    "Optional[str]"  = None,   # Legacy compatibility; ignored on writes
         downstream_intelligence: "Optional[dict]" = None,
+        analyst_result:      "Optional[dict]" = None,
     ) -> None:
         """
         Upsert a directional prop opportunity at evaluation time.
@@ -6520,6 +6561,7 @@ class Database:
             "reason_codes": reason_codes,
             "watchlist_state": watchlist_state,
             "downstream_intelligence": downstream_intelligence,
+            "analyst_result": analyst_result,
             "product": PLAYER_PROPS_PRODUCT,
         }])
         return
@@ -6769,6 +6811,7 @@ class Database:
             _confidence = opportunity.get("confidence", 0)
             _bet_quality = opportunity.get("bet_quality_score")
             _intelligence = opportunity.get("downstream_intelligence")
+            _analyst = opportunity.get("analyst_result")
             if _intelligence is None:
                 _intelligence = build_downstream_payload(
                     evidence={},
@@ -6801,6 +6844,10 @@ class Database:
             _sharp_components = (
                 _json.dumps(_sharp.get("components") or {}, separators=(",", ":"))
                 if _intelligence else None
+            )
+            _analyst_json = (
+                _json.dumps(_analyst, separators=(",", ":"))
+                if isinstance(_analyst, dict) else None
             )
 
             # The active monitoring universe has no secondary classification.
@@ -6837,6 +6884,23 @@ class Database:
                 "evidence_completeness": _intel_completeness,
                 "sharp_confidence": _sharp_confidence,
                 "sharp_confidence_components": _sharp_components,
+                "analyst_prediction": (
+                    _analyst.get("prediction") if isinstance(_analyst, dict) else None
+                ),
+                "analyst_confidence": (
+                    _analyst.get("confidence") if isinstance(_analyst, dict) else None
+                ),
+                "analyst_risk_level": (
+                    _analyst.get("risk_level") if isinstance(_analyst, dict) else None
+                ),
+                "analyst_model": (
+                    _analyst.get("model") if isinstance(_analyst, dict) else None
+                ),
+                "analyst_model_version": (
+                    _analyst.get("model_version")
+                    if isinstance(_analyst, dict) else None
+                ),
+                "analyst_payload_json": _analyst_json,
             }
 
         prepared = list(prepared_by_identity.values())
@@ -6872,6 +6936,12 @@ class Database:
                         "evidence_completeness",
                         "sharp_confidence",
                         "sharp_confidence_components",
+                        "analyst_prediction",
+                        "analyst_confidence",
+                        "analyst_risk_level",
+                        "analyst_model",
+                        "analyst_model_version",
+                        "analyst_payload_json",
                     )
                 }
                 # A compatibility caller may not carry event identity even
@@ -7999,6 +8069,10 @@ class Database:
             existing_result = str(opp_row.result or "").upper()
             if existing_result not in {"", "PENDING"}:
                 return
+            _ai_grade = _analyst_grade(opp_row.analyst_prediction, evidence_result)
+            if _ai_grade is not None:
+                values["analyst_grade"] = _ai_grade
+                values["analyst_graded_at"] = datetime.utcnow()
             if evidence_result in {"HIT", "MISS", "PUSH"}:
                 player_name = display_player_name(opp_row.player_name)
                 sport = (opp_row.sport or "").upper().strip()
@@ -8116,6 +8190,13 @@ class Database:
                     "actual_value": actual_value,
                     "graded_at": datetime.utcnow(),
                 }
+                _ai_grade = _analyst_grade(
+                    opp_row.analyst_prediction,
+                    outcome,
+                )
+                if _ai_grade is not None:
+                    values["analyst_grade"] = _ai_grade
+                    values["analyst_graded_at"] = datetime.utcnow()
                 if item.get("error_type") is not None:
                     values["error_type"] = item["error_type"]
                 if item.get("void_reason") is not None:
@@ -8135,6 +8216,96 @@ class Database:
                 applied += int(response.rowcount or 0)
             await s.commit()
         return applied
+
+    async def get_analyst_performance(
+        self,
+        *,
+        group_by: str = "sport",
+        sport: Optional[str] = None,
+        stat_type: Optional[str] = None,
+        direction: Optional[str] = None,
+        confidence_min: Optional[int] = None,
+        confidence_max: Optional[int] = None,
+        risk_level: Optional[str] = None,
+        player_name: Optional[str] = None,
+        league: Optional[str] = None,
+        model_version: Optional[str] = None,
+    ) -> dict:
+        """Return auditable analyst results grouped by a supported dimension."""
+        dimensions = {
+            "sport": lambda row, payload: row.sport or "UNAVAILABLE",
+            "market": lambda row, payload: row.stat_type or "UNAVAILABLE",
+            "direction": lambda row, payload: row.analyst_prediction or "UNAVAILABLE",
+            "confidence": lambda row, payload: (
+                str(row.analyst_confidence)
+                if row.analyst_confidence is not None else "UNAVAILABLE"
+            ),
+            "risk": lambda row, payload: row.analyst_risk_level or "UNAVAILABLE",
+            "player": lambda row, payload: row.player_name or "UNAVAILABLE",
+            "league": lambda row, payload: payload.get("league", "UNAVAILABLE"),
+            "model_version": lambda row, payload: (
+                row.analyst_model_version or "UNAVAILABLE"
+            ),
+        }
+        if group_by not in dimensions:
+            raise ValueError(f"unsupported analyst dimension: {group_by}")
+
+        async with self.session() as s:
+            result = await s.execute(
+                select(PropOpportunityLog).where(
+                    PropOpportunityLog.analyst_prediction.in_(("OVER", "UNDER"))
+                )
+            )
+            rows = list(result.scalars().all())
+
+        buckets: dict[str, dict[str, int | float | None]] = {}
+        for row in rows:
+            if sport and (row.sport or "").upper() != sport.upper():
+                continue
+            if stat_type and (row.stat_type or "").lower() != stat_type.lower():
+                continue
+            if direction and (row.analyst_prediction or "").upper() != direction.upper():
+                continue
+            if confidence_min is not None and (
+                row.analyst_confidence is None
+                or row.analyst_confidence < confidence_min
+            ):
+                continue
+            if confidence_max is not None and (
+                row.analyst_confidence is None
+                or row.analyst_confidence > confidence_max
+            ):
+                continue
+            if risk_level and (row.analyst_risk_level or "").upper() != risk_level.upper():
+                continue
+            if player_name and (row.player_name or "").lower() != player_name.lower():
+                continue
+            if model_version and row.analyst_model_version != model_version:
+                continue
+            try:
+                payload = json.loads(row.analyst_payload_json or "{}")
+            except (TypeError, ValueError):
+                payload = {}
+            if league and payload.get("league") != league:
+                continue
+
+            key = str(dimensions[group_by](row, payload))
+            bucket = buckets.setdefault(
+                key, {"total": 0, "graded": 0, "hits": 0, "misses": 0, "pushes": 0}
+            )
+            bucket["total"] = int(bucket["total"] or 0) + 1
+            if row.analyst_grade in {"HIT", "MISS", "PUSH"}:
+                bucket["graded"] = int(bucket["graded"] or 0) + 1
+                name = row.analyst_grade.lower() + "s"
+                bucket[name] = int(bucket[name] or 0) + 1
+
+        for bucket in buckets.values():
+            graded = int(bucket["graded"] or 0)
+            bucket["hit_rate"] = (
+                round(int(bucket["hits"] or 0) / graded * 100, 2)
+                if graded else None
+            )
+        return {"group_by": group_by, "buckets": buckets}
 
     @_retry_sqlite_write
     async def mark_opportunity_alert_sent(

@@ -95,6 +95,26 @@ _SPORT_PLAYER_PROP_MARKETS: dict[Sport, str] = {
     # alert_scope_filter.py.
 }
 
+# Explicit coverage contract for the sportsbook confirmation feed.  This is
+# intentionally separate from the Odds API sport-key map: a sport may have a
+# general Odds API key while player-prop availability is still unverified.
+SPORTSBOOK_PLAYER_PROP_COVERAGE: dict[str, dict[str, object]] = {
+    "MLB": {"status": "validated", "markets": _SPORT_PLAYER_PROP_MARKETS[Sport.MLB]},
+    "NBA": {"status": "validated", "markets": _SPORT_PLAYER_PROP_MARKETS[Sport.NBA]},
+    "WNBA": {"status": "validated", "markets": _SPORT_PLAYER_PROP_MARKETS[Sport.WNBA]},
+    "NFL": {"status": "validated", "markets": _SPORT_PLAYER_PROP_MARKETS[Sport.NFL]},
+    "NHL": {"status": "validated", "markets": _SPORT_PLAYER_PROP_MARKETS[Sport.NHL]},
+    # No speculative market requests: these remain visible as unverified.
+    "EPL": {"status": "unverified", "markets": "", "reason": "player props not validated"},
+    "LaLiga": {"status": "unverified", "markets": "", "reason": "player props not validated"},
+    "SerieA": {"status": "unverified", "markets": "", "reason": "player props not validated"},
+    "Bundesliga": {"status": "unverified", "markets": "", "reason": "player props not validated"},
+    "Ligue1": {"status": "unverified", "markets": "", "reason": "player props not validated"},
+    "MLS": {"status": "unverified", "markets": "", "reason": "player props not validated"},
+    "UCL": {"status": "unverified", "markets": "", "reason": "player props not validated"},
+    "TENNIS": {"status": "unverified", "markets": "", "reason": "sport not mapped"},
+}
+
 _ODDS_MARKET_TO_PROP_STAT: dict[str, str] = {
     "player_points": "Points",
     "player_rebounds": "Rebounds",
