@@ -4965,17 +4965,19 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         _fpr_by_sport = fpr_stats.get("fpr_by_sport", {})
         _scan_actionable_by_sport = scan_summary.get("actionable_by_sport", {})
         _scan_removed_by_sport = scan_summary.get("removed_by_sport", {})
-        from engine.sport_policy import is_football_related_sport as _is_football_sport
 
-        def _report_sport_allowed(sport: object) -> bool:
-            return bool(str(sport or "").strip()) and not _is_football_sport(sport)
+        # Reporting is intentionally broader than delivery.  Suppressed or
+        # inactive sports still need to be visible so the funnel accounts for
+        # the complete monitoring universe.
+        def _has_reportable_sport_name(sport: object) -> bool:
+            return bool(str(sport or "").strip())
 
         _breakdown_sports = {
             sport
             for sport in (
                 set(_scan_actionable_by_sport) | set(_scan_removed_by_sport)
             )
-            if _report_sport_allowed(sport)
+            if _has_reportable_sport_name(sport)
         }
         by_sport = (
             [
@@ -4989,7 +4991,7 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     {
                         sport
                         for sport in set(_fpr_by_sport) | _breakdown_sports
-                        if _report_sport_allowed(sport)
+                        if _has_reportable_sport_name(sport)
                     },
                     key=lambda sport: (
                         -_fpr_by_sport.get(sport, 0),
@@ -5233,7 +5235,7 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 ]
                 for row in by_sport:
                     sport = row.get("sport")
-                    if not _report_sport_allowed(sport):
+                    if not _has_reportable_sport_name(sport):
                         continue
                     sp = _html.escape(str(sport)[:10])
                     lines.append(
@@ -5261,7 +5263,7 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     | set(normalized_delivered_by_sport)
                 )
                 for sport in sorted(
-                    (sport for sport in _sports if _report_sport_allowed(sport)),
+                    (sport for sport in _sports if _has_reportable_sport_name(sport)),
                     key=lambda sport: (
                         -int(normalized_by_sport.get(sport, 0) or 0),
                         str(sport).upper(),
