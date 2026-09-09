@@ -32,8 +32,14 @@ class CanonicalPlayerProp:
     provider_status: str | None
     fetched_at: datetime
     raw: Any
+    # Evaluation metadata is copied through when a provider has already
+    # enriched its source object.  This lets the same persistence boundary
+    # refresh qualification metadata without importing provider models.
+    score_total: float | None = None
+    score_tier: str | None = None
     bet_recommendation: str | None = None
     bet_confidence: int | None = None
+    market_quality_score: int | None = None
     removed: bool = False
 
     @property
@@ -89,8 +95,11 @@ def canonicalize_player_prop(provider: str, prop: Any) -> CanonicalPlayerProp | 
         ),
         fetched_at=observed_at,
         raw=prop,
+        score_total=getattr(prop, "score_total", None),
+        score_tier=getattr(prop, "score_tier", None),
         bet_recommendation=getattr(prop, "bet_recommendation", None),
         bet_confidence=getattr(prop, "bet_confidence", None),
+        market_quality_score=getattr(prop, "market_quality_score", None),
         removed=bool(getattr(prop, "removed", False)),
     )
 
@@ -143,8 +152,11 @@ def as_history_objects(
                 event_id=prop.game_id,
                 line_variant=prop.line_variant,
                 fetched_at=prop.fetched_at,
+                score_total=prop.score_total,
+                score_tier=prop.score_tier,
                 bet_recommendation=prop.bet_recommendation,
                 bet_confidence=prop.bet_confidence,
+                market_quality_score=prop.market_quality_score,
                 removed=prop.removed,
             )
         )

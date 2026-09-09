@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 # scheduled PropLine supplement is their documented history path.
 _SUPPORTED_HISTORY_SPORTS = frozenset({
     "MLB", "NBA",
-    "NFL", "NCAAF", "CFB", "FCS", "CFL", "AFL", "AFLW",
     "WNBA", "NHL", "CS", "DOTA", "TENNIS",
     "MLS", "NCAAB", "FIFA",
     "SOCCER",         # Requires FOOTBALL_DATA_API_KEY; returns [] gracefully without it
@@ -286,6 +285,8 @@ async def player_history_collector_job(context) -> None:
                     stat = re.sub(r"\s+-?\d+(?:\.\d+)?\s*$", "", selection)
                     stat = stat or selection
                 sport = (getattr(s, "sport", None) or "UNKNOWN").upper()
+                if is_football_related_sport(sport):
+                    continue
                 key = (player.strip(), sport, (stat or "").lower().strip())
                 target_sources.setdefault(
                     key,

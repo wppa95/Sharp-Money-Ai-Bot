@@ -525,7 +525,7 @@ _scheduled_execution_coordinator = _ScheduledExecutionCoordinator()
 # ownership group so they wait before starting instead of competing for the
 # process-wide writer gate while a full Underdog persistence drain is active.
 _SQLITE_WRITE_JOB_GROUP = "sqlite_write_jobs"
-_SCAN_JOB_KWARGS = {"coalesce": False}
+_SCAN_JOB_KWARGS = {"coalesce": False, "max_instances": 1000}
 
 
 def _coordinated_job(
@@ -748,7 +748,7 @@ async def post_init(application: Application) -> None:
     # exposed as an independent Telegram provider.
     from providers.propline import PropLinePrizePicksProvider
     _propline_enabled = PropLinePrizePicksProvider(
-        bookmaker=config.PROPLINE_PRIZEPICKS_BOOKMAKER
+        bookmaker=config.PROPLINE_UNDERDOG_BOOKMAKER
     ).is_available()
     # OddsAPI is registered so quota headers (x-requests-remaining/used) recorded
     # by OddsApiCache._fetch() appear in /status and health logs.

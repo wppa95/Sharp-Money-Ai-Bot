@@ -28,7 +28,6 @@ from sqlalchemy import insert as sa_insert
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy.schema import CreateTable
 
 logger = logging.getLogger(__name__)
 
@@ -733,11 +732,10 @@ class UnderdogSnapshotRecord(Base):
     line_delta  = Column(Float,       nullable=True)
     removed     = Column(Boolean,     default=False, nullable=False)
     alert_sent  = Column(Boolean,     default=False, nullable=False)
-    # Legacy score fields.  They remain nullable/readable for historical rows,
-    # but current persistence no longer populates them.
-    score_total = Column(Float,       nullable=True, info={"legacy": True})
-    score_tier  = Column(String(8),   nullable=True, info={"legacy": True})
-    score_stars = Column(Integer,     nullable=True, info={"legacy": True})
+    # Scoring fields — populated for line-change props that reach the scoring gate
+    score_total = Column(Float,       nullable=True)   # composite score (0-100)
+    score_tier  = Column(String(8),   nullable=True)   # S / A / B / PASS
+    score_stars = Column(Integer,     nullable=True)   # 0-5
     # Delivery outcome: "sent" | "filtered:<reason>" | "skipped" | "failed"
     alert_outcome   = Column(String(64), nullable=True)
     # Validation metrics snapshot — compact JSON produced by player_validator.
@@ -789,14 +787,17 @@ class PropLineHistory(Base):
     # Opening line — set once on first INSERT, never updated.
     # Enables opening-vs-current movement display in alerts.
     opening_line       = Column(Float,     nullable=True)
-    # Legacy score fields are retained only so older history remains readable.
-    # New monitoring writes use direction/evidence fields below instead.
-    score_tier         = Column(String(8), nullable=True, info={"legacy": True})
+    # Qualification tier synced from the source provider snapshot.
+    # NULL = not yet scored.  S / A / B = qualifying.  PASS = excluded from picks.
+    score_tier         = Column(String(8), nullable=True)
     # Bet direction synced from UnderdogSnapshotRecord — OVER | UNDER | PASS | NULL
     bet_recommendation   = Column(String(8), nullable=True)
     bet_confidence       = Column(Integer,   nullable=True)
-    market_quality_score = Column(Integer,   nullable=True, info={"legacy": True})
-    score_total          = Column(Float,     nullable=True, info={"legacy": True})
+    # Market quality score (0–100) stored at scoring time; NULL = not yet computed.
+    market_quality_score = Column(Integer,   nullable=True)
+    # Composite score (BQ, 0–100) stored at scoring time for tier-aware /picks and /slip gating.
+    # Tier 2 (NBA/MLB/NFL) requires score_total ≥ 75 for Telegram eligibility.
+    score_total          = Column(Float,     nullable=True)
 
     __table_args__ = (
         # Current monitoring is bounded by provider and reporting-day
@@ -914,9 +915,7 @@ class PropOpportunityLog(Base):
     stat_type      = Column(String(64),  nullable=False)
     line_value     = Column(Float,       nullable=False)
     recommendation = Column(String(8),   nullable=False)   # OVER | UNDER
-    # Historical score metadata.  Nullable so new directional rows do not need
-    # to manufacture a tier just to satisfy the old schema.
-    decision_tier  = Column(String(8),   nullable=True, info={"legacy": True})
+    decision_tier  = Column(String(8),   nullable=False)   # Legacy score metadata
     confidence     = Column(Integer,     nullable=False, default=0)
     game_time      = Column(DateTime,    nullable=True)
     game_id        = Column(String(128), nullable=False, default="", index=True)
@@ -937,7 +936,7 @@ class PropOpportunityLog(Base):
     recommendation_id  = Column(String(64),  nullable=True, index=True)
     # Stable ID derived from (external_id, stat_type); links prop → decision → result.
     provider           = Column(String(32),  nullable=True)               # "Underdog" | "PrizePicks"
-    bet_quality_score  = Column(Integer,     nullable=True, info={"legacy": True})
+    bet_quality_score  = Column(Integer,     nullable=True)               # 0-100 decision confidence
     qualification_path = Column(Text,        nullable=True)               # JSON list of gate outcomes
     reason_codes       = Column(Text,        nullable=True)               # JSON: ["STRONG_L5", …]
     watchlist_state    = Column(String(16),  nullable=True)               # Legacy compatibility; current writes null
@@ -1003,12 +1002,12 @@ class PropTrackingLog(Base):
 
 class PropCandidateLog(Base):
     """
-    Directional candidate evidence.
+    Directional scored-candidate evidence.
 
     Written once per directional candidate per scan cycle. The legacy
-    score and gate columns remain readable for historical databases, but
-    current writes use direction/evidence fields only. Alert delivery is
-    tracked separately.
+    gate_decision and rejection_reason columns remain for compatibility with
+    existing databases, but current writes use EVALUATED with no rejection
+    reason. Alert delivery is tracked separately.
     """
     __tablename__ = "prop_candidate_log"
 
@@ -1020,11 +1019,11 @@ class PropCandidateLog(Base):
     stat_type            = Column(String(64),  nullable=False)
     line_value           = Column(Float,       nullable=False, default=0.0)
     provider             = Column(String(32),  nullable=False, default="Underdog")
-    score_total          = Column(Float,       nullable=True, info={"legacy": True})
-    score_tier           = Column(String(8),   nullable=True, info={"legacy": True})
+    score_total          = Column(Float,       nullable=True)
+    score_tier           = Column(String(8),   nullable=True)    # Scoring metadata
     confidence           = Column(Integer,     nullable=True)
-    gate_decision        = Column(String(16),  nullable=True, info={"legacy": True})
-    rejection_reason     = Column(Text,        nullable=True, info={"legacy": True})
+    gate_decision        = Column(String(16),  nullable=False)   # Current writes: EVALUATED
+    rejection_reason     = Column(Text,        nullable=True)    # Legacy compatibility; current writes null
     reason_codes         = Column(Text,        nullable=True)    # JSON list e.g. ["STRONG_L5", "S_TIER"]
     snapshot_external_id = Column(String(64),  nullable=True, index=True)
 
@@ -1229,7 +1228,6 @@ class Database:
         await self._migrate_prop_line_variants_v1()
         await self._migrate_player_game_results_v1()
         await self._migrate_prop_opportunity_log_v6()
-        await self._migrate_prop_score_compat_v1()
         await self._migrate_telegram_delivery_audit_v1()
         await self._migrate_telegram_delivery_audit_v2()
         await self._migrate_slip_journal_leg_v1()
@@ -3415,14 +3413,54 @@ class Database:
         self,
         mq_map: "dict[tuple[str, str, str], tuple[int, float]]",
     ) -> None:
-        """Legacy no-op retained for older callers.
-
-        Market-quality/BQ persistence was removed from the active prop
-        pipeline.  Keeping this narrow compatibility method avoids breaking
-        an older scheduler during a rolling restart without creating new
-        score-field writes.
         """
-        return
+        Update market_quality_score and score_total on the most-recent PropLineHistory
+        row for each (player_name, sport, stat_type) entry in mq_map.
+
+        mq_map values are (mq_score: int, bq_score: float) tuples written by the
+        scan loop at each compute_market_quality() call site.
+
+        Called once per scan cycle.  Non-fatal — write failures are logged and skipped.
+        """
+        if not mq_map:
+            return
+        try:
+            async with self.session() as s:
+                for (pn, sp, st), scores in mq_map.items():
+                    try:
+                        # Unpack — backward-compat: accept bare int from legacy callers.
+                        if isinstance(scores, tuple):
+                            mq_score, bq_score = scores
+                        else:
+                            mq_score, bq_score = int(scores), None
+                        result = await s.execute(
+                            select(func.max(PropLineHistory.id))
+                            .where(
+                                PropLineHistory.provider    == "Underdog",
+                                PropLineHistory.player_name == pn,
+                                PropLineHistory.sport       == sp,
+                                PropLineHistory.stat_type   == st,
+                                PropLineHistory.removed.isnot(True),
+                            )
+                        )
+                        row_id = result.scalar_one_or_none()
+                        if row_id is not None:
+                            _vals: dict = {"market_quality_score": int(mq_score)}
+                            if bq_score is not None:
+                                _vals["score_total"] = float(bq_score)
+                            await s.execute(
+                                sa_update(PropLineHistory)
+                                .where(PropLineHistory.id == row_id)
+                                .values(**_vals)
+                            )
+                    except Exception as _row_exc:
+                        logger.debug(
+                            "update_ud_props_mq_scores_bulk: %s/%s/%s error: %s",
+                            pn, sp, st, _row_exc,
+                        )
+                await s.commit()
+        except Exception as _bulk_exc:
+            logger.debug("update_ud_props_mq_scores_bulk: session error: %s", _bulk_exc)
 
     async def save_prop_line_history(self, record: "PropLineHistory") -> "PropLineHistory":
         """Store one normalized PlayerProp snapshot from any provider."""
@@ -3583,8 +3621,11 @@ class Database:
                         last_seen=observed_at,
                         change_count=0,
                         opening_line=line_value,
+                        score_tier=getattr(prop, "score_tier", None),
                         bet_recommendation=getattr(prop, "bet_recommendation", None),
                         bet_confidence=getattr(prop, "bet_confidence", None),
+                        market_quality_score=getattr(prop, "market_quality_score", None),
+                        score_total=getattr(prop, "score_total", None),
                     )
                     s.add(row)
                     latest[key] = row
@@ -3637,8 +3678,13 @@ class Database:
                             if getattr(latest[key], "opening_line", None) is not None
                             else old_line
                         ),
+                        score_tier=getattr(prop, "score_tier", None),
                         bet_recommendation=getattr(prop, "bet_recommendation", None),
                         bet_confidence=getattr(prop, "bet_confidence", None),
+                        market_quality_score=getattr(
+                            prop, "market_quality_score", None
+                        ),
+                        score_total=getattr(prop, "score_total", None),
                     )
                     s.add(row)
                     latest[key] = row
@@ -3669,11 +3715,17 @@ class Database:
                 row.removed = False
                 row.lifecycle_state = "DISCOVERED"
                 if refresh_metadata:
+                    row.score_tier = getattr(prop, "score_tier", None)
                     row.bet_recommendation = getattr(
                         prop, "bet_recommendation", None
                     )
                     row.bet_confidence = getattr(prop, "bet_confidence", None)
+                    row.market_quality_score = getattr(
+                        prop, "market_quality_score", None
+                    )
+                    row.score_total = getattr(prop, "score_total", None)
                 else:
+                    row.score_tier = getattr(prop, "score_tier", None) or row.score_tier
                     row.bet_recommendation = (
                         getattr(prop, "bet_recommendation", None)
                         or row.bet_recommendation
@@ -3682,6 +3734,16 @@ class Database:
                         getattr(prop, "bet_confidence", None)
                         if getattr(prop, "bet_confidence", None) is not None
                         else row.bet_confidence
+                    )
+                    row.market_quality_score = (
+                        getattr(prop, "market_quality_score", None)
+                        if getattr(prop, "market_quality_score", None) is not None
+                        else row.market_quality_score
+                    )
+                    row.score_total = (
+                        getattr(prop, "score_total", None)
+                        if getattr(prop, "score_total", None) is not None
+                        else row.score_total
                     )
 
             await s.commit()
@@ -4213,6 +4275,8 @@ class Database:
             now_ts      = latest_snap.fetched_at or datetime.utcnow()
             is_removed  = bool(latest_snap.removed)
             new_line    = float(latest_snap.line_value) if latest_snap.line_value is not None else 0.0
+            snap_tier   = getattr(latest_snap, "score_tier", None)  # may be None for unscored
+
             if existing is None:
                 # First appearance — collect for batch INSERT
                 row = PropLineHistory(
@@ -4228,13 +4292,14 @@ class Database:
                     game_id      = latest_snap.game_id     or "",
                     fetched_at   = now_ts,
                 )
-                # Lifecycle and direction metadata are the current source of truth.
+                # Lifecycle + score_tier columns (migration adds them; ignore on old schema)
                 try:
                     row.first_seen   = now_ts
                     row.last_seen    = now_ts
                     row.change_count = 0
                     row.prev_line    = None
                     row.removed      = is_removed
+                    row.score_tier   = snap_tier
                     row.bet_recommendation = getattr(latest_snap, "bet_recommendation", None)
                     row.bet_confidence     = getattr(latest_snap, "bet_confidence", None)
                 except AttributeError:
@@ -4267,6 +4332,9 @@ class Database:
                     uvals["game_id"] = latest_snap.game_id
                 if line_changed:
                     uvals["prev_line"] = old_line
+                # Always propagate score_tier when the snapshot has a value
+                if snap_tier is not None:
+                    uvals["score_tier"] = snap_tier
                 # Always propagate bet direction from snapshot
                 _snap_rec = getattr(latest_snap, "bet_recommendation", None)
                 _snap_bc  = getattr(latest_snap, "bet_confidence", None)
@@ -5039,6 +5107,9 @@ class Database:
                                     "line_delta": record.line_delta,
                                     "removed": bool(record.removed),
                                     "alert_sent": bool(record.alert_sent),
+                                    "score_total": record.score_total,
+                                    "score_tier": record.score_tier,
+                                    "score_stars": record.score_stars,
                                     "alert_outcome": record.alert_outcome,
                                     "validation_json": record.validation_json,
                                     "bet_recommendation": record.bet_recommendation,
@@ -5081,6 +5152,16 @@ class Database:
                     stage=stage,
                     exc=exc,
                 )
+                # The scan contract is fail-fast: the caller owns recovery and
+                # must mark the scan incomplete rather than silently retrying
+                # or moving this batch to a background queue.
+                logger.error(
+                    "save_underdog_snapshots_bulk: required batch failed "
+                    "without retry (%d records): %s",
+                    len(records),
+                    exc,
+                )
+                raise
                 if (
                     _is_sqlite_cantopen_error(exc)
                     and session is not None
@@ -6091,65 +6172,6 @@ class Database:
             except Exception:
                 pass
 
-    async def _migrate_prop_score_compat_v1(self) -> None:
-        """Make legacy prop score columns nullable on pre-v1 databases.
-
-        Older ``prop_opportunity_log`` tables declared ``decision_tier`` as
-        NOT NULL, which forced current directional writes to invent a tier.
-        SQLite cannot alter nullability in place, so rebuild only when the
-        old constraint is detected.  All existing columns/rows are copied;
-        the current ORM definition then permits direction-only inserts.
-        """
-        if not self._url.startswith("sqlite"):
-            return
-        async with self._engine.begin() as conn:
-            for model, column_name in (
-                (PropOpportunityLog, "decision_tier"),
-                (PropCandidateLog, "gate_decision"),
-            ):
-                table_name = model.__tablename__
-                result = await conn.execute(
-                    text(f"PRAGMA table_info({table_name})")
-                )
-                info = result.fetchall()
-                legacy_column = next(
-                    (row for row in info if row[1] == column_name),
-                    None,
-                )
-                if legacy_column is None or not bool(legacy_column[3]):
-                    continue
-
-                existing = {row[1] for row in info}
-                model_columns = [
-                    column.name
-                    for column in model.__table__.columns
-                    if column.name in existing
-                ]
-                columns_sql = ", ".join(f'"{name}"' for name in model_columns)
-                migration_table = f"{table_name}__legacy_migration"
-                create_sql = str(
-                    CreateTable(model.__table__).compile(
-                        dialect=conn.dialect,
-                    )
-                ).replace(
-                    f"CREATE TABLE {table_name}",
-                    f"CREATE TABLE {migration_table}",
-                    1,
-                )
-                await conn.execute(text(create_sql))
-                await conn.execute(text(
-                    f"INSERT INTO {migration_table} ({columns_sql}) "
-                    f"SELECT {columns_sql} FROM {table_name}"
-                ))
-                await conn.execute(text(f"DROP TABLE {table_name}"))
-                await conn.execute(text(
-                    f"ALTER TABLE {migration_table} RENAME TO {table_name}"
-                ))
-        logger.info(
-            "_migrate_prop_score_compat_v1: made legacy prop columns nullable "
-            "without dropping historical rows"
-        )
-
     async def _migrate_slip_journal_leg_v1(self) -> None:
         """Add provider identity to journal legs without changing old entries."""
         async with self._engine.begin() as conn:
@@ -6170,9 +6192,9 @@ class Database:
         stat_type: str,
         line_value: float,
         recommendation: str,            # Current writes: OVER | UNDER
-        decision_tier: "Optional[str]" = None,  # Historical compatibility only
-        confidence: int = 0,
-        game_time: "Optional[datetime]" = None,
+        decision_tier: str,             # Legacy score metadata
+        confidence: int,
+        game_time: "Optional[datetime]",
         game_id: str = "",
         # Phase 2 enrichment — optional, captured at alert time
         stars:       "Optional[int]"   = None,   # 0–5 stars
@@ -6180,7 +6202,7 @@ class Database:
         explanation: "Optional[str]"   = None,   # reason / narrative excerpt
         # Phase 4 Evidence Infrastructure — optional
         provider:           "Optional[str]"  = None,   # "Underdog" | "PrizePicks"
-        bet_quality_score:  "Optional[int]"  = None,   # Historical compatibility only
+        bet_quality_score:  "Optional[int]"  = None,   # 0-100 (== confidence for now)
         qualification_path: "Optional[list]" = None,   # gates passed, JSON-encoded
         reason_codes:       "Optional[list]" = None,   # structured codes, JSON-encoded
         watchlist_state:    "Optional[str]"  = None,   # Legacy compatibility; ignored on writes
@@ -6193,16 +6215,15 @@ class Database:
         intentionally not persisted as PASS/watchlist opportunities.
 
         On conflict with the same (external_id, stat_type) — i.e. the prop was
-        re-evaluated in a later cycle — updates direction, confidence, line
-        value, and enrichment to reflect the latest decision.  Legacy score
-        metadata is deliberately not required or refreshed.
+        re-evaluated in a later cycle — updates recommendation, tier, confidence,
+        line_value, and enrichment to reflect the latest decision.
         Preserves any existing grading (result / actual_value / graded_at) so
         re-evaluation does not wipe a completed outcome.
 
         Extended result codes accepted by grade_opportunity:
           HIT | MISS | PUSH | PENDING | VOID | CANCELLED | INJURY_VOID | GAME_INTERRUPTED
         """
-        payload = {
+        await self.log_prop_opportunity_bulk([{
             "external_id": external_id,
             "player_name": player_name,
             "team": team,
@@ -6210,6 +6231,7 @@ class Database:
             "stat_type": stat_type,
             "line_value": line_value,
             "recommendation": recommendation,
+            "decision_tier": decision_tier,
             "confidence": confidence,
             "game_time": game_time,
             "game_id": game_id,
@@ -6217,18 +6239,12 @@ class Database:
             "risk_level": risk_level,
             "explanation": explanation,
             "provider": provider,
+            "bet_quality_score": bet_quality_score,
             "qualification_path": qualification_path,
             "reason_codes": reason_codes,
             "watchlist_state": watchlist_state,
             "downstream_intelligence": downstream_intelligence,
-        }
-        # Older callers may still provide historical score metadata. Preserve
-        # it when explicitly supplied, while direction-only callers omit it.
-        if decision_tier is not None:
-            payload["decision_tier"] = decision_tier
-        if bet_quality_score is not None:
-            payload["bet_quality_score"] = bet_quality_score
-        await self.log_prop_opportunity_bulk([payload])
+        }])
         return
 
     async def track_prop_records(
@@ -6471,11 +6487,12 @@ class Database:
             _external_id = _stored_opportunity_external_id(_external_id, _provider)
             _stat_type = str(_stat_type)
             _confidence = opportunity.get("confidence", 0)
+            _bet_quality = opportunity.get("bet_quality_score")
             _intelligence = opportunity.get("downstream_intelligence")
             if _intelligence is None:
                 _intelligence = build_downstream_payload(
                     evidence={},
-                    bet_quality=None,
+                    bet_quality=_bet_quality,
                     bet_confidence=_confidence,
                     sample_size=0,
                 )
@@ -6507,9 +6524,8 @@ class Database:
             )
 
             # The active monitoring universe has no secondary classification.
-            # Keep legacy values only when an older caller explicitly supplied
-            # them, so current writes do not require or refresh score fields.
-            prepared_row = {
+            # Keep the nullable column only for compatibility with old databases.
+            prepared_by_identity[(_external_id, _stat_type)] = {
                 "external_id": _external_id,
                 "player_name": opportunity.get("player_name"),
                 "team": opportunity.get("team"),
@@ -6517,6 +6533,7 @@ class Database:
                 "stat_type": _stat_type,
                 "line_value": opportunity.get("line_value"),
                 "recommendation": _recommendation,
+                "decision_tier": opportunity.get("decision_tier"),
                 "confidence": _confidence,
                 "game_time": opportunity.get("game_time"),
                 "game_id": str(opportunity.get("game_id") or ""),
@@ -6529,20 +6546,15 @@ class Database:
                 "explanation": opportunity.get("explanation"),
                 "recommendation_id": _rec_id,
                 "provider": _provider,
+                "bet_quality_score": _bet_quality,
                 "qualification_path": _qpath,
                 "reason_codes": _rcodes,
+                "watchlist_state": None,
                 "downstream_intelligence_json": _intel_json,
                 "evidence_completeness": _intel_completeness,
                 "sharp_confidence": _sharp_confidence,
                 "sharp_confidence_components": _sharp_components,
             }
-            if "decision_tier" in opportunity:
-                prepared_row["decision_tier"] = opportunity.get("decision_tier")
-            if "bet_quality_score" in opportunity:
-                prepared_row["bet_quality_score"] = opportunity.get("bet_quality_score")
-            if "watchlist_state" in opportunity:
-                prepared_row["watchlist_state"] = opportunity.get("watchlist_state")
-            prepared_by_identity[(_external_id, _stat_type)] = prepared_row
 
         prepared = list(prepared_by_identity.values())
         if not prepared:
@@ -6559,6 +6571,7 @@ class Database:
                     column: getattr(_insert_stmt.excluded, column)
                     for column in (
                         "recommendation",
+                        "decision_tier",
                         "confidence",
                         "line_value",
                         "game_id",
@@ -6567,20 +6580,16 @@ class Database:
                         "explanation",
                         "recommendation_id",
                         "provider",
+                        "bet_quality_score",
                         "qualification_path",
                         "reason_codes",
+                        "watchlist_state",
                         "downstream_intelligence_json",
                         "evidence_completeness",
                         "sharp_confidence",
                         "sharp_confidence_components",
                     )
                 }
-                if any("decision_tier" in row for row in rows):
-                    _update_columns["decision_tier"] = _insert_stmt.excluded.decision_tier
-                if any("bet_quality_score" in row for row in rows):
-                    _update_columns["bet_quality_score"] = _insert_stmt.excluded.bet_quality_score
-                if any("watchlist_state" in row for row in rows):
-                    _update_columns["watchlist_state"] = _insert_stmt.excluded.watchlist_state
                 stmt = _insert_stmt.on_conflict_do_update(
                     index_elements=["external_id", "stat_type"],
                     set_=_update_columns,
@@ -6601,8 +6610,8 @@ class Database:
 
         Each dict must have keys matching PropCandidateLog columns.
         Keys: scan_ts, player_name, team, sport, stat_type, line_value,
-              provider, confidence, reason_codes (pre-serialised JSON str),
-              snapshot_external_id. Legacy score/gate keys are ignored.
+              provider, score_total, score_tier, confidence, gate_decision,
+              rejection_reason, reason_codes (pre-serialised JSON str), snapshot_external_id.
 
         Returns count of rows inserted.
         """
@@ -6620,6 +6629,8 @@ class Database:
                     stat_type            = c.get("stat_type", ""),
                     line_value           = float(c.get("line_value") or 0.0),
                     provider             = c.get("provider", "Underdog"),
+                    score_total          = c.get("score_total"),
+                    score_tier           = c.get("score_tier"),
                     confidence           = c.get("confidence"),
                     gate_decision        = c.get("gate_decision", "EVALUATED"),
                     rejection_reason     = c.get("rejection_reason"),
