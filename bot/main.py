@@ -748,7 +748,7 @@ async def post_init(application: Application) -> None:
     # exposed as an independent Telegram provider.
     from providers.propline import PropLinePrizePicksProvider
     _propline_enabled = PropLinePrizePicksProvider(
-        bookmaker=config.PROPLINE_UNDERDOG_BOOKMAKER
+        bookmaker=config.PROPLINE_PRIZEPICKS_BOOKMAKER
     ).is_available()
     # OddsAPI is registered so quota headers (x-requests-remaining/used) recorded
     # by OddsApiCache._fetch() appear in /status and health logs.

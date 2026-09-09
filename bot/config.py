@@ -128,6 +128,12 @@ class Config:
     PROPLINE_UNDERDOG_BOOKMAKER: str = os.environ.get(
         "PROPLINE_UNDERDOG_BOOKMAKER", "underdog"
     )
+    # PropLine's PrizePicks ingestion lane must use the PrizePicks namespace.
+    # Keep the Underdog setting above for the separate history/reconciliation
+    # adapter that still evaluates Underdog-owned rows.
+    PROPLINE_PRIZEPICKS_BOOKMAKER: str = os.environ.get(
+        "PROPLINE_PRIZEPICKS_BOOKMAKER", "prizepicks"
+    )
     # Minimum edge % vs sportsbook fair probability to trigger a PP alert.
     MIN_PP_EDGE: float = float(os.environ.get("MIN_PP_EDGE", "5.0"))
     # Minimum fair probability at the PP line to alert (filters razor-thin lines).
