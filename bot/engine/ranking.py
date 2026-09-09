@@ -133,10 +133,17 @@ class HistoricalBreakdown:
     clv_adj:      int = 0   # ±3 from historical CLV
     market_adj:   int = 0   # ±2 from market-type performance
     ml_adj:       int = 0   # ±0 until ML model is trained
+    adaptive_adj: int = 0   # ±2 from audited provider-aware weights
 
     @property
     def total(self) -> int:
-        return self.overall_adj + self.clv_adj + self.market_adj + self.ml_adj
+        return (
+            self.overall_adj
+            + self.clv_adj
+            + self.market_adj
+            + self.ml_adj
+            + self.adaptive_adj
+        )
 
 
 @dataclass
@@ -160,6 +167,7 @@ class RankingResult:
     overall_history: Optional[HistoricalStats]
     market_history:  Optional[HistoricalStats]
     sport_history:   Optional[HistoricalStats]
+    adaptive_weight_version: Optional[str] = None
 
     # ── Display helpers ───────────────────────────────────────────────────────
 
