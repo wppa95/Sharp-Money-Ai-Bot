@@ -6357,6 +6357,51 @@ class Database:
             except Exception:
                 pass
 
+    async def repair_underdog_opportunity_game_ids(self) -> int:
+        """Repair blank opportunity event IDs from retained UD snapshots.
+
+        This is intentionally explicit maintenance, not startup work: the
+        snapshot ledger is append-only and large, so a historical repair must
+        never delay the monitoring process from becoming healthy.
+        """
+        repaired = 0
+        async with self._engine.begin() as conn:
+            try:
+                result = await conn.execute(text(
+                    """
+                    UPDATE prop_opportunity_log
+                    SET game_id = (
+                        SELECT snapshot.game_id
+                        FROM underdog_snapshots AS snapshot
+                        WHERE snapshot.external_id =
+                              prop_opportunity_log.external_id
+                          AND trim(coalesce(snapshot.game_id, '')) <> ''
+                        LIMIT 1
+                    )
+                    WHERE trim(coalesce(prop_opportunity_log.game_id, '')) = ''
+                      AND EXISTS (
+                        SELECT 1
+                        FROM underdog_snapshots AS snapshot
+                        WHERE snapshot.external_id =
+                              prop_opportunity_log.external_id
+                          AND trim(coalesce(snapshot.game_id, '')) <> ''
+                    )
+                    """
+                ))
+                if result.rowcount:
+                    repaired = int(result.rowcount)
+                    logger.info(
+                        "repair_underdog_opportunity_game_ids: repaired %d "
+                        "missing Underdog event IDs",
+                        repaired,
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "repair_underdog_opportunity_game_ids: backfill skipped: %s",
+                    exc,
+                )
+        return repaired
+
     async def _migrate_slip_journal_leg_v1(self) -> None:
         """Add provider identity to journal legs without changing old entries."""
         async with self._engine.begin() as conn:
@@ -6783,6 +6828,16 @@ class Database:
                         "sharp_confidence_components",
                     )
                 }
+                # A compatibility caller may not carry event identity even
+                # though the existing opportunity already has it. Never let
+                # an empty later observation erase a known settlement key.
+                _update_columns["game_id"] = case(
+                    (
+                        func.trim(_insert_stmt.excluded.game_id) != "",
+                        _insert_stmt.excluded.game_id,
+                    ),
+                    else_=PropOpportunityLog.game_id,
+                )
                 stmt = _insert_stmt.on_conflict_do_update(
                     index_elements=["external_id", "stat_type"],
                     set_=_update_columns,

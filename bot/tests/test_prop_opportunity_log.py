@@ -21,6 +21,7 @@ from database import (
     PlayerGameResult,
     PropOpportunityLog,
     PropTrackingLog,
+    UnderdogSnapshotRecord,
 )
 
 
@@ -604,6 +605,85 @@ class TestBulkPropOpportunityLog:
         assert row.result == "HIT"
         assert row.actual_value == 3.0
         assert row.graded_at is not None
+
+    @pytest.mark.asyncio
+    async def test_bulk_upsert_does_not_erase_event_identity_with_blank_value(
+        self, db: Database
+    ) -> None:
+        base = {
+            "external_id": "event-identity",
+            "player_name": "Event Player",
+            "team": "TEAM",
+            "sport": "MLB",
+            "stat_type": "Hits",
+            "line_value": 1.5,
+            "recommendation": "OVER",
+            "decision_tier": "A",
+            "confidence": 80,
+            "game_time": _future(6),
+            "game_id": "144297",
+            "provider": "Underdog",
+        }
+        await db.log_prop_opportunity_bulk([base])
+        await db.log_prop_opportunity_bulk([dict(base, game_id="")])
+
+        async with db.session() as s:
+            from sqlalchemy import select
+
+            result = await s.execute(
+                select(PropOpportunityLog).where(
+                    PropOpportunityLog.external_id == "event-identity"
+                )
+            )
+            row = result.scalar_one()
+
+        assert row.game_id == "144297"
+
+    @pytest.mark.asyncio
+    async def test_event_identity_backfill_uses_matching_underdog_snapshot(
+        self, db: Database
+    ) -> None:
+        async with db.session() as s:
+            s.add(UnderdogSnapshotRecord(
+                external_id="snapshot-event",
+                player_name="Event Player",
+                team="TEAM",
+                sport="MLB",
+                stat_type="Hits",
+                line_value=1.5,
+                game_id="144297",
+                game_time=_future(6),
+            ))
+            s.add(PropOpportunityLog(
+                external_id="snapshot-event",
+                player_name="Event Player",
+                team="TEAM",
+                sport="MLB",
+                stat_type="Hits",
+                line_value=1.5,
+                recommendation="OVER",
+                decision_tier="A",
+                confidence=80,
+                game_time=_future(6),
+                game_id="",
+                provider="Underdog",
+                result="PENDING",
+            ))
+            await s.commit()
+
+        await db.repair_underdog_opportunity_game_ids()
+
+        async with db.session() as s:
+            from sqlalchemy import select
+
+            result = await s.execute(
+                select(PropOpportunityLog).where(
+                    PropOpportunityLog.external_id == "snapshot-event"
+                )
+            )
+            row = result.scalar_one()
+
+        assert row.game_id == "144297"
 
     @pytest.mark.asyncio
     async def test_bulk_persists_evidence_and_intelligence_summaries(

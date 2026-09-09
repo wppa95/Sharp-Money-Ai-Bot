@@ -1324,6 +1324,17 @@ async def _grade_opportunities_job(context) -> None:
                 else:
                     for _gr in _all_grade_results:
                         await db.upsert_player_result(_gr)
+                # Keep the in-memory diagnostic population aligned with the
+                # rows just fetched.  Settlement still requires the exact
+                # event/date below, but this lets the report distinguish
+                # missing settlement evidence from a player with no history.
+                for _gr in _all_grade_results:
+                    _gr_key = (
+                        str(getattr(_gr, "player_name", "") or ""),
+                        str(getattr(_gr, "sport", "") or ""),
+                        str(getattr(_gr, "stat_type", "") or "").lower().strip(),
+                    )
+                    _stored_grade_results.setdefault(_gr_key, []).append(_gr)
             except Exception as _prov_fetch_exc:
                 logger.warning(
                     "_grade_opportunities_job: stat provider fetch/persist failed: %s",
@@ -1401,8 +1412,20 @@ async def _grade_opportunities_job(context) -> None:
         no_data  = 0
         date_shifted = 0
         no_data_by_sport: dict[str, int] = defaultdict(int)
+        historical_evidence_available = 0
+        no_historical_evidence = 0
+        historical_evidence_by_sport: dict[str, int] = defaultdict(int)
         _tracked_grades: list[tuple[int, str, float]] = []
         _opportunity_grades: list[dict[str, Any]] = []
+
+        def _stored_history_for(opp) -> list:
+            _key = (
+                str(getattr(opp, "player_name", "") or ""),
+                str(getattr(opp, "sport", "") or ""),
+                str(getattr(opp, "stat_type", "") or "").lower().strip(),
+            )
+            return _stored_grade_results.get(_key, [])
+
         for opp in pending:
             game_date = (
                 opp.game_time.strftime("%Y-%m-%d")
@@ -1438,6 +1461,13 @@ async def _grade_opportunities_job(context) -> None:
             if not game_date and not getattr(opp, "game_id", ""):
                 no_data += 1
                 no_data_by_sport[str(getattr(opp, "sport", "UNKNOWN")).upper()] += 1
+                if _stored_history_for(opp):
+                    historical_evidence_available += 1
+                    historical_evidence_by_sport[
+                        str(getattr(opp, "sport", "UNKNOWN")).upper()
+                    ] += 1
+                else:
+                    no_historical_evidence += 1
                 continue
             _result_lookup_kwargs = {}
             if getattr(opp, "game_id", ""):
@@ -1503,6 +1533,13 @@ async def _grade_opportunities_job(context) -> None:
             if result_row is None:
                 no_data += 1
                 no_data_by_sport[str(getattr(opp, "sport", "UNKNOWN")).upper()] += 1
+                if _stored_history_for(opp):
+                    historical_evidence_available += 1
+                    historical_evidence_by_sport[
+                        str(getattr(opp, "sport", "UNKNOWN")).upper()
+                    ] += 1
+                else:
+                    no_historical_evidence += 1
                 logger.debug(
                     "_grade_opportunities_job: no result for %s | %s | %s | %s",
                     opp.player_name, opp.sport, opp.stat_type,
@@ -1586,11 +1623,16 @@ async def _grade_opportunities_job(context) -> None:
         if graded or no_data:
             logger.info(
                 "_grade_opportunities_job: graded=%d opportunities "
-                "(no_data=%d date_shifted=%d no_data_by_sport=%s)",
+                "(no_data=%d date_shifted=%d historical_evidence_available=%d "
+                "no_historical_evidence=%d no_data_by_sport=%s "
+                "historical_evidence_by_sport=%s)",
                 graded,
                 no_data,
                 date_shifted,
+                historical_evidence_available,
+                no_historical_evidence,
                 dict(sorted(no_data_by_sport.items())),
+                dict(sorted(historical_evidence_by_sport.items())),
             )
         _ht_g = get_health_tracker()
         if _ht_g:

@@ -90,6 +90,17 @@ from engine.provider_confirmation import (
     normalize_market,
     normalize_name,
 )
+
+
+def _snapshot_event_id(snapshot) -> str:
+    """Return the provider event identity from any supported snapshot shape."""
+    for attr in ("event", "game_id", "event_id", "match_id"):
+        value = getattr(snapshot, attr, None)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ""
+
+
 from alerts import AlertDelivery, broadcast_alert, identify_sharp_books
 from alerts_multiplatform import (
     format_steam_multibook_alert,
@@ -4513,11 +4524,7 @@ async def underdog_job(context) -> None:
             _snapshot_line = float(_snapshot.line or 0.0)
         except (TypeError, ValueError):
             _snapshot_line = 0.0
-        _snapshot_game_id = str(
-            getattr(_snapshot, "event", "")
-            or getattr(_snapshot, "game_id", "")
-            or ""
-        )
+        _snapshot_game_id = _snapshot_event_id(_snapshot)
         _snapshot_external_id = str(
             getattr(_snapshot, "external_id", "") or ""
         )
@@ -4649,7 +4656,7 @@ async def underdog_job(context) -> None:
             continue
         if _tracked_line < 0:
             continue
-        _tracked_game_id = str(getattr(_tracked_snap, "game_id", "") or "").strip()
+        _tracked_game_id = _snapshot_event_id(_tracked_snap)
         _tracked_external = str(
             getattr(_tracked_snap, "external_id", "") or ""
         ).strip()
@@ -5053,7 +5060,7 @@ async def underdog_job(context) -> None:
                                 decision_tier     = decision.decision_tier,
                                 confidence        = decision.confidence,
                                 game_time         = snap.game_time,
-                                game_id           = getattr(snap, "game_id", "") or "",
+                                game_id           = _snapshot_event_id(snap),
                                 provider          = "Underdog",
                                 bet_quality_score = decision.confidence,
                                 reason_codes      = _compute_reason_codes(score, decision),
@@ -5354,7 +5361,7 @@ async def underdog_job(context) -> None:
                                     decision_tier     = decision.decision_tier,
                                     confidence        = decision.confidence,
                                     game_time         = snap.game_time,
-                                    game_id           = getattr(snap, "game_id", "") or "",
+                                    game_id           = _snapshot_event_id(snap),
                                     provider          = "Underdog",
                                     bet_quality_score = decision.confidence,
                                     reason_codes      = _compute_reason_codes(score, decision),
@@ -6039,7 +6046,7 @@ async def underdog_job(context) -> None:
                         decision_tier     = _sdec.decision_tier,
                         confidence        = _sdec.confidence,
                         game_time         = _ssnap.game_time,
-                        game_id           = getattr(_ssnap, "game_id", "") or "",
+                        game_id           = _snapshot_event_id(_ssnap),
                         provider          = "Underdog",
                         bet_quality_score = _sdec.confidence,
                         reason_codes      = _compute_reason_codes(_sscore, _sdec),
@@ -8274,7 +8281,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         "decision_tier": getattr(_fpr_dec, "decision_tier", None),
                         "confidence": getattr(_fpr_dec, "confidence", 0),
                         "game_time": getattr(_fpr_snap, "game_time", None),
-                        "game_id": getattr(_fpr_snap, "game_id", "") or "",
+                        "game_id": _snapshot_event_id(_fpr_snap),
                         "provider": _fpr_provider,
                         "bet_quality_score": float(getattr(_fpr_score, "total", 0) or 0),
                         "reason_codes": _compute_reason_codes(_fpr_score, _fpr_dec),
