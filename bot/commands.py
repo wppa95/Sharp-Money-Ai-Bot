@@ -5275,12 +5275,26 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 normalized_evaluated_by_sport = (
                     summary.get("evaluated_by_sport", {}) or {}
                 )
+                # A live session can have FPR sport telemetry while the
+                # normalized history aggregate has no per-sport active rows
+                # yet (for example, immediately after a restart or when the
+                # compatibility candidate fallback supplied the aggregate
+                # totals).  Keep those rows visible instead of rendering an
+                # empty table beneath populated pipeline totals.
+                legacy_by_sport = {
+                    str(row.get("sport") or "").strip(): row
+                    for row in (by_sport or [])
+                    if isinstance(row, dict)
+                    and _has_reportable_sport_name(row.get("sport"))
+                }
                 _sports = (
                     set(normalized_by_sport)
                     | set(normalized_observed_by_sport)
                     | set(normalized_evaluated_by_sport)
                     | set(normalized_directional_by_sport)
                     | set(normalized_delivered_by_sport)
+                    | set(_fpr_by_sport)
+                    | set(legacy_by_sport)
                 )
                 for sport in sorted(
                     (sport for sport in _sports if _has_reportable_sport_name(sport)),
@@ -5291,9 +5305,22 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 ):
                     # Escape dynamic sport name to prevent HTML parse errors
                     sp = _html.escape(str(sport)[:6])
-                    sc = normalized_by_sport.get(sport, 0)
+                    legacy_row = legacy_by_sport.get(str(sport), {})
+                    sc = normalized_by_sport.get(
+                        sport,
+                        _fpr_by_sport.get(
+                            sport,
+                            legacy_row.get("tracked", 0),
+                        ),
+                    )
                     so = normalized_observed_by_sport.get(sport, 0)
-                    se = normalized_evaluated_by_sport.get(sport, 0)
+                    se = normalized_evaluated_by_sport.get(
+                        sport,
+                        legacy_row.get(
+                            "evaluated",
+                            _fpr_by_sport.get(sport, 0),
+                        ),
+                    )
                     sa = normalized_directional_by_sport.get(sport, 0)
                     sd = normalized_delivered_by_sport.get(sport, 0)
                     _sport_table_lines.append(

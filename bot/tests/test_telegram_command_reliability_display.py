@@ -471,6 +471,44 @@ async def test_funnel_single_scan_reports_age_not_report_window_as_duration():
 
 
 @pytest.mark.asyncio
+async def test_funnel_sport_breakdown_uses_fpr_rows_when_normalized_sport_maps_are_empty():
+    """FPR telemetry must not be hidden by an empty normalized aggregate."""
+    update, context = _update_and_context()
+    db = MagicMock()
+    db.get_scan_cycle_summary = AsyncMock(return_value={"cycles": 0})
+    db.get_funnel_summary = AsyncMock(return_value={
+        "active_tracked": 0,
+        "historical_observations": 0,
+        "evaluated": 12,
+        "directional_total": 4,
+        "delivered": 1,
+        "active_by_sport": {},
+        "observations_by_sport": {},
+        "evaluated_by_sport": {},
+        "directional_by_sport": {},
+        "delivered_by_sport": {},
+    })
+    health = MagicMock()
+    health.get_fpr_stats.return_value = {
+        "pool_size": 12,
+        "fpr_rescored": 12,
+        "fpr_by_sport": {"MLB": 8, "NBA": 4},
+    }
+
+    with (
+        patch("commands._check_allowed", return_value=True),
+        patch("commands._db", db),
+        patch("engine.health.get_health_tracker", return_value=health),
+    ):
+        await commands.cmd_funnel(update, context)
+
+    message = update.message.reply_text.await_args.args[0]
+    table = message.split("Sport Funnel Breakdown", 1)[1]
+    assert re.search(r"MLB\s+0\s+8\s+8\s+0\s+0", table)
+    assert re.search(r"NBA\s+0\s+4\s+4\s+0\s+0", table)
+
+
+@pytest.mark.asyncio
 async def test_funnel_uses_cycle_log_when_normalized_population_query_times_out():
     update, context = _update_and_context(["1"])
     db = MagicMock()
