@@ -12,6 +12,7 @@ import json as _json
 import logging
 import time
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any, Optional
 
 from httpx import ReadError
@@ -1735,6 +1736,62 @@ def _has_current_prop_data(
     )
 
 
+def _display_prop_from_opportunity(opportunity: Any) -> Any:
+    """Adapt the canonical delivered opportunity to the pick/slip row shape."""
+    confidence = getattr(opportunity, "bet_quality_score", None)
+    if confidence is None:
+        confidence = getattr(opportunity, "confidence", None)
+    try:
+        confidence = float(confidence) if confidence is not None else None
+    except (TypeError, ValueError):
+        confidence = None
+    tier = str(getattr(opportunity, "decision_tier", "") or "").upper()
+    if tier not in {"S", "A", "B"}:
+        tier = (
+            "S" if (confidence or 0) >= 85
+            else "A" if (confidence or 0) >= 70
+            else "B"
+        )
+    return SimpleNamespace(
+        provider="Underdog",
+        product="player_props",
+        player_name=getattr(opportunity, "player_name", ""),
+        team=getattr(opportunity, "team", "") or "",
+        sport=getattr(opportunity, "sport", ""),
+        stat_type=getattr(opportunity, "stat_type", ""),
+        line_value=getattr(opportunity, "line_value", 0.0),
+        game_time=getattr(opportunity, "game_time", None),
+        provider_status=None,
+        external_id=getattr(opportunity, "external_id", "") or "",
+        game_id=getattr(opportunity, "game_id", "") or "",
+        fetched_at=(
+            getattr(opportunity, "alert_sent_at", None)
+            or getattr(opportunity, "detected_at", None)
+            or datetime.utcnow()
+        ),
+        first_seen=getattr(opportunity, "detected_at", None),
+        prev_line=None,
+        opening_line=None,
+        removed=False,
+        score_tier=tier,
+        bet_recommendation=getattr(opportunity, "recommendation", None),
+        bet_confidence=confidence,
+        score_total=confidence or 1,
+        market_quality_score=(
+            getattr(opportunity, "bet_quality_score", None)
+            or confidence
+            or 1
+        ),
+        alert_sent=True,
+        canonical_alert=True,
+        result=getattr(opportunity, "result", "PENDING"),
+    )
+
+
+def _is_canonical_alert_prop(prop: Any) -> bool:
+    return bool(getattr(prop, "canonical_alert", False))
+
+
 def _pick_source_identity(provider: str, prop: Any) -> tuple[str, ...]:
     """Provider-owned identity for current /picks rows."""
     source_id = str(
@@ -1806,11 +1863,12 @@ def _select_directional_provider_rows(
     for provider, prop in (("Underdog", row) for row in ud_props):
         effective_rec = getattr(prop, "bet_recommendation", None)
         if provider == "Underdog":
-            live_rec, _ = rec_map.get(
-                _ud_recommendation_identity(prop),
-                (None, None),
-            )
-            if str(live_rec or "").strip().upper() in ("OVER", "UNDER"):
+            if not _is_canonical_alert_prop(prop):
+                live_rec, _ = rec_map.get(
+                    _ud_recommendation_identity(prop),
+                    (None, None),
+                )
+                if str(live_rec or "").strip().upper() in ("OVER", "UNDER"):
                     effective_rec = str(live_rec).strip().upper()
         if effective_rec not in ("OVER", "UNDER"):
             continue
@@ -1879,6 +1937,7 @@ class PropPickAdapter:
         "game_description", "confidence", "tier", "best_edge",
         "best_side", "pp_line_value", "prev_line", "opening_line",
         "sportsbook", "external_id", "game_id", "result", "detected_at", "comp",
+        "canonical_alert",
     )
 
     def __init__(
@@ -1903,6 +1962,7 @@ class PropPickAdapter:
         self.result      = None
         self.sportsbook  = getattr(plh, "provider", None) or "Underdog"
         self.comp        = comp
+        self.canonical_alert = _is_canonical_alert_prop(plh)
 
         # Prefer a verified comparison confidence, then persisted engine
         # output. Never manufacture the old ``40`` fallback for report views.
@@ -2102,6 +2162,40 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if sport_filter:
         ud_props = [p for p in ud_props if p.sport.upper() == sport_filter]
+
+    # Delivered opportunities are the canonical actionable population. Merge
+    # them ahead of the live observation pool so a later removed/PASS snapshot
+    # cannot make a sent alert disappear from /picks.
+    try:
+        _alerted_opps = await _bounded(
+            _db.get_current_actionable_opportunities(limit=500)
+        )
+    except Exception as _alerted_exc:
+        logger.warning("cmd_picks: delivered opportunity lookup failed: %s", _alerted_exc)
+        _alerted_opps = []
+    _canonical_props = [
+        _display_prop_from_opportunity(row)
+        for row in (_alerted_opps or [])
+        if not _is_season_future(getattr(row, "stat_type", ""))
+        and _is_active_display_sport(getattr(row, "sport", None))
+        and not is_telegram_suppressed_sport(getattr(row, "sport", None))
+        and _is_upcoming_game(
+            getattr(row, "game_time", None),
+            getattr(row, "provider_status", None),
+        )
+        and (
+            not sport_filter
+            or str(getattr(row, "sport", "")).upper() == sport_filter
+        )
+    ]
+    _seen_pick_ids = {
+        _pick_source_identity("Underdog", row)
+        for row in _canonical_props
+    }
+    ud_props = _canonical_props + [
+        row for row in ud_props
+        if _pick_source_identity("Underdog", row) not in _seen_pick_ids
+    ]
 
     # PropLine is an internal evidence source, not a separate Telegram
     # provider. Keep the bounded legacy read for comparison compatibility, but
@@ -2327,6 +2421,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         _live_r, _ = _rec_map.get(_ud_recommendation_identity(plh), (None, None))
         if (
             (getattr(plh, "provider", None) or "Underdog") == "Underdog"
+            and not _is_canonical_alert_prop(plh)
             and _live_r is not None
         ):
             _eff_rec = _live_r
@@ -2406,6 +2501,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         # Prefer live snapshot if available; fall back to synced column
         if (
             (getattr(plh, "provider", None) or "Underdog") == "Underdog"
+            and not _is_canonical_alert_prop(plh)
             and _live_rec is not None
         ):
             bet_rec = _live_rec
@@ -3044,6 +3140,24 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         ),
         fallback=[],
     )
+    try:
+        _alerted_opps = await _report_read(
+            _db.get_current_actionable_opportunities(limit=500),
+            fallback=[],
+        )
+    except Exception:
+        _alerted_opps = []
+    _canonical_props = [
+        _display_prop_from_opportunity(row)
+        for row in (_alerted_opps or [])
+        if not _is_season_future(getattr(row, "stat_type", ""))
+        and _is_active_display_sport(getattr(row, "sport", None))
+        and not is_telegram_suppressed_sport(getattr(row, "sport", None))
+        and _is_upcoming_game(
+            getattr(row, "game_time", None),
+            getattr(row, "provider_status", None),
+        )
+    ]
     # Display filter: hide season-long futures and already-started events
     # (stored & tracked as normal).
     ud_props = [
@@ -3057,6 +3171,14 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             getattr(p, "game_time", None),
             getattr(p, "provider_status", None),
         )
+    ]
+    _seen_slip_ids = {
+        _pick_source_identity("Underdog", row)
+        for row in _canonical_props
+    }
+    ud_props = _canonical_props + [
+        row for row in ud_props
+        if _pick_source_identity("Underdog", row) not in _seen_slip_ids
     ]
     # PropLine is internal evidence for Underdog, not a separate Telegram
     # provider. Only Underdog-owned rows enter the slip display.
@@ -3111,7 +3233,11 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         for _cand, (_provider, _plh) in zip(_candidates, provider_props):
             _k = _ud_recommendation_identity(_plh)
             _lr, _ = _slip_rec_map.get(_k, (None, None))
-            if _cand.sportsbook == "Underdog" and _lr in ("OVER", "UNDER"):
+            if (
+                _cand.sportsbook == "Underdog"
+                and not _cand.canonical_alert
+                and _lr in ("OVER", "UNDER")
+            ):
                 _cand.best_side = _lr
     except Exception as _slip_rec_exc:
         logger.debug("cmd_slip: rec_map lookup failed: %s", _slip_rec_exc)
@@ -3234,51 +3360,6 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             report.to_telegram(),
             parse_mode=ParseMode.HTML,
         )
-
-    # ── Supplemental stat-provider status ─────────────────────────────────────
-    # Provider pipeline, activity counts, and recent props are rendered once by
-    # DashboardReport. Keep only enrichment-provider status here.
-    try:
-        pm_lines: list[str] = ["📊 <b>Stat Providers</b>", ""]
-
-        # Stat providers (historical enrichment for hit-rate pipeline)
-        try:
-            from engine.health import get_health_tracker as _get_ht_dash
-            _ht_dash = _get_ht_dash()
-        except Exception:
-            _ht_dash = None
-        from config import config as _cfg_dash
-        _slp_on_dash = getattr(_cfg_dash, "UD_SLEEPER_ENABLED", True)
-        if _ht_dash:
-            _slp_dash = _ht_dash.get_provider_info("Sleeper")
-            if _slp_dash:
-                _slp_d_fetch = _ht_dash.provider_last_fetch_str("Sleeper")
-                _slp_d_streak = _slp_dash.get("error_streak", 0)
-                _slp_d_icon = "✅" if _slp_d_streak == 0 else "⚠️"
-                pm_lines.append(
-                    f"  {_slp_d_icon} <b>Sleeper</b>  NFL enrichment  ·  last sync: {_html.escape(_slp_d_fetch)}"
-                )
-            elif _slp_on_dash:
-                pm_lines.append("  ⚪ <b>Sleeper</b>  NFL enrichment  ·  pending first sync")
-            else:
-                pm_lines.append("  ⏸️ <b>Sleeper</b>  <i>disabled</i>")
-        else:
-            pm_lines.append(f"  {'⚪' if _slp_on_dash else '⏸️'} <b>Sleeper</b>  NFL enrichment")
-        pm_lines.append("  ⚪ <b>ESPN</b>  on-demand gamelog (NBA/NFL/WNBA/MLB)")
-        pm_lines.append("  ⚪ <b>NHL API</b>  on-demand skater/goalie logs")
-
-        # ── Bot health ────────────────────────────────────────────────────────
-        pm_lines += [
-            "",
-            "🤖 <b>Bot</b>",
-            f"  Uptime: {_uptime_str()}",
-        ]
-
-        await update.message.reply_text("\n".join(pm_lines), parse_mode=ParseMode.HTML)
-    except Exception as exc:
-        logger.exception("cmd_dashboard: player prop market section failed: %s", exc)
-        # Non-fatal — main dashboard already sent
-
 
 async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/alerts — Recent player prop alert history."""
@@ -3674,13 +3755,13 @@ async def _cmd_backfill_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                     propline_results_cache[key] = []
             return propline_results_cache[key]
 
-        # All PENDING opportunities whose game already finished (4+ h ago)
-        pending = await _db.get_pending_opportunities(cutoff_hours=4)
+        # All PENDING opportunities whose game finished at least 30 minutes ago.
+        pending = await _db.get_pending_opportunities(cutoff_hours=0.5)
 
         if not pending:
             await update.message.reply_text(
                 "✅ No pending opportunities eligible for grading yet.\n"
-                "<i>Opportunities become eligible 4 h after game_time.</i>",
+                "<i>Opportunities become eligible 30 minutes after game_time.</i>",
                 parse_mode=ParseMode.HTML,
             )
             return
@@ -5201,10 +5282,11 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         lines += [
             "",
             _thick,
-            "🔭 <b>Tracking &amp; Grading Funnel</b>",
+             "🔭 <b>Tracking &amp; Grading Funnel</b>",
             _thick,
             "",
-            f"<i>Current tracking, windowed evaluation, delivery, and grading are separate populations.</i>",
+             f"<i>Scan = feed observations/evaluations. Tracking, delivery, and grading use the "
+             f"same durable opportunity records; they are stages, not a second alert path.</i>",
             "",
             f"📥 Active tracked props: <b>{active:,}</b>",
             f"🧾 Historical observations: <b>{tracked_observations:,}</b>",

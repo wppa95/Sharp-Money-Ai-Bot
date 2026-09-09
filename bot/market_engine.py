@@ -2983,7 +2983,7 @@ async def _run_prizepicks_independent_cycle(
             decision.recommendation,
             float(getattr(score, "total", 0) or 0),
             float(getattr(market_quality, "score", 0) or 0),
-            _has_strong_delivery_evidence(
+            _has_delivery_evidence(
                 score=score,
                 validation=validation,
                 decision=decision,
@@ -3570,13 +3570,12 @@ def _has_strong_delivery_evidence(
     decision: object = None,
     intelligence_trace: object = None,
 ) -> bool:
-    """Return whether existing scoring/validation data supports delivery.
+    """Return whether existing scoring/validation data supports strong delivery.
 
-    This is deliberately a delivery-only check.  It does not change scoring,
-    persistence, grading, or whether a prop is evaluated.  A directional
-    result must have strong completed-result evidence in every required
-    window: 70%+ OVER or 30%- OVER for UNDER across L5, L10, L15, L20,
-    L30, and season.
+    This remains the strict compatibility helper: a directional result must
+    have strong completed-result evidence in every required window. The actual
+    alert gate uses ``_has_delivery_evidence`` below, because a valid
+    lower-volume sport need not have every history window populated.
     """
     def _strong_directional_history(obj: object) -> bool:
         recommendation = str(
@@ -3678,8 +3677,8 @@ def _has_strong_delivery_evidence(
         )
         if enough_games:
             # Validation-only callers use this helper to check provenance
-            # before a decision exists. Actual delivery must also satisfy the
-            # strong directional window rule above.
+            # before a decision exists. Actual strong delivery must also
+            # satisfy the complete directional window rule above.
             return decision is None or _strong_directional_history(decision)
     for obj in (decision, intelligence_trace):
         if isinstance(obj, dict):
@@ -3703,6 +3702,61 @@ def _has_strong_delivery_evidence(
                     _strong_directional_history(obj)
                     and serialized_evidence_supports_delivery(value)
                 ):
+                    return True
+    return False
+
+
+def _has_delivery_evidence(
+    *,
+    validation: object = None,
+    decision: object = None,
+    intelligence_trace: object = None,
+) -> bool:
+    """Return whether a directional candidate has sufficient evidence to send.
+
+    Unlike the strong-label helper, this only requires a provenance-labeled
+    sample or a persisted historical-average/serialized evidence payload.
+    The canonical direction gate still rejects missing or invalid directions.
+    """
+    if bool(getattr(validation, "has_supporting_data", False)):
+        source = str(getattr(validation, "data_source", "") or "").lower().strip()
+        n_real = int(getattr(validation, "n_real_games", 0) or 0)
+        n_supplemental = int(
+            getattr(validation, "n_supplemental_games", 0) or 0
+        )
+        if (
+            (source in {"real", "primary"} and n_real >= 5)
+            or (source == "propline" and n_supplemental >= 5)
+            or (
+                source in {"real+propline", "primary+propline"}
+                and n_real + n_supplemental >= 5
+            )
+        ):
+            return True
+
+        fallback_direction = str(
+            getattr(decision, "recommendation", "")
+            or (decision.get("rec") if isinstance(decision, dict) else "")
+            or ""
+        ).upper()
+        fallback_avg = getattr(decision, "avg_vs_line_pct", None)
+        if (
+            fallback_direction in {"OVER", "UNDER"}
+            and isinstance(fallback_avg, (int, float))
+            and not isinstance(fallback_avg, bool)
+            and (
+                (fallback_direction == "OVER" and fallback_avg > 0)
+                or (fallback_direction == "UNDER" and fallback_avg < 0)
+            )
+        ):
+            return True
+
+    for obj in (decision, intelligence_trace):
+        if isinstance(obj, dict) and serialized_evidence_supports_delivery(obj):
+            return True
+        if obj is not None and not isinstance(obj, dict):
+            for attr in ("evidence", "bet_evidence", "intelligence_trace"):
+                if serialized_evidence_supports_delivery(getattr(obj, attr, None)):
                     return True
     return False
 
@@ -5185,7 +5239,7 @@ async def underdog_job(context) -> None:
                     _np_direction = decision.recommendation if decision else ""
                     _np_gate_ok   = _tier_delivery_gate(
                         snap.sport or "UNKNOWN", _np_direction, 0, 0,
-                        _has_strong_delivery_evidence(
+                        _has_delivery_evidence(
                             score=score, validation=validation, decision=decision,
                             intelligence_trace=_np_intel_trace,
                         ),
@@ -5694,7 +5748,7 @@ async def underdog_job(context) -> None:
                     _lc_direction = decision.recommendation if decision else ""
                     if not is_removed and not _tier_delivery_gate(
                         snap.sport or "UNKNOWN", _lc_direction, 0, 0,
-                        _has_strong_delivery_evidence(
+                        _has_delivery_evidence(
                             score=score, validation=validation, decision=decision,
                             intelligence_trace=_lc_intel_trace,
                         ),
@@ -6119,7 +6173,7 @@ async def underdog_job(context) -> None:
                 _s_direction = _sdec.recommendation if _sdec else ""
                 if not _tier_delivery_gate(
                     _ssport, _s_direction, 0, 0,
-                    _has_strong_delivery_evidence(
+                    _has_delivery_evidence(
                         score=_sscore, validation=_sval, decision=_sdec,
                         intelligence_trace=_s_intel_trace,
                     ),
@@ -6219,7 +6273,7 @@ async def underdog_job(context) -> None:
                 _dq_direction = _dq_dec.recommendation if _dq_dec else ""
                 if not _tier_delivery_gate(
                      _dq_sport, _dq_direction, 0, 0,
-                    _has_strong_delivery_evidence(
+                    _has_delivery_evidence(
                         score=_dq_score, validation=_dq_val, decision=_dq_dec,
                         intelligence_trace=_dq_intel,
                     ),
@@ -7455,7 +7509,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             # ── Tier delivery gate [stable-refresh] ──────────────────────────
             if not _tier_delivery_gate(
                 _sr_sport, _sr_dec.recommendation, 0, 0,
-                _has_strong_delivery_evidence(
+                _has_delivery_evidence(
                     score=_sr_score,
                     validation=_sr_val,
                     decision=_sr_dec,
@@ -8303,7 +8357,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     # ── Direction/evidence delivery gate ─────────────────────
                     _fpr_evidence_ok = _tier_delivery_gate(
                         _fpr_sport, _fpr_dec.recommendation, 0, 0,
-                        _has_strong_delivery_evidence(
+                        _has_delivery_evidence(
                             score=_fpr_score,
                             validation=_fpr_val,
                             decision=_fpr_dec,

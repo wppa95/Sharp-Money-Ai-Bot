@@ -45,3 +45,15 @@ have no per-sport rows after a restart or during database catch-up.
 **How to apply:** Use FPR sport counts as the active/evaluation fallback for
 the table, while preserving normalized observation, directional, and delivery
 counts whenever those populations are available.
+
+Current /picks and /slip views should include recent delivered opportunities
+from durable opportunity/audit identity, then apply future-event and sport-scope
+filters; they must not depend only on the latest mutable feed observation.
+
+**Why:** A later feed refresh can mark a line removed or PASS after Telegram
+accepted the actionable pick, otherwise user-facing reports contradict delivery
+history.
+
+**How to apply:** Prefer the newest identity-complete delivered opportunity for
+command display, preserve its direction, and use live snapshots only as a
+fallback or enrichment source.

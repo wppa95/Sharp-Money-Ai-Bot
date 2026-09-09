@@ -1814,6 +1814,51 @@ class Database:
 
         return _balanced[:limit]
 
+    async def get_current_actionable_opportunities(
+        self,
+        *,
+        limit: int = 100,
+        since_hours: int = 72,
+    ) -> list["PropOpportunityLog"]:
+        """Return recently delivered, still-pregame Underdog opportunities.
+
+        User-facing pick/slip reports must not lose an alert merely because a
+        later feed observation marked its current ``PropLineHistory`` row as
+        removed or PASS.  The delivered opportunity is the durable actionable
+        record; current event timing and sport scope remain presentation gates
+        in the command layer.
+        """
+        from datetime import timedelta
+
+        cutoff = datetime.utcnow() - timedelta(hours=max(1, int(since_hours)))
+        now = datetime.utcnow()
+        async with self.session() as s:
+            result = await s.execute(
+                select(PropOpportunityLog)
+                .where(
+                    PropOpportunityLog.provider == "Underdog",
+                    PropOpportunityLog.recommendation.in_(("OVER", "UNDER")),
+                    PropOpportunityLog.alert_sent == True,  # noqa: E712
+                    PropOpportunityLog.alert_sent_at >= cutoff,
+                    PropOpportunityLog.game_time.isnot(None),
+                    PropOpportunityLog.game_time > now,
+                )
+                .order_by(
+                    desc(PropOpportunityLog.alert_sent_at),
+                    desc(PropOpportunityLog.id),
+                )
+                .limit(max(1, min(int(limit), 500)))
+            )
+            rows = list(result.scalars().all())
+
+        # A line-change alert can create more than one opportunity for the same
+        # event/stat. Keep the newest delivered version for command display.
+        latest: dict[tuple[str, str], PropOpportunityLog] = {}
+        for row in rows:
+            key = (str(row.external_id or ""), str(row.stat_type or ""))
+            latest.setdefault(key, row)
+        return list(latest.values())
+
     async def get_ud_recommendations_bulk(
         self,
         player_stat_identities: "list[tuple[str, str, str, str]]",
@@ -2666,15 +2711,16 @@ class Database:
                     PropOpportunityLog.stat_type,
                 ).where(
                     PropOpportunityLog.recommendation.in_(("OVER", "UNDER")),
-                    PropOpportunityLog.alert_sent == True,  # noqa: E712
                 )
             )
         ).all()
         linked = {
             (
-                str(provider or "Underdog").strip() or "Underdog",
-                str(external_id or ""),
-                str(stat_type or ""),
+                str(provider or "Underdog").strip().lower() or "underdog",
+                _stored_opportunity_external_id(
+                    str(external_id or ""), provider
+                ),
+                str(stat_type or "").strip(),
             )
             for provider, external_id, stat_type in opportunity_rows
         }
@@ -2682,11 +2728,11 @@ class Database:
             audit
             for audit in audits
             if (
-                str(audit.provider or "Unknown").strip() or "Unknown",
+                str(audit.provider or "Unknown").strip().lower() or "unknown",
                 _stored_opportunity_external_id(
                     str(audit.external_id or ""), audit.provider
                 ),
-                str(audit.stat_type or ""),
+                str(audit.stat_type or "").strip(),
             ) in linked
         ]
 
@@ -6583,7 +6629,7 @@ class Database:
 
     async def get_pending_tracked_props(
         self,
-        cutoff_hours: int = 4,
+        cutoff_hours: float = 0.5,
         after_id: Optional[int] = None,
         limit: int = 500,
     ) -> "list[PropTrackingLog]":
@@ -7859,7 +7905,7 @@ class Database:
 
     async def get_pending_opportunities(
         self,
-        cutoff_hours: int = 4,
+        cutoff_hours: float = 0.5,
         after_id: Optional[int] = None,
         limit: int = 500,
     ) -> "list[PropOpportunityLog]":
@@ -8334,14 +8380,15 @@ class Database:
                     PropOpportunityLog.result,
                 ).where(
                     PropOpportunityLog.recommendation.in_(("OVER", "UNDER")),
-                    PropOpportunityLog.alert_sent == True,  # noqa: E712
                 )
             )
             result_by_identity = {
                 (
-                    str(provider or "Underdog"),
-                    str(external_id or ""),
-                    str(stat_type or ""),
+                    str(provider or "Underdog").strip().lower() or "underdog",
+                    _stored_opportunity_external_id(
+                        str(external_id or ""), provider
+                    ),
+                    str(stat_type or "").strip(),
                 ): str(result or "PENDING").upper()
                 for provider, external_id, stat_type, result
                 in opportunity_rows.all()
@@ -8352,11 +8399,11 @@ class Database:
                 source = str(audit.provider or "Underdog")
                 result_val = result_by_identity.get(
                     (
-                        source,
+                        source.strip().lower() or "underdog",
                         _stored_opportunity_external_id(
                             str(audit.external_id or ""), source
                         ),
-                        str(audit.stat_type or ""),
+                        str(audit.stat_type or "").strip(),
                     ),
                     "PENDING",
                 )

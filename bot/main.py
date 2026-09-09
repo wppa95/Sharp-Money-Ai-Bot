@@ -1154,24 +1154,24 @@ async def _grade_opportunities_job(context) -> None:
         )
         try:
             pending = await db.get_pending_opportunities(
-                cutoff_hours=4,
+                cutoff_hours=0.5,
                 after_id=_cursor,
                 limit=_GRADE_BATCH_SIZE,
             )
         except TypeError:
             # Keep lightweight test doubles and older database adapters
             # compatible while production uses the rotating query.
-            pending = await db.get_pending_opportunities(cutoff_hours=4)
+            pending = await db.get_pending_opportunities(cutoff_hours=0.5)
         # Wrap once the cursor reaches the end of the pending set.
         if not pending and _cursor:
             try:
                 pending = await db.get_pending_opportunities(
-                    cutoff_hours=4,
+                    cutoff_hours=0.5,
                     after_id=None,
                     limit=_GRADE_BATCH_SIZE,
                 )
             except TypeError:
-                pending = await db.get_pending_opportunities(cutoff_hours=4)
+                pending = await db.get_pending_opportunities(cutoff_hours=0.5)
 
         # Universal ingestion tracking is a separate settlement population.
         # Keep legacy directional rows in the existing rotating query, then
@@ -1183,7 +1183,7 @@ async def _grade_opportunities_job(context) -> None:
         if callable(_get_pending_tracked):
             try:
                 _tracked_result = _get_pending_tracked(
-                    cutoff_hours=4,
+                    cutoff_hours=0.5,
                     after_id=_tracked_cursor,
                     limit=_GRADE_BATCH_SIZE,
                 )
@@ -1191,20 +1191,20 @@ async def _grade_opportunities_job(context) -> None:
                     _tracked_pending = await _tracked_result
             except TypeError:
                 # Compatibility with older adapters that do not accept limit.
-                _tracked_result = _get_pending_tracked(cutoff_hours=4)
+                _tracked_result = _get_pending_tracked(cutoff_hours=0.5)
                 if hasattr(_tracked_result, "__await__"):
                     _tracked_pending = await _tracked_result
             if not _tracked_pending and _tracked_cursor:
                 try:
                     _tracked_result = _get_pending_tracked(
-                        cutoff_hours=4,
+                        cutoff_hours=0.5,
                         after_id=None,
                         limit=_GRADE_BATCH_SIZE,
                     )
                     if hasattr(_tracked_result, "__await__"):
                         _tracked_pending = await _tracked_result
                 except TypeError:
-                    _tracked_result = _get_pending_tracked(cutoff_hours=4)
+                    _tracked_result = _get_pending_tracked(cutoff_hours=0.5)
                     if hasattr(_tracked_result, "__await__"):
                         _tracked_pending = await _tracked_result
         pending = _legacy_pending + list(_tracked_pending or [])
