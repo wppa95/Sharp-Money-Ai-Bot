@@ -58,5 +58,7 @@ async def test_propline_observation_is_stored_in_history_and_tracking(db: Databa
     assert history.line_value == 1.5
     assert history.game_id == "event-123"
     assert history.line_variant == "demon"
+    assert history.product == "Player Props"
     assert tracking.game_id == "event-123"
+    assert tracking.product == "Player Props"
     assert tracking.result == "PENDING"

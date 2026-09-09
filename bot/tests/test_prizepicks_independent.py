@@ -283,6 +283,7 @@ class TestIndependentPrizePicks:
         rows = await db.get_prop_line_observations("PrizePicks")
         assert len(rows) == 2
         assert {row.line_value for row in rows} == {20.5, 21.5}
+        assert {row.product for row in rows} == {"Player Props"}
         assert all(isinstance(row, PropLineObservation) for row in rows)
 
     def test_provider_alerts_do_not_mix_prizepicks_and_underdog_lines(self):

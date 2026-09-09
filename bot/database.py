@@ -42,6 +42,7 @@ _UNDERDOG_BULK_BATCH_SIZE = 200
 _PROP_HISTORY_BATCH_SIZE = 200
 _TRACKING_BATCH_SIZE = 200
 _CLV_BULK_BATCH_SIZE = 100
+PLAYER_PROPS_PRODUCT = "Player Props"
 _DB_WRITE_MAX_RETRIES = 2
 _DB_WRITE_RETRY_DELAYS = (0.15, 0.5)
 _PRIZEPICKS_EXTERNAL_PREFIX = "PrizePicks::"
@@ -763,7 +764,8 @@ class PropLineHistory(Base):
     __tablename__ = "prop_line_history"
 
     id          = Column(Integer,  primary_key=True, autoincrement=True)
-    provider    = Column(String(64),  nullable=False, index=True)   # "PrizePicks" | "Underdog" | …
+    provider    = Column(String(64),  nullable=False, index=True)   # Source provenance
+    product     = Column(String(32),  nullable=False, default=PLAYER_PROPS_PRODUCT, index=True)
     sport       = Column(String(32),  nullable=False, index=True)
     player_name = Column(String(128), nullable=False, index=True)
     team        = Column(String(64),  nullable=False, default="")
@@ -826,6 +828,7 @@ class PropLineObservation(Base):
     snapshot_id = Column(String(96), nullable=False, index=True)
     observation_key = Column(String(64), nullable=False, index=True)
     provider = Column(String(64), nullable=False, index=True)
+    product = Column(String(32), nullable=False, default=PLAYER_PROPS_PRODUCT, index=True)
     sport = Column(String(32), nullable=False, index=True)
     player_name = Column(String(128), nullable=False)
     team = Column(String(64), nullable=False, default="")
@@ -971,7 +974,8 @@ class PropOpportunityLog(Base):
     # Phase 4 Evidence Infrastructure — added via migration
     recommendation_id  = Column(String(64),  nullable=True, index=True)
     # Stable ID derived from (external_id, stat_type); links prop → decision → result.
-    provider           = Column(String(32),  nullable=True)               # "Underdog" | "PrizePicks"
+    provider           = Column(String(32),  nullable=True)               # Source provenance
+    product            = Column(String(32),  nullable=False, default=PLAYER_PROPS_PRODUCT, index=True)
     bet_quality_score  = Column(Integer,     nullable=True)               # 0-100 decision confidence
     qualification_path = Column(Text,        nullable=True)               # JSON list of gate outcomes
     reason_codes       = Column(Text,        nullable=True)               # JSON: ["STRONG_L5", …]
@@ -1009,7 +1013,8 @@ class PropTrackingLog(Base):
     __tablename__ = "prop_tracking_log"
 
     id           = Column(Integer,     primary_key=True, autoincrement=True)
-    provider     = Column(String(32),  nullable=False, index=True)
+    provider     = Column(String(32),  nullable=False, index=True)  # Source provenance
+    product      = Column(String(32),  nullable=False, default=PLAYER_PROPS_PRODUCT, index=True)
     external_id  = Column(String(128), nullable=False, index=True)
     player_name  = Column(String(128), nullable=False, index=True)
     team         = Column(String(64),  nullable=False, default="")
@@ -1262,6 +1267,7 @@ class Database:
         await self._migrate_prop_line_history_v6()
         await self._migrate_prop_line_history_v7()
         await self._migrate_prop_line_variants_v1()
+        await self._migrate_player_props_product_v1()
         await self._migrate_player_game_results_v1()
         await self._migrate_prop_opportunity_log_v6()
         await self._migrate_telegram_delivery_audit_v1()
@@ -3577,6 +3583,7 @@ class Database:
                     snapshot_id=snapshot,
                     observation_key=observation_key,
                     provider=str(provider or "").strip() or "Unknown",
+                        product=PLAYER_PROPS_PRODUCT,
                     sport=sport,
                     player_name=player,
                     team=str(getattr(prop, "team", "") or ""),
@@ -6184,6 +6191,24 @@ class Database:
                 except Exception:
                     pass
 
+    async def _migrate_player_props_product_v1(self) -> None:
+        """Classify shared prop records as Player Props while retaining source provenance."""
+        async with self._engine.begin() as conn:
+            for statement in (
+                "ALTER TABLE prop_line_history "
+                "ADD COLUMN product VARCHAR(32) NOT NULL DEFAULT 'Player Props'",
+                "ALTER TABLE prop_line_observations "
+                "ADD COLUMN product VARCHAR(32) NOT NULL DEFAULT 'Player Props'",
+                "ALTER TABLE prop_tracking_log "
+                "ADD COLUMN product VARCHAR(32) NOT NULL DEFAULT 'Player Props'",
+                "ALTER TABLE prop_opportunity_log "
+                "ADD COLUMN product VARCHAR(32) NOT NULL DEFAULT 'Player Props'",
+            ):
+                try:
+                    await conn.execute(text(statement))
+                except Exception:
+                    pass
+
     async def _migrate_prop_opportunity_log(self) -> None:
         """Add error_type column to existing tables (learning label classification)."""
         async with self._engine.begin() as conn:
@@ -6398,6 +6423,7 @@ class Database:
             "reason_codes": reason_codes,
             "watchlist_state": watchlist_state,
             "downstream_intelligence": downstream_intelligence,
+            "product": PLAYER_PROPS_PRODUCT,
         }])
         return
 
@@ -6459,6 +6485,9 @@ class Database:
                 external_id = f"{external_id}:line={line_identity}"
             prepared_by_identity[(provider, external_id, stat_type)] = {
                 "provider": provider,
+                "product": str(
+                    record.get("product") or PLAYER_PROPS_PRODUCT
+                ).strip() or PLAYER_PROPS_PRODUCT,
                 "external_id": external_id,
                 "player_name": player_name,
                 "team": str(record.get("team") or ""),
@@ -6700,6 +6729,9 @@ class Database:
                 "explanation": opportunity.get("explanation"),
                 "recommendation_id": _rec_id,
                 "provider": _provider,
+                "product": str(
+                    opportunity.get("product") or PLAYER_PROPS_PRODUCT
+                ).strip() or PLAYER_PROPS_PRODUCT,
                 "bet_quality_score": _bet_quality,
                 "qualification_path": _qpath,
                 "reason_codes": _rcodes,
@@ -6734,6 +6766,7 @@ class Database:
                         "explanation",
                         "recommendation_id",
                         "provider",
+                        "product",
                         "bet_quality_score",
                         "qualification_path",
                         "reason_codes",

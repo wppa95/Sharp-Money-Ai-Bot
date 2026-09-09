@@ -74,6 +74,7 @@ from database import (
     CLVRecord,
     UnderdogSnapshotRecord,
     SteamRecord,
+    PLAYER_PROPS_PRODUCT,
     get_sqlite_backpressure_metrics,
 )
 # AlertCLVSeed rows are seeded by the existing Underdog delivery/harvest
@@ -544,6 +545,7 @@ async def _persist_propline_observations(
                     getattr(prop, "line_variant", "") or ""
                 ).lower(),
                 "provider": "PrizePicks",
+                "product": PLAYER_PROPS_PRODUCT,
             })
         if include_tracking:
             track_props = getattr(db, "track_prop_records", None)
@@ -2736,6 +2738,7 @@ async def _run_prizepicks_independent_cycle(
                 getattr(_tracked_prop, "line_variant", "") or ""
             ).lower(),
             "provider": "PrizePicks",
+            "product": PLAYER_PROPS_PRODUCT,
         })
     _track_props = getattr(db, "track_prop_records", None)
     if callable(_track_props):
