@@ -1252,30 +1252,19 @@ async def propline_request_scan_job(context) -> None:
                 try:
                     result = await fetch_result(
                         sport,
-                        bookmaker=getattr(
-                            config,
-                            "PROPLINE_UNDERDOG_BOOKMAKER",
-                            "underdog",
-                        ),
+                        bookmaker="prizepicks",
                         event_scoped=True,
                     )
                 except TypeError:
                     result = await fetch_result(
                         sport,
-                        bookmaker=getattr(
-                            config,
-                            "PROPLINE_UNDERDOG_BOOKMAKER",
-                            "underdog",
-                        ),
+                        bookmaker="prizepicks",
                     )
                 props = list(getattr(result, "props", []) or [])
                 succeeded = bool(getattr(result, "succeeded", False))
             elif callable(fetch_props):
                 props = list(await fetch_props(sport) or [])
                 succeeded = True
-            if not isinstance(db, Database):
-                props = []
-                succeeded = False
             props = [
                 prop for prop in props
                 if not is_football_related_sport(getattr(prop, "sport", ""))
@@ -2812,8 +2801,6 @@ async def _run_prizepicks_independent_cycle(
             "stat_type": stat,
             "line_value": line,
             "provider": "PrizePicks",
-            "score_total": getattr(score, "total", None),
-            "score_tier": getattr(decision, "decision_tier", None),
             "confidence": getattr(decision, "confidence", None),
             "gate_decision": "EVALUATED",
             "rejection_reason": None,
@@ -2824,11 +2811,8 @@ async def _run_prizepicks_independent_cycle(
         if decision is None or decision.recommendation not in ("OVER", "UNDER"):
             continue
         directional += 1
-        setattr(prop, "score_tier", getattr(decision, "decision_tier", None))
         setattr(prop, "bet_recommendation", decision.recommendation)
         setattr(prop, "bet_confidence", decision.confidence)
-        setattr(prop, "market_quality_score", getattr(market_quality, "score", None))
-        setattr(prop, "score_total", getattr(score, "total", None))
         try:
             await db.log_prop_opportunity(
                 external_id=external_id,
@@ -2838,7 +2822,6 @@ async def _run_prizepicks_independent_cycle(
                 stat_type=stat,
                 line_value=line,
                 recommendation=decision.recommendation,
-                decision_tier=decision.decision_tier,
                 confidence=decision.confidence,
                 game_time=getattr(prop, "game_time", None),
                 game_id=str(
@@ -2847,7 +2830,6 @@ async def _run_prizepicks_independent_cycle(
                     or ""
                 ),
                 provider="PrizePicks",
-                bet_quality_score=decision.confidence,
                 reason_codes=_compute_reason_codes(score, decision),
                 downstream_intelligence=_build_downstream_intel(
                     line_delta=(line - previous) if previous is not None else None,
@@ -2880,7 +2862,6 @@ async def _run_prizepicks_independent_cycle(
                 decision=decision,
                 intelligence_trace=None,
             ),
-            score_tier=getattr(decision, "decision_tier", None),
             confidence=getattr(decision, "confidence", None),
         ):
             actionable.append({
@@ -3157,7 +3138,6 @@ def _compute_reason_codes_from_scored_dict(p: dict) -> list[str]:
     avg  = p.get("avg", 0) or 0
     sta  = p.get("sta", 0) or 0
     vel  = p.get("vel", 0) or 0
-    tier = p.get("score_tier")
 
     if n < 5:
         codes.append("LOW_SAMPLE")
@@ -3180,9 +3160,6 @@ def _compute_reason_codes_from_scored_dict(p: dict) -> list[str]:
     elif sta <= 3 and n >= 5:
         codes.append("VOLATILE_LINE")
 
-    _tc = {"S": "S_TIER", "A": "A_TIER", "B": "B_TIER"}.get(tier)
-    if _tc:
-        codes.append(_tc)
     _evidence_source = str(p.get("evidence_source") or "").strip().lower()
     if _evidence_source == "settled_results":
         codes.append("EVIDENCE:SETTLED_RESULTS")
@@ -4861,14 +4838,11 @@ async def underdog_job(context) -> None:
                                 stat_type         = stat_type,
                                 line_value        = line_val,
                                 recommendation    = decision.recommendation,
-                                decision_tier     = decision.decision_tier,
                                 confidence        = decision.confidence,
                                 game_time         = snap.game_time,
                                 game_id           = getattr(snap, "game_id", "") or "",
                                 provider          = "Underdog",
-                                bet_quality_score = decision.confidence,
                                 reason_codes      = _compute_reason_codes(score, decision),
-                                watchlist_state   = None,
                                 downstream_intelligence = _build_downstream_intel(
                                     line_delta=getattr(snap, "line_delta", None),
                                     evidence={
@@ -5120,9 +5094,9 @@ async def underdog_job(context) -> None:
                         int(getattr(market_quality, "score", 0)),
                         float(score.total if score else 0),
                     )
-                    # Mark every existing prop handled by this scan so the
-                    # standing compatibility path cannot evaluate it twice.
-                    _processed_keys.add((player, stat_type))
+                    # NOTE: _processed_keys is NOT set here.  A line change
+                    # below the alert threshold must remain eligible for the
+                    # standing evidence path after validation.
                     validation = validate_player_prop(
                         player_name  = player,
                         stat_type    = stat_type,
@@ -5162,14 +5136,11 @@ async def underdog_job(context) -> None:
                                     stat_type         = stat_type,
                                     line_value        = snap.line or 0.0,
                                     recommendation    = decision.recommendation,
-                                    decision_tier     = decision.decision_tier,
                                     confidence        = decision.confidence,
                                     game_time         = snap.game_time,
                                     game_id           = getattr(snap, "game_id", "") or "",
                                     provider          = "Underdog",
-                                    bet_quality_score = decision.confidence,
                                     reason_codes      = _compute_reason_codes(score, decision),
-                                    watchlist_state   = None,
                                 )
                                 _opportunity_batch.append(_lc_opportunity_kwargs)
                             except Exception as _pol_exc:
@@ -5385,7 +5356,8 @@ async def underdog_job(context) -> None:
                 if should_alert and not is_removed:
                     _sp_gated = snap.sport or "UNKNOWN"
                     _sport_gated[_sp_gated] = _sport_gated.get(_sp_gated, 0) + 1
-                    # Mark as handled: props that are actually alert-eligible (should_alert=True)
+                    # tier_gate [standing]: props that are actually
+                    # alert-eligible (should_alert=True)
                     # are excluded from the standing path to prevent double-evaluation.
                     # Props with sub-threshold line movement (should_alert=False) are intentionally
                     # left out of _processed_keys so the standing path can evaluate them.
@@ -5612,17 +5584,11 @@ async def underdog_job(context) -> None:
             )
             record.removed = is_removed
             record.alert_sent = ud_result.sent
-            record.score_total = (
+            # Validate legacy score objects at the persistence boundary for
+            # older callers, but do not persist the retired score fields.
+            if score is not None:
                 clamp_score(score.total, "ud_score.total", 0, 100)
-                if score is not None
-                else None
-            )
-            record.score_tier = score.tier if score is not None else None
-            record.score_stars = (
                 clamp_score(score.stars, "ud_score.stars", 0, 5)
-                if score is not None
-                else None
-            )
             record.alert_outcome = _alert_outcome
             record.validation_json = (
                 validation.to_json() if validation is not None else None
@@ -5642,11 +5608,13 @@ async def underdog_job(context) -> None:
             record.fetched_at = now
             _next_ud_scan_state[(player, stat_type)] = SimpleNamespace(
                 line_value=float(snap.line or 0.0),
-                score_tier=score.tier if score is not None else getattr(prev_record, "score_tier", None),
-                score_total=(
-                    clamp_score(score.total, "ud_score.total", 0, 100)
-                    if score is not None
-                    else getattr(prev_record, "score_total", None)
+                bet_recommendation=(
+                    decision.recommendation if decision is not None else
+                    getattr(prev_record, "bet_recommendation", None)
+                ),
+                bet_confidence=(
+                    decision.confidence if decision is not None else
+                    getattr(prev_record, "bet_confidence", None)
                 ),
                 alert_sent=bool(ud_result.sent),
                 fetched_at=now,
@@ -5717,7 +5685,10 @@ async def underdog_job(context) -> None:
                 _by_sport.setdefault(_sc[3], []).append(_sc)
             _standing_ordered: list = []
             for _sp_grp in _by_sport.values():
-                _sp_grp.sort(key=lambda x: x[4].score_total or 0, reverse=True)
+                _sp_grp.sort(
+                    key=lambda x: getattr(x[4], "bet_confidence", None) or 0,
+                    reverse=True,
+                )
                 _standing_ordered.extend(_sp_grp[:3])
     
             for (_ssnap, _sp, _st, _ssport, _prev) in _standing_ordered:
@@ -5844,14 +5815,11 @@ async def underdog_job(context) -> None:
                         stat_type         = _st,
                         line_value        = _line_val,
                         recommendation    = _sdec.recommendation,
-                        decision_tier     = _sdec.decision_tier,
                         confidence        = _sdec.confidence,
                         game_time         = _ssnap.game_time,
                         game_id           = getattr(_ssnap, "game_id", "") or "",
                         provider          = "Underdog",
-                        bet_quality_score = _sdec.confidence,
                         reason_codes      = _compute_reason_codes(_sscore, _sdec),
-                        watchlist_state   = None,
                         downstream_intelligence = _build_downstream_intel(
                             line_delta=getattr(_ssnap, "line_delta", None),
                             evidence={
@@ -6024,7 +5992,6 @@ async def underdog_job(context) -> None:
                         score=_dq_score, validation=_dq_val, decision=_dq_dec,
                         intelligence_trace=_dq_intel,
                     ),
-                    score_tier=getattr(_dq_dec, "decision_tier", None),
                     confidence=getattr(_dq_dec, "confidence", None),
                 ):
                     _n_dq_deferred += 1
@@ -6442,8 +6409,8 @@ async def underdog_job(context) -> None:
                 _state_prev = recent_by_key.get(_state_key)
                 _next_ud_scan_state[_state_key] = SimpleNamespace(
                     line_value=float(_state_snap.line or 0.0),
-                    score_tier=getattr(_state_prev, "score_tier", None),
-                    score_total=getattr(_state_prev, "score_total", None),
+                    bet_recommendation=getattr(_state_prev, "bet_recommendation", None),
+                    bet_confidence=getattr(_state_prev, "bet_confidence", None),
                     alert_sent=False,
                     fetched_at=now,
                 )
@@ -6572,12 +6539,7 @@ async def underdog_job(context) -> None:
                         "stat_type":            _cp.get("stat_type", ""),
                         "line_value":           float(_cp.get("line") or 0.0),
                         "provider":             "Underdog",
-                        "score_total":          _cp.get("total"),
-                        "score_tier":           _cp.get("score_tier"),
                         "confidence":           _cp.get("decision_conf"),
-                        # Legacy column retained for schema compatibility.
-                        # Current monitoring uses one neutral evaluated state;
-                        # delivery is measured separately in ScanCycleLog.
                         "gate_decision":        "EVALUATED",
                         "rejection_reason":     None,
                         "reason_codes":         _json.dumps(_ccodes) if _ccodes else None,
@@ -6633,22 +6595,6 @@ async def underdog_job(context) -> None:
                     _opportunity_exc,
                 )
 
-        # ── Bulk MQ score write — update PropLineHistory for /picks and /slip filtering ──
-        if _plh_mq_scores and db and not _cycle_budget_exhausted:
-            try:
-                if isinstance(db, Database):
-                    _mq_scores = dict(_plh_mq_scores)
-                    await db.update_ud_props_mq_scores_bulk(_mq_scores)
-                else:
-                    await _cycle_timing.await_db(
-                        "write",
-                        "update_ud_props_mq_scores_bulk",
-                        db.update_ud_props_mq_scores_bulk(_plh_mq_scores),
-                    )
-            except Exception as _mq_bulk_exc:
-                _persistence_ok = False
-                logger.error("underdog_job: mq_scores bulk write failed: %s", _mq_bulk_exc)
-        
     # ── Scan cycle log — full pipeline evidence ──────────────────────────────────
         # Proves that all ~4,600 active props are monitored each poll (not just scored ones).
         try:
@@ -7219,12 +7165,10 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         stat_type         = _sr_stat,
                         line_value        = _sr_line,
                         recommendation    = _sr_dec.recommendation,
-                        decision_tier     = _sr_dec.decision_tier,
                         confidence        = _sr_dec.confidence,
                         game_time         = _sr_snap.game_time,
                         game_id           = getattr(_sr_snap, "game_id", "") or "",
                         provider          = "Underdog",
-                        bet_quality_score = _sr_dec.confidence,
                         reason_codes      = _compute_reason_codes(_sr_score, _sr_dec),
                     )
                 except Exception as _sr_pol_exc:
@@ -8046,11 +7990,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     "stat_type": _fpr_stat,
                     "line_value": _fpr_line,
                     "provider": _fpr_provider,
-                    "score_total": getattr(_fpr_score, "total", None),
-                    "score_tier": getattr(_fpr_score, "tier", None),
                     "confidence": getattr(_fpr_dec, "confidence", None),
-                    "gate_decision": "EVALUATED",
-                    "rejection_reason": None,
                     "reason_codes": json.dumps(
                         _compute_reason_codes(_fpr_score, _fpr_dec)
                     ),
@@ -8070,14 +8010,11 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         "stat_type": _fpr_stat,
                         "line_value": _fpr_line,
                         "recommendation": getattr(_fpr_dec, "recommendation", None),
-                        "decision_tier": getattr(_fpr_dec, "decision_tier", None),
                         "confidence": getattr(_fpr_dec, "confidence", 0),
                         "game_time": getattr(_fpr_snap, "game_time", None),
                         "game_id": getattr(_fpr_snap, "game_id", "") or "",
                         "provider": _fpr_provider,
-                        "bet_quality_score": float(getattr(_fpr_score, "total", 0) or 0),
                         "reason_codes": _compute_reason_codes(_fpr_score, _fpr_dec),
-                        "watchlist_state": None,
                     })
 
                 # Scan-time eligibility is non-blocking. Props without a

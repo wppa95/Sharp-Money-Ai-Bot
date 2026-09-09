@@ -525,7 +525,7 @@ _scheduled_execution_coordinator = _ScheduledExecutionCoordinator()
 # ownership group so they wait before starting instead of competing for the
 # process-wide writer gate while a full Underdog persistence drain is active.
 _SQLITE_WRITE_JOB_GROUP = "sqlite_write_jobs"
-_SCAN_JOB_KWARGS = {"coalesce": False, "max_instances": 1000}
+_SCAN_JOB_KWARGS = {"coalesce": False}
 
 
 def _coordinated_job(

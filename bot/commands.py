@@ -1708,11 +1708,6 @@ def _has_current_prop_data(
         ).upper()
         if recommendation not in {"OVER", "UNDER"}:
             return False
-    tier = str(getattr(prop, "score_tier", "") or "").upper()
-    if tier not in {"S", "A", "B"}:
-        return False
-    score = getattr(prop, "score_total", None)
-    quality = getattr(prop, "market_quality_score", None)
     confidence = getattr(prop, "bet_confidence", None)
 
     def _positive_finite(value: Any) -> bool:
@@ -1724,15 +1719,9 @@ def _has_current_prop_data(
         except (TypeError, ValueError):
             return False
 
-    # Both the composite and market-quality fields are evidence that the row
-    # reached the provider scoring pipeline.  Confidence must also be present
-    # and positive; a direction copied onto a zero-confidence row is not an
-    # actionable pick.
-    return (
-        _positive_finite(score)
-        and _positive_finite(quality)
-        and _positive_finite(confidence)
-    )
+    # Direction plus persisted decision confidence is the current evidence
+    # boundary. Legacy tier/BQ/MQ fields are intentionally not consulted.
+    return _positive_finite(confidence)
 
 
 def _pick_source_identity(provider: str, prop: Any) -> tuple[str, ...]:
@@ -1913,8 +1902,6 @@ class PropPickAdapter:
         )
         if conf is None:
             conf = getattr(plh, "bet_confidence", None)
-        if conf is None:
-            conf = getattr(plh, "score_total", None)
         try:
             self.confidence = float(conf) if conf is not None else None
         except (TypeError, ValueError):
@@ -2350,28 +2337,12 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     def _render_pick_entry(rank: int, flat_idx: int, plh, comp) -> str:
         conf      = comp.proxy_match_confidence if comp else 0
 
-        # For sports with no cross-provider comparison data (CS, LOL, ESPORTS, VAL,
-        # TENNIS, etc.), proxy_match_confidence is 0 because no PrizePicks/DK/FD
-        # lines exist.  In those cases, fall back to the engine's own scoring:
-        #   - tier  → plh.score_tier  (set by the Underdog scoring engine)
-        #   - conf  → derived from score_tier band midpoint
-        # PropLineHistory stores score_tier but not score_confidence; bet_confidence
-        # is the decision confidence and may be zero when direction is unavailable.
-        # We derive a representative display confidence from the tier band midpoint so
-        # S-tier props show 5 stars and A-tier props show 4 stars.
-        _db_tier = getattr(plh, "score_tier", None) or ""
-        _db_conf = getattr(plh, "score_confidence", None)
-        # Derive a display confidence from the stored score band when the
-        # numeric confidence is absent.
-        if _db_conf is None and _db_tier in ("S", "A", "B"):
-            _db_conf = {"S": 87, "A": 72, "B": 57}.get(_db_tier)
-        if conf < 30 and _db_tier in ("S", "A", "B") and _db_conf is not None:
-            # No cross-provider data — use engine scores for display.
-            tier  = _db_tier
-            stars = _stars_from_conf(float(_db_conf))
-        else:
-            tier  = _tier_from_conf(conf)
-            stars = _stars_from_conf(float(conf))
+        # Comparison confidence is display-only; persisted decision confidence
+        # is the fallback when no cross-provider comparison is available.
+        if conf is None or conf < 30:
+            conf = getattr(plh, "bet_confidence", None) or 0
+        tier = _tier_from_conf(conf)
+        stars = _stars_from_conf(float(conf))
 
         # Keep the source line canonical for this row. A PrizePicks-only row
         # must never be rendered as though its line came from Underdog.
@@ -2477,14 +2448,6 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         def _shown(value: object, suffix: str = "") -> str:
             return "unavailable" if value is None else f"{value}{suffix}"
 
-        _bq = getattr(plh, "score_total", None)
-        _mq = getattr(plh, "market_quality_score", None)
-        _bq_label = (
-            "ELITE" if float(_bq) >= 85 else "STRONG" if float(_bq) >= 70 else "BELOW STRONG"
-        ) if _bq is not None else "unavailable"
-        _mq_label = (
-            "ELITE" if float(_mq) >= 85 else "STRONG" if float(_mq) >= 70 else "BELOW STRONG"
-        ) if _mq is not None else "unavailable"
         _projection = _value.get("projection") if isinstance(_value, dict) else None
         _edge = _value.get("edge") if isinstance(_value, dict) else None
         _movement_quality = "unavailable"
@@ -4559,15 +4522,11 @@ async def cmd_analyst(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         for snap in alerted[:3]:
             dec_ns = __import__("types", fromlist=["SimpleNamespace"]).SimpleNamespace(
                 confidence    = getattr(snap, "bet_confidence", 70) or 70,
-                decision_tier = getattr(snap, "score_tier", "B") or "B",
+                decision_tier = None,
                 recommendation= getattr(snap, "bet_recommendation", "PASS"),
                 reason        = getattr(snap, "bet_reason", "") or "",
                 hit_rates     = {},
                 window_agreement = 0,
-            )
-            score_ns = __import__("types", fromlist=["SimpleNamespace"]).SimpleNamespace(
-                total     = getattr(snap, "score_total", 60) or 60,
-                n_history = 10,
             )
             try:
                 c = candidate_from_ud_decision(
@@ -4576,7 +4535,6 @@ async def cmd_analyst(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                     stat_type   = snap.stat_type,
                     line        = snap.line_value,
                     decision    = dec_ns,
-                    score       = score_ns,
                 )
                 # Attach validation data if available
                 import json

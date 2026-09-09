@@ -276,6 +276,10 @@ class DashboardReport:
                 )
             parts.append("")
 
+        if "totals" in self.unavailable:
+            parts.append("  Totals: <i>UNAVAILABLE</i>")
+            parts.append("")
+
         if self.recent_tracked_props:
             parts.append("🔔 <b>Recently Tracked Props</b>  <i>(last hour · all sports)</i>")
             for prop in self.recent_tracked_props[:5]:
@@ -365,6 +369,8 @@ class DashboardReport:
                 parts.append(f"  Crashes:   <code>{sp.crash_count}</code>")
             if sp.active_blocks:
                 parts.append(f"  Blocks:    <code>{sp.active_blocks}</code> players blocked")
+            for provider, status in sorted((sp.provider_status or {}).items()):
+                parts.append(f"  {provider}: <code>{status}</code>")
             parts.append("")
 
         # ── Intelligence panel ────────────────────────────────────────────────
@@ -771,20 +777,21 @@ class DashboardEngine:
     async def _gather_ud_breakdown(db: "Database", r: DashboardReport) -> None:
         try:
             from sqlalchemy import select, func
-            from database import PropLineHistory
+            from database import PropOpportunityLog
             r.ud_tracked_snapshots = int(
                 (r.tracking_by_provider.get("Underdog") or {}).get("observed", 0)
                 or 0
             )
             async with db.session() as s:
-                score_res = await s.execute(
-                    select(func.avg(PropLineHistory.score_total))
+                confidence_res = await s.execute(
+                    select(func.avg(PropOpportunityLog.confidence))
                     .where(
-                        PropLineHistory.provider == "Underdog",
-                        PropLineHistory.score_total.isnot(None),
+                        PropOpportunityLog.provider == "Underdog",
+                        PropOpportunityLog.recommendation.in_(("OVER", "UNDER")),
+                        PropOpportunityLog.confidence.isnot(None),
                     )
                 )
-                r.ud_avg_score = score_res.scalar()
+                r.ud_avg_score = confidence_res.scalar()
         except Exception:
             r.unavailable.add("ud")
 
