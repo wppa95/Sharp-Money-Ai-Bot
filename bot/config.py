@@ -444,6 +444,17 @@ class Config:
     ENABLE_LEARNING_UPDATES: bool = (
         os.environ.get("ENABLE_LEARNING_UPDATES", "false").lower() == "true"
     )
+    # Adaptive weights remain descriptive until explicitly enabled.  These
+    # safeguards are applied per provider × sport × market population.
+    ADAPTIVE_LEARNING_MIN_SAMPLE_SIZE: int = int(
+        os.environ.get("ADAPTIVE_LEARNING_MIN_SAMPLE_SIZE", "30")
+    )
+    ADAPTIVE_LEARNING_MIN_MODEL_ERRORS: int = int(
+        os.environ.get("ADAPTIVE_LEARNING_MIN_MODEL_ERRORS", "5")
+    )
+    ADAPTIVE_LEARNING_MAX_DELTA: float = float(
+        os.environ.get("ADAPTIVE_LEARNING_MAX_DELTA", "0.10")
+    )
 
     # ── Game timing filter ───────────────────────────────────────────────────
     # Block alerts for games that start sooner than this (minutes).

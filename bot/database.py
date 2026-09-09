@@ -8718,6 +8718,278 @@ class Database:
             },
         }
 
+    async def rebuild_adaptive_learning_weights(
+        self,
+        *,
+        min_sample_size: Optional[int] = None,
+        min_model_errors: Optional[int] = None,
+        max_delta: Optional[float] = None,
+        activate: Optional[bool] = None,
+    ) -> dict:
+        """Build and optionally activate one auditable adaptive-weight version.
+
+        Only directional opportunity rows are considered.  ``HIT`` rows and
+        ``MISS`` rows explicitly classified as ``Model`` form the eligible
+        sample; pushes and all other miss classifications remain descriptive.
+        """
+        from engine.adaptive_learning import (
+            DEFAULT_MAX_DELTA,
+            DEFAULT_MIN_MODEL_ERRORS,
+            DEFAULT_MIN_SAMPLE_SIZE,
+            build_adaptive_weight,
+            sample_from_outcomes,
+        )
+
+        try:
+            from config import config as app_config
+        except Exception:
+            app_config = None
+        min_sample_size = max(
+            1,
+            int(
+                min_sample_size
+                if min_sample_size is not None
+                else getattr(
+                    app_config,
+                    "ADAPTIVE_LEARNING_MIN_SAMPLE_SIZE",
+                    DEFAULT_MIN_SAMPLE_SIZE,
+                )
+            ),
+        )
+        min_model_errors = max(
+            1,
+            int(
+                min_model_errors
+                if min_model_errors is not None
+                else getattr(
+                    app_config,
+                    "ADAPTIVE_LEARNING_MIN_MODEL_ERRORS",
+                    DEFAULT_MIN_MODEL_ERRORS,
+                )
+            ),
+        )
+        max_delta = max(
+            0.0,
+            min(
+                0.25,
+                float(
+                    max_delta
+                    if max_delta is not None
+                    else getattr(
+                        app_config,
+                        "ADAPTIVE_LEARNING_MAX_DELTA",
+                        DEFAULT_MAX_DELTA,
+                    )
+                ),
+            ),
+        )
+        if activate is None:
+            activate = bool(
+                getattr(app_config, "ENABLE_LEARNING_UPDATES", False)
+            )
+
+        version = "adaptive-v1-" + datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
+        grouped: dict[tuple[str, str, str], list[tuple[str, Optional[str]]]] = {}
+        async with self.session() as s:
+            rows = await s.execute(
+                select(
+                    PropOpportunityLog.provider,
+                    PropOpportunityLog.sport,
+                    PropOpportunityLog.stat_type,
+                    PropOpportunityLog.result,
+                    PropOpportunityLog.error_type,
+                ).where(
+                    PropOpportunityLog.recommendation.in_(("OVER", "UNDER")),
+                    PropOpportunityLog.result.in_(("HIT", "MISS", "PUSH")),
+                )
+            )
+            for provider, sport, market_type, result, error_type in rows.all():
+                key = (
+                    str(provider or "Underdog"),
+                    str(sport or "UNKNOWN").upper(),
+                    str(market_type or "UNKNOWN"),
+                )
+                grouped.setdefault(key, []).append(
+                    (str(result or ""), error_type)
+                )
+
+            weights = []
+            for (provider, sport, market_type), outcomes in sorted(grouped.items()):
+                sample = sample_from_outcomes(
+                    provider=provider,
+                    sport=sport,
+                    market_type=market_type,
+                    outcomes=outcomes,
+                )
+                weights.append(
+                    build_adaptive_weight(
+                        sample,
+                        version=version,
+                        min_sample_size=min_sample_size,
+                        min_model_errors=min_model_errors,
+                        max_delta=max_delta,
+                        active=bool(activate),
+                    )
+                )
+
+            now = datetime.utcnow()
+            if activate:
+                await s.execute(
+                    update(AdaptiveLearningRun).values(active=False)
+                )
+
+            run = AdaptiveLearningRun(
+                version=version,
+                created_at=now,
+                activated_at=now if activate else None,
+                active=bool(activate),
+                min_sample_size=min_sample_size,
+                min_model_errors=min_model_errors,
+                max_delta=max_delta,
+                eligible_groups=sum(1 for item in weights if item.eligible),
+                total_groups=len(weights),
+                status="ACTIVE" if activate else "DESCRIPTIVE",
+            )
+            s.add(run)
+            for item in weights:
+                s.add(
+                    AdaptiveLearningWeight(
+                        version=item.version,
+                        provider=item.provider,
+                        sport=item.sport,
+                        market_type=item.market_type,
+                        sample_size=item.sample_size,
+                        eligible_samples=item.eligible_samples,
+                        model_errors=item.model_errors,
+                        hit_rate=item.hit_rate,
+                        multiplier=item.multiplier,
+                        status=item.status,
+                        created_at=now,
+                    )
+                )
+            await s.commit()
+
+        return {
+            "version": version,
+            "active": bool(activate),
+            "status": "ACTIVE" if activate else "DESCRIPTIVE",
+            "min_sample_size": min_sample_size,
+            "min_model_errors": min_model_errors,
+            "max_delta": max_delta,
+            "eligible_groups": sum(1 for item in weights if item.eligible),
+            "total_groups": len(weights),
+        }
+
+    async def get_adaptive_learning_status(self) -> dict:
+        """Return the active version and its provider-aware audit summary."""
+        async with self.session() as s:
+            active_run = (
+                await s.execute(
+                    select(AdaptiveLearningRun)
+                    .where(AdaptiveLearningRun.active.is_(True))
+                    .order_by(AdaptiveLearningRun.id.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            latest_run = (
+                await s.execute(
+                    select(AdaptiveLearningRun)
+                    .order_by(AdaptiveLearningRun.id.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            run = active_run or latest_run
+            if run is None:
+                return {
+                    "version": None,
+                    "active": False,
+                    "status": "NOT_INITIALIZED",
+                    "weights": [],
+                }
+
+            rows = await s.execute(
+                select(AdaptiveLearningWeight)
+                .where(AdaptiveLearningWeight.version == run.version)
+                .order_by(
+                    AdaptiveLearningWeight.provider,
+                    AdaptiveLearningWeight.sport,
+                    AdaptiveLearningWeight.market_type,
+                )
+            )
+            weights = [
+                {
+                    "provider": row.provider,
+                    "sport": row.sport,
+                    "market_type": row.market_type,
+                    "sample_size": row.sample_size,
+                    "eligible_samples": row.eligible_samples,
+                    "model_errors": row.model_errors,
+                    "hit_rate": row.hit_rate,
+                    "multiplier": row.multiplier,
+                    "status": row.status,
+                }
+                for row in rows.scalars().all()
+            ]
+            return {
+                "version": run.version,
+                "active": bool(active_run),
+                "status": run.status,
+                "created_at": run.created_at.isoformat() if run.created_at else None,
+                "activated_at": (
+                    run.activated_at.isoformat() if run.activated_at else None
+                ),
+                "min_sample_size": run.min_sample_size,
+                "min_model_errors": run.min_model_errors,
+                "max_delta": run.max_delta,
+                "eligible_groups": run.eligible_groups,
+                "total_groups": run.total_groups,
+                "weights": weights,
+            }
+
+    async def get_active_adaptive_weight(
+        self,
+        provider: str,
+        sport: str,
+        market_type: str,
+    ) -> Optional[dict]:
+        """Return one eligible active weight, or None for safe neutral behavior."""
+        async with self.session() as s:
+            run = (
+                await s.execute(
+                    select(AdaptiveLearningRun)
+                    .where(AdaptiveLearningRun.active.is_(True))
+                    .order_by(AdaptiveLearningRun.id.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if run is None:
+                return None
+            row = (
+                await s.execute(
+                    select(AdaptiveLearningWeight)
+                    .where(
+                        AdaptiveLearningWeight.version == run.version,
+                        AdaptiveLearningWeight.provider == str(provider or "Underdog"),
+                        AdaptiveLearningWeight.sport == str(sport or "UNKNOWN").upper(),
+                        AdaptiveLearningWeight.market_type == str(market_type or "UNKNOWN"),
+                        AdaptiveLearningWeight.status == "ACTIVE",
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            return {
+                "version": row.version,
+                "provider": row.provider,
+                "sport": row.sport,
+                "market_type": row.market_type,
+                "multiplier": row.multiplier,
+                "eligible_samples": row.eligible_samples,
+                "model_errors": row.model_errors,
+                "hit_rate": row.hit_rate,
+            }
+
     async def get_learning_rollups(self) -> "dict":
         """
         Return learning-focused performance rollups for the /rollups command.
