@@ -48,16 +48,16 @@ def test_selects_one_winner_per_player_and_keeps_providers_independent():
     assert selected == [pp_points, ud_points]
 
 
-def test_higher_confidence_wins_even_when_processed_later():
-    weaker = _candidate("Underdog", "Jordan Lee", "Points", confidence=70)
-    stronger = _candidate("Underdog", "Jordan Lee", "Assists", confidence=91)
+def test_evidence_ordering_is_deterministic_even_when_processed_later():
+    weaker = _candidate("Underdog", "Jordan Lee", "Points", evidence_count=5)
+    stronger = _candidate("Underdog", "Jordan Lee", "Assists", evidence_count=15)
 
     selected = select_strongest_actionable_picks([weaker, stronger])
 
     assert selected == [stronger]
 
 
-def test_ties_use_tier_then_bq_then_mq_then_evidence():
+def test_ties_ignore_tier_bq_and_mq_and_use_evidence_then_identity():
     low_tier = _candidate("PrizePicks", "Taylor Reed", "Points", tier="B")
     high_tier = _candidate("PrizePicks", "Taylor Reed", "Assists", tier="A")
     high_bq = _candidate(
@@ -80,7 +80,7 @@ def test_ties_use_tier_then_bq_then_mq_then_evidence():
         [no_evidence, high_mq, high_bq, high_tier, low_tier]
     )
 
-    assert selected == [high_mq]
+    assert selected == [high_tier]
 
 
 def test_exact_strength_ties_are_order_independent():

@@ -36,7 +36,7 @@ from datetime import datetime, timedelta
 from typing import Any, Optional
 
 import config as _config
-from engine.delivery_gates import tier_delivery_gate as _canonical_tier_delivery_gate
+from engine.delivery_gates import directional_evidence_gate as _directional_evidence_gate
 from engine.sport_policy import is_football_related_sport
 from engine.timing import is_game_alertable
 
@@ -379,11 +379,8 @@ async def run_pp_reference_cycle(
             p.get("evidence_available")
             or getattr(p.get("validation"), "has_supporting_data", False)
         )
-        if not _canonical_tier_delivery_gate(
-            sport=sport,
-            direction=direction,
-            bq_score=float(p.get("total") or p.get("score_total") or 0),
-            mq_score=float(p.get("market_quality_score") or 0),
+        if not _directional_evidence_gate(
+            direction,
             evidence_available=evidence_available,
         ):
             logger.debug(

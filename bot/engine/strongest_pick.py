@@ -10,13 +10,6 @@ from collections import defaultdict
 from typing import Iterable
 
 
-_TIER_RANK = {
-    "S": 4,
-    "A": 3,
-    "B": 2,
-    "C": 1,
-    "PASS": 0,
-}
 _PRIMARY_PROVIDERS = {"prizepicks", "underdog"}
 
 
@@ -65,39 +58,9 @@ def _validation_evidence(candidate: dict) -> tuple[int, float]:
 
 
 def _ranking_key(candidate: dict) -> tuple[float, ...]:
-    """Existing qualification signals, ordered strongest first."""
-    decision = _decision(candidate)
-    score = candidate.get("score")
-    market_quality = candidate.get("market_quality")
+    """Evidence-only ordering for already-qualified candidates."""
     evidence, sample_count = _validation_evidence(candidate)
-    confidence = _number(
-        candidate.get("conf")
-        if candidate.get("conf") is not None
-        else getattr(decision, "confidence", 0)
-    )
-    tier = _TIER_RANK.get(
-        str(
-            candidate.get("tier")
-            or getattr(decision, "decision_tier", "")
-            or "PASS"
-        ).upper(),
-        0,
-    )
-    bet_quality = _number(
-        candidate.get("bq")
-        if candidate.get("bq") is not None
-        else getattr(score, "total", 0)
-    )
-    market_score = _number(
-        candidate.get("mq")
-        if candidate.get("mq") is not None
-        else getattr(market_quality, "score", 0)
-    )
     return (
-        confidence,
-        float(tier),
-        bet_quality,
-        market_score,
         float(evidence),
         sample_count,
         float(bool(candidate.get("is_meaningful_change"))),

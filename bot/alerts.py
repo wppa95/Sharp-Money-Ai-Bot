@@ -32,7 +32,7 @@ from telegram.constants import ParseMode
 from telegram.error import TelegramError
 
 from config import config
-from engine.delivery_gates import tier_delivery_gate as _canonical_tier_delivery_gate
+from engine.delivery_gates import directional_evidence_gate as _directional_evidence_gate
 from engine.score_validation import clamp_score
 from engine.sport_policy import is_football_related_sport
 from engine.delivery_evidence import serialized_evidence_supports_delivery
@@ -1564,13 +1564,7 @@ class AlertDelivery:
         # flood protection, and delivery failures remain independent
         # safety/integrity protections.
         _pp_direction = str(getattr(opp, "best_side", "") or "").strip().upper()
-        if not _canonical_tier_delivery_gate(
-            sport=_pp_sport,
-            direction=_pp_direction,
-            bq_score=float(getattr(score, "total", 0) or 0),
-            mq_score=0,
-            evidence_available=evidence_available,
-        ):
+        if not _directional_evidence_gate(_pp_direction, evidence_available):
             return DeliveryResult(
                 sent=False,
                 filtered=True,
@@ -1806,21 +1800,15 @@ class AlertDelivery:
         # Every prop Telegram path uses the same canonical gate. Market
         # movement, removal, new-prop, and moneyline labels are monitoring
         # context; none is an actionable direction/evidence substitute.
-        _bq = float(getattr(score, "total", 0) or 0)
-        _mq = float(getattr(market_quality, "score", 0) or 0)
         _direction = str(getattr(decision, "recommendation", "") or "").upper()
-        if not _canonical_tier_delivery_gate(
-            sport=sport,
-            direction=_direction,
-            bq_score=_bq,
-            mq_score=_mq,
-            evidence_available=_has_strong_underdog_evidence(
+        if not _directional_evidence_gate(
+            _direction,
+            _has_strong_underdog_evidence(
                 score=score,
                 validation=validation,
                 decision=decision,
                 intelligence_trace=intelligence_trace,
             ),
-            confidence=getattr(decision, "confidence", None),
         ):
             return DeliveryResult(
                 sent=False,

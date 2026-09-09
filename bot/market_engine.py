@@ -63,9 +63,7 @@ from engine.evidence_memory import (
     put_line_observation as _remember_line_observation,
 )
 from providers import FailureType, get_health_monitor
-from engine.delivery_gates import (
-    tier_delivery_gate as _canonical_tier_delivery_gate,
-)
+from engine.delivery_gates import directional_evidence_gate as _directional_evidence_gate
 from engine.player_props_pipeline import (
     canonicalize_player_props,
     persist_canonical_player_props,
@@ -1375,67 +1373,6 @@ def _release_underdog_scan_slot() -> None:
     _ud_full_scan_running = False
 
 
-def _bq_stars(bq: int) -> str:
-    """V3.4 star display string computed from Bet Quality (decision.confidence).
-
-    Mapping:
-      100     → ★★★★★
-      80–99   → ★★★★☆
-      70–79   → ★★★☆☆
-      40–69   → ★★☆☆☆
-      0–39    → ★☆☆☆☆
-    """
-    if bq >= 100: n = 5
-    elif bq >= 80: n = 4
-    elif bq >= 70: n = 3
-    elif bq >= 40: n = 2
-    else: n = 1
-    return "★" * n + "☆" * (5 - n)
-
-
-def _format_95_priority_alert(
-    player: str,
-    snap: object,
-    stat_type: str,
-    score: object,
-    decision: "Optional[object]",
-    line_val: float,
-) -> str:
-    """Format the legacy high-confidence priority-display message.
-
-    Both OVER and UNDER are valid for all sports.  Current delivery uses the
-    shared direction-only gate rather than this legacy formatter.
-    """
-    sport  = getattr(snap, "sport", None) or "UNKNOWN"
-    rec    = getattr(decision, "recommendation", None) if decision is not None else None
-    conf   = getattr(decision, "confidence", 0)      if decision is not None else 0
-    stars  = _bq_stars(int(conf))  # V3.4: stars from Bet Quality, not raw score.total
-
-    dir_line = ""
-    if rec in ("OVER", "UNDER"):
-        dir_line = f"\n📈 <b>{rec}</b>   Confidence: {conf}"
-
-    gt_line = ""
-    gt = getattr(snap, "game_time", None)
-    if gt is not None:
-        try:
-            gt_line = f"\n🕐 {gt.strftime('%-I:%M %p ET')}"
-        except Exception:
-            pass
-
-    return (
-        f"🔥🚨 <b>S-TIER PRIORITY OVERRIDE — {conf}/100</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"<b>{player}</b>  ·  {stat_type}\n"
-        f"🏆 S-TIER  {stars}  {sport}"
-        f"{gt_line}"
-        f"\nLine: {line_val:.1f}"
-        f"{dir_line}\n"
-        f"\n<i>🔥 Bet Quality {conf}/100 — Priority</i>"
-        f"\n<i>Line movement and decision context are shown for research.</i>"
-    )
-
-
 def _is_game_live_or_past(snap: object, now: datetime) -> bool:
     """Return True when actionable alerts for this snap must be suppressed.
 
@@ -2182,7 +2119,10 @@ async def _fetch_and_compute_hit_rates(
                     len(raw_results), player_name, stat_type,
                 )
 
-        if preloaded_results is not None:
+        # A bulk hydration miss is not proof that no history exists. Always
+        # consult the durable database when the preloaded batch is empty so
+        # missing in-memory evidence can be rebuilt from persisted records.
+        if preloaded_results:
             db_results = list(preloaded_results)
         elif cycle_timing is not None:
             db_results = await cycle_timing.await_db(
@@ -2199,7 +2139,7 @@ async def _fetch_and_compute_hit_rates(
         primary_result_count = len(db_results)
         supplemental_count = 0
         if (
-            preloaded_results is None
+            (preloaded_results is None or not preloaded_results)
             and supplemental_results is None
             and _supports_history_enrichment(db)
             and len(db_results) < config.UD_VALIDATION_MIN_SAMPLES
@@ -2955,8 +2895,6 @@ async def _run_prizepicks_independent_cycle(
                 "score": score,
                 "validation": validation,
                 "decision": decision,
-                "market_quality": market_quality,
-                "market_pressure": market_pressure,
             })
 
     try:
@@ -3036,8 +2974,6 @@ async def _run_prizepicks_independent_cycle(
                 score=candidate["score"],
                 validation=candidate["validation"],
                 decision=candidate["decision"],
-                market_quality=candidate["market_quality"],
-                market_pressure=candidate["market_pressure"],
                 pp_line=line,
                 standing=True,
                 strict_pregame=True,
@@ -3678,14 +3614,7 @@ def _tier_delivery_gate(
     call sites and diagnostics.  They are informational and never gate a
     valid directional pick.
     """
-    return _canonical_tier_delivery_gate(
-        sport=sport,
-        direction=direction,
-        bq_score=bq_score,
-        mq_score=mq_score,
-        evidence_available=evidence_available,
-        confidence=confidence,
-    )
+    return _directional_evidence_gate(direction, evidence_available)
 
 
 async def _try_claim_delivery_slot(
@@ -3790,8 +3719,6 @@ async def _deliver_full_pool_candidate(
             score=candidate["score"],
             validation=candidate["validation"],
             decision=decision,
-            market_quality=candidate["market_quality"],
-            market_pressure=candidate["market_pressure"],
             pp_line=candidate.get("pp_line"),
             standing=True,
             strict_pregame=True,
@@ -5059,22 +4986,18 @@ async def underdog_job(context) -> None:
                             pass
                     # ── Direction delivery gate [new-prop] ───────────────────
                     # Scoring, evidence, and quality values are informational.
-                    _np_mq_score  = float(getattr(market_quality, "score", 0) if market_quality else 0)
-                    _np_bq_score  = float(score.total if score else 0)
                     _np_direction = decision.recommendation if decision else ""
                     _np_gate_ok   = _tier_delivery_gate(
-                        snap.sport or "UNKNOWN", _np_direction, _np_bq_score, _np_mq_score,
+                        snap.sport or "UNKNOWN", _np_direction, 0, 0,
                         _has_strong_delivery_evidence(
                             score=score, validation=validation, decision=decision,
                             intelligence_trace=_np_intel_trace,
                         ),
-                        score_tier=getattr(decision, "decision_tier", None),
-                        confidence=getattr(decision, "confidence", None),
                     )
                     if not _np_gate_ok:
                         logger.debug(
-                            "UD tier_gate [new]: %s | %s | sport=%s bq=%.0f mq=%.0f dir=%s — blocked",
-                            player, stat_type, snap.sport, _np_bq_score, _np_mq_score, _np_direction,
+                            "UD direction/evidence gate [new]: %s | %s | sport=%s dir=%s — blocked",
+                            player, stat_type, snap.sport, _np_direction,
                         )
                     else:
                         # Collect into ranked delivery queue — all candidates compete for
@@ -5092,8 +5015,6 @@ async def underdog_job(context) -> None:
                             "score":              score,
                             "decision":           decision,
                             "validation":         validation,
-                            "market_quality":     market_quality,
-                            "market_pressure":    market_pressure,
                             "intel_trace":        _np_intel_trace,
                             "odds_confirm":       _np_odds_confirm,
                             "pp_line":            _prizepicks_line_from_confirmation(_np_odds_confirm),
@@ -5101,10 +5022,6 @@ async def underdog_job(context) -> None:
                             "ext_id":             _np_ext_id,
                             "record":             None,   # linked after record construction
                             "sport":              snap.sport or "UNKNOWN",
-                            "tier":               decision.decision_tier if decision else "B",
-                            "conf":               float(decision.confidence if decision else 0),
-                            "bq":                 float(score.total if score else 0),
-                            "mq":                 float(getattr(market_quality, "score", 0) if market_quality else 0),
                             "is_meaningful_change": False,  # new props have no prev line
                             "_sent":              False,
                         })
@@ -5578,22 +5495,18 @@ async def underdog_job(context) -> None:
                     # Removals are not Telegram-alerted (suppressed per doc #2/#3) —
                     # lifecycle tracking is applied via _lifecycle_removed separately.
                     # ── Tier delivery gate [lc] ─────────────────────────────────
-                    _lc_mq_score  = float(getattr(market_quality, "score", 0) if market_quality else 0)
-                    _lc_bq_score  = float(score.total if score else 0)
                     _lc_direction = decision.recommendation if decision else ""
                     if not is_removed and not _tier_delivery_gate(
-                        snap.sport or "UNKNOWN", _lc_direction, _lc_bq_score, _lc_mq_score,
+                        snap.sport or "UNKNOWN", _lc_direction, 0, 0,
                         _has_strong_delivery_evidence(
                             score=score, validation=validation, decision=decision,
                             intelligence_trace=_lc_intel_trace,
                         ),
-                        score_tier=getattr(decision, "decision_tier", None),
-                        confidence=getattr(decision, "confidence", None),
                     ):
                         should_alert = False
                         logger.debug(
-                            "UD tier_gate [lc]: %s | %s | sport=%s bq=%.0f mq=%.0f dir=%s — blocked",
-                            player, stat_type, snap.sport, _lc_bq_score, _lc_mq_score, _lc_direction,
+                            "UD direction/evidence gate [lc]: %s | %s | sport=%s dir=%s — blocked",
+                            player, stat_type, snap.sport, _lc_direction,
                         )
                     if not is_removed and should_alert:
                         _lc_mag_abs  = (
@@ -5616,8 +5529,6 @@ async def underdog_job(context) -> None:
                             "score":              score,
                             "decision":           decision,
                             "validation":         validation,
-                            "market_quality":     market_quality,
-                            "market_pressure":    market_pressure,
                             "intel_trace":        _lc_intel_trace,
                             "odds_confirm":       _lc_odds_confirm,
                             "pp_line":            _prizepicks_line_from_confirmation(_lc_odds_confirm),
@@ -5625,10 +5536,6 @@ async def underdog_job(context) -> None:
                             "ext_id":             _lc_ext_id_q,
                             "record":             None,   # linked after record construction
                             "sport":              snap.sport or "UNKNOWN",
-                            "tier":               decision.decision_tier if decision else "B",
-                            "conf":               float(decision.confidence if decision else 0),
-                            "bq":                 float(score.total if score else 0),
-                            "mq":                 float(getattr(market_quality, "score", 0) if market_quality else 0),
                             "is_meaningful_change": _lc_is_mc,
                             "_sent":              False,
                         })
@@ -6010,21 +5917,17 @@ async def underdog_job(context) -> None:
                     continue
 
                 # ── Tier delivery gate [standing] ────────────────────────
-                _s_mq_score  = float(getattr(_smq, "score", 0) if _smq else 0)
-                _s_bq_score  = float(_sscore.total if _sscore else 0)
                 _s_direction = _sdec.recommendation if _sdec else ""
                 if not _tier_delivery_gate(
-                    _ssport, _s_direction, _s_bq_score, _s_mq_score,
+                    _ssport, _s_direction, 0, 0,
                     _has_strong_delivery_evidence(
                         score=_sscore, validation=_sval, decision=_sdec,
                         intelligence_trace=_s_intel_trace,
                     ),
-                    score_tier=getattr(_sdec, "decision_tier", None),
-                    confidence=getattr(_sdec, "confidence", None),
                 ):
                     logger.debug(
-                        "UD tier_gate [standing]: %s | %s | sport=%s bq=%.0f mq=%.0f dir=%s — blocked",
-                        _sp, _st, _ssport, _s_bq_score, _s_mq_score, _s_direction,
+                        "UD direction/evidence gate [standing]: %s | %s | sport=%s dir=%s — blocked",
+                        _sp, _st, _ssport, _s_direction,
                     )
                     continue
 
@@ -6041,8 +5944,6 @@ async def underdog_job(context) -> None:
                     "score":              _sscore,
                     "decision":           _sdec,
                     "validation":         _sval,
-                    "market_quality":     _smq,
-                    "market_pressure":    _smp,
                     "intel_trace":        _s_intel_trace,
                     "odds_confirm":       _s_odds_confirm,
                     "pp_line":            _prizepicks_line_from_confirmation(_s_odds_confirm),
@@ -6050,10 +5951,6 @@ async def underdog_job(context) -> None:
                     "ext_id":             _s_ext_id_q,
                     "record":             None,   # standing path has no new snapshot record
                     "sport":              _ssport,
-                    "tier":               _sdec.decision_tier if _sdec else "B",
-                    "conf":               float(_sdec.confidence if _sdec else 0),
-                    "bq":                 float(_sscore.total if _sscore else 0),
-                    "mq":                 float(getattr(_smq, "score", 0) if _smq else 0),
                     "is_meaningful_change": False,  # standing = stable line
                     "_sent":              False,
                 })
@@ -6104,8 +6001,6 @@ async def underdog_job(context) -> None:
                 _dq_score     = _dq["score"]
                 _dq_dec       = _dq["decision"]
                 _dq_val       = _dq["validation"]
-                _dq_mq        = _dq["market_quality"]
-                _dq_mp        = _dq["market_pressure"]
                 _dq_intel     = _dq["intel_trace"]
                 _dq_odds      = _dq["odds_confirm"]
                 _dq_pp_line   = _dq.get("pp_line")
@@ -6122,11 +6017,9 @@ async def underdog_job(context) -> None:
                 # collection-point gate is caught here before Telegram.
                 # Final backstop: preserve the direction-only qualification
                 # contract before any Telegram delivery callback.
-                _dq_mq_score  = float(getattr(_dq_mq, "score", 0) if _dq_mq else _dq.get("mq", 0))
-                _dq_bq_score  = float(_dq.get("bq", 0))
                 _dq_direction = _dq_dec.recommendation if _dq_dec else ""
                 if not _tier_delivery_gate(
-                    _dq_sport, _dq_direction, _dq_bq_score, _dq_mq_score,
+                     _dq_sport, _dq_direction, 0, 0,
                     _has_strong_delivery_evidence(
                         score=_dq_score, validation=_dq_val, decision=_dq_dec,
                         intelligence_trace=_dq_intel,
@@ -6137,8 +6030,8 @@ async def underdog_job(context) -> None:
                     _n_dq_deferred += 1
                     _dq_deferred_log.append(
                         f"{_dq_player}/{_dq_st}"
-                        f" [sport={_dq_sport} bq={_dq_bq_score:.0f}"
-                        f" mq={_dq_mq_score:.0f} dir={_dq_direction}]: tier gate (backstop)"
+                         f" [sport={_dq_sport} dir={_dq_direction}]: "
+                         "direction/evidence gate"
                     )
                     continue
 
@@ -6185,8 +6078,6 @@ async def underdog_job(context) -> None:
                         new_prop            = _dq_is_new,
                         validation          = _dq_val,
                         decision            = _dq_dec,
-                        market_quality      = _dq_mq,
-                        market_pressure     = _dq_mp,
                         pp_line             = _dq_pp_line,
                         intelligence_trace  = _dq_intel,
                         market_confirmation = _dq_odds,
@@ -6339,8 +6230,7 @@ async def underdog_job(context) -> None:
                     )
                     _n_dq_deferred += 1
                     _dq_deferred_log.append(
-                        f"{_dq_player}/{_dq_st} [tier={_dq.get('tier', '?')}]"
-                        f" bq={_dq.get('bq',0):.0f} path={_dq_path}]:"
+                         f"{_dq_player}/{_dq_st} [path={_dq_path}]:"
                         f"{str(_dq_result)}"
                     )
                                     
@@ -6348,7 +6238,6 @@ async def underdog_job(context) -> None:
             if _n_dq_deferred:
                 _dq_sent_log = [
                     f"{c['player']}/{c['stat_type']}"
-                    f" [{c.get('tier','?')} bq={c.get('bq',0):.0f}]"
                     for c in _delivery_queue if c.get("_sent")
                 ]
                 # Deferral is expected when another scan path already owns the
@@ -7356,23 +7245,20 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             _sr_mp = _sr_dmp(None, _sr_hist)
 
             # ── Tier delivery gate [stable-refresh] ──────────────────────────
-            _sr_mq_score = float(getattr(_sr_mq, "score", 0) if _sr_mq else 0)
-            _sr_bq_score = float(_sr_score.total if _sr_score else 0)
             if not _tier_delivery_gate(
-                _sr_sport, _sr_dec.recommendation, _sr_bq_score, _sr_mq_score,
+                _sr_sport, _sr_dec.recommendation, 0, 0,
                 _has_strong_delivery_evidence(
                     score=_sr_score,
                     validation=_sr_val,
                     decision=_sr_dec,
                     intelligence_trace=getattr(_sr_dec, "evidence", None),
                 ),
-                score_tier=getattr(_sr_dec, "decision_tier", None),
             ):
                 sr_not_delivered += 1
                 sr_actionable -= 1
                 logger.debug(
-                    "UD tier_gate [sr]: %s | %s | sport=%s bq=%.0f mq=%.0f dir=%s — blocked",
-                    _sr_player, _sr_stat, _sr_sport, _sr_bq_score, _sr_mq_score, _sr_dec.recommendation,
+                    "UD direction/evidence gate [sr]: %s | %s | sport=%s dir=%s — blocked",
+                    _sr_player, _sr_stat, _sr_sport, _sr_dec.recommendation,
                 )
                 continue
 
@@ -8129,7 +8015,6 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 )
                 _fpr_hits = await _fetch_and_compute_hit_rates(
                     db, _fpr_player, _fpr_sport, _fpr_stat, _fpr_line,
-                    allow_remote=False,
                     source_provider=_fpr_provider,
                     preloaded_results=_fpr_results_by_prop.get(
                         (_fpr_player, _fpr_sport, _fpr_stat.lower().strip())
@@ -8207,29 +8092,23 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 # preserve its directional opportunity, but never send it.
                 _fpr_game_live = _is_game_live_or_past(_fpr_snap, now)
                 if _fpr_has_direction and chat_ids and not _fpr_game_live:
-                    _fpr_mq       = _fpr_cmq(_fpr_stat, _fpr_line, _fpr_score)
-                    _fpr_mp       = _fpr_dmp(None, _fpr_hist)
-                    # ── Tier delivery gate [full-pool-rescan] ────────────────
-                    _fpr_mq_score = float(getattr(_fpr_mq, "score", 0) if _fpr_mq else 0)
-                    _fpr_bq_score = float(_fpr_score.total if _fpr_score else 0)
-                    _fpr_mq_ok    = _tier_delivery_gate(
-                        _fpr_sport, _fpr_dec.recommendation, _fpr_bq_score, _fpr_mq_score,
+                    # ── Direction/evidence delivery gate ─────────────────────
+                    _fpr_evidence_ok = _tier_delivery_gate(
+                        _fpr_sport, _fpr_dec.recommendation, 0, 0,
                         _has_strong_delivery_evidence(
                             score=_fpr_score,
                             validation=_fpr_val,
                             decision=_fpr_dec,
                             intelligence_trace=getattr(_fpr_dec, "evidence", None),
                         ),
-                        score_tier=getattr(_fpr_dec, "decision_tier", None),
-                        confidence=getattr(_fpr_dec, "confidence", None),
                     )
-                    if not _fpr_mq_ok:
+                    if not _fpr_evidence_ok:
                         fpr_not_delivered += 1
                         logger.debug(
-                            "UD tier_gate [fpr]: %s | %s | sport=%s bq=%.0f mq=%.0f dir=%s — blocked",
-                            _fpr_player, _fpr_stat, _fpr_sport, _fpr_bq_score, _fpr_mq_score, _fpr_dec.recommendation,
+                            "UD direction/evidence gate [fpr]: %s | %s | sport=%s dir=%s — blocked",
+                            _fpr_player, _fpr_stat, _fpr_sport, _fpr_dec.recommendation,
                         )
-                    if _fpr_mq_ok:
+                    if _fpr_evidence_ok:
                         _fpr_delivery_candidates.append({
                             "provider": _fpr_provider,
                             "player": _fpr_player,
@@ -8239,8 +8118,6 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                             "score": _fpr_score,
                             "validation": _fpr_val,
                             "decision": _fpr_dec,
-                            "market_quality": _fpr_mq,
-                            "market_pressure": _fpr_mp,
                             "snap": _fpr_snap,
                             "pp_line": _fpr_pp_line,
                             "ext_id": _fpr_ext_id,
@@ -8253,8 +8130,8 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         # The legacy inline branch below is retained for
                         # compatibility, but delivery now occurs after the
                         # complete batch has been strongest-pick filtered.
-                        _fpr_mq_ok = False
-                    if _fpr_mq_ok:
+                        _fpr_evidence_ok = False
+                    if _fpr_evidence_ok:
                      # ── Atomic dedup claim [full-pool-rescan] ─────────────────
                      if not await _try_claim_delivery_slot(
                          _fpr_player, _fpr_sport, _fpr_stat, _fpr_line,
@@ -8268,8 +8145,8 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                              "UD dedup_claim [fpr]: %s | %s | concurrent path already claimed",
                              _fpr_player, _fpr_stat,
                          )
-                         _fpr_mq_ok = False
-                    if _fpr_mq_ok:
+                         _fpr_evidence_ok = False
+                    if _fpr_evidence_ok:
                      _fpr_delivery = AlertDelivery(db, bot, chat_ids)
                      try:
                       _fpr_result   = await _fpr_delivery.deliver_underdog(
@@ -8288,8 +8165,6 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                          score           = _fpr_score,
                          validation      = _fpr_val,
                          decision        = _fpr_dec,
-                         market_quality  = _fpr_mq,
-                         market_pressure = _fpr_mp,
                           pp_line         = _fpr_pp_line,
                          standing        = True,
                          strict_pregame   = True,
@@ -8337,7 +8212,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                           type(_fpr_delivery_exc).__name__,
                       )
                       _fpr_result = DeliveryResult(sent=False)
-                    if _fpr_mq_ok and _fpr_result.sent:
+                    if _fpr_evidence_ok and _fpr_result.sent:
                         fpr_sent      += 1
                         # _record_prop_alerted already called by _try_claim_delivery_slot.
                         try:
@@ -8364,7 +8239,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                                 _fpr_stat,
                                 _fpr_bookkeeping_exc,
                             )
-                    elif _fpr_mq_ok:
+                    elif _fpr_evidence_ok:
                         # deliver_underdog returned not-sent (etc.)
                         fpr_not_delivered += 1
                         _release_prop_delivery_claim(

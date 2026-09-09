@@ -131,3 +131,4 @@
 - [PropLine completed-evidence coverage](propline-coverage-evidence.md) — only explicit settlements are usable; unresolved complete payloads are unavailable and coverage is audited by sport and market.
 - [CLV bulk writes](clv-bulk-writes.md) — bounded CLV batches and no full-history sort before LIMIT keep scheduled CLV work from appearing stuck.
 - [Funnel timing](funnel-timing.md) — report scan age/cadence from observed timestamps, never from the requested report window.
+- [Direction-only prop delivery](direction-only-delivery.md) — active delivery and selection use direction plus evidence; tier/BQ/MQ/PASS are legacy metadata only.

@@ -371,7 +371,7 @@ class TestConfidence:
     def test_pass_via_make_pass_has_zero_confidence(self):
         d = UDBetDecision.make_pass("test reason")
         assert d.confidence == 0
-        assert d.recommendation == "PASS"
+        assert d.recommendation is None
 
 
 # ── Window evidence fields ────────────────────────────────────────────────────
@@ -534,15 +534,15 @@ class TestSerialization:
     def test_to_json_pass_values(self):
         d    = UDBetDecision.make_pass("no data")
         blob = json.loads(d.to_json())
-        assert blob["rec"]  == "PASS"
-        assert blob["tier"] == "PASS"
+        assert blob["rec"]  is None
+        assert blob["tier"] is None
         assert blob["conf"] == 0
 
     def test_to_json_pick_values(self):
         hr   = _hit_rates(l5_r=0.80, l10_r=0.70)
         d    = make_ud_bet_decision(_score(), _validation(), 25.5, hit_rates=hr)
         blob = json.loads(d.to_json())
-        assert blob["rec"] in ("OVER", "UNDER", "PASS")
+        assert blob["rec"] in ("OVER", "UNDER", None)
         assert isinstance(blob["conf"], int)
         assert blob["evidence_source"] == "settled_results"
         assert blob["evidence_label"] == "Settled player-game results"
@@ -568,8 +568,8 @@ class TestSerialization:
 class TestConstructors:
     def test_make_pass_sets_recommendation(self):
         d = UDBetDecision.make_pass("reason")
-        assert d.recommendation == "PASS"
-        assert d.decision_tier  == "PASS"
+        assert d.recommendation is None
+        assert d.decision_tier  is None
         assert d.confidence     == 0
         assert d.reason         == "reason"
 
@@ -580,7 +580,7 @@ class TestConstructors:
     def test_make_pass_inherits_window_data(self):
         hr = _hit_rates(l5_r=0.80, l10_r=0.70)
         d  = UDBetDecision.make_pass("test", hit_rates=hr)
-        # Window data still populated even though it's a PASS
+        # Window data still populated for a neutral evaluation.
         assert d.l5_games    == 5
         assert d.l10_games   == 10
 

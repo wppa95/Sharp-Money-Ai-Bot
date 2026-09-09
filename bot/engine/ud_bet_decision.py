@@ -181,24 +181,12 @@ class UDBetDecision:
         avg_vs_line_pct: Optional[float] = None,
         at_historical_low: bool = False,
     ) -> "UDBetDecision":
-        """Legacy constructor retained for historical callers and fixtures.
-
-        The active decision entry point uses ``make_no_direction`` instead.
-        """
-        w = _windows_from_hit_rates(hit_rates)
-        return cls(
-            recommendation     = "PASS",
-            decision_tier      = "PASS",
-            confidence         = 0,
-            reason             = reason,
-            avg_vs_line_pct    = avg_vs_line_pct,
-            at_historical_low  = at_historical_low,
-            evidence_source    = (
-                EVIDENCE_SETTLED_RESULTS
-                if getattr(hit_rates, "has_real_data", False)
-                else None
-            ),
-            **w,
+        """Compatibility alias for the neutral no-direction state."""
+        return cls.make_no_direction(
+            reason=reason,
+            hit_rates=hit_rates,
+            avg_vs_line_pct=avg_vs_line_pct,
+            at_historical_low=at_historical_low,
         )
 
     @classmethod

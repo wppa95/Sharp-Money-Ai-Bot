@@ -24,7 +24,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Optional
-from engine.delivery_gates import tier_delivery_gate as _canonical_tier_delivery_gate
+from engine.delivery_gates import directional_evidence_gate as _directional_evidence_gate
 from engine.sport_policy import is_football_related_sport
 
 
@@ -505,11 +505,8 @@ class PregameWatchEngine:
             # monitoring-only until a real decision/evidence payload is wired.
             _watch_direction = str(getattr(comp, "direction", "") or "").upper()
             _watch_evidence = bool(getattr(comp, "evidence_available", False))
-            if not _canonical_tier_delivery_gate(
-                sport=entry.sport,
-                direction=_watch_direction,
-                bq_score=0,
-                mq_score=0,
+            if not _directional_evidence_gate(
+                _watch_direction,
                 evidence_available=_watch_evidence,
             ):
                 continue

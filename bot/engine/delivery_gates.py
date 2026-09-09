@@ -2,23 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Optional
+def directional_evidence_gate(direction: str, evidence_available: bool = False) -> bool:
+    """Return whether a prop has a direction and legitimate evidence.
 
-
-def tier_delivery_gate(
-    sport: str,
-    direction: str,
-    bq_score: float,
-    mq_score: float,
-    evidence_available: bool = False,
-    confidence: Optional[float] = None,
-) -> bool:
-    """Return whether an actionable prop has legitimate delivery evidence.
-
-    Score, confidence, tier, and sport-tier values are retained for call-site
-    compatibility and reporting only. Timing, scope, football suppression,
-    stale-line, provider identity, deduplication, and rate-limit protections
-    run independently at their respective delivery boundaries.
+    Delivery is intentionally independent of score, tier, bet quality, and
+    market quality. Those classifications are not part of the active alert
+    framework.
     """
     return (
         (direction or "").strip().upper() in {"OVER", "UNDER"}
