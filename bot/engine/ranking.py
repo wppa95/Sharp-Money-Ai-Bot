@@ -458,6 +458,8 @@ def compute_ranking(
     overall_history:  Optional[HistoricalStats] = None,
     market_history:   Optional[HistoricalStats] = None,
     sport_history:    Optional[HistoricalStats] = None,
+    adaptive_multiplier: Optional[float] = None,
+    adaptive_weight_version: Optional[str] = None,
 ) -> RankingResult:
     """
     Compute the full AI ranking decision for one market opportunity.
