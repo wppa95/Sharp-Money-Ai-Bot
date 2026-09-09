@@ -4558,10 +4558,7 @@ class PropLinePrizePicksProvider(PropProviderBase):
         ) -> None:
             self._sport_filter = {s.upper() for s in sport_filter} if sport_filter else None
             self.bookmaker = (
-                (
-                    bookmaker
-                    or os.getenv("PROPLINE_PRIZEPICKS_BOOKMAKER", "prizepicks")
-                )
+                (bookmaker or os.getenv("PROPLINE_UNDERDOG_BOOKMAKER", "prizepicks"))
                 .strip()
                 .lower()
             )
@@ -4597,7 +4594,7 @@ class PropLinePrizePicksProvider(PropProviderBase):
         discovered = await self.client.discover_sports()
         if getattr(self.client, "sports_discovery_failed", False):
             # Preserve a failed catalog as distinguishable from a valid empty
-            # slate so the caller can use its complete catalog fallback.
+            # slate so the caller can use its complete non-football fallback.
             return None
         if self._sport_filter is not None:
             discovered = [

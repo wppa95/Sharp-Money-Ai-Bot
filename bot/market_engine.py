@@ -839,10 +839,10 @@ def init_odds_confirmation(engine: object, db: Optional[Database] = None) -> Non
         from providers.propline import PropLinePrizePicksProvider
         _propline_provider = PropLinePrizePicksProvider(
             bookmaker=str(
-                getattr(config, "PROPLINE_PRIZEPICKS_BOOKMAKER", "prizepicks")
-                or "prizepicks"
+                getattr(config, "PROPLINE_UNDERDOG_BOOKMAKER", "underdog")
+                or "underdog"
             ).strip()
-            or "prizepicks"
+            or "underdog"
         )
     except Exception:
         # Provider setup is optional; the existing OddsAPI confirmation path
