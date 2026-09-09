@@ -5244,8 +5244,8 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     )
             else:
                 _sport_table_lines = [
-                    f"{'Sport':<8}{'Obs':>7}  {'Act':>7}  {'Eval':>7}  {'Dir':>7}  {'Del':>7}",
-                    f"{'--------':<8}{'-------':>7}  {'-------':>7}  {'-------':>7}  {'-------':>7}  {'-------':>7}",
+                    f"{'Sport':<6}{'Obs':>5}{'Act':>5}{'Eval':>5}{'Dir':>5}{'Del':>5}",
+                    f"{'------':<6}{'-----':>5}{'-----':>5} {'-----':>5}{'-----':>5}{'-----':>5}",
                 ]
                 normalized_observed_by_sport = (
                     summary.get("observations_by_sport", {}) or {}
@@ -5275,8 +5275,8 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     sa = normalized_directional_by_sport.get(sport, 0)
                     sd = normalized_delivered_by_sport.get(sport, 0)
                     _sport_table_lines.append(
-                        f"{sp:<8}{int(so or 0):>7}  {int(sc or 0):>7}"
-                        f"  {int(se or 0):>7}  {int(sa or 0):>7}  {int(sd or 0):>7}"
+                        f"{sp:<6}{int(so or 0):>5}{int(sc or 0):>5}"
+                        f" {int(se or 0):>5}{int(sa or 0):>5}{int(sd or 0):>5}"
                     )
                 lines += ["", "<pre>" + "\n".join(_sport_table_lines) + "</pre>"]
         else:
