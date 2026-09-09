@@ -304,6 +304,31 @@ class DashboardReport:
             parts.append(f"  Pending:   <code>{self.clv_seeds_pending}</code> seeds awaiting close")
         parts.append("")
 
+        # ── Provider pipeline ──────────────────────────────────────────────────
+        # Keep this as a compact current-activity section.  The dashboard
+        # intentionally exposes the primary Underdog stream only; secondary
+        # provider records are not part of the active product surface.
+        pipeline_values = self.provider_pipeline.get("Underdog")
+        if not isinstance(pipeline_values, dict):
+            pipeline_values = {}
+        observed = pipeline_values.get(
+            "observed",
+            self._normalized_activity("Underdog", self.total_ud_alerts),
+        )
+        active = pipeline_values.get(
+            "active",
+            self.active_tracked_props,
+        )
+        parts += [
+            "📡 <b>Provider Pipeline</b>",
+            (
+                "  <b>Underdog</b>  "
+                f"Observed: <code>{_count(observed)}</code> · "
+                f"Active: <code>{_count(active)}</code>"
+            ),
+            "",
+        ]
+
         # ── By sport ──────────────────────────────────────────────────────────
         # All-time cumulative alert distribution across EV + Underdog + PrizePicks.
         # Differs from Today count — shows historical model performance by sport.

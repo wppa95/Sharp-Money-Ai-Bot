@@ -837,11 +837,11 @@ def _sanitize_user_alert_message(message: str) -> str:
             continue
         _clean_lines.append(_line)
     text = "\n".join(_clean_lines)
-    # Keep Telegram focused on the pick itself. These operational fields stay
-    # in the database and internal reports, but are not part of the user-facing
-    # alert surface.
+    # Keep internal routing and lifecycle labels out of Telegram while
+    # preserving evidence and provider context. Those two fields explain why
+    # the pick exists and are part of the user-facing alert contract.
     _hidden_labels = re.compile(
-        r"\b(?:source|provider|evidence|reason(?:s| codes)?|status)\b\s*:",
+        r"\b(?:source|reason(?:s| codes)?|status)\b\s*:",
         flags=re.IGNORECASE,
     )
     text = "\n".join(
