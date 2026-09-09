@@ -395,7 +395,6 @@ def test_bulk_fetch_discovers_and_fetches_multiple_sports_without_nba_only_path(
 
     assert {(prop.sport, prop.player_name, prop.direction) for prop in props} == {
         ("NBA", "NBA Player", "OVER"),
-        ("NFL", "NFL Player", "UNDER"),
     }
     assert all(prop.provider == "PrizePicks" for prop in props)
 
@@ -462,10 +461,8 @@ def test_sport_scoped_fetch_preserves_requested_alias_for_confirmation_matching(
         PropLinePrizePicksProvider(client=client).fetch_props_for_sport("CFB")
     )
 
-    assert [(prop.sport, prop.player_name) for prop in props] == [
-        ("CFB", "College Player")
-    ]
-    assert len(session.calls) == 1
+    assert props == []
+    assert session.calls == []
 
 
 def test_client_reuses_fresh_cache_instead_of_repeating_request():

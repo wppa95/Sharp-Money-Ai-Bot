@@ -1080,7 +1080,7 @@ def build_propline_result_evidence(
         return None
     stat_type = _normalize_stat(market_key.removeprefix("player_"))
     sport = _normalize_sport(record.get("sport_key"))
-    if not sport or not stat_type:
+    if not sport or not stat_type or is_football_related_sport(sport):
         return None
 
     observed = observed_at or _parse_datetime(record.get("_observed_at"))
@@ -1648,7 +1648,7 @@ def normalize_propline_prizepicks_record(
     stat_type = _normalize_stat(
         _first(raw_record, "stat_type", "stat", "market_name", "prop_type", "category")
     )
-    if not sport or not stat_type:
+    if not sport or not stat_type or is_football_related_sport(sport):
         return None
 
     raw_line = _first(raw_record, "line_value", "line", "point", "threshold", "value")
@@ -4545,8 +4545,8 @@ class PropLinePrizePicksProvider(PropProviderBase):
 
     The legacy class name is retained for storage/API compatibility. PropLine
     is not exposed as an independent Telegram provider or delivery stream.
-    All catalog sports are persisted; active scoring and delivery apply their
-    own football suppression after persistence.
+    All non-football catalog sports are persisted; football is blocked before
+    persistence and delivery.
     """
 
     def __init__(
@@ -4604,6 +4604,13 @@ class PropLinePrizePicksProvider(PropProviderBase):
                 sport
                 for sport in discovered
                 if sport.canonical_key in self._sport_filter
+                and not is_football_related_sport(sport.canonical_key)
+            ]
+        else:
+            discovered = [
+                sport
+                for sport in discovered
+                if not is_football_related_sport(sport.canonical_key)
             ]
         return discovered
 
@@ -4617,7 +4624,8 @@ class PropLinePrizePicksProvider(PropProviderBase):
             result = await self.client.fetch_prizepicks_props(bookmaker=self.bookmaker)
             return [
                 prop for prop in result.props
-                if self._sport_filter is None or prop.sport in self._sport_filter
+                if not is_football_related_sport(prop.sport)
+                and (self._sport_filter is None or prop.sport in self._sport_filter)
             ]
 
         discovered = await self.client.discover_sports()
@@ -4625,6 +4633,12 @@ class PropLinePrizePicksProvider(PropProviderBase):
             discovered = [
                 sport for sport in discovered
                 if sport.canonical_key in self._sport_filter
+                and not is_football_related_sport(sport.canonical_key)
+            ]
+        else:
+            discovered = [
+                sport for sport in discovered
+                if not is_football_related_sport(sport.canonical_key)
             ]
 
         props: list[PlayerProp] = []
@@ -4655,6 +4669,12 @@ class PropLinePrizePicksProvider(PropProviderBase):
                 error="PropLine is not configured", failure_kind="disabled",
             )
         canonical_sport = _normalize_sport(sport)
+        if is_football_related_sport(canonical_sport):
+            return PropLineFetchResult(
+                [], datetime.utcnow(),
+                error=f"PropLine sport is outside football-free scope: {canonical_sport}",
+                failure_kind="configuration",
+            )
         if self._sport_filter is not None and canonical_sport not in self._sport_filter:
             return PropLineFetchResult(
                 [], datetime.utcnow(),
@@ -4727,7 +4747,10 @@ class PropLinePrizePicksProvider(PropProviderBase):
                 sport_key=canonical_sport, market=_clean(market),
                 error="PropLine is not configured", failure_kind="disabled",
             )
-        if self._sport_filter is not None and canonical_sport not in self._sport_filter:
+        if (
+            is_football_related_sport(canonical_sport)
+            or (self._sport_filter is not None and canonical_sport not in self._sport_filter)
+        ):
             return PropLinePlayerHistoryFetchResult(
                 (), datetime.utcnow(), player_name=_clean(player_name),
                 sport_key=canonical_sport, market=_clean(market),
@@ -4770,7 +4793,10 @@ class PropLinePrizePicksProvider(PropProviderBase):
                 sport_key=canonical_sport,
                 error="PropLine is not configured", failure_kind="disabled",
             )
-        if self._sport_filter is not None and canonical_sport not in self._sport_filter:
+        if (
+            is_football_related_sport(canonical_sport)
+            or (self._sport_filter is not None and canonical_sport not in self._sport_filter)
+        ):
             return PropLinePlayerTrendsFetchResult(
                 (), datetime.utcnow(), player_name=_clean(player_name),
                 sport_key=canonical_sport,

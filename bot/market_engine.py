@@ -917,15 +917,14 @@ def propline_request_schedule_state() -> Optional[dict[str, object]]:
 
 
 async def _get_prizepicks_scan_sports(provider) -> tuple[str, ...]:
-    """Return the provider's complete active canonical sport catalog.
+    """Return the provider's active non-football canonical sport catalog.
 
     PropLine's sports catalog is authoritative when available.  The configured
     list remains a compatibility fallback for test/custom providers and for a
     temporary catalog outage. When no explicit scope is configured, the
     provider's complete known namespace keeps a temporary catalog failure from
     suppressing coverage. It is never used to turn an empty successful catalog
-    into a fabricated sport. Active scoring and delivery apply football
-    suppression after this database/history ingestion boundary.
+    into a fabricated sport. Football remains blocked at ingestion.
     """
     configured = tuple(
         str(sport).strip()
@@ -939,13 +938,14 @@ async def _get_prizepicks_scan_sports(provider) -> tuple[str, ...]:
     )
     fallback = configured or provider_sports
 
-    def _all_sports(values) -> tuple[str, ...]:
+    def _non_football(values) -> tuple[str, ...]:
         result: list[str] = []
         seen: set[str] = set()
         for value in values:
             canonical = str(value).strip()
             if (
                 canonical
+                and not is_football_related_sport(canonical)
                 and canonical.upper() not in seen
             ):
                 seen.add(canonical.upper())
@@ -954,18 +954,18 @@ async def _get_prizepicks_scan_sports(provider) -> tuple[str, ...]:
 
     discover = getattr(provider, "discover_sports", None)
     if not callable(discover):
-        return _all_sports(fallback)
+        return _non_football(fallback)
     try:
         discovered = await discover()
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "prizepicks_cycle: active-sport discovery failed; using "
-            "complete catalog fallback: %s",
+            "non-football fallback: %s",
             type(exc).__name__,
         )
-        fallback_sports = _all_sports(fallback)
+        fallback_sports = _non_football(fallback)
         logger.info(
-            "prizepicks_cycle: catalog fallback active; sports=%d",
+            "prizepicks_cycle: catalog fallback active; non-football sports=%d",
             len(fallback_sports),
         )
         return fallback_sports
@@ -980,12 +980,13 @@ async def _get_prizepicks_scan_sports(provider) -> tuple[str, ...]:
         ).strip()
         if (
             canonical
+            and not is_football_related_sport(canonical)
             and canonical.upper() not in seen
         ):
             seen.add(canonical.upper())
             sports.append(canonical)
     if discovered is None:
-        return _all_sports(fallback)
+        return _non_football(fallback)
     # A successful but empty catalog means there is no currently advertised
     # PP slate.  Do not issue requests against guessed static sports.
     return tuple(sports)
@@ -1264,6 +1265,10 @@ async def propline_request_scan_job(context) -> None:
             elif callable(fetch_props):
                 props = list(await fetch_props(sport) or [])
                 succeeded = True
+            props = [
+                prop for prop in props
+                if not is_football_related_sport(getattr(prop, "sport", ""))
+            ]
             if succeeded:
                 persisted = await _persist_propline_observations(
                     getattr(context, "bot_data", {}).get("db"),
