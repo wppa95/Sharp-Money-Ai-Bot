@@ -146,9 +146,6 @@ class _MixedPropLineClient:
     api_url = "https://authorized.example/props"
     is_configured = True
 
-    def official_sport_for(self, sport):
-        return sport
-
     async def fetch_prizepicks_props(self, **_kwargs):
         return PropLineFetchResult(
             props=[
@@ -174,34 +171,31 @@ class _MixedPropLineClient:
         )
 
 
-def test_prizepicks_custom_endpoint_keeps_mixed_sports_for_persistence():
+def test_prizepicks_custom_endpoint_filters_mixed_football_batch():
     provider = PropLinePrizePicksProvider(client=_MixedPropLineClient())
 
     props = asyncio.run(provider.fetch_props())
 
-    assert {(prop.sport, prop.player_name) for prop in props} == {
-        ("NFL", "NFL Player"),
-        ("NBA", "NBA Player"),
-    }
+    assert [(prop.sport, prop.player_name) for prop in props] == [
+        ("NBA", "NBA Player")
+    ]
 
 
-def test_prizepicks_sport_scoped_football_fetch_is_enabled_for_persistence():
+def test_prizepicks_sport_scoped_football_fetch_is_blocked_before_request():
     client = _MixedPropLineClient()
     provider = PropLinePrizePicksProvider(client=client)
 
     result = asyncio.run(provider.fetch_props_for_sport_result("CFB"))
 
-    assert [(prop.sport, prop.player_name) for prop in result.props] == [
-        ("NFL", "NFL Player")
-    ]
-    assert result.succeeded is True
+    assert result.props == []
+    assert result.failure_kind == "configuration"
 
 
 @pytest.mark.parametrize(
     "sport",
     ["NFL", "NCAAF", "CFB", "FCS", "CFL", "AFL", "AFLW"],
 )
-def test_prizepicks_normalization_keeps_football_for_history_persistence(sport):
+def test_prizepicks_normalization_rejects_football_without_persistable_prop(sport):
     from providers.propline import normalize_propline_prizepicks_record
 
     record = {
@@ -213,6 +207,4 @@ def test_prizepicks_normalization_keeps_football_for_history_persistence(sport):
         "line": 20.5,
     }
 
-    normalized = normalize_propline_prizepicks_record(record)
-    assert normalized is not None
-    assert normalized.sport == sport
+    assert normalize_propline_prizepicks_record(record) is None
