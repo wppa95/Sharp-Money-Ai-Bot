@@ -333,6 +333,7 @@ class _HistoricalScorer:
         overall_history:   Optional[HistoricalStats],
         market_history:    Optional[HistoricalStats],
         sport_history:     Optional[HistoricalStats],
+        adaptive_multiplier: Optional[float] = None,
     ) -> tuple[int, HistoricalBreakdown]:
         """Return (final_score, breakdown)."""
         base = confidence_result.confidence_score
@@ -341,12 +342,14 @@ class _HistoricalScorer:
         clv_adj     = self._clv_adj(overall_history)
         market_adj  = self._market_adj(market_history)
         ml_adj      = self._apply_ml_override(overall_history, market_history, base)
+        adaptive_adj = adaptive_score_adjustment(base, adaptive_multiplier)
 
         breakdown = HistoricalBreakdown(
             overall_adj=overall_adj,
             clv_adj=clv_adj,
             market_adj=market_adj,
             ml_adj=ml_adj,
+            adaptive_adj=adaptive_adj,
         )
 
         final = min(max(base + breakdown.total, 0), 100)
