@@ -566,10 +566,8 @@ class PlayerHistoryProvider:
                 rows=tuple(primary),
                 status=PROPLINE_COVERAGE_NOT_NEEDED,
             )
-        from engine.sport_policy import is_football_related_sport
-
         sport_u = str(sport or "").upper().strip()
-        if not sport_u or is_football_related_sport(sport_u):
+        if not sport_u:
             return PropLineHistoryCoverage(
                 rows=tuple(primary),
                 status=PROPLINE_COVERAGE_NOT_NEEDED,
@@ -641,10 +639,8 @@ class PlayerHistoryProvider:
             _normalize_stat,
             _parse_datetime,
         )
-        from engine.sport_policy import is_football_related_sport
-
         sport_u = str(sport or "").upper().strip()
-        if not sport_u or is_football_related_sport(sport_u):
+        if not sport_u:
             return []
         if self._propline_client is None:
             self._propline_client = PropLineClient()
@@ -1186,10 +1182,8 @@ class PlayerHistoryProvider:
         """
         from providers.player_stats import RawGameResult
         from providers.propline import PropLineClient, _normalize_stat, _parse_datetime
-        from engine.sport_policy import is_football_related_sport
-
         sport_u = str(sport or "").upper().strip()
-        if not sport_u or is_football_related_sport(sport_u):
+        if not sport_u:
             return []
         if self._propline_client is None:
             self._propline_client = PropLineClient()
